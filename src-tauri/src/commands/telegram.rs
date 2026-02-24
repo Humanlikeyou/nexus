@@ -28,6 +28,12 @@ pub struct NexusConfig {
     pub gateway_retry_base_secs: Option<u32>,
     #[serde(default = "default_gateway_retry_max")]
     pub gateway_retry_max_secs: Option<u32>,
+    #[serde(default)]
+    pub n8n_webhook_secret: Option<String>,
+    #[serde(default)]
+    pub preferred_muse_address: Option<String>,
+    #[serde(default)]
+    pub preferred_whoop_address: Option<String>,
 }
 
 fn default_gateway_url() -> Option<String> {

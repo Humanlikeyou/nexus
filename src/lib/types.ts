@@ -283,6 +283,9 @@ export interface NexusConfig {
   gateway_batch_size: number | null;
   gateway_retry_base_secs: number | null;
   gateway_retry_max_secs: number | null;
+  n8n_webhook_secret: string | null;
+  preferred_muse_address: string | null;
+  preferred_whoop_address: string | null;
 }
 
 export interface PackageInfo {

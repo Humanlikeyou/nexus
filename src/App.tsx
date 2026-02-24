@@ -14,9 +14,9 @@ import { useScoreConfidence } from "./hooks/useScoreConfidence";
 import { useSimpleSession } from "./hooks/useSimpleSession";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNexus } from "./context/NexusContext";
-import { readTasks, readContentPipeline, saveSession, listSessions, saveSnapshot, insertEvents } from "./lib/api";
+import { readTasks, readContentPipeline, saveSession, listSessions, saveSnapshot, insertEvents, getConfig } from "./lib/api";
 import { sessionToEvents, nfSessionToEvents, snapshotToEvents } from "./lib/events";
-import type { PageId, TaskItem, ContentPipelineItem, RecordedSession, NfSession, BrainSnapshot, ReplayMode, DataSource } from "./lib/types";
+import type { PageId, TaskItem, ContentPipelineItem, RecordedSession, NfSession, BrainSnapshot, ReplayMode, DataSource, NexusConfig } from "./lib/types";
 
 // Toast + Command Palette + Onboarding
 import { ToastContainer } from "./components/ui/Toast";
@@ -287,6 +287,12 @@ const pageTransition = {
 export default function App() {
   const { setMuseState, setWhoopState, toast, addNotification } = useNexus();
 
+  // App config (for n8n webhook secret, etc.)
+  const [appConfig, setAppConfig] = useState<NexusConfig | null>(null);
+  useEffect(() => {
+    getConfig().then(setAppConfig).catch(() => {});
+  }, []);
+
   const openclaw = useOpenClaw();
 
   // Business data
@@ -314,6 +320,16 @@ export default function App() {
 
   // Whoop
   const whoop = useWhoop();
+
+  // Wire Whoop reconnect lifecycle toasts (single toast per phase, not per attempt)
+  useEffect(() => {
+    whoop.setReconnectCallbacks(
+      () => toast({ type: "warning", title: "Whoop disconnected", description: "Reconnecting…", duration: 5000 }),
+      () => toast({ type: "success", title: "Whoop reconnected" }),
+      () => toast({ type: "error", title: "Whoop reconnect failed", description: "Tap 'Try again' in the Fitness panel", duration: 8000 }),
+    );
+  }, [whoop.setReconnectCallbacks, toast]);
+
   const whoopAnalytics = useWhoopAnalytics(
     whoop.hrData,
     whoop.rrIntervals,
@@ -568,7 +584,9 @@ export default function App() {
             </div>
             <div className="grid grid-cols-2 gap-5">
               <GatewayStatus />
-              <OpenClawStatusCard onHealthFetched={pushHealthToN8n} />
+              <OpenClawStatusCard
+                onHealthFetched={(h) => pushHealthToN8n(h, appConfig?.n8n_webhook_secret ?? undefined)}
+              />
             </div>
             <div className="grid grid-cols-2 gap-5">
               <CronSchedule jobs={openclaw.cronJobs} loading={openclaw.loading} />
@@ -583,7 +601,7 @@ export default function App() {
             <TaskBoard tasks={tasks} loading={bizLoading} />
             <div className="grid grid-cols-2 gap-5">
               <ContentPipeline items={pipeline} loading={bizLoading} />
-              <RevenueCard revenueSummary={arm.revenueSummary} loading={arm.loading} />
+              <RevenueCard revenueSummary={arm.revenueSummary} loading={arm.loading} fetchedAt={arm.fetchedAt} />
             </div>
           </motion.div>
         );
@@ -742,6 +760,23 @@ export default function App() {
               recording={whoopRecording}
               onToggleRecord={toggleWhoopRecording}
             />
+            {whoop.reconnectPhase === "reconnecting" && (
+              <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-warning/10 border border-warning/20 text-warning text-xs">
+                <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
+                Whoop disconnected — reconnecting automatically…
+              </div>
+            )}
+            {whoop.reconnectPhase === "failed" && (
+              <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs">
+                <span>Whoop reconnect failed after multiple attempts</span>
+                <button
+                  onClick={whoop.retryConnect}
+                  className="px-3 py-1 rounded-lg bg-destructive/20 hover:bg-destructive/30 transition-colors font-medium"
+                >
+                  Try again
+                </button>
+              </div>
+            )}
             <ProofPanel />
             <div className="grid grid-cols-3 gap-5">
               <RecoveryScore

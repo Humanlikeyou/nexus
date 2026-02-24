@@ -366,6 +366,42 @@ pub fn read_daily_log(date: Option<String>) -> Result<String, String> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// OpenClaw Process Control
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Restart the OpenClaw LaunchAgent via `launchctl kickstart -k`.
+/// Works on macOS; returns an error string on failure.
+#[tauri::command]
+pub async fn restart_openclaw() -> Result<String, String> {
+    // Resolve the current user UID so we can address the gui/<uid>/ domain.
+    let uid_out = std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .map_err(|e| format!("Failed to get UID: {}", e))?;
+    let uid = String::from_utf8_lossy(&uid_out.stdout).trim().to_string();
+
+    let output = std::process::Command::new("launchctl")
+        .args([
+            "kickstart",
+            "-k",
+            &format!("gui/{}/ai.openclaw.gateway", uid),
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run launchctl: {}", e))?;
+
+    if output.status.success() {
+        Ok("OpenClaw gateway restarting…".to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            "launchctl kickstart failed — is the LaunchAgent installed?".to_string()
+        } else {
+            stderr
+        })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OpenClaw Health Check
 // ─────────────────────────────────────────────────────────────────────────────
 

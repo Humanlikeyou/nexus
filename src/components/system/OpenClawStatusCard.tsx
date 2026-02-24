@@ -18,9 +18,10 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getOpenClawHealth } from "@/lib/api";
+import { getOpenClawHealth, restartOpenclaw } from "@/lib/api";
 import type { OpenClawHealth } from "@/lib/types";
 
 const REFRESH_INTERVAL_MS = 60_000;
@@ -100,6 +101,8 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [restartMsg, setRestartMsg] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -174,6 +177,21 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
     );
   }
 
+  const handleRestart = useCallback(async () => {
+    setRestarting(true);
+    setRestartMsg(null);
+    try {
+      const msg = await restartOpenclaw();
+      setRestartMsg(msg);
+      // Re-check health after a short delay to let the process come back up
+      setTimeout(() => fetchHealth(true), 4000);
+    } catch (e) {
+      setRestartMsg(`Failed: ${e}`);
+    } finally {
+      setRestarting(false);
+    }
+  }, [fetchHealth]);
+
   // ─── Loaded state ─────────────────────────────────────────────────────────
   const h = health!;
 
@@ -247,27 +265,44 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
       {h.status !== "healthy" && (
         <div
           className={cn(
-            "px-3 py-2.5 rounded-xl text-xs leading-relaxed",
+            "px-3 py-2.5 rounded-xl text-xs leading-relaxed space-y-2",
             h.status === "offline"
               ? "bg-destructive/8 text-destructive border border-destructive/20"
               : "bg-warning/8 text-warning border border-warning/20",
           )}
         >
           {h.status === "offline" && (
-            <>
-              <strong>Gateway unreachable.</strong> Run{" "}
-              <code className="font-mono">openclaw gateway start</code> or check
-              the LaunchAgent.
-            </>
+            <div className="flex items-start justify-between gap-3">
+              <p>
+                <strong>Gateway unreachable.</strong> Run{" "}
+                <code className="font-mono">openclaw gateway start</code> or restart
+                via LaunchAgent.
+              </p>
+              <button
+                onClick={handleRestart}
+                disabled={restarting}
+                className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors text-[11px] font-medium whitespace-nowrap"
+              >
+                {restarting ? (
+                  <RefreshCw size={11} className="animate-spin" />
+                ) : (
+                  <RotateCcw size={11} />
+                )}
+                Restart
+              </button>
+            </div>
           )}
           {h.status === "degraded" && h.memory_search === "missing" && (
-            <>
+            <p>
               <strong>Memory search not configured.</strong> Install a local model
               or switch to a remote provider:{" "}
               <code className="font-mono text-[13px]">
                 openclaw config set agents.defaults.memorySearch.provider openai
               </code>
-            </>
+            </p>
+          )}
+          {restartMsg && (
+            <p className="text-[11px] opacity-70 font-mono">{restartMsg}</p>
           )}
         </div>
       )}

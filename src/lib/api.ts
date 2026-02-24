@@ -47,6 +47,9 @@ export const readOpenClawStatus = () =>
 export const getOpenClawHealth = () =>
   invoke<OpenClawHealth>("get_openclaw_health");
 
+export const restartOpenclaw = () =>
+  invoke<string>("restart_openclaw");
+
 export const readCronJobs = () => invoke<CronJob[]>("read_cron_jobs");
 
 export const readSkills = () => invoke<Skill[]>("read_skills");
@@ -173,6 +176,16 @@ export const queryEvents = (query: EventQuery) =>
 
 export const migrateExistingData = () =>
   invoke<string>("migrate_existing_data");
+
+// ============================================================
+// Notifications (Tauri-persisted)
+// ============================================================
+
+export const readNotifications = () =>
+  invoke<import("./types").AppNotification[]>("read_notifications");
+
+export const saveNotifications = (notifications: import("./types").AppNotification[]) =>
+  invoke<void>("save_notifications", { notifications });
 
 // ============================================================
 // Onboarding

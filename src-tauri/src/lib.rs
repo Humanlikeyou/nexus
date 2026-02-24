@@ -1,6 +1,6 @@
 mod commands;
 
-use commands::{arm, ble_common, events, goals, muse, onboarding, openclaw, outbox, packager, replay, sessions, snapshots, system, telegram, whoop};
+use commands::{arm, ble_common, events, goals, muse, notifications, onboarding, openclaw, outbox, packager, replay, sessions, snapshots, system, telegram, whoop};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
@@ -54,6 +54,10 @@ pub fn run() {
             openclaw::read_content_pipeline,
             openclaw::read_daily_log,
             openclaw::get_openclaw_health,
+            openclaw::restart_openclaw,
+            // Notifications
+            notifications::read_notifications,
+            notifications::save_notifications,
             // Muse BLE
             muse::scan_muse,
             muse::connect_muse,

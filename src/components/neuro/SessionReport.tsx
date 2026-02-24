@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { X, Trophy } from "lucide-react";
+import { X, Trophy, Download } from "lucide-react";
 import { SpiralScore } from "./SpiralScore";
 import { StateTimeline } from "./StateTimeline";
 import { getMilestone, MILESTONE_COLORS } from "@/lib/neurofeedback/scoring";
@@ -10,6 +10,17 @@ interface SessionReportProps {
   open: boolean;
   onClose: () => void;
   onSave: (session: NfSession) => void;
+}
+
+function downloadSessionJson(session: NfSession) {
+  const blob = new Blob([JSON.stringify(session, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const dateStr = new Date(session.start).toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `nexus-session-${dateStr}-${session.protocol_name}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export function SessionReport({ session, open, onClose, onSave }: SessionReportProps) {
@@ -110,6 +121,14 @@ export function SessionReport({ session, open, onClose, onSave }: SessionReportP
               className="flex-1 py-2.5 rounded-lg bg-accent/15 text-accent text-sm font-medium hover:bg-accent/25 transition-colors border border-accent/30"
             >
               Save Session
+            </button>
+            <button
+              onClick={() => downloadSessionJson(session)}
+              className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg bg-muted/20 text-muted-foreground text-sm hover:bg-muted/30 transition-colors"
+              title="Export session as JSON"
+            >
+              <Download size={13} />
+              Export
             </button>
             <button
               onClick={onClose}

@@ -36,6 +36,7 @@ export function useArm(pollIntervalMs = 300_000) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
+  const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -51,6 +52,7 @@ export function useArm(pollIntervalMs = 300_000) {
       setRiskStatus(risk);
       setDecisions(decs);
       setConfig(cfg);
+      setFetchedAt(new Date());
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -162,6 +164,7 @@ export function useArm(pollIntervalMs = 300_000) {
     loading,
     error,
     polling,
+    fetchedAt,
     refresh,
     pollWorkers,
     createStrategy,

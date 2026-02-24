@@ -20,6 +20,10 @@ import {
   Sun,
   Moon,
   Monitor,
+  Webhook,
+  Bluetooth,
+  TrendingUp,
+  SendHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNexus } from "@/context/NexusContext";
@@ -33,7 +37,12 @@ import {
   getAppPaths,
   simulateGatewayDown,
   simulateGatewayUp,
+  armGetConfig,
+  armSaveConfig,
+  getOpenClawHealth,
 } from "@/lib/api";
+import { pushHealthToN8n } from "@/terrance/system/openclawHealth";
+import type { ArmConfig } from "@/lib/types";
 import type { NexusConfig, PackageInfo } from "@/lib/types";
 
 export function SettingsPage() {
@@ -51,6 +60,9 @@ export function SettingsPage() {
     gateway_batch_size: null,
     gateway_retry_base_secs: null,
     gateway_retry_max_secs: null,
+    n8n_webhook_secret: null,
+    preferred_muse_address: null,
+    preferred_whoop_address: null,
   });
   const [gatewaySimDown, setGatewaySimDown] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -63,10 +75,14 @@ export function SettingsPage() {
   const [unpackResult, setUnpackResult] = useState<string[] | null>(null);
   const [paths, setPaths] = useState<Record<string, string>>({});
   const [autoStart, setAutoStart] = useState(false);
+  const [armConfig, setArmConfig] = useState<ArmConfig | null>(null);
+  const [savingArm, setSavingArm] = useState(false);
+  const [n8nTesting, setN8nTesting] = useState(false);
 
   useEffect(() => {
     getConfig().then(setConfig).catch(() => {});
     getAppPaths().then(setPaths).catch(() => {});
+    armGetConfig().then(setArmConfig).catch(() => {});
     // Check current autostart state
     invoke<boolean>("plugin:autostart|is_enabled")
       .then(setAutoStart)
@@ -144,6 +160,33 @@ export function SettingsPage() {
       }
     };
     input.click();
+  };
+
+  const handleSaveArm = async () => {
+    if (!armConfig) return;
+    setSavingArm(true);
+    try {
+      await armSaveConfig(armConfig);
+      toast({ type: "success", title: "ARM Config Saved" });
+    } catch (e) {
+      toast({ type: "error", title: "ARM Save Failed", description: String(e) });
+    } finally {
+      setSavingArm(false);
+    }
+  };
+
+  const handleTestN8n = async () => {
+    setN8nTesting(true);
+    try {
+      await saveSettings(config);
+      const health = await getOpenClawHealth();
+      await pushHealthToN8n(health, config.n8n_webhook_secret ?? undefined);
+      toast({ type: "success", title: "n8n Webhook Sent", description: "Check n8n for the incoming event" });
+    } catch (e) {
+      toast({ type: "error", title: "n8n Test Failed", description: String(e) });
+    } finally {
+      setN8nTesting(false);
+    }
   };
 
   const handleAutoStartToggle = async () => {
@@ -409,6 +452,139 @@ export function SettingsPage() {
               {gatewaySimDown ? <ToggleRight size={12} /> : <ToggleLeft size={12} />}
               {gatewaySimDown ? "Simulating Down" : "Simulate Down"}
             </button>
+          </div>
+
+          {/* n8n Webhook Auth */}
+          <div className="pt-2 space-y-3 border-t border-border/15">
+            <p className="text-[13px] text-muted-foreground font-medium flex items-center gap-1.5">
+              <Webhook size={13} /> n8n Webhook Auth
+            </p>
+            <div>
+              <label className="text-[13px] text-muted-foreground mb-1 block">
+                Webhook Secret
+              </label>
+              <input
+                type="password"
+                value={config.n8n_webhook_secret || ""}
+                onChange={(e) => updateField("n8n_webhook_secret", e.target.value)}
+                placeholder="Shared secret for X-Nexus-Secret header"
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+              />
+              <p className="text-xs text-muted-foreground/40 mt-1">
+                Must match the secret checked in your n8n Health Monitor Code node
+              </p>
+            </div>
+            <button
+              onClick={handleTestN8n}
+              disabled={n8nTesting}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent/15 text-accent text-xs hover:bg-accent/25 transition-colors disabled:opacity-40"
+            >
+              {n8nTesting ? <Loader2 size={12} className="animate-spin" /> : <SendHorizontal size={12} />}
+              Test n8n Webhook
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ARM Config */}
+      {armConfig && (
+        <section className="glass p-6 space-y-5">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-success/15 flex items-center justify-center">
+              <TrendingUp size={16} className="text-success" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold">ARM — Revenue Module</h3>
+              <p className="text-[13px] text-muted-foreground">
+                Global risk limits for the Autonomous Revenue Module
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[13px] text-muted-foreground mb-1 block">
+                  Capital Limit ($)
+                </label>
+                <input
+                  type="number"
+                  value={armConfig.global_capital_limit}
+                  onChange={(e) => setArmConfig((a) => a && ({ ...a, global_capital_limit: parseFloat(e.target.value) || 0 }))}
+                  className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="text-[13px] text-muted-foreground mb-1 block">
+                  Daily Loss Cap ($)
+                </label>
+                <input
+                  type="number"
+                  value={armConfig.global_daily_loss_cap}
+                  onChange={(e) => setArmConfig((a) => a && ({ ...a, global_daily_loss_cap: parseFloat(e.target.value) || 0 }))}
+                  className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-[13px] text-muted-foreground mb-1 block">
+                Poll Interval (seconds)
+              </label>
+              <input
+                type="number"
+                value={armConfig.poll_interval_secs}
+                onChange={(e) => setArmConfig((a) => a && ({ ...a, poll_interval_secs: parseInt(e.target.value) || 300 }))}
+                placeholder="300"
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleSaveArm}
+            disabled={savingArm}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-success/15 text-success text-sm font-medium hover:bg-success/25 transition-colors disabled:opacity-40"
+          >
+            {savingArm ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+            Save ARM Config
+          </button>
+        </section>
+      )}
+
+      {/* BLE Preferred Devices */}
+      <section className="glass p-6 space-y-5">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-accent/15 flex items-center justify-center">
+            <Bluetooth size={16} className="text-accent" />
+          </div>
+          <div>
+            <h3 className="text-base font-semibold">Preferred BLE Devices</h3>
+            <p className="text-[13px] text-muted-foreground">
+              Save device addresses to skip scanning on next launch
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-[13px] text-muted-foreground mb-1 block">Muse Device Address</label>
+            <input
+              type="text"
+              value={config.preferred_muse_address || ""}
+              onChange={(e) => updateField("preferred_muse_address", e.target.value)}
+              placeholder="XX:XX:XX:XX:XX:XX"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+            />
+          </div>
+          <div>
+            <label className="text-[13px] text-muted-foreground mb-1 block">Whoop Device Address</label>
+            <input
+              type="text"
+              value={config.preferred_whoop_address || ""}
+              onChange={(e) => updateField("preferred_whoop_address", e.target.value)}
+              placeholder="XX:XX:XX:XX:XX:XX"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+            />
           </div>
         </div>
       </section>

@@ -1,22 +1,41 @@
-import { DollarSign, TrendingUp, TrendingDown } from "lucide-react";
+import { DollarSign, TrendingUp, TrendingDown, Clock, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ArmRevenueSummary } from "@/lib/types";
+
+const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
 interface RevenueCardProps {
   revenueSummary: ArmRevenueSummary | null;
   loading?: boolean;
+  fetchedAt?: Date | null;
 }
 
-export function RevenueCard({ revenueSummary, loading }: RevenueCardProps) {
+export function RevenueCard({ revenueSummary, loading, fetchedAt }: RevenueCardProps) {
   const net = revenueSummary?.net_income ?? null;
   const month = revenueSummary?.month_revenue ?? null;
   const today = revenueSummary?.today_revenue ?? null;
+  const isStale = fetchedAt != null && Date.now() - fetchedAt.getTime() > STALE_THRESHOLD_MS;
+  const ageLabel = fetchedAt
+    ? (() => {
+        const secs = Math.round((Date.now() - fetchedAt.getTime()) / 1000);
+        if (secs < 60) return `${secs}s ago`;
+        const mins = Math.round(secs / 60);
+        return `${mins}m ago`;
+      })()
+    : null;
 
   return (
     <div className="glass p-6 space-y-5">
-      <div className="flex items-center gap-2">
-        <DollarSign size={16} className="text-success" />
-        <h3 className="text-base font-medium text-muted-foreground">Revenue</h3>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <DollarSign size={16} className="text-success" />
+          <h3 className="text-base font-medium text-muted-foreground">Revenue</h3>
+        </div>
+        {isStale && (
+          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-warning/15 text-warning text-[11px] font-medium">
+            <AlertCircle size={10} /> Stale
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -55,6 +74,16 @@ export function RevenueCard({ revenueSummary, loading }: RevenueCardProps) {
           <p className="text-xs text-muted-foreground/60 text-center">
             No ARM revenue data — add a strategy on the Revenue page
           </p>
+        </div>
+      )}
+
+      {ageLabel && (
+        <div className={cn(
+          "flex items-center gap-1 text-[11px]",
+          isStale ? "text-warning/70" : "text-muted-foreground/40",
+        )}>
+          <Clock size={10} />
+          Updated {ageLabel}
         </div>
       )}
     </div>

@@ -34,8 +34,11 @@ const steps = [
   },
 ];
 
+const LOCAL_ONBOARDED_KEY = "nexus:onboarded";
+
 export function OnboardingModal() {
   const [open, setOpen] = useState(false);
+  const [syncPending, setSyncPending] = useState(false);
   const [step, setStep] = useState(0);
   const [config, setConfig] = useState<NexusConfig>({
     telegram_bot_token: null,
@@ -48,31 +51,43 @@ export function OnboardingModal() {
     gateway_batch_size: null,
     gateway_retry_base_secs: null,
     gateway_retry_max_secs: null,
+    n8n_webhook_secret: null,
+    preferred_muse_address: null,
+    preferred_whoop_address: null,
   });
 
   useEffect(() => {
+    const localDone = localStorage.getItem(LOCAL_ONBOARDED_KEY) === "1";
     checkOnboarding()
-      .then((completed) => {
-        if (!completed) {
+      .then((backendDone) => {
+        if (!backendDone && !localDone) {
+          // Neither local nor backend says done — show modal
           setOpen(true);
           getConfig().then(setConfig).catch(() => {});
+        } else if (localDone && !backendDone) {
+          // Local says done but backend doesn't know — show sync pending indicator
+          setSyncPending(true);
+          // Try to sync in the background
+          completeOnboarding().then(() => setSyncPending(false)).catch(() => {});
         }
       })
       .catch(() => {
-        // Backend unavailable — fall back to localStorage flag
-        const localDone = localStorage.getItem("nexus:onboarded") === "1";
+        // Backend unavailable — trust local flag only, don't show modal if local says done
         if (!localDone) setOpen(true);
+        else setSyncPending(true); // backend unreachable, flag it
       });
   }, []);
 
   const handleComplete = async () => {
+    localStorage.setItem(LOCAL_ONBOARDED_KEY, "1");
     try {
       await saveSettings(config);
       await completeOnboarding();
+      setSyncPending(false);
     } catch {
-      // Still mark locally so modal doesn't reappear every launch
+      // Backend failed — local flag set, will show sync pending on next launch
+      setSyncPending(true);
     }
-    localStorage.setItem("nexus:onboarded", "1");
     setOpen(false);
   };
 
@@ -84,6 +99,7 @@ export function OnboardingModal() {
   const Icon = currentStep.icon;
 
   return (
+    <>
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <AnimatePresence>
         {open && (
@@ -204,8 +220,10 @@ export function OnboardingModal() {
                   ) : (
                     <button
                       onClick={() => {
-                        completeOnboarding().catch(() => {});
-                        localStorage.setItem("nexus:onboarded", "1");
+                        localStorage.setItem(LOCAL_ONBOARDED_KEY, "1");
+                        completeOnboarding()
+                          .then(() => setSyncPending(false))
+                          .catch(() => setSyncPending(true));
                         setOpen(false);
                       }}
                       className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
@@ -236,5 +254,24 @@ export function OnboardingModal() {
         )}
       </AnimatePresence>
     </Dialog.Root>
+
+    {/* Sync pending indicator — shown when local says done but backend hasn't confirmed */}
+    {syncPending && !open && (
+      <div className="fixed bottom-4 right-4 z-[90] flex items-center gap-2 px-3 py-2 rounded-xl glass-elevated border border-warning/20 text-warning text-xs shadow-lg">
+        <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
+        Setup sync pending
+        <button
+          onClick={() => {
+            completeOnboarding()
+              .then(() => setSyncPending(false))
+              .catch(() => {});
+          }}
+          className="ml-1 underline opacity-70 hover:opacity-100"
+        >
+          Retry
+        </button>
+      </div>
+    )}
+    </>
   );
 }

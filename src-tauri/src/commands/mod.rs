@@ -13,3 +13,4 @@ pub mod events;
 pub mod arm;
 pub mod outbox;
 pub mod replay;
+pub mod notifications;

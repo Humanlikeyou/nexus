@@ -10,7 +10,10 @@ import {
 import type { WhoopDevice, HeartRateData, WhoopConnectionState, BleFlowState } from "@/lib/types";
 
 const MAX_HR_POINTS = 300; // 5 minutes of data at 1Hz
-const RECONNECT_DELAYS = [3000, 6000, 12000]; // exponential backoff (ms)
+const RECONNECT_DELAYS = [3000, 6000, 12000, 24000, 48000]; // backoff steps (ms)
+
+/** Reconnect lifecycle visible to the UI. */
+export type WhoopReconnectPhase = "idle" | "reconnecting" | "failed";
 
 export function useWhoop() {
   const [devices, setDevices] = useState<WhoopDevice[]>([]);
@@ -26,23 +29,52 @@ export function useWhoop() {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bleState, setBleState] = useState<BleFlowState>("idle");
+  const [reconnectPhase, setReconnectPhase] = useState<WhoopReconnectPhase>("idle");
   const unlistenRef = useRef<UnlistenFn | null>(null);
   const unlistenStateRef = useRef<UnlistenFn | null>(null);
   const lastAddressRef = useRef<string | null>(null);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userDisconnectedRef = useRef(false);
+  // Callbacks injected by consumers for reconnect lifecycle toasts
+  const onReconnectingRef = useRef<(() => void) | null>(null);
+  const onReconnectedRef = useRef<(() => void) | null>(null);
+  const onReconnectFailedRef = useRef<(() => void) | null>(null);
 
   // Listen to Rust-emitted BLE state (single source of truth)
   useEffect(() => {
     let cancelled = false;
+
     listen<BleFlowState>("whoop-ble-state", (event) => {
       if (cancelled) return;
       const newState = event.payload;
       setBleState(newState);
-      // Unexpected drop: was streaming/connected, now idle — attempt reconnect
+
+      // Successful connection / reconnection
+      if (newState === "connected" || newState === "streaming") {
+        const wasReconnecting = reconnectAttemptRef.current > 0;
+        reconnectAttemptRef.current = 0;
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
+        if (wasReconnecting) {
+          setReconnectPhase("idle");
+          onReconnectedRef.current?.();
+        }
+        return;
+      }
+
+      // Unexpected drop: was connected/streaming, now idle
       if (newState === "idle" && !userDisconnectedRef.current && lastAddressRef.current) {
         const attempt = reconnectAttemptRef.current;
+
+        if (attempt === 0) {
+          // First drop: notify UI once that reconnect is starting
+          setReconnectPhase("reconnecting");
+          onReconnectingRef.current?.();
+        }
+
         if (attempt < RECONNECT_DELAYS.length) {
           const delay = RECONNECT_DELAYS[attempt];
           reconnectAttemptRef.current = attempt + 1;
@@ -53,23 +85,23 @@ export function useWhoop() {
                 const state = await connectWhoop(lastAddressRef.current);
                 setConnectionState(state);
                 setConnecting(false);
-                reconnectAttemptRef.current = 0;
+                // bleState event will fire "connected" and handle phase reset
               } catch {
-                // next timeout will retry if attempts remain
+                // next idle event will trigger the next attempt
               }
             }
           }, delay);
-        }
-      } else if (newState === "connected" || newState === "streaming") {
-        reconnectAttemptRef.current = 0;
-        if (reconnectTimerRef.current) {
-          clearTimeout(reconnectTimerRef.current);
-          reconnectTimerRef.current = null;
+        } else {
+          // All attempts exhausted
+          setReconnectPhase("failed");
+          onReconnectFailedRef.current?.();
+          reconnectAttemptRef.current = 0;
         }
       }
     }).then((unlisten) => {
       unlistenStateRef.current = unlisten;
     });
+
     return () => {
       cancelled = true;
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
@@ -94,6 +126,7 @@ export function useWhoop() {
     setConnecting(true);
     setError(null);
     userDisconnectedRef.current = false;
+    setReconnectPhase("idle");
     try {
       const state = await connectWhoop(address);
       lastAddressRef.current = address;
@@ -110,6 +143,7 @@ export function useWhoop() {
     userDisconnectedRef.current = true;
     lastAddressRef.current = null;
     reconnectAttemptRef.current = 0;
+    setReconnectPhase("idle");
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
@@ -124,6 +158,33 @@ export function useWhoop() {
     } catch (e) {
       setError(String(e));
     }
+  }, []);
+
+  /** Manually retry after reconnect failed. Resets counters and tries immediately. */
+  const retryConnect = useCallback(async () => {
+    if (!lastAddressRef.current) return;
+    setReconnectPhase("reconnecting");
+    reconnectAttemptRef.current = 0;
+    userDisconnectedRef.current = false;
+    try {
+      const state = await connectWhoop(lastAddressRef.current);
+      setConnectionState(state);
+      setReconnectPhase("idle");
+    } catch (e) {
+      setError(String(e));
+      setReconnectPhase("failed");
+    }
+  }, []);
+
+  /** Register lifecycle callbacks to fire toasts (call once from a component). */
+  const setReconnectCallbacks = useCallback((
+    onReconnecting: () => void,
+    onReconnected: () => void,
+    onFailed: () => void,
+  ) => {
+    onReconnectingRef.current = onReconnecting;
+    onReconnectedRef.current = onReconnected;
+    onReconnectFailedRef.current = onFailed;
   }, []);
 
   const startStream = useCallback(async () => {
@@ -172,6 +233,7 @@ export function useWhoop() {
     scanning,
     connecting,
     bleState,
+    reconnectPhase,
     hrData,
     currentHR,
     rrIntervals,
@@ -179,6 +241,8 @@ export function useWhoop() {
     scan,
     connect,
     disconnect,
+    retryConnect,
+    setReconnectCallbacks,
     startStream,
     stopStream,
   };

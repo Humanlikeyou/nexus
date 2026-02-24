@@ -104,12 +104,24 @@ const N8N_HEALTH_MONITOR = "http://localhost:5678/webhook/terrance/openclaw/heal
  * as an `openclaw.health` event.  n8n routes it through the
  * OpenClaw Health Monitor workflow for alerting and logging.
  *
+ * Pass `secret` (from NexusConfig.n8n_webhook_secret) to include
+ * an `X-Nexus-Secret` header that your n8n Code node should validate.
+ *
  * Safe to call on every UI refresh cycle — fire-and-forget.
  */
-export async function pushHealthToN8n(health: OpenClawHealth): Promise<void> {
+export async function pushHealthToN8n(
+  health: OpenClawHealth,
+  secret?: string,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (secret) {
+    headers["X-Nexus-Secret"] = secret;
+  }
   await fetch(N8N_HEALTH_MONITOR, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       trace_id: `health-${Date.now()}`,
       ...health,

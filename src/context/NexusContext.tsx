@@ -4,8 +4,10 @@ import {
   useState,
   useCallback,
   useRef,
+  useEffect,
   type ReactNode,
 } from "react";
+import { readNotifications, saveNotifications } from "@/lib/api";
 import type {
   PageId,
   AppNotification,
@@ -55,29 +57,9 @@ const NexusContext = createContext<NexusContextValue | null>(null);
 
 const MAX_NOTIFICATIONS = 50;
 const MAX_TOASTS = 5;
-const NOTIF_STORAGE_KEY = "nexus:notifications";
 
 let notifCounter = 0;
 let toastCounter = 0;
-
-function loadStoredNotifications(): AppNotification[] {
-  try {
-    const raw = localStorage.getItem(NOTIF_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function persistNotifications(notifications: AppNotification[]) {
-  try {
-    localStorage.setItem(NOTIF_STORAGE_KEY, JSON.stringify(notifications.slice(0, MAX_NOTIFICATIONS)));
-  } catch {
-    // localStorage quota exceeded or unavailable — non-fatal
-  }
-}
 
 export function NexusProvider({ children }: { children: ReactNode }) {
   // Navigation
@@ -99,8 +81,25 @@ export function NexusProvider({ children }: { children: ReactNode }) {
     streaming: false,
   });
 
-  // Notifications — persisted to localStorage
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => loadStoredNotifications());
+  // Notifications — persisted to Tauri app data directory
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  // Load from disk on mount (async — starts empty, populates quickly)
+  useEffect(() => {
+    readNotifications()
+      .then((stored) => {
+        if (stored.length > 0) setNotifications(stored);
+      })
+      .catch(() => {
+        // Backend unavailable; non-fatal — start with empty list
+      });
+  }, []);
+
+  const persistToTauri = useCallback((updated: AppNotification[]) => {
+    saveNotifications(updated.slice(0, MAX_NOTIFICATIONS)).catch(() => {
+      // Non-fatal: notifications will still work in-memory
+    });
+  }, []);
 
   const addNotification = useCallback(
     (n: Omit<AppNotification, "id" | "timestamp" | "read">) => {
@@ -112,32 +111,32 @@ export function NexusProvider({ children }: { children: ReactNode }) {
       };
       setNotifications((prev) => {
         const updated = [notif, ...prev].slice(0, MAX_NOTIFICATIONS);
-        persistNotifications(updated);
+        persistToTauri(updated);
         return updated;
       });
     },
-    [],
+    [persistToTauri],
   );
 
   const markRead = useCallback((id: string) => {
     setNotifications((prev) => {
       const updated = prev.map((n) => (n.id === id ? { ...n, read: true } : n));
-      persistNotifications(updated);
+      persistToTauri(updated);
       return updated;
     });
-  }, []);
+  }, [persistToTauri]);
 
   const markAllRead = useCallback(() => {
     setNotifications((prev) => {
       const updated = prev.map((n) => ({ ...n, read: true }));
-      persistNotifications(updated);
+      persistToTauri(updated);
       return updated;
     });
-  }, []);
+  }, [persistToTauri]);
 
   const clearNotifications = useCallback(() => {
-    localStorage.removeItem(NOTIF_STORAGE_KEY);
     setNotifications([]);
+    saveNotifications([]).catch(() => {});
   }, []);
 
   // Toasts
