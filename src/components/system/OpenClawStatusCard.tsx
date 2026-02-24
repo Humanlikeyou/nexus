@@ -130,6 +130,21 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
     return () => clearInterval(interval);
   }, [fetchHealth]);
 
+  const handleRestart = useCallback(async () => {
+    setRestarting(true);
+    setRestartMsg(null);
+    try {
+      const msg = await restartOpenclaw();
+      setRestartMsg(msg);
+      // Re-check health after a short delay to let the process come back up
+      setTimeout(() => fetchHealth(true), 4000);
+    } catch (e) {
+      setRestartMsg(`Failed: ${e}`);
+    } finally {
+      setRestarting(false);
+    }
+  }, [fetchHealth]);
+
   // ─── Skeleton ──────────────────────────────────────────────────────────────
   if (loading && !health) {
     return (
@@ -176,21 +191,6 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
       </div>
     );
   }
-
-  const handleRestart = useCallback(async () => {
-    setRestarting(true);
-    setRestartMsg(null);
-    try {
-      const msg = await restartOpenclaw();
-      setRestartMsg(msg);
-      // Re-check health after a short delay to let the process come back up
-      setTimeout(() => fetchHealth(true), 4000);
-    } catch (e) {
-      setRestartMsg(`Failed: ${e}`);
-    } finally {
-      setRestarting(false);
-    }
-  }, [fetchHealth]);
 
   // ─── Loaded state ─────────────────────────────────────────────────────────
   const h = health!;
