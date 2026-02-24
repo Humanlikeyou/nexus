@@ -5,7 +5,7 @@
  * Status: healthy (green) | degraded (yellow) | offline (red)
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Wifi,
   WifiOff,
@@ -104,16 +104,28 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
   const [restarting, setRestarting] = useState(false);
   const [restartMsg, setRestartMsg] = useState<string | null>(null);
 
+  // Keep a stable ref to the callback so fetchHealth never re-creates
+  // when the caller passes an inline arrow function.
+  const onHealthFetchedRef = useRef(onHealthFetched);
+  onHealthFetchedRef.current = onHealthFetched;
+
+  // Keep a ref to current health so the loading-state branch inside
+  // fetchHealth can read it without adding `health` to deps (which
+  // would re-create fetchHealth after every successful poll and
+  // immediately re-trigger the useEffect interval).
+  const healthRef = useRef(health);
+  healthRef.current = health;
+
   const fetchHealth = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
-    else if (!health) setLoading(true);
+    else if (!healthRef.current) setLoading(true);
 
     try {
       const result = await getOpenClawHealth();
       setHealth(result);
       setError(null);
       setLastRefresh(new Date());
-      onHealthFetched?.(result);
+      onHealthFetchedRef.current?.(result);
     } catch (err) {
       setError(String(err));
       // Keep last known health visible; mark gateway as suspect
@@ -121,9 +133,9 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
       setLoading(false);
       setRefreshing(false);
     }
-  }, [health, onHealthFetched]);
+  }, []); // stable — no external deps needed thanks to refs above
 
-  // Initial fetch + 60s polling
+  // Initial fetch + 60s polling — runs exactly once on mount
   useEffect(() => {
     fetchHealth();
     const interval = setInterval(() => fetchHealth(), REFRESH_INTERVAL_MS);

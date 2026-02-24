@@ -293,6 +293,13 @@ export default function App() {
     getConfig().then(setAppConfig).catch(() => {});
   }, []);
 
+  // Stable callback for OpenClawStatusCard — only recreates when the secret changes
+  const handleHealthFetched = useCallback(
+    (h: import("./lib/types").OpenClawHealth) =>
+      pushHealthToN8n(h, appConfig?.n8n_webhook_secret ?? undefined),
+    [appConfig?.n8n_webhook_secret],
+  );
+
   const openclaw = useOpenClaw();
 
   // Business data
@@ -584,9 +591,7 @@ export default function App() {
             </div>
             <div className="grid grid-cols-2 gap-5">
               <GatewayStatus />
-              <OpenClawStatusCard
-                onHealthFetched={(h) => pushHealthToN8n(h, appConfig?.n8n_webhook_secret ?? undefined)}
-              />
+              <OpenClawStatusCard onHealthFetched={handleHealthFetched} />
             </div>
             <div className="grid grid-cols-2 gap-5">
               <CronSchedule jobs={openclaw.cronJobs} loading={openclaw.loading} />
