@@ -1,0 +1,432 @@
+use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter};
+use tokio::sync::Mutex;
+
+use super::events::get_events_db;
+use super::telegram::load_config;
+
+static WORKER_STARTED: AtomicBool = AtomicBool::new(false);
+
+lazy_static::lazy_static! {
+    static ref GATEWAY_SIM_DOWN: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+}
+
+/// Gateway ACK contract: POST /events must return { "received": ["event_id", ...] }
+/// Only event IDs listed in `received` are considered delivered.
+#[derive(Debug, Clone, Deserialize)]
+struct GatewayAck {
+    received: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OutboxStatus {
+    pub gateway_online: bool,
+    pub queue_depth: u64,
+    pub last_delivered_at: Option<String>,
+    pub last_error: Option<String>,
+    pub total_delivered: u64,
+}
+
+/// Start the background delivery worker (called once from setup).
+/// Uses tauri::async_runtime::spawn so it works from the sync setup() context.
+/// Guarded by AtomicBool to ensure only one worker ever runs.
+pub fn start_delivery_worker(app: AppHandle) {
+    if WORKER_STARTED.swap(true, Ordering::SeqCst) {
+        println!("[outbox] delivery_worker: already running, skipping");
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        // Small delay to let the app finish initializing
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        println!("[outbox] delivery_worker: started interval_secs=15");
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            if let Err(e) = delivery_tick(&app).await {
+                println!("[outbox] tick_error: {e}");
+            }
+        }
+    });
+}
+
+async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
+    let config = load_config();
+    let gateway_url = config
+        .gateway_url
+        .unwrap_or_else(|| "http://127.0.0.1:18789".to_string());
+    let batch_size = config.gateway_batch_size.unwrap_or(50);
+    let retry_base = config.gateway_retry_base_secs.unwrap_or(5) as u64;
+    let retry_max = config.gateway_retry_max_secs.unwrap_or(300) as u64;
+    let auth_token = config.gateway_auth_token.clone();
+
+    // Check simulated down state
+    let sim_down = *GATEWAY_SIM_DOWN.lock().await;
+
+    // Health check
+    let online = if sim_down {
+        false
+    } else {
+        match reqwest::Client::new()
+            .get(format!("{}/health", gateway_url))
+            .timeout(std::time::Duration::from_secs(3))
+            .send()
+            .await
+        {
+            Ok(resp) => resp.status().is_success(),
+            Err(_) => false,
+        }
+    };
+
+    // Load queue stats
+    let (queue_depth, total_delivered, last_delivered_at) =
+        tokio::task::spawn_blocking(|| -> Result<(u64, u64, Option<String>), String> {
+            let conn = get_events_db()?;
+            let pending: u64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM outbox WHERE status = 'pending'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            let delivered: u64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM outbox WHERE status = 'delivered'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            let last: Option<String> = conn
+                .query_row(
+                    "SELECT created_at FROM outbox WHERE status = 'delivered' ORDER BY outbox_id DESC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .ok();
+            Ok((pending, delivered, last))
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+
+    if !online {
+        let status = OutboxStatus {
+            gateway_online: false,
+            queue_depth,
+            last_delivered_at,
+            last_error: Some("Gateway offline".to_string()),
+            total_delivered,
+        };
+        let _ = app.emit("outbox-status", &status);
+        return Ok(());
+    }
+
+    // Load pending outbox items
+    let gateway_url_clone = gateway_url.clone();
+    let auth_clone = auth_token.clone();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<Vec<(i64, String)>, String> {
+        let conn = get_events_db()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut stmt = conn
+            .prepare(
+                "SELECT outbox_id, event_ids FROM outbox WHERE status = 'pending' AND (next_retry_at IS NULL OR next_retry_at <= ?1) ORDER BY outbox_id ASC LIMIT ?2",
+            )
+            .map_err(|e| format!("Prepare failed: {e}"))?;
+        let rows: Vec<(i64, String)> = stmt
+            .query_map(rusqlite::params![now, batch_size], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .map_err(|e| format!("Query failed: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    if result.is_empty() {
+        let status = OutboxStatus {
+            gateway_online: true,
+            queue_depth: 0,
+            last_delivered_at,
+            last_error: None,
+            total_delivered,
+        };
+        let _ = app.emit("outbox-status", &status);
+        return Ok(());
+    }
+
+    // Load event payloads for the batch
+    let outbox_ids: Vec<i64> = result.iter().map(|(id, _)| *id).collect();
+    let all_event_ids: Vec<String> = result
+        .iter()
+        .flat_map(|(_, ids_json)| {
+            serde_json::from_str::<Vec<String>>(ids_json).unwrap_or_default()
+        })
+        .collect();
+
+    let events_payload = tokio::task::spawn_blocking(move || -> Result<Vec<serde_json::Value>, String> {
+        let conn = get_events_db()?;
+        let mut events = Vec::new();
+        for event_id in &all_event_ids {
+            let row: Option<String> = conn
+                .query_row(
+                    "SELECT json_object('id', id, 'session_id', session_id, 'timestamp', timestamp, 'source', source, 'metric', metric, 'value', value, 'unit', unit, 'confidence', confidence, 'tags', tags) FROM events WHERE id = ?1",
+                    rusqlite::params![event_id],
+                    |row| row.get(0),
+                )
+                .ok();
+            if let Some(json_str) = row {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    events.push(val);
+                }
+            }
+        }
+        Ok(events)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    // POST to gateway
+    let mut request = reqwest::Client::new()
+        .post(format!("{}/events", gateway_url_clone))
+        .json(&events_payload)
+        .timeout(std::time::Duration::from_secs(10));
+
+    if let Some(token) = auth_clone {
+        if !token.is_empty() {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+    }
+
+    let delivery_result = request.send().await;
+
+    match delivery_result {
+        Ok(resp) if resp.status().is_success() => {
+            // Parse ACK: gateway MUST return { "received": ["event_id", ...] }
+            let body = resp.text().await.unwrap_or_default();
+            let ack: Option<GatewayAck> = serde_json::from_str(&body).ok();
+
+            let received_set: std::collections::HashSet<String> = match &ack {
+                Some(a) => a.received.iter().cloned().collect(),
+                None => std::collections::HashSet::new(),
+            };
+
+            if received_set.is_empty() {
+                // No valid ACK — do NOT mark delivered
+                let error_text = format!("No ACK: gateway returned 2xx but body missing or invalid received[] (body={})",
+                    if body.len() > 200 { &body[..200] } else { &body });
+                println!("[outbox] {}", error_text);
+                apply_backoff(&outbox_ids, &error_text, retry_base, retry_max).await?;
+
+                let status = OutboxStatus {
+                    gateway_online: true,
+                    queue_depth,
+                    last_delivered_at,
+                    last_error: Some(error_text),
+                    total_delivered,
+                };
+                let _ = app.emit("outbox-status", &status);
+            } else {
+                // Check each outbox row: only mark delivered if ALL its event_ids are ACKed
+                let mut acked_outbox_ids: Vec<i64> = Vec::new();
+                let mut unacked_outbox_ids: Vec<i64> = Vec::new();
+
+                for (outbox_id, ids_json) in &result {
+                    let event_ids: Vec<String> = serde_json::from_str(ids_json).unwrap_or_default();
+                    let all_acked = !event_ids.is_empty() && event_ids.iter().all(|id| received_set.contains(id));
+                    if all_acked {
+                        acked_outbox_ids.push(*outbox_id);
+                    } else {
+                        unacked_outbox_ids.push(*outbox_id);
+                    }
+                }
+
+                // Mark fully-ACKed outbox rows as delivered
+                if !acked_outbox_ids.is_empty() {
+                    let ids = acked_outbox_ids.clone();
+                    tokio::task::spawn_blocking(move || -> Result<(), String> {
+                        let conn = get_events_db()?;
+                        for id in &ids {
+                            conn.execute(
+                                "UPDATE outbox SET status = 'delivered' WHERE outbox_id = ?1",
+                                rusqlite::params![id],
+                            )
+                            .map_err(|e| format!("Update failed: {e}"))?;
+                        }
+                        Ok(())
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map_err(|e| e.to_string())?;
+                }
+
+                // Backoff unACKed rows
+                if !unacked_outbox_ids.is_empty() {
+                    let error_text = format!("Partial ACK: {}/{} outbox items not confirmed", unacked_outbox_ids.len(), result.len());
+                    println!("[outbox] {}", error_text);
+                    apply_backoff(&unacked_outbox_ids, &error_text, retry_base, retry_max).await?;
+                }
+
+                let acked_count = acked_outbox_ids.len() as u64;
+                println!("[outbox] delivered: acked={} unacked={} events_sent={}", acked_count, unacked_outbox_ids.len(), events_payload.len());
+
+                let status = OutboxStatus {
+                    gateway_online: true,
+                    queue_depth: queue_depth.saturating_sub(acked_count),
+                    last_delivered_at: if acked_count > 0 { Some(chrono::Utc::now().to_rfc3339()) } else { last_delivered_at },
+                    last_error: if !unacked_outbox_ids.is_empty() {
+                        Some(format!("Partial ACK: {}/{} unconfirmed", unacked_outbox_ids.len(), result.len()))
+                    } else {
+                        None
+                    },
+                    total_delivered: total_delivered + acked_count,
+                };
+                let _ = app.emit("outbox-status", &status);
+            }
+        }
+        Ok(resp) => {
+            let error_text = format!("HTTP {}", resp.status());
+            apply_backoff(&outbox_ids, &error_text, retry_base, retry_max).await?;
+
+            let status = OutboxStatus {
+                gateway_online: true,
+                queue_depth,
+                last_delivered_at,
+                last_error: Some(error_text),
+                total_delivered,
+            };
+            let _ = app.emit("outbox-status", &status);
+        }
+        Err(e) => {
+            let error_text = e.to_string();
+            apply_backoff(&outbox_ids, &error_text, retry_base, retry_max).await?;
+
+            let status = OutboxStatus {
+                gateway_online: false,
+                queue_depth,
+                last_delivered_at,
+                last_error: Some(error_text),
+                total_delivered,
+            };
+            let _ = app.emit("outbox-status", &status);
+        }
+    }
+
+    Ok(())
+}
+
+async fn apply_backoff(
+    outbox_ids: &[i64],
+    error: &str,
+    retry_base: u64,
+    retry_max: u64,
+) -> Result<(), String> {
+    let ids = outbox_ids.to_vec();
+    let error = error.to_string();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let conn = get_events_db()?;
+        for id in &ids {
+            let attempts: u32 = conn
+                .query_row(
+                    "SELECT attempts FROM outbox WHERE outbox_id = ?1",
+                    rusqlite::params![id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            let new_attempts = attempts + 1;
+            let backoff_secs = std::cmp::min(
+                retry_max,
+                retry_base * 2u64.pow(new_attempts.min(10)),
+            );
+            // Add jitter (0-25% of backoff)
+            let jitter = (backoff_secs as f64 * 0.25 * rand_simple()) as u64;
+            let next_retry = chrono::Utc::now()
+                + chrono::Duration::seconds((backoff_secs + jitter) as i64);
+            conn.execute(
+                "UPDATE outbox SET attempts = ?1, next_retry_at = ?2, last_error = ?3 WHERE outbox_id = ?4",
+                rusqlite::params![new_attempts, next_retry.to_rfc3339(), error, id],
+            )
+            .map_err(|e| format!("Backoff update failed: {e}"))?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Simple deterministic-ish jitter without pulling in a rand crate.
+fn rand_simple() -> f64 {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    (t % 1000) as f64 / 1000.0
+}
+
+// ── Tauri Commands ──────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_outbox_status() -> Result<OutboxStatus, String> {
+    tokio::task::spawn_blocking(|| -> Result<OutboxStatus, String> {
+        let conn = get_events_db()?;
+        let pending: u64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM outbox WHERE status = 'pending'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        let delivered: u64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM outbox WHERE status = 'delivered'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        let last: Option<String> = conn
+            .query_row(
+                "SELECT created_at FROM outbox WHERE status = 'delivered' ORDER BY outbox_id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+        let last_error: Option<String> = conn
+            .query_row(
+                "SELECT last_error FROM outbox WHERE status = 'pending' AND last_error IS NOT NULL ORDER BY outbox_id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+        let sim_down = false; // can't easily check async from sync context
+
+        Ok(OutboxStatus {
+            gateway_online: !sim_down && pending == 0,
+            queue_depth: pending,
+            last_delivered_at: last,
+            last_error,
+            total_delivered: delivered,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn simulate_gateway_down() -> Result<(), String> {
+    let mut sim = GATEWAY_SIM_DOWN.lock().await;
+    *sim = true;
+    println!("[outbox] simulate: gateway_down=true");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn simulate_gateway_up() -> Result<(), String> {
+    let mut sim = GATEWAY_SIM_DOWN.lock().await;
+    *sim = false;
+    println!("[outbox] simulate: gateway_down=false");
+    Ok(())
+}
