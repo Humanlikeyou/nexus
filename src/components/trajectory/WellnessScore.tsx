@@ -14,8 +14,6 @@ export function WellnessScore({ score }: WellnessScoreProps) {
         { name: "Recovery", max: 100 },
         { name: "Focus", max: 100 },
         { name: "Productivity", max: 100 },
-        { name: "Sleep", max: 100 },
-        { name: "Activity", max: 100 },
       ],
       shape: "circle" as const,
       splitNumber: 4,
@@ -38,8 +36,6 @@ export function WellnessScore({ score }: WellnessScoreProps) {
               score.recovery,
               score.focus,
               score.productivity,
-              75, // Sleep placeholder
-              68, // Activity placeholder
             ],
             name: "Wellness",
             lineStyle: { color: "#0891b2", width: 2 },

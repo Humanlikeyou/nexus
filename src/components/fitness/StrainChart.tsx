@@ -6,22 +6,17 @@ import type { StrainMetrics } from "@/lib/types";
 interface StrainChartProps {
   metrics: StrainMetrics;
   streaming: boolean;
-  /** Recent strain history (last 7 entries) for trend chart */
-  history: { label: string; strain: number }[];
 }
 
 const ZONE_LABELS = ["Recovery", "Light", "Moderate", "Hard", "Max"];
 const ZONE_COLORS = ["#10b981", "#06b6d4", "#f59e0b", "#f97316", "#ef4444"];
 
-export function StrainChart({ metrics, streaming, history }: StrainChartProps) {
+export function StrainChart({ metrics, streaming }: StrainChartProps) {
   const hasData = metrics.durationSecs > 0;
 
-  // Use history if available, otherwise show current session as single point
-  const chartData = history.length > 0
-    ? history
-    : hasData
-      ? [{ label: "Now", strain: metrics.strain }]
-      : [];
+  const chartData = hasData
+    ? [{ label: "Now", strain: metrics.strain }]
+    : [];
 
   const chartOption = {
     backgroundColor: "transparent",

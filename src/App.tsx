@@ -528,7 +528,9 @@ export default function App() {
   }, [whoopRecording, toast, addNotification]);
 
   const loadSessions = useCallback(() => {
-    listSessions().then(setSessions).catch(() => {});
+    listSessions().then(setSessions).catch((e) => {
+      console.error("[loadSessions]", e);
+    });
   }, []);
 
   // Load business data + sessions on mount
@@ -538,11 +540,14 @@ export default function App() {
         setTasks(t);
         setPipeline(p);
       })
-      .catch(() => {})
+      .catch((e) => {
+        console.error("[bizLoad]", e);
+        toast({ type: "error", title: "Failed to load data", description: "Business data unavailable" });
+      })
       .finally(() => setBizLoading(false));
 
     loadSessions();
-  }, [loadSessions]);
+  }, [loadSessions, toast]);
 
   // Listen for nexus:refresh custom event
   useEffect(() => {
@@ -750,7 +755,6 @@ export default function App() {
               <StrainChart
                 metrics={whoopAnalytics.strain}
                 streaming={whoop.connectionState.streaming}
-                history={[]}
               />
             </div>
             <HrvTrend

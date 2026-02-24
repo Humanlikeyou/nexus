@@ -23,6 +23,17 @@ export default defineConfig(async () => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    chunkSizeWarningLimit: 1100,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          echarts: ["echarts", "echarts-for-react"],
+          motion: ["framer-motion"],
+        },
+      },
+    },
+  },
   clearScreen: false,
   server: {
     port: 1420,
