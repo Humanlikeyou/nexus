@@ -58,7 +58,11 @@ export function OnboardingModal() {
           getConfig().then(setConfig).catch(() => {});
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        // Backend unavailable — fall back to localStorage flag
+        const localDone = localStorage.getItem("nexus:onboarded") === "1";
+        if (!localDone) setOpen(true);
+      });
   }, []);
 
   const handleComplete = async () => {
@@ -66,8 +70,9 @@ export function OnboardingModal() {
       await saveSettings(config);
       await completeOnboarding();
     } catch {
-      // Still close — they can configure later
+      // Still mark locally so modal doesn't reappear every launch
     }
+    localStorage.setItem("nexus:onboarded", "1");
     setOpen(false);
   };
 
@@ -200,6 +205,7 @@ export function OnboardingModal() {
                     <button
                       onClick={() => {
                         completeOnboarding().catch(() => {});
+                        localStorage.setItem("nexus:onboarded", "1");
                         setOpen(false);
                       }}
                       className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"

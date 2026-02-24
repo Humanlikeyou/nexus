@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Target,
   DollarSign,
@@ -43,8 +43,14 @@ const emptyForm: GoalFormData = {
 };
 
 export function GoalTracker() {
-  const { goals, addGoal, updateGoal, removeGoal } = useGoals();
+  const { goals, addGoal, updateGoal, removeGoal, saveError } = useGoals();
   const { toast } = useNexus();
+
+  useEffect(() => {
+    if (saveError) {
+      toast({ type: "error", title: "Goal save failed", description: saveError, duration: 6000 });
+    }
+  }, [saveError, toast]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<GoalFormData>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);

@@ -208,9 +208,9 @@ export interface Goal {
 
 export interface WellnessScore {
   overall: number;
-  recovery: number;
-  focus: number;
-  productivity: number;
+  recovery: number | null;
+  focus: number | null;
+  productivity: number | null;
 }
 
 // ============================================================

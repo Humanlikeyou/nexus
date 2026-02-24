@@ -583,7 +583,7 @@ export default function App() {
             <TaskBoard tasks={tasks} loading={bizLoading} />
             <div className="grid grid-cols-2 gap-5">
               <ContentPipeline items={pipeline} loading={bizLoading} />
-              <RevenueCard />
+              <RevenueCard revenueSummary={arm.revenueSummary} loading={arm.loading} />
             </div>
           </motion.div>
         );
@@ -592,8 +592,8 @@ export default function App() {
         return (
           <motion.div key="assistant" {...pageTransition} className="space-y-7">
             <div className="grid grid-cols-2 gap-5">
-              <CalendarView placeholder />
-              <EmailSummary placeholder />
+              <CalendarView />
+              <EmailSummary />
             </div>
             <DailyLog />
           </motion.div>
@@ -766,17 +766,22 @@ export default function App() {
           </motion.div>
         );
 
-      case "trajectory":
+      case "trajectory": {
+        const recoveryVal = whoopAnalytics.recovery.ready ? Math.round(whoopAnalytics.recovery.score) : null;
+        const focusVal = fftBands.focusScore > 0 ? Math.round(fftBands.focusScore) : null;
+        const nonNull = [recoveryVal, focusVal].filter((v): v is number => v != null);
+        const overallVal = nonNull.length > 0 ? Math.round(nonNull.reduce((a, b) => a + b, 0) / nonNull.length) : 0;
         return (
           <motion.div key="trajectory" {...pageTransition} className="space-y-7">
             <div className="grid grid-cols-2 gap-6">
               <GoalTracker />
               <WellnessScore
-                score={{ overall: 68, recovery: 72, focus: fftBands.focusScore || 62, productivity: 71 }}
+                score={{ overall: overallVal, recovery: recoveryVal, focus: focusVal, productivity: null }}
               />
             </div>
           </motion.div>
         );
+      }
 
       case "revenue":
         return (
