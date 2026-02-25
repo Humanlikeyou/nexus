@@ -41,8 +41,19 @@ export function TelegramChat() {
 
     // Create a new chat session and load any prior messages
     createChatSession(new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))
-      .then((session) => {
+      .then(async (session) => {
         sessionIdRef.current = session.id;
+        try {
+          const history = await loadChatHistory(session.id);
+          if (history.length > 0) {
+            setMessages(history.map((m) => ({
+              id: m.id,
+              role: m.role,
+              text: m.text,
+              ts: m.ts,
+            })));
+          }
+        } catch {}
       })
       .catch(() => {});
   }, []);

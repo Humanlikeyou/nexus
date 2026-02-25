@@ -83,11 +83,8 @@ pub struct CostEstimate {
 
 fn usage_log_path() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap()
-                .join("Library/Application Support")
-        })
+        .or_else(|| dirs::home_dir().map(|h| h.join("Library/Application Support")))
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("com.taisun.electron")
         .join("llm_usage.json")
 }
@@ -246,13 +243,15 @@ pub fn decide_provider(
 // ─── Provider callers ─────────────────────────────────────────────────────────
 
 fn strip_thinking_tags(s: &str) -> String {
-    let s = s.trim();
-    if let (Some(start), Some(end)) = (s.find("<think>"), s.find("</think>")) {
+    let mut result = s.to_string();
+    while let (Some(start), Some(end)) = (result.find("<think>"), result.find("</think>")) {
         if start < end {
-            return s[end + "</think>".len()..].trim().to_string();
+            result = format!("{}{}", &result[..start], &result[end + "</think>".len()..]);
+        } else {
+            break;
         }
     }
-    s.to_string()
+    result.trim().to_string()
 }
 
 async fn call_ollama(

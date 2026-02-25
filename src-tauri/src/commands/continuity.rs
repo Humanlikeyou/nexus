@@ -16,7 +16,8 @@ use std::path::PathBuf;
 
 fn data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join("Library/Application Support"))
+        .or_else(|| dirs::home_dir().map(|h| h.join("Library/Application Support")))
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("com.taisun.electron")
 }
 
@@ -74,6 +75,7 @@ pub fn read_identity_file() -> Result<String, String> {
 // ─── Context Store ─────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct TerranceContext {
     pub active_goals: Vec<String>,
     pub last_session_summary: Option<String>,
@@ -102,6 +104,7 @@ pub fn save_terrance_context(context: TerranceContext) -> Result<(), String> {
 // ─── Session Log ───────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionLogEntry {
     pub id: String,
     pub timestamp: u64,
