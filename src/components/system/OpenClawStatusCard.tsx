@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getOpenClawHealth, restartOpenclaw } from "@/lib/api";
+import { useNexus } from "@/context/NexusContext";
 import type { OpenClawHealth } from "@/lib/types";
 
 const REFRESH_INTERVAL_MS = 60_000;
@@ -96,6 +97,7 @@ interface OpenClawStatusCardProps {
 }
 
 export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps = {}) {
+  const { addNotification } = useNexus();
   const [health, setHealth] = useState<OpenClawHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -115,6 +117,13 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
   // immediately re-trigger the useEffect interval).
   const healthRef = useRef(health);
   healthRef.current = health;
+
+  // Track previous status for transition notifications + auto-restart
+  const prevStatusRef = useRef<OpenClawHealth["status"] | null>(null);
+  const addNotificationRef = useRef(addNotification);
+  addNotificationRef.current = addNotification;
+  const lastAutoRestartRef = useRef<number>(0);
+  const AUTO_RESTART_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes between auto-restarts
 
   const fetchHealth = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -141,6 +150,40 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
     const interval = setInterval(() => fetchHealth(), REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [fetchHealth]);
+
+  // Fire notifications on status transitions + auto-restart when offline
+  useEffect(() => {
+    if (!health) return;
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = health.status;
+    if (prev === null) return; // first load — no notification
+    if (prev === health.status) return; // no change
+
+    if (health.status === "offline") {
+      // Auto-restart via launchctl if cooldown has elapsed
+      const now = Date.now();
+      if (now - lastAutoRestartRef.current > AUTO_RESTART_COOLDOWN_MS) {
+        lastAutoRestartRef.current = now;
+        addNotificationRef.current({ type: "warning", title: "OpenClaw Auto-Restart", message: "Gateway went offline — attempting automatic restart via launchctl", source: "OpenClaw" });
+        restartOpenclaw()
+          .then((msg) => {
+            setRestartMsg(msg);
+            // Re-check health after process has time to come back up
+            setTimeout(() => fetchHealth(true), 6000);
+          })
+          .catch((e) => {
+            setRestartMsg(`Auto-restart failed: ${e}`);
+            addNotificationRef.current({ type: "error", title: "Auto-Restart Failed", message: String(e), source: "OpenClaw" });
+          });
+      } else {
+        addNotificationRef.current({ type: "error", title: "OpenClaw Offline", message: "Gateway is unreachable — auto-restart on cooldown, try manual restart", source: "OpenClaw" });
+      }
+    } else if (health.status === "degraded") {
+      addNotificationRef.current({ type: "warning", title: "OpenClaw Degraded", message: "Gateway is up but some subsystems are impaired", source: "OpenClaw" });
+    } else if (prev !== "healthy") {
+      addNotificationRef.current({ type: "success", title: "OpenClaw Recovered", message: `Gateway is healthy again (was ${prev})`, source: "OpenClaw" });
+    }
+  }, [health, fetchHealth]);
 
   const handleRestart = useCallback(async () => {
     setRestarting(true);

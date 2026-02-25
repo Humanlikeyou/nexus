@@ -202,7 +202,52 @@ All 9 chart components import this: `TokenUsage`, `RevenueChart`, `SleepChart`, 
 - [x] **Settings inputs** — `py-2 rounded-lg` → `py-2.5 rounded-xl`
 - [x] **App.tsx grids** — `gap-4→gap-5`, `space-y-6→space-y-7`
 
+### LLM Router (Session Feb 2026)
+- [x] `src/lib/types.ts` — Added `ComputeMode`, `LlmRouterConfig`, `RouterResponse`, `LlmUsageRecord`, `CostEstimate`; 8 new `NexusConfig` fields
+- [x] `src-tauri/src/commands/llm_router.rs` — Full routing module: `decide_provider()`, `call_ollama()`, `call_anthropic()`, 4 Tauri commands, 16 unit tests
+- [x] `src-tauri/src/commands/mod.rs` — Added `pub mod llm_router`
+- [x] `src-tauri/src/lib.rs` — Registered 4 commands: `chat_with_router`, `get_cost_estimate`, `get_llm_usage`, `clear_llm_usage`
+- [x] `src-tauri/src/commands/telegram.rs` — Added 8 `#[serde(default)]` LLM router fields to `NexusConfig` struct
+- [x] `src/lib/llm-router.ts` — TypeScript helpers: `estimateTokens`, `estimateCostUsd`, `formatCost`, `formatProvider`, `buildRouterConfig`, `aggregateUsage`
+- [x] `src/lib/api.ts` — Added `chatWithRouter`, `getCostEstimate`, `getLlmUsage`, `clearLlmUsage` wrappers
+- [x] `src/components/settings/SettingsPage.tsx` — Compute Mode section: mode selector, model inputs, API key, budget caps, cost toggle, usage summary
+- [x] `src/components/terrance/TelegramChat.tsx` — Wired to `chatWithRouter`; shows provider badge + cost estimate per message
+
+### Terrance Continuity Architecture (Session Feb 2026)
+- [x] `config/terrance.identity.md` — Canonical identity: operating principles, communication style, decision priorities, tone constraints, mission alignment. Prepended to ALL model calls regardless of provider.
+- [x] `src/terrance/system/continuity.ts` — `buildSystemPrompt()` (identity + context primer), `summarizeAndStoreSession()` (post-session memory), `loadContext()` / `saveContext()`, `INFERENCE_PARAMS` (shared temperature/top_p/repeat_penalty)
+- [x] `src-tauri/src/commands/continuity.rs` — `read_identity_file`, `load_terrance_context`, `save_terrance_context`, `store_session_log`, `list_session_logs`
+- [x] `memory/session_logs/` — Directory for per-session JSON summaries (committed to repo for portability)
+- [x] `~/Library/.../terrance_context.json` — Runtime context store: active goals + last session summary
+- [x] `src/components/terrance/TelegramChat.tsx` — Identity injected at send time; "Save to memory" button triggers `summarizeAndStoreSession()`; provider badge + cost shown per message
+
+**Continuity guarantees:**
+- Identity file is always prepended regardless of mode (local/hybrid/api)
+- Context (goals + last summary) loaded from external storage before every session
+- Session summaries stored to `memory/session_logs/` after each conversation
+- Fallback identity inline if file read fails — Terrance never loses its identity
+- Routing never alters the identity prompt — only the compute engine changes
+
+#### LLM Router Test Checklist
+- [ ] **Local mode** — Set mode=local, send a message, verify provider badge shows "Local", no API cost logged
+- [ ] **Hybrid default** — Set mode=hybrid, send a short message, verify it routes to Ollama
+- [ ] **Hybrid tag escalation** — In hybrid mode, if tags include "heavy", verify Anthropic is used (requires API key)
+- [ ] **API mode** — Set mode=api with valid API key, send a message, verify Anthropic is used and cost is logged
+- [ ] **Budget enforcement** — Set daily cap to $0.00, verify hybrid mode falls back to Ollama (cap exceeded)
+- [ ] **Usage log** — After several calls, open Settings → Compute Mode, verify usage summary shows correct counts and costs
+- [ ] **Clear usage** — Click "Clear" in usage summary, verify log resets to zero
+- [ ] **Offline fallback** — In hybrid mode with API key, kill internet, verify graceful fallback to Ollama (no crash)
+- [ ] **Unit tests** — Run `cargo test -p nexus-lib` and verify all 16 router tests pass
+
 ---
+
+### OpenClaw Model Routing (Session Feb 25 2026)
+- [x] OpenClaw primary switched to `google/gemini-2.0-flash` (temporary — until Anthropic credits topped up)
+- [x] Fallback chain: `ollama/qwen2.5:7b → ollama/qwen2.5:32b → anthropic/claude-haiku → anthropic/claude-sonnet`
+- [x] `OLLAMA_API_KEY=ollama-local` added to LaunchAgent plist
+- [x] `models.json` fixed — was storing literal string "OLLAMA_API_KEY" instead of value
+- [x] Sessions cache cleared (was locked on deleted deepseek-r1:32b)
+- [ ] **When Anthropic credits topped up**: change primary back to `anthropic/claude-haiku-4-5-20251001` in `~/.openclaw/openclaw.json`
 
 ## Pending / Future Work
 

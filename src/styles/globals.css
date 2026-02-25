@@ -306,6 +306,38 @@ html.light .glow-success {
     0 0 45px oklch(0.48 0.22 150 / 0.04);
 }
 
+html.light .gradient-border::before {
+  background: linear-gradient(135deg, oklch(0.50 0.20 195), oklch(0.45 0.22 285));
+}
+
+html.light .animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(0 0 0 / 0.04) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+}
+
+html.light .animate-glow-pulse {
+  animation-name: glow-pulse-light;
+}
+
+@keyframes glow-pulse-light {
+  0%, 100% {
+    box-shadow:
+      0 0 8px oklch(0.50 0.20 195 / 0.18),
+      0 0 20px oklch(0.50 0.20 195 / 0.08);
+  }
+  50% {
+    box-shadow:
+      0 0 12px oklch(0.50 0.20 195 / 0.30),
+      0 0 32px oklch(0.50 0.20 195 / 0.15),
+      0 0 60px oklch(0.50 0.20 195 / 0.05);
+  }
+}
+
 html.light .gradient-accent {
   background: linear-gradient(135deg, oklch(0.45 0.20 195), oklch(0.45 0.20 155));
 }

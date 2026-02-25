@@ -28,6 +28,12 @@ import type {
   ArmConfig,
   ArmStrategyConfig,
   ReplayFileInfo,
+  RouterResponse,
+  LlmRouterConfig,
+  CostEstimate,
+  LlmUsageRecord,
+  TerranceContext,
+  SessionLogEntry,
 } from "./types";
 
 // ============================================================
@@ -117,6 +123,9 @@ export const sendTelegramMessage = (text: string) =>
 export const testTelegramConnection = () =>
   invoke<string>("test_telegram_connection");
 
+export const sendToTerrance = (text: string) =>
+  invoke<string>("send_to_terrance", { text });
+
 // ============================================================
 // Packager
 // ============================================================
@@ -176,6 +185,25 @@ export const queryEvents = (query: EventQuery) =>
 
 export const migrateExistingData = () =>
   invoke<string>("migrate_existing_data");
+
+// ============================================================
+// Chat History (SQLite-persisted)
+// ============================================================
+
+export const createChatSession = (title: string) =>
+  invoke<import("./types").ChatSession>("create_chat_session", { title });
+
+export const listChatSessions = () =>
+  invoke<import("./types").ChatSession[]>("list_chat_sessions");
+
+export const saveChatMessage = (message: import("./types").PersistedChatMessage) =>
+  invoke<number>("save_chat_message", { message });
+
+export const loadChatHistory = (sessionId: string, limit?: number) =>
+  invoke<import("./types").PersistedChatMessage[]>("load_chat_history", { sessionId, limit });
+
+export const deleteChatSession = (sessionId: string) =>
+  invoke<void>("delete_chat_session", { sessionId });
 
 // ============================================================
 // Notifications (Tauri-persisted)
@@ -338,3 +366,54 @@ export const startDemoEeg = (mode: string, speed: number) =>
   invoke<void>("start_demo_eeg", { mode, speed });
 
 export const stopDemoEeg = () => invoke<void>("stop_demo_eeg");
+
+// ============================================================
+// LLM Router
+// ============================================================
+
+export const chatWithRouter = (
+  text: string,
+  config: LlmRouterConfig,
+  tags: string[],
+  forceProvider?: string,
+  anthropicApiKey?: string,
+) =>
+  invoke<RouterResponse>("chat_with_router", {
+    text,
+    config,
+    tags,
+    forceProvider,
+    anthropicApiKey,
+  });
+
+export const getCostEstimate = (
+  text: string,
+  config: LlmRouterConfig,
+  tags: string[],
+) =>
+  invoke<CostEstimate>("get_cost_estimate", { text, config, tags });
+
+export const getLlmUsage = () =>
+  invoke<LlmUsageRecord[]>("get_llm_usage");
+
+export const clearLlmUsage = () =>
+  invoke<void>("clear_llm_usage");
+
+// ============================================================
+// Terrance Continuity
+// ============================================================
+
+export const readIdentityFile = () =>
+  invoke<string>("read_identity_file");
+
+export const loadTerranceContext = () =>
+  invoke<TerranceContext>("load_terrance_context");
+
+export const saveTerranceContext = (context: TerranceContext) =>
+  invoke<void>("save_terrance_context", { context });
+
+export const storeSessionLog = (entry: SessionLogEntry) =>
+  invoke<void>("store_session_log", { entry });
+
+export const listSessionLogs = () =>
+  invoke<SessionLogEntry[]>("list_session_logs");

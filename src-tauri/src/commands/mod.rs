@@ -14,3 +14,6 @@ pub mod arm;
 pub mod outbox;
 pub mod replay;
 pub mod notifications;
+pub mod llm_router;
+pub mod continuity;
+pub mod assistant;

@@ -586,7 +586,7 @@ export default function App() {
           <motion.div key="terrance" {...pageTransition} className="space-y-7">
             <div className="grid grid-cols-3 gap-5">
               <StatusCard status={openclaw.status} loading={openclaw.loading} />
-              <TokenUsage loading={openclaw.loading} />
+              <TokenUsage />
               <SkillsList skills={openclaw.skills} loading={openclaw.loading} />
             </div>
             <div className="grid grid-cols-2 gap-5">

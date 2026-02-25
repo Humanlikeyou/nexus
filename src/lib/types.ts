@@ -286,12 +286,92 @@ export interface NexusConfig {
   n8n_webhook_secret: string | null;
   preferred_muse_address: string | null;
   preferred_whoop_address: string | null;
+  // LLM Router
+  compute_mode: string | null;
+  llm_ollama_model: string | null;
+  llm_anthropic_model: string | null;
+  llm_token_threshold: number | null;
+  llm_daily_cap_usd: number | null;
+  llm_per_task_cap_usd: number | null;
+  llm_show_cost_estimate: boolean | null;
+  anthropic_api_key: string | null;
+}
+
+// ============================================================
+// LLM Router
+// ============================================================
+
+export type ComputeMode = "local" | "hybrid" | "api";
+
+export interface LlmRouterConfig {
+  mode: ComputeMode;
+  ollama_model: string;
+  anthropic_model: string;
+  token_threshold: number;
+  daily_cap_usd: number | null;
+  per_task_cap_usd: number | null;
+  show_cost_estimate: boolean;
+}
+
+export interface RouterResponse {
+  content: string;
+  provider: "ollama" | "anthropic";
+  model: string;
+  latency_ms: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_cost_usd: number;
+  routing_reason: string;
+}
+
+export interface LlmUsageRecord {
+  id: string;
+  timestamp: number;
+  provider: "ollama" | "anthropic";
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_cost_usd: number;
+  latency_ms: number;
+  routing_reason: string;
+}
+
+export interface CostEstimate {
+  provider: string;
+  model: string;
+  estimated_input_tokens: number;
+  estimated_cost_usd: number;
+  routing_reason: string;
 }
 
 export interface PackageInfo {
   path: string;
   size_mb: number;
   includes: string[];
+}
+
+// ============================================================
+// Chat History (SQLite-persisted)
+// ============================================================
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  message_count: number;
+}
+
+export interface PersistedChatMessage {
+  id: number;
+  session_id: string;
+  role: "user" | "terrance";
+  text: string;
+  ts: number;
+  provider?: string | null;
+  model?: string | null;
+  latency_ms?: number | null;
+  cost_usd?: number | null;
 }
 
 // ============================================================
@@ -773,4 +853,24 @@ export interface ArmConfig {
   poll_interval_secs: number;
   kill_switch_active: boolean;
   worker_api_keys: Array<{ name: string; key: string }>;
+}
+
+// ============================================================
+// Terrance Continuity
+// ============================================================
+
+export interface TerranceContext {
+  active_goals: string[];
+  last_session_summary: string | null;
+  last_session_timestamp: number | null;
+  relevant_memory: string[];
+}
+
+export interface SessionLogEntry {
+  id: string;
+  timestamp: number;
+  message_count: number;
+  summary: string;
+  provider: string;
+  model: string;
 }

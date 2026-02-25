@@ -24,6 +24,8 @@ import {
   Bluetooth,
   TrendingUp,
   SendHorizontal,
+  Cpu,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNexus } from "@/context/NexusContext";
@@ -40,10 +42,13 @@ import {
   armGetConfig,
   armSaveConfig,
   getOpenClawHealth,
+  getLlmUsage,
+  clearLlmUsage,
 } from "@/lib/api";
 import { pushHealthToN8n } from "@/terrance/system/openclawHealth";
-import type { ArmConfig } from "@/lib/types";
+import type { ArmConfig, LlmUsageRecord } from "@/lib/types";
 import type { NexusConfig, PackageInfo } from "@/lib/types";
+import { aggregateUsage, formatCost, formatProvider } from "@/lib/llm-router";
 
 export function SettingsPage() {
   const { toast, addNotification } = useNexus();
@@ -63,6 +68,14 @@ export function SettingsPage() {
     n8n_webhook_secret: null,
     preferred_muse_address: null,
     preferred_whoop_address: null,
+    compute_mode: null,
+    llm_ollama_model: null,
+    llm_anthropic_model: null,
+    llm_token_threshold: null,
+    llm_daily_cap_usd: null,
+    llm_per_task_cap_usd: null,
+    llm_show_cost_estimate: null,
+    anthropic_api_key: null,
   });
   const [gatewaySimDown, setGatewaySimDown] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -78,11 +91,14 @@ export function SettingsPage() {
   const [armConfig, setArmConfig] = useState<ArmConfig | null>(null);
   const [savingArm, setSavingArm] = useState(false);
   const [n8nTesting, setN8nTesting] = useState(false);
+  const [llmUsage, setLlmUsage] = useState<LlmUsageRecord[]>([]);
+  const [clearingUsage, setClearingUsage] = useState(false);
 
   useEffect(() => {
     getConfig().then(setConfig).catch(() => {});
     getAppPaths().then(setPaths).catch(() => {});
     armGetConfig().then(setArmConfig).catch(() => {});
+    getLlmUsage().then(setLlmUsage).catch(() => {});
     // Check current autostart state
     invoke<boolean>("plugin:autostart|is_enabled")
       .then(setAutoStart)
@@ -587,6 +603,206 @@ export function SettingsPage() {
             />
           </div>
         </div>
+      </section>
+
+      {/* Compute Mode */}
+      <section className="glass p-6 space-y-5">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-accent/15 flex items-center justify-center">
+            <Cpu size={16} className="text-accent" />
+          </div>
+          <div>
+            <h3 className="text-base font-semibold">Compute Mode</h3>
+            <p className="text-[13px] text-muted-foreground">
+              Control how Terrance routes AI tasks between local and API models
+            </p>
+          </div>
+        </div>
+
+        {/* Mode selector */}
+        <div className="space-y-2">
+          <label className="text-[13px] text-muted-foreground">Routing Mode</label>
+          <div className="flex gap-2">
+            {(["local", "hybrid", "api"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setConfig((prev) => ({ ...prev, compute_mode: m }))}
+                className={cn(
+                  "flex-1 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors capitalize",
+                  (config.compute_mode ?? "hybrid") === m
+                    ? "bg-accent/15 text-accent border border-accent/30"
+                    : "bg-muted/15 text-muted-foreground border border-border/15 hover:bg-muted/25",
+                )}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground/40">
+            {(config.compute_mode ?? "hybrid") === "local" && "Always uses Ollama — fully offline, no API costs."}
+            {(config.compute_mode ?? "hybrid") === "hybrid" && "Defaults to local; escalates to API for heavy/complex tasks within budget."}
+            {(config.compute_mode ?? "hybrid") === "api" && "Always uses the Anthropic API — best quality, incurs cost."}
+          </p>
+        </div>
+
+        {/* Model inputs */}
+        <div className="space-y-3">
+          <div>
+            <label className="text-[13px] text-muted-foreground mb-1 block">Local Model (Ollama)</label>
+            <input
+              type="text"
+              value={config.llm_ollama_model || ""}
+              onChange={(e) => updateField("llm_ollama_model", e.target.value)}
+              placeholder="qwen2.5:32b"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+            />
+          </div>
+          <div>
+            <label className="text-[13px] text-muted-foreground mb-1 block">API Model (Anthropic)</label>
+            <input
+              type="text"
+              value={config.llm_anthropic_model || ""}
+              onChange={(e) => updateField("llm_anthropic_model", e.target.value)}
+              placeholder="claude-haiku-4-5-20251001"
+              disabled={(config.compute_mode ?? "hybrid") === "local"}
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
+            />
+          </div>
+          <div>
+            <label className="text-[13px] text-muted-foreground mb-1 block">Anthropic API Key</label>
+            <input
+              type="password"
+              value={config.anthropic_api_key || ""}
+              onChange={(e) => updateField("anthropic_api_key", e.target.value)}
+              placeholder="sk-ant-..."
+              disabled={(config.compute_mode ?? "hybrid") === "local"}
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
+            />
+          </div>
+        </div>
+
+        {/* Budget controls */}
+        <div className="space-y-3 pt-1 border-t border-border/15">
+          <p className="text-[13px] text-muted-foreground font-medium">Budget Controls</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[13px] text-muted-foreground mb-1 block">Daily Cap (USD)</label>
+              <input
+                type="number"
+                step="0.50"
+                min="0"
+                value={config.llm_daily_cap_usd ?? ""}
+                onChange={(e) => setConfig((prev) => ({ ...prev, llm_daily_cap_usd: e.target.value ? parseFloat(e.target.value) : null }))}
+                placeholder="5.00"
+                disabled={(config.compute_mode ?? "hybrid") === "local"}
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
+              />
+            </div>
+            <div>
+              <label className="text-[13px] text-muted-foreground mb-1 block">Per-Task Cap (USD)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={config.llm_per_task_cap_usd ?? ""}
+                onChange={(e) => setConfig((prev) => ({ ...prev, llm_per_task_cap_usd: e.target.value ? parseFloat(e.target.value) : null }))}
+                placeholder="0.10"
+                disabled={(config.compute_mode ?? "hybrid") === "local"}
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-[13px] text-muted-foreground mb-1 block">Token Threshold for API Escalation</label>
+            <input
+              type="number"
+              step="1000"
+              min="0"
+              value={config.llm_token_threshold ?? ""}
+              onChange={(e) => setConfig((prev) => ({ ...prev, llm_token_threshold: e.target.value ? parseInt(e.target.value) : null }))}
+              placeholder="8000"
+              disabled={(config.compute_mode ?? "hybrid") === "local"}
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
+            />
+            <p className="text-xs text-muted-foreground/40 mt-1">
+              In hybrid mode, tasks with more estimated tokens than this escalate to API
+            </p>
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[13px] text-muted-foreground">Show Cost Estimate</p>
+              <p className="text-xs text-muted-foreground/40">Display estimated cost before each API call</p>
+            </div>
+            <button
+              onClick={() => setConfig((prev) => ({ ...prev, llm_show_cost_estimate: !(prev.llm_show_cost_estimate ?? true) }))}
+              disabled={(config.compute_mode ?? "hybrid") === "local"}
+              className={cn(
+                "relative w-11 h-6 rounded-full transition-colors disabled:opacity-40",
+                (config.llm_show_cost_estimate ?? true) ? "bg-accent" : "bg-muted/30",
+              )}
+            >
+              <div
+                className={cn(
+                  "absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform",
+                  (config.llm_show_cost_estimate ?? true) ? "translate-x-[22px]" : "translate-x-0.5",
+                )}
+              />
+            </button>
+          </div>
+        </div>
+
+        {/* Usage summary */}
+        {llmUsage.length > 0 && (() => {
+          const stats = aggregateUsage(llmUsage);
+          return (
+            <div className="space-y-3 pt-1 border-t border-border/15">
+              <div className="flex items-center justify-between">
+                <p className="text-[13px] text-muted-foreground font-medium">Usage Summary</p>
+                <button
+                  onClick={async () => {
+                    setClearingUsage(true);
+                    try {
+                      await clearLlmUsage();
+                      setLlmUsage([]);
+                      toast({ type: "success", title: "Usage log cleared" });
+                    } catch {
+                      /* ignore */
+                    } finally {
+                      setClearingUsage(false);
+                    }
+                  }}
+                  disabled={clearingUsage}
+                  className="flex items-center gap-1 px-2 py-1 rounded text-xs text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                >
+                  {clearingUsage ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                  Clear
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/15">
+                  <p className="text-muted-foreground/50">Today's Cost</p>
+                  <p className="font-mono font-medium mt-0.5">{formatCost(stats.todayCost)}</p>
+                </div>
+                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/15">
+                  <p className="text-muted-foreground/50">Today's Calls</p>
+                  <p className="font-mono font-medium mt-0.5">{stats.todayCalls}</p>
+                </div>
+                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/15">
+                  <p className="text-muted-foreground/50">Total Cost</p>
+                  <p className="font-mono font-medium mt-0.5">{formatCost(stats.totalCost)}</p>
+                </div>
+                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/15">
+                  <p className="text-muted-foreground/50">By Provider</p>
+                  <p className="font-mono font-medium mt-0.5 truncate">
+                    {Object.entries(stats.byProvider)
+                      .map(([p, n]) => `${formatProvider(p)}: ${n}`)
+                      .join(" · ")}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </section>
 
       {/* Save Button */}

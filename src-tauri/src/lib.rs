@@ -1,6 +1,6 @@
 mod commands;
 
-use commands::{arm, ble_common, events, goals, muse, notifications, onboarding, openclaw, outbox, packager, replay, sessions, snapshots, system, telegram, whoop};
+use commands::{arm, assistant, ble_common, continuity, events, goals, llm_router, muse, notifications, onboarding, openclaw, outbox, packager, replay, sessions, snapshots, system, telegram, whoop};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
@@ -78,6 +78,7 @@ pub fn run() {
             telegram::get_telegram_messages,
             telegram::send_telegram_message,
             telegram::test_telegram_connection,
+            telegram::send_to_terrance,
             // Packager
             packager::pack_it_up,
             packager::unpack_backup,
@@ -127,6 +128,23 @@ pub fn run() {
             arm::arm_poll_all,
             arm::arm_get_config,
             arm::arm_save_config,
+            // Continuity
+            continuity::read_identity_file,
+            continuity::load_terrance_context,
+            continuity::save_terrance_context,
+            continuity::store_session_log,
+            continuity::list_session_logs,
+            // LLM Router
+            llm_router::chat_with_router,
+            llm_router::get_cost_estimate,
+            llm_router::get_llm_usage,
+            llm_router::clear_llm_usage,
+            // Assistant chat history
+            assistant::create_chat_session,
+            assistant::list_chat_sessions,
+            assistant::save_chat_message,
+            assistant::load_chat_history,
+            assistant::delete_chat_session,
             // Replay / Demo
             replay::start_eeg_recording,
             replay::stop_eeg_recording,

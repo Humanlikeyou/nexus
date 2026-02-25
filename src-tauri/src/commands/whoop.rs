@@ -394,29 +394,107 @@ pub async fn start_hr_stream(app: AppHandle) -> Result<(), String> {
 
     let app_handle = app.clone();
     tokio::spawn(async move {
-        let mut notification_stream = peripheral.notifications().await.unwrap();
+        const MAX_BACKOFF_MS: u64 = 60_000; // cap at 60s
+        const MAX_RECONNECT_ATTEMPTS: u32 = 10;
+        let mut backoff_ms: u64;
 
-        while let Some(notification) = notification_stream.next().await {
+        'outer: loop {
+            let mut notification_stream = match peripheral.notifications().await {
+                Ok(s) => s,
+                Err(e) => {
+                    println!("[whoop] hr_stream: notification_stream_error={e}");
+                    break;
+                }
+            };
+
+            // Reset backoff on each successful stream start
+            backoff_ms = 1000;
+
+            while let Some(notification) = notification_stream.next().await {
+                let streaming = WHOOP_STREAMING.lock().await;
+                if !*streaming {
+                    break 'outer; // user stopped streaming
+                }
+                drop(streaming);
+
+                let data = &notification.value;
+
+                if notification.uuid == DATA_FROM_STRAP {
+                    if let Some(hr_data) = parse_whoop_data_packet(data) {
+                        let _ = app_handle.emit("whoop-hr", &hr_data);
+                    }
+                } else if notification.uuid == HR_MEASUREMENT {
+                    if let Some(hr_data) = parse_standard_hr(data) {
+                        let _ = app_handle.emit("whoop-hr", &hr_data);
+                    }
+                }
+            }
+
+            // Stream ended — check if user stopped or connection dropped
             let streaming = WHOOP_STREAMING.lock().await;
             if !*streaming {
-                break;
+                break; // user stopped
             }
             drop(streaming);
 
-            let data = &notification.value;
+            // Connection dropped — attempt reconnect with exponential backoff
+            println!("[whoop] hr_stream: connection_dropped — starting reconnect");
+            emit_whoop_state(&app_handle, BleState::Connecting).await;
 
-            if notification.uuid == DATA_FROM_STRAP {
-                // Parse custom Whoop data packet
-                if let Some(hr_data) = parse_whoop_data_packet(data) {
-                    let _ = app_handle.emit("whoop-hr", &hr_data);
+            let mut reconnected = false;
+            for attempt in 1..=MAX_RECONNECT_ATTEMPTS {
+                let streaming = WHOOP_STREAMING.lock().await;
+                if !*streaming {
+                    break 'outer; // user stopped during backoff
                 }
-            } else if notification.uuid == HR_MEASUREMENT {
-                // Parse standard BLE HR measurement
-                if let Some(hr_data) = parse_standard_hr(data) {
-                    let _ = app_handle.emit("whoop-hr", &hr_data);
+                drop(streaming);
+
+                println!("[whoop] reconnect: attempt={attempt}/{MAX_RECONNECT_ATTEMPTS} backoff_ms={backoff_ms}");
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+
+                match peripheral.connect().await {
+                    Ok(()) => {
+                        // Re-discover services and re-subscribe
+                        if peripheral.discover_services().await.is_ok() {
+                            let chars = peripheral.characteristics();
+                            // Re-subscribe to HR characteristics
+                            if let Some(data_char) = chars.iter().find(|c| c.uuid == DATA_FROM_STRAP) {
+                                let _ = peripheral.subscribe(data_char).await;
+                            }
+                            if let Some(hr_char) = chars.iter().find(|c| c.uuid == HR_MEASUREMENT) {
+                                let _ = peripheral.subscribe(hr_char).await;
+                            }
+                            // Re-enable HR broadcast
+                            if let Some(cmd_to) = chars.iter().find(|c| c.uuid == CMD_TO_STRAP) {
+                                let cmd = build_whoop_command(0x0E, &[0x01]);
+                                let _ = peripheral.write(cmd_to, &cmd, WriteType::WithResponse).await;
+                            }
+
+                            println!("[whoop] reconnect: status=success attempt={attempt}");
+                            emit_whoop_state(&app_handle, BleState::Streaming).await;
+                            reconnected = true;
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        println!("[whoop] reconnect: status=failed attempt={attempt} reason={e}");
+                    }
                 }
+
+                // Exponential backoff: double up to max
+                backoff_ms = (backoff_ms * 2).min(MAX_BACKOFF_MS);
             }
+
+            if !reconnected {
+                println!("[whoop] reconnect: exhausted after {MAX_RECONNECT_ATTEMPTS} attempts");
+                let mut streaming = WHOOP_STREAMING.lock().await;
+                *streaming = false;
+                emit_whoop_state(&app_handle, BleState::Idle).await;
+                break;
+            }
+            // Loop back to 'outer to re-acquire the notification stream
         }
+
         println!("[whoop] hr_stream: status=task_exited");
     });
 

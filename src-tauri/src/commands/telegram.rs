@@ -34,6 +34,23 @@ pub struct NexusConfig {
     pub preferred_muse_address: Option<String>,
     #[serde(default)]
     pub preferred_whoop_address: Option<String>,
+    // LLM Router
+    #[serde(default)]
+    pub compute_mode: Option<String>,
+    #[serde(default)]
+    pub llm_ollama_model: Option<String>,
+    #[serde(default)]
+    pub llm_anthropic_model: Option<String>,
+    #[serde(default)]
+    pub llm_token_threshold: Option<u32>,
+    #[serde(default)]
+    pub llm_daily_cap_usd: Option<f64>,
+    #[serde(default)]
+    pub llm_per_task_cap_usd: Option<f64>,
+    #[serde(default)]
+    pub llm_show_cost_estimate: Option<bool>,
+    #[serde(default)]
+    pub anthropic_api_key: Option<String>,
 }
 
 fn default_gateway_url() -> Option<String> {
@@ -215,7 +232,7 @@ pub async fn send_telegram_message(text: String) -> Result<TelegramMessage, Stri
         from_name: "You".to_string(),
         text,
         date,
-        is_outgoing: false,
+        is_outgoing: true,
     })
 }
 
@@ -243,4 +260,88 @@ pub async fn test_telegram_connection() -> Result<String, String> {
         .unwrap_or("Bot".to_string());
 
     Ok(format!("Connected to bot: {}", name))
+}
+
+/// Pick the best available Ollama model for chat (prefers smaller/faster models).
+/// Returns the first model found from the preference list, falls back to whatever is installed.
+async fn pick_ollama_model(client: &reqwest::Client) -> String {
+    let preferred = ["qwen2.5:32b", "qwen2.5:14b", "qwen2.5:7b", "llama3.3", "llama3.2", "mistral"];
+
+    let Ok(resp) = client
+        .get("http://127.0.0.1:11434/api/tags")
+        .send()
+        .await
+    else {
+        return "deepseek-r1:32b".to_string();
+    };
+    let Ok(body) = resp.json::<serde_json::Value>().await else {
+        return "deepseek-r1:32b".to_string();
+    };
+
+    let installed: Vec<String> = body["models"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
+        .collect();
+
+    // Return first preferred model that's installed
+    for pref in &preferred {
+        if installed.iter().any(|m| m.starts_with(pref)) {
+            return pref.to_string();
+        }
+    }
+
+    // Fall back to whatever is installed first
+    installed
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| "deepseek-r1:32b".to_string())
+}
+
+#[tauri::command]
+pub async fn send_to_terrance(text: String) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let model = pick_ollama_model(&client).await;
+
+    let resp = client
+        .post("http://127.0.0.1:11434/api/chat")
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": text}],
+            "stream": false
+        }))
+        .timeout(std::time::Duration::from_secs(180))
+        .send()
+        .await
+        .map_err(|e| format!("Ollama unreachable — is it running? ({})", e))?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Bad response from Ollama: {}", e))?;
+
+    if let Some(err) = body["error"].as_str() {
+        return Err(format!("Ollama error: {}", err));
+    }
+
+    let content = body["message"]["content"]
+        .as_str()
+        .ok_or_else(|| "No response from Ollama".to_string())?;
+
+    // Strip DeepSeek R1 thinking tags (<think>...</think>) from output
+    let cleaned = {
+        let s = content.trim();
+        if let (Some(start), Some(end)) = (s.find("<think>"), s.find("</think>")) {
+            if start < end {
+                s[end + "</think>".len()..].trim().to_string()
+            } else {
+                s.to_string()
+            }
+        } else {
+            s.to_string()
+        }
+    };
+
+    Ok(cleaned)
 }

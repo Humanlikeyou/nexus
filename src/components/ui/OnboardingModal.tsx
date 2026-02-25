@@ -54,6 +54,14 @@ export function OnboardingModal() {
     n8n_webhook_secret: null,
     preferred_muse_address: null,
     preferred_whoop_address: null,
+    compute_mode: null,
+    llm_ollama_model: null,
+    llm_anthropic_model: null,
+    llm_token_threshold: null,
+    llm_daily_cap_usd: null,
+    llm_per_task_cap_usd: null,
+    llm_show_cost_estimate: null,
+    anthropic_api_key: null,
   });
 
   useEffect(() => {
