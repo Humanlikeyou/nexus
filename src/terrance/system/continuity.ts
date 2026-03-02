@@ -19,6 +19,32 @@ import type { LlmRouterConfig, RouterResponse } from "@/lib/types";
 import { buildRouterConfig } from "@/lib/llm-router";
 import { getConfig } from "@/lib/api";
 
+// ─── Skills ──────────────────────────────────────────────────────────────────
+
+interface TerrranceSkill {
+  name: string;
+  status: string;
+  description: string;
+  content: string;
+}
+
+let _skillsCache: TerrranceSkill[] | null = null;
+
+async function loadSkills(): Promise<TerrranceSkill[]> {
+  if (_skillsCache) return _skillsCache;
+  try {
+    _skillsCache = await invoke<TerrranceSkill[]>("read_skills");
+  } catch {
+    _skillsCache = [];
+  }
+  return _skillsCache;
+}
+
+/** Force reload skills (call after settings change) */
+export function invalidateSkillsCache(): void {
+  _skillsCache = null;
+}
+
 // ─── Identity ─────────────────────────────────────────────────────────────────
 
 /** The canonical system prompt prefix loaded from config/terrance.identity.md */
@@ -74,12 +100,24 @@ export async function saveContext(ctx: TerranceContext): Promise<void> {
  * It assembles identity + memory context into a system prompt.
  */
 export async function buildSystemPrompt(ctx?: TerranceContext): Promise<string> {
-  const [identity, context] = await Promise.all([
+  const [identity, context, skills] = await Promise.all([
     loadIdentity(),
     ctx ? Promise.resolve(ctx) : loadContext(),
+    loadSkills(),
   ]);
 
   const parts: string[] = [identity, ""];
+
+  // Skills block — inject active skill knowledge
+  const activeSkills = skills.filter((s) => s.status === "active" && s.content);
+  if (activeSkills.length > 0) {
+    parts.push("## Active Skills");
+    parts.push("You have the following specialized capabilities loaded:\n");
+    for (const skill of activeSkills) {
+      parts.push(skill.content);
+      parts.push("");
+    }
+  }
 
   // Continuity primer block
   parts.push("## Session Context");

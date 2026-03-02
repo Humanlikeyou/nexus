@@ -65,25 +65,41 @@ export function OnboardingModal() {
   });
 
   useEffect(() => {
+    let cancelled = false;
     const localDone = localStorage.getItem(LOCAL_ONBOARDED_KEY) === "1";
+
+    const retrySync = (attempts: number, delayMs: number) => {
+      if (cancelled || attempts <= 0) return;
+      setTimeout(() => {
+        if (cancelled) return;
+        completeOnboarding()
+          .then(() => { if (!cancelled) setSyncPending(false); })
+          .catch(() => retrySync(attempts - 1, Math.min(delayMs * 2, 30_000)));
+      }, delayMs);
+    };
+
     checkOnboarding()
       .then((backendDone) => {
+        if (cancelled) return;
         if (!backendDone && !localDone) {
-          // Neither local nor backend says done — show modal
           setOpen(true);
           getConfig().then(setConfig).catch(() => {});
         } else if (localDone && !backendDone) {
-          // Local says done but backend doesn't know — show sync pending indicator
           setSyncPending(true);
-          // Try to sync in the background
-          completeOnboarding().then(() => setSyncPending(false)).catch(() => {});
+          completeOnboarding()
+            .then(() => { if (!cancelled) setSyncPending(false); })
+            .catch(() => retrySync(2, 5_000));
         }
       })
       .catch(() => {
-        // Backend unavailable — trust local flag only, don't show modal if local says done
+        if (cancelled) return;
         if (!localDone) setOpen(true);
-        else setSyncPending(true); // backend unreachable, flag it
+        else {
+          setSyncPending(true);
+          retrySync(3, 3_000);
+        }
       });
+    return () => { cancelled = true; };
   }, []);
 
   const handleComplete = async () => {
@@ -277,6 +293,13 @@ export function OnboardingModal() {
           className="ml-1 underline opacity-70 hover:opacity-100"
         >
           Retry
+        </button>
+        <button
+          onClick={() => setSyncPending(false)}
+          className="ml-1 opacity-50 hover:opacity-100"
+          aria-label="Dismiss"
+        >
+          &times;
         </button>
       </div>
     )}

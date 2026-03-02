@@ -201,37 +201,39 @@ pub fn decide_provider(
                 }
             }
 
-            // 2. Per-task cap guard (pre-check against estimated cost)
-            if let Some(per_task) = config.per_task_cap_usd {
-                let est_out = estimated_tokens / 2;
-                let est_cost =
-                    estimate_cost("anthropic", &config.anthropic_model, estimated_tokens, est_out);
-                if est_cost > per_task {
-                    return RoutingDecision {
-                        provider: "ollama".to_string(),
-                        reason: format!("per_task_cap({:.4}>{:.2})", est_cost, per_task),
-                    };
-                }
-            }
-
-            // 3. Tag-based escalation
+            // 2. Determine if escalation is warranted (tags or token threshold)
             let escalation_tags = ["heavy", "research", "code", "long"];
-            if let Some(trigger) = tags.iter().find(|t| escalation_tags.contains(&t.as_str())) {
+            let tag_trigger = tags.iter().find(|t| escalation_tags.contains(&t.as_str()));
+            let token_trigger = estimated_tokens > config.token_threshold;
+
+            let escalation_reason = if let Some(trigger) = tag_trigger {
+                Some(format!("tag={}", trigger))
+            } else if token_trigger {
+                Some(format!("tokens_>{}", config.token_threshold))
+            } else {
+                None
+            };
+
+            // 3. If escalation warranted, apply per-task cap guard
+            if let Some(reason) = escalation_reason {
+                if let Some(per_task) = config.per_task_cap_usd {
+                    let est_out = estimated_tokens / 2;
+                    let est_cost =
+                        estimate_cost("anthropic", &config.anthropic_model, estimated_tokens, est_out);
+                    if est_cost > per_task {
+                        return RoutingDecision {
+                            provider: "ollama".to_string(),
+                            reason: format!("per_task_cap({:.4}>{:.2},would:{})", est_cost, per_task, reason),
+                        };
+                    }
+                }
                 return RoutingDecision {
                     provider: "anthropic".to_string(),
-                    reason: format!("tag={}", trigger),
+                    reason,
                 };
             }
 
-            // 4. Token-threshold escalation
-            if estimated_tokens > config.token_threshold {
-                return RoutingDecision {
-                    provider: "anthropic".to_string(),
-                    reason: format!("tokens_>{}", config.token_threshold),
-                };
-            }
-
-            // 5. Default: stay local
+            // 4. Default: stay local
             RoutingDecision {
                 provider: "ollama".to_string(),
                 reason: "hybrid_default_local".to_string(),
@@ -543,9 +545,20 @@ mod tests {
     #[test]
     fn per_task_cap_blocks_expensive_request() {
         // 120_000 tokens → est_cost = (120k*$0.00025 + 60k*$0.00125)/1k = $0.105 > $0.10 cap
+        // Escalation would have been triggered by tokens_>8000; per-task cap blocks it
         let d = decide_provider(&cfg("hybrid"), &[], 120_000, None, 0.0);
         assert_eq!(d.provider, "ollama");
         assert!(d.reason.contains("per_task_cap"), "reason: {}", d.reason);
+        assert!(d.reason.contains("would:tokens_>"), "should show blocked reason: {}", d.reason);
+    }
+
+    #[test]
+    fn per_task_cap_shows_blocked_tag_escalation() {
+        // "heavy" tag would escalate, but 120k tokens makes it too expensive
+        let d = decide_provider(&cfg("hybrid"), &["heavy".to_string()], 120_000, None, 0.0);
+        assert_eq!(d.provider, "ollama");
+        assert!(d.reason.contains("per_task_cap"), "reason: {}", d.reason);
+        assert!(d.reason.contains("would:tag=heavy"), "should show blocked tag: {}", d.reason);
     }
 
     // ── Force override ───────────────────────────────────────────────────────

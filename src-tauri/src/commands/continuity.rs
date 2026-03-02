@@ -64,10 +64,14 @@ pub fn read_identity_file() -> Result<String, String> {
             break;
         }
     }
-    // Fallback: check well-known project path
-    let fallback = PathBuf::from("/Users/thevisualdude/projects/nexus/config/terrance.identity.md");
-    if fallback.exists() {
-        return fs::read_to_string(&fallback).map_err(|e| e.to_string());
+    // Fallback: check well-known project paths relative to home dir
+    if let Some(home) = dirs::home_dir() {
+        for rel in &["projects/nexus/config/terrance.identity.md"] {
+            let candidate = home.join(rel);
+            if candidate.exists() {
+                return fs::read_to_string(&candidate).map_err(|e| e.to_string());
+            }
+        }
     }
     Err("Identity file not found. Ensure config/terrance.identity.md exists in the project root.".to_string())
 }

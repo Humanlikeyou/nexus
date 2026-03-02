@@ -43,12 +43,25 @@ export function TokenUsage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getLlmUsage()
-      .then((data) => {
-        setRecords(data);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    let cancelled = false;
+    const fetch = () => {
+      getLlmUsage()
+        .then((data) => {
+          if (!cancelled) {
+            setRecords(data);
+            setLoading(false);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
+    fetch();
+    const interval = setInterval(fetch, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   const stats = weeklyStats(records);

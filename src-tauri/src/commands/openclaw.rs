@@ -28,11 +28,13 @@ pub struct CronJob {
     pub enabled: bool,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Skill {
     pub name: String,
     pub status: String,
     pub description: String,
+    #[serde(default)]
+    pub content: String,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -110,47 +112,59 @@ pub fn read_cron_jobs() -> Result<Vec<CronJob>, String> {
 
 #[tauri::command]
 pub fn read_skills() -> Result<Vec<Skill>, String> {
-    let base = openclaw_dir();
-    let skills_dir = base.join("skills");
     let mut skills = Vec::new();
+    let mut seen = std::collections::HashSet::new();
 
-    if skills_dir.exists() {
-        if let Ok(entries) = fs::read_dir(&skills_dir) {
+    // Helper: load .md skills from a directory
+    let load_from = |dir: &std::path::Path, skills: &mut Vec<Skill>, seen: &mut std::collections::HashSet<String>| {
+        if !dir.exists() { return; }
+        if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
-                let name = entry
-                    .file_name()
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+                let name = path.file_stem()
+                    .unwrap_or_default()
                     .to_string_lossy()
-                    .trim_end_matches(".md")
                     .to_string();
+                if !seen.insert(name.clone()) { continue; }
+                let content = fs::read_to_string(&path).unwrap_or_default();
+                // Extract first line after "# " as description
+                let description = content.lines()
+                    .find(|l| l.starts_with("# "))
+                    .map(|l| l.trim_start_matches("# ").to_string())
+                    .unwrap_or_default();
                 skills.push(Skill {
                     name,
                     status: "active".to_string(),
-                    description: String::new(),
+                    description,
+                    content,
                 });
             }
         }
+    };
+
+    // 1. Project skills: config/skills/ (walk up from binary to find project root)
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.as_path();
+        while let Some(parent) = dir.parent() {
+            let candidate = parent.join("config").join("skills");
+            if candidate.exists() {
+                load_from(&candidate, &mut skills, &mut seen);
+                break;
+            }
+            dir = parent;
+        }
+    }
+    // Fallback: well-known project path
+    if let Some(home) = dirs::home_dir() {
+        let fallback = home.join("projects/nexus/config/skills");
+        if fallback.exists() {
+            load_from(&fallback, &mut skills, &mut seen);
+        }
     }
 
-    if skills.is_empty() {
-        // Return placeholder skills if directory doesn't exist
-        skills = vec![
-            Skill {
-                name: "morning-briefing".to_string(),
-                status: "active".to_string(),
-                description: "Daily morning summary and agenda".to_string(),
-            },
-            Skill {
-                name: "task-manager".to_string(),
-                status: "active".to_string(),
-                description: "Task tracking and prioritization".to_string(),
-            },
-            Skill {
-                name: "content-pipeline".to_string(),
-                status: "active".to_string(),
-                description: "Content creation workflow".to_string(),
-            },
-        ];
-    }
+    // 2. OpenClaw skills: ~/.openclaw/skills/
+    load_from(&openclaw_dir().join("skills"), &mut skills, &mut seen);
 
     Ok(skills)
 }
