@@ -1,0 +1,148 @@
+{
+  "name": "OpenClaw Health Monitor",
+  "nodes": [
+    {
+      "id": "wh-health-01",
+      "name": "Receive Health Report",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [80, 400],
+      "webhookId": "terrance-openclaw-health-v1",
+      "parameters": {
+        "path": "terrance/openclaw/health",
+        "responseMode": "responseNode",
+        "httpMethod": "POST",
+        "options": {}
+      }
+    },
+    {
+      "id": "cd-extract-01",
+      "name": "Extract + Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [360, 400],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst trace_id = body.trace_id ?? ('health-' + Date.now());\n\n// Support both direct POST and openclaw.health event envelope\nconst payload = body.event?.payload ?? body;\n\nconst status      = payload.status      ?? 'offline';\nconst version     = payload.version     ?? null;\nconst gateway     = payload.gateway     ?? false;\nconst rpc         = payload.rpc         ?? false;\nconst memSearch   = payload.memory_search ?? 'missing';\nconst telegram    = payload.channels?.telegram ?? 'unknown';\nconst whatsapp    = payload.channels?.whatsapp ?? 'unknown';\nconst timestamp   = payload.timestamp   ?? new Date().toISOString();\n\nreturn [{ json: {\n  trace_id,\n  status,\n  version,\n  gateway,\n  rpc,\n  memory_search: memSearch,\n  channels: { telegram, whatsapp },\n  timestamp,\n  needs_alert: status !== 'healthy',\n  alert_level: status === 'offline' ? 'urgent' : status === 'degraded' ? 'warning' : 'none',\n} }];"
+      }
+    },
+    {
+      "id": "sw-status-01",
+      "name": "Route on Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [640, 400],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "id": "c-off", "leftValue": "={{ $json.status }}", "rightValue": "offline", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "id": "c-deg", "leftValue": "={{ $json.status }}", "rightValue": "degraded", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      }
+    },
+    {
+      "id": "cd-alert-urgent-01",
+      "name": "Compose Urgent Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 200],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const d = $input.first().json;\nconst ts = new Date(d.timestamp).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });\nconst msg = [\n  '🚨 *OpenClaw OFFLINE*',\n  '',\n  `Gateway: ${d.gateway ? '✓' : '✗'} reachable`,\n  `RPC:     ${d.rpc     ? '✓' : '✗'} responding`,\n  `Version: ${d.version ?? 'unknown'}`,\n  '',\n  `Checked: ${ts}`,\n  '',\n  'Run: `openclaw gateway start`',\n].join('\\n');\nreturn [{ json: { ...d, alert_message: msg } }];"
+      }
+    },
+    {
+      "id": "cd-alert-warn-01",
+      "name": "Compose Warning Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 400],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const d = $input.first().json;\nconst ts = new Date(d.timestamp).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });\nconst issues = [];\nif (d.memory_search === 'missing') issues.push('• Memory search has no local model');\nif (d.channels.telegram === 'disconnected') issues.push('• Telegram disconnected');\nif (d.channels.whatsapp === 'not_linked') issues.push('• WhatsApp not linked');\nconst msg = [\n  '⚠️ *OpenClaw DEGRADED*',\n  '',\n  ...issues,\n  '',\n  `Version: ${d.version ?? 'unknown'}`,\n  `Checked: ${ts}`,\n  '',\n  'Run: `openclaw doctor --fix`',\n].join('\\n');\nreturn [{ json: { ...d, alert_message: msg } }];"
+      }
+    },
+    {
+      "id": "cd-send-tg-01",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 280],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ── Telegram alert sender ────────────────────────────────────────────────────\n// Reads credentials from n8n environment variables.\n// Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in your n8n instance\n// (Settings → Environment Variables) or export them in the n8n process env.\nconst BOT_TOKEN = $env.TELEGRAM_BOT_TOKEN ?? '';\nconst CHAT_ID   = $env.TELEGRAM_CHAT_ID   ?? '';\n\nconst d   = $input.first().json;\nconst msg = d.alert_message;\n\nif (!BOT_TOKEN || !CHAT_ID) {\n  return [{ json: { ...d, telegram_sent: false, reason: 'TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — add them to n8n environment variables' } }];\n}\n\ntry {\n  const res = await helpers.httpRequest({\n    url: 'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: { chat_id: CHAT_ID, text: msg, parse_mode: 'Markdown' },\n    json: true,\n  });\n  return [{ json: { ...d, telegram_sent: true, tg_message_id: res.result?.message_id } }];\n} catch (err) {\n  return [{ json: { ...d, telegram_sent: false, tg_error: err.message } }];\n}"
+      }
+    },
+    {
+      "id": "cd-log-healthy-01",
+      "name": "Log Healthy Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 580],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const d = $input.first().json;\nconst ts = new Date(d.timestamp).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles' });\nconsole.log(`[OpenClaw] HEALTHY @ ${ts} — v${d.version ?? '?'} gateway=${d.gateway} rpc=${d.rpc} mem=${d.memory_search} tg=${d.channels.telegram}`);\nreturn [{ json: { ...d, logged: true } }];"
+      }
+    },
+    {
+      "id": "rp-health-01",
+      "name": "Send 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1480, 400],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, trace_id: $json.trace_id, status: $json.status, timestamp: $json.timestamp } }}"
+      }
+    }
+  ],
+  "connections": {
+    "Receive Health Report": {
+      "main": [
+        [{ "node": "Extract + Validate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract + Validate": {
+      "main": [
+        [{ "node": "Route on Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route on Status": {
+      "main": [
+        [{ "node": "Compose Urgent Alert",  "type": "main", "index": 0 }],
+        [{ "node": "Compose Warning Alert", "type": "main", "index": 0 }],
+        [{ "node": "Log Healthy Report",    "type": "main", "index": 0 }]
+      ]
+    },
+    "Compose Urgent Alert":  { "main": [[{ "node": "Send Telegram Alert", "type": "main", "index": 0 }]] },
+    "Compose Warning Alert": { "main": [[{ "node": "Send Telegram Alert", "type": "main", "index": 0 }]] },
+    "Send Telegram Alert":   { "main": [[{ "node": "Send 200 OK",         "type": "main", "index": 0 }]] },
+    "Log Healthy Report":    { "main": [[{ "node": "Send 200 OK",         "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "openclaw-health-monitor-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "terrance-local"
+  }
+}

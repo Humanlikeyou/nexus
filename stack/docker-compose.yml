@@ -1,0 +1,150 @@
+# Terrance Intelligence Stack — Sprint 1
+# Security baseline:
+#   - All host ports bound to 127.0.0.1 (localhost-only, no LAN exposure)
+#   - Telemetry disabled on every service that supports it
+#   - All credentials sourced from .env — never hardcoded here
+#   - Data volumes live under ./data/ (covered by macOS FileVault)
+
+x-logging: &log
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  # ── Shared PostgreSQL + pgvector ────────────────────────────────────────────
+  postgres:
+    image: ankane/pgvector:latest
+    restart: unless-stopped
+    logging: *log
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: terrance
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./init-dbs.sh:/docker-entrypoint-initdb.d/init-dbs.sh:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── n8n — Automation Backbone ───────────────────────────────────────────────
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    restart: unless-stopped
+    logging: *log
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      # Database
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n_db
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      # Encryption — all workflow credentials encrypted at rest
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      N8N_SECURE_COOKIE: "false"         # HTTP-only on localhost, no HTTPS needed
+      # Telemetry — all off
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"    # stops phone-home for template list
+      N8N_SENTRY_DSN: ""
+      EXTERNAL_FRONTEND_HOOKS_URLS: ""
+      N8N_HIRING_BANNER_ENABLED: "false"
+      N8N_COMMUNITY_PACKAGES_ENABLED: "false"
+      # Runtime
+      N8N_HOST: "0.0.0.0"               # binds inside container; host port locked to 127.0.0.1 above
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: "http://localhost:5678/"
+      GENERIC_TIMEZONE: ${TIMEZONE:-America/Los_Angeles}
+      # Stage 3 — downstream service URLs (Docker-internal; used by Code nodes)
+      LETTA_URL:     "http://letta:8283"
+      VERBA_URL:     "http://verba:8000"
+      WEAVIATE_URL:  "http://weaviate:8080"
+    volumes:
+      - ./data/n8n:/home/node/.n8n
+
+  # ── Letta (MemGPT) — Agent Long-Term Memory ─────────────────────────────────
+  letta:
+    image: letta/letta:latest
+    restart: unless-stopped
+    logging: *log
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8283:8283"   # REST API + ADE web UI (both on same port)
+    environment:
+      LETTA_PG_URI: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/letta_db"
+      # LLM backends — fill in what you use; unused keys left blank
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      # Telemetry off
+      LETTA_TELEMETRY: "false"
+      SENTRY_DSN: ""
+    volumes:
+      - ./data/letta:/root/.letta
+
+  # ── Weaviate — Vector Store (backing Verba) ─────────────────────────────────
+  weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.24.6
+    restart: unless-stopped
+    logging: *log
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --scheme
+      - http
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      CLUSTER_HOSTNAME: weaviate
+      DISABLE_TELEMETRY: "true"          # Weaviate-native telemetry flag
+    volumes:
+      - ./data/weaviate:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Verba — RAG Knowledge Base ──────────────────────────────────────────────
+  verba:
+    build:
+      context: ../Verba
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    logging: *log
+    depends_on:
+      weaviate:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8001:8000"   # 8001 avoids conflict if Windmill added later
+    environment:
+      WEAVIATE_URL_VERBA: "http://weaviate:8080"   # internal Docker network
+      # LLM / embedding backends
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+    volumes:
+      - ./data/verba:/data

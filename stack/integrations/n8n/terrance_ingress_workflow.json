@@ -1,0 +1,181 @@
+{
+  "id": "laKQPqbtCQcWT3XL",
+  "name": "Terrance Ingress Gateway",
+  "nodes": [
+    {
+      "id": "wh-terrance-01",
+      "name": "Ingress Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [80, 400],
+      "webhookId": "terrance-ingress-v1",
+      "parameters": {
+        "path": "terrance/ingress",
+        "responseMode": "responseNode",
+        "httpMethod": "POST",
+        "options": {}
+      }
+    },
+    {
+      "id": "sw-route-01",
+      "name": "Route by event.type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [360, 400],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "id": "c-hp", "leftValue": "={{ $json.body.event.type }}", "rightValue": "health.ping", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "id": "c-mw", "leftValue": "={{ $json.body.event.type }}", "rightValue": "memory.write", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "id": "c-mq", "leftValue": "={{ $json.body.event.type }}", "rightValue": "memory.query", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "id": "c-ki", "leftValue": "={{ $json.body.event.type }}", "rightValue": "kb.ingest", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "id": "c-kq", "leftValue": "={{ $json.body.event.type }}", "rightValue": "kb.query", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      }
+    },
+    {
+      "id": "cd-health-01",
+      "name": "Handle health.ping",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 140],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst trace_id = body.trace_id ?? 'no-trace-id';\nreturn [{\n  json: {\n    ok: true,\n    trace_id,\n    services: {\n      n8n: 'up',\n      letta: 'http://letta:8283',\n      verba: 'http://verba:8000',\n      weaviate: 'http://weaviate:8080'\n    }\n  }\n}];"
+      }
+    },
+    {
+      "id": "cd-memwrite-01",
+      "name": "Handle memory.write",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 260],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst trace_id = body.trace_id ?? 'no-trace-id';\nconst payload = body.event?.payload ?? {};\nconst LETTA_URL = 'http://letta:8283';\nconst AGENT_ID = 'agent-5efd68f1-6976-4af5-a677-b82f668d6843';\n\ntry {\n  const content = payload.content || '';\n  const mode = payload.mode || 'append';\n  const block = payload.block || 'human';\n\n  if (!content) {\n    return [{ json: { ok: false, trace_id, error: { message: 'No content provided', node: 'memory.write' } } }];\n  }\n\n  let newValue = content;\n\n  if (mode === 'append') {\n    const current = await helpers.httpRequest({\n      url: LETTA_URL + '/v1/agents/' + AGENT_ID + '/core-memory',\n      method: 'GET',\n      json: true\n    });\n    const blocks = current.blocks || [];\n    const targetBlock = blocks.find(function(b) { return b.label === block; });\n    const currentValue = targetBlock ? targetBlock.value : '';\n    newValue = currentValue + '\\n' + content;\n  }\n\n  const res = await helpers.httpRequest({\n    url: LETTA_URL + '/v1/agents/' + AGENT_ID + '/core-memory/blocks/' + block,\n    method: 'PATCH',\n    headers: { 'Content-Type': 'application/json' },\n    body: { value: newValue },\n    json: true\n  });\n\n  return [{ json: { ok: true, trace_id, result: { agent_id: AGENT_ID, block: block, mode: mode, value: res.value } } }];\n} catch (err) {\n  return [{ json: { ok: false, trace_id, error: { message: err.message, node: 'memory.write', details: String(err) } } }];\n}"
+      }
+    },
+    {
+      "id": "cd-memquery-01",
+      "name": "Handle memory.query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 380],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst trace_id = body.trace_id ?? 'no-trace-id';\nconst payload = body.event?.payload ?? {};\nconst LETTA_URL = 'http://letta:8283';\nconst AGENT_ID = 'agent-5efd68f1-6976-4af5-a677-b82f668d6843';\n\ntry {\n  const agentId = payload.agent_id || AGENT_ID;\n\n  const res = await helpers.httpRequest({\n    url: LETTA_URL + '/v1/agents/' + agentId + '/core-memory',\n    method: 'GET',\n    json: true\n  });\n  const blocks = res.blocks || [];\n  return [{ json: { ok: true, trace_id, result: { agent_id: agentId, blocks: blocks } } }];\n} catch (err) {\n  const detail = (err.response && err.response.data) ? JSON.stringify(err.response.data) : String(err);\n  return [{ json: { ok: false, trace_id, error: { message: err.message, node: 'memory.query', details: detail } } }];\n}"
+      }
+    },
+    {
+      "id": "cd-kbingest-01",
+      "name": "Handle kb.ingest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 500],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst trace_id = body.trace_id ?? 'no-trace-id';\nconst payload = body.event?.payload ?? {};\nconst WEAVIATE_URL = 'http://weaviate:8080';\nconst OLLAMA_URL = 'http://host.docker.internal:11434';\n\ntry {\n  const content = payload.content || '';\n  const filename = payload.filename || ('ingested-' + Date.now() + '.txt');\n  const labels = payload.labels || [];\n\n  if (!content) {\n    return [{ json: { ok: false, trace_id, error: { message: 'No content provided', node: 'kb.ingest' } } }];\n  }\n\n  // Ensure collections exist\n  const ensureCollection = async function(name) {\n    try {\n      await helpers.httpRequest({ url: WEAVIATE_URL + '/v1/schema/' + name, method: 'GET', json: true });\n    } catch (e) {\n      await helpers.httpRequest({\n        url: WEAVIATE_URL + '/v1/schema',\n        method: 'POST',\n        headers: { 'Content-Type': 'application/json' },\n        body: { class: name },\n        json: true\n      });\n    }\n  };\n  await ensureCollection('VERBA_DOCUMENTS');\n  await ensureCollection('VERBA_Embedding_nomic_embed_text');\n\n  // Chunk content (~250 words per chunk, 50 word overlap)\n  const words = content.split(/\\s+/);\n  const CHUNK_SIZE = 250;\n  const OVERLAP = 50;\n  const chunks = [];\n\n  if (words.length <= CHUNK_SIZE) {\n    chunks.push({ content: content, content_without_overlap: content, start_i: 0, end_i: words.length });\n  } else {\n    for (let i = 0; i < words.length; i += (CHUNK_SIZE - OVERLAP)) {\n      const end = Math.min(i + CHUNK_SIZE, words.length);\n      const overlapStart = (i === 0) ? 0 : i + OVERLAP;\n      chunks.push({\n        content: words.slice(i, end).join(' '),\n        content_without_overlap: words.slice(Math.min(overlapStart, end), end).join(' '),\n        start_i: i,\n        end_i: end\n      });\n      if (end >= words.length) break;\n    }\n  }\n\n  // Get embeddings from Ollama\n  const embeddings = [];\n  for (const chunk of chunks) {\n    const embedRes = await helpers.httpRequest({\n      url: OLLAMA_URL + '/api/embed',\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: { model: 'nomic-embed-text', input: chunk.content },\n      json: true\n    });\n    embeddings.push(embedRes.embeddings[0]);\n  }\n\n  // Create document in VERBA_DOCUMENTS\n  const docMeta = JSON.stringify({ Embedder: 'Ollama', Model: 'nomic-embed-text', Chunker: 'Token', ingested_via: 'kb.ingest' });\n  const docRes = await helpers.httpRequest({\n    url: WEAVIATE_URL + '/v1/objects',\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: {\n      class: 'VERBA_DOCUMENTS',\n      properties: { title: filename, content: content, extension: filename.split('.').pop() || 'txt', fileSize: content.length, labels: labels, source: '', meta: docMeta, metadata: '' }\n    },\n    json: true\n  });\n  const docUuid = docRes.id;\n\n  // Create chunks in VERBA_Embedding_nomic_embed_text\n  const chunkIds = [];\n  for (let i = 0; i < chunks.length; i++) {\n    const chunkRes = await helpers.httpRequest({\n      url: WEAVIATE_URL + '/v1/objects',\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: {\n        class: 'VERBA_Embedding_nomic_embed_text',\n        properties: { content: chunks[i].content, chunk_id: i, doc_uuid: docUuid, title: filename, pca: [0, 0, 0], start_i: chunks[i].start_i, end_i: chunks[i].end_i, content_without_overlap: chunks[i].content_without_overlap, labels: labels },\n        vector: embeddings[i]\n      },\n      json: true\n    });\n    chunkIds.push(chunkRes.id);\n  }\n\n  return [{ json: { ok: true, trace_id, result: { doc_uuid: docUuid, filename: filename, chunks_created: chunkIds.length, chunk_ids: chunkIds } } }];\n} catch (err) {\n  return [{ json: { ok: false, trace_id, error: { message: err.message, node: 'kb.ingest', details: String(err) } } }];\n}"
+      }
+    },
+    {
+      "id": "cd-kbquery-01",
+      "name": "Handle kb.query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 620],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst trace_id = body.trace_id ?? 'no-trace-id';\nconst payload  = body.event?.payload ?? {};\nconst VERBA_URL    = 'http://verba:8000';\nconst WEAVIATE_URL = 'http://weaviate:8080';\n\ntry {\n  const cs = function(t,v,d,vs) { return {type:t,value:v,description:d||'',values:vs||[]}; };\n  const defaultRAG = {\n    Embedder: {\n      selected: 'Ollama',\n      components: {\n        Ollama: { name: 'Ollama', variables: [], library: [], description: '', type: 'FILE', available: true,\n          config: { Model: cs('dropdown','nomic-embed-text','',['nomic-embed-text']) } }\n      }\n    },\n    Retriever: {\n      selected: 'Advanced',\n      components: {\n        Advanced: { name: 'Advanced', variables: [], library: [], description: '', type: 'FILE', available: true,\n          config: {\n            'Search Mode': cs('dropdown','Hybrid Search','',['Hybrid Search']),\n            'Limit Mode': cs('dropdown','Autocut','',['Autocut','Fixed']),\n            'Limit/Sensitivity': cs('number',1,''),\n            'Chunk Window': cs('number',1,''),\n            'Threshold': cs('number',80,'')\n          }\n        }\n      }\n    }\n  };\n\n  const ragConfig = payload.rag_config || defaultRAG;\n\n  const res = await helpers.httpRequest({\n    url: VERBA_URL + '/api/query',\n    method: 'POST',\n    headers: {\n      'Content-Type': 'application/json',\n      'Origin':       'http://verba:8000'\n    },\n    body: {\n      query:          payload.query           || '',\n      RAG:            ragConfig,\n      labels:         payload.labels          || [],\n      documentFilter: payload.document_filter || [],\n      credentials: {\n        deployment: 'Docker',\n        url:        WEAVIATE_URL,\n        key:        ''\n      }\n    },\n    json: true\n  });\n\n  return [{ json: { ok: true, trace_id, result: res } }];\n} catch (err) {\n  return [{ json: { ok: false, trace_id, error: { message: err.message, node: 'kb.query', details: String(err) } } }];\n}"
+      }
+    },
+    {
+      "id": "cd-unknown-01",
+      "name": "Handle unknown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 740],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst trace_id   = body.trace_id    ?? 'no-trace-id';\nconst event_type = body.event?.type ?? 'undefined';\n\nreturn [{\n  json: {\n    ok: false,\n    trace_id,\n    error: {\n      message: 'Unknown event.type: \"' + event_type + '\"',\n      node:    'router',\n      details: 'Valid types: health.ping, memory.write, memory.query, kb.ingest, kb.query'\n    }\n  }\n}];"
+      }
+    },
+    {
+      "id": "rp-shared-01",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [920, 440],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      }
+    }
+  ],
+  "connections": {
+    "Ingress Webhook": {
+      "main": [
+        [{ "node": "Route by event.type", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route by event.type": {
+      "main": [
+        [{ "node": "Handle health.ping",  "type": "main", "index": 0 }],
+        [{ "node": "Handle memory.write", "type": "main", "index": 0 }],
+        [{ "node": "Handle memory.query", "type": "main", "index": 0 }],
+        [{ "node": "Handle kb.ingest",    "type": "main", "index": 0 }],
+        [{ "node": "Handle kb.query",     "type": "main", "index": 0 }],
+        [{ "node": "Handle unknown",      "type": "main", "index": 0 }]
+      ]
+    },
+    "Handle health.ping":  { "main": [[{ "node": "Send Response", "type": "main", "index": 0 }]] },
+    "Handle memory.write": { "main": [[{ "node": "Send Response", "type": "main", "index": 0 }]] },
+    "Handle memory.query": { "main": [[{ "node": "Send Response", "type": "main", "index": 0 }]] },
+    "Handle kb.ingest":    { "main": [[{ "node": "Send Response", "type": "main", "index": 0 }]] },
+    "Handle kb.query":     { "main": [[{ "node": "Send Response", "type": "main", "index": 0 }]] },
+    "Handle unknown":      { "main": [[{ "node": "Send Response", "type": "main", "index": 0 }]] }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "terrance-stage3-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "terrance-local"
+  }
+}

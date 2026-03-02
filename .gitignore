@@ -24,3 +24,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Stack (Terrance infrastructure)
+stack/data/
+stack/.env
+stack/.venv-crewai/
