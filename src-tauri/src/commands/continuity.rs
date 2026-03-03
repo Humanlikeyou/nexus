@@ -85,6 +85,10 @@ pub struct TerranceContext {
     pub last_session_summary: Option<String>,
     pub last_session_timestamp: Option<u64>,
     pub relevant_memory: Vec<String>,
+    #[serde(default)]
+    pub last_consolidation_timestamp: Option<u64>,
+    #[serde(default)]
+    pub last_reasoning_timestamp: Option<u64>,
 }
 
 #[tauri::command]

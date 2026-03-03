@@ -3,7 +3,7 @@ import { Send, Bot, User, Loader2, AlertTriangle, Cpu, BookOpen } from "lucide-r
 import { cn } from "@/lib/utils";
 import { chatWithRouter, getConfig, createChatSession, saveChatMessage, loadChatHistory } from "@/lib/api";
 import { buildRouterConfig, formatCost, formatProvider } from "@/lib/llm-router";
-import { buildSystemPrompt, summarizeAndStoreSession } from "@/terrance/system/continuity";
+import { buildSystemPrompt, summarizeAndStoreSession, summarizeAndStoreSessionSilent } from "@/terrance/system/continuity";
 import type { LlmRouterConfig, RouterResponse } from "@/lib/types";
 
 interface ChatMessage {
@@ -27,6 +27,9 @@ export function TelegramChat() {
   const [anthropicApiKey, setAnthropicApiKey] = useState<string | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasAutoSavedRef = useRef(false);
+  const [autoSaved, setAutoSaved] = useState(false);
 
   // Load router config + build system prompt with identity + memory context
   useEffect(() => {
@@ -63,6 +66,36 @@ export function TelegramChat() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, sending]);
+
+  // Auto-save: reset idle timer whenever messages change (after a response arrives)
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (hasAutoSavedRef.current) return;
+    idleTimerRef.current = setTimeout(async () => {
+      const msgs = messagesRef.current;
+      if (msgs.length < 4 || hasAutoSavedRef.current) return;
+      hasAutoSavedRef.current = true;
+      const entries = msgs.map((m) => ({ role: m.role as "user" | "terrance", text: m.text, ts: m.ts }));
+      const result = await summarizeAndStoreSessionSilent(entries);
+      if (result.saved) setAutoSaved(true);
+    }, 2 * 60 * 1000); // 2 minutes
+  }, []);
+
+  // Cleanup: auto-save on unmount if not already saved
+  useEffect(() => {
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      const msgs = messagesRef.current;
+      if (msgs.length >= 4 && !hasAutoSavedRef.current) {
+        hasAutoSavedRef.current = true;
+        const entries = msgs.map((m) => ({ role: m.role as "user" | "terrance", text: m.text, ts: m.ts }));
+        summarizeAndStoreSessionSilent(entries);
+      }
+    };
+  }, []);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -121,6 +154,9 @@ export function TelegramChat() {
           latency_ms: resp.latency_ms, cost_usd: resp.estimated_cost_usd,
         }).catch(() => {});
       }
+
+      // Reset auto-save idle timer after each response
+      resetIdleTimer();
     } catch (e) {
       const msg = String(e).replace(/^Error:\s*/, "");
       setError(msg);
@@ -129,9 +165,12 @@ export function TelegramChat() {
     }
   };
 
-  // Summarize and store the session when explicitly requested or on unmount
+  // Summarize and store the session when explicitly requested
   const handleSummarize = useCallback(async () => {
     if (messages.length < 2 || summarizing) return;
+    // Cancel idle timer and prevent auto-save
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    hasAutoSavedRef.current = true;
     setSummarizing(true);
     try {
       const entries = messages.map((m) => ({
@@ -165,12 +204,17 @@ export function TelegramChat() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Cpu size={16} className="text-accent" />
-          <h3 className="text-base font-medium text-muted-foreground">Terrance</h3>
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Terrance</h3>
           <span className="text-xs px-2 py-0.5 rounded-md font-medium bg-accent/10 text-accent capitalize">
             {computeMode}
           </span>
         </div>
-        {canSummarize && (
+        {autoSaved ? (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground/30">
+            <BookOpen size={11} />
+            Auto-saved
+          </span>
+        ) : canSummarize && (
           <button
             onClick={handleSummarize}
             disabled={summarizing}
@@ -225,7 +269,7 @@ export function TelegramChat() {
               className={cn(
                 "px-3 py-2 rounded-xl text-xs leading-relaxed",
                 msg.role === "user"
-                  ? "bg-muted/20 border border-border/20 rounded-tr-sm"
+                  ? "bg-muted/20 border border-border/12 rounded-tr-sm"
                   : "bg-accent/8 border border-accent/20 rounded-tl-sm",
               )}
             >

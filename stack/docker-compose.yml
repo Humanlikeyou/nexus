@@ -68,6 +68,8 @@ services:
       N8N_PROTOCOL: http
       WEBHOOK_URL: "http://localhost:5678/"
       GENERIC_TIMEZONE: ${TIMEZONE:-America/Los_Angeles}
+      # Stage 4 — gateway authentication (shared secret validated by ingress workflow)
+      NEXUS_SECRET: ${NEXUS_SECRET:-}
       # Stage 3 — downstream service URLs (Docker-internal; used by Code nodes)
       LETTA_URL:     "http://letta:8283"
       VERBA_URL:     "http://verba:8000"

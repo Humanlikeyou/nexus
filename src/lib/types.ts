@@ -860,16 +860,18 @@ export interface ArmConfig {
 // ============================================================
 
 export interface TerranceContext {
-  active_goals: string[];
-  last_session_summary: string | null;
-  last_session_timestamp: number | null;
-  relevant_memory: string[];
+  activeGoals: string[];
+  lastSessionSummary: string | null;
+  lastSessionTimestamp: number | null;
+  relevantMemory: string[];
+  lastConsolidationTimestamp: number | null;
+  lastReasoningTimestamp: number | null;
 }
 
 export interface SessionLogEntry {
   id: string;
   timestamp: number;
-  message_count: number;
+  messageCount: number;
   summary: string;
   provider: string;
   model: string;

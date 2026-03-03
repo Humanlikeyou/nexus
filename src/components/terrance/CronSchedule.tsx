@@ -15,13 +15,13 @@ const defaultJobs: CronJob[] = [
 ];
 
 export function CronSchedule({ jobs, loading }: CronScheduleProps) {
-  const displayJobs = jobs.length > 0 ? jobs : defaultJobs;
+  const displayJobs = (jobs ?? []).length > 0 ? jobs : defaultJobs;
 
   return (
     <div className="glass p-6 space-y-5">
       <div className="flex items-center gap-2">
         <Clock size={16} className="text-accent" />
-        <h3 className="text-base font-medium text-muted-foreground">Cron Schedule</h3>
+        <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Cron Schedule</h3>
       </div>
 
       {loading ? (
@@ -37,7 +37,7 @@ export function CronSchedule({ jobs, loading }: CronScheduleProps) {
               key={i}
               className={cn(
                 "flex items-center justify-between px-3 py-2.5 rounded-lg",
-                "bg-muted/20 border border-border/20",
+                "bg-muted/20 border border-border/12",
               )}
             >
               <div className="flex items-center gap-3">

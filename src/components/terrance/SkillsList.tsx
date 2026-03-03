@@ -12,8 +12,8 @@ export function SkillsList({ skills, loading }: SkillsListProps) {
     <div className="glass p-6 space-y-5">
       <div className="flex items-center gap-2">
         <Zap size={16} className="text-accent" />
-        <h3 className="text-base font-medium text-muted-foreground">Active Skills</h3>
-        <span className="ml-auto text-xs text-muted-foreground/60">{skills.length}</span>
+        <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Active Skills</h3>
+        <span className="ml-auto text-xs text-muted-foreground/60">{(skills ?? []).length}</span>
       </div>
 
       {loading ? (
@@ -46,7 +46,7 @@ export function SkillsList({ skills, loading }: SkillsListProps) {
               </div>
               <span
                 className={cn(
-                  "text-xs px-1.5 py-0.5 rounded",
+                  "text-[11px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded",
                   skill.status === "active"
                     ? "bg-success/10 text-success"
                     : "bg-muted/30 text-muted-foreground/50",

@@ -66,6 +66,9 @@ import { GatewayStatus } from "./components/terrance/GatewayStatus";
 import { OpenClawStatusCard } from "./components/system/OpenClawStatusCard";
 import { pushHealthToN8n } from "./terrance/system/openclawHealth";
 
+// Terrance scheduler (consolidation + reasoning loops)
+import { startScheduler, stopScheduler } from "./terrance/system/scheduler";
+
 // ARM / Revenue
 import { ArmDashboard } from "./components/arm/ArmDashboard";
 import { useArm } from "./hooks/useArm";
@@ -205,7 +208,7 @@ function BlePanel({
             )}
             <button
               onClick={onDisconnect}
-              className="px-3 py-1.5 rounded-lg bg-muted/30 text-muted-foreground text-xs hover:bg-muted/50 transition-colors"
+              className="px-3 py-1.5 rounded-lg bg-muted/30 text-muted-foreground text-xs hover:bg-muted/30 transition-colors"
             >
               Disconnect
             </button>
@@ -278,10 +281,10 @@ function BlePanel({
 }
 
 const pageTransition = {
-  initial: { opacity: 0, y: 8 },
+  initial: { opacity: 0, y: 4 },
   animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -8 },
-  transition: { duration: 0.2, ease: "easeOut" },
+  exit: { opacity: 0, y: -4 },
+  transition: { duration: 0.35, ease: [0.25, 0.1, 0.25, 1] },
 };
 
 export default function App() {
@@ -291,6 +294,12 @@ export default function App() {
   const [appConfig, setAppConfig] = useState<NexusConfig | null>(null);
   useEffect(() => {
     getConfig().then(setAppConfig).catch(() => {});
+  }, []);
+
+  // Terrance scheduler — consolidation every 6h, reasoning every 12h
+  useEffect(() => {
+    startScheduler();
+    return () => stopScheduler();
   }, []);
 
   // Stable callback for OpenClawStatusCard — only recreates when the secret changes
@@ -583,17 +592,17 @@ export default function App() {
     switch (page) {
       case "terrance":
         return (
-          <motion.div key="terrance" {...pageTransition} className="space-y-7">
-            <div className="grid grid-cols-3 gap-5">
+          <motion.div key="terrance" {...pageTransition} className="space-y-5">
+            <div className="grid grid-cols-3 gap-4">
               <StatusCard status={openclaw.status} loading={openclaw.loading} />
               <TokenUsage />
               <SkillsList skills={openclaw.skills} loading={openclaw.loading} />
             </div>
-            <div className="grid grid-cols-2 gap-5">
+            <div className="grid grid-cols-2 gap-4">
               <GatewayStatus />
               <OpenClawStatusCard onHealthFetched={handleHealthFetched} />
             </div>
-            <div className="grid grid-cols-2 gap-5">
+            <div className="grid grid-cols-2 gap-4">
               <CronSchedule jobs={openclaw.cronJobs} loading={openclaw.loading} />
               <TelegramChat />
             </div>
@@ -602,9 +611,9 @@ export default function App() {
 
       case "business":
         return (
-          <motion.div key="business" {...pageTransition} className="space-y-7">
+          <motion.div key="business" {...pageTransition} className="space-y-5">
             <TaskBoard tasks={tasks} loading={bizLoading} />
-            <div className="grid grid-cols-2 gap-5">
+            <div className="grid grid-cols-2 gap-4">
               <ContentPipeline items={pipeline} loading={bizLoading} />
               <RevenueCard revenueSummary={arm.revenueSummary} loading={arm.loading} fetchedAt={arm.fetchedAt} />
             </div>
@@ -613,8 +622,8 @@ export default function App() {
 
       case "assistant":
         return (
-          <motion.div key="assistant" {...pageTransition} className="space-y-7">
-            <div className="grid grid-cols-2 gap-5">
+          <motion.div key="assistant" {...pageTransition} className="space-y-5">
+            <div className="grid grid-cols-2 gap-4">
               <CalendarView />
               <EmailSummary />
             </div>
@@ -625,7 +634,7 @@ export default function App() {
       case "neuro":
         if (nfSession.phase !== "idle") {
           return (
-            <motion.div key="neuro-session" {...pageTransition} className="space-y-7">
+            <motion.div key="neuro-session" {...pageTransition} className="space-y-5">
               <SessionView
                 phase={nfSession.phase}
                 protocol={nfSession.protocol}
@@ -663,7 +672,7 @@ export default function App() {
           );
         }
         return (
-          <motion.div key="neuro" {...pageTransition} className="space-y-7">
+          <motion.div key="neuro" {...pageTransition} className="space-y-5">
             <BlePanel
               title="Muse Headband"
               devices={muse.devices}
@@ -748,7 +757,7 @@ export default function App() {
 
       case "fitness":
         return (
-          <motion.div key="fitness" {...pageTransition} className="space-y-7">
+          <motion.div key="fitness" {...pageTransition} className="space-y-5">
             <BlePanel
               title="Whoop 4.0"
               devices={whoop.devices}
@@ -783,7 +792,7 @@ export default function App() {
               </div>
             )}
             <ProofPanel />
-            <div className="grid grid-cols-3 gap-5">
+            <div className="grid grid-cols-3 gap-4">
               <RecoveryScore
                 metrics={whoopAnalytics.recovery}
                 streaming={whoop.connectionState.streaming}
@@ -812,7 +821,7 @@ export default function App() {
         const nonNull = [recoveryVal, focusVal].filter((v): v is number => v != null);
         const overallVal = nonNull.length > 0 ? Math.round(nonNull.reduce((a, b) => a + b, 0) / nonNull.length) : 0;
         return (
-          <motion.div key="trajectory" {...pageTransition} className="space-y-7">
+          <motion.div key="trajectory" {...pageTransition} className="space-y-5">
             <div className="grid grid-cols-2 gap-6">
               <GoalTracker />
               <WellnessScore
@@ -825,7 +834,7 @@ export default function App() {
 
       case "revenue":
         return (
-          <motion.div key="revenue" {...pageTransition} className="space-y-7">
+          <motion.div key="revenue" {...pageTransition} className="space-y-5">
             <ArmDashboard
               strategies={arm.strategies}
               revenueSummary={arm.revenueSummary}
