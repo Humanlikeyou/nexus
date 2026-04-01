@@ -145,10 +145,10 @@ export function TokenUsage() {
             <p className="metric-value text-lg">{insights.recentSessionCount}</p>
             <p className="metric-label">30d Active</p>
           </div>
-          {Object.entries(insights.byProvider).length > 0 && (
+          {Object.entries(insights.byProvider ?? {}).length > 0 && (
             <div className="flex-1">
               <div className="flex gap-2 flex-wrap">
-                {Object.entries(insights.byProvider).map(([provider, count]) => (
+                {Object.entries(insights.byProvider ?? {}).map(([provider, count]) => (
                   <span key={provider} className="badge-status bg-accent/8 text-muted-foreground/70 border border-border/18">
                     {provider}: {count}
                   </span>

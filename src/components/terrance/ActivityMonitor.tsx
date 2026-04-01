@@ -504,7 +504,7 @@ function SubagentsSection() {
                     </p>
                     <p className="text-[9px] font-mono text-muted-foreground/40 truncate">
                       {agent.purpose.slice(0, 50)}
-                      {agent.jobs.length > 0 ? ` [${agent.jobs.length} jobs]` : ""}
+                      {(agent.jobs ?? []).length > 0 ? ` [${(agent.jobs ?? []).length} jobs]` : ""}
                     </p>
                   </button>
                 </div>
@@ -535,10 +535,10 @@ function SubagentsSection() {
                       Ran {formatTimeAgo(agent.lastRun)}
                     </p>
                   )}
-                  {agent.jobs.length > 0 && (
+                  {(agent.jobs ?? []).length > 0 && (
                     <div className="space-y-0.5 pt-0.5">
                       <p className="text-[9px] font-mono text-muted-foreground/40 uppercase tracking-wider">Jobs:</p>
-                      {agent.jobs.map((job) => (
+                      {(agent.jobs ?? []).map((job) => (
                         <div key={job.id} className="flex items-center justify-between">
                           <span className="text-[9px] font-mono text-foreground/70 truncate">
                             {job.enabled ? "▶" : "⏸"} {job.name}
@@ -550,10 +550,10 @@ function SubagentsSection() {
                       ))}
                     </div>
                   )}
-                  {agent.memory.length > 0 && (
+                  {(agent.memory ?? []).length > 0 && (
                     <div className="space-y-0.5 pt-0.5">
-                      <p className="text-[9px] font-mono text-muted-foreground/40 uppercase tracking-wider">Memory ({agent.memory.length}):</p>
-                      {agent.memory.slice(-3).map((m, i) => (
+                      <p className="text-[9px] font-mono text-muted-foreground/40 uppercase tracking-wider">Memory ({(agent.memory ?? []).length}):</p>
+                      {(agent.memory ?? []).slice(-3).map((m, i) => (
                         <p key={i} className="text-[9px] font-mono text-muted-foreground/40 truncate">
                           {m.slice(0, 100)}
                         </p>
