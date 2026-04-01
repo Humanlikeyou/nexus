@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Save,
   Check,
@@ -51,7 +52,7 @@ import type { NexusConfig, PackageInfo } from "@/lib/types";
 import { aggregateUsage, formatCost, formatProvider } from "@/lib/llm-router";
 
 export function SettingsPage() {
-  const { toast, addNotification } = useNexus();
+  const { toast } = useNexus();
   const { mode: themeMode, setMode: setThemeMode } = useTheme();
 
   const [config, setConfig] = useState<NexusConfig>({
@@ -112,7 +113,6 @@ export function SettingsPage() {
       await saveSettings(config);
       setSaved(true);
       toast({ type: "success", title: "Settings Saved" });
-      addNotification({ type: "success", title: "Settings Saved", message: "Configuration updated", source: "Settings" });
       setTimeout(() => setSaved(false), 3000);
     } catch (e) {
       toast({ type: "error", title: "Save Failed", description: String(e) });
@@ -129,7 +129,6 @@ export function SettingsPage() {
       const result = await testTelegramConnection();
       setTelegramStatus(result);
       toast({ type: "success", title: "Telegram Connected", description: result });
-      addNotification({ type: "success", title: "Telegram Test", message: result, source: "Settings" });
     } catch (e) {
       setTelegramStatus(`Error: ${e}`);
       toast({ type: "error", title: "Telegram Test Failed", description: String(e) });
@@ -145,7 +144,6 @@ export function SettingsPage() {
       const result = await packItUp();
       setPackResult(result);
       toast({ type: "success", title: "Backup Created", description: `${result.size_mb} MB saved to Desktop` });
-      addNotification({ type: "success", title: "Backup Created", message: `${result.size_mb} MB — ${result.includes.length} items packed`, source: "Packager" });
     } catch (e) {
       setPackResult({ path: "", size_mb: 0, includes: [`Error: ${e}`] });
       toast({ type: "error", title: "Backup Failed", description: String(e) });
@@ -155,27 +153,24 @@ export function SettingsPage() {
   };
 
   const handleUnpack = async () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".tar.gz,.nexus-backup";
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      setUnpacking(true);
-      setUnpackResult(null);
-      try {
-        const result = await unpackBackup((file as any).path || file.name);
-        setUnpackResult(result);
-        toast({ type: "success", title: "Backup Restored", description: `${result.length} items restored` });
-        addNotification({ type: "success", title: "Backup Restored", message: `${result.length} items restored from archive`, source: "Packager" });
-      } catch (e) {
-        setUnpackResult([`Error: ${e}`]);
-        toast({ type: "error", title: "Restore Failed", description: String(e) });
-      } finally {
-        setUnpacking(false);
-      }
-    };
-    input.click();
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "Backup", extensions: ["tar.gz", "nexus-backup"] }],
+    });
+    if (!selected) return;
+    const filePath = typeof selected === "string" ? selected : String(selected);
+    setUnpacking(true);
+    setUnpackResult(null);
+    try {
+      const result = await unpackBackup(filePath);
+      setUnpackResult(result);
+      toast({ type: "success", title: "Backup Restored", description: `${result.length} items restored` });
+    } catch (e) {
+      setUnpackResult([`Error: ${e}`]);
+      toast({ type: "error", title: "Restore Failed", description: String(e) });
+    } finally {
+      setUnpacking(false);
+    }
   };
 
   const handleSaveArm = async () => {
@@ -229,7 +224,7 @@ export function SettingsPage() {
   return (
     <div className="space-y-6 max-w-[720px]">
       {/* Telegram Configuration */}
-      <section className="glass p-6 space-y-5">
+      <section className="panel p-4 space-y-5">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center">
             <MessageCircle size={16} className="text-blue-400" />
@@ -252,9 +247,9 @@ export function SettingsPage() {
               value={config.telegram_bot_token || ""}
               onChange={(e) => updateField("telegram_bot_token", e.target.value)}
               placeholder="123456:ABC-DEF..."
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
             />
-            <p className="text-xs text-muted-foreground/40 mt-1">
+            <p className="text-xs text-muted-foreground/60 mt-1">
               Get this from @BotFather on Telegram
             </p>
           </div>
@@ -268,9 +263,9 @@ export function SettingsPage() {
               value={config.telegram_chat_id || ""}
               onChange={(e) => updateField("telegram_chat_id", e.target.value)}
               placeholder="-1001234567890"
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
             />
-            <p className="text-xs text-muted-foreground/40 mt-1">
+            <p className="text-xs text-muted-foreground/60 mt-1">
               Your personal chat or group where Terrance operates
             </p>
           </div>
@@ -283,7 +278,7 @@ export function SettingsPage() {
                 "flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs transition-colors",
                 config.telegram_bot_token
                   ? "bg-blue-500/15 text-blue-400 hover:bg-blue-500/25"
-                  : "bg-muted/10 text-muted-foreground/30 cursor-not-allowed",
+                  : "bg-muted/10 text-muted-foreground/50 cursor-not-allowed",
               )}
             >
               {telegramTesting ? (
@@ -310,7 +305,7 @@ export function SettingsPage() {
       </section>
 
       {/* Data Paths */}
-      <section className="glass p-6 space-y-5">
+      <section className="panel p-4 space-y-5">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-accent/15 flex items-center justify-center">
             <FolderOpen size={16} className="text-accent" />
@@ -333,7 +328,7 @@ export function SettingsPage() {
               value={config.openclaw_path || ""}
               onChange={(e) => updateField("openclaw_path", e.target.value)}
               placeholder={paths.openclaw_dir || "~/.openclaw"}
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
             />
           </div>
 
@@ -346,7 +341,7 @@ export function SettingsPage() {
               value={config.tasks_path || ""}
               onChange={(e) => updateField("tasks_path", e.target.value)}
               placeholder="~/.openclaw/workspace/TASKS.md"
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
             />
           </div>
 
@@ -359,14 +354,14 @@ export function SettingsPage() {
               value={config.pipeline_path || ""}
               onChange={(e) => updateField("pipeline_path", e.target.value)}
               placeholder="~/.openclaw/workspace/CONTENT-PIPELINE.md"
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
             />
           </div>
         </div>
       </section>
 
       {/* Gateway / Pipeline */}
-      <section className="glass p-6 space-y-5">
+      <section className="panel p-4 space-y-5">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-success/15 flex items-center justify-center">
             <ArrowUpRight size={16} className="text-success" />
@@ -389,7 +384,7 @@ export function SettingsPage() {
               value={config.gateway_url || ""}
               onChange={(e) => updateField("gateway_url", e.target.value)}
               placeholder="http://127.0.0.1:18789"
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
             />
           </div>
 
@@ -402,7 +397,7 @@ export function SettingsPage() {
               value={config.gateway_auth_token || ""}
               onChange={(e) => updateField("gateway_auth_token", e.target.value)}
               placeholder="Optional bearer token"
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
             />
           </div>
 
@@ -416,7 +411,7 @@ export function SettingsPage() {
                 value={config.gateway_batch_size ?? ""}
                 onChange={(e) => setConfig((prev) => ({ ...prev, gateway_batch_size: e.target.value ? Number(e.target.value) : null }))}
                 placeholder="50"
-                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
               />
             </div>
             <div>
@@ -428,7 +423,7 @@ export function SettingsPage() {
                 value={config.gateway_retry_base_secs ?? ""}
                 onChange={(e) => setConfig((prev) => ({ ...prev, gateway_retry_base_secs: e.target.value ? Number(e.target.value) : null }))}
                 placeholder="5"
-                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
               />
             </div>
             <div>
@@ -440,7 +435,7 @@ export function SettingsPage() {
                 value={config.gateway_retry_max_secs ?? ""}
                 onChange={(e) => setConfig((prev) => ({ ...prev, gateway_retry_max_secs: e.target.value ? Number(e.target.value) : null }))}
                 placeholder="300"
-                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
               />
             </div>
           </div>
@@ -471,7 +466,7 @@ export function SettingsPage() {
           </div>
 
           {/* n8n Webhook Auth */}
-          <div className="pt-2 space-y-3 border-t border-border/15">
+          <div className="pt-2 space-y-3 border-t border-border/25">
             <p className="text-[13px] text-muted-foreground font-medium flex items-center gap-1.5">
               <Webhook size={13} /> n8n Webhook Auth
             </p>
@@ -484,9 +479,9 @@ export function SettingsPage() {
                 value={config.n8n_webhook_secret || ""}
                 onChange={(e) => updateField("n8n_webhook_secret", e.target.value)}
                 placeholder="Shared secret for X-Nexus-Secret header"
-                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
               />
-              <p className="text-xs text-muted-foreground/40 mt-1">
+              <p className="text-xs text-muted-foreground/60 mt-1">
                 Must match the secret checked in your n8n Health Monitor Code node
               </p>
             </div>
@@ -504,7 +499,7 @@ export function SettingsPage() {
 
       {/* ARM Config */}
       {armConfig && (
-        <section className="glass p-6 space-y-5">
+        <section className="panel p-4 space-y-5">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-success/15 flex items-center justify-center">
               <TrendingUp size={16} className="text-success" />
@@ -527,7 +522,7 @@ export function SettingsPage() {
                   type="number"
                   value={armConfig.global_capital_limit}
                   onChange={(e) => setArmConfig((a) => a && ({ ...a, global_capital_limit: parseFloat(e.target.value) || 0 }))}
-                  className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+                  className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
                 />
               </div>
               <div>
@@ -538,7 +533,7 @@ export function SettingsPage() {
                   type="number"
                   value={armConfig.global_daily_loss_cap}
                   onChange={(e) => setArmConfig((a) => a && ({ ...a, global_daily_loss_cap: parseFloat(e.target.value) || 0 }))}
-                  className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+                  className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
                 />
               </div>
             </div>
@@ -551,8 +546,23 @@ export function SettingsPage() {
                 value={armConfig.poll_interval_secs}
                 onChange={(e) => setArmConfig((a) => a && ({ ...a, poll_interval_secs: parseInt(e.target.value) || 300 }))}
                 placeholder="300"
-                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
               />
+            </div>
+            <div>
+              <label className="text-[13px] text-muted-foreground mb-1 block">
+                Default Worker URL
+              </label>
+              <input
+                type="text"
+                value={armConfig.worker_base_url ?? ""}
+                onChange={(e) => setArmConfig((a) => a && ({ ...a, worker_base_url: e.target.value || null }))}
+                placeholder="https://my-worker.workers.dev"
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+              />
+              <p className="text-[10px] text-muted-foreground/50 mt-1">
+                Pre-fills worker URL when creating new strategies
+              </p>
             </div>
           </div>
 
@@ -568,7 +578,7 @@ export function SettingsPage() {
       )}
 
       {/* BLE Preferred Devices */}
-      <section className="glass p-6 space-y-5">
+      <section className="panel p-4 space-y-5">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-accent/15 flex items-center justify-center">
             <Bluetooth size={16} className="text-accent" />
@@ -589,7 +599,7 @@ export function SettingsPage() {
               value={config.preferred_muse_address || ""}
               onChange={(e) => updateField("preferred_muse_address", e.target.value)}
               placeholder="XX:XX:XX:XX:XX:XX"
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
             />
           </div>
           <div>
@@ -599,14 +609,14 @@ export function SettingsPage() {
               value={config.preferred_whoop_address || ""}
               onChange={(e) => updateField("preferred_whoop_address", e.target.value)}
               placeholder="XX:XX:XX:XX:XX:XX"
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
             />
           </div>
         </div>
       </section>
 
       {/* Compute Mode */}
-      <section className="glass p-6 space-y-5">
+      <section className="panel p-4 space-y-5">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-accent/15 flex items-center justify-center">
             <Cpu size={16} className="text-accent" />
@@ -631,14 +641,14 @@ export function SettingsPage() {
                   "flex-1 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors capitalize",
                   (config.compute_mode ?? "hybrid") === m
                     ? "bg-accent/15 text-accent border border-accent/30"
-                    : "bg-muted/15 text-muted-foreground border border-border/15 hover:bg-muted/25",
+                    : "bg-muted/15 text-muted-foreground border border-border/25 hover:bg-muted/25",
                 )}
               >
                 {m}
               </button>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground/40">
+          <p className="text-xs text-muted-foreground/60">
             {(config.compute_mode ?? "hybrid") === "local" && "Always uses Ollama — fully offline, no API costs."}
             {(config.compute_mode ?? "hybrid") === "hybrid" && "Defaults to local; escalates to API for heavy/complex tasks within budget."}
             {(config.compute_mode ?? "hybrid") === "api" && "Always uses the Anthropic API — best quality, incurs cost."}
@@ -653,8 +663,8 @@ export function SettingsPage() {
               type="text"
               value={config.llm_ollama_model || ""}
               onChange={(e) => updateField("llm_ollama_model", e.target.value)}
-              placeholder="qwen2.5:32b"
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+              placeholder="qwen3.5"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
             />
           </div>
           <div>
@@ -665,7 +675,7 @@ export function SettingsPage() {
               onChange={(e) => updateField("llm_anthropic_model", e.target.value)}
               placeholder="claude-haiku-4-5-20251001"
               disabled={(config.compute_mode ?? "hybrid") === "local"}
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
             />
           </div>
           <div>
@@ -676,13 +686,13 @@ export function SettingsPage() {
               onChange={(e) => updateField("anthropic_api_key", e.target.value)}
               placeholder="sk-ant-..."
               disabled={(config.compute_mode ?? "hybrid") === "local"}
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
             />
           </div>
         </div>
 
         {/* Budget controls */}
-        <div className="space-y-3 pt-1 border-t border-border/15">
+        <div className="space-y-3 pt-1 border-t border-border/25">
           <p className="text-[13px] text-muted-foreground font-medium">Budget Controls</p>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -695,7 +705,7 @@ export function SettingsPage() {
                 onChange={(e) => setConfig((prev) => ({ ...prev, llm_daily_cap_usd: e.target.value ? parseFloat(e.target.value) : null }))}
                 placeholder="5.00"
                 disabled={(config.compute_mode ?? "hybrid") === "local"}
-                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
               />
             </div>
             <div>
@@ -708,7 +718,7 @@ export function SettingsPage() {
                 onChange={(e) => setConfig((prev) => ({ ...prev, llm_per_task_cap_usd: e.target.value ? parseFloat(e.target.value) : null }))}
                 placeholder="0.10"
                 disabled={(config.compute_mode ?? "hybrid") === "local"}
-                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
+                className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
               />
             </div>
           </div>
@@ -722,16 +732,16 @@ export function SettingsPage() {
               onChange={(e) => setConfig((prev) => ({ ...prev, llm_token_threshold: e.target.value ? parseInt(e.target.value) : null }))}
               placeholder="8000"
               disabled={(config.compute_mode ?? "hybrid") === "local"}
-              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
+              className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors disabled:opacity-40"
             />
-            <p className="text-xs text-muted-foreground/40 mt-1">
+            <p className="text-xs text-muted-foreground/60 mt-1">
               In hybrid mode, tasks with more estimated tokens than this escalate to API
             </p>
           </div>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[13px] text-muted-foreground">Show Cost Estimate</p>
-              <p className="text-xs text-muted-foreground/40">Display estimated cost before each API call</p>
+              <p className="text-xs text-muted-foreground/60">Display estimated cost before each API call</p>
             </div>
             <button
               onClick={() => setConfig((prev) => ({ ...prev, llm_show_cost_estimate: !(prev.llm_show_cost_estimate ?? true) }))}
@@ -755,7 +765,7 @@ export function SettingsPage() {
         {llmUsage.length > 0 && (() => {
           const stats = aggregateUsage(llmUsage);
           return (
-            <div className="space-y-3 pt-1 border-t border-border/15">
+            <div className="space-y-3 pt-1 border-t border-border/25">
               <div className="flex items-center justify-between">
                 <p className="text-[13px] text-muted-foreground font-medium">Usage Summary</p>
                 <button
@@ -779,19 +789,19 @@ export function SettingsPage() {
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/15">
+                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/25">
                   <p className="text-muted-foreground/50">Today's Cost</p>
                   <p className="font-mono font-medium mt-0.5">{formatCost(stats.todayCost)}</p>
                 </div>
-                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/15">
+                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/25">
                   <p className="text-muted-foreground/50">Today's Calls</p>
                   <p className="font-mono font-medium mt-0.5">{stats.todayCalls}</p>
                 </div>
-                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/15">
+                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/25">
                   <p className="text-muted-foreground/50">Total Cost</p>
                   <p className="font-mono font-medium mt-0.5">{formatCost(stats.totalCost)}</p>
                 </div>
-                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/15">
+                <div className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/25">
                   <p className="text-muted-foreground/50">By Provider</p>
                   <p className="font-mono font-medium mt-0.5 truncate">
                     {Object.entries(stats.byProvider)
@@ -827,7 +837,7 @@ export function SettingsPage() {
       </button>
 
       {/* Auto-launch */}
-      <section className="glass p-6 space-y-3">
+      <section className="panel p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-success/15 flex items-center justify-center">
@@ -858,7 +868,7 @@ export function SettingsPage() {
       </section>
 
       {/* Theme */}
-      <section className="glass p-6 space-y-5">
+      <section className="panel p-4 space-y-5">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-accent/15 flex items-center justify-center">
             <Palette size={16} className="text-accent" />
@@ -884,7 +894,7 @@ export function SettingsPage() {
                 "flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors",
                 themeMode === value
                   ? "bg-accent/15 text-accent border border-accent/30"
-                  : "bg-muted/15 text-muted-foreground border border-border/15 hover:bg-muted/25",
+                  : "bg-muted/15 text-muted-foreground border border-border/25 hover:bg-muted/25",
               )}
             >
               <Icon size={14} />
@@ -895,7 +905,7 @@ export function SettingsPage() {
       </section>
 
       {/* Pack It Up */}
-      <section className="glass p-6 space-y-5">
+      <section className="panel p-4 space-y-5">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-warning/15 flex items-center justify-center">
             <Package size={16} className="text-warning" />
@@ -989,7 +999,7 @@ export function SettingsPage() {
       </section>
 
       {/* App Info */}
-      <section className="glass p-6 space-y-3">
+      <section className="panel p-4 space-y-3">
         <h3 className="text-base font-semibold">About Electron</h3>
         <div className="grid grid-cols-2 gap-3 text-xs">
           <div>

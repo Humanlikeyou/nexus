@@ -20,17 +20,12 @@ function stressLabel(score: number): { label: string; color: string } {
 export function HrvTrend({ hrData, rrIntervals, currentHR, stress }: HrvTrendProps) {
   const hrv = computeHRV(rrIntervals);
 
-  // Use real data if streaming, otherwise placeholder
-  const displayData = hrData.length > 0
+  const hasData = hrData.length > 0;
+  const displayData = hasData
     ? hrData.slice(-60).map((d, i) => ({ idx: i, hr: d.heart_rate }))
-    : [
-        { idx: 0, hr: 62 }, { idx: 1, hr: 64 }, { idx: 2, hr: 61 },
-        { idx: 3, hr: 65 }, { idx: 4, hr: 63 }, { idx: 5, hr: 60 },
-        { idx: 6, hr: 66 }, { idx: 7, hr: 68 }, { idx: 8, hr: 65 },
-        { idx: 9, hr: 63 },
-      ];
+    : [];
 
-  const displayHR = currentHR || 63;
+  const displayHR = currentHR;
   const stressInfo = stressLabel(stress.score);
 
   const chartOption = {
@@ -74,11 +69,11 @@ export function HrvTrend({ hrData, rrIntervals, currentHR, stress }: HrvTrendPro
   };
 
   return (
-    <div className="glass p-6 space-y-3">
+    <div className="panel p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Heart size={16} className="text-red-500" />
-          <h3 className="text-base font-medium text-muted-foreground">Heart Rate & HRV</h3>
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Heart Rate & HRV</h3>
         </div>
         {hrData.length > 0 && (
           <div className="flex items-center gap-1.5">
@@ -90,18 +85,18 @@ export function HrvTrend({ hrData, rrIntervals, currentHR, stress }: HrvTrendPro
 
       <div className="flex gap-6">
         <div>
-          <p className="text-2xl font-bold">{displayHR}</p>
+          <p className="text-2xl font-bold">{displayHR ?? "—"}</p>
           <p className="text-xs text-muted-foreground">BPM</p>
         </div>
         <div>
           <p className="text-2xl font-bold text-accent">
-            {hrv.rmssd > 0 ? hrv.rmssd : 42}
+            {hrv.rmssd > 0 ? hrv.rmssd : "—"}
           </p>
           <p className="text-xs text-muted-foreground">HRV (RMSSD)</p>
         </div>
         <div>
           <p className="text-2xl font-bold text-success">
-            {hrv.sdnn > 0 ? hrv.sdnn : 38}
+            {hrv.sdnn > 0 ? hrv.sdnn : "—"}
           </p>
           <p className="text-xs text-muted-foreground">SDNN</p>
         </div>
@@ -119,11 +114,19 @@ export function HrvTrend({ hrData, rrIntervals, currentHR, stress }: HrvTrendPro
         </div>
       </div>
 
-      <ReactECharts
-        option={chartOption}
-        style={{ height: 120 }}
-        opts={{ renderer: "canvas" }}
-      />
+      {hasData ? (
+        <ReactECharts
+          option={chartOption}
+          style={{ height: 120 }}
+          opts={{ renderer: "canvas" }}
+        />
+      ) : (
+        <div className="h-[120px] flex items-center justify-center border border-dashed border-border/25 rounded">
+          <p className="text-[10px] font-mono text-muted-foreground/40 uppercase tracking-wider">
+            Connect Whoop to stream HR data
+          </p>
+        </div>
+      )}
     </div>
   );
 }

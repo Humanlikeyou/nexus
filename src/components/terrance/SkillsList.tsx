@@ -9,47 +9,41 @@ interface SkillsListProps {
 
 export function SkillsList({ skills, loading }: SkillsListProps) {
   return (
-    <div className="glass p-6 space-y-5">
-      <div className="flex items-center gap-2">
-        <Zap size={16} className="text-accent" />
-        <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Active Skills</h3>
-        <span className="ml-auto text-xs text-muted-foreground/60">{(skills ?? []).length}</span>
+    <div className="panel p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="heading-section">Active Skills</h3>
+        <span className="text-[10px] font-mono text-muted-foreground/60">{(skills ?? []).length}</span>
       </div>
 
       {loading ? (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-8 bg-muted/30 rounded animate-pulse" />
+            <div key={i} className="h-7 bg-muted/15 rounded-sm animate-pulse" />
           ))}
         </div>
       ) : (
-        <div className="space-y-1.5">
+        <div className="space-y-px">
           {skills.map((skill, i) => (
             <div
               key={i}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/20 transition-colors"
+              className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-sm hover:bg-muted/10 transition-colors"
             >
               <Circle
-                size={8}
+                size={5}
                 fill="currentColor"
                 className={cn(
-                  skill.status === "active" ? "text-success" : "text-muted-foreground/30",
+                  skill.status === "active" ? "text-success" : "text-muted-foreground/35",
                 )}
               />
               <div className="flex-1 min-w-0">
-                <p className="text-sm truncate">{skill.name}</p>
-                {skill.description && (
-                  <p className="text-xs text-muted-foreground/60 truncate">
-                    {skill.description}
-                  </p>
-                )}
+                <p className="text-[11px] font-mono truncate text-foreground/85">{skill.name}</p>
               </div>
               <span
                 className={cn(
-                  "text-[11px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded",
+                  "text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-sm",
                   skill.status === "active"
-                    ? "bg-success/10 text-success"
-                    : "bg-muted/30 text-muted-foreground/50",
+                    ? "bg-success/12 text-success"
+                    : "bg-muted/15 text-muted-foreground/50",
                 )}
               >
                 {skill.status}

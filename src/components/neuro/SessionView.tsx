@@ -128,7 +128,7 @@ export function SessionView({
 
   return (
     <>
-      <div className="relative space-y-5">
+      <div className="relative space-y-5 animate-solar-breathe rounded-xl">
         {/* Visual feedback overlay */}
         <VisualFeedback
           glowColor={visualState.glowColor}
@@ -146,7 +146,7 @@ export function SessionView({
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-2xl font-mono font-bold tabular-nums">
+            <span className="text-2xl font-mono font-bold tabular-nums text-solar">
               {formatTimer(remaining)}
             </span>
             <div className="flex gap-2">
@@ -183,9 +183,9 @@ export function SessionView({
             {/* Signal intensity bar */}
             {(phase === "running" || phase === "paused") && (
               <div className="flex items-center gap-2 w-32">
-                <div className="flex-1 h-2 rounded-full bg-muted/20 overflow-hidden">
+                <div className="flex-1 h-1.5 rounded-sm bg-muted/20 overflow-hidden">
                   <div
-                    className="h-full rounded-full transition-all duration-500"
+                    className="h-full rounded-sm transition-all duration-500"
                     style={{
                       width: `${Math.round(signal.intensity * 100)}%`,
                       backgroundColor: signal.action === "reward"
@@ -197,7 +197,7 @@ export function SessionView({
                     }}
                   />
                 </div>
-                <span className="text-[13px] text-muted-foreground/40 tabular-nums w-7 text-right">
+                <span className="text-[13px] text-muted-foreground/60 tabular-nums w-7 text-right">
                   {Math.round(signal.intensity * 100)}%
                 </span>
               </div>
@@ -206,11 +206,11 @@ export function SessionView({
 
           {/* Stats sidebar */}
           <div className="w-36 space-y-5 py-4">
-            <div className="glass p-3 rounded-lg text-center">
+            <div className="panel p-2 rounded-lg text-center">
               <p className="text-2xl font-bold tabular-nums">{Math.round(score)}</p>
               <p className="text-xs text-muted-foreground/50">SCORE</p>
             </div>
-            <div className="glass p-3 rounded-lg text-center">
+            <div className="panel p-2 rounded-lg text-center">
               <div className="flex items-center justify-center gap-1.5">
                 <div
                   className="w-2 h-2 rounded-full"
@@ -223,7 +223,7 @@ export function SessionView({
                 </span>
               </div>
             </div>
-            <div className="glass p-3 rounded-lg text-center">
+            <div className="panel p-2 rounded-lg text-center">
               <p className="text-lg font-bold tabular-nums">{timeInZonePct}%</p>
               <p className="text-xs text-muted-foreground/50">IN ZONE</p>
             </div>
@@ -246,10 +246,10 @@ export function SessionView({
         />
 
         {/* State timeline */}
-        <div className="glass p-6 rounded-xl space-y-2">
+        <div className="panel p-4 rounded-xl space-y-2">
           <p className="text-xs text-muted-foreground/50">State Timeline</p>
           <StateTimeline timeline={timeline} elapsed={elapsed} duration={duration} />
-          <div className="flex gap-3 text-xs text-muted-foreground/40">
+          <div className="flex gap-3 text-xs text-muted-foreground/60">
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-sm bg-emerald-500" /> Calm
             </span>
@@ -263,7 +263,7 @@ export function SessionView({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between text-[13px] text-muted-foreground/40">
+        <div className="flex items-center justify-between text-[13px] text-muted-foreground/60">
           <button
             onClick={() => onSetMuted(!muted)}
             className="flex items-center gap-1.5 hover:text-muted-foreground transition-colors"

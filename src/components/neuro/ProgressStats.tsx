@@ -35,8 +35,8 @@ export function ProgressStats({ sessions }: ProgressStatsProps) {
   const sparklineData = last10.map((s) => s.total_score).reverse();
 
   return (
-    <div className="glass p-6 space-y-3">
-      <h3 className="text-base font-medium text-muted-foreground">Progress</h3>
+    <div className="panel p-4 space-y-3">
+      <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Progress</h3>
 
       <div className="grid grid-cols-2 gap-3">
         <StatItem icon={<Clock size={12} />} label="Sessions" value={`${totalSessions}`} />
@@ -47,7 +47,7 @@ export function ProgressStats({ sessions }: ProgressStatsProps) {
 
       {last10.length > 0 && (
         <div className="space-y-1.5">
-          <div className="flex justify-between text-xs text-muted-foreground/40">
+          <div className="flex justify-between text-xs text-muted-foreground/60">
             <span>Avg In-Zone: {avgTimeInZone}%</span>
             <span className="flex items-center gap-1">
               <TrendingUp size={9} /> Last {last10.length}
@@ -71,7 +71,7 @@ function StatItem({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-muted-foreground/40">{icon}</span>
+      <span className="text-muted-foreground/60">{icon}</span>
       <div>
         <p className="text-sm font-bold tabular-nums">{value}</p>
         <p className="text-[13px] text-muted-foreground/50">{label}</p>

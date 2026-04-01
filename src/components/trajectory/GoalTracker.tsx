@@ -55,6 +55,7 @@ export function GoalTracker() {
   const [form, setForm] = useState<GoalFormData>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingProgress, setEditingProgress] = useState<{ id: string; value: string } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const handleOpenAdd = () => {
     setForm(emptyForm);
@@ -76,36 +77,63 @@ export function GoalTracker() {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) return;
-    if (editingId) {
-      await updateGoal(editingId, form);
-      toast({ type: "success", title: "Goal Updated" });
-    } else {
-      await addGoal(form);
-      toast({ type: "success", title: "Goal Added", description: form.title });
+    if (!form.title.trim() || saving) return;
+    setSaving(true);
+    try {
+      if (editingId) {
+        await updateGoal(editingId, form);
+        toast({ type: "success", title: "Goal Updated" });
+      } else {
+        await addGoal(form);
+        toast({ type: "success", title: "Goal Added", description: form.title });
+      }
+      setDialogOpen(false);
+    } catch (e) {
+      toast({ type: "error", title: "Save failed", description: String(e) });
+    } finally {
+      setSaving(false);
     }
-    setDialogOpen(false);
   };
 
   const handleDelete = async (id: string) => {
-    await removeGoal(id);
-    toast({ type: "info", title: "Goal Removed" });
+    setSaving(true);
+    try {
+      await removeGoal(id);
+      toast({ type: "info", title: "Goal Removed" });
+    } catch (e) {
+      toast({ type: "error", title: "Delete failed", description: String(e) });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleProgressSubmit = async (id: string, value: string) => {
     const num = parseFloat(value);
-    if (!isNaN(num)) {
-      await updateGoal(id, { current: num });
+    if (isNaN(num)) {
+      setEditingProgress(null);
+      return;
     }
-    setEditingProgress(null);
+    setSaving(true);
+    try {
+      await updateGoal(id, { current: num });
+      const goal = goals.find((g) => g.id === id);
+      if (goal && num >= goal.target && goal.current < goal.target) {
+        toast({ type: "success", title: "Goal Complete!", description: goal.title, duration: 6000 });
+      }
+    } catch (e) {
+      toast({ type: "error", title: "Update failed", description: String(e) });
+    } finally {
+      setSaving(false);
+      setEditingProgress(null);
+    }
   };
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Target size={16} className="text-accent" />
-          <h3 className="text-base font-medium text-muted-foreground">Goals & Milestones</h3>
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Goals & Milestones</h3>
         </div>
         <button
           onClick={handleOpenAdd}
@@ -117,8 +145,8 @@ export function GoalTracker() {
 
       {goals.length === 0 ? (
         <div className="py-8 text-center">
-          <Target size={24} className="text-muted-foreground/20 mx-auto mb-2" />
-          <p className="text-xs text-muted-foreground/40">No goals yet. Add one to start tracking.</p>
+          <Target size={24} className="text-muted-foreground/35 mx-auto mb-2" />
+          <p className="text-xs text-muted-foreground/60">No goals yet. Add one to start tracking.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -129,7 +157,7 @@ export function GoalTracker() {
             return (
               <div
                 key={goal.id}
-                className="group px-4 py-3 rounded-lg bg-muted/15 border border-border/15 space-y-2"
+                className="group px-4 py-3 rounded-lg bg-muted/15 border border-border/25 space-y-2"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -147,7 +175,7 @@ export function GoalTracker() {
                             if (e.key === "Enter") handleProgressSubmit(goal.id, editingProgress.value);
                             if (e.key === "Escape") setEditingProgress(null);
                           }}
-                          className="w-16 px-2 py-0.5 rounded bg-muted/30 border border-border/30 text-xs font-mono focus:outline-none focus:border-accent/40"
+                          className="w-16 px-2 py-0.5 rounded bg-muted/30 border border-border/45 text-xs font-mono focus:outline-none focus:border-accent/40"
                           autoFocus
                         />
                         <button onClick={() => handleProgressSubmit(goal.id, editingProgress.value)}>
@@ -171,17 +199,17 @@ export function GoalTracker() {
                       <button onClick={() => handleOpenEdit(goal)}>
                         <Edit3 size={12} className="text-muted-foreground/50 hover:text-accent" />
                       </button>
-                      <button onClick={() => handleDelete(goal.id)}>
+                      <button onClick={() => handleDelete(goal.id)} disabled={saving}>
                         <Trash2 size={12} className="text-muted-foreground/50 hover:text-destructive" />
                       </button>
                     </div>
                   </div>
                 </div>
 
-                <div className="w-full h-2 rounded-full bg-muted/30 overflow-hidden">
+                <div className="w-full h-1.5 rounded-sm bg-muted/20 overflow-hidden">
                   <div
                     className={cn(
-                      "h-full rounded-full transition-all duration-500",
+                      "h-full rounded-sm transition-all duration-500",
                       progress >= 100
                         ? "bg-success"
                         : progress >= 50
@@ -212,7 +240,7 @@ export function GoalTracker() {
       <Dialog.Root open={dialogOpen} onOpenChange={setDialogOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[85] bg-black/50 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[86] w-[420px] glass rounded-xl border border-border/30 shadow-2xl p-6 space-y-5">
+          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[86] w-[420px] glass rounded-xl border border-border/45 shadow-2xl p-6 space-y-5">
             <Dialog.Title className="text-sm font-semibold">
               {editingId ? "Edit Goal" : "Add Goal"}
             </Dialog.Title>
@@ -225,7 +253,7 @@ export function GoalTracker() {
                   value={form.title}
                   onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
                   placeholder="What are you working toward?"
-                  className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+                  className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
                 />
               </div>
 
@@ -235,7 +263,7 @@ export function GoalTracker() {
                   <select
                     value={form.category}
                     onChange={(e) => setForm((f) => ({ ...f, category: e.target.value as Goal["category"] }))}
-                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm focus:outline-none focus:border-accent/40 transition-colors"
+                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm focus:outline-none focus:border-accent/40 transition-colors"
                   >
                     <option value="revenue">Revenue</option>
                     <option value="health">Health</option>
@@ -250,7 +278,7 @@ export function GoalTracker() {
                     value={form.unit}
                     onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}
                     placeholder="%"
-                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
                   />
                 </div>
               </div>
@@ -262,7 +290,7 @@ export function GoalTracker() {
                     type="number"
                     value={form.target}
                     onChange={(e) => setForm((f) => ({ ...f, target: parseFloat(e.target.value) || 0 }))}
-                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
                   />
                 </div>
                 <div>
@@ -271,7 +299,7 @@ export function GoalTracker() {
                     type="number"
                     value={form.current}
                     onChange={(e) => setForm((f) => ({ ...f, current: parseFloat(e.target.value) || 0 }))}
-                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
                   />
                 </div>
               </div>
@@ -284,7 +312,7 @@ export function GoalTracker() {
                   type="date"
                   value={form.deadline || ""}
                   onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value || null }))}
-                  className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm focus:outline-none focus:border-accent/40 transition-colors"
+                  className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm focus:outline-none focus:border-accent/40 transition-colors"
                 />
               </div>
             </div>
@@ -297,10 +325,10 @@ export function GoalTracker() {
               </Dialog.Close>
               <button
                 onClick={handleSave}
-                disabled={!form.title.trim()}
+                disabled={saving || !form.title.trim()}
                 className="px-4 py-2 rounded-lg bg-accent/15 text-accent text-sm font-medium hover:bg-accent/25 transition-colors disabled:opacity-40"
               >
-                {editingId ? "Save Changes" : "Add Goal"}
+                {saving ? "Saving..." : editingId ? "Save Changes" : "Add Goal"}
               </button>
             </div>
           </Dialog.Content>

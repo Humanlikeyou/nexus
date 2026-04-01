@@ -17,3 +17,5 @@ pub mod notifications;
 pub mod llm_router;
 pub mod continuity;
 pub mod assistant;
+pub mod research;
+pub mod kv;

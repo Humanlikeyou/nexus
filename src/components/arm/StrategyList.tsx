@@ -26,7 +26,7 @@ const statusColors: Record<ArmStrategyStatus, string> = {
 };
 
 const statusBg: Record<ArmStrategyStatus, string> = {
-  draft: "bg-muted-foreground/15",
+  draft: "bg-muted-foreground/30",
   testing: "bg-warning/15",
   active: "bg-success/15",
   paused: "bg-orange-400/15",
@@ -53,6 +53,7 @@ interface StrategyListProps {
     dailyLossCap: number,
   ) => void;
   onSelect?: (strategy: ArmStrategy) => void;
+  defaultWorkerUrl?: string | null;
 }
 
 interface CreateForm {
@@ -82,14 +83,19 @@ export function StrategyList({
   onKill,
   onCreate,
   onSelect,
+  defaultWorkerUrl,
 }: StrategyListProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState<CreateForm>(emptyForm);
+  const [form, setForm] = useState<CreateForm>(() => ({
+    ...emptyForm,
+    worker_url: defaultWorkerUrl ?? "",
+  }));
   const [reasonDialog, setReasonDialog] = useState<{
     action: "pause" | "kill";
     id: string;
   } | null>(null);
   const [reason, setReason] = useState("");
+  const [actioning, setActioning] = useState(false);
 
   const handleCreate = () => {
     if (!form.name.trim() || !form.worker_url.trim()) return;
@@ -104,7 +110,7 @@ export function StrategyList({
       form.capital_limit,
       form.daily_loss_cap,
     );
-    setForm(emptyForm);
+    setForm({ ...emptyForm, worker_url: defaultWorkerUrl ?? "" });
     setDialogOpen(false);
   };
 
@@ -120,14 +126,14 @@ export function StrategyList({
   };
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Layers size={16} className="text-accent" />
-          <h3 className="text-base font-medium text-muted-foreground">
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">
             Strategies
           </h3>
-          <span className="text-xs text-muted-foreground/40">
+          <span className="text-xs text-muted-foreground/60">
             {strategies.filter((s) => s.status === "active").length} active
           </span>
         </div>
@@ -144,8 +150,8 @@ export function StrategyList({
 
       {strategies.length === 0 ? (
         <div className="py-8 text-center">
-          <Layers size={24} className="text-muted-foreground/20 mx-auto mb-2" />
-          <p className="text-xs text-muted-foreground/40">
+          <Layers size={24} className="text-muted-foreground/35 mx-auto mb-2" />
+          <p className="text-xs text-muted-foreground/60">
             No strategies yet. Deploy your first revenue worker.
           </p>
         </div>
@@ -156,7 +162,7 @@ export function StrategyList({
             return (
               <div
                 key={strat.id}
-                className="group px-4 py-3 rounded-lg bg-muted/15 border border-border/15 space-y-2 cursor-pointer hover:bg-muted/25 transition-colors"
+                className="group px-4 py-3 rounded-lg bg-muted/15 border border-border/25 space-y-2 cursor-pointer hover:bg-muted/25 transition-colors"
                 onClick={() => onSelect?.(strat)}
               >
                 <div className="flex items-center justify-between">
@@ -190,7 +196,7 @@ export function StrategyList({
                     </span>
                     <ChevronRight
                       size={14}
-                      className="text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors"
+                      className="text-muted-foreground/50 group-hover:text-muted-foreground/60 transition-colors"
                     />
                   </div>
                 </div>
@@ -205,8 +211,12 @@ export function StrategyList({
                   >
                     {(strat.status === "draft" || strat.status === "testing" || strat.status === "paused") && (
                       <button
-                        onClick={() => onActivate(strat.id)}
-                        className="p-1 rounded hover:bg-success/15 transition-colors"
+                        onClick={async () => {
+                          setActioning(true);
+                          try { await onActivate(strat.id); } finally { setActioning(false); }
+                        }}
+                        disabled={actioning}
+                        className="p-1 rounded hover:bg-success/15 transition-colors disabled:opacity-40"
                         title="Activate"
                       >
                         <Play size={12} className="text-success" />
@@ -217,7 +227,8 @@ export function StrategyList({
                         onClick={() =>
                           setReasonDialog({ action: "pause", id: strat.id })
                         }
-                        className="p-1 rounded hover:bg-warning/15 transition-colors"
+                        disabled={actioning}
+                        className="p-1 rounded hover:bg-warning/15 transition-colors disabled:opacity-40"
                         title="Pause"
                       >
                         <Pause size={12} className="text-warning" />
@@ -228,7 +239,8 @@ export function StrategyList({
                         onClick={() =>
                           setReasonDialog({ action: "kill", id: strat.id })
                         }
-                        className="p-1 rounded hover:bg-destructive/15 transition-colors"
+                        disabled={actioning}
+                        className="p-1 rounded hover:bg-destructive/15 transition-colors disabled:opacity-40"
                         title="Kill"
                       >
                         <Skull size={12} className="text-destructive" />
@@ -246,7 +258,7 @@ export function StrategyList({
       <Dialog.Root open={dialogOpen} onOpenChange={setDialogOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[85] bg-black/50 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[86] w-[460px] glass rounded-xl border border-border/30 shadow-2xl p-6 space-y-5">
+          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[86] w-[460px] glass rounded-xl border border-border/45 shadow-2xl p-6 space-y-5">
             <Dialog.Title className="text-sm font-semibold">
               Deploy Strategy
             </Dialog.Title>
@@ -263,7 +275,7 @@ export function StrategyList({
                     setForm((f) => ({ ...f, name: e.target.value }))
                   }
                   placeholder="My API Microservice"
-                  className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+                  className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
                 />
               </div>
 
@@ -277,7 +289,7 @@ export function StrategyList({
                     onChange={(e) =>
                       setForm((f) => ({ ...f, type: e.target.value }))
                     }
-                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm focus:outline-none focus:border-accent/40 transition-colors"
+                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm focus:outline-none focus:border-accent/40 transition-colors"
                   >
                     <option value="api_service">API Service</option>
                     <option value="content_syndication">
@@ -299,7 +311,7 @@ export function StrategyList({
                       setForm((f) => ({ ...f, worker_url: e.target.value }))
                     }
                     placeholder="https://my-worker.workers.dev"
-                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
                   />
                 </div>
               </div>
@@ -318,7 +330,7 @@ export function StrategyList({
                         capital_limit: parseFloat(e.target.value) || 0,
                       }))
                     }
-                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
                   />
                 </div>
                 <div>
@@ -334,7 +346,7 @@ export function StrategyList({
                         daily_loss_cap: parseFloat(e.target.value) || 0,
                       }))
                     }
-                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
                   />
                 </div>
               </div>
@@ -370,7 +382,7 @@ export function StrategyList({
       >
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[85] bg-black/50 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[86] w-[400px] glass rounded-xl border border-border/30 shadow-2xl p-6 space-y-5">
+          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[86] w-[400px] glass rounded-xl border border-border/45 shadow-2xl p-6 space-y-5">
             <Dialog.Title className="text-sm font-semibold">
               {reasonDialog?.action === "kill" ? "Kill Strategy" : "Pause Strategy"}
             </Dialog.Title>
@@ -383,7 +395,7 @@ export function StrategyList({
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="Why are you taking this action?"
                 rows={3}
-                className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors resize-none"
+                className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors resize-none"
               />
             </div>
             <div className="flex items-center justify-end gap-3">

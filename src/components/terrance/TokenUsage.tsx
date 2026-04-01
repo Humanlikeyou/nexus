@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { Coins } from "lucide-react";
 import ReactECharts from "echarts-for-react";
-import { getLlmUsage } from "@/lib/api";
+import { getLlmUsage, getSessionInsights } from "@/lib/api";
 import { formatCost } from "@/lib/llm-router";
 import { CHART_THEME } from "@/lib/chart-theme";
-import type { LlmUsageRecord } from "@/lib/types";
+import type { LlmUsageRecord, SessionInsights } from "@/lib/types";
 
 function weeklyStats(records: LlmUsageRecord[]) {
   const now = Date.now();
@@ -17,7 +17,6 @@ function weeklyStats(records: LlmUsageRecord[]) {
   );
   const totalCost = week.reduce((s, r) => s + r.estimated_cost_usd, 0);
 
-  // Group by day (last 7 days)
   const days: { label: string; tokens: number }[] = [];
   for (let i = 6; i >= 0; i--) {
     const dayStart = new Date(now - i * 24 * 60 * 60 * 1000);
@@ -40,15 +39,17 @@ function weeklyStats(records: LlmUsageRecord[]) {
 
 export function TokenUsage() {
   const [records, setRecords] = useState<LlmUsageRecord[]>([]);
+  const [insights, setInsights] = useState<SessionInsights | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    const fetch = () => {
-      getLlmUsage()
-        .then((data) => {
+    const fetchData = () => {
+      Promise.all([getLlmUsage(), getSessionInsights().catch(() => null)])
+        .then(([usage, si]) => {
           if (!cancelled) {
-            setRecords(data);
+            setRecords(usage);
+            if (si) setInsights(si);
             setLoading(false);
           }
         })
@@ -56,8 +57,8 @@ export function TokenUsage() {
           if (!cancelled) setLoading(false);
         });
     };
-    fetch();
-    const interval = setInterval(fetch, 30_000);
+    fetchData();
+    const interval = setInterval(fetchData, 30_000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -67,13 +68,13 @@ export function TokenUsage() {
   const stats = weeklyStats(records);
 
   const chartOption = {
-    grid: { left: 0, right: 0, top: 4, bottom: 20, containLabel: false },
+    grid: { left: 0, right: 0, top: 2, bottom: 18, containLabel: false },
     xAxis: {
       type: "category" as const,
       data: stats.days.map((d) => d.label),
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { ...CHART_THEME.axisLabelMuted, fontSize: 10 },
+      axisLabel: { ...CHART_THEME.axisLabelDim, fontSize: 9 },
     },
     yAxis: { type: "value" as const, show: false },
     tooltip: {
@@ -89,13 +90,13 @@ export function TokenUsage() {
         type: "bar",
         data: stats.days.map((d) => d.tokens),
         itemStyle: {
-          borderRadius: [4, 4, 0, 0],
+          borderRadius: [2, 2, 0, 0],
           color: {
             type: "linear",
             x: 0, y: 0, x2: 0, y2: 1,
             colorStops: [
-              { offset: 0, color: "oklch(0.68 0.20 195 / 0.7)" },
-              { offset: 1, color: "oklch(0.68 0.20 195 / 0.2)" },
+              { offset: 0, color: "rgba(74, 158, 126, 0.6)" },
+              { offset: 1, color: "rgba(74, 158, 126, 0.12)" },
             ],
           },
         },
@@ -107,48 +108,70 @@ export function TokenUsage() {
   const hasData = stats.callCount > 0;
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Coins size={16} className="text-accent" />
-          <h3 className="text-base font-medium text-muted-foreground">Token Usage</h3>
-        </div>
-        <span className="text-xs text-muted-foreground">This week</span>
+        <h3 className="heading-section">Token Usage</h3>
+        <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-wider">7d</span>
       </div>
 
-      <div className="flex gap-6">
+      <div className="flex gap-5">
         <div>
-          <p className="text-2xl font-semibold">
-            {loading ? "--" : stats.totalTokens.toLocaleString()}
+          <p className="metric-value text-lg">
+            {loading ? "—" : stats.totalTokens.toLocaleString()}
           </p>
-          <p className="text-xs text-muted-foreground">Total tokens</p>
+          <p className="metric-label">Tokens</p>
         </div>
         <div>
-          <p className="text-2xl font-semibold">
-            {loading ? "--" : formatCost(stats.totalCost)}
+          <p className="metric-value text-lg">
+            {loading ? "—" : formatCost(stats.totalCost)}
           </p>
-          <p className="text-xs text-muted-foreground">Est. cost</p>
+          <p className="metric-label">Cost</p>
         </div>
         <div>
-          <p className="text-2xl font-semibold">
-            {loading ? "--" : stats.callCount}
+          <p className="metric-value text-lg">
+            {loading ? "—" : stats.callCount}
           </p>
-          <p className="text-xs text-muted-foreground">Calls</p>
+          <p className="metric-label">Calls</p>
         </div>
       </div>
+
+      {insights && (
+        <div className="flex gap-5 border-t border-border/18 pt-2">
+          <div>
+            <p className="metric-value text-lg">{insights.totalSessions}</p>
+            <p className="metric-label">Sessions</p>
+          </div>
+          <div>
+            <p className="metric-value text-lg">{insights.recentSessionCount}</p>
+            <p className="metric-label">30d Active</p>
+          </div>
+          {Object.entries(insights.byProvider).length > 0 && (
+            <div className="flex-1">
+              <div className="flex gap-2 flex-wrap">
+                {Object.entries(insights.byProvider).map(([provider, count]) => (
+                  <span key={provider} className="badge-status bg-accent/8 text-muted-foreground/70 border border-border/18">
+                    {provider}: {count}
+                  </span>
+                ))}
+              </div>
+              <p className="metric-label mt-1">By Provider</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {loading ? (
-        <div className="h-[120px] bg-muted/30 rounded animate-pulse" />
+        <div className="h-[90px] bg-muted/10 rounded-sm animate-pulse" />
       ) : hasData ? (
         <ReactECharts
           option={chartOption}
-          style={{ height: 120 }}
+          style={{ height: 90 }}
           opts={{ renderer: "svg" }}
         />
       ) : (
-        <div className="h-[120px] flex items-center justify-center">
-          <span className="text-xs text-muted-foreground/40">
-            No usage data this week
+        <div className="h-[90px] flex items-center justify-center">
+          <span className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-wider">
+            No data
           </span>
         </div>
       )}

@@ -32,12 +32,12 @@ export function SessionReport({ session, open, onClose, onSave }: SessionReportP
     <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[480px] max-h-[85vh] overflow-y-auto glass-elevated rounded-2xl p-6 border border-border/30 shadow-2xl">
+        <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[480px] max-h-[85vh] overflow-y-auto glass-elevated rounded-2xl p-6 border border-border/45 shadow-2xl">
           <div className="flex items-center justify-between mb-5">
             <Dialog.Title className="text-base font-semibold">
               Session Complete
             </Dialog.Title>
-            <Dialog.Close className="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
+            <Dialog.Close className="text-muted-foreground/60 hover:text-muted-foreground transition-colors">
               <X size={16} />
             </Dialog.Close>
           </div>
@@ -79,7 +79,7 @@ export function SessionReport({ session, open, onClose, onSave }: SessionReportP
 
           {/* Protocol badge */}
           <div className="mb-4">
-            <span className="text-[13px] px-2 py-1 rounded-full bg-accent/10 text-accent border border-accent/20">
+            <span className="text-[13px] px-2 py-1 rounded-full bg-accent/15 text-accent border border-accent/20">
               {session.protocol_name}
             </span>
           </div>

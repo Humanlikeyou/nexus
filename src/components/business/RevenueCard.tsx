@@ -2,7 +2,7 @@ import { DollarSign, TrendingUp, TrendingDown, Clock, AlertCircle } from "lucide
 import { cn } from "@/lib/utils";
 import type { ArmRevenueSummary } from "@/lib/types";
 
-const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
 interface RevenueCardProps {
   revenueSummary: ArmRevenueSummary | null;
@@ -25,65 +25,62 @@ export function RevenueCard({ revenueSummary, loading, fetchedAt }: RevenueCardP
     : null;
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <DollarSign size={16} className="text-success" />
-          <h3 className="text-base font-medium text-muted-foreground">Revenue</h3>
-        </div>
+        <h3 className="heading-section">Revenue</h3>
         {isStale && (
-          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-warning/15 text-warning text-[11px] font-medium">
-            <AlertCircle size={10} /> Stale
+          <div className="badge-status bg-warning/12 text-warning/80 border border-warning/25">
+            <AlertCircle size={8} /> Stale
           </div>
         )}
       </div>
 
       {loading ? (
-        <div className="space-y-3">
-          <div className="h-10 bg-muted/30 rounded animate-pulse w-1/2" />
-          <div className="h-4 bg-muted/30 rounded animate-pulse w-1/3" />
+        <div className="space-y-2">
+          <div className="h-8 bg-muted/15 rounded-sm animate-pulse w-1/2" />
+          <div className="h-3 bg-muted/15 rounded-sm animate-pulse w-1/3" />
         </div>
       ) : month != null ? (
         <>
           <div className="flex items-end gap-4">
             <div>
-              <p className="text-3xl font-semibold">${month.toFixed(2)}</p>
-              <p className="text-xs text-muted-foreground">This month</p>
+              <p className="metric-value">${month.toFixed(2)}</p>
+              <p className="metric-label">This month</p>
             </div>
             {net != null && (
-              <div className={cn("flex items-center gap-1 pb-1 text-sm font-medium",
-                net >= 0 ? "text-success" : "text-destructive"
+              <div className={cn("flex items-center gap-1 pb-1 text-xs font-mono font-medium",
+                net >= 0 ? "text-success/70" : "text-destructive/70"
               )}>
-                {net >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                {net >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                 <span>{net >= 0 ? "+" : ""}${net.toFixed(2)} net</span>
               </div>
             )}
           </div>
 
           {today != null && (
-            <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-muted/10 border border-border/10">
-              <span className="text-xs text-muted-foreground/60">Today</span>
-              <span className="text-xs font-mono font-medium text-success">
+            <div className="flex items-center justify-between px-2.5 py-1.5 rounded-sm bg-muted/5 border border-border/25">
+              <span className="metric-label">Today</span>
+              <span className="text-xs font-mono font-medium text-success/70">
                 +${today.toFixed(2)}
               </span>
             </div>
           )}
         </>
       ) : (
-        <div className="p-3 rounded-lg bg-muted/10 border border-border/10">
-          <p className="text-xs text-muted-foreground/60 text-center">
-            No ARM revenue data — add a strategy on the Revenue page
+        <div className="p-2.5 rounded-sm bg-muted/5 border border-border/25">
+          <p className="text-[10px] font-mono text-muted-foreground/50 text-center uppercase tracking-wider">
+            No ARM data — add a strategy
           </p>
         </div>
       )}
 
       {ageLabel && (
         <div className={cn(
-          "flex items-center gap-1 text-[11px]",
-          isStale ? "text-warning/70" : "text-muted-foreground/40",
+          "flex items-center gap-1 text-[10px] font-mono",
+          isStale ? "text-warning/70" : "text-muted-foreground/45",
         )}>
-          <Clock size={10} />
-          Updated {ageLabel}
+          <Clock size={9} />
+          {ageLabel}
         </div>
       )}
     </div>

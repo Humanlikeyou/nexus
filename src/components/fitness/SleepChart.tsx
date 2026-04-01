@@ -74,11 +74,11 @@ export function SleepChart({ metrics, streaming }: SleepChartProps) {
   };
 
   return (
-    <div className="glass p-6 space-y-3 relative">
+    <div className="panel p-4 space-y-3 relative">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Moon size={16} className="text-accent" />
-          <h3 className="text-base font-medium text-muted-foreground">Sleep</h3>
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Sleep</h3>
         </div>
         <div className="text-right">
           <p className="text-lg font-semibold">

@@ -155,9 +155,9 @@ export function FrequencyBands({
     : data.length * 30 + 20;
 
   return (
-    <div className={compact ? "glass p-3 rounded-xl" : "glass p-6 space-y-3"}>
+    <div className={compact ? "panel p-2 rounded-xl" : "panel p-4 space-y-3"}>
       {!compact && (
-        <h3 className="text-base font-medium text-muted-foreground">Frequency Bands</h3>
+        <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Frequency Bands</h3>
       )}
       <ReactECharts
         option={chartOption}

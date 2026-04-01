@@ -36,11 +36,11 @@ export function RecoveryScore({ metrics, streaming }: RecoveryScoreProps) {
         max: 100,
         progress: {
           show: true,
-          width: 14,
+          width: CHART_THEME.gauge.progressWidth,
           itemStyle: { color },
         },
         axisLine: {
-          lineStyle: { width: 14, color: [[1, "rgba(255,255,255,0.05)"]] },
+          lineStyle: { width: CHART_THEME.gauge.axisLineWidth, color: [[1, "rgba(30, 37, 48, 0.3)"]] },
         },
         axisTick: { show: false },
         splitLine: { show: false },
@@ -71,23 +71,23 @@ export function RecoveryScore({ metrics, streaming }: RecoveryScoreProps) {
   };
 
   return (
-    <div className="glass p-6 flex flex-col items-center relative">
-      <h3 className="text-base font-medium text-muted-foreground mb-2">Recovery Score</h3>
+    <div className="panel p-4 flex flex-col items-center relative">
+      <h3 className="heading-section mb-1">Recovery</h3>
       <ReactECharts
         option={chartOption}
         style={{ height: 180, width: 180 }}
         opts={{ renderer: "canvas" }}
       />
       {metrics.ready && (
-        <div className="flex gap-4 text-xs text-muted-foreground mt-1">
-          <span>RHR: {metrics.restingHR} bpm</span>
-          {metrics.hrvBaseline > 0 && <span>HRV: {metrics.hrvBaseline} ms</span>}
+        <div className="flex gap-4 mt-1">
+          <span className="metric-label">RHR: {metrics.restingHR}</span>
+          {metrics.hrvBaseline > 0 && <span className="metric-label">HRV: {metrics.hrvBaseline}</span>}
         </div>
       )}
       {showPlaceholder && !streaming && (
-        <div className="absolute inset-0 flex items-center justify-center bg-background/60 backdrop-blur-sm rounded-lg">
-          <span className="text-xs text-muted-foreground/60 font-medium px-3 py-1.5 rounded-full bg-muted/20 border border-border/20">
-            Connect Whoop to start
+        <div className="absolute inset-0 flex items-center justify-center bg-background/70 rounded">
+          <span className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-wider px-2.5 py-1 rounded-sm bg-muted/10 border border-border/35">
+            Connect Whoop
           </span>
         </div>
       )}

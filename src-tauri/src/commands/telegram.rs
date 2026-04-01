@@ -262,10 +262,126 @@ pub async fn test_telegram_connection() -> Result<String, String> {
     Ok(format!("Connected to bot: {}", name))
 }
 
+/// A single Telegram update from getUpdates.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TelegramUpdate {
+    pub update_id: i64,
+    pub message_id: i64,
+    pub from_name: String,
+    pub text: String,
+    pub date: i64,
+    pub is_bot: bool,
+}
+
+/// Poll Telegram for new updates using offset-based sequential polling.
+/// Pass the last processed update_id (or 0 for first poll).
+/// Returns new updates with update_id > last_update_id.
+#[tauri::command]
+pub async fn poll_telegram_updates(last_update_id: i64) -> Result<Vec<TelegramUpdate>, String> {
+    let config = load_config();
+    let token = config.telegram_bot_token.as_deref().unwrap_or("");
+    let chat_id = config.telegram_chat_id.as_deref().unwrap_or("");
+
+    if token.is_empty() || chat_id.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // offset = last_update_id + 1 to only get new updates
+    let offset = if last_update_id > 0 {
+        last_update_id + 1
+    } else {
+        // First poll: use -1 to get only the most recent update (to establish baseline)
+        -1
+    };
+
+    let url = format!(
+        "https://api.telegram.org/bot{}/getUpdates?offset={}&limit=100&timeout=5",
+        token, offset
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    let body: TgResponse = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+
+    if !body.ok {
+        return Err("Telegram API returned an error".to_string());
+    }
+
+    let mut updates = Vec::new();
+
+    if let Some(results) = body.result {
+        if let Some(update_arr) = results.as_array() {
+            for update in update_arr {
+                let uid = update.get("update_id").and_then(|id| id.as_i64()).unwrap_or(0);
+
+                if let Some(msg) = update.get("message") {
+                    let chat = msg.get("chat").and_then(|c| c.get("id")).and_then(|id| id.as_i64());
+                    if chat.map(|id| id.to_string()) != Some(chat_id.to_string()) {
+                        continue;
+                    }
+
+                    let from = msg.get("from");
+                    let from_name = from
+                        .and_then(|f| f.get("first_name"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("Unknown")
+                        .to_string();
+                    let is_bot = from
+                        .and_then(|f| f.get("is_bot"))
+                        .and_then(|b| b.as_bool())
+                        .unwrap_or(false);
+
+                    // Skip messages from the bot itself
+                    if is_bot {
+                        continue;
+                    }
+
+                    let text = msg
+                        .get("text")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let date = msg
+                        .get("date")
+                        .and_then(|d| d.as_i64())
+                        .unwrap_or(0);
+                    let message_id = msg
+                        .get("message_id")
+                        .and_then(|id| id.as_i64())
+                        .unwrap_or(0);
+
+                    if !text.is_empty() {
+                        updates.push(TelegramUpdate {
+                            update_id: uid,
+                            message_id,
+                            from_name,
+                            text,
+                            date,
+                            is_bot,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    updates.sort_by_key(|u| u.update_id);
+    Ok(updates)
+}
+
 /// Pick the best available Ollama model for chat (prefers smaller/faster models).
 /// Returns the first model found from the preference list, falls back to whatever is installed.
 async fn pick_ollama_model(client: &reqwest::Client) -> String {
-    let preferred = ["qwen2.5:32b", "qwen2.5:14b", "qwen2.5:7b", "llama3.3", "llama3.2", "mistral"];
+    let preferred = ["qwen3.5", "llama3.3", "llama3.2", "mistral"];
 
     let Ok(resp) = client
         .get("http://127.0.0.1:11434/api/tags")

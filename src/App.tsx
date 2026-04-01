@@ -26,6 +26,7 @@ import { OnboardingModal } from "./components/ui/OnboardingModal";
 // Terrance page components
 import { StatusCard } from "./components/terrance/StatusCard";
 import { CronSchedule } from "./components/terrance/CronSchedule";
+import { ActivityMonitor } from "./components/terrance/ActivityMonitor";
 import { TokenUsage } from "./components/terrance/TokenUsage";
 import { SkillsList } from "./components/terrance/SkillsList";
 
@@ -133,7 +134,7 @@ function BlePanel({
     const badgeColor = replayMode === "demo" ? "blue" : "yellow";
     const badgeLabel = replayMode === "demo" ? "Demo Mode" : "Replay Mode";
     return (
-      <div className="glass p-6 space-y-5">
+      <div className="panel p-4 space-y-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Bluetooth size={16} className="text-accent" />
@@ -157,7 +158,7 @@ function BlePanel({
   }
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {connectionState.connected ? (
@@ -288,7 +289,7 @@ const pageTransition = {
 };
 
 export default function App() {
-  const { setMuseState, setWhoopState, toast, addNotification } = useNexus();
+  const { setMuseState, setWhoopState, toast } = useNexus();
 
   // App config (for n8n webhook secret, etc.)
   const [appConfig, setAppConfig] = useState<NexusConfig | null>(null);
@@ -437,25 +438,21 @@ export default function App() {
   useEffect(() => {
     if (muse.connectionState.connected && !prevMuseConnected.current) {
       toast({ type: "success", title: "Muse Connected", description: muse.connectionState.device_name || "Headband" });
-      addNotification({ type: "success", title: "Muse Connected", message: `Connected to ${muse.connectionState.device_name || "headband"}`, source: "BLE" });
     } else if (!muse.connectionState.connected && prevMuseConnected.current) {
       toast({ type: "info", title: "Muse Disconnected" });
-      addNotification({ type: "info", title: "Muse Disconnected", message: "Headband disconnected", source: "BLE" });
     }
     prevMuseConnected.current = muse.connectionState.connected;
-  }, [muse.connectionState.connected, muse.connectionState.device_name, toast, addNotification]);
+  }, [muse.connectionState.connected, muse.connectionState.device_name, toast]);
 
   const prevWhoopConnected = useRef(whoop.connectionState.connected);
   useEffect(() => {
     if (whoop.connectionState.connected && !prevWhoopConnected.current) {
       toast({ type: "success", title: "Whoop Connected", description: whoop.connectionState.device_name || "Band" });
-      addNotification({ type: "success", title: "Whoop Connected", message: `Connected to ${whoop.connectionState.device_name || "band"}`, source: "BLE" });
     } else if (!whoop.connectionState.connected && prevWhoopConnected.current) {
       toast({ type: "info", title: "Whoop Disconnected" });
-      addNotification({ type: "info", title: "Whoop Disconnected", message: "Band disconnected", source: "BLE" });
     }
     prevWhoopConnected.current = whoop.connectionState.connected;
-  }, [whoop.connectionState.connected, whoop.connectionState.device_name, toast, addNotification]);
+  }, [whoop.connectionState.connected, whoop.connectionState.device_name, toast]);
 
   // Buffer recording data
   useEffect(() => {
@@ -510,13 +507,12 @@ export default function App() {
         session.file_path = path;
         insertEvents(sessionToEvents(session, path)).catch(() => {});
         toast({ type: "success", title: "Session Saved", description: `${session.duration_secs}s, ${session.data_points} points` });
-        addNotification({ type: "success", title: "Muse Session Saved", message: `Recorded ${Math.round(session.duration_secs / 60)}min session`, source: "Recording" });
         loadSessions();
       } catch (e) {
         toast({ type: "error", title: "Save Failed", description: String(e) });
       }
     }
-  }, [museRecording, fftBands, toast, addNotification]);
+  }, [museRecording, fftBands, toast]);
 
   const toggleWhoopRecording = useCallback(async () => {
     if (!whoopRecording) {
@@ -551,13 +547,12 @@ export default function App() {
         session.file_path = path;
         insertEvents(sessionToEvents(session, path)).catch(() => {});
         toast({ type: "success", title: "Session Saved", description: `${session.duration_secs}s, avg ${avgHR} BPM` });
-        addNotification({ type: "success", title: "Whoop Session Saved", message: `Recorded ${Math.round(session.duration_secs / 60)}min session`, source: "Recording" });
         loadSessions();
       } catch (e) {
         toast({ type: "error", title: "Save Failed", description: String(e) });
       }
     }
-  }, [whoopRecording, toast, addNotification]);
+  }, [whoopRecording, toast]);
 
   const loadSessions = useCallback(() => {
     listSessions().then(setSessions).catch((e) => {
@@ -592,26 +587,29 @@ export default function App() {
     switch (page) {
       case "terrance":
         return (
-          <motion.div key="terrance" {...pageTransition} className="space-y-5">
-            <div className="grid grid-cols-3 gap-4">
-              <StatusCard status={openclaw.status} loading={openclaw.loading} />
+          <motion.div key="terrance" {...pageTransition} className="space-y-3">
+            {/* SYSTEM CORE — dominant, full width */}
+            <StatusCard status={openclaw.status} loading={openclaw.loading} />
+
+            {/* Secondary modules — dense 3-col */}
+            <div className="grid grid-cols-3 gap-3">
               <TokenUsage />
+              <GatewayStatus />
               <SkillsList skills={openclaw.skills} loading={openclaw.loading} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <GatewayStatus />
+
+            {/* Tertiary — OpenClaw + Activity Monitor */}
+            <div className="grid grid-cols-2 gap-3">
               <OpenClawStatusCard onHealthFetched={handleHealthFetched} />
+              <ActivityMonitor />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <CronSchedule jobs={openclaw.cronJobs} loading={openclaw.loading} />
-              <TelegramChat />
-            </div>
+
           </motion.div>
         );
 
       case "business":
         return (
-          <motion.div key="business" {...pageTransition} className="space-y-5">
+          <motion.div key="business" {...pageTransition} className="space-y-3">
             <TaskBoard tasks={tasks} loading={bizLoading} />
             <div className="grid grid-cols-2 gap-4">
               <ContentPipeline items={pipeline} loading={bizLoading} />
@@ -622,7 +620,7 @@ export default function App() {
 
       case "assistant":
         return (
-          <motion.div key="assistant" {...pageTransition} className="space-y-5">
+          <motion.div key="assistant" {...pageTransition} className="space-y-3">
             <div className="grid grid-cols-2 gap-4">
               <CalendarView />
               <EmailSummary />
@@ -634,7 +632,7 @@ export default function App() {
       case "neuro":
         if (nfSession.phase !== "idle") {
           return (
-            <motion.div key="neuro-session" {...pageTransition} className="space-y-5">
+            <motion.div key="neuro-session" {...pageTransition} className="space-y-3">
               <SessionView
                 phase={nfSession.phase}
                 protocol={nfSession.protocol}
@@ -661,7 +659,6 @@ export default function App() {
                     const path = await saveSession(session, session.state_timeline);
                     insertEvents(nfSessionToEvents(session, path)).catch(() => {});
                     toast({ type: "success", title: "Session Saved", description: `Score: ${session.total_score}, In Zone: ${session.time_in_zone_pct}%` });
-                    addNotification({ type: "success", title: "NF Session Saved", message: `${session.protocol_name} — Score: ${session.total_score}`, source: "Neurofeedback" });
                     loadSessions();
                   } catch (e) {
                     toast({ type: "error", title: "Save Failed", description: String(e) });
@@ -672,7 +669,7 @@ export default function App() {
           );
         }
         return (
-          <motion.div key="neuro" {...pageTransition} className="space-y-5">
+          <motion.div key="neuro" {...pageTransition} className="space-y-3">
             <BlePanel
               title="Muse Headband"
               devices={muse.devices}
@@ -757,7 +754,7 @@ export default function App() {
 
       case "fitness":
         return (
-          <motion.div key="fitness" {...pageTransition} className="space-y-5">
+          <motion.div key="fitness" {...pageTransition} className="space-y-3">
             <BlePanel
               title="Whoop 4.0"
               devices={whoop.devices}
@@ -821,7 +818,7 @@ export default function App() {
         const nonNull = [recoveryVal, focusVal].filter((v): v is number => v != null);
         const overallVal = nonNull.length > 0 ? Math.round(nonNull.reduce((a, b) => a + b, 0) / nonNull.length) : 0;
         return (
-          <motion.div key="trajectory" {...pageTransition} className="space-y-5">
+          <motion.div key="trajectory" {...pageTransition} className="space-y-3">
             <div className="grid grid-cols-2 gap-6">
               <GoalTracker />
               <WellnessScore
@@ -834,7 +831,7 @@ export default function App() {
 
       case "revenue":
         return (
-          <motion.div key="revenue" {...pageTransition} className="space-y-5">
+          <motion.div key="revenue" {...pageTransition} className="space-y-3">
             <ArmDashboard
               strategies={arm.strategies}
               revenueSummary={arm.revenueSummary}
@@ -854,7 +851,6 @@ export default function App() {
               onKill={arm.kill}
               onKillSwitch={arm.toggleKillSwitch}
               onLogDecision={arm.logDecision}
-              onUpdateOutcome={arm.updateOutcome}
             />
           </motion.div>
         );

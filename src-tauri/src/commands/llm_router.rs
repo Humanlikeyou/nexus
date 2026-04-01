@@ -1,13 +1,11 @@
 /**
- * LLM Router — unified local-first routing with optional API escalation.
+ * LLM Router — unified routing with multiple provider support.
  *
  * Modes:
- *   local  — always Ollama, never calls any external API
- *   hybrid — Ollama by default; escalates to Anthropic when:
- *              (a) task tagged "heavy" / "research" / "code"
- *              (b) estimated tokens > token_threshold
- *              (c) daily budget not exceeded
- *   api    — always Anthropic (direct HTTP, no OpenClaw dependency)
+ *   local   — always Ollama, never calls any external API
+ *   hybrid  — Ollama by default; escalates to Anthropic when warranted
+ *   api     — always Anthropic (direct HTTP)
+ *   gateway — always OpenClaw gateway (routes to whatever model is configured there)
  *
  * Usage logging is written to:
  *   ~/Library/Application Support/com.taisun.electron/llm_usage.json
@@ -35,7 +33,7 @@ impl Default for RouterConfig {
     fn default() -> Self {
         Self {
             mode: "hybrid".to_string(),
-            ollama_model: "qwen2.5:32b".to_string(),
+            ollama_model: "qwen3.5".to_string(),
             anthropic_model: "claude-haiku-4-5-20251001".to_string(),
             token_threshold: 8000,
             daily_cap_usd: Some(5.0),
@@ -189,6 +187,11 @@ pub fn decide_provider(
             reason: "mode=api".to_string(),
         },
 
+        "gateway" => RoutingDecision {
+            provider: "gateway".to_string(),
+            reason: "mode=gateway".to_string(),
+        },
+
         _ => {
             // ── hybrid ──────────────────────────────────────────────────────
             // 1. Daily budget guard — if exceeded, always stay local
@@ -339,6 +342,63 @@ async fn call_anthropic(
     Ok((content.to_string(), prompt_tokens, completion_tokens))
 }
 
+async fn call_openclaw(
+    gateway_url: &str,
+    gateway_token: &str,
+    text: &str,
+    system_prompt: Option<&str>,
+    client: &reqwest::Client,
+) -> Result<(String, u32, u32, String), String> {
+    let url = format!("{}/v1/chat/completions", gateway_url.trim_end_matches('/'));
+
+    let mut messages = Vec::new();
+    if let Some(sys) = system_prompt {
+        messages.push(serde_json::json!({"role": "system", "content": sys}));
+    }
+    messages.push(serde_json::json!({"role": "user", "content": text}));
+
+    let mut req = client
+        .post(&url)
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "messages": messages,
+            "max_tokens": 4096
+        }))
+        .timeout(std::time::Duration::from_secs(120));
+
+    if !gateway_token.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", gateway_token));
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("OpenClaw gateway unreachable: {}", e))?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("OpenClaw parse error: {}", e))?;
+
+    if let Some(err) = body["error"]["message"].as_str() {
+        return Err(format!("OpenClaw: {}", err));
+    }
+
+    let content = body["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| "OpenClaw: no content in response".to_string())?;
+
+    let model = body["model"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+
+    let prompt_tokens = body["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
+    let completion_tokens = body["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
+
+    Ok((content.to_string(), prompt_tokens, completion_tokens, model))
+}
+
 // ─── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -348,6 +408,8 @@ pub async fn chat_with_router(
     tags: Vec<String>,
     force_provider: Option<String>,
     anthropic_api_key: Option<String>,
+    gateway_url: Option<String>,
+    gateway_auth_token: Option<String>,
 ) -> Result<RouterResponse, String> {
     let client = reqwest::Client::new();
     let estimated_tokens = estimate_tokens(&text);
@@ -365,15 +427,20 @@ pub async fn chat_with_router(
 
     let start = Instant::now();
 
-    // Dispatch to chosen provider; in hybrid mode, fall back to Ollama if API fails.
+    // Dispatch to chosen provider
     let (content, prompt_tokens, completion_tokens, actual_provider, actual_model) =
         match decision.provider.as_str() {
+            "gateway" => {
+                let url = gateway_url.as_deref().unwrap_or("http://127.0.0.1:18789");
+                let token = gateway_auth_token.as_deref().unwrap_or("");
+                let (c, p, o, model) = call_openclaw(url, token, &text, None, &client).await?;
+                (c, p, o, "gateway".to_string(), model)
+            }
             "anthropic" => {
                 let key = anthropic_api_key.as_deref().unwrap_or("");
                 match call_anthropic(&config.anthropic_model, &text, key, &client).await {
                     Ok((c, p, o)) => (c, p, o, "anthropic".to_string(), config.anthropic_model.clone()),
                     Err(e) if config.mode == "hybrid" => {
-                        // Graceful fallback to local on API error in hybrid mode
                         eprintln!("[llm_router] Anthropic failed ({}), falling back to Ollama", e);
                         let (c, p, o) =
                             call_ollama(&config.ollama_model, &text, &client).await?;
@@ -471,7 +538,7 @@ mod tests {
     fn cfg(mode: &str) -> RouterConfig {
         RouterConfig {
             mode: mode.to_string(),
-            ollama_model: "qwen2.5:32b".to_string(),
+            ollama_model: "qwen3.5".to_string(),
             anthropic_model: "claude-haiku-4-5-20251001".to_string(),
             token_threshold: 8000,
             daily_cap_usd: Some(5.0),
@@ -603,7 +670,7 @@ mod tests {
 
     #[test]
     fn ollama_cost_is_zero() {
-        assert_eq!(estimate_cost("ollama", "qwen2.5:32b", 1000, 500), 0.0);
+        assert_eq!(estimate_cost("ollama", "qwen3.5", 1000, 500), 0.0);
     }
 
     #[test]

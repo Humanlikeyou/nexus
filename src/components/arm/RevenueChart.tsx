@@ -99,11 +99,11 @@ export function RevenueChart({ revenueSummary }: RevenueChartProps) {
   ];
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <TrendingUp size={16} className="text-success" />
-          <h3 className="text-base font-medium text-muted-foreground">Revenue</h3>
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Revenue</h3>
         </div>
         <div className="flex items-center gap-1 bg-muted/15 rounded-lg p-0.5">
           {ranges.map((r) => (
@@ -126,19 +126,19 @@ export function RevenueChart({ revenueSummary }: RevenueChartProps) {
       {/* Summary Cards */}
       <div className="grid grid-cols-3 gap-3">
         <div className="px-3 py-2 rounded-lg bg-muted/10">
-          <p className="text-xs text-muted-foreground/40">Revenue</p>
+          <p className="text-xs text-muted-foreground/60">Revenue</p>
           <p className="text-lg font-mono font-semibold text-success">
             ${displayRevenue.toFixed(2)}
           </p>
         </div>
         <div className="px-3 py-2 rounded-lg bg-muted/10">
-          <p className="text-xs text-muted-foreground/40">Expenses</p>
+          <p className="text-xs text-muted-foreground/60">Expenses</p>
           <p className="text-lg font-mono font-semibold text-destructive">
             ${summary?.total_expenses.toFixed(2) ?? "0.00"}
           </p>
         </div>
         <div className="px-3 py-2 rounded-lg bg-muted/10">
-          <p className="text-xs text-muted-foreground/40">Net Income</p>
+          <p className="text-xs text-muted-foreground/60">Net Income</p>
           <p
             className={cn(
               "text-lg font-mono font-semibold",
@@ -159,7 +159,7 @@ export function RevenueChart({ revenueSummary }: RevenueChartProps) {
         />
       ) : (
         <div className="h-[200px] flex items-center justify-center">
-          <p className="text-xs text-muted-foreground/30">
+          <p className="text-xs text-muted-foreground/50">
             Revenue data will appear once strategies are active
           </p>
         </div>

@@ -63,7 +63,7 @@ export function FocusScore({
 
   return (
     <div
-      className="glass p-6 flex flex-col items-center relative"
+      className="panel p-4 flex flex-col items-center relative"
       style={{ opacity: frozen ? 0.3 : containerOpacity }}
     >
       <ReactECharts

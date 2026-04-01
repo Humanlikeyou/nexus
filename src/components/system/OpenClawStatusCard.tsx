@@ -1,5 +1,5 @@
 /**
- * OpenClawStatusCard — Nexus Systems Panel component
+ * OpenClawStatusCard — Tactical Command Panel
  *
  * Displays live OpenClaw gateway health with auto-refresh every 60 seconds.
  * Status: healthy (green) | degraded (yellow) | offline (red)
@@ -22,40 +22,32 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getOpenClawHealth, restartOpenclaw } from "@/lib/api";
-import { useNexus } from "@/context/NexusContext";
 import type { OpenClawHealth } from "@/lib/types";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
 function StatusBadge({ status }: { status: OpenClawHealth["status"] }) {
   const variants = {
     healthy: {
-      icon: <Wifi size={12} />,
+      icon: <Wifi size={10} />,
       label: "Healthy",
-      className: "bg-success/15 text-success",
+      className: "bg-success/12 text-success border border-success/30",
     },
     degraded: {
-      icon: <AlertTriangle size={12} />,
+      icon: <AlertTriangle size={10} />,
       label: "Degraded",
-      className: "bg-warning/15 text-warning",
+      className: "bg-warning/12 text-warning border border-warning/20",
     },
     offline: {
-      icon: <WifiOff size={12} />,
+      icon: <WifiOff size={10} />,
       label: "Offline",
-      className: "bg-destructive/15 text-destructive",
+      className: "bg-destructive/12 text-destructive border border-destructive/20",
     },
   } as const;
 
   const v = variants[status];
   return (
-    <div
-      className={cn(
-        "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
-        v.className,
-      )}
-    >
+    <div className={cn("badge-status", v.className)}>
       {v.icon}
       {v.label}
     </div>
@@ -74,30 +66,26 @@ function HealthRow({
   ok: boolean;
 }) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="text-accent flex-shrink-0">{icon}</div>
+    <div className="flex items-center gap-2.5">
+      <div className="text-muted-foreground/60 flex-shrink-0">{icon}</div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-sm font-medium truncate">{value}</p>
+        <p className="metric-label">{label}</p>
+        <p className="text-[11px] font-mono text-foreground/85 truncate mt-0.5">{value}</p>
       </div>
       {ok ? (
-        <CheckCircle2 size={14} className="text-success flex-shrink-0" />
+        <CheckCircle2 size={12} className="text-success/80 flex-shrink-0" />
       ) : (
-        <XCircle size={14} className="text-destructive flex-shrink-0" />
+        <XCircle size={12} className="text-destructive/80 flex-shrink-0" />
       )}
     </div>
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
-
 interface OpenClawStatusCardProps {
-  /** Called after each successful health fetch — useful for n8n push. */
   onHealthFetched?: (health: OpenClawHealth) => void;
 }
 
 export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps = {}) {
-  const { addNotification } = useNexus();
   const [health, setHealth] = useState<OpenClawHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -106,24 +94,13 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
   const [restarting, setRestarting] = useState(false);
   const [restartMsg, setRestartMsg] = useState<string | null>(null);
 
-  // Keep a stable ref to the callback so fetchHealth never re-creates
-  // when the caller passes an inline arrow function.
   const onHealthFetchedRef = useRef(onHealthFetched);
   onHealthFetchedRef.current = onHealthFetched;
-
-  // Keep a ref to current health so the loading-state branch inside
-  // fetchHealth can read it without adding `health` to deps (which
-  // would re-create fetchHealth after every successful poll and
-  // immediately re-trigger the useEffect interval).
   const healthRef = useRef(health);
   healthRef.current = health;
-
-  // Track previous status for transition notifications + auto-restart
   const prevStatusRef = useRef<OpenClawHealth["status"] | null>(null);
-  const addNotificationRef = useRef(addNotification);
-  addNotificationRef.current = addNotification;
   const lastAutoRestartRef = useRef<number>(0);
-  const AUTO_RESTART_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes between auto-restarts
+  const AUTO_RESTART_COOLDOWN_MS = 5 * 60 * 1000;
 
   const fetchHealth = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -137,51 +114,39 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
       onHealthFetchedRef.current?.(result);
     } catch (err) {
       setError(String(err));
-      // Keep last known health visible; mark gateway as suspect
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []); // stable — no external deps needed thanks to refs above
+  }, []);
 
-  // Initial fetch + 60s polling — runs exactly once on mount
   useEffect(() => {
     fetchHealth();
     const interval = setInterval(() => fetchHealth(), REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [fetchHealth]);
 
-  // Fire notifications on status transitions + auto-restart when offline
   useEffect(() => {
     if (!health) return;
     const prev = prevStatusRef.current;
     prevStatusRef.current = health.status;
-    if (prev === null) return; // first load — no notification
-    if (prev === health.status) return; // no change
+    if (prev === null) return;
+    if (prev === health.status) return;
 
     if (health.status === "offline") {
-      // Auto-restart via launchctl if cooldown has elapsed
       const now = Date.now();
       if (now - lastAutoRestartRef.current > AUTO_RESTART_COOLDOWN_MS) {
         lastAutoRestartRef.current = now;
-        addNotificationRef.current({ type: "warning", title: "OpenClaw Auto-Restart", message: "Gateway went offline — attempting automatic restart via launchctl", source: "OpenClaw" });
         restartOpenclaw()
           .then((msg) => {
             setRestartMsg(msg);
-            // Re-check health after process has time to come back up
             setTimeout(() => fetchHealth(true), 6000);
           })
           .catch((e) => {
             setRestartMsg(`Auto-restart failed: ${e}`);
-            addNotificationRef.current({ type: "error", title: "Auto-Restart Failed", message: String(e), source: "OpenClaw" });
           });
       } else {
-        addNotificationRef.current({ type: "error", title: "OpenClaw Offline", message: "Gateway is unreachable — auto-restart on cooldown, try manual restart", source: "OpenClaw" });
       }
-    } else if (health.status === "degraded") {
-      addNotificationRef.current({ type: "warning", title: "OpenClaw Degraded", message: "Gateway is up but some subsystems are impaired", source: "OpenClaw" });
-    } else if (prev !== "healthy") {
-      addNotificationRef.current({ type: "success", title: "OpenClaw Recovered", message: `Gateway is healthy again (was ${prev})`, source: "OpenClaw" });
     }
   }, [health, fetchHealth]);
 
@@ -191,7 +156,6 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
     try {
       const msg = await restartOpenclaw();
       setRestartMsg(msg);
-      // Re-check health after a short delay to let the process come back up
       setTimeout(() => fetchHealth(true), 4000);
     } catch (e) {
       setRestartMsg(`Failed: ${e}`);
@@ -200,21 +164,21 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
     }
   }, [fetchHealth]);
 
-  // ─── Skeleton ──────────────────────────────────────────────────────────────
+  // Skeleton
   if (loading && !health) {
     return (
-      <div className="glass p-6 space-y-5">
+      <div className="panel p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-medium text-muted-foreground">OpenClaw Gateway</h3>
-          <div className="h-6 w-20 bg-muted/30 rounded-full animate-pulse" />
+          <h3 className="heading-section">OpenClaw Gateway</h3>
+          <div className="h-5 w-16 bg-muted/15 rounded-sm animate-pulse" />
         </div>
-        <div className="space-y-5">
+        <div className="space-y-3">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <div className="w-4 h-4 bg-muted/30 rounded animate-pulse" />
-              <div className="space-y-1.5 flex-1">
-                <div className="h-3 bg-muted/30 rounded animate-pulse w-1/3" />
-                <div className="h-4 bg-muted/30 rounded animate-pulse w-1/2" />
+            <div key={i} className="flex items-center gap-2.5">
+              <div className="w-3 h-3 bg-muted/15 rounded-sm animate-pulse" />
+              <div className="space-y-1 flex-1">
+                <div className="h-2 bg-muted/15 rounded-sm animate-pulse w-1/3" />
+                <div className="h-3 bg-muted/15 rounded-sm animate-pulse w-1/2" />
               </div>
             </div>
           ))}
@@ -223,31 +187,30 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
     );
   }
 
-  // ─── Error state (no prior data) ──────────────────────────────────────────
+  // Error state
   if (error && !health) {
     return (
-      <div className="glass p-6 space-y-5">
+      <div className="panel p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-medium text-muted-foreground">OpenClaw Gateway</h3>
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-destructive/15 text-destructive">
-            <WifiOff size={12} /> Offline
+          <h3 className="heading-section">OpenClaw Gateway</h3>
+          <div className="badge-status bg-destructive/12 text-destructive border border-destructive/20">
+            <WifiOff size={10} /> Offline
           </div>
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[10px] font-mono text-muted-foreground/60">
           Health check failed — gateway may be down.
         </p>
         <button
           onClick={() => fetchHealth(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/20 text-muted-foreground text-xs hover:bg-muted/30 transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm bg-muted/10 text-muted-foreground text-[10px] font-mono hover:bg-muted/20 transition-colors"
         >
-          <RefreshCw size={12} className={cn(refreshing && "animate-spin")} />
+          <RefreshCw size={10} className={cn(refreshing && "animate-spin")} />
           Retry
         </button>
       </div>
     );
   }
 
-  // ─── Loaded state ─────────────────────────────────────────────────────────
   const h = health!;
 
   const channelValue = (v: string) =>
@@ -259,57 +222,50 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
   const channelOk = (v: string) => v === "connected";
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Server size={15} className="text-muted-foreground" />
-          <h3 className="text-base font-medium text-muted-foreground">OpenClaw Gateway</h3>
-        </div>
+        <h3 className="heading-section">OpenClaw Gateway</h3>
         <div className="flex items-center gap-2">
           <StatusBadge status={h.status} />
           <button
             onClick={() => fetchHealth(true)}
-            className="p-1 rounded-lg text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/20 transition-colors"
+            className="p-1 rounded-sm text-muted-foreground/50 hover:text-muted-foreground/60 hover:bg-muted/10 transition-colors"
             title="Refresh"
           >
-            <RefreshCw size={13} className={cn(refreshing && "animate-spin")} />
+            <RefreshCw size={11} className={cn(refreshing && "animate-spin")} />
           </button>
         </div>
       </div>
 
       {/* Health rows */}
-      <div className="space-y-3.5">
+      <div className="space-y-2.5">
         <HealthRow
-          icon={<Tag size={15} />}
+          icon={<Tag size={12} />}
           label="Version"
           value={h.version ?? "unknown"}
           ok={!!h.version}
         />
-
         <HealthRow
-          icon={<Server size={15} />}
+          icon={<Server size={12} />}
           label="Gateway (port 18789)"
           value={h.gateway ? "Reachable" : "Unreachable"}
           ok={h.gateway}
         />
-
         <HealthRow
-          icon={<Wifi size={15} />}
+          icon={<Wifi size={12} />}
           label="RPC Probe"
           value={h.rpc ? "OK" : "No response"}
           ok={h.rpc}
         />
-
         <HealthRow
-          icon={<Brain size={15} />}
+          icon={<Brain size={12} />}
           label="Memory Search"
-          value={h.memory_search === "configured" ? "Configured" : "Missing — no local model"}
+          value={h.memory_search === "configured" ? "Configured" : "Missing"}
           ok={h.memory_search === "configured"}
         />
-
         <HealthRow
-          icon={<MessageCircle size={15} />}
+          icon={<MessageCircle size={12} />}
           label="Telegram"
           value={channelValue(h.channels.telegram)}
           ok={channelOk(h.channels.telegram)}
@@ -320,14 +276,14 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
       {h.status !== "healthy" && (
         <div
           className={cn(
-            "px-3 py-2.5 rounded-xl text-xs leading-relaxed space-y-2",
+            "px-2.5 py-2 rounded-sm text-[10px] font-mono leading-relaxed space-y-1.5",
             h.status === "offline"
-              ? "bg-destructive/8 text-destructive border border-destructive/20"
-              : "bg-warning/8 text-warning border border-warning/20",
+              ? "bg-destructive/5 text-destructive/70 border border-destructive/25"
+              : "bg-warning/5 text-warning/70 border border-warning/25",
           )}
         >
           {h.status === "offline" && (
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start justify-between gap-2">
               <p>
                 <strong>Gateway unreachable.</strong> Run{" "}
                 <code className="font-mono">openclaw gateway start</code> or restart
@@ -336,12 +292,12 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
               <button
                 onClick={handleRestart}
                 disabled={restarting}
-                className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors text-[11px] font-medium whitespace-nowrap"
+                className="btn-kill flex-shrink-0 flex items-center gap-1 !px-2 !py-1 !text-[10px]"
               >
                 {restarting ? (
-                  <RefreshCw size={11} className="animate-spin" />
+                  <RefreshCw size={10} className="animate-spin" />
                 ) : (
-                  <RotateCcw size={11} />
+                  <RotateCcw size={10} />
                 )}
                 Restart
               </button>
@@ -350,23 +306,20 @@ export function OpenClawStatusCard({ onHealthFetched }: OpenClawStatusCardProps 
           {h.status === "degraded" && h.memory_search === "missing" && (
             <p>
               <strong>Memory search not configured.</strong> Install a local model
-              or switch to a remote provider:{" "}
-              <code className="font-mono text-[13px]">
-                openclaw config set agents.defaults.memorySearch.provider openai
-              </code>
+              or switch to a remote provider.
             </p>
           )}
           {restartMsg && (
-            <p className="text-[11px] opacity-70 font-mono">{restartMsg}</p>
+            <p className="text-[10px] opacity-60">{restartMsg}</p>
           )}
         </div>
       )}
 
       {/* Last refresh */}
       {lastRefresh && (
-        <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground/40">
-          <Clock size={11} />
-          Refreshed {lastRefresh.toLocaleTimeString()} · every 60 s
+        <div className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground/45">
+          <Clock size={9} />
+          {lastRefresh.toLocaleTimeString()} / 60s
         </div>
       )}
     </div>

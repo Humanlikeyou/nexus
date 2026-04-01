@@ -19,10 +19,10 @@ interface BrainWavesProps {
 }
 
 const channelColors: Record<string, string> = {
-  TP9: "#8b5cf6",
-  AF7: "#06b6d4",
-  AF8: "#f59e0b",
-  TP10: "#10b981",
+  TP9: "#7c6fae",
+  AF7: "#5a9ebf",
+  AF8: "#c49a4a",
+  TP10: "#3d9e7e",
 };
 
 const qualityDotColors: Record<ChannelQuality, string> = {
@@ -125,7 +125,7 @@ function BrainWavesInner({
       max: yMax,
       axisLine: { show: false },
       axisTick: { show: false },
-      splitLine: { lineStyle: { color: "rgba(255,255,255,0.04)" } },
+      splitLine: { lineStyle: { color: "rgba(255,255,255,0.03)" } },
       axisLabel: { color: "#555", fontSize: CHART_THEME.axisLabel.fontSize, formatter: (v: number) => `${v}\u00B5V` },
     },
     series: channels.map((ch) => ({
@@ -134,7 +134,7 @@ function BrainWavesInner({
       data: processedData[ch] || [],
       showSymbol: false,
       lineStyle: {
-        width: viewMode === "clean" ? 1.2 : 1,
+        width: 1,
         color: channelColors[ch],
         opacity: viewMode === "clean" ? 0.85 : 1,
       },
@@ -162,10 +162,10 @@ function BrainWavesInner({
   const noPacketsWhileStreaming = streaming && eegDebug && eegDebug.packetsReceived === 0;
 
   return (
-    <div className="glass p-6 space-y-3">
+    <div className="panel p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h3 className="text-base font-medium text-muted-foreground">
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">
             Real-time EEG
           </h3>
           {/* Electrode contact quality indicators */}
@@ -272,7 +272,7 @@ function BrainWavesInner({
           <span>
             buf: {["TP9", "AF7", "AF8", "TP10"].map((ch) => `${ch}=${eegDebug.bufferLens[ch] || 0}`).join(" ")}
           </span>
-          <span className="ml-auto text-muted-foreground/40">
+          <span className="ml-auto text-muted-foreground/60">
             {viewMode === "clean" ? "smoothed" : "raw"} · ±{Math.abs(yMax)}µV
           </span>
           {noPacketsWhileStreaming && (

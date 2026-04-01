@@ -17,14 +17,14 @@ const columns = [
 export function TaskBoard({ tasks, loading }: TaskBoardProps) {
   if (loading) {
     return (
-      <div className="glass p-6">
-        <h3 className="text-base font-medium text-muted-foreground mb-4">Task Board</h3>
-        <div className="grid grid-cols-4 gap-4">
+      <div className="panel p-4">
+        <h3 className="heading-section mb-3">Task Board</h3>
+        <div className="grid grid-cols-4 gap-3">
           {columns.map((col) => (
-            <div key={col.id} className="space-y-2">
-              <div className="h-4 bg-muted/30 rounded animate-pulse w-24" />
-              <div className="h-16 bg-muted/20 rounded animate-pulse" />
-              <div className="h-16 bg-muted/20 rounded animate-pulse" />
+            <div key={col.id} className="space-y-1.5">
+              <div className="h-3 bg-muted/15 rounded-sm animate-pulse w-20" />
+              <div className="h-12 bg-muted/10 rounded-sm animate-pulse" />
+              <div className="h-12 bg-muted/10 rounded-sm animate-pulse" />
             </div>
           ))}
         </div>
@@ -33,42 +33,39 @@ export function TaskBoard({ tasks, loading }: TaskBoardProps) {
   }
 
   return (
-    <div className="glass p-6 space-y-5">
-      <h3 className="text-base font-medium text-muted-foreground">Task Board</h3>
+    <div className="panel p-4 space-y-3">
+      <h3 className="heading-section">Task Board</h3>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-4 gap-3">
         {columns.map((col) => {
           const Icon = col.icon;
           const colTasks = tasks.filter((t) => t.status === col.id);
 
           return (
-            <div key={col.id} className="space-y-2">
-              <div className="flex items-center gap-2 pb-2 border-b border-border/20">
-                <Icon size={14} className={col.color} />
-                <span className="text-xs font-medium text-muted-foreground">
+            <div key={col.id} className="space-y-1.5">
+              <div className="flex items-center gap-1.5 pb-1.5 border-b border-border/35">
+                <Icon size={11} className={col.color} />
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/60">
                   {col.label}
                 </span>
-                <span className="ml-auto text-xs text-muted-foreground/50">
+                <span className="ml-auto text-[10px] font-mono text-muted-foreground/50">
                   {colTasks.length}
                 </span>
               </div>
 
-              <div className="space-y-2 min-h-[100px]">
+              <div className="space-y-1 min-h-[80px]">
                 {colTasks.map((task, i) => (
                   <div
                     key={i}
-                    className={cn(
-                      "p-3 rounded-lg bg-muted/15 border border-border/15",
-                      "hover:bg-muted/25 transition-colors cursor-default",
-                    )}
+                    className="p-2 rounded-sm bg-muted/5 border border-border/25 hover:bg-muted/10 transition-colors"
                   >
-                    <p className="text-xs leading-relaxed">{task.title}</p>
+                    <p className="text-[11px] font-mono leading-relaxed text-foreground/85">{task.title}</p>
                     {task.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2">
+                      <div className="flex flex-wrap gap-1 mt-1.5">
                         {task.tags.map((tag) => (
                           <span
                             key={tag}
-                            className="text-[13px] px-2 py-0.5 rounded-md font-medium bg-accent/10 text-accent/70"
+                            className="text-[9px] font-mono px-1.5 py-0.5 rounded-sm bg-accent/12 text-accent/70 uppercase tracking-wider"
                           >
                             {tag}
                           </span>
@@ -78,12 +75,12 @@ export function TaskBoard({ tasks, loading }: TaskBoardProps) {
                     {task.priority && (
                       <span
                         className={cn(
-                          "inline-block mt-1.5 text-[13px] px-1.5 py-0.5 rounded",
+                          "inline-block mt-1 text-[9px] font-mono px-1.5 py-0.5 rounded-sm uppercase tracking-wider",
                           task.priority === "high"
-                            ? "bg-destructive/10 text-destructive"
+                            ? "bg-destructive/12 text-destructive/80"
                             : task.priority === "medium"
-                              ? "bg-warning/10 text-warning"
-                              : "bg-muted/30 text-muted-foreground/50",
+                              ? "bg-warning/12 text-warning/80"
+                              : "bg-muted/15 text-muted-foreground/50",
                         )}
                       >
                         {task.priority}

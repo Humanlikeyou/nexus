@@ -26,7 +26,7 @@ export function StrainChart({ metrics, streaming }: StrainChartProps) {
       data: chartData.map((d) => d.label),
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: "#666", fontSize: CHART_THEME.axisLabel.fontSize },
+      axisLabel: { color: CHART_THEME.axisLabel.color, fontSize: CHART_THEME.axisLabel.fontSize },
     },
     yAxis: {
       type: "value" as const,
@@ -34,8 +34,8 @@ export function StrainChart({ metrics, streaming }: StrainChartProps) {
       max: 21,
       axisLine: { show: false },
       axisTick: { show: false },
-      splitLine: { lineStyle: { color: "rgba(255,255,255,0.04)" } },
-      axisLabel: { color: "#555", fontSize: CHART_THEME.axisLabel.fontSize },
+      splitLine: { lineStyle: { color: CHART_THEME.splitLine.color } },
+      axisLabel: { color: CHART_THEME.axisLabelMuted.color, fontSize: CHART_THEME.axisLabel.fontSize },
     },
     series: [
       {
@@ -68,11 +68,11 @@ export function StrainChart({ metrics, streaming }: StrainChartProps) {
   };
 
   return (
-    <div className="glass p-6 space-y-3 relative">
+    <div className="panel p-4 space-y-3 relative">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Flame size={16} className="text-warning" />
-          <h3 className="text-base font-medium text-muted-foreground">Strain</h3>
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Strain</h3>
         </div>
         <div className="text-right">
           <p className="text-lg font-semibold">
@@ -92,7 +92,7 @@ export function StrainChart({ metrics, streaming }: StrainChartProps) {
         />
       ) : (
         <div className="h-[140px] flex items-center justify-center">
-          <span className="text-xs text-muted-foreground/40">
+          <span className="text-xs text-muted-foreground/60">
             {streaming ? "Accumulating..." : "Start streaming to track strain"}
           </span>
         </div>
@@ -111,7 +111,7 @@ export function StrainChart({ metrics, streaming }: StrainChartProps) {
                 style={{ flex: Math.max(pct, 5) }}
               >
                 <div
-                  className="w-full h-2 rounded-full"
+                  className="w-full h-1.5 rounded-sm"
                   style={{ backgroundColor: ZONE_COLORS[i], opacity: pct > 0 ? 1 : 0.2 }}
                 />
                 <span className="text-[8px] text-muted-foreground/50">{ZONE_LABELS[i]}</span>

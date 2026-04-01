@@ -109,18 +109,30 @@ export function useArm(pollIntervalMs = 300_000) {
   }, []);
 
   const activate = useCallback(async (id: string) => {
-    const strat = await armActivateStrategy(id);
-    setStrategies((prev) => prev.map((s) => (s.id === id ? strat : s)));
+    try {
+      const strat = await armActivateStrategy(id);
+      setStrategies((prev) => prev.map((s) => (s.id === id ? strat : s)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   }, []);
 
   const pause = useCallback(async (id: string, reasoning: string) => {
-    const strat = await armPauseStrategy(id, reasoning);
-    setStrategies((prev) => prev.map((s) => (s.id === id ? strat : s)));
+    try {
+      const strat = await armPauseStrategy(id, reasoning);
+      setStrategies((prev) => prev.map((s) => (s.id === id ? strat : s)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   }, []);
 
   const kill = useCallback(async (id: string, reasoning: string) => {
-    const strat = await armKillStrategy(id, reasoning);
-    setStrategies((prev) => prev.map((s) => (s.id === id ? strat : s)));
+    try {
+      const strat = await armKillStrategy(id, reasoning);
+      setStrategies((prev) => prev.map((s) => (s.id === id ? strat : s)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   }, []);
 
   const toggleKillSwitch = useCallback(async (active: boolean, reasoning: string) => {

@@ -20,10 +20,8 @@ export function GatewayStatus() {
   const [status, setStatus] = useState<OutboxStatus | null>(null);
 
   useEffect(() => {
-    // Initial fetch
     getOutboxStatus().then(setStatus).catch(() => {});
 
-    // Live updates from delivery worker
     let unlisten: UnlistenFn | null = null;
     listen<OutboxStatus>("outbox-status", (event) => {
       setStatus(event.payload);
@@ -31,7 +29,6 @@ export function GatewayStatus() {
       unlisten = fn;
     });
 
-    // Poll every 30s as fallback
     const interval = setInterval(() => {
       getOutboxStatus().then(setStatus).catch(() => {});
     }, 30000);
@@ -44,33 +41,30 @@ export function GatewayStatus() {
 
   if (!status) {
     return (
-      <div className="glass p-6">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground/50">
-          <ArrowUpRight size={14} />
-          <span>Gateway Pipeline</span>
-          <span className="ml-auto text-xs">Loading...</span>
+      <div className="panel p-4">
+        <div className="flex items-center gap-2">
+          <ArrowUpRight size={12} className="text-muted-foreground/50" />
+          <span className="heading-section">Gateway Pipeline</span>
+          <span className="ml-auto text-[10px] font-mono text-muted-foreground/50">Loading...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="glass p-6 space-y-3">
+    <div className="panel p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ArrowUpRight size={14} className="text-accent" />
-          <span className="text-xs font-medium text-muted-foreground">Gateway Pipeline</span>
-        </div>
+        <h3 className="heading-section">Gateway Pipeline</h3>
         <div className="flex items-center gap-1.5">
           <div
             className={cn(
-              "w-2 h-2 rounded-full",
+              "w-1.5 h-1.5 rounded-full",
               status.gateway_online
                 ? "bg-success animate-pulse-dot"
                 : "bg-destructive",
             )}
           />
-          <span className="text-xs text-muted-foreground">
+          <span className="text-[10px] font-mono text-muted-foreground/70 uppercase tracking-wider">
             {status.gateway_online ? "Online" : "Offline"}
           </span>
         </div>
@@ -78,35 +72,32 @@ export function GatewayStatus() {
 
       <div className="grid grid-cols-3 gap-3">
         <div>
-          <p className="text-xs text-muted-foreground/50">Queue</p>
+          <p className="metric-label">Queue</p>
           <p className={cn(
-            "text-sm font-mono font-semibold",
-            status.queue_depth > 0 ? "text-warning" : "text-foreground/70",
+            "text-sm font-mono font-semibold mt-0.5",
+            status.queue_depth > 0 ? "text-warning" : "text-foreground/75",
           )}>
             {status.queue_depth}
           </p>
         </div>
         <div>
-          <p className="text-xs text-muted-foreground/50">Delivered</p>
-          <p className="text-sm font-mono font-semibold text-foreground/70">
+          <p className="metric-label">Delivered</p>
+          <p className="text-sm font-mono font-semibold text-foreground/75 mt-0.5">
             {status.total_delivered}
           </p>
         </div>
         <div>
-          <div className="flex items-center gap-1">
-            <Clock size={8} className="text-muted-foreground/40" />
-            <p className="text-xs text-muted-foreground/50">Last Sent</p>
-          </div>
-          <p className="text-[13px] font-mono text-foreground/70">
+          <p className="metric-label">Last Sent</p>
+          <p className="text-xs font-mono text-foreground/75 mt-0.5">
             {relativeTime(status.last_delivered_at)}
           </p>
         </div>
       </div>
 
       {status.last_error && !status.gateway_online && (
-        <div className="flex items-start gap-1.5 px-2.5 py-1.5 rounded-md bg-destructive/5 border border-destructive/15">
-          <AlertTriangle size={10} className="text-destructive mt-0.5 shrink-0" />
-          <p className="text-xs text-destructive/80 break-all">{status.last_error}</p>
+        <div className="flex items-start gap-1.5 px-2 py-1.5 rounded-sm bg-destructive/8 border border-destructive/20">
+          <AlertTriangle size={9} className="text-destructive/80 mt-0.5 shrink-0" />
+          <p className="text-[10px] font-mono text-destructive/80 break-all">{status.last_error}</p>
         </div>
       )}
     </div>

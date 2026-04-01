@@ -205,7 +205,7 @@ export function CommandPalette() {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.96, y: -10 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
-                className="fixed left-1/2 top-[20%] -translate-x-1/2 z-[91] w-[560px] max-h-[440px] glass-elevated rounded-xl border border-border/30 shadow-2xl overflow-hidden"
+                className="fixed left-1/2 top-[20%] -translate-x-1/2 z-[91] w-[560px] max-h-[440px] glass-elevated rounded-xl border border-border/45 shadow-2xl overflow-hidden"
               >
                 <div className="flex items-center gap-3 px-4 py-3 border-b border-border/20">
                   <Search size={16} className="text-muted-foreground/50" />
@@ -215,9 +215,9 @@ export function CommandPalette() {
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder="Search commands..."
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/30"
+                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
                   />
-                  <kbd className="text-xs text-muted-foreground/40 px-2 py-0.5 rounded-md font-medium bg-muted/20 border border-border/20">
+                  <kbd className="text-xs text-muted-foreground/60 px-2 py-0.5 rounded-md font-medium bg-muted/20 border border-border/20">
                     ESC
                   </kbd>
                 </div>
@@ -230,7 +230,7 @@ export function CommandPalette() {
                   ) : (
                     Object.entries(grouped).map(([category, cmds]) => (
                       <div key={category}>
-                        <p className="text-xs font-medium text-muted-foreground/40 uppercase tracking-wider px-4 py-1.5">
+                        <p className="text-xs font-medium text-muted-foreground/60 uppercase tracking-wider px-4 py-1.5">
                           {category}
                         </p>
                         {cmds.map((cmd) => {
@@ -245,14 +245,14 @@ export function CommandPalette() {
                               className={cn(
                                 "flex items-center gap-3 w-full px-4 py-2.5 text-sm transition-colors",
                                 globalIdx === selectedIndex
-                                  ? "bg-accent/10 text-accent"
+                                  ? "bg-accent/15 text-accent"
                                   : "text-muted-foreground hover:bg-muted/20",
                               )}
                             >
                               <Icon size={16} />
                               <span className="flex-1 text-left">{cmd.label}</span>
                               {cmd.shortcut && (
-                                <kbd className="text-xs text-muted-foreground/40 px-2 py-0.5 rounded-md font-medium bg-muted/15 border border-border/15">
+                                <kbd className="text-xs text-muted-foreground/60 px-2 py-0.5 rounded-md font-medium bg-muted/15 border border-border/25">
                                   {cmd.shortcut}
                                 </kbd>
                               )}
@@ -264,7 +264,7 @@ export function CommandPalette() {
                   )}
                 </div>
 
-                <div className="flex items-center gap-4 px-4 py-2 border-t border-border/20 text-xs text-muted-foreground/30">
+                <div className="flex items-center gap-4 px-4 py-2 border-t border-border/20 text-xs text-muted-foreground/50">
                   <span className="flex items-center gap-1">
                     <Command size={10} /> K to toggle
                   </span>

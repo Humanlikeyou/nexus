@@ -10,7 +10,7 @@ interface AnimatedNumberProps {
 
 export function AnimatedNumber({
   value,
-  duration = 600,
+  duration = 900,
   suffix = "",
   decimals = 0,
   className,
@@ -32,8 +32,8 @@ export function AnimatedNumber({
     function animate(now: number) {
       const elapsed = now - start;
       const progress = Math.min(elapsed / duration, 1);
-      // ease-out quad
-      const eased = 1 - (1 - progress) * (1 - progress);
+      // cubic deceleration
+      const eased = 1 - Math.pow(1 - progress, 3);
       setDisplay(from + diff * eased);
 
       if (progress < 1) {

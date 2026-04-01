@@ -18,41 +18,6 @@ export function BrainSnapshotCard({ streaming, eegData, onSnapshotComplete }: Br
   const samplesRef = useRef<FrequencyBandPowers[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const takeSnapshot = useCallback(() => {
-    if (!streaming) return;
-    setRecording(true);
-    setProgress(0);
-    samplesRef.current = [];
-
-    let elapsed = 0;
-    const total = 30000; // 30 seconds
-
-    intervalRef.current = setInterval(() => {
-      elapsed += 500;
-      setProgress(Math.min(100, (elapsed / total) * 100));
-
-      // Compute bands from current EEG data
-      const af7 = eegData.AF7 || [];
-      const af8 = eegData.AF8 || [];
-      if (af7.length >= FFT_SIZE || af8.length >= FFT_SIZE) {
-        const samples = new Array(FFT_SIZE);
-        const af7Slice = af7.slice(-FFT_SIZE);
-        const af8Slice = af8.slice(-FFT_SIZE);
-        for (let i = 0; i < FFT_SIZE; i++) {
-          samples[i] = ((af7Slice[i] ?? 0) + (af8Slice[i] ?? 0)) / 2;
-        }
-        const bands = computeBands(samples);
-        samplesRef.current.push(bands);
-      }
-
-      if (elapsed >= total) {
-        if (intervalRef.current) clearInterval(intervalRef.current);
-        setRecording(false);
-        finalizeSnapshot();
-      }
-    }, 500);
-  }, [streaming, eegData]);
-
   const finalizeSnapshot = useCallback(() => {
     const s = samplesRef.current;
     if (s.length === 0) {
@@ -99,6 +64,41 @@ export function BrainSnapshotCard({ streaming, eegData, onSnapshotComplete }: Br
     onSnapshotComplete?.(snap);
   }, [onSnapshotComplete]);
 
+  const takeSnapshot = useCallback(() => {
+    if (!streaming) return;
+    setRecording(true);
+    setProgress(0);
+    samplesRef.current = [];
+
+    let elapsed = 0;
+    const total = 30000; // 30 seconds
+
+    intervalRef.current = setInterval(() => {
+      elapsed += 500;
+      setProgress(Math.min(100, (elapsed / total) * 100));
+
+      // Compute bands from current EEG data
+      const af7 = eegData.AF7 || [];
+      const af8 = eegData.AF8 || [];
+      if (af7.length >= FFT_SIZE || af8.length >= FFT_SIZE) {
+        const samples = new Array(FFT_SIZE);
+        const af7Slice = af7.slice(-FFT_SIZE);
+        const af8Slice = af8.slice(-FFT_SIZE);
+        for (let i = 0; i < FFT_SIZE; i++) {
+          samples[i] = ((af7Slice[i] ?? 0) + (af8Slice[i] ?? 0)) / 2;
+        }
+        const bands = computeBands(samples);
+        samplesRef.current.push(bands);
+      }
+
+      if (elapsed >= total || !streaming) {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        setRecording(false);
+        if (streaming) finalizeSnapshot();
+      }
+    }, 500);
+  }, [streaming, eegData, finalizeSnapshot]);
+
   useEffect(() => {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -113,9 +113,9 @@ export function BrainSnapshotCard({ streaming, eegData, onSnapshotComplete }: Br
   };
 
   return (
-    <div className="glass p-6 space-y-3">
+    <div className="panel p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-base font-medium text-muted-foreground">Brain Snapshot</h3>
+        <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Brain Snapshot</h3>
         <button
           onClick={takeSnapshot}
           disabled={!streaming || recording}
@@ -174,7 +174,7 @@ export function BrainSnapshotCard({ streaming, eegData, onSnapshotComplete }: Br
       )}
 
       {!snapshot && !recording && (
-        <p className="text-[13px] text-muted-foreground/30 text-center py-3">
+        <p className="text-[13px] text-muted-foreground/50 text-center py-3">
           30s recording to analyze brain state
         </p>
       )}
@@ -194,7 +194,7 @@ function MetricCell({
   colorClass: string;
 }) {
   return (
-    <div className="glass p-2.5 rounded-lg text-center">
+    <div className="panel p-2.5 rounded-lg text-center">
       <p className={`text-lg font-bold tabular-nums ${colorClass}`}>
         {value}
         {unit && <span className="text-xs font-normal ml-0.5">{unit}</span>}

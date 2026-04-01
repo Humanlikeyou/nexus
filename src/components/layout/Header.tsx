@@ -2,7 +2,6 @@ import { Settings, RefreshCw, Sun, Moon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNexus } from "@/context/NexusContext";
 import { useTheme } from "@/context/ThemeContext";
-import { NotificationCenter } from "@/components/ui/NotificationCenter";
 import type { PageId } from "@/lib/types";
 
 const pageTitles: Record<PageId, string> = {
@@ -38,60 +37,59 @@ export function Header({ activePage, terranceOnline = false, onRefresh }: Header
   const { resolved, setMode } = useTheme();
 
   return (
-    <header className="glass-subtle flex items-center justify-between px-7 py-5 border-b border-border/20">
+    <header className="flex items-center justify-between px-4 py-3 border-b border-border/55">
       <div>
         <div className="flex items-center gap-3">
-          <h2 className="text-xl font-semibold tracking-tight">
+          <h2 className="text-xs font-semibold uppercase font-mono tracking-[0.12em] text-foreground/90">
             {pageTitles[activePage]}
           </h2>
           {activePage === "terrance" && (
             <div className="flex items-center gap-1.5">
               <div
                 className={cn(
-                  "w-2 h-2 rounded-full",
+                  "w-1.5 h-1.5 rounded-full",
                   terranceOnline
-                    ? "bg-success animate-pulse-dot"
-                    : "bg-muted-foreground/30",
+                    ? "bg-success animate-status-glow"
+                    : "bg-muted-foreground/35",
                 )}
               />
-              <span className="text-xs text-muted-foreground">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
                 {terranceOnline ? "Online" : "Offline"}
               </span>
             </div>
           )}
         </div>
-        <p className="text-sm text-muted-foreground mt-0.5">
+        <p className="text-[10px] font-mono tracking-wide text-muted-foreground/65 mt-0.5">
           {pageDescriptions[activePage]}
         </p>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-1.5">
         {onRefresh && (
           <button
             onClick={onRefresh}
-            className="p-2.5 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            className="p-2 rounded text-muted-foreground/65 hover:text-foreground/80 hover:bg-muted/25 transition-colors"
           >
-            <RefreshCw size={16} />
+            <RefreshCw size={14} />
           </button>
         )}
-        <NotificationCenter />
         <button
           onClick={() => setMode(resolved === "dark" ? "light" : "dark")}
-          className="p-2.5 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+          className="p-2 rounded text-muted-foreground/65 hover:text-foreground/80 hover:bg-muted/25 transition-colors"
           title={resolved === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
-          {resolved === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          {resolved === "dark" ? <Sun size={14} /> : <Moon size={14} />}
         </button>
         <button
           onClick={() => navigate("settings")}
           className={cn(
-            "p-2.5 rounded-xl transition-colors",
+            "p-2 rounded transition-colors",
             activePage === "settings"
-              ? "text-accent bg-accent/10"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+              ? "text-accent bg-accent/8"
+              : "text-muted-foreground/65 hover:text-foreground/80 hover:bg-muted/25",
           )}
         >
-          <Settings size={16} />
+          <Settings size={14} />
         </button>
       </div>
     </header>

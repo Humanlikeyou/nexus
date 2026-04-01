@@ -20,10 +20,10 @@ export function WellnessScore({ score }: WellnessScoreProps) {
       indicator: axes.map((a) => ({ name: a.name, max: 100 })),
       shape: "circle" as const,
       splitNumber: 4,
-      axisName: { color: "#888", fontSize: 11 },
-      splitLine: { lineStyle: { color: "rgba(255,255,255,0.06)" } },
+      axisName: { color: "rgba(139, 149, 163, 0.8)", fontSize: 11 },
+      splitLine: { lineStyle: { color: "rgba(38, 48, 64, 0.4)" } },
       splitArea: { show: false },
-      axisLine: { lineStyle: { color: "rgba(255,255,255,0.1)" } },
+      axisLine: { lineStyle: { color: "rgba(38, 48, 64, 0.5)" } },
     },
     series: [
       {
@@ -33,9 +33,9 @@ export function WellnessScore({ score }: WellnessScoreProps) {
               {
                 value: axes.map((a) => a.value),
                 name: "Wellness",
-                lineStyle: { color: "#0891b2", width: 2 },
-                areaStyle: { color: "rgba(8, 145, 178, 0.15)" },
-                itemStyle: { color: "#0891b2" },
+                lineStyle: { color: "#4A80A3", width: 2 },
+                areaStyle: { color: "rgba(74, 128, 163, 0.18)" },
+                itemStyle: { color: "#4A80A3" },
               },
             ]
           : [],
@@ -50,9 +50,9 @@ export function WellnessScore({ score }: WellnessScoreProps) {
   ];
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-5">
       <div className="flex items-center justify-between">
-        <h3 className="text-base font-medium text-muted-foreground">
+        <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">
           Combined Wellness Score
         </h3>
         <div className="text-right">
@@ -69,7 +69,7 @@ export function WellnessScore({ score }: WellnessScoreProps) {
         />
       ) : (
         <div className="h-[220px] flex items-center justify-center">
-          <span className="text-xs text-muted-foreground/40">
+          <span className="text-xs text-muted-foreground/60">
             Connect Muse or Whoop to populate wellness data
           </span>
         </div>
@@ -78,7 +78,7 @@ export function WellnessScore({ score }: WellnessScoreProps) {
       <div className="grid grid-cols-3 gap-3">
         {statTiles.map(({ label, value, color }) => (
           <div key={label} className="text-center p-2 rounded-lg bg-muted/10">
-            <p className={`text-lg font-semibold ${value != null ? color : "text-muted-foreground/30"}`}>
+            <p className={`text-lg font-semibold ${value != null ? color : "text-muted-foreground/50"}`}>
               {value != null ? value : "--"}
             </p>
             <p className="text-xs text-muted-foreground">{label}</p>

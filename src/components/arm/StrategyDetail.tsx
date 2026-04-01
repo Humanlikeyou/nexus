@@ -62,12 +62,31 @@ export function StrategyDetail({
   const [reasonDialog, setReasonDialog] = useState<"pause" | "kill" | null>(null);
   const [reason, setReason] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [actioning, setActioning] = useState(false);
 
   const net = strategy.total_revenue - strategy.total_expenses;
 
   const handleSaveEdit = async () => {
-    await onUpdate(strategy.id, editName, undefined, editCapital, editLossCap);
-    setEditOpen(false);
+    if (!editName.trim() || saving) return;
+    setSaving(true);
+    try {
+      await onUpdate(strategy.id, editName, undefined, editCapital, editLossCap);
+      setEditOpen(false);
+    } catch (e) {
+      // error surfaces via parent
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleActivate = async () => {
+    setActioning(true);
+    try {
+      await onActivate(strategy.id);
+    } finally {
+      setActioning(false);
+    }
   };
 
   const handleReasonSubmit = () => {
@@ -125,8 +144,9 @@ export function StrategyDetail({
             strategy.status === "testing" ||
             strategy.status === "paused") && (
             <button
-              onClick={() => onActivate(strategy.id)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success/15 text-success text-xs hover:bg-success/25 transition-colors"
+              onClick={handleActivate}
+              disabled={actioning}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success/15 text-success text-xs hover:bg-success/25 transition-colors disabled:opacity-40"
             >
               <Play size={12} /> Activate
             </button>
@@ -134,7 +154,8 @@ export function StrategyDetail({
           {strategy.status === "active" && (
             <button
               onClick={() => setReasonDialog("pause")}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-warning/15 text-warning text-xs hover:bg-warning/25 transition-colors"
+              disabled={actioning}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-warning/15 text-warning text-xs hover:bg-warning/25 transition-colors disabled:opacity-40"
             >
               <Pause size={12} /> Pause
             </button>
@@ -142,7 +163,8 @@ export function StrategyDetail({
           {strategy.status !== "killed" && (
             <button
               onClick={() => setReasonDialog("kill")}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive/15 text-destructive text-xs hover:bg-destructive/25 transition-colors"
+              disabled={actioning}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive/15 text-destructive text-xs hover:bg-destructive/25 transition-colors disabled:opacity-40"
             >
               <Skull size={12} /> Kill
             </button>
@@ -152,20 +174,20 @@ export function StrategyDetail({
 
       {/* Stats Grid */}
       <div className="grid grid-cols-4 gap-4">
-        <div className="glass p-6 space-y-1">
-          <p className="text-xs text-muted-foreground/40">Total Revenue</p>
+        <div className="panel p-4 space-y-1">
+          <p className="text-xs text-muted-foreground/60">Total Revenue</p>
           <p className="text-xl font-mono font-semibold text-success">
             ${strategy.total_revenue.toFixed(2)}
           </p>
         </div>
-        <div className="glass p-6 space-y-1">
-          <p className="text-xs text-muted-foreground/40">Expenses</p>
+        <div className="panel p-4 space-y-1">
+          <p className="text-xs text-muted-foreground/60">Expenses</p>
           <p className="text-xl font-mono font-semibold text-destructive">
             ${strategy.total_expenses.toFixed(2)}
           </p>
         </div>
-        <div className="glass p-6 space-y-1">
-          <p className="text-xs text-muted-foreground/40">Net Income</p>
+        <div className="panel p-4 space-y-1">
+          <p className="text-xs text-muted-foreground/60">Net Income</p>
           <p
             className={cn(
               "text-xl font-mono font-semibold",
@@ -175,8 +197,8 @@ export function StrategyDetail({
             {net >= 0 ? "+" : ""}${net.toFixed(2)}
           </p>
         </div>
-        <div className="glass p-6 space-y-1">
-          <p className="text-xs text-muted-foreground/40">Health</p>
+        <div className="panel p-4 space-y-1">
+          <p className="text-xs text-muted-foreground/60">Health</p>
           <div className="flex items-center gap-2">
             <Circle
               size={8}
@@ -195,7 +217,7 @@ export function StrategyDetail({
             </p>
           </div>
           {strategy.last_health && (
-            <p className="text-xs text-muted-foreground/30">
+            <p className="text-xs text-muted-foreground/50">
               Last: {new Date(strategy.last_health).toLocaleTimeString()}
             </p>
           )}
@@ -205,7 +227,7 @@ export function StrategyDetail({
       {/* Config + Decisions */}
       <div className="grid grid-cols-2 gap-4">
         {/* Config */}
-        <div className="glass p-6 space-y-3">
+        <div className="panel p-4 space-y-3">
           <h3 className="text-xs font-medium text-muted-foreground">Configuration</h3>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -239,7 +261,7 @@ export function StrategyDetail({
           </div>
 
           {/* Danger Zone */}
-          <div className="pt-3 border-t border-border/10">
+          <div className="pt-3 border-t border-border/18">
             {deleteConfirm ? (
               <div className="flex items-center justify-between">
                 <span className="text-xs text-destructive">Are you sure?</span>
@@ -261,7 +283,7 @@ export function StrategyDetail({
             ) : (
               <button
                 onClick={() => setDeleteConfirm(true)}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground/40 hover:text-destructive transition-colors"
+                className="flex items-center gap-1.5 text-xs text-muted-foreground/60 hover:text-destructive transition-colors"
               >
                 <Trash2 size={12} /> Delete strategy
               </button>
@@ -270,12 +292,12 @@ export function StrategyDetail({
         </div>
 
         {/* Decisions for this strategy */}
-        <div className="glass p-6 space-y-3">
+        <div className="panel p-4 space-y-3">
           <h3 className="text-xs font-medium text-muted-foreground">
             Decision History ({decisions.length})
           </h3>
           {decisions.length === 0 ? (
-            <p className="text-xs text-muted-foreground/30 py-4 text-center">
+            <p className="text-xs text-muted-foreground/50 py-4 text-center">
               No decisions logged for this strategy
             </p>
           ) : (
@@ -283,13 +305,13 @@ export function StrategyDetail({
               {decisions.map((dec) => (
                 <div
                   key={dec.id}
-                  className="px-3 py-2 rounded-lg bg-muted/10 border border-border/10 space-y-1"
+                  className="px-3 py-2 rounded-lg bg-muted/10 border border-border/18 space-y-1"
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium">
                       {dec.action.replace(/_/g, " ")}
                     </span>
-                    <span className="text-xs text-muted-foreground/30">
+                    <span className="text-xs text-muted-foreground/50">
                       {new Date(dec.timestamp).toLocaleString()}
                     </span>
                   </div>
@@ -307,7 +329,7 @@ export function StrategyDetail({
       <Dialog.Root open={editOpen} onOpenChange={setEditOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[85] bg-black/50 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[86] w-[420px] glass rounded-xl border border-border/30 shadow-2xl p-6 space-y-5">
+          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[86] w-[420px] glass rounded-xl border border-border/45 shadow-2xl p-6 space-y-5">
             <Dialog.Title className="text-sm font-semibold">
               Edit Strategy
             </Dialog.Title>
@@ -318,7 +340,7 @@ export function StrategyDetail({
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm focus:outline-none focus:border-accent/40 transition-colors"
+                  className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm focus:outline-none focus:border-accent/40 transition-colors"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -328,7 +350,7 @@ export function StrategyDetail({
                     type="number"
                     value={editCapital}
                     onChange={(e) => setEditCapital(parseFloat(e.target.value) || 0)}
-                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
                   />
                 </div>
                 <div>
@@ -337,7 +359,7 @@ export function StrategyDetail({
                     type="number"
                     value={editLossCap}
                     onChange={(e) => setEditLossCap(parseFloat(e.target.value) || 0)}
-                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+                    className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
                   />
                 </div>
               </div>
@@ -350,9 +372,10 @@ export function StrategyDetail({
               </Dialog.Close>
               <button
                 onClick={handleSaveEdit}
-                className="px-4 py-2 rounded-lg bg-accent/15 text-accent text-sm font-medium hover:bg-accent/25 transition-colors"
+                disabled={saving || !editName.trim()}
+                className="px-4 py-2 rounded-lg bg-accent/15 text-accent text-sm font-medium hover:bg-accent/25 transition-colors disabled:opacity-40"
               >
-                Save
+                {saving ? "Saving..." : "Save"}
               </button>
             </div>
           </Dialog.Content>
@@ -371,7 +394,7 @@ export function StrategyDetail({
       >
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[85] bg-black/50 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[86] w-[400px] glass rounded-xl border border-border/30 shadow-2xl p-6 space-y-5">
+          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[86] w-[400px] glass rounded-xl border border-border/45 shadow-2xl p-6 space-y-5">
             <Dialog.Title className="text-sm font-semibold">
               {reasonDialog === "kill" ? "Kill Strategy" : "Pause Strategy"}
             </Dialog.Title>
@@ -380,7 +403,7 @@ export function StrategyDetail({
               onChange={(e) => setReason(e.target.value)}
               placeholder="Why are you taking this action?"
               rows={3}
-              className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors resize-none"
+              className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors resize-none"
             />
             <div className="flex items-center justify-end gap-3">
               <Dialog.Close asChild>

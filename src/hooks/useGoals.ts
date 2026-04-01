@@ -1,7 +1,19 @@
 import { useState, useEffect, useCallback } from "react";
 import { readGoals, saveGoals, deleteGoal as deleteGoalApi, insertEvents } from "@/lib/api";
 import { goalToEvents } from "@/lib/events";
+import { loadContext, saveContext } from "@/terrance/system/continuity";
 import type { Goal } from "@/lib/types";
+
+/** Sync goal titles into TerranceContext so Terrance is goal-aware in every prompt */
+async function syncGoalsToTerrance(goals: Goal[]): Promise<void> {
+  try {
+    const ctx = await loadContext();
+    ctx.activeGoals = goals.map((g) => g.title);
+    await saveContext(ctx);
+  } catch {
+    // Non-fatal — context will catch up on next load
+  }
+}
 
 export function useGoals() {
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -26,6 +38,7 @@ export function useGoals() {
   const persist = useCallback(async (updated: Goal[]): Promise<boolean> => {
     try {
       await saveGoals(updated);
+      await syncGoalsToTerrance(updated);
       setSaveError(null);
       return true;
     } catch (e) {

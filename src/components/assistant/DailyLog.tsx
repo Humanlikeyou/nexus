@@ -18,6 +18,8 @@ export function DailyLog() {
       .finally(() => setLoading(false));
   }, [date]);
 
+  const today = new Date().toISOString().split("T")[0];
+
   const changeDate = (delta: number) => {
     const d = new Date(date);
     d.setDate(d.getDate() + delta);
@@ -25,39 +27,36 @@ export function DailyLog() {
   };
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <FileText size={16} className="text-accent" />
-          <h3 className="text-base font-medium text-muted-foreground">Daily Log</h3>
-        </div>
-
-        <div className="flex items-center gap-2">
+        <h3 className="heading-section">Daily Log</h3>
+        <div className="flex items-center gap-1.5">
           <button
             onClick={() => changeDate(-1)}
-            className="p-1 rounded hover:bg-muted/50 text-muted-foreground"
+            className="p-1 rounded-sm hover:bg-muted/10 text-muted-foreground/50 transition-colors"
           >
-            <ChevronLeft size={14} />
+            <ChevronLeft size={12} />
           </button>
-          <span className="text-xs font-mono text-muted-foreground">{date}</span>
+          <span className="text-[10px] font-mono text-muted-foreground/60">{date}</span>
           <button
             onClick={() => changeDate(1)}
-            className="p-1 rounded hover:bg-muted/50 text-muted-foreground"
+            disabled={date >= today}
+            className="p-1 rounded-sm hover:bg-muted/10 text-muted-foreground/50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           >
-            <ChevronRight size={14} />
+            <ChevronRight size={12} />
           </button>
         </div>
       </div>
 
       {loading ? (
-        <div className="space-y-2">
-          <div className="h-4 bg-muted/30 rounded animate-pulse w-3/4" />
-          <div className="h-4 bg-muted/30 rounded animate-pulse w-full" />
-          <div className="h-4 bg-muted/30 rounded animate-pulse w-5/6" />
+        <div className="space-y-1.5">
+          <div className="h-3 bg-muted/10 rounded-sm animate-pulse w-3/4" />
+          <div className="h-3 bg-muted/10 rounded-sm animate-pulse w-full" />
+          <div className="h-3 bg-muted/10 rounded-sm animate-pulse w-5/6" />
         </div>
       ) : (
-        <div className="max-h-[300px] overflow-y-auto">
-          <pre className="text-xs text-muted-foreground/80 whitespace-pre-wrap font-mono leading-relaxed">
+        <div className="terminal-readout max-h-[280px] overflow-y-auto p-3">
+          <pre className="whitespace-pre-wrap break-words">
             {content}
           </pre>
         </div>

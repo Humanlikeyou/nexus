@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { checkOnboarding, completeOnboarding, saveSettings, getConfig } from "@/lib/api";
+import { useNexus } from "@/context/NexusContext";
 import type { NexusConfig } from "@/lib/types";
 
 const steps = [
@@ -37,8 +38,10 @@ const steps = [
 const LOCAL_ONBOARDED_KEY = "nexus:onboarded";
 
 export function OnboardingModal() {
+  const { toast } = useNexus();
   const [open, setOpen] = useState(false);
   const [syncPending, setSyncPending] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [step, setStep] = useState(0);
   const [config, setConfig] = useState<NexusConfig>({
     telegram_bot_token: null,
@@ -103,16 +106,27 @@ export function OnboardingModal() {
   }, []);
 
   const handleComplete = async () => {
-    localStorage.setItem(LOCAL_ONBOARDED_KEY, "1");
+    setSaving(true);
     try {
       await saveSettings(config);
       await completeOnboarding();
+      localStorage.setItem(LOCAL_ONBOARDED_KEY, "1");
       setSyncPending(false);
+      setOpen(false);
     } catch {
-      // Backend failed — local flag set, will show sync pending on next launch
+      // Backend failed — set local flag so we don't block the user forever,
+      // but show feedback and keep sync pending indicator
+      localStorage.setItem(LOCAL_ONBOARDED_KEY, "1");
       setSyncPending(true);
+      setOpen(false);
+      toast({
+        type: "warning",
+        title: "Setup saved locally",
+        description: "Backend sync failed — will retry automatically on next launch.",
+      });
+    } finally {
+      setSaving(false);
     }
-    setOpen(false);
   };
 
   const updateField = (field: keyof NexusConfig, value: string) => {
@@ -142,7 +156,7 @@ export function OnboardingModal() {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.2, ease: "easeOut" }}
-                className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[96] w-[480px] glass-elevated rounded-2xl border border-border/30 shadow-2xl overflow-hidden"
+                className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[96] w-[480px] glass-elevated rounded-2xl border border-border/45 shadow-2xl overflow-hidden"
               >
                 {/* Progress dots */}
                 <div className="flex items-center justify-center gap-2 pt-6 pb-2">
@@ -192,7 +206,7 @@ export function OnboardingModal() {
                               updateField("telegram_bot_token", e.target.value)
                             }
                             placeholder="123456:ABC-DEF..."
-                            className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+                            className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
                           />
                         </div>
                         <div>
@@ -206,7 +220,7 @@ export function OnboardingModal() {
                               updateField("telegram_chat_id", e.target.value)
                             }
                             placeholder="-1001234567890"
-                            className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+                            className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
                           />
                         </div>
                       </div>
@@ -225,7 +239,7 @@ export function OnboardingModal() {
                             updateField("openclaw_path", e.target.value)
                           }
                           placeholder="~/.openclaw"
-                          className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+                          className="w-full px-3 py-2.5 rounded-xl bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
                         />
                       </div>
                     )}
@@ -266,9 +280,10 @@ export function OnboardingModal() {
                   ) : (
                     <button
                       onClick={handleComplete}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-success/15 text-success text-sm font-medium hover:bg-success/25 transition-colors"
+                      disabled={saving}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-success/15 text-success text-sm font-medium hover:bg-success/25 transition-colors disabled:opacity-50"
                     >
-                      <Check size={14} /> Get Started
+                      <Check size={14} /> {saving ? "Saving…" : "Get Started"}
                     </button>
                   )}
                 </div>

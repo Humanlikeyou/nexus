@@ -20,7 +20,7 @@ export function ArtifactTicker({ artifacts, artifactRate, streaming }: ArtifactT
   const now = Date.now();
 
   return (
-    <div className="glass p-3">
+    <div className="panel p-2">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs text-muted-foreground uppercase tracking-wider">
           Artifacts
@@ -38,7 +38,7 @@ export function ArtifactTicker({ artifacts, artifactRate, streaming }: ArtifactT
           return (
             <div
               key={`${event.timestamp}-${i}`}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-muted/15 border border-border/10"
+              className="flex items-center gap-1 px-2 py-1 rounded bg-muted/15 border border-border/18"
             >
               <Icon size={10} className="text-muted-foreground/70" />
               <span className="text-xs text-muted-foreground">

@@ -34,6 +34,7 @@ import type {
   LlmUsageRecord,
   TerranceContext,
   SessionLogEntry,
+  SessionInsights,
 } from "./types";
 
 // ============================================================
@@ -126,6 +127,9 @@ export const testTelegramConnection = () =>
 export const sendToTerrance = (text: string) =>
   invoke<string>("send_to_terrance", { text });
 
+export const pollTelegramUpdates = (lastUpdateId: number) =>
+  invoke<import("./types").TelegramUpdate[]>("poll_telegram_updates", { lastUpdateId });
+
 // ============================================================
 // Packager
 // ============================================================
@@ -204,16 +208,6 @@ export const loadChatHistory = (sessionId: string, limit?: number) =>
 
 export const deleteChatSession = (sessionId: string) =>
   invoke<void>("delete_chat_session", { sessionId });
-
-// ============================================================
-// Notifications (Tauri-persisted)
-// ============================================================
-
-export const readNotifications = () =>
-  invoke<import("./types").AppNotification[]>("read_notifications");
-
-export const saveNotifications = (notifications: import("./types").AppNotification[]) =>
-  invoke<void>("save_notifications", { notifications });
 
 // ============================================================
 // Onboarding
@@ -377,6 +371,8 @@ export const chatWithRouter = (
   tags: string[],
   forceProvider?: string,
   anthropicApiKey?: string,
+  gatewayUrl?: string,
+  gatewayAuthToken?: string,
 ) =>
   invoke<RouterResponse>("chat_with_router", {
     text,
@@ -384,6 +380,8 @@ export const chatWithRouter = (
     tags,
     forceProvider,
     anthropicApiKey,
+    gatewayUrl,
+    gatewayAuthToken,
   });
 
 export const getCostEstimate = (
@@ -417,3 +415,69 @@ export const storeSessionLog = (entry: SessionLogEntry) =>
 
 export const listSessionLogs = () =>
   invoke<SessionLogEntry[]>("list_session_logs");
+
+export const archiveOldSessionLogs = (daysThreshold: number) =>
+  invoke<number>("archive_old_session_logs", { daysThreshold });
+
+export const pruneContextMemory = (maxItems: number) =>
+  invoke<number>("prune_context_memory", { maxItems });
+
+export const getSessionInsights = () =>
+  invoke<string>("get_session_insights").then((raw) => JSON.parse(raw) as SessionInsights);
+
+export const loadCustomJobs = () =>
+  invoke<string>("load_custom_jobs").then((raw) => JSON.parse(raw));
+
+export const saveCustomJobs = (data: string) =>
+  invoke<void>("save_custom_jobs", { data });
+
+export const saveSkill = (name: string, content: string) =>
+  invoke<void>("save_skill", { name, content });
+
+export const deleteSkill = (name: string) =>
+  invoke<boolean>("delete_skill", { name });
+
+// ============================================================
+// System — Docker / Port checks
+// ============================================================
+
+export const checkDockerService = (name: string) =>
+  invoke<string>("check_docker_service", { name });
+
+export const restartDockerService = (name: string) =>
+  invoke<string>("restart_docker_service", { name });
+
+export const checkServicePort = (host: string, port: number) =>
+  invoke<string>("check_service_port", { host, port });
+
+// ============================================================
+// Research
+// ============================================================
+
+export const webSearch = (query: string, maxResults?: number) =>
+  invoke<import("./types").ResearchResult[]>("web_search", { query, maxResults });
+
+export const fetchUrl = (url: string, maxChars?: number) =>
+  invoke<string>("fetch_url", { url, maxChars });
+
+// ============================================================
+// Activity Log
+// ============================================================
+
+export const storeActivityEntry = (entry: import("./types").ActivityEntry) =>
+  invoke<void>("store_activity_entry", { entry });
+
+export const listActivityEntries = (limit?: number) =>
+  invoke<import("./types").ActivityEntry[]>("list_activity_entries", { limit });
+
+export const pruneActivityLog = (days: number) =>
+  invoke<number>("prune_activity_log", { days });
+
+// ============================================================
+// Subagents
+// ============================================================
+
+export const loadSubagents = () => invoke<string>("load_subagents");
+
+export const saveSubagents = (data: string) =>
+  invoke<void>("save_subagents", { data });

@@ -301,7 +301,7 @@ export interface NexusConfig {
 // LLM Router
 // ============================================================
 
-export type ComputeMode = "local" | "hybrid" | "api";
+export type ComputeMode = "local" | "hybrid" | "api" | "gateway";
 
 export interface LlmRouterConfig {
   mode: ComputeMode;
@@ -315,7 +315,7 @@ export interface LlmRouterConfig {
 
 export interface RouterResponse {
   content: string;
-  provider: "ollama" | "anthropic";
+  provider: "ollama" | "anthropic" | "gateway";
   model: string;
   latency_ms: number;
   prompt_tokens: number;
@@ -327,7 +327,7 @@ export interface RouterResponse {
 export interface LlmUsageRecord {
   id: string;
   timestamp: number;
-  provider: "ollama" | "anthropic";
+  provider: "ollama" | "anthropic" | "gateway";
   model: string;
   prompt_tokens: number;
   completion_tokens: number;
@@ -372,20 +372,6 @@ export interface PersistedChatMessage {
   model?: string | null;
   latency_ms?: number | null;
   cost_usd?: number | null;
-}
-
-// ============================================================
-// Notifications
-// ============================================================
-
-export interface AppNotification {
-  id: string;
-  type: "info" | "success" | "warning" | "error";
-  title: string;
-  message: string;
-  timestamp: number;
-  read: boolean;
-  source: string;
 }
 
 // ============================================================
@@ -853,6 +839,7 @@ export interface ArmConfig {
   poll_interval_secs: number;
   kill_switch_active: boolean;
   worker_api_keys: Array<{ name: string; key: string }>;
+  worker_base_url: string | null;
 }
 
 // ============================================================
@@ -866,6 +853,62 @@ export interface TerranceContext {
   relevantMemory: string[];
   lastConsolidationTimestamp: number | null;
   lastReasoningTimestamp: number | null;
+  lastDailySummaryTimestamp: number | null;
+  dailySummaryHour: number | null;
+  lastHealthCheckTimestamp: number | null;
+  lastPruneTimestamp: number | null;
+  lastTelegramUpdateId: number | null;
+  lastMiddayTimestamp: number | null;
+  lastEveningTimestamp: number | null;
+}
+
+export interface DiagnosticReport {
+  timestamp: number;
+  openclawOnline: boolean;
+  openclawGateway: boolean;
+  n8nReachable: boolean;
+  ollamaReachable: boolean;
+  diskSpaceOk: boolean;
+  issues: DiagnosticIssue[];
+}
+
+export interface DiagnosticIssue {
+  service: string;
+  status: "down" | "degraded" | "error";
+  message: string;
+  canAutoHeal: boolean;
+}
+
+export interface HealingAction {
+  service: string;
+  action: string;
+  success: boolean;
+  message: string;
+  timestamp: number;
+}
+
+export interface ResearchTask {
+  id: string;
+  topic: string;
+  status: "pending" | "searching" | "reading" | "synthesizing" | "complete" | "error";
+  query: string;
+  results: ResearchResult[];
+  summary: string | null;
+  timestamp: number;
+}
+
+export interface ResearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export interface SchedulerJobStatus {
+  name: string;
+  interval: string;
+  lastRun: number | null;
+  nextRun: number | null;
+  enabled: boolean;
 }
 
 export interface SessionLogEntry {
@@ -875,4 +918,70 @@ export interface SessionLogEntry {
   summary: string;
   provider: string;
   model: string;
+}
+
+export interface SessionInsights {
+  totalSessions: number;
+  totalMessages: number;
+  byProvider: Record<string, number>;
+  byModel: Record<string, number>;
+  dailyBreakdown: Record<string, number>;
+  recentSessionCount: number;
+}
+
+// ============================================================
+// Activity Monitor
+// ============================================================
+
+export interface ActivityEntry {
+  id: string;
+  type: string;
+  name: string;
+  status: string;
+  startedAt: number;
+  completedAt: number;
+  durationMs: number;
+  detail: string | null;
+  outcome: string | null;
+}
+
+// ============================================================
+// Telegram Bridge
+// ============================================================
+
+export interface TelegramUpdate {
+  updateId: number;
+  messageId: number;
+  fromName: string;
+  text: string;
+  date: number;
+  isBot: boolean;
+}
+
+// ============================================================
+// Subagents
+// ============================================================
+
+export interface SubagentJob {
+  id: string;
+  name: string;
+  prompt: string;
+  schedule: string;
+  parsedSchedule: import("@/terrance/system/cronParser").ParsedSchedule | null;
+  enabled: boolean;
+  lastRun: number;
+}
+
+export interface Subagent {
+  id: string;
+  name: string;
+  purpose: string;
+  schedule: string;
+  parsedSchedule: import("@/terrance/system/cronParser").ParsedSchedule | null;
+  status: "active" | "paused" | "stopped";
+  lastRun: number;
+  lastOutput: string | null;
+  memory: string[];
+  createdAt: number;
+  jobs: SubagentJob[];
 }

@@ -45,8 +45,8 @@ export function SessionModePicker({
 
   if (phase === "idle") {
     return (
-      <div className="glass p-6 space-y-5">
-        <h3 className="text-base font-medium text-muted-foreground">Quick Session</h3>
+      <div className="panel p-4 space-y-5">
+        <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Quick Session</h3>
         <div className="grid grid-cols-3 gap-3">
           {SESSION_MODES.map((mode) => {
             const Icon = ICON_MAP[mode.icon] || Circle;
@@ -57,8 +57,8 @@ export function SessionModePicker({
                 onClick={() => { setSelectedMode(mode); setDuration(mode.defaultDurationMin); }}
                 className={`flex flex-col items-center gap-2 p-4 rounded-lg border transition-colors ${
                   isSelected
-                    ? "border-accent bg-accent/10 text-accent"
-                    : "border-border/15 bg-muted/10 text-muted-foreground hover:bg-muted/20"
+                    ? "border-accent bg-accent/15 text-accent"
+                    : "border-border/25 bg-muted/10 text-muted-foreground hover:bg-muted/20"
                 }`}
               >
                 <Icon size={20} />
@@ -74,7 +74,7 @@ export function SessionModePicker({
             <select
               value={duration}
               onChange={(e) => setDuration(Number(e.target.value))}
-              className="bg-muted/20 border border-border/15 rounded px-2 py-1 text-xs text-foreground"
+              className="bg-muted/20 border border-border/25 rounded px-2 py-1 text-xs text-foreground"
             >
               {DURATION_OPTIONS.map((d) => (
                 <option key={d} value={d}>{d} min</option>
@@ -95,9 +95,9 @@ export function SessionModePicker({
 
   if (phase === "warmup") {
     return (
-      <div className="glass p-6 space-y-3">
+      <div className="panel p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-medium text-muted-foreground">
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">
             {activeMode?.label} Session
           </h3>
           <span className="text-xs text-muted-foreground/50 uppercase tracking-wider">
@@ -117,18 +117,18 @@ export function SessionModePicker({
     const progress = total > 0 ? (elapsed / total) * 100 : 0;
 
     return (
-      <div className="glass p-6 space-y-3">
+      <div className="panel p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-medium text-muted-foreground">
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">
             {activeMode?.label} Session
           </h3>
           <span className="text-xs text-muted-foreground">
             {formatTime(elapsed)} / {formatTime(total)}
           </span>
         </div>
-        <div className="w-full h-2 rounded-full bg-muted/20 overflow-hidden">
+        <div className="w-full h-1.5 rounded-sm bg-muted/20 overflow-hidden">
           <div
-            className="h-full rounded-full bg-accent transition-all duration-1000"
+            className="h-full rounded-sm bg-accent transition-all duration-1000"
             style={{ width: `${progress}%` }}
           />
         </div>
@@ -149,9 +149,9 @@ export function SessionModePicker({
 
   if (phase === "cooldown") {
     return (
-      <div className="glass p-6 space-y-3">
+      <div className="panel p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-medium text-muted-foreground">
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">
             {activeMode?.label} Session
           </h3>
           <span className="text-xs text-muted-foreground/50 uppercase tracking-wider">
@@ -167,9 +167,9 @@ export function SessionModePicker({
 
   if (phase === "complete" && summary) {
     return (
-      <div className="glass p-6 space-y-5">
+      <div className="panel p-4 space-y-5">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-medium text-muted-foreground">
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">
             Session Complete
           </h3>
           <button

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Play,
   Square,
@@ -77,11 +77,27 @@ export function ReplayControls({
 }: ReplayControlsProps) {
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [showDemoMenu, setShowDemoMenu] = useState(false);
+  const filePickerRef = useRef<HTMLDivElement>(null);
+  const demoMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showFilePicker && !showDemoMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (showFilePicker && filePickerRef.current && !filePickerRef.current.contains(e.target as Node)) {
+        setShowFilePicker(false);
+      }
+      if (showDemoMenu && demoMenuRef.current && !demoMenuRef.current.contains(e.target as Node)) {
+        setShowDemoMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showFilePicker, showDemoMenu]);
 
   // Recording state
   if (mode === "recording") {
     return (
-      <div className="glass p-6">
+      <div className="panel p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Circle size={10} className="fill-red-400 text-red-400 animate-pulse" />
@@ -106,7 +122,7 @@ export function ReplayControls({
   // Replaying state
   if (mode === "replaying") {
     return (
-      <div className="glass p-6">
+      <div className="panel p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="px-2 py-0.5 rounded bg-yellow-500/15 text-yellow-400 text-xs font-semibold uppercase tracking-wide">
@@ -131,7 +147,7 @@ export function ReplayControls({
   // Demo state
   if (mode === "demo") {
     return (
-      <div className="glass p-6">
+      <div className="panel p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="px-2 py-0.5 rounded bg-blue-500/15 text-blue-400 text-xs font-semibold uppercase tracking-wide">
@@ -164,7 +180,7 @@ export function ReplayControls({
 
   // Idle state — show controls
   return (
-    <div className="glass p-6 space-y-3">
+    <div className="panel p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           EEG Source
@@ -200,7 +216,7 @@ export function ReplayControls({
         )}
 
         {/* Replay button */}
-        <div className="relative">
+        <div className="relative" ref={filePickerRef}>
           <button
             onClick={() => {
               onRefreshFiles();
@@ -239,7 +255,7 @@ export function ReplayControls({
                           ` · ${formatDuration(file.duration_secs)}`}
                       </span>
                     </div>
-                    <Play size={10} className="text-muted-foreground/40" />
+                    <Play size={10} className="text-muted-foreground/60" />
                   </button>
                 ))
               )}
@@ -248,7 +264,7 @@ export function ReplayControls({
         </div>
 
         {/* Demo button */}
-        <div className="relative">
+        <div className="relative" ref={demoMenuRef}>
           <button
             onClick={() => {
               setShowDemoMenu(!showDemoMenu);

@@ -32,7 +32,7 @@ export function ElectrodePanel({
   const mode = modeConfig[derivedMode];
 
   return (
-    <div className="glass p-6 space-y-3">
+    <div className="panel p-4 space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -47,10 +47,10 @@ export function ElectrodePanel({
             className={cn(
               "flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium",
               derivedMode === "read"
-                ? "bg-accent/10 text-accent"
+                ? "bg-accent/15 text-accent"
                 : derivedMode === "off"
                   ? "bg-muted/20 text-muted-foreground"
-                  : "bg-warning/10 text-warning",
+                  : "bg-warning/15 text-warning",
             )}
           >
             {derivedMode === "read" ? (
@@ -126,7 +126,7 @@ export function ElectrodePanel({
           "flex items-center gap-2 px-3 py-2 rounded-lg border text-xs",
           outputAllowed
             ? "bg-destructive/5 border-destructive/20 text-destructive"
-            : "bg-success/5 border-success/20 text-success",
+            : "bg-success/5 border-success/30 text-success",
         )}
       >
         {outputAllowed ? (

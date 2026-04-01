@@ -51,7 +51,6 @@ interface ArmDashboardProps {
     reasoning: string,
     context?: Record<string, unknown>,
   ) => void;
-  onUpdateOutcome: (id: string, outcome: string, notes?: string) => void;
 }
 
 export function ArmDashboard({
@@ -73,7 +72,6 @@ export function ArmDashboard({
   onKill,
   onKillSwitch,
   onLogDecision: _onLogDecision,
-  onUpdateOutcome,
 }: ArmDashboardProps) {
   const [selectedStrategy, setSelectedStrategy] = useState<ArmStrategy | null>(null);
 
@@ -167,11 +165,11 @@ export function ArmDashboard({
           onKill={onKill}
           onCreate={onCreateStrategy}
           onSelect={setSelectedStrategy}
+          defaultWorkerUrl={_config?.worker_base_url}
         />
         <DecisionLog
           decisions={decisions}
           strategies={strategies.map((s) => ({ id: s.id, name: s.name }))}
-          onUpdateOutcome={onUpdateOutcome}
         />
       </div>
     </div>

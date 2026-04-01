@@ -7,10 +7,8 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
-import { readNotifications, saveNotifications } from "@/lib/api";
 import type {
   PageId,
-  AppNotification,
   ToastItem,
   ToastOptions,
   MuseConnectionState,
@@ -32,13 +30,6 @@ interface NexusContextValue {
   whoopState: WhoopConnectionState;
   setWhoopState: (state: WhoopConnectionState) => void;
 
-  // Notifications
-  notifications: AppNotification[];
-  addNotification: (n: Omit<AppNotification, "id" | "timestamp" | "read">) => void;
-  markRead: (id: string) => void;
-  markAllRead: () => void;
-  clearNotifications: () => void;
-
   // Toast
   toasts: ToastItem[];
   toast: (options: ToastOptions) => void;
@@ -55,10 +46,8 @@ const NexusContext = createContext<NexusContextValue | null>(null);
 // Provider
 // ============================================================
 
-const MAX_NOTIFICATIONS = 50;
 const MAX_TOASTS = 5;
 
-let notifCounter = 0;
 let toastCounter = 0;
 
 export function NexusProvider({ children }: { children: ReactNode }) {
@@ -80,64 +69,6 @@ export function NexusProvider({ children }: { children: ReactNode }) {
     device_name: null,
     streaming: false,
   });
-
-  // Notifications — persisted to Tauri app data directory
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-
-  // Load from disk on mount (async — starts empty, populates quickly)
-  useEffect(() => {
-    readNotifications()
-      .then((stored) => {
-        if (stored.length > 0) setNotifications(stored);
-      })
-      .catch(() => {
-        // Backend unavailable; non-fatal — start with empty list
-      });
-  }, []);
-
-  const persistToTauri = useCallback((updated: AppNotification[]) => {
-    saveNotifications(updated.slice(0, MAX_NOTIFICATIONS)).catch(() => {
-      // Non-fatal: notifications will still work in-memory
-    });
-  }, []);
-
-  const addNotification = useCallback(
-    (n: Omit<AppNotification, "id" | "timestamp" | "read">) => {
-      const notif: AppNotification = {
-        ...n,
-        id: `notif-${++notifCounter}`,
-        timestamp: Date.now(),
-        read: false,
-      };
-      setNotifications((prev) => {
-        const updated = [notif, ...prev].slice(0, MAX_NOTIFICATIONS);
-        persistToTauri(updated);
-        return updated;
-      });
-    },
-    [persistToTauri],
-  );
-
-  const markRead = useCallback((id: string) => {
-    setNotifications((prev) => {
-      const updated = prev.map((n) => (n.id === id ? { ...n, read: true } : n));
-      persistToTauri(updated);
-      return updated;
-    });
-  }, [persistToTauri]);
-
-  const markAllRead = useCallback(() => {
-    setNotifications((prev) => {
-      const updated = prev.map((n) => ({ ...n, read: true }));
-      persistToTauri(updated);
-      return updated;
-    });
-  }, [persistToTauri]);
-
-  const clearNotifications = useCallback(() => {
-    setNotifications([]);
-    saveNotifications([]).catch(() => {});
-  }, []);
 
   // Toasts
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -179,11 +110,6 @@ export function NexusProvider({ children }: { children: ReactNode }) {
         setMuseState,
         whoopState,
         setWhoopState,
-        notifications,
-        addNotification,
-        markRead,
-        markAllRead,
-        clearNotifications,
         toasts,
         toast,
         dismissToast,

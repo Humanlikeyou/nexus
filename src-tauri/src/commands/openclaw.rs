@@ -169,6 +169,31 @@ pub fn read_skills() -> Result<Vec<Skill>, String> {
     Ok(skills)
 }
 
+/// Write or update a skill file in ~/.openclaw/skills/.
+/// Used by the skills self-improvement loop to create/update learned skills.
+#[tauri::command]
+pub fn save_skill(name: String, content: String) -> Result<(), String> {
+    let dir = openclaw_dir().join("skills");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let filename = format!("{}.md", name.replace(' ', "-").to_lowercase());
+    let path = dir.join(filename);
+    fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+/// Delete a skill file from ~/.openclaw/skills/.
+#[tauri::command]
+pub fn delete_skill(name: String) -> Result<bool, String> {
+    let dir = openclaw_dir().join("skills");
+    let filename = format!("{}.md", name.replace(' ', "-").to_lowercase());
+    let path = dir.join(filename);
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 #[tauri::command]
 pub fn read_tasks(workspace_path: Option<String>) -> Result<Vec<TaskItem>, String> {
     let path = workspace_path
@@ -416,6 +441,79 @@ pub async fn restart_openclaw() -> Result<String, String> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// OpenClaw Sandbox Toggle
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxStatus {
+    pub mode: String,
+    pub restarted: bool,
+}
+
+/// Read the current sandbox mode from ~/.openclaw/openclaw.json.
+#[tauri::command]
+pub fn get_openclaw_sandbox() -> Result<String, String> {
+    let config_path = openclaw_dir().join("openclaw.json");
+    let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+    let config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    let mode = config
+        .get("agents")
+        .and_then(|v| v.get("defaults"))
+        .and_then(|v| v.get("sandbox"))
+        .and_then(|v| v.get("mode"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("off");
+
+    Ok(mode.to_string())
+}
+
+/// Toggle sandbox mode between "off" and "all", then restart OpenClaw.
+#[tauri::command]
+pub async fn toggle_openclaw_sandbox(mode: Option<String>) -> Result<SandboxStatus, String> {
+    let config_path = openclaw_dir().join("openclaw.json");
+    let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+    let mut config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    let current = config
+        .get("agents")
+        .and_then(|v| v.get("defaults"))
+        .and_then(|v| v.get("sandbox"))
+        .and_then(|v| v.get("mode"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("off")
+        .to_string();
+
+    let new_mode = match mode {
+        Some(m) => m,
+        None => if current == "off" { "all".to_string() } else { "off".to_string() },
+    };
+
+    // Ensure the path agents.defaults.sandbox.mode exists
+    let agents = config.as_object_mut().ok_or("invalid config")?
+        .entry("agents").or_insert_with(|| serde_json::json!({}));
+    let defaults = agents.as_object_mut().ok_or("invalid agents")?
+        .entry("defaults").or_insert_with(|| serde_json::json!({}));
+    let sandbox = defaults.as_object_mut().ok_or("invalid defaults")?
+        .entry("sandbox").or_insert_with(|| serde_json::json!({}));
+    sandbox.as_object_mut().ok_or("invalid sandbox")?
+        .insert("mode".to_string(), serde_json::Value::String(new_mode.clone()));
+
+    // Write back with pretty-print
+    let out = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    fs::write(&config_path, out).map_err(|e| e.to_string())?;
+
+    // Restart OpenClaw so it picks up the change
+    let restarted = restart_openclaw().await.is_ok();
+
+    Ok(SandboxStatus {
+        mode: new_mode,
+        restarted,
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OpenClaw Health Check
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -437,7 +535,20 @@ pub struct OpenClawHealth {
 }
 
 fn get_openclaw_version() -> Option<String> {
-    std::process::Command::new("openclaw")
+    // Prefer reading from config metadata (always available, no PATH issues)
+    let config_path = openclaw_dir().join("openclaw.json");
+    if let Ok(content) = fs::read_to_string(&config_path) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(ver) = v.get("meta")
+                .and_then(|m| m.get("lastTouchedVersion"))
+                .and_then(|v| v.as_str())
+            {
+                return Some(ver.to_string());
+            }
+        }
+    }
+    // Fallback to CLI
+    std::process::Command::new("/opt/homebrew/bin/openclaw")
         .arg("--version")
         .output()
         .ok()
@@ -519,7 +630,7 @@ fn check_memory_search(config: &Option<serde_json::Value>) -> String {
                 "missing".to_string()
             }
         }
-        "openai" | "anthropic" | "ollama" | "cohere" | "azure" => "configured".to_string(),
+        "openai" | "anthropic" | "ollama" | "cohere" | "azure" | "gemini" | "minimax" => "configured".to_string(),
         _ => "missing".to_string(),
     }
 }

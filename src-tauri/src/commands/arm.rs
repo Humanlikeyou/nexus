@@ -123,6 +123,8 @@ pub struct ArmConfig {
     pub poll_interval_secs: u64,
     pub kill_switch_active: bool,
     pub worker_api_keys: Vec<WorkerApiKey>,
+    #[serde(default)]
+    pub worker_base_url: Option<String>,
 }
 
 impl Default for ArmConfig {
@@ -134,6 +136,7 @@ impl Default for ArmConfig {
             poll_interval_secs: 300,
             kill_switch_active: false,
             worker_api_keys: Vec::new(),
+            worker_base_url: None,
         }
     }
 }

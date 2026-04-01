@@ -1,6 +1,6 @@
 # Nexus — Project Brief for Claude Coders
 
-> **Central Goal**: Nexus is a personal AI-powered command center — a Tauri desktop app that aggregates your entire life into one dashboard. It unifies AI agent management (Terrance + OpenClaw), neuro/biometric monitoring (Muse EEG, Whoop), business intelligence (ARM trading system), fitness tracking, and an AI assistant — all orchestrated through n8n automation workflows and surfaced in a premium dark-glass UI.
+> **Central Goal**: Nexus is a personal AI-powered command center — a Tauri desktop app that aggregates your entire life into one dashboard. It unifies AI agent management (Terrance + OpenClaw), neuro/biometric monitoring (Muse EEG, Whoop), business intelligence (ARM trading system), fitness tracking, and an AI assistant — all orchestrated through n8n automation workflows and surfaced in a tactical command interface (dark graphite, precision-engineered panels, desaturated emerald accents).
 
 ---
 
@@ -117,27 +117,38 @@ This was needed because `openclaw memory status --deep` downloads the model but 
 ## UI Design System
 
 ### Philosophy
-Apple Vision Pro-inspired: deep glass morphism, vivid OKLch accent colors, multi-layered blur, ambient gradient mesh.
+Tactical command interface — precision-engineered, restrained, authority. Think luxury aerospace instrumentation. No glass morphism, no pastels, no SaaS card aesthetic. Dark only.
 
 ### Key CSS Classes (`src/styles/globals.css`)
 ```css
-.glass          /* Main card: blur(24px) saturate(1.3), gradient bg, inner shadow */
-.glass-subtle   /* Lighter panels: blur(12px) saturate(1.2) */
-.glass-elevated /* Modals/dialogs: blur(32px) saturate(1.4) — use for all Radix overlays */
-.glow-accent    /* Multi-layered cyan glow (15/45/80px spread) */
-.gradient-accent-vivid  /* cyan → violet gradient */
+.panel          /* Main panel: flat #0F1318 bg, 1px border, inset highlight */
+.panel-subtle   /* Lighter panels: semi-transparent, thinner border */
+.panel-elevated /* Modals/overlays: slightly lighter, drop shadow */
+.panel-primary  /* Dominant system panel: emerald-tinted border + glow */
+.glass/.glass-subtle/.glass-elevated  /* Aliases → panel equivalents (backward compat) */
+.heading-section  /* ALL CAPS, 11px, tracked, muted */
+.metric-value     /* Mono, 24px, semibold — dominant numbers */
+.metric-label     /* Mono, 10px, uppercase, desaturated */
+.badge-status     /* Mono, 10px, uppercase, tracked, inline-flex */
+.btn-kill         /* Deliberate destructive button — mono, bordered */
+.subsystem-inactive  /* Dashed border, dimmed — for unconnected modules */
+.terminal-readout    /* Dark bg, mono font — for log output */
 ```
 
-### Color Palette (OKLch)
+### Color Palette (hex — dark only, contrast-calibrated)
 | Token | Value | Use |
 |-------|-------|-----|
-| `--background` | `oklch(0.11 0.015 220)` | Deep navy base |
-| `--card` | `oklch(0.14 0.015 220)` | Card surface |
-| `--accent` | `oklch(0.68 0.20 195)` | Vivid cyan |
-| `--accent-secondary` | `oklch(0.62 0.22 285)` | Warm violet |
-| `--success` | `oklch(0.72 0.18 145)` | Green |
-| `--warning` | `oklch(0.78 0.18 70)` | Amber |
-| `--destructive` | `oklch(0.62 0.22 25)` | Red |
+| `--background` | `#0B0F14` | Near-black base (Layer 1) |
+| `--card` | `#131921` | Panel surface (Layer 2) |
+| `--foreground` | `#E0E3E9` | Primary text |
+| `--muted-foreground` | `#737D8C` | Secondary labels |
+| `--accent` | `#4A9E7E` | Calibrated emerald (+15% sat) |
+| `--accent-secondary` | `#378A68` | Deeper emerald |
+| `--success` | `#4A9E6A` | Lifted green |
+| `--warning` | `#A3923D` | Lifted amber |
+| `--destructive` | `#A34E4E` | Lifted red |
+| `--data` | `#4A80A3` | Cool blue (neuro) |
+| `--border` | `#263040` | Visible steel borders |
 
 ### Typography Scale
 | Old | New | Context |
@@ -150,12 +161,13 @@ Apple Vision Pro-inspired: deep glass morphism, vivid OKLch accent colors, multi
 ### ECharts Shared Theme (`src/lib/chart-theme.ts`)
 ```ts
 export const CHART_THEME = {
-  axisLabel: { fontSize: 11, color: "#666" },
-  tooltip: { borderRadius: 12, padding: [10, 14], textStyle: { color: "#fff", fontSize: 13 } },
-  gauge: { progressWidth: 14, axisLineWidth: 14, titleFontSize: 13, detailFontSize: 32 },
+  gauge: { progressWidth: 6, axisLineWidth: 6, titleFontSize: 10, detailFontSize: 24 },
+  colors: { phthalo: "#4A9E7E", amber: "#A3923D", cyan: "#4A80A3", solar: "#A3803D" },
+  axisLabel: { color: "rgba(139, 149, 163, 0.8)" },
+  splitLine: { color: "rgba(38, 48, 64, 0.4)" },
 }
 ```
-All 9 chart components import this: `TokenUsage`, `RevenueChart`, `SleepChart`, `StrainChart`, `RecoveryScore`, `FocusScore`, `BrainWaves`, `FrequencyBands`, `WellnessScore`.
+Thin instrumentation arcs, contrast-calibrated colors aligned to globals.css. All chart components import this.
 
 ---
 
@@ -248,6 +260,36 @@ All 9 chart components import this: `TokenUsage`, `RevenueChart`, `SleepChart`, 
 - [x] `models.json` fixed — was storing literal string "OLLAMA_API_KEY" instead of value
 - [x] Sessions cache cleared (was locked on deleted deepseek-r1:32b)
 - [ ] **When Anthropic credits topped up**: change primary back to `anthropic/claude-haiku-4-5-20251001` in `~/.openclaw/openclaw.json`
+
+### Visual Redesign: Tactical Command Interface (Session Mar 2026)
+- [x] **globals.css** — Complete rewrite: removed glass morphism, OKLch colors → hex, near-black base (#0B0F14), `.panel`/`.panel-primary`/`.panel-elevated` replace `.glass` classes, new utility classes (`.heading-section`, `.metric-value`, `.metric-label`, `.badge-status`, `.btn-kill`, `.subsystem-inactive`, `.terminal-readout`), reduced border-radius (max 6px), removed light mode, restrained animations
+- [x] **chart-theme.ts** — Thinner gauges (progressWidth: 6), desaturated colors (#3D8B6E emerald, #8B7A3D amber), darker tooltip/axis styling
+- [x] **Shell.tsx** — Removed vignette overlay div, reduced padding (p-6→px-4 py-3)
+- [x] **Header.tsx** — Removed glass-subtle, smaller typography (text-xs), mono uppercase tracked headings, tighter layout
+- [x] **Sidebar.tsx** — Removed glass class, dark bg (#0A0E13), narrower (56px collapsed/200px expanded), mono uppercase labels, reduced border-radius
+- [x] **Terrance page** — Full redesign: SYSTEM CORE dominant full-width panel at top, 3-col secondary modules (Token/Gateway/Skills), 2-col tertiary (OpenClaw/Schedule), full-width chat. All components use `.panel`/`.heading-section`/`.metric-value`/`.metric-label`
+- [x] **Business page** — TaskBoard, ContentPipeline, RevenueCard: glass→panel, reduced padding, mono fonts, tighter spacing
+- [x] **Assistant page** — CalendarView/EmailSummary use `.subsystem-inactive` (dimmed, dashed border), DailyLog uses `.terminal-readout`
+- [x] **Fitness page** — RecoveryScore/SleepChart/StrainChart/HrvTrend: glass→panel, thinner gauge arcs via CHART_THEME
+- [x] **Trajectory page** — WellnessScore/GoalTracker: glass→panel
+- [x] **ARM/Revenue page** — All 7 arm components: glass→panel (bulk sed)
+- [x] **Neuro page** — All 24 neuro components: glass→panel (bulk sed)
+- [x] **Settings page** — All sections: glass→panel (bulk sed)
+- [x] **TypeScript** — Zero errors (`npx tsc --noEmit` clean)
+
+**Design language**: Near-black graphite base, 1px steel borders, desaturated emerald accent, ALL CAPS tracked headings, JetBrains Mono for metrics, thin instrumentation gauges, no drop shadows, no blur, no pastels, no rounded-xl. Panels feel mounted, not floating.
+
+### Contrast Calibration Pass (Session Mar 2026)
+- [x] **globals.css** — Lifted all CSS custom properties: card #0F1318→#131921, foreground #C8CCD4→#E0E3E9, muted-foreground #5C6370→#737D8C, accent #3D8B6E→#4A9E7E (+15% saturation), border #1E2530→#263040 (higher opacity), panel-primary glow strengthened, heading color #5C6370→#8B95A3, metric-value #F0F2F5 (brightest tier), metric-label #454D58→#6B7585, all semantic colors lifted ~15%
+- [x] **chart-theme.ts** — Axis labels rgba(92,99,112)→rgba(139,149,163), splitLine rgba(30,37,48)→rgba(38,48,64), tooltip text lifted to match new foreground, chart colors aligned to new accent (#4A9E7E, #A3923D, #4A80A3)
+- [x] **Terrance page** — All 6 components manually calibrated: StatusCard (model text /90→100%, heartbeat /70→/85), TokenUsage (chart bar colors updated to new accent), SkillsList (skill names /70→/85, badges /70→100%), GatewayStatus (metric values /50→/75, destructive /60→/80), CronSchedule (job names /70→/85, borders /20→/35), TelegramChat (comprehensive overhaul: timestamps /20→/40, meta /15→/35, bot icons /60→/80, message borders /10→/18, input bg #080B0F→#0C1018, placeholder /20→/35, send button /70→/85, typing dots /30→/45)
+- [x] **Header.tsx** — Page title /80→/90, description /50→/65, buttons /50→/65, hover states /70→/80, header border /40→/55
+- [x] **Sidebar.tsx** — Sidebar bg #0A0E13→#0C1018, borders /20→/35 and /40→/55, title /70→/85, subtitle /40→/55, version /25→/40, BLE dots /20→/35, tooltip arrow fill #121820→#172030
+- [x] **System-wide bulk uplift** — All remaining components (~50 files): text-muted-foreground (/15→/30, /20→/35, /25→/45, /30→/50, /40→/60), text-foreground (/50→/70, /60→/80, /70→/85), border-border (/10→/18, /12→/20, /15→/25, /20→/35, /30→/45), semantic colors (text-accent/destructive/success/warning /50→/70 and /60→/80), semantic bg (/8→/12, /10→/15), semantic borders (accent/warning/destructive /15→/25, success /20→/30)
+- [x] **Fitness charts** — StrainChart: axis labels → CHART_THEME refs, splitLine → CHART_THEME. WellnessScore: radar axis colors aligned to calibrated palette, chart trace #0891b2→#4A80A3
+- [x] **TypeScript** — Zero errors (`npx tsc --noEmit` clean)
+
+**Calibration principle**: 3-layer depth system (background #0B0F14 → panels #131921 → primary #161E2A), typography legibility tiers (headings ~#8B95A3, metrics #F0F2F5, secondary 70-85%, tertiary minimum 50%), accent +15% saturation, all borders ≥ /18 opacity, no text below /30 opacity.
 
 ## Pending / Future Work
 

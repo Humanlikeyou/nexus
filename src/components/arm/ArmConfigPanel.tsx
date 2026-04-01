@@ -16,6 +16,7 @@ const defaultConfig: ArmConfig = {
   poll_interval_secs: 300,
   kill_switch_active: false,
   worker_api_keys: [],
+  worker_base_url: null,
 };
 
 export function ArmConfigPanel({
@@ -64,11 +65,11 @@ export function ArmConfigPanel({
   };
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Settings size={16} className="text-accent" />
-          <h3 className="text-base font-medium text-muted-foreground">
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">
             ARM Configuration
           </h3>
         </div>
@@ -79,7 +80,7 @@ export function ArmConfigPanel({
             "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
             dirty
               ? "bg-accent/15 text-accent hover:bg-accent/25"
-              : "bg-muted/15 text-muted-foreground/30 cursor-not-allowed",
+              : "bg-muted/15 text-muted-foreground/50 cursor-not-allowed",
           )}
         >
           <Save size={12} /> Save
@@ -96,7 +97,7 @@ export function ArmConfigPanel({
           value={form.wallet_address ?? ""}
           onChange={(e) => updateField("wallet_address", e.target.value || null)}
           placeholder="0x..."
-          className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+          className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
         />
       </div>
 
@@ -112,7 +113,7 @@ export function ArmConfigPanel({
             onChange={(e) =>
               updateField("global_capital_limit", parseFloat(e.target.value) || 0)
             }
-            className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+            className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
           />
         </div>
         <div>
@@ -125,7 +126,7 @@ export function ArmConfigPanel({
             onChange={(e) =>
               updateField("global_daily_loss_cap", parseFloat(e.target.value) || 0)
             }
-            className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+            className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
           />
         </div>
       </div>
@@ -142,9 +143,9 @@ export function ArmConfigPanel({
             updateField("poll_interval_secs", parseInt(e.target.value) || 300)
           }
           min={30}
-          className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/30 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
+          className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-border/45 text-sm font-mono focus:outline-none focus:border-accent/40 transition-colors"
         />
-        <p className="text-xs text-muted-foreground/30 mt-1">
+        <p className="text-xs text-muted-foreground/50 mt-1">
           How often to poll worker health and revenue endpoints (min 30s)
         </p>
       </div>
@@ -157,17 +158,17 @@ export function ArmConfigPanel({
         {form.worker_api_keys.map((k, i) => (
           <div
             key={i}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/10 border border-border/10"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/10 border border-border/18"
           >
             <span className="text-xs font-medium flex-shrink-0">{k.name}</span>
-            <span className="text-[13px] font-mono text-muted-foreground/40 flex-1 truncate">
+            <span className="text-[13px] font-mono text-muted-foreground/60 flex-1 truncate">
               {k.key.slice(0, 8)}{"•".repeat(8)}
             </span>
             <button
               onClick={() => removeApiKey(i)}
               className="p-1 rounded hover:bg-destructive/15 transition-colors"
             >
-              <Trash2 size={12} className="text-muted-foreground/30 hover:text-destructive" />
+              <Trash2 size={12} className="text-muted-foreground/50 hover:text-destructive" />
             </button>
           </div>
         ))}
@@ -178,14 +179,14 @@ export function ArmConfigPanel({
             value={newKeyName}
             onChange={(e) => setNewKeyName(e.target.value)}
             placeholder="Name"
-            className="w-24 px-2 py-1.5 rounded-lg bg-muted/15 border border-border/30 text-xs placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+            className="w-24 px-2 py-1.5 rounded-lg bg-muted/15 border border-border/45 text-xs placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
           />
           <input
             type="password"
             value={newKeyValue}
             onChange={(e) => setNewKeyValue(e.target.value)}
             placeholder="API Key"
-            className="flex-1 px-2 py-1.5 rounded-lg bg-muted/15 border border-border/30 text-xs font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-accent/40 transition-colors"
+            className="flex-1 px-2 py-1.5 rounded-lg bg-muted/15 border border-border/45 text-xs font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-accent/40 transition-colors"
           />
           <button
             onClick={addApiKey}

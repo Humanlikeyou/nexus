@@ -25,7 +25,7 @@ export function CalibrationPanel({
 }: CalibrationPanelProps) {
   if (status === "idle") {
     return (
-      <div className="glass p-6 space-y-2">
+      <div className="panel p-4 space-y-2">
         <h4 className="text-xs font-medium text-muted-foreground">Calibration</h4>
         <p className="text-xs text-muted-foreground/70">
           Calibrate to set your baseline. Sit still, eyes open, relaxed for 20 seconds.
@@ -44,7 +44,7 @@ export function CalibrationPanel({
   if (status === "calibrating") {
     const pct = Math.round(progress * 100);
     return (
-      <div className="glass p-6 space-y-3">
+      <div className="panel p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h4 className="text-xs font-medium text-muted-foreground">Calibrating...</h4>
           <span className="text-xs text-accent font-mono">{pct}%</span>
@@ -64,7 +64,7 @@ export function CalibrationPanel({
 
   // status === "done"
   return (
-    <div className="glass p-6 space-y-2">
+    <div className="panel p-4 space-y-2">
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-medium text-success">Calibrated</h4>
         <button

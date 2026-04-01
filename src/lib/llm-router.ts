@@ -43,6 +43,7 @@ export function formatCost(usd: number): string {
 export function formatProvider(provider: string): string {
   if (provider === "ollama") return "Local";
   if (provider === "anthropic") return "Anthropic";
+  if (provider === "gateway") return "OpenClaw";
   return provider;
 }
 
@@ -64,7 +65,7 @@ export function buildRouterConfig(cfg: {
 }): LlmRouterConfig {
   return {
     mode: (cfg.compute_mode as ComputeMode) ?? "hybrid",
-    ollama_model: cfg.llm_ollama_model ?? "qwen2.5:32b",
+    ollama_model: cfg.llm_ollama_model ?? "qwen3.5",
     anthropic_model: cfg.llm_anthropic_model ?? "claude-haiku-4-5-20251001",
     token_threshold: cfg.llm_token_threshold ?? 8000,
     daily_cap_usd: cfg.llm_daily_cap_usd ?? 5.0,

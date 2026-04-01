@@ -47,11 +47,11 @@ export function RiskPanel({ riskStatus, onKillSwitch }: RiskPanelProps) {
   };
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ShieldAlert size={16} className="text-accent" />
-          <h3 className="text-base font-medium text-muted-foreground">
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">
             Risk Controls
           </h3>
         </div>
@@ -84,10 +84,10 @@ export function RiskPanel({ riskStatus, onKillSwitch }: RiskPanelProps) {
             {risk?.global_capital_limit?.toFixed(2) ?? "0.00"}
           </span>
         </div>
-        <div className="w-full h-2 rounded-full bg-muted/30 overflow-hidden">
+        <div className="w-full h-1.5 rounded-sm bg-muted/20 overflow-hidden">
           <div
             className={cn(
-              "h-full rounded-full transition-all duration-500",
+              "h-full rounded-sm transition-all duration-500",
               capitalPct > 80 ? "bg-destructive" : capitalPct > 50 ? "bg-warning" : "bg-accent",
             )}
             style={{ width: `${Math.min(100, capitalPct)}%` }}
@@ -114,10 +114,10 @@ export function RiskPanel({ riskStatus, onKillSwitch }: RiskPanelProps) {
             {risk?.global_daily_loss_cap?.toFixed(2) ?? "0.00"}
           </span>
         </div>
-        <div className="w-full h-2 rounded-full bg-muted/30 overflow-hidden">
+        <div className="w-full h-1.5 rounded-sm bg-muted/20 overflow-hidden">
           <div
             className={cn(
-              "h-full rounded-full transition-all duration-500",
+              "h-full rounded-sm transition-all duration-500",
               lossPct > 80 ? "bg-destructive" : lossPct > 50 ? "bg-warning" : "bg-success",
             )}
             style={{ width: `${Math.min(100, lossPct)}%` }}
@@ -128,11 +128,11 @@ export function RiskPanel({ riskStatus, onKillSwitch }: RiskPanelProps) {
       {/* Stats Row */}
       <div className="flex items-center gap-4 pt-1">
         <div>
-          <p className="text-xs text-muted-foreground/40">Active</p>
+          <p className="text-xs text-muted-foreground/60">Active</p>
           <p className="text-sm font-mono">{risk?.active_strategies ?? 0}</p>
         </div>
         <div>
-          <p className="text-xs text-muted-foreground/40">Kill Switch</p>
+          <p className="text-xs text-muted-foreground/60">Kill Switch</p>
           <p
             className={cn(
               "text-sm font-mono",
@@ -150,7 +150,7 @@ export function RiskPanel({ riskStatus, onKillSwitch }: RiskPanelProps) {
         className={cn(
           "w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium transition-colors",
           risk?.kill_switch_active
-            ? "bg-success/15 text-success hover:bg-success/25 border border-success/20"
+            ? "bg-success/15 text-success hover:bg-success/25 border border-success/30"
             : "bg-destructive/10 text-destructive hover:bg-destructive/20 border border-destructive/20",
         )}
       >
@@ -183,7 +183,7 @@ export function RiskPanel({ riskStatus, onKillSwitch }: RiskPanelProps) {
               value={killConfirm}
               onChange={(e) => setKillConfirm(e.target.value)}
               placeholder='Type "KILL" to confirm'
-              className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-destructive/30 text-sm font-mono placeholder:text-muted-foreground/20 focus:outline-none focus:border-destructive/60 transition-colors"
+              className="w-full px-3 py-2 rounded-lg bg-muted/15 border border-destructive/30 text-sm font-mono placeholder:text-muted-foreground/35 focus:outline-none focus:border-destructive/60 transition-colors"
               autoFocus
             />
             <div className="flex items-center justify-end gap-3">

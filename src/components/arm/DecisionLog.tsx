@@ -24,7 +24,6 @@ const outcomeColors: Record<string, string> = {
 interface DecisionLogProps {
   decisions: ArmDecision[];
   strategies: Array<{ id: string; name: string }>;
-  onUpdateOutcome?: (id: string, outcome: string, notes?: string) => void;
 }
 
 function formatRelativeTime(timestamp: string): string {
@@ -45,14 +44,14 @@ export function DecisionLog({
   const stratMap = new Map(strategies.map((s) => [s.id, s.name]));
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <BookOpen size={16} className="text-accent" />
-          <h3 className="text-base font-medium text-muted-foreground">
+          <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">
             Decision Journal
           </h3>
-          <span className="text-xs text-muted-foreground/40">
+          <span className="text-xs text-muted-foreground/60">
             {decisions.length} entries
           </span>
         </div>
@@ -62,9 +61,9 @@ export function DecisionLog({
         <div className="py-8 text-center">
           <BookOpen
             size={24}
-            className="text-muted-foreground/20 mx-auto mb-2"
+            className="text-muted-foreground/35 mx-auto mb-2"
           />
-          <p className="text-xs text-muted-foreground/40">
+          <p className="text-xs text-muted-foreground/60">
             No decisions logged yet.
           </p>
         </div>
@@ -78,7 +77,7 @@ export function DecisionLog({
             return (
               <div
                 key={dec.id}
-                className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/10 space-y-1"
+                className="px-3 py-2.5 rounded-lg bg-muted/10 border border-border/18 space-y-1"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -93,7 +92,7 @@ export function DecisionLog({
                     <span className="text-xs font-medium">
                       {dec.action.replace(/_/g, " ")}
                     </span>
-                    <span className="text-xs text-muted-foreground/40">
+                    <span className="text-xs text-muted-foreground/60">
                       {stratName}
                     </span>
                   </div>
@@ -108,7 +107,7 @@ export function DecisionLog({
                         {dec.outcome}
                       </span>
                     )}
-                    <span className="text-xs text-muted-foreground/30">
+                    <span className="text-xs text-muted-foreground/50">
                       {formatRelativeTime(dec.timestamp)}
                     </span>
                   </div>
@@ -117,7 +116,7 @@ export function DecisionLog({
                   {dec.reasoning}
                 </p>
                 {dec.outcome_notes && (
-                  <p className="text-xs text-muted-foreground/40 italic">
+                  <p className="text-xs text-muted-foreground/60 italic">
                     {dec.outcome_notes}
                   </p>
                 )}

@@ -1,6 +1,6 @@
 mod commands;
 
-use commands::{arm, assistant, ble_common, continuity, events, goals, llm_router, muse, notifications, onboarding, openclaw, outbox, packager, replay, sessions, snapshots, system, telegram, whoop};
+use commands::{arm, assistant, ble_common, continuity, events, goals, kv, llm_router, muse, onboarding, openclaw, outbox, packager, replay, research, sessions, snapshots, system, telegram, whoop};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
@@ -13,6 +13,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // System tray
             let quit = MenuItem::with_id(app, "quit", "Quit Electron", true, None::<&str>)?;
@@ -46,6 +47,9 @@ pub fn run() {
             // System
             system::get_system_info,
             system::health_check,
+            system::check_docker_service,
+            system::restart_docker_service,
+            system::check_service_port,
             // OpenClaw / Terrance
             openclaw::read_openclaw_status,
             openclaw::read_cron_jobs,
@@ -55,9 +59,10 @@ pub fn run() {
             openclaw::read_daily_log,
             openclaw::get_openclaw_health,
             openclaw::restart_openclaw,
-            // Notifications
-            notifications::read_notifications,
-            notifications::save_notifications,
+            openclaw::save_skill,
+            openclaw::delete_skill,
+            openclaw::get_openclaw_sandbox,
+            openclaw::toggle_openclaw_sandbox,
             // Muse BLE
             muse::scan_muse,
             muse::connect_muse,
@@ -79,6 +84,7 @@ pub fn run() {
             telegram::send_telegram_message,
             telegram::test_telegram_connection,
             telegram::send_to_terrance,
+            telegram::poll_telegram_updates,
             // Packager
             packager::pack_it_up,
             packager::unpack_backup,
@@ -130,10 +136,25 @@ pub fn run() {
             arm::arm_save_config,
             // Continuity
             continuity::read_identity_file,
+            continuity::read_profile_file,
+            kv::load_kv,
+            kv::save_kv,
             continuity::load_terrance_context,
             continuity::save_terrance_context,
             continuity::store_session_log,
             continuity::list_session_logs,
+            continuity::archive_old_session_logs,
+            continuity::prune_context_memory,
+            continuity::load_custom_jobs,
+            continuity::save_custom_jobs,
+            continuity::get_session_insights,
+            // Activity Log
+            continuity::store_activity_entry,
+            continuity::list_activity_entries,
+            continuity::prune_activity_log,
+            // Subagents
+            continuity::load_subagents,
+            continuity::save_subagents,
             // LLM Router
             llm_router::chat_with_router,
             llm_router::get_cost_estimate,
@@ -145,6 +166,9 @@ pub fn run() {
             assistant::save_chat_message,
             assistant::load_chat_history,
             assistant::delete_chat_session,
+            // Research
+            research::web_search,
+            research::fetch_url,
             // Replay / Demo
             replay::start_eeg_recording,
             replay::stop_eeg_recording,

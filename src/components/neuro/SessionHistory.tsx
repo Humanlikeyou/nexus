@@ -29,16 +29,16 @@ export function SessionHistory({ sessions }: SessionHistoryProps) {
   };
 
   return (
-    <div className="glass p-6 space-y-5">
+    <div className="panel p-4 space-y-5">
       <div className="flex items-center gap-2">
         <Brain size={16} className="text-accent" />
-        <h3 className="text-base font-medium text-muted-foreground">Session History</h3>
+        <h3 className="text-sm font-medium text-muted-foreground/70 uppercase tracking-wide">Session History</h3>
       </div>
 
       {sessions.length === 0 ? (
         <div className="py-6 text-center">
-          <Clock size={20} className="text-muted-foreground/20 mx-auto mb-2" />
-          <p className="text-xs text-muted-foreground/40">
+          <Clock size={20} className="text-muted-foreground/35 mx-auto mb-2" />
+          <p className="text-xs text-muted-foreground/60">
             No sessions recorded yet. Start streaming and hit Record.
           </p>
         </div>
@@ -49,7 +49,7 @@ export function SessionHistory({ sessions }: SessionHistoryProps) {
             const expanded = expandedId === session.id;
 
             return (
-              <div key={session.id} className="rounded-lg bg-muted/15 border border-border/15">
+              <div key={session.id} className="rounded-lg bg-muted/15 border border-border/25">
                 <div
                   className="group flex items-center justify-between px-3 py-2.5 cursor-pointer"
                   onClick={() => setExpandedId(expanded ? null : session.id)}
@@ -62,7 +62,7 @@ export function SessionHistory({ sessions }: SessionHistoryProps) {
                           {new Date(session.start).toLocaleDateString()}
                         </p>
                         {isNf && (
-                          <span className="text-[13px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent">
+                          <span className="text-[13px] px-1.5 py-0.5 rounded-full bg-accent/15 text-accent">
                             {session.protocol_name}
                           </span>
                         )}
@@ -118,8 +118,8 @@ export function SessionHistory({ sessions }: SessionHistoryProps) {
 
                     {isNf && (
                       expanded
-                        ? <ChevronUp size={12} className="text-muted-foreground/30" />
-                        : <ChevronDown size={12} className="text-muted-foreground/30" />
+                        ? <ChevronUp size={12} className="text-muted-foreground/50" />
+                        : <ChevronDown size={12} className="text-muted-foreground/50" />
                     )}
 
                     <button
@@ -129,14 +129,14 @@ export function SessionHistory({ sessions }: SessionHistoryProps) {
                       }}
                       className="opacity-0 group-hover:opacity-100 transition-opacity"
                     >
-                      <Trash2 size={12} className="text-muted-foreground/30 hover:text-destructive" />
+                      <Trash2 size={12} className="text-muted-foreground/50 hover:text-destructive" />
                     </button>
                   </div>
                 </div>
 
                 {/* Expanded view for NF sessions */}
                 {expanded && isNf && (
-                  <div className="px-3 pb-3 space-y-3 border-t border-border/10 pt-3">
+                  <div className="px-3 pb-3 space-y-3 border-t border-border/18 pt-3">
                     <div className="flex gap-4">
                       <SpiralScore
                         timeline={session.state_timeline}
@@ -150,7 +150,7 @@ export function SessionHistory({ sessions }: SessionHistoryProps) {
                           duration={session.duration_secs}
                         />
                         {session.avg_alpha_peak && (
-                          <p className="text-xs text-muted-foreground/40">
+                          <p className="text-xs text-muted-foreground/60">
                             Alpha Peak: {session.avg_alpha_peak.toFixed(1)} Hz
                           </p>
                         )}

@@ -247,11 +247,11 @@ export function NeuroDashboard({
       <div className="grid grid-cols-2 gap-4">
         <FrequencyBands
           bands={{
-            delta: fftBands.delta || 15,
-            theta: fftBands.theta || 22,
-            alpha: fftBands.alpha || 35,
-            beta: fftBands.beta || 20,
-            gamma: fftBands.gamma || 8,
+            delta: fftBands.delta,
+            theta: fftBands.theta,
+            alpha: fftBands.alpha,
+            beta: fftBands.beta,
+            gamma: fftBands.gamma,
           }}
           smr={fftBands.smr}
         />

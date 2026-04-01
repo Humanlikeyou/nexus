@@ -97,7 +97,7 @@ export function ProofPanel() {
               className="max-h-[200px] overflow-y-auto rounded-lg bg-background/50 border border-border/20 p-2 space-y-0.5"
             >
               {events.length === 0 ? (
-                <p className="text-xs text-muted-foreground/40 text-center py-4">
+                <p className="text-xs text-muted-foreground/60 text-center py-4">
                   No events yet. Scan or connect a device.
                 </p>
               ) : (
