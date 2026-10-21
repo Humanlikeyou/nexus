@@ -21,10 +21,10 @@ fn data_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os(DATA_DIR_ENV).filter(|v| !v.is_empty()) {
         return PathBuf::from(dir);
     }
-    dirs::data_dir()
-        .or_else(|| dirs::home_dir().map(|h| h.join("Library/Application Support")))
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join(crate::app_paths::DATA_DIR_NAME)
+    // Shared app-data location (com.taisun.nexus). Legacy com.taisun.electron
+    // data is copied in, non-destructively, by app_paths::migrate_legacy_data_dir()
+    // at startup before any command can run.
+    crate::app_paths::data_dir()
 }
 
 const CONTEXT_FILE: &str = "terrance_context.json";
@@ -739,9 +739,54 @@ mod repro_tests {
 
     /// Bug #1 (Rust side): `save_terrance_context` uses a plain `fs::write`, so a crash
     /// mid-write leaves a truncated file. There's no path seam to fault-inject today.
+    /// Bug #1: now covered via the `save_context_to(dir)` seam and `atomic_write`.
     #[test]
-    #[ignore = "needs approved refactor: save_terrance_context_at(path) + atomic tmp+rename; assert no partial file / no leftover .tmp"]
     fn repro_context_save_is_atomic() {
-        todo!("write via save_terrance_context_at(tmpdir) with an injected failure between write and rename");
+        let dir = std::env::temp_dir().join(format!("nexus-repro-atomic-{}", uuid::Uuid::new_v4().simple()));
+        let mut ctx = TerranceContext::default();
+        ctx.active_goals = vec!["first".into()];
+        save_context_to(&dir, &ctx).unwrap();
+        ctx.active_goals = vec!["second".into()];
+        save_context_to(&dir, &ctx).unwrap();
+        // Injected failure: the target is a non-empty directory, so the rename fails.
+        let blocked = dir.join("blocked");
+        fs::create_dir_all(blocked.join("x")).unwrap();
+        assert!(atomic_write(&blocked, b"partial").is_err());
+        let names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(names.iter().all(|n| !n.ends_with(".tmp")), "leftover tmp: {names:?}");
+        assert_eq!(load_context_from(&dir).unwrap().active_goals, vec!["second".to_string()]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Legacy com.taisun.electron context is migrated into com.taisun.nexus and
+    /// loads intact; the legacy copy is left in place and existing new data wins.
+    #[test]
+    fn legacy_context_is_migrated_and_loadable() {
+        let base = std::env::temp_dir().join(format!("nexus-ctx-mig-{}", uuid::Uuid::new_v4().simple()));
+        let legacy = base.join("com.taisun.electron");
+        fs::create_dir_all(&legacy).unwrap();
+        let raw = r#"{"activeGoals":["Legacy goal"],"lastSessionSummary":"s","lastSessionTimestamp":1,"relevantMemory":["m"],"dailySummaryHour":6}"#;
+        fs::write(legacy.join(CONTEXT_FILE), raw).unwrap();
+        fs::write(legacy.join("subagents.json"), "[]").unwrap();
+
+        let copied = crate::app_paths::migrate_legacy_data_dir_in(&base).unwrap();
+        assert!(copied.contains(&CONTEXT_FILE.to_string()));
+        let new_dir = base.join(crate::app_paths::DATA_DIR_NAME);
+        let ctx = load_context_from(&new_dir).unwrap();
+        assert_eq!(ctx.active_goals, vec!["Legacy goal".to_string()]);
+        assert_eq!(ctx.daily_summary_hour, Some(6));
+        assert!(legacy.join(CONTEXT_FILE).exists(), "legacy data must not be removed");
+
+        // A later save goes to the new dir and is not clobbered by a re-run.
+        let mut updated = ctx.clone();
+        updated.active_goals = vec!["New goal".into()];
+        save_context_to(&new_dir, &updated).unwrap();
+        assert!(crate::app_paths::migrate_legacy_data_dir_in(&base).unwrap().is_empty());
+        assert_eq!(load_context_from(&new_dir).unwrap().active_goals, vec!["New goal".to_string()]);
+        let _ = fs::remove_dir_all(&base);
     }
 }
