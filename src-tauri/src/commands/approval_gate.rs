@@ -2,6 +2,15 @@
 //! (service restarts, sandbox changes). Mirrors the terrence_actions gate:
 //! a native dialog titled "Nexus — Approve Action" showing the exact
 //! operation, one in-flight dialog per command key, and Deny = error, no-op.
+//!
+//! Error strings are machine-distinguishable by prefix (stable contract for
+//! the frontend; the text after the prefix is human-readable and may change):
+//! - `declined:` — the user clicked Deny. Nothing was changed.
+//! - `busy:`     — an approval dialog for the same key is already open.
+//! - `changed:`  — (command-specific) state changed while the dialog was open;
+//!   the operation was refused and nothing was written.
+//!
+//! Any other error is an ordinary failure of the command itself.
 
 use std::collections::HashSet;
 use std::sync::{LazyLock, Mutex};
@@ -9,7 +18,14 @@ use std::sync::{LazyLock, Mutex};
 pub const APPROVAL_DIALOG_TITLE: &str = "Nexus — Approve Action";
 /// Longer text is refused rather than truncated.
 pub const MAX_APPROVAL_TEXT_CHARS: usize = 2_000;
-pub const DENIED_MESSAGE: &str = "Denied in the native approval dialog. Nothing was changed.";
+/// Prefix for a Deny outcome.
+pub const DECLINED_PREFIX: &str = "declined:";
+/// Prefix when a dialog for the same key is already open.
+pub const BUSY_PREFIX: &str = "busy:";
+/// Error returned when the user clicks Deny.
+pub fn denied_message() -> String {
+    format!("{DECLINED_PREFIX} Denied in the native approval dialog. Nothing was changed.")
+}
 
 static IN_FLIGHT: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
@@ -22,7 +38,9 @@ impl InFlightGuard {
             .lock()
             .map_err(|_| "Approval lock is unavailable.".to_string())?;
         if !set.insert(key.to_string()) {
-            return Err("An approval dialog for this operation is already open.".to_string());
+            return Err(format!(
+                "{BUSY_PREFIX} An approval dialog for this operation is already open."
+            ));
         }
         Ok(InFlightGuard(key.to_string()))
     }
@@ -49,7 +67,7 @@ pub fn approval_text(operation: &str, detail: &str) -> Result<String, String> {
 }
 
 /// Acquire the per-key lock, show the native dialog, and return the guard if
-/// the user clicked Allow. Deny returns `Err(DENIED_MESSAGE)`.
+/// the user clicked Allow. Deny returns `Err(denied_message())`.
 pub async fn require_approval(
     app: &tauri::AppHandle,
     key: &str,
@@ -74,7 +92,7 @@ pub async fn require_approval(
     if allowed {
         Ok(guard)
     } else {
-        Err(DENIED_MESSAGE.to_string())
+        Err(denied_message())
     }
 }
 
@@ -85,7 +103,9 @@ mod tests {
     #[test]
     fn lock_is_per_key_and_released_on_drop() {
         let a = InFlightGuard::acquire("test:restart:a").unwrap();
-        assert!(InFlightGuard::acquire("test:restart:a").is_err());
+        let busy = InFlightGuard::acquire("test:restart:a").err().unwrap();
+        assert!(busy.starts_with(BUSY_PREFIX), "{busy}");
+        assert!(denied_message().starts_with(DECLINED_PREFIX));
         let _b = InFlightGuard::acquire("test:restart:b").unwrap();
         drop(a);
         assert!(InFlightGuard::acquire("test:restart:a").is_ok());
