@@ -40,7 +40,10 @@ pub fn migrate_legacy_data_dir_in(base: &Path) -> std::io::Result<Vec<String>> {
         copy_recursive(&entry.path(), &target)?;
         copied.push(entry.file_name().to_string_lossy().to_string());
     }
-    fs::write(new.join(MARKER), "legacy data copied; old directory left in place\n")?;
+    fs::write(
+        new.join(MARKER),
+        "legacy data copied; old directory left in place\n",
+    )?;
     Ok(copied)
 }
 
@@ -55,7 +58,9 @@ pub fn migrate_legacy_data_dir() {
 
 #[allow(dead_code)]
 pub fn data_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join(DATA_DIR_NAME)
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(DATA_DIR_NAME)
 }
 
 #[cfg(test)]
