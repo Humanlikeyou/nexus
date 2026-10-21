@@ -23,6 +23,9 @@ import { TerranceField } from "./screens/TerranceScreen";
 import { TrajectoryField } from "./screens/TrajectoryScreen";
 import type { MuseOperation } from "./screens/muse";
 import { ContextInspector } from "./shell/ContextInspector";
+import { Footer } from "./shell/Footer";
+import { Sidebar } from "./shell/Sidebar";
+import { Toolbar } from "./shell/Toolbar";
 import type { ModuleId, MuseDevice, RecordedSession, SystemSnapshot } from "./types";
 import { RefreshCw, Zap } from "lucide-react";
 
@@ -309,24 +312,10 @@ export default function App() {
 
   return (
     <CommandSurface mode={active}>
-      <IntelligenceOverlay>
-        <header className="nexus-mark"><span className="nexus-symbol"><Zap size={16} /></span><div><strong>Nexus</strong><span>Local intelligence</span></div></header>
-        <div className="field-clock"><span className="toolbar-location">{selected.label}</span><span>{now.toLocaleDateString([], { month: "short", day: "numeric" })}</span><strong>{now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</strong><button onClick={refresh} disabled={busy} aria-label="Refresh all systems" title="Refresh all systems"><RefreshCw size={15} /></button></div>
-      </IntelligenceOverlay>
-
-      <nav className="system-constellation" aria-label="Nexus navigation">
-        {SYSTEM_GROUPS.map((group) => <section className="nav-group" key={group.label}><h2>{group.label}</h2>{group.systems.map((system) => { const Icon = system.icon; const index = SYSTEMS.findIndex((entry) => entry.id === system.id); return <button key={system.id} className={active === system.id ? "is-active" : ""} aria-current={active === system.id ? "page" : undefined} onClick={() => setActive(system.id)} title={`${system.label}${index < 9 ? ` (Command+${index + 1})` : ""}`}><i><Icon size={17} /></i><span>{system.label}</span><small>{system.signal}</small></button>; })}</section>)}
-        <div className="sidebar-status"><StatusIndicator tone={data.hermes.status === "online" ? "success" : "danger"}>{data.hermes.status === "online" ? "Nexus ready" : "Nexus offline"}</StatusIndicator><span>{data.hermes.model}</span></div>
-      </nav>
-
+      <Toolbar label={selected.label} now={now} busy={busy} onRefresh={refresh} />
+      <Sidebar active={active} onSelect={setActive} data={data} />
       <section className="active-field" aria-label={`${selected.label} system`}>{view}</section>
-      <footer className="field-footer">
-        <span>Local only</span><i className={data.hermes.status === "online" ? "is-live" : ""} />
-        <span>{data.hermes.model}</span><span>{data.capabilities.length} capabilities</span>
-        {data.unavailableSources.length > 0 && <span className="footer-unavailable" title={data.unavailableSources.map((source) => source.label).join(", ")}>{data.unavailableSources.length} unavailable</span>}
-        <span className="footer-spacer" />
-        <span>{busy ? "Refreshing" : `Updated ${time(data.refreshedAt)}`}</span>
-      </footer>
+      <Footer data={data} busy={busy} />
       {notice && <div className="field-notice"><i />{notice}</div>}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />
     </CommandSurface>
