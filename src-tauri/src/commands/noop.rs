@@ -297,11 +297,39 @@ fn read_daily_metrics(conn: &Connection, device_id: &str) -> Result<Vec<NoopDail
         for row in rows {
             let metric =
                 row.map_err(|error| format!("NOOP daily metrics could not be read: {error}"))?;
-            // Imported data takes precedence over NOOP-computed fallbacks, matching NOOP Local Access.
-            merged.insert(metric.day.clone(), metric);
+            // Imported data takes precedence over NOOP-computed fallbacks, matching NOOP Local Access,
+            // but only field by field: an imported NULL must not hide a computed value.
+            match merged.remove(&metric.day) {
+                Some(fallback) => {
+                    let combined = merge_daily_metric(fallback, metric);
+                    merged.insert(combined.day.clone(), combined)
+                }
+                None => merged.insert(metric.day.clone(), metric),
+            };
         }
     }
     Ok(merged.into_values().collect())
+}
+
+/// Combine two rows for the same day. Every `Some` field of `preferred` wins;
+/// `None` fields fall back to `fallback`. The source label follows `preferred`.
+fn merge_daily_metric(fallback: NoopDailyMetric, preferred: NoopDailyMetric) -> NoopDailyMetric {
+    NoopDailyMetric {
+        day: preferred.day,
+        source: preferred.source,
+        total_sleep_min: preferred.total_sleep_min.or(fallback.total_sleep_min),
+        efficiency: preferred.efficiency.or(fallback.efficiency),
+        deep_min: preferred.deep_min.or(fallback.deep_min),
+        rem_min: preferred.rem_min.or(fallback.rem_min),
+        light_min: preferred.light_min.or(fallback.light_min),
+        resting_hr: preferred.resting_hr.or(fallback.resting_hr),
+        avg_hrv: preferred.avg_hrv.or(fallback.avg_hrv),
+        recovery: preferred.recovery.or(fallback.recovery),
+        strain: preferred.strain.or(fallback.strain),
+        spo2_pct: preferred.spo2_pct.or(fallback.spo2_pct),
+        skin_temp_dev_c: preferred.skin_temp_dev_c.or(fallback.skin_temp_dev_c),
+        resp_rate_bpm: preferred.resp_rate_bpm.or(fallback.resp_rate_bpm),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
