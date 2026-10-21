@@ -1832,14 +1832,172 @@ pub(crate) fn runtime_action_brief(max_chars: usize) -> Result<String, String> {
         .unwrap_or_default())
 }
 
+// ─── Native approval gate ────────────────────────────────────────────────────
+
+/// Distinctive title the webview cannot imitate (the dialog is native).
+const APPROVAL_DIALOG_TITLE: &str = "Nexus — Approve Action";
+/// Approval text longer than this is refused outright, never truncated, so the
+/// user always sees everything that will run.
+const MAX_APPROVAL_TEXT_CHARS: usize = 2_000;
+
+/// Action ids with an approval dialog currently open (one dialog per action).
+static APPROVALS_IN_FLIGHT: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+struct InFlightGuard(String);
+
+impl InFlightGuard {
+    fn acquire(id: &str) -> Result<Self, String> {
+        let mut set = APPROVALS_IN_FLIGHT
+            .lock()
+            .map_err(|_| "Approval lock is unavailable.".to_string())?;
+        if !set.insert(id.to_string()) {
+            return Err("An approval dialog for this action is already open.".to_string());
+        }
+        Ok(InFlightGuard(id.to_string()))
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = APPROVALS_IN_FLIGHT.lock() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+/// Stable hash of exactly what is shown and executed: tool id + normalized params.
+/// serde_json maps are BTreeMap-ordered (no preserve_order feature), so the
+/// serialization is canonical.
+fn approval_fingerprint(tool_id: &str, normalized: &Value) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let params = serde_json::to_string(normalized)
+        .map_err(|error| format!("Action parameters could not be encoded: {error}"))?;
+    let mut hasher = Sha256::new();
+    hasher.update(tool_id.as_bytes());
+    hasher.update([0u8]);
+    hasher.update(params.as_bytes());
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// The concrete operation, in the exact form it will be executed.
+fn describe_operation(tool_id: &str, normalized: &Value) -> Result<String, String> {
+    let object = normalized
+        .as_object()
+        .ok_or_else(|| "Action parameters are invalid.".to_string())?;
+    let field = |name: &str| object.get(name).map(|v| v.to_string()).unwrap_or_default();
+    Ok(match tool_id {
+        "system.open_url" => format!("Open URL: {}", field("url")),
+        "system.open_application" => format!("Open application: {}", field("application")),
+        "filesystem.reveal" => format!("Reveal in Finder: {}", field("path")),
+        "system.set_volume" => format!("Set output volume to {}", field("volume")),
+        "system.adjust_volume" => format!("Change output volume by {}", field("delta")),
+        "system.set_mute" => format!("Set mute: {}", field("muted")),
+        _ => format!(
+            "Run {tool_id} with:\n{}",
+            serde_json::to_string_pretty(normalized).unwrap_or_default()
+        ),
+    })
+}
+
+fn approval_text(action: &TerrenceAction, normalized: &Value) -> Result<String, String> {
+    let retry_line = action
+        .retry_of_action_id
+        .as_deref()
+        .map(|original| format!("Retry of {original}\n\n"))
+        .unwrap_or_default();
+    let text = format!(
+        "{retry_line}{}\n\nTool: {}\n\nRequested as: {}\n\nAction ID: {}",
+        describe_operation(&action.tool_id, normalized)?,
+        action.tool_id,
+        action.title,
+        action.id
+    );
+    if text.chars().count() > MAX_APPROVAL_TEXT_CHARS {
+        return Err(
+            "This action is too large to show in full for approval, so it was refused.".to_string(),
+        );
+    }
+    Ok(text)
+}
+
+/// Ask the human through a native (non-webview) dialog that the webview
+/// cannot draw, script or click.
+fn confirm_natively(app: &tauri::AppHandle, text: String) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    app.dialog()
+        .message(text)
+        .title(APPROVAL_DIALOG_TITLE)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Allow".to_string(),
+            "Deny".to_string(),
+        ))
+        .blocking_show()
+}
+
+/// Everything except the dialog itself, so it can be unit-tested.
+fn prepare_approval(conn: &Connection, id: &str) -> Result<(TerrenceAction, Value, String, String), String> {
+    let pending =
+        get_action(conn, id)?.ok_or_else(|| "Terrence action was not found.".to_string())?;
+    if pending.status != "awaiting_approval" || !pending.requires_approval {
+        return Err("This action is not awaiting approval.".to_string());
+    }
+    let normalized = normalize_parameters(&pending.tool_id, pending.parameters.clone())?;
+    let text = approval_text(&pending, &normalized)?;
+    let fingerprint = approval_fingerprint(&pending.tool_id, &normalized)?;
+    Ok((pending, normalized, text, fingerprint))
+}
+
+/// After the dialog, the row must still be awaiting approval with the same
+/// tool and the same normalized parameters that were shown.
+fn verify_unchanged(conn: &Connection, id: &str, shown_fingerprint: &str) -> Result<(), String> {
+    let current =
+        get_action(conn, id)?.ok_or_else(|| "Terrence action was not found.".to_string())?;
+    if current.status != "awaiting_approval" {
+        return Err("The action changed while the approval dialog was open.".to_string());
+    }
+    let normalized = normalize_parameters(&current.tool_id, current.parameters.clone())?;
+    if approval_fingerprint(&current.tool_id, &normalized)? != shown_fingerprint {
+        return Err(
+            "The action changed while the approval dialog was open, so it was refused.".to_string(),
+        );
+    }
+    Ok(())
+}
+
 #[tauri::command]
-pub fn approve_terrence_action(id: String) -> Result<TerrenceAction, String> {
+pub async fn approve_terrence_action(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<TerrenceAction, String> {
     let id = clean_required(&id, "Terrence action ID", 120)?;
+    tauri::async_runtime::spawn_blocking(move || approve_action_blocking(&app, &id))
+        .await
+        .map_err(|error| format!("Approval task failed: {error}"))?
+}
+
+fn approve_action_blocking(app: &tauri::AppHandle, id: &str) -> Result<TerrenceAction, String> {
+    // One dialog per action; also acts as the debounce for double clicks.
+    let _guard = InFlightGuard::acquire(id)?;
     let conn = action_db()?;
-    let approved =
-        update_action_status(&conn, &id, &["awaiting_approval"], "approved", None, None)?;
-    let executing =
+    let (_pending, normalized, text, fingerprint) = prepare_approval(&conn, id)?;
+    if !confirm_natively(app, text) {
+        return update_action_status(
+            &conn,
+            id,
+            &["awaiting_approval"],
+            "cancelled",
+            None,
+            Some("Denied in the native approval dialog.".to_string()),
+        );
+    }
+    verify_unchanged(&conn, id, &fingerprint)?;
+    let approved = update_action_status(&conn, id, &["awaiting_approval"], "approved", None, None)?;
+    let mut executing =
         update_action_status(&conn, &approved.id, &["approved"], "executing", None, None)?;
+    // Execute exactly the normalized parameters that were shown and approved.
+    executing.parameters = normalized;
     match execute_local_action(&executing) {
         Ok(result) => update_action_status(
             &conn,
@@ -2527,4 +2685,54 @@ mod tests {
             "Open https://example.com?access_token=[REDACTED]"
         );
     }
+
+    #[test]
+    fn approval_gate_in_flight_lock_blocks_a_second_dialog() {
+        let first = super::InFlightGuard::acquire("gate-lock-test").unwrap();
+        assert!(super::InFlightGuard::acquire("gate-lock-test").is_err());
+        drop(first);
+        assert!(super::InFlightGuard::acquire("gate-lock-test").is_ok());
+    }
+
+    #[test]
+    fn approval_gate_fingerprint_detects_param_changes() {
+        let a = super::approval_fingerprint("system.open_url", &json!({"url": "https://a.example"})).unwrap();
+        let b = super::approval_fingerprint("system.open_url", &json!({"url": "https://b.example"})).unwrap();
+        let c = super::approval_fingerprint("system.open_application", &json!({"url": "https://a.example"})).unwrap();
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert_eq!(a, super::approval_fingerprint("system.open_url", &json!({"url": "https://a.example"})).unwrap());
+    }
+
+    #[test]
+    fn approval_gate_shows_exact_target_and_refuses_oversized_text() {
+        let op = super::describe_operation("system.open_url", &json!({"url": "https://a.example/x"})).unwrap();
+        assert!(op.contains("https://a.example/x"));
+        let mut action = sample_gate_action();
+        let normal = super::approval_text(&action, &json!({"url": "https://a.example/x"})).unwrap();
+        assert!(normal.starts_with("Open URL: "));
+        assert!(normal.contains("Requested as: "));
+        action.tool_id = "macos.workflow".to_string();
+        let huge = json!({"steps": "x".repeat(5_000)});
+        assert!(super::approval_text(&action, &huge).is_err());
+        action.retry_of_action_id = Some("orig-1".to_string());
+        action.tool_id = "system.open_url".to_string();
+        let retry = super::approval_text(&action, &json!({"url": "https://a.example/x"})).unwrap();
+        assert!(retry.starts_with("Retry of orig-1"));
+    }
+
+    fn sample_gate_action() -> super::TerrenceAction {
+        let mut action: super::TerrenceAction = serde_json::from_value(json!({
+            "id": "gate-1", "toolId": "system.open_url", "title": "Open URL: fake",
+            "status": "awaiting_approval", "requiresApproval": true, "parameters": {},
+            "conversationId": null, "contextItemIds": [], "requestedAt": "2026-10-21T00:00:00Z",
+            "updatedAt": "2026-10-21T00:00:00Z", "approvedAt": null, "startedAt": null,
+            "completedAt": null, "result": null, "error": null, "retryOfActionId": null,
+            "retryAllowed": false, "summary": ""
+        }))
+        .expect("TerrenceAction must deserialize from a minimal row");
+        action.retry_of_action_id = None;
+        action
+    }
+
 }
