@@ -42,6 +42,7 @@ import { useMuseTelemetry, type MuseTelemetry } from "./neuro/useMuseTelemetry";
 import { useTraining } from "./neuro/useTraining";
 import { SessionFinalizer } from "./neuro/sessionFinalizer";
 import { useIdleAutoSave } from "./hooks/useIdleAutoSave";
+import { useSchedulerLifecycle } from "./hooks/useSchedulerLifecycle";
 
 const SYSTEM_GROUPS: Array<{ label: string; systems: Array<{ id: ModuleId; label: string; signal: string; icon: LucideIcon }> }> = [
   { label: "Nexus", systems: [
@@ -980,6 +981,8 @@ export default function App() {
   // Session continuity: summarize the Terrance chat after idle / on new chat / on close (bug 6).
   // Move with the chat state when the shell is split.
   useIdleAutoSave(messages, conversationId);
+  // Terrance background scheduler: started once for the shell, stopped on unmount.
+  useSchedulerLifecycle();
 
   const refresh = useCallback(async () => { setBusy(true); setData(await loadSystemSnapshot()); setBusy(false); }, []);
   useEffect(() => { refresh(); const refreshTimer = window.setInterval(refresh, 15_000); const clockTimer = window.setInterval(() => setNow(new Date()), 1_000); return () => { window.clearInterval(refreshTimer); window.clearInterval(clockTimer); }; }, [refresh]);
