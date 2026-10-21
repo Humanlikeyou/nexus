@@ -54,12 +54,9 @@ jobs:
       - name: Stub frontend dist
         working-directory: .
         run: mkdir -p dist
-      # TODO: make blocking once the existing fmt/clippy backlog is cleared.
       - name: cargo fmt --check
-        continue-on-error: true
         run: cargo fmt --check
       - name: cargo clippy
-        continue-on-error: true
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: cargo test
         run: cargo test --locked
