@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { type ConversationMessage, CONVERSATION_KEY, HERMES_SESSION_KEY, HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE, createConversationId, actionPlan, messagesFromInteractions } from "./app/conversation";
+import { SYSTEM_GROUPS, SYSTEMS } from "./app/routes";
 import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, connectMuse, correctTerrenceContextItem, deleteTerrenceContextItem, disconnectMuse, interactWithTerrence, listTerrenceContextItems, listTerrenceInteractions, loadSystemSnapshot, migrateLegacyTerrenceContext, retryTerrenceAction, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "./bridge";
 import { ActionButton, EmptyState, Metric, PageHeading, SectionHeading, SegmentedControl, StatusIndicator } from "./design/ProductUI";
 import { BiometricReadout, CommandSurface, IntelligenceOverlay, SignalStream } from "./design/SystemPrimitives";
@@ -10,117 +12,8 @@ import { SessionFinalizer } from "./neuro/sessionFinalizer";
 import { useMuseTelemetry, type MuseTelemetry } from "./neuro/useMuseTelemetry";
 import { useTraining } from "./neuro/useTraining";
 import { BackupSection } from "./settings/BackupSection";
-import type { ModuleId, MuseDevice, NoopHealthInsight, RecordedSession, SystemSnapshot, TerrenceAction, TerrenceContextItem, TerrenceInteraction } from "./types";
-import { Activity, BookOpen, BrainCircuit, BriefcaseBusiness, Bluetooth, Bot, Check, ChevronDown, CircleDollarSign, Crosshair, HardDrive, HeartPulse, History, Pencil, Play, Radio, RefreshCw, RotateCcw, Route, Satellite, Send, Settings2, SlidersHorizontal, Square, SquarePen, Sparkles, Sun, Trash2, Unplug, X, Zap, type LucideIcon } from "lucide-react";
-
-const SYSTEM_GROUPS: Array<{ label: string; systems: Array<{ id: ModuleId; label: string; signal: string; icon: LucideIcon }> }> = [
-  { label: "Nexus", systems: [
-    { id: "terrance", label: "Overview", signal: "AI", icon: Bot },
-    { id: "neuro", label: "Live", signal: "EEG", icon: Radio },
-    { id: "sessions", label: "Sessions", signal: "HISTORY", icon: History },
-    { id: "health", label: "Health", signal: "NOOP", icon: HeartPulse },
-  ] },
-  { label: "Direction", systems: [
-    { id: "trajectory", label: "Trajectory", signal: "GOALS", icon: Route },
-    { id: "business", label: "Business", signal: "WORK", icon: BriefcaseBusiness },
-    { id: "revenue", label: "Revenue", signal: "ARM", icon: CircleDollarSign },
-  ] },
-  { label: "System", systems: [
-    { id: "devices", label: "Devices", signal: "BLE", icon: Bluetooth },
-    { id: "assistant", label: "Activity", signal: "LOG", icon: Activity },
-    { id: "settings", label: "Settings", signal: "APP", icon: Settings2 },
-  ] },
-];
-
-const SYSTEMS = SYSTEM_GROUPS.flatMap((group) => group.systems);
-
-type ConversationMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: string;
-  status?: "failed";
-  model?: string;
-};
-
-const CONVERSATION_KEY = "nexus.terrence.conversationId";
-const HERMES_SESSION_KEY = "nexus.terrence.hermesSessionId";
-const HERMES_SESSION_PROFILE_KEY = "nexus.terrence.hermesSessionProfile";
-const NEXUS_RUNTIME_PROFILE = "nexus-managed-actions-v5";
-
-function createConversationId() {
-  return typeof crypto?.randomUUID === "function"
-    ? `nexus-${crypto.randomUUID()}`
-    : `nexus-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function displayAssistantMessage(content: string) {
-  return content.replace(/^\u{256d}[^\n]*Hermes[^\n]*\r?\n/u, "").trim();
-}
-
-function actionPlan(action: TerrenceAction): string[] {
-  if (action.toolId === "macos.workflow") {
-    const steps = action.parameters.steps;
-    if (!Array.isArray(steps)) return [];
-    return steps.flatMap((step, index) => {
-      if (!step || typeof step !== "object") return [];
-      const values = step as Record<string, unknown>;
-      const kind = typeof values.kind === "string" ? values.kind.replace(/_/g, " ") : "desktop step";
-      const target = typeof values.url === "string" ? values.url
-        : typeof values.application === "string" ? values.application
-          : typeof values.path === "string" ? values.path
-            : typeof values.from === "string" && typeof values.to === "string" ? `${values.from} to ${values.to}`
-              : typeof values.from === "string" && typeof values.name === "string" ? `${values.from} to ${values.name}`
-                : typeof values.name === "string" ? values.name
-                  : typeof values.volume === "number" ? `${values.volume}%`
-                    : typeof values.delta === "number" ? `${values.delta > 0 ? "+" : ""}${values.delta}%`
-                      : typeof values.muted === "boolean" ? values.muted ? "on" : "off"
-                        : "";
-      return [`${index + 1}. ${kind}${target ? `: ${target}` : ""}`];
-    });
-  }
-  if (action.toolId === "filesystem.organize_directory") {
-    const moves = action.parameters.moves;
-    if (!Array.isArray(moves)) return [];
-    return moves.flatMap((move, index) => {
-      if (!move || typeof move !== "object") return [];
-      const values = move as Record<string, unknown>;
-      const source = typeof values.from === "string" ? values.from.split("/").filter(Boolean).pop() : null;
-      const category = typeof values.category === "string" ? values.category : "organized files";
-      return source ? [`${index + 1}. Move ${source} to ${category}`] : [];
-    });
-  }
-  return [];
-}
-
-function messagesFromInteractions(interactions: TerrenceInteraction[]): ConversationMessage[] {
-  return interactions.flatMap((interaction) => {
-    const messages: ConversationMessage[] = [{
-      id: `${interaction.id}-user`,
-      role: "user",
-      content: interaction.userMessage,
-      timestamp: interaction.startedAt,
-    }];
-    if (interaction.assistantMessage) {
-      messages.push({
-        id: `${interaction.id}-assistant`,
-        role: "assistant",
-        content: displayAssistantMessage(interaction.assistantMessage),
-        timestamp: interaction.completedAt,
-        model: interaction.model,
-      });
-    } else if (interaction.error) {
-      messages.push({
-        id: `${interaction.id}-failed`,
-        role: "assistant",
-        content: interaction.error,
-        timestamp: interaction.completedAt,
-        status: "failed",
-      });
-    }
-    return messages;
-  });
-}
+import type { ModuleId, MuseDevice, NoopHealthInsight, RecordedSession, SystemSnapshot, TerrenceAction, TerrenceContextItem } from "./types";
+import { Activity, BookOpen, BrainCircuit, BriefcaseBusiness, Bluetooth, Bot, Check, ChevronDown, Crosshair, HardDrive, HeartPulse, History, Pencil, Play, Radio, RefreshCw, RotateCcw, Satellite, Send, SlidersHorizontal, Square, SquarePen, Sparkles, Sun, Trash2, Unplug, X, Zap } from "lucide-react";
 
 function State({ value, label }: { value: string | boolean | null | undefined; label?: string }) {
   const display = label ?? (typeof value === "boolean" ? (value ? "Online" : "Offline") : humanize(String(value ?? "unknown")));
