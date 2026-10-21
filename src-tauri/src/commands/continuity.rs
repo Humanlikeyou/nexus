@@ -203,6 +203,17 @@ pub(crate) fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Res
         })?
         .to_string_lossy()
         .to_string();
+    // Refuse to replace a symlink (it could point anywhere); callers must
+    // resolve and validate real paths themselves.
+    if fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("refusing to replace symlink {}", path.display()),
+        ));
+    }
     let tmp = dir.join(format!(
         ".{}.{}.tmp",
         file_name,
@@ -714,6 +725,34 @@ mod tests {
         let after = fs::metadata(&target).unwrap().permissions().mode();
         assert_eq!(after & 0o7000, 0, "special bits must not be copied");
         assert_eq!(after & 0o777, 0o755);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_refuses_to_replace_a_symlink() {
+        let dir = temp_dir("symlink");
+        let real = dir.join("real.json");
+        fs::write(&real, b"original").unwrap();
+        let link = dir.join("link.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(atomic_write(&link, b"new").is_err());
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read(&real).unwrap(), b"original");
+        let leftovers = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0);
+        // Dangling symlink is refused too.
+        let dangling = dir.join("dangling.json");
+        std::os::unix::fs::symlink(dir.join("missing"), &dangling).unwrap();
+        assert!(atomic_write(&dangling, b"x").is_err());
+        assert!(!dir.join("missing").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 
