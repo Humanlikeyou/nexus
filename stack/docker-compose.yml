@@ -77,12 +77,16 @@ services:
       NEXUS_SECRET: ${NEXUS_SECRET:-}
       # n8n 2.x blocks $env in Code nodes by default; the ingress Validate Secret node needs it.
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # Letta API password, sent by the ingress memory.* Code nodes (Authorization: Bearer)
+      LETTA_SERVER_PASSWORD: ${LETTA_SERVER_PASSWORD:?set LETTA_SERVER_PASSWORD in .env}
     volumes:
       - ./data/n8n:/home/node/.n8n
 
   # ── Letta (MemGPT) — Agent Long-Term Memory ─────────────────────────────────
   letta:
-    image: letta/letta:0.34.19
+    # 0.16.8 = last Python Letta server image (newer tags are "Letta Code", incompatible).
+    # Known CVEs accepted for localhost single-user use — see stack/SECURITY-NOTES.md.
+    image: letta/letta:0.16.8
     restart: unless-stopped
     logging: *log
     depends_on:
@@ -94,6 +98,7 @@ services:
       LETTA_PG_URI: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/letta_db"
       # Require a password on the Letta REST API / ADE
       SECURE: "true"
+      LETTA_SERVER_SECURE: "true"
       LETTA_SERVER_PASSWORD: ${LETTA_SERVER_PASSWORD:?set LETTA_SERVER_PASSWORD in .env}
       # LLM backends — fill in what you use; unused keys left blank
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -184,7 +189,7 @@ services:
       MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.io/anthropic}
       MINIMAX_MODEL: ${MINIMAX_MODEL:-MiniMax-M2.5}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      CREW_OLLAMA_MODEL: ${CREW_OLLAMA_MODEL:-qwen3.5}
+      CREW_OLLAMA_MODEL: ${CREW_OLLAMA_MODEL:-gemma4}
       # Persistence — crew_runs table in the shared terrance DB
       CREW_DB_HOST: postgres
       CREW_DB_PORT: "5432"
