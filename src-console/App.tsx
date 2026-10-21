@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ConversationMessage, CONVERSATION_KEY, HERMES_SESSION_KEY, HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE, createConversationId, messagesFromInteractions } from "./app/conversation";
 import { SYSTEMS } from "./app/routes";
+import { useConversation } from "./app/useConversation";
 import { approvalNotice } from "./lib/approval";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
@@ -42,27 +43,13 @@ export default function App() {
   const { telemetry, reset: resetTelemetry, readCounters } = useMuseTelemetry();
   const training = useTraining(telemetry, sessionStartedAt !== null && sessionEndedAt === null && data.muse.streaming);
   const { theme, setTheme, reduceMotion, setReduceMotion } = useAppearance();
-  const [conversationId, setConversationId] = useState(() => {
-    const existing = window.localStorage.getItem(CONVERSATION_KEY);
-    if (existing) return existing;
-    const created = createConversationId();
-    window.localStorage.setItem(CONVERSATION_KEY, created);
-    return created;
-  });
-  const [hermesSessionId, setHermesSessionId] = useState<string | null>(() => (
-    window.localStorage.getItem(HERMES_SESSION_PROFILE_KEY) === NEXUS_RUNTIME_PROFILE
-      ? window.localStorage.getItem(HERMES_SESSION_KEY)
-      : null
-  ));
-  const [messages, setMessages] = useState<ConversationMessage[]>([]);
-  const [sending, setSending] = useState(false);
-  // Session continuity: summarize the Terrance chat after idle / on new chat / on close (bug 6).
-  // Move with the chat state when the shell is split.
-  useIdleAutoSave(messages, conversationId);
   // Terrance background scheduler: started once for the shell, stopped on unmount.
   useSchedulerLifecycle();
 
   const refresh = useCallback(async () => { setBusy(true); setData(await loadSystemSnapshot()); setBusy(false); }, []);
+  const { conversationId, messages, sending, sendToTerrence, startNewConversation } = useConversation(refresh);
+  // Session continuity: summarize the Terrance chat after idle / on new chat / on close (bug 6).
+  useIdleAutoSave(messages, conversationId);
   useEffect(() => { refresh(); const refreshTimer = window.setInterval(refresh, 15_000); return () => { window.clearInterval(refreshTimer); }; }, [refresh]);
   useEffect(() => {
     let activeRequest = true;
@@ -84,23 +71,6 @@ export default function App() {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, []);
-  useEffect(() => {
-    let activeRequest = true;
-    listTerrenceInteractions(conversationId).then((interactions) => {
-      if (!activeRequest) return;
-      setMessages(messagesFromInteractions(interactions));
-      const latestSession = [...interactions]
-        .reverse()
-        .find((interaction) => interaction.runtimeProfile === NEXUS_RUNTIME_PROFILE && interaction.hermesSessionId)
-        ?.hermesSessionId;
-      if (latestSession) {
-        setHermesSessionId(latestSession);
-        window.localStorage.setItem(HERMES_SESSION_KEY, latestSession);
-        window.localStorage.setItem(HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE);
-      }
-    }).catch((error) => console.warn("[console] interaction history unavailable", error));
-    return () => { activeRequest = false; };
-  }, [conversationId]);
 
   const act = useCallback(async (name: string, action: () => Promise<unknown>) => { setBusy(true); setNotice(`${name} in progress`); try { await action(); setNotice(`${name} complete`); await refresh(); } catch { setBusy(false); setNotice(`${name} unavailable`); } window.setTimeout(() => setNotice(null), 3500); }, [refresh]);
 
@@ -286,40 +256,6 @@ export default function App() {
       window.setTimeout(() => setNotice(null), 3000);
     }
   }, [data.muse.streaming, sessionStartedAt, persistMuseSession, refresh, resetTelemetry, training.finish]);
-  const sendToTerrence = useCallback(async (message: string) => {
-    const requestId = `pending-${Date.now()}`;
-    setMessages((current) => [...current, { id: `${requestId}-user`, role: "user", content: message, timestamp: new Date().toISOString() }]);
-    setSending(true);
-    try {
-      const interaction = await interactWithTerrence({ message, conversationId, hermesSessionId });
-      if (interaction.hermesSessionId) {
-        setHermesSessionId(interaction.hermesSessionId);
-        window.localStorage.setItem(HERMES_SESSION_KEY, interaction.hermesSessionId);
-        window.localStorage.setItem(HERMES_SESSION_PROFILE_KEY, interaction.runtimeProfile);
-      }
-      setMessages((current) => [...current, ...messagesFromInteractions([interaction]).filter((entry) => entry.role === "assistant")]);
-      await refresh();
-    } catch (error) {
-      setMessages((current) => [...current, {
-        id: `${requestId}-failed`,
-        role: "assistant",
-        content: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
-        status: "failed",
-      }]);
-    } finally {
-      setSending(false);
-    }
-  }, [conversationId, hermesSessionId, refresh]);
-  const startNewConversation = useCallback(() => {
-    const created = createConversationId();
-    window.localStorage.setItem(CONVERSATION_KEY, created);
-    window.localStorage.removeItem(HERMES_SESSION_KEY);
-    window.localStorage.removeItem(HERMES_SESSION_PROFILE_KEY);
-    setHermesSessionId(null);
-    setMessages([]);
-    setConversationId(created);
-  }, []);
   const selected = useMemo(() => SYSTEMS.find((system) => system.id === active)!, [active]);
   const view = active === "terrance" ? <TerranceField data={data} messages={messages} sending={sending} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
     : active === "health" ? <HealthField data={data} />
