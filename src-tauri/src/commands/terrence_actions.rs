@@ -1854,7 +1854,10 @@ impl InFlightGuard {
             .lock()
             .map_err(|_| "Approval lock is unavailable.".to_string())?;
         if !set.insert(id.to_string()) {
-            return Err("An approval dialog for this action is already open.".to_string());
+            return Err(format!(
+                "{} An approval dialog for this action is already open.",
+                super::approval_gate::BUSY_PREFIX
+            ));
         }
         Ok(InFlightGuard(id.to_string()))
     }
@@ -1916,9 +1919,10 @@ fn approval_text(action: &TerrenceAction, normalized: &Value) -> Result<String, 
         action.id
     );
     if text.chars().count() > MAX_APPROVAL_TEXT_CHARS {
-        return Err(
-            "This action is too large to show in full for approval, so it was refused.".to_string(),
-        );
+        return Err(format!(
+            "{} This action is too large to show in full for approval, so it was refused.",
+            super::approval_gate::REFUSED_PREFIX
+        ));
     }
     Ok(text)
 }
@@ -1960,12 +1964,13 @@ fn verify_unchanged(conn: &Connection, id: &str, shown_fingerprint: &str) -> Res
     let current =
         get_action(conn, id)?.ok_or_else(|| "Terrence action was not found.".to_string())?;
     if current.status != "awaiting_approval" {
-        return Err("The action changed while the approval dialog was open.".to_string());
+        return Err("changed: The action changed while the approval dialog was open.".to_string());
     }
     let normalized = normalize_parameters(&current.tool_id, current.parameters.clone())?;
     if approval_fingerprint(&current.tool_id, &normalized)? != shown_fingerprint {
         return Err(
-            "The action changed while the approval dialog was open, so it was refused.".to_string(),
+            "changed: The action changed while the approval dialog was open, so it was refused."
+                .to_string(),
         );
     }
     Ok(())
@@ -1994,7 +1999,7 @@ fn approve_action_blocking(app: &tauri::AppHandle, id: &str) -> Result<TerrenceA
             &["awaiting_approval"],
             "cancelled",
             None,
-            Some("Denied in the native approval dialog.".to_string()),
+            Some(super::approval_gate::denied_message()),
         );
     }
     verify_unchanged(&conn, id, &fingerprint)?;
@@ -2694,7 +2699,10 @@ mod tests {
     #[test]
     fn approval_gate_in_flight_lock_blocks_a_second_dialog() {
         let first = super::InFlightGuard::acquire("gate-lock-test").unwrap();
-        assert!(super::InFlightGuard::acquire("gate-lock-test").is_err());
+        let busy = super::InFlightGuard::acquire("gate-lock-test")
+            .err()
+            .unwrap();
+        assert!(busy.starts_with("busy:"), "{busy}");
         drop(first);
         assert!(super::InFlightGuard::acquire("gate-lock-test").is_ok());
     }
@@ -2733,7 +2741,8 @@ mod tests {
         assert!(normal.contains("Requested as: "));
         action.tool_id = "macos.workflow".to_string();
         let huge = json!({"steps": "x".repeat(5_000)});
-        assert!(super::approval_text(&action, &huge).is_err());
+        let refused = super::approval_text(&action, &huge).unwrap_err();
+        assert!(refused.starts_with("refused:"), "{refused}");
         action.retry_of_action_id = Some("orig-1".to_string());
         action.tool_id = "system.open_url".to_string();
         let retry = super::approval_text(&action, &json!({"url": "https://a.example/x"})).unwrap();
