@@ -432,7 +432,7 @@ pub fn read_daily_log(date: Option<String>) -> Result<String, String> {
 pub async fn restart_openclaw(app: tauri::AppHandle) -> Result<String, String> {
     let _approval = super::approval_gate::require_approval(
         &app,
-        "openclaw_restart",
+        &[super::approval_gate::service_key("openclaw")],
         super::approval_gate::approval_text(
             OPENCLAW_RESTART_OPERATION,
             "Restarts the OpenClaw gateway LaunchAgent. Connected channels reconnect.",
@@ -613,7 +613,8 @@ pub async fn toggle_openclaw_sandbox(
     let new_mode = resolve_sandbox_mode(&current, mode)?;
     let _approval = super::approval_gate::require_approval(
         &app,
-        "openclaw_sandbox",
+        // Same key as restarts: this command restarts OpenClaw too.
+        &[super::approval_gate::service_key("openclaw")],
         super::approval_gate::approval_text(
             &sandbox_operation(&config_path, &current, &new_mode),
             "Writes this setting to the OpenClaw config, then restarts the OpenClaw gateway.",

@@ -89,7 +89,7 @@ pub async fn restart_docker_service(app: tauri::AppHandle, name: String) -> Resu
     let (operation, detail) = docker_restart_prompt(&name);
     let _approval = super::approval_gate::require_approval(
         &app,
-        &format!("docker_restart:{name}"),
+        &[super::approval_gate::service_key(&format!("docker:{name}"))],
         super::approval_gate::approval_text(&operation, &detail)?,
     )
     .await?;

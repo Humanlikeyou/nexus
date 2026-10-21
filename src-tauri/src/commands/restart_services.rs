@@ -76,10 +76,14 @@ fn parse_services(services: &[String]) -> Result<Vec<Service>, String> {
     Ok(parsed)
 }
 
-fn lock_key(services: &[Service]) -> String {
-    let mut ids: Vec<String> = services.iter().map(Service::id).collect();
-    ids.sort();
-    format!("restart_services:{}", ids.join(","))
+/// Per-service keys shared with the single-service commands.
+fn lock_keys(services: &[Service]) -> Vec<String> {
+    let mut keys: Vec<String> = services
+        .iter()
+        .map(|s| approval_gate::service_key(&s.id()))
+        .collect();
+    keys.sort();
+    keys
 }
 
 fn dialog_text(services: &[Service]) -> Result<String, String> {
@@ -166,7 +170,7 @@ pub async fn restart_services(
     let deadline = effective_deadline(deadline_ms, now_ms());
     check_deadline(deadline, now_ms())?;
     let _approval =
-        approval_gate::require_approval(&app, &lock_key(&parsed), dialog_text(&parsed)?).await?;
+        approval_gate::require_approval(&app, &lock_keys(&parsed), dialog_text(&parsed)?).await?;
     check_deadline(deadline, now_ms())?;
     run_sequential(
         &parsed,
@@ -209,7 +213,11 @@ mod tests {
     fn lock_key_is_order_independent_and_dialog_lists_every_command() {
         let a = parse_services(&s(&["openclaw", "docker:n8n"])).unwrap();
         let b = parse_services(&s(&["docker:n8n", "openclaw"])).unwrap();
-        assert_eq!(lock_key(&a), lock_key(&b));
+        assert_eq!(lock_keys(&a), lock_keys(&b));
+        assert_eq!(
+            lock_keys(&a),
+            vec!["svc:docker:n8n".to_string(), "svc:openclaw".to_string()]
+        );
         let text = dialog_text(&a).unwrap();
         assert!(text.contains("Run: launchctl kickstart -k gui/<your uid>/ai.openclaw.gateway"));
         assert!(text.contains("Run: docker restart n8n"));

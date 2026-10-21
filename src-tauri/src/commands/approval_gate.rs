@@ -35,27 +35,48 @@ pub fn denied_message() -> String {
 
 static IN_FLIGHT: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
-/// Held for the whole approve + execute span; releases the key on drop.
-pub struct InFlightGuard(String);
+/// Lock key for one restartable service, shared by single and batch commands:
+/// `svc:openclaw`, `svc:docker:<name>`.
+pub fn service_key(service_id: &str) -> String {
+    format!("svc:{service_id}")
+}
+
+/// Held for the whole approve + execute span; releases its keys on drop.
+pub struct InFlightGuard(Vec<String>);
 
 impl InFlightGuard {
-    pub fn acquire(key: &str) -> Result<Self, String> {
+    #[cfg(test)]
+    fn acquire(key: &str) -> Result<Self, String> {
+        Self::acquire_all(&[key.to_string()])
+    }
+
+    /// All-or-nothing: under one mutex hold, take every key (sorted, deduped)
+    /// or none. If any key is already held, returns `busy:` and takes nothing.
+    pub fn acquire_all(keys: &[String]) -> Result<Self, String> {
+        let mut wanted: Vec<String> = keys.to_vec();
+        wanted.sort();
+        wanted.dedup();
         let mut set = IN_FLIGHT
             .lock()
             .map_err(|_| "Approval lock is unavailable.".to_string())?;
-        if !set.insert(key.to_string()) {
+        if wanted.iter().any(|k| set.contains(k)) {
             return Err(format!(
-                "{BUSY_PREFIX} An approval dialog for this operation is already open."
+                "{BUSY_PREFIX} An approval dialog or restart for this service is already in progress."
             ));
         }
-        Ok(InFlightGuard(key.to_string()))
+        for key in &wanted {
+            set.insert(key.clone());
+        }
+        Ok(InFlightGuard(wanted))
     }
 }
 
 impl Drop for InFlightGuard {
     fn drop(&mut self) {
         if let Ok(mut set) = IN_FLIGHT.lock() {
-            set.remove(&self.0);
+            for key in &self.0 {
+                set.remove(key);
+            }
         }
     }
 }
@@ -75,10 +96,10 @@ pub fn approval_text(operation: &str, detail: &str) -> Result<String, String> {
 /// the user clicked Allow. Deny returns `Err(denied_message())`.
 pub async fn require_approval(
     app: &tauri::AppHandle,
-    key: &str,
+    keys: &[String],
     text: String,
 ) -> Result<InFlightGuard, String> {
-    let guard = InFlightGuard::acquire(key)?;
+    let guard = InFlightGuard::acquire_all(keys)?;
     let app = app.clone();
     let allowed = tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
@@ -114,6 +135,30 @@ mod tests {
         let _b = InFlightGuard::acquire("test:restart:b").unwrap();
         drop(a);
         assert!(InFlightGuard::acquire("test:restart:a").is_ok());
+    }
+
+    #[test]
+    fn acquire_all_is_all_or_nothing() {
+        let single = InFlightGuard::acquire(&service_key("docker:t-shared")).unwrap();
+        // Batch overlapping a single-service restart is busy and takes nothing.
+        let batch = vec![service_key("docker:t-free"), service_key("docker:t-shared")];
+        assert!(InFlightGuard::acquire_all(&batch)
+            .err()
+            .unwrap()
+            .starts_with(BUSY_PREFIX));
+        let free = InFlightGuard::acquire(&service_key("docker:t-free")).unwrap();
+        drop(free);
+        drop(single);
+        // Overlapping batches.
+        let b1 = InFlightGuard::acquire_all(&batch).unwrap();
+        let b2 = vec![
+            service_key("docker:t-shared"),
+            service_key("docker:t-other"),
+        ];
+        assert!(InFlightGuard::acquire_all(&b2).is_err());
+        assert!(InFlightGuard::acquire(&service_key("docker:t-other")).is_ok());
+        drop(b1);
+        assert!(InFlightGuard::acquire_all(&b2).is_ok());
     }
 
     #[test]
