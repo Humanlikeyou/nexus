@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ConversationMessage, CONVERSATION_KEY, HERMES_SESSION_KEY, HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE, createConversationId, messagesFromInteractions } from "./app/conversation";
-import { SYSTEM_GROUPS, SYSTEMS } from "./app/routes";
+import { SYSTEMS } from "./app/routes";
+import { ActivityField, BusinessField, DevicesField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, TrajectoryField } from "./app/lazyScreens";
 import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, connectMuse, disconnectMuse, interactWithTerrence, listTerrenceInteractions, loadSystemSnapshot, migrateLegacyTerrenceContext, retryTerrenceAction, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "./bridge";
 import { StatusIndicator } from "./design/ProductUI";
 import { CommandSurface, IntelligenceOverlay } from "./design/SystemPrimitives";
@@ -11,16 +12,7 @@ import { tone, number, time, readableError } from "./lib/format";
 import { SessionFinalizer } from "./neuro/sessionFinalizer";
 import { useMuseTelemetry } from "./neuro/useMuseTelemetry";
 import { useTraining } from "./neuro/useTraining";
-import { ActivityField } from "./screens/ActivityScreen";
-import { BusinessField } from "./screens/BusinessScreen";
-import { DevicesField } from "./screens/DevicesScreen";
-import { HealthField } from "./screens/HealthScreen";
-import { NeuroField } from "./screens/NeuroScreen";
-import { RevenueField } from "./screens/RevenueScreen";
-import { SessionsField } from "./screens/SessionsScreen";
-import { SettingsField } from "./screens/SettingsScreen";
 import { TerranceField } from "./screens/TerranceScreen";
-import { TrajectoryField } from "./screens/TrajectoryScreen";
 import type { MuseOperation } from "./screens/muse";
 import { ContextInspector } from "./shell/ContextInspector";
 import { Footer } from "./shell/Footer";
@@ -313,7 +305,7 @@ export default function App() {
     <CommandSurface mode={active}>
       <Toolbar label={selected.label} busy={busy} onRefresh={refresh} />
       <Sidebar active={active} onSelect={setActive} data={data} />
-      <section className="active-field" aria-label={`${selected.label} system`}>{view}</section>
+      <section className="active-field" aria-label={`${selected.label} system`}><Suspense fallback={null}>{view}</Suspense></section>
       <Footer data={data} busy={busy} />
       {notice && <div className="field-notice"><i />{notice}</div>}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />
