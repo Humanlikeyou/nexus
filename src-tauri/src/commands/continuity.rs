@@ -119,7 +119,7 @@ pub struct TerranceContext {
     pub last_reasoning_timestamp: Option<u64>,
     #[serde(default)]
     pub last_daily_summary_timestamp: Option<u64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_hour")]
     pub daily_summary_hour: Option<u8>,
     #[serde(default)]
     pub last_health_check_timestamp: Option<u64>,
@@ -131,6 +131,25 @@ pub struct TerranceContext {
     pub last_midday_timestamp: Option<u64>,
     #[serde(default)]
     pub last_evening_timestamp: Option<u64>,
+}
+
+/// Accept any JSON value for `dailySummaryHour`. Valid hours (0-23, integer or
+/// integral float/string) are kept; anything else (negative, >23, wrong type)
+/// becomes `None` so the frontend default applies instead of failing the
+/// whole context load.
+fn lenient_hour<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let as_f64 = match &value {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    Ok(as_f64
+        .filter(|h| h.fract() == 0.0 && (0.0..=23.0).contains(h))
+        .map(|h| h as u8))
 }
 
 #[tauri::command]
@@ -513,6 +532,37 @@ mod tests {
         let d = std::env::temp_dir().join(format!("nexus-continuity-{}-{}", tag, uuid::Uuid::new_v4().simple()));
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    fn hour_of(json: &str) -> Option<u8> {
+        let raw = format!(r#"{{"activeGoals":["g"],"relevantMemory":[],"dailySummaryHour":{}}}"#, json);
+        let ctx: TerranceContext = serde_json::from_str(&raw).expect("context must still load");
+        assert_eq!(ctx.active_goals, vec!["g".to_string()]);
+        ctx.daily_summary_hour
+    }
+
+    #[test]
+    fn daily_summary_hour_out_of_range_does_not_fail_load() {
+        assert_eq!(hour_of("7"), Some(7));
+        assert_eq!(hour_of("0"), Some(0));
+        assert_eq!(hour_of("23"), Some(23));
+        assert_eq!(hour_of("\"8\""), Some(8));
+        assert_eq!(hour_of("24"), None);
+        assert_eq!(hour_of("300"), None);
+        assert_eq!(hour_of("-1"), None);
+        assert_eq!(hour_of("7.5"), None);
+        assert_eq!(hour_of("null"), None);
+        assert_eq!(hour_of("\"abc\""), None);
+    }
+
+    #[test]
+    fn legacy_context_without_new_fields_loads() {
+        let ctx: TerranceContext = serde_json::from_str(
+            r#"{"activeGoals":[],"lastSessionSummary":null,"lastSessionTimestamp":null,"relevantMemory":[]}"#,
+        )
+        .unwrap();
+        assert!(ctx.daily_summary_hour.is_none());
+        assert!(ctx.last_midday_timestamp.is_none());
     }
 
     #[test]
