@@ -34,14 +34,20 @@ import { startTelegramBridge, stopTelegramBridge } from "./telegramBridge";
 const CONSOLIDATION_INTERVAL_MS = 6 * 60 * 60 * 1000;  // 6 hours
 const REASONING_INTERVAL_MS = 12 * 60 * 60 * 1000;      // 12 hours
 const HEALTH_CHECK_INTERVAL_MS = 30 * 60 * 1000;         // 30 minutes
-const DAILY_SUMMARY_COOLDOWN_MS = 20 * 60 * 60 * 1000;   // 20 hours (prevents double-send)
-const MIDDAY_COOLDOWN_MS = 20 * 60 * 60 * 1000;           // 20 hours (prevents double-send)
-const EVENING_COOLDOWN_MS = 20 * 60 * 60 * 1000;          // 20 hours (prevents double-send)
 const PRUNE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;       // 7 days
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;                  // Check every 5 minutes
 const DEFAULT_SUMMARY_HOUR = 7;                            // 7 AM local time
-const DEFAULT_MIDDAY_HOUR = 12;                            // 12:30 PM local time
+const DEFAULT_MIDDAY_HOUR = 12;
+const DEFAULT_MIDDAY_MINUTE = 30;                          // 12:30 PM local time
 const DEFAULT_EVENING_HOUR = 21;                           // 9 PM local time
+const HOUR_MS = 60 * 60 * 1000;
+/** Daily-summary catch-up ends at the midday slot (12:30). */
+const DAILY_CATCHUP_UNTIL_MIN = DEFAULT_MIDDAY_HOUR * 60 + DEFAULT_MIDDAY_MINUTE;
+/** Midday catch-up ends at the evening slot (21:00). */
+const MIDDAY_WINDOW_MS = (DEFAULT_EVENING_HOUR * 60 - DAILY_CATCHUP_UNTIL_MIN) * 60_000;
+/** Evening catch-up runs until 03:00 the next day. */
+const EVENING_CATCHUP_UNTIL_HOUR = 3;
+const EVENING_WINDOW_MS = (24 - DEFAULT_EVENING_HOUR + EVENING_CATCHUP_UNTIL_HOUR) * HOUR_MS;
 const MAX_HEAVY_JOBS_PER_TICK = 1;                         // LLM / Telegram jobs per tick
 
 /** Timestamps whose absence means "first observation": seed to now instead of firing. */
@@ -82,6 +88,91 @@ export function getSchedulerStatus(): SchedulerStatus {
   return { ..._lastStatus };
 }
 
+// ─── Slot-based timing (bug 5) ─────────────────────────────────────────────────
+
+/** Most recent local occurrence of hh:mm at or before `now` (ms). */
+export function lastSlot(now: number, hour: number, minute = 0): number {
+  const s = new Date(now);
+  s.setHours(hour, minute, 0, 0);
+  if (s.getTime() > now) s.setDate(s.getDate() - 1);
+  return s.getTime();
+}
+
+/**
+ * A daily touch is due when it has not run since its latest slot and we are
+ * still inside the catch-up window after that slot. A missing timestamp is
+ * not due (the scheduler seeds it instead).
+ */
+export function isTouchDue(
+  last: number | undefined,
+  now: number,
+  hour: number,
+  minute: number,
+  windowMs: number,
+): { due: boolean; catchUp: boolean; slot: number } {
+  const slot = lastSlot(now, hour, minute);
+  const due = last != null && last > 0 && last < slot && now - slot < windowMs;
+  return { due, catchUp: due && now - slot > CHECK_INTERVAL_MS * 2, slot };
+}
+
+export function clampSummaryHour(h: unknown): number {
+  return typeof h === "number" && Number.isInteger(h) && h >= 0 && h <= 23 ? h : DEFAULT_SUMMARY_HOUR;
+}
+
+export type SchedulerTimestamps = Pick<
+  TerranceContext,
+  | "dailySummaryHour"
+  | "lastDailySummaryTimestamp"
+  | "lastMiddayTimestamp"
+  | "lastEveningTimestamp"
+  | "lastHealthCheckTimestamp"
+  | "lastConsolidationTimestamp"
+  | "lastReasoningTimestamp"
+  | "lastPruneTimestamp"
+>;
+
+export interface DueTask {
+  id: JobId;
+  /** True when running late inside the catch-up window. */
+  catchUp: boolean;
+  /** Backoff window key: the slot start for daily touches, "interval" otherwise. */
+  window: string;
+}
+
+/**
+ * Pure decision: which jobs are due at `now` (ms, local time), in run order.
+ * Does not apply failure backoff or the one-heavy-job-per-tick budget; tick()
+ * does that.
+ */
+export function decideDueTasks(ctx: SchedulerTimestamps, now: number): DueTask[] {
+  const due: DueTask[] = [];
+  const summaryHour = clampSummaryHour(ctx.dailySummaryHour);
+  const dailyWindowMs = Math.max((DAILY_CATCHUP_UNTIL_MIN - summaryHour * 60) * 60_000, HOUR_MS);
+
+  const touches: [JobId, number | undefined, number, number, number][] = [
+    ["daily", ctx.lastDailySummaryTimestamp, summaryHour, 0, dailyWindowMs],
+    ["midday", ctx.lastMiddayTimestamp, DEFAULT_MIDDAY_HOUR, DEFAULT_MIDDAY_MINUTE, MIDDAY_WINDOW_MS],
+    ["evening", ctx.lastEveningTimestamp, DEFAULT_EVENING_HOUR, 0, EVENING_WINDOW_MS],
+  ];
+  for (const [id, last, h, m, w] of touches) {
+    const t = isTouchDue(last, now, h, m, w);
+    if (t.due) due.push({ id, catchUp: t.catchUp, window: String(t.slot) });
+  }
+
+  const intervals: [JobId, number | undefined, number, boolean][] = [
+    // Health check may run with a missing timestamp (light, not seeded).
+    ["health", ctx.lastHealthCheckTimestamp ?? 0, HEALTH_CHECK_INTERVAL_MS, true],
+    ["consolidation", ctx.lastConsolidationTimestamp, CONSOLIDATION_INTERVAL_MS, false],
+    ["reasoning", ctx.lastReasoningTimestamp, REASONING_INTERVAL_MS, false],
+    ["prune", ctx.lastPruneTimestamp, PRUNE_INTERVAL_MS, false],
+  ];
+  for (const [id, last, interval, allowMissing] of intervals) {
+    if (last == null || (!allowMissing && last <= 0)) continue;
+    if (now - last >= interval) due.push({ id, catchUp: false, window: "interval" });
+  }
+  return due;
+}
+
 // ─── Failure backoff (bug 3) ──────────────────────────────────────────────────
 // Attempts are tracked in memory only (a restart may retry once; success still
 // persists the real timestamp). Lead decision: retry after 5, 15, 60 min, max 3
@@ -99,24 +190,18 @@ interface FailureState {
 }
 const failures = new Map<JobId, FailureState>();
 
-/** Window key for a job; failure counters reset when it changes. */
-function windowKeyFor(id: JobId, now: number): string {
-  if (id === "daily" || id === "midday" || id === "evening") return new Date(now).toDateString();
-  return "interval";
-}
-
-function inBackoff(id: JobId, now: number): boolean {
+/** Failure counters reset when the job's window (slot) changes. */
+function inBackoff(id: JobId, now: number, window: string): boolean {
   const f = failures.get(id);
   if (!f) return false;
-  if (f.window !== windowKeyFor(id, now)) {
+  if (f.window !== window) {
     failures.delete(id);
     return false;
   }
   return f.count >= MAX_ATTEMPTS_PER_WINDOW || now < f.nextAt;
 }
 
-function recordFailure(id: JobId, now: number): void {
-  const window = windowKeyFor(id, now);
+function recordFailure(id: JobId, now: number, window: string): void {
   const prev = failures.get(id);
   const count = prev && prev.window === window ? prev.count + 1 : 1;
   const delay = BACKOFF_DELAYS_MS[Math.min(count - 1, BACKOFF_DELAYS_MS.length - 1)];
@@ -175,6 +260,7 @@ async function runJob(
   kind: Parameters<typeof activityBus.register>[1],
   fn: () => Promise<JobOutcome>,
   now: number,
+  window: string,
   detail?: string,
 ): Promise<void> {
   const taskId = activityBus.register(label, kind, detail ? { detail } : undefined);
@@ -189,7 +275,7 @@ async function runJob(
     recordSuccess(id);
     activityBus.complete(taskId, outcome.detail);
   } else {
-    recordFailure(id, now);
+    recordFailure(id, now, window);
     activityBus.fail(taskId, outcome.detail);
     console.error(`[scheduler] ${label} failed: ${outcome.detail}`);
   }
@@ -228,8 +314,7 @@ async function tick() {
         console.error("[scheduler] could not persist seeded timestamps:", e);
       }
     }
-    const currentHour = new Date(now).getHours();
-    const summaryHour = ctx.dailySummaryHour ?? DEFAULT_SUMMARY_HOUR;
+    const summaryHour = clampSummaryHour(ctx.dailySummaryHour);
 
     // Update status cache
     _lastStatus = {
@@ -242,45 +327,46 @@ async function tick() {
       dailySummaryHour: summaryHour,
     };
 
-    const heavy = (id: JobId) => heavyBudget > 0 && !inBackoff(id, now);
     const sentOutcome = (r: { sent: boolean }): JobOutcome =>
       r.sent ? { ok: true, detail: "Sent via Telegram" } : { ok: false, detail: "Generation or delivery failed" };
 
-    // Daily summary — runs at the configured hour, or catches up if missed
-    const lastSummary = ctx.lastDailySummaryTimestamp ?? 0;
-    const missedSummary = now - lastSummary > DAILY_SUMMARY_COOLDOWN_MS;
-    const isScheduledHour = currentHour === summaryHour;
-    const isCatchUp = missedSummary && currentHour >= summaryHour;
-    if (missedSummary && (isScheduledHour || isCatchUp) && heavy("daily")) {
-      heavyBudget--;
-      await runJob("daily", "Daily Summary", "daily_summary",
-        async () => sentOutcome(await generateDailySummary()), now,
-        isCatchUp && !isScheduledHour ? "catch-up" : undefined);
-    }
-
-    // Midday correction
-    const lastMidday = ctx.lastMiddayTimestamp ?? 0;
-    const missedMidday = now - lastMidday > MIDDAY_COOLDOWN_MS;
-    const isMiddayHour = currentHour === DEFAULT_MIDDAY_HOUR;
-    const isMiddayCatchUp = missedMidday && currentHour > DEFAULT_MIDDAY_HOUR && currentHour < DEFAULT_EVENING_HOUR;
-    if (missedMidday && (isMiddayHour || isMiddayCatchUp) && heavy("midday")) {
-      heavyBudget--;
-      await runJob("midday", "Midday Correction", "daily_summary",
-        async () => sentOutcome(await generateMiddayCorrection()), now,
-        isMiddayCatchUp && !isMiddayHour ? "catch-up" : undefined);
-    }
-
-    // Evening integration
-    const lastEvening = ctx.lastEveningTimestamp ?? 0;
-    const missedEvening = now - lastEvening > EVENING_COOLDOWN_MS;
-    const isEveningHour = currentHour === DEFAULT_EVENING_HOUR;
-    const isEveningCatchUp = missedEvening && currentHour > DEFAULT_EVENING_HOUR;
-    if (missedEvening && (isEveningHour || isEveningCatchUp) && heavy("evening")) {
-      heavyBudget--;
-      await runJob("evening", "Evening Integration", "daily_summary",
-        async () => sentOutcome(await generateEveningIntegration()), now,
-        isEveningCatchUp && !isEveningHour ? "catch-up" : undefined);
-    }
+    const jobs: Record<JobId, { label: string; kind: Parameters<typeof activityBus.register>[1]; heavy: boolean; fn: () => Promise<JobOutcome> }> = {
+      daily: { label: "Daily Summary", kind: "daily_summary", heavy: true, fn: async () => sentOutcome(await generateDailySummary()) },
+      midday: { label: "Midday Correction", kind: "daily_summary", heavy: true, fn: async () => sentOutcome(await generateMiddayCorrection()) },
+      evening: { label: "Evening Integration", kind: "daily_summary", heavy: true, fn: async () => sentOutcome(await generateEveningIntegration()) },
+      health: {
+        label: "Health Check", kind: "health_check", heavy: false,
+        fn: async () => {
+          const report = await runDiagnostics();
+          if (report.issues.length > 0) {
+            await autoHeal(report);
+            return { ok: true, detail: `${report.issues.length} issue(s) addressed` };
+          }
+          return { ok: true, detail: "All systems healthy" };
+        },
+      },
+      consolidation: {
+        label: "Memory Consolidation", kind: "consolidation", heavy: true,
+        fn: async () => {
+          const result = await consolidateRecentSessions();
+          return { ok: true, detail: result.consolidated ? "Consolidated recent sessions" : "Skipped (not enough sessions)" };
+        },
+      },
+      reasoning: {
+        label: "Reasoning Loop", kind: "reasoning", heavy: true,
+        fn: async () => {
+          const result = await runReasoningLoop();
+          return { ok: true, detail: result.reasoned ? "Reflection complete" : "Skipped" };
+        },
+      },
+      prune: {
+        label: "Memory Pruning", kind: "prune", heavy: true,
+        fn: async () => {
+          const result = await pruneMemory();
+          return { ok: true, detail: `${result.archived} archived, ${result.pruned} trimmed` };
+        },
+      },
+    };
 
     // Ritual reminders (presence drills, training, weekly/monthly check-ins)
     try {
@@ -289,57 +375,27 @@ async function tick() {
       console.error("[scheduler] Rituals tick error:", e);
     }
 
-    // Health check (light, not budgeted)
-    const lastHealthCheck = ctx.lastHealthCheckTimestamp ?? 0;
-    if (now - lastHealthCheck >= HEALTH_CHECK_INTERVAL_MS && !inBackoff("health", now)) {
-      await runJob("health", "Health Check", "health_check", async () => {
-        const report = await runDiagnostics();
-        if (report.issues.length > 0) {
-          await autoHeal(report);
-          return { ok: true, detail: `${report.issues.length} issue(s) addressed` };
-        }
-        return { ok: true, detail: "All systems healthy" };
-      }, now);
-    }
-
-    // Consolidation (+ skills evolution on the same cadence)
-    const lastConsolidation = ctx.lastConsolidationTimestamp ?? 0;
-    if (now - lastConsolidation >= CONSOLIDATION_INTERVAL_MS && heavy("consolidation")) {
-      heavyBudget--;
-      await runJob("consolidation", "Memory Consolidation", "consolidation", async () => {
-        const result = await consolidateRecentSessions();
-        return { ok: true, detail: result.consolidated ? "Consolidated recent sessions" : "Skipped (not enough sessions)" };
-      }, now);
-
-      try {
-        const evoId = activityBus.register("Skills Evolution", "skills_evolution");
-        const evo = await withTimeout(evolveSkills(), AUX_TIMEOUT_MS, "skills evolution");
-        activityBus.complete(evoId, evo.created > 0 || evo.updated > 0
-          ? `${evo.created} created, ${evo.updated} updated`
-          : "No new patterns");
-      } catch (e) {
-        console.error("[scheduler] Skills evolution error:", e);
+    for (const task of decideDueTasks(ctx, now)) {
+      const job = jobs[task.id];
+      if (inBackoff(task.id, now, task.window)) continue;
+      if (job.heavy) {
+        if (heavyBudget <= 0) continue;
+        heavyBudget--;
       }
-    }
+      await runJob(task.id, job.label, job.kind, job.fn, now, task.window, task.catchUp ? "catch-up" : undefined);
 
-    // Reasoning
-    const lastReasoning = ctx.lastReasoningTimestamp ?? 0;
-    if (now - lastReasoning >= REASONING_INTERVAL_MS && heavy("reasoning")) {
-      heavyBudget--;
-      await runJob("reasoning", "Reasoning Loop", "reasoning", async () => {
-        const result = await runReasoningLoop();
-        return { ok: true, detail: result.reasoned ? "Reflection complete" : "Skipped" };
-      }, now);
-    }
-
-    // Weekly pruning
-    const lastPrune = ctx.lastPruneTimestamp ?? 0;
-    if (now - lastPrune >= PRUNE_INTERVAL_MS && heavy("prune")) {
-      heavyBudget--;
-      await runJob("prune", "Memory Pruning", "prune", async () => {
-        const result = await pruneMemory();
-        return { ok: true, detail: `${result.archived} archived, ${result.pruned} trimmed` };
-      }, now);
+      // Skills self-improvement runs on the consolidation cadence
+      if (task.id === "consolidation") {
+        try {
+          const evoId = activityBus.register("Skills Evolution", "skills_evolution");
+          const evo = await withTimeout(evolveSkills(), AUX_TIMEOUT_MS, "skills evolution");
+          activityBus.complete(evoId, evo.created > 0 || evo.updated > 0
+            ? `${evo.created} created, ${evo.updated} updated`
+            : "No new patterns");
+        } catch (e) {
+          console.error("[scheduler] Skills evolution error:", e);
+        }
+      }
     }
 
     // Custom user-defined jobs
