@@ -77,3 +77,35 @@ pub fn list_snapshots() -> Result<Vec<BrainSnapshot>, String> {
     snapshots.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     Ok(snapshots)
 }
+
+/// Failing repro for TEST_PLAN bug #8 (same-second snapshot overwrite).
+#[cfg(test)]
+mod repro_tests {
+    use super::*;
+
+    fn snap(id: &str, ts: &str) -> BrainSnapshot {
+        BrainSnapshot {
+            id: id.into(), timestamp: ts.into(), fatigue: 0.1, engagement: 0.2, alpha_peak: 10.0,
+            beta_balance: 0.5, focus_score: 0.6, relaxation_score: 0.7,
+        }
+    }
+
+    /// Ignored by default because it sets the process-wide HOME, which would race other
+    /// tests. Run with: cargo test repro_ -- --ignored --test-threads=1
+    #[test]
+    #[ignore = "mutates HOME; run with --ignored --test-threads=1"]
+    fn repro_same_second_snapshots_are_both_kept() {
+        let home = std::env::temp_dir().join(format!("nexus-snap-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let old = std::env::var_os("HOME");
+        std::env::set_var("HOME", &home);
+        let a = save_snapshot(snap("a", "2026-10-21T18:00:00Z"));
+        let b = save_snapshot(snap("b", "2026-10-21T18:00:00Z"));
+        let listed = list_snapshots();
+        match old { Some(v) => std::env::set_var("HOME", v), None => std::env::remove_var("HOME") }
+        let _ = std::fs::remove_dir_all(&home);
+        assert!(a.unwrap().starts_with(home.to_str().unwrap()), "snapshot escaped temp HOME");
+        b.unwrap();
+        assert_eq!(listed.unwrap().len(), 2, "second snapshot overwrote the first");
+    }
+}

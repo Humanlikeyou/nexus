@@ -1256,3 +1256,31 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 }
+
+/// Failing repro for TEST_PLAN bug #7 (imported row blanks NOOP-computed fields).
+#[cfg(test)]
+mod repro_tests {
+    use super::*;
+
+    #[test]
+    fn repro_imported_null_field_does_not_hide_noop_value() {
+        let path = std::env::temp_dir().join(format!("nexus-noop-merge-{}.sqlite", uuid::Uuid::new_v4()));
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE dailyMetric (
+                deviceId TEXT NOT NULL, day TEXT NOT NULL, totalSleepMin REAL, efficiency REAL,
+                deepMin REAL, remMin REAL, lightMin REAL, restingHr INTEGER, avgHrv REAL,
+                recovery REAL, strain REAL, spo2Pct REAL, skinTempDevC REAL, respRateBpm REAL);
+             INSERT INTO dailyMetric VALUES
+               ('my-whoop-noop','2026-10-20',410,.89,80,95,235,56,54,62,9,97,.1,14.2),
+               ('my-whoop',     '2026-10-20',430,.91,85,100,245,54,59,NULL,8,98,.0,14.1);",
+        )
+        .unwrap();
+        let days = read_daily_metrics(&conn, "my-whoop").unwrap();
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(days.len(), 1);
+        assert_eq!(days[0].total_sleep_min, Some(430.0), "imported value should win where present");
+        assert_eq!(days[0].recovery, Some(62.0), "imported NULL blanked the NOOP-computed recovery");
+    }
+}
