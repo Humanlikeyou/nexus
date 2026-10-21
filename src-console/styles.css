@@ -430,3 +430,14 @@ a { color: inherit; }
 .backup-skipped summary { cursor: default; }
 .backup-skipped ul { margin: var(--space-1) 0 0; padding-left: var(--space-4); }
 .backup-skipped code, .backup-result code { font: var(--text-subheadline)/1.35 var(--font-mono); }
+
+/* Lazy screen placeholder: hidden for 150ms, then a calm fade-in (no spinner). */
+@keyframes screen-skeleton-in { from { opacity: 0; } to { opacity: 1; } }
+.screen-skeleton { display: grid; gap: var(--space-3); padding: var(--space-6) var(--space-5); opacity: 0; animation: screen-skeleton-in var(--dur-state) var(--ease-standard) 150ms forwards; }
+.screen-skeleton span { display: block; border-radius: var(--radius-sm); background: var(--fill-tertiary); }
+.screen-skeleton__title { width: 220px; height: var(--lh-large-title); }
+.screen-skeleton__line { width: min(560px, 80%); height: var(--lh-body); }
+.screen-skeleton__line--short { width: min(360px, 50%); }
+.screen-skeleton__block { height: 240px; border-radius: var(--radius-md) !important; }
+@media (prefers-reduced-motion: reduce) { .screen-skeleton { animation-duration: 1ms; } }
+:root[data-reduce-motion="true"] .screen-skeleton { animation: none; opacity: 1; }

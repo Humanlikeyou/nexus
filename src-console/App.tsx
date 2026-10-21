@@ -20,6 +20,7 @@ import type { MuseOperation } from "./screens/muse";
 import { ContextInspector } from "./shell/ContextInspector";
 import { Footer } from "./shell/Footer";
 import { Sidebar } from "./shell/Sidebar";
+import { ScreenSkeleton } from "./shell/ScreenSkeleton";
 import { Toolbar } from "./shell/Toolbar";
 import type { ModuleId, MuseDevice, RecordedSession } from "./types";
 
@@ -258,7 +259,7 @@ export default function App() {
     <CommandSurface mode={active}>
       <Toolbar label={selected.label} busy={busy} onRefresh={refresh} />
       <Sidebar active={active} onSelect={setActive} data={data} />
-      <section className="active-field" aria-label={`${selected.label} system`}><Suspense fallback={null}>{view}</Suspense></section>
+      <section className="active-field" aria-label={`${selected.label} system`}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></section>
       <Footer data={data} busy={busy} />
       {notice && <div className="field-notice"><i />{notice}</div>}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />
