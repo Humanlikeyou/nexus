@@ -97,13 +97,63 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn check_deadline(deadline_ms: Option<u64>, now: u64) -> Result<(), String> {
-    match deadline_ms {
-        Some(deadline) if now > deadline => Err(format!(
+/// Longest a restart approval stays valid, whatever the caller asks for.
+pub const MAX_DEADLINE_WINDOW_MS: u64 = 5 * 60 * 1000;
+
+/// min(requested, now + 5 min); now + 5 min when not given.
+fn effective_deadline(requested: Option<u64>, now: u64) -> u64 {
+    let cap = now.saturating_add(MAX_DEADLINE_WINDOW_MS);
+    requested.map_or(cap, |d| d.min(cap))
+}
+
+fn check_deadline(deadline: u64, now: u64) -> Result<(), String> {
+    if now > deadline {
+        Err(format!(
             "{EXPIRED_PREFIX} The restart request's deadline passed; nothing was run."
-        )),
-        _ => Ok(()),
+        ))
+    } else {
+        Ok(())
     }
+}
+
+/// Run restarts in order, re-checking the deadline before each one. If the
+/// deadline passes before anything ran, the whole call is `Err(expired:)`;
+/// otherwise each remaining service gets `{ok:false, error:"expired: …"}`.
+async fn run_sequential<S, R, Fut, N>(
+    services: &[S],
+    deadline: u64,
+    mut now: N,
+    mut restart: R,
+    id: impl Fn(&S) -> String,
+) -> Result<Vec<ServiceRestartResult>, String>
+where
+    R: FnMut(&S) -> Fut,
+    Fut: std::future::Future<Output = Result<String, String>>,
+    N: FnMut() -> u64,
+{
+    let mut results = Vec::with_capacity(services.len());
+    for service in services {
+        if let Err(expired) = check_deadline(deadline, now()) {
+            if results.is_empty() {
+                return Err(expired);
+            }
+            results.push(ServiceRestartResult {
+                service: id(service),
+                ok: false,
+                error: Some(format!(
+                    "{EXPIRED_PREFIX} Deadline passed before this service was restarted."
+                )),
+            });
+            continue;
+        }
+        let outcome = restart(service).await;
+        results.push(ServiceRestartResult {
+            service: id(service),
+            ok: outcome.is_ok(),
+            error: outcome.err(),
+        });
+    }
+    Ok(results)
 }
 
 #[tauri::command]
@@ -113,25 +163,22 @@ pub async fn restart_services(
     deadline_ms: Option<u64>,
 ) -> Result<Vec<ServiceRestartResult>, String> {
     let parsed = parse_services(&services)?;
-    check_deadline(deadline_ms, now_ms())?;
+    let deadline = effective_deadline(deadline_ms, now_ms());
+    check_deadline(deadline, now_ms())?;
     let _approval =
         approval_gate::require_approval(&app, &lock_key(&parsed), dialog_text(&parsed)?).await?;
-    check_deadline(deadline_ms, now_ms())?;
-
-    let mut results = Vec::with_capacity(parsed.len());
-    for service in &parsed {
-        let outcome = service.restart().await;
-        results.push(to_result(service, outcome));
-    }
-    Ok(results)
-}
-
-fn to_result(service: &Service, outcome: Result<String, String>) -> ServiceRestartResult {
-    ServiceRestartResult {
-        service: service.id(),
-        ok: outcome.is_ok(),
-        error: outcome.err(),
-    }
+    check_deadline(deadline, now_ms())?;
+    run_sequential(
+        &parsed,
+        deadline,
+        now_ms,
+        |s| {
+            let s = s.clone();
+            async move { s.restart().await }
+        },
+        Service::id,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -169,22 +216,72 @@ mod tests {
     }
 
     #[test]
-    fn deadline_expiry() {
-        assert!(check_deadline(None, 10).is_ok());
-        assert!(check_deadline(Some(10), 10).is_ok());
-        let err = check_deadline(Some(10), 11).unwrap_err();
-        assert!(err.starts_with(EXPIRED_PREFIX), "{err}");
+    fn deadline_is_capped_at_five_minutes_and_defaults_to_it() {
+        let now = 1_000_000;
+        assert_eq!(effective_deadline(None, now), now + MAX_DEADLINE_WINDOW_MS);
+        assert_eq!(effective_deadline(Some(now + 10), now), now + 10);
+        assert_eq!(
+            effective_deadline(Some(u64::MAX), now),
+            now + MAX_DEADLINE_WINDOW_MS
+        );
+        assert!(check_deadline(10, 10).is_ok());
+        assert!(check_deadline(10, 11)
+            .unwrap_err()
+            .starts_with(EXPIRED_PREFIX));
     }
 
-    #[test]
-    fn result_shape_is_camel_case() {
-        let ok = to_result(&Service::OpenClaw, Ok("done".into()));
-        let bad = to_result(&Service::Docker("n8n".into()), Err("boom".into()));
+    fn ids(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn expiry_before_anything_ran_is_an_error() {
+        let svcs = ids(&["a", "b"]);
+        let err = run_sequential(
+            &svcs,
+            10,
+            || 11,
+            |_| async { Ok("x".into()) },
+            |s| s.clone(),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.starts_with(EXPIRED_PREFIX));
+    }
+
+    #[tokio::test]
+    async fn expiry_mid_batch_marks_remaining_services_and_failures_continue() {
+        let svcs = ids(&["a", "b", "c"]);
+        let clock = std::cell::Cell::new(0u64);
+        let results = run_sequential(
+            &svcs,
+            10,
+            || {
+                let t = clock.get();
+                clock.set(t + 6); // 0, 6, 12
+                t
+            },
+            |s: &String| {
+                let fail = s == "a";
+                async move {
+                    if fail {
+                        Err("boom".to_string())
+                    } else {
+                        Ok("ok".to_string())
+                    }
+                }
+            },
+            |s| s.clone(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
-            serde_json::to_value([ok, bad]).unwrap(),
+            serde_json::to_value(&results).unwrap(),
             serde_json::json!([
-                {"service": "openclaw", "ok": true, "error": null},
-                {"service": "docker:n8n", "ok": false, "error": "boom"}
+                {"service": "a", "ok": false, "error": "boom"},
+                {"service": "b", "ok": true, "error": null},
+                {"service": "c", "ok": false,
+                 "error": "expired: Deadline passed before this service was restarted."}
             ])
         );
     }
