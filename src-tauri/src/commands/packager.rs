@@ -19,6 +19,8 @@ pub struct PackageInfo {
     pub path: String,
     pub size_mb: f64,
     pub includes: Vec<String>,
+    /// Files left out of the backup (too large or symlinks), never silent.
+    pub skipped: Vec<String>,
 }
 
 #[tauri::command]
@@ -34,12 +36,13 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     fs::create_dir_all(&staging).map_err(|e| format!("Failed to create staging dir: {}", e))?;
 
     let mut includes = Vec::new();
+    let mut skipped = Vec::new();
 
     // 1. Copy Nexus config
     let config_src = nexus_data_dir();
     if config_src.exists() {
         let dest = staging.join("nexus-config");
-        copy_dir_recursive(&config_src, &dest)?;
+        copy_dir_recursive(&config_src, &dest, Some(MAX_PACK_FILE_BYTES), &mut skipped)?;
         includes.push("Nexus settings & config".to_string());
     }
 
@@ -51,6 +54,8 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
             &openclaw,
             &dest,
             &["openclaw.json", "cron", "skills", "memory", "workspace"],
+            Some(MAX_PACK_FILE_BYTES),
+            &mut skipped,
         )?;
         includes.push("OpenClaw workspace & memory".to_string());
     }
@@ -59,7 +64,12 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     let sessions_dir = nexus_data_dir().join("sessions");
     if sessions_dir.exists() {
         let dest = staging.join("sessions");
-        copy_dir_recursive(&sessions_dir, &dest)?;
+        copy_dir_recursive(
+            &sessions_dir,
+            &dest,
+            Some(MAX_PACK_FILE_BYTES),
+            &mut skipped,
+        )?;
         includes.push("BLE session recordings".to_string());
     }
 
@@ -94,6 +104,7 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
         "packed_at": chrono::Local::now().to_rfc3339(),
         "hostname": hostname::get().map(|h| h.to_string_lossy().to_string()).unwrap_or_default(),
         "includes": &includes,
+        "skipped": &skipped,
         "restore_instructions": "To restore: Open Nexus on the new machine, go to Settings, click 'Unpack', and select this file."
     });
     let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
@@ -143,6 +154,7 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
         path: archive_path.to_string_lossy().to_string(),
         size_mb: (size_mb * 100.0).round() / 100.0,
         includes,
+        skipped,
     })
 }
 
@@ -189,6 +201,9 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
         .unwrap_or(staging.clone());
 
     let mut restored = Vec::new();
+    // Restore copies everything that was packed (the archive is already capped);
+    // only symlinks are skipped, and they are reported.
+    let mut skipped = Vec::new();
 
     // Restore config
     let config_src = {
@@ -202,7 +217,7 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     if config_src.exists() {
         let dest = nexus_data_dir();
         fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-        copy_dir_recursive(&config_src, &dest)?;
+        copy_dir_recursive(&config_src, &dest, None, &mut skipped)?;
         restored.push("Settings & config restored".to_string());
     }
 
@@ -211,7 +226,7 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     if openclaw_src.exists() {
         let dest = openclaw_dir();
         fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-        copy_dir_recursive(&openclaw_src, &dest)?;
+        copy_dir_recursive(&openclaw_src, &dest, None, &mut skipped)?;
         restored.push("OpenClaw workspace restored".to_string());
     }
 
@@ -220,7 +235,7 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     if sessions_src.exists() {
         let dest = nexus_data_dir().join("sessions");
         fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-        copy_dir_recursive(&sessions_src, &dest)?;
+        copy_dir_recursive(&sessions_src, &dest, None, &mut skipped)?;
         restored.push("BLE session data restored".to_string());
     }
 
@@ -250,6 +265,7 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     }
 
     // Staging cleanup happens when `_staging_guard` drops.
+    restored.extend(skipped.into_iter().map(|s| format!("Skipped: {s}")));
 
     if restored.is_empty() {
         restored.push("Archive was empty — nothing to restore".to_string());
@@ -388,47 +404,126 @@ pub fn get_app_paths() -> Result<serde_json::Value, String> {
     }))
 }
 
-fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
+/// Per-file limit when packing (keeps backups a manageable size). Files over
+/// it are listed in `PackageInfo::skipped` and the manifest.
+const MAX_PACK_FILE_BYTES: u64 = 50_000_000;
+
+/// macOS metadata that is not user data (never packed or restored).
+fn is_os_junk(name: &str) -> bool {
+    name == ".DS_Store" || name.starts_with("._")
+}
+
+/// Recursively copy `src` into `dst`. Dot-files are copied. Symlinks are never
+/// followed, and files over `max_file_bytes` (if set) are not copied; both are
+/// recorded in `skipped` instead of being dropped silently.
+fn copy_dir_recursive(
+    src: &Path,
+    dst: &Path,
+    max_file_bytes: Option<u64>,
+    skipped: &mut Vec<String>,
+) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("mkdir {}: {}", dst.display(), e))?;
 
     for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
+        let name = entry.file_name().to_string_lossy().to_string();
+        if is_os_junk(&name) {
+            continue;
+        }
 
-        // Never follow symlinks while copying restored data.
         let file_type = entry.file_type().map_err(|e| e.to_string())?;
         if file_type.is_symlink() {
+            skipped.push(format!("{} (symlink)", src_path.display()));
             continue;
         }
         if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            // Skip very large files (>50MB) and hidden OS files
-            let size = fs::metadata(&src_path).map(|m| m.len()).unwrap_or(0);
-            let name = entry.file_name().to_string_lossy().to_string();
-            if size < 50_000_000 && !name.starts_with('.') {
-                fs::copy(&src_path, &dst_path)
-                    .map_err(|e| format!("copy {}: {}", src_path.display(), e))?;
-            }
+            copy_dir_recursive(&src_path, &dst_path, max_file_bytes, skipped)?;
+            continue;
         }
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        if max_file_bytes.is_some_and(|max| size >= max) {
+            skipped.push(format!(
+                "{} ({:.1} MB, over the {} MB per-file limit)",
+                src_path.display(),
+                size as f64 / 1_000_000.0,
+                max_file_bytes.unwrap_or(0) / 1_000_000
+            ));
+            continue;
+        }
+        fs::copy(&src_path, &dst_path)
+            .map_err(|e| format!("copy {}: {}", src_path.display(), e))?;
     }
     Ok(())
 }
 
-fn copy_dir_selective(src: &Path, dst: &Path, names: &[&str]) -> Result<(), String> {
+fn copy_dir_selective(
+    src: &Path,
+    dst: &Path,
+    names: &[&str],
+    max_file_bytes: Option<u64>,
+    skipped: &mut Vec<String>,
+) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| e.to_string())?;
 
     for name in names {
         let src_path = src.join(name);
         let dst_path = dst.join(name);
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
+        if src_path.is_symlink() {
+            skipped.push(format!("{} (symlink)", src_path.display()));
+        } else if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path, max_file_bytes, skipped)?;
         } else if src_path.is_file() {
             fs::copy(&src_path, &dst_path).map_err(|e| e.to_string())?;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::copy_dir_recursive;
+
+    #[test]
+    fn copies_dotfiles_reports_symlinks_and_oversize_skips_junk() {
+        let base =
+            std::env::temp_dir().join(format!("nexus-copy-{}", uuid::Uuid::new_v4().simple()));
+        let src = base.join("src");
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::write(src.join(".hidden_config"), b"keep").unwrap();
+        std::fs::write(src.join("sub").join("big.bin"), vec![0u8; 2048]).unwrap();
+        std::fs::write(src.join(".DS_Store"), b"junk").unwrap();
+        std::fs::write(src.join("._x"), b"junk").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/etc/hosts", src.join("link")).unwrap();
+
+        // Restore mode: no size limit.
+        let mut skipped = Vec::new();
+        copy_dir_recursive(&src, &base.join("restore"), None, &mut skipped).unwrap();
+        assert_eq!(
+            std::fs::read(base.join("restore/.hidden_config")).unwrap(),
+            b"keep"
+        );
+        assert!(base.join("restore/sub/big.bin").is_file());
+        assert!(!base.join("restore/.DS_Store").exists());
+        assert!(!base.join("restore/._x").exists());
+        #[cfg(unix)]
+        {
+            assert!(!base.join("restore/link").exists());
+            assert_eq!(skipped.len(), 1);
+            assert!(skipped[0].contains("symlink"));
+        }
+
+        // Pack mode: per-file limit is reported, not silent.
+        let mut skipped = Vec::new();
+        copy_dir_recursive(&src, &base.join("pack"), Some(1024), &mut skipped).unwrap();
+        assert!(!base.join("pack/sub/big.bin").exists());
+        assert!(skipped
+            .iter()
+            .any(|s| s.contains("big.bin") && s.contains("limit")));
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
 
 #[cfg(test)]
