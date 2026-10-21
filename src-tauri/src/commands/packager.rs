@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
 fn nexus_data_dir() -> PathBuf {
@@ -395,7 +395,7 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn copy_dir_selective(src: &PathBuf, dst: &PathBuf, names: &[&str]) -> Result<(), String> {
+fn copy_dir_selective(src: &Path, dst: &Path, names: &[&str]) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| e.to_string())?;
 
     for name in names {
@@ -545,7 +545,7 @@ mod unpack_tests {
         let mut raw = Vec::new();
         for i in 0..3 {
             let mut e = raw_header(&format!("p/f{i}"), tar::EntryType::Regular, 1, "g").as_bytes().to_vec();
-            e.extend_from_slice(&[b'x']);
+            e.extend_from_slice(b"x");
             e.resize(1024, 0);
             raw.extend(e);
         }

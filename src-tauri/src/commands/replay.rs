@@ -227,9 +227,9 @@ pub async fn list_replays() -> Result<Vec<ReplayFileInfo>, String> {
         let modified = meta
             .modified()
             .ok()
-            .and_then(|t| {
+            .map(|t| {
                 let dt: chrono::DateTime<chrono::Utc> = t.into();
-                Some(dt.to_rfc3339())
+                dt.to_rfc3339()
             })
             .unwrap_or_default();
 
@@ -369,7 +369,7 @@ async fn replay_task(app: &AppHandle, path: &PathBuf, speed: f64) {
         let _ = app.emit("muse-eeg", &sample);
         packets_emitted += 1;
 
-        if packets_emitted <= 3 || packets_emitted % 500 == 0 {
+        if packets_emitted <= 3 || packets_emitted.is_multiple_of(500) {
             println!(
                 "[replay] emitted={packets_emitted} ch={} samples={}",
                 sample.channel,
@@ -499,8 +499,7 @@ async fn demo_task(app: &AppHandle, mode: &str, speed: f64) {
                 let noise = rng.next_gaussian() * 3.0;
 
                 // Blink artifact on frontal channels
-                let blink = if blink_timer <= 0.15
-                    && blink_timer >= 0.0
+                let blink = if (0.0..=0.15).contains(&blink_timer)
                     && (*ch == "AF7" || *ch == "AF8")
                 {
                     120.0 * (pi2 * blink_timer / 0.15).sin().abs()
@@ -531,7 +530,7 @@ async fn demo_task(app: &AppHandle, mode: &str, speed: f64) {
             blink_timer = 5.0 + (rng.next_u64() % 5000) as f64 / 1000.0;
         }
 
-        if packets_emitted <= 12 || packets_emitted % 2000 == 0 {
+        if packets_emitted <= 12 || packets_emitted.is_multiple_of(2000) {
             println!("[replay] demo emitted={packets_emitted} t={t:.2}s");
         }
 

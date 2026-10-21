@@ -499,16 +499,14 @@ fn list_context_items_in(
         sql.push_str(" AND deleted_at IS NULL");
     }
     if let Some(kinds) = query.kinds.filter(|items| !items.is_empty()) {
-        let placeholders = std::iter::repeat("?")
-            .take(kinds.len())
+        let placeholders = std::iter::repeat_n("?", kinds.len())
             .collect::<Vec<_>>()
             .join(", ");
         sql.push_str(&format!(" AND kind IN ({placeholders})"));
         values.extend(kinds);
     }
     if let Some(statuses) = query.statuses.filter(|items| !items.is_empty()) {
-        let placeholders = std::iter::repeat("?")
-            .take(statuses.len())
+        let placeholders = std::iter::repeat_n("?", statuses.len())
             .collect::<Vec<_>>()
             .join(", ");
         sql.push_str(&format!(" AND status IN ({placeholders})"));
@@ -714,7 +712,7 @@ fn apply_hermes_context_event_in(
                 .item
                 .ok_or_else(|| "Hermes context record is missing its item.".to_string())?;
             if let Some(event_id) = reference.as_deref() {
-                if context_event_already_processed(&conn, event_id)? {
+                if context_event_already_processed(conn, event_id)? {
                     return Ok(());
                 }
                 let provenance_ref = context_event_reference(event_id);
@@ -728,17 +726,17 @@ fn apply_hermes_context_event_in(
                     != 0;
                 if !duplicate {
                     insert_context_item(
-                        &conn,
+                        conn,
                         Uuid::new_v4().to_string(),
                         hermes_context_input(item, provenance_source, Some(provenance_ref)),
                         None,
                         None,
                     )?;
                 }
-                mark_context_event_processed(&conn, event_id)?;
+                mark_context_event_processed(conn, event_id)?;
             } else {
                 insert_context_item(
-                    &conn,
+                    conn,
                     Uuid::new_v4().to_string(),
                     hermes_context_input(item, provenance_source, None),
                     None,
@@ -754,7 +752,7 @@ fn apply_hermes_context_event_in(
                 "Hermes context correction is missing its replacement.".to_string()
             })?;
             if let Some(event_id) = reference.as_deref() {
-                if context_event_already_processed(&conn, event_id)? {
+                if context_event_already_processed(conn, event_id)? {
                     return Ok(());
                 }
                 let provenance_ref = context_event_reference(event_id);
@@ -780,7 +778,7 @@ fn apply_hermes_context_event_in(
                         },
                     )?;
                 }
-                mark_context_event_processed(&conn, event_id)?;
+                mark_context_event_processed(conn, event_id)?;
             } else {
                 correct_context_item_in(
                     conn,
@@ -796,16 +794,16 @@ fn apply_hermes_context_event_in(
                 .context_id
                 .ok_or_else(|| "Hermes context deletion is missing its context ID.".to_string())?;
             if let Some(event_id) = reference.as_deref() {
-                if context_event_already_processed(&conn, event_id)? {
+                if context_event_already_processed(conn, event_id)? {
                     return Ok(());
                 }
-                let existing = get_context_item(&conn, &context_id)?;
+                let existing = get_context_item(conn, &context_id)?;
                 if existing.is_some_and(|item| item.deleted_at.is_none()) {
-                    delete_context_item_in(&conn, context_id)?;
+                    delete_context_item_in(conn, context_id)?;
                 }
-                mark_context_event_processed(&conn, event_id)?;
+                mark_context_event_processed(conn, event_id)?;
             } else {
-                delete_context_item_in(&conn, context_id)?;
+                delete_context_item_in(conn, context_id)?;
             }
         }
         _ => return Err("Unsupported Hermes context event type.".to_string()),

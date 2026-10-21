@@ -1728,8 +1728,7 @@ fn list_terrence_actions_in(query: TerrenceActionQuery) -> Result<Vec<TerrenceAc
     );
     let mut values = Vec::new();
     if !statuses.is_empty() {
-        let placeholders = std::iter::repeat("?")
-            .take(statuses.len())
+        let placeholders = std::iter::repeat_n("?", statuses.len())
             .collect::<Vec<_>>()
             .join(", ");
         sql.push_str(&format!(" WHERE status IN ({placeholders})"));
@@ -1827,9 +1826,7 @@ pub(crate) fn runtime_action_brief(max_chars: usize) -> Result<String, String> {
         }
         lines.push(action);
     }
-    Ok((lines.len() > 2)
-        .then(|| lines.join("\n"))
-        .unwrap_or_default())
+    Ok(if lines.len() > 2 { lines.join("\n") } else { Default::default() })
 }
 
 // ─── Native approval gate ────────────────────────────────────────────────────

@@ -412,8 +412,7 @@ pub fn list_terrence_projects(
         .into_iter()
         .map(|status| clean_status(Some(status)))
         .collect::<Result<Vec<_>, _>>()?;
-    let placeholders = std::iter::repeat("?")
-        .take(statuses.len())
+    let placeholders = std::iter::repeat_n("?", statuses.len())
         .collect::<Vec<_>>()
         .join(", ");
     if placeholders.is_empty() {

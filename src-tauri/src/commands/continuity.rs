@@ -72,7 +72,8 @@ pub fn read_identity_file() -> Result<String, String> {
     }
     // Fallback: check well-known project paths relative to home dir
     if let Some(home) = dirs::home_dir() {
-        for rel in &["projects/nexus/config/terrance.identity.md"] {
+        {
+            let rel = &"projects/nexus/config/terrance.identity.md";
             let candidate = home.join(rel);
             if candidate.exists() {
                 return fs::read_to_string(&candidate).map_err(|e| e.to_string());
@@ -103,7 +104,8 @@ pub fn read_profile_file() -> Result<String, String> {
         }
     }
     if let Some(home) = dirs::home_dir() {
-        for rel in &["projects/nexus/config/terrance.profile.md"] {
+        {
+            let rel = &"projects/nexus/config/terrance.profile.md";
             let candidate = home.join(rel);
             if candidate.exists() {
                 return fs::read_to_string(&candidate).map_err(|e| e.to_string());
@@ -588,10 +590,12 @@ mod tests {
         let dir = temp_dir("roundtrip");
         assert!(load_context_from(&dir).unwrap().active_goals.is_empty());
         assert!(!dir.join(CONTEXT_FILE).exists(), "load must not create the file");
-        let mut ctx = TerranceContext::default();
-        ctx.active_goals = vec!["ship nexus-v2".into()];
-        ctx.daily_summary_hour = Some(6);
-        ctx.last_evening_timestamp = Some(42);
+        let ctx = TerranceContext {
+            active_goals: vec!["ship nexus-v2".into()],
+            daily_summary_hour: Some(6),
+            last_evening_timestamp: Some(42),
+            ..Default::default()
+        };
         save_context_to(&dir, &ctx).unwrap();
         let raw = fs::read_to_string(dir.join(CONTEXT_FILE)).unwrap();
         assert!(raw.contains("\"dailySummaryHour\": 6"));
@@ -685,11 +689,10 @@ pub fn prune_activity_log(days: u32) -> Result<u32, String> {
         if path.extension().map(|x| x == "json").unwrap_or(false) {
             if let Ok(content) = fs::read_to_string(&path) {
                 if let Ok(log) = serde_json::from_str::<ActivityEntry>(&content) {
-                    if now - log.started_at > cutoff_ms {
-                        if fs::remove_file(&path).is_ok() {
+                    if now - log.started_at > cutoff_ms
+                        && fs::remove_file(&path).is_ok() {
                             removed += 1;
                         }
-                    }
                 }
             }
         }
@@ -743,8 +746,10 @@ mod repro_tests {
     #[test]
     fn repro_context_save_is_atomic() {
         let dir = std::env::temp_dir().join(format!("nexus-repro-atomic-{}", uuid::Uuid::new_v4().simple()));
-        let mut ctx = TerranceContext::default();
-        ctx.active_goals = vec!["first".into()];
+        let mut ctx = TerranceContext {
+            active_goals: vec!["first".into()],
+            ..Default::default()
+        };
         save_context_to(&dir, &ctx).unwrap();
         ctx.active_goals = vec!["second".into()];
         save_context_to(&dir, &ctx).unwrap();

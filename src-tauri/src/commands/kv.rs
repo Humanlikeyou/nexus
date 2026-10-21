@@ -1,7 +1,7 @@
 use std::fs;
 
-/// Simple key-value store persisted to the app data directory.
-/// Each key maps to a file: {app_data}/kv/{key}.json
+// Simple key-value store persisted to the app data directory.
+// Each key maps to a file: {app_data}/kv/{key}.json
 
 fn kv_dir() -> Result<std::path::PathBuf, String> {
     let dir = dirs::data_dir()

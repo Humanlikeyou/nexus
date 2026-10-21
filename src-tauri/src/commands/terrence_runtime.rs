@@ -6,7 +6,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tauri::State;
 use uuid::Uuid;
@@ -299,7 +299,7 @@ fn hermes_home() -> Result<PathBuf, String> {
         .ok_or_else(|| "Hermes home was not found at ~/.hermes.".to_string())
 }
 
-fn hermes_python_path(home: &PathBuf) -> Result<PathBuf, String> {
+fn hermes_python_path(home: &Path) -> Result<PathBuf, String> {
     let path = home
         .join("hermes-agent")
         .join("venv")
@@ -326,7 +326,7 @@ fn interaction_dir() -> PathBuf {
     app_data_dir().join("terrence_interactions")
 }
 
-fn config_text(home: &PathBuf) -> String {
+fn config_text(home: &Path) -> String {
     fs::read_to_string(home.join("config.yaml")).unwrap_or_default()
 }
 
@@ -396,7 +396,7 @@ async fn gateway_running() -> bool {
         .unwrap_or(false)
 }
 
-fn telegram_status(home: &PathBuf, running: bool) -> String {
+fn telegram_status(home: &Path, running: bool) -> String {
     let log = fs::read_to_string(home.join("logs").join("gateway.log")).unwrap_or_default();
     let tail: String = log
         .chars()
@@ -442,7 +442,7 @@ fn telegram_status_from_log(log: &str, running: bool) -> String {
     }
 }
 
-fn active_schedule_count(home: &PathBuf) -> u64 {
+fn active_schedule_count(home: &Path) -> u64 {
     let path = home.join("cron").join("jobs.json");
     let Ok(content) = fs::read_to_string(path) else {
         return 0;
@@ -640,16 +640,30 @@ fn turn_context_selection(message: &str) -> TurnContextSelection {
     }
 }
 
+/// The per-turn background briefs fed into a Nexus turn query.
+#[derive(Clone, Copy)]
+struct TurnBriefs<'a> {
+    priority: &'a str,
+    decision: &'a str,
+    project: &'a str,
+    action: &'a str,
+    automation: &'a str,
+    health: &'a str,
+}
+
 fn nexus_turn_query(
     message: &str,
     runtime_context: &terrence_context::RuntimeContextBrief,
-    priority_brief: &str,
-    decision_brief: &str,
-    project_brief: &str,
-    action_brief: &str,
-    automation_brief: &str,
-    health_brief: &str,
+    briefs: TurnBriefs<'_>,
 ) -> String {
+    let TurnBriefs {
+        priority: priority_brief,
+        decision: decision_brief,
+        project: project_brief,
+        action: action_brief,
+        automation: automation_brief,
+        health: health_brief,
+    } = briefs;
     let selection = turn_context_selection(message);
     let mut background_sections = Vec::new();
     if !runtime_context.text.is_empty() {
@@ -893,12 +907,14 @@ pub async fn interact_with_terrence(
     let query = nexus_turn_query(
         &message,
         &runtime_context,
-        &priority_brief,
-        &decision_brief,
-        &project_brief,
-        &action_brief,
-        &automation_brief,
-        &health_brief,
+        TurnBriefs {
+            priority: &priority_brief,
+            decision: &decision_brief,
+            project: &project_brief,
+            action: &action_brief,
+            automation: &automation_brief,
+            health: &health_brief,
+        },
     );
 
     let python = hermes_python_path(&home)?;
@@ -1252,12 +1268,14 @@ mod tests {
         let query = nexus_turn_query(
             "Hey, how are you?",
             &context,
-            "Current priorities",
-            "Decision history",
-            "Project history",
-            "Action history",
-            "Automation history",
-            "NOOP health context",
+            TurnBriefs {
+                priority: "Current priorities",
+                decision: "Decision history",
+                project: "Project history",
+                action: "Action history",
+                automation: "Automation history",
+                health: "NOOP health context",
+            },
         );
 
         assert!(query.contains("Current personal context"));
@@ -1277,12 +1295,14 @@ mod tests {
         let query = nexus_turn_query(
             "Open YouTube in my browser again.",
             &context,
-            "Current priorities",
-            "Decision history",
-            "Project history",
-            "Action history",
-            "Automation history",
-            "NOOP health context",
+            TurnBriefs {
+                priority: "Current priorities",
+                decision: "Decision history",
+                project: "Project history",
+                action: "Action history",
+                automation: "Automation history",
+                health: "NOOP health context",
+            },
         );
 
         assert!(query.contains("Action history"));

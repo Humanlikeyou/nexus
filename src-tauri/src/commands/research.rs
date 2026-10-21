@@ -111,7 +111,7 @@ async fn duckduckgo_search(
                     url.split("uddg=")
                         .nth(1)
                         .and_then(|u| u.split('&').next())
-                        .map(|u| urlencoding_decode(u))
+                        .map(urlencoding_decode)
                         .unwrap_or_else(|| url.to_string())
                 } else {
                     url.to_string()
@@ -211,7 +211,7 @@ pub async fn fetch_url(url: String, max_chars: Option<usize>) -> Result<String, 
 
     if resp
         .content_length()
-        .map_or(false, |len| len > MAX_FETCH_BYTES as u64)
+        .is_some_and(|len| len > MAX_FETCH_BYTES as u64)
     {
         return Err(format!(
             "Response is too large (limit {} MB)",
@@ -349,62 +349,6 @@ fn is_public_ip(ip: &std::net::IpAddr) -> bool {
     }
 }
 
-#[cfg(test)]
-mod ssrf_tests {
-    use super::*;
-
-    #[test]
-    fn rejects_non_http_and_local_urls() {
-        for bad in [
-            "file:///etc/passwd",
-            "ftp://example.com/x",
-            "http://localhost:5678/",
-            "http://api.localhost/",
-            "http://127.0.0.1/",
-            "http://10.0.0.5/",
-            "http://192.168.1.1/",
-            "http://169.254.169.254/latest/meta-data/",
-            "http://[::1]/",
-            "http://[fe80::1]/",
-            "http://[fd00::1]/",
-            "http://[::ffff:127.0.0.1]/",
-            "http://0.0.0.0/",
-            "http://100.64.0.1/",
-            "http://user:pw@example.com/",
-            "http://[2002:7f00:1::1]/",
-            "http://[2001:0:4136:e378::1]/",
-            "http://[::127.0.0.1]/",
-            "http://[::10.0.0.1]/",
-            "http://[64:ff9b::7f00:1]/",
-            "http://[64:ff9b::808:808]/",
-            "not a url",
-        ] {
-            assert!(parse_public_url(bad).is_err(), "{bad} should be rejected");
-        }
-    }
-
-    #[test]
-    fn accepts_public_urls() {
-        assert!(parse_public_url("https://example.com/path?q=1").is_ok());
-        assert!(parse_public_url("http://93.184.216.34/").is_ok());
-        assert!(parse_public_url("https://[2606:4700::1111]/").is_ok());
-    }
-
-    #[test]
-    fn body_cap_is_enforced_while_streaming() {
-        let mut buf = Vec::new();
-        push_capped(&mut buf, &[0u8; 6], 10).unwrap();
-        push_capped(&mut buf, &[0u8; 4], 10).unwrap();
-        assert!(push_capped(&mut buf, &[0u8; 1], 10).is_err());
-        assert_eq!(buf.len(), 10);
-    }
-
-    #[tokio::test]
-    async fn resolve_rejects_loopback_hostname_literal() {
-        assert!(resolve_public("127.0.0.1", 80).await.is_err());
-    }
-}
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn strip_html_tags(html: &str) -> String {
@@ -483,4 +427,60 @@ fn urlencoding_decode(s: &str) -> String {
         i += 1;
     }
     result
+}
+
+#[cfg(test)]
+mod ssrf_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_non_http_and_local_urls() {
+        for bad in [
+            "file:///etc/passwd",
+            "ftp://example.com/x",
+            "http://localhost:5678/",
+            "http://api.localhost/",
+            "http://127.0.0.1/",
+            "http://10.0.0.5/",
+            "http://192.168.1.1/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]/",
+            "http://[fe80::1]/",
+            "http://[fd00::1]/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://0.0.0.0/",
+            "http://100.64.0.1/",
+            "http://user:pw@example.com/",
+            "http://[2002:7f00:1::1]/",
+            "http://[2001:0:4136:e378::1]/",
+            "http://[::127.0.0.1]/",
+            "http://[::10.0.0.1]/",
+            "http://[64:ff9b::7f00:1]/",
+            "http://[64:ff9b::808:808]/",
+            "not a url",
+        ] {
+            assert!(parse_public_url(bad).is_err(), "{bad} should be rejected");
+        }
+    }
+
+    #[test]
+    fn accepts_public_urls() {
+        assert!(parse_public_url("https://example.com/path?q=1").is_ok());
+        assert!(parse_public_url("http://93.184.216.34/").is_ok());
+        assert!(parse_public_url("https://[2606:4700::1111]/").is_ok());
+    }
+
+    #[test]
+    fn body_cap_is_enforced_while_streaming() {
+        let mut buf = Vec::new();
+        push_capped(&mut buf, &[0u8; 6], 10).unwrap();
+        push_capped(&mut buf, &[0u8; 4], 10).unwrap();
+        assert!(push_capped(&mut buf, &[0u8; 1], 10).is_err());
+        assert_eq!(buf.len(), 10);
+    }
+
+    #[tokio::test]
+    async fn resolve_rejects_loopback_hostname_literal() {
+        assert!(resolve_public("127.0.0.1", 80).await.is_err());
+    }
 }

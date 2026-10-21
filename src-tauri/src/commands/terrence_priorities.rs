@@ -909,7 +909,7 @@ fn create_terrence_decision_in(
         ],
     )
     .map_err(|error| format!("Failed to record Terrence decision: {error}"))?;
-    get_decision(&conn, &id)?
+    get_decision(conn, &id)?
         .ok_or_else(|| "Recorded Terrence decision could not be read.".to_string())
 }
 
@@ -966,7 +966,7 @@ fn resolve_terrence_decision_in(
     }
     let now = Utc::now().to_rfc3339();
     let existing =
-        get_decision(&conn, &id)?.ok_or_else(|| "Terrence decision was not found.".to_string())?;
+        get_decision(conn, &id)?.ok_or_else(|| "Terrence decision was not found.".to_string())?;
     if matches!(existing.status.as_str(), "closed" | "cancelled") {
         return Err("This Terrence decision is already closed.".to_string());
     }
@@ -982,7 +982,7 @@ fn resolve_terrence_decision_in(
         params![status, decision, outcome, now, id],
     )
     .map_err(|error| format!("Failed to resolve Terrence decision: {error}"))?;
-    get_decision(&conn, &id)?
+    get_decision(conn, &id)?
         .ok_or_else(|| "Resolved Terrence decision could not be read.".to_string())
 }
 

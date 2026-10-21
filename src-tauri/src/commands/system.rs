@@ -42,7 +42,7 @@ pub fn health_check() -> Result<String, String> {
 fn validate_container_name(name: &str) -> Result<(), String> {
     let mut chars = name.chars();
     let ok = name.len() <= 128
-        && chars.next().map_or(false, |c| c.is_ascii_alphanumeric())
+        && chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
     if ok {
         Ok(())
