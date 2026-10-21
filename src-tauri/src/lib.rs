@@ -3,9 +3,9 @@ mod commands;
 
 use commands::{
     arm, assistant, ble_common, continuity, crew, events, goals, kv, llm_router, muse, noop,
-    onboarding, openclaw, outbox, packager, replay, research, sessions, snapshots, system,
-    telegram, terrence_actions, terrence_automations, terrence_context, terrence_priorities,
-    terrence_projects, terrence_runtime, terrence_runtime_bridge,
+    onboarding, openclaw, outbox, packager, replay, research, restart_services, sessions,
+    snapshots, system, telegram, terrence_actions, terrence_automations, terrence_context,
+    terrence_priorities, terrence_projects, terrence_runtime, terrence_runtime_bridge,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -60,6 +60,7 @@ pub fn run() {
             system::health_check,
             system::check_docker_service,
             system::restart_docker_service,
+            restart_services::restart_services,
             system::check_service_port,
             // OpenClaw / Terrance
             openclaw::read_openclaw_status,

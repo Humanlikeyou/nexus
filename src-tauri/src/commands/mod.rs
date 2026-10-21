@@ -17,6 +17,7 @@ pub mod packager;
 pub mod path_safety;
 pub mod replay;
 pub mod research;
+pub mod restart_services;
 pub mod sessions;
 pub mod snapshots;
 pub mod system;

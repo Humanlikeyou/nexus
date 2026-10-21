@@ -39,7 +39,7 @@ pub fn health_check() -> Result<String, String> {
 
 /// Docker container names: `[A-Za-z0-9][A-Za-z0-9_.-]*`. Also stops a name
 /// starting with `-` from being parsed as a docker CLI flag.
-fn validate_container_name(name: &str) -> Result<(), String> {
+pub(super) fn validate_container_name(name: &str) -> Result<(), String> {
     let mut chars = name.chars();
     let ok = name.len() <= 128
         && chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
@@ -75,7 +75,7 @@ pub async fn check_docker_service(name: String) -> Result<String, String> {
 }
 
 /// Exact operation shown in the approval dialog for a container restart.
-fn docker_restart_prompt(name: &str) -> (String, String) {
+pub(super) fn docker_restart_prompt(name: &str) -> (String, String) {
     (
         format!("Run: docker restart {name}"),
         "Restarts this Docker container. Running requests in it will be interrupted.".to_string(),
@@ -93,8 +93,13 @@ pub async fn restart_docker_service(app: tauri::AppHandle, name: String) -> Resu
         super::approval_gate::approval_text(&operation, &detail)?,
     )
     .await?;
+    docker_restart(&name).await
+}
+
+/// The ungated restart. Only call with a validated name after approval.
+pub(super) async fn docker_restart(name: &str) -> Result<String, String> {
     let output = tokio::process::Command::new("docker")
-        .args(["restart", &name])
+        .args(["restart", name])
         .output()
         .await
         .map_err(|e| format!("Failed to run docker restart: {}", e))?;

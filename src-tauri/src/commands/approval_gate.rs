@@ -7,6 +7,8 @@
 //! the frontend; the text after the prefix is human-readable and may change):
 //! - `declined:` — the user clicked Deny. Nothing was changed.
 //! - `busy:`     — an approval dialog for the same key is already open.
+//! - `expired:`  — the caller's deadline passed (before the dialog, or by the
+//!   time Allow was clicked); nothing was run.
 //! - `changed:`  — (command-specific) state changed while the dialog was open;
 //!   the operation was refused and nothing was written.
 //!

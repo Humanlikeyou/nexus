@@ -443,11 +443,11 @@ pub async fn restart_openclaw(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 /// Exact operation shown for an OpenClaw restart (uid is resolved at run time).
-const OPENCLAW_RESTART_OPERATION: &str =
+pub(super) const OPENCLAW_RESTART_OPERATION: &str =
     "Run: launchctl kickstart -k gui/<your uid>/ai.openclaw.gateway";
 
 /// The ungated restart. Only call after approval has been obtained.
-async fn kickstart_openclaw() -> Result<String, String> {
+pub(super) async fn kickstart_openclaw() -> Result<String, String> {
     // Resolve the current user UID so we can address the gui/<uid>/ domain.
     let uid_out = tokio::process::Command::new("id")
         .arg("-u")
