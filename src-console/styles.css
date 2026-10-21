@@ -100,8 +100,8 @@ a { color: inherit; }
 .nav-group button > span { overflow: hidden; font-size: var(--text-body); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
 .nav-group button > small { color: var(--text-tertiary); font: var(--text-subheadline)/1 var(--font-mono); }
 .nav-group button:hover { color: var(--text); background: color-mix(in srgb, var(--surface) 55%, transparent); }
-.nav-group button.is-active { color: var(--text); background: var(--selection); box-shadow: inset 3px 0 0 var(--selection-strong); }
-.nav-group button.is-active > i { color: var(--selection-strong); }
+.nav-group button.is-active { color: var(--text); background: var(--sidebar-selection); }
+.nav-group button.is-active > i { color: var(--accent); }
 .sidebar-status { display: grid; gap: 6px; margin-top: auto; padding: 12px 10px 2px; border-top: 1px solid var(--separator); }
 .sidebar-status > span:last-child { overflow: hidden; color: var(--text-tertiary); font: var(--text-subheadline)/1.25 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 
