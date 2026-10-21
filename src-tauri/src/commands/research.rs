@@ -209,10 +209,25 @@ pub async fn fetch_url(url: String, max_chars: Option<usize>) -> Result<String, 
         .unwrap_or("")
         .to_string();
 
-    let body = resp
-        .text()
+    if resp
+        .content_length()
+        .map_or(false, |len| len > MAX_FETCH_BYTES as u64)
+    {
+        return Err(format!(
+            "Response is too large (limit {} MB)",
+            MAX_FETCH_BYTES / (1024 * 1024)
+        ));
+    }
+    let mut resp = resp;
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
         .await
-        .map_err(|e| format!("Read error: {}", e))?;
+        .map_err(|e| format!("Read error: {}", e))?
+    {
+        push_capped(&mut bytes, &chunk, MAX_FETCH_BYTES)?;
+    }
+    let body = String::from_utf8_lossy(&bytes).into_owned();
 
     // If HTML, strip tags to get readable text
     let text = if content_type.contains("html") {
@@ -238,6 +253,21 @@ pub async fn fetch_url(url: String, max_chars: Option<usize>) -> Result<String, 
 }
 
 // ─── URL safety (SSRF guard) ────────────────────────────────────────────────
+
+/// Hard cap on downloaded body bytes, enforced while streaming (Content-Length
+/// can be missing or wrong).
+const MAX_FETCH_BYTES: usize = 5 * 1024 * 1024;
+
+fn push_capped(buf: &mut Vec<u8>, chunk: &[u8], cap: usize) -> Result<(), String> {
+    if buf.len().saturating_add(chunk.len()) > cap {
+        return Err(format!(
+            "Response is too large (limit {} MB)",
+            cap / (1024 * 1024)
+        ));
+    }
+    buf.extend_from_slice(chunk);
+    Ok(())
+}
 
 /// Parse a URL and require http/https with a host. Literal IPs must be public.
 fn parse_public_url(raw: &str) -> Result<reqwest::Url, String> {
@@ -298,8 +328,16 @@ fn is_public_ip(ip: &std::net::IpAddr) -> bool {
             if let Some(v4) = v6.to_ipv4_mapped() {
                 return is_public_ip(&IpAddr::V4(v4));
             }
-            let seg0 = v6.segments()[0];
+            let seg = v6.segments();
+            let seg0 = seg[0];
+            // IPv4-compatible ::a.b.c.d (deprecated) — judge by the embedded IPv4.
+            if seg[..6].iter().all(|s| *s == 0) && !v6.is_loopback() && !v6.is_unspecified() {
+                let o = v6.octets();
+                return is_public_ip(&IpAddr::V4(std::net::Ipv4Addr::new(o[12], o[13], o[14], o[15])));
+            }
             !(v6.is_loopback()
+                || seg0 == 0x2002 // 2002::/16 6to4 (embeds arbitrary IPv4)
+                || (seg0 == 0x2001 && seg[1] == 0x0000) // 2001::/32 Teredo
                 || v6.is_unspecified()
                 || v6.is_multicast()
                 || (seg0 & 0xFE00) == 0xFC00 // fc00::/7 unique local
@@ -333,6 +371,10 @@ mod ssrf_tests {
             "http://0.0.0.0/",
             "http://100.64.0.1/",
             "http://user:pw@example.com/",
+            "http://[2002:7f00:1::1]/",
+            "http://[2001:0:4136:e378::1]/",
+            "http://[::127.0.0.1]/",
+            "http://[::10.0.0.1]/",
             "not a url",
         ] {
             assert!(parse_public_url(bad).is_err(), "{bad} should be rejected");
@@ -344,6 +386,15 @@ mod ssrf_tests {
         assert!(parse_public_url("https://example.com/path?q=1").is_ok());
         assert!(parse_public_url("http://93.184.216.34/").is_ok());
         assert!(parse_public_url("https://[2606:4700::1111]/").is_ok());
+    }
+
+    #[test]
+    fn body_cap_is_enforced_while_streaming() {
+        let mut buf = Vec::new();
+        push_capped(&mut buf, &[0u8; 6], 10).unwrap();
+        push_capped(&mut buf, &[0u8; 4], 10).unwrap();
+        assert!(push_capped(&mut buf, &[0u8; 1], 10).is_err());
+        assert_eq!(buf.len(), 10);
     }
 
     #[tokio::test]
