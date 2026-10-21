@@ -1,18 +1,17 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type ConversationMessage, CONVERSATION_KEY, HERMES_SESSION_KEY, HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE, createConversationId, messagesFromInteractions } from "./app/conversation";
 import { SYSTEMS } from "./app/routes";
 import { useConversation } from "./app/useConversation";
+import { useSnapshot } from "./app/useSnapshot";
 import { approvalNotice } from "./lib/approval";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
 import { ActivityField, BusinessField, DevicesField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, TrajectoryField } from "./app/lazyScreens";
-import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, connectMuse, disconnectMuse, interactWithTerrence, listTerrenceInteractions, loadSystemSnapshot, migrateLegacyTerrenceContext, retryTerrenceAction, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "./bridge";
-import { StatusIndicator } from "./design/ProductUI";
-import { CommandSurface, IntelligenceOverlay } from "./design/SystemPrimitives";
+import { approveTerrenceAction, cancelTerrenceAction, connectMuse, disconnectMuse, retryTerrenceAction, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "./bridge";
+import { CommandSurface } from "./design/SystemPrimitives";
 import { useAppearance } from "./design/useAppearance";
 import { useIdleAutoSave } from "./hooks/useIdleAutoSave";
 import { useSchedulerLifecycle } from "./hooks/useSchedulerLifecycle";
-import { tone, number, time, readableError } from "./lib/format";
+import { number, readableError } from "./lib/format";
 import { SessionFinalizer } from "./neuro/sessionFinalizer";
 import { useMuseTelemetry } from "./neuro/useMuseTelemetry";
 import { useTraining } from "./neuro/useTraining";
@@ -22,13 +21,11 @@ import { ContextInspector } from "./shell/ContextInspector";
 import { Footer } from "./shell/Footer";
 import { Sidebar } from "./shell/Sidebar";
 import { Toolbar } from "./shell/Toolbar";
-import type { ModuleId, MuseDevice, RecordedSession, SystemSnapshot } from "./types";
-import { RefreshCw, Zap } from "lucide-react";
+import type { ModuleId, MuseDevice, RecordedSession } from "./types";
 
 export default function App() {
   const [active, setActive] = useState<ModuleId>("terrance");
-  const [data, setData] = useState<SystemSnapshot>(INITIAL_SNAPSHOT);
-  const [busy, setBusy] = useState(true);
+  const { data, busy, setBusy, refresh } = useSnapshot();
   const [notice, setNotice] = useState<string | null>(null);
   const [contextInspectorOpen, setContextInspectorOpen] = useState(false);
   const [museDevices, setMuseDevices] = useState<MuseDevice[]>([]);
@@ -46,20 +43,9 @@ export default function App() {
   // Terrance background scheduler: started once for the shell, stopped on unmount.
   useSchedulerLifecycle();
 
-  const refresh = useCallback(async () => { setBusy(true); setData(await loadSystemSnapshot()); setBusy(false); }, []);
   const { conversationId, messages, sending, sendToTerrence, startNewConversation } = useConversation(refresh);
   // Session continuity: summarize the Terrance chat after idle / on new chat / on close (bug 6).
   useIdleAutoSave(messages, conversationId);
-  useEffect(() => { refresh(); const refreshTimer = window.setInterval(refresh, 15_000); return () => { window.clearInterval(refreshTimer); }; }, [refresh]);
-  useEffect(() => {
-    let activeRequest = true;
-    migrateLegacyTerrenceContext()
-      .then(() => {
-        if (activeRequest) return refresh();
-      })
-      .catch((error) => console.warn("[console] legacy context migration unavailable", error));
-    return () => { activeRequest = false; };
-  }, [refresh]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (!event.metaKey || event.ctrlKey || event.altKey || !/^[1-9]$/.test(event.key)) return;
