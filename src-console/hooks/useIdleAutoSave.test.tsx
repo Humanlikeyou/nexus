@@ -85,4 +85,13 @@ describe("useIdleAutoSave", () => {
     unmount();
     expect(silent).toHaveBeenCalledTimes(2);
   });
+
+  it("treats a legacy (pre-hash) signature as already saved and upgrades it", async () => {
+    window.localStorage.setItem(AUTOSAVE_SIGNATURE_KEY, `c1:2:${Date.parse(msgs[1].timestamp)}`);
+    const { unmount } = renderHook(() => useIdleAutoSave(msgs, "c1", 1000));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    unmount();
+    expect(silent).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(AUTOSAVE_SIGNATURE_KEY)).toMatch(/^c1:2:\d+:h[0-9a-z]+$/);
+  });
 });

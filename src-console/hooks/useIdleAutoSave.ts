@@ -4,7 +4,7 @@
  * Saves a session summary when the transcript has been idle for `idleMs`, when
  * the window is hidden, when the conversation changes (new chat), and on
  * unmount. Each unique transcript (conversation + length + last message) is
- * saved at most once, persisted in localStorage so a relaunch that reloads
+ * saved at most once (signature includes a content hash, so edits re-save), persisted in localStorage so a relaunch that reloads
  * history does not re-summarize it.
  *
  * Fail-closed note: summarizeAndStoreSession aborts its context write if the
@@ -38,9 +38,27 @@ export function toSessionEntries(messages: AutoSaveMessage[]): SessionEntry[] {
     }));
 }
 
-function signature(s: Snapshot): string {
+/** Pre-#11 signature (no content hash). Still recognized so upgrades don't re-summarize. */
+function legacySignature(s: Snapshot): string {
   const last = s.entries[s.entries.length - 1];
   return `${s.key}:${s.entries.length}:${last?.ts ?? 0}`;
+}
+
+/** 32-bit FNV-1a over all message roles and text: cheap, catches edits anywhere. */
+export function contentHash(entries: SessionEntry[]): string {
+  let h = 0x811c9dc5;
+  for (const e of entries) {
+    const str = `${e.role}\u0000${e.text}\u0001`;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+  }
+  return (h >>> 0).toString(36);
+}
+
+function signature(s: Snapshot): string {
+  return `${legacySignature(s)}:h${contentHash(s.entries)}`;
 }
 
 function readSaved(): string | null {
@@ -61,7 +79,13 @@ export function useIdleAutoSave(
   const save = (s: Snapshot) => {
     if (s.entries.length < 2) return;
     const sig = signature(s);
-    if (sig === inFlight.current || sig === readSaved()) return;
+    const saved = readSaved();
+    if (sig === inFlight.current || sig === saved) return;
+    if (saved === legacySignature(s)) {
+      // Saved before content hashing existed: assume unchanged, upgrade in place.
+      writeSaved(sig);
+      return;
+    }
     inFlight.current = sig;
     void summarizeAndStoreSessionSilent(s.entries)
       .then((r) => { if (r.saved) writeSaved(sig); })
