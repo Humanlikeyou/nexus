@@ -1,5 +1,6 @@
 # Exact pins — resolved 2026-10-21. Bump deliberately, never float.
-crewai==1.15.28
+crewai[anthropic]==1.15.28
+anthropic==0.73.0
 crewai-tools==1.15.28
 fastapi==0.156.8
 uvicorn==0.54.0

@@ -174,7 +174,7 @@ services:
       CREW_ALLOWED_NAMES: ${CREW_ALLOWED_NAMES:-}
       # LLM — MiniMax primary, local Ollama fallback (no OpenAI)
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
-      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.io/v1}
+      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.io/anthropic}
       MINIMAX_MODEL: ${MINIMAX_MODEL:-MiniMax-M2.5}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       CREW_OLLAMA_MODEL: ${CREW_OLLAMA_MODEL:-qwen3.5}

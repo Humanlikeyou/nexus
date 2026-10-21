@@ -8,7 +8,7 @@ FastAPI wrapper around CrewAI. Contract matches src-tauri/src/commands/crew.rs:
   POST /crews/stop             {id} -> {"id", "status", "stopped": bool}
 
 Every /crews/* call needs header X-Crew-Token == $CREW_SERVICE_TOKEN.
-LLM: MiniMax-M2.5 (OpenAI-compatible API) primary, Ollama qwen3.5 fallback.
+LLM: MiniMax-M2.5 (Anthropic-messages API, same endpoint OpenClaw uses) primary, Ollama qwen3.5 fallback.
 Runs persist to Postgres table crew_runs (created at startup).
 Each crew runs in its own process so /crews/stop can really cancel it.
 """
@@ -45,7 +45,7 @@ MAX_CONCURRENT = int(_env("CREW_MAX_CONCURRENT", "2"))
 RUN_TIMEOUT_S = int(_env("CREW_RUN_TIMEOUT_SECONDS", "900"))
 
 MINIMAX_API_KEY = _env("MINIMAX_API_KEY")
-MINIMAX_BASE_URL = _env("MINIMAX_BASE_URL", "https://api.minimax.io/v1")
+MINIMAX_BASE_URL = _env("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic")
 MINIMAX_MODEL = _env("MINIMAX_MODEL", "MiniMax-M2.5")
 OLLAMA_BASE_URL = _env("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 CREW_OLLAMA_MODEL = _env("CREW_OLLAMA_MODEL", "qwen3.5")
@@ -203,7 +203,7 @@ def _build_llms():
     llms = []
     if MINIMAX_API_KEY:
         llms.append(("minimax/" + MINIMAX_MODEL, LLM(
-            model=MINIMAX_MODEL, provider="openai",
+            model=MINIMAX_MODEL, provider="anthropic",
             base_url=MINIMAX_BASE_URL, api_key=MINIMAX_API_KEY,
         )))
     llms.append(("ollama/" + CREW_OLLAMA_MODEL, LLM(
