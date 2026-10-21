@@ -35,7 +35,6 @@ export default function App() {
   const [busy, setBusy] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [contextInspectorOpen, setContextInspectorOpen] = useState(false);
-  const [now, setNow] = useState(new Date());
   const [museDevices, setMuseDevices] = useState<MuseDevice[]>([]);
   const [museOperation, setMuseOperation] = useState<MuseOperation>(null);
   const [museError, setMuseError] = useState<string | null>(null);
@@ -69,7 +68,7 @@ export default function App() {
   useSchedulerLifecycle();
 
   const refresh = useCallback(async () => { setBusy(true); setData(await loadSystemSnapshot()); setBusy(false); }, []);
-  useEffect(() => { refresh(); const refreshTimer = window.setInterval(refresh, 15_000); const clockTimer = window.setInterval(() => setNow(new Date()), 1_000); return () => { window.clearInterval(refreshTimer); window.clearInterval(clockTimer); }; }, [refresh]);
+  useEffect(() => { refresh(); const refreshTimer = window.setInterval(refresh, 15_000); return () => { window.clearInterval(refreshTimer); }; }, [refresh]);
   useEffect(() => {
     let activeRequest = true;
     migrateLegacyTerrenceContext()
@@ -301,7 +300,7 @@ export default function App() {
   const selected = useMemo(() => SYSTEMS.find((system) => system.id === active)!, [active]);
   const view = active === "terrance" ? <TerranceField data={data} messages={messages} sending={sending} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onApproveAction={(action) => { void act(`Approving ${action.title}`, () => approveTerrenceAction(action.id)); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
     : active === "health" ? <HealthField data={data} />
-    : active === "neuro" ? <NeuroField training={training} data={data} devices={museDevices} telemetry={telemetry} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} now={now} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
+    : active === "neuro" ? <NeuroField training={training} data={data} devices={museDevices} telemetry={telemetry} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : active === "sessions" ? <SessionsField data={data} />
     : active === "devices" ? <DevicesField data={data} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} />
     : active === "business" ? <BusinessField data={data} />
@@ -312,7 +311,7 @@ export default function App() {
 
   return (
     <CommandSurface mode={active}>
-      <Toolbar label={selected.label} now={now} busy={busy} onRefresh={refresh} />
+      <Toolbar label={selected.label} busy={busy} onRefresh={refresh} />
       <Sidebar active={active} onSelect={setActive} data={data} />
       <section className="active-field" aria-label={`${selected.label} system`}>{view}</section>
       <Footer data={data} busy={busy} />

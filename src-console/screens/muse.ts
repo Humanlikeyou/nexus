@@ -12,7 +12,6 @@ export interface MuseScreenProps {
   error: string | null;
   sessionStartedAt: number | null;
   sessionEndedAt: number | null;
-  now: Date;
   onScan: () => void;
   onConnect: (device: MuseDevice) => void;
   onDisconnect: () => void;

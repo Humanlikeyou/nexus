@@ -1,3 +1,4 @@
+import { useNow } from "../shell/useNow";
 import { ActionButton, EmptyState, Metric, PageHeading, SectionHeading, StatusIndicator } from "../design/ProductUI";
 import { tone, number, date, time } from "../lib/format";
 import { useTraining } from "../neuro/useTraining";
@@ -5,7 +6,8 @@ import { type MuseScreenProps, museSignalState } from "./muse";
 import { Trace } from "./shared";
 import { BrainCircuit, Bluetooth, ChevronDown, Play, Radio, RefreshCw, Square, Unplug } from "lucide-react";
 
-export function NeuroField({ data, devices, telemetry, operation, error, sessionStartedAt, sessionEndedAt, now, onScan, onConnect, onDisconnect, onStart, onStop, training }: MuseScreenProps & { training: ReturnType<typeof useTraining> }) {
+export function NeuroField({ data, devices, telemetry, operation, error, sessionStartedAt, sessionEndedAt, onScan, onConnect, onDisconnect, onStart, onStop, training }: MuseScreenProps & { training: ReturnType<typeof useTraining> }) {
+  const now = useNow(); // 1 s tick scoped to this screen (was the app root clock)
   const sessions = data.sessions.filter((session) => session.device_type === "muse");
   const signal = museSignalState(data, telemetry);
   const elapsedSeconds = sessionStartedAt ? Math.max(0, Math.floor(((sessionEndedAt ?? now.getTime()) - sessionStartedAt) / 1000)) : 0;
