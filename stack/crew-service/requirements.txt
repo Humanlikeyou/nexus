@@ -1,6 +1,7 @@
-fastapi
-uvicorn
-crewai
-pydantic
-python-dotenv
-httpx
+# Exact pins — resolved 2026-10-21. Bump deliberately, never float.
+crewai==1.15.28
+crewai-tools==1.15.28
+fastapi==0.156.8
+uvicorn==0.54.0
+pydantic==2.12.5
+psycopg[binary]==3.3.6

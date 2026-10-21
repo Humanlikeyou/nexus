@@ -2,25 +2,30 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+COPY main.py .
 
-# Expose port 8400
+RUN useradd --create-home --uid 10001 crew
+USER crew
+
 EXPOSE 8400
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PORT=8400
+ENV PYTHONUNBUFFERED=1 \
+    CREWAI_DISABLE_TELEMETRY=true \
+    OTEL_SDK_DISABLED=true \
+    CREW_SERVICE_HOST=127.0.0.1 \
+    CREW_SERVICE_PORT=8400
 
-# Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8400"]
+HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
+  CMD curl -fsS "http://127.0.0.1:${CREW_SERVICE_PORT}/health" || exit 1
+
+# Host defaults to 127.0.0.1; compose overrides to 0.0.0.0 *inside* the
+# container so the 127.0.0.1-bound host port mapping can reach it.
+CMD ["sh", "-c", "exec uvicorn main:app --host \"$CREW_SERVICE_HOST\" --port \"$CREW_SERVICE_PORT\""]
