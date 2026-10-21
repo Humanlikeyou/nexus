@@ -68,12 +68,12 @@ services:
       N8N_PROTOCOL: http
       WEBHOOK_URL: "http://localhost:5678/"
       GENERIC_TIMEZONE: ${TIMEZONE:-America/Los_Angeles}
-      # Stage 4 — gateway authentication (shared secret validated by ingress workflow)
-      NEXUS_SECRET: ${NEXUS_SECRET:-}
       # Stage 3 — downstream service URLs (Docker-internal; used by Code nodes)
       LETTA_URL:     "http://letta:8283"
       VERBA_URL:     "http://verba:8000"
       WEAVIATE_URL:  "http://weaviate:8080"
+      # Stage 4 — Gateway auth secret (used by Terrance Ingress workflow)
+      NEXUS_SECRET: ${NEXUS_SECRET:-}
     volumes:
       - ./data/n8n:/home/node/.n8n
 
@@ -150,3 +150,18 @@ services:
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
     volumes:
       - ./data/verba:/data
+
+  # ── CrewAI — Multi-Agent Ingress ────────────────────────────────────────────
+  crew:
+    build:
+      context: ./crew-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    logging: *log
+    ports:
+      - "127.0.0.1:8400:8400"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}

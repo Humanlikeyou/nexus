@@ -22,6 +22,7 @@ echo "╠═══════════════════════�
 echo "║  n8n Automation    →  http://localhost:5678            ║"
 echo "║  Letta REST + ADE  →  http://localhost:8283            ║"
 echo "║  Verba RAG         →  http://localhost:8001            ║"
+echo "║  Crew Service      →  http://localhost:8400            ║"
 echo "║  Weaviate          →  http://localhost:8080  (internal)║"
 echo "║  PostgreSQL        →  localhost:5432         (internal)║"
 echo "╚═══════════════════════════════════════════════════════╝"

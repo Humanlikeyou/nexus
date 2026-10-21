@@ -21,7 +21,7 @@ echo ""
 
 # ── 2. Host listeners (lsof) ────────────────────────────────────────────────
 echo "▶ Local listeners:"
-for port in 5432 5678 8001 8080 8283; do
+for port in 5432 5678 8001 8080 8283 8400; do
   line=$(lsof -iTCP:$port -sTCP:LISTEN -n -P 2>/dev/null | awk 'NR==2{print $1, $9}')
   if [ -n "$line" ]; then
     pass ":$port  → $line"
@@ -50,6 +50,7 @@ http_check "n8n            " "http://localhost:5678"
 http_check "Letta REST     " "http://localhost:8283/v1/agents/"
 http_check "Weaviate ready " "http://localhost:8080/v1/.well-known/ready"
 http_check "Verba health   " "http://localhost:8001/api/health"
+http_check "Crew health    " "http://localhost:8400/health"
 echo ""
 
 # ── 4. Gateway reachability (n8n ingress) ───────────────────────────────────
