@@ -56,9 +56,22 @@ pub fn migrate_legacy_data_dir() {
     }
 }
 
-#[allow(dead_code)]
+/// Environment variable that overrides the app data directory
+/// (tests, dev profiles, portable installs).
+pub const DATA_DIR_ENV: &str = "NEXUS_DATA_DIR";
+
+/// The app data directory: `$NEXUS_DATA_DIR` if set and non-empty, else
+/// `<platform data dir>/com.taisun.nexus`.
 pub fn data_dir() -> PathBuf {
+    data_dir_with_override(std::env::var_os(DATA_DIR_ENV))
+}
+
+fn data_dir_with_override(override_dir: Option<std::ffi::OsString>) -> PathBuf {
+    if let Some(dir) = override_dir.filter(|v| !v.is_empty()) {
+        return PathBuf::from(dir);
+    }
     dirs::data_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join("Library/Application Support")))
         .unwrap_or_else(|| PathBuf::from("."))
         .join(DATA_DIR_NAME)
 }
@@ -66,6 +79,16 @@ pub fn data_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_dir_honours_override() {
+        assert_eq!(
+            data_dir_with_override(Some("/tmp/nexus-custom".into())),
+            PathBuf::from("/tmp/nexus-custom")
+        );
+        assert!(data_dir_with_override(Some("".into())).ends_with(DATA_DIR_NAME));
+        assert!(data_dir_with_override(None).ends_with(DATA_DIR_NAME));
+    }
 
     #[test]
     fn copies_missing_entries_without_overwriting() {

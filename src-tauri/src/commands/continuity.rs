@@ -13,17 +13,10 @@ use std::path::PathBuf;
 
 // ─── Paths ─────────────────────────────────────────────────────────────────────
 
-/// Environment variable that overrides the continuity data directory
-/// (useful for tests, dev profiles and portable installs).
-pub(crate) const DATA_DIR_ENV: &str = "NEXUS_DATA_DIR";
-
+/// Shared app-data location (com.taisun.nexus, or `$NEXUS_DATA_DIR`). Legacy
+/// com.taisun.electron data is copied in, non-destructively, by
+/// app_paths::migrate_legacy_data_dir() at startup before any command runs.
 fn data_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os(DATA_DIR_ENV).filter(|v| !v.is_empty()) {
-        return PathBuf::from(dir);
-    }
-    // Shared app-data location (com.taisun.nexus). Legacy com.taisun.electron
-    // data is copied in, non-destructively, by app_paths::migrate_legacy_data_dir()
-    // at startup before any command can run.
     crate::app_paths::data_dir()
 }
 

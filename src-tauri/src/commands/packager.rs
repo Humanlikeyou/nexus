@@ -3,14 +3,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
+/// Shared app-data dir (honours `NEXUS_DATA_DIR`).
 fn nexus_data_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap()
-                .join("Library/Application Support")
-        })
-        .join("com.taisun.nexus")
+    crate::app_paths::data_dir()
 }
 
 fn openclaw_dir() -> PathBuf {
