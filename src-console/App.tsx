@@ -3,7 +3,7 @@ import { SYSTEMS } from "./app/routes";
 import { useConversation } from "./app/useConversation";
 import { useSnapshot } from "./app/useSnapshot";
 import { useMuseSession } from "./app/useMuseSession";
-import { approvalNotice } from "./lib/approval";
+import { runApproval } from "./lib/approval";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
 import { ActivityField, BusinessField, DevicesField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, TrajectoryField } from "./app/lazyScreens";
@@ -49,16 +49,7 @@ export default function App() {
   const act = useCallback(async (name: string, action: () => Promise<unknown>) => { setBusy(true); setNotice(`${name} in progress`); try { await action(); setNotice(`${name} complete`); await refresh(); } catch { setBusy(false); setNotice(`${name} unavailable`); } window.setTimeout(() => setNotice(null), 3500); }, [refresh]);
 
   const approveAction = useCallback(async (action: TerrenceAction) => {
-    setBusy(true);
-    setNotice(`Approving ${action.title} in progress`);
-    try {
-      const result = await approveTerrenceAction(action.id);
-      setNotice(approvalNotice(action.title, { result }));
-      await refresh();
-    } catch (error) {
-      setBusy(false);
-      setNotice(approvalNotice(action.title, { error }));
-    }
+    await runApproval(action.title, { approve: () => approveTerrenceAction(action.id), refresh, setBusy, setNotice });
     window.setTimeout(() => setNotice(null), 3500);
   }, [refresh]);
 
