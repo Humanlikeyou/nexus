@@ -101,42 +101,95 @@ export interface TerranceContext {
   lastEveningTimestamp?: number;
 }
 
-export async function loadContext(): Promise<TerranceContext> {
-  try {
-    const ctx = await invoke<TerranceContext>("load_terrance_context");
-
-    // Sync goals from goals.json into activeGoals so Terrance is always goal-aware
-    let goalTitles: string[] = ctx.activeGoals ?? [];
-    try {
-      const goals = await invoke<{ title: string }[]>("read_goals");
-      if (goals.length > 0) {
-        goalTitles = goals.map((g) => g.title);
-      }
-    } catch {
-      // goals.json unavailable — keep whatever was in context
-    }
-
-    return {
-      ...ctx,
-      activeGoals: goalTitles,
-      relevantMemory: ctx.relevantMemory ?? [],
-    };
-  } catch {
-    return {
-      activeGoals: [],
-      lastSessionSummary: null,
-      lastSessionTimestamp: null,
-      relevantMemory: [],
-    };
+export class ContextLoadError extends Error {
+  constructor(public readonly cause: unknown) {
+    super(`load_terrance_context failed: ${String(cause)}`);
+    this.name = "ContextLoadError";
   }
 }
 
-export async function saveContext(ctx: TerranceContext): Promise<void> {
+/** Brand for fallback contexts that must never be persisted. */
+const FALLBACK = Symbol("terrance.fallbackContext");
+
+function emptyFallback(): TerranceContext {
+  const ctx: TerranceContext = {
+    activeGoals: [],
+    lastSessionSummary: null,
+    lastSessionTimestamp: null,
+    relevantMemory: [],
+  };
+  Object.defineProperty(ctx, FALLBACK, { value: true, enumerable: false });
+  return ctx;
+}
+
+export function isFallbackContext(ctx: TerranceContext): boolean {
+  return (ctx as unknown as Record<symbol, unknown>)[FALLBACK] === true;
+}
+
+/**
+ * Load the persisted context. Fails closed: throws ContextLoadError if the
+ * file cannot be read, and never fabricates an empty context. Use this for
+ * any read-modify-write so a load error aborts the write instead of
+ * clobbering the real file.
+ */
+export async function loadContext(): Promise<TerranceContext> {
+  let ctx: TerranceContext;
+  try {
+    ctx = await invoke<TerranceContext>("load_terrance_context");
+  } catch (e) {
+    console.error("[continuity] context load failed; failing closed:", e);
+    throw new ContextLoadError(e);
+  }
+
+  // Sync goals from goals.json into activeGoals so Terrance is always goal-aware
+  let goalTitles: string[] = ctx.activeGoals ?? [];
+  try {
+    const goals = await invoke<{ title: string }[]>("read_goals");
+    if (goals.length > 0) {
+      goalTitles = goals.map((g) => g.title);
+    }
+  } catch {
+    // goals.json unavailable — keep whatever was in context
+  }
+
+  return {
+    ...ctx,
+    activeGoals: goalTitles,
+    relevantMemory: ctx.relevantMemory ?? [],
+  };
+}
+
+/**
+ * Read-only variant for prompt building: returns a branded empty fallback on
+ * load failure. Never pass the result to saveContext (it will be refused).
+ */
+export async function loadContextOrDefault(): Promise<TerranceContext> {
+  try {
+    return await loadContext();
+  } catch {
+    return emptyFallback();
+  }
+}
+
+/** Persist the context. Refuses fallback contexts. Returns true on success. */
+export async function saveContext(ctx: TerranceContext): Promise<boolean> {
+  if (isFallbackContext(ctx)) {
+    console.error("[continuity] refusing to persist a fallback context");
+    return false;
+  }
   try {
     await invoke<void>("save_terrance_context", { context: ctx });
+    return true;
   } catch {
-    // Non-fatal — context will reload from last good state on next session
+    // Non-fatal — caller decides; context reloads from last good state next session
+    return false;
   }
+}
+
+/** Narrow fail-closed read-modify-write: loads fresh, merges patch, saves. Throws on load failure. */
+export async function patchContext(patch: Partial<TerranceContext>): Promise<boolean> {
+  const fresh = await loadContext();
+  return saveContext({ ...fresh, ...patch });
 }
 
 // ─── Continuity Primer ────────────────────────────────────────────────────────
@@ -149,7 +202,7 @@ export async function buildSystemPrompt(ctx?: TerranceContext): Promise<string> 
   const [identity, profile, context, skills] = await Promise.all([
     loadIdentity(),
     loadProfile(),
-    ctx ? Promise.resolve(ctx) : loadContext(),
+    ctx ? Promise.resolve(ctx) : loadContextOrDefault(),
     loadSkills(),
   ]);
 
