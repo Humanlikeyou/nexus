@@ -1,5 +1,7 @@
 # Build Guide — Nexus
 
+> Bundle name: `Nexus` (`com.taisun.nexus`) in the working tree; rename from `electron` is planned/in progress — `package.json` and the Rust lib (`electron_lib`) still use the old name.
+
 ## Prerequisites
 
 | Tool | Version | Notes |
@@ -38,7 +40,7 @@ sudo apt-get install -y \
 npm run tauri -- dev
 ```
 
-Vite serves at `http://localhost:1420`. Rust changes trigger an automatic recompile.
+Vite serves at `http://127.0.0.1:1420` (`strictPort: true`) from `index.html` → `src-console/main.tsx`. Rust changes trigger an automatic recompile.
 
 ---
 
@@ -47,7 +49,7 @@ Vite serves at `http://localhost:1420`. Rust changes trigger an automatic recomp
 Run these in order:
 
 ```bash
-# 1. Type-check TypeScript
+# 1. Type-check TypeScript (tsconfig includes src-console only)
 npx tsc --noEmit
 
 # 2. Build frontend (tsc + vite bundle → dist/)
@@ -58,9 +60,24 @@ npm run build
 
 # 4. Full Tauri bundle (dmg + .app on macOS)
 npm run tauri -- build
+# or, ad-hoc signed for local use:
+npm run bundle:local
 ```
 
 Output lands in `src-tauri/target/release/bundle/`.
+
+---
+
+## Tests & helper scripts
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust unit tests
+npm run test:neuro          # src-console/neuro/*.test.mjs (node --experimental-strip-types --test)
+npm run mock-gateway        # mock OpenClaw gateway (also :partial, :no-ack, :fail)
+npm run outbox-status       # scripts/outbox-status.sh
+```
+
+CI (`.github/workflows/ci.yml`) runs on Node 20 (does not yet run `test:neuro` or `cargo test`; note `--experimental-strip-types` needs Node ≥ 22.6): `npm ci`, `npx tsc --noEmit`, `npm run build`, and `cargo build --manifest-path src-tauri/Cargo.toml`.
 
 ---
 
@@ -70,7 +87,7 @@ Output lands in `src-tauri/target/release/bundle/`.
 Tauri 2.x enforces capability declarations. Check `src-tauri/capabilities/default.json` and ensure the required permission string is listed (e.g. `core:event:allow-listen`). See [Tauri capability docs](https://v2.tauri.app/security/capabilities/).
 
 ### `port already in use` (1420)
-Another Vite instance is running. Kill it:
+Another Vite instance is running (`strictPort` means Vite will not fall back to another port). Kill it:
 ```bash
 lsof -ti :1420 | xargs kill -9
 ```
@@ -88,7 +105,7 @@ cargo build --manifest-path src-tauri/Cargo.toml
 ```
 
 ### `npm run tauri -- build` fails on macOS with signing errors
-Add `--no-bundle` to skip code-signing for local testing:
+Add `--no-bundle` to skip bundling/code-signing for local testing (produces only the binary in `src-tauri/target/release/`):
 ```bash
 npm run tauri -- build --no-bundle
 ```

@@ -1,6 +1,8 @@
 # Nexus — Project Brief for Claude Coders
 
-> **Central Goal**: Nexus is a personal AI-powered command center — a Tauri desktop app that aggregates your entire life into one dashboard. It unifies AI agent management (Terrance + OpenClaw), neuro/biometric monitoring (Muse EEG, Whoop), business intelligence (ARM trading system), fitness tracking, and an AI assistant — all orchestrated through n8n automation workflows and surfaced in a tactical command interface (dark graphite, precision-engineered panels, desaturated emerald accents).
+> **Central Goal**: Nexus is a local, private command center — a Tauri 2 desktop app combining Terrence (AI agent runtime + OpenClaw gateway), neuro sessions (Muse EEG), health signals (read-only from NOOP), business/ARM data, and goals, with n8n automation behind it.
+
+> **Rename (planned / in progress):** `electron` → **Nexus** (`com.taisun.nexus`). Already changed (WIP commit 4a33ff6): Cargo package `nexus`, `productName`/window title `Nexus`, identifier `com.taisun.nexus`. Still old: `package.json` name `electron`, Rust lib `electron_lib` (`main.rs` calls `electron_lib::run()`), `index.html` favicon `/electron.svg`. Finish the remaining items before treating the rename as done.
 
 ---
 
@@ -8,75 +10,71 @@
 
 ```
 nexus/
-├── src/                        # React + TypeScript frontend
-│   ├── App.tsx                 # Root — page routing via sidebar, 8 pages
-│   ├── components/
-│   │   ├── layout/             # Sidebar (icon rail), Shell, Header
-│   │   ├── system/             # OpenClawStatusCard
-│   │   ├── terrance/           # AI agent monitoring (StatusCard, TokenUsage, etc.)
-│   │   ├── arm/                # Trading system (RiskPanel, PositionsTable, etc.)
-│   │   ├── neuro/              # EEG/brain monitoring (20+ components)
-│   │   ├── fitness/            # Whoop integration (StrainChart, RecoveryScore, etc.)
-│   │   ├── business/           # Business metrics
-│   │   ├── trajectory/         # Goal tracking
-│   │   ├── assistant/          # AI chat interface
-│   │   ├── settings/           # App configuration
-│   │   └── ui/                 # Shared: OnboardingModal, CommandPalette, etc.
-│   ├── lib/
-│   │   ├── types.ts            # All TypeScript types (OpenClawStatus, ArmRiskStatus, etc.)
-│   │   ├── chart-theme.ts      # Shared ECharts constants (fontSize, borderRadius, etc.)
-│   │   ├── api.ts              # Tauri invoke wrappers
-│   │   └── utils.ts            # formatRelativeTime, cn(), etc.
-│   ├── terrance/system/        # openclawHealth.ts — pushHealthToN8n()
-│   └── styles/globals.css      # Design system: OKLch palette, glass classes, animations
+├── index.html                  # Loads /src-console/main.tsx (title "Terrence Nexus")
+├── src-console/                # LIVE UI (React 19 + TS, plain CSS, lucide-react icons)
+│   ├── App.tsx                 # Shell + navigation: Overview, Live, Sessions, Health, Trajectory,
+│   │                           #   Business, Revenue, Devices, Activity, Settings
+│   ├── bridge.ts               # Tauri invoke wrappers used by the console
+│   ├── types.ts
+│   ├── styles.css              # Console design system
+│   ├── design/                 # ProductUI, SystemPrimitives, useAppearance
+│   └── neuro/                  # fft, training, sessionFinalizer, useMuseTelemetry (+ *.test.mjs)
+├── src/                        # LEGACY — not type-checked (tsconfig includes only src-console)
+│   ├── context/, hooks/, lib/  # Remaining helpers (neurofeedback, electrode, llm-router, api.ts)
+│   └── terrance/system/        # continuity.ts, rituals.ts, openclawHealth.ts, ...
+│                               # (App.tsx, main.tsx, components/*, styles/globals.css,
+│                               #  whoop hooks/lib are deleted; empty dirs remain)
 ├── src-tauri/
-│   ├── src/commands/
-│   │   ├── openclaw.rs         # get_openclaw_health(), kill_openclaw(), restart_openclaw()
-│   │   ├── whoop.rs            # Whoop BLE streaming commands
-│   │   ├── muse.rs             # Muse EEG BLE streaming commands
-│   │   ├── arm.rs              # ARM trading system commands
-│   │   ├── sessions.rs         # Neuro session recording
-│   │   ├── telegram.rs         # Telegram notifications
-│   │   └── ...                 # goals, snapshots, replay, packager, outbox, etc.
-│   └── Cargo.toml              # Rust dependencies (tauri 2.0, dirs, serde, etc.)
-└── CLAUDE.md                   # This file
+│   ├── src/lib.rs              # Builder + generate_handler! (~136 commands)
+│   ├── src/main.rs             # calls electron_lib::run()
+│   └── src/commands/           # 28 modules in mod.rs, incl.:
+│       ├── noop.rs             # Read-only bridge to NOOP's local SQLite health store
+│       ├── crew.rs             # CrewAI service client (http://127.0.0.1:8400)
+│       ├── terrence_*.rs       # actions, automations, context, priorities, projects,
+│       │                       #   runtime, runtime_bridge
+│       ├── openclaw.rs, muse.rs, arm.rs, sessions.rs, telegram.rs, continuity.rs,
+│       └── llm_router.rs, research.rs, kv.rs, goals, snapshots, replay, packager, outbox, ...
+├── config/                     # terrance.identity.md, terrance.profile.md, skills/
+├── scripts/                    # mock-gateway.mjs, outbox-status.sh
+├── stack/                      # Docker stack; n8n workflows in integrations/n8n/
+└── docs/                       # NEXUS_PRODUCT_VERIFICATION.md, TERRENCE_ARCHITECTURE_AUDIT.md
 ```
+
+There is **no Whoop integration** any more: `whoop.rs`, `useWhoop*`, `src/lib/whoop/` and the fitness components are deleted. Health data is read from NOOP's database (`OpenWhoop/whoop.sqlite` under Application Support) by `noop.rs`; Nexus does not pair with the strap or compute metrics.
+`commands/notifications.rs` still exists on disk but is no longer declared in `mod.rs`.
 
 ### Tech Stack
 | Layer | Technology |
 |-------|-----------|
-| Desktop shell | Tauri 2.0 (Rust backend + WebView frontend) |
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS 4 |
-| UI components | Radix UI, Framer Motion, ECharts (echarts-for-react) |
-| Rust backend | Tauri commands, `dirs`, `serde_json`, `tokio` |
+| Desktop shell | Tauri 2 (Rust backend + WebView frontend) |
+| Frontend | React 19, TypeScript, Vite 6, plain CSS (`src-console/styles.css`), lucide-react |
+| Rust backend | Tauri commands, `tokio`, `reqwest`, `rusqlite`, `dirs`, `serde_json` |
 | Automation | n8n (self-hosted, Docker stack) |
 | AI gateway | OpenClaw (Node.js, port 18789, LaunchAgent) |
-| Biometrics | Muse EEG via BLE, Whoop via BLE |
+| Biometrics | Muse EEG via BLE; health via NOOP (read-only SQLite) |
+| Agents | CrewAI service via `crew.rs` (port 8400) |
 | Trading | ARM system via local HTTP |
 | Notifications | Telegram Bot API |
+
+Removed from deps: Tailwind, Radix UI, ECharts, framer-motion.
 
 ---
 
 ## Development Commands
 
+Run from the repo root.
+
 ```bash
-# Start the app in dev mode (hot-reload frontend, watch Rust)
-cd /Users/thevisualdude/projects/nexus
-npm run tauri -- dev
-
-# TypeScript type check (no emit)
-npx tsc --noEmit
-
-# Frontend only (Vite dev server, no Tauri window)
-npm run dev
-
-# Build production app
-cargo tauri build
+npm run tauri -- dev          # Vite (127.0.0.1:1420, strictPort) + Tauri window
+npm run dev                   # Frontend only
+npx tsc --noEmit              # Type-check (src-console only)
+npm run test:neuro            # node --test src-console/neuro/*.test.mjs
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run tauri -- build        # Production bundle
+npm run bundle:local          # Ad-hoc signed local bundle (APPLE_SIGNING_IDENTITY=-)
+npm run mock-gateway          # also :partial, :no-ack, :fail
+npm run outbox-status
 ```
-
-**Dev server**: Frontend at `http://localhost:1420` with Vite HMR.
-**Rust changes**: Require full app restart (Cargo recompiles automatically with `tauri dev`).
-**Frontend changes**: Picked up instantly via Vite HMR — no restart needed.
 
 ---
 
@@ -87,7 +85,7 @@ cargo tauri build
 | OpenClaw AI gateway | `127.0.0.1:18789` | LaunchAgent `ai.openclaw.gateway`, module at `/opt/homebrew/lib/node_modules/openclaw/openclaw.mjs` |
 | n8n automation | Docker: `stack-n8n-1` | Backed by `stack-postgres-1`, db `n8n_db`, user `terrance` |
 | Postgres | Docker: `stack-postgres-1` | `psql -U terrance -d n8n_db` |
-| Terrance integrations | `/Users/thevisualdude/terrance-integrations/` | n8n workflow JSON files in `stack/integrations/n8n/` |
+| Terrance integrations | `stack/integrations/` (in this repo) | n8n workflow JSON files in `stack/integrations/n8n/` |
 
 ### OpenClaw Health Check Logic (Rust)
 `src-tauri/src/commands/openclaw.rs` — `check_memory_search()`:
@@ -102,7 +100,7 @@ This was needed because `openclaw memory status --deep` downloads the model but 
 ## n8n Workflows
 
 ### openclaw_health_monitor.json
-- **Location**: `/Users/thevisualdude/terrance-integrations/stack/integrations/n8n/openclaw_health_monitor.json`
+- **Location**: `stack/integrations/n8n/openclaw_health_monitor.json`
 - **Workflow ID**: `tAKyEzsax7BoTM7t`
 - **Trigger**: Webhook POST from Nexus app (via `pushHealthToN8n()` in `openclawHealth.ts`)
 - **Flow**: webhook → extract status → switch (healthy/degraded/offline) → 3 conditional branches → Telegram alert → respond
@@ -116,74 +114,13 @@ This was needed because `openclaw memory status --deep` downloads the model but 
 
 ## UI Design System
 
-### Philosophy
-Tactical command interface — precision-engineered, restrained, authority. Think luxury aerospace instrumentation. No glass morphism, no pastels, no SaaS card aesthetic. Dark only.
-
-### Key CSS Classes (`src/styles/globals.css`)
-```css
-.panel          /* Main panel: flat #0F1318 bg, 1px border, inset highlight */
-.panel-subtle   /* Lighter panels: semi-transparent, thinner border */
-.panel-elevated /* Modals/overlays: slightly lighter, drop shadow */
-.panel-primary  /* Dominant system panel: emerald-tinted border + glow */
-.glass/.glass-subtle/.glass-elevated  /* Aliases → panel equivalents (backward compat) */
-.heading-section  /* ALL CAPS, 11px, tracked, muted */
-.metric-value     /* Mono, 24px, semibold — dominant numbers */
-.metric-label     /* Mono, 10px, uppercase, desaturated */
-.badge-status     /* Mono, 10px, uppercase, tracked, inline-flex */
-.btn-kill         /* Deliberate destructive button — mono, bordered */
-.subsystem-inactive  /* Dashed border, dimmed — for unconnected modules */
-.terminal-readout    /* Dark bg, mono font — for log output */
-```
-
-### Color Palette (hex — dark only, contrast-calibrated)
-| Token | Value | Use |
-|-------|-------|-----|
-| `--background` | `#0B0F14` | Near-black base (Layer 1) |
-| `--card` | `#131921` | Panel surface (Layer 2) |
-| `--foreground` | `#E0E3E9` | Primary text |
-| `--muted-foreground` | `#737D8C` | Secondary labels |
-| `--accent` | `#4A9E7E` | Calibrated emerald (+15% sat) |
-| `--accent-secondary` | `#378A68` | Deeper emerald |
-| `--success` | `#4A9E6A` | Lifted green |
-| `--warning` | `#A3923D` | Lifted amber |
-| `--destructive` | `#A34E4E` | Lifted red |
-| `--data` | `#4A80A3` | Cool blue (neuro) |
-| `--border` | `#263040` | Visible steel borders |
-
-### Typography Scale
-| Old | New | Context |
-|-----|-----|---------|
-| `text-[9px]` | `text-[11px]` | Micro labels |
-| `text-[10px]` | `text-xs` (12px) | Small labels |
-| `text-[11px]` | `text-[13px]` | Secondary text |
-| `text-sm font-medium` (h3) | `text-base font-medium` | Card headings |
-
-### ECharts Shared Theme (`src/lib/chart-theme.ts`)
-```ts
-export const CHART_THEME = {
-  gauge: { progressWidth: 6, axisLineWidth: 6, titleFontSize: 10, detailFontSize: 24 },
-  colors: { phthalo: "#4A9E7E", amber: "#A3923D", cyan: "#4A80A3", solar: "#A3803D" },
-  axisLabel: { color: "rgba(139, 149, 163, 0.8)" },
-  splitLine: { color: "rgba(38, 48, 64, 0.4)" },
-}
-```
-Thin instrumentation arcs, contrast-calibrated colors aligned to globals.css. All chart components import this.
+The live design system is `src-console/styles.css` + `src-console/design/`. The former `src/styles/globals.css`, `src/lib/chart-theme.ts` (ECharts) and Sidebar icon rail are legacy/deleted; their history is kept in the session log below. See also `TERRANCE_UI_DOCTRINE.md`.
 
 ---
 
-## Sidebar — Icon Rail
+## Completed Work (Session Log — historical)
 
-`src/components/layout/Sidebar.tsx`
-- **Collapsed** (default): 64px wide, icons only, Radix Tooltip on hover
-- **Expanded** (mouse enter): 220px wide, icon + text label, framer-motion `animate={{ width }}`
-- **Animation**: 250ms cubic-bezier `[0.25, 0.1, 0.25, 1]`
-- **Active indicator**: 3px accent left bar + `bg-accent/12` + glow
-- **BLE status dots**: Compact stacked circles when collapsed, dot + label when expanded
-- **Pages**: Terrance, Business, Revenue, Assistant, Neuro, Fitness, Trajectory, Settings
-
----
-
-## Completed Work (Session Log)
+> Entries below describe the pre-`src-console` UI (`src/App.tsx`, `src/components/*`, Whoop). Many referenced files are now deleted.
 
 ### OpenClaw Integration
 - [x] Updated OpenClaw from v2026.2.6-3 → v2026.2.22
@@ -229,7 +166,7 @@ Thin instrumentation arcs, contrast-calibrated colors aligned to globals.css. Al
 - [x] `config/terrance.identity.md` — Canonical identity: operating principles, communication style, decision priorities, tone constraints, mission alignment. Prepended to ALL model calls regardless of provider.
 - [x] `src/terrance/system/continuity.ts` — `buildSystemPrompt()` (identity + context primer), `summarizeAndStoreSession()` (post-session memory), `loadContext()` / `saveContext()`, `INFERENCE_PARAMS` (shared temperature/top_p/repeat_penalty)
 - [x] `src-tauri/src/commands/continuity.rs` — `read_identity_file`, `load_terrance_context`, `save_terrance_context`, `store_session_log`, `list_session_logs`
-- [x] `memory/session_logs/` — Directory for per-session JSON summaries (committed to repo for portability)
+- [x] `memory/session_logs/` — Directory for per-session JSON summaries (runtime directory, not tracked in git)
 - [x] `~/Library/.../terrance_context.json` — Runtime context store: active goals + last session summary
 - [x] `src/components/terrance/TelegramChat.tsx` — Identity injected at send time; "Save to memory" button triggers `summarizeAndStoreSession()`; provider badge + cost shown per message
 
@@ -249,7 +186,7 @@ Thin instrumentation arcs, contrast-calibrated colors aligned to globals.css. Al
 - [ ] **Usage log** — After several calls, open Settings → Compute Mode, verify usage summary shows correct counts and costs
 - [ ] **Clear usage** — Click "Clear" in usage summary, verify log resets to zero
 - [ ] **Offline fallback** — In hybrid mode with API key, kill internet, verify graceful fallback to Ollama (no crash)
-- [ ] **Unit tests** — Run `cargo test -p nexus-lib` and verify all 16 router tests pass
+- [ ] **Unit tests** — Run `cargo test --manifest-path src-tauri/Cargo.toml` and verify all 16 router tests pass
 
 ---
 
@@ -293,27 +230,13 @@ Thin instrumentation arcs, contrast-calibrated colors aligned to globals.css. Al
 
 ## Pending / Future Work
 
-### High Priority
-- [ ] **End-to-end Telegram alert test** — Trigger a real health status push from the app and verify the Telegram message arrives with correct formatting
-- [ ] **OpenClaw auto-restart** — When health check shows offline, auto-restart via LaunchAgent `launchctl kickstart`; surface result in UI
-- [ ] **n8n webhook auth** — The health monitor webhook is currently unauthenticated; add a shared secret header check in the n8n Code node
-- [ ] **Whoop BLE stability** — Whoop connection drops intermittently; needs reconnect logic with exponential backoff in `whoop.rs`
-
-### Medium Priority
-- [ ] **TokenUsage real data** — `TokenUsage.tsx` uses hardcoded placeholder data; wire to actual token tracking from OpenClaw or n8n API call log
-- [ ] **ARM trading live feed** — RiskPanel and PositionsTable are wired but ARM API endpoint URL is not persisted in settings; add to SettingsPage
-- [ ] **Neuro session export** — SessionReport dialog generates report but has no share/save-to-disk action; add Tauri `save` dialog
-- [ ] **Light mode parity** — `globals.css` has light mode overrides but some newer glass classes (`glass-elevated`, ambient orbs) have no light mode equivalents
-- [ ] **Onboarding flow** — OnboardingModal exists but skip/complete state is not persisted; user sees it every launch
-
-### Low Priority / Nice to Have
-- [ ] **Trajectory page** — GoalTracker is wired but no backend persistence yet; goals reset on restart
-- [ ] **Keyboard shortcuts** — CommandPalette exists but shortcut bindings are sparse; populate with all page navigation + common actions
-- [ ] **Assistant page history** — Chat history is in-memory only; persist to SQLite via Tauri plugin
-- [ ] **Notification Center** — NotificationCenter dropdown UI exists but doesn't pull from a real notification store
-- [ ] **BLE device picker** — Muse and Whoop connect to hardcoded devices; add a scan/pick UI in Settings
-- [ ] **Tauri updater** — No auto-update mechanism; add `tauri-plugin-updater` for OTA updates
-- [ ] **Production build CI** — No CI/CD; add GitHub Actions for `cargo tauri build` on push
+- [ ] **Finish rename to Nexus** — `package.json` name, Rust lib `electron_lib` + `main.rs`, `/electron.svg` favicon, `index.html` title, CI/docs paths
+- [ ] **Clean up after the src-console migration** (WIP snapshot commit 4a33ff6): remove empty legacy dirs (`src/components/*`, `src/styles`, `src-next/`, `src-console/system/`)
+- [ ] **Legacy `src/`** — decide what remains (not type-checked or imported by the entry point)
+- [ ] **`notifications.rs`** — re-declare in `mod.rs` or delete
+- [ ] **CI** — add `npm run test:neuro` and `cargo test`; add a bundle job
+- [ ] **CrewAI service** — `crew.rs` expects a service at 127.0.0.1:8400; `stack/crew-service/` does not exist yet
+- [ ] **End-to-end Telegram alert test**, **OpenClaw auto-restart**, **n8n webhook auth** (from earlier list)
 
 ---
 
@@ -321,29 +244,12 @@ Thin instrumentation arcs, contrast-calibrated colors aligned to globals.css. Al
 
 ### Adding a New Tauri Command
 1. Write `#[tauri::command] pub async fn my_command(...) -> Result<T, String>` in `src-tauri/src/commands/`
-2. Register in `mod.rs` and `main.rs` `tauri::Builder::invoke_handler`
-3. Add TypeScript wrapper in `src/lib/api.ts` using `invoke<T>('my_command', { args })`
+2. Declare `pub mod` in `commands/mod.rs` and add to `tauri::generate_handler![...]` in `src-tauri/src/lib.rs`
+3. Add TypeScript wrapper in `src-console/bridge.ts` using `invoke<T>('my_command', { args })`
 4. Use in components with `useEffect` + `useState`
 
 ### Adding a New Page
-1. Add nav entry to `Sidebar.tsx` `navItems` array (icon, label, id)
-2. Add `case 'my-page':` to App.tsx switch/render block
-3. Create `src/components/my-page/` directory with components
-4. Use `<div className="space-y-7">` as page root, `<div className="grid grid-cols-2 gap-5">` for 2-col layouts
-
-### Glass Card Pattern
-```tsx
-<div className="glass p-6 space-y-5">
-  <div className="flex items-center justify-between">
-    <div className="flex items-center gap-2">
-      <IconName size={16} className="text-accent" />
-      <h3 className="text-base font-medium text-muted-foreground">Card Title</h3>
-    </div>
-    {/* optional right slot: badge, status, etc. */}
-  </div>
-  {/* card content */}
-</div>
-```
+Add an entry to the nav list in `src-console/App.tsx` and render its view there.
 
 ### n8n HTTP Calls from Code Nodes
 n8n 2.x task runner sandbox — **no `fetch`, no `process`**. Use:
@@ -363,13 +269,12 @@ const response = await helpers.httpRequest({
 
 | File | Purpose |
 |------|---------|
-| `src/styles/globals.css` | Entire design system — edit here for global visual changes |
-| `src/lib/chart-theme.ts` | ECharts shared constants — edit to change all chart styling |
-| `src/lib/types.ts` | All TypeScript interfaces — add new types here |
-| `src/App.tsx` | Page routing and top-level state — wire new pages/components here |
+| `src-console/App.tsx` | Live UI shell + navigation |
+| `src-console/bridge.ts` | Tauri invoke wrappers |
+| `src-console/styles.css` | Design system |
+| `src-tauri/src/lib.rs` | Command registration (`generate_handler!`) |
+| `src-tauri/src/commands/mod.rs` | Command module declarations |
+| `src-tauri/src/commands/noop.rs` | NOOP health bridge (read-only) |
 | `src-tauri/src/commands/openclaw.rs` | OpenClaw health check logic |
-| `src-tauri/src/commands/mod.rs` | Command registration |
 | `~/.openclaw/config.json` | OpenClaw runtime config |
-| `~/.node-llama-cpp/models/` | Local LLM models for OpenClaw memory search |
-| `/opt/homebrew/lib/node_modules/openclaw/` | OpenClaw install location |
-| `/Users/thevisualdude/terrance-integrations/stack/integrations/n8n/` | n8n workflow JSON files |
+| `stack/integrations/n8n/` | n8n workflow JSON files |

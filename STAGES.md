@@ -17,7 +17,7 @@
 - Hardened .gitignore
 - Set up private GitHub repo + CI
 - Built Tauri desktop shell
-- Deployed to /Applications/Electron.app
+- Deployed to /Applications/Electron.app (rename to Nexus / `com.taisun.nexus` planned, in progress)
 
 **Result:** Moved from cloud dependency to controlled local runtime. The "I own my machine" stage.
 
@@ -76,7 +76,7 @@
 - n8n ingress gateway
 - 5 event types: health.ping, memory.write, memory.query, kb.ingest, kb.query
 - Terrance identity canonical definition
-- 67 Tauri commands across 19 Rust modules
+- 67 Tauri commands across 19 Rust modules (at the time; working tree now ~136 commands across 28 modules)
 - OpenClaw health monitor + Telegram alerting
 
 **Result:** Terrance gained long-term memory (Letta), semantic knowledge retrieval (Weaviate), workflow routing (n8n), and observability (health monitor). The "external brain" stage.
@@ -136,16 +136,25 @@
 - "/research [topic]" command in TelegramChat triggers background research
 - New Rust module: `src-tauri/src/commands/research.rs`
 
-**Phase 5E — CrewAI Integration** (not started, last)
+**Phase 5E — CrewAI Integration** (started — Rust client only)
 - Python FastAPI service with CrewAI in Docker
-- Tauri commands to start/stop/status crews via HTTP
-- CrewDashboard.tsx for crew monitoring UI
-- Files: stack/crew-service/ (NEW), crew.rs (NEW), CrewDashboard.tsx (NEW)
+- [x] `src-tauri/src/commands/crew.rs` — crew_list/start/status/stop/health against http://127.0.0.1:8400 (WIP commit 4a33ff6)
+- [ ] Python FastAPI CrewAI service (`stack/crew-service/` — not created; `stack/install-crewai.sh` exists)
+- [ ] Crew monitoring UI (planned in `src-console/`; the old CrewDashboard.tsx plan targeted the deleted `src/components`)
 
 *Approach: Built on existing TypeScript/Rust stack first (5A-5D), CrewAI Python service last (5E).*
 *Local model: qwen3.5 (9.7B). OpenClaw primary: MiniMax-M2.5, fallback: ollama/qwen3.5.*
 
 This stage turns Terrance from semi-autonomous to fully autonomous.
+
+---
+
+## Stage 5½ — Console Rebuild (In Progress — WIP commit 4a33ff6)
+
+- Live UI moved to `src-console/` (old `src/App.tsx` + `src/components/*` deleted; Tailwind/Radix/ECharts/framer-motion removed)
+- Whoop BLE integration removed (`whoop.rs`); health is read-only from NOOP via `noop.rs`
+- Terrence runtime modules: `terrence_actions/automations/context/priorities/projects/runtime/runtime_bridge.rs`
+- Rename electron → Nexus (`com.taisun.nexus`) planned; partially applied
 
 ---
 
@@ -158,7 +167,7 @@ This stage turns Terrance from semi-autonomous to fully autonomous.
 - Continuous learning — model fine-tuning on personal data
 - Distributed execution logic — offload tasks across machines
 - Self-prioritization of tasks — autonomous goal ranking
-- Cross-domain reasoning — connect insights across neuro, business, fitness, etc.
+- Cross-domain reasoning — connect insights across neuro, business, health (NOOP), etc.
 
 *Note: Secure authenticated gateway was delivered in Stage 4.*
 
