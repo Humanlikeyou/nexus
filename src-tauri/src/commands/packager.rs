@@ -158,69 +158,29 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
         return Err("Archive file not found".to_string());
     }
 
-    let archive_str = archive
-        .to_str()
-        .ok_or_else(|| "Archive path is not valid UTF-8".to_string())?
-        .to_string();
-
-    // Inspect the archive before extracting anything: reject absolute paths,
-    // `..` components and link entries that could write outside the staging dir.
-    let listing = Command::new("tar")
-        .args(["-tvzf", &archive_str])
-        .output()
-        .await
-        .map_err(|e| format!("Failed to read archive: {}", e))?;
-    if !listing.status.success() {
-        return Err(format!(
-            "Archive could not be read: {}",
-            String::from_utf8_lossy(&listing.stderr)
-        ));
-    }
-    let names = Command::new("tar")
-        .args(["-tzf", &archive_str])
-        .output()
-        .await
-        .map_err(|e| format!("Failed to read archive: {}", e))?;
-    if !names.status.success() {
-        return Err("Archive could not be read".to_string());
-    }
-    validate_archive_listing(
-        &String::from_utf8_lossy(&names.stdout),
-        &String::from_utf8_lossy(&listing.stdout),
-    )?;
-
     // Unique, freshly created staging dir (create_dir fails if it already exists).
     let staging =
         std::env::temp_dir().join(format!("nexus-unpack-{}", uuid::Uuid::new_v4().simple()));
     fs::create_dir(&staging).map_err(|e| format!("Failed to create staging dir: {}", e))?;
-    let staging_str = staging
-        .to_str()
-        .ok_or_else(|| "Staging path is not valid UTF-8".to_string())?
-        .to_string();
 
-    // Extract archive
-    let output = Command::new("tar")
-        .args([
-            "-xzf",
-            &archive_str,
-            "--no-same-owner",
-            "--no-same-permissions",
-            "-C",
-            &staging_str,
-        ])
-        .output()
-        .await
-        .map_err(|e| {
-            let _ = fs::remove_dir_all(&staging);
-            format!("Failed to extract: {}", e)
-        })?;
-
-    if !output.status.success() {
+    // Validate and extract in one pass with the tar crate, reading sizes and
+    // types from the headers themselves (no CLI listing to parse), so what is
+    // checked is exactly what is written.
+    let (archive_for_task, staging_for_task) = (archive.clone(), staging.clone());
+    let unpacked = tokio::task::spawn_blocking(move || {
+        unpack_archive_checked(
+            &archive_for_task,
+            &staging_for_task,
+            MAX_UNPACK_TOTAL_BYTES,
+            MAX_UNPACK_ENTRIES,
+        )
+    })
+    .await
+    .map_err(|e| format!("Extract task failed: {}", e))
+    .and_then(|r| r);
+    if let Err(error) = unpacked {
         let _ = fs::remove_dir_all(&staging);
-        return Err(format!(
-            "Extract failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+        return Err(error);
     }
 
     // Find the extracted directory (should be nexus-pack-*)
@@ -301,42 +261,70 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     Ok(restored)
 }
 
-/// Unpack limits, checked from the listing before anything is extracted.
+/// Unpack limits, enforced from tar headers before each entry is written.
 const MAX_UNPACK_TOTAL_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
 const MAX_UNPACK_ENTRIES: usize = 50_000;
 
-/// Size column of a `tar -tv` line. bsdtar (macOS): `perm links user group size ...`;
-/// GNU tar: `perm user/group size ...`.
-fn listed_entry_size(line: &str) -> Option<u64> {
-    let fields: Vec<&str> = line.split_whitespace().collect();
-    let idx = if fields.get(1).map_or(false, |f| f.contains('/')) { 2 } else { 4 };
-    fields.get(idx)?.parse().ok()
+/// Check one entry's path: relative, no `..`, no root/prefix components.
+fn check_entry_path(path: &std::path::Path) -> Result<(), String> {
+    use std::path::Component;
+    if path.as_os_str().is_empty() {
+        return Err("Archive rejected: empty entry name".to_string());
+    }
+    for component in path.components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(format!("Archive rejected: '..' in entry '{}'", path.display()))
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "Archive rejected: absolute path entry '{}'",
+                    path.display()
+                ))
+            }
+        }
+    }
+    Ok(())
 }
 
-/// Validate `tar -tzf` (names) and `tar -tvzf` (verbose) output for an archive.
-/// Rejects absolute paths, any `..` component, symlink/hardlink entries, and
-/// archives over the entry-count or total-size limits.
-fn validate_archive_listing(names: &str, verbose: &str) -> Result<(), String> {
-    validate_archive_listing_with_limits(names, verbose, MAX_UNPACK_TOTAL_BYTES, MAX_UNPACK_ENTRIES)
-}
-
-fn validate_archive_listing_with_limits(
-    names: &str,
-    verbose: &str,
+/// Gzip'd tar -> `dest`. Every header is checked before its entry is written:
+/// only regular files and directories, safe relative paths, entry count and
+/// cumulative declared size within limits. Ownership, permissions, mtimes and
+/// xattrs from the archive are not applied. Returns the number of entries.
+fn unpack_archive_checked(
+    archive: &std::path::Path,
+    dest: &std::path::Path,
     max_total_bytes: u64,
     max_entries: usize,
-) -> Result<(), String> {
-    let entry_count = names.lines().filter(|l| !l.is_empty()).count();
-    if entry_count > max_entries {
-        return Err(format!(
-            "Archive rejected: {} entries exceeds the limit of {}",
-            entry_count, max_entries
-        ));
-    }
+) -> Result<usize, String> {
+    let file = fs::File::open(archive).map_err(|e| format!("Failed to open archive: {}", e))?;
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    tar.set_preserve_permissions(false);
+    tar.set_preserve_ownerships(false);
+    tar.set_preserve_mtime(false);
+    tar.set_unpack_xattrs(false);
+    tar.set_overwrite(false);
+
+    let mut count = 0usize;
     let mut total: u64 = 0;
-    for line in verbose.lines().filter(|l| !l.is_empty()) {
-        let size = listed_entry_size(line)
-            .ok_or_else(|| "Archive rejected: entry size could not be read".to_string())?;
+    for entry in tar.entries().map_err(|e| format!("Archive could not be read: {}", e))? {
+        let mut entry = entry.map_err(|e| format!("Archive could not be read: {}", e))?;
+        let entry_type = entry.header().entry_type();
+        if !(entry_type.is_file() || entry_type.is_dir()) {
+            return Err("Archive rejected: contains link or special entries".to_string());
+        }
+        count += 1;
+        if count > max_entries {
+            return Err(format!(
+                "Archive rejected: more than {} entries",
+                max_entries
+            ));
+        }
+        let size = entry
+            .header()
+            .size()
+            .map_err(|e| format!("Archive rejected: bad entry size: {}", e))?;
         total = total.saturating_add(size);
         if total > max_total_bytes {
             return Err(format!(
@@ -344,30 +332,23 @@ fn validate_archive_listing_with_limits(
                 max_total_bytes / (1024 * 1024)
             ));
         }
-    }
-    for name in names.lines().filter(|l| !l.is_empty()) {
-        let path = std::path::Path::new(name);
-        if name.starts_with('/') || name.starts_with('\\') || path.is_absolute() {
-            return Err(format!("Archive rejected: absolute path entry '{}'", name));
-        }
-        if path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::Prefix(_)))
-        {
-            return Err(format!("Archive rejected: '..' in entry '{}'", name));
-        }
-    }
-    for line in verbose.lines().filter(|l| !l.is_empty()) {
-        match line.chars().next() {
-            Some('-') | Some('d') => {}
-            _ => {
-                return Err(
-                    "Archive rejected: contains link or special entries".to_string(),
-                )
-            }
+        let path = entry
+            .path()
+            .map_err(|e| format!("Archive rejected: bad entry name: {}", e))?
+            .into_owned();
+        check_entry_path(&path)?;
+        // unpack_in also refuses anything that would land outside `dest`.
+        let inside = entry
+            .unpack_in(dest)
+            .map_err(|e| format!("Extract failed for '{}': {}", path.display(), e))?;
+        if !inside {
+            return Err(format!(
+                "Archive rejected: entry '{}' escapes the staging dir",
+                path.display()
+            ));
         }
     }
-    Ok(())
+    Ok(count)
 }
 
 #[tauri::command]
@@ -424,46 +405,135 @@ fn copy_dir_selective(src: &PathBuf, dst: &PathBuf, names: &[&str]) -> Result<()
 
 #[cfg(test)]
 mod unpack_tests {
-    use super::{listed_entry_size, validate_archive_listing, validate_archive_listing_with_limits};
+    use super::unpack_archive_checked;
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
 
-    #[test]
-    fn reads_sizes_from_bsd_and_gnu_listings() {
-        assert_eq!(listed_entry_size("-rw-r--r--  0 u g 1234 Oct 21 18:00 a/b"), Some(1234));
-        assert_eq!(listed_entry_size("-rw-r--r-- u/g 99 2026-10-21 18:00 a/b"), Some(99));
-        assert_eq!(listed_entry_size("garbage"), None);
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("nexus-unpack-test-{}-{}", tag, uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn gz(dir: &Path, raw_tar: &[u8]) -> PathBuf {
+        let path = dir.join("a.tar.gz");
+        let mut enc = flate2::write::GzEncoder::new(std::fs::File::create(&path).unwrap(), flate2::Compression::fast());
+        enc.write_all(raw_tar).unwrap();
+        enc.finish().unwrap();
+        path
+    }
+
+    /// Raw header with arbitrary name/type/size, bypassing Builder's path checks.
+    fn raw_header(name: &str, kind: tar::EntryType, size: u64, gname: &str) -> tar::Header {
+        let mut h = tar::Header::new_gnu();
+        {
+            let bytes = h.as_old_mut();
+            bytes.name = [0; 100];
+            bytes.name[..name.len()].copy_from_slice(name.as_bytes());
+        }
+        h.set_entry_type(kind);
+        h.set_size(size);
+        h.set_mode(0o644);
+        h.set_groupname(gname).unwrap();
+        h.set_cksum();
+        h
+    }
+
+    fn one_entry_tar(name: &str, kind: tar::EntryType, data: &[u8], declared: u64, gname: &str) -> Vec<u8> {
+        let mut out = raw_header(name, kind, declared, gname).as_bytes().to_vec();
+        out.extend_from_slice(data);
+        out.resize(out.len().div_ceil(512) * 512 + 1024, 0);
+        out
     }
 
     #[test]
-    fn rejects_oversized_or_too_many_entries() {
-        let names = "a/1\na/2\n";
-        let verbose = "-rw-r--r--  0 u g 600 Oct 21 18:00 a/1\n-rw-r--r--  0 u g 600 Oct 21 18:00 a/2\n";
-        assert!(validate_archive_listing_with_limits(names, verbose, 1_200, 10).is_ok());
-        assert!(validate_archive_listing_with_limits(names, verbose, 1_000, 10).is_err());
-        assert!(validate_archive_listing_with_limits(names, verbose, 10_000, 1).is_err());
-        assert!(validate_archive_listing_with_limits("a\n", "-rw-r--r-- nonsense\n", 10_000, 10).is_err());
+    fn unpacks_a_normal_pack() {
+        let dir = tmp("ok");
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_size(5);
+        h.set_mode(0o600);
+        h.set_cksum();
+        b.append_data(&mut h, "nexus-pack-1/manifest.json", &b"{\"a\"}"[..]).unwrap();
+        let archive = gz(&dir, &b.into_inner().unwrap());
+        let dest = dir.join("out");
+        std::fs::create_dir(&dest).unwrap();
+        assert_eq!(unpack_archive_checked(&archive, &dest, 1_000, 10).unwrap(), 1);
+        assert_eq!(std::fs::read(dest.join("nexus-pack-1/manifest.json")).unwrap(), b"{\"a\"}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Archives made by the system `tar` CLI (what pack_it_up uses, incl. macOS
+    /// bsdtar pax/xattr headers) must unpack.
+    #[test]
+    fn unpacks_an_archive_made_by_system_tar() {
+        let dir = tmp("cli");
+        let src = dir.join("nexus-pack-x");
+        std::fs::create_dir_all(src.join("sessions")).unwrap();
+        std::fs::write(src.join("manifest.json"), b"{}").unwrap();
+        std::fs::write(src.join("sessions").join("s.json"), b"[]").unwrap();
+        let archive = dir.join("cli.tar.gz");
+        let ok = std::process::Command::new("tar")
+            .args(["-czf", archive.to_str().unwrap(), "-C", dir.to_str().unwrap(), "nexus-pack-x"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !ok {
+            eprintln!("system tar unavailable; skipping");
+            return;
+        }
+        let dest = dir.join("out");
+        std::fs::create_dir(&dest).unwrap();
+        unpack_archive_checked(&archive, &dest, 1_000_000, 100).unwrap();
+        assert!(dest.join("nexus-pack-x/sessions/s.json").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn accepts_normal_pack_listing() {
-        let names = "nexus-pack-1/\nnexus-pack-1/manifest.json\nnexus-pack-1/sessions/a.json\n";
-        let verbose = "drwxr-xr-x  0 u g 0 Oct 21 18:00 nexus-pack-1/\n-rw-r--r--  0 u g 10 Oct 21 18:00 nexus-pack-1/manifest.json\n";
-        assert!(validate_archive_listing(names, verbose).is_ok());
+    fn malicious_gname_and_huge_declared_size_hit_the_cap_before_writing() {
+        // A group name with spaces used to shift the `tar -tv` columns; the
+        // header-based size must still be read and capped.
+        let dir = tmp("cap");
+        let raw = one_entry_tar("nexus-pack-1/big.bin", tar::EntryType::Regular, b"", 3 * 1024 * 1024 * 1024, "x 0");
+        let archive = gz(&dir, &raw);
+        let dest = dir.join("out");
+        std::fs::create_dir(&dest).unwrap();
+        let err = unpack_archive_checked(&archive, &dest, 2 * 1024 * 1024 * 1024, 10).unwrap_err();
+        assert!(err.contains("size exceeds"), "{err}");
+        assert!(!dest.join("nexus-pack-1").exists(), "nothing may be written");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn rejects_traversal_absolute_and_links() {
-        assert!(validate_archive_listing("../evil\n", "").is_err());
-        assert!(validate_archive_listing("a/../../evil\n", "").is_err());
-        assert!(validate_archive_listing("/etc/passwd\n", "").is_err());
-        assert!(validate_archive_listing(
-            "a/link\n",
-            "lrwxr-xr-x  0 u g 0 Oct 21 18:00 a/link -> /etc\n"
-        )
-        .is_err());
-        assert!(validate_archive_listing(
-            "a/hard\n",
-            "hrw-r--r--  0 u g 0 Oct 21 18:00 a/hard link to /etc/passwd\n"
-        )
-        .is_err());
+    fn rejects_traversal_absolute_links_and_too_many_entries() {
+        for (name, kind) in [
+            ("../evil", tar::EntryType::Regular),
+            ("a/../../evil", tar::EntryType::Regular),
+            ("/etc/evil", tar::EntryType::Regular),
+            ("a/link", tar::EntryType::Symlink),
+            ("a/hard", tar::EntryType::Link),
+        ] {
+            let dir = tmp("bad");
+            let archive = gz(&dir, &one_entry_tar(name, kind, b"x", 1, "g"));
+            let dest = dir.join("out");
+            std::fs::create_dir(&dest).unwrap();
+            assert!(unpack_archive_checked(&archive, &dest, 1_000, 10).is_err(), "{name} must be rejected");
+            assert!(!dir.join("evil").exists());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        let dir = tmp("count");
+        let mut raw = Vec::new();
+        for i in 0..3 {
+            let mut e = raw_header(&format!("p/f{i}"), tar::EntryType::Regular, 1, "g").as_bytes().to_vec();
+            e.extend_from_slice(&[b'x']);
+            e.resize(1024, 0);
+            raw.extend(e);
+        }
+        raw.extend([0u8; 1024]);
+        let archive = gz(&dir, &raw);
+        let dest = dir.join("out");
+        std::fs::create_dir(&dest).unwrap();
+        assert!(unpack_archive_checked(&archive, &dest, 1_000, 2).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
