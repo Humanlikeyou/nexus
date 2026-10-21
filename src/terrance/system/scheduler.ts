@@ -127,6 +127,42 @@ function recordSuccess(id: JobId): void {
   failures.delete(id);
 }
 
+// ─── Timeouts (bug 4) ─────────────────────────────────────────────────────────
+// JS cannot cancel the underlying invoke; an orphaned promise may still finish
+// and write its timestamp later, which is acceptable.
+
+export const TASK_TIMEOUTS_MS: Record<JobId, number> = {
+  daily: 3 * 60_000,
+  midday: 3 * 60_000,
+  evening: 3 * 60_000,
+  consolidation: 5 * 60_000,
+  reasoning: 5 * 60_000,
+  prune: 2 * 60_000,
+  health: 60_000,
+};
+const AUX_TIMEOUT_MS = 60_000;          // rituals, custom jobs, subagents, skills evolution
+const LOAD_TIMEOUT_MS = 30_000;
+export const TICK_WATCHDOG_MS = 15 * 60_000;
+let tickStartedAt = 0;
+let tickGen = 0;
+
+export class TaskTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TaskTimeoutError";
+  }
+}
+
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    p.finally(() => clearTimeout(t)),
+    new Promise<never>((_, rej) => {
+      t = setTimeout(() => rej(new TaskTimeoutError(`${label} timed out after ${ms}ms`)), ms);
+    }),
+  ]);
+}
+
 interface JobOutcome {
   ok: boolean;
   detail: string;
@@ -145,7 +181,7 @@ async function runJob(
   console.log(`[scheduler] Running ${label}${detail ? ` (${detail})` : ""}...`);
   let outcome: JobOutcome;
   try {
-    outcome = await fn();
+    outcome = await withTimeout(fn(), TASK_TIMEOUTS_MS[id], label);
   } catch (e) {
     outcome = { ok: false, detail: String(e) };
   }
@@ -160,13 +196,18 @@ async function runJob(
 }
 
 async function tick() {
-  if (running) return;
+  if (running) {
+    if (Date.now() - tickStartedAt < TICK_WATCHDOG_MS) return;
+    console.error("[scheduler] watchdog: previous tick stuck; forcing reset");
+  }
   running = true;
+  tickStartedAt = Date.now();
+  const gen = ++tickGen;
 
   try {
     let ctx: TerranceContext;
     try {
-      ctx = await loadContext();
+      ctx = await withTimeout(loadContext(), LOAD_TIMEOUT_MS, "loadContext");
     } catch (e) {
       console.error("[scheduler] context unavailable; skipping tick (fail closed):", e);
       return; // finally still resets running
@@ -182,7 +223,7 @@ async function tick() {
     if (Object.keys(seed).length > 0) {
       ctx = { ...ctx, ...seed };
       try {
-        await patchContext(seed);
+        await withTimeout(patchContext(seed), LOAD_TIMEOUT_MS, "seed timestamps");
       } catch (e) {
         console.error("[scheduler] could not persist seeded timestamps:", e);
       }
@@ -243,7 +284,7 @@ async function tick() {
 
     // Ritual reminders (presence drills, training, weekly/monthly check-ins)
     try {
-      await tickRituals();
+      await withTimeout(Promise.resolve(tickRituals()), AUX_TIMEOUT_MS, "rituals");
     } catch (e) {
       console.error("[scheduler] Rituals tick error:", e);
     }
@@ -272,7 +313,7 @@ async function tick() {
 
       try {
         const evoId = activityBus.register("Skills Evolution", "skills_evolution");
-        const evo = await evolveSkills();
+        const evo = await withTimeout(evolveSkills(), AUX_TIMEOUT_MS, "skills evolution");
         activityBus.complete(evoId, evo.created > 0 || evo.updated > 0
           ? `${evo.created} created, ${evo.updated} updated`
           : "No new patterns");
@@ -303,7 +344,7 @@ async function tick() {
 
     // Custom user-defined jobs
     try {
-      const jobResults = await tickCustomJobs();
+      const jobResults = await withTimeout(tickCustomJobs(), AUX_TIMEOUT_MS, "custom jobs");
       if (jobResults.length > 0) {
         const delivered = jobResults.filter((r) => r.delivered).length;
         const silent = jobResults.filter((r) => r.silent).length;
@@ -315,7 +356,7 @@ async function tick() {
 
     // Subagents
     try {
-      await tickSubagents();
+      await withTimeout(Promise.resolve(tickSubagents()), AUX_TIMEOUT_MS, "subagents");
     } catch (e) {
       console.error("[scheduler] Subagents error:", e);
     }
@@ -325,7 +366,8 @@ async function tick() {
   } catch (e) {
     console.error("[scheduler] Error:", e);
   } finally {
-    running = false;
+    // A stale tick (reset by the watchdog) must not clear `running` for the new one.
+    if (gen === tickGen) running = false;
   }
 }
 
