@@ -147,22 +147,55 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
         return Err("Archive file not found".to_string());
     }
 
-    let staging = std::env::temp_dir().join("nexus-unpack");
-    let _ = fs::remove_dir_all(&staging);
-    fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+    let archive_str = archive
+        .to_str()
+        .ok_or_else(|| "Archive path is not valid UTF-8".to_string())?
+        .to_string();
+
+    // Inspect the archive before extracting anything: reject absolute paths,
+    // `..` components and link entries that could write outside the staging dir.
+    let listing = Command::new("tar")
+        .args(["-tvzf", &archive_str])
+        .output()
+        .map_err(|e| format!("Failed to read archive: {}", e))?;
+    if !listing.status.success() {
+        return Err(format!(
+            "Archive could not be read: {}",
+            String::from_utf8_lossy(&listing.stderr)
+        ));
+    }
+    let names = Command::new("tar")
+        .args(["-tzf", &archive_str])
+        .output()
+        .map_err(|e| format!("Failed to read archive: {}", e))?;
+    if !names.status.success() {
+        return Err("Archive could not be read".to_string());
+    }
+    validate_archive_listing(
+        &String::from_utf8_lossy(&names.stdout),
+        &String::from_utf8_lossy(&listing.stdout),
+    )?;
+
+    // Unique, freshly created staging dir (create_dir fails if it already exists).
+    let staging =
+        std::env::temp_dir().join(format!("nexus-unpack-{}", uuid::Uuid::new_v4().simple()));
+    fs::create_dir(&staging).map_err(|e| format!("Failed to create staging dir: {}", e))?;
+    let staging_str = staging
+        .to_str()
+        .ok_or_else(|| "Staging path is not valid UTF-8".to_string())?
+        .to_string();
 
     // Extract archive
     let output = Command::new("tar")
-        .args([
-            "-xzf",
-            archive.to_str().unwrap(),
-            "-C",
-            staging.to_str().unwrap(),
-        ])
+        .args(["-xzf", &archive_str, "-C", &staging_str])
         .output()
-        .map_err(|e| format!("Failed to extract: {}", e))?;
+        .map_err(|e| {
+            let _ = fs::remove_dir_all(&staging);
+            format!("Failed to extract: {}", e)
+        })?;
 
     if !output.status.success() {
+        let _ = fs::remove_dir_all(&staging);
         return Err(format!(
             "Extract failed: {}",
             String::from_utf8_lossy(&output.stderr)
@@ -247,6 +280,34 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     Ok(restored)
 }
 
+/// Validate `tar -tzf` (names) and `tar -tvzf` (verbose) output for an archive.
+/// Rejects absolute paths, any `..` component, and symlink/hardlink entries.
+fn validate_archive_listing(names: &str, verbose: &str) -> Result<(), String> {
+    for name in names.lines().filter(|l| !l.is_empty()) {
+        let path = std::path::Path::new(name);
+        if name.starts_with('/') || name.starts_with('\\') || path.is_absolute() {
+            return Err(format!("Archive rejected: absolute path entry '{}'", name));
+        }
+        if path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::Prefix(_)))
+        {
+            return Err(format!("Archive rejected: '..' in entry '{}'", name));
+        }
+    }
+    for line in verbose.lines().filter(|l| !l.is_empty()) {
+        match line.chars().next() {
+            Some('-') | Some('d') => {}
+            _ => {
+                return Err(
+                    "Archive rejected: contains link or special entries".to_string(),
+                )
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_app_paths() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
@@ -264,7 +325,12 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
 
-        if src_path.is_dir() {
+        // Never follow symlinks while copying restored data.
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
             // Skip very large files (>50MB) and hidden OS files
@@ -292,4 +358,33 @@ fn copy_dir_selective(src: &PathBuf, dst: &PathBuf, names: &[&str]) -> Result<()
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod unpack_tests {
+    use super::validate_archive_listing;
+
+    #[test]
+    fn accepts_normal_pack_listing() {
+        let names = "nexus-pack-1/\nnexus-pack-1/manifest.json\nnexus-pack-1/sessions/a.json\n";
+        let verbose = "drwxr-xr-x  0 u g 0 Oct 21 18:00 nexus-pack-1/\n-rw-r--r--  0 u g 10 Oct 21 18:00 nexus-pack-1/manifest.json\n";
+        assert!(validate_archive_listing(names, verbose).is_ok());
+    }
+
+    #[test]
+    fn rejects_traversal_absolute_and_links() {
+        assert!(validate_archive_listing("../evil\n", "").is_err());
+        assert!(validate_archive_listing("a/../../evil\n", "").is_err());
+        assert!(validate_archive_listing("/etc/passwd\n", "").is_err());
+        assert!(validate_archive_listing(
+            "a/link\n",
+            "lrwxr-xr-x  0 u g 0 Oct 21 18:00 a/link -> /etc\n"
+        )
+        .is_err());
+        assert!(validate_archive_listing(
+            "a/hard\n",
+            "hrw-r--r--  0 u g 0 Oct 21 18:00 a/hard link to /etc/passwd\n"
+        )
+        .is_err());
+    }
 }
