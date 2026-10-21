@@ -8,7 +8,8 @@ FastAPI wrapper around CrewAI. Contract matches src-tauri/src/commands/crew.rs:
   POST /crews/stop             {id} -> {"id", "status", "stopped": bool}
 
 Every /crews/* call needs header X-Crew-Token == $CREW_SERVICE_TOKEN.
-LLM: MiniMax-M2.5 (Anthropic-messages API, same endpoint OpenClaw uses) primary, Ollama qwen3.5 fallback.
+LLM: local Ollama gemma4 primary. MiniMax-M2.5 (Anthropic-messages API, same endpoint
+OpenClaw uses) is an optional fallback, enabled only when MINIMAX_API_KEY is non-empty.
 Runs persist to Postgres table crew_runs (created at startup).
 Each crew runs in its own process so /crews/stop can really cancel it.
 """
@@ -48,7 +49,7 @@ MINIMAX_API_KEY = _env("MINIMAX_API_KEY")
 MINIMAX_BASE_URL = _env("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic")
 MINIMAX_MODEL = _env("MINIMAX_MODEL", "MiniMax-M2.5")
 OLLAMA_BASE_URL = _env("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-CREW_OLLAMA_MODEL = _env("CREW_OLLAMA_MODEL", "qwen3.5")
+CREW_OLLAMA_MODEL = _env("CREW_OLLAMA_MODEL", "gemma4")
 
 PG = dict(
     host=_env("CREW_DB_HOST", "postgres"),
@@ -200,15 +201,15 @@ def db_finish(crew_id: str, status: str, result: Optional[str], llm: Optional[st
 def _build_llms():
     from crewai import LLM
 
-    llms = []
+    # Local-first: Ollama is primary. MiniMax is optional and only added when a key is set.
+    llms = [("ollama/" + CREW_OLLAMA_MODEL, LLM(
+        model=CREW_OLLAMA_MODEL, provider="ollama", base_url=OLLAMA_BASE_URL,
+    ))]
     if MINIMAX_API_KEY:
         llms.append(("minimax/" + MINIMAX_MODEL, LLM(
             model=MINIMAX_MODEL, provider="anthropic",
             base_url=MINIMAX_BASE_URL, api_key=MINIMAX_API_KEY,
         )))
-    llms.append(("ollama/" + CREW_OLLAMA_MODEL, LLM(
-        model=CREW_OLLAMA_MODEL, provider="ollama", base_url=OLLAMA_BASE_URL,
-    )))
     return llms
 
 
@@ -281,7 +282,7 @@ async def lifespan(_app: FastAPI):
     if n:
         log.info("marked %d orphaned runs as interrupted", n)
     if not MINIMAX_API_KEY:
-        log.warning("MINIMAX_API_KEY not set; using Ollama only")
+        log.info("MINIMAX_API_KEY not set; local Ollama only (%s)", CREW_OLLAMA_MODEL)
     yield
     with _lock:
         for p in _procs.values():

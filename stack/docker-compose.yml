@@ -184,7 +184,7 @@ services:
       CREW_MAX_CONCURRENT: ${CREW_MAX_CONCURRENT:-2}
       CREW_RUN_TIMEOUT_SECONDS: ${CREW_RUN_TIMEOUT_SECONDS:-900}
       CREW_ALLOWED_NAMES: ${CREW_ALLOWED_NAMES:-}
-      # LLM — MiniMax primary, local Ollama fallback (no OpenAI)
+      # LLM — local Ollama (gemma4) primary; MiniMax optional, only if MINIMAX_API_KEY is set
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.io/anthropic}
       MINIMAX_MODEL: ${MINIMAX_MODEL:-MiniMax-M2.5}
