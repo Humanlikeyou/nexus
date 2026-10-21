@@ -273,6 +273,8 @@ export interface PackageInfo {
   path: string;
   size_mb: number;
   includes: string[];
+  /** Files left out of the backup (oversized, symlinks). Older backends omit it. */
+  skipped: string[];
 }
 
 // ============================================================
