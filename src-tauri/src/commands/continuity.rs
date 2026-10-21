@@ -241,8 +241,8 @@ pub struct SessionLogEntry {
 pub fn store_session_log(entry: SessionLogEntry) -> Result<(), String> {
     let dir = session_logs_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let filename = format!("{}.json", entry.id);
-    let path = dir.join(filename);
+    super::path_safety::validate_name(&entry.id)?;
+    let path = super::path_safety::safe_join(&dir, &format!("{}.json", entry.id))?;
     let json = serde_json::to_string_pretty(&entry).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
 }
@@ -499,8 +499,8 @@ pub fn store_activity_entry(entry: ActivityEntry) -> Result<(), String> {
     let dir = activity_log_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let entry = redact_activity_entry(entry);
-    let filename = format!("{}.json", entry.id);
-    let path = dir.join(filename);
+    super::path_safety::validate_name(&entry.id)?;
+    let path = super::path_safety::safe_join(&dir, &format!("{}.json", entry.id))?;
     let json = serde_json::to_string_pretty(&entry).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
 }

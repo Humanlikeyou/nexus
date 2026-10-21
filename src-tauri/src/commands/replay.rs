@@ -273,8 +273,9 @@ fn estimate_duration(path: &PathBuf) -> Option<f64> {
 
 #[tauri::command]
 pub async fn start_replay(app: AppHandle, filename: String, speed: f64) -> Result<(), String> {
-    let path = replays_dir().join(&filename);
-    if !path.exists() {
+    super::path_safety::validate_file_name(&filename, &["ndjson"])?;
+    let path = super::path_safety::safe_join(&replays_dir(), &filename)?;
+    if !path.is_file() {
         return Err(format!("Replay file not found: {filename}"));
     }
 

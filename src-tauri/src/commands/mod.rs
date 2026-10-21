@@ -13,6 +13,7 @@ pub mod onboarding;
 pub mod openclaw;
 pub mod outbox;
 pub mod packager;
+pub mod path_safety;
 pub mod replay;
 pub mod research;
 pub mod sessions;

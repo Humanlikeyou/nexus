@@ -42,8 +42,10 @@ pub fn save_session(session: RecordedSession, data: serde_json::Value) -> Result
     let dir = sessions_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create sessions dir: {}", e))?;
 
+    super::path_safety::validate_name(&session.device_type)?;
+    super::path_safety::validate_name(&session.id)?;
     let filename = format!("{}_{}.json", session.device_type, session.id);
-    let path = dir.join(&filename);
+    let path = super::path_safety::safe_join(&dir, &filename)?;
 
     let payload = serde_json::json!({
         "session": session,

@@ -184,19 +184,24 @@ pub fn read_skills() -> Result<Vec<Skill>, String> {
 #[tauri::command]
 pub fn save_skill(name: String, content: String) -> Result<(), String> {
     let dir = openclaw_dir().join("skills");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let filename = format!("{}.md", name.replace(' ', "-").to_lowercase());
-    let path = dir.join(filename);
+    let path = skill_path(&dir, &name)?;
     fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+/// Map a user-facing skill name ("Daily Brief") to `<dir>/daily-brief.md`,
+/// rejecting anything that could escape the skills directory.
+fn skill_path(dir: &std::path::Path, name: &str) -> Result<PathBuf, String> {
+    let stem = name.trim().replace(' ', "-").to_lowercase();
+    super::path_safety::validate_name(&stem)?;
+    super::path_safety::safe_join(dir, &format!("{stem}.md"))
 }
 
 /// Delete a skill file from ~/.openclaw/skills/.
 #[tauri::command]
 pub fn delete_skill(name: String) -> Result<bool, String> {
     let dir = openclaw_dir().join("skills");
-    let filename = format!("{}.md", name.replace(' ', "-").to_lowercase());
-    let path = dir.join(filename);
-    if path.exists() {
+    let path = skill_path(&dir, &name)?;
+    if path.is_file() {
         fs::remove_file(&path).map_err(|e| e.to_string())?;
         Ok(true)
     } else {
