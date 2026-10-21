@@ -2,7 +2,7 @@
 
 > **Central Goal**: Nexus is a local, private command center — a Tauri 2 desktop app combining Terrence (AI agent runtime + OpenClaw gateway), neuro sessions (Muse EEG), health signals (read-only from NOOP), business/ARM data, and goals, with n8n automation behind it.
 
-> **Rename (planned / in progress):** `electron` → **Nexus** (`com.taisun.nexus`). Already changed (WIP commit 4a33ff6): Cargo package `nexus`, `productName`/window title `Nexus`, identifier `com.taisun.nexus`. Still old: `package.json` name `electron`, Rust lib `electron_lib` (`main.rs` calls `electron_lib::run()`), `index.html` favicon `/electron.svg`. Finish the remaining items before treating the rename as done.
+> **Rename: done** (80276f9, f30acbb). `electron` → **Nexus**: npm package `nexus`, Cargo package `nexus`, Rust lib `nexus_lib` (`main.rs` calls `nexus_lib::run()`), `productName` `Nexus`, identifier `com.taisun.nexus`, favicon `public/nexus.svg`. Backups are `nexus-backup-*.tar.gz` (staging `nexus-pack-*`, config dir `nexus-config`); older `electron-pack`/`electron-config` backups still unpack. App data moves from `com.taisun.electron` to `com.taisun.nexus` via a one-time, non-destructive copy on first launch (`src-tauri/src/app_paths.rs`).
 
 ---
 
@@ -26,7 +26,7 @@ nexus/
 │                               #  whoop hooks/lib are deleted; empty dirs remain)
 ├── src-tauri/
 │   ├── src/lib.rs              # Builder + generate_handler! (~136 commands)
-│   ├── src/main.rs             # calls electron_lib::run()
+│   ├── src/main.rs             # calls nexus_lib::run()
 │   └── src/commands/           # 28 modules in mod.rs, incl.:
 │       ├── noop.rs             # Read-only bridge to NOOP's local SQLite health store
 │       ├── crew.rs             # CrewAI service client (http://127.0.0.1:8400)
@@ -230,12 +230,12 @@ The live design system is `src-console/styles.css` + `src-console/design/`. The 
 
 ## Pending / Future Work
 
-- [ ] **Finish rename to Nexus** — `package.json` name, Rust lib `electron_lib` + `main.rs`, `/electron.svg` favicon, `index.html` title, CI/docs paths
+- [x] **Rename to Nexus** — done in 80276f9 (names) and f30acbb (app-data migration)
 - [ ] **Clean up after the src-console migration** (WIP snapshot commit 4a33ff6): remove empty legacy dirs (`src/components/*`, `src/styles`, `src-next/`, `src-console/system/`)
 - [ ] **Legacy `src/`** — decide what remains (not type-checked or imported by the entry point)
 - [ ] **`notifications.rs`** — re-declare in `mod.rs` or delete
-- [ ] **CI** — add `npm run test:neuro` and `cargo test`; add a bundle job
-- [ ] **CrewAI service** — `crew.rs` expects a service at 127.0.0.1:8400; `stack/crew-service/` does not exist yet
+- [x] **CI** — Node 22 via `.nvmrc`, `test:neuro`, `cargo test --locked`, fmt/clippy (non-blocking), macOS job; tag-triggered draft release in `release.yml`
+- [ ] **CrewAI service** — `crew.rs` expects a service at 127.0.0.1:8400; service code imported to `stack/crew-service/` (Dockerfile, main.py); wiring/UI still pending
 - [ ] **End-to-end Telegram alert test**, **OpenClaw auto-restart**, **n8n webhook auth** (from earlier list)
 
 ---

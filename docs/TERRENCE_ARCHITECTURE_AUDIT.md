@@ -26,18 +26,18 @@ Do not add more specialist agents, dashboards, or automations until one runtime,
 
 - `src-tauri/src/lib.rs` registers a broad set of direct commands for models, OpenClaw, Telegram, memory, goals, telemetry, device control, research, ARM, and CrewAI.
 - The Rust backend starts a durable event outbox worker at app startup. This is the only confirmed background worker hosted by Tauri itself.
-- The app identity is still `Electron` / `com.taisun.electron` in `src-tauri/tauri.conf.json`, despite using Tauri and being called Nexus elsewhere.
+- ~~The app identity is still `Electron` / `com.taisun.electron`~~ — resolved: the app is now `Nexus` / `com.taisun.nexus` (80276f9).
 
 ### Persistence
 
 The app currently persists state in several independent places:
 
-- `~/Library/Application Support/com.taisun.electron/events.db`: sensor/event records and outbox rows.
-- `~/Library/Application Support/com.taisun.electron/assistant.db`: chat sessions and chat messages.
-- `~/Library/Application Support/com.taisun.electron/goals.json`: structured goals.
-- `~/Library/Application Support/com.taisun.electron/terrance_context.json`: string-based active goals, a session summary, and `relevantMemory`.
-- `~/Library/Application Support/com.taisun.electron/session_logs/` or a repository-relative `memory/session_logs/`: session summaries.
-- `~/Library/Application Support/com.taisun.electron/activity_log/`: one JSON file per completed background activity.
+- `~/Library/Application Support/com.taisun.nexus/events.db`: sensor/event records and outbox rows.
+- `~/Library/Application Support/com.taisun.nexus/assistant.db`: chat sessions and chat messages.
+- `~/Library/Application Support/com.taisun.nexus/goals.json`: structured goals.
+- `~/Library/Application Support/com.taisun.nexus/terrance_context.json`: string-based active goals, a session summary, and `relevantMemory`.
+- `~/Library/Application Support/com.taisun.nexus/session_logs/` or a repository-relative `memory/session_logs/`: session summaries.
+- `~/Library/Application Support/com.taisun.nexus/activity_log/`: one JSON file per completed background activity.
 - `~/.openclaw/`: OpenClaw configuration, markdown tasks/content pipeline, cron data, memory, and skills.
 - `~/.hermes/`: the live Hermes configuration, sessions, Telegram runtime, cron jobs, and Amara model wrapper.
 - The Docker stack is intended to add n8n, Letta, Weaviate, Verba, and Postgres, but Docker was unavailable during this audit.
@@ -124,7 +124,7 @@ The app currently persists state in several independent places:
 ## F. Architectural Debt
 
 - The large uncommitted UI migration deletes approximately 15,794 lines across the legacy UI while adding an untracked `src-console` replacement. It currently builds, but it has not been committed as an intentional product boundary or verified end-to-end.
-- Names are inconsistent: Terrence/Terrance, Nexus/Electron, and OpenClaw/Hermes. These make operating state and future migration decisions ambiguous.
+- Names are inconsistent: Terrence/Terrance and OpenClaw/Hermes (Nexus/Electron was resolved by the rename). These make operating state and future migration decisions ambiguous.
 - `src-tauri/tauri.conf.json` sets `csp` to `null` and the app has broad command exposure. Future tool execution needs narrower, explicit IPC boundaries.
 - `NexusConfig` persists sensitive provider and integration configuration in an application JSON file. This needs a defined secret-storage policy before more external integrations are added.
 - Identity text asserts behaviors such as continuous operation, Telegram processing, and comprehensive tracking that the active Nexus application does not currently guarantee.

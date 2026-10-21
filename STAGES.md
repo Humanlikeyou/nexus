@@ -17,7 +17,7 @@
 - Hardened .gitignore
 - Set up private GitHub repo + CI
 - Built Tauri desktop shell
-- Deployed to /Applications/Electron.app (rename to Nexus / `com.taisun.nexus` planned, in progress)
+- Deployed to /Applications/Electron.app (pre-rename name; now Nexus / `com.taisun.nexus`)
 
 **Result:** Moved from cloud dependency to controlled local runtime. The "I own my machine" stage.
 
@@ -139,7 +139,7 @@
 **Phase 5E — CrewAI Integration** (started — Rust client only)
 - Python FastAPI service with CrewAI in Docker
 - [x] `src-tauri/src/commands/crew.rs` — crew_list/start/status/stop/health against http://127.0.0.1:8400 (WIP commit 4a33ff6)
-- [ ] Python FastAPI CrewAI service (`stack/crew-service/` — not created; `stack/install-crewai.sh` exists)
+- [x] Python FastAPI CrewAI service code imported to `stack/crew-service/` (a71e91f); not yet verified running
 - [ ] Crew monitoring UI (planned in `src-console/`; the old CrewDashboard.tsx plan targeted the deleted `src/components`)
 
 *Approach: Built on existing TypeScript/Rust stack first (5A-5D), CrewAI Python service last (5E).*
@@ -154,7 +154,7 @@ This stage turns Terrance from semi-autonomous to fully autonomous.
 - Live UI moved to `src-console/` (old `src/App.tsx` + `src/components/*` deleted; Tailwind/Radix/ECharts/framer-motion removed)
 - Whoop BLE integration removed (`whoop.rs`); health is read-only from NOOP via `noop.rs`
 - Terrence runtime modules: `terrence_actions/automations/context/priorities/projects/runtime/runtime_bridge.rs`
-- Rename electron → Nexus (`com.taisun.nexus`) planned; partially applied
+- [x] Rename electron → Nexus (`com.taisun.nexus`) done (80276f9), with one-time non-destructive app-data copy from `com.taisun.electron` (f30acbb)
 
 ---
 

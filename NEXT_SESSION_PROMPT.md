@@ -4,7 +4,7 @@
 
 ## Context
 
-Stage 4 (Activation) for the Nexus/Terrance project was just implemented and committed (`0db686f`). The production app is deployed to `/Applications/Electron.app`. Four features were added:
+Stage 4 (Activation) for the Nexus/Terrance project was just implemented and committed (`0db686f`). The production app was deployed to `/Applications/Electron.app` at the time (pre-rename; the app is now `Nexus`, `com.taisun.nexus`). Four features were added:
 
 1. **Automatic Memory Capture** — TelegramChat.tsx has a 2-minute idle timer that auto-saves sessions with 4+ messages. Coordinates with the manual "Save to memory" button.
 2. **Scheduled Memory Consolidation** — `src/terrance/system/scheduler.ts` runs every 6 hours, consolidates last 24h session logs into a single Letta memory write via n8n ingress.

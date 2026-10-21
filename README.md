@@ -3,7 +3,7 @@
 Local, private command center — Tauri 2 + React 19 (`src-console/`) + Rust (`src-tauri/`).
 Covers Terrence (AI runtime + OpenClaw), Muse EEG sessions, health signals read from NOOP, business/ARM and goals.
 
-> Rename from `electron` to **Nexus** (`com.taisun.nexus`) is planned and partly applied; some internal names still say `electron`.
+> Formerly named `electron`; the rename to **Nexus** (`com.taisun.nexus`, Rust lib `nexus_lib`) is complete. Existing app data in `com.taisun.electron` is copied over once on first launch, and old `electron-*` backups still restore.
 
 ## Quick start
 

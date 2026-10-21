@@ -62,7 +62,7 @@ Upstream references reviewed during the audit: [Tauri releases](https://tauri.ap
 
 ## Protected Boundaries
 
-This pass has not changed the Muse BLE protocol, backend sample acquisition, WHOOP/NOOP storage schema, historical session schema, approval rules, or user-data locations. The legacy `com.taisun.electron` data directory remains intentional. The training summary is additional content inside the already-flexible session data payload. The recorder stop path now retains its writer on flush failure; this is a targeted data-loss fix, not a protocol or acquisition rewrite.
+This pass has not changed the Muse BLE protocol, backend sample acquisition, WHOOP/NOOP storage schema, historical session schema, approval rules, or user-data locations. At the time, the legacy `com.taisun.electron` data directory remained intentional; it has since been superseded by `com.taisun.nexus` with a one-time non-destructive copy on first launch (f30acbb). The training summary is additional content inside the already-flexible session data payload. The recorder stop path now retains its writer on flush failure; this is a targeted data-loss fix, not a protocol or acquisition rewrite.
 
 Current active frontend files include `App.tsx`, `bridge.ts`, `types.ts`, `styles.css`, `design/ProductUI.tsx`, `design/SystemPrimitives.tsx`, `design/useAppearance.ts`, and the `neuro` modules/tests. Legacy signal-quality code only exports its existing pure channel assessor for reuse. Vite/TypeScript aliases permit reuse of the existing domain modules.
 

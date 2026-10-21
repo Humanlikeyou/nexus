@@ -1,12 +1,12 @@
 # Build Guide — Nexus
 
-> Bundle name: `Nexus` (`com.taisun.nexus`) in the working tree; rename from `electron` is planned/in progress — `package.json` and the Rust lib (`electron_lib`) still use the old name.
+> App: `Nexus` (`com.taisun.nexus`), npm package `nexus`, Rust lib `nexus_lib`. Formerly `electron` (rename done in 80276f9).
 
 ## Prerequisites
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| Node.js | >= 20 (tested: v25.6.0) | No `.nvmrc`; use latest LTS or current |
+| Node.js | 22 (`.nvmrc`; ≥ 22.6 needed for `test:neuro`) | `nvm use` picks it up |
 | npm | >= 10 (tested: v11.8.0) | Lockfile is `package-lock.json` — use `npm`, not pnpm |
 | Rust | stable (tested: 1.93.0, `stable-aarch64-apple-darwin`) | No `rust-toolchain.toml`; `rustup default stable` |
 | Tauri CLI | ^2.10.0 | Installed as a devDependency — invoked via `npm run tauri` |
@@ -77,7 +77,13 @@ npm run mock-gateway        # mock OpenClaw gateway (also :partial, :no-ack, :fa
 npm run outbox-status       # scripts/outbox-status.sh
 ```
 
-CI (`.github/workflows/ci.yml`) runs on Node 20 (does not yet run `test:neuro` or `cargo test`; note `--experimental-strip-types` needs Node ≥ 22.6): `npm ci`, `npx tsc --noEmit`, `npm run build`, and `cargo build --manifest-path src-tauri/Cargo.toml`.
+CI (`.github/workflows/ci.yml`) uses Node 22 from `.nvmrc`: `npm ci`, `npx tsc --noEmit`, `npm run test:neuro`, `npm run build`; Rust on Linux (`cargo fmt --check`, `cargo clippy`, `cargo test --locked`) and macOS (`cargo build --locked`, `cargo test --locked`). `release.yml` builds a draft macOS release on `v*` tags.
+
+## App data & backups
+
+App data lives in `~/Library/Application Support/com.taisun.nexus`. On first launch after the rename, Nexus copies `~/Library/Application Support/com.taisun.electron` into it once (marker file; never deletes or overwrites existing files). The old directory is left in place.
+
+Backups (`pack_it_up`) are written to `~/Desktop/nexus-backup-<timestamp>.tar.gz` (staging dir `nexus-pack-*`, config in `nexus-config`). Restore also accepts legacy `electron-pack*` / `electron-config` backups.
 
 ---
 
