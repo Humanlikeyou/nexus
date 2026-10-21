@@ -4,7 +4,11 @@ use std::path::PathBuf;
 
 fn nexus_data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join("Library/Application Support"))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap()
+                .join("Library/Application Support")
+        })
         .join("com.taisun.electron")
 }
 
@@ -36,8 +40,8 @@ pub fn save_snapshot(snapshot: BrainSnapshot) -> Result<String, String> {
     let filename = format!("{}.json", snapshot.timestamp.replace(':', "-"));
     let path = dir.join(&filename);
 
-    let json =
-        serde_json::to_string_pretty(&snapshot).map_err(|e| format!("Failed to serialize: {}", e))?;
+    let json = serde_json::to_string_pretty(&snapshot)
+        .map_err(|e| format!("Failed to serialize: {}", e))?;
     fs::write(&path, json).map_err(|e| format!("Failed to write snapshot: {}", e))?;
 
     Ok(path.to_string_lossy().to_string())

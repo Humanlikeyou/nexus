@@ -15,7 +15,10 @@ pub struct SearchResult {
 /// Search the web using Brave Search API.
 /// Falls back to a simple DuckDuckGo scrape if no API key configured.
 #[tauri::command]
-pub async fn web_search(query: String, max_results: Option<u32>) -> Result<Vec<SearchResult>, String> {
+pub async fn web_search(
+    query: String,
+    max_results: Option<u32>,
+) -> Result<Vec<SearchResult>, String> {
     let limit = max_results.unwrap_or(5).min(10);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -117,7 +120,11 @@ async fn duckduckgo_search(
                 // Extract title (text between > and </a>)
                 let title = href_rest
                     .find('>')
-                    .and_then(|s| href_rest[s + 1..].find("</a>").map(|e| &href_rest[s + 1..s + 1 + e]))
+                    .and_then(|s| {
+                        href_rest[s + 1..]
+                            .find("</a>")
+                            .map(|e| &href_rest[s + 1..s + 1 + e])
+                    })
                     .unwrap_or("")
                     .replace("<b>", "")
                     .replace("</b>", "");
@@ -183,7 +190,11 @@ pub async fn fetch_url(url: String, max_chars: Option<usize>) -> Result<String, 
 
     // Truncate to limit
     if text.len() > limit {
-        Ok(format!("{}...\n\n[Truncated at {} chars]", &text[..limit], limit))
+        Ok(format!(
+            "{}...\n\n[Truncated at {} chars]",
+            &text[..limit],
+            limit
+        ))
     } else {
         Ok(text)
     }
@@ -255,10 +266,9 @@ fn urlencoding_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                16,
-            ) {
+            if let Ok(byte) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+            {
                 result.push(byte as char);
                 i += 3;
                 continue;

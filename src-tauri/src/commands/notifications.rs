@@ -4,7 +4,11 @@ use std::path::PathBuf;
 
 fn nexus_data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join("Library/Application Support"))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap()
+                .join("Library/Application Support")
+        })
         .join("com.taisun.electron")
 }
 
@@ -31,11 +35,10 @@ pub fn read_notifications() -> Result<Vec<StoredNotification>, String> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let data = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read notifications: {}", e))?;
+    let data =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read notifications: {}", e))?;
     let notifications: Vec<StoredNotification> =
-        serde_json::from_str(&data)
-            .map_err(|e| format!("Failed to parse notifications: {}", e))?;
+        serde_json::from_str(&data).map_err(|e| format!("Failed to parse notifications: {}", e))?;
     Ok(notifications)
 }
 

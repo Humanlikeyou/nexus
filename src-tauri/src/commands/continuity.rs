@@ -7,7 +7,6 @@
  *  - save_terrance_context  — persists context to data dir
  *  - store_session_log      — writes session summaries to memory/session_logs/
  */
-
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -28,19 +27,17 @@ fn context_path() -> PathBuf {
 fn session_logs_dir() -> PathBuf {
     // Session logs stored alongside the app source so they can be committed to the repo
     // Falls back to data dir if the repo path isn't found
-    let repo_path = std::env::current_exe()
-        .ok()
-        .and_then(|p| {
-            // Walk up from the binary to find the project root (contains CLAUDE.md)
-            let mut dir = p.parent()?.to_path_buf();
-            for _ in 0..6 {
-                if dir.join("CLAUDE.md").exists() {
-                    return Some(dir.join("memory").join("session_logs"));
-                }
-                dir = dir.parent()?.to_path_buf();
+    let repo_path = std::env::current_exe().ok().and_then(|p| {
+        // Walk up from the binary to find the project root (contains CLAUDE.md)
+        let mut dir = p.parent()?.to_path_buf();
+        for _ in 0..6 {
+            if dir.join("CLAUDE.md").exists() {
+                return Some(dir.join("memory").join("session_logs"));
             }
-            None
-        });
+            dir = dir.parent()?.to_path_buf();
+        }
+        None
+    });
     repo_path.unwrap_or_else(|| data_dir().join("session_logs"))
 }
 
@@ -73,7 +70,10 @@ pub fn read_identity_file() -> Result<String, String> {
             }
         }
     }
-    Err("Identity file not found. Ensure config/terrance.identity.md exists in the project root.".to_string())
+    Err(
+        "Identity file not found. Ensure config/terrance.identity.md exists in the project root."
+            .to_string(),
+    )
 }
 
 /// Read the operational profile from config/terrance.profile.md.
@@ -321,7 +321,8 @@ pub fn get_session_insights() -> Result<String, String> {
         .map_err(|e| e.to_string())?
         .as_millis() as u64;
     let thirty_days_ms = 30u64 * 24 * 60 * 60 * 1000;
-    let recent: Vec<&SessionLogEntry> = entries.iter()
+    let recent: Vec<&SessionLogEntry> = entries
+        .iter()
         .filter(|e| now - e.timestamp < thirty_days_ms)
         .collect();
 
@@ -357,7 +358,7 @@ fn activity_log_dir() -> PathBuf {
     data_dir().join("activity_log")
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityEntry {
     pub id: String,
@@ -372,11 +373,59 @@ pub struct ActivityEntry {
     pub outcome: Option<String>,
 }
 
+fn redact_marker_value(text: &str, marker: &str, terminators: &[char]) -> String {
+    let lower = text.to_ascii_lowercase();
+    let marker_lower = marker.to_ascii_lowercase();
+    let mut cursor = 0;
+    let mut redacted = String::with_capacity(text.len());
+
+    while let Some(relative_start) = lower[cursor..].find(&marker_lower) {
+        let marker_start = cursor + relative_start;
+        let value_start = marker_start + marker.len();
+        let value_end = text[value_start..]
+            .find(|character: char| terminators.contains(&character))
+            .map(|relative_end| value_start + relative_end)
+            .unwrap_or(text.len());
+        redacted.push_str(&text[cursor..value_start]);
+        redacted.push_str("[REDACTED]");
+        cursor = value_end;
+    }
+    redacted.push_str(&text[cursor..]);
+    redacted
+}
+
+pub(crate) fn redact_sensitive_text(text: &str) -> String {
+    let mut redacted = redact_marker_value(
+        text,
+        "https://api.telegram.org/bot",
+        &['/', '?', '#', ' ', '\n', '\r', '\"', '\''],
+    );
+    for marker in [
+        "authorization: bearer ",
+        "access_token=",
+        "api_key=",
+        "api_key:",
+        "bot token: ",
+        "token=",
+        "token:",
+    ] {
+        redacted = redact_marker_value(&redacted, marker, &[' ', '\n', '\r', '\"', '\'', '&']);
+    }
+    redacted
+}
+
+fn redact_activity_entry(mut entry: ActivityEntry) -> ActivityEntry {
+    entry.detail = entry.detail.map(|detail| redact_sensitive_text(&detail));
+    entry.outcome = entry.outcome.map(|outcome| redact_sensitive_text(&outcome));
+    entry
+}
+
 /// Store an activity entry to disk as a JSON file.
 #[tauri::command]
 pub fn store_activity_entry(entry: ActivityEntry) -> Result<(), String> {
     let dir = activity_log_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let entry = redact_activity_entry(entry);
     let filename = format!("{}.json", entry.id);
     let path = dir.join(filename);
     let json = serde_json::to_string_pretty(&entry).map_err(|e| e.to_string())?;
@@ -398,15 +447,51 @@ pub fn list_activity_entries(limit: Option<u32>) -> Result<Vec<ActivityEntry>, S
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().map(|x| x == "json").unwrap_or(false))
         .filter_map(|e| {
-            fs::read_to_string(e.path())
+            let path = e.path();
+            fs::read_to_string(&path)
                 .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
+                .map(|entry: ActivityEntry| {
+                    let redacted = redact_activity_entry(entry.clone());
+                    if redacted != entry {
+                        if let Ok(json) = serde_json::to_string_pretty(&redacted) {
+                            let _ = fs::write(&path, json);
+                        }
+                    }
+                    redacted
+                })
         })
         .collect();
 
     entries.sort_by(|a, b| b.started_at.cmp(&a.started_at));
     entries.truncate(max);
     Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_sensitive_text;
+
+    #[test]
+    fn redacts_telegram_tokens_without_hiding_the_endpoint() {
+        let text = "Network error at https://api.telegram.org/bot123456:secret/sendMessage";
+        assert_eq!(
+            redact_sensitive_text(text),
+            "Network error at https://api.telegram.org/bot[REDACTED]/sendMessage"
+        );
+    }
+
+    #[test]
+    fn redacts_common_credential_values() {
+        assert_eq!(
+            redact_sensitive_text("Authorization: Bearer private-value failed"),
+            "Authorization: Bearer [REDACTED] failed"
+        );
+        assert_eq!(
+            redact_sensitive_text("https://example.com?access_token=private-value&x=1"),
+            "https://example.com?access_token=[REDACTED]&x=1"
+        );
+    }
 }
 
 /// Prune activity log entries older than `days` days. Returns count removed.

@@ -4,7 +4,11 @@ use std::path::PathBuf;
 
 fn nexus_data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join("Library/Application Support"))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap()
+                .join("Library/Application Support")
+        })
         .join("com.taisun.electron")
 }
 

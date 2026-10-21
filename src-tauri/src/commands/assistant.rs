@@ -5,7 +5,11 @@ use std::path::PathBuf;
 
 fn nexus_data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join("Library/Application Support"))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap()
+                .join("Library/Application Support")
+        })
         .join("com.taisun.electron")
 }
 
@@ -168,7 +172,10 @@ pub fn save_chat_message(message: ChatMessage) -> Result<i64, String> {
 }
 
 #[tauri::command]
-pub fn load_chat_history(session_id: String, limit: Option<u32>) -> Result<Vec<ChatMessage>, String> {
+pub fn load_chat_history(
+    session_id: String,
+    limit: Option<u32>,
+) -> Result<Vec<ChatMessage>, String> {
     let conn = get_db()?;
     let lim = limit.unwrap_or(200) as i64;
 

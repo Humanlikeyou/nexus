@@ -162,9 +162,7 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
     let outbox_ids: Vec<i64> = result.iter().map(|(id, _)| *id).collect();
     let all_event_ids: Vec<String> = result
         .iter()
-        .flat_map(|(_, ids_json)| {
-            serde_json::from_str::<Vec<String>>(ids_json).unwrap_or_default()
-        })
+        .flat_map(|(_, ids_json)| serde_json::from_str::<Vec<String>>(ids_json).unwrap_or_default())
         .collect();
 
     let events_payload = tokio::task::spawn_blocking(move || -> Result<Vec<serde_json::Value>, String> {
@@ -217,8 +215,14 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
 
             if received_set.is_empty() {
                 // No valid ACK — do NOT mark delivered
-                let error_text = format!("No ACK: gateway returned 2xx but body missing or invalid received[] (body={})",
-                    if body.len() > 200 { &body[..200] } else { &body });
+                let error_text = format!(
+                    "No ACK: gateway returned 2xx but body missing or invalid received[] (body={})",
+                    if body.len() > 200 {
+                        &body[..200]
+                    } else {
+                        &body
+                    }
+                );
                 println!("[outbox] {}", error_text);
                 apply_backoff(&outbox_ids, &error_text, retry_base, retry_max).await?;
 
@@ -237,7 +241,8 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
 
                 for (outbox_id, ids_json) in &result {
                     let event_ids: Vec<String> = serde_json::from_str(ids_json).unwrap_or_default();
-                    let all_acked = !event_ids.is_empty() && event_ids.iter().all(|id| received_set.contains(id));
+                    let all_acked = !event_ids.is_empty()
+                        && event_ids.iter().all(|id| received_set.contains(id));
                     if all_acked {
                         acked_outbox_ids.push(*outbox_id);
                     } else {
@@ -266,20 +271,37 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
 
                 // Backoff unACKed rows
                 if !unacked_outbox_ids.is_empty() {
-                    let error_text = format!("Partial ACK: {}/{} outbox items not confirmed", unacked_outbox_ids.len(), result.len());
+                    let error_text = format!(
+                        "Partial ACK: {}/{} outbox items not confirmed",
+                        unacked_outbox_ids.len(),
+                        result.len()
+                    );
                     println!("[outbox] {}", error_text);
                     apply_backoff(&unacked_outbox_ids, &error_text, retry_base, retry_max).await?;
                 }
 
                 let acked_count = acked_outbox_ids.len() as u64;
-                println!("[outbox] delivered: acked={} unacked={} events_sent={}", acked_count, unacked_outbox_ids.len(), events_payload.len());
+                println!(
+                    "[outbox] delivered: acked={} unacked={} events_sent={}",
+                    acked_count,
+                    unacked_outbox_ids.len(),
+                    events_payload.len()
+                );
 
                 let status = OutboxStatus {
                     gateway_online: true,
                     queue_depth: queue_depth.saturating_sub(acked_count),
-                    last_delivered_at: if acked_count > 0 { Some(chrono::Utc::now().to_rfc3339()) } else { last_delivered_at },
+                    last_delivered_at: if acked_count > 0 {
+                        Some(chrono::Utc::now().to_rfc3339())
+                    } else {
+                        last_delivered_at
+                    },
                     last_error: if !unacked_outbox_ids.is_empty() {
-                        Some(format!("Partial ACK: {}/{} unconfirmed", unacked_outbox_ids.len(), result.len()))
+                        Some(format!(
+                            "Partial ACK: {}/{} unconfirmed",
+                            unacked_outbox_ids.len(),
+                            result.len()
+                        ))
                     } else {
                         None
                     },

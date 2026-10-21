@@ -5,7 +5,11 @@ use std::fs;
 use std::path::PathBuf;
 fn nexus_data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join("Library/Application Support"))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap()
+                .join("Library/Application Support")
+        })
         .join("com.taisun.electron")
 }
 
@@ -18,8 +22,7 @@ fn get_db() -> Result<Connection, String> {
     fs::create_dir_all(path.parent().unwrap())
         .map_err(|e| format!("Failed to create data dir: {}", e))?;
 
-    let conn =
-        Connection::open(&path).map_err(|e| format!("Failed to open events.db: {}", e))?;
+    let conn = Connection::open(&path).map_err(|e| format!("Failed to open events.db: {}", e))?;
 
     conn.pragma_update(None, "journal_mode", "WAL")
         .map_err(|e| format!("Failed to set WAL mode: {}", e))?;
@@ -186,8 +189,7 @@ pub fn insert_events(events: Vec<Event>) -> Result<u64, String> {
     }
 
     // COMMIT — if this line is never reached (early return via ?), Transaction::drop runs ROLLBACK
-    tx.commit()
-        .map_err(|e| format!("COMMIT failed: {}", e))?;
+    tx.commit().map_err(|e| format!("COMMIT failed: {}", e))?;
 
     Ok(count)
 }
@@ -224,7 +226,9 @@ pub fn query_events(query: EventQuery) -> Result<Vec<Event>, String> {
         sql.push_str(&format!(" AND timestamp <= ?{}", param_idx));
         param_values.push(Box::new(to.clone()));
         #[allow(unused_assignments)]
-        { param_idx += 1; }
+        {
+            param_idx += 1;
+        }
     }
 
     sql.push_str(" ORDER BY timestamp DESC");
@@ -243,8 +247,7 @@ pub fn query_events(query: EventQuery) -> Result<Vec<Event>, String> {
     let rows = stmt
         .query_map(params_ref.as_slice(), |row| {
             let tags_str: String = row.get(8)?;
-            let tags: Vec<String> =
-                serde_json::from_str(&tags_str).unwrap_or_default();
+            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
 
             Ok(Event {
                 id: Some(row.get(0)?),
@@ -370,7 +373,11 @@ pub fn migrate_existing_data() -> Result<String, String> {
                 if let Some(summary) = session.get("summary") {
                     let summary_metrics = [
                         ("avg_focus", summary["avg_focus"].as_f64(), "score"),
-                        ("avg_relaxation", summary["avg_relaxation"].as_f64(), "score"),
+                        (
+                            "avg_relaxation",
+                            summary["avg_relaxation"].as_f64(),
+                            "score",
+                        ),
                         ("avg_hr", summary["avg_hr"].as_f64(), "bpm"),
                         ("max_hr", summary["max_hr"].as_f64(), "bpm"),
                         ("avg_hrv", summary["avg_hrv"].as_f64(), "ms"),
@@ -427,7 +434,8 @@ pub fn migrate_existing_data() -> Result<String, String> {
 
                     if let Some(current) = goal["current"].as_f64() {
                         let unit = goal["unit"].as_str().unwrap_or("");
-                        let tags = serde_json::to_string(&vec![category, title]).unwrap_or_else(|_| "[]".to_string());
+                        let tags = serde_json::to_string(&vec![category, title])
+                            .unwrap_or_else(|_| "[]".to_string());
                         let id = make_event_id("goal", "current", &ts, &goal_id);
                         let _ = conn.execute(
                             "INSERT OR IGNORE INTO events (id, session_id, timestamp, source, metric, value, unit, confidence, tags, raw_ref, created_at, schema_version)
@@ -439,7 +447,8 @@ pub fn migrate_existing_data() -> Result<String, String> {
 
                     if let Some(target) = goal["target"].as_f64() {
                         let unit = goal["unit"].as_str().unwrap_or("");
-                        let tags = serde_json::to_string(&vec![category, title]).unwrap_or_else(|_| "[]".to_string());
+                        let tags = serde_json::to_string(&vec![category, title])
+                            .unwrap_or_else(|_| "[]".to_string());
                         let id = make_event_id("goal", "target", &ts, &goal_id);
                         let _ = conn.execute(
                             "INSERT OR IGNORE INTO events (id, session_id, timestamp, source, metric, value, unit, confidence, tags, raw_ref, created_at, schema_version)

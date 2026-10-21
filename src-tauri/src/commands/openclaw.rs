@@ -116,20 +116,30 @@ pub fn read_skills() -> Result<Vec<Skill>, String> {
     let mut seen = std::collections::HashSet::new();
 
     // Helper: load .md skills from a directory
-    let load_from = |dir: &std::path::Path, skills: &mut Vec<Skill>, seen: &mut std::collections::HashSet<String>| {
-        if !dir.exists() { return; }
+    let load_from = |dir: &std::path::Path,
+                     skills: &mut Vec<Skill>,
+                     seen: &mut std::collections::HashSet<String>| {
+        if !dir.exists() {
+            return;
+        }
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
-                let name = path.file_stem()
+                if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+                let name = path
+                    .file_stem()
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string();
-                if !seen.insert(name.clone()) { continue; }
+                if !seen.insert(name.clone()) {
+                    continue;
+                }
                 let content = fs::read_to_string(&path).unwrap_or_default();
                 // Extract first line after "# " as description
-                let description = content.lines()
+                let description = content
+                    .lines()
                     .find(|l| l.starts_with("# "))
                     .map(|l| l.trim_start_matches("# ").to_string())
                     .unwrap_or_default();
@@ -215,7 +225,10 @@ fn parse_tasks_md(content: &str) -> Vec<TaskItem> {
         // Detect section headers
         if trimmed.starts_with("## ") || trimmed.starts_with("### ") {
             let header = trimmed.trim_start_matches('#').trim().to_lowercase();
-            if header.contains("active") || header.contains("sprint") || header.contains("in progress") {
+            if header.contains("active")
+                || header.contains("sprint")
+                || header.contains("in progress")
+            {
                 current_status = "active".to_string();
             } else if header.contains("backlog") || header.contains("todo") {
                 current_status = "backlog".to_string();
@@ -303,7 +316,9 @@ fn parse_tasks_md(content: &str) -> Vec<TaskItem> {
 }
 
 #[tauri::command]
-pub fn read_content_pipeline(workspace_path: Option<String>) -> Result<Vec<ContentPipelineItem>, String> {
+pub fn read_content_pipeline(
+    workspace_path: Option<String>,
+) -> Result<Vec<ContentPipelineItem>, String> {
     let path = workspace_path
         .map(PathBuf::from)
         .unwrap_or_else(|| openclaw_dir().join("workspace").join("CONTENT-PIPELINE.md"));
@@ -386,9 +401,7 @@ fn parse_content_pipeline(content: &str) -> Vec<ContentPipelineItem> {
 
 #[tauri::command]
 pub fn read_daily_log(date: Option<String>) -> Result<String, String> {
-    let date_str = date.unwrap_or_else(|| {
-        chrono::Local::now().format("%Y-%m-%d").to_string()
-    });
+    let date_str = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
 
     let path = openclaw_dir()
         .join("memory")
@@ -474,7 +487,8 @@ pub fn get_openclaw_sandbox() -> Result<String, String> {
 pub async fn toggle_openclaw_sandbox(mode: Option<String>) -> Result<SandboxStatus, String> {
     let config_path = openclaw_dir().join("openclaw.json");
     let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let mut config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let mut config: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| e.to_string())?;
 
     let current = config
         .get("agents")
@@ -487,18 +501,35 @@ pub async fn toggle_openclaw_sandbox(mode: Option<String>) -> Result<SandboxStat
 
     let new_mode = match mode {
         Some(m) => m,
-        None => if current == "off" { "all".to_string() } else { "off".to_string() },
+        None => {
+            if current == "off" {
+                "all".to_string()
+            } else {
+                "off".to_string()
+            }
+        }
     };
 
     // Ensure the path agents.defaults.sandbox.mode exists
-    let agents = config.as_object_mut().ok_or("invalid config")?
-        .entry("agents").or_insert_with(|| serde_json::json!({}));
-    let defaults = agents.as_object_mut().ok_or("invalid agents")?
-        .entry("defaults").or_insert_with(|| serde_json::json!({}));
-    let sandbox = defaults.as_object_mut().ok_or("invalid defaults")?
-        .entry("sandbox").or_insert_with(|| serde_json::json!({}));
-    sandbox.as_object_mut().ok_or("invalid sandbox")?
-        .insert("mode".to_string(), serde_json::Value::String(new_mode.clone()));
+    let agents = config
+        .as_object_mut()
+        .ok_or("invalid config")?
+        .entry("agents")
+        .or_insert_with(|| serde_json::json!({}));
+    let defaults = agents
+        .as_object_mut()
+        .ok_or("invalid agents")?
+        .entry("defaults")
+        .or_insert_with(|| serde_json::json!({}));
+    let sandbox = defaults
+        .as_object_mut()
+        .ok_or("invalid defaults")?
+        .entry("sandbox")
+        .or_insert_with(|| serde_json::json!({}));
+    sandbox.as_object_mut().ok_or("invalid sandbox")?.insert(
+        "mode".to_string(),
+        serde_json::Value::String(new_mode.clone()),
+    );
 
     // Write back with pretty-print
     let out = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
@@ -525,11 +556,11 @@ pub struct OpenClawChannels {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct OpenClawHealth {
-    pub status: String,          // "healthy" | "degraded" | "offline"
+    pub status: String, // "healthy" | "degraded" | "offline"
     pub version: Option<String>,
     pub gateway: bool,
     pub rpc: bool,
-    pub memory_search: String,   // "configured" | "missing"
+    pub memory_search: String, // "configured" | "missing"
     pub channels: OpenClawChannels,
     pub timestamp: String,
 }
@@ -539,7 +570,8 @@ fn get_openclaw_version() -> Option<String> {
     let config_path = openclaw_dir().join("openclaw.json");
     if let Ok(content) = fs::read_to_string(&config_path) {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(ver) = v.get("meta")
+            if let Some(ver) = v
+                .get("meta")
                 .and_then(|m| m.get("lastTouchedVersion"))
                 .and_then(|v| v.as_str())
             {
@@ -630,7 +662,9 @@ fn check_memory_search(config: &Option<serde_json::Value>) -> String {
                 "missing".to_string()
             }
         }
-        "openai" | "anthropic" | "ollama" | "cohere" | "azure" | "gemini" | "minimax" => "configured".to_string(),
+        "openai" | "anthropic" | "ollama" | "cohere" | "azure" | "gemini" | "minimax" => {
+            "configured".to_string()
+        }
         _ => "missing".to_string(),
     }
 }

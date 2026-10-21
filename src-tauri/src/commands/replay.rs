@@ -13,7 +13,11 @@ use super::muse::EegSample;
 
 fn nexus_data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join("Library/Application Support"))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap()
+                .join("Library/Application Support")
+        })
         .join("com.taisun.electron")
 }
 
@@ -150,19 +154,59 @@ pub async fn start_eeg_recording() -> Result<String, String> {
     Ok(filename)
 }
 
+fn finish_recording<W: Write>(slot: &mut Option<BufWriter<W>>) -> std::io::Result<()> {
+    // Retain the writer and buffered samples until flushing succeeds.
+    if let Some(writer) = slot.as_mut() {
+        writer.flush()?;
+    }
+    slot.take();
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn stop_eeg_recording() -> Result<String, String> {
     *RECORDING_ENABLED.lock().await = false;
 
     let mut file_guard = RECORDING_FILE.lock().await;
-    if let Some(mut writer) = file_guard.take() {
-        writer.flush().map_err(|e| e.to_string())?;
-    }
+    finish_recording(&mut file_guard).map_err(|e| e.to_string())?;
 
     *RECORDING_PREV_TS.lock().await = None;
 
     println!("[replay] recording stopped");
     Ok("stopped".to_string())
+}
+
+#[cfg(test)]
+mod recording_tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct RetryWriter { fail: bool, bytes: Vec<u8> }
+
+    impl Write for RetryWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.fail { return Err(std::io::Error::other("disk unavailable")); }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+
+    #[test]
+    fn failed_flush_keeps_pending_samples_for_retry() {
+        let mut writer = BufWriter::new(RetryWriter { fail: true, ..Default::default() });
+        writer.write_all(b"recorded samples").unwrap();
+        let mut slot = Some(writer);
+        assert!(finish_recording(&mut slot).is_err());
+        let retained = slot.as_mut().expect("writer must remain available");
+        assert_eq!(retained.buffer(), b"recorded samples");
+        retained.get_mut().fail = false;
+        retained.flush().unwrap();
+        assert_eq!(retained.get_ref().bytes, b"recorded samples");
+        finish_recording(&mut slot).unwrap();
+        assert!(slot.is_none());
+        finish_recording(&mut slot).unwrap();
+    }
 }
 
 #[tauri::command]
@@ -317,11 +361,7 @@ async fn replay_task(app: &AppHandle, path: &PathBuf, speed: f64) {
             samples: v
                 .get("samples")
                 .and_then(|s| s.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_f64())
-                        .collect::<Vec<f64>>()
-                })
+                .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<f64>>())
                 .unwrap_or_default(),
         };
 

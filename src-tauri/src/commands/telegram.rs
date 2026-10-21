@@ -4,7 +4,11 @@ use std::path::PathBuf;
 
 fn nexus_data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join("Library/Application Support"))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap()
+                .join("Library/Application Support")
+        })
         .join("com.taisun.electron")
 }
 
@@ -32,8 +36,6 @@ pub struct NexusConfig {
     pub n8n_webhook_secret: Option<String>,
     #[serde(default)]
     pub preferred_muse_address: Option<String>,
-    #[serde(default)]
-    pub preferred_whoop_address: Option<String>,
     // LLM Router
     #[serde(default)]
     pub compute_mode: Option<String>,
@@ -131,9 +133,12 @@ pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMes
         .get(&url)
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?;
+        .map_err(|_| "Network error contacting Telegram.".to_string())?;
 
-    let body: TgResponse = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let body: TgResponse = resp
+        .json()
+        .await
+        .map_err(|_| "Telegram returned an unreadable response.".to_string())?;
 
     if !body.ok {
         return Err("Telegram API returned an error".to_string());
@@ -145,7 +150,10 @@ pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMes
         if let Some(updates) = results.as_array() {
             for update in updates {
                 if let Some(msg) = update.get("message") {
-                    let chat = msg.get("chat").and_then(|c| c.get("id")).and_then(|id| id.as_i64());
+                    let chat = msg
+                        .get("chat")
+                        .and_then(|c| c.get("id"))
+                        .and_then(|id| id.as_i64());
                     if chat.map(|id| id.to_string()) != Some(chat_id.to_string()) {
                         continue;
                     }
@@ -166,10 +174,7 @@ pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMes
                         .and_then(|t| t.as_str())
                         .unwrap_or("")
                         .to_string();
-                    let date = msg
-                        .get("date")
-                        .and_then(|d| d.as_i64())
-                        .unwrap_or(0);
+                    let date = msg.get("date").and_then(|d| d.as_i64()).unwrap_or(0);
                     let message_id = msg
                         .get("message_id")
                         .and_then(|id| id.as_i64())
@@ -215,16 +220,24 @@ pub async fn send_telegram_message(text: String) -> Result<TelegramMessage, Stri
         }))
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?;
+        .map_err(|_| "Network error contacting Telegram.".to_string())?;
 
-    let body: TgResponse = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let body: TgResponse = resp
+        .json()
+        .await
+        .map_err(|_| "Telegram returned an unreadable response.".to_string())?;
 
     if !body.ok {
-        return Err("Telegram API returned an error. Check your bot token and chat ID.".to_string());
+        return Err(
+            "Telegram API returned an error. Check your bot token and chat ID.".to_string(),
+        );
     }
 
     let result = body.result.unwrap_or_default();
-    let message_id = result.get("message_id").and_then(|id| id.as_i64()).unwrap_or(0);
+    let message_id = result
+        .get("message_id")
+        .and_then(|id| id.as_i64())
+        .unwrap_or(0);
     let date = result.get("date").and_then(|d| d.as_i64()).unwrap_or(0);
 
     Ok(TelegramMessage {
@@ -247,8 +260,15 @@ pub async fn test_telegram_connection() -> Result<String, String> {
 
     let url = format!("https://api.telegram.org/bot{}/getMe", token);
     let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await.map_err(|e| format!("Network error: {}", e))?;
-    let body: TgResponse = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|_| "Network error contacting Telegram.".to_string())?;
+    let body: TgResponse = resp
+        .json()
+        .await
+        .map_err(|_| "Telegram returned an unreadable response.".to_string())?;
 
     if !body.ok {
         return Err("Invalid bot token".to_string());
@@ -256,7 +276,11 @@ pub async fn test_telegram_connection() -> Result<String, String> {
 
     let name = body
         .result
-        .and_then(|r| r.get("first_name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+        .and_then(|r| {
+            r.get("first_name")
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
+        })
         .unwrap_or("Bot".to_string());
 
     Ok(format!("Connected to bot: {}", name))
@@ -302,15 +326,18 @@ pub async fn poll_telegram_updates(last_update_id: i64) -> Result<Vec<TelegramUp
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("Client error: {}", e))?;
+        .map_err(|_| "Unable to configure a Telegram client.".to_string())?;
 
     let resp = client
         .get(&url)
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?;
+        .map_err(|_| "Network error contacting Telegram.".to_string())?;
 
-    let body: TgResponse = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let body: TgResponse = resp
+        .json()
+        .await
+        .map_err(|_| "Telegram returned an unreadable response.".to_string())?;
 
     if !body.ok {
         return Err("Telegram API returned an error".to_string());
@@ -321,10 +348,16 @@ pub async fn poll_telegram_updates(last_update_id: i64) -> Result<Vec<TelegramUp
     if let Some(results) = body.result {
         if let Some(update_arr) = results.as_array() {
             for update in update_arr {
-                let uid = update.get("update_id").and_then(|id| id.as_i64()).unwrap_or(0);
+                let uid = update
+                    .get("update_id")
+                    .and_then(|id| id.as_i64())
+                    .unwrap_or(0);
 
                 if let Some(msg) = update.get("message") {
-                    let chat = msg.get("chat").and_then(|c| c.get("id")).and_then(|id| id.as_i64());
+                    let chat = msg
+                        .get("chat")
+                        .and_then(|c| c.get("id"))
+                        .and_then(|id| id.as_i64());
                     if chat.map(|id| id.to_string()) != Some(chat_id.to_string()) {
                         continue;
                     }
@@ -350,10 +383,7 @@ pub async fn poll_telegram_updates(last_update_id: i64) -> Result<Vec<TelegramUp
                         .and_then(|t| t.as_str())
                         .unwrap_or("")
                         .to_string();
-                    let date = msg
-                        .get("date")
-                        .and_then(|d| d.as_i64())
-                        .unwrap_or(0);
+                    let date = msg.get("date").and_then(|d| d.as_i64()).unwrap_or(0);
                     let message_id = msg
                         .get("message_id")
                         .and_then(|id| id.as_i64())
@@ -383,11 +413,7 @@ pub async fn poll_telegram_updates(last_update_id: i64) -> Result<Vec<TelegramUp
 async fn pick_ollama_model(client: &reqwest::Client) -> String {
     let preferred = ["qwen3.5", "llama3.3", "llama3.2", "mistral"];
 
-    let Ok(resp) = client
-        .get("http://127.0.0.1:11434/api/tags")
-        .send()
-        .await
-    else {
+    let Ok(resp) = client.get("http://127.0.0.1:11434/api/tags").send().await else {
         return "deepseek-r1:32b".to_string();
     };
     let Ok(body) = resp.json::<serde_json::Value>().await else {

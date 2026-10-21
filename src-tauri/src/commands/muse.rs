@@ -1,6 +1,4 @@
-use btleplug::api::{
-    Central, Manager as _, Peripheral as _, ScanFilter, WriteType,
-};
+use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter, WriteType};
 use btleplug::platform::{Manager, Peripheral};
 use futures::StreamExt;
 use serde::Serialize;
@@ -81,7 +79,10 @@ async fn get_or_init_adapter() -> Result<btleplug::platform::Adapter, String> {
         e.to_string()
     })?;
     let adapters = manager.adapters().await.map_err(|e| e.to_string())?;
-    let adapter = adapters.into_iter().next().ok_or("No Bluetooth adapter found")?;
+    let adapter = adapters
+        .into_iter()
+        .next()
+        .ok_or("No Bluetooth adapter found")?;
     println!("[muse] init: status=adapter_ready");
     *stored = Some(adapter.clone());
     Ok(adapter)
@@ -154,7 +155,12 @@ pub async fn scan_muse(app: AppHandle) -> Result<Vec<MuseDevice>, String> {
             }
             if name.to_lowercase().contains("muse") {
                 println!("[muse] scan: match=true id={id} name={name}");
-                push_proof_event("muse", "scan_result", &format!("id={id} name={name} rssi={:?}", props.rssi)).await;
+                push_proof_event(
+                    "muse",
+                    "scan_result",
+                    &format!("id={id} name={name} rssi={:?}", props.rssi),
+                )
+                .await;
                 discovered.insert(id.clone(), p);
                 devices.push(MuseDevice {
                     name,
@@ -244,7 +250,10 @@ pub async fn connect_muse(app: AppHandle, address: String) -> Result<MuseConnect
                     .collect::<Vec<_>>()
             );
 
-            if let Some(p) = peripherals.into_iter().find(|p| p.id().to_string() == address) {
+            if let Some(p) = peripherals
+                .into_iter()
+                .find(|p| p.id().to_string() == address)
+            {
                 println!("[muse] resolve: source=adapter");
                 p
             } else {
@@ -259,7 +268,11 @@ pub async fn connect_muse(app: AppHandle, address: String) -> Result<MuseConnect
                 adapter.stop_scan().await.ok();
 
                 let ids: Vec<_> = peripherals.iter().map(|p| p.id().to_string()).collect();
-                println!("[muse] resolve: rescan_peripherals={} ids={:?}", ids.len(), ids);
+                println!(
+                    "[muse] resolve: rescan_peripherals={} ids={:?}",
+                    ids.len(),
+                    ids
+                );
 
                 peripherals
                     .into_iter()
@@ -282,7 +295,12 @@ pub async fn connect_muse(app: AppHandle, address: String) -> Result<MuseConnect
 
     for attempt in 1..=max_retries {
         println!("[muse] ble_connect: attempt={attempt}/{max_retries}");
-        push_proof_event("muse", "connect_attempt", &format!("attempt={attempt}/{max_retries} id={address}")).await;
+        push_proof_event(
+            "muse",
+            "connect_attempt",
+            &format!("attempt={attempt}/{max_retries} id={address}"),
+        )
+        .await;
         match peripheral.connect().await {
             Ok(()) => {
                 println!("[muse] ble_connect: status=success attempt={attempt}");
@@ -293,7 +311,12 @@ pub async fn connect_muse(app: AppHandle, address: String) -> Result<MuseConnect
             Err(e) => {
                 last_err = e.to_string();
                 println!("[muse] ble_connect: status=failed attempt={attempt} reason={last_err}");
-                push_proof_event("muse", "connect_failed", &format!("attempt={attempt} reason={last_err}")).await;
+                push_proof_event(
+                    "muse",
+                    "connect_failed",
+                    &format!("attempt={attempt} reason={last_err}"),
+                )
+                .await;
                 if attempt < max_retries {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
@@ -304,9 +327,7 @@ pub async fn connect_muse(app: AppHandle, address: String) -> Result<MuseConnect
     if !last_err.is_empty() {
         let connected = peripheral.is_connected().await.unwrap_or(false);
         if !connected {
-            let msg = format!(
-                "Connect failed after {max_retries} attempts: {last_err}"
-            );
+            let msg = format!("Connect failed after {max_retries} attempts: {last_err}");
             println!("[muse] ble_connect: error=retries_exhausted");
             emit_muse_state(&app, BleState::Discovered).await;
             return Err(msg);
@@ -407,7 +428,12 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
                 .await
                 .map_err(|e| format!("subscribe {name} failed: {e}"))?;
             println!("[muse] subscribe_ok uuid={} channel={name}", ch.uuid);
-            push_proof_event("muse", "subscribe_ok", &format!("uuid={} channel={name}", ch.uuid)).await;
+            push_proof_event(
+                "muse",
+                "subscribe_ok",
+                &format!("uuid={} channel={name}", ch.uuid),
+            )
+            .await;
             channel_map.push((ch.uuid, name.to_string()));
         } else {
             println!("[muse] eeg_stream: characteristic_not_found channel={name} prefix={:02x}{:02x}{:02x}{:02x}", prefix[0], prefix[1], prefix[2], prefix[3]);
@@ -425,21 +451,35 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
     // Send start commands to Muse control characteristic (prefix match).
     // Commands MUST be length-prefixed: [len, ...ascii, 0x0a].
     // Sequence: p50 (Muse 2 preset) → s (start) → d (data delivery).
-    if let Some(control) = chars.iter().find(|c| uuid_prefix_match(&c.uuid, &MUSE_CONTROL_PREFIX)) {
+    if let Some(control) = chars
+        .iter()
+        .find(|c| uuid_prefix_match(&c.uuid, &MUSE_CONTROL_PREFIX))
+    {
         let commands: &[(&str, Vec<u8>)] = &[
-            ("p50", muse_cmd("p50")),  // Muse 2 EEG preset (p21 for 2016, p50 for Muse 2/S)
-            ("s",   muse_cmd("s")),    // Resume/start streaming
-            ("d",   muse_cmd("d")),    // Start data delivery
+            ("p50", muse_cmd("p50")), // Muse 2 EEG preset (p21 for 2016, p50 for Muse 2/S)
+            ("s", muse_cmd("s")),     // Resume/start streaming
+            ("d", muse_cmd("d")),     // Start data delivery
         ];
         for (label, cmd) in commands {
             peripheral
                 .write(control, cmd, WriteType::WithoutResponse)
                 .await
                 .map_err(|e| format!("write {label} failed: {e}"))?;
-            println!("[muse] write_ok uuid={} cmd={} bytes={} hex={}", control.uuid, label, cmd.len(), hex::encode(cmd));
+            println!(
+                "[muse] write_ok uuid={} cmd={} bytes={} hex={}",
+                control.uuid,
+                label,
+                cmd.len(),
+                hex::encode(cmd)
+            );
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
-        push_proof_event("muse", "commands_sent", &format!("uuid={} cmds=p50,s,d (length-prefixed)", control.uuid)).await;
+        push_proof_event(
+            "muse",
+            "commands_sent",
+            &format!("uuid={} cmds=p50,s,d (length-prefixed)", control.uuid),
+        )
+        .await;
     } else {
         println!("[muse] eeg_stream: control_characteristic_not_found");
         push_proof_event("muse", "control_missing", "no 273e0001 prefix found").await;
@@ -507,7 +547,8 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
                 Some(n) => n,
                 None => {
                     println!("[muse] eeg_task: notification_stream ended (None)");
-                    push_proof_event("muse", "stream_ended", "notification_stream returned None").await;
+                    push_proof_event("muse", "stream_ended", "notification_stream returned None")
+                        .await;
                     break;
                 }
             };
@@ -515,8 +556,21 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
             if !got_first {
                 got_first = true;
                 let wait_ms = task_start.elapsed().as_millis();
-                println!("[muse] eeg_task: first notification received after {wait_ms}ms uuid={} len={}", notification.uuid, notification.value.len());
-                push_proof_event("muse", "first_notification", &format!("after={wait_ms}ms uuid={} len={}", notification.uuid, notification.value.len())).await;
+                println!(
+                    "[muse] eeg_task: first notification received after {wait_ms}ms uuid={} len={}",
+                    notification.uuid,
+                    notification.value.len()
+                );
+                push_proof_event(
+                    "muse",
+                    "first_notification",
+                    &format!(
+                        "after={wait_ms}ms uuid={} len={}",
+                        notification.uuid,
+                        notification.value.len()
+                    ),
+                )
+                .await;
             }
 
             packets_total += 1;
@@ -529,7 +583,9 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
 
             let data = &notification.value;
             last_sizes.push(data.len());
-            if last_sizes.len() > 20 { last_sizes.remove(0); }
+            if last_sizes.len() > 20 {
+                last_sizes.remove(0);
+            }
 
             // Parse Muse EEG packet: 16-bit timestamp + 12x 12-bit samples
             if data.len() >= 20 {
@@ -549,14 +605,25 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
                         emit_errors += 1;
                         if emit_errors <= 5 {
                             println!("[muse] eeg_task: EMIT_ERROR channel={channel_name} err={e}");
-                            push_proof_event("muse", "emit_error", &format!("channel={channel_name} err={e}")).await;
+                            push_proof_event(
+                                "muse",
+                                "emit_error",
+                                &format!("channel={channel_name} err={e}"),
+                            )
+                            .await;
                         }
                     }
                 }
             } else {
                 packets_dropped += 1;
                 if packets_dropped <= 10 {
-                    println!("[muse] eeg_task: dropped len={} uuid={} channel={} hex={}", data.len(), notification.uuid, channel_name, hex::encode(data));
+                    println!(
+                        "[muse] eeg_task: dropped len={} uuid={} channel={} hex={}",
+                        data.len(),
+                        notification.uuid,
+                        channel_name,
+                        hex::encode(data)
+                    );
                 }
             }
 
@@ -596,7 +663,10 @@ pub async fn stop_eeg_stream(app: AppHandle) -> Result<(), String> {
     if let Some(peripheral) = stored.as_ref() {
         let chars = peripheral.characteristics();
         // Send halt command (length-prefixed)
-        if let Some(control) = chars.iter().find(|c| uuid_prefix_match(&c.uuid, &MUSE_CONTROL_PREFIX)) {
+        if let Some(control) = chars
+            .iter()
+            .find(|c| uuid_prefix_match(&c.uuid, &MUSE_CONTROL_PREFIX))
+        {
             let cmd = muse_cmd("h");
             let _ = peripheral
                 .write(control, &cmd, WriteType::WithoutResponse)

@@ -16,7 +16,13 @@ fn kv_dir() -> Result<std::path::PathBuf, String> {
 
 fn sanitize_key(key: &str) -> String {
     key.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 

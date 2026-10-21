@@ -7,7 +7,11 @@ use std::path::PathBuf;
 
 fn nexus_data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join("Library/Application Support"))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap()
+                .join("Library/Application Support")
+        })
         .join("com.taisun.electron")
 }
 
@@ -20,8 +24,7 @@ fn get_db() -> Result<Connection, String> {
     fs::create_dir_all(path.parent().unwrap())
         .map_err(|e| format!("Failed to create data dir: {}", e))?;
 
-    let conn =
-        Connection::open(&path).map_err(|e| format!("Failed to open events.db: {}", e))?;
+    let conn = Connection::open(&path).map_err(|e| format!("Failed to open events.db: {}", e))?;
 
     conn.pragma_update(None, "journal_mode", "WAL")
         .map_err(|e| format!("Failed to set WAL mode: {}", e))?;
@@ -244,7 +247,13 @@ fn get_strategy_by_id(conn: &Connection, id: &str) -> Result<ArmStrategy, String
     .map_err(|e| format!("Strategy not found: {}", e))
 }
 
-fn insert_decision(conn: &Connection, strategy_id: &str, action: &str, reasoning: &str, context: &serde_json::Value) -> Result<ArmDecision, String> {
+fn insert_decision(
+    conn: &Connection,
+    strategy_id: &str,
+    action: &str,
+    reasoning: &str,
+    context: &serde_json::Value,
+) -> Result<ArmDecision, String> {
     let now = chrono::Utc::now().to_rfc3339();
     let id = make_id("decision", action, &now);
     let context_str = serde_json::to_string(context).unwrap_or_else(|_| "{}".to_string());
@@ -269,7 +278,15 @@ fn insert_decision(conn: &Connection, strategy_id: &str, action: &str, reasoning
     })
 }
 
-fn insert_revenue_event(conn: &Connection, strategy_id: &str, metric: &str, value: f64, unit: &str, tags: &[&str], raw_ref: &str) -> Result<(), String> {
+fn insert_revenue_event(
+    conn: &Connection,
+    strategy_id: &str,
+    metric: &str,
+    value: f64,
+    unit: &str,
+    tags: &[&str],
+    raw_ref: &str,
+) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
     let id = make_id("arm", &format!("{}|{}", metric, strategy_id), &now);
     let tags_json = serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string());
@@ -343,7 +360,13 @@ pub fn arm_create_strategy(
     )
     .map_err(|e| format!("Insert failed: {}", e))?;
 
-    insert_decision(&conn, &id, "deploy", &format!("Created strategy: {name}"), &serde_json::json!({ "type": strategy_type, "capital_limit": capital_limit }))?;
+    insert_decision(
+        &conn,
+        &id,
+        "deploy",
+        &format!("Created strategy: {name}"),
+        &serde_json::json!({ "type": strategy_type, "capital_limit": capital_limit }),
+    )?;
 
     println!("[arm] create_strategy: id={id} status=created");
     get_strategy_by_id(&conn, &id)
@@ -408,7 +431,13 @@ pub fn arm_activate_strategy(id: String) -> Result<ArmStrategy, String> {
     )
     .map_err(|e| format!("Activate failed: {}", e))?;
 
-    insert_decision(&conn, &id, "activate", &format!("Activated strategy: {}", existing.name), &serde_json::json!({ "previous_status": existing.status }))?;
+    insert_decision(
+        &conn,
+        &id,
+        "activate",
+        &format!("Activated strategy: {}", existing.name),
+        &serde_json::json!({ "previous_status": existing.status }),
+    )?;
 
     println!("[arm] activate_strategy: id={id} status=active");
     get_strategy_by_id(&conn, &id)
@@ -428,10 +457,20 @@ pub fn arm_pause_strategy(id: String, reasoning: String) -> Result<ArmStrategy, 
     )
     .map_err(|e| format!("Pause failed: {}", e))?;
 
-    insert_decision(&conn, &id, "pause", &reasoning, &serde_json::json!({ "previous_status": existing.status }))?;
+    insert_decision(
+        &conn,
+        &id,
+        "pause",
+        &reasoning,
+        &serde_json::json!({ "previous_status": existing.status }),
+    )?;
 
     // Try to send pause signal to worker
-    if let Some(pause_url) = existing.config.get("pause_endpoint").and_then(|v| v.as_str()) {
+    if let Some(pause_url) = existing
+        .config
+        .get("pause_endpoint")
+        .and_then(|v| v.as_str())
+    {
         println!("[arm] pause_strategy: sending_pause_signal url={pause_url}");
         // Fire and forget — don't fail the command if worker is unreachable
         let url = pause_url.to_string();
@@ -464,10 +503,20 @@ pub fn arm_kill_strategy(id: String, reasoning: String) -> Result<ArmStrategy, S
     )
     .map_err(|e| format!("Kill failed: {}", e))?;
 
-    insert_decision(&conn, &id, "kill", &reasoning, &serde_json::json!({ "previous_status": existing.status, "total_revenue": existing.total_revenue, "total_expenses": existing.total_expenses }))?;
+    insert_decision(
+        &conn,
+        &id,
+        "kill",
+        &reasoning,
+        &serde_json::json!({ "previous_status": existing.status, "total_revenue": existing.total_revenue, "total_expenses": existing.total_expenses }),
+    )?;
 
     // Try to send kill signal to worker
-    if let Some(kill_url) = existing.config.get("kill_endpoint").and_then(|v| v.as_str()) {
+    if let Some(kill_url) = existing
+        .config
+        .get("kill_endpoint")
+        .and_then(|v| v.as_str())
+    {
         println!("[arm] kill_strategy: sending_kill_signal url={kill_url}");
         let url = kill_url.to_string();
         let key = get_worker_key(&existing.config);
@@ -486,7 +535,10 @@ pub fn arm_kill_strategy(id: String, reasoning: String) -> Result<ArmStrategy, S
 }
 
 fn get_worker_key(config: &serde_json::Value) -> Option<String> {
-    config.get("auth_key").and_then(|v| v.as_str()).map(|s| s.to_string())
+    config
+        .get("auth_key")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 // ─── Revenue Tracking ────────────────────────────────────
@@ -497,7 +549,9 @@ pub async fn arm_poll_revenue(strategy_id: String) -> Result<f64, String> {
     let conn = get_db()?;
     let strategy = get_strategy_by_id(&conn, &strategy_id)?;
 
-    let revenue_url = strategy.config.get("revenue_endpoint")
+    let revenue_url = strategy
+        .config
+        .get("revenue_endpoint")
         .and_then(|v| v.as_str())
         .ok_or("Strategy has no revenue_endpoint configured")?
         .to_string();
@@ -508,10 +562,19 @@ pub async fn arm_poll_revenue(strategy_id: String) -> Result<f64, String> {
         req = req.header("X-ARM-Key", key);
     }
 
-    let resp = req.send().await.map_err(|e| format!("HTTP request failed: {}", e))?;
-    let body: WorkerRevenueResponse = resp.json().await.map_err(|e| format!("Invalid response: {}", e))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request failed: {}", e))?;
+    let body: WorkerRevenueResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Invalid response: {}", e))?;
 
-    println!("[arm] poll_revenue: strategy_id={strategy_id} revenue={} expenses={} transactions={}", body.revenue_usd, body.expenses_usd, body.transaction_count);
+    println!(
+        "[arm] poll_revenue: strategy_id={strategy_id} revenue={} expenses={} transactions={}",
+        body.revenue_usd, body.expenses_usd, body.transaction_count
+    );
 
     let now = chrono::Utc::now().to_rfc3339();
     let strategy_name = &strategy.name;
@@ -519,14 +582,38 @@ pub async fn arm_poll_revenue(strategy_id: String) -> Result<f64, String> {
 
     // Insert revenue events into canonical store
     if body.revenue_usd > 0.0 {
-        insert_revenue_event(&conn, &strategy_id, "revenue", body.revenue_usd, "usd", &["autonomous", "arm", strategy_type, strategy_name], &revenue_url)?;
+        insert_revenue_event(
+            &conn,
+            &strategy_id,
+            "revenue",
+            body.revenue_usd,
+            "usd",
+            &["autonomous", "arm", strategy_type, strategy_name],
+            &revenue_url,
+        )?;
     }
     if body.expenses_usd > 0.0 {
-        insert_revenue_event(&conn, &strategy_id, "expense", body.expenses_usd, "usd", &["autonomous", "arm", strategy_type, strategy_name], &revenue_url)?;
+        insert_revenue_event(
+            &conn,
+            &strategy_id,
+            "expense",
+            body.expenses_usd,
+            "usd",
+            &["autonomous", "arm", strategy_type, strategy_name],
+            &revenue_url,
+        )?;
     }
     let net = body.revenue_usd - body.expenses_usd;
     if body.revenue_usd > 0.0 || body.expenses_usd > 0.0 {
-        insert_revenue_event(&conn, &strategy_id, "net_income", net, "usd", &["autonomous", "arm", strategy_type, strategy_name], &revenue_url)?;
+        insert_revenue_event(
+            &conn,
+            &strategy_id,
+            "net_income",
+            net,
+            "usd",
+            &["autonomous", "arm", strategy_type, strategy_name],
+            &revenue_url,
+        )?;
     }
 
     // Update strategy totals
@@ -540,7 +627,10 @@ pub async fn arm_poll_revenue(strategy_id: String) -> Result<f64, String> {
 }
 
 #[tauri::command]
-pub fn arm_get_revenue_summary(from: Option<String>, to: Option<String>) -> Result<RevenueSummary, String> {
+pub fn arm_get_revenue_summary(
+    from: Option<String>,
+    to: Option<String>,
+) -> Result<RevenueSummary, String> {
     println!("[arm] get_revenue_summary: from={:?} to={:?}", from, to);
     let conn = get_db()?;
 
@@ -639,8 +729,14 @@ pub fn arm_log_decision(
 }
 
 #[tauri::command]
-pub fn arm_list_decisions(strategy_id: Option<String>, limit: Option<u32>) -> Result<Vec<ArmDecision>, String> {
-    println!("[arm] list_decisions: strategy_id={:?} limit={:?}", strategy_id, limit);
+pub fn arm_list_decisions(
+    strategy_id: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<ArmDecision>, String> {
+    println!(
+        "[arm] list_decisions: strategy_id={:?} limit={:?}",
+        strategy_id, limit
+    );
     let conn = get_db()?;
 
     let sql = if strategy_id.is_some() {
@@ -655,7 +751,9 @@ pub fn arm_list_decisions(strategy_id: Option<String>, limit: Option<u32>) -> Re
         )
     };
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| format!("Prepare failed: {}", e))?;
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("Prepare failed: {}", e))?;
 
     let rows = if let Some(ref sid) = strategy_id {
         stmt.query_map(params![sid], read_decision_row)
@@ -674,7 +772,11 @@ pub fn arm_list_decisions(strategy_id: Option<String>, limit: Option<u32>) -> Re
 }
 
 #[tauri::command]
-pub fn arm_update_decision_outcome(id: String, outcome: String, notes: Option<String>) -> Result<ArmDecision, String> {
+pub fn arm_update_decision_outcome(
+    id: String,
+    outcome: String,
+    notes: Option<String>,
+) -> Result<ArmDecision, String> {
     println!("[arm] update_decision_outcome: id={id} outcome={outcome}");
     let conn = get_db()?;
 
@@ -817,10 +919,19 @@ pub fn arm_kill_switch(active: bool, reasoning: String) -> Result<(), String> {
             )
             .map_err(|e| format!("Pause failed: {}", e))?;
 
-            insert_decision(&conn, sid, "kill", &format!("Kill switch activated: {reasoning}"), &serde_json::json!({ "kill_switch": true, "strategy_name": sname }))?;
+            insert_decision(
+                &conn,
+                sid,
+                "kill",
+                &format!("Kill switch activated: {reasoning}"),
+                &serde_json::json!({ "kill_switch": true, "strategy_name": sname }),
+            )?;
         }
 
-        println!("[arm] kill_switch: paused_strategies={}", active_strategies.len());
+        println!(
+            "[arm] kill_switch: paused_strategies={}",
+            active_strategies.len()
+        );
     }
 
     Ok(())
@@ -834,7 +945,9 @@ pub async fn arm_health_check(strategy_id: String) -> Result<WorkerHealthRespons
     let conn = get_db()?;
     let strategy = get_strategy_by_id(&conn, &strategy_id)?;
 
-    let health_url = strategy.config.get("health_endpoint")
+    let health_url = strategy
+        .config
+        .get("health_endpoint")
         .and_then(|v| v.as_str())
         .ok_or("Strategy has no health_endpoint configured")?
         .to_string();
@@ -851,7 +964,10 @@ pub async fn arm_health_check(strategy_id: String) -> Result<WorkerHealthRespons
 
     match result {
         Ok(resp) => {
-            let body: WorkerHealthResponse = resp.json().await.map_err(|e| format!("Invalid health response: {}", e))?;
+            let body: WorkerHealthResponse = resp
+                .json()
+                .await
+                .map_err(|e| format!("Invalid health response: {}", e))?;
 
             conn.execute(
                 "UPDATE arm_strategies SET health_status = ?1, last_health = ?2, updated_at = ?2 WHERE id = ?3",
@@ -859,7 +975,10 @@ pub async fn arm_health_check(strategy_id: String) -> Result<WorkerHealthRespons
             )
             .map_err(|e| format!("Update health failed: {}", e))?;
 
-            println!("[arm] health_check: strategy_id={strategy_id} status={}", body.status);
+            println!(
+                "[arm] health_check: strategy_id={strategy_id} status={}",
+                body.status
+            );
             Ok(body)
         }
         Err(e) => {
@@ -926,13 +1045,26 @@ pub async fn arm_poll_all() -> Result<Vec<ArmStrategy>, String> {
             .unwrap_or(0.0);
 
         if today_expenses > config.global_daily_loss_cap && config.global_daily_loss_cap > 0.0 {
-            println!("[arm] poll_all: daily_loss_cap_exceeded expenses={today_expenses} cap={}", config.global_daily_loss_cap);
+            println!(
+                "[arm] poll_all: daily_loss_cap_exceeded expenses={today_expenses} cap={}",
+                config.global_daily_loss_cap
+            );
             for sid in &active_ids {
                 conn.execute(
                     "UPDATE arm_strategies SET status = 'paused', updated_at = ?1 WHERE id = ?2 AND status = 'active'",
                     params![now, sid],
                 ).ok();
-                insert_decision(&conn, sid, "pause", &format!("Auto-paused: daily loss cap exceeded (${today_expenses:.2} > ${:.2})", config.global_daily_loss_cap), &serde_json::json!({ "auto": true, "daily_expenses": today_expenses })).ok();
+                insert_decision(
+                    &conn,
+                    sid,
+                    "pause",
+                    &format!(
+                        "Auto-paused: daily loss cap exceeded (${today_expenses:.2} > ${:.2})",
+                        config.global_daily_loss_cap
+                    ),
+                    &serde_json::json!({ "auto": true, "daily_expenses": today_expenses }),
+                )
+                .ok();
             }
         }
     }

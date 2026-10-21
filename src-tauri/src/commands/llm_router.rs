@@ -10,7 +10,6 @@
  * Usage logging is written to:
  *   ~/Library/Application Support/com.taisun.electron/llm_usage.json
  */
-
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -221,12 +220,19 @@ pub fn decide_provider(
             if let Some(reason) = escalation_reason {
                 if let Some(per_task) = config.per_task_cap_usd {
                     let est_out = estimated_tokens / 2;
-                    let est_cost =
-                        estimate_cost("anthropic", &config.anthropic_model, estimated_tokens, est_out);
+                    let est_cost = estimate_cost(
+                        "anthropic",
+                        &config.anthropic_model,
+                        estimated_tokens,
+                        est_out,
+                    );
                     if est_cost > per_task {
                         return RoutingDecision {
                             provider: "ollama".to_string(),
-                            reason: format!("per_task_cap({:.4}>{:.2},would:{})", est_cost, per_task, reason),
+                            reason: format!(
+                                "per_task_cap({:.4}>{:.2},would:{})",
+                                est_cost, per_task, reason
+                            ),
                         };
                     }
                 }
@@ -303,9 +309,7 @@ async fn call_anthropic(
     client: &reqwest::Client,
 ) -> Result<(String, u32, u32), String> {
     if api_key.is_empty() {
-        return Err(
-            "Anthropic API key not set. Add it in Settings → Compute Mode.".to_string(),
-        );
+        return Err("Anthropic API key not set. Add it in Settings → Compute Mode.".to_string());
     }
 
     let resp = client
@@ -388,10 +392,7 @@ async fn call_openclaw(
         .as_str()
         .ok_or_else(|| "OpenClaw: no content in response".to_string())?;
 
-    let model = body["model"]
-        .as_str()
-        .unwrap_or("unknown")
-        .to_string();
+    let model = body["model"].as_str().unwrap_or("unknown").to_string();
 
     let prompt_tokens = body["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
     let completion_tokens = body["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
@@ -439,11 +440,19 @@ pub async fn chat_with_router(
             "anthropic" => {
                 let key = anthropic_api_key.as_deref().unwrap_or("");
                 match call_anthropic(&config.anthropic_model, &text, key, &client).await {
-                    Ok((c, p, o)) => (c, p, o, "anthropic".to_string(), config.anthropic_model.clone()),
+                    Ok((c, p, o)) => (
+                        c,
+                        p,
+                        o,
+                        "anthropic".to_string(),
+                        config.anthropic_model.clone(),
+                    ),
                     Err(e) if config.mode == "hybrid" => {
-                        eprintln!("[llm_router] Anthropic failed ({}), falling back to Ollama", e);
-                        let (c, p, o) =
-                            call_ollama(&config.ollama_model, &text, &client).await?;
+                        eprintln!(
+                            "[llm_router] Anthropic failed ({}), falling back to Ollama",
+                            e
+                        );
+                        let (c, p, o) = call_ollama(&config.ollama_model, &text, &client).await?;
                         (c, p, o, "ollama".to_string(), config.ollama_model.clone())
                     }
                     Err(e) => return Err(e),
@@ -456,7 +465,12 @@ pub async fn chat_with_router(
         };
 
     let latency_ms = start.elapsed().as_millis() as u64;
-    let cost = estimate_cost(&actual_provider, &actual_model, prompt_tokens, completion_tokens);
+    let cost = estimate_cost(
+        &actual_provider,
+        &actual_model,
+        prompt_tokens,
+        completion_tokens,
+    );
 
     // Persist usage record
     append_usage_record(LlmUsageRecord {
@@ -606,7 +620,11 @@ mod tests {
             5.01, // over the $5.00 cap
         );
         assert_eq!(d.provider, "ollama");
-        assert!(d.reason.contains("daily_cap_exceeded"), "reason: {}", d.reason);
+        assert!(
+            d.reason.contains("daily_cap_exceeded"),
+            "reason: {}",
+            d.reason
+        );
     }
 
     #[test]
@@ -616,7 +634,11 @@ mod tests {
         let d = decide_provider(&cfg("hybrid"), &[], 120_000, None, 0.0);
         assert_eq!(d.provider, "ollama");
         assert!(d.reason.contains("per_task_cap"), "reason: {}", d.reason);
-        assert!(d.reason.contains("would:tokens_>"), "should show blocked reason: {}", d.reason);
+        assert!(
+            d.reason.contains("would:tokens_>"),
+            "should show blocked reason: {}",
+            d.reason
+        );
     }
 
     #[test]
@@ -625,7 +647,11 @@ mod tests {
         let d = decide_provider(&cfg("hybrid"), &["heavy".to_string()], 120_000, None, 0.0);
         assert_eq!(d.provider, "ollama");
         assert!(d.reason.contains("per_task_cap"), "reason: {}", d.reason);
-        assert!(d.reason.contains("would:tag=heavy"), "should show blocked tag: {}", d.reason);
+        assert!(
+            d.reason.contains("would:tag=heavy"),
+            "should show blocked tag: {}",
+            d.reason
+        );
     }
 
     // ── Force override ───────────────────────────────────────────────────────

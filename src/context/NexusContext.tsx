@@ -12,7 +12,6 @@ import type {
   ToastItem,
   ToastOptions,
   MuseConnectionState,
-  WhoopConnectionState,
 } from "@/lib/types";
 
 // ============================================================
@@ -27,8 +26,6 @@ interface NexusContextValue {
   // BLE device states
   museState: MuseConnectionState;
   setMuseState: (state: MuseConnectionState) => void;
-  whoopState: WhoopConnectionState;
-  setWhoopState: (state: WhoopConnectionState) => void;
 
   // Toast
   toasts: ToastItem[];
@@ -64,12 +61,6 @@ export function NexusProvider({ children }: { children: ReactNode }) {
     device_name: null,
     streaming: false,
   });
-  const [whoopState, setWhoopState] = useState<WhoopConnectionState>({
-    connected: false,
-    device_name: null,
-    streaming: false,
-  });
-
   // Toasts
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -108,8 +99,6 @@ export function NexusProvider({ children }: { children: ReactNode }) {
         navigate,
         museState,
         setMuseState,
-        whoopState,
-        setWhoopState,
         toasts,
         toast,
         dismissToast,

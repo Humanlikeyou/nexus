@@ -5,7 +5,6 @@ import type { ElectrodeDeviceInfo, DeviceTelemetry } from "@/lib/types";
  *
  * Modeled after patterns found in:
  * - MuseLSL2 (Python/bleak): scan → connect → subscribe → start('d') → callbacks
- * - OpenWhoop (Rust/btleplug): scan → connect → subscribe → read notifications
  *
  * The interface mirrors the BLE lifecycle: discover → connect → stream → disconnect.
  * Data flows via callbacks registered before streaming starts.

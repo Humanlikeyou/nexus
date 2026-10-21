@@ -5,7 +5,11 @@ use std::process::Command;
 
 fn nexus_data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join("Library/Application Support"))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap()
+                .join("Library/Application Support")
+        })
         .join("com.taisun.nexus")
 }
 
@@ -48,17 +52,15 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     let openclaw = openclaw_dir();
     if openclaw.exists() {
         let dest = staging.join("openclaw");
-        copy_dir_selective(&openclaw, &dest, &[
-            "openclaw.json",
-            "cron",
-            "skills",
-            "memory",
-            "workspace",
-        ])?;
+        copy_dir_selective(
+            &openclaw,
+            &dest,
+            &["openclaw.json", "cron", "skills", "memory", "workspace"],
+        )?;
         includes.push("OpenClaw workspace & memory".to_string());
     }
 
-    // 3. Copy local session data (Muse/Whoop recordings)
+    // 3. Copy local session data
     let sessions_dir = nexus_data_dir().join("sessions");
     if sessions_dir.exists() {
         let dest = staging.join("sessions");
@@ -161,7 +163,10 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
         .map_err(|e| format!("Failed to extract: {}", e))?;
 
     if !output.status.success() {
-        return Err(format!("Extract failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "Extract failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
     // Find the extracted directory (should be electron-pack-*)

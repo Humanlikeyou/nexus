@@ -1,6 +1,11 @@
 mod commands;
 
-use commands::{arm, assistant, ble_common, continuity, events, goals, kv, llm_router, muse, onboarding, openclaw, outbox, packager, replay, research, sessions, snapshots, system, telegram, whoop};
+use commands::{
+    arm, assistant, ble_common, continuity, crew, events, goals, kv, llm_router, muse, noop,
+    onboarding, openclaw, outbox, packager, replay, research, sessions, snapshots, system,
+    telegram, terrence_actions, terrence_automations, terrence_context, terrence_priorities,
+    terrence_projects, terrence_runtime, terrence_runtime_bridge,
+};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
@@ -8,6 +13,7 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(terrence_runtime_bridge::NexusRuntimeBridge::default())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -15,9 +21,12 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // A process cannot resume an in-flight Hermes child after restart.
+            let _ = terrence_actions::reconcile_interrupted_conversations();
+
             // System tray
-            let quit = MenuItem::with_id(app, "quit", "Quit Electron", true, None::<&str>)?;
-            let open = MenuItem::with_id(app, "open", "Open Electron", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Nexus", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Open Nexus", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
 
             TrayIconBuilder::new()
@@ -70,13 +79,8 @@ pub fn run() {
             muse::start_eeg_stream,
             muse::stop_eeg_stream,
             muse::get_muse_state,
-            // Whoop BLE
-            whoop::scan_whoop,
-            whoop::connect_whoop,
-            whoop::disconnect_whoop,
-            whoop::start_hr_stream,
-            whoop::stop_hr_stream,
-            whoop::get_whoop_state,
+            // NOOP is the exclusive WHOOP/health reader. It owns strap sync and health storage.
+            noop::get_noop_health_snapshot,
             // Telegram
             telegram::get_config,
             telegram::save_settings,
@@ -160,6 +164,36 @@ pub fn run() {
             llm_router::get_cost_estimate,
             llm_router::get_llm_usage,
             llm_router::clear_llm_usage,
+            // Terrence action registry and approval ledger
+            terrence_actions::list_terrence_tools,
+            terrence_actions::request_terrence_action,
+            terrence_actions::list_terrence_actions,
+            terrence_actions::approve_terrence_action,
+            terrence_actions::retry_terrence_action,
+            terrence_actions::cancel_terrence_action,
+            // Terrence automation records from the persistent Hermes runner
+            terrence_automations::list_terrence_automations,
+            terrence_automations::list_terrence_automation_runs,
+            // Terrence canonical context
+            terrence_context::create_context_item,
+            terrence_context::list_context_items,
+            terrence_context::correct_context_item,
+            terrence_context::delete_context_item,
+            terrence_context::get_terrence_context_snapshot,
+            terrence_context::migrate_legacy_terrence_context,
+            // Terrence current-priority and decision loop
+            terrence_priorities::get_current_terrence_priority_snapshot,
+            terrence_priorities::record_terrence_decision,
+            terrence_priorities::list_terrence_decisions,
+            terrence_priorities::resolve_terrence_decision,
+            // Terrence project intelligence
+            terrence_projects::upsert_terrence_project,
+            terrence_projects::list_terrence_projects,
+            // Terrence runtime (Hermes)
+            terrence_runtime::get_terrence_runtime_health,
+            terrence_runtime::list_terrence_capabilities,
+            terrence_runtime::interact_with_terrence,
+            terrence_runtime::list_terrence_interactions,
             // Assistant chat history
             assistant::create_chat_session,
             assistant::list_chat_sessions,
@@ -177,7 +211,13 @@ pub fn run() {
             replay::stop_replay,
             replay::start_demo_eeg,
             replay::stop_demo_eeg,
+            // CrewAI
+            crew::crew_list,
+            crew::crew_start,
+            crew::crew_status,
+            crew::crew_stop,
+            crew::crew_health,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Electron");
+        .expect("error while running Nexus");
 }

@@ -1,21 +1,21 @@
 {
-  "productName": "Electron",
+  "productName": "Nexus",
   "version": "0.1.0",
-  "identifier": "com.taisun.electron",
+  "identifier": "com.taisun.nexus",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "title": "Electron",
+        "title": "Nexus",
         "width": 1400,
         "height": 900,
-        "minWidth": 960,
-        "minHeight": 600,
+        "minWidth": 900,
+        "minHeight": 620,
         "resizable": true,
         "fullscreen": false,
         "decorations": true,
@@ -42,9 +42,9 @@
       "icons/icon.ico"
     ],
     "category": "Productivity",
-    "shortDescription": "Taisun's Command Center",
-    "longDescription": "Electron — Centralized command center for Terrance system status, TaiyoSkin business metrics, neurofeedback, fitness tracking, and life trajectory.",
-    "copyright": "2025 Taisun",
+    "shortDescription": "Local intelligence and sensing workspace",
+    "longDescription": "Nexus brings local intelligence, neural sessions, health signals, and deliberate execution into one private workspace.",
+    "copyright": "2026 Taisun",
     "macOS": {
       "entitlements": null,
       "exceptionDomain": "",

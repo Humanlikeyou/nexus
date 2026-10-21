@@ -8,8 +8,6 @@ import type {
   ContentPipelineItem,
   MuseDevice,
   MuseConnectionState,
-  WhoopDevice,
-  WhoopConnectionState,
   SystemInfo,
   NexusConfig,
   TelegramMessage,
@@ -87,24 +85,6 @@ export const stopEegStream = () => invoke<void>("stop_eeg_stream");
 
 export const getMuseState = () =>
   invoke<MuseConnectionState>("get_muse_state");
-
-// ============================================================
-// Whoop BLE
-// ============================================================
-
-export const scanWhoop = () => invoke<WhoopDevice[]>("scan_whoop");
-
-export const connectWhoop = (address: string) =>
-  invoke<WhoopConnectionState>("connect_whoop", { address });
-
-export const disconnectWhoop = () => invoke<void>("disconnect_whoop");
-
-export const startHrStream = () => invoke<void>("start_hr_stream");
-
-export const stopHrStream = () => invoke<void>("stop_hr_stream");
-
-export const getWhoopState = () =>
-  invoke<WhoopConnectionState>("get_whoop_state");
 
 // ============================================================
 // Telegram
@@ -481,3 +461,22 @@ export const loadSubagents = () => invoke<string>("load_subagents");
 
 export const saveSubagents = (data: string) =>
   invoke<void>("save_subagents", { data });
+
+// ============================================================
+// CrewAI
+// ============================================================
+
+export const crewList = () =>
+  invoke<import("./types").CrewInfo[]>("crew_list");
+
+export const crewStart = (name: string, task: string, agents?: string[]) =>
+  invoke<import("./types").CrewInfo>("crew_start", { name, task, agents });
+
+export const crewStatus = (id: string) =>
+  invoke<import("./types").CrewInfo>("crew_status", { id });
+
+export const crewStop = (id: string) =>
+  invoke<string>("crew_stop", { id });
+
+export const crewHealth = () =>
+  invoke<string>("crew_health");

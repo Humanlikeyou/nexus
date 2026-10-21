@@ -1,6 +1,5 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import crypto from "crypto";
 
@@ -11,7 +10,7 @@ const buildHash = crypto.randomBytes(4).toString("hex"); // 8-char hex
 const buildTime = new Date().toISOString();
 
 export default defineConfig(async () => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [react()],
   define: {
     __BUILD_HASH__: JSON.stringify(buildHash),
     __BUILD_TIME__: JSON.stringify(buildTime),
@@ -21,15 +20,16 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@console": path.resolve(__dirname, "./src-console"),
     },
   },
   build: {
-    chunkSizeWarningLimit: 1100,
+    chunkSizeWarningLimit: 750,
     rollupOptions: {
       output: {
-        manualChunks: {
-          echarts: ["echarts", "echarts-for-react"],
-          motion: ["framer-motion"],
+        manualChunks(id) {
+          if (id.includes("lucide-react")) return "interface-icons";
+          return undefined;
         },
       },
     },
@@ -37,8 +37,8 @@ export default defineConfig(async () => ({
   clearScreen: false,
   server: {
     port: 1420,
-    strictPort: false,
-    host: host || false,
+    strictPort: true,
+    host: host || "127.0.0.1",
     hmr: host
       ? {
           protocol: "ws",

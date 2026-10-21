@@ -111,7 +111,7 @@ export function useSignalQuality(
   return quality;
 }
 
-function assessChannel(samples: number[]): ChannelQuality {
+export function assessChannel(samples: number[]): ChannelQuality {
   if (samples.length < 32) return "good"; // Not enough data yet
 
   // Check for railed values

@@ -117,80 +117,6 @@ export interface MuseSession {
 }
 
 // ============================================================
-// Whoop / Fitness types
-// ============================================================
-
-export interface WhoopDevice {
-  name: string;
-  address: string;
-  rssi: number | null;
-}
-
-export interface HeartRateData {
-  timestamp: number;
-  heart_rate: number;
-  rr_interval: number | null;
-  source: "custom" | "standard";
-}
-
-export interface WhoopConnectionState {
-  connected: boolean;
-  device_name: string | null;
-  streaming: boolean;
-}
-
-export interface WhoopSession {
-  id: string;
-  start: string;
-  end: string | null;
-  duration_secs: number;
-  avg_hr: number;
-  max_hr: number;
-  avg_hrv: number | null;
-}
-
-// Whoop Analytics — ported from OpenWhoop algorithms
-export interface StressScore {
-  score: number;          // 0-10 (0 = very relaxed, 10 = max stress)
-  mode: number;           // most frequent RR interval (ms)
-  variationRange: number; // max - min RR (ms)
-  sampleCount: number;    // how many HR samples used
-  ready: boolean;         // true when enough data collected (≥120 samples)
-}
-
-export interface StrainMetrics {
-  strain: number;         // 0-21 scale (TRIMP-style accumulation)
-  maxHR: number;          // peak HR in session
-  avgHR: number;          // mean HR in session
-  durationSecs: number;   // total seconds of HR data
-  hrZones: [number, number, number, number, number]; // seconds in zone 1-5
-}
-
-export interface RecoveryMetrics {
-  score: number;          // 0-100 (67+ green, 34-66 yellow, <34 red)
-  hrvBaseline: number;    // RMSSD used for score
-  restingHR: number;      // lowest stable HR
-  hrVariability: number;  // coefficient of variation
-  ready: boolean;         // true when enough data for meaningful score
-}
-
-export interface SleepStage {
-  name: "Awake" | "Light" | "REM" | "Deep (SWS)";
-  hours: number;
-  color: string;
-}
-
-export interface SleepMetrics {
-  totalHours: number;
-  score: number;          // 0-100
-  stages: SleepStage[];
-  avgHR: number;
-  minHR: number;
-  avgHRV: number;
-  ready: boolean;         // true when sleep data available
-}
-
-// ============================================================
 // Trajectory / Goals types
 // ============================================================
 
@@ -243,7 +169,7 @@ export interface TelegramMessage {
 
 export interface BleProofEvent {
   timestamp: number;
-  device: "muse" | "whoop";
+  device: "muse" | "legacy_health";
   event_type: string;
   detail: string;
 }
@@ -285,7 +211,6 @@ export interface NexusConfig {
   gateway_retry_max_secs: number | null;
   n8n_webhook_secret: string | null;
   preferred_muse_address: string | null;
-  preferred_whoop_address: string | null;
   // LLM Router
   compute_mode: string | null;
   llm_ollama_model: string | null;
@@ -548,7 +473,7 @@ export interface ElectrodeDeviceInfo {
 /**
  * Device telemetry — battery, firmware, hardware info.
  * Matches patterns from Muse control response (hn/sn/bp/fw fields)
- * and Whoop device metadata.
+ * and wearable-service metadata.
  */
 export interface DeviceTelemetry {
   batteryPct: number | null;       // 0-100, null if unknown
@@ -671,7 +596,7 @@ export interface BrainSnapshot {
 
 export interface RecordedSession {
   id: string;
-  device_type: "muse" | "whoop";
+  device_type: "muse" | "legacy_health";
   start: string;
   end: string;
   duration_secs: number;
@@ -984,4 +909,18 @@ export interface Subagent {
   memory: string[];
   createdAt: number;
   jobs: SubagentJob[];
+}
+
+// ============================================================
+// CrewAI
+// ============================================================
+
+export interface CrewInfo {
+  id: string;
+  name: string;
+  status: string;
+  agents: string[];
+  started_at: string | null;
+  task: string | null;
+  result: string | null;
 }
