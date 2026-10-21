@@ -1,0 +1,248 @@
+/*
+ * Nexus design tokens: single source for color, type, spacing, radius,
+ * elevation, materials, motion and layout.
+ * Spec: nexus-audit/proposal.md §4 + Design Lead answers (2026-10-21).
+ *
+ * Light/dark: macOS 13 floor = WKWebView Safari 16.4, which has no
+ * light-dark() (Safari 17.5+). So the dark palette is written once as
+ * --d-* values and switched by reference from two selectors:
+ *   :root[data-theme="dark"] and prefers-color-scheme: dark (unless light).
+ * data-theme="system" (useAppearance) follows the media query.
+ */
+
+:root {
+  color-scheme: light;
+  font-family: var(--font-text);
+  font-synthesis: none;
+
+  /* ── Type families ─────────────────────────────────────────────── */
+  --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  /* ── Light palette (semantic) ──────────────────────────────────── */
+  --label: #1d1d1f;
+  --label-secondary: rgba(60, 60, 67, .60);
+  --label-tertiary: rgba(60, 60, 67, .30);
+  --bg-window: #f5f5f7;
+  --bg-content: #ffffff;
+  --bg-rgb: 245, 245, 247;
+  --fill-secondary: rgba(120, 120, 128, .16);
+  --fill-tertiary: rgba(120, 120, 128, .08);
+  --separator: rgba(60, 60, 67, .18);
+  --separator-strong: rgba(60, 60, 67, .29);
+  --hairline-color: rgba(0, 0, 0, .08);
+
+  --accent: #0f8b77;            /* fills and tints only */
+  --accent-strong: #0b6e5e;     /* text, and fills carrying white labels (≈5.5:1) */
+  --on-accent: #ffffff;         /* label on --accent-strong fills */
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-hover: color-mix(in srgb, var(--accent-strong) 88%, #000);
+
+  --sidebar-selection: rgba(0, 0, 0, .06);
+  --selection: color-mix(in srgb, var(--accent) 14%, var(--bg-content));
+  --focus-ring: var(--sys-blue);
+
+  --sys-blue: #007aff;
+  --sys-green: #34c759;
+  --sys-orange: #ff9500;
+  --sys-red: #ff3b30;
+  --sys-purple: #af52de;
+  --sys-teal: #30b0c7;
+  --sys-indigo: #5e5ce6;
+
+  /* Data colors (Health). Recovery bands: 67–100 / 34–66 / 0–33. */
+  --data-recovery-high: #30a46c;
+  --data-recovery-mid: #f5b800;
+  --data-recovery-mid-text: #8a6500;
+  --data-recovery-low: #e5484d;
+  --data-strain: var(--sys-blue);   /* 0–21 scale */
+  --data-sleep: #5e5ce6;
+  --data-hrv: var(--sys-teal);
+
+  /* Elevation */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, .06);
+  --elev-2: 0 4px 12px rgba(0, 0, 0, .08);
+  --elev-3: 0 12px 40px rgba(0, 0, 0, .18);
+  --hairline: 0.5px solid var(--hairline-color);
+
+  /* Materials (blurred surfaces) */
+  --material-sidebar: rgba(var(--bg-rgb), .72);
+  --material-toolbar: rgba(var(--bg-rgb), .80);
+  --material-popover: rgba(255, 255, 255, .80);
+  --material-blur: blur(30px) saturate(180%);
+
+  /* ── Dark palette, written once ────────────────────────────────── */
+  --d-label: #f5f5f7;
+  --d-label-secondary: rgba(235, 235, 245, .60);
+  --d-label-tertiary: rgba(235, 235, 245, .30);
+  --d-bg-window: #1c1c1e;
+  --d-bg-content: #232325;
+  --d-bg-rgb: 28, 28, 30;
+  --d-fill-secondary: rgba(120, 120, 128, .32);
+  --d-fill-tertiary: rgba(120, 120, 128, .16);
+  --d-separator: rgba(84, 84, 88, .60);
+  --d-separator-strong: rgba(84, 84, 88, .90);
+  --d-hairline-color: rgba(255, 255, 255, .08);
+  --d-accent: #2ec4a6;
+  --d-accent-strong: #2ec4a6;
+  --d-on-accent: #04201b;
+  --d-sidebar-selection: rgba(255, 255, 255, .08);
+  --d-sys-blue: #0a84ff;
+  --d-sys-green: #30d158;
+  --d-sys-orange: #ff9f0a;
+  --d-sys-red: #ff453a;
+  --d-sys-purple: #bf5af2;
+  --d-sys-teal: #40c8e0;
+  --d-sys-indigo: #5e5ce6;
+  --d-elev-1: 0 1px 2px rgba(0, 0, 0, .4);
+  --d-elev-2: 0 8px 24px rgba(0, 0, 0, .5);
+  --d-elev-3: 0 20px 48px rgba(0, 0, 0, .6);
+  --d-material-sidebar: rgba(30, 30, 32, .72);
+  --d-material-toolbar: rgba(30, 30, 32, .80);
+  --d-material-popover: rgba(44, 44, 46, .78);
+
+  /* ── Type roles: size / line-height (weights alongside) ────────── */
+  --text-large-title: 26px;  --lh-large-title: 32px;   /* 700 */
+  --text-title1: 22px;       --lh-title1: 28px;        /* 700 */
+  --text-title2: 17px;       --lh-title2: 22px;        /* 600 */
+  --text-title3: 15px;       --lh-title3: 20px;        /* 600 */
+  --text-headline: 13px;     --lh-headline: 16px;      /* 600 */
+  --text-body: 13px;         --lh-body: 16px;          /* 400 */
+  --text-callout: 12px;      --lh-callout: 15px;
+  --text-subheadline: 11px;  --lh-subheadline: 14px;   /* minimum for text */
+  --text-badge: 10px;        --tracking-badge: .02em;  /* UPPERCASE badges only */
+  --text-display: 34px;      --lh-display: 40px;       /* 600, tabular-nums */
+  --type-large-title: 700 var(--text-large-title)/var(--lh-large-title) var(--font-text);
+  --type-title1: 700 var(--text-title1)/var(--lh-title1) var(--font-text);
+  --type-title2: 600 var(--text-title2)/var(--lh-title2) var(--font-text);
+  --type-title3: 600 var(--text-title3)/var(--lh-title3) var(--font-text);
+  --type-headline: 600 var(--text-headline)/var(--lh-headline) var(--font-text);
+  --type-body: 400 var(--text-body)/var(--lh-body) var(--font-text);
+  --type-callout: 400 var(--text-callout)/var(--lh-callout) var(--font-text);
+  --type-subheadline: 400 var(--text-subheadline)/var(--lh-subheadline) var(--font-text);
+  --type-display: 600 var(--text-display)/var(--lh-display) var(--font-text);
+
+  /* ── Spacing (4pt grid) ────────────────────────────────────────── */
+  --space-0_5: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --inset-content: 20px;
+  --pad-card: 16px;
+  --row-h: 28px;
+  --row-h-lg: 32px;
+  --control-h: 28px;
+  --control-h-sm: 22px;
+
+  /* ── Radius (concentric: inner = outer − padding) ──────────────── */
+  --radius-xs: 4px;     /* badges */
+  --radius-sm: 6px;     /* controls */
+  --radius-md: 10px;    /* cards, list groups */
+  --radius-lg: 14px;    /* panels, sheets */
+  --radius-xl: 20px;    /* popover windows */
+  --radius-pill: 999px;
+
+  /* ── Motion ────────────────────────────────────────────────────── */
+  --ease-standard: cubic-bezier(.2, .8, .2, 1);
+  --dur-fast: 160ms;    /* hover / press */
+  --dur-state: 200ms;   /* state changes */
+  --dur-page: 240ms;    /* sheets / pages */
+
+  /* ── Layout ────────────────────────────────────────────────────── */
+  --sidebar-w: 220px;
+  --sidebar-w-min: 200px;
+  --sidebar-w-max: 280px;
+  --toolbar-h: 52px;
+  --footer-h: 24px;
+  --inspector-w: 280px;
+  --agent-list-w: 260px;
+}
+
+/* Dark set, by reference only (no literal values here). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --label: var(--d-label);
+  --label-secondary: var(--d-label-secondary);
+  --label-tertiary: var(--d-label-tertiary);
+  --bg-window: var(--d-bg-window);
+  --bg-content: var(--d-bg-content);
+  --bg-rgb: var(--d-bg-rgb);
+  --fill-secondary: var(--d-fill-secondary);
+  --fill-tertiary: var(--d-fill-tertiary);
+  --separator: var(--d-separator);
+  --separator-strong: var(--d-separator-strong);
+  --hairline-color: var(--d-hairline-color);
+  --accent: var(--d-accent);
+  --accent-strong: var(--d-accent-strong);
+  --on-accent: var(--d-on-accent);
+  --accent-hover: color-mix(in srgb, var(--d-accent) 85%, #fff);
+  --sidebar-selection: var(--d-sidebar-selection);
+  --sys-blue: var(--d-sys-blue);
+  --sys-green: var(--d-sys-green);
+  --sys-orange: var(--d-sys-orange);
+  --sys-red: var(--d-sys-red);
+  --sys-purple: var(--d-sys-purple);
+  --sys-teal: var(--d-sys-teal);
+  --sys-indigo: var(--d-sys-indigo);
+  --elev-1: var(--d-elev-1);
+  --elev-2: var(--d-elev-2);
+  --elev-3: var(--d-elev-3);
+  --material-sidebar: var(--d-material-sidebar);
+  --material-toolbar: var(--d-material-toolbar);
+  --material-popover: var(--d-material-popover);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --label: var(--d-label);
+    --label-secondary: var(--d-label-secondary);
+    --label-tertiary: var(--d-label-tertiary);
+    --bg-window: var(--d-bg-window);
+    --bg-content: var(--d-bg-content);
+    --bg-rgb: var(--d-bg-rgb);
+    --fill-secondary: var(--d-fill-secondary);
+    --fill-tertiary: var(--d-fill-tertiary);
+    --separator: var(--d-separator);
+    --separator-strong: var(--d-separator-strong);
+    --hairline-color: var(--d-hairline-color);
+    --accent: var(--d-accent);
+    --accent-strong: var(--d-accent-strong);
+    --on-accent: var(--d-on-accent);
+    --accent-hover: color-mix(in srgb, var(--d-accent) 85%, #fff);
+    --sidebar-selection: var(--d-sidebar-selection);
+    --sys-blue: var(--d-sys-blue);
+    --sys-green: var(--d-sys-green);
+    --sys-orange: var(--d-sys-orange);
+    --sys-red: var(--d-sys-red);
+    --sys-purple: var(--d-sys-purple);
+    --sys-teal: var(--d-sys-teal);
+    --sys-indigo: var(--d-sys-indigo);
+    --elev-1: var(--d-elev-1);
+    --elev-2: var(--d-elev-2);
+    --elev-3: var(--d-elev-3);
+    --material-sidebar: var(--d-material-sidebar);
+    --material-toolbar: var(--d-material-toolbar);
+    --material-popover: var(--d-material-popover);
+  }
+}
+:root[data-theme="light"] { color-scheme: light; }
+
+/* Reduced motion: durations collapse (opacity fades may keep --dur-fast). */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-state: 0ms; --dur-page: 0ms; }
+}
+:root[data-reduce-motion="true"] { --dur-state: 0ms; --dur-page: 0ms; }
+
+/* Material helper: blur with -webkit- prefix (Safari 16.4) and opaque fallback. */
+.material {
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root { --material-sidebar: var(--bg-window); --material-toolbar: var(--bg-window); --material-popover: var(--bg-content); }
+}

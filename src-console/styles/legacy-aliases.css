@@ -1,0 +1,32 @@
+/*
+ * TEMPORARY: maps pre-v2 variable names used by styles.css onto the new
+ * tokens. Delete at the end of the screen migration (frontend-plan Phase 5).
+ * Values are references only; the palette lives in tokens.css.
+ * Selectors match tokens.css so dark-mode re-resolution happens per theme.
+ */
+:root, :root[data-theme="dark"] {
+  --text: var(--label);
+  --text-secondary: var(--label-secondary);
+  --text-tertiary: var(--label-tertiary);
+  --window: var(--bg-window);
+  --surface: var(--bg-content);
+  --surface-subtle: var(--fill-tertiary);
+  --surface-raised: var(--bg-content);
+  --sidebar: var(--bg-window);          /* opaque until the shell uses .material */
+  --selection-strong: var(--focus-ring);
+  --success: var(--sys-green);
+  --warning: var(--data-recovery-mid-text);
+  --danger: var(--sys-red);
+  --blue: var(--sys-blue);
+  --violet: var(--sys-purple);
+  --shadow: var(--elev-2);
+  --radius: var(--radius-md);
+  --radius-small: var(--radius-sm);
+  --control-height: 34px;               /* not yet --control-h (28px): would reflow every control */
+  --motion: var(--dur-fast);
+  --sidebar-width: var(--sidebar-w);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --warning: var(--sys-orange); }
+}
+:root[data-theme="dark"] { --warning: var(--sys-orange); }
