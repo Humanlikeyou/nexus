@@ -271,6 +271,13 @@ impl Drop for StagingGuard {
 const MAX_UNPACK_TOTAL_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
 const MAX_UNPACK_ENTRIES: usize = 50_000;
 
+/// `._foo` resource-fork sidecar files created by macOS tar/Finder.
+fn is_apple_double(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("._"))
+}
+
 /// Check one entry's path: relative, no `..`, no root/prefix components.
 fn check_entry_path(path: &std::path::Path) -> Result<(), String> {
     use std::path::Component;
@@ -322,6 +329,15 @@ fn unpack_archive_checked(
         .map_err(|e| format!("Archive could not be read: {}", e))?
     {
         let mut entry = entry.map_err(|e| format!("Archive could not be read: {}", e))?;
+        // macOS AppleDouble metadata (`._name`) is never written and does not
+        // count toward the entry/size caps.
+        if is_apple_double(
+            &entry
+                .path()
+                .map_err(|e| format!("Archive rejected: bad entry name: {}", e))?,
+        ) {
+            continue;
+        }
         let entry_type = entry.header().entry_type();
         if !(entry_type.is_file() || entry_type.is_dir()) {
             return Err("Archive rejected: contains link or special entries".to_string());
@@ -537,6 +553,34 @@ mod unpack_tests {
         std::fs::create_dir(&dest).unwrap();
         unpack_archive_checked(&archive, &dest, 1_000_000, 100).unwrap();
         assert!(dest.join("nexus-pack-x/sessions/s.json").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apple_double_entries_are_skipped_and_not_counted() {
+        let dir = tmp("appledouble");
+        // AppleDouble entry + one real file; caps of 1 entry / 1 byte only pass
+        // if the AppleDouble entry is not counted.
+        let mut small = Vec::new();
+        let mut ad = raw_header("p/._f", tar::EntryType::Regular, 1, "g")
+            .as_bytes()
+            .to_vec();
+        ad.extend_from_slice(b"m");
+        ad.resize(1024, 0);
+        small.extend(ad);
+        let mut f = raw_header("p/f", tar::EntryType::Regular, 1, "g")
+            .as_bytes()
+            .to_vec();
+        f.extend_from_slice(b"x");
+        f.resize(1024, 0);
+        small.extend(f);
+        small.extend([0u8; 1024]);
+        let archive = gz(&dir, &small);
+        let dest = dir.join("out");
+        std::fs::create_dir(&dest).unwrap();
+        assert_eq!(unpack_archive_checked(&archive, &dest, 1, 1).unwrap(), 1);
+        assert!(dest.join("p/f").is_file());
+        assert!(!dest.join("p/._f").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
