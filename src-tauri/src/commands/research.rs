@@ -157,17 +157,50 @@ async fn duckduckgo_search(
 #[tauri::command]
 pub async fn fetch_url(url: String, max_chars: Option<usize>) -> Result<String, String> {
     let limit = max_chars.unwrap_or(10_000);
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let resp = client
-        .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Nexus/Terrance Research Agent)")
-        .send()
-        .await
-        .map_err(|e| format!("Fetch error: {}", e))?;
+    let mut current = parse_public_url(&url)?;
+    let mut hops = 0;
+    let resp = loop {
+        let host = current
+            .host_str()
+            .ok_or_else(|| "URL has no host".to_string())?
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_string();
+        let port = current.port_or_known_default().unwrap_or(443);
+        let addrs = resolve_public(&host, port).await?;
+        // Pin the connection to the vetted addresses (prevents DNS rebinding) and
+        // never auto-follow redirects; each hop is re-validated below.
+        let mut builder = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .redirect(reqwest::redirect::Policy::none());
+        if host.parse::<std::net::IpAddr>().is_err() {
+            builder = builder.resolve_to_addrs(&host, &addrs);
+        }
+        let client = builder.build().map_err(|e| e.to_string())?;
+        let resp = client
+            .get(current.clone())
+            .header("User-Agent", "Mozilla/5.0 (Nexus/Terrance Research Agent)")
+            .send()
+            .await
+            .map_err(|e| format!("Fetch error: {}", e))?;
+        if resp.status().is_redirection() {
+            hops += 1;
+            if hops > 5 {
+                return Err("Too many redirects".to_string());
+            }
+            let location = resp
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .ok_or_else(|| "Redirect without Location header".to_string())?;
+            let next = current
+                .join(location)
+                .map_err(|e| format!("Invalid redirect: {}", e))?;
+            current = parse_public_url(next.as_str())?;
+            continue;
+        }
+        break resp;
+    };
 
     let content_type = resp
         .headers()
@@ -188,15 +221,134 @@ pub async fn fetch_url(url: String, max_chars: Option<usize>) -> Result<String, 
         body
     };
 
-    // Truncate to limit
+    // Truncate to limit (on a char boundary, so multi-byte text can't panic)
     if text.len() > limit {
+        let mut cut = limit;
+        while !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
         Ok(format!(
             "{}...\n\n[Truncated at {} chars]",
-            &text[..limit],
+            &text[..cut],
             limit
         ))
     } else {
         Ok(text)
+    }
+}
+
+// ─── URL safety (SSRF guard) ────────────────────────────────────────────────
+
+/// Parse a URL and require http/https with a host. Literal IPs must be public.
+fn parse_public_url(raw: &str) -> Result<reqwest::Url, String> {
+    let url = reqwest::Url::parse(raw.trim()).map_err(|e| format!("Invalid URL: {}", e))?;
+    match url.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("URL scheme '{}' is not allowed", other)),
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("URLs with embedded credentials are not allowed".to_string());
+    }
+    let host = url.host_str().ok_or_else(|| "URL has no host".to_string())?;
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if bare.eq_ignore_ascii_case("localhost") || bare.to_ascii_lowercase().ends_with(".localhost") {
+        return Err("Local addresses are not allowed".to_string());
+    }
+    if let Ok(ip) = bare.parse::<std::net::IpAddr>() {
+        if !is_public_ip(&ip) {
+            return Err("Private, loopback or link-local addresses are not allowed".to_string());
+        }
+    }
+    Ok(url)
+}
+
+async fn resolve_public(host: &str, port: u16) -> Result<Vec<std::net::SocketAddr>, String> {
+    let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| format!("DNS lookup failed: {}", e))?
+        .collect();
+    if addrs.is_empty() {
+        return Err("DNS lookup returned no addresses".to_string());
+    }
+    if addrs.iter().any(|a| !is_public_ip(&a.ip())) {
+        return Err("Host resolves to a private, loopback or link-local address".to_string());
+    }
+    Ok(addrs)
+}
+
+fn is_public_ip(ip: &std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            !(v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_multicast()
+                || o[0] == 0
+                || (o[0] == 100 && (o[1] & 0xC0) == 64) // 100.64/10 CGNAT
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0) // 192.0.0/24
+                || (o[0] == 198 && (o[1] & 0xFE) == 18) // 198.18/15
+                || o[0] >= 240)
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_public_ip(&IpAddr::V4(v4));
+            }
+            let seg0 = v6.segments()[0];
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (seg0 & 0xFE00) == 0xFC00 // fc00::/7 unique local
+                || (seg0 & 0xFFC0) == 0xFE80 // fe80::/10 link-local
+                || (seg0 & 0xFFC0) == 0xFEC0 // fec0::/10 site-local
+                || (seg0 == 0x2001 && v6.segments()[1] == 0x0db8) // documentation
+                || (seg0 == 0x0064 && v6.segments()[1] == 0xff9b)) // NAT64 (may map to private v4)
+        }
+    }
+}
+
+#[cfg(test)]
+mod ssrf_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_non_http_and_local_urls() {
+        for bad in [
+            "file:///etc/passwd",
+            "ftp://example.com/x",
+            "http://localhost:5678/",
+            "http://api.localhost/",
+            "http://127.0.0.1/",
+            "http://10.0.0.5/",
+            "http://192.168.1.1/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]/",
+            "http://[fe80::1]/",
+            "http://[fd00::1]/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://0.0.0.0/",
+            "http://100.64.0.1/",
+            "http://user:pw@example.com/",
+            "not a url",
+        ] {
+            assert!(parse_public_url(bad).is_err(), "{bad} should be rejected");
+        }
+    }
+
+    #[test]
+    fn accepts_public_urls() {
+        assert!(parse_public_url("https://example.com/path?q=1").is_ok());
+        assert!(parse_public_url("http://93.184.216.34/").is_ok());
+        assert!(parse_public_url("https://[2606:4700::1111]/").is_ok());
+    }
+
+    #[tokio::test]
+    async fn resolve_rejects_loopback_hostname_literal() {
+        assert!(resolve_public("127.0.0.1", 80).await.is_err());
     }
 }
 
