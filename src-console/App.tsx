@@ -1,49 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import {
-  Activity,
-  BookOpen,
-  BrainCircuit,
-  BriefcaseBusiness,
-  Bluetooth,
-  Bot,
-  Check,
-  ChevronDown,
-  CircleDollarSign,
-  Crosshair,
-  HardDrive,
-  HeartPulse,
-  History,
-  Pencil,
-  Play,
-  Radio,
-  RefreshCw,
-  RotateCcw,
-  Route,
-  Satellite,
-  Send,
-  Settings2,
-  SlidersHorizontal,
-  Square,
-  SquarePen,
-  Sparkles,
-  Sun,
-  Trash2,
-  Unplug,
-  X,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
 import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, connectMuse, correctTerrenceContextItem, deleteTerrenceContextItem, disconnectMuse, interactWithTerrence, listTerrenceContextItems, listTerrenceInteractions, loadSystemSnapshot, migrateLegacyTerrenceContext, retryTerrenceAction, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "./bridge";
-import type { ModuleId, MuseDevice, NoopHealthInsight, RecordedSession, SystemSnapshot, TerrenceAction, TerrenceContextItem, TerrenceInteraction } from "./types";
-import { BiometricReadout, CommandSurface, IntelligenceOverlay, SignalStream } from "./design/SystemPrimitives";
 import { ActionButton, EmptyState, Metric, PageHeading, SectionHeading, SegmentedControl, StatusIndicator } from "./design/ProductUI";
+import { BiometricReadout, CommandSurface, IntelligenceOverlay, SignalStream } from "./design/SystemPrimitives";
 import { useAppearance, type ThemePreference } from "./design/useAppearance";
-import { useMuseTelemetry, type MuseTelemetry } from "./neuro/useMuseTelemetry";
-import { useTraining } from "./neuro/useTraining";
-import { SessionFinalizer } from "./neuro/sessionFinalizer";
 import { useIdleAutoSave } from "./hooks/useIdleAutoSave";
 import { useSchedulerLifecycle } from "./hooks/useSchedulerLifecycle";
+import { tone, humanize, plainText, number, money, date, time, formatMinutes, shortDuration, readableError } from "./lib/format";
+import { SessionFinalizer } from "./neuro/sessionFinalizer";
+import { useMuseTelemetry, type MuseTelemetry } from "./neuro/useMuseTelemetry";
+import { useTraining } from "./neuro/useTraining";
 import { BackupSection } from "./settings/BackupSection";
+import type { ModuleId, MuseDevice, NoopHealthInsight, RecordedSession, SystemSnapshot, TerrenceAction, TerrenceContextItem, TerrenceInteraction } from "./types";
+import { Activity, BookOpen, BrainCircuit, BriefcaseBusiness, Bluetooth, Bot, Check, ChevronDown, CircleDollarSign, Crosshair, HardDrive, HeartPulse, History, Pencil, Play, Radio, RefreshCw, RotateCcw, Route, Satellite, Send, Settings2, SlidersHorizontal, Square, SquarePen, Sparkles, Sun, Trash2, Unplug, X, Zap, type LucideIcon } from "lucide-react";
 
 const SYSTEM_GROUPS: Array<{ label: string; systems: Array<{ id: ModuleId; label: string; signal: string; icon: LucideIcon }> }> = [
   { label: "Nexus", systems: [
@@ -65,8 +33,6 @@ const SYSTEM_GROUPS: Array<{ label: string; systems: Array<{ id: ModuleId; label
 ];
 
 const SYSTEMS = SYSTEM_GROUPS.flatMap((group) => group.systems);
-
-type Tone = "live" | "watch" | "fault" | "quiet";
 
 type ConversationMessage = {
   id: string;
@@ -156,76 +122,9 @@ function messagesFromInteractions(interactions: TerrenceInteraction[]): Conversa
   });
 }
 
-function tone(value: string | boolean | null | undefined): Tone {
-  if (value === true) return "live";
-  if (!value) return "fault";
-  const text = String(value).toLowerCase();
-  if (["healthy", "online", "active", "connected", "configured", "complete", "streaming", "enabled", "watching"].some((item) => text.includes(item))) return "live";
-  if (["waiting", "degraded", "watch", "testing", "paused", "pending", "unknown", "proxy"].some((item) => text.includes(item))) return "watch";
-  if (["offline", "error", "failed", "missing", "disconnected", "killed", "down"].some((item) => text.includes(item))) return "fault";
-  return "quiet";
-}
-
-function humanize(value: string | null | undefined) {
-  const text = String(value ?? "unknown").replace(/[_-]+/g, " ").trim();
-  return text ? text.charAt(0).toUpperCase() + text.slice(1).toLowerCase() : "Unknown";
-}
-
-function plainText(value: string) {
-  return value
-    .replace(/^\s*[-*]\s+/, "")
-    .replace(/^\s*\[[ x~>-]\]\s*/i, "")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .trim();
-}
-
 function State({ value, label }: { value: string | boolean | null | undefined; label?: string }) {
   const display = label ?? (typeof value === "boolean" ? (value ? "Online" : "Offline") : humanize(String(value ?? "unknown")));
   return <span className={`field-state field-state--${tone(value)}`}><i />{display}</span>;
-}
-
-function number(value: number | null | undefined, digits = 0) {
-  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "--";
-}
-
-function money(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value || 0);
-}
-
-function date(value: string | number | null | undefined) {
-  if (!value) return "No record";
-  const parsed = new Date(typeof value === "number" && value < 1e12 ? value * 1000 : value);
-  if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function time(value: string | number | null | undefined) {
-  if (!value) return "--";
-  const parsed = new Date(typeof value === "number" && value < 1e12 ? value * 1000 : value);
-  if (Number.isNaN(parsed.getTime())) return "--";
-  return parsed.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-function formatMinutes(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "--";
-  const rounded = Math.round(value);
-  if (rounded < 60) return `${rounded}m`;
-  return `${Math.floor(rounded / 60)}h ${rounded % 60}m`;
-}
-
-function shortDuration(ms: number) {
-  if (ms < 1000) return `${ms || 0}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms / 60_000)}m`;
-}
-
-function readableError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  if (message.toLowerCase().includes("bluetooth adapter")) return "Bluetooth is unavailable. Check that Bluetooth is on, then try again.";
-  if (message.toLowerCase().includes("not found") || message.toLowerCase().includes("not in discovered")) return "That Muse is no longer available. Put it back in pairing mode and scan again.";
-  if (message.toLowerCase().includes("permission")) return "Nexus needs Bluetooth permission in System Settings before it can connect.";
-  return message.replace(/^Error:\s*/i, "") || "The device request could not be completed.";
 }
 
 function Trace({ values, labels, tint = "cyan", tall = false }: { values: number[]; labels?: string[]; tint?: "cyan" | "lime" | "amber" | "coral"; tall?: boolean }) {
