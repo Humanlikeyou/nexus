@@ -209,10 +209,24 @@ pub(crate) fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Res
         uuid::Uuid::new_v4().simple()
     ));
     let result = (|| {
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        // Never widen permissions: create the temp file 0600, then match the
+        // original's mode (if one exists) before it replaces the target.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut f = options.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(path)
+                .map(|m| m.permissions().mode() & 0o7777)
+                .unwrap_or(0o600);
+            f.set_permissions(fs::Permissions::from_mode(mode))?;
+        }
         f.write_all(bytes)?;
         f.sync_all()?;
         drop(f);
@@ -646,6 +660,38 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(leftovers.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_restrictive_mode_and_defaults_new_files_to_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("mode");
+        let existing = dir.join("openclaw.json");
+        fs::write(&existing, b"{}").unwrap();
+        fs::set_permissions(&existing, fs::Permissions::from_mode(0o600)).unwrap();
+        atomic_write(&existing, b"{\"a\":1}").unwrap();
+        assert_eq!(
+            fs::metadata(&existing).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        let fresh = dir.join("new.json");
+        atomic_write(&fresh, b"{}").unwrap();
+        assert_eq!(
+            fs::metadata(&fresh).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        let shared = dir.join("shared.json");
+        fs::write(&shared, b"{}").unwrap();
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o644)).unwrap();
+        atomic_write(&shared, b"{}").unwrap();
+        assert_eq!(
+            fs::metadata(&shared).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
