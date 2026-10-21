@@ -1987,20 +1987,28 @@ pub async fn approve_terrence_action(
         .map_err(|error| format!("Approval task failed: {error}"))?
 }
 
+/// Deny: mark the action cancelled (ledger keeps the `declined:` reason) and
+/// return the `declined:` error for the caller.
+fn record_denial(conn: &Connection, id: &str) -> String {
+    let message = super::approval_gate::denied_message();
+    let _ = update_action_status(
+        conn,
+        id,
+        &["awaiting_approval"],
+        "cancelled",
+        None,
+        Some(message.clone()),
+    );
+    message
+}
+
 fn approve_action_blocking(app: &tauri::AppHandle, id: &str) -> Result<TerrenceAction, String> {
     // One dialog per action; also acts as the debounce for double clicks.
     let _guard = InFlightGuard::acquire(id)?;
     let conn = action_db()?;
     let (_pending, normalized, text, fingerprint) = prepare_approval(&conn, id)?;
     if !confirm_natively(app, text) {
-        return update_action_status(
-            &conn,
-            id,
-            &["awaiting_approval"],
-            "cancelled",
-            None,
-            Some(super::approval_gate::denied_message()),
-        );
+        return Err(record_denial(&conn, id));
     }
     verify_unchanged(&conn, id, &fingerprint)?;
     let approved = update_action_status(&conn, id, &["awaiting_approval"], "approved", None, None)?;
@@ -2277,6 +2285,29 @@ mod tests {
             "Nexus sent the request to open https://example.com."
         );
         assert!(!result.contains("completed"));
+    }
+
+    #[test]
+    fn deny_cancels_the_action_and_returns_declined_error() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_action_db(&conn).unwrap();
+        let tool = find_tool("system.open_url").unwrap();
+        let input = action_input("system.open_url", json!({ "url": "https://example.com" }));
+        let action = insert_action(
+            &conn,
+            &tool,
+            "Open link".to_string(),
+            "awaiting_approval",
+            normalize_parameters(&input.tool_id, input.parameters).unwrap(),
+            input.conversation_id,
+            normalize_context_item_ids(input.context_item_ids).unwrap(),
+        )
+        .unwrap();
+        let err = record_denial(&conn, &action.id);
+        assert!(err.starts_with("declined:"), "{err}");
+        let stored = get_action(&conn, &action.id).unwrap().unwrap();
+        assert_eq!(stored.status, "cancelled");
+        assert!(stored.error.unwrap().starts_with("declined:"));
     }
 
     #[test]
