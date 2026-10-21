@@ -135,7 +135,7 @@ export interface DueTask {
   id: JobId;
   /** True when running late inside the catch-up window. */
   catchUp: boolean;
-  /** Backoff window key: the slot start for daily touches, "interval" otherwise. */
+  /** Backoff window key: the slot start for daily touches; for interval jobs, the due time plus full intervals elapsed since. */
   window: string;
 }
 
@@ -168,7 +168,12 @@ export function decideDueTasks(ctx: SchedulerTimestamps, now: number): DueTask[]
   ];
   for (const [id, last, interval, allowMissing] of intervals) {
     if (last == null || (!allowMissing && last <= 0)) continue;
-    if (now - last >= interval) due.push({ id, catchUp: false, window: "interval" });
+    if (now - last < interval) continue;
+    // Window = number of full intervals since the job became due. Failure
+    // counters reset each interval, so a job that exhausted its tries is
+    // retried one interval later instead of staying blocked until restart.
+    const windowIdx = Math.floor((now - (last + interval)) / interval);
+    due.push({ id, catchUp: false, window: `interval:${last + interval}:${windowIdx}` });
   }
   return due;
 }
