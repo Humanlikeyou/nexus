@@ -14,7 +14,9 @@
     "mock-gateway:partial": "node scripts/mock-gateway.mjs --partial",
     "mock-gateway:no-ack": "node scripts/mock-gateway.mjs --no-ack",
     "mock-gateway:fail": "node scripts/mock-gateway.mjs --fail",
-    "outbox-status": "bash scripts/outbox-status.sh"
+    "outbox-status": "bash scripts/outbox-status.sh",
+    "test:unit": "TZ=Asia/Tokyo vitest run",
+    "test": "tsc --noEmit && npm run test:unit && npm run test:neuro && cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
@@ -24,10 +26,14 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.0",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^29.1.1",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "vitest": "^4.1.12"
   }
 }
