@@ -14,6 +14,8 @@
 
 import {
   loadContext,
+  patchContext,
+  type TerranceContext,
   consolidateRecentSessions,
   runReasoningLoop,
   generateDailySummary,
@@ -40,6 +42,17 @@ const CHECK_INTERVAL_MS = 5 * 60 * 1000;                  // Check every 5 minut
 const DEFAULT_SUMMARY_HOUR = 7;                            // 7 AM local time
 const DEFAULT_MIDDAY_HOUR = 12;                            // 12:30 PM local time
 const DEFAULT_EVENING_HOUR = 21;                           // 9 PM local time
+const MAX_HEAVY_JOBS_PER_TICK = 1;                         // LLM / Telegram jobs per tick
+
+/** Timestamps whose absence means "first observation": seed to now instead of firing. */
+const SEEDED_TIMESTAMPS = [
+  "lastDailySummaryTimestamp",
+  "lastMiddayTimestamp",
+  "lastEveningTimestamp",
+  "lastConsolidationTimestamp",
+  "lastReasoningTimestamp",
+  "lastPruneTimestamp",
+] as const;
 
 let checkIntervalId: ReturnType<typeof setInterval> | null = null;
 let startupTimerId: ReturnType<typeof setTimeout> | null = null;
@@ -74,8 +87,29 @@ async function tick() {
   running = true;
 
   try {
-    const ctx = await loadContext();
+    let ctx: TerranceContext;
+    try {
+      ctx = await loadContext();
+    } catch (e) {
+      console.error("[scheduler] context unavailable; skipping tick (fail closed):", e);
+      return; // finally still resets running
+    }
     const now = Date.now();
+    let heavyBudget = MAX_HEAVY_JOBS_PER_TICK;
+
+    // Missing timestamps (fresh or partial context) are seeded, not treated as "infinitely overdue".
+    const seed: Partial<TerranceContext> = {};
+    for (const k of SEEDED_TIMESTAMPS) {
+      if (!ctx[k]) seed[k] = now;
+    }
+    if (Object.keys(seed).length > 0) {
+      ctx = { ...ctx, ...seed };
+      try {
+        await patchContext(seed);
+      } catch (e) {
+        console.error("[scheduler] could not persist seeded timestamps:", e);
+      }
+    }
     const currentHour = new Date().getHours();
     const summaryHour = ctx.dailySummaryHour ?? DEFAULT_SUMMARY_HOUR;
 
@@ -95,7 +129,8 @@ async function tick() {
     const missedSummary = now - lastSummary > DAILY_SUMMARY_COOLDOWN_MS;
     const isScheduledHour = currentHour === summaryHour;
     const isCatchUp = missedSummary && currentHour >= summaryHour;
-    if (missedSummary && (isScheduledHour || isCatchUp)) {
+    if (heavyBudget > 0 && missedSummary && (isScheduledHour || isCatchUp)) {
+      heavyBudget--;
       const taskId = activityBus.register("Daily Summary", "daily_summary", {
         detail: isCatchUp && !isScheduledHour ? "catch-up" : undefined,
       });
@@ -115,7 +150,8 @@ async function tick() {
     const missedMidday = now - lastMidday > MIDDAY_COOLDOWN_MS;
     const isMiddayHour = currentHour === DEFAULT_MIDDAY_HOUR;
     const isMiddayCatchUp = missedMidday && currentHour > DEFAULT_MIDDAY_HOUR && currentHour < DEFAULT_EVENING_HOUR;
-    if (missedMidday && (isMiddayHour || isMiddayCatchUp)) {
+    if (heavyBudget > 0 && missedMidday && (isMiddayHour || isMiddayCatchUp)) {
+      heavyBudget--;
       const taskId = activityBus.register("Midday Correction", "daily_summary", {
         detail: isMiddayCatchUp && !isMiddayHour ? "catch-up" : undefined,
       });
@@ -134,7 +170,8 @@ async function tick() {
     const missedEvening = now - lastEvening > EVENING_COOLDOWN_MS;
     const isEveningHour = currentHour === DEFAULT_EVENING_HOUR;
     const isEveningCatchUp = missedEvening && currentHour > DEFAULT_EVENING_HOUR;
-    if (missedEvening && (isEveningHour || isEveningCatchUp)) {
+    if (heavyBudget > 0 && missedEvening && (isEveningHour || isEveningCatchUp)) {
+      heavyBudget--;
       const taskId = activityBus.register("Evening Integration", "daily_summary", {
         detail: isEveningCatchUp && !isEveningHour ? "catch-up" : undefined,
       });
@@ -179,7 +216,8 @@ async function tick() {
 
     // Consolidation check
     const lastConsolidation = ctx.lastConsolidationTimestamp ?? 0;
-    if (now - lastConsolidation >= CONSOLIDATION_INTERVAL_MS) {
+    if (heavyBudget > 0 && now - lastConsolidation >= CONSOLIDATION_INTERVAL_MS) {
+      heavyBudget--;
       const taskId = activityBus.register("Memory Consolidation", "consolidation");
       console.log("[scheduler] Running memory consolidation...");
       const result = await consolidateRecentSessions();
@@ -208,7 +246,8 @@ async function tick() {
 
     // Reasoning check
     const lastReasoning = ctx.lastReasoningTimestamp ?? 0;
-    if (now - lastReasoning >= REASONING_INTERVAL_MS) {
+    if (heavyBudget > 0 && now - lastReasoning >= REASONING_INTERVAL_MS) {
+      heavyBudget--;
       const taskId = activityBus.register("Reasoning Loop", "reasoning");
       console.log("[scheduler] Running reasoning loop...");
       const result = await runReasoningLoop();
@@ -223,7 +262,8 @@ async function tick() {
 
     // Weekly pruning check
     const lastPrune = ctx.lastPruneTimestamp ?? 0;
-    if (now - lastPrune >= PRUNE_INTERVAL_MS) {
+    if (heavyBudget > 0 && now - lastPrune >= PRUNE_INTERVAL_MS) {
+      heavyBudget--;
       const taskId = activityBus.register("Memory Pruning", "prune");
       console.log("[scheduler] Running weekly memory pruning...");
       const result = await pruneMemory();
