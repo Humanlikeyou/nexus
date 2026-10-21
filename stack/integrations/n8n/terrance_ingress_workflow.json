@@ -32,7 +32,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "return $input.all();"
+        "jsCode": "// Stage 4 gateway auth — FAILS CLOSED.\n// Rejects unless NEXUS_SECRET is configured AND the X-Nexus-Secret header matches it.\n// Needs N8N_BLOCK_ENV_ACCESS_IN_NODE=false on the n8n container (see docker-compose.yml).\nfunction constantTimeEqual(a, b) {\n  // Pure-JS constant-time compare (crypto built-in is not allowlisted in Code nodes).\n  const len = Math.max(a.length, b.length);\n  let diff = a.length ^ b.length;\n  for (let i = 0; i < len; i++) {\n    diff |= (a.charCodeAt(i % (a.length || 1)) || 0) ^ (b.charCodeAt(i % (b.length || 1)) || 0);\n  }\n  return diff === 0;\n}\n\nlet expected = '';\ntry { expected = String($env.NEXUS_SECRET || ''); } catch (e) { expected = ''; }\n\nreturn $input.all().map((item) => {\n  const headers = (item.json && item.json.headers) || {};\n  let provided = headers['x-nexus-secret'];\n  if (Array.isArray(provided)) provided = provided[0];\n  provided = typeof provided === 'string' ? provided : '';\n\n  let ok = false;\n  let reason = 'unauthorized';\n  if (!expected) {\n    reason = 'gateway secret not configured';\n  } else if (!provided) {\n    reason = 'missing X-Nexus-Secret header';\n  } else if (constantTimeEqual(provided, expected)) {\n    ok = true;\n    reason = 'ok';\n  }\n  // Never echo the secret back; keep the original payload for the router.\n  const json = { ...item.json, ok: ok === true, authReason: reason };\n  if (json.headers) { json.headers = { ...json.headers }; delete json.headers['x-nexus-secret']; }\n  return { json };\n});"
       }
     },
     {
@@ -54,16 +54,18 @@
           "conditions": [
             {
               "id": "c-auth",
-              "leftValue": "={{ $json.ok }}",
-              "rightValue": false,
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": true,
               "operator": {
                 "type": "boolean",
-                "operation": "equals"
+                "operation": "true",
+                "singleValue": true
               }
             }
           ],
           "combinator": "and"
-        }
+        },
+        "looseTypeValidation": false
       }
     },
     {
@@ -288,6 +290,23 @@
         "respondWith": "json",
         "responseBody": "={{ $json }}"
       }
+    },
+    {
+      "id": "rw-unauth-01",
+      "name": "Reject Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        620,
+        620
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, error: 'unauthorized' } }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
     }
   ],
   "connections": {
@@ -317,14 +336,14 @@
       "main": [
         [
           {
-            "node": "Send Response",
+            "node": "Route by event.type",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Route by event.type",
+            "node": "Reject Unauthorized",
             "type": "main",
             "index": 0
           }
