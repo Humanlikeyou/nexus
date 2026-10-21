@@ -15,4 +15,8 @@ describe("terrence_actions approve Deny handling", () => {
     expect(approvalNotice("X", { result: { status: "approved", error: null } })).toBe("Approving X complete");
     expect(isDeclinedAction({ status: "cancelled", error: "user cancelled" })).toBe(false);
   });
+  it("approve_terrence_action Deny now rejects with declined: and is shown as a quiet decline", () => {
+    const rejection = new Error("declined: Denied in the native approval dialog. Nothing was changed.");
+    expect(approvalNotice("Send report", { error: rejection })).toBe("Send report declined");
+  });
 });

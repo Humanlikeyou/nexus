@@ -10,7 +10,7 @@ vi.mock("./activityBus", () => ({
 }));
 
 import {
-  autoHeal, __resetAutoHealForTests, DECLINE_COOLDOWN_MS, DECLINE_COOLDOWN_KV_KEY, NEXUS_NOTICE_EVENT,
+  autoHeal, __resetAutoHealForTests, loadDeclinedUntil, DECLINE_COOLDOWN_MS, DECLINE_COOLDOWN_KV_KEY, NEXUS_NOTICE_EVENT,
   RESTART_DEADLINE_MS, RESTART_DECLINED_NOTICE,
 } from "./selfDiagnosis";
 import { approvalOutcome } from "./approvalErrors";
@@ -143,5 +143,72 @@ describe("autoHeal (batched restart_services)", () => {
     await vi.waitFor(() => expect(calls("restart_services")).toHaveLength(1));
     release();
     expect((await first).status).toBe("addressed");
+  });
+
+  it("per-service expired: mid-batch is awaiting/not-run: no Telegram, no cooldown", async () => {
+    restart = async () => [
+      { service: "openclaw", ok: true, error: null },
+      { service: "docker:stack-n8n-1", ok: false, error: "expired: deadline passed before this service ran" },
+    ];
+    const r = await autoHeal(report("openclaw", "n8n"), NOW);
+    expect(r.status).toBe("awaiting");
+    expect(calls("send_telegram_message")).toHaveLength(0);
+    expect(kv[DECLINE_COOLDOWN_KV_KEY]).toBeUndefined();
+    expect(r.actions.map((a) => a.service)).toEqual(["openclaw"]);
+  });
+
+  it("Telegram never contains raw error text (whole-call or per-service)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const secret = "token=abc123 /Users/me/.secret stderr dump";
+    restart = async () => { throw secret; };
+    await autoHeal(report("openclaw"), NOW);
+    restart = async () => [{ service: "openclaw", ok: false, error: secret }];
+    await autoHeal(report("openclaw"), NOW);
+    const texts = calls("send_telegram_message").map((c) => String(c[1].text));
+    expect(texts).toEqual(["Auto-heal: restart failed (openclaw)", "Auto-heal: restart failed (openclaw)"]);
+    expect(texts.join(" ")).not.toContain("abc123");
+  });
+});
+
+describe("decline cooldown fails closed", () => {
+  const CAP = NOW + DECLINE_COOLDOWN_MS;
+  const cands = ["openclaw", "docker:stack-n8n-1"];
+  const load = async (value: string | null | Error) => {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd !== "load_kv") return undefined;
+      if (value instanceof Error) throw value;
+      return value;
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    return loadDeclinedUntil(cands, NOW);
+  };
+
+  it("missing key means nothing is cooling down", async () => {
+    expect(await load(null)).toEqual({});
+  });
+  it.each([
+    ["array", "[1,2]"], ["null", "null"], ["number", "42"], ["string", '"x"'],
+  ])("non-object value (%s) cools every candidate until now+4h", async (_n, raw) => {
+    expect(await load(raw)).toEqual({ openclaw: CAP, "docker:stack-n8n-1": CAP });
+  });
+  it("parse error or load error cools every candidate until now+4h", async () => {
+    expect(await load("{not json")).toEqual({ openclaw: CAP, "docker:stack-n8n-1": CAP });
+    expect(await load(new Error("io"))).toEqual({ openclaw: CAP, "docker:stack-n8n-1": CAP });
+  });
+  it("malformed per-service values (NaN/null/string/object) mean now+4h", async () => {
+    for (const bad of ['"soon"', "null", "{}", '"NaN"']) {
+      expect(await load(`{"openclaw": ${bad}}`)).toEqual({ openclaw: CAP });
+    }
+  });
+  it("far-future values are clamped to now+4h; past values pass through", async () => {
+    expect(await load(JSON.stringify({ openclaw: 9e15, "docker:stack-n8n-1": NOW - 1 })))
+      .toEqual({ openclaw: CAP, "docker:stack-n8n-1": NOW - 1 });
+  });
+  it("a malformed store blocks the prompt (no restart_services call)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    kv[DECLINE_COOLDOWN_KV_KEY] = "[]";
+    const r = await autoHeal(report("openclaw"), NOW);
+    expect(r.status).toBe("declined");
+    expect(calls("restart_services")).toHaveLength(0);
   });
 });

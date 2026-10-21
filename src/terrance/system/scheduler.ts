@@ -342,10 +342,11 @@ async function tick() {
       health: {
         label: "Health Check", kind: "health_check", heavy: false,
         fn: async () => {
+          const startedAt = Date.now(); // job start: drives the restart deadline and cooldown checks
           const report = await runDiagnostics();
           if (report.issues.length > 0) {
             // "addressed" only when every restart tried was allowed and succeeded.
-            const healed = await autoHeal(report);
+            const healed = await autoHeal(report, startedAt);
             const status = healed?.status ?? "awaiting";
             const label = status === "none" ? "awaiting" : status;
             return { ok: status !== "failed", detail: `${report.issues.length} issue(s) ${label}` };

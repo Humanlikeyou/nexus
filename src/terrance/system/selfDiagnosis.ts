@@ -59,15 +59,40 @@ function serviceIdFor(issue: DiagnosticIssue): string | null {
 
 let inFlight: Promise<AutoHealResult> | null = null;
 
-async function loadDeclinedUntil(): Promise<Record<string, number>> {
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+}
+
+/**
+ * Load the persisted decline cooldowns for `candidates`, failing CLOSED:
+ * a load/parse error or a non-object value cools every candidate until
+ * now+4h; a present non-finite value cools that service until now+4h; every
+ * value is clamped to at most now+4h so a far-future value can't suppress a
+ * service forever. Absent entries mean "not declined".
+ */
+export async function loadDeclinedUntil(candidates: string[], now: number): Promise<Record<string, number>> {
+  const cap = now + DECLINE_COOLDOWN_MS;
+  const all = () => Object.fromEntries(candidates.map((s) => [s, cap]));
+  let parsed: unknown;
   try {
     const raw = await invoke<string | null>("load_kv", { key: DECLINE_COOLDOWN_KV_KEY });
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed as Record<string, number> : {};
-  } catch {
-    return {};
+    if (raw == null) return {};
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    console.error("[self-diagnosis] decline cooldown unreadable; failing closed:", e);
+    return all();
   }
+  if (!isPlainObject(parsed)) {
+    console.error("[self-diagnosis] decline cooldown malformed; failing closed");
+    return all();
+  }
+  const out: Record<string, number> = {};
+  for (const s of candidates) {
+    if (!Object.prototype.hasOwnProperty.call(parsed, s)) continue;
+    const v = parsed[s];
+    out[s] = typeof v === "number" && Number.isFinite(v) ? Math.min(v, cap) : cap;
+  }
+  return out;
 }
 
 async function saveDeclinedUntil(map: Record<string, number>): Promise<void> {
@@ -207,7 +232,7 @@ async function runAutoHeal(report: DiagnosticReport, now: number): Promise<AutoH
   const wanted = [...new Set(report.issues.filter((i) => i.canAutoHeal).map(serviceIdFor).filter((s): s is string => !!s))].slice(0, 8);
   if (wanted.length === 0) return { status: "none", actions: [] };
 
-  const declinedUntil = await loadDeclinedUntil();
+  const declinedUntil = await loadDeclinedUntil(wanted, now);
   const services = wanted.filter((s) => !(declinedUntil[s] > now));
   if (services.length === 0) {
     console.log("[self-diagnosis] restart recently declined; waiting out the 4h cooldown");
@@ -242,13 +267,18 @@ async function runAutoHeal(report: DiagnosticReport, now: number): Promise<AutoH
         return { status: "failed", actions: [] };
       default: {
         activityBus.fail(taskId, String(e));
-        await telegramAlert(`⚠️ *Terrance Auto-Heal Failed*\n\nServices: \`${services.join(", ")}\`\nError: ${String(e)}\n\nManual intervention may be required.`);
+        // Full error stays in the local log; Telegram gets a fixed category + service ids only.
+        console.error(`[self-diagnosis] restart_services failed for ${services.join(", ")}:`, e);
+        await telegramAlert(`Auto-heal: restart failed (${services.join(", ")})`);
         return { status: "failed", actions: [] };
       }
     }
   }
 
-  const actions: HealingAction[] = results.map((r) => ({
+  // A per-service expired: means that service was not run (awaiting), not a failure.
+  const expired = results.filter((r) => !r.ok && approvalOutcome(r.error ?? "") === "expired");
+  const ran = results.filter((r) => !expired.includes(r));
+  const actions: HealingAction[] = ran.map((r) => ({
     service: r.service,
     action: r.service.startsWith("docker:") ? "restart_docker" : "restart_launchagent",
     success: r.ok,
@@ -256,11 +286,15 @@ async function runAutoHeal(report: DiagnosticReport, now: number): Promise<AutoH
     timestamp: now,
   }));
   const failed = actions.filter((a) => !a.success);
-  const allTriedOk = failed.length === 0 && services.every((s) => results.some((r) => r.service === s && r.ok));
+  const allTriedOk = failed.length === 0 && expired.length === 0 && services.every((s) => results.some((r) => r.service === s && r.ok));
   for (const f of failed) {
-    await telegramAlert(`⚠️ *Terrance Auto-Heal Failed*\n\nService: \`${f.service}\`\nAction: ${f.action}\nError: ${f.message}\n\nManual intervention may be required.`);
+    console.error(`[self-diagnosis] restart failed for ${f.service}: ${f.message}`);
+    // Only allow-listed service ids from our own request reach Telegram.
+    const id = services.includes(f.service) ? f.service : "unknown service";
+    await telegramAlert(`Auto-heal: restart failed (${id})`);
   }
   if (allTriedOk) activityBus.complete(taskId, `${actions.length} service(s) restarted`);
+  else if (failed.length === 0) activityBus.complete(taskId, `${expired.length} restart(s) expired before running`);
   else activityBus.fail(taskId, `${failed.length}/${actions.length} restart(s) failed`);
 
   try {
@@ -276,5 +310,5 @@ async function runAutoHeal(report: DiagnosticReport, now: number): Promise<AutoH
     });
   } catch {}
 
-  return { status: allTriedOk ? "addressed" : "failed", actions };
+  return { status: allTriedOk ? "addressed" : failed.length > 0 ? "failed" : "awaiting", actions };
 }
