@@ -160,8 +160,35 @@ services:
     logging: *log
     ports:
       - "127.0.0.1:8400:8400"
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Bind all interfaces *inside* the container; the host port above is 127.0.0.1-only.
+      CREW_SERVICE_HOST: "0.0.0.0"
+      CREW_SERVICE_PORT: "8400"
+      CREW_SERVICE_TOKEN: ${CREW_SERVICE_TOKEN:?set CREW_SERVICE_TOKEN in .env}
+      CREW_MAX_TASK_CHARS: ${CREW_MAX_TASK_CHARS:-4000}
+      CREW_MAX_CONCURRENT: ${CREW_MAX_CONCURRENT:-2}
+      CREW_RUN_TIMEOUT_SECONDS: ${CREW_RUN_TIMEOUT_SECONDS:-900}
+      CREW_ALLOWED_NAMES: ${CREW_ALLOWED_NAMES:-}
+      # LLM — MiniMax primary, local Ollama fallback (no OpenAI)
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.io/v1}
+      MINIMAX_MODEL: ${MINIMAX_MODEL:-MiniMax-M2.5}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}
+      CREW_OLLAMA_MODEL: ${CREW_OLLAMA_MODEL:-qwen3.5}
+      # Persistence — crew_runs table in the shared terrance DB
+      CREW_DB_HOST: postgres
+      CREW_DB_PORT: "5432"
+      CREW_DB_NAME: terrance
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Telemetry off
+      CREWAI_DISABLE_TELEMETRY: "true"
+      OTEL_SDK_DISABLED: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8400/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
