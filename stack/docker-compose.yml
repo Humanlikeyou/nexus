@@ -74,12 +74,10 @@ services:
       LETTA_URL:     "http://letta:8283"
       VERBA_URL:     "http://verba:8000"
       WEAVIATE_URL:  "http://weaviate:8080"
-      # Stage 4 — Gateway auth secret (used by Terrance Ingress workflow)
-      NEXUS_SECRET: ${NEXUS_SECRET:-}
-      # n8n 2.x blocks $env in Code nodes by default; the ingress Validate Secret node needs it.
-      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
-      # Letta API password, sent by the ingress memory.* Code nodes (Authorization: Bearer)
-      LETTA_SERVER_PASSWORD: ${LETTA_SERVER_PASSWORD:?set LETTA_SERVER_PASSWORD in .env}
+      # Code nodes must not read container env. Ingress auth (X-Nexus-Secret) and the Letta
+      # Bearer token live in encrypted n8n credentials (Header Auth), created from .env by
+      # scripts/n8n_sync_credentials.sh — never in n8n's environment.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
     volumes:
       - ./data/n8n:/home/node/.n8n
 
