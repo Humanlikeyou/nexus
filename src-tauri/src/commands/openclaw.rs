@@ -454,7 +454,12 @@ async fn kickstart_openclaw() -> Result<String, String> {
         .output()
         .await
         .map_err(|e| format!("Failed to get UID: {}", e))?;
-    let uid = String::from_utf8_lossy(&uid_out.stdout).trim().to_string();
+    if !uid_out.status.success() {
+        return Err(
+            "Could not determine the current user id; refusing to restart OpenClaw.".to_string(),
+        );
+    }
+    let uid = parse_uid(&String::from_utf8_lossy(&uid_out.stdout))?;
 
     let output = tokio::process::Command::new("launchctl")
         .args([
@@ -507,6 +512,72 @@ pub fn get_openclaw_sandbox() -> Result<String, String> {
     Ok(mode.to_string())
 }
 
+fn read_sandbox_config(path: &std::path::Path) -> Result<serde_json::Value, String> {
+    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
+fn sandbox_mode_of(config: &serde_json::Value) -> String {
+    config
+        .get("agents")
+        .and_then(|v| v.get("defaults"))
+        .and_then(|v| v.get("sandbox"))
+        .and_then(|v| v.get("mode"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("off")
+        .to_string()
+}
+
+/// Re-read the config, require the mode to still be `expected_old` (what the
+/// approval dialog showed), set `new_mode`, and write atomically.
+fn apply_sandbox_change(
+    config_path: &std::path::Path,
+    expected_old: &str,
+    new_mode: &str,
+) -> Result<(), String> {
+    let mut config = read_sandbox_config(config_path)?;
+    let now = sandbox_mode_of(&config);
+    if now != expected_old {
+        return Err(format!(
+            "changed: sandbox mode is now \"{now}\", not the \"{expected_old}\" shown for approval; nothing was written"
+        ));
+    }
+    let agents = config
+        .as_object_mut()
+        .ok_or("invalid config")?
+        .entry("agents")
+        .or_insert_with(|| serde_json::json!({}));
+    let defaults = agents
+        .as_object_mut()
+        .ok_or("invalid agents")?
+        .entry("defaults")
+        .or_insert_with(|| serde_json::json!({}));
+    let sandbox = defaults
+        .as_object_mut()
+        .ok_or("invalid defaults")?
+        .entry("sandbox")
+        .or_insert_with(|| serde_json::json!({}));
+    sandbox.as_object_mut().ok_or("invalid sandbox")?.insert(
+        "mode".to_string(),
+        serde_json::Value::String(new_mode.to_string()),
+    );
+    let out = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    super::continuity::atomic_write(config_path, out.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// `id -u` output must be a plain non-empty decimal uid.
+fn parse_uid(raw: &str) -> Result<u32, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || !trimmed.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(
+            "Could not determine the current user id; refusing to restart OpenClaw.".to_string(),
+        );
+    }
+    trimmed.parse::<u32>().map_err(|_| {
+        "Could not determine the current user id; refusing to restart OpenClaw.".to_string()
+    })
+}
+
 const SANDBOX_MODES: [&str; 3] = ["off", "non-main", "all"];
 
 /// Explicit mode must be a known OpenClaw sandbox mode; `None` toggles off <-> all.
@@ -537,18 +608,7 @@ pub async fn toggle_openclaw_sandbox(
     mode: Option<String>,
 ) -> Result<SandboxStatus, String> {
     let config_path = openclaw_dir().join("openclaw.json");
-    let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let mut config: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| e.to_string())?;
-
-    let current = config
-        .get("agents")
-        .and_then(|v| v.get("defaults"))
-        .and_then(|v| v.get("sandbox"))
-        .and_then(|v| v.get("mode"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("off")
-        .to_string();
+    let current = read_sandbox_config(&config_path).map(|c| sandbox_mode_of(&c))?;
 
     let new_mode = resolve_sandbox_mode(&current, mode)?;
     let _approval = super::approval_gate::require_approval(
@@ -561,30 +621,9 @@ pub async fn toggle_openclaw_sandbox(
     )
     .await?;
 
-    // Ensure the path agents.defaults.sandbox.mode exists
-    let agents = config
-        .as_object_mut()
-        .ok_or("invalid config")?
-        .entry("agents")
-        .or_insert_with(|| serde_json::json!({}));
-    let defaults = agents
-        .as_object_mut()
-        .ok_or("invalid agents")?
-        .entry("defaults")
-        .or_insert_with(|| serde_json::json!({}));
-    let sandbox = defaults
-        .as_object_mut()
-        .ok_or("invalid defaults")?
-        .entry("sandbox")
-        .or_insert_with(|| serde_json::json!({}));
-    sandbox.as_object_mut().ok_or("invalid sandbox")?.insert(
-        "mode".to_string(),
-        serde_json::Value::String(new_mode.clone()),
-    );
-
-    // Write back with pretty-print
-    let out = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    fs::write(&config_path, out).map_err(|e| e.to_string())?;
+    // Re-read after approval: refuse if the mode changed under the dialog,
+    // then write atomically.
+    apply_sandbox_change(&config_path, &current, &new_mode)?;
 
     // Restart OpenClaw so it picks up the change (covered by the same approval).
     let restarted = kickstart_openclaw().await.is_ok();
@@ -816,6 +855,44 @@ mod approval_tests {
             "non-main"
         );
         assert!(resolve_sandbox_mode("off", Some("everything; rm -rf".into())).is_err());
+    }
+
+    fn tmp_config(body: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("nexus-sbx-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("openclaw.json");
+        std::fs::write(&p, body).unwrap();
+        p
+    }
+
+    #[test]
+    fn sandbox_change_applies_when_mode_unchanged() {
+        let p = tmp_config(r#"{"agents":{"defaults":{"sandbox":{"mode":"off"}}},"keep":1}"#);
+        apply_sandbox_change(&p, "off", "all").unwrap();
+        let v = read_sandbox_config(&p).unwrap();
+        assert_eq!(sandbox_mode_of(&v), "all");
+        assert_eq!(v["keep"], 1);
+        let leftovers = std::fs::read_dir(p.parent().unwrap()).unwrap().count();
+        assert_eq!(leftovers, 1, "no temp files left behind");
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn sandbox_change_refused_if_mode_changed_after_dialog() {
+        let body = r#"{"agents":{"defaults":{"sandbox":{"mode":"non-main"}}}}"#;
+        let p = tmp_config(body);
+        let err = apply_sandbox_change(&p, "off", "all").unwrap_err();
+        assert!(err.starts_with("changed:"), "{err}");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), body, "file untouched");
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn uid_must_be_numeric_and_non_empty() {
+        assert_eq!(parse_uid("501\n").unwrap(), 501);
+        for bad in ["", "  \n", "abc", "-1", "501 502", "5O1"] {
+            assert!(parse_uid(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
