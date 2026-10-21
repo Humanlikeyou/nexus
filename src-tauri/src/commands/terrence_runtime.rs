@@ -382,10 +382,11 @@ fn configured_toolsets(config: &str) -> Vec<String> {
     toolsets
 }
 
-fn gateway_running() -> bool {
-    std::process::Command::new("ps")
+async fn gateway_running() -> bool {
+    tokio::process::Command::new("ps")
         .args(["-ax", "-o", "command="])
         .output()
+        .await
         .ok()
         .map(|output| {
             String::from_utf8_lossy(&output.stdout)
@@ -786,12 +787,12 @@ fn interaction_failure(
 }
 
 #[tauri::command]
-pub fn get_terrence_runtime_health() -> Result<TerrenceRuntimeHealth, String> {
+pub async fn get_terrence_runtime_health() -> Result<TerrenceRuntimeHealth, String> {
     let home = hermes_home()?;
     let config = config_text(&home);
     let model = config_value(&config, "model", "default", "unknown");
     let provider = config_value(&config, "model", "provider", "unknown");
-    let running = gateway_running();
+    let running = gateway_running().await;
     let telegram = telegram_status(&home, running);
     let status = if running && telegram == "connected" {
         "online"

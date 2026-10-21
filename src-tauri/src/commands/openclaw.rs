@@ -431,19 +431,21 @@ pub fn read_daily_log(date: Option<String>) -> Result<String, String> {
 #[tauri::command]
 pub async fn restart_openclaw() -> Result<String, String> {
     // Resolve the current user UID so we can address the gui/<uid>/ domain.
-    let uid_out = std::process::Command::new("id")
+    let uid_out = tokio::process::Command::new("id")
         .arg("-u")
         .output()
+        .await
         .map_err(|e| format!("Failed to get UID: {}", e))?;
     let uid = String::from_utf8_lossy(&uid_out.stdout).trim().to_string();
 
-    let output = std::process::Command::new("launchctl")
+    let output = tokio::process::Command::new("launchctl")
         .args([
             "kickstart",
             "-k",
             &format!("gui/{}/ai.openclaw.gateway", uid),
         ])
         .output()
+        .await
         .map_err(|e| format!("Failed to run launchctl: {}", e))?;
 
     if output.status.success() {
@@ -570,7 +572,7 @@ pub struct OpenClawHealth {
     pub timestamp: String,
 }
 
-fn get_openclaw_version() -> Option<String> {
+async fn get_openclaw_version() -> Option<String> {
     // Prefer reading from config metadata (always available, no PATH issues)
     let config_path = openclaw_dir().join("openclaw.json");
     if let Ok(content) = fs::read_to_string(&config_path) {
@@ -585,9 +587,11 @@ fn get_openclaw_version() -> Option<String> {
         }
     }
     // Fallback to CLI
-    std::process::Command::new("/opt/homebrew/bin/openclaw")
+    tokio::process::Command::new("/opt/homebrew/bin/openclaw")
         .arg("--version")
+        .kill_on_drop(true)
         .output()
+        .await
         .ok()
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -732,7 +736,7 @@ pub async fn get_openclaw_health() -> Result<OpenClawHealth, String> {
     // Port + RPC checks run concurrently to minimise latency
     let (gateway, rpc) = tokio::join!(check_gateway_port(), probe_gateway_rpc());
 
-    let version = get_openclaw_version();
+    let version = get_openclaw_version().await;
     let memory_search = check_memory_search(&config);
     let channels = get_channel_status(&config);
 

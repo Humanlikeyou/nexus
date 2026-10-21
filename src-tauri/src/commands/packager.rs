@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use tokio::process::Command;
 
 fn nexus_data_dir() -> PathBuf {
     dirs::data_dir()
@@ -106,15 +106,26 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
         .map_err(|e| format!("Failed to write manifest: {}", e))?;
 
     // 6. Create tar.gz archive
+    let utf8 = |p: &std::path::Path| {
+        p.to_str()
+            .map(str::to_string)
+            .ok_or_else(|| format!("Path is not valid UTF-8: {}", p.display()))
+    };
+    let archive_arg = utf8(&archive_path)?;
+    let parent_arg = utf8(
+        staging
+            .parent()
+            .ok_or_else(|| "Staging dir has no parent".to_string())?,
+    )?;
+    let name_arg = utf8(std::path::Path::new(
+        staging
+            .file_name()
+            .ok_or_else(|| "Staging dir has no name".to_string())?,
+    ))?;
     let output = Command::new("tar")
-        .args([
-            "-czf",
-            archive_path.to_str().unwrap(),
-            "-C",
-            staging.parent().unwrap().to_str().unwrap(),
-            staging.file_name().unwrap().to_str().unwrap(),
-        ])
+        .args(["-czf", &archive_arg, "-C", &parent_arg, &name_arg])
         .output()
+        .await
         .map_err(|e| format!("Failed to create archive: {}", e))?;
 
     if !output.status.success() {
@@ -157,6 +168,7 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     let listing = Command::new("tar")
         .args(["-tvzf", &archive_str])
         .output()
+        .await
         .map_err(|e| format!("Failed to read archive: {}", e))?;
     if !listing.status.success() {
         return Err(format!(
@@ -167,6 +179,7 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     let names = Command::new("tar")
         .args(["-tzf", &archive_str])
         .output()
+        .await
         .map_err(|e| format!("Failed to read archive: {}", e))?;
     if !names.status.success() {
         return Err("Archive could not be read".to_string());
@@ -189,6 +202,7 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     let output = Command::new("tar")
         .args(["-xzf", &archive_str, "-C", &staging_str])
         .output()
+        .await
         .map_err(|e| {
             let _ = fs::remove_dir_all(&staging);
             format!("Failed to extract: {}", e)

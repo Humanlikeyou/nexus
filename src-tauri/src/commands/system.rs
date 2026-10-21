@@ -37,13 +37,29 @@ pub fn health_check() -> Result<String, String> {
 
 // ─── Docker Service Management ──────────────────────────────────────────────
 
+/// Docker container names: `[A-Za-z0-9][A-Za-z0-9_.-]*`. Also stops a name
+/// starting with `-` from being parsed as a docker CLI flag.
+fn validate_container_name(name: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    let ok = name.len() <= 128
+        && chars.next().map_or(false, |c| c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+    if ok {
+        Ok(())
+    } else {
+        Err("Invalid container name".to_string())
+    }
+}
+
 /// Check the status of a Docker container by name.
 /// Returns "running", "exited", "paused", "not_found", or the raw status string.
 #[tauri::command]
-pub fn check_docker_service(name: String) -> Result<String, String> {
-    let output = std::process::Command::new("docker")
+pub async fn check_docker_service(name: String) -> Result<String, String> {
+    validate_container_name(&name)?;
+    let output = tokio::process::Command::new("docker")
         .args(["inspect", "--format", "{{.State.Status}}", &name])
         .output()
+        .await
         .map_err(|e| format!("Failed to run docker inspect: {}", e))?;
 
     if output.status.success() {
@@ -60,10 +76,12 @@ pub fn check_docker_service(name: String) -> Result<String, String> {
 
 /// Restart a Docker container by name.
 #[tauri::command]
-pub fn restart_docker_service(name: String) -> Result<String, String> {
-    let output = std::process::Command::new("docker")
+pub async fn restart_docker_service(name: String) -> Result<String, String> {
+    validate_container_name(&name)?;
+    let output = tokio::process::Command::new("docker")
         .args(["restart", &name])
         .output()
+        .await
         .map_err(|e| format!("Failed to run docker restart: {}", e))?;
 
     if output.status.success() {
@@ -86,5 +104,19 @@ pub async fn check_service_port(host: String, port: u16) -> Result<String, Strin
     {
         Ok(Ok(_)) => Ok("open".to_string()),
         _ => Ok("closed".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_container_name;
+
+    #[test]
+    fn container_names() {
+        assert!(validate_container_name("crew-service").is_ok());
+        assert!(validate_container_name("n8n_1.x").is_ok());
+        for bad in ["", "-rm", "--help", "a b", "a;b", "../x"] {
+            assert!(validate_container_name(bad).is_err(), "{bad:?}");
+        }
     }
 }
