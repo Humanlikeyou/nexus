@@ -6,7 +6,7 @@ use std::fs;
 fn kv_dir() -> Result<std::path::PathBuf, String> {
     let dir = dirs::data_dir()
         .ok_or("No data directory found")?
-        .join("com.taisun.electron")
+        .join(crate::app_paths::DATA_DIR_NAME)
         .join("kv");
     if !dir.exists() {
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

@@ -319,7 +319,7 @@ fn app_data_dir() -> PathBuf {
     dirs::data_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join("Library/Application Support")))
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("com.taisun.electron")
+        .join(crate::app_paths::DATA_DIR_NAME)
 }
 
 fn interaction_dir() -> PathBuf {

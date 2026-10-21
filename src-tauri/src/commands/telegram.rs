@@ -9,7 +9,7 @@ fn nexus_data_dir() -> PathBuf {
                 .unwrap()
                 .join("Library/Application Support")
         })
-        .join("com.taisun.electron")
+        .join(crate::app_paths::DATA_DIR_NAME)
 }
 
 fn config_path() -> PathBuf {

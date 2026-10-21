@@ -8,7 +8,7 @@
  *  - Memory retrieval (load before response generation)
  *
  * All persistent state lives outside model context in:
- *  ~/Library/Application Support/com.taisun.electron/
+ *  ~/Library/Application Support/com.taisun.nexus/
  *    terrance_context.json   — active goals + last session summary
  *    llm_usage.json          — cost/usage log (managed by llm_router.rs)
  *  nexus/memory/session_logs/ — per-session summaries (committed to repo)

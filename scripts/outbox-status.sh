@@ -2,7 +2,7 @@
 # Print outbox status from SQLite directly.
 # Usage: bash scripts/outbox-status.sh
 
-DB="$HOME/Library/Application Support/com.taisun.electron/events.db"
+DB="$HOME/Library/Application Support/com.taisun.nexus/events.db"
 
 if [ ! -f "$DB" ]; then
   echo "ERROR: events.db not found at: $DB"

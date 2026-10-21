@@ -1,3 +1,4 @@
+mod app_paths;
 mod commands;
 
 use commands::{
@@ -12,6 +13,7 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    app_paths::migrate_legacy_data_dir();
     tauri::Builder::default()
         .manage(terrence_runtime_bridge::NexusRuntimeBridge::default())
         .plugin(tauri_plugin_shell::init())

@@ -162,7 +162,7 @@ fn nexus_data_dir() -> PathBuf {
         .or_else(|| dirs::home_dir().map(|home| home.join("Library/Application Support")))
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         // Preserve the established local store while the native application identity becomes Nexus.
-        .join("com.taisun.electron")
+        .join(crate::app_paths::DATA_DIR_NAME)
 }
 
 fn db_path() -> PathBuf {

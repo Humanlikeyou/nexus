@@ -8,7 +8,7 @@
  *   gateway — always OpenClaw gateway (routes to whatever model is configured there)
  *
  * Usage logging is written to:
- *   ~/Library/Application Support/com.taisun.electron/llm_usage.json
+ *   ~/Library/Application Support/com.taisun.nexus/llm_usage.json
  */
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -82,7 +82,7 @@ fn usage_log_path() -> PathBuf {
     dirs::data_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join("Library/Application Support")))
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("com.taisun.electron")
+        .join("com.taisun.nexus")
         .join("llm_usage.json")
 }
 
