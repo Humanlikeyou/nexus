@@ -455,7 +455,10 @@ export async function generateDailySummary(): Promise<{ sent: boolean; summary: 
     try {
       await invoke<void>("send_telegram_message", { text: summary });
     } catch (telegramErr) {
+      // Delivery failure counts as a job failure (scheduler backs off and retries);
+      // the timestamp is not advanced.
       console.error("[daily-summary] Failed to send via Telegram:", telegramErr);
+      return { sent: false, summary };
     }
 
     // Store as a session log
@@ -527,6 +530,7 @@ export async function generateMiddayCorrection(): Promise<{ sent: boolean; messa
       await invoke<void>("send_telegram_message", { text: message });
     } catch (e) {
       console.error("[midday-correction] Telegram send failed:", e);
+      return { sent: false, message };
     }
 
     // Update timestamp
@@ -600,6 +604,7 @@ export async function generateEveningIntegration(): Promise<{ sent: boolean; mes
       await invoke<void>("send_telegram_message", { text: message });
     } catch (e) {
       console.error("[evening-integration] Telegram send failed:", e);
+      return { sent: false, message };
     }
 
     // Store as session log

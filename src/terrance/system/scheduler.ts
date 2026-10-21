@@ -82,6 +82,83 @@ export function getSchedulerStatus(): SchedulerStatus {
   return { ..._lastStatus };
 }
 
+// ─── Failure backoff (bug 3) ──────────────────────────────────────────────────
+// Attempts are tracked in memory only (a restart may retry once; success still
+// persists the real timestamp). Lead decision: retry after 5, 15, 60 min, max 3
+// tries per window. No fixed 5-minute retry loop.
+
+export type JobId = "daily" | "midday" | "evening" | "consolidation" | "reasoning" | "prune" | "health";
+
+export const BACKOFF_DELAYS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000] as const;
+export const MAX_ATTEMPTS_PER_WINDOW = 3;
+
+interface FailureState {
+  count: number;
+  nextAt: number;
+  window: string;
+}
+const failures = new Map<JobId, FailureState>();
+
+/** Window key for a job; failure counters reset when it changes. */
+function windowKeyFor(id: JobId, now: number): string {
+  if (id === "daily" || id === "midday" || id === "evening") return new Date(now).toDateString();
+  return "interval";
+}
+
+function inBackoff(id: JobId, now: number): boolean {
+  const f = failures.get(id);
+  if (!f) return false;
+  if (f.window !== windowKeyFor(id, now)) {
+    failures.delete(id);
+    return false;
+  }
+  return f.count >= MAX_ATTEMPTS_PER_WINDOW || now < f.nextAt;
+}
+
+function recordFailure(id: JobId, now: number): void {
+  const window = windowKeyFor(id, now);
+  const prev = failures.get(id);
+  const count = prev && prev.window === window ? prev.count + 1 : 1;
+  const delay = BACKOFF_DELAYS_MS[Math.min(count - 1, BACKOFF_DELAYS_MS.length - 1)];
+  failures.set(id, { count, nextAt: now + delay, window });
+}
+
+function recordSuccess(id: JobId): void {
+  failures.delete(id);
+}
+
+interface JobOutcome {
+  ok: boolean;
+  detail: string;
+}
+
+/** Run one job with its own try/catch so a throw never skips the rest of the tick. */
+async function runJob(
+  id: JobId,
+  label: string,
+  kind: Parameters<typeof activityBus.register>[1],
+  fn: () => Promise<JobOutcome>,
+  now: number,
+  detail?: string,
+): Promise<void> {
+  const taskId = activityBus.register(label, kind, detail ? { detail } : undefined);
+  console.log(`[scheduler] Running ${label}${detail ? ` (${detail})` : ""}...`);
+  let outcome: JobOutcome;
+  try {
+    outcome = await fn();
+  } catch (e) {
+    outcome = { ok: false, detail: String(e) };
+  }
+  if (outcome.ok) {
+    recordSuccess(id);
+    activityBus.complete(taskId, outcome.detail);
+  } else {
+    recordFailure(id, now);
+    activityBus.fail(taskId, outcome.detail);
+    console.error(`[scheduler] ${label} failed: ${outcome.detail}`);
+  }
+}
+
 async function tick() {
   if (running) return;
   running = true;
@@ -110,7 +187,7 @@ async function tick() {
         console.error("[scheduler] could not persist seeded timestamps:", e);
       }
     }
-    const currentHour = new Date().getHours();
+    const currentHour = new Date(now).getHours();
     const summaryHour = ctx.dailySummaryHour ?? DEFAULT_SUMMARY_HOUR;
 
     // Update status cache
@@ -124,65 +201,44 @@ async function tick() {
       dailySummaryHour: summaryHour,
     };
 
-    // Daily summary check — runs at the configured hour, or catches up if missed
+    const heavy = (id: JobId) => heavyBudget > 0 && !inBackoff(id, now);
+    const sentOutcome = (r: { sent: boolean }): JobOutcome =>
+      r.sent ? { ok: true, detail: "Sent via Telegram" } : { ok: false, detail: "Generation or delivery failed" };
+
+    // Daily summary — runs at the configured hour, or catches up if missed
     const lastSummary = ctx.lastDailySummaryTimestamp ?? 0;
     const missedSummary = now - lastSummary > DAILY_SUMMARY_COOLDOWN_MS;
     const isScheduledHour = currentHour === summaryHour;
     const isCatchUp = missedSummary && currentHour >= summaryHour;
-    if (heavyBudget > 0 && missedSummary && (isScheduledHour || isCatchUp)) {
+    if (missedSummary && (isScheduledHour || isCatchUp) && heavy("daily")) {
       heavyBudget--;
-      const taskId = activityBus.register("Daily Summary", "daily_summary", {
-        detail: isCatchUp && !isScheduledHour ? "catch-up" : undefined,
-      });
-      console.log(`[scheduler] Running daily summary${isCatchUp && !isScheduledHour ? " (catch-up)" : ""}...`);
-      const result = await generateDailySummary();
-      if (result.sent) {
-        activityBus.complete(taskId, "Sent via Telegram");
-        console.log("[scheduler] Daily summary sent via Telegram.");
-      } else {
-        activityBus.fail(taskId, "Generation failed");
-        console.log("[scheduler] Daily summary generation failed.");
-      }
+      await runJob("daily", "Daily Summary", "daily_summary",
+        async () => sentOutcome(await generateDailySummary()), now,
+        isCatchUp && !isScheduledHour ? "catch-up" : undefined);
     }
 
-    // Midday correction check — runs around 12:30 PM
+    // Midday correction
     const lastMidday = ctx.lastMiddayTimestamp ?? 0;
     const missedMidday = now - lastMidday > MIDDAY_COOLDOWN_MS;
     const isMiddayHour = currentHour === DEFAULT_MIDDAY_HOUR;
     const isMiddayCatchUp = missedMidday && currentHour > DEFAULT_MIDDAY_HOUR && currentHour < DEFAULT_EVENING_HOUR;
-    if (heavyBudget > 0 && missedMidday && (isMiddayHour || isMiddayCatchUp)) {
+    if (missedMidday && (isMiddayHour || isMiddayCatchUp) && heavy("midday")) {
       heavyBudget--;
-      const taskId = activityBus.register("Midday Correction", "daily_summary", {
-        detail: isMiddayCatchUp && !isMiddayHour ? "catch-up" : undefined,
-      });
-      console.log(`[scheduler] Running midday correction${isMiddayCatchUp && !isMiddayHour ? " (catch-up)" : ""}...`);
-      const result = await generateMiddayCorrection();
-      if (result.sent) {
-        activityBus.complete(taskId, "Sent via Telegram");
-        console.log("[scheduler] Midday correction sent via Telegram.");
-      } else {
-        activityBus.fail(taskId, "Generation failed");
-      }
+      await runJob("midday", "Midday Correction", "daily_summary",
+        async () => sentOutcome(await generateMiddayCorrection()), now,
+        isMiddayCatchUp && !isMiddayHour ? "catch-up" : undefined);
     }
 
-    // Evening integration check — runs around 9 PM
+    // Evening integration
     const lastEvening = ctx.lastEveningTimestamp ?? 0;
     const missedEvening = now - lastEvening > EVENING_COOLDOWN_MS;
     const isEveningHour = currentHour === DEFAULT_EVENING_HOUR;
     const isEveningCatchUp = missedEvening && currentHour > DEFAULT_EVENING_HOUR;
-    if (heavyBudget > 0 && missedEvening && (isEveningHour || isEveningCatchUp)) {
+    if (missedEvening && (isEveningHour || isEveningCatchUp) && heavy("evening")) {
       heavyBudget--;
-      const taskId = activityBus.register("Evening Integration", "daily_summary", {
-        detail: isEveningCatchUp && !isEveningHour ? "catch-up" : undefined,
-      });
-      console.log(`[scheduler] Running evening integration${isEveningCatchUp && !isEveningHour ? " (catch-up)" : ""}...`);
-      const result = await generateEveningIntegration();
-      if (result.sent) {
-        activityBus.complete(taskId, "Sent via Telegram");
-        console.log("[scheduler] Evening integration sent via Telegram.");
-      } else {
-        activityBus.fail(taskId, "Generation failed");
-      }
+      await runJob("evening", "Evening Integration", "daily_summary",
+        async () => sentOutcome(await generateEveningIntegration()), now,
+        isEveningCatchUp && !isEveningHour ? "catch-up" : undefined);
     }
 
     // Ritual reminders (presence drills, training, weekly/monthly check-ins)
@@ -192,83 +248,57 @@ async function tick() {
       console.error("[scheduler] Rituals tick error:", e);
     }
 
-    // Health check
+    // Health check (light, not budgeted)
     const lastHealthCheck = ctx.lastHealthCheckTimestamp ?? 0;
-    if (now - lastHealthCheck >= HEALTH_CHECK_INTERVAL_MS) {
-      const taskId = activityBus.register("Health Check", "health_check");
-      console.log("[scheduler] Running health check...");
-      try {
+    if (now - lastHealthCheck >= HEALTH_CHECK_INTERVAL_MS && !inBackoff("health", now)) {
+      await runJob("health", "Health Check", "health_check", async () => {
         const report = await runDiagnostics();
         if (report.issues.length > 0) {
-          activityBus.update(taskId, "running", `${report.issues.length} issue(s), auto-healing...`);
-          console.log(`[scheduler] ${report.issues.length} issue(s) found, attempting auto-heal...`);
           await autoHeal(report);
-          activityBus.complete(taskId, `${report.issues.length} issue(s) addressed`);
-        } else {
-          activityBus.complete(taskId, "All systems healthy");
-          console.log("[scheduler] All systems healthy.");
+          return { ok: true, detail: `${report.issues.length} issue(s) addressed` };
         }
-      } catch (e) {
-        activityBus.fail(taskId, String(e));
-        console.error("[scheduler] Health check error:", e);
-      }
+        return { ok: true, detail: "All systems healthy" };
+      }, now);
     }
 
-    // Consolidation check
+    // Consolidation (+ skills evolution on the same cadence)
     const lastConsolidation = ctx.lastConsolidationTimestamp ?? 0;
-    if (heavyBudget > 0 && now - lastConsolidation >= CONSOLIDATION_INTERVAL_MS) {
+    if (now - lastConsolidation >= CONSOLIDATION_INTERVAL_MS && heavy("consolidation")) {
       heavyBudget--;
-      const taskId = activityBus.register("Memory Consolidation", "consolidation");
-      console.log("[scheduler] Running memory consolidation...");
-      const result = await consolidateRecentSessions();
-      if (result.consolidated) {
-        activityBus.complete(taskId, "Consolidated recent sessions");
-        console.log("[scheduler] Consolidation complete.");
-      } else {
-        activityBus.complete(taskId, "Skipped (not enough sessions)");
-        console.log("[scheduler] Consolidation skipped (not enough sessions).");
-      }
+      await runJob("consolidation", "Memory Consolidation", "consolidation", async () => {
+        const result = await consolidateRecentSessions();
+        return { ok: true, detail: result.consolidated ? "Consolidated recent sessions" : "Skipped (not enough sessions)" };
+      }, now);
 
-      // Skills self-improvement (runs on consolidation cadence)
       try {
         const evoId = activityBus.register("Skills Evolution", "skills_evolution");
         const evo = await evolveSkills();
-        if (evo.created > 0 || evo.updated > 0) {
-          activityBus.complete(evoId, `${evo.created} created, ${evo.updated} updated`);
-          console.log(`[scheduler] Skills evolution: ${evo.created} created, ${evo.updated} updated.`);
-        } else {
-          activityBus.complete(evoId, "No new patterns");
-        }
+        activityBus.complete(evoId, evo.created > 0 || evo.updated > 0
+          ? `${evo.created} created, ${evo.updated} updated`
+          : "No new patterns");
       } catch (e) {
         console.error("[scheduler] Skills evolution error:", e);
       }
     }
 
-    // Reasoning check
+    // Reasoning
     const lastReasoning = ctx.lastReasoningTimestamp ?? 0;
-    if (heavyBudget > 0 && now - lastReasoning >= REASONING_INTERVAL_MS) {
+    if (now - lastReasoning >= REASONING_INTERVAL_MS && heavy("reasoning")) {
       heavyBudget--;
-      const taskId = activityBus.register("Reasoning Loop", "reasoning");
-      console.log("[scheduler] Running reasoning loop...");
-      const result = await runReasoningLoop();
-      if (result.reasoned) {
-        activityBus.complete(taskId, "Reflection complete");
-        console.log("[scheduler] Reasoning loop complete.");
-      } else {
-        activityBus.complete(taskId, "Skipped");
-        console.log("[scheduler] Reasoning loop skipped.");
-      }
+      await runJob("reasoning", "Reasoning Loop", "reasoning", async () => {
+        const result = await runReasoningLoop();
+        return { ok: true, detail: result.reasoned ? "Reflection complete" : "Skipped" };
+      }, now);
     }
 
-    // Weekly pruning check
+    // Weekly pruning
     const lastPrune = ctx.lastPruneTimestamp ?? 0;
-    if (heavyBudget > 0 && now - lastPrune >= PRUNE_INTERVAL_MS) {
+    if (now - lastPrune >= PRUNE_INTERVAL_MS && heavy("prune")) {
       heavyBudget--;
-      const taskId = activityBus.register("Memory Pruning", "prune");
-      console.log("[scheduler] Running weekly memory pruning...");
-      const result = await pruneMemory();
-      activityBus.complete(taskId, `${result.archived} archived, ${result.pruned} trimmed`);
-      console.log(`[scheduler] Pruning complete: ${result.archived} archived, ${result.pruned} trimmed.`);
+      await runJob("prune", "Memory Pruning", "prune", async () => {
+        const result = await pruneMemory();
+        return { ok: true, detail: `${result.archived} archived, ${result.pruned} trimmed` };
+      }, now);
     }
 
     // Custom user-defined jobs
