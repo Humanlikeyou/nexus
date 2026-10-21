@@ -223,7 +223,8 @@ pub(crate) fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Res
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = fs::metadata(path)
-                .map(|m| m.permissions().mode() & 0o7777)
+                // Only rwx bits: never carry setuid/setgid/sticky over.
+                .map(|m| m.permissions().mode() & 0o777)
                 .unwrap_or(0o600);
             f.set_permissions(fs::Permissions::from_mode(mode))?;
         }
@@ -692,6 +693,27 @@ mod tests {
             fs::metadata(&shared).unwrap().permissions().mode() & 0o777,
             0o644
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_drops_setuid_setgid_and_sticky_bits() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("special-bits");
+        let target = dir.join("tool.json");
+        fs::write(&target, b"{}").unwrap();
+        // Owner may set setuid on their own file; sticky on files may be refused
+        // by some kernels, so fall back to setuid+setgid only.
+        if fs::set_permissions(&target, fs::Permissions::from_mode(0o7755)).is_err() {
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o6755)).unwrap();
+        }
+        let before = fs::metadata(&target).unwrap().permissions().mode();
+        assert_ne!(before & 0o7000, 0, "test setup should have special bits");
+        atomic_write(&target, b"{\"a\":1}").unwrap();
+        let after = fs::metadata(&target).unwrap().permissions().mode();
+        assert_eq!(after & 0o7000, 0, "special bits must not be copied");
+        assert_eq!(after & 0o777, 0o755);
         let _ = fs::remove_dir_all(&dir);
     }
 
