@@ -21,6 +21,7 @@ import logging
 import multiprocessing as mp
 import os
 import re
+import signal
 import threading
 import time
 import uuid
@@ -197,6 +198,23 @@ def db_finish(crew_id: str, status: str, result: Optional[str], llm: Optional[st
         )
 
 
+# ── Error sanitizing ────────────────────────────────────────────────────────
+_SECRETISH = re.compile(r"(?i)(bearer\s+\S+|(?:api[_-]?key|token|password|secret)\s*[=:]\s*\S+|[A-Za-z0-9_\-]{32,})")
+_URL_CREDS = re.compile(r"(\w+://)[^/\s:@]+:[^/\s@]+@")
+MAX_ERR_CHARS = 300
+
+
+def sanitize_error(exc: BaseException) -> str:
+    """Exception type + a short, redacted message. Never the raw upstream body."""
+    msg = str(exc).splitlines()[0] if str(exc) else ""
+    msg = _URL_CREDS.sub(r"\1***@", msg)
+    msg = _SECRETISH.sub("[redacted]", msg)
+    msg = "".join(ch for ch in msg if ch.isprintable())
+    if len(msg) > MAX_ERR_CHARS:
+        msg = msg[:MAX_ERR_CHARS] + "…"
+    return f"{type(exc).__name__}: {msg}" if msg else type(exc).__name__
+
+
 # ── Crew execution (child process) ──────────────────────────────────────────
 def _build_llms():
     from crewai import LLM
@@ -215,6 +233,8 @@ def _build_llms():
 
 def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
     """Runs in a separate process. Sends (status, result, llm_label) back."""
+    # Own process group, so stop/timeout can kill the crew and anything it spawned.
+    os.setsid()
     try:
         from crewai import Agent, Crew, Process, Task
 
@@ -240,10 +260,10 @@ def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
                 conn.send(("completed", str(out), label))
                 return
             except Exception as e:  # try next LLM
-                last_err = f"{label}: {type(e).__name__}: {e}"
+                last_err = f"{label}: {sanitize_error(e)}"
         conn.send(("failed", last_err, None))
     except Exception as e:
-        conn.send(("failed", f"{type(e).__name__}: {e}", None))
+        conn.send(("failed", sanitize_error(e), None))
     finally:
         conn.close()
 
@@ -253,12 +273,35 @@ _procs: Dict[str, mp.Process] = {}
 _lock = threading.Lock()
 
 
+def kill_group(proc, grace_s: float = 5.0) -> None:
+    """SIGTERM the run's whole process group, then SIGKILL whatever is left."""
+    if proc.pid is None:
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return
+    if pgid == os.getpgid(0):  # setsid not applied yet: never signal our own group
+        proc.kill()
+        proc.join(grace_s)
+        return
+    for sig, wait in ((signal.SIGTERM, grace_s), (signal.SIGKILL, 2.0)):
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            break
+        proc.join(wait)
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            break  # group fully gone
+
+
 def _watch(crew_id: str, proc, parent_conn) -> None:
     proc.join(RUN_TIMEOUT_S)
     if proc.is_alive():
-        proc.terminate()
-        proc.join(5)
-        db_finish(crew_id, "failed", f"timed out after {RUN_TIMEOUT_S}s")
+        db_finish(crew_id, "failed", f"TimeoutError: run exceeded {RUN_TIMEOUT_S}s")
+        kill_group(proc)
     elif parent_conn.poll():
         status, result, llm = parent_conn.recv()
         db_finish(crew_id, status, result, llm)
@@ -286,7 +329,7 @@ async def lifespan(_app: FastAPI):
     yield
     with _lock:
         for p in _procs.values():
-            p.terminate()
+            kill_group(p)
 
 
 app = FastAPI(title="Terrance Crew Service", lifespan=lifespan)
@@ -350,10 +393,7 @@ def stop_crew(req: CrewStopRequest):
     # Mark stopped first so the watcher can't overwrite it with "failed".
     db_finish(req.id, "stopped", "stopped by user")
     if proc and proc.is_alive():
-        proc.terminate()
-        proc.join(5)
-        if proc.is_alive():
-            proc.kill()
+        kill_group(proc)
     return {"id": req.id, "status": "stopped", "stopped": True}
 
 
