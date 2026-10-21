@@ -181,20 +181,30 @@ mod recording_tests {
     use super::*;
 
     #[derive(Default)]
-    struct RetryWriter { fail: bool, bytes: Vec<u8> }
+    struct RetryWriter {
+        fail: bool,
+        bytes: Vec<u8>,
+    }
 
     impl Write for RetryWriter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            if self.fail { return Err(std::io::Error::other("disk unavailable")); }
+            if self.fail {
+                return Err(std::io::Error::other("disk unavailable"));
+            }
             self.bytes.extend_from_slice(bytes);
             Ok(bytes.len())
         }
-        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
     fn failed_flush_keeps_pending_samples_for_retry() {
-        let mut writer = BufWriter::new(RetryWriter { fail: true, ..Default::default() });
+        let mut writer = BufWriter::new(RetryWriter {
+            fail: true,
+            ..Default::default()
+        });
         writer.write_all(b"recorded samples").unwrap();
         let mut slot = Some(writer);
         assert!(finish_recording(&mut slot).is_err());
@@ -499,8 +509,7 @@ async fn demo_task(app: &AppHandle, mode: &str, speed: f64) {
                 let noise = rng.next_gaussian() * 3.0;
 
                 // Blink artifact on frontal channels
-                let blink = if (0.0..=0.15).contains(&blink_timer)
-                    && (*ch == "AF7" || *ch == "AF8")
+                let blink = if (0.0..=0.15).contains(&blink_timer) && (*ch == "AF7" || *ch == "AF8")
                 {
                     120.0 * (pi2 * blink_timer / 0.15).sin().abs()
                 } else {

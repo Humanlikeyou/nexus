@@ -279,7 +279,9 @@ fn parse_public_url(raw: &str) -> Result<reqwest::Url, String> {
     if !url.username().is_empty() || url.password().is_some() {
         return Err("URLs with embedded credentials are not allowed".to_string());
     }
-    let host = url.host_str().ok_or_else(|| "URL has no host".to_string())?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "URL has no host".to_string())?;
     let bare = host.trim_start_matches('[').trim_end_matches(']');
     if bare.eq_ignore_ascii_case("localhost") || bare.to_ascii_lowercase().ends_with(".localhost") {
         return Err("Local addresses are not allowed".to_string());
@@ -333,7 +335,9 @@ fn is_public_ip(ip: &std::net::IpAddr) -> bool {
             // IPv4-compatible ::a.b.c.d (deprecated) — judge by the embedded IPv4.
             if seg[..6].iter().all(|s| *s == 0) && !v6.is_loopback() && !v6.is_unspecified() {
                 let o = v6.octets();
-                return is_public_ip(&IpAddr::V4(std::net::Ipv4Addr::new(o[12], o[13], o[14], o[15])));
+                return is_public_ip(&IpAddr::V4(std::net::Ipv4Addr::new(
+                    o[12], o[13], o[14], o[15],
+                )));
             }
             !(v6.is_loopback()
                 || seg0 == 0x2002 // 2002::/16 6to4 (embeds arbitrary IPv4)

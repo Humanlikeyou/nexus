@@ -45,11 +45,21 @@ pub fn save_snapshot(snapshot: BrainSnapshot) -> Result<String, String> {
 fn snapshot_filename(timestamp: &str) -> String {
     let safe: String = timestamp
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let safe = safe.trim_matches('.');
     let safe = if safe.is_empty() { "snapshot" } else { safe };
-    format!("{}_{}.json", safe, &uuid::Uuid::new_v4().simple().to_string()[..12])
+    format!(
+        "{}_{}.json",
+        safe,
+        &uuid::Uuid::new_v4().simple().to_string()[..12]
+    )
 }
 
 fn save_snapshot_in(dir: &std::path::Path, snapshot: &BrainSnapshot) -> Result<PathBuf, String> {
@@ -59,7 +69,11 @@ fn save_snapshot_in(dir: &std::path::Path, snapshot: &BrainSnapshot) -> Result<P
     // create_new guarantees we never overwrite an existing snapshot.
     for _ in 0..4 {
         let path = dir.join(snapshot_filename(&snapshot.timestamp));
-        match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
             Ok(mut f) => {
                 f.write_all(json.as_bytes())
                     .map_err(|e| format!("Failed to write snapshot: {}", e))?;
@@ -78,11 +92,18 @@ mod tests {
 
     #[test]
     fn same_second_snapshots_get_distinct_files() {
-        let dir = std::env::temp_dir().join(format!("nexus-snapfix-{}", uuid::Uuid::new_v4().simple()));
+        let dir =
+            std::env::temp_dir().join(format!("nexus-snapfix-{}", uuid::Uuid::new_v4().simple()));
         fs::create_dir_all(&dir).unwrap();
         let snap = BrainSnapshot {
-            id: "a".into(), timestamp: "2026-10-21T18:00:00Z".into(), fatigue: 0.1, engagement: 0.2,
-            alpha_peak: 10.0, beta_balance: 0.5, focus_score: 0.6, relaxation_score: 0.7,
+            id: "a".into(),
+            timestamp: "2026-10-21T18:00:00Z".into(),
+            fatigue: 0.1,
+            engagement: 0.2,
+            alpha_peak: 10.0,
+            beta_balance: 0.5,
+            focus_score: 0.6,
+            relaxation_score: 0.7,
         };
         let a = save_snapshot_in(&dir, &snap).unwrap();
         let b = save_snapshot_in(&dir, &snap).unwrap();
@@ -138,8 +159,14 @@ mod repro_tests {
 
     fn snap(id: &str, ts: &str) -> BrainSnapshot {
         BrainSnapshot {
-            id: id.into(), timestamp: ts.into(), fatigue: 0.1, engagement: 0.2, alpha_peak: 10.0,
-            beta_balance: 0.5, focus_score: 0.6, relaxation_score: 0.7,
+            id: id.into(),
+            timestamp: ts.into(),
+            fatigue: 0.1,
+            engagement: 0.2,
+            alpha_peak: 10.0,
+            beta_balance: 0.5,
+            focus_score: 0.6,
+            relaxation_score: 0.7,
         }
     }
 
@@ -155,10 +182,20 @@ mod repro_tests {
         let a = save_snapshot(snap("a", "2026-10-21T18:00:00Z"));
         let b = save_snapshot(snap("b", "2026-10-21T18:00:00Z"));
         let listed = list_snapshots();
-        match old { Some(v) => std::env::set_var("HOME", v), None => std::env::remove_var("HOME") }
+        match old {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
         let _ = std::fs::remove_dir_all(&home);
-        assert!(a.unwrap().starts_with(home.to_str().unwrap()), "snapshot escaped temp HOME");
+        assert!(
+            a.unwrap().starts_with(home.to_str().unwrap()),
+            "snapshot escaped temp HOME"
+        );
         b.unwrap();
-        assert_eq!(listed.unwrap().len(), 2, "second snapshot overwrote the first");
+        assert_eq!(
+            listed.unwrap().len(),
+            2,
+            "second snapshot overwrote the first"
+        );
     }
 }

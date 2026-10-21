@@ -198,7 +198,11 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     // Restore config
     let config_src = {
         let new_cfg = extracted.join("nexus-config");
-        if new_cfg.exists() { new_cfg } else { extracted.join("electron-config") } // legacy backups
+        if new_cfg.exists() {
+            new_cfg
+        } else {
+            extracted.join("electron-config")
+        } // legacy backups
     };
     if config_src.exists() {
         let dest = nexus_data_dir();
@@ -282,7 +286,10 @@ fn check_entry_path(path: &std::path::Path) -> Result<(), String> {
         match component {
             Component::Normal(_) | Component::CurDir => {}
             Component::ParentDir => {
-                return Err(format!("Archive rejected: '..' in entry '{}'", path.display()))
+                return Err(format!(
+                    "Archive rejected: '..' in entry '{}'",
+                    path.display()
+                ))
             }
             Component::RootDir | Component::Prefix(_) => {
                 return Err(format!(
@@ -315,7 +322,10 @@ fn unpack_archive_checked(
 
     let mut count = 0usize;
     let mut total: u64 = 0;
-    for entry in tar.entries().map_err(|e| format!("Archive could not be read: {}", e))? {
+    for entry in tar
+        .entries()
+        .map_err(|e| format!("Archive could not be read: {}", e))?
+    {
         let mut entry = entry.map_err(|e| format!("Archive could not be read: {}", e))?;
         let entry_type = entry.header().entry_type();
         if !(entry_type.is_file() || entry_type.is_dir()) {
@@ -417,14 +427,21 @@ mod unpack_tests {
     use std::path::{Path, PathBuf};
 
     fn tmp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("nexus-unpack-test-{}-{}", tag, uuid::Uuid::new_v4().simple()));
+        let d = std::env::temp_dir().join(format!(
+            "nexus-unpack-test-{}-{}",
+            tag,
+            uuid::Uuid::new_v4().simple()
+        ));
         std::fs::create_dir_all(&d).unwrap();
         d
     }
 
     fn gz(dir: &Path, raw_tar: &[u8]) -> PathBuf {
         let path = dir.join("a.tar.gz");
-        let mut enc = flate2::write::GzEncoder::new(std::fs::File::create(&path).unwrap(), flate2::Compression::fast());
+        let mut enc = flate2::write::GzEncoder::new(
+            std::fs::File::create(&path).unwrap(),
+            flate2::Compression::fast(),
+        );
         enc.write_all(raw_tar).unwrap();
         enc.finish().unwrap();
         path
@@ -446,7 +463,13 @@ mod unpack_tests {
         h
     }
 
-    fn one_entry_tar(name: &str, kind: tar::EntryType, data: &[u8], declared: u64, gname: &str) -> Vec<u8> {
+    fn one_entry_tar(
+        name: &str,
+        kind: tar::EntryType,
+        data: &[u8],
+        declared: u64,
+        gname: &str,
+    ) -> Vec<u8> {
         let mut out = raw_header(name, kind, declared, gname).as_bytes().to_vec();
         out.extend_from_slice(data);
         out.resize(out.len().div_ceil(512) * 512 + 1024, 0);
@@ -474,12 +497,19 @@ mod unpack_tests {
         h.set_size(5);
         h.set_mode(0o600);
         h.set_cksum();
-        b.append_data(&mut h, "nexus-pack-1/manifest.json", &b"{\"a\"}"[..]).unwrap();
+        b.append_data(&mut h, "nexus-pack-1/manifest.json", &b"{\"a\"}"[..])
+            .unwrap();
         let archive = gz(&dir, &b.into_inner().unwrap());
         let dest = dir.join("out");
         std::fs::create_dir(&dest).unwrap();
-        assert_eq!(unpack_archive_checked(&archive, &dest, 1_000, 10).unwrap(), 1);
-        assert_eq!(std::fs::read(dest.join("nexus-pack-1/manifest.json")).unwrap(), b"{\"a\"}");
+        assert_eq!(
+            unpack_archive_checked(&archive, &dest, 1_000, 10).unwrap(),
+            1
+        );
+        assert_eq!(
+            std::fs::read(dest.join("nexus-pack-1/manifest.json")).unwrap(),
+            b"{\"a\"}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -494,7 +524,13 @@ mod unpack_tests {
         std::fs::write(src.join("sessions").join("s.json"), b"[]").unwrap();
         let archive = dir.join("cli.tar.gz");
         let ok = std::process::Command::new("tar")
-            .args(["-czf", archive.to_str().unwrap(), "-C", dir.to_str().unwrap(), "nexus-pack-x"])
+            .args([
+                "-czf",
+                archive.to_str().unwrap(),
+                "-C",
+                dir.to_str().unwrap(),
+                "nexus-pack-x",
+            ])
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
@@ -514,13 +550,22 @@ mod unpack_tests {
         // A group name with spaces used to shift the `tar -tv` columns; the
         // header-based size must still be read and capped.
         let dir = tmp("cap");
-        let raw = one_entry_tar("nexus-pack-1/big.bin", tar::EntryType::Regular, b"", 3 * 1024 * 1024 * 1024, "x 0");
+        let raw = one_entry_tar(
+            "nexus-pack-1/big.bin",
+            tar::EntryType::Regular,
+            b"",
+            3 * 1024 * 1024 * 1024,
+            "x 0",
+        );
         let archive = gz(&dir, &raw);
         let dest = dir.join("out");
         std::fs::create_dir(&dest).unwrap();
         let err = unpack_archive_checked(&archive, &dest, 2 * 1024 * 1024 * 1024, 10).unwrap_err();
         assert!(err.contains("size exceeds"), "{err}");
-        assert!(!dest.join("nexus-pack-1").exists(), "nothing may be written");
+        assert!(
+            !dest.join("nexus-pack-1").exists(),
+            "nothing may be written"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -537,14 +582,19 @@ mod unpack_tests {
             let archive = gz(&dir, &one_entry_tar(name, kind, b"x", 1, "g"));
             let dest = dir.join("out");
             std::fs::create_dir(&dest).unwrap();
-            assert!(unpack_archive_checked(&archive, &dest, 1_000, 10).is_err(), "{name} must be rejected");
+            assert!(
+                unpack_archive_checked(&archive, &dest, 1_000, 10).is_err(),
+                "{name} must be rejected"
+            );
             assert!(!dir.join("evil").exists());
             let _ = std::fs::remove_dir_all(&dir);
         }
         let dir = tmp("count");
         let mut raw = Vec::new();
         for i in 0..3 {
-            let mut e = raw_header(&format!("p/f{i}"), tar::EntryType::Regular, 1, "g").as_bytes().to_vec();
+            let mut e = raw_header(&format!("p/f{i}"), tar::EntryType::Regular, 1, "g")
+                .as_bytes()
+                .to_vec();
             e.extend_from_slice(b"x");
             e.resize(1024, 0);
             raw.extend(e);

@@ -24,7 +24,10 @@ pub fn validate_name(name: &str) -> Result<&str, String> {
 }
 
 /// Validate `stem.ext` where `stem` passes [`validate_name`] and `ext` is in `allowed_exts`.
-pub fn validate_file_name<'a>(file_name: &'a str, allowed_exts: &[&str]) -> Result<&'a str, String> {
+pub fn validate_file_name<'a>(
+    file_name: &'a str,
+    allowed_exts: &[&str],
+) -> Result<&'a str, String> {
     let (stem, ext) = file_name
         .rsplit_once('.')
         .ok_or_else(|| "Invalid file name: missing extension".to_string())?;
@@ -73,7 +76,17 @@ mod tests {
     #[test]
     fn names() {
         assert!(validate_name("daily-brief_2").is_ok());
-        for bad in ["", "..", "a/b", "a\\b", "a.b", "a b", "../etc", "é", &"x".repeat(129)] {
+        for bad in [
+            "",
+            "..",
+            "a/b",
+            "a\\b",
+            "a.b",
+            "a b",
+            "../etc",
+            "é",
+            &"x".repeat(129),
+        ] {
             assert!(validate_name(bad).is_err(), "{bad:?} should be rejected");
         }
     }
@@ -97,10 +110,14 @@ mod tests {
         assert!(safe_join(&base, "/etc/passwd").is_err());
         #[cfg(unix)]
         {
-            let outside = std::env::temp_dir().join(format!("nexus-ps-out-{}", uuid::Uuid::new_v4().simple()));
+            let outside = std::env::temp_dir()
+                .join(format!("nexus-ps-out-{}", uuid::Uuid::new_v4().simple()));
             std::fs::write(&outside, b"x").unwrap();
             std::os::unix::fs::symlink(&outside, base.join("link.json")).unwrap();
-            assert!(safe_join(&base, "link.json").is_err(), "symlink escape must be rejected");
+            assert!(
+                safe_join(&base, "link.json").is_err(),
+                "symlink escape must be rejected"
+            );
             let _ = std::fs::remove_file(&outside);
         }
         let _ = std::fs::remove_dir_all(&base);

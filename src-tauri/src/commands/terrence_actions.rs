@@ -1826,7 +1826,11 @@ pub(crate) fn runtime_action_brief(max_chars: usize) -> Result<String, String> {
         }
         lines.push(action);
     }
-    Ok(if lines.len() > 2 { lines.join("\n") } else { Default::default() })
+    Ok(if lines.len() > 2 {
+        lines.join("\n")
+    } else {
+        Default::default()
+    })
 }
 
 // ─── Native approval gate ────────────────────────────────────────────────────
@@ -1838,8 +1842,9 @@ const APPROVAL_DIALOG_TITLE: &str = "Nexus — Approve Action";
 const MAX_APPROVAL_TEXT_CHARS: usize = 2_000;
 
 /// Action ids with an approval dialog currently open (one dialog per action).
-static APPROVALS_IN_FLIGHT: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
-    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+static APPROVALS_IN_FLIGHT: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashSet<String>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
 
 struct InFlightGuard(String);
 
@@ -1934,7 +1939,10 @@ fn confirm_natively(app: &tauri::AppHandle, text: String) -> bool {
 }
 
 /// Everything except the dialog itself, so it can be unit-tested.
-fn prepare_approval(conn: &Connection, id: &str) -> Result<(TerrenceAction, Value, String, String), String> {
+fn prepare_approval(
+    conn: &Connection,
+    id: &str,
+) -> Result<(TerrenceAction, Value, String, String), String> {
     let pending =
         get_action(conn, id)?.ok_or_else(|| "Terrence action was not found.".to_string())?;
     if pending.status != "awaiting_approval" || !pending.requires_approval {
@@ -2693,17 +2701,31 @@ mod tests {
 
     #[test]
     fn approval_gate_fingerprint_detects_param_changes() {
-        let a = super::approval_fingerprint("system.open_url", &json!({"url": "https://a.example"})).unwrap();
-        let b = super::approval_fingerprint("system.open_url", &json!({"url": "https://b.example"})).unwrap();
-        let c = super::approval_fingerprint("system.open_application", &json!({"url": "https://a.example"})).unwrap();
+        let a =
+            super::approval_fingerprint("system.open_url", &json!({"url": "https://a.example"}))
+                .unwrap();
+        let b =
+            super::approval_fingerprint("system.open_url", &json!({"url": "https://b.example"}))
+                .unwrap();
+        let c = super::approval_fingerprint(
+            "system.open_application",
+            &json!({"url": "https://a.example"}),
+        )
+        .unwrap();
         assert_ne!(a, b);
         assert_ne!(a, c);
-        assert_eq!(a, super::approval_fingerprint("system.open_url", &json!({"url": "https://a.example"})).unwrap());
+        assert_eq!(
+            a,
+            super::approval_fingerprint("system.open_url", &json!({"url": "https://a.example"}))
+                .unwrap()
+        );
     }
 
     #[test]
     fn approval_gate_shows_exact_target_and_refuses_oversized_text() {
-        let op = super::describe_operation("system.open_url", &json!({"url": "https://a.example/x"})).unwrap();
+        let op =
+            super::describe_operation("system.open_url", &json!({"url": "https://a.example/x"}))
+                .unwrap();
         assert!(op.contains("https://a.example/x"));
         let mut action = sample_gate_action();
         let normal = super::approval_text(&action, &json!({"url": "https://a.example/x"})).unwrap();
@@ -2731,5 +2753,4 @@ mod tests {
         action.retry_of_action_id = None;
         action
     }
-
 }

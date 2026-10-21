@@ -423,8 +423,8 @@ fn read_sleep(
         let ended_at = DateTime::<Utc>::from_timestamp(latest.end, 0)
             .unwrap_or_else(Utc::now)
             .with_timezone(&Local);
-        let is_overnight = started_at.hour() >= 18
-            || (started_at.hour() < 4 && ended_at.hour() <= 12);
+        let is_overnight =
+            started_at.hour() >= 18 || (started_at.hour() < 4 && ended_at.hour() <= 12);
         if selection == SleepSelection::Latest || is_overnight {
             let stage_totals = group
                 .iter()
@@ -729,7 +729,10 @@ fn sleep_session_insights(
         .collect::<Vec<_>>();
     let mut insights = vec![NoopHealthInsight {
         metric: "sleep".to_string(),
-        fact: format!("Last night's sleep: {}.", duration_label(sleep.duration_min)),
+        fact: format!(
+            "Last night's sleep: {}.",
+            duration_label(sleep.duration_min)
+        ),
         context: baseline(window.iter().map(|day| day.total_sleep_min)).map(|average| {
             let delta = sleep.duration_min - average;
             baseline_context(delta, "average", "minutes")
@@ -796,8 +799,8 @@ fn snapshot_from_database(
             .ok()
             .map(|date| (now.date_naive() - date).num_days().max(0))
     });
-    let stages_column_present = tables.contains("sleepSession")
-        && has_column(&conn, "sleepSession", "stagesJSON")?;
+    let stages_column_present =
+        tables.contains("sleepSession") && has_column(&conn, "sleepSession", "stagesJSON")?;
     let latest_sleep = if tables.contains("sleepSession") {
         read_latest_sleep(&conn, &device_id, stages_column_present)?
     } else {
@@ -1142,10 +1145,22 @@ mod tests {
         let path = seeded_database();
         let conn = Connection::open(&path).unwrap();
         conn.execute("DELETE FROM sleepSession", []).unwrap();
-        let night_start = Utc.with_ymd_and_hms(2026, 9, 6, 14, 30, 0).unwrap().timestamp();
-        let night_end = Utc.with_ymd_and_hms(2026, 9, 6, 22, 30, 0).unwrap().timestamp();
-        let nap_start = Utc.with_ymd_and_hms(2026, 9, 7, 4, 30, 0).unwrap().timestamp();
-        let nap_end = Utc.with_ymd_and_hms(2026, 9, 7, 8, 0, 0).unwrap().timestamp();
+        let night_start = Utc
+            .with_ymd_and_hms(2026, 9, 6, 14, 30, 0)
+            .unwrap()
+            .timestamp();
+        let night_end = Utc
+            .with_ymd_and_hms(2026, 9, 6, 22, 30, 0)
+            .unwrap()
+            .timestamp();
+        let nap_start = Utc
+            .with_ymd_and_hms(2026, 9, 7, 4, 30, 0)
+            .unwrap()
+            .timestamp();
+        let nap_end = Utc
+            .with_ymd_and_hms(2026, 9, 7, 8, 0, 0)
+            .unwrap()
+            .timestamp();
         conn.execute(
             "INSERT INTO sleepSession VALUES ('my-whoop-noop', ?1, ?2, .91, 61, 82, NULL)",
             params![night_start, night_end],
@@ -1292,7 +1307,8 @@ mod repro_tests {
 
     #[test]
     fn repro_imported_null_field_does_not_hide_noop_value() {
-        let path = std::env::temp_dir().join(format!("nexus-noop-merge-{}.sqlite", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("nexus-noop-merge-{}.sqlite", uuid::Uuid::new_v4()));
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
             "CREATE TABLE dailyMetric (
@@ -1308,7 +1324,15 @@ mod repro_tests {
         drop(conn);
         let _ = std::fs::remove_file(&path);
         assert_eq!(days.len(), 1);
-        assert_eq!(days[0].total_sleep_min, Some(430.0), "imported value should win where present");
-        assert_eq!(days[0].recovery, Some(62.0), "imported NULL blanked the NOOP-computed recovery");
+        assert_eq!(
+            days[0].total_sleep_min,
+            Some(430.0),
+            "imported value should win where present"
+        );
+        assert_eq!(
+            days[0].recovery,
+            Some(62.0),
+            "imported NULL blanked the NOOP-computed recovery"
+        );
     }
 }

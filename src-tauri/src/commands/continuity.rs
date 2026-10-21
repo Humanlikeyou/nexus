@@ -184,7 +184,10 @@ pub(crate) fn load_context_from(dir: &std::path::Path) -> Result<TerranceContext
 }
 
 /// Atomically save the context to `dir/terrance_context.json`.
-pub(crate) fn save_context_to(dir: &std::path::Path, context: &TerranceContext) -> Result<(), String> {
+pub(crate) fn save_context_to(
+    dir: &std::path::Path,
+    context: &TerranceContext,
+) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(context).map_err(|e| e.to_string())?;
     atomic_write(&dir.join(CONTEXT_FILE), json.as_bytes()).map_err(|e| e.to_string())
@@ -202,12 +205,21 @@ pub(crate) fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Res
         .unwrap_or_else(|| std::path::Path::new("."));
     let file_name = path
         .file_name()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name"))?
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name")
+        })?
         .to_string_lossy()
         .to_string();
-    let tmp = dir.join(format!(".{}.{}.tmp", file_name, uuid::Uuid::new_v4().simple()));
+    let tmp = dir.join(format!(
+        ".{}.{}.tmp",
+        file_name,
+        uuid::Uuid::new_v4().simple()
+    ));
     let result = (|| {
-        let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
         drop(f);
@@ -549,13 +561,20 @@ mod tests {
     use super::*;
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("nexus-continuity-{}-{}", tag, uuid::Uuid::new_v4().simple()));
+        let d = std::env::temp_dir().join(format!(
+            "nexus-continuity-{}-{}",
+            tag,
+            uuid::Uuid::new_v4().simple()
+        ));
         fs::create_dir_all(&d).unwrap();
         d
     }
 
     fn hour_of(json: &str) -> Option<u8> {
-        let raw = format!(r#"{{"activeGoals":["g"],"relevantMemory":[],"dailySummaryHour":{}}}"#, json);
+        let raw = format!(
+            r#"{{"activeGoals":["g"],"relevantMemory":[],"dailySummaryHour":{}}}"#,
+            json
+        );
         let ctx: TerranceContext = serde_json::from_str(&raw).expect("context must still load");
         assert_eq!(ctx.active_goals, vec!["g".to_string()]);
         ctx.daily_summary_hour
@@ -589,7 +608,10 @@ mod tests {
     fn context_roundtrip_in_custom_dir() {
         let dir = temp_dir("roundtrip");
         assert!(load_context_from(&dir).unwrap().active_goals.is_empty());
-        assert!(!dir.join(CONTEXT_FILE).exists(), "load must not create the file");
+        assert!(
+            !dir.join(CONTEXT_FILE).exists(),
+            "load must not create the file"
+        );
         let ctx = TerranceContext {
             active_goals: vec!["ship nexus-v2".into()],
             daily_summary_hour: Some(6),
@@ -611,7 +633,10 @@ mod tests {
         let dir = temp_dir("corrupt");
         fs::write(dir.join(CONTEXT_FILE), b"{\"activeGoals\": [").unwrap();
         assert!(load_context_from(&dir).is_err());
-        assert_eq!(fs::read(dir.join(CONTEXT_FILE)).unwrap(), b"{\"activeGoals\": [");
+        assert_eq!(
+            fs::read(dir.join(CONTEXT_FILE)).unwrap(),
+            b"{\"activeGoals\": ["
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -689,10 +714,9 @@ pub fn prune_activity_log(days: u32) -> Result<u32, String> {
         if path.extension().map(|x| x == "json").unwrap_or(false) {
             if let Ok(content) = fs::read_to_string(&path) {
                 if let Ok(log) = serde_json::from_str::<ActivityEntry>(&content) {
-                    if now - log.started_at > cutoff_ms
-                        && fs::remove_file(&path).is_ok() {
-                            removed += 1;
-                        }
+                    if now - log.started_at > cutoff_ms && fs::remove_file(&path).is_ok() {
+                        removed += 1;
+                    }
                 }
             }
         }
@@ -737,7 +761,11 @@ mod repro_tests {
         let raw = r#"{"activeGoals":["Ship v2"],"lastSessionSummary":null,
             "lastSessionTimestamp":null,"relevantMemory":["m"],"dailySummaryHour":300}"#;
         let parsed = serde_json::from_str::<TerranceContext>(raw);
-        assert!(parsed.is_ok(), "context load failed on one bad field: {:?}", parsed.err());
+        assert!(
+            parsed.is_ok(),
+            "context load failed on one bad field: {:?}",
+            parsed.err()
+        );
     }
 
     /// Bug #1 (Rust side): `save_terrance_context` uses a plain `fs::write`, so a crash
@@ -745,7 +773,10 @@ mod repro_tests {
     /// Bug #1: now covered via the `save_context_to(dir)` seam and `atomic_write`.
     #[test]
     fn repro_context_save_is_atomic() {
-        let dir = std::env::temp_dir().join(format!("nexus-repro-atomic-{}", uuid::Uuid::new_v4().simple()));
+        let dir = std::env::temp_dir().join(format!(
+            "nexus-repro-atomic-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
         let mut ctx = TerranceContext {
             active_goals: vec!["first".into()],
             ..Default::default()
@@ -762,8 +793,14 @@ mod repro_tests {
             .flatten()
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
-        assert!(names.iter().all(|n| !n.ends_with(".tmp")), "leftover tmp: {names:?}");
-        assert_eq!(load_context_from(&dir).unwrap().active_goals, vec!["second".to_string()]);
+        assert!(
+            names.iter().all(|n| !n.ends_with(".tmp")),
+            "leftover tmp: {names:?}"
+        );
+        assert_eq!(
+            load_context_from(&dir).unwrap().active_goals,
+            vec!["second".to_string()]
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -771,7 +808,8 @@ mod repro_tests {
     /// loads intact; the legacy copy is left in place and existing new data wins.
     #[test]
     fn legacy_context_is_migrated_and_loadable() {
-        let base = std::env::temp_dir().join(format!("nexus-ctx-mig-{}", uuid::Uuid::new_v4().simple()));
+        let base =
+            std::env::temp_dir().join(format!("nexus-ctx-mig-{}", uuid::Uuid::new_v4().simple()));
         let legacy = base.join("com.taisun.electron");
         fs::create_dir_all(&legacy).unwrap();
         let raw = r#"{"activeGoals":["Legacy goal"],"lastSessionSummary":"s","lastSessionTimestamp":1,"relevantMemory":["m"],"dailySummaryHour":6}"#;
@@ -784,14 +822,22 @@ mod repro_tests {
         let ctx = load_context_from(&new_dir).unwrap();
         assert_eq!(ctx.active_goals, vec!["Legacy goal".to_string()]);
         assert_eq!(ctx.daily_summary_hour, Some(6));
-        assert!(legacy.join(CONTEXT_FILE).exists(), "legacy data must not be removed");
+        assert!(
+            legacy.join(CONTEXT_FILE).exists(),
+            "legacy data must not be removed"
+        );
 
         // A later save goes to the new dir and is not clobbered by a re-run.
         let mut updated = ctx.clone();
         updated.active_goals = vec!["New goal".into()];
         save_context_to(&new_dir, &updated).unwrap();
-        assert!(crate::app_paths::migrate_legacy_data_dir_in(&base).unwrap().is_empty());
-        assert_eq!(load_context_from(&new_dir).unwrap().active_goals, vec!["New goal".to_string()]);
+        assert!(crate::app_paths::migrate_legacy_data_dir_in(&base)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            load_context_from(&new_dir).unwrap().active_goals,
+            vec!["New goal".to_string()]
+        );
         let _ = fs::remove_dir_all(&base);
     }
 }
