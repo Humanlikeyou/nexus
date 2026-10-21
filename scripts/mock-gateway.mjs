@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Mock Gateway Server for Electron outbox pipeline testing.
+ * Mock Gateway Server for Nexus outbox pipeline testing.
  *
  * Usage:
  *   node scripts/mock-gateway.mjs                  # normal mode (ACK all)

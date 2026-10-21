@@ -31,11 +31,11 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let desktop = home.join("Desktop");
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-    let archive_name = format!("electron-backup-{}.tar.gz", timestamp);
+    let archive_name = format!("nexus-backup-{}.tar.gz", timestamp);
     let archive_path = desktop.join(&archive_name);
 
     // Create a temp staging directory
-    let staging = std::env::temp_dir().join(format!("electron-pack-{}", timestamp));
+    let staging = std::env::temp_dir().join(format!("nexus-pack-{}", timestamp));
     fs::create_dir_all(&staging).map_err(|e| format!("Failed to create staging dir: {}", e))?;
 
     let mut includes = Vec::new();
@@ -43,9 +43,9 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     // 1. Copy Nexus config
     let config_src = nexus_data_dir();
     if config_src.exists() {
-        let dest = staging.join("electron-config");
+        let dest = staging.join("nexus-config");
         copy_dir_recursive(&config_src, &dest)?;
-        includes.push("Electron settings & config".to_string());
+        includes.push("Nexus settings & config".to_string());
     }
 
     // 2. Copy OpenClaw data
@@ -99,7 +99,7 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
         "packed_at": chrono::Local::now().to_rfc3339(),
         "hostname": hostname::get().map(|h| h.to_string_lossy().to_string()).unwrap_or_default(),
         "includes": &includes,
-        "restore_instructions": "To restore: Open Electron on the new machine, go to Settings, click 'Unpack', and select this file."
+        "restore_instructions": "To restore: Open Nexus on the new machine, go to Settings, click 'Unpack', and select this file."
     });
     let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
     fs::write(staging.join("manifest.json"), &manifest_json)
@@ -147,7 +147,7 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
         return Err("Archive file not found".to_string());
     }
 
-    let staging = std::env::temp_dir().join("electron-unpack");
+    let staging = std::env::temp_dir().join("nexus-unpack");
     let _ = fs::remove_dir_all(&staging);
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
 
@@ -169,18 +169,24 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
         ));
     }
 
-    // Find the extracted directory (should be electron-pack-*)
+    // Find the extracted directory (should be nexus-pack-*)
     let extracted = fs::read_dir(&staging)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
-        .find(|e| e.file_name().to_string_lossy().starts_with("electron-pack"))
+        .find(|e| {
+            let n = e.file_name().to_string_lossy().to_string();
+            n.starts_with("nexus-pack") || n.starts_with("electron-pack") // legacy backups
+        })
         .map(|e| e.path())
         .unwrap_or(staging.clone());
 
     let mut restored = Vec::new();
 
     // Restore config
-    let config_src = extracted.join("electron-config");
+    let config_src = {
+        let new_cfg = extracted.join("nexus-config");
+        if new_cfg.exists() { new_cfg } else { extracted.join("electron-config") } // legacy backups
+    };
     if config_src.exists() {
         let dest = nexus_data_dir();
         fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
