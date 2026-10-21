@@ -15,7 +15,8 @@ services:
 
   # ── Shared PostgreSQL + pgvector ────────────────────────────────────────────
   postgres:
-    image: ankane/pgvector:latest
+    # Same PG major (15) as ./data/postgres. PG18 needs dump/restore — see STAGE5E notes.
+    image: pgvector/pgvector:0.8.7-pg15-bookworm
     restart: unless-stopped
     logging: *log
     environment:
@@ -35,7 +36,7 @@ services:
 
   # ── n8n — Automation Backbone ───────────────────────────────────────────────
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    image: docker.n8n.io/n8nio/n8n:2.44.5
     restart: unless-stopped
     logging: *log
     depends_on:
@@ -74,12 +75,14 @@ services:
       WEAVIATE_URL:  "http://weaviate:8080"
       # Stage 4 — Gateway auth secret (used by Terrance Ingress workflow)
       NEXUS_SECRET: ${NEXUS_SECRET:-}
+      # n8n 2.x blocks $env in Code nodes by default; the ingress Validate Secret node needs it.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
     volumes:
       - ./data/n8n:/home/node/.n8n
 
   # ── Letta (MemGPT) — Agent Long-Term Memory ─────────────────────────────────
   letta:
-    image: letta/letta:latest
+    image: letta/letta:0.34.19
     restart: unless-stopped
     logging: *log
     depends_on:
@@ -89,6 +92,9 @@ services:
       - "127.0.0.1:8283:8283"   # REST API + ADE web UI (both on same port)
     environment:
       LETTA_PG_URI: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/letta_db"
+      # Require a password on the Letta REST API / ADE
+      SECURE: "true"
+      LETTA_SERVER_PASSWORD: ${LETTA_SERVER_PASSWORD:?set LETTA_SERVER_PASSWORD in .env}
       # LLM backends — fill in what you use; unused keys left blank
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -101,7 +107,8 @@ services:
 
   # ── Weaviate — Vector Store (backing Verba) ─────────────────────────────────
   weaviate:
-    image: cr.weaviate.io/semitechnologies/weaviate:1.24.6
+    # 1.24 -> 1.40 must step one minor at a time on existing data (Raft migration at 1.25).
+    image: cr.weaviate.io/semitechnologies/weaviate:1.40.1
     restart: unless-stopped
     logging: *log
     command:
