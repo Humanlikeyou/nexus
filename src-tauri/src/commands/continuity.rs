@@ -148,7 +148,43 @@ pub fn save_terrance_context(context: TerranceContext) -> Result<(), String> {
     let dir = data_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?;
-    fs::write(context_path(), json).map_err(|e| e.to_string())
+    atomic_write(&context_path(), json.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// Write `bytes` to `path` atomically: write a uniquely named temp file in the
+/// same directory, fsync it, then rename over the target (and fsync the dir on
+/// Unix). A crash mid-write leaves either the old file or the new one, never a
+/// truncated mix.
+pub(crate) fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let dir = path
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name"))?
+        .to_string_lossy()
+        .to_string();
+    let tmp = dir.join(format!(".{}.{}.tmp", file_name, uuid::Uuid::new_v4().simple()));
+    let result = (|| {
+        let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        fs::rename(&tmp, path)?;
+        #[cfg(unix)]
+        {
+            if let Ok(d) = fs::File::open(dir) {
+                let _ = d.sync_all();
+            }
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
 }
 
 // ─── Session Log ───────────────────────────────────────────────────────────────
@@ -471,6 +507,46 @@ pub fn list_activity_entries(limit: Option<u32>) -> Result<Vec<ActivityEntry>, S
 #[cfg(test)]
 mod tests {
     use super::redact_sensitive_text;
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("nexus-continuity-{}-{}", tag, uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn atomic_write_replaces_content_and_leaves_no_temp_files() {
+        let dir = temp_dir("atomic");
+        let path = dir.join("terrance_context.json");
+        fs::write(&path, b"old").unwrap();
+        atomic_write(&path, b"{\"new\":true}").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{\"new\":true}");
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn atomic_write_failure_keeps_original_file() {
+        let dir = temp_dir("atomic-fail");
+        // Target is a directory, so the rename fails; nothing should be clobbered.
+        let target = dir.join("target");
+        fs::create_dir_all(target.join("child")).unwrap();
+        assert!(atomic_write(&target, b"x").is_err());
+        assert!(target.join("child").is_dir());
+        let leftovers = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0);
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn redacts_telegram_tokens_without_hiding_the_endpoint() {
