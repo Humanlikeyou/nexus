@@ -1,6 +1,9 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ConversationMessage, CONVERSATION_KEY, HERMES_SESSION_KEY, HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE, createConversationId, messagesFromInteractions } from "./app/conversation";
 import { SYSTEMS } from "./app/routes";
+import { approvalNotice } from "./lib/approval";
+import type { TerrenceAction } from "./types";
+import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
 import { ActivityField, BusinessField, DevicesField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, TrajectoryField } from "./app/lazyScreens";
 import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, connectMuse, disconnectMuse, interactWithTerrence, listTerrenceInteractions, loadSystemSnapshot, migrateLegacyTerrenceContext, retryTerrenceAction, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "./bridge";
 import { StatusIndicator } from "./design/ProductUI";
@@ -100,6 +103,34 @@ export default function App() {
   }, [conversationId]);
 
   const act = useCallback(async (name: string, action: () => Promise<unknown>) => { setBusy(true); setNotice(`${name} in progress`); try { await action(); setNotice(`${name} complete`); await refresh(); } catch { setBusy(false); setNotice(`${name} unavailable`); } window.setTimeout(() => setNotice(null), 3500); }, [refresh]);
+
+  const approveAction = useCallback(async (action: TerrenceAction) => {
+    setBusy(true);
+    setNotice(`Approving ${action.title} in progress`);
+    try {
+      const result = await approveTerrenceAction(action.id);
+      setNotice(approvalNotice(action.title, { result }));
+      await refresh();
+    } catch (error) {
+      setBusy(false);
+      setNotice(approvalNotice(action.title, { error }));
+    }
+    window.setTimeout(() => setNotice(null), 3500);
+  }, [refresh]);
+
+  // Quiet in-app notices from background work (e.g. auto-heal "Restart declined").
+  useEffect(() => {
+    let timer: number | undefined;
+    const onNotice = (event: Event) => {
+      const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+      if (!message) return;
+      setNotice(message);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setNotice(null), 3500);
+    };
+    window.addEventListener(NEXUS_NOTICE_EVENT, onNotice);
+    return () => { window.removeEventListener(NEXUS_NOTICE_EVENT, onNotice); window.clearTimeout(timer); };
+  }, []);
 
   const scanForMuse = useCallback(async () => {
     setMuseOperation("scanning");
@@ -290,7 +321,7 @@ export default function App() {
     setConversationId(created);
   }, []);
   const selected = useMemo(() => SYSTEMS.find((system) => system.id === active)!, [active]);
-  const view = active === "terrance" ? <TerranceField data={data} messages={messages} sending={sending} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onApproveAction={(action) => { void act(`Approving ${action.title}`, () => approveTerrenceAction(action.id)); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
+  const view = active === "terrance" ? <TerranceField data={data} messages={messages} sending={sending} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
     : active === "health" ? <HealthField data={data} />
     : active === "neuro" ? <NeuroField training={training} data={data} devices={museDevices} telemetry={telemetry} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : active === "sessions" ? <SessionsField data={data} />

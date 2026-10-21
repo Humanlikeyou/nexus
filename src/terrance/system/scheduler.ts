@@ -344,8 +344,11 @@ async function tick() {
         fn: async () => {
           const report = await runDiagnostics();
           if (report.issues.length > 0) {
-            await autoHeal(report);
-            return { ok: true, detail: `${report.issues.length} issue(s) addressed` };
+            // "addressed" only when every restart tried was allowed and succeeded.
+            const healed = await autoHeal(report);
+            const status = healed?.status ?? "awaiting";
+            const label = status === "none" ? "awaiting" : status;
+            return { ok: status !== "failed", detail: `${report.issues.length} issue(s) ${label}` };
           }
           return { ok: true, detail: "All systems healthy" };
         },
