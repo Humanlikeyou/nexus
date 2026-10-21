@@ -12,6 +12,7 @@ const c = vi.hoisted(() => ({
   generateMiddayCorrection: vi.fn(async () => ({ sent: true })),
   generateEveningIntegration: vi.fn(async () => ({ sent: true })),
   pruneMemory: vi.fn(async () => ({ archived: 0, pruned: 0 })),
+  patchContext: vi.fn(async () => true),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ emit: vi.fn(), listen: vi.fn() }));
@@ -32,6 +33,8 @@ vi.mock("../../src/terrance/system/activityBus", () => ({
 // Fresh module per test: scheduler keeps module-level `running` state (a hung test would leak).
 let startScheduler: () => void;
 let stopScheduler: () => void;
+let BACKOFF_DELAYS_MS: readonly number[];
+let MAX_ATTEMPTS_PER_WINDOW: number;
 
 const H = 60 * 60 * 1000;
 /** What the real loadContext returns when the Tauri load fails (continuity.ts:123-130). */
@@ -62,7 +65,7 @@ function freshCtx(now: number, over: Record<string, unknown> = {}) {
 describe("scheduler repros", () => {
   beforeEach(async () => {
     vi.resetModules();
-    ({ startScheduler, stopScheduler } = await import("../../src/terrance/system/scheduler"));
+    ({ startScheduler, stopScheduler, BACKOFF_DELAYS_MS, MAX_ATTEMPTS_PER_WINDOW } = await import("../../src/terrance/system/scheduler"));
     vi.useFakeTimers();
     Object.values(c).forEach((f) => (f as any).mockClear());
   });
@@ -83,15 +86,53 @@ describe("scheduler repros", () => {
     expect(fired).toBe(0);
   });
 
-  it("bug#3: failed daily summary is not retried every 5 minutes", async () => {
+  it("bug#3: failed daily summary follows the 5/15/60-min backoff, max 3 tries per window", async () => {
+    const now = at("2026-10-21T07:05:00+09:00");
+    vi.setSystemTime(now);
+    c.loadContext.mockResolvedValue(freshCtx(now, { lastDailySummaryTimestamp: now - 24 * H }));
+    const callTimes: number[] = [];
+    c.generateDailySummary.mockImplementation(async () => {
+      callTimes.push(Date.now());
+      return { sent: false } as any;
+    });
+    await firstTick();
+    // Run through the rest of the daily window (it ends at 12:30) and past it.
+    await vi.advanceTimersByTimeAsync(6 * H);
+
+    expect(MAX_ATTEMPTS_PER_WINDOW).toBe(3);
+    expect(BACKOFF_DELAYS_MS).toEqual([5 * 60_000, 15 * 60_000, 60 * 60_000]);
+    expect(callTimes.length).toBe(MAX_ATTEMPTS_PER_WINDOW);
+    expect(callTimes[0]).toBe(now + 30_000); // first tick
+    const CHECK = 5 * 60_000;                 // tick granularity
+    for (let i = 1; i < callTimes.length; i++) {
+      const gap = callTimes[i] - callTimes[i - 1];
+      expect(gap, `retry ${i} gap`).toBeGreaterThanOrEqual(BACKOFF_DELAYS_MS[i - 1]);
+      expect(gap, `retry ${i} gap`).toBeLessThan(BACKOFF_DELAYS_MS[i - 1] + CHECK);
+    }
+  });
+
+  it("bug#3b: the next day's window resets the try budget", async () => {
     const now = at("2026-10-21T07:05:00+09:00");
     vi.setSystemTime(now);
     c.loadContext.mockResolvedValue(freshCtx(now, { lastDailySummaryTimestamp: now - 24 * H }));
     c.generateDailySummary.mockResolvedValue({ sent: false } as any);
     await firstTick();
-    await vi.advanceTimersByTimeAsync(5 * 60_000 * 3); // 3 more ticks
-    // Intended: backoff → at most one attempt within 20 minutes.
-    expect(c.generateDailySummary.mock.calls.length).toBeLessThanOrEqual(1);
+    await vi.advanceTimersByTimeAsync(30 * H); // through 2026-10-22 13:05 (day-2 window closed)
+    expect(c.generateDailySummary.mock.calls.length).toBe(2 * MAX_ATTEMPTS_PER_WINDOW);
+  });
+
+  it("interval job that fails 3 times is retried after a later interval (not blocked until restart)", async () => {
+    const now = at("2026-10-21T14:00:00+09:00");
+    vi.setSystemTime(now);
+    const consolidationLast = now - 7 * H;
+    c.loadContext.mockImplementation(async () => freshCtx(Date.now(), { lastConsolidationTimestamp: consolidationLast }));
+    c.consolidateRecentSessions.mockRejectedValue(new Error("llm down"));
+    await firstTick();
+    await vi.advanceTimersByTimeAsync(2 * H); // exhaust the 3 tries
+    expect(c.consolidateRecentSessions).toHaveBeenCalledTimes(3);
+    c.consolidateRecentSessions.mockResolvedValue({ consolidated: true } as any);
+    await vi.advanceTimersByTimeAsync(24 * H); // a full day later, still overdue
+    expect(c.consolidateRecentSessions.mock.calls.length).toBeGreaterThan(3);
   });
 
   it("bug#4: a hung task does not stall the scheduler forever", async () => {
@@ -126,7 +167,4 @@ describe("scheduler repros", () => {
     expect(c.generateEveningIntegration).toHaveBeenCalledTimes(1);
   });
 
-  it.todo(
-    "decideDueTasks(ctx, now) pure API: table-driven window tests — blocked on approved refactor extracting decision logic from tick()",
-  );
 });
