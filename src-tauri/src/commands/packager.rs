@@ -162,6 +162,8 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     let staging =
         std::env::temp_dir().join(format!("nexus-unpack-{}", uuid::Uuid::new_v4().simple()));
     fs::create_dir(&staging).map_err(|e| format!("Failed to create staging dir: {}", e))?;
+    // Removed on every exit path, including early `?` returns during restore.
+    let _staging_guard = StagingGuard(staging.clone());
 
     // Validate and extract in one pass with the tar crate, reading sizes and
     // types from the headers themselves (no CLI listing to parse), so what is
@@ -178,10 +180,7 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     .await
     .map_err(|e| format!("Extract task failed: {}", e))
     .and_then(|r| r);
-    if let Err(error) = unpacked {
-        let _ = fs::remove_dir_all(&staging);
-        return Err(error);
-    }
+    unpacked?;
 
     // Find the extracted directory (should be nexus-pack-*)
     let extracted = fs::read_dir(&staging)
@@ -251,14 +250,22 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
         restored.push("Event store restored".to_string());
     }
 
-    // Cleanup
-    let _ = fs::remove_dir_all(&staging);
+    // Staging cleanup happens when `_staging_guard` drops.
 
     if restored.is_empty() {
         restored.push("Archive was empty — nothing to restore".to_string());
     }
 
     Ok(restored)
+}
+
+/// Deletes the staging directory when dropped.
+struct StagingGuard(PathBuf);
+
+impl Drop for StagingGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 /// Unpack limits, enforced from tar headers before each entry is written.
@@ -444,6 +451,19 @@ mod unpack_tests {
         out.extend_from_slice(data);
         out.resize(out.len().div_ceil(512) * 512 + 1024, 0);
         out
+    }
+
+    #[test]
+    fn staging_guard_removes_dir_on_early_return() {
+        fn fails_midway(dir: &Path) -> Result<(), String> {
+            let _guard = super::StagingGuard(dir.to_path_buf());
+            std::fs::write(dir.join("partial"), b"x").map_err(|e| e.to_string())?;
+            Err("restore failed".to_string())?;
+            Ok(())
+        }
+        let dir = tmp("guard");
+        assert!(fails_midway(&dir).is_err());
+        assert!(!dir.exists(), "staging dir must be removed on error paths");
     }
 
     #[test]
