@@ -74,10 +74,25 @@ pub async fn check_docker_service(name: String) -> Result<String, String> {
     }
 }
 
-/// Restart a Docker container by name.
+/// Exact operation shown in the approval dialog for a container restart.
+fn docker_restart_prompt(name: &str) -> (String, String) {
+    (
+        format!("Run: docker restart {name}"),
+        "Restarts this Docker container. Running requests in it will be interrupted.".to_string(),
+    )
+}
+
+/// Restart a Docker container by name (requires native approval).
 #[tauri::command]
-pub async fn restart_docker_service(name: String) -> Result<String, String> {
+pub async fn restart_docker_service(app: tauri::AppHandle, name: String) -> Result<String, String> {
     validate_container_name(&name)?;
+    let (operation, detail) = docker_restart_prompt(&name);
+    let _approval = super::approval_gate::require_approval(
+        &app,
+        &format!("docker_restart:{name}"),
+        super::approval_gate::approval_text(&operation, &detail)?,
+    )
+    .await?;
     let output = tokio::process::Command::new("docker")
         .args(["restart", &name])
         .output()
@@ -118,5 +133,11 @@ mod tests {
         for bad in ["", "-rm", "--help", "a b", "a;b", "../x"] {
             assert!(validate_container_name(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn docker_restart_prompt_shows_exact_command() {
+        let (op, _) = super::docker_restart_prompt("stack-n8n-1");
+        assert_eq!(op, "Run: docker restart stack-n8n-1");
     }
 }

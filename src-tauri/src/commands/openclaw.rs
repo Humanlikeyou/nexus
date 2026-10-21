@@ -429,7 +429,25 @@ pub fn read_daily_log(date: Option<String>) -> Result<String, String> {
 /// Restart the OpenClaw LaunchAgent via `launchctl kickstart -k`.
 /// Works on macOS; returns an error string on failure.
 #[tauri::command]
-pub async fn restart_openclaw() -> Result<String, String> {
+pub async fn restart_openclaw(app: tauri::AppHandle) -> Result<String, String> {
+    let _approval = super::approval_gate::require_approval(
+        &app,
+        "openclaw_restart",
+        super::approval_gate::approval_text(
+            OPENCLAW_RESTART_OPERATION,
+            "Restarts the OpenClaw gateway LaunchAgent. Connected channels reconnect.",
+        )?,
+    )
+    .await?;
+    kickstart_openclaw().await
+}
+
+/// Exact operation shown for an OpenClaw restart (uid is resolved at run time).
+const OPENCLAW_RESTART_OPERATION: &str =
+    "Run: launchctl kickstart -k gui/<your uid>/ai.openclaw.gateway";
+
+/// The ungated restart. Only call after approval has been obtained.
+async fn kickstart_openclaw() -> Result<String, String> {
     // Resolve the current user UID so we can address the gui/<uid>/ domain.
     let uid_out = tokio::process::Command::new("id")
         .arg("-u")
@@ -489,9 +507,35 @@ pub fn get_openclaw_sandbox() -> Result<String, String> {
     Ok(mode.to_string())
 }
 
-/// Toggle sandbox mode between "off" and "all", then restart OpenClaw.
+const SANDBOX_MODES: [&str; 3] = ["off", "non-main", "all"];
+
+/// Explicit mode must be a known OpenClaw sandbox mode; `None` toggles off <-> all.
+fn resolve_sandbox_mode(current: &str, requested: Option<String>) -> Result<String, String> {
+    match requested {
+        Some(m) if SANDBOX_MODES.contains(&m.as_str()) => Ok(m),
+        Some(_) => Err(format!(
+            "Invalid sandbox mode. Allowed: {}",
+            SANDBOX_MODES.join(", ")
+        )),
+        None if current == "off" => Ok("all".to_string()),
+        None => Ok("off".to_string()),
+    }
+}
+
+fn sandbox_operation(config_path: &std::path::Path, current: &str, new_mode: &str) -> String {
+    format!(
+        "Set agents.defaults.sandbox.mode: \"{current}\" -> \"{new_mode}\"\nin {}\nthen run: launchctl kickstart -k gui/<your uid>/ai.openclaw.gateway",
+        config_path.display()
+    )
+}
+
+/// Toggle sandbox mode between "off" and "all", then restart OpenClaw
+/// (requires native approval).
 #[tauri::command]
-pub async fn toggle_openclaw_sandbox(mode: Option<String>) -> Result<SandboxStatus, String> {
+pub async fn toggle_openclaw_sandbox(
+    app: tauri::AppHandle,
+    mode: Option<String>,
+) -> Result<SandboxStatus, String> {
     let config_path = openclaw_dir().join("openclaw.json");
     let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
     let mut config: serde_json::Value =
@@ -506,16 +550,16 @@ pub async fn toggle_openclaw_sandbox(mode: Option<String>) -> Result<SandboxStat
         .unwrap_or("off")
         .to_string();
 
-    let new_mode = match mode {
-        Some(m) => m,
-        None => {
-            if current == "off" {
-                "all".to_string()
-            } else {
-                "off".to_string()
-            }
-        }
-    };
+    let new_mode = resolve_sandbox_mode(&current, mode)?;
+    let _approval = super::approval_gate::require_approval(
+        &app,
+        "openclaw_sandbox",
+        super::approval_gate::approval_text(
+            &sandbox_operation(&config_path, &current, &new_mode),
+            "Writes this setting to the OpenClaw config, then restarts the OpenClaw gateway.",
+        )?,
+    )
+    .await?;
 
     // Ensure the path agents.defaults.sandbox.mode exists
     let agents = config
@@ -542,8 +586,8 @@ pub async fn toggle_openclaw_sandbox(mode: Option<String>) -> Result<SandboxStat
     let out = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     fs::write(&config_path, out).map_err(|e| e.to_string())?;
 
-    // Restart OpenClaw so it picks up the change
-    let restarted = restart_openclaw().await.is_ok();
+    // Restart OpenClaw so it picks up the change (covered by the same approval).
+    let restarted = kickstart_openclaw().await.is_ok();
 
     Ok(SandboxStatus {
         mode: new_mode,
@@ -757,4 +801,32 @@ pub async fn get_openclaw_health() -> Result<OpenClawHealth, String> {
         channels,
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
+}
+
+#[cfg(test)]
+mod approval_tests {
+    use super::*;
+
+    #[test]
+    fn sandbox_mode_is_validated_and_toggles() {
+        assert_eq!(resolve_sandbox_mode("off", None).unwrap(), "all");
+        assert_eq!(resolve_sandbox_mode("all", None).unwrap(), "off");
+        assert_eq!(
+            resolve_sandbox_mode("off", Some("non-main".into())).unwrap(),
+            "non-main"
+        );
+        assert!(resolve_sandbox_mode("off", Some("everything; rm -rf".into())).is_err());
+    }
+
+    #[test]
+    fn sandbox_operation_names_exact_change() {
+        let op = sandbox_operation(
+            std::path::Path::new("/h/.openclaw/openclaw.json"),
+            "off",
+            "all",
+        );
+        assert!(op.starts_with("Set agents.defaults.sandbox.mode: \"off\" -> \"all\""));
+        assert!(op.contains("/h/.openclaw/openclaw.json"));
+        assert!(op.contains("launchctl kickstart -k"));
+    }
 }
