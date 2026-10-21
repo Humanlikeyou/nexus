@@ -375,6 +375,8 @@ mod ssrf_tests {
             "http://[2001:0:4136:e378::1]/",
             "http://[::127.0.0.1]/",
             "http://[::10.0.0.1]/",
+            "http://[64:ff9b::7f00:1]/",
+            "http://[64:ff9b::808:808]/",
             "not a url",
         ] {
             assert!(parse_public_url(bad).is_err(), "{bad} should be rejected");
