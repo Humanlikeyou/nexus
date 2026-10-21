@@ -200,7 +200,14 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
 
     // Extract archive
     let output = Command::new("tar")
-        .args(["-xzf", &archive_str, "-C", &staging_str])
+        .args([
+            "-xzf",
+            &archive_str,
+            "--no-same-owner",
+            "--no-same-permissions",
+            "-C",
+            &staging_str,
+        ])
         .output()
         .await
         .map_err(|e| {
@@ -294,9 +301,50 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
     Ok(restored)
 }
 
+/// Unpack limits, checked from the listing before anything is extracted.
+const MAX_UNPACK_TOTAL_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
+const MAX_UNPACK_ENTRIES: usize = 50_000;
+
+/// Size column of a `tar -tv` line. bsdtar (macOS): `perm links user group size ...`;
+/// GNU tar: `perm user/group size ...`.
+fn listed_entry_size(line: &str) -> Option<u64> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    let idx = if fields.get(1).map_or(false, |f| f.contains('/')) { 2 } else { 4 };
+    fields.get(idx)?.parse().ok()
+}
+
 /// Validate `tar -tzf` (names) and `tar -tvzf` (verbose) output for an archive.
-/// Rejects absolute paths, any `..` component, and symlink/hardlink entries.
+/// Rejects absolute paths, any `..` component, symlink/hardlink entries, and
+/// archives over the entry-count or total-size limits.
 fn validate_archive_listing(names: &str, verbose: &str) -> Result<(), String> {
+    validate_archive_listing_with_limits(names, verbose, MAX_UNPACK_TOTAL_BYTES, MAX_UNPACK_ENTRIES)
+}
+
+fn validate_archive_listing_with_limits(
+    names: &str,
+    verbose: &str,
+    max_total_bytes: u64,
+    max_entries: usize,
+) -> Result<(), String> {
+    let entry_count = names.lines().filter(|l| !l.is_empty()).count();
+    if entry_count > max_entries {
+        return Err(format!(
+            "Archive rejected: {} entries exceeds the limit of {}",
+            entry_count, max_entries
+        ));
+    }
+    let mut total: u64 = 0;
+    for line in verbose.lines().filter(|l| !l.is_empty()) {
+        let size = listed_entry_size(line)
+            .ok_or_else(|| "Archive rejected: entry size could not be read".to_string())?;
+        total = total.saturating_add(size);
+        if total > max_total_bytes {
+            return Err(format!(
+                "Archive rejected: unpacked size exceeds the limit of {} MB",
+                max_total_bytes / (1024 * 1024)
+            ));
+        }
+    }
     for name in names.lines().filter(|l| !l.is_empty()) {
         let path = std::path::Path::new(name);
         if name.starts_with('/') || name.starts_with('\\') || path.is_absolute() {
@@ -376,7 +424,24 @@ fn copy_dir_selective(src: &PathBuf, dst: &PathBuf, names: &[&str]) -> Result<()
 
 #[cfg(test)]
 mod unpack_tests {
-    use super::validate_archive_listing;
+    use super::{listed_entry_size, validate_archive_listing, validate_archive_listing_with_limits};
+
+    #[test]
+    fn reads_sizes_from_bsd_and_gnu_listings() {
+        assert_eq!(listed_entry_size("-rw-r--r--  0 u g 1234 Oct 21 18:00 a/b"), Some(1234));
+        assert_eq!(listed_entry_size("-rw-r--r-- u/g 99 2026-10-21 18:00 a/b"), Some(99));
+        assert_eq!(listed_entry_size("garbage"), None);
+    }
+
+    #[test]
+    fn rejects_oversized_or_too_many_entries() {
+        let names = "a/1\na/2\n";
+        let verbose = "-rw-r--r--  0 u g 600 Oct 21 18:00 a/1\n-rw-r--r--  0 u g 600 Oct 21 18:00 a/2\n";
+        assert!(validate_archive_listing_with_limits(names, verbose, 1_200, 10).is_ok());
+        assert!(validate_archive_listing_with_limits(names, verbose, 1_000, 10).is_err());
+        assert!(validate_archive_listing_with_limits(names, verbose, 10_000, 1).is_err());
+        assert!(validate_archive_listing_with_limits("a\n", "-rw-r--r-- nonsense\n", 10_000, 10).is_err());
+    }
 
     #[test]
     fn accepts_normal_pack_listing() {
