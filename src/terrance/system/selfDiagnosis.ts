@@ -71,12 +71,16 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * service forever. Absent entries mean "not declined".
  */
 export async function loadDeclinedUntil(candidates: string[], now: number): Promise<Record<string, number>> {
+  return (await readKvCooldowns(candidates, now)).values;
+}
+
+async function readKvCooldowns(candidates: string[], now: number): Promise<{ values: Record<string, number>; corrupted: boolean }> {
   const cap = now + DECLINE_COOLDOWN_MS;
-  const all = () => Object.fromEntries(candidates.map((s) => [s, cap]));
+  const all = () => ({ values: Object.fromEntries(candidates.map((s) => [s, cap])), corrupted: true });
   let parsed: unknown;
   try {
     const raw = await invoke<string | null>("load_kv", { key: DECLINE_COOLDOWN_KV_KEY });
-    if (raw == null) return {};
+    if (raw == null) return { values: {}, corrupted: false };
     parsed = JSON.parse(raw);
   } catch (e) {
     console.error("[self-diagnosis] decline cooldown unreadable; failing closed:", e);
@@ -92,7 +96,44 @@ export async function loadDeclinedUntil(candidates: string[], now: number): Prom
     const v = parsed[s];
     out[s] = typeof v === "number" && Number.isFinite(v) ? Math.min(v, cap) : cap;
   }
-  return out;
+  return { values: out, corrupted: false };
+}
+
+/**
+ * In-memory mirror of the decline cooldowns. Merged with kv (max per service,
+ * clamped to now+4h) on every check, so a failed save_kv after a Deny or a
+ * corrupted kv value still bounds prompting to the 4h window for this run.
+ */
+const memDeclinedUntil: Record<string, number> = {};
+const repairedThisRun = new Set<string>();
+
+/** Effective cooldowns for `candidates`; repairs a corrupted kv value once. */
+async function currentCooldowns(candidates: string[], now: number): Promise<Record<string, number>> {
+  const cap = now + DECLINE_COOLDOWN_MS;
+  const { values, corrupted } = await readKvCooldowns(candidates, now);
+  if (corrupted) {
+    // Fail closed once, then repair: a clean, dated map so the block ends after 4h
+    // instead of recomputing now+4h forever.
+    // Services already repaired this run keep their original deadline, so a
+    // repair that can't be saved still ends after 4h instead of sliding forever.
+    const clean: Record<string, number> = {};
+    for (const s of candidates) {
+      if (!repairedThisRun.has(s)) {
+        memDeclinedUntil[s] = Math.max(memDeclinedUntil[s] ?? 0, cap);
+        repairedThisRun.add(s);
+      }
+      clean[s] = memDeclinedUntil[s];
+    }
+    console.warn(`[self-diagnosis] repairing corrupted decline cooldown in kv; blocking ${candidates.join(", ")} until ${new Date(cap).toISOString()}`);
+    await saveDeclinedUntil(clean);
+  }
+  const merged: Record<string, number> = {};
+  for (const s of candidates) {
+    // A corrupted read yields synthetic now+4h values; rely on the dated in-memory map instead.
+    const v = Math.max(corrupted ? 0 : values[s] ?? 0, memDeclinedUntil[s] ?? 0);
+    if (v > 0) merged[s] = Math.min(v, cap);
+  }
+  return merged;
 }
 
 async function saveDeclinedUntil(map: Record<string, number>): Promise<void> {
@@ -121,6 +162,8 @@ async function telegramAlert(text: string): Promise<void> {
 /** Test-only: forget the in-flight cycle. */
 export function __resetAutoHealForTests(): void {
   inFlight = null;
+  for (const k of Object.keys(memDeclinedUntil)) delete memDeclinedUntil[k];
+  repairedThisRun.clear();
 }
 
 export async function runDiagnostics(): Promise<DiagnosticReport> {
@@ -232,7 +275,7 @@ async function runAutoHeal(report: DiagnosticReport, now: number): Promise<AutoH
   const wanted = [...new Set(report.issues.filter((i) => i.canAutoHeal).map(serviceIdFor).filter((s): s is string => !!s))].slice(0, 8);
   if (wanted.length === 0) return { status: "none", actions: [] };
 
-  const declinedUntil = await loadDeclinedUntil(wanted, now);
+  const declinedUntil = await currentCooldowns(wanted, now);
   const services = wanted.filter((s) => !(declinedUntil[s] > now));
   if (services.length === 0) {
     console.log("[self-diagnosis] restart recently declined; waiting out the 4h cooldown");
@@ -248,7 +291,10 @@ async function runAutoHeal(report: DiagnosticReport, now: number): Promise<AutoH
     switch (outcome) {
       case "declined": {
         const until = now + DECLINE_COOLDOWN_MS;
-        for (const s of services) declinedUntil[s] = until;
+        for (const s of services) {
+          declinedUntil[s] = until;
+          memDeclinedUntil[s] = until; // survives a failed save_kv for this run
+        }
         await saveDeclinedUntil(declinedUntil);
         console.log(`[self-diagnosis] restart declined for ${services.join(", ")}; next prompt after 4h`);
         quietNotice(RESTART_DECLINED_NOTICE);

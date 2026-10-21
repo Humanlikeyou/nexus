@@ -212,3 +212,50 @@ describe("decline cooldown fails closed", () => {
     expect(calls("restart_services")).toHaveLength(0);
   });
 });
+
+describe("cooldown resilience", () => {
+  it("save_kv failing after a Deny still blocks the next cycle (in-memory cooldown)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const base = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (cmd: string, args: any) => {
+      if (cmd === "save_kv") throw new Error("disk full");
+      return base(cmd, args);
+    });
+    restart = async () => { throw "declined: Denied"; };
+    expect((await autoHeal(report("openclaw"), NOW)).status).toBe("declined");
+    expect(kv[DECLINE_COOLDOWN_KV_KEY]).toBeUndefined();
+    const next = await autoHeal(report("openclaw"), NOW + 5 * 60_000);
+    expect(next.status).toBe("declined");
+    expect(calls("restart_services")).toHaveLength(1);
+  });
+
+  it("corrupted kv is repaired once: no prompt for 4h, then a prompt", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    kv[DECLINE_COOLDOWN_KV_KEY] = "{garbage";
+    expect((await autoHeal(report("openclaw"), NOW)).status).toBe("declined");
+    expect(JSON.parse(kv[DECLINE_COOLDOWN_KV_KEY])).toEqual({ openclaw: NOW + DECLINE_COOLDOWN_MS });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("repairing"))).toBe(true);
+    expect((await autoHeal(report("openclaw"), NOW + 3 * 60 * 60_000)).status).toBe("declined");
+    expect(calls("restart_services")).toHaveLength(0);
+    expect((await autoHeal(report("openclaw"), NOW + DECLINE_COOLDOWN_MS + 1)).status).toBe("addressed");
+    expect(calls("restart_services")).toHaveLength(1);
+  });
+
+  it("a failed repair save is still bounded to 4h by the in-memory map", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const base = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (cmd: string, args: any) => {
+      if (cmd === "load_kv") return "[]"; // stays corrupted: repair can't be written
+      if (cmd === "save_kv") throw new Error("read-only");
+      return base(cmd, args);
+    });
+    expect((await autoHeal(report("openclaw"), NOW)).status).toBe("declined");
+    expect((await autoHeal(report("openclaw"), NOW + 60 * 60_000)).status).toBe("declined");
+    expect(calls("restart_services")).toHaveLength(0);
+    // kv is still corrupted, but the in-memory deadline from the first repair (NOW+4h) holds.
+    expect((await autoHeal(report("openclaw"), NOW + DECLINE_COOLDOWN_MS + 1)).status).toBe("addressed");
+    expect(calls("restart_services")).toHaveLength(1);
+  });
+});
