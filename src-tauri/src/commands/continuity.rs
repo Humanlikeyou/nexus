@@ -13,15 +13,24 @@ use std::path::PathBuf;
 
 // ─── Paths ─────────────────────────────────────────────────────────────────────
 
+/// Environment variable that overrides the continuity data directory
+/// (useful for tests, dev profiles and portable installs).
+pub(crate) const DATA_DIR_ENV: &str = "NEXUS_DATA_DIR";
+
 fn data_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os(DATA_DIR_ENV).filter(|v| !v.is_empty()) {
+        return PathBuf::from(dir);
+    }
     dirs::data_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join("Library/Application Support")))
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("com.taisun.electron")
+        .join(crate::app_paths::DATA_DIR_NAME)
 }
 
+const CONTEXT_FILE: &str = "terrance_context.json";
+
 fn context_path() -> PathBuf {
-    data_dir().join("terrance_context.json")
+    data_dir().join(CONTEXT_FILE)
 }
 
 fn session_logs_dir() -> PathBuf {
@@ -154,7 +163,17 @@ where
 
 #[tauri::command]
 pub fn load_terrance_context() -> Result<TerranceContext, String> {
-    let path = context_path();
+    load_context_from(&data_dir())
+}
+
+#[tauri::command]
+pub fn save_terrance_context(context: TerranceContext) -> Result<(), String> {
+    save_context_to(&data_dir(), &context)
+}
+
+/// Load the context from `dir/terrance_context.json` (default if missing).
+pub(crate) fn load_context_from(dir: &std::path::Path) -> Result<TerranceContext, String> {
+    let path = dir.join(CONTEXT_FILE);
     if !path.exists() {
         return Ok(TerranceContext::default());
     }
@@ -162,12 +181,11 @@ pub fn load_terrance_context() -> Result<TerranceContext, String> {
     serde_json::from_str(&raw).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub fn save_terrance_context(context: TerranceContext) -> Result<(), String> {
-    let dir = data_dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let json = serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?;
-    atomic_write(&context_path(), json.as_bytes()).map_err(|e| e.to_string())
+/// Atomically save the context to `dir/terrance_context.json`.
+pub(crate) fn save_context_to(dir: &std::path::Path, context: &TerranceContext) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(context).map_err(|e| e.to_string())?;
+    atomic_write(&dir.join(CONTEXT_FILE), json.as_bytes()).map_err(|e| e.to_string())
 }
 
 /// Write `bytes` to `path` atomically: write a uniquely named temp file in the
@@ -566,6 +584,34 @@ mod tests {
     }
 
     #[test]
+    fn context_roundtrip_in_custom_dir() {
+        let dir = temp_dir("roundtrip");
+        assert!(load_context_from(&dir).unwrap().active_goals.is_empty());
+        assert!(!dir.join(CONTEXT_FILE).exists(), "load must not create the file");
+        let mut ctx = TerranceContext::default();
+        ctx.active_goals = vec!["ship nexus-v2".into()];
+        ctx.daily_summary_hour = Some(6);
+        ctx.last_evening_timestamp = Some(42);
+        save_context_to(&dir, &ctx).unwrap();
+        let raw = fs::read_to_string(dir.join(CONTEXT_FILE)).unwrap();
+        assert!(raw.contains("\"dailySummaryHour\": 6"));
+        let back = load_context_from(&dir).unwrap();
+        assert_eq!(back.active_goals, ctx.active_goals);
+        assert_eq!(back.daily_summary_hour, Some(6));
+        assert_eq!(back.last_evening_timestamp, Some(42));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_context_errors_and_is_not_overwritten_by_load() {
+        let dir = temp_dir("corrupt");
+        fs::write(dir.join(CONTEXT_FILE), b"{\"activeGoals\": [").unwrap();
+        assert!(load_context_from(&dir).is_err());
+        assert_eq!(fs::read(dir.join(CONTEXT_FILE)).unwrap(), b"{\"activeGoals\": [");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn atomic_write_replaces_content_and_leaves_no_temp_files() {
         let dir = temp_dir("atomic");
         let path = dir.join("terrance_context.json");
@@ -673,4 +719,29 @@ pub fn save_subagents(data: String) -> Result<(), String> {
     let dir = data_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     fs::write(subagents_path(), data).map_err(|e| e.to_string())
+}
+
+/// Failing repros for TEST_PLAN bugs #1 and #9 (see /workspace/nexus-qa/TEST_PLAN.md).
+#[cfg(test)]
+mod repro_tests {
+    use super::*;
+
+    /// Bug #9: an out-of-range `dailySummaryHour` (u8) makes the whole context
+    /// unreadable, which the frontend turns into an empty context and then a wipe.
+    /// Intended: tolerate or clamp the bad field and keep the rest of the context.
+    #[test]
+    fn repro_out_of_range_summary_hour_does_not_fail_whole_context() {
+        let raw = r#"{"activeGoals":["Ship v2"],"lastSessionSummary":null,
+            "lastSessionTimestamp":null,"relevantMemory":["m"],"dailySummaryHour":300}"#;
+        let parsed = serde_json::from_str::<TerranceContext>(raw);
+        assert!(parsed.is_ok(), "context load failed on one bad field: {:?}", parsed.err());
+    }
+
+    /// Bug #1 (Rust side): `save_terrance_context` uses a plain `fs::write`, so a crash
+    /// mid-write leaves a truncated file. There's no path seam to fault-inject today.
+    #[test]
+    #[ignore = "needs approved refactor: save_terrance_context_at(path) + atomic tmp+rename; assert no partial file / no leftover .tmp"]
+    fn repro_context_save_is_atomic() {
+        todo!("write via save_terrance_context_at(tmpdir) with an injected failure between write and rename");
+    }
 }
