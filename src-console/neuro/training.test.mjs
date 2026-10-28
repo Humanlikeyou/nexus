@@ -61,6 +61,19 @@ test("calm % counts non-gated entries at or above 1.1x the relaxation baseline",
   assert.equal(calmPercent([entry(0, 3, true)], 1), null);
 });
 
+test("calm % is null for a zero or negative baseline", () => {
+  const timeline = [entry(0, 1), entry(500, -2), entry(1000, 0)];
+  assert.equal(calmPercent(timeline, 0), null);
+  assert.equal(calmPercent(timeline, -1), null);
+  assert.equal(calmPercent(timeline, NaN), null);
+});
+
+test("calm % leaves non-finite relaxation entries out of numerator and denominator", () => {
+  const timeline = [entry(0, 2), entry(500, NaN), entry(1000, 1), entry(1500, Infinity)];
+  assert.equal(calmPercent(timeline, 1), 50); // 1 of the 2 finite entries reaches 1.1
+  assert.equal(calmPercent([entry(0, NaN)], 1), null);
+});
+
 test("relaxation baseline is the calibration mean, else the first 60 s of valid entries", () => {
   assert.equal(relaxationBaseline([1, 2, 3], [entry(0, 100)]), 2);
   const timeline = [entry(0, 9, true), entry(1000, 1), entry(30_000, 3), entry(61_000, 50)];

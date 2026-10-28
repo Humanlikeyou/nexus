@@ -44,10 +44,14 @@ export function relaxationBaseline(calibration: number[], timeline: TimelineEntr
   return mean(valid.filter((entry) => entry.timestamp - start < FALLBACK_BASELINE_MS).map((entry) => entry.relaxation));
 }
 
-/** Share (0–100) of non-gated entries with relaxation >= CALM_RATIO x baseline; null without data. */
+/**
+ * Share (0–100) of non-gated entries with relaxation >= CALM_RATIO x baseline; null without data.
+ * A baseline <= 0 has no meaningful ratio, so it yields null; non-finite relaxation entries are
+ * left out of both the numerator and the denominator.
+ */
 export function calmPercent(timeline: TimelineEntry[], baseline: number | null): number | null {
-  if (baseline === null || !Number.isFinite(baseline)) return null;
-  const valid = timeline.filter((entry) => !entry.gated);
+  if (baseline === null || !Number.isFinite(baseline) || baseline <= 0) return null;
+  const valid = timeline.filter((entry) => !entry.gated && Number.isFinite(entry.relaxation));
   if (!valid.length) return null;
   return valid.filter((entry) => entry.relaxation >= CALM_RATIO * baseline).length / valid.length * 100;
 }

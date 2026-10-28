@@ -16,9 +16,11 @@ const emptySeries = (): BandSeries => ({ delta: [], theta: [], alpha: [], beta: 
 /**
  * Rolling 60 s history of relative band power, fed by the telemetry store's
  * ≤4 Hz publishes (Decision 7: client-side, Neuro screen only). Points older
- * than the window are dropped; a telemetry reset (packetCount back to 0) clears it.
+ * than the window (relative to the newest point and to `now()`) are dropped; a
+ * telemetry reset (packetCount back to 0) clears it, and so does a stall: when
+ * the last packet is more than `windowMs` old the sparklines empty out.
  */
-export function createBandHistory(source: Source = museTelemetry, windowMs = HISTORY_MS) {
+export function createBandHistory(source: Source = museTelemetry, windowMs = HISTORY_MS, now: () => number = Date.now) {
   let points: Array<{ at: number; bands: FrequencyBands }> = [];
   let lastPacket = -1;
   let series: BandSeries = emptySeries();
@@ -30,6 +32,19 @@ export function createBandHistory(source: Source = museTelemetry, windowMs = HIS
     for (const point of points) for (const key of BAND_KEYS) series[key].push(point.bands[key]);
   };
 
+  /** Drop points outside the window; returns true when anything changed. */
+  const prune = (lastPacketAt: number | null): boolean => {
+    if (!points.length) return false;
+    const at = now();
+    const stalled = lastPacketAt == null || at - lastPacketAt > windowMs;
+    const newest = points[points.length - 1].at;
+    const kept = stalled ? [] : points.filter((point) => newest - point.at <= windowMs && at - point.at <= windowMs);
+    if (kept.length === points.length) return false;
+    points = kept;
+    rebuild();
+    return true;
+  };
+
   const onTelemetry = () => {
     const telemetry = source.getSnapshot();
     if (telemetry.packetCount === lastPacket) return;
@@ -38,8 +53,7 @@ export function createBandHistory(source: Source = museTelemetry, windowMs = HIS
     if (telemetry.sampleCount >= MIN_SAMPLES && telemetry.lastPacketAt != null) {
       points.push({ at: telemetry.lastPacketAt, bands: telemetry.bands });
     }
-    const newest = points.length ? points[points.length - 1].at : 0;
-    points = points.filter((point) => newest - point.at <= windowMs);
+    prune(telemetry.lastPacketAt);
     rebuild();
     for (const listener of listeners) listener();
   };
@@ -53,7 +67,11 @@ export function createBandHistory(source: Source = museTelemetry, windowMs = HIS
         if (listeners.size === 0) { unsubscribe?.(); unsubscribe = null; }
       };
     },
-    getSnapshot: () => series,
+    /** Also prunes lazily (e.g. on the screen's 1 s tick) so a stall empties the series without new packets. */
+    getSnapshot: () => {
+      prune(source.getSnapshot().lastPacketAt);
+      return series;
+    },
   };
 }
 
