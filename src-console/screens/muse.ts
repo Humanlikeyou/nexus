@@ -1,5 +1,5 @@
 import { tone, number } from "../lib/format";
-import type { MuseTelemetry } from "../neuro/useMuseTelemetry";
+import type { MuseTelemetry } from "../neuro/telemetryStore";
 import type { MuseDevice, SystemSnapshot } from "../types";
 
 export type MuseOperation = "scanning" | "connecting" | "starting" | "stopping" | "disconnecting" | null;
@@ -7,7 +7,6 @@ export type MuseOperation = "scanning" | "connecting" | "starting" | "stopping" 
 export interface MuseScreenProps {
   data: SystemSnapshot;
   devices: MuseDevice[];
-  telemetry: MuseTelemetry;
   operation: MuseOperation;
   error: string | null;
   sessionStartedAt: number | null;

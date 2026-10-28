@@ -3,7 +3,7 @@ import { tone, number, date } from "../lib/format";
 import type { MuseScreenProps } from "./muse";
 import { BrainCircuit, Bluetooth, HeartPulse, RefreshCw, Unplug } from "lucide-react";
 
-export function DevicesField({ data, devices, operation, error, onScan, onConnect, onDisconnect }: Omit<MuseScreenProps, "telemetry" | "sessionStartedAt" | "sessionEndedAt" | "onStart" | "onStop">) {
+export function DevicesField({ data, devices, operation, error, onScan, onConnect, onDisconnect }: Omit<MuseScreenProps, "sessionStartedAt" | "sessionEndedAt" | "onStart" | "onStop">) {
   const noopReady = data.noop.status === "ready" || data.noop.status === "waiting_for_nightly_data" || data.noop.status === "stale";
   return <div className="system-field devices-field">
     <PageHeading eyebrow="Connections" title="Devices" description="Manage the sensors Nexus reads from and understand their current state." actions={<ActionButton icon={RefreshCw} onClick={onScan} disabled={operation !== null}>{operation === "scanning" ? "Searching..." : "Scan for Muse"}</ActionButton>} />

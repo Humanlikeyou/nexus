@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PROTOCOLS } from "../../src/lib/neurofeedback/protocols";
 import { INACTIVE_TRAINING, TrainingSession } from "./training";
-import type { MuseTelemetry } from "./useMuseTelemetry";
+import type { MuseTelemetry } from "./telemetryStore";
 
-export function useTraining(telemetry: MuseTelemetry, active: boolean) {
+/** `readTelemetry` is read on each 500 ms tick (no React subscription to live data). */
+export function useTraining(readTelemetry: () => MuseTelemetry, active: boolean) {
   const [protocolId, setProtocolId] = useState("off");
   const [state, setState] = useState(INACTIVE_TRAINING);
   const session = useRef<TrainingSession | null>(null);
-  const live = useRef({ telemetry, active });
-  live.current = { telemetry, active };
+  const live = useRef({ readTelemetry, active });
+  useEffect(() => { live.current = { readTelemetry, active }; }, [readTelemetry, active]);
 
   const begin = useCallback(() => {
     const protocol = PROTOCOLS.find((item) => item.id === protocolId);
@@ -19,7 +20,7 @@ export function useTraining(telemetry: MuseTelemetry, active: boolean) {
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (live.current.active && session.current) {
-        setState({ ...session.current.tick(live.current.telemetry, Date.now()) });
+        setState({ ...session.current.tick(live.current.readTelemetry(), Date.now()) });
       }
     }, 500);
     return () => window.clearInterval(timer);

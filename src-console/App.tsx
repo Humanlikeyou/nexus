@@ -6,13 +6,13 @@ import { useMuseSession } from "./app/useMuseSession";
 import { runApproval } from "./lib/approval";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
-import { ActivityField, BusinessField, DevicesField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, TrajectoryField } from "./app/lazyScreens";
+import { ActivityField, BusinessField, DevicesField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, TrajectoryField, retryLazyScreens } from "./app/lazyScreens";
+import { ScreenErrorBoundary } from "./shell/ScreenErrorBoundary";
 import { approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";
 import { CommandSurface } from "./design/SystemPrimitives";
 import { useAppearance } from "./design/useAppearance";
 import { useIdleAutoSave } from "./hooks/useIdleAutoSave";
 import { useSchedulerLifecycle } from "./hooks/useSchedulerLifecycle";
-import { number } from "./lib/format";
 import { ChatField } from "./screens/ChatScreen";
 import { TerranceField } from "./screens/TerranceScreen";
 import { ContextInspector } from "./shell/ContextInspector";
@@ -26,7 +26,7 @@ export default function App() {
   const [active, setActive] = useState<ModuleId>("terrance");
   const { data, busy, setBusy, refresh } = useSnapshot();
   const [notice, setNotice] = useState<string | null>(null);
-  const { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, telemetry, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession } = useMuseSession(data, refresh, setNotice);
+  const { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession } = useMuseSession(data, refresh, setNotice);
   const [contextInspectorOpen, setContextInspectorOpen] = useState(false);
   const { theme, setTheme, reduceMotion, setReduceMotion } = useAppearance();
   // Terrance background scheduler: started once for the shell, stopped on unmount.
@@ -72,7 +72,7 @@ export default function App() {
   const retrySnapshot = () => { void refresh(); };
   const view = active === "terrance" ? <TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} />
     : active === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
-    : active === "neuro" ? <NeuroField training={training} data={data} devices={museDevices} telemetry={telemetry} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
+    : active === "neuro" ? <NeuroField training={training} data={data} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : active === "sessions" ? <SessionsField data={data} />
     : active === "devices" ? <DevicesField data={data} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} />
     : active === "business" ? <BusinessField data={data} />
@@ -86,7 +86,7 @@ export default function App() {
     <CommandSurface mode={active}>
       <Toolbar label={selected.label} busy={busy} onRefresh={refresh} />
       <Sidebar active={active} onSelect={setActive} data={data} />
-      <section className="active-field" aria-label={`${selected.label} system`}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></section>
+      <section className="active-field" aria-label={`${selected.label} system`}><ScreenErrorBoundary resetKey={active} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
       <Footer data={data} busy={busy} />
       {notice && <div className="field-notice"><i />{notice}</div>}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />

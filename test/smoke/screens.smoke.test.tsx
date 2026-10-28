@@ -173,7 +173,6 @@ describe("isolated clock", () => {
     for (let i = 0; i < 240; i++) await act(async () => { await vi.advanceTimersByTimeAsync(250); });
     expect(document.querySelector(".field-clock strong")?.textContent).not.toBe(clockBefore);
     // 4 snapshot refreshes x (busy on, data, busy off) = at most ~12 App renders; nothing per tick.
-    // Known bug: useMuseTelemetry setTelemetry every 250 ms re-renders App even when idle.
     expect(h.appRenders - base, "App renders during 60 s idle").toBeLessThanOrEqual(12);
   });
 });

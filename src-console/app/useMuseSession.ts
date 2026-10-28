@@ -1,8 +1,8 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { connectMuse, disconnectMuse, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "../bridge";
 import { readableError } from "../lib/format";
 import { SessionFinalizer } from "../neuro/sessionFinalizer";
-import { useMuseTelemetry } from "../neuro/useMuseTelemetry";
+import { museTelemetry } from "../neuro/telemetryStore";
 import { useTraining } from "../neuro/useTraining";
 import type { MuseOperation } from "../screens/muse";
 import type { MuseDevice, RecordedSession, SystemSnapshot } from "../types";
@@ -22,8 +22,11 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
   const sessionFinalizer = useRef<SessionFinalizer<{ session: RecordedSession & { file_path: string }; data: Record<string, unknown> }> | null>(null);
   const sessionOperation = useRef(false);
   const sessionStopTime = useRef<number | null>(null);
-  const { telemetry, reset: resetTelemetry, readCounters } = useMuseTelemetry();
-  const training = useTraining(telemetry, sessionStartedAt !== null && sessionEndedAt === null && data.muse.streaming);
+  // Live telemetry lives in an external store; this hook never re-renders on packets.
+  useEffect(() => museTelemetry.start(), []);
+  const resetTelemetry = museTelemetry.reset;
+  const readCounters = museTelemetry.readCounters;
+  const training = useTraining(museTelemetry.getSnapshot, sessionStartedAt !== null && sessionEndedAt === null && data.muse.streaming);
 
   const scanForMuse = useCallback(async () => {
     setMuseOperation("scanning");
@@ -180,5 +183,5 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     }
   }, [data.muse.streaming, sessionStartedAt, persistMuseSession, refresh, resetTelemetry, training.finish]);
 
-  return { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, telemetry, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession };
+  return { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession };
 }
