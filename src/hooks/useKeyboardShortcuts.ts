@@ -2,13 +2,16 @@ import { useEffect } from "react";
 import { useNexus } from "@/context/NexusContext";
 import type { PageId } from "@/lib/types";
 
+// Mirrors the Amara OS 6-item nav (src-console/app/routes.ts SYSTEMS): Home, Chat & Agents,
+// Fitness, Neuro, Business, Settings. The legacy app has no "chat" page, so ⌘2 opens its
+// "assistant" page; trajectory and revenue stay reachable from their own pages.
 const pageMap: Record<string, PageId> = {
   "1": "terrance",
-  "2": "business",
-  "3": "assistant",
+  "2": "assistant",
+  "3": "fitness",
   "4": "neuro",
-  "5": "fitness",
-  "6": "trajectory",
+  "5": "business",
+  "6": "settings",
 };
 
 export function useKeyboardShortcuts() {
@@ -43,7 +46,7 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Cmd+1-6 — page navigation
+      // Cmd+1-6 — page navigation (same order as the Amara OS sidebar)
       if (e.key in pageMap) {
         e.preventDefault();
         navigate(pageMap[e.key]);
