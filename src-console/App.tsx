@@ -13,6 +13,7 @@ import { useAppearance } from "./design/useAppearance";
 import { useIdleAutoSave } from "./hooks/useIdleAutoSave";
 import { useSchedulerLifecycle } from "./hooks/useSchedulerLifecycle";
 import { number } from "./lib/format";
+import { ChatField } from "./screens/ChatScreen";
 import { TerranceField } from "./screens/TerranceScreen";
 import { ContextInspector } from "./shell/ContextInspector";
 import { Footer } from "./shell/Footer";
@@ -77,6 +78,7 @@ export default function App() {
     : active === "revenue" ? <RevenueField data={data} />
     : active === "assistant" ? <ActivityField data={data} />
     : active === "trajectory" ? <TrajectoryField data={data} />
+    : active === "chat" ? <ChatField data={data} />
     : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} />;
 
   return (

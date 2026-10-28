@@ -1,12 +1,13 @@
 import type { ModuleId } from "../types";
-import { Activity, BriefcaseBusiness, Bluetooth, Bot, CircleDollarSign, HeartPulse, History, Radio, Route, Settings2, type LucideIcon } from "lucide-react";
+import { Activity, BriefcaseBusiness, Bluetooth, Bot, CircleDollarSign, HeartPulse, History, MessagesSquare, Radio, Route, Settings2, type LucideIcon } from "lucide-react";
 
 export const SYSTEM_GROUPS: Array<{ label: string; systems: Array<{ id: ModuleId; label: string; signal: string; icon: LucideIcon }> }> = [
   { label: "Nexus", systems: [
-    { id: "terrance", label: "Overview", signal: "AI", icon: Bot },
-    { id: "neuro", label: "Live", signal: "EEG", icon: Radio },
+    { id: "terrance", label: "Home", signal: "AI", icon: Bot },
+    { id: "chat", label: "Chat & Agents", signal: "CHAT", icon: MessagesSquare },
+    { id: "neuro", label: "Neuro", signal: "EEG", icon: Radio },
     { id: "sessions", label: "Sessions", signal: "HISTORY", icon: History },
-    { id: "health", label: "Health", signal: "NOOP", icon: HeartPulse },
+    { id: "health", label: "Fitness", signal: "NOOP", icon: HeartPulse },
   ] },
   { label: "Direction", systems: [
     { id: "trajectory", label: "Trajectory", signal: "GOALS", icon: Route },

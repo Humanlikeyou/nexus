@@ -39,7 +39,8 @@
   --accent-hover: color-mix(in srgb, var(--accent-strong) 88%, #000);
 
   --sidebar-selection: rgba(0, 0, 0, .06);
-  --selection: color-mix(in srgb, var(--accent) 14%, var(--bg-content));
+  /* Gray list/row selection (macOS); the accent tints the icon, not the row. */
+  --selection: rgba(0, 0, 0, .06);
   --focus-ring: var(--sys-blue);
 
   --sys-blue: #007aff;
@@ -87,6 +88,7 @@
   --d-accent-strong: #2ec4a6;
   --d-on-accent: #04201b;
   --d-sidebar-selection: rgba(255, 255, 255, .08);
+  --d-selection: rgba(255, 255, 255, .08);
   --d-sys-blue: #0a84ff;
   --d-sys-green: #30d158;
   --d-sys-orange: #ff9f0a;
@@ -182,6 +184,7 @@
   --on-accent: var(--d-on-accent);
   --accent-hover: color-mix(in srgb, var(--d-accent) 85%, #fff);
   --sidebar-selection: var(--d-sidebar-selection);
+  --selection: var(--d-selection);
   --sys-blue: var(--d-sys-blue);
   --sys-green: var(--d-sys-green);
   --sys-orange: var(--d-sys-orange);
@@ -215,6 +218,7 @@
     --on-accent: var(--d-on-accent);
     --accent-hover: color-mix(in srgb, var(--d-accent) 85%, #fff);
     --sidebar-selection: var(--d-sidebar-selection);
+    --selection: var(--d-selection);
     --sys-blue: var(--d-sys-blue);
     --sys-green: var(--d-sys-green);
     --sys-orange: var(--d-sys-orange);

@@ -8,6 +8,7 @@ import type {
   MuseState,
   NexusUnavailableSource,
   NoopHealthSnapshot,
+  OpenClawStatus,
   OutboxStatus,
   PipelineItem,
   RecordedSession,
@@ -55,6 +56,7 @@ const SOURCE_LABELS: Record<string, string> = {
   read_goals: "Legacy goals",
   get_outbox_status: "Delivery outbox",
   list_activity_entries: "Activity log",
+  read_openclaw_status: "OpenClaw",
 };
 
 function unavailableSource(command: string): NexusUnavailableSource {
@@ -85,6 +87,13 @@ const EMPTY_NOOP: NoopHealthSnapshot = {
   insights: [],
   message: "NOOP health data is not available yet.",
 };
+
+const EMPTY_OPENCLAW: OpenClawStatus = { online: false, model: "unknown", gateway_url: "", last_heartbeat: null };
+
+/** Keep only the typed fields: the Rust command also returns the raw openclaw.json config, which must not sit in UI state. */
+function pickOpenClaw(s: OpenClawStatus): OpenClawStatus {
+  return { online: Boolean(s?.online), model: s?.model ?? "unknown", gateway_url: s?.gateway_url ?? "", last_heartbeat: s?.last_heartbeat ?? null };
+}
 
 const EMPTY_REVENUE: RevenueSummary = {
   total_revenue: 0,
@@ -156,10 +165,11 @@ export const INITIAL_SNAPSHOT: SystemSnapshot = {
   goals: [],
   outbox: { gateway_online: false, queue_depth: 0, last_delivered_at: null, last_error: null, total_delivered: 0 },
   activity: [],
+  openclaw: EMPTY_OPENCLAW,
 };
 
 export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
-  const [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity] =
+  const [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw] =
     await Promise.all([
       read<HermesRuntimeHealth>("get_terrence_runtime_health", INITIAL_SNAPSHOT.hermes),
       read<TerrenceCapability[]>("list_terrence_capabilities", []),
@@ -181,9 +191,10 @@ export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
       read<Goal[]>("read_goals", []),
       read<OutboxStatus>("get_outbox_status", INITIAL_SNAPSHOT.outbox),
       read<ActivityEntry[]>("list_activity_entries", [], { limit: 30 }),
+      read<OpenClawStatus>("read_openclaw_status", EMPTY_OPENCLAW),
     ]);
 
-  const reads = [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity];
+  const reads = [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw];
 
   return {
     refreshedAt: Date.now(),
@@ -208,6 +219,7 @@ export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
     goals: goals.value,
     outbox: outbox.value,
     activity: activity.value,
+    openclaw: pickOpenClaw(openclaw.value),
   };
 }
 

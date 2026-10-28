@@ -1,4 +1,4 @@
-export type ModuleId = "terrance" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "trajectory" | "settings";
+export type ModuleId = "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "trajectory" | "settings";
 
 export interface OpenClawStatus {
   online: boolean;
@@ -440,6 +440,8 @@ export interface SystemSnapshot {
   goals: Goal[];
   outbox: OutboxStatus;
   activity: ActivityEntry[];
+  /** OpenClaw gateway (local config + heartbeat file). `online` = config present. */
+  openclaw: OpenClawStatus;
 }
 
 export interface NexusUnavailableSource {

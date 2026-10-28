@@ -57,7 +57,8 @@ afterEach(() => {
 
 const nav = () => screen.getByRole("navigation", { name: "Nexus navigation" });
 const go = (label: string) => fireEvent.click(within(nav()).getByTitle(new RegExp(`^${label}( \\(|$)`)));
-const field = (label: string) => document.querySelector(`section.active-field[aria-label="${label} system"]`) as HTMLElement | null;
+// Match by attribute value, not a CSS selector: labels like "Chat & Agents" break selector parsing.
+const field = (label: string) => (Array.from(document.querySelectorAll<HTMLElement>("section.active-field")).find((el) => el.getAttribute("aria-label") === `${label} system`) ?? null);
 
 describe("lazy screens", () => {
   // Pre-warm every screen chunk so lazy() resolves in microtasks, not on module-transform
@@ -93,11 +94,11 @@ describe("lazy screens", () => {
     vi.useFakeTimers();
     render(<App />);
     await flush();
-    go("Health");
-    await settle("Health");
-    go("Overview");
-    go("Health");
-    expect(loading("Health")).toBeNull();
+    go("Fitness");
+    await settle("Fitness");
+    go("Home");
+    go("Fitness");
+    expect(loading("Fitness")).toBeNull();
   });
 });
 
@@ -113,7 +114,7 @@ describe("Neuro (Live) session timer (fake timers)", () => {
     h.muse.connected = true;
     render(<App />);
     await flush(); await flush();
-    go("Live");
+    go("Neuro");
     for (let i = 0; i < 5 && !document.querySelector(".live-readout"); i++) await flush();
     expect(readout()).toBe("Ready");
   }
@@ -134,9 +135,9 @@ describe("Neuro (Live) session timer (fake timers)", () => {
     await click(/Start session/);
     await flush(15_000);
     expect(readout()).toBe("00:15");
-    go("Health"); await flush(); await flush();
+    go("Fitness"); await flush(); await flush();
     await flush(10_000);
-    go("Live"); await flush();
+    go("Neuro"); await flush();
     expect(readout()).toBe("00:25");
     await flush(15_000); // includes a 15 s snapshot refresh re-render
     expect(readout()).toBe("00:40");
