@@ -2,7 +2,7 @@ import { Activity, BatteryMedium, HeartPulse, Moon, RefreshCw, Sparkles, Wind } 
 import type { LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { INITIAL_SNAPSHOT } from "../bridge";
-import { date, formatMinutes, number, time } from "../lib/format";
+import { date, formatMinutes, number } from "../lib/format";
 import type { NoopDailyMetric, NoopHealthInsight, NoopHealthSnapshot, SystemSnapshot } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, Ring, SegmentedControl, Sparkline, StatTile, type Tone } from "../ui";
 import "./HealthScreen.css";
@@ -82,7 +82,7 @@ export function buildInsights(health: NoopHealthSnapshot): NoopHealthInsight[] {
     out.push({
       metric: "latest_sleep",
       fact: `${hm(sleepMin)} of sleep`,
-      context: overnight ? `NOOP recorded the latest night from ${time(overnight.startedAt)} to ${time(overnight.endedAt)}.` : "Taken from the latest completed NOOP daily record.",
+      context: overnight ? `NOOP recorded the latest night from ${clock(overnight.startedAt)} to ${clock(overnight.endedAt)}.` : "Taken from the latest completed NOOP daily record.",
     });
   }
   if (stages.length > 0 && overnight) {
