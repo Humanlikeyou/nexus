@@ -223,9 +223,88 @@ async fn loopback_reachable(url: &str) -> bool {
 }
 
 fn read_json(path: &std::path::Path) -> Option<serde_json::Value> {
-    fs::read_to_string(path)
+    read_capped(path, MAX_READ_BYTES)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
+}
+
+/// Largest OpenClaw file (config, heartbeat, cron, tasks, logs, one skill) read into memory.
+const MAX_READ_BYTES: u64 = 1024 * 1024;
+/// Largest skill body `save_skill` will write.
+const MAX_SKILL_BYTES: usize = 256 * 1024;
+
+/// Read a UTF-8 file, refusing anything over `max` bytes (checked before and while reading).
+fn read_capped(path: &std::path::Path, max: u64) -> Result<String, String> {
+    use std::io::Read;
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    if file.metadata().map(|m| m.len()).unwrap_or(0) > max {
+        return Err(format!("file is larger than {max} bytes"));
+    }
+    let mut buf = String::new();
+    file.take(max + 1)
+        .read_to_string(&mut buf)
+        .map_err(|e| e.to_string())?;
+    if buf.len() as u64 > max {
+        return Err(format!("file is larger than {max} bytes"));
+    }
+    Ok(buf)
+}
+
+/// A UI-supplied workspace file must be an existing `.md` inside ~/.openclaw/workspace
+/// (after resolving symlinks); `None` means the default file there.
+fn workspace_file(
+    workspace: &std::path::Path,
+    requested: Option<String>,
+    default_name: &str,
+) -> Result<PathBuf, String> {
+    let Some(raw) = requested.filter(|s| !s.trim().is_empty()) else {
+        return Ok(workspace.join(default_name));
+    };
+    let candidate = PathBuf::from(raw.trim());
+    let candidate = if candidate.is_absolute() {
+        candidate
+    } else {
+        workspace.join(candidate)
+    };
+    let base = workspace
+        .canonicalize()
+        .map_err(|_| "OpenClaw workspace not found".to_string())?;
+    let resolved = candidate
+        .canonicalize()
+        .map_err(|_| "Workspace file not found".to_string())?;
+    if !resolved.starts_with(&base)
+        || !resolved.is_file()
+        || resolved.extension().and_then(|e| e.to_str()) != Some("md")
+    {
+        return Err("Only .md files inside the OpenClaw workspace can be read".to_string());
+    }
+    Ok(resolved)
+}
+
+/// Daily log names are exactly `YYYY-MM-DD`.
+fn daily_log_date(date: Option<String>) -> Result<String, String> {
+    match date {
+        None => Ok(chrono::Local::now().format("%Y-%m-%d").to_string()),
+        Some(d) => {
+            let d = d.trim();
+            let ok = d.len() == 10 && chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok();
+            if ok {
+                Ok(d.to_string())
+            } else {
+                Err("Invalid date: expected YYYY-MM-DD".to_string())
+            }
+        }
+    }
+}
+
+/// Version strings from config/CLI are shown only if they look like versions.
+fn sanitize_version(raw: &str) -> Option<String> {
+    let v = raw.trim();
+    let ok = !v.is_empty()
+        && v.len() <= 40
+        && v.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | ' ' | '_'));
+    ok.then(|| v.to_string())
 }
 
 #[tauri::command]
@@ -422,7 +501,7 @@ mod status_tests {
 #[tauri::command]
 pub fn read_cron_jobs() -> Result<Vec<CronJob>, String> {
     let path = openclaw_dir().join("cron").join("jobs.json");
-    let content = fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string());
+    let content = read_capped(&path, MAX_READ_BYTES).unwrap_or_else(|_| "[]".to_string());
     let jobs: Vec<CronJob> = serde_json::from_str(&content).unwrap_or_default();
     Ok(jobs)
 }
@@ -453,7 +532,10 @@ pub fn read_skills() -> Result<Vec<Skill>, String> {
                 if !seen.insert(name.clone()) {
                     continue;
                 }
-                let content = fs::read_to_string(&path).unwrap_or_default();
+                // Oversized or unreadable skill files are skipped, not loaded.
+                let Ok(content) = read_capped(&path, MAX_READ_BYTES) else {
+                    continue;
+                };
                 // Extract first line after "# " as description
                 let description = content
                     .lines()
@@ -501,6 +583,9 @@ pub fn read_skills() -> Result<Vec<Skill>, String> {
 #[tauri::command]
 pub fn save_skill(name: String, content: String) -> Result<(), String> {
     let dir = openclaw_dir().join("skills");
+    if content.len() > MAX_SKILL_BYTES {
+        return Err(format!("Skill is larger than {MAX_SKILL_BYTES} bytes"));
+    }
     let path = skill_path(&dir, &name)?;
     fs::write(&path, content).map_err(|e| e.to_string())
 }
@@ -528,11 +613,12 @@ pub fn delete_skill(name: String) -> Result<bool, String> {
 
 #[tauri::command]
 pub fn read_tasks(workspace_path: Option<String>) -> Result<Vec<TaskItem>, String> {
-    let path = workspace_path
-        .map(PathBuf::from)
-        .unwrap_or_else(|| openclaw_dir().join("workspace").join("TASKS.md"));
-
-    let content = fs::read_to_string(&path).unwrap_or_default();
+    let path = workspace_file(
+        &openclaw_dir().join("workspace"),
+        workspace_path,
+        "TASKS.md",
+    )?;
+    let content = read_capped(&path, MAX_READ_BYTES).unwrap_or_default();
     let tasks = parse_tasks_md(&content);
     Ok(tasks)
 }
@@ -641,11 +727,12 @@ fn parse_tasks_md(content: &str) -> Vec<TaskItem> {
 pub fn read_content_pipeline(
     workspace_path: Option<String>,
 ) -> Result<Vec<ContentPipelineItem>, String> {
-    let path = workspace_path
-        .map(PathBuf::from)
-        .unwrap_or_else(|| openclaw_dir().join("workspace").join("CONTENT-PIPELINE.md"));
-
-    let content = fs::read_to_string(&path).unwrap_or_default();
+    let path = workspace_file(
+        &openclaw_dir().join("workspace"),
+        workspace_path,
+        "CONTENT-PIPELINE.md",
+    )?;
+    let content = read_capped(&path, MAX_READ_BYTES).unwrap_or_default();
     let items = parse_content_pipeline(&content);
     Ok(items)
 }
@@ -723,13 +810,13 @@ fn parse_content_pipeline(content: &str) -> Vec<ContentPipelineItem> {
 
 #[tauri::command]
 pub fn read_daily_log(date: Option<String>) -> Result<String, String> {
-    let date_str = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+    let date_str = daily_log_date(date)?;
 
     let path = openclaw_dir()
         .join("memory")
         .join(format!("{}.md", date_str));
 
-    let content = fs::read_to_string(&path).unwrap_or_else(|_| {
+    let content = read_capped(&path, MAX_READ_BYTES).unwrap_or_else(|_| {
         format!(
             "# Daily Log — {}\n\nNo log entry found for this date. Logs are created automatically by Terrance during daily operations.\n\n## Notes\n- Start your day with intention\n- Review yesterday's accomplishments\n- Set today's priorities",
             date_str
@@ -976,28 +1063,29 @@ pub struct OpenClawHealth {
 async fn get_openclaw_version() -> Option<String> {
     // Prefer reading from config metadata (always available, no PATH issues)
     let config_path = openclaw_dir().join("openclaw.json");
-    if let Ok(content) = fs::read_to_string(&config_path) {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(ver) = v
-                .get("meta")
-                .and_then(|m| m.get("lastTouchedVersion"))
-                .and_then(|v| v.as_str())
-            {
-                return Some(ver.to_string());
-            }
-        }
+    if let Some(ver) = read_json(&config_path).as_ref().and_then(|v| {
+        v.get("meta")
+            .and_then(|m| m.get("lastTouchedVersion"))
+            .and_then(|v| v.as_str())
+            .and_then(sanitize_version)
+    }) {
+        return Some(ver);
     }
-    // Fallback to CLI
-    tokio::process::Command::new("/opt/homebrew/bin/openclaw")
-        .arg("--version")
-        .kill_on_drop(true)
-        .output()
-        .await
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    // Fallback to CLI (fixed binary and args; bounded so a hung CLI cannot stall health).
+    let out = tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio::process::Command::new("/opt/homebrew/bin/openclaw")
+            .arg("--version")
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    sanitize_version(&String::from_utf8_lossy(&out.stdout))
 }
 
 async fn check_gateway_port() -> bool {
@@ -1130,9 +1218,7 @@ pub async fn get_openclaw_health() -> Result<OpenClawHealth, String> {
     let base = openclaw_dir();
 
     // Read main config
-    let config: Option<serde_json::Value> = fs::read_to_string(base.join("openclaw.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok());
+    let config = read_json(&base.join("openclaw.json"));
 
     // Port + RPC checks run concurrently to minimise latency
     let (gateway, rpc) = tokio::join!(check_gateway_port(), probe_gateway_rpc());
@@ -1158,6 +1244,115 @@ pub async fn get_openclaw_health() -> Result<OpenClawHealth, String> {
         channels,
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d =
+            std::env::temp_dir().join(format!("nexus-oc-{tag}-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    #[test]
+    fn read_capped_refuses_oversized_files() {
+        let d = tmp("cap");
+        let small = d.join("a.md");
+        fs::write(&small, "hello").unwrap();
+        assert_eq!(read_capped(&small, 5).unwrap(), "hello");
+        assert!(read_capped(&small, 4).is_err());
+        assert!(read_capped(&d.join("missing.md"), 10).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn workspace_file_stays_inside_the_workspace() {
+        let root = tmp("ws");
+        let ws = root.join("workspace");
+        fs::create_dir_all(&ws).unwrap();
+        fs::write(ws.join("TASKS.md"), "- [ ] a").unwrap();
+        fs::write(ws.join("notes.txt"), "x").unwrap();
+        fs::write(root.join("secret.md"), "x").unwrap();
+
+        assert_eq!(
+            workspace_file(&ws, None, "TASKS.md").unwrap(),
+            ws.join("TASKS.md")
+        );
+        assert_eq!(
+            workspace_file(&ws, Some("  ".into()), "TASKS.md").unwrap(),
+            ws.join("TASKS.md")
+        );
+        assert_eq!(
+            workspace_file(&ws, Some("TASKS.md".into()), "x").unwrap(),
+            ws.join("TASKS.md")
+        );
+        let abs = ws.join("TASKS.md").to_string_lossy().to_string();
+        assert!(workspace_file(&ws, Some(abs), "x").is_ok());
+        for bad in [
+            "../secret.md".to_string(),
+            root.join("secret.md").to_string_lossy().to_string(),
+            "/etc/hosts".to_string(),
+            "notes.txt".to_string(),
+            "missing.md".to_string(),
+        ] {
+            assert!(
+                workspace_file(&ws, Some(bad.clone()), "x").is_err(),
+                "{bad}"
+            );
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("secret.md"), ws.join("link.md")).unwrap();
+            assert!(
+                workspace_file(&ws, Some("link.md".into()), "x").is_err(),
+                "symlink escape"
+            );
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn daily_log_date_must_be_iso() {
+        assert_eq!(
+            daily_log_date(Some("2026-10-28".into())).unwrap(),
+            "2026-10-28"
+        );
+        assert_eq!(daily_log_date(None).unwrap().len(), 10);
+        for bad in [
+            "../../.ssh/id_rsa",
+            "2026-10-28/../../x",
+            "2026-13-01",
+            "2026-1-2",
+            "",
+            "2026-10-28.md",
+        ] {
+            assert!(daily_log_date(Some(bad.into())).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn versions_are_sanitised() {
+        assert_eq!(
+            sanitize_version("2026.10.1\n").as_deref(),
+            Some("2026.10.1")
+        );
+        assert_eq!(
+            sanitize_version("openclaw 1.2.3-beta+4").as_deref(),
+            Some("openclaw 1.2.3-beta+4")
+        );
+        assert_eq!(sanitize_version("token=abc; rm -rf /"), None);
+        assert_eq!(sanitize_version(&"9".repeat(41)), None);
+        assert_eq!(sanitize_version(""), None);
+    }
+
+    #[test]
+    fn save_skill_refuses_oversized_content_before_touching_disk() {
+        let err = save_skill("too-big".into(), "x".repeat(MAX_SKILL_BYTES + 1)).unwrap_err();
+        assert!(err.contains("larger"), "{err}");
+    }
 }
 
 #[cfg(test)]

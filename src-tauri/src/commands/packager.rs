@@ -31,9 +31,17 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     let archive_name = format!("nexus-backup-{}.tar.gz", timestamp);
     let archive_path = desktop.join(&archive_name);
 
-    // Create a temp staging directory
-    let staging = std::env::temp_dir().join(format!("nexus-pack-{}", timestamp));
-    fs::create_dir_all(&staging).map_err(|e| format!("Failed to create staging dir: {}", e))?;
+    // Fresh, unguessable staging dir (create_dir fails if it already exists, so a
+    // pre-planted dir or symlink in the temp dir is never reused). The archive's
+    // top-level name stays `nexus-pack-*`, which unpack_backup looks for.
+    let staging = std::env::temp_dir().join(format!(
+        "nexus-pack-{}-{}",
+        timestamp,
+        uuid::Uuid::new_v4().simple()
+    ));
+    fs::create_dir(&staging).map_err(|e| format!("Failed to create staging dir: {}", e))?;
+    // Removed on every exit path, including early `?` returns while copying.
+    let _staging_guard = StagingGuard(staging.clone());
 
     let mut includes = Vec::new();
     let mut skipped = Vec::new();
@@ -139,8 +147,7 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
         return Err(format!("tar failed: {}", stderr));
     }
 
-    // Cleanup staging
-    let _ = fs::remove_dir_all(&staging);
+    // Staging cleanup happens when `_staging_guard` drops.
 
     // Get file size
     let metadata = fs::metadata(&archive_path).map_err(|e| e.to_string())?;
