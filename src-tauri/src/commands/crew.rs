@@ -12,13 +12,56 @@ fn crew_service_url() -> String {
         .unwrap_or_else(|| DEFAULT_CREW_SERVICE_URL.to_string())
 }
 
-/// Shared secret from `CREW_SERVICE_TOKEN` (must match stack/.env).
+const CREW_TOKEN_ENV: &str = "CREW_SERVICE_TOKEN";
+/// File under the app data dir holding the token for Finder-launched apps
+/// (written by scripts/sync-crew-token.sh). Must be mode 0600.
+pub(crate) const CREW_TOKEN_FILE: &str = "crew_service_token";
+const NOT_CONFIGURED: &str =
+    "Crew service token is not configured. Run scripts/sync-crew-token.sh, then reopen Amara OS.";
+
+/// Shared secret (must match stack/.env): env `CREW_SERVICE_TOKEN` first,
+/// then `<app data dir>/crew_service_token`.
 fn crew_token() -> Result<String, String> {
-    std::env::var("CREW_SERVICE_TOKEN")
-        .ok()
+    crew_token_from(
+        std::env::var(CREW_TOKEN_ENV).ok(),
+        &crate::app_paths::data_dir().join(CREW_TOKEN_FILE),
+    )
+}
+
+pub(crate) fn crew_token_from(
+    env_value: Option<String>,
+    file: &std::path::Path,
+) -> Result<String, String> {
+    if let Some(v) = env_value
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
-        .ok_or_else(|| "CREW_SERVICE_TOKEN is not set for the Amara OS app".to_string())
+    {
+        return Ok(v);
+    }
+    let meta = match std::fs::symlink_metadata(file) {
+        Ok(m) => m,
+        Err(_) => return Err(NOT_CONFIGURED.to_string()),
+    };
+    if !meta.is_file() {
+        return Err("Crew token file is not a regular file; refusing to read it.".to_string());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o777 != 0o600 {
+            return Err(
+                "Crew token file must be mode 0600 (chmod 600 it or rerun scripts/sync-crew-token.sh)."
+                    .to_string(),
+            );
+        }
+    }
+    let value = std::fs::read_to_string(file)
+        .map_err(|_| "Crew token file could not be read.".to_string())?;
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(NOT_CONFIGURED.to_string());
+    }
+    Ok(value.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,19 +193,92 @@ pub async fn crew_stop(id: String) -> Result<String, String> {
     }
 }
 
+/// One of "not_configured" (no token), "offline" (unreachable), "degraded"
+/// (reachable but unhealthy) or "operational". Never an error: every state is
+/// something the UI shows.
 #[tauri::command]
 pub async fn crew_health() -> Result<String, String> {
+    if crew_token().is_err() {
+        return Ok("not_configured".to_string());
+    }
     let client = reqwest::Client::new();
-    let resp = client
+    let resp = match client
         .get(format!("{}/health", crew_service_url()))
         .timeout(std::time::Duration::from_secs(3))
         .send()
         .await
-        .map_err(|_| "Crew service offline".to_string())?;
+    {
+        Ok(r) => r,
+        Err(_) => return Ok("offline".to_string()),
+    };
 
     if resp.status().is_success() {
         Ok("operational".to_string())
     } else {
         Ok("degraded".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn token_file(tag: &str, contents: &str, mode: u32) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("nexus-crew-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(CREW_TOKEN_FILE);
+        fs::write(&path, contents).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+        path
+    }
+
+    #[test]
+    fn env_token_wins_over_the_file() {
+        let path = token_file("env", "from-file\n", 0o600);
+        assert_eq!(
+            crew_token_from(Some(" from-env ".into()), &path).unwrap(),
+            "from-env"
+        );
+        // blank env falls through to the file
+        assert_eq!(
+            crew_token_from(Some("  ".into()), &path).unwrap(),
+            "from-file"
+        );
+        assert_eq!(crew_token_from(None, &path).unwrap(), "from-file");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn token_file_must_be_0600() {
+        for mode in [0o644, 0o640, 0o400, 0o700] {
+            let path = token_file("perm", "secret", mode);
+            let err = crew_token_from(None, &path).unwrap_err();
+            assert!(err.contains("0600"), "mode {mode:o}: {err}");
+            assert!(!err.contains("secret"));
+            let _ = fs::remove_dir_all(path.parent().unwrap());
+        }
+    }
+
+    #[test]
+    fn empty_or_missing_file_is_not_configured() {
+        let path = token_file("empty", " \n", 0o600);
+        assert_eq!(crew_token_from(None, &path).unwrap_err(), NOT_CONFIGURED);
+        let missing = path.with_file_name("absent");
+        assert_eq!(crew_token_from(None, &missing).unwrap_err(), NOT_CONFIGURED);
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn symlinked_token_file_is_refused() {
+        let real = token_file("link", "secret", 0o600);
+        let link = real.with_file_name("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(crew_token_from(None, &link)
+            .unwrap_err()
+            .contains("regular file"));
+        let _ = fs::remove_dir_all(real.parent().unwrap());
     }
 }
