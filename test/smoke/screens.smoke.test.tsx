@@ -64,7 +64,7 @@ describe("lazy screens", () => {
   // Pre-warm every screen chunk so lazy() resolves in microtasks, not on module-transform
   // time; makes resolution independent of machine load (fake timers throughout).
   beforeAll(async () => {
-    await Promise.all(["Health", "Neuro", "Sessions", "Devices", "Settings", "Business", "Revenue", "Activity", "Trajectory"]
+    await Promise.all(["Health", "Neuro", "Sessions", "Devices", "Settings", "Business", "Revenue", "Activity", "Crews", "Trajectory"]
       .map((n) => import(`../../src-console/screens/${n}Screen.tsx`)));
   });
   const flush = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(0); }); };
@@ -94,7 +94,7 @@ describe("lazy screens", () => {
     vi.useFakeTimers();
     render(<App />);
     await flush();
-    for (const [host, view] of [["Chat & Agents", "Activity"], ["Neuro", "History"], ["Business", "Revenue"]] as const) {
+    for (const [host, view] of [["Chat & Agents", "Activity"], ["Chat & Agents", "Crews"], ["Neuro", "History"], ["Business", "Revenue"]] as const) {
       go(host);
       await settle(host);
       fireEvent.click(within(field(host)!).getByRole("radio", { name: view }));

@@ -30,5 +30,6 @@ export const DevicesField = retryableLazy(() => import("../screens/DevicesScreen
 export const SettingsField = retryableLazy(() => import("../screens/SettingsScreen").then((m) => ({ default: m.SettingsField })));
 export const BusinessField = retryableLazy(() => import("../screens/BusinessScreen").then((m) => ({ default: m.BusinessField })));
 export const RevenueField = retryableLazy(() => import("../screens/RevenueScreen").then((m) => ({ default: m.RevenueField })));
+export const CrewsField = retryableLazy(() => import("../screens/CrewsScreen").then((m) => ({ default: m.CrewsField })));
 export const ActivityField = retryableLazy(() => import("../screens/ActivityScreen").then((m) => ({ default: m.ActivityField })));
 export const TrajectoryField = retryableLazy(() => import("../screens/TrajectoryScreen").then((m) => ({ default: m.TrajectoryField })));

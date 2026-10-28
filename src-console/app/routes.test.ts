@@ -12,6 +12,8 @@ describe("navigation (6 items, 4 groups)", () => {
     expect(resolveRoute("trajectory")).toEqual({ id: "terrance", view: "goals" });
     expect(resolveRoute("revenue")).toEqual({ id: "business", view: "revenue" });
     expect(resolveRoute("assistant")).toEqual({ id: "chat", view: "activity" });
+    expect(resolveRoute("crews")).toEqual({ id: "chat", view: "crews" });
+    expect(HOST_VIEWS.chat?.map((v) => v.label)).toEqual(["Chat", "Activity", "Crews"]);
     expect(resolveRoute("devices")).toEqual({ id: "settings", view: "devices" });
     expect(screenFor(resolveRoute("trajectory"))).toBe("terrance");
     expect(screenFor(resolveRoute("devices"))).toBe("settings");

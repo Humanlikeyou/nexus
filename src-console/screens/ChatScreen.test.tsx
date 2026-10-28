@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ConversationMessage } from "../app/conversation";
@@ -37,6 +37,23 @@ function setup(over: Partial<ChatFieldProps> = {}) {
 }
 
 describe("ChatField", () => {
+  it("agent column: Crews row shows the running count and opens the Crews view", () => {
+    const onOpenCrews = vi.fn();
+    const runs = [
+      { id: "a", name: "a", status: "running", agents: [], started_at: null, task: null, result: null },
+      { id: "b", name: "b", status: "completed", agents: [], started_at: null, task: null, result: null },
+    ];
+    setup({ onOpenCrews, data: { ...loaded, crew: { health: "online", runs } } });
+    fireEvent.click(screen.getByRole("button", { name: /Crews/ }));
+    expect(screen.getByText("1 running")).toBeInTheDocument();
+    expect(onOpenCrews).toHaveBeenCalled();
+  });
+
+  it("agent column: Crews row says Not configured without a token", () => {
+    setup({ onOpenCrews: vi.fn(), data: { ...loaded, crew: { health: "not_configured", runs: [] } } });
+    expect(screen.getByText("Not configured")).toBeInTheDocument();
+  });
+
   it("shows a skeleton until the first snapshot lands", () => {
     setup({ data: INITIAL_SNAPSHOT });
     expect(screen.getByRole("status", { name: "Loading" })).toBeInTheDocument();

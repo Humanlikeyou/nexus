@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Activity, Bot, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Workflow, X } from "lucide-react";
+import { Activity, Bot, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
 import { openClawBadge } from "../app/openclaw";
 import { time } from "../lib/format";
@@ -25,6 +25,8 @@ export interface ChatFieldProps {
   onRetrySources?: () => void;
   /** §10: opens Chat & Agents › Activity. */
   onOpenActivity?: () => void;
+  /** Stage 5E: opens Chat & Agents › Crews. */
+  onOpenCrews?: () => void;
   /** Pre-filled composer text (⌘K “Ask Amara”); remount via key to apply. */
   initialDraft?: string;
   busy?: boolean;
@@ -58,8 +60,16 @@ function relative(ms: number, now: number): string {
   return time(ms);
 }
 
+/** Crews row value: running count when the service is up, else its state. */
+function crewsValue(crew: SystemSnapshot["crew"]): string {
+  if (crew.health === "not_configured") return "Not configured";
+  if (crew.health === "offline") return "Offline";
+  const running = crew.runs.filter((r) => r.status === "running").length;
+  return running > 0 ? `${running} running` : "0 running";
+}
+
 export function ChatField({
-  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onOpenContext, onOpenActivity, initialDraft = "",
+  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onOpenContext, onOpenActivity, onOpenCrews, initialDraft = "",
   onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false,
 }: ChatFieldProps) {
   const [draft, setDraft] = useState(initialDraft);
@@ -136,6 +146,7 @@ export function ChatField({
         <InsetGroup title="Agents">
           {agents.map((a) => <ListRow key={a.id} icon={a.icon} title={a.title} subtitle={a.subtitle} accessory={<Badge tone={a.tone}>{a.label}</Badge>} />)}
           {agents.length === 0 && <ListRow title="No matching agents" />}
+          {onOpenCrews && <ListRow icon={Users} title="Crews" value={crewsValue(data.crew)} onSelect={onOpenCrews} />}
         </InsetGroup>
         <InsetGroup title="Conversation" footer="Earlier conversations will be listed here later.">
           <ListRow icon={SquarePen} title="Current" subtitle={startedAt ? `Started ${time(startedAt)}` : "No messages yet"} selected onSelect={() => composerRef.current?.focus()} />

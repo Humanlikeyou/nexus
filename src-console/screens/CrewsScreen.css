@@ -1,0 +1,13 @@
+.crews { display: grid; gap: var(--space-4, 16px); }
+.crews__title { margin: 0; font: var(--type-title1, 600 22px/1.2 system-ui); color: var(--label); }
+.crews__note { margin: 0; color: var(--label-secondary); font: var(--type-callout); }
+.crews__note strong { color: var(--label); }
+.crews__note code { font: var(--type-callout); font-family: var(--font-mono, ui-monospace, monospace); color: var(--label); }
+.crews__clamp { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 52ch; }
+.crews__unavailable { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 12px); color: var(--label-secondary); }
+.crews__unavailable p { margin: 0; }
+.crews__result { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font: var(--type-callout); color: var(--label); }
+.crews__result--error, .crews__error { color: var(--system-red, #ff3b30); }
+.crews__error { margin: 0; font: var(--type-callout); }
+.crews__form { display: grid; gap: var(--space-3, 12px); }
+.crews__actions { display: flex; justify-content: flex-end; }

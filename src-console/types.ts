@@ -1,4 +1,4 @@
-export type ModuleId = "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "trajectory" | "settings";
+export type ModuleId = "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings";
 
 export type OpenClawState = "online" | "configured" | "offline";
 
@@ -449,6 +449,30 @@ export interface SystemSnapshot {
   activity: ActivityEntry[];
   /** OpenClaw gateway (local config + heartbeat file). `online` = config present. */
   openclaw: OpenClawStatus;
+  /** CrewAI service (stack/crew-service via crew.rs). */
+  crew: CrewSnapshot;
+}
+
+/** crew-service run states (crew_runs.status). */
+export type CrewRunStatus = "running" | "completed" | "failed" | "stopped" | "interrupted";
+
+/** One crew run (crew.rs CrewInfo). For failed runs `result` holds the sanitized error. */
+export interface CrewInfo {
+  id: string;
+  name: string;
+  status: CrewRunStatus | string;
+  agents: string[];
+  started_at: string | null;
+  task: string | null;
+  result: string | null;
+}
+
+/** not_configured: no token in env or the app data dir; offline: unreachable or unhealthy. */
+export type CrewServiceHealth = "not_configured" | "offline" | "online";
+
+export interface CrewSnapshot {
+  health: CrewServiceHealth;
+  runs: CrewInfo[];
 }
 
 export interface NexusUnavailableSource {
