@@ -39,7 +39,7 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
         timestamp,
         uuid::Uuid::new_v4().simple()
     ));
-    fs::create_dir(&staging).map_err(|e| format!("Failed to create staging dir: {}", e))?;
+    create_private_dir(&staging).map_err(|e| format!("Failed to create staging dir: {}", e))?;
     // Removed on every exit path, including early `?` returns while copying.
     let _staging_guard = StagingGuard(staging.clone());
 
@@ -136,6 +136,10 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
             .file_name()
             .ok_or_else(|| "Staging dir has no name".to_string())?,
     ))?;
+    // Pre-create the archive 0600 (tar truncates it but keeps the mode), so the
+    // backup is never readable by other users, even briefly.
+    create_private_file(&archive_path)
+        .map_err(|e| format!("Failed to create archive file: {}", e))?;
     let output = Command::new("tar")
         .args(["-czf", &archive_arg, "-C", &parent_arg, &name_arg])
         .output()
@@ -143,8 +147,15 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
         .map_err(|e| format!("Failed to create archive: {}", e))?;
 
     if !output.status.success() {
+        let _ = fs::remove_file(&archive_path);
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("tar failed: {}", stderr));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&archive_path, fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to restrict archive permissions: {}", e))?;
     }
 
     // Staging cleanup happens when `_staging_guard` drops.
@@ -165,25 +176,33 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     })
 }
 
+/// How long the restore dialog may stay open before Allow no longer counts.
+const RESTORE_APPROVAL_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+const RESTORE_LOCK_KEY: &str = "restore:backup";
+const RESTORE_BACKUP_DIR: &str = "restore-backups";
+
 #[tauri::command]
-pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> {
+pub async fn unpack_backup(
+    app: tauri::AppHandle,
+    archive_path: String,
+) -> Result<Vec<String>, String> {
     let archive = PathBuf::from(&archive_path);
-    if !archive.exists() {
+    if !archive.is_file() {
         return Err("Archive file not found".to_string());
     }
 
     // Unique, freshly created staging dir (create_dir fails if it already exists).
     let staging =
         std::env::temp_dir().join(format!("nexus-unpack-{}", uuid::Uuid::new_v4().simple()));
-    fs::create_dir(&staging).map_err(|e| format!("Failed to create staging dir: {}", e))?;
+    create_private_dir(&staging).map_err(|e| format!("Failed to create staging dir: {}", e))?;
     // Removed on every exit path, including early `?` returns during restore.
     let _staging_guard = StagingGuard(staging.clone());
 
     // Validate and extract in one pass with the tar crate, reading sizes and
     // types from the headers themselves (no CLI listing to parse), so what is
-    // checked is exactly what is written.
+    // checked is exactly what is written. Nothing outside staging is touched yet.
     let (archive_for_task, staging_for_task) = (archive.clone(), staging.clone());
-    let unpacked = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         unpack_archive_checked(
             &archive_for_task,
             &staging_for_task,
@@ -192,93 +211,359 @@ pub async fn unpack_backup(archive_path: String) -> Result<Vec<String>, String> 
         )
     })
     .await
-    .map_err(|e| format!("Extract task failed: {}", e))
-    .and_then(|r| r);
-    unpacked?;
+    .map_err(|e| format!("Extract task failed: {}", e))??;
 
-    // Find the extracted directory (should be nexus-pack-*)
-    let extracted = fs::read_dir(&staging)
+    let extracted = find_pack_root(&staging)?;
+    let roots = RestoreRoots {
+        openclaw: openclaw_dir(),
+        data: nexus_data_dir(),
+    };
+    let plan = plan_restore(&extracted)?;
+    if plan.items.is_empty() {
+        return Ok(vec!["Archive was empty — nothing to restore".to_string()]);
+    }
+    let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let replaced = replaced_files(&plan, &roots);
+    let archive_name = archive
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let asked_at = std::time::Instant::now();
+    let _approval = super::approval_gate::require_approval(
+        &app,
+        &[RESTORE_LOCK_KEY.to_string()],
+        super::approval_gate::approval_text(
+            &restore_operation(&archive_name, &plan, &replaced, &roots, &stamp),
+            "Only files Nexus backups contain are restored; everything else in the archive is skipped. Replaced files are copied to the backup folder first.",
+        )?,
+    )
+    .await?;
+    if asked_at.elapsed() > RESTORE_APPROVAL_TTL {
+        return Err(format!(
+            "{} The restore dialog was open too long; nothing was restored. Try again.",
+            super::restart_services::EXPIRED_PREFIX
+        ));
+    }
+    // What gets replaced must still be what the dialog showed.
+    if replaced_files(&plan, &roots) != replaced {
+        return Err("changed: files in ~/.openclaw or the Nexus data folder changed while the dialog was open; nothing was restored".to_string());
+    }
+
+    let mut restored = apply_restore(&plan, &roots, &stamp)?;
+    restored.extend(plan.skipped.iter().map(|s| format!("Skipped: {s}")));
+    Ok(restored)
+}
+
+/// The `nexus-pack-*` (or legacy `electron-pack-*`) folder inside staging, else staging.
+fn find_pack_root(staging: &Path) -> Result<PathBuf, String> {
+    Ok(fs::read_dir(staging)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
         .find(|e| {
             let n = e.file_name().to_string_lossy().to_string();
-            n.starts_with("nexus-pack") || n.starts_with("electron-pack") // legacy backups
+            (n.starts_with("nexus-pack") || n.starts_with("electron-pack"))
+                && e.file_type().map(|t| t.is_dir()).unwrap_or(false)
         })
         .map(|e| e.path())
-        .unwrap_or(staging.clone());
+        .unwrap_or_else(|| staging.to_path_buf()))
+}
 
-    let mut restored = Vec::new();
-    // Restore copies everything that was packed (the archive is already capped);
-    // only symlinks are skipped, and they are reported.
-    let mut skipped = Vec::new();
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum RestoreRoot {
+    OpenClaw,
+    Data,
+}
 
-    // Restore config
-    let config_src = {
-        let new_cfg = extracted.join("nexus-config");
-        if new_cfg.exists() {
-            new_cfg
-        } else {
-            extracted.join("electron-config")
-        } // legacy backups
+struct RestoreRoots {
+    openclaw: PathBuf,
+    data: PathBuf,
+}
+
+impl RestoreRoots {
+    fn get(&self, root: RestoreRoot) -> &Path {
+        match root {
+            RestoreRoot::OpenClaw => &self.openclaw,
+            RestoreRoot::Data => &self.data,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RestoreItem {
+    src: PathBuf,
+    root: RestoreRoot,
+    rel: PathBuf,
+}
+
+#[derive(Debug, Default)]
+struct RestorePlan {
+    items: Vec<RestoreItem>,
+    skipped: Vec<String>,
+}
+
+/// Lower-case extension of the last component, if any.
+fn ext_of(rel: &Path) -> Option<String> {
+    rel.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+}
+
+/// Files pack_it_up writes under `openclaw/` (openclaw.json, cron, skills,
+/// memory, workspace), restricted to the file types those folders hold.
+fn openclaw_allowed(rel: &[String]) -> bool {
+    let path: PathBuf = rel.iter().collect();
+    let ext = ext_of(&path);
+    let ext = ext.as_deref();
+    match rel {
+        [only] => only == "openclaw.json",
+        [dir, _] if dir == "cron" => ext == Some("json"),
+        [dir, _] if dir == "skills" => ext == Some("md"),
+        [dir, rest @ ..] if dir == "memory" && rest.len() <= 3 => {
+            matches!(ext, Some("md" | "json" | "jsonl" | "txt"))
+        }
+        [dir, rest @ ..] if dir == "workspace" && rest.len() <= 3 => {
+            matches!(ext, Some("md" | "json" | "txt"))
+        }
+        _ => false,
+    }
+}
+
+/// Map an archive file (path relative to the pack root) to where it may be restored.
+fn restore_target(rel: &[String]) -> Option<(RestoreRoot, PathBuf)> {
+    let join = |parts: &[String]| parts.iter().collect::<PathBuf>();
+    match rel {
+        [top, rest @ ..] if top == "openclaw" && !rest.is_empty() => {
+            openclaw_allowed(rest).then(|| (RestoreRoot::OpenClaw, join(rest)))
+        }
+        [top, rest @ ..]
+            if (top == "nexus-config" || top == "electron-config")
+                && !rest.is_empty()
+                && rest[0] != RESTORE_BACKUP_DIR =>
+        {
+            Some((RestoreRoot::Data, join(rest)))
+        }
+        [top, rest @ ..] if top == "sessions" && !rest.is_empty() => {
+            Some((RestoreRoot::Data, join(rel)))
+        }
+        [only]
+            if matches!(
+                only.as_str(),
+                "goals.json" | "events.db" | "events.db-wal" | "events.db-shm"
+            ) =>
+        {
+            Some((RestoreRoot::Data, PathBuf::from(only)))
+        }
+        _ => None,
+    }
+}
+
+/// Walk the extracted pack (regular files only; staging holds no links) and
+/// split it into allowed restore items and skipped entries.
+fn plan_restore(pack_root: &Path) -> Result<RestorePlan, String> {
+    let mut plan = RestorePlan::default();
+    let mut stack = vec![(pack_root.to_path_buf(), Vec::<String>::new())];
+    while let Some((dir, prefix)) = stack.pop() {
+        for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            let mut rel = prefix.clone();
+            rel.push(name.clone());
+            let ft = entry.file_type().map_err(|e| e.to_string())?;
+            if ft.is_dir() {
+                stack.push((entry.path(), rel));
+            } else if ft.is_file() {
+                if rel == ["manifest.json"] || is_os_junk(&name) {
+                    continue;
+                }
+                match restore_target(&rel) {
+                    Some((root, target)) if check_entry_path(&target).is_ok() => {
+                        plan.items.push(RestoreItem {
+                            src: entry.path(),
+                            root,
+                            rel: target,
+                        })
+                    }
+                    _ => plan
+                        .skipped
+                        .push(format!("{} (not part of a Nexus backup)", rel.join("/"))),
+                }
+            } else {
+                plan.skipped
+                    .push(format!("{} (not a regular file)", rel.join("/")));
+            }
+        }
+    }
+    // nexus-config/ is a full copy of the data dir, so goals.json, sessions/… can
+    // appear twice. Restore each destination once, preferring the dedicated copy.
+    let from_config = |i: &RestoreItem| {
+        i.src
+            .strip_prefix(pack_root)
+            .ok()
+            .and_then(|r| r.components().next())
+            .is_some_and(|c| c.as_os_str() == "nexus-config" || c.as_os_str() == "electron-config")
     };
-    if config_src.exists() {
-        let dest = nexus_data_dir();
-        fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-        copy_dir_recursive(&config_src, &dest, None, &mut skipped)?;
-        restored.push("Settings & config restored".to_string());
-    }
+    plan.items
+        .sort_by(|a, b| (a.root, &a.rel, from_config(a)).cmp(&(b.root, &b.rel, from_config(b))));
+    plan.items
+        .dedup_by(|later, first| later.root == first.root && later.rel == first.rel);
+    plan.skipped.sort();
+    Ok(plan)
+}
 
-    // Restore OpenClaw
-    let openclaw_src = extracted.join("openclaw");
-    if openclaw_src.exists() {
-        let dest = openclaw_dir();
-        fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-        copy_dir_recursive(&openclaw_src, &dest, None, &mut skipped)?;
-        restored.push("OpenClaw workspace restored".to_string());
-    }
+/// Destination files that already exist and would be replaced.
+fn replaced_files(plan: &RestorePlan, roots: &RestoreRoots) -> Vec<(RestoreRoot, PathBuf)> {
+    plan.items
+        .iter()
+        .filter(|i| roots.get(i.root).join(&i.rel).symlink_metadata().is_ok())
+        .map(|i| (i.root, i.rel.clone()))
+        .collect()
+}
 
-    // Restore sessions
-    let sessions_src = extracted.join("sessions");
-    if sessions_src.exists() {
-        let dest = nexus_data_dir().join("sessions");
-        fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-        copy_dir_recursive(&sessions_src, &dest, None, &mut skipped)?;
-        restored.push("BLE session data restored".to_string());
-    }
-
-    // Restore goals
-    let goals_src = extracted.join("goals.json");
-    if goals_src.exists() {
-        let dest = nexus_data_dir().join("goals.json");
-        fs::copy(&goals_src, &dest).map_err(|e| e.to_string())?;
-        restored.push("Goals restored".to_string());
-    }
-
-    // Restore events database
-    let events_src = extracted.join("events.db");
-    if events_src.exists() {
-        let dest = nexus_data_dir().join("events.db");
-        fs::copy(&events_src, &dest).map_err(|e| e.to_string())?;
-        // Also restore WAL/SHM if present
-        let wal_src = extracted.join("events.db-wal");
-        let shm_src = extracted.join("events.db-shm");
-        if wal_src.exists() {
-            let _ = fs::copy(&wal_src, nexus_data_dir().join("events.db-wal"));
+fn restore_operation(
+    archive_name: &str,
+    plan: &RestorePlan,
+    replaced: &[(RestoreRoot, PathBuf)],
+    roots: &RestoreRoots,
+    stamp: &str,
+) -> String {
+    let count = |r: RestoreRoot| plan.items.iter().filter(|i| i.root == r).count();
+    let rcount = |r: RestoreRoot| replaced.iter().filter(|(x, _)| *x == r).count();
+    let mut out = format!(
+        "Restore backup {archive_name}:\n- {} files into {} ({} replaced)\n- {} files into {} ({} replaced)\nReplaced files are first copied to {}/{stamp} in each folder.",
+        count(RestoreRoot::OpenClaw),
+        roots.openclaw.display(),
+        rcount(RestoreRoot::OpenClaw),
+        count(RestoreRoot::Data),
+        roots.data.display(),
+        rcount(RestoreRoot::Data),
+        RESTORE_BACKUP_DIR,
+    );
+    if !replaced.is_empty() {
+        out.push_str("\nReplaces:");
+        for (root, rel) in replaced.iter().take(12) {
+            let label = if *root == RestoreRoot::OpenClaw {
+                "~/.openclaw"
+            } else {
+                "data"
+            };
+            out.push_str(&format!("\n  {label}/{}", rel.display()));
         }
-        if shm_src.exists() {
-            let _ = fs::copy(&shm_src, nexus_data_dir().join("events.db-shm"));
+        if replaced.len() > 12 {
+            out.push_str(&format!("\n  … and {} more", replaced.len() - 12));
         }
-        restored.push("Event store restored".to_string());
     }
-
-    // Staging cleanup happens when `_staging_guard` drops.
-    restored.extend(skipped.into_iter().map(|s| format!("Skipped: {s}")));
-
-    if restored.is_empty() {
-        restored.push("Archive was empty — nothing to restore".to_string());
+    if !plan.skipped.is_empty() {
+        out.push_str(&format!(
+            "\nSkipped (not restorable): {}",
+            plan.skipped.len()
+        ));
     }
+    out
+}
 
-    Ok(restored)
+/// Resolve `root/rel` for writing: every existing component must be a real
+/// directory (no symlinks) and the result must stay inside `root`.
+fn safe_dest(root: &Path, rel: &Path) -> Result<PathBuf, String> {
+    check_entry_path(rel)?;
+    fs::create_dir_all(root).map_err(|e| e.to_string())?;
+    let root_canon = root.canonicalize().map_err(|e| e.to_string())?;
+    let mut cur = root_canon.clone();
+    let comps: Vec<_> = rel.components().collect();
+    for (i, c) in comps.iter().enumerate() {
+        cur.push(c.as_os_str());
+        let last = i + 1 == comps.len();
+        match cur.symlink_metadata() {
+            Ok(m) if m.file_type().is_symlink() => {
+                return Err(format!(
+                    "Refusing to restore through a symlink: {}",
+                    cur.display()
+                ))
+            }
+            Ok(m) if !last && !m.is_dir() => {
+                return Err(format!("Not a directory: {}", cur.display()))
+            }
+            Ok(m) if last && m.is_dir() => {
+                return Err(format!("A folder is in the way: {}", cur.display()))
+            }
+            Ok(_) => {}
+            Err(_) if !last => fs::create_dir(&cur).map_err(|e| e.to_string())?,
+            Err(_) => {}
+        }
+    }
+    if !cur.starts_with(&root_canon) {
+        return Err("Path escapes its restore folder".to_string());
+    }
+    Ok(cur)
+}
+
+/// Copy every planned file into place. Existing files are first copied to
+/// `<root>/restore-backups/<stamp>/<rel>`; new files are written via a temp
+/// sibling + rename so a crash never leaves a half-written file.
+fn apply_restore(
+    plan: &RestorePlan,
+    roots: &RestoreRoots,
+    stamp: &str,
+) -> Result<Vec<String>, String> {
+    let mut counts = std::collections::BTreeMap::new();
+    let mut backed_up = 0usize;
+    for item in &plan.items {
+        let root = roots.get(item.root);
+        let dest = safe_dest(root, &item.rel)?;
+        if dest.is_file() {
+            let backup_rel = Path::new(RESTORE_BACKUP_DIR).join(stamp).join(&item.rel);
+            let backup = safe_dest(root, &backup_rel)?;
+            fs::copy(&dest, &backup).map_err(|e| format!("backup {}: {}", dest.display(), e))?;
+            backed_up += 1;
+        }
+        let tmp = dest.with_file_name(format!(
+            ".{}.restore-{}",
+            dest.file_name().unwrap_or_default().to_string_lossy(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::copy(&item.src, &tmp).map_err(|e| format!("restore {}: {}", item.rel.display(), e))?;
+        fs::rename(&tmp, &dest).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            format!("restore {}: {}", item.rel.display(), e)
+        })?;
+        *counts.entry(item.root).or_insert(0usize) += 1;
+    }
+    let mut out = Vec::new();
+    if let Some(n) = counts.get(&RestoreRoot::OpenClaw) {
+        out.push(format!("OpenClaw: {n} files restored"));
+    }
+    if let Some(n) = counts.get(&RestoreRoot::Data) {
+        out.push(format!("Nexus data: {n} files restored"));
+    }
+    if backed_up > 0 {
+        out.push(format!(
+            "{backed_up} replaced files saved to {RESTORE_BACKUP_DIR}/{stamp}"
+        ));
+    }
+    Ok(out)
+}
+
+/// New directory readable only by the user (0700 on Unix); fails if it exists.
+fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    let mut b = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        b.mode(0o700);
+    }
+    b.create(path)
+}
+
+/// New empty file readable only by the user (0600 on Unix); fails if it exists.
+fn create_private_file(path: &Path) -> std::io::Result<()> {
+    let mut o = fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    o.open(path).map(|_| ())
 }
 
 /// Deletes the staging directory when dropped.
@@ -746,5 +1031,239 @@ mod unpack_tests {
         std::fs::create_dir(&dest).unwrap();
         assert!(unpack_archive_checked(&archive, &dest, 1_000, 2).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::*;
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "nexus-restore-test-{}-{}",
+            tag,
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    fn put(base: &Path, rel: &str, body: &str) {
+        let p = base.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, body).unwrap();
+    }
+
+    fn s(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|p| p.to_string()).collect()
+    }
+
+    #[test]
+    fn allow_list_matches_what_pack_it_up_writes() {
+        let ok = |p: &[&str]| restore_target(&s(p));
+        assert_eq!(
+            ok(&["openclaw", "openclaw.json"]),
+            Some((RestoreRoot::OpenClaw, "openclaw.json".into()))
+        );
+        assert_eq!(
+            ok(&["openclaw", "skills", "brief.md"]),
+            Some((RestoreRoot::OpenClaw, "skills/brief.md".into()))
+        );
+        assert_eq!(
+            ok(&["openclaw", "workspace", "TASKS.md"]),
+            Some((RestoreRoot::OpenClaw, "workspace/TASKS.md".into()))
+        );
+        assert_eq!(
+            ok(&["openclaw", "cron", "jobs.json"]),
+            Some((RestoreRoot::OpenClaw, "cron/jobs.json".into()))
+        );
+        assert_eq!(
+            ok(&["openclaw", "memory", "2026-10-28.md"]).map(|t| t.0),
+            Some(RestoreRoot::OpenClaw)
+        );
+        assert_eq!(
+            ok(&["sessions", "eeg.ndjson"]),
+            Some((RestoreRoot::Data, "sessions/eeg.ndjson".into()))
+        );
+        assert_eq!(
+            ok(&["goals.json"]),
+            Some((RestoreRoot::Data, "goals.json".into()))
+        );
+        assert_eq!(
+            ok(&["nexus-config", "settings.json"]),
+            Some((RestoreRoot::Data, "settings.json".into()))
+        );
+        for bad in [
+            &["openclaw", "credentials", "telegram.json"][..],
+            &["openclaw", "skills", "evil.sh"],
+            &["openclaw", "skills", "nested", "x.md"],
+            &["openclaw", "LaunchAgents", "x.plist"],
+            &["openclaw", "workspace", "run.sh"],
+            &["openclaw", "sessions", "whatsapp.json"],
+            &["nexus-config", "restore-backups", "x.json"],
+            &["random.txt"],
+        ] {
+            assert_eq!(ok(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn plan_skips_everything_off_the_list() {
+        let pack = tmp("plan");
+        put(&pack, "manifest.json", "{}");
+        put(&pack, "openclaw/openclaw.json", "{}");
+        put(&pack, "openclaw/skills/a.md", "# a");
+        put(&pack, "openclaw/credentials/token.json", "{}");
+        put(&pack, "extra/x", "x");
+        put(&pack, "goals.json", "top");
+        put(&pack, "nexus-config/goals.json", "nested");
+        let plan = plan_restore(&pack).unwrap();
+        let goals: Vec<_> = plan
+            .items
+            .iter()
+            .filter(|i| i.rel == Path::new("goals.json"))
+            .collect();
+        assert_eq!(goals.len(), 1, "one write per destination");
+        assert_eq!(fs::read_to_string(&goals[0].src).unwrap(), "top");
+        let plan = RestorePlan {
+            items: plan
+                .items
+                .into_iter()
+                .filter(|i| i.root == RestoreRoot::OpenClaw)
+                .collect(),
+            skipped: plan.skipped,
+        };
+        let rels: Vec<_> = plan
+            .items
+            .iter()
+            .map(|i| i.rel.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(rels, ["openclaw.json", "skills/a.md"]);
+        assert_eq!(plan.skipped.len(), 2, "{:?}", plan.skipped);
+        let _ = fs::remove_dir_all(&pack);
+    }
+
+    #[test]
+    fn apply_backs_up_replaced_files_and_stays_inside_roots() {
+        let base = tmp("apply");
+        let pack = base.join("pack");
+        put(&pack, "openclaw/openclaw.json", "NEW");
+        put(&pack, "openclaw/skills/a.md", "# new skill");
+        put(&pack, "goals.json", "[1]");
+        let roots = RestoreRoots {
+            openclaw: base.join("home/.openclaw"),
+            data: base.join("data"),
+        };
+        put(&roots.openclaw, "openclaw.json", "OLD");
+        let plan = plan_restore(&pack).unwrap();
+        let replaced = replaced_files(&plan, &roots);
+        assert_eq!(
+            replaced,
+            vec![(RestoreRoot::OpenClaw, PathBuf::from("openclaw.json"))]
+        );
+        let op = restore_operation("b.tar.gz", &plan, &replaced, &roots, "20261028_140000");
+        assert!(
+            op.contains("2 files into")
+                && op.contains("(1 replaced)")
+                && op.contains("~/.openclaw/openclaw.json"),
+            "{op}"
+        );
+
+        let out = apply_restore(&plan, &roots, "20261028_140000").unwrap();
+        assert_eq!(
+            fs::read_to_string(roots.openclaw.join("openclaw.json")).unwrap(),
+            "NEW"
+        );
+        assert_eq!(
+            fs::read_to_string(
+                roots
+                    .openclaw
+                    .join("restore-backups/20261028_140000/openclaw.json")
+            )
+            .unwrap(),
+            "OLD"
+        );
+        assert_eq!(
+            fs::read_to_string(roots.openclaw.join("skills/a.md")).unwrap(),
+            "# new skill"
+        );
+        assert_eq!(
+            fs::read_to_string(roots.data.join("goals.json")).unwrap(),
+            "[1]"
+        );
+        assert!(
+            out.iter().any(|l| l.contains("1 replaced files saved")),
+            "{out:?}"
+        );
+        // No temp files left next to restored files.
+        let leftovers: Vec<_> = fs::read_dir(&roots.openclaw)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".restore-"))
+            .collect();
+        assert!(leftovers.is_empty());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_refuses_symlinked_destinations() {
+        let base = tmp("link");
+        let outside = base.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        let root = base.join(".openclaw");
+        fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("skills")).unwrap();
+        assert!(safe_dest(&root, Path::new("skills/a.md")).is_err());
+        std::os::unix::fs::symlink(outside.join("x.json"), root.join("openclaw.json")).unwrap();
+        assert!(safe_dest(&root, Path::new("openclaw.json")).is_err());
+        assert!(safe_dest(&root, Path::new("../x")).is_err());
+        assert!(safe_dest(&root, Path::new("/etc/hosts")).is_err());
+        assert!(safe_dest(&root, Path::new("workspace/ok.md"))
+            .unwrap()
+            .starts_with(&root));
+        assert_eq!(
+            fs::read_dir(&outside).unwrap().count(),
+            0,
+            "nothing written outside"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_dir_and_file_modes() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tmp("modes");
+        let d = base.join("staging");
+        create_private_dir(&d).unwrap();
+        assert_eq!(
+            fs::metadata(&d).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert!(
+            create_private_dir(&d).is_err(),
+            "never reuses an existing dir"
+        );
+        let f = base.join("a.tar.gz");
+        create_private_file(&f).unwrap();
+        assert_eq!(
+            fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(
+            create_private_file(&f).is_err(),
+            "never reuses an existing file"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn pack_root_prefers_the_pack_folder() {
+        let base = tmp("root");
+        assert_eq!(find_pack_root(&base).unwrap(), base);
+        fs::create_dir_all(base.join("nexus-pack-1")).unwrap();
+        assert_eq!(find_pack_root(&base).unwrap(), base.join("nexus-pack-1"));
+        let _ = fs::remove_dir_all(&base);
     }
 }

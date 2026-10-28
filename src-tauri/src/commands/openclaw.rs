@@ -902,8 +902,7 @@ pub struct SandboxStatus {
 #[tauri::command]
 pub fn get_openclaw_sandbox() -> Result<String, String> {
     let config_path = openclaw_dir().join("openclaw.json");
-    let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let config = read_sandbox_config(&config_path)?;
 
     let mode = config
         .get("agents")
@@ -917,7 +916,7 @@ pub fn get_openclaw_sandbox() -> Result<String, String> {
 }
 
 fn read_sandbox_config(path: &std::path::Path) -> Result<serde_json::Value, String> {
-    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let content = read_capped(path, MAX_READ_BYTES)?;
     serde_json::from_str(&content).map_err(|e| e.to_string())
 }
 
@@ -1387,6 +1386,17 @@ mod approval_tests {
         assert_eq!(v["keep"], 1);
         let leftovers = std::fs::read_dir(p.parent().unwrap()).unwrap().count();
         assert_eq!(leftovers, 1, "no temp files left behind");
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn sandbox_config_read_is_capped() {
+        let p = tmp_config(&format!(
+            "{{\"pad\":\"{}\"}}",
+            "x".repeat(MAX_READ_BYTES as usize)
+        ));
+        assert!(read_sandbox_config(&p).unwrap_err().contains("larger"));
+        assert!(apply_sandbox_change(&p, "off", "all").is_err());
         let _ = std::fs::remove_dir_all(p.parent().unwrap());
     }
 
