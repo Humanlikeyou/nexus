@@ -1,0 +1,9 @@
+.activity { display: grid; gap: var(--space-4, 16px); }
+.activity__title { margin: 0; font: var(--type-title1, 600 22px/1.2 system-ui); color: var(--label); }
+.activity__tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3, 12px); margin-bottom: var(--space-3, 12px); }
+.activity__note { margin: 0; color: var(--label-secondary); font: var(--type-callout); }
+.activity__note strong { color: var(--label); }
+.activity__clamp { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 52ch; }
+.activity__error { color: var(--system-red, #ff3b30); font: var(--type-callout); }
+.activity__unavailable { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 12px); color: var(--label-secondary); }
+.activity__unavailable p { margin: 0; }

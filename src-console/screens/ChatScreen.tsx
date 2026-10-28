@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Bot, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Workflow, X } from "lucide-react";
+import { Activity, Bot, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Workflow, X } from "lucide-react";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
 import { openClawBadge } from "../app/openclaw";
 import { time } from "../lib/format";
@@ -23,6 +23,8 @@ export interface ChatFieldProps {
   onRetryAction: (action: TerrenceAction) => void;
   onCancelAction: (action: TerrenceAction) => void;
   onRetrySources?: () => void;
+  /** §10: opens Chat & Agents › Activity. */
+  onOpenActivity?: () => void;
   busy?: boolean;
 }
 
@@ -55,7 +57,7 @@ function relative(ms: number, now: number): string {
 }
 
 export function ChatField({
-  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onOpenContext,
+  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onOpenContext, onOpenActivity,
   onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false,
 }: ChatFieldProps) {
   const [draft, setDraft] = useState("");
@@ -136,6 +138,11 @@ export function ChatField({
         <InsetGroup title="Conversation" footer="Earlier conversations will be listed here later.">
           <ListRow icon={SquarePen} title="Current" subtitle={startedAt ? `Started ${time(startedAt)}` : "No messages yet"} selected onSelect={() => composerRef.current?.focus()} />
         </InsetGroup>
+        {onOpenActivity && (
+          <InsetGroup title="History">
+            <ListRow icon={Activity} title="Activity" value={String(data.activity.length)} onSelect={onOpenActivity} />
+          </InsetGroup>
+        )}
         <Button variant="plain" icon={SquarePen} onClick={onNewConversation} title="New chat (⌘N)">New Chat</Button>
       </aside>
 
