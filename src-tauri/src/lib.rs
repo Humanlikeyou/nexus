@@ -11,6 +11,56 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 
+/// Re-exports for the integration tests in `src-tauri/tests/`. Not an API:
+/// the items stay private to the app; this only lets the tests reach them.
+#[doc(hidden)]
+pub mod test_support {
+    use std::path::Path;
+
+    pub use crate::app_paths::{
+        data_dir, merge_legacy_config_in, migrate_legacy_data_dir_in, DATA_DIR_ENV, DATA_DIR_NAME,
+    };
+    pub use crate::commands::noop::health_snapshot;
+    pub use crate::commands::outbox::get_outbox_status;
+    pub use crate::commands::path_safety::{safe_join, validate_file_name, validate_name};
+
+    pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        crate::commands::continuity::atomic_write(path, bytes)
+    }
+
+    pub fn unpack_archive_checked(
+        archive: &Path,
+        dest: &Path,
+        max_total_bytes: u64,
+        max_entries: usize,
+    ) -> Result<usize, String> {
+        crate::commands::packager::unpack_archive_checked(
+            archive,
+            dest,
+            max_total_bytes,
+            max_entries,
+        )
+    }
+
+    /// Whether a pack-relative path (e.g. `["openclaw", "skills", "a.md"]`) may be restored.
+    pub fn restore_allowed(rel: &[&str]) -> bool {
+        let rel: Vec<String> = rel.iter().map(|s| s.to_string()).collect();
+        crate::commands::packager::restore_target(&rel).is_some()
+    }
+
+    /// (restored destinations, skipped entries) for an extracted pack.
+    pub fn plan_restore(pack_root: &Path) -> Result<(Vec<String>, Vec<String>), String> {
+        let plan = crate::commands::packager::plan_restore(pack_root)?;
+        Ok((
+            plan.items
+                .iter()
+                .map(|i| i.rel.to_string_lossy().to_string())
+                .collect(),
+            plan.skipped,
+        ))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     app_paths::migrate_legacy_data_dir();

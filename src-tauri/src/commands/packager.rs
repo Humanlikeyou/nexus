@@ -270,7 +270,7 @@ fn find_pack_root(staging: &Path) -> Result<PathBuf, String> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum RestoreRoot {
+pub(crate) enum RestoreRoot {
     OpenClaw,
     Data,
 }
@@ -290,16 +290,16 @@ impl RestoreRoots {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct RestoreItem {
+pub(crate) struct RestoreItem {
     src: PathBuf,
     root: RestoreRoot,
-    rel: PathBuf,
+    pub(crate) rel: PathBuf,
 }
 
 #[derive(Debug, Default)]
-struct RestorePlan {
-    items: Vec<RestoreItem>,
-    skipped: Vec<String>,
+pub(crate) struct RestorePlan {
+    pub(crate) items: Vec<RestoreItem>,
+    pub(crate) skipped: Vec<String>,
 }
 
 /// Lower-case extension of the last component, if any.
@@ -330,7 +330,7 @@ fn openclaw_allowed(rel: &[String]) -> bool {
 }
 
 /// Map an archive file (path relative to the pack root) to where it may be restored.
-fn restore_target(rel: &[String]) -> Option<(RestoreRoot, PathBuf)> {
+pub(crate) fn restore_target(rel: &[String]) -> Option<(RestoreRoot, PathBuf)> {
     let join = |parts: &[String]| parts.iter().collect::<PathBuf>();
     match rel {
         [top, rest @ ..] if top == "openclaw" && !rest.is_empty() => {
@@ -360,7 +360,7 @@ fn restore_target(rel: &[String]) -> Option<(RestoreRoot, PathBuf)> {
 
 /// Walk the extracted pack (regular files only; staging holds no links) and
 /// split it into allowed restore items and skipped entries.
-fn plan_restore(pack_root: &Path) -> Result<RestorePlan, String> {
+pub(crate) fn plan_restore(pack_root: &Path) -> Result<RestorePlan, String> {
     let mut plan = RestorePlan::default();
     let mut stack = vec![(pack_root.to_path_buf(), Vec::<String>::new())];
     while let Some((dir, prefix)) = stack.pop() {
@@ -616,7 +616,7 @@ fn check_entry_path(path: &std::path::Path) -> Result<(), String> {
 /// only regular files and directories, safe relative paths, entry count and
 /// cumulative declared size within limits. Ownership, permissions, mtimes and
 /// xattrs from the archive are not applied. Returns the number of entries.
-fn unpack_archive_checked(
+pub(crate) fn unpack_archive_checked(
     archive: &std::path::Path,
     dest: &std::path::Path,
     max_total_bytes: u64,
