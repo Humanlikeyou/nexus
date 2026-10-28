@@ -80,7 +80,7 @@ export function ChatField({
   const startedAt = messages[0]?.timestamp;
 
   const agents = [
-    { id: "hermes", icon: Bot, title: "Terrance", subtitle: hermesUnavailable ? "Status unavailable" : hermes.model, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
+    { id: "hermes", icon: Bot, title: "Terrence", subtitle: hermesUnavailable ? "Status unavailable" : hermes.model, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
     { id: "openclaw", icon: Workflow, title: "OpenClaw", subtitle: openclaw.subtitle, tone: openclaw.tone, label: openclaw.label },
   ].filter((a) => !query.trim() || `${a.title} ${a.subtitle}`.toLowerCase().includes(query.trim().toLowerCase()));
 
@@ -142,7 +142,7 @@ export function ChatField({
       <section className="chat-screen__conversation" aria-labelledby="chat-title">
         <header className="chat-screen__header">
           <div className="chat-screen__heading">
-            <h1 id="chat-title">Terrance</h1>
+            <h1 id="chat-title">Terrence</h1>
             <Badge tone={online ? "success" : "warning"}>{online ? "Online" : "Offline"}</Badge>
             <span className="chat-screen__model">{hermes.model}</span>
             {lastSavedAt != null && <span className="chat-screen__saved" title={new Date(lastSavedAt).toLocaleString()}>Saved {relative(lastSavedAt, Date.now())}</span>}
@@ -161,15 +161,15 @@ export function ChatField({
           <ol ref={listRef} className="chat-screen__messages" aria-live="polite" aria-label="Messages">
             {messages.length === 0 && !sending && (
               <li className="chat-screen__empty">
-                <Card title="Ask Terrance anything" headingLevel={2}>
-                  <p>Terrance knows your priorities, projects and recent activity.</p>
+                <Card title="Ask Terrence anything" headingLevel={2}>
+                  <p>Terrence knows your priorities, projects and recent activity.</p>
                   {suggestions.length > 0 && <div className="chat-screen__suggestions">{suggestions.map((s) => <Button key={s} size="small" onClick={() => void send(s)}>{s}</Button>)}</div>}
                 </Card>
               </li>
             )}
             {messages.map((m, i) => (
               <li key={m.id} className="chat-message" data-role={m.role} data-start={starts[i] || undefined}>
-                {starts[i] && <span className="chat-message__meta">{m.role === "user" ? "You" : "Terrance"} · <time dateTime={m.timestamp}>{time(m.timestamp)}</time></span>}
+                {starts[i] && <span className="chat-message__meta">{m.role === "user" ? "You" : "Terrence"} · <time dateTime={m.timestamp}>{time(m.timestamp)}</time></span>}
                 <div className="chat-bubble" data-role={m.role} data-failed={m.status === "failed" || undefined} title={m.role === "assistant" ? [m.model, time(m.timestamp)].filter(Boolean).join(" · ") : undefined}>
                   {m.content}
                 </div>
@@ -180,7 +180,7 @@ export function ChatField({
             ))}
             {sending && (
               <li className="chat-message" data-role="assistant" data-start>
-                <div className="chat-bubble chat-bubble--pending" data-role="assistant" role="status" aria-label="Terrance is thinking">
+                <div className="chat-bubble chat-bubble--pending" data-role="assistant" role="status" aria-label="Terrence is thinking">
                   <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>Thinking…
                 </div>
               </li>
@@ -212,7 +212,7 @@ export function ChatField({
         )}
 
         <form className="chat-screen__composer" onSubmit={submit}>
-          <label htmlFor="chat-composer" className="ui-visually-hidden">Message Terrance</label>
+          <label htmlFor="chat-composer" className="ui-visually-hidden">Message Terrence</label>
           <textarea
             id="chat-composer"
             ref={composerRef}
@@ -220,7 +220,7 @@ export function ChatField({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onComposerKey}
-            placeholder={online ? "Message Terrance" : "Terrance is offline — messages may fail"}
+            placeholder={online ? "Message Terrence" : "Terrence is offline — messages may fail"}
           />
           <Button type="submit" variant="primary" icon={Send} iconOnly aria-label="Send" disabled={sending || !draft.trim()} />
         </form>

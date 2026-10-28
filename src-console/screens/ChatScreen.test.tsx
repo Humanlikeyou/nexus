@@ -40,7 +40,7 @@ describe("ChatField", () => {
   it("shows a skeleton until the first snapshot lands", () => {
     setup({ data: INITIAL_SNAPSHOT });
     expect(screen.getByRole("status", { name: "Loading" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Terrance" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Terrence" })).toBeInTheDocument();
   });
 
   it("empty state offers priority suggestions that send", async () => {
@@ -48,14 +48,14 @@ describe("ChatField", () => {
       { rank: 1, sourceKind: "context" as const, sourceId: "c1", title: "Ship Nexus v2", sourceStatus: "active", score: 1, confidence: 1, reasons: [], contextItemIds: [], actionId: null },
     ] } };
     const props = setup({ data });
-    expect(screen.getByRole("heading", { name: "Ask Terrance anything" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Ask Terrence anything" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Ship Nexus v2" }));
     expect(props.onSend).toHaveBeenCalledWith("Ship Nexus v2");
   });
 
   it("Enter sends, Shift+Enter adds a newline, and the composer clears", async () => {
     const props = setup();
-    const box = screen.getByLabelText("Message Terrance");
+    const box = screen.getByLabelText("Message Terrence");
     await userEvent.type(box, "hello{Shift>}{Enter}{/Shift}there");
     expect(box).toHaveValue("hello\nthere");
     await userEvent.type(box, "{Enter}");
@@ -65,7 +65,7 @@ describe("ChatField", () => {
 
   it("offline: warning badge, offline placeholder, OpenClaw not connected", () => {
     setup({ data: { ...loaded, hermes: { ...loaded.hermes, status: "offline" } } });
-    expect(screen.getByLabelText("Message Terrance")).toHaveAttribute("placeholder", "Terrance is offline — messages may fail");
+    expect(screen.getByLabelText("Message Terrence")).toHaveAttribute("placeholder", "Terrence is offline — messages may fail");
     expect(screen.getAllByText("Offline").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Not connected").length).toBeGreaterThan(0);
   });
@@ -90,7 +90,7 @@ describe("ChatField", () => {
 
   it("shows the thinking bubble while sending", () => {
     setup({ messages: [msg("u1", "user", "hi", "2026-10-28T05:00:00Z")], sending: true });
-    expect(screen.getByRole("status", { name: "Terrance is thinking" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Terrence is thinking" })).toBeInTheDocument();
   });
 
   it("action cards: approve, cancel, retry; hermes chat actions are hidden", async () => {
