@@ -94,4 +94,22 @@ describe("useIdleAutoSave", () => {
     expect(silent).not.toHaveBeenCalled();
     expect(window.localStorage.getItem(AUTOSAVE_SIGNATURE_KEY)).toMatch(/^c1:2:\d+:h[0-9a-z]+$/);
   });
+
+  it("saveNow saves immediately, dedupes, and sets lastSavedAt", async () => {
+    vi.setSystemTime(new Date("2026-10-28T05:00:00Z"));
+    const { result } = renderHook(() => useIdleAutoSave(msgs, "c1", 60_000));
+    expect(result.current.lastSavedAt).toBeNull();
+    await act(async () => { result.current.saveNow(); await vi.advanceTimersByTimeAsync(0); });
+    expect(silent).toHaveBeenCalledTimes(1);
+    expect(result.current.lastSavedAt).toBe(Date.parse("2026-10-28T05:00:00Z"));
+    await act(async () => { result.current.saveNow(); await vi.advanceTimersByTimeAsync(0); });
+    expect(silent).toHaveBeenCalledTimes(1);
+  });
+
+  it("saveNow with fewer than 2 messages does nothing", async () => {
+    const { result } = renderHook(() => useIdleAutoSave([msgs[0]], "c1", 60_000));
+    await act(async () => { result.current.saveNow(); await vi.advanceTimersByTimeAsync(0); });
+    expect(silent).not.toHaveBeenCalled();
+    expect(result.current.lastSavedAt).toBeNull();
+  });
 });

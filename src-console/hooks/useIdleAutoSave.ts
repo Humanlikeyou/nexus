@@ -10,7 +10,7 @@
  * Fail-closed note: summarizeAndStoreSession aborts its context write if the
  * context cannot be loaded (bug 1); the session log is still stored.
  */
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { summarizeAndStoreSessionSilent, type SessionEntry } from "@/terrance/system/continuity";
 
 export const IDLE_AUTOSAVE_MS = 10 * 60_000;
@@ -68,13 +68,22 @@ function writeSaved(sig: string): void {
   try { window.localStorage.setItem(AUTOSAVE_SIGNATURE_KEY, sig); } catch { /* storage unavailable */ }
 }
 
+export interface IdleAutoSave {
+  /** Epoch ms of the last successful save this session (null until one lands). */
+  lastSavedAt: number | null;
+  /** Save the current transcript now (same rules: 2+ entries, deduped). */
+  saveNow: () => void;
+}
+
 export function useIdleAutoSave(
   messages: AutoSaveMessage[],
   conversationKey: string,
   idleMs: number = IDLE_AUTOSAVE_MS,
-): void {
+): IdleAutoSave {
   const snapshot = useRef<Snapshot>({ key: conversationKey, entries: [] });
   const inFlight = useRef<string | null>(null);
+  const mounted = useRef(true);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
 
   const save = (s: Snapshot) => {
     if (s.entries.length < 2) return;
@@ -88,7 +97,11 @@ export function useIdleAutoSave(
     }
     inFlight.current = sig;
     void summarizeAndStoreSessionSilent(s.entries)
-      .then((r) => { if (r.saved) writeSaved(sig); })
+      .then((r) => {
+        if (!r.saved) return;
+        writeSaved(sig);
+        if (mounted.current) setLastSavedAt(Date.now());
+      })
       .catch(() => { /* Silent variant should not throw; never let auto-save break the UI */ })
       .finally(() => { if (inFlight.current === sig) inFlight.current = null; });
   };
@@ -112,6 +125,11 @@ export function useIdleAutoSave(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationKey]);
 
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
   // Window hidden / closing.
   useEffect(() => {
     const onHide = () => { if (document.visibilityState === "hidden") save(snapshot.current); };
@@ -124,4 +142,8 @@ export function useIdleAutoSave(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const saveNow = useCallback(() => save(snapshot.current), []);
+  return { lastSavedAt, saveNow };
 }

@@ -72,6 +72,10 @@ export interface SchedulerStatus {
   lastHealthCheck: number | null;
   lastPrune: number | null;
   dailySummaryHour: number;
+  /** Next time each job becomes due (ms), from the interval constants. Null until the first tick. */
+  nextConsolidationAt: number | null;
+  nextReasoningAt: number | null;
+  nextDailySummaryAt: number | null;
 }
 
 let _lastStatus: SchedulerStatus = {
@@ -82,6 +86,9 @@ let _lastStatus: SchedulerStatus = {
   lastHealthCheck: null,
   lastPrune: null,
   dailySummaryHour: DEFAULT_SUMMARY_HOUR,
+  nextConsolidationAt: null,
+  nextReasoningAt: null,
+  nextDailySummaryAt: null,
 };
 
 export function getSchedulerStatus(): SchedulerStatus {
@@ -96,6 +103,33 @@ export function lastSlot(now: number, hour: number, minute = 0): number {
   s.setHours(hour, minute, 0, 0);
   if (s.getTime() > now) s.setDate(s.getDate() - 1);
   return s.getTime();
+}
+
+/** Next local occurrence of hh:mm strictly after `now` (ms). */
+export function nextSlot(now: number, hour: number, minute = 0): number {
+  const s = new Date(lastSlot(now, hour, minute));
+  s.setDate(s.getDate() + 1);
+  return s.getTime();
+}
+
+/**
+ * When consolidation, reasoning and the daily summary are next due.
+ * Interval jobs: last run + interval (null if never seeded). Daily summary:
+ * today's slot if it hasn't run since then, else the next day's slot.
+ */
+export function computeNextRuns(
+  ctx: Pick<SchedulerTimestamps, "dailySummaryHour" | "lastConsolidationTimestamp" | "lastReasoningTimestamp" | "lastDailySummaryTimestamp">,
+  now: number,
+): Pick<SchedulerStatus, "nextConsolidationAt" | "nextReasoningAt" | "nextDailySummaryAt"> {
+  const hour = clampSummaryHour(ctx.dailySummaryHour);
+  const slot = lastSlot(now, hour);
+  const lastDaily = ctx.lastDailySummaryTimestamp;
+  const next = (last: number | undefined | null, interval: number) => (last != null && last > 0 ? last + interval : null);
+  return {
+    nextConsolidationAt: next(ctx.lastConsolidationTimestamp, CONSOLIDATION_INTERVAL_MS),
+    nextReasoningAt: next(ctx.lastReasoningTimestamp, REASONING_INTERVAL_MS),
+    nextDailySummaryAt: lastDaily != null && lastDaily > 0 && lastDaily < slot ? slot : nextSlot(now, hour),
+  };
 }
 
 /**
@@ -286,6 +320,33 @@ async function runJob(
   }
 }
 
+async function consolidationJob(): Promise<JobOutcome> {
+  const result = await consolidateRecentSessions();
+  return { ok: true, detail: result.consolidated ? "Consolidated recent sessions" : "Skipped (not enough sessions)" };
+}
+
+export type RunNowResult = { started: true } | { started: false; reason: "busy" };
+
+/**
+ * Run memory consolidation now (e.g. a "Consolidate now" button). Shares the
+ * tick's single-flight guard: if a tick or another run-now is in progress it
+ * returns { started: false, reason: "busy" } instead of running concurrently.
+ * Result lands in the activity bus like a scheduled run.
+ */
+export async function runConsolidationNow(): Promise<RunNowResult> {
+  if (running && Date.now() - tickStartedAt < TICK_WATCHDOG_MS) return { started: false, reason: "busy" };
+  running = true;
+  tickStartedAt = Date.now();
+  const gen = ++tickGen;
+  try {
+    const now = Date.now();
+    await runJob("consolidation", "Memory Consolidation", "consolidation", consolidationJob, now, `manual:${now}`, "run now");
+    return { started: true };
+  } finally {
+    if (gen === tickGen) running = false;
+  }
+}
+
 async function tick() {
   if (running) {
     if (Date.now() - tickStartedAt < TICK_WATCHDOG_MS) return;
@@ -330,6 +391,7 @@ async function tick() {
       lastHealthCheck: ctx.lastHealthCheckTimestamp ?? null,
       lastPrune: ctx.lastPruneTimestamp ?? null,
       dailySummaryHour: summaryHour,
+      ...computeNextRuns(ctx, now),
     };
 
     const sentOutcome = (r: { sent: boolean }): JobOutcome =>
@@ -354,13 +416,7 @@ async function tick() {
           return { ok: true, detail: "All systems healthy" };
         },
       },
-      consolidation: {
-        label: "Memory Consolidation", kind: "consolidation", heavy: true,
-        fn: async () => {
-          const result = await consolidateRecentSessions();
-          return { ok: true, detail: result.consolidated ? "Consolidated recent sessions" : "Skipped (not enough sessions)" };
-        },
-      },
+      consolidation: { label: "Memory Consolidation", kind: "consolidation", heavy: true, fn: consolidationJob },
       reasoning: {
         label: "Reasoning Loop", kind: "reasoning", heavy: true,
         fn: async () => {
