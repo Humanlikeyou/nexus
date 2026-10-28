@@ -28,7 +28,7 @@ describe("StatTile", () => {
   });
 
   it("flat trend defaults to neutral sentiment", () => {
-    render(<StatTile label="Strain" value="10.2" trend={{ direction: "flat", label: "No change" }} />);
+    render(<StatTile label="Effort" value="48.6" trend={{ direction: "flat", label: "No change" }} />);
     const [, trend] = screen.getAllByRole("definition");
     expect(trend).toHaveAttribute("data-direction", "flat");
     expect(trend).toHaveAttribute("data-sentiment", "neutral");

@@ -78,7 +78,7 @@ export function Gallery({ theme }: { theme: "light" | "dark" }) {
       <div className="ui-gallery__stats">
         <StatTile label="Recovery" value={74} unit="%" trend={{ direction: "up", value: "+6%", label: "Up 6% from yesterday", sentiment: "positive" }} />
         <StatTile label="HRV" value={62} unit="ms" trend={{ direction: "down", value: "−4 ms", label: "Down 4 ms from yesterday", sentiment: "negative" }} />
-        <StatTile label="Strain" value="10.2" trend={{ direction: "flat", value: "0.0", label: "No change from yesterday" }} />
+        <StatTile label="Effort" value="48.6" trend={{ direction: "flat", value: "0.0", label: "No change from yesterday" }} />
         <StatTile label="Focus sessions" value={128} />
       </div>
 
@@ -86,7 +86,7 @@ export function Gallery({ theme }: { theme: "light" | "dark" }) {
         <Card title="Ring" elevation={0}>
           <div className="ui-gallery__row">
             <Ring value={74} label="Recovery" valueText="74%, High" color="var(--data-recovery-high)"><strong>74%</strong><small>High</small></Ring>
-            <Ring value={12.4} max={21} label="Strain" color="var(--data-strain)"><strong>12.4</strong><small>of 21</small></Ring>
+            <Ring value={48.6} max={100} label="Effort" color="var(--data-strain)"><strong>48.6</strong><small>of 100</small></Ring>
             <Ring value={null} label="Recovery (no data)" size="sm" />
           </div>
         </Card>

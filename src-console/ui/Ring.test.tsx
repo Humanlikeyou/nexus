@@ -17,9 +17,9 @@ describe("Ring", () => {
     expect(meter.style.getPropertyValue("--ui-ring-color")).toBe("var(--data-recovery-high)");
   });
 
-  it("clamps to the range (strain 0–21)", () => {
-    render(<Ring value={25.4} max={21} label="Strain" />);
-    expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "21");
+  it("clamps to the range (Effort 0–100)", () => {
+    render(<Ring value={125.4} max={100} label="Effort" />);
+    expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "100");
   });
 
   it("null value renders the track only and says No data", () => {
