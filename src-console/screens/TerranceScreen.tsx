@@ -54,13 +54,14 @@ function readScheduler(): SchedulerView {
 }
 
 function useSchedulerStatus(override?: SchedulerView): SchedulerView {
-  const [status, setStatus] = useState<SchedulerView>(() => override ?? readScheduler());
+  // An override wins outright (derived, not mirrored into state); otherwise poll every 30s.
+  const [polled, setPolled] = useState<SchedulerView>(() => override ?? readScheduler());
   useEffect(() => {
-    if (override) { setStatus(override); return; }
-    const id = window.setInterval(() => setStatus(readScheduler()), 30_000);
+    if (override) return;
+    const id = window.setInterval(() => setPolled(readScheduler()), 30_000);
     return () => window.clearInterval(id);
   }, [override]);
-  return status;
+  return override ?? polled;
 }
 
 function useNow(fixed?: number) {
