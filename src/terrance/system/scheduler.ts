@@ -28,6 +28,7 @@ import { tickRituals } from "./rituals";
 import { tickCustomJobs } from "./customJobs";
 import { evolveSkills } from "./skillsEvolution";
 import { activityBus } from "./activityBus";
+import { Backoff } from "./backoff";
 import { tickSubagents } from "./subagents";
 import { startTelegramBridge, stopTelegramBridge } from "./telegramBridge";
 
@@ -214,42 +215,19 @@ export function decideDueTasks(ctx: SchedulerTimestamps, now: number): DueTask[]
 
 // ─── Failure backoff (bug 3) ──────────────────────────────────────────────────
 // Attempts are tracked in memory only (a restart may retry once; success still
-// persists the real timestamp). Lead decision: retry after 5, 15, 60 min, max 3
-// tries per window. No fixed 5-minute retry loop.
+// persists the real timestamp). See ./backoff for the 5/15/60-min schedule.
 
 export type JobId = "daily" | "midday" | "evening" | "consolidation" | "reasoning" | "prune" | "health";
 
-export const BACKOFF_DELAYS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000] as const;
-export const MAX_ATTEMPTS_PER_WINDOW = 3;
+export { BACKOFF_DELAYS_MS, MAX_ATTEMPTS_PER_WINDOW } from "./backoff";
+const backoff = new Backoff<JobId>();
 
-interface FailureState {
-  count: number;
-  nextAt: number;
-  window: string;
-}
-const failures = new Map<JobId, FailureState>();
-
-/** Failure counters reset when the job's window (slot) changes. */
-function inBackoff(id: JobId, now: number, window: string): boolean {
-  const f = failures.get(id);
-  if (!f) return false;
-  if (f.window !== window) {
-    failures.delete(id);
-    return false;
-  }
-  return f.count >= MAX_ATTEMPTS_PER_WINDOW || now < f.nextAt;
-}
-
-function recordFailure(id: JobId, now: number, window: string): void {
-  const prev = failures.get(id);
-  const count = prev && prev.window === window ? prev.count + 1 : 1;
-  const delay = BACKOFF_DELAYS_MS[Math.min(count - 1, BACKOFF_DELAYS_MS.length - 1)];
-  failures.set(id, { count, nextAt: now + delay, window });
-}
-
-function recordSuccess(id: JobId): void {
-  failures.delete(id);
-}
+/**
+ * A heavy job that fails this fast did no real (LLM) work, e.g. a missing
+ * model or an unconfigured Telegram. It does not spend the tick's heavy
+ * budget, so it can't starve overdue consolidation/reasoning behind it.
+ */
+export const FAST_FAIL_MS = 10_000;
 
 // ─── Timeouts (bug 4) ─────────────────────────────────────────────────────────
 // JS cannot cancel the underlying invoke; an orphaned promise may still finish
@@ -301,7 +279,8 @@ async function runJob(
   now: number,
   window: string,
   detail?: string,
-): Promise<void> {
+): Promise<{ ok: boolean; ms: number }> {
+  const startedAt = Date.now();
   const taskId = activityBus.register(label, kind, detail ? { detail } : undefined);
   console.log(`[scheduler] Running ${label}${detail ? ` (${detail})` : ""}...`);
   let outcome: JobOutcome;
@@ -311,13 +290,14 @@ async function runJob(
     outcome = { ok: false, detail: String(e) };
   }
   if (outcome.ok) {
-    recordSuccess(id);
+    backoff.recordSuccess(id);
     activityBus.complete(taskId, outcome.detail);
   } else {
-    recordFailure(id, now, window);
+    backoff.recordFailure(id, now, window);
     activityBus.fail(taskId, outcome.detail);
     console.error(`[scheduler] ${label} failed: ${outcome.detail}`);
   }
+  return { ok: outcome.ok, ms: Date.now() - startedAt };
 }
 
 async function consolidationJob(): Promise<JobOutcome> {
@@ -442,12 +422,13 @@ async function tick() {
 
     for (const task of decideDueTasks(ctx, now)) {
       const job = jobs[task.id];
-      if (inBackoff(task.id, now, task.window)) continue;
+      if (backoff.inBackoff(task.id, now, task.window)) continue;
       if (job.heavy) {
         if (heavyBudget <= 0) continue;
         heavyBudget--;
       }
-      await runJob(task.id, job.label, job.kind, job.fn, now, task.window, task.catchUp ? "catch-up" : undefined);
+      const result = await runJob(task.id, job.label, job.kind, job.fn, now, task.window, task.catchUp ? "catch-up" : undefined);
+      if (job.heavy && !result.ok && result.ms < FAST_FAIL_MS) heavyBudget++;
 
       // Skills self-improvement runs on the consolidation cadence
       if (task.id === "consolidation") {

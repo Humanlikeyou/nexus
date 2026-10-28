@@ -6,6 +6,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { activityBus } from "./activityBus";
+import { Backoff } from "./backoff";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -287,6 +288,15 @@ function shouldFire(ritual: Ritual, now: Date): boolean {
   return true;
 }
 
+// Failed sends back off (5/15/60 min, max 3 per day) instead of retrying
+// every tick while the ritual stays due. In memory only.
+const sendBackoff = new Backoff();
+
+/** Backoff window: one per local calendar day (rituals fire at most daily). */
+function dayWindow(now: Date): string {
+  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+}
+
 /**
  * Called every scheduler tick (5 min). Fires any due rituals.
  */
@@ -297,6 +307,7 @@ export async function tickRituals(): Promise<void> {
 
   for (const ritual of RITUALS) {
     if (!shouldFire(ritual, now)) continue;
+    if (sendBackoff.inBackoff(ritual.id, now.getTime(), dayWindow(now))) continue;
 
     const taskId = activityBus.register(`Ritual: ${ritual.name}`, "daily_summary");
 
@@ -311,9 +322,11 @@ export async function tickRituals(): Promise<void> {
     try {
       await invoke<void>("send_telegram_message", { text: message });
       state.lastRunTimestamps[ritual.id] = now.getTime();
+      sendBackoff.recordSuccess(ritual.id);
       activityBus.complete(taskId, `Sent: ${ritual.name}`);
       fired++;
     } catch (e) {
+      sendBackoff.recordFailure(ritual.id, now.getTime(), dayWindow(now));
       console.error(`[rituals] Failed to send ${ritual.id}:`, e);
       activityBus.fail(taskId, String(e));
     }
