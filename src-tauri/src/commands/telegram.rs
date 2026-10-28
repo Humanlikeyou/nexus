@@ -515,11 +515,17 @@ mod tests {
         };
         save_config_at(&path, &cfg).unwrap();
 
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         let back: NexusConfig = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(back.telegram_chat_id.as_deref(), Some("42"));
         // no temp files left behind
-        let names: Vec<_> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        let names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
         assert_eq!(names, vec![std::ffi::OsString::from("config.json")]);
         let _ = fs::remove_dir_all(&dir);
     }

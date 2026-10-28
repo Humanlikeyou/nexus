@@ -223,7 +223,12 @@ mod tests {
         fs::read_dir(base.join(DATA_DIR_NAME))
             .unwrap()
             .map(|e| e.unwrap().path())
-            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("config.json.bak-"))
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("config.json.bak-")
+            })
             .collect()
     }
 
@@ -241,7 +246,12 @@ mod tests {
         merged.sort();
         assert_eq!(
             merged,
-            vec!["gateway_auth_token", "gateway_url", "llm_token_threshold", "telegram_chat_id"]
+            vec![
+                "gateway_auth_token",
+                "gateway_url",
+                "llm_token_threshold",
+                "telegram_chat_id"
+            ]
         );
         let cfg = read_cfg(&base);
         assert_eq!(cfg["telegram_chat_id"], "123");
@@ -283,7 +293,10 @@ mod tests {
     #[test]
     fn config_merge_runs_once() {
         let base = merge_fixture("once", r#"{"a":"x"}"#, r#"{}"#);
-        assert_eq!(merge_legacy_config_in(&base).unwrap(), vec!["a".to_string()]);
+        assert_eq!(
+            merge_legacy_config_in(&base).unwrap(),
+            vec!["a".to_string()]
+        );
         assert!(base.join(DATA_DIR_NAME).join(CONFIG_MERGE_MARKER).exists());
         // a later legacy change is not picked up again
         fs::write(base.join(LEGACY_DIR_NAME).join(CONFIG_FILE), r#"{"b":"z"}"#).unwrap();
