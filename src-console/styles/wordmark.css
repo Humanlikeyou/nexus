@@ -1,0 +1,51 @@
+/* Amara wordmark (screen-specs › Shell › Wordmark). Cormorant Garamond SemiBold 600, Latin subset,
+ * self-hosted under SIL OFL 1.1 (assets/fonts/OFL.txt). Used ONLY for the "Amara" wordmark;
+ * the rest of the UI stays on the system font. No external font requests (CSP font-src 'self'). */
+@font-face {
+  font-family: "Amara Wordmark";
+  src: url("../assets/fonts/CormorantGaramond-SemiBold-latin.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2212, U+FEFF, U+FFFD;
+}
+
+:root {
+  --font-wordmark: "Amara Wordmark", ui-serif, Georgia, serif;
+  --wordmark-nudge: 1px;
+}
+
+.wordmark-lockup {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  transform: translateY(var(--wordmark-nudge));
+}
+
+.wordmark {
+  font-family: var(--font-wordmark);
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  font-synthesis: none;
+  font-kerning: normal;
+  font-feature-settings: "kern", "liga";
+  -webkit-font-smoothing: antialiased;
+  color: var(--label, var(--text));
+}
+
+/* "OS" suffix: system font, 11px / 500, uppercase, +.08em, secondary label colour. */
+.wordmark-os {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label-secondary);
+}
+
+[data-window-active="false"] .wordmark { color: var(--label-secondary); }

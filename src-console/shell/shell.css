@@ -35,7 +35,7 @@ main.command-surface > .intelligence-overlay > .field-clock { padding: 0 var(--i
  * so decorative children let the pointer through; buttons stay clickable. */
 main.command-surface > .intelligence-overlay > .nexus-mark > *,
 main.command-surface > .intelligence-overlay > .field-clock > :not(button) { pointer-events: none; }
-main.command-surface .nexus-wordmark { color: var(--label, var(--text)); font-size: var(--text-body); font-weight: 650; line-height: 1; white-space: nowrap; }
+main.command-surface > .intelligence-overlay > .nexus-mark { padding-left: calc(var(--shell-traffic-inset) + 6px); } /* wordmark starts at x≈84px */
 
 /* Sidebar: material, gray selection, accent-tinted icon, never a left bar. */
 main.command-surface > nav.system-constellation {
