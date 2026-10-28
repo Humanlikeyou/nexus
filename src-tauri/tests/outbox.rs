@@ -3,14 +3,9 @@ use nexus_lib::test_support::{get_outbox_status, DATA_DIR_ENV};
 
 mod common;
 
-// BUG: commands/events.rs:6-17 builds its own path from dirs::data_dir()
-// (`nexus_data_dir()` → <Application Support>/com.taisun.nexus/events.db) and
-// ignores NEXUS_DATA_DIR (app_paths::data_dir()). Running this test would open
-// and create tables in the user's REAL events.db, so it stays ignored until
-// events.rs uses app_paths::data_dir(). (commands/telegram.rs:5 has the same
-// pattern for config.json.)
+// events.rs and telegram.rs resolve the data dir via app_paths::data_dir(), so
+// NEXUS_DATA_DIR keeps this test inside a temp dir.
 #[tokio::test]
-#[ignore = "events.rs ignores NEXUS_DATA_DIR and would open the real events.db (events.rs:6)"]
 async fn outbox_status_on_an_empty_data_dir() {
     let dir = common::tmp("outbox");
     std::env::set_var(DATA_DIR_ENV, &dir);
