@@ -112,8 +112,9 @@ struct NexusActionProposalFile {
 impl NexusActionProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_action_proposals");
-        fs::create_dir_all(&directory)
-            .map_err(|error| format!("Failed to prepare Amara OS action proposal store: {error}"))?;
+        fs::create_dir_all(&directory).map_err(|error| {
+            format!("Failed to prepare Amara OS action proposal store: {error}")
+        })?;
         Ok(Self {
             path: directory.join(format!("{}.json", Uuid::new_v4())),
         })
@@ -150,8 +151,9 @@ struct NexusDecisionProposalFile {
 impl NexusDecisionProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_decision_proposals");
-        fs::create_dir_all(&directory)
-            .map_err(|error| format!("Failed to prepare Amara OS decision proposal store: {error}"))?;
+        fs::create_dir_all(&directory).map_err(|error| {
+            format!("Failed to prepare Amara OS decision proposal store: {error}")
+        })?;
         Ok(Self {
             path: directory.join(format!("{}.json", Uuid::new_v4())),
         })
@@ -162,7 +164,9 @@ impl NexusDecisionProposalFile {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => {
-                return Err(format!("Failed to read Amara OS decision proposal: {error}"));
+                return Err(format!(
+                    "Failed to read Amara OS decision proposal: {error}"
+                ));
             }
         };
         let _ = fs::remove_file(&self.path);
@@ -201,7 +205,9 @@ impl NexusDecisionResolutionProposalFile {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => {
-                return Err(format!("Failed to read Amara OS decision resolution: {error}"));
+                return Err(format!(
+                    "Failed to read Amara OS decision resolution: {error}"
+                ));
             }
         };
         let _ = fs::remove_file(&self.path);
@@ -227,8 +233,9 @@ struct NexusProjectProposalFile {
 impl NexusProjectProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_project_proposals");
-        fs::create_dir_all(&directory)
-            .map_err(|error| format!("Failed to prepare Amara OS project proposal store: {error}"))?;
+        fs::create_dir_all(&directory).map_err(|error| {
+            format!("Failed to prepare Amara OS project proposal store: {error}")
+        })?;
         Ok(Self {
             path: directory.join(format!("{}.json", Uuid::new_v4())),
         })
@@ -263,8 +270,9 @@ struct NexusContextProposalFile {
 impl NexusContextProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_context_proposals");
-        fs::create_dir_all(&directory)
-            .map_err(|error| format!("Failed to prepare Amara OS context proposal store: {error}"))?;
+        fs::create_dir_all(&directory).map_err(|error| {
+            format!("Failed to prepare Amara OS context proposal store: {error}")
+        })?;
         Ok(Self {
             path: directory.join(format!("{}.json", Uuid::new_v4())),
         })
@@ -728,7 +736,9 @@ fn append_runtime_notice(message: String, notice: String) -> String {
 }
 
 fn prepared_action_message(title: &str) -> String {
-    format!("I prepared {title} for your approval in Amara OS. It will not run unless you approve it.")
+    format!(
+        "I prepared {title} for your approval in Amara OS. It will not run unless you approve it."
+    )
 }
 
 fn user_facing_runtime_error(error: &str, fallback: &str) -> String {

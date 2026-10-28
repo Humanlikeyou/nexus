@@ -269,8 +269,7 @@ fn upsert_project_in(
         ],
     )
     .map_err(|error| format!("Failed to persist Amara project: {error}"))?;
-    get_project_in(conn, &id)?
-        .ok_or_else(|| "Saved Amara project could not be read.".to_string())
+    get_project_in(conn, &id)?.ok_or_else(|| "Saved Amara project could not be read.".to_string())
 }
 
 fn get_project_in(conn: &Connection, id: &str) -> Result<Option<TerrenceProject>, String> {

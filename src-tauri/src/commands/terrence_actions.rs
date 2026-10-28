@@ -1024,12 +1024,9 @@ fn update_action_status(
     error: Option<String>,
 ) -> Result<TerrenceAction, String> {
     if !ACTION_STATUSES.contains(&next_status) {
-        return Err(format!(
-            "Unsupported Amara action status: {next_status}."
-        ));
+        return Err(format!("Unsupported Amara action status: {next_status}."));
     }
-    let action =
-        get_action(conn, id)?.ok_or_else(|| "Amara action was not found.".to_string())?;
+    let action = get_action(conn, id)?.ok_or_else(|| "Amara action was not found.".to_string())?;
     if !expected_statuses.contains(&action.status.as_str()) {
         return Err(format!(
             "Amara action cannot move from '{}' to '{}'.",
@@ -1397,7 +1394,8 @@ fn execute_directory_organization(parameters: &Value) -> Result<String, String> 
         }
         if to.exists() {
             return Err(
-                "An organization destination now exists; Amara OS will not overwrite it.".to_string(),
+                "An organization destination now exists; Amara OS will not overwrite it."
+                    .to_string(),
             );
         }
         verified_moves.push((from, to));
@@ -1587,7 +1585,9 @@ pub(crate) fn create_terrence_action(
 ) -> Result<TerrenceAction, String> {
     let tool_id = clean_required(&input.tool_id, "Amara tool ID", 120)?.to_ascii_lowercase();
     if tool_id == "agent.hermes_chat" {
-        return Err("The Hermes conversation tool is reserved for Amara OS runtime use.".to_string());
+        return Err(
+            "The Hermes conversation tool is reserved for Amara OS runtime use.".to_string(),
+        );
     }
     let tool = find_tool(&tool_id).ok_or_else(|| format!("Unknown Amara tool: {tool_id}."))?;
     let parameters = normalize_parameters(&tool_id, input.parameters)?;
@@ -1951,8 +1951,7 @@ fn prepare_approval(
     conn: &Connection,
     id: &str,
 ) -> Result<(TerrenceAction, Value, String, String), String> {
-    let pending =
-        get_action(conn, id)?.ok_or_else(|| "Amara action was not found.".to_string())?;
+    let pending = get_action(conn, id)?.ok_or_else(|| "Amara action was not found.".to_string())?;
     if pending.status != "awaiting_approval" || !pending.requires_approval {
         return Err("This action is not awaiting approval.".to_string());
     }
@@ -1965,8 +1964,7 @@ fn prepare_approval(
 /// After the dialog, the row must still be awaiting approval with the same
 /// tool and the same normalized parameters that were shown.
 fn verify_unchanged(conn: &Connection, id: &str, shown_fingerprint: &str) -> Result<(), String> {
-    let current =
-        get_action(conn, id)?.ok_or_else(|| "Amara action was not found.".to_string())?;
+    let current = get_action(conn, id)?.ok_or_else(|| "Amara action was not found.".to_string())?;
     if current.status != "awaiting_approval" {
         return Err("changed: The action changed while the approval dialog was open.".to_string());
     }

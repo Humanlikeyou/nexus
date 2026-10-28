@@ -138,6 +138,9 @@ mod tests {
         let new = serde_json::json!({ "avg_focus": null, "avg_relaxation": null, "avg_hr": null, "max_hr": null, "avg_hrv": null, "calm_pct": 61.5, "time_in_target_pct": 40.0 });
         let summary: SessionSummary = serde_json::from_value(new).unwrap();
         assert_eq!(summary.calm_pct, Some(61.5));
-        assert_eq!(serde_json::to_value(&summary).unwrap()["time_in_target_pct"], 40.0);
+        assert_eq!(
+            serde_json::to_value(&summary).unwrap()["time_in_target_pct"],
+            40.0
+        );
     }
 }

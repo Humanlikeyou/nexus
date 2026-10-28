@@ -909,8 +909,7 @@ fn create_terrence_decision_in(
         ],
     )
     .map_err(|error| format!("Failed to record Amara decision: {error}"))?;
-    get_decision(conn, &id)?
-        .ok_or_else(|| "Recorded Amara decision could not be read.".to_string())
+    get_decision(conn, &id)?.ok_or_else(|| "Recorded Amara decision could not be read.".to_string())
 }
 
 // Not registered in generate_handler! (no live caller); kept so it can be restored.
@@ -984,8 +983,7 @@ fn resolve_terrence_decision_in(
         params![status, decision, outcome, now, id],
     )
     .map_err(|error| format!("Failed to resolve Amara decision: {error}"))?;
-    get_decision(conn, &id)?
-        .ok_or_else(|| "Resolved Amara decision could not be read.".to_string())
+    get_decision(conn, &id)?.ok_or_else(|| "Resolved Amara decision could not be read.".to_string())
 }
 
 #[tauri::command]

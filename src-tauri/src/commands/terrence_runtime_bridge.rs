@@ -110,34 +110,39 @@ impl NexusRuntimeBridge {
             ));
         }
 
-        let response_line =
-            match tokio::time::timeout(BRIDGE_TIMEOUT, bridge.stdout.next_line()).await {
-                Ok(Ok(Some(line))) => line,
-                Ok(Ok(None)) => {
-                    reset_process(&mut process);
-                    return Err("Amara OS local Hermes runtime ended without a response.".to_string());
-                }
-                Ok(Err(error)) => {
-                    reset_process(&mut process);
-                    return Err(format!(
-                        "Amara OS could not read the local Hermes response: {error}"
-                    ));
-                }
-                Err(_) => {
-                    reset_process(&mut process);
-                    return Err("Hermes did not complete within 30 minutes.".to_string());
-                }
-            };
+        let response_line = match tokio::time::timeout(BRIDGE_TIMEOUT, bridge.stdout.next_line())
+            .await
+        {
+            Ok(Ok(Some(line))) => line,
+            Ok(Ok(None)) => {
+                reset_process(&mut process);
+                return Err("Amara OS local Hermes runtime ended without a response.".to_string());
+            }
+            Ok(Err(error)) => {
+                reset_process(&mut process);
+                return Err(format!(
+                    "Amara OS could not read the local Hermes response: {error}"
+                ));
+            }
+            Err(_) => {
+                reset_process(&mut process);
+                return Err("Hermes did not complete within 30 minutes.".to_string());
+            }
+        };
         let response: NexusBridgeResponse = match serde_json::from_str(&response_line) {
             Ok(response) => response,
             Err(_) => {
                 reset_process(&mut process);
-                return Err("Amara OS local Hermes runtime returned an invalid response.".to_string());
+                return Err(
+                    "Amara OS local Hermes runtime returned an invalid response.".to_string(),
+                );
             }
         };
         if response.id.as_deref() != Some(expected_id.as_str()) {
             reset_process(&mut process);
-            return Err("Amara OS local Hermes runtime returned a mismatched response.".to_string());
+            return Err(
+                "Amara OS local Hermes runtime returned a mismatched response.".to_string(),
+            );
         }
         if !response.ok {
             return Err(response

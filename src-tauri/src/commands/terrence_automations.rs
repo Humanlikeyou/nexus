@@ -402,9 +402,7 @@ fn ingest_hermes_automation_inbox_in(conn: &Connection, directory: &Path) -> usi
                         automation_id
                     ],
                 )
-                .map_err(|error| {
-                    format!("Failed to update Amara automation outcome: {error}")
-                })?;
+                .map_err(|error| format!("Failed to update Amara automation outcome: {error}"))?;
             }
             Ok(())
         })();
