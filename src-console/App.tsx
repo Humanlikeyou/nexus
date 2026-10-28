@@ -23,6 +23,14 @@ import { ScreenSkeleton } from "./shell/ScreenSkeleton";
 import { Toolbar } from "./shell/Toolbar";
 import type { ModuleId } from "./types";
 
+const BUSINESS_VIEW_KEY = "amara.business.view";
+function readBusinessView(): string | null {
+  try { return sessionStorage.getItem(BUSINESS_VIEW_KEY); } catch { return null; }
+}
+function writeBusinessView(view: string) {
+  try { sessionStorage.setItem(BUSINESS_VIEW_KEY, view); } catch { /* storage unavailable: choice just isn't remembered */ }
+}
+
 export default function App() {
   const [route, setRoute] = useState<Route>({ id: "terrance", view: "main" });
   const active = route.id;
@@ -34,7 +42,12 @@ export default function App() {
     return () => cancelAnimationFrame(frame);
   }, [route]);
   // Old ids (sessions, trajectory, revenue, assistant, devices) resolve to their host + sub-view.
-  const setActive = useCallback((id: ModuleId) => setRoute(resolveRoute(id)), []);
+  // §7+8: the Business Work | Revenue choice persists for the session.
+  const setActive = useCallback((id: ModuleId) => setRoute(() => {
+    const next = resolveRoute(id);
+    if (id === "business" && next.view === "main" && readBusinessView() === "revenue") return { ...next, view: "revenue" };
+    return next;
+  }), []);
   const { data, busy, setBusy, refresh } = useSnapshot();
   const [notice, setNotice] = useState<string | null>(null);
   const { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession } = useMuseSession(data, refresh, setNotice);
@@ -87,8 +100,8 @@ export default function App() {
     : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => setRoute({ id: "neuro", view: "main" })} />
     : screenId === "devices" ? <DevicesField data={data} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} />
-    : screenId === "business" ? <BusinessField data={data} />
-    : screenId === "revenue" ? <RevenueField data={data} />
+    : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} />
+    : screenId === "revenue" ? <RevenueField data={data} onRetry={retrySnapshot} />
     : screenId === "assistant" ? <ActivityField data={data} />
     : screenId === "chat" ? <ChatField data={data} messages={messages} sending={sending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
     : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} />;
@@ -97,7 +110,7 @@ export default function App() {
     <CommandSurface mode={screenId}>
       <Toolbar label={selected.label} busy={busy} onRefresh={refresh} />
       <Sidebar active={active} onSelect={setActive} data={data} />
-      <section className="active-field" aria-label={`${selected.label} system`}>{subViews && <div className="subview-bar"><SegmentedControl label={`${selected.label} view`} size="small" value={route.view} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => setRoute({ id: active, view })} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
+      <section className="active-field" aria-label={`${selected.label} system`}>{subViews && <div className="subview-bar"><SegmentedControl label={`${selected.label} view`} size="small" value={route.view} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); setRoute({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
       <Footer data={data} busy={busy} />
       {notice && <div className="field-notice"><i />{notice}</div>}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />
