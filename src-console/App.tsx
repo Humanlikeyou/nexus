@@ -21,6 +21,7 @@ import { Footer } from "./shell/Footer";
 import { Sidebar } from "./shell/Sidebar";
 import { ScreenSkeleton } from "./shell/ScreenSkeleton";
 import { Toolbar } from "./shell/Toolbar";
+import { CommandPalette } from "./shell/CommandPalette";
 import type { ModuleId } from "./types";
 
 const BUSINESS_VIEW_KEY = "amara.business.view";
@@ -62,6 +63,17 @@ export default function App() {
   const { conversationId, messages, sending, sendToTerrence, startNewConversation } = useConversation(refresh);
   // Session continuity: summarize the Amara chat after idle / on new chat / on close (bug 6).
   const autoSave = useIdleAutoSave(messages, conversationId);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [askDraft, setAskDraft] = useState<{ text: string; n: number }>({ text: "", n: 0 });
+  useEffect(() => {
+    const palette = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      setPaletteOpen((open) => !open);
+    };
+    window.addEventListener("keydown", palette);
+    return () => window.removeEventListener("keydown", palette);
+  }, []);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (!event.metaKey || event.ctrlKey || event.altKey || !/^[1-9]$/.test(event.key)) return;
@@ -105,12 +117,14 @@ export default function App() {
     : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} />
     : screenId === "revenue" ? <RevenueField data={data} onRetry={retrySnapshot} />
     : screenId === "assistant" ? <ActivityField data={data} onRetry={retrySnapshot} />
-    : screenId === "chat" ? <ChatField data={data} messages={messages} sending={sending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} onOpenActivity={() => setRoute({ id: "chat", view: "activity" })} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
+    : screenId === "chat" ? <ChatField key={askDraft.n} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} onOpenActivity={() => setRoute({ id: "chat", view: "activity" })} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
     : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} />;
 
   return (
     <CommandSurface mode={screenId}>
-      <Toolbar label={selected.label} busy={busy} onRefresh={refresh} />
+      <Toolbar label={selected.label} busy={busy} onRefresh={refresh} onSearch={() => setPaletteOpen(true)} />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={setRoute}
+        onAsk={(text) => { setAskDraft((d) => ({ text, n: d.n + 1 })); setRoute({ id: "chat", view: "main" }); }} />
       <Sidebar active={active} onSelect={setActive} data={data} />
       <section className="active-field" aria-label={`${selected.label} system`}>{subViews && <div className="subview-bar"><SegmentedControl label={`${selected.label} view`} size="small" value={route.view} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); setRoute({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
       <Footer data={data} busy={busy} />

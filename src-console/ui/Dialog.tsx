@@ -8,21 +8,24 @@ export type DialogProps = {
   title: string;
   /** Body copy; plain text or nodes. */
   children?: ReactNode;
-  confirmLabel: string;
+  /** Omit (with onConfirm) for a content-only dialog such as the ⌘K palette: no action row. */
+  confirmLabel?: string;
   cancelLabel?: string;
   /** Red confirm button for actions that delete or overwrite. */
   destructive?: boolean;
   /** Disables both buttons and shows a spinner on confirm while work runs. */
   busy?: boolean;
-  onConfirm: () => void;
+  onConfirm?: () => void;
   /** Cancel button, Esc and backdrop-less close all route here. */
   onCancel: () => void;
   className?: string;
+  /** Keep the title for assistive tech only. */
+  hideTitle?: boolean;
 };
 
 /** Thin confirm dialog over the native <dialog> (macOS 13 WebKit; no Popover API).
  *  Initial focus is on Cancel, Esc = Cancel, focus returns to the opener on close. */
-export function Dialog({ open, title, children, confirmLabel, cancelLabel = "Cancel", destructive = false, busy = false, onConfirm, onCancel, className }: DialogProps) {
+export function Dialog({ open, title, children, confirmLabel, cancelLabel = "Cancel", destructive = false, busy = false, onConfirm, onCancel, className, hideTitle = false }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const opener = useRef<Element | null>(null);
@@ -55,12 +58,14 @@ export function Dialog({ open, title, children, confirmLabel, cancelLabel = "Can
 
   return (
     <dialog ref={ref} className={cx("ui-dialog", className)} aria-labelledby={titleId} aria-describedby={children ? bodyId : undefined} data-destructive={destructive || undefined}>
-      <h2 id={titleId} className="ui-dialog__title">{title}</h2>
+      <h2 id={titleId} className={hideTitle ? "ui-visually-hidden" : "ui-dialog__title"}>{title}</h2>
       {children && <div id={bodyId} className="ui-dialog__body">{children}</div>}
-      <div className="ui-dialog__actions">
-        <Button ref={cancelRef} variant="secondary" onClick={onCancel} disabled={busy}>{cancelLabel}</Button>
-        <Button variant={destructive ? "destructive" : "primary"} onClick={onConfirm} loading={busy}>{confirmLabel}</Button>
-      </div>
+      {confirmLabel && onConfirm && (
+        <div className="ui-dialog__actions">
+          <Button ref={cancelRef} variant="secondary" onClick={onCancel} disabled={busy}>{cancelLabel}</Button>
+          <Button variant={destructive ? "destructive" : "primary"} onClick={onConfirm} loading={busy}>{confirmLabel}</Button>
+        </div>
+      )}
     </dialog>
   );
 }

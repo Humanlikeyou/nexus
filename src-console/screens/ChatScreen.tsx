@@ -25,6 +25,8 @@ export interface ChatFieldProps {
   onRetrySources?: () => void;
   /** §10: opens Chat & Agents › Activity. */
   onOpenActivity?: () => void;
+  /** Pre-filled composer text (⌘K “Ask Amara”); remount via key to apply. */
+  initialDraft?: string;
   busy?: boolean;
 }
 
@@ -57,10 +59,10 @@ function relative(ms: number, now: number): string {
 }
 
 export function ChatField({
-  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onOpenContext, onOpenActivity,
+  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onOpenContext, onOpenActivity, initialDraft = "",
   onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false,
 }: ChatFieldProps) {
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(initialDraft);
   const [query, setQuery] = useState("");
   const listRef = useRef<HTMLOListElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
