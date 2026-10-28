@@ -22,6 +22,7 @@
   letter-spacing: -.01em;
 }
 .ui-stat__unit { color: var(--label-secondary); font: var(--type-headline); }
+.ui-stat__value[data-empty] { color: var(--label-tertiary); font: var(--type-title1); }
 
 .ui-stat__trend {
   display: inline-flex;

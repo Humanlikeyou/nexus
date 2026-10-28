@@ -7,6 +7,11 @@
   padding: var(--space-0_5);
   border-radius: calc(var(--radius-sm) + var(--space-0_5));
   background: var(--fill-secondary);
+  /* Hugs its segments (left-aligned) instead of stretching across a grid/card. */
+  width: auto;
+  max-width: 480px;
+  justify-self: start;
+  align-self: start;
 }
 .ui-segmented[data-size="small"] { --ui-seg-h: var(--control-h-sm); --ui-seg-icon: var(--text-callout); }
 

@@ -15,6 +15,7 @@ export type StatTrend = {
 
 export type StatTileProps = Omit<ComponentPropsWithRef<"dl">, "children"> & {
   label: ReactNode;
+  /** null/undefined renders a tertiary "—" placeholder (Title1) and hides the unit. */
   value: ReactNode;
   unit?: ReactNode;
   trend?: StatTrend;
@@ -24,12 +25,13 @@ const TREND_ICON = { up: ArrowUpRight, down: ArrowDownRight, flat: ArrowRight } 
 
 export function StatTile({ label, value, unit, trend, className, ...rest }: StatTileProps) {
   const TrendIcon = trend ? TREND_ICON[trend.direction] : null;
+  const empty = value == null;
   return (
     <dl {...rest} className={cx("ui-stat", className)}>
       <dt className="ui-stat__label">{label}</dt>
-      <dd className="ui-stat__value">
-        {value}
-        {unit != null && <span className="ui-stat__unit">{unit}</span>}
+      <dd className="ui-stat__value" data-empty={empty || undefined}>
+        {empty ? <span title="unavailable">—</span> : value}
+        {!empty && unit != null && <span className="ui-stat__unit">{unit}</span>}
       </dd>
       {trend && TrendIcon && (
         <dd className="ui-stat__trend" data-direction={trend.direction} data-sentiment={trend.sentiment ?? "neutral"}>

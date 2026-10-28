@@ -56,8 +56,12 @@
   --data-recovery-mid: #f5b800;
   --data-recovery-mid-text: #8a6500;
   --data-recovery-low: #e5484d;
-  --data-strain: var(--sys-blue);   /* 0–21 scale */
+  --data-strain: var(--sys-blue);   /* Effort, 0–100 scale (NOOP native) */
   --data-sleep: #5e5ce6;
+  --data-sleep-deep: #5e5ce6;
+  --data-sleep-rem: #8e8cf0;
+  --data-sleep-light: #c7c6f7;
+  --data-sleep-awake: rgba(60, 60, 67, .12);
   --data-hrv: var(--sys-teal);
 
   /* Elevation */
@@ -90,6 +94,12 @@
   --d-sidebar-selection: rgba(255, 255, 255, .08);
   --d-selection: rgba(255, 255, 255, .08);
   --d-sys-blue: #0a84ff;
+  /* Data colors that need a dark variant (same variable names, overridden below). */
+  --d-data-recovery-mid-text: #f5b800;
+  --d-data-sleep-deep: #7d7aff;
+  --d-data-sleep-rem: #a5a3ff;
+  --d-data-sleep-light: rgba(201, 200, 255, .55);
+  --d-data-sleep-awake: rgba(235, 235, 245, .22);
   --d-sys-green: #30d158;
   --d-sys-orange: #ff9f0a;
   --d-sys-red: #ff453a;
@@ -198,6 +208,11 @@
   --material-sidebar: var(--d-material-sidebar);
   --material-toolbar: var(--d-material-toolbar);
   --material-popover: var(--d-material-popover);
+  --data-recovery-mid-text: var(--d-data-recovery-mid-text);
+  --data-sleep-deep: var(--d-data-sleep-deep);
+  --data-sleep-rem: var(--d-data-sleep-rem);
+  --data-sleep-light: var(--d-data-sleep-light);
+  --data-sleep-awake: var(--d-data-sleep-awake);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -232,6 +247,11 @@
     --material-sidebar: var(--d-material-sidebar);
     --material-toolbar: var(--d-material-toolbar);
     --material-popover: var(--d-material-popover);
+    --data-recovery-mid-text: var(--d-data-recovery-mid-text);
+    --data-sleep-deep: var(--d-data-sleep-deep);
+    --data-sleep-rem: var(--d-data-sleep-rem);
+    --data-sleep-light: var(--d-data-sleep-light);
+    --data-sleep-awake: var(--d-data-sleep-awake);
   }
 }
 :root[data-theme="light"] { color-scheme: light; }

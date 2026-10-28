@@ -27,6 +27,14 @@ describe("StatTile", () => {
     expect(trend.textContent).toContain("Up 6% from yesterday");
   });
 
+  it("null value shows a tertiary dash and hides the unit", () => {
+    render(<StatTile label="HRV" value={null} unit="ms" />);
+    const [value] = screen.getAllByRole("definition");
+    expect(value).toHaveTextContent(/^—$/);
+    expect(value).toHaveAttribute("data-empty", "true");
+    expect(screen.queryByText("ms")).toBeNull();
+  });
+
   it("flat trend defaults to neutral sentiment", () => {
     render(<StatTile label="Effort" value="48.6" trend={{ direction: "flat", label: "No change" }} />);
     const [, trend] = screen.getAllByRole("definition");
