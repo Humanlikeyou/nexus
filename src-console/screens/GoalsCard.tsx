@@ -1,9 +1,12 @@
 import { RefreshCw } from "lucide-react";
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, StatTile } from "../ui";
-import { date } from "../lib/format";
+import { humanize } from "../lib/format";
 import type { Goal } from "../types";
 
 /** Trajectory folded into Home (screen-specs §6). Goals only; the readiness block is dropped. */
+/** Deadlines are calendar dates: no time of day (the shared date() formatter includes one). */
+const targetDate = (value: string) => new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "Asia/Tokyo" });
+
 export const goalProgress = (goal: Goal) => (goal.target > 0 ? Math.min(100, (goal.current / goal.target) * 100) : 0);
 
 export function GoalsCard({ goals, failed, onRetry }: { goals: Goal[]; failed?: boolean; onRetry?: () => void }) {
@@ -31,7 +34,7 @@ export function GoalsCard({ goals, failed, onRetry }: { goals: Goal[]; failed?: 
               <ListRow
                 key={goal.id}
                 title={goal.title}
-                subtitle={<>{goal.deadline ? `${goal.category} · Target ${date(goal.deadline)}` : `${goal.category} · No target date`}<span className="home__goal-callout">{goal.current.toLocaleString()} / {goal.target.toLocaleString()} {goal.unit}</span></>}
+                subtitle={<>{goal.deadline ? `${humanize(goal.category)} · Target ${targetDate(goal.deadline)}` : `${humanize(goal.category)} · No target date`}<span className="home__goal-callout">{goal.target > 0 ? `${goal.current.toLocaleString()} / ${goal.target.toLocaleString()}` : goal.current.toLocaleString()} {goal.unit}</span></>}
                 value={goal.target > 0 ? `${Math.round(progress)}%` : "No target"}
                 accessory={goal.target > 0 ? <Meter className="home__goal-meter" size="sm" label={`${goal.title} progress`} value={goal.current} max={goal.target} valueText={`${Math.round(progress)}%`} /> : undefined}
               />

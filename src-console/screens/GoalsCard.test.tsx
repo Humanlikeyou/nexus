@@ -14,6 +14,7 @@ describe("Home › Goals card (§6)", () => {
     expect(within(card).getAllByRole("progressbar")).toHaveLength(2);
     expect(within(card).getByText("No target")).toBeInTheDocument();
     expect(within(card).getByText("80 / 100 km")).toBeInTheDocument();
+    expect(within(card).getByText(/Health · Target Dec 31, 2026/)).toBeInTheDocument();
     expect(within(card).queryByText(/Strain|readiness/i)).toBeNull();
   });
 
