@@ -24,3 +24,5 @@ export { Meter } from "./Meter";
 export type { MeterProps, MeterSegment } from "./Meter";
 export { Sparkline, sparklineSummary } from "./Sparkline";
 export type { SparklineProps } from "./Sparkline";
+export { Dialog } from "./Dialog";
+export type { DialogProps } from "./Dialog";
