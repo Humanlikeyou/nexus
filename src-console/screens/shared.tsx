@@ -1,4 +1,4 @@
-import { tone, humanize, number } from "../lib/format";
+import { tone, humanize } from "../lib/format";
 
 export function State({ value, label }: { value: string | boolean | null | undefined; label?: string }) {
   const display = label ?? (typeof value === "boolean" ? (value ? "Online" : "Offline") : humanize(String(value ?? "unknown")));

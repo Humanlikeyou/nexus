@@ -17,7 +17,7 @@
     "outbox-status": "bash scripts/outbox-status.sh",
     "test:unit": "TZ=Asia/Tokyo vitest run",
     "test": "tsc --noEmit && npm run test:unit && npm run test:neuro && cargo test --manifest-path src-tauri/Cargo.toml",
-    "lint": "eslint src-console/ui"
+    "lint": "eslint src-console"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

@@ -116,13 +116,11 @@ export function useIdleAutoSave(
     if (messages.length < 2) return;
     const t = setTimeout(() => save(snapshot.current), idleMs);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, conversationKey, idleMs]);
 
   // Conversation switch (new chat): save the outgoing transcript.
   useEffect(() => {
     return () => save(snapshot.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationKey]);
 
   useEffect(() => {
@@ -140,10 +138,8 @@ export function useIdleAutoSave(
       document.removeEventListener("visibilitychange", onHide);
       window.removeEventListener("pagehide", onPageHide);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const saveNow = useCallback(() => save(snapshot.current), []);
   return { lastSavedAt, saveNow };
 }

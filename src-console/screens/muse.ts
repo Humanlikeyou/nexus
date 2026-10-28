@@ -1,4 +1,3 @@
-import { tone, number } from "../lib/format";
 import type { MuseTelemetry } from "../neuro/telemetryStore";
 import type { MuseDevice, SystemSnapshot } from "../types";
 

@@ -7,6 +7,7 @@ export function useSnapshot() {
   const [data, setData] = useState<SystemSnapshot>(INITIAL_SNAPSHOT);
   const [busy, setBusy] = useState(true);
   const refresh = useCallback(async () => { setBusy(true); setData(await loadSystemSnapshot()); setBusy(false); }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- initial load + 15 s polling of an external source; refresh() sets busy before awaiting
   useEffect(() => { refresh(); const refreshTimer = window.setInterval(refresh, 15_000); return () => { window.clearInterval(refreshTimer); }; }, [refresh]);
   useEffect(() => {
     let activeRequest = true;

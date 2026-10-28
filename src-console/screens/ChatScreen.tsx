@@ -145,6 +145,7 @@ export function ChatField({
             <h1 id="chat-title">Terrence</h1>
             <Badge tone={online ? "success" : "warning"}>{online ? "Online" : "Offline"}</Badge>
             <span className="chat-screen__model">{hermes.model}</span>
+            {/* eslint-disable-next-line react-hooks/purity -- the 'Saved …' label is read at render on purpose; it re-renders on every save */}
             {lastSavedAt != null && <span className="chat-screen__saved" title={new Date(lastSavedAt).toLocaleString()}>Saved {relative(lastSavedAt, Date.now())}</span>}
           </div>
           <div className="chat-screen__tools">

@@ -1,5 +1,5 @@
 import { ActionButton, PageHeading, SectionHeading, StatusIndicator } from "../design/ProductUI";
-import { tone, number, date } from "../lib/format";
+import { number, date } from "../lib/format";
 import type { MuseScreenProps } from "./muse";
 import { BrainCircuit, Bluetooth, HeartPulse, RefreshCw, Unplug } from "lucide-react";
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { EmptyState, Metric, PageHeading, SectionHeading, StatusIndicator } from "../design/ProductUI";
-import { tone, number, date, time } from "../lib/format";
+import { number, date, time } from "../lib/format";
 import type { SystemSnapshot } from "../types";
 import { BrainCircuit, HeartPulse, History } from "lucide-react";
 

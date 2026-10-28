@@ -17,9 +17,9 @@ describe("backup skipped files", () => {
   it("renders nothing for an empty list or an older backend without the field", () => {
     const empty = render(<SkippedFilesList info={{ ...base, skipped: [] }} />);
     expect(empty.container.innerHTML).toBe("");
-    const legacy = render(<SkippedFilesList info={base as any} />);
+    const legacy = render(<SkippedFilesList info={base as unknown as Parameters<typeof skippedFiles>[0]} />);
     expect(legacy.container.innerHTML).toBe("");
-    expect(skippedFiles({ ...base, skipped: "nope" } as any)).toEqual([]);
+    expect(skippedFiles({ ...base, skipped: "nope" } as unknown as Parameters<typeof skippedFiles>[0])).toEqual([]);
   });
 
   it("shows skipped files after creating a backup", async () => {

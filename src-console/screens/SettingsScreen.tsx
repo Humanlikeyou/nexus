@@ -1,6 +1,6 @@
 import { PageHeading, SectionHeading, SegmentedControl, StatusIndicator } from "../design/ProductUI";
 import type { ThemePreference } from "../design/useAppearance";
-import { tone, date } from "../lib/format";
+import { date } from "../lib/format";
 import { BackupSection } from "../settings/BackupSection";
 import type { SystemSnapshot } from "../types";
 import { HardDrive, SlidersHorizontal, Sun } from "lucide-react";

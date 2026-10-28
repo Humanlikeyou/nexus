@@ -22,7 +22,7 @@ describe("terrence_actions approve Deny handling", () => {
 });
 
 describe("runApproval refreshes after errors", () => {
-  const deps = (approve: () => Promise<any>, refresh = vi.fn(async () => {})) =>
+  const deps = (approve: () => Promise<{ status?: string; error?: string | null } | null | undefined>, refresh = vi.fn(async () => {})) =>
     ({ approve, refresh, setBusy: vi.fn(), setNotice: vi.fn() });
 
   it("a declined: rejection refreshes so the row leaves 'awaiting approval'", async () => {

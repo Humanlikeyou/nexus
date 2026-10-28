@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { correctTerrenceContextItem, deleteTerrenceContextItem, listTerrenceContextItems } from "../bridge";
-import { date, time } from "../lib/format";
+import { date } from "../lib/format";
 import type { TerrenceContextItem } from "../types";
-import { Check, History, Pencil, Trash2, X } from "lucide-react";
+import { Check, Pencil, Trash2, X } from "lucide-react";
 
 export type ContextCorrectionDraft = {
   item: TerrenceContextItem;
@@ -38,6 +38,7 @@ export function ContextInspector({ visible, onClose, onChanged }: { visible: boo
 
   useEffect(() => {
     if (!visible) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset the inspector's local state when it closes; moving this to a key/remount would change load timing
       setEditing(null);
       setPendingDeletion(null);
       setScope("current");
@@ -127,7 +128,7 @@ export function ContextInspector({ visible, onClose, onChanged }: { visible: boo
         {editing && <aside className="context-editor">
           <form onSubmit={(event) => void saveCorrection(event)}>
             <span className="system-kicker">Correcting {editing.item.kind}</span>
-            <label>Title<input value={editing.title} onChange={(event) => setEditing((current) => current && { ...current, title: event.target.value })} maxLength={300} autoFocus /></label>
+            <label>Title<input value={editing.title} onChange={(event) => setEditing((current) => current && { ...current, title: event.target.value })} maxLength={300} /* eslint-disable-line jsx-a11y/no-autofocus -- focus moves into the edit field the user just opened */ autoFocus /></label>
             <label>Details<textarea value={editing.content} onChange={(event) => setEditing((current) => current && { ...current, content: event.target.value })} maxLength={12000} rows={7} /></label>
             <div className="context-editor-row"><label>Status<select value={editing.status} onChange={(event) => setEditing((current) => current && { ...current, status: event.target.value as TerrenceContextItem["status"] })}><option value="active">Active</option><option value="blocked">Blocked</option><option value="paused">Paused</option><option value="completed">Completed</option><option value="archived">Archived</option><option value="historical">Historical</option></select></label><label>Confidence<input type="number" min="0" max="1" step="0.05" value={editing.confidence} onChange={(event) => setEditing((current) => current && { ...current, confidence: event.target.value })} /></label></div>
             <div className="context-editor-actions"><button type="button" onClick={() => setEditing(null)} disabled={saving}>Cancel</button><button type="submit" disabled={saving}><Check size={15} />Save correction</button></div>

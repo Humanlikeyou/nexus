@@ -1,4 +1,4 @@
-import { number, date, time } from "../lib/format";
+import { number, date } from "../lib/format";
 import type { SystemSnapshot } from "../types";
 import { State } from "./shared";
 

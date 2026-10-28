@@ -1,8 +1,8 @@
 import { SignalStream } from "../design/SystemPrimitives";
-import { tone, humanize, plainText, date, time, shortDuration } from "../lib/format";
+import { tone, humanize, plainText, date, shortDuration } from "../lib/format";
 import type { SystemSnapshot } from "../types";
 import { State } from "./shared";
-import { Activity, History, Satellite } from "lucide-react";
+import { Activity, Satellite } from "lucide-react";
 
 export function ActivityField({ data }: { data: SystemSnapshot }) {
   return (

@@ -50,6 +50,8 @@ function Resizer({ width, setWidth }: { width: number; setWidth: (w: number) => 
     else if (e.key === "End") { e.preventDefault(); setWidth(SIDEBAR_MAX); }
   };
   return (
+    // WAI-ARIA window-splitter pattern: a focusable separator with a value is interactive, but jsx-a11y treats role="separator" as static.
+    /* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */
     <div
       className="shell-sidebar-resizer"
       role="separator"
@@ -67,6 +69,7 @@ function Resizer({ width, setWidth }: { width: number; setWidth: (w: number) => 
       onDoubleClick={() => setWidth(SIDEBAR_DEFAULT)}
       onKeyDown={onKeyDown}
     />
+    /* eslint-enable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */
   );
 }
 
