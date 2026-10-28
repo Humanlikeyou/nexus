@@ -31,6 +31,11 @@ main.command-surface > .intelligence-overlay > .nexus-mark {
   border-right: var(--hairline, 1px solid var(--separator));
 }
 main.command-surface > .intelligence-overlay > .field-clock { padding: 0 var(--inset-content, 20px); }
+/* Drag regions: Tauri only starts a drag on the element carrying data-tauri-drag-region,
+ * so decorative children let the pointer through; buttons stay clickable. */
+main.command-surface > .intelligence-overlay > .nexus-mark > *,
+main.command-surface > .intelligence-overlay > .field-clock > :not(button) { pointer-events: none; }
+main.command-surface .nexus-wordmark { color: var(--label, var(--text)); font-size: var(--text-body); font-weight: 650; line-height: 1; white-space: nowrap; }
 
 /* Sidebar: material, gray selection, accent-tinted icon, never a left bar. */
 main.command-surface > nav.system-constellation {
@@ -47,6 +52,21 @@ main.command-surface .nav-group button.is-active {
   box-shadow: none;
 }
 main.command-surface .nav-group button.is-active > i { color: var(--accent-strong, var(--accent)); }
+/* ⌘-number hint: normal text, tertiary label, only on hover/keyboard focus. */
+main.command-surface .nav-group button > small.nav-shortcut {
+  color: var(--label-tertiary, var(--text-tertiary));
+  font-family: inherit;
+  font-size: var(--text-subheadline);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transition: opacity var(--dur-fast, 120ms) var(--ease-standard, ease);
+}
+main.command-surface .nav-group button:hover > small.nav-shortcut,
+main.command-surface .nav-group button:focus-visible > small.nav-shortcut { opacity: 1; }
 
 .shell-sidebar-resizer {
   position: absolute;
@@ -76,6 +96,8 @@ main.command-surface > .field-footer {
 /* Narrow windows keep the legacy icon rail; resizing is desktop-width only. */
 @media (max-width: 1120px) {
   main.command-surface { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
+  /* The 76px rail is fully covered by the traffic lights: keep the band, hide the mark. */
   main.command-surface > .intelligence-overlay > .nexus-mark { padding-left: 0; }
+  main.command-surface > .intelligence-overlay > .nexus-mark > * { visibility: hidden; }
   .shell-sidebar-resizer { display: none; }
 }

@@ -35,6 +35,15 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: /Chat & Agents/ })).toHaveAttribute("aria-current", "page");
   });
 
+  it("shows ⌘-number hints instead of uppercase signal labels", () => {
+    const { container } = render(<Sidebar active="terrance" onSelect={() => {}} data={online} />);
+    expect(screen.queryByText("HISTORY")).toBeNull();
+    expect(screen.queryByText("NOOP")).toBeNull();
+    const hints = [...container.querySelectorAll(".nav-shortcut")].map((n) => n.textContent);
+    expect(hints.slice(0, 3)).toEqual(["⌘1", "⌘2", "⌘3"]);
+    expect(hints.length).toBe(9);
+  });
+
   it("clamps", () => {
     expect([clampSidebar(10), clampSidebar(240.4), clampSidebar(1e6)]).toEqual([200, 240, 280]);
   });
