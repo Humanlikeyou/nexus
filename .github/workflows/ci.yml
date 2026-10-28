@@ -84,3 +84,27 @@ jobs:
         run: cargo build --locked
       - name: cargo test
         run: cargo test --locked
+
+  # ── E2E: built console in Chromium with mocked Tauri IPC ─────────────────
+  e2e:
+    name: E2E (Playwright Chromium, light + dark)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc" # Node 22
+          cache: "npm"
+      - run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: npm run test:e2e
+        run: npm run test:e2e
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
