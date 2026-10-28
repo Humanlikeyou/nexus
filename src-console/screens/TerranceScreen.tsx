@@ -8,6 +8,7 @@ import { money } from "../lib/format";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, type Tone } from "../ui";
 import { recoveryBand } from "./HealthScreen";
+import { GoalsCard } from "./GoalsCard";
 import "./TerranceScreen.css";
 
 const DASH = "—";
@@ -230,6 +231,8 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
             </InsetGroup>
           )}
       </Card>
+
+      <GoalsCard goals={data.goals} failed={down("read_goals")} onRetry={onRetry} />
 
       <div className="home__half">
         <Card title="Neuro" accessory={<OpenLink to="neuro" label="Open Neuro" onNavigate={onNavigate} />}>

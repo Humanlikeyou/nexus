@@ -31,7 +31,6 @@ export type SubView = { view: string; label: string; screen: ModuleId };
 /** Sub-views per host. Interim: folded screens render as-is behind a SegmentedControl so nothing
  *  becomes unreachable; each host replaces its legacy screen as its spec (§5–§10) lands. */
 export const HOST_VIEWS: Partial<Record<ModuleId, SubView[]>> = {
-  terrance: [{ view: "main", label: "Overview", screen: "terrance" }, { view: "goals", label: "Goals", screen: "trajectory" }],
   chat: [{ view: "main", label: "Chat", screen: "chat" }, { view: "activity", label: "Activity", screen: "assistant" }],
   neuro: [{ view: "main", label: "Live", screen: "neuro" }, { view: "history", label: "History", screen: "sessions" }],
   business: [{ view: "main", label: "Work", screen: "business" }, { view: "revenue", label: "Revenue", screen: "revenue" }],
@@ -41,6 +40,7 @@ export const HOST_VIEWS: Partial<Record<ModuleId, SubView[]>> = {
 /** Folded ids stay valid ModuleIds (stored state, ⌘K, onNavigate) and resolve to their host. */
 export const ROUTE_ALIASES: Partial<Record<ModuleId, { id: ModuleId; view: string }>> = {
   sessions: { id: "neuro", view: "history" },
+  // Anchor alias (no sub-view): Home renders the Goals card and App scrolls to #goals.
   trajectory: { id: "terrance", view: "goals" },
   revenue: { id: "business", view: "revenue" },
   assistant: { id: "chat", view: "activity" },

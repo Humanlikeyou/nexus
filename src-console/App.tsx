@@ -7,7 +7,7 @@ import { useMuseSession } from "./app/useMuseSession";
 import { runApproval } from "./lib/approval";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
-import { ActivityField, BusinessField, DevicesField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, TrajectoryField, retryLazyScreens } from "./app/lazyScreens";
+import { ActivityField, BusinessField, DevicesField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, retryLazyScreens } from "./app/lazyScreens";
 import { ScreenErrorBoundary } from "./shell/ScreenErrorBoundary";
 import { approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";
 import { CommandSurface } from "./design/SystemPrimitives";
@@ -27,6 +27,12 @@ export default function App() {
   const [route, setRoute] = useState<Route>({ id: "terrance", view: "main" });
   const active = route.id;
   const screenId = screenFor(route);
+  // §6: Trajectory folded into Home as the Goals card; the alias lands on Home and scrolls to it.
+  useEffect(() => {
+    if (route.id !== "terrance" || route.view !== "goals") return;
+    const frame = requestAnimationFrame(() => document.getElementById("goals")?.scrollIntoView?.({ block: "start", behavior: "smooth" }));
+    return () => cancelAnimationFrame(frame);
+  }, [route]);
   // Old ids (sessions, trajectory, revenue, assistant, devices) resolve to their host + sub-view.
   const setActive = useCallback((id: ModuleId) => setRoute(resolveRoute(id)), []);
   const { data, busy, setBusy, refresh } = useSnapshot();
@@ -84,7 +90,6 @@ export default function App() {
     : screenId === "business" ? <BusinessField data={data} />
     : screenId === "revenue" ? <RevenueField data={data} />
     : screenId === "assistant" ? <ActivityField data={data} />
-    : screenId === "trajectory" ? <TrajectoryField data={data} />
     : screenId === "chat" ? <ChatField data={data} messages={messages} sending={sending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
     : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} />;
 

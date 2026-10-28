@@ -94,7 +94,7 @@ describe("lazy screens", () => {
     vi.useFakeTimers();
     render(<App />);
     await flush();
-    for (const [host, view] of [["Home", "Goals"], ["Chat & Agents", "Activity"], ["Neuro", "History"], ["Business", "Revenue"], ["Settings", "Devices"]] as const) {
+    for (const [host, view] of [["Chat & Agents", "Activity"], ["Neuro", "History"], ["Business", "Revenue"], ["Settings", "Devices"]] as const) {
       go(host);
       await settle(host);
       fireEvent.click(within(field(host)!).getByRole("radio", { name: view }));

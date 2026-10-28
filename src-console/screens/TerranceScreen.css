@@ -36,3 +36,6 @@
 @media (prefers-reduced-motion: reduce) { .home__skel { animation: none; } }
 :root[data-reduce-motion="true"] .home__skel { animation: none; }
 @media (max-width: 960px) { .home__top, .home__half { grid-template-columns: 1fr; } }
+.home__goals { scroll-margin-top: var(--space-4); }
+.home__goal-callout { display: block; font: var(--type-callout); color: var(--label-secondary); font-variant-numeric: tabular-nums; }
+.home__goal-meter { width: 120px; }
