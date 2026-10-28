@@ -1,129 +1,253 @@
-import { useState, type FormEvent } from "react";
-import { type ConversationMessage, actionPlan } from "../app/conversation";
-import { tone, date, time } from "../lib/format";
-import type { SystemSnapshot, TerrenceAction } from "../types";
-import { State } from "./shared";
-import { Activity, BookOpen, Bot, Check, RotateCcw, Send, SquarePen, Sparkles, X } from "lucide-react";
+import { Bot, Brain, ChevronRight, CircleDollarSign, Cpu, RefreshCw, Sparkles } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { getSchedulerStatus, type SchedulerStatus } from "@/terrance/system/scheduler";
+import type { ConversationMessage } from "../app/conversation";
+import { INITIAL_SNAPSHOT } from "../bridge";
+import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
+import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, type Tone } from "../ui";
+import { recoveryBand } from "./HealthScreen";
+import "./TerranceScreen.css";
 
-export function TerranceField({
-  data,
-  messages,
-  sending,
-  onSend,
-  onNewConversation,
-  onOpenContext,
-  onApproveAction,
-  onRetryAction,
-  onCancelAction,
-  busy,
-}: {
-  data: SystemSnapshot;
-  messages: ConversationMessage[];
-  sending: boolean;
-  onSend: (message: string) => Promise<void>;
-  onNewConversation: () => void;
-  onOpenContext: () => void;
-  onApproveAction: (action: TerrenceAction) => void;
-  onRetryAction: (action: TerrenceAction) => void;
-  onCancelAction: (action: TerrenceAction) => void;
-  busy: boolean;
-}) {
-  const [draft, setDraft] = useState("");
-  const priorities = data.prioritySnapshot.items;
-  const latestDecision = data.decisions[0];
-  const latestAutomationRun = data.automationRuns[0];
-  const latestAutomation = latestAutomationRun ? data.automations.find((automation) => automation.id === latestAutomationRun.automationId) : null;
-  const automationState = latestAutomationRun?.deliveryStatus === "failed" ? "failed" : latestAutomationRun?.status;
-  const activeProject = data.projects[0];
-  const recentActionOutcome = data.context.recentObservations.find((item) => item.metadata?.source === "terrence_action_ledger");
-  const macActions = data.actions.filter((action) => action.toolId !== "agent.hermes_chat");
-  const visibleMacActions = [
-    ...macActions.filter((action) => action.status === "awaiting_approval" || action.retryAllowed),
-    ...macActions.filter((action) => action.status !== "awaiting_approval" && !action.retryAllowed),
-  ].slice(0, 3);
-  const unavailableSummary = data.unavailableSources.map((source) => source.label).join(", ");
+const DASH = "—";
+const HOUR = 3_600_000;
+// TODO(scheduler): switch to SchedulerStatus.nextConsolidationAt / nextReasoningAt once they land in HEAD (Decision 3).
+const CONSOLIDATION_MS = 6 * HOUR;
+const REASONING_MS = 12 * HOUR;
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const message = draft.trim();
-    if (!message || sending) return;
-    setDraft("");
-    await onSend(message);
+type SchedulerView = Pick<SchedulerStatus, "running" | "lastConsolidation" | "lastReasoning"> & {
+  nextConsolidationAt?: number | null;
+  nextReasoningAt?: number | null;
+};
+
+export function nextRuns(s: SchedulerView) {
+  return {
+    consolidation: s.nextConsolidationAt ?? (s.lastConsolidation != null ? s.lastConsolidation + CONSOLIDATION_MS : null),
+    reasoning: s.nextReasoningAt ?? (s.lastReasoning != null ? s.lastReasoning + REASONING_MS : null),
   };
+}
+
+/** "in 2h 14m" / "now" / "3h 5m ago". */
+export function relative(target: number | null, now: number) {
+  if (target == null) return null;
+  const diff = target - now;
+  const abs = Math.abs(diff);
+  const h = Math.floor(abs / HOUR);
+  const m = Math.round((abs % HOUR) / 60_000);
+  const span = h > 0 ? `${h}h ${m}m` : `${m}m`;
+  if (abs < 60_000) return "now";
+  return diff > 0 ? `in ${span}` : `${span} ago`;
+}
+
+const tokyo = (ms: number | string, opts: Intl.DateTimeFormatOptions) => new Date(ms).toLocaleString("en-GB", { timeZone: "Asia/Tokyo", ...opts });
+const clock = (ms: number | string | null | undefined) => (ms == null || Number.isNaN(new Date(ms).getTime()) ? DASH : tokyo(ms, { hour: "2-digit", minute: "2-digit", hour12: false }));
+const exact = (ms: number | null) => (ms == null ? undefined : tokyo(ms, { dateStyle: "medium", timeStyle: "short", hour12: false }));
+
+export function greeting(now: number) {
+  const hour = Number(tokyo(now, { hour: "2-digit", hour12: false }));
+  return hour >= 5 && hour < 12 ? "Good morning" : hour >= 12 && hour < 18 ? "Good afternoon" : "Good evening";
+}
+
+const STOPPED: SchedulerView = { running: false, lastConsolidation: null, lastReasoning: null };
+/** A scheduler read must never take Home down (it is renderer-side module state). */
+function readScheduler(): SchedulerView {
+  try { return getSchedulerStatus(); } catch { return STOPPED; }
+}
+
+function useSchedulerStatus(override?: SchedulerView): SchedulerView {
+  const [status, setStatus] = useState<SchedulerView>(() => override ?? readScheduler());
+  useEffect(() => {
+    if (override) { setStatus(override); return; }
+    const id = window.setInterval(() => setStatus(readScheduler()), 30_000);
+    return () => window.clearInterval(id);
+  }, [override]);
+  return status;
+}
+
+function useNow(fixed?: number) {
+  const [now, setNow] = useState(() => fixed ?? Date.now());
+  useEffect(() => {
+    if (fixed != null) return;
+    const id = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, [fixed]);
+  return now;
+}
+
+const PRIORITY_TONE: Record<string, Tone> = { active: "accent", in_progress: "accent", blocked: "danger", attention: "warning", awaiting_approval: "warning", done: "success", completed: "success" };
+
+export type TerranceFieldProps = {
+  data: SystemSnapshot;
+  /** Navigates to another screen (Home cards deep-link). Links are hidden without it. */
+  onNavigate?: (id: ModuleId) => void;
+  /** Re-runs the snapshot load. Retry buttons are hidden without it. */
+  onRetry?: () => void;
+  /** Overrides first-load detection (refreshedAt still equals INITIAL_SNAPSHOT's). */
+  loading?: boolean;
+  /** Test seams. */
+  now?: number;
+  scheduler?: SchedulerView;
+  // Legacy chat props: the conversation moved to Chat & Agents. Still accepted so App keeps compiling.
+  messages?: ConversationMessage[];
+  sending?: boolean;
+  onSend?: (message: string) => Promise<void>;
+  onNewConversation?: () => void;
+  onOpenContext?: () => void;
+  onApproveAction?: (action: TerrenceAction) => void;
+  onRetryAction?: (action: TerrenceAction) => void;
+  onCancelAction?: (action: TerrenceAction) => void;
+  busy?: boolean;
+};
+
+function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }) {
+  return (
+    <div className="home__unavailable">
+      <p>{label} unavailable</p>
+      {onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
+    </div>
+  );
+}
+
+function OpenLink({ to, label, onNavigate }: { to: ModuleId; label: string; onNavigate?: (id: ModuleId) => void }) {
+  if (!onNavigate) return null;
+  return <Button variant="plain" size="small" onClick={() => onNavigate(to)} aria-label={label}>Open<ChevronRight className="home__chevron" aria-hidden="true" /></Button>;
+}
+
+export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNow, scheduler: schedulerOverride }: TerranceFieldProps) {
+  const now = useNow(fixedNow);
+  const scheduler = useSchedulerStatus(schedulerOverride);
+  const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
+  const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
+  const unavailable = data.unavailableSources;
+
+  const header = (
+    <header className="home__header">
+      <div>
+        <h1>{greeting(now)}, Taisun</h1>
+        <p className="home__date">{tokyo(now, { weekday: "long", day: "numeric", month: "long" })}</p>
+      </div>
+      <div className="home__header-badges">
+        {unavailable.length > 0 && <Badge tone="warning" title={unavailable.map((s) => s.label).join(", ")}>{unavailable.length} source{unavailable.length === 1 ? "" : "s"} unavailable</Badge>}
+        {!isLoading && (data.outbox.gateway_online || data.hermes.gatewayRunning
+          ? <Badge tone="success">Gateway online</Badge>
+          : <Badge tone="neutral">Gateway offline</Badge>)}
+      </div>
+    </header>
+  );
+
+  if (isLoading) {
+    return (
+      <div className="home" data-state="loading" aria-busy="true" aria-label="Loading Home">
+        {header}
+        <div className="home__top">{["Recovery & sleep", "Scheduler", "Latest insight"].map((t) => <Card key={t} title={t}><span className="home__skel" /></Card>)}</div>
+        <Card title="Agents"><span className="home__skel home__skel--short" /></Card>
+        <Card title="Priorities"><span className="home__skel home__skel--short" /></Card>
+      </div>
+    );
+  }
+
+  const noop = data.noop;
+  const night = noop.latestNight ?? noop.latestSleep;
+  const recovery = noop.today?.recovery ?? null;
+  const band = recoveryBand(recovery);
+  const sleepMin = night?.durationMin ?? noop.today?.totalSleepMin ?? null;
+  const hrv = night?.avgHrv ?? noop.today?.avgHrv ?? null;
+  const next = nextRuns(scheduler);
+  const lastReasoning = scheduler.lastReasoning;
+  const insight = noop.insights[0];
+  const priorities = data.prioritySnapshot.items.slice(0, 5);
+  const muse = data.sessions.find((s) => s.device_type === "muse");
+  const hermes = data.hermes;
+  const hermesOnline = hermes.status === "online";
+  const nextConsolidation = relative(next.consolidation, now);
+  const nextReasoning = relative(next.reasoning, now);
+
+  let recoveryBody: ReactNode;
+  if (down("get_noop_health_snapshot")) recoveryBody = <Unavailable label="NOOP health" onRetry={onRetry} />;
+  else recoveryBody = (
+    <div className="home__recovery">
+      <Ring value={recovery} label="Recovery" color={band?.color} valueText={band ? `${recovery}%, ${band.word}` : undefined}>
+        <span className="home__ring-value">{recovery == null ? DASH : `${Math.round(recovery)}%`}</span>
+        {band && <span className="home__ring-band">{band.word}</span>}
+      </Ring>
+      <div className="home__recovery-stats">
+        <StatTile label="Sleep" value={sleepMin == null ? DASH : `${Math.floor(sleepMin / 60)}h ${Math.round(sleepMin % 60)}m`} />
+        <StatTile label="HRV" value={hrv == null ? DASH : Math.round(hrv)} unit="ms" />
+      </div>
+      {recovery == null && <p className="home__note">No recovery yet{noop.message ? ` · ${noop.message}` : ""}</p>}
+    </div>
+  );
 
   return (
-    <div className="system-field terrance-field">
-      <section className="terrance-presence">
-        <div className={`assistant-mark ${data.hermes.status === "online" ? "is-live" : ""}`}><Bot size={25} /></div>
-        <div className="presence-copy">
-          <span className="system-kicker">Nexus overview</span>
-          <h1>Terrence</h1>
-          <p>Your local operating partner and current focus.</p>
-        </div>
-        <div className="presence-status">
-          <State value={data.hermes.status} label={data.hermes.status === "online" ? "Terrence ready" : "Terrence offline"} />
-          <State value={data.muse.connected} label={data.muse.streaming ? "Muse streaming" : data.muse.connected ? "Muse connected" : "Muse disconnected"} />
-          <State value={data.noop.status === "ready" || data.noop.status === "waiting_for_nightly_data"} label={data.noop.status === "ready" ? "WHOOP current" : data.noop.status === "waiting_for_nightly_data" ? "WHOOP syncing" : "WHOOP unavailable"} />
-          <span>{data.muse.streaming ? "A neural session is active" : `${data.capabilities.length} capabilities available`}</span>
-          {data.unavailableSources.length > 0 && <span className="availability-warning" title={unavailableSummary}>{data.unavailableSources.length} source{data.unavailableSources.length === 1 ? "" : "s"} unavailable</span>}
-        </div>
-      </section>
+    <div className="home" data-state="ready">
+      {header}
 
-      <section className="terrance-thread">
-        <div className="thread-stats">
-          <div><span>Runtime</span><strong>Hermes</strong><State value={data.hermes.gatewayRunning} /></div>
-          <div><span>Telegram</span><strong>{data.hermes.telegramStatus}</strong><State value={data.hermes.telegramStatus} /></div>
-          <div><span>Provider</span><strong>{data.hermes.provider}</strong><State value="configured" /></div>
-          <div><span>Checked</span><strong>{date(data.hermes.checkedAt)}</strong></div>
-        </div>
-      </section>
+      <div className="home__top">
+        <Card title="Recovery & sleep" accessory={<OpenLink to="health" label="Open Fitness" onNavigate={onNavigate} />}>{recoveryBody}</Card>
 
-      <aside className="terrence-context" aria-label="Current focus">
-        <header><Sparkles size={16} /><span>Current focus</span><strong>{priorities.length}</strong><button className="context-inspect-toggle" type="button" onClick={onOpenContext} title="Inspect Terrence context"><BookOpen size={15} /></button></header>
-        <div className="focus-list">
-          {priorities.length === 0 && <p className="field-empty">No current priorities are recorded.</p>}
-          {priorities.map((priority) => <article key={`${priority.sourceKind}-${priority.sourceId}`}>
-            <span>#{priority.rank}</span>
-            <strong>{priority.title}</strong>
-          </article>)}
-        </div>
-        {recentActionOutcome && <section className="context-observation"><span>Recent verified outcome</span><strong>{recentActionOutcome.title}</strong><p>{recentActionOutcome.content || "Terrence recorded a completed action."}</p></section>}
-        {activeProject && <section className="context-project"><span>Active project</span><strong>{activeProject.title}</strong><p>{activeProject.nextAction || activeProject.currentState}</p></section>}
-      </aside>
+        <Card title="Scheduler" accessory={scheduler.running ? <Badge tone="success">Running</Badge> : <Badge tone="danger">Stopped</Badge>}>
+          <InsetGroup>
+            <ListRow title={<span title={exact(next.consolidation)}>{nextConsolidation ? `Next: Consolidation ${nextConsolidation}` : "Next: Consolidation not scheduled yet"}</span>} />
+            <ListRow title={<span title={exact(lastReasoning)}>{lastReasoning == null ? "Last: No reasoning run yet" : `Last: Reasoning ${clock(lastReasoning)}`}</span>} />
+          </InsetGroup>
+          {!scheduler.running && <p className="home__note" role="note">Background jobs aren&apos;t running.</p>}
+        </Card>
 
-      <section className="terrence-conversation" aria-label="Conversation with Terrence">
-        <header><span>Conversation</span><div className="conversation-header-meta"><State value={data.hermes.status} /><button className="conversation-new" type="button" onClick={onNewConversation} disabled={sending} title="Start a new conversation"><SquarePen size={15} /></button></div></header>
-        <div className="conversation-stream" aria-live="polite">
-          {messages.length === 0 && <p className="conversation-empty">Terrence is ready.</p>}
-          {messages.map((message) => <article key={message.id} className={`conversation-message conversation-message--${message.role} ${message.status === "failed" ? "is-failed" : ""}`}>
-            <header><span>{message.role === "user" ? "You" : "Terrence"}</span><time>{date(message.timestamp)}</time>{message.model && <small>{message.model}</small>}</header>
-            <p>{message.content}</p>
-          </article>)}
-          {sending && <article className="conversation-message conversation-message--assistant is-pending"><header><span>Terrence</span><small>Working</small></header><p>Thinking through it.</p></article>}
-        </div>
-        <form className="conversation-compose" onSubmit={submit}>
-          <label className="sr-only" htmlFor="terrence-message">Message Terrence</label>
-          <textarea id="terrence-message" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Message Terrence" disabled={sending} rows={2} />
-          <button type="submit" disabled={sending || !draft.trim()} title="Send message to Terrence"><Send size={16} /></button>
-        </form>
-      </section>
+        <Card title="Latest insight">
+          {down("get_noop_health_snapshot")
+            ? <Unavailable label="NOOP health" onRetry={onRetry} />
+            : insight
+              ? <div className="home__insight"><p className="home__insight-fact">{insight.fact}</p>{insight.context && <p className="home__note">{insight.context}</p>}</div>
+              : <p className="home__note">Insights appear after NOOP&apos;s nightly sync.</p>}
+          {onNavigate && <Button variant="plain" onClick={() => onNavigate("health")}>Open Fitness</Button>}
+        </Card>
+      </div>
 
-      <aside className="execution-stream">
-        <header><Activity size={14} /><span>Mac actions</span><strong>{macActions.length}</strong></header>
-        <div>{visibleMacActions.map((action) => {
-          const plan = actionPlan(action);
-          return <article key={action.id}><i className={`tone-${tone(action.status)}`} /><time>{date(action.requestedAt)}</time><strong>{action.title}</strong><p>{action.error || action.result || action.summary}</p>{action.status === "awaiting_approval" && plan.length > 0 && <details className="action-preview"><summary>Review {plan.length} planned change{plan.length === 1 ? "" : "s"}</summary><ol>{plan.map((step) => <li key={step}>{step}</li>)}</ol></details>}<small>{action.status.replace(/_/g, " ")}</small>{action.status === "awaiting_approval" && <span className="action-controls"><button type="button" onClick={() => onApproveAction(action)} disabled={busy} title={`Approve ${action.title}`}><Check size={12} /></button><button type="button" onClick={() => onCancelAction(action)} disabled={busy} title={`Cancel ${action.title}`}><X size={12} /></button></span>}{action.retryAllowed && <span className="action-controls"><button type="button" onClick={() => onRetryAction(action)} disabled={busy} title={`Prepare a retry for ${action.title}`}><RotateCcw size={12} /></button></span>}</article>;
-        })}</div>
-        {macActions.length === 0 && <p className="field-empty">No Mac actions recorded</p>}
-      </aside>
+      <Card title="Agents">
+        {down("get_terrence_runtime_health")
+          ? <Unavailable label="Terrence runtime" onRetry={onRetry} />
+          : (
+            <InsetGroup>
+              <ListRow icon={Bot} title="Hermes" subtitle={[hermes.model, hermes.provider].filter(Boolean).join(" · ") || DASH}
+                accessory={<Badge tone={hermesOnline ? "success" : "warning"}>{hermesOnline ? "Online" : hermes.status ? hermes.status.replace(/_/g, " ") : "Offline"}</Badge>}
+                value={hermes.telegramStatus ? `Telegram ${hermes.telegramStatus}` : `Checked ${clock(hermes.checkedAt)}`} />
+              <ListRow icon={Cpu} title="OpenClaw" subtitle="Status read not wired yet" accessory={<Badge tone="neutral">Not connected</Badge>} />
+            </InsetGroup>
+          )}
+      </Card>
 
-      <section className="automation-ribbon">
-        <span className="ribbon-title">AUTOMATION</span>
-        <div><State value={data.automations.length > 0 ? data.automations.some((automation) => automation.status === "attention") ? "attention" : "active" : data.hermes.activeSchedules > 0} /><strong>{data.automations.filter((automation) => automation.enabled).length || data.hermes.activeSchedules} active Hermes schedules</strong><span>Persistent gateway routines</span><time>{date(data.hermes.checkedAt)}</time></div>
-        {latestAutomationRun && <details className="automation-memory"><summary><span>Last run</span><strong>{latestAutomation?.name || "Terrence automation"}</strong><State value={automationState} /></summary><p>{latestAutomationRun.error || latestAutomationRun.result || "Completed without a user-facing message."}</p><small>{latestAutomationRun.deliveryStatus === "delivered" ? `Delivered to ${latestAutomationRun.deliveryTarget || "the configured channel"}.` : latestAutomationRun.deliveryStatus === "suppressed" ? "Intentionally silent." : latestAutomationRun.deliveryStatus === "failed" ? "Delivery needs attention." : "No delivery was requested."}</small></details>}
-        {activeProject && <details className="project-memory"><summary><span>Project state</span><strong>{activeProject.title}</strong><State value={activeProject.status} /></summary><p>{activeProject.currentState}</p>{activeProject.nextAction && <small>Next: {activeProject.nextAction}</small>}{activeProject.blockers.length > 0 && <small>Blocked by: {activeProject.blockers.join(" · ")}</small>}</details>}
-        {latestDecision && <details className="decision-memory"><summary><span>Decision memory</span><strong>{latestDecision.question}</strong><State value={latestDecision.status} /></summary><p>{latestDecision.recommendation}</p>{latestDecision.uncertainty && <small>Uncertainty: {latestDecision.uncertainty}</small>}{latestDecision.outcome && <small>Outcome: {latestDecision.outcome}</small>}</details>}
-      </section>
+      <Card title="Priorities" accessory={onNavigate && <Button variant="plain" size="small" onClick={() => onNavigate("chat" as ModuleId)}>Open Chat</Button>}>
+        {priorities.length === 0
+          ? <p className="home__note">No current priorities</p>
+          : (
+            <InsetGroup>
+              {priorities.map((p) => (
+                <ListRow key={`${p.sourceKind}-${p.sourceId}`} icon={Sparkles} title={p.title} subtitle={`#${p.rank} · ${p.sourceKind}`}
+                  accessory={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{p.sourceStatus.replace(/_/g, " ")}</Badge>} />
+              ))}
+            </InsetGroup>
+          )}
+      </Card>
+
+      <div className="home__half">
+        <Card title="Neuro" accessory={<OpenLink to="neuro" label="Open Neuro" onNavigate={onNavigate} />}>
+          {muse
+            ? <StatTile label="Last session" value={Math.round(muse.duration_secs / 60)} unit="min" />
+            : <p className="home__note"><Brain className="home__inline-icon" aria-hidden="true" /> Your first completed session will appear here.</p>}
+        </Card>
+        <Card title="Revenue today" accessory={<OpenLink to="revenue" label="Open Revenue" onNavigate={onNavigate} />}>
+          <div className="home__pair">
+            <StatTile label="Today" value={`$${data.revenue.today_revenue.toFixed(0)}`} />
+            <StatTile label="Net income" value={`$${data.revenue.net_income.toFixed(0)}`} />
+          </div>
+          <CircleDollarSign className="home__ghost-icon" aria-hidden="true" />
+        </Card>
+      </div>
+
+      {scheduler.running && (nextConsolidation || nextReasoning) && (
+        <footer className="home__footer">
+          Scheduler{nextConsolidation ? ` · next consolidation ${nextConsolidation.replace(/^in /, "")}` : ""}{nextReasoning ? ` · next reasoning ${nextReasoning.replace(/^in /, "")}` : ""}
+        </footer>
+      )}
     </div>
   );
 }

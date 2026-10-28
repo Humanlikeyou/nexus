@@ -1,0 +1,31 @@
+/* Home (Command Center). Tokens only; see styles/tokens.css and ui/. */
+.home { display: grid; gap: var(--space-4); padding: var(--space-5); max-width: 1120px; margin: 0 auto; color: var(--label); }
+.home__header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.home__header h1 { margin: 0; font: var(--type-large-title); letter-spacing: -.01em; }
+.home__date { margin: var(--space-1) 0 0; color: var(--label-secondary); font: var(--type-subheadline); }
+.home__header-badges { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.home__top { display: grid; gap: var(--space-4); grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.home__half { display: grid; gap: var(--space-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.home__recovery { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: var(--space-4); }
+.home__recovery .home__note { grid-column: 1 / -1; }
+.home__recovery-stats, .home__pair { display: grid; gap: var(--space-2); }
+.home__pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.home .ui-card .ui-stat { box-shadow: none; background: var(--fill-tertiary); border-color: transparent; padding: var(--space-3); }
+.home .ui-card .ui-stat .ui-stat__value { font: var(--type-title2); font-variant-numeric: tabular-nums; }
+.home__ring-value { font: var(--type-title2); font-variant-numeric: tabular-nums; }
+.home__ring-band { color: var(--label-secondary); font: var(--type-subheadline); }
+.home__insight { display: grid; gap: var(--space-1); margin-bottom: var(--space-2); }
+.home__insight-fact { margin: 0; font: var(--type-headline); }
+.home__note { margin: var(--space-2) 0 0; color: var(--label-secondary); font: var(--type-callout); }
+.home__inline-icon { width: 14px; height: 14px; vertical-align: -2px; }
+.home__chevron { width: 14px; height: 14px; margin-left: 2px; }
+.home__ghost-icon { display: none; }
+.home__unavailable { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--label-secondary); font: var(--type-callout); }
+.home__unavailable p { margin: 0; }
+.home__footer { color: var(--label-secondary); font: var(--type-subheadline); font-variant-numeric: tabular-nums; }
+.home__skel { display: block; height: 112px; border-radius: var(--radius-md); background: var(--fill-tertiary); animation: home-pulse 1.4s ease-in-out infinite; }
+.home__skel--short { height: 88px; }
+@keyframes home-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .home__skel { animation: none; } }
+:root[data-reduce-motion="true"] .home__skel { animation: none; }
+@media (max-width: 960px) { .home__top, .home__half { grid-template-columns: 1fr; } }
