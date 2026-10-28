@@ -7,7 +7,7 @@ export default defineConfig(async (env) =>
       environment: "jsdom",
       setupFiles: ["./test/setup.ts"],
       include: ["src/**/*.test.ts?(x)", "src-console/**/*.test.ts?(x)", "test/**/*.test.ts?(x)"],
-      exclude: ["**/node_modules/**", "src-console/neuro/*.test.mjs", "src-tauri/**"],
+      exclude: ["**/node_modules/**", "src-console/neuro/*.test.mjs", "src-tauri/**", "test/e2e/**"],
       restoreMocks: true,
       clearMocks: true,
       passWithNoTests: true,

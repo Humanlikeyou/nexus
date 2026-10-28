@@ -29,3 +29,7 @@ Thumbs.db
 stack/data/
 stack/.env
 stack/.venv-crewai/
+
+# Playwright
+test-results/
+playwright-report/
