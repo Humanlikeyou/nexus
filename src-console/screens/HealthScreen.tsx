@@ -1,4 +1,4 @@
-import { Activity, BatteryMedium, HeartPulse, Moon, RefreshCw, Sparkles, Wind } from "lucide-react";
+import { Activity, BatteryCharging, BatteryLow, BatteryMedium, HeartPulse, Inbox, Moon, RefreshCw, Sparkles, Wind } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { INITIAL_SNAPSHOT } from "../bridge";
@@ -36,9 +36,12 @@ function hm(minutes: number | null | undefined) {
 function fmt(value: number | null | undefined, digits = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : DASH;
 }
-function signed(value: number | null | undefined) {
+export function signed(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) return DASH;
-  return `${value > 0 ? "+" : value < 0 ? "−" : "±"}${Math.abs(value).toFixed(1)}`;
+  // Zero is "0.0" (no sign); ± would read as a tolerance. U+2212 for negatives.
+  const text = Math.abs(value).toFixed(1);
+  if (Number(text) === 0) return "0.0";
+  return `${value > 0 ? "+" : "−"}${text}`;
 }
 function clock(iso: string | null | undefined) {
   if (!iso) return DASH;
@@ -48,6 +51,8 @@ function clock(iso: string | null | undefined) {
 const pct = (fraction: number | null | undefined) => (typeof fraction === "number" && Number.isFinite(fraction) ? fraction * 100 : null);
 const Missing = () => <span title="unavailable">{DASH}</span>;
 const val = (text: string) => (text === DASH ? <Missing /> : text);
+/** StatTile renders null as a tertiary "—" and hides the unit. */
+const nullable = (text: string) => (text === DASH ? null : text);
 
 /** NOOP stores daily strain as "Effort" on its native 0–100 axis (StrainScorer.maxStrain = 100). */
 const EFFORT_MAX = 100;
@@ -59,7 +64,7 @@ const TRENDS: Record<TrendKey, { label: string; unit: string; digits: number; co
   sleep: { label: "Sleep", unit: "h", digits: 1, color: "var(--data-sleep)", pick: (d) => (d.totalSleepMin == null ? null : d.totalSleepMin / 60) },
   hrv: { label: "HRV", unit: "ms", digits: 0, color: "var(--data-hrv)", pick: (d) => d.avgHrv },
   rhr: { label: "RHR", unit: "bpm", digits: 0, color: "var(--sys-red)", pick: (d) => d.restingHr },
-  strain: { label: "Effort", unit: "", digits: 1, color: "var(--data-strain)", pick: (d) => (d.strain == null ? null : clampEffort(d.strain)) },
+  strain: { label: "Effort", unit: "", digits: 0, color: "var(--data-strain)", pick: (d) => (d.strain == null ? null : clampEffort(d.strain)) },
   skin: { label: "Skin temp", unit: "°C", digits: 1, color: "var(--sys-orange)", pick: (d) => d.skinTempDevC },
   resp: { label: "Resp", unit: "br/min", digits: 1, color: "var(--sys-teal)", pick: (d) => d.respRateBpm },
 };
@@ -116,11 +121,17 @@ export function buildInsights(health: NoopHealthSnapshot): NoopHealthInsight[] {
   return visible;
 }
 
-function BatteryBadge({ battery }: { battery: NoopHealthSnapshot["battery"] }) {
-  if (!battery) return <Badge tone="neutral">NOOP band · no reading</Badge>;
+/** Sentence-case status text with a battery glyph (badges are for 1–2 word tags). */
+function BatteryStatus({ battery }: { battery: NoopHealthSnapshot["battery"] }) {
+  if (!battery) return <span className="fitness__status"><BatteryMedium className="fitness__status-icon" aria-hidden="true" />NOOP band · no reading</span>;
   const state = battery.charging === true ? "Charging" : battery.charging === false ? "On strap" : "Charge state unknown";
-  const tone: Tone = battery.percentage <= 15 && battery.charging !== true ? "danger" : "neutral";
-  return <Badge tone={tone} title={`Observed ${date(battery.observedAt)}`}>NOOP band {number(battery.percentage)}% · {state}</Badge>;
+  const low = battery.percentage <= 15 && battery.charging !== true;
+  const Icon = battery.charging === true ? BatteryCharging : low ? BatteryLow : BatteryMedium;
+  return (
+    <span className="fitness__status" data-tone={low ? "danger" : undefined} title={`Observed ${date(battery.observedAt)}`}>
+      <Icon className="fitness__status-icon" aria-hidden="true" />NOOP band {number(battery.percentage)}% · {state}
+    </span>
+  );
 }
 
 export type HealthFieldProps = {
@@ -157,7 +168,7 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
         </p>
       </div>
       <div className="fitness__header-trailing">
-        {!failed && <BatteryBadge battery={health.battery} />}
+        {!failed && <BatteryStatus battery={health.battery} />}
         {failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
       </div>
     </header>
@@ -168,16 +179,20 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
       <div className="fitness" data-state={failed ? "error" : "empty"}>
         {header}
         <Card className="fitness__empty" title={failed ? "NOOP health is unavailable" : "Waiting for the first NOOP record"} headingLevel={2}>
-          <p className="fitness__callout">{failed ? "Nexus couldn't read the local NOOP store. Try again in a moment." : health.message || "NOOP health data is not available yet."}</p>
-          <div className="fitness__tiles fitness__tiles--3">
-            <StatTile label="Recovery" value={<Missing />} />
-            <StatTile label="HRV" value={<Missing />} unit="ms" />
-            <StatTile label="Sleep" value={<Missing />} />
+          <div className="fitness__empty-lead">
+            <Inbox className="fitness__empty-icon" aria-hidden="true" />
+            <p className="fitness__callout">{failed ? "Nexus couldn't read the local NOOP store. Try again in a moment." : health.message || "NOOP health data is not available yet."}</p>
+            {!failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Check Again</Button>}
           </div>
-          <InsetGroup title="Readiness">
-            <ListRow icon={HeartPulse} title="Data access" subtitle="Terrence has no NOOP daily record to read yet." value="Local store missing" />
-            <ListRow icon={Sparkles} title="Morning briefing" subtitle="Amara stays quiet until a fresh sleep session is available." value="Waiting for nightly data" />
-            <ListRow icon={BatteryMedium} title="Battery watch" subtitle={health.battery ? "A current NOOP band reading is available." : "No NOOP band battery reading is available locally."} value={health.battery ? `${number(health.battery.percentage)}%` : "Waiting for device state"} />
+          <div className="fitness__tiles fitness__tiles--3">
+            <StatTile label="Recovery" value={null} />
+            <StatTile label="HRV" value={null} unit="ms" />
+            <StatTile label="Sleep" value={null} />
+          </div>
+          <InsetGroup title="Readiness" className="fitness__readiness">
+            <ListRow icon={HeartPulse} title="Data access" subtitle="Terrence has no NOOP daily record to read yet." accessory={<Badge tone="neutral">Store missing</Badge>} />
+            <ListRow icon={Sparkles} title="Morning briefing" subtitle="Amara stays quiet until a fresh sleep session is available." accessory={<Badge tone="neutral">Waiting</Badge>} />
+            <ListRow icon={BatteryMedium} title="Battery watch" subtitle={health.battery ? "A current NOOP band reading is available." : "No NOOP band battery reading is available locally."} accessory={<Badge tone="neutral">{health.battery ? `${number(health.battery.percentage)}%` : "No reading"}</Badge>} />
           </InsetGroup>
         </Card>
       </div>
@@ -202,13 +217,18 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
   const days = health.recentDays;
   const everNull = (pick: (d: NoopDailyMetric) => number | null) => days.every((d) => pick(d) == null) && (today == null || pick(today) == null);
   const pending = "Arrives after the sleep record closes";
+  const extraTiles = [
+    !everNull((d) => d.spo2Pct) && <StatTile key="spo2" label="SpO₂" value={nullable(fmt(today?.spo2Pct, 1))} unit="%" />,
+    !everNull((d) => d.skinTempDevC) && <StatTile key="skin" label="Skin temp" value={nullable(signed(today?.skinTempDevC))} unit="°C vs baseline" />,
+    !everNull((d) => d.respRateBpm) && <StatTile key="resp" label="Respiratory" value={nullable(fmt(today?.respRateBpm, 1))} unit="br/min" />,
+  ].filter(Boolean);
 
   const stages = [
-    { label: "Deep", value: overnight?.deepMin ?? today?.deepMin ?? 0, color: "var(--data-sleep)" },
-    { label: "REM", value: overnight?.remMin ?? today?.remMin ?? 0, color: "color-mix(in srgb, var(--data-sleep) 65%, var(--bg-content))" },
-    { label: "Light", value: overnight?.lightMin ?? today?.lightMin ?? 0, color: "color-mix(in srgb, var(--data-sleep) 35%, var(--bg-content))" },
+    { label: "Deep", value: overnight?.deepMin ?? today?.deepMin ?? 0, color: "var(--data-sleep-deep)" },
+    { label: "REM", value: overnight?.remMin ?? today?.remMin ?? 0, color: "var(--data-sleep-rem)" },
+    { label: "Light", value: overnight?.lightMin ?? today?.lightMin ?? 0, color: "var(--data-sleep-light)" },
   ];
-  const nightStages = [...stages, { label: "Awake", value: overnight?.awakeMin ?? 0, color: "var(--fill-secondary)" }];
+  const nightStages = [...stages, { label: "Awake", value: overnight?.awakeMin ?? 0, color: "var(--data-sleep-awake)" }];
 
   const trendOptions = (Object.keys(TRENDS) as TrendKey[])
     .filter((k) => !((k === "skin" || k === "resp") && everNull(TRENDS[k].pick)))
@@ -241,8 +261,8 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
         </Card>
         <Card title="Effort" className="fitness__ring-card">
           <div className="fitness__ring-body">
-            <Ring value={strain} max={EFFORT_MAX} label="Effort" size="lg" color="var(--data-strain)" valueText={strain == null ? undefined : `${fmt(strain, 1)} of ${EFFORT_MAX}`}>
-              <span className="fitness__ring-value">{strain == null ? <Missing /> : fmt(strain, 1)}</span>
+            <Ring value={strain} max={EFFORT_MAX} label="Effort" size="lg" color="var(--data-strain)" valueText={strain == null ? undefined : `${fmt(strain)} of ${EFFORT_MAX}`}>
+              <span className="fitness__ring-value">{strain == null ? <Missing /> : fmt(strain)}</span>
               <span className="fitness__ring-unit">of {EFFORT_MAX}</span>
             </Ring>
           </div>
@@ -266,13 +286,8 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
         </Card>
       </div>
 
-      <div className="fitness__tiles">
-        <StatTile label="Resting HR" value={nightly ? <Missing /> : val(fmt(rhr))} unit="bpm" />
-        <StatTile label="HRV" value={nightly ? <Missing /> : val(fmt(hrv))} unit="ms" />
-        {!everNull((d) => d.spo2Pct) && <StatTile label="SpO₂" value={val(fmt(today?.spo2Pct, 1))} unit="%" />}
-        {!everNull((d) => d.skinTempDevC) && <StatTile label="Skin temp" value={val(signed(today?.skinTempDevC))} unit="°C vs baseline" />}
-        {!everNull((d) => d.respRateBpm) && <StatTile label="Respiratory" value={val(fmt(today?.respRateBpm, 1))} unit="br/min" />}
-      </div>
+      {/* Row 2: only signals not shown elsewhere (RHR/HRV live in Last night); hidden when all are null. */}
+      {extraTiles.length > 0 && <div className="fitness__tiles">{extraTiles}</div>}
 
       {!nightly && overnight && (
         <Card title="Last night" accessory={overnight.sessionCount > 1 ? <Badge tone="info">{overnight.sessionCount} sessions merged</Badge> : undefined}>
@@ -283,11 +298,10 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
           <ul className="fitness__legend" aria-hidden="true">
             {nightStages.map((s) => <li key={s.label}><i style={{ background: s.color }} />{s.label} <span className="fitness__num">{formatMinutes(s.value)}</span></li>)}
           </ul>
-          <div className="fitness__tiles fitness__tiles--4">
-            <StatTile label="Duration" value={val(hm(overnight.durationMin))} />
-            <StatTile label="Efficiency" value={val(fmt(pct(overnight.efficiency)))} unit="%" />
-            <StatTile label="RHR" value={val(fmt(overnight.restingHr))} unit="bpm" />
-            <StatTile label="HRV" value={val(fmt(overnight.avgHrv))} unit="ms" />
+          {/* Duration and efficiency already lead the Sleep card; keep the overnight signals only, at Title1. */}
+          <div className="fitness__tiles fitness__tiles--2 fitness__tiles--compact">
+            <StatTile label="Resting HR" value={nullable(fmt(overnight.restingHr ?? rhr))} unit="bpm" />
+            <StatTile label="HRV" value={nullable(fmt(overnight.avgHrv ?? hrv))} unit="ms" />
           </div>
         </Card>
       )}

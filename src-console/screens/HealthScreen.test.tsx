@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { NoopDailyMetric, NoopHealthSnapshot, SystemSnapshot } from "../types";
-import { HealthField, buildInsights, recoveryBand } from "./HealthScreen";
+import { HealthField, buildInsights, recoveryBand, signed } from "./HealthScreen";
 
 const day = (d: string, over: Partial<NoopDailyMetric> = {}): NoopDailyMetric => ({
   day: d, source: "noop", totalSleepMin: 452, efficiency: 0.91, deepMin: 92, remMin: 104, lightMin: 230,
@@ -41,6 +41,17 @@ describe("Fitness (HealthField)", () => {
     expect(container.textContent).not.toMatch(/whoop/i);
   });
 
+  it("empty: Check Again action, null tiles hide units, readiness values are badges", () => {
+    const onRetry = vi.fn();
+    const { container } = render(<HealthField onRetry={onRetry} data={snap({ status: "waiting_for_data" })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Again" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(container.querySelectorAll(".ui-stat__value[data-empty]")).toHaveLength(3);
+    expect(screen.queryByText("ms")).toBeNull();
+    expect(screen.getByText("Store missing")).toHaveClass("ui-badge");
+    expect(screen.getByText("Terrence has no NOOP daily record to read yet.")).toBeInTheDocument();
+  });
+
   it("error: NOOP command unavailable shows Unavailable badge and Retry", () => {
     const onRetry = vi.fn();
     render(<HealthField onRetry={onRetry} data={snap(ready, { unavailableSources: [{ command: "get_noop_health_snapshot", label: "NOOP health" }] })} />);
@@ -59,9 +70,13 @@ describe("Fitness (HealthField)", () => {
     expect(screen.getByText("High")).toBeInTheDocument();
     const effort = screen.getByRole("meter", { name: "Effort" });
     expect(effort).toHaveAttribute("aria-valuenow", "100");
-    expect(effort).toHaveAttribute("aria-valuetext", "100.0 of 100");
+    expect(effort).toHaveAttribute("aria-valuetext", "100 of 100");
     expect(screen.getByRole("radio", { name: "Effort" })).toBeInTheDocument();
-    expect(screen.getByText(/NOOP band 82% · On strap/)).toBeInTheDocument();
+    expect(screen.getByText(/NOOP band 82% · On strap/)).toHaveClass("fitness__status");
+    // No duplicate numbers: Row 2 (SpO2/skin/resp) is hidden when all are null, Last night keeps RHR + HRV only.
+    expect(screen.queryByText("Duration")).toBeNull();
+    expect(screen.getAllByText("Resting HR", { selector: "dt" })).toHaveLength(1);
+    expect(screen.getAllByText("HRV", { selector: "dt" })).toHaveLength(1);
     expect(screen.getByText("2 sessions merged")).toBeInTheDocument();
     expect(screen.getByText("23:41 → 07:13")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "Sleep efficiency" })).toHaveAttribute("aria-valuenow", "91");
@@ -100,6 +115,10 @@ describe("Fitness (HealthField)", () => {
     expect(recoveryBand(34)?.word).toBe("Medium");
     expect(recoveryBand(33)?.word).toBe("Low");
     expect(recoveryBand(null)).toBeNull();
+    expect(signed(0)).toBe("0.0");
+    expect(signed(-0.04)).toBe("0.0");
+    expect(signed(0.3)).toBe("+0.3");
+    expect(signed(-0.2)).toBe("−0.2");
     const merged = buildInsights({ ...(INITIAL_SNAPSHOT.noop), ...ready, insights: [{ metric: "latest_sleep", fact: "server", context: null }] } as NoopHealthSnapshot);
     expect(merged.filter((i) => i.metric === "latest_sleep")).toEqual([{ metric: "latest_sleep", fact: "server", context: null }]);
   });
