@@ -90,7 +90,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
           duration_secs: Math.max(1, Math.round((endedAt - sessionStartedAt) / 1000)),
           data_points: counters.sampleCount,
           file_path: recordingFile,
-          summary: { avg_focus: trainingSummary?.avg_focus ?? null, avg_relaxation: trainingSummary?.avg_relaxation ?? null, avg_hr: null, max_hr: null, avg_hrv: null },
+          summary: { avg_focus: trainingSummary?.avg_focus ?? null, avg_relaxation: trainingSummary?.avg_relaxation ?? null, avg_hr: null, max_hr: null, avg_hrv: null, calm_pct: trainingSummary?.calm_pct ?? null, time_in_target_pct: trainingSummary?.time_in_target_pct ?? null },
         };
         training.finish();
         return { session, data: {

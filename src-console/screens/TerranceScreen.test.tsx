@@ -27,6 +27,14 @@ describe("Home (TerranceField)", () => {
     expect(revenue).toHaveTextContent("-$12,346");
   });
 
+  it("neuro: Calm shows the saved calm_pct, rounded, with the BETA badge", () => {
+    const session = { ...full.sessions[0], summary: { calm_pct: 61.6, time_in_target_pct: 40 } };
+    render(<TerranceField data={{ ...full, sessions: [session] }} now={NOW} scheduler={running} />);
+    const neuro = screen.getByRole("region", { name: "Neuro" });
+    expect(neuro).toHaveTextContent("Calm BETA62%");
+    expect(within(neuro).getByText("BETA")).toBeInTheDocument();
+  });
+
   it("loading: skeleton cards, heading, no dashes", () => {
     const { container } = render(<TerranceField data={INITIAL_SNAPSHOT} now={NOW} scheduler={running} />);
     expect(screen.getByRole("heading", { level: 1, name: "Good afternoon, Taisun" })).toBeInTheDocument();
@@ -49,7 +57,7 @@ describe("Home (TerranceField)", () => {
     expect(screen.getByText("Ship Nexus v2")).toBeInTheDocument();
     const neuro = screen.getByRole("region", { name: "Neuro" });
     expect(neuro).toHaveTextContent("Last session20min");
-    // calm_pct isn't in the session summary yet: Calm shows "—" + BETA (Decision 5).
+    // A session saved before calm_pct existed: Calm shows "—" + BETA (Decision 5).
     expect(neuro).toHaveTextContent("Calm BETA—");
     expect(within(neuro).getByText("BETA")).toBeInTheDocument();
     // Recovery band word is colored by band; header status is sentence-case text, not a badge.

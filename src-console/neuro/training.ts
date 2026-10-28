@@ -10,6 +10,11 @@ import type { MuseTelemetry } from "./useMuseTelemetry";
 const CHANNELS = ["TP9", "AF7", "AF8", "TP10"];
 const CALIBRATION_TICKS = 10;
 const TICK_MS = 500;
+/** Calm = relaxation at or above this multiple of the session's relaxation baseline (Decision 5). */
+export const CALM_RATIO = 1.1;
+const FALLBACK_BASELINE_MS = 60_000;
+
+export type TimelineEntry = { timestamp: number; focus: number; relaxation: number; action: string; gated: boolean };
 
 export type TrainingState = {
   phase: "off" | "calibrating" | "training" | "held";
@@ -18,9 +23,34 @@ export type TrainingState = {
   signal: FeedbackSignal | null;
   focus: number | null;
   relaxation: number | null;
+  /** Live Calm % (0–100) so far this session; null until there is a baseline and a valid entry. */
+  calmPercent: number | null;
 };
 
-export const INACTIVE_TRAINING: TrainingState = { phase: "off", label: "Recording only", calibrationPercent: 0, signal: null, focus: null, relaxation: null };
+export const INACTIVE_TRAINING: TrainingState = { phase: "off", label: "Recording only", calibrationPercent: 0, signal: null, focus: null, relaxation: null, calmPercent: null };
+
+const mean = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+
+/**
+ * The session's relaxation baseline: the mean relaxation during calibration, or,
+ * with no calibration, the mean over non-gated entries in the first 60 s.
+ */
+export function relaxationBaseline(calibration: number[], timeline: TimelineEntry[]): number | null {
+  const calibrated = mean(calibration.filter(Number.isFinite));
+  if (calibrated !== null) return calibrated;
+  const valid = timeline.filter((entry) => !entry.gated && Number.isFinite(entry.relaxation));
+  if (!valid.length) return null;
+  const start = valid[0].timestamp;
+  return mean(valid.filter((entry) => entry.timestamp - start < FALLBACK_BASELINE_MS).map((entry) => entry.relaxation));
+}
+
+/** Share (0–100) of non-gated entries with relaxation >= CALM_RATIO x baseline; null without data. */
+export function calmPercent(timeline: TimelineEntry[], baseline: number | null): number | null {
+  if (baseline === null || !Number.isFinite(baseline)) return null;
+  const valid = timeline.filter((entry) => !entry.gated);
+  if (!valid.length) return null;
+  return valid.filter((entry) => entry.relaxation >= CALM_RATIO * baseline).length / valid.length * 100;
+}
 
 function bandValue(bands: FrequencyBandPowers, label: string): number {
   const keys: Record<string, keyof FrequencyBandPowers> = { delta: "delta", theta: "theta", alpha: "alpha", beta: "beta", gamma: "gamma", smr: "smr", lowbeta: "lowBeta", highbeta: "highBeta" };
@@ -35,7 +65,8 @@ export class TrainingSession {
   private jawBaseline = 0;
   private artifacts: number[] = [];
   private lastArtifactAt = -Infinity;
-  private entries: Array<{ timestamp: number; focus: number; relaxation: number; action: string; gated: boolean }> = [];
+  private entries: TimelineEntry[] = [];
+  private calibrationRelaxation: number[] = [];
   state: TrainingState = { ...INACTIVE_TRAINING };
 
   constructor(readonly protocol: NfProtocol) {
@@ -80,13 +111,14 @@ export class TrainingSession {
     if (!this.thresholds) {
       this.baseline.push(bands);
       if (this.baseline.length >= CALIBRATION_TICKS) {
+        this.calibrationRelaxation = this.baseline.map((item) => item.relaxationScore);
         const average = (label: string) => this.baseline.reduce((sum, item) => sum + bandValue(item, label), 0) / this.baseline.length;
         this.thresholds = {
           rewardMin: Object.fromEntries(this.protocol.rewardBands.map((band) => [band.label, Math.max(0.01, average(band.label) * 1.1)])),
           inhibitMax: Object.fromEntries(this.protocol.inhibitBands.map((band) => [band.label, Math.max(0.01, average(band.label) * 0.9)])),
         };
       }
-      this.state = { phase: "calibrating", label: "Calibrating", calibrationPercent: Math.min(100, this.baseline.length / CALIBRATION_TICKS * 100), signal: null, focus: null, relaxation: null };
+      this.state = { phase: "calibrating", label: "Calibrating", calibrationPercent: Math.min(100, this.baseline.length / CALIBRATION_TICKS * 100), signal: null, focus: null, relaxation: null, calmPercent: null };
       return this.state;
     }
     const signal = computeFeedbackSignal(bands, this.protocol, this.thresholds, 1, "good", this.artifacts.length, false);
@@ -95,6 +127,7 @@ export class TrainingSession {
       phase: signal.gated ? "held" : "training",
       label: signal.gated ? "Feedback paused" : signal.action === "reward" ? "In target range" : signal.action === "inhibit" ? "Above inhibit threshold" : "Approaching target",
       calibrationPercent: 100, signal, focus: signal.gated ? null : bands.focusScore, relaxation: signal.gated ? null : bands.relaxationScore,
+      calmPercent: calmPercent(this.entries, relaxationBaseline(this.calibrationRelaxation, this.entries)),
     };
     return this.state;
   }
@@ -102,6 +135,11 @@ export class TrainingSession {
   summary() {
     const valid = this.entries.filter((entry) => !entry.gated);
     const average = (key: "focus" | "relaxation") => valid.length ? valid.reduce((sum, entry) => sum + entry[key], 0) / valid.length : null;
-    return { protocol_id: this.protocol.id, protocol_name: this.protocol.name, avg_focus: average("focus"), avg_relaxation: average("relaxation"), time_in_target_pct: valid.length ? valid.filter((entry) => entry.action === "reward").length / valid.length * 100 : null, timeline: [...this.entries] };
+    const baseline = relaxationBaseline(this.calibrationRelaxation, this.entries);
+    return {
+      protocol_id: this.protocol.id, protocol_name: this.protocol.name, avg_focus: average("focus"), avg_relaxation: average("relaxation"),
+      time_in_target_pct: valid.length ? valid.filter((entry) => entry.action === "reward").length / valid.length * 100 : null,
+      relaxation_baseline: baseline, calm_pct: calmPercent(this.entries, baseline), timeline: [...this.entries],
+    };
   }
 }

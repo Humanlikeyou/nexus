@@ -23,6 +23,11 @@ pub struct SessionSummary {
     pub avg_hr: Option<f64>,
     pub max_hr: Option<f64>,
     pub avg_hrv: Option<f64>,
+    // Muse training only; older session files don't have them.
+    #[serde(default)]
+    pub calm_pct: Option<f64>,
+    #[serde(default)]
+    pub time_in_target_pct: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,4 +119,25 @@ pub fn delete_session(session_id: String) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_without_calm_fields_still_loads() {
+        let old = serde_json::json!({ "avg_focus": 0.4, "avg_relaxation": 0.6, "avg_hr": null, "max_hr": null, "avg_hrv": null });
+        let summary: SessionSummary = serde_json::from_value(old).unwrap();
+        assert_eq!(summary.calm_pct, None);
+        assert_eq!(summary.time_in_target_pct, None);
+    }
+
+    #[test]
+    fn calm_fields_round_trip() {
+        let new = serde_json::json!({ "avg_focus": null, "avg_relaxation": null, "avg_hr": null, "max_hr": null, "avg_hrv": null, "calm_pct": 61.5, "time_in_target_pct": 40.0 });
+        let summary: SessionSummary = serde_json::from_value(new).unwrap();
+        assert_eq!(summary.calm_pct, Some(61.5));
+        assert_eq!(serde_json::to_value(&summary).unwrap()["time_in_target_pct"], 40.0);
+    }
 }

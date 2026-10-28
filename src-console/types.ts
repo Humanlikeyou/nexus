@@ -299,6 +299,9 @@ export interface RecordedSession {
     avg_hr?: number | null;
     max_hr?: number | null;
     avg_hrv?: number | null;
+    /** Muse training only; absent on sessions saved before 2026-10-28 (show "—"). */
+    calm_pct?: number | null;
+    time_in_target_pct?: number | null;
   };
 }
 
