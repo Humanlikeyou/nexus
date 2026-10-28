@@ -169,6 +169,8 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     logging: *log
+    # tini as PID 1 reaps grandchildren of stopped runs (uvicorn as PID 1 would leave zombies).
+    init: true
     ports:
       - "127.0.0.1:8400:8400"
     depends_on:

@@ -201,13 +201,19 @@ def db_finish(crew_id: str, status: str, result: Optional[str], llm: Optional[st
 # ── Error sanitizing ────────────────────────────────────────────────────────
 _SECRETISH = re.compile(r"(?i)(bearer\s+\S+|(?:api[_-]?key|token|password|secret)\s*[=:]\s*\S+|[A-Za-z0-9_\-]{32,})")
 _URL_CREDS = re.compile(r"(\w+://)[^/\s:@]+:[^/\s@]+@")
+# Filesystem paths (/a/b, ~/a, ./a/b). URL paths are kept: they follow host:port, not a boundary.
+_SEG = r"/[^\s'\"/:,;()\[\]<>]+"
+_PATH = re.compile(rf"(?<![\w.:/])(?:(?:~|\.{{1,2}})(?:{_SEG})+|(?:{_SEG}){{2,}})/?")
 MAX_ERR_CHARS = 300
 
 
 def sanitize_error(exc: BaseException) -> str:
     """Exception type + a short, redacted message. Never the raw upstream body."""
     msg = str(exc).splitlines()[0] if str(exc) else ""
+    if msg.lstrip().startswith(("Traceback", 'File "')):  # an embedded stack trace
+        msg = ""
     msg = _URL_CREDS.sub(r"\1***@", msg)
+    msg = _PATH.sub("[path]", msg)
     msg = _SECRETISH.sub("[redacted]", msg)
     msg = "".join(ch for ch in msg if ch.isprintable())
     if len(msg) > MAX_ERR_CHARS:
@@ -283,6 +289,12 @@ def kill_group(proc, grace_s: float = 5.0) -> None:
         return
     if pgid == os.getpgid(0):  # setsid not applied yet: never signal our own group
         proc.kill()
+        # setsid() may have landed after the check; the group id is then the child's pid
+        # (still unreaped here, so it can't have been reused).
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
         proc.join(grace_s)
         return
     for sig, wait in ((signal.SIGTERM, grace_s), (signal.SIGKILL, 2.0)):
