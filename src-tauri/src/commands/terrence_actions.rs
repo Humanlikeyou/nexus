@@ -1572,6 +1572,8 @@ pub(crate) fn fail_terrence_action(id: &str, error: String) -> Result<TerrenceAc
     )
 }
 
+// Not registered in generate_handler! (no live caller); kept so it can be restored.
+#[allow(dead_code)]
 #[tauri::command]
 pub fn list_terrence_tools() -> Vec<TerrenceTool> {
     registered_tools()
@@ -1609,6 +1611,8 @@ pub(crate) fn create_terrence_action(
     )
 }
 
+// Not registered in generate_handler! (no live caller); kept so it can be restored.
+#[allow(dead_code)]
 #[tauri::command]
 pub fn request_terrence_action(input: CreateTerrenceActionInput) -> Result<TerrenceAction, String> {
     create_terrence_action(input)

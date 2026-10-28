@@ -104,6 +104,13 @@ pub fn run() {
 
             Ok(())
         })
+        // Unregistered 2026-10-29: no live frontend caller (docs/terrance-merge-inventory.md).
+        // The fns stay; re-add the `module::fn` line to restore one:
+        // openclaw::{get_openclaw_sandbox, toggle_openclaw_sandbox},
+        // terrence_actions::{list_terrence_tools, request_terrence_action},
+        // terrence_context::create_context_item,
+        // terrence_priorities::{record_terrence_decision, resolve_terrence_decision},
+        // terrence_projects::upsert_terrence_project.
         .invoke_handler(tauri::generate_handler![
             // System
             system::get_system_info,
@@ -123,8 +130,6 @@ pub fn run() {
             openclaw::restart_openclaw,
             openclaw::save_skill,
             openclaw::delete_skill,
-            openclaw::get_openclaw_sandbox,
-            openclaw::toggle_openclaw_sandbox,
             // Muse BLE
             muse::scan_muse,
             muse::connect_muse,
@@ -218,8 +223,6 @@ pub fn run() {
             llm_router::get_llm_usage,
             llm_router::clear_llm_usage,
             // Amara action registry and approval ledger
-            terrence_actions::list_terrence_tools,
-            terrence_actions::request_terrence_action,
             terrence_actions::list_terrence_actions,
             terrence_actions::approve_terrence_action,
             terrence_actions::retry_terrence_action,
@@ -228,7 +231,6 @@ pub fn run() {
             terrence_automations::list_terrence_automations,
             terrence_automations::list_terrence_automation_runs,
             // Amara canonical context
-            terrence_context::create_context_item,
             terrence_context::list_context_items,
             terrence_context::correct_context_item,
             terrence_context::delete_context_item,
@@ -236,11 +238,8 @@ pub fn run() {
             terrence_context::migrate_legacy_terrence_context,
             // Amara current-priority and decision loop
             terrence_priorities::get_current_terrence_priority_snapshot,
-            terrence_priorities::record_terrence_decision,
             terrence_priorities::list_terrence_decisions,
-            terrence_priorities::resolve_terrence_decision,
             // Amara project intelligence
-            terrence_projects::upsert_terrence_project,
             terrence_projects::list_terrence_projects,
             // Amara runtime (Hermes)
             terrence_runtime::get_terrence_runtime_health,

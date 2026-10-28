@@ -902,6 +902,8 @@ fn insert_legacy_if_missing(
     Ok(())
 }
 
+// Not registered in generate_handler! (no live caller); kept so it can be restored.
+#[allow(dead_code)]
 #[tauri::command]
 pub fn create_context_item(input: CreateContextItemInput) -> Result<ContextItem, String> {
     let conn = get_db()?;

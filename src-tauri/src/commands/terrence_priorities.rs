@@ -913,6 +913,8 @@ fn create_terrence_decision_in(
         .ok_or_else(|| "Recorded Amara decision could not be read.".to_string())
 }
 
+// Not registered in generate_handler! (no live caller); kept so it can be restored.
+#[allow(dead_code)]
 #[tauri::command]
 pub fn record_terrence_decision(
     input: CreateTerrenceDecisionInput,

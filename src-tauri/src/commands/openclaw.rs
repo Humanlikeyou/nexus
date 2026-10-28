@@ -899,6 +899,8 @@ pub struct SandboxStatus {
 }
 
 /// Read the current sandbox mode from ~/.openclaw/openclaw.json.
+// Not registered in generate_handler! (no live caller); kept so it can be restored.
+#[allow(dead_code)]
 #[tauri::command]
 pub fn get_openclaw_sandbox() -> Result<String, String> {
     let config_path = openclaw_dir().join("openclaw.json");
@@ -1005,6 +1007,8 @@ fn sandbox_operation(config_path: &std::path::Path, current: &str, new_mode: &st
 
 /// Toggle sandbox mode between "off" and "all", then restart OpenClaw
 /// (requires native approval).
+// Not registered in generate_handler! (no live caller); kept so it can be restored.
+#[allow(dead_code)]
 #[tauri::command]
 pub async fn toggle_openclaw_sandbox(
     app: tauri::AppHandle,
