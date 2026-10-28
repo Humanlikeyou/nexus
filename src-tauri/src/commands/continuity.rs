@@ -191,6 +191,17 @@ pub(crate) fn save_context_to(
 /// Unix). A crash mid-write leaves either the old file or the new one, never a
 /// truncated mix.
 pub(crate) fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    atomic_write_with_mode(path, bytes, None)
+}
+
+/// Like [`atomic_write`], but the result always has exactly `mode` (Unix)
+/// instead of inheriting the original file's mode. Use for files holding
+/// secrets, e.g. `atomic_write_with_mode(p, b, Some(0o600))`.
+pub(crate) fn atomic_write_with_mode(
+    path: &std::path::Path,
+    bytes: &[u8],
+    forced_mode: Option<u32>,
+) -> std::io::Result<()> {
     use std::io::Write;
     let dir = path
         .parent()
@@ -233,10 +244,13 @@ pub(crate) fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Res
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(path)
-                // Only rwx bits: never carry setuid/setgid/sticky over.
-                .map(|m| m.permissions().mode() & 0o777)
-                .unwrap_or(0o600);
+            let mode = match forced_mode {
+                Some(m) => m & 0o777,
+                None => fs::metadata(path)
+                    // Only rwx bits: never carry setuid/setgid/sticky over.
+                    .map(|m| m.permissions().mode() & 0o777)
+                    .unwrap_or(0o600),
+            };
             f.set_permissions(fs::Permissions::from_mode(mode))?;
         }
         f.write_all(bytes)?;
