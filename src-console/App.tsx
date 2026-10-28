@@ -34,7 +34,7 @@ export default function App() {
 
   const { conversationId, messages, sending, sendToTerrence, startNewConversation } = useConversation(refresh);
   // Session continuity: summarize the Terrance chat after idle / on new chat / on close (bug 6).
-  useIdleAutoSave(messages, conversationId);
+  const autoSave = useIdleAutoSave(messages, conversationId);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (!event.metaKey || event.ctrlKey || event.altKey || !/^[1-9]$/.test(event.key)) return;
@@ -78,7 +78,7 @@ export default function App() {
     : active === "revenue" ? <RevenueField data={data} />
     : active === "assistant" ? <ActivityField data={data} />
     : active === "trajectory" ? <TrajectoryField data={data} />
-    : active === "chat" ? <ChatField data={data} />
+    : active === "chat" ? <ChatField data={data} messages={messages} sending={sending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={() => { void refresh(); }} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
     : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} />;
 
   return (
