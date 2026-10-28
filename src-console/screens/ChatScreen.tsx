@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Bot, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Workflow, X } from "lucide-react";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
+import { openClawBadge } from "../app/openclaw";
 import { time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction } from "../types";
@@ -65,7 +66,7 @@ export function ChatField({
   const loading = (loadingProp ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt) && messages.length === 0;
   const hermes = data.hermes;
   const online = hermes.status === "online";
-  const openclaw = data.openclaw;
+  const openclaw = openClawBadge(data.openclaw);
   const actionsUnavailable = data.unavailableSources.some((s) => s.command === "list_terrence_actions");
   const hermesUnavailable = data.unavailableSources.some((s) => s.command === "get_terrence_runtime_health");
 
@@ -80,7 +81,7 @@ export function ChatField({
 
   const agents = [
     { id: "hermes", icon: Bot, title: "Terrance", subtitle: hermesUnavailable ? "Status unavailable" : hermes.model, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
-    { id: "openclaw", icon: Workflow, title: "OpenClaw", subtitle: openclaw.online ? openclaw.model : "Not connected", tone: (openclaw.online ? "success" : "neutral") as Tone, label: openclaw.online ? "Connected" : "Not connected" },
+    { id: "openclaw", icon: Workflow, title: "OpenClaw", subtitle: openclaw.subtitle, tone: openclaw.tone, label: openclaw.label },
   ].filter((a) => !query.trim() || `${a.title} ${a.subtitle}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   // Keep the newest message in view.

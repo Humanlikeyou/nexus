@@ -70,6 +70,13 @@ describe("ChatField", () => {
     expect(screen.getAllByText("Not connected").length).toBeGreaterThan(0);
   });
 
+  it("OpenClaw configured without a heartbeat is not shown as online", () => {
+    setup({ data: { ...loaded, openclaw: { status: "configured", online: false, model: "unknown", gateway_url: "ws://127.0.0.1:18789", last_heartbeat: null } } });
+    const agents = screen.getByLabelText("Agents and conversations");
+    expect(within(agents).getByText("No heartbeat")).toBeInTheDocument();
+    expect(within(agents).queryByText("Connected")).not.toBeInTheDocument();
+  });
+
   it("failed reply shows Retry that resends the previous user message; pending shows Thinking", async () => {
     const messages = [
       msg("u1", "user", "what's next?", "2026-10-28T05:00:00Z"),

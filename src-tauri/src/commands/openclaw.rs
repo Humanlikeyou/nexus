@@ -9,15 +9,36 @@ fn openclaw_dir() -> PathBuf {
         .join(".openclaw")
 }
 
-#[derive(Serialize, Deserialize, Default)]
+/// What the UI may see about OpenClaw. Deliberately a closed, typed shape: the raw
+/// openclaw.json (tokens, keys, paths) and heartbeat file never leave Rust.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct OpenClawStatus {
+    /// "online" (fresh heartbeat or gateway reachable), "configured" (config present,
+    /// no live signal) or "offline" (no config).
+    pub status: OpenClawState,
+    /// `status == online`, kept for older callers.
     pub online: bool,
     pub model: String,
+    /// scheme://host[:port] only; userinfo, path, query and fragment are dropped.
     pub gateway_url: String,
+    /// Normalised RFC 3339 (UTC) time of the last heartbeat, if any.
     pub last_heartbeat: Option<String>,
-    pub heartbeat_data: Option<serde_json::Value>,
-    pub config: Option<serde_json::Value>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenClawState {
+    Online,
+    Configured,
+    Offline,
+}
+
+/// A heartbeat newer than this counts as "online".
+const HEARTBEAT_FRESH_SECS: i64 = 5 * 60;
+/// Tolerated clock skew for heartbeats stamped slightly in the future.
+const HEARTBEAT_SKEW_SECS: i64 = 60;
+const DEFAULT_GATEWAY_URL: &str = "ws://127.0.0.1:18789";
+const MODEL_MAX_LEN: usize = 80;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct CronJob {
@@ -53,53 +74,349 @@ pub struct ContentPipelineItem {
     pub notes: Option<String>,
 }
 
-#[tauri::command]
-pub fn read_openclaw_status() -> Result<OpenClawStatus, String> {
-    let base = openclaw_dir();
+/// Keep only scheme://host[:port] of a gateway URL; "" if it is not a ws/http URL.
+fn sanitize_gateway_url(raw: &str) -> String {
+    let Ok(url) = reqwest::Url::parse(raw.trim()) else {
+        return String::new();
+    };
+    if !matches!(url.scheme(), "ws" | "wss" | "http" | "https") {
+        return String::new();
+    }
+    let Some(host) = url.host_str() else {
+        return String::new();
+    };
+    match url.port() {
+        Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
+        None => format!("{}://{}", url.scheme(), host),
+    }
+}
 
-    // Read main config
-    let config_path = base.join("openclaw.json");
-    let config: Option<serde_json::Value> = fs::read_to_string(&config_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok());
+/// Loopback host and port of a sanitised gateway URL, for the reachability probe.
+/// Remote gateways are not probed (no network calls from a status read).
+fn loopback_target(url: &str) -> Option<(String, u16)> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed
+        .host_str()?
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string();
+    if !matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1") {
+        return None;
+    }
+    let port = parsed.port_or_known_default().or(match parsed.scheme() {
+        "ws" => Some(80),
+        "wss" => Some(443),
+        _ => None,
+    })?;
+    Some((host, port))
+}
 
-    // Read heartbeat state
-    let hb_path = base.join("memory").join("heartbeat-state.json");
-    let heartbeat_data: Option<serde_json::Value> = fs::read_to_string(&hb_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok());
+/// A model id is shown as-is only if it looks like one ("anthropic/claude-x", "llama3:8b").
+/// Paths are reduced to their file name; anything else (keys, URLs, objects) is "unknown".
+fn sanitize_model(raw: Option<&serde_json::Value>) -> String {
+    let Some(s) = raw.and_then(|v| v.as_str()).map(str::trim) else {
+        return "unknown".to_string();
+    };
+    let s = if s.starts_with('/') || s.starts_with('~') || s.contains('\\') {
+        s.rsplit(['/', '\\']).next().unwrap_or("")
+    } else {
+        s
+    };
+    let ok_chars = s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/' | '@'));
+    let looks_secret =
+        s.starts_with("sk-") || s.contains("://") || s.contains('@') && s.contains(':');
+    if s.is_empty() || s.len() > MODEL_MAX_LEN || !ok_chars || looks_secret {
+        "unknown".to_string()
+    } else {
+        s.to_string()
+    }
+}
 
-    let last_heartbeat = heartbeat_data
-        .as_ref()
-        .and_then(|v| v.get("last_run"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+/// `last_run` as RFC 3339, or epoch seconds / milliseconds.
+fn parse_heartbeat(hb: Option<&serde_json::Value>) -> Option<chrono::DateTime<chrono::Utc>> {
+    let v = hb?.get("last_run")?;
+    if let Some(s) = v.as_str() {
+        return chrono::DateTime::parse_from_rfc3339(s.trim())
+            .ok()
+            .map(|d| d.with_timezone(&chrono::Utc));
+    }
+    let n = v.as_f64()?;
+    if !n.is_finite() || n <= 0.0 {
+        return None;
+    }
+    let ms = if n > 1e12 { n } else { n * 1000.0 } as i64;
+    chrono::DateTime::from_timestamp_millis(ms)
+}
 
-    let gateway_url = config
-        .as_ref()
+fn heartbeat_is_fresh(
+    hb: Option<chrono::DateTime<chrono::Utc>>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    hb.map(|t| {
+        let age = (now - t).num_seconds();
+        (-HEARTBEAT_SKEW_SECS..=HEARTBEAT_FRESH_SECS).contains(&age)
+    })
+    .unwrap_or(false)
+}
+
+fn derive_state(
+    config_present: bool,
+    heartbeat_fresh: bool,
+    gateway_reachable: bool,
+) -> OpenClawState {
+    if heartbeat_fresh || gateway_reachable {
+        OpenClawState::Online
+    } else if config_present {
+        OpenClawState::Configured
+    } else {
+        OpenClawState::Offline
+    }
+}
+
+/// Pure part of `read_openclaw_status`: picks typed, redacted fields out of the files.
+fn build_status(
+    config: Option<&serde_json::Value>,
+    heartbeat: Option<&serde_json::Value>,
+    now: chrono::DateTime<chrono::Utc>,
+    gateway_reachable: bool,
+) -> OpenClawStatus {
+    let raw_url = config
         .and_then(|v| v.get("gateway"))
         .and_then(|v| v.get("url"))
         .and_then(|v| v.as_str())
-        .unwrap_or("ws://127.0.0.1:18789")
-        .to_string();
+        .unwrap_or(DEFAULT_GATEWAY_URL);
+    let model_value = config.and_then(|v| v.get("model")).or_else(|| {
+        config
+            .and_then(|v| v.get("agents"))
+            .and_then(|v| v.get("defaults"))
+            .and_then(|v| v.get("model"))
+            .and_then(|v| v.get("primary"))
+    });
+    let hb = parse_heartbeat(heartbeat);
+    let status = derive_state(
+        config.is_some(),
+        heartbeat_is_fresh(hb, now),
+        gateway_reachable,
+    );
+    OpenClawStatus {
+        status,
+        online: status == OpenClawState::Online,
+        model: sanitize_model(model_value),
+        gateway_url: sanitize_gateway_url(raw_url),
+        last_heartbeat: hb.map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+    }
+}
 
-    let model = config
-        .as_ref()
-        .and_then(|v| v.get("model"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
+async fn loopback_reachable(url: &str) -> bool {
+    let Some((host, port)) = loopback_target(url) else {
+        return false;
+    };
+    tokio::time::timeout(
+        Duration::from_millis(300),
+        tokio::net::TcpStream::connect((host.as_str(), port)),
+    )
+    .await
+    .map(|r| r.is_ok())
+    .unwrap_or(false)
+}
 
-    let online = config.is_some();
+fn read_json(path: &std::path::Path) -> Option<serde_json::Value> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+}
 
-    Ok(OpenClawStatus {
-        online,
-        model,
-        gateway_url,
-        last_heartbeat,
-        heartbeat_data,
-        config,
-    })
+#[tauri::command]
+pub async fn read_openclaw_status() -> Result<OpenClawStatus, String> {
+    let base = openclaw_dir();
+    let config = read_json(&base.join("openclaw.json"));
+    let heartbeat = read_json(&base.join("memory").join("heartbeat-state.json"));
+    let now = chrono::Utc::now();
+
+    // Only probe the (loopback) gateway when the heartbeat alone does not prove liveness.
+    let mut status = build_status(config.as_ref(), heartbeat.as_ref(), now, false);
+    if !status.online && config.is_some() && loopback_reachable(&status.gateway_url).await {
+        status = build_status(config.as_ref(), heartbeat.as_ref(), now, true);
+    }
+    Ok(status)
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn at(s: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    #[test]
+    fn gateway_url_keeps_only_scheme_host_port() {
+        assert_eq!(
+            sanitize_gateway_url("ws://127.0.0.1:18789"),
+            "ws://127.0.0.1:18789"
+        );
+        assert_eq!(
+            sanitize_gateway_url("wss://user:s3cret@gw.example.com:8443/rpc?token=abc#x"),
+            "wss://gw.example.com:8443"
+        );
+        assert_eq!(
+            sanitize_gateway_url("https://gw.example.com/?key=k"),
+            "https://gw.example.com"
+        );
+        assert_eq!(
+            sanitize_gateway_url("http://[::1]:18789/a"),
+            "http://[::1]:18789"
+        );
+        for bad in [
+            "",
+            "not a url",
+            "file:///Users/me/.openclaw/sock",
+            "javascript:alert(1)",
+            "/tmp/gw.sock",
+        ] {
+            assert_eq!(sanitize_gateway_url(bad), "", "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn model_is_redacted_unless_it_looks_like_an_id() {
+        assert_eq!(
+            sanitize_model(Some(&json!("anthropic/claude-sonnet-4"))),
+            "anthropic/claude-sonnet-4"
+        );
+        assert_eq!(sanitize_model(Some(&json!("llama3.1:8b"))), "llama3.1:8b");
+        assert_eq!(
+            sanitize_model(Some(&json!("/Users/me/models/qwen-7b.gguf"))),
+            "qwen-7b.gguf"
+        );
+        assert_eq!(sanitize_model(Some(&json!("~/m/x.gguf"))), "x.gguf");
+        for bad in [
+            json!("sk-ant-abc123"),
+            json!("https://u:p@host/m"),
+            json!("has space"),
+            json!({"primary": "x"}),
+            json!("a".repeat(81)),
+        ] {
+            assert_eq!(sanitize_model(Some(&bad)), "unknown", "{bad}");
+        }
+        assert_eq!(sanitize_model(None), "unknown");
+    }
+
+    #[test]
+    fn heartbeat_parses_rfc3339_and_epochs() {
+        let t = at("2026-10-28T05:00:00Z");
+        assert_eq!(
+            parse_heartbeat(Some(&json!({"last_run": "2026-10-28T14:00:00+09:00"}))),
+            Some(t)
+        );
+        assert_eq!(
+            parse_heartbeat(Some(&json!({"last_run": t.timestamp()}))),
+            Some(t)
+        );
+        assert_eq!(
+            parse_heartbeat(Some(&json!({"last_run": t.timestamp_millis()}))),
+            Some(t)
+        );
+        for bad in [
+            json!({}),
+            json!({"last_run": "yesterday"}),
+            json!({"last_run": -5}),
+            json!({"last_run": null}),
+        ] {
+            assert_eq!(parse_heartbeat(Some(&bad)), None, "{bad}");
+        }
+        assert_eq!(parse_heartbeat(None), None);
+    }
+
+    #[test]
+    fn freshness_window_is_five_minutes_with_small_skew() {
+        let now = at("2026-10-28T05:10:00Z");
+        assert!(heartbeat_is_fresh(Some(at("2026-10-28T05:05:00Z")), now));
+        assert!(heartbeat_is_fresh(Some(at("2026-10-28T05:10:30Z")), now));
+        assert!(!heartbeat_is_fresh(Some(at("2026-10-28T05:04:59Z")), now));
+        assert!(!heartbeat_is_fresh(Some(at("2026-10-28T05:12:00Z")), now));
+        assert!(!heartbeat_is_fresh(None, now));
+    }
+
+    #[test]
+    fn state_needs_a_live_signal_to_be_online() {
+        assert_eq!(derive_state(true, true, false), OpenClawState::Online);
+        assert_eq!(derive_state(true, false, true), OpenClawState::Online);
+        assert_eq!(derive_state(true, false, false), OpenClawState::Configured);
+        assert_eq!(derive_state(false, false, false), OpenClawState::Offline);
+    }
+
+    #[test]
+    fn loopback_only_probe_targets() {
+        assert_eq!(
+            loopback_target("ws://127.0.0.1:18789"),
+            Some(("127.0.0.1".into(), 18789))
+        );
+        assert_eq!(
+            loopback_target("ws://localhost"),
+            Some(("localhost".into(), 80))
+        );
+        assert_eq!(loopback_target("http://[::1]:9"), Some(("::1".into(), 9)));
+        assert_eq!(loopback_target("wss://gw.example.com:8443"), None);
+        assert_eq!(loopback_target(""), None);
+    }
+
+    #[test]
+    fn build_status_serialises_only_typed_redacted_fields() {
+        let config = json!({
+            "model": "anthropic/claude-sonnet-4",
+            "gateway": {"url": "ws://admin:hunter2@127.0.0.1:18789/ws?token=tok_live_123", "auth": {"token": "tok_live_123"}},
+            "env": {"ANTHROPIC_API_KEY": "sk-ant-SECRET"},
+            "workspace": "/Users/me/.openclaw/workspace"
+        });
+        let hb = json!({"last_run": "2026-10-28T05:08:00Z", "notes": "sk-ant-SECRET in /Users/me"});
+        let status = build_status(Some(&config), Some(&hb), at("2026-10-28T05:10:00Z"), false);
+        assert_eq!(status.status, OpenClawState::Online);
+        assert!(status.online);
+        assert_eq!(status.gateway_url, "ws://127.0.0.1:18789");
+        assert_eq!(
+            status.last_heartbeat.as_deref(),
+            Some("2026-10-28T05:08:00Z")
+        );
+
+        let v = serde_json::to_value(&status).unwrap();
+        let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            ["gateway_url", "last_heartbeat", "model", "online", "status"]
+        );
+        assert_eq!(v["status"], "online");
+        let text = v.to_string();
+        for leak in [
+            "hunter2", "admin", "tok_live", "sk-ant", "/Users", "token", "notes",
+        ] {
+            assert!(!text.contains(leak), "{leak} leaked: {text}");
+        }
+    }
+
+    #[test]
+    fn build_status_without_live_signal() {
+        let now = at("2026-10-28T05:10:00Z");
+        let stale = json!({"last_run": "2026-10-28T04:00:00Z"});
+        let s = build_status(Some(&json!({})), Some(&stale), now, false);
+        assert_eq!((s.status, s.online), (OpenClawState::Configured, false));
+        assert_eq!(s.gateway_url, DEFAULT_GATEWAY_URL);
+        assert_eq!(s.model, "unknown");
+        assert_eq!(s.last_heartbeat.as_deref(), Some("2026-10-28T04:00:00Z"));
+        let s = build_status(Some(&json!({})), None, now, true);
+        assert_eq!(s.status, OpenClawState::Online);
+        let s = build_status(None, None, now, false);
+        assert_eq!(
+            (s.status, s.online, s.last_heartbeat),
+            (OpenClawState::Offline, false, None)
+        );
+    }
 }
 
 #[tauri::command]

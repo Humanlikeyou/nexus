@@ -88,11 +88,12 @@ const EMPTY_NOOP: NoopHealthSnapshot = {
   message: "NOOP health data is not available yet.",
 };
 
-const EMPTY_OPENCLAW: OpenClawStatus = { online: false, model: "unknown", gateway_url: "", last_heartbeat: null };
+const EMPTY_OPENCLAW: OpenClawStatus = { status: "offline", online: false, model: "unknown", gateway_url: "", last_heartbeat: null };
 
-/** Keep only the typed fields: the Rust command also returns the raw openclaw.json config, which must not sit in UI state. */
+/** Keep only the typed fields (defence in depth; the Rust command already returns just these). */
 function pickOpenClaw(s: OpenClawStatus): OpenClawStatus {
-  return { online: Boolean(s?.online), model: s?.model ?? "unknown", gateway_url: s?.gateway_url ?? "", last_heartbeat: s?.last_heartbeat ?? null };
+  const status = s?.status === "online" || s?.status === "configured" || s?.status === "offline" ? s.status : s?.online ? "online" : "offline";
+  return { status, online: status === "online", model: s?.model ?? "unknown", gateway_url: s?.gateway_url ?? "", last_heartbeat: s?.last_heartbeat ?? null };
 }
 
 const EMPTY_REVENUE: RevenueSummary = {

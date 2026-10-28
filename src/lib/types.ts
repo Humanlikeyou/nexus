@@ -3,12 +3,11 @@
 // ============================================================
 
 export interface OpenClawStatus {
+  status: "online" | "configured" | "offline";
   online: boolean;
   model: string;
   gateway_url: string;
   last_heartbeat: string | null;
-  heartbeat_data: Record<string, unknown> | null;
-  config: Record<string, unknown> | null;
 }
 
 export interface OpenClawChannels {

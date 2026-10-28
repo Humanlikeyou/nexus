@@ -2,6 +2,7 @@ import { Bot, Brain, ChevronRight, CircleDollarSign, Cpu, RefreshCw, Sparkles } 
 import { useEffect, useState, type ReactNode } from "react";
 import { getSchedulerStatus, type SchedulerStatus } from "@/terrance/system/scheduler";
 import type { ConversationMessage } from "../app/conversation";
+import { openClawBadge } from "../app/openclaw";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, type Tone } from "../ui";
@@ -211,7 +212,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
               <ListRow icon={Bot} title="Hermes" subtitle={[hermes.model, hermes.provider].filter(Boolean).join(" · ") || DASH}
                 accessory={<Badge tone={hermesOnline ? "success" : "warning"}>{hermesOnline ? "Online" : hermes.status ? hermes.status.replace(/_/g, " ") : "Offline"}</Badge>}
                 value={hermes.telegramStatus ? `Telegram ${hermes.telegramStatus}` : `Checked ${clock(hermes.checkedAt)}`} />
-              <ListRow icon={Cpu} title="OpenClaw" subtitle="Status read not wired yet" accessory={<Badge tone="neutral">Not connected</Badge>} />
+              <ListRow icon={Cpu} title="OpenClaw" subtitle={openClawBadge(data.openclaw).subtitle} accessory={<Badge tone={openClawBadge(data.openclaw).tone}>{openClawBadge(data.openclaw).label}</Badge>} />
             </InsetGroup>
           )}
       </Card>

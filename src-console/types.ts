@@ -1,6 +1,10 @@
 export type ModuleId = "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "trajectory" | "settings";
 
+export type OpenClawState = "online" | "configured" | "offline";
+
 export interface OpenClawStatus {
+  /** online = fresh heartbeat (<5 min) or reachable loopback gateway; configured = config only. Optional for older backends. */
+  status?: OpenClawState;
   online: boolean;
   model: string;
   gateway_url: string;
