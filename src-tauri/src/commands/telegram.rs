@@ -95,11 +95,18 @@ pub fn load_config() -> NexusConfig {
 }
 
 fn save_config(config: &NexusConfig) -> Result<(), String> {
-    let dir = nexus_data_dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    save_config_at(&config_path(), config)
+}
+
+/// config.json holds the bot token and gateway auth: always write it
+/// atomically with mode 0600, whatever mode the previous file had.
+fn save_config_at(path: &std::path::Path, config: &NexusConfig) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
     let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    fs::write(config_path(), json).map_err(|e| e.to_string())?;
-    Ok(())
+    crate::commands::continuity::atomic_write_with_mode(path, json.as_bytes(), Some(0o600))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -486,4 +493,34 @@ pub async fn send_to_terrance(text: String) -> Result<String, String> {
     };
 
     Ok(cleaned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn save_config_writes_0600_atomically_over_a_0644_file() {
+        let dir = std::env::temp_dir().join(format!("nexus-savecfg-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        fs::write(&path, "{}").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        let cfg = NexusConfig {
+            telegram_chat_id: Some("42".into()),
+            ..Default::default()
+        };
+        save_config_at(&path, &cfg).unwrap();
+
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        let back: NexusConfig = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(back.telegram_chat_id.as_deref(), Some("42"));
+        // no temp files left behind
+        let names: Vec<_> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("config.json")]);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
