@@ -1,0 +1,81 @@
+/* App shell per screen-specs "Shared rules": 220px sidebar (resizable 200–280),
+ * gray selection with an accent icon and no left bar, 52px unified toolbar with a
+ * traffic-light inset and vibrancy, 24px footer only when there is live status,
+ * 20px content inset. `main.command-surface` outranks the legacy rules in styles.css. */
+
+:root {
+  --shell-toolbar-bg: rgba(246, 246, 248, .72);
+  --shell-traffic-inset: 78px; /* macOS traffic lights: 12px + 3×14px + 2×8px gaps + 8px */
+}
+:root[data-theme="dark"] { --shell-toolbar-bg: rgba(30, 30, 32, .72); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --shell-toolbar-bg: rgba(30, 30, 32, .72); }
+}
+
+main.command-surface {
+  grid-template-columns: var(--shell-sidebar-w, var(--sidebar-w, 220px)) minmax(0, 1fr);
+  grid-template-rows: var(--toolbar-h, 52px) minmax(0, 1fr) auto;
+}
+
+/* Unified toolbar: sidebar header + content toolbar share one 52px band. */
+main.command-surface > .intelligence-overlay > .nexus-mark,
+main.command-surface > .intelligence-overlay > .field-clock {
+  height: var(--toolbar-h, 52px);
+  background: var(--shell-toolbar-bg);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  border-bottom: var(--hairline, 1px solid var(--separator));
+}
+main.command-surface > .intelligence-overlay > .nexus-mark {
+  padding-left: var(--shell-traffic-inset);
+  border-right: var(--hairline, 1px solid var(--separator));
+}
+main.command-surface > .intelligence-overlay > .field-clock { padding: 0 var(--inset-content, 20px); }
+
+/* Sidebar: material, gray selection, accent-tinted icon, never a left bar. */
+main.command-surface > nav.system-constellation {
+  position: relative;
+  grid-row: 2 / 4;
+  background: var(--material-sidebar, var(--sidebar));
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border-right: var(--hairline, 1px solid var(--separator));
+}
+main.command-surface .nav-group button.is-active {
+  color: var(--label, var(--text));
+  background: var(--selection);
+  box-shadow: none;
+}
+main.command-surface .nav-group button.is-active > i { color: var(--accent-strong, var(--accent)); }
+
+.shell-sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.shell-sidebar-resizer:hover, .shell-sidebar-resizer[data-dragging], .shell-sidebar-resizer:focus-visible {
+  background: linear-gradient(to right, transparent 2px, var(--separator-strong, var(--separator)) 2px, var(--separator-strong, var(--separator)) 4px, transparent 4px);
+  outline: none;
+}
+
+/* 20px content inset at every width. */
+main.command-surface > .active-field { padding: var(--inset-content, 20px); }
+
+/* Footer: 24px, only rendered when it has live status (see Footer.tsx). */
+main.command-surface > .field-footer {
+  height: var(--footer-h, 24px);
+  padding: 0 var(--inset-content, 20px);
+  font-size: var(--text-subheadline);
+}
+
+/* Narrow windows keep the legacy icon rail; resizing is desktop-width only. */
+@media (max-width: 1120px) {
+  main.command-surface { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
+  main.command-surface > .intelligence-overlay > .nexus-mark { padding-left: 0; }
+  .shell-sidebar-resizer { display: none; }
+}
