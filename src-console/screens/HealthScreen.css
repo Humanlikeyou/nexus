@@ -66,3 +66,4 @@
 @media (max-width: 860px) {
   .fitness__row { grid-template-columns: 1fr; }
 }
+.fitness__hint { color: var(--label-tertiary); }

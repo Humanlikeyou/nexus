@@ -49,6 +49,12 @@ function clock(iso: string | null | undefined) {
   return Number.isNaN(d.getTime()) ? DASH : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Tokyo" });
 }
 const pct = (fraction: number | null | undefined) => (typeof fraction === "number" && Number.isFinite(fraction) ? fraction * 100 : null);
+/** "2026-09-20" → "Sep 20" (a calendar day, not an instant: no time, no UTC shift). */
+export function dayLabel(day: string): string {
+  const parsed = new Date(`${day}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? day : parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 const Missing = () => <span title="unavailable">{DASH}</span>;
 const val = (text: string) => (text === DASH ? <Missing /> : text);
 /** StatTile renders null as a tertiary "—" and hides the unit. */
@@ -157,9 +163,7 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
           <h1>Fitness</h1>
           {failed
             ? <Badge tone="danger">Unavailable</Badge>
-            : health.status === "stale" && health.dataAgeDays != null
-              ? <Badge tone="warning">Stale · {health.dataAgeDays}d</Badge>
-              : <Badge tone={status.tone}>{status.text}</Badge>}
+            : <Badge tone={status.tone}>{status.text}</Badge>}
         </div>
         <p className="fitness__meta">
           {failed
@@ -244,7 +248,11 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
   return (
     <div className="fitness" data-state={health.status}>
       {header}
-      {health.status === "stale" && <p className="fitness__callout" role="note">Showing the last NOOP record.</p>}
+      {health.status === "stale" && (
+        <p className="fitness__callout" role="note">
+          Last NOOP data {health.latestDay ? dayLabel(health.latestDay) : "unknown"}. <span className="fitness__hint">Open NOOP to sync.</span>
+        </p>
+      )}
 
       <div className="fitness__row fitness__row--today">
         <Card title="Recovery" className="fitness__ring-card">

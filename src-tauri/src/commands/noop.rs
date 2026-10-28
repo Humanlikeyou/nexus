@@ -9,11 +9,14 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_DEVICE_ID: &str = "my-whoop";
 const NOOP_BUNDLE_ID: &str = "com.noopapp.noop";
 const RECENT_DAY_LIMIT: usize = 14;
+/// Newest day more than this many days old → status "stale".
+const STALE_AFTER_DAYS: i64 = 2;
 const BASELINE_DAY_LIMIT: usize = 7;
 const BATTERY_MAX_AGE_SECONDS: i64 = 48 * 60 * 60;
 const BATTERY_MAX_FUTURE_SKEW_SECONDS: i64 = 5 * 60;
@@ -158,6 +161,64 @@ pub struct NoopHealthSnapshot {
     pub message: Option<String>,
 }
 
+/// Which NOOP store a snapshot was read from (logged/printed; never values).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NoopStoreKind {
+    /// `NOOP_DB_PATH` override.
+    Explicit,
+    /// Sandboxed production app: ~/Library/Containers/com.noopapp.noop/...
+    Container,
+    /// Unsandboxed build: ~/Library/Application Support/OpenWhoop/...
+    AppSupport,
+}
+
+#[cfg(test)]
+impl NoopStoreKind {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Explicit => "explicit",
+            Self::Container => "container",
+            Self::AppSupport => "app-support",
+        }
+    }
+}
+
+const STORE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Open a NOOP store strictly read-only. NOOP may be writing to it right now:
+/// never write, checkpoint, VACUUM or copy it.
+fn open_store(path: &Path) -> rusqlite::Result<Connection> {
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.busy_timeout(STORE_BUSY_TIMEOUT)?;
+    Ok(conn)
+}
+
+/// Newest `dailyMetric.day` across the imported and NOOP-computed rows, or
+/// None if the store can't be read (it still loses to any readable store).
+fn store_latest_day(path: &Path, device_id: &str) -> Option<String> {
+    let conn = open_store(path).ok()?;
+    conn.query_row(
+        "SELECT MAX(day) FROM dailyMetric WHERE deviceId IN (?1, ?2)",
+        params![device_id, format!("{device_id}-noop")],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .ok()
+    .flatten()
+}
+
+/// Newer mtime of the database file or its -wal (NOOP writes the WAL first).
+fn store_mtime(path: &Path) -> Option<std::time::SystemTime> {
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    [path.to_path_buf(), PathBuf::from(wal)]
+        .iter()
+        .filter_map(|p| fs::metadata(p).and_then(|m| m.modified()).ok())
+        .max()
+}
+
 #[derive(Debug, Clone)]
 struct NoopPaths {
     explicit: Option<PathBuf>,
@@ -167,32 +228,61 @@ struct NoopPaths {
 impl NoopPaths {
     fn from_environment() -> Self {
         Self {
-            explicit: env::var_os("NOOP_DB_PATH").map(PathBuf::from),
+            explicit: env::var_os("NOOP_DB_PATH")
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from),
             home: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp")),
         }
     }
 
-    fn candidates(&self) -> Vec<PathBuf> {
+    /// Production stores only. The `com.noopapp.noop.staging` container is
+    /// never a candidate.
+    fn candidates(&self) -> Vec<(NoopStoreKind, PathBuf)> {
         if let Some(path) = self.explicit.as_ref() {
-            return vec![expand_home(path, &self.home)];
+            return vec![(NoopStoreKind::Explicit, expand_home(path, &self.home))];
         }
         vec![
-            self.home
-                .join("Library/Containers")
-                .join(NOOP_BUNDLE_ID)
-                .join("Data/Library/Application Support/OpenWhoop/whoop.sqlite"),
-            self.home
-                .join("Library/Application Support/OpenWhoop/whoop.sqlite"),
+            (
+                NoopStoreKind::Container,
+                self.home
+                    .join("Library/Containers")
+                    .join(NOOP_BUNDLE_ID)
+                    .join("Data/Library/Application Support/OpenWhoop/whoop.sqlite"),
+            ),
+            (
+                NoopStoreKind::AppSupport,
+                self.home
+                    .join("Library/Application Support/OpenWhoop/whoop.sqlite"),
+            ),
         ]
     }
 
-    fn resolve(&self) -> Result<PathBuf, String> {
-        self.candidates()
+    /// `NOOP_DB_PATH` wins when set. Otherwise every existing candidate is
+    /// checked and the freshest one is used: newest MAX(dailyMetric.day), ties
+    /// broken by the newer mtime of the db or its -wal.
+    fn resolve(&self, device_id: &str) -> Result<(NoopStoreKind, PathBuf), String> {
+        let existing: Vec<_> = self
+            .candidates()
             .into_iter()
-            .find(|candidate| candidate.is_file())
-            .ok_or_else(|| {
+            .filter(|(_, path)| path.is_file())
+            .collect();
+        if existing.len() <= 1 {
+            return existing.into_iter().next().ok_or_else(|| {
                 "NOOP has not created its local health store yet. Open NOOP, pair or import your data, then Amara will read it locally.".to_string()
+            });
+        }
+        Ok(existing
+            .into_iter()
+            .map(|(kind, path)| {
+                let rank = (store_latest_day(&path, device_id), store_mtime(&path));
+                (rank, kind, path)
             })
+            // max_by_key keeps the last maximum; reverse so a full tie keeps
+            // candidate order (container first).
+            .rev()
+            .max_by_key(|(rank, _, _)| rank.clone())
+            .map(|(_, kind, path)| (kind, path))
+            .expect("non-empty"))
     }
 }
 
@@ -772,7 +862,7 @@ fn snapshot_from_database(
     battery_confirmation_path: Option<&Path>,
     now: DateTime<Utc>,
 ) -> Result<NoopHealthSnapshot, String> {
-    let conn = Connection::open_with_flags(database_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+    let conn = open_store(database_path)
         .map_err(|error| format!("NOOP health store is unavailable: {error}"))?;
     let tables = table_names(&conn)?;
     if !tables.contains("grdb_migrations") {
@@ -813,7 +903,7 @@ fn snapshot_from_database(
     };
     let status = if today.is_none() {
         "waiting_for_data"
-    } else if data_age_days.unwrap_or(2) > 1 {
+    } else if data_age_days.unwrap_or(STALE_AFTER_DAYS + 1) > STALE_AFTER_DAYS {
         "stale"
     } else if !has_nightly_data(today.as_ref(), latest_night.as_ref()) {
         "waiting_for_nightly_data"
@@ -849,7 +939,7 @@ fn snapshot_from_database(
     let message = match status {
         "ready" => None,
         "stale" => Some(
-            "NOOP health data is older than yesterday, so Amara will not present it as current."
+            "NOOP health data is more than 2 days old, so Amara will not present it as current."
                 .to_string(),
         ),
         "waiting_for_nightly_data" => Some(
@@ -882,8 +972,8 @@ pub fn health_snapshot() -> NoopHealthSnapshot {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_DEVICE_ID.to_string());
     let paths = NoopPaths::from_environment();
-    let path = match paths.resolve() {
-        Ok(path) => path,
+    let path = match paths.resolve(&device_id) {
+        Ok((_, path)) => path,
         Err(error) => return unavailable_snapshot(device_id, now, error),
     };
     let battery_confirmation_path = health_delivery_state_path(&paths.home);
@@ -1079,7 +1169,7 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 8, 31, 12, 0, 0).unwrap();
         let snapshot = snapshot_from_database(&path, "my-whoop".to_string(), None, now).unwrap();
         assert_eq!(snapshot.status, "stale");
-        assert!(snapshot.message.unwrap().contains("older than yesterday"));
+        assert!(snapshot.message.unwrap().contains("more than 2 days old"));
         let _ = fs::remove_file(path);
     }
 
@@ -1283,6 +1373,199 @@ mod tests {
         );
         let _ = fs::remove_file(path);
         let _ = fs::remove_file(confirmation_path);
+    }
+
+    /// A fake home with the given stores: (kind, latest day or None for an
+    /// empty dailyMetric, or "garbage" for a non-SQLite file).
+    fn fake_home(stores: &[(NoopStoreKind, Option<&str>)]) -> NoopPaths {
+        let home = std::env::temp_dir().join(format!("nexus-noop-home-{}", Uuid::new_v4()));
+        let paths = NoopPaths {
+            explicit: None,
+            home,
+        };
+        for (kind, day) in stores {
+            let path = paths
+                .candidates()
+                .into_iter()
+                .find(|(k, _)| k == kind)
+                .unwrap()
+                .1;
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            if *day == Some("garbage") {
+                fs::write(&path, "not sqlite").unwrap();
+                continue;
+            }
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE dailyMetric (deviceId TEXT, day TEXT);")
+                .unwrap();
+            if let Some(day) = day {
+                conn.execute(
+                    "INSERT INTO dailyMetric VALUES ('my-whoop-noop', ?1)",
+                    params![day],
+                )
+                .unwrap();
+            }
+        }
+        paths
+    }
+
+    fn set_mtime(path: &Path, secs_ago: u64) {
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(secs_ago);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+    }
+
+    fn path_of(paths: &NoopPaths, kind: NoopStoreKind) -> PathBuf {
+        paths
+            .candidates()
+            .into_iter()
+            .find(|(k, _)| *k == kind)
+            .unwrap()
+            .1
+    }
+
+    #[test]
+    fn picks_the_store_with_the_newest_day_over_the_container() {
+        // The real layout on 2026-10-28: a stale container and a live app-support store.
+        let paths = fake_home(&[
+            (NoopStoreKind::Container, Some("2026-09-20")),
+            (NoopStoreKind::AppSupport, Some("2026-10-28")),
+        ]);
+        // The stale store being touched more recently must not matter.
+        set_mtime(&path_of(&paths, NoopStoreKind::AppSupport), 3600);
+        let (kind, path) = paths.resolve("my-whoop").unwrap();
+        assert_eq!(kind, NoopStoreKind::AppSupport);
+        assert_eq!(path, path_of(&paths, NoopStoreKind::AppSupport));
+        let _ = fs::remove_dir_all(&paths.home);
+    }
+
+    #[test]
+    fn equal_days_fall_back_to_the_newer_db_or_wal_mtime() {
+        let paths = fake_home(&[
+            (NoopStoreKind::Container, Some("2026-10-28")),
+            (NoopStoreKind::AppSupport, Some("2026-10-28")),
+        ]);
+        let container = path_of(&paths, NoopStoreKind::Container);
+        let app = path_of(&paths, NoopStoreKind::AppSupport);
+        set_mtime(&container, 7200);
+        set_mtime(&app, 3600);
+        assert_eq!(
+            paths.resolve("my-whoop").unwrap().0,
+            NoopStoreKind::AppSupport
+        );
+        // A fresh -wal makes the container newer even though its main file is older.
+        let mut wal = container.as_os_str().to_owned();
+        wal.push("-wal");
+        fs::write(PathBuf::from(wal), "").unwrap();
+        assert_eq!(
+            paths.resolve("my-whoop").unwrap().0,
+            NoopStoreKind::Container
+        );
+        let _ = fs::remove_dir_all(&paths.home);
+    }
+
+    #[test]
+    fn an_unreadable_or_empty_store_loses_to_a_readable_one() {
+        let paths = fake_home(&[
+            (NoopStoreKind::Container, Some("garbage")),
+            (NoopStoreKind::AppSupport, None),
+        ]);
+        set_mtime(&path_of(&paths, NoopStoreKind::AppSupport), 7200);
+        // Both have no day; the newer mtime (the garbage file) wins the tie...
+        assert_eq!(
+            paths.resolve("my-whoop").unwrap().0,
+            NoopStoreKind::Container
+        );
+        let paths2 = fake_home(&[
+            (NoopStoreKind::Container, Some("garbage")),
+            (NoopStoreKind::AppSupport, Some("2026-01-01")),
+        ]);
+        // ...but any real day beats it.
+        assert_eq!(
+            paths2.resolve("my-whoop").unwrap().0,
+            NoopStoreKind::AppSupport
+        );
+        let _ = fs::remove_dir_all(&paths.home);
+        let _ = fs::remove_dir_all(&paths2.home);
+    }
+
+    #[test]
+    fn explicit_path_overrides_and_staging_is_never_a_candidate() {
+        let paths = fake_home(&[
+            (NoopStoreKind::Container, Some("2026-09-20")),
+            (NoopStoreKind::AppSupport, Some("2026-10-28")),
+        ]);
+        let staging = paths.home.join(
+            "Library/Containers/com.noopapp.noop.staging/Data/Library/Application Support/OpenWhoop/whoop.sqlite",
+        );
+        assert!(paths
+            .candidates()
+            .iter()
+            .all(|(_, p)| !p.starts_with(staging.parent().unwrap())));
+        assert!(paths
+            .candidates()
+            .iter()
+            .all(|(_, p)| !p.to_string_lossy().contains(".staging")));
+        let explicit = NoopPaths {
+            explicit: Some(path_of(&paths, NoopStoreKind::Container)),
+            home: paths.home.clone(),
+        };
+        let (kind, path) = explicit.resolve("my-whoop").unwrap();
+        assert_eq!(kind, NoopStoreKind::Explicit);
+        assert_eq!(path, path_of(&paths, NoopStoreKind::Container));
+        let _ = fs::remove_dir_all(&paths.home);
+    }
+
+    #[test]
+    fn data_two_days_old_is_not_stale_but_three_is() {
+        let path = seeded_database();
+        let two = Utc.with_ymd_and_hms(2026, 8, 28, 12, 0, 0).unwrap();
+        let three = Utc.with_ymd_and_hms(2026, 8, 29, 12, 0, 0).unwrap();
+        let s2 = snapshot_from_database(&path, "my-whoop".to_string(), None, two).unwrap();
+        let s3 = snapshot_from_database(&path, "my-whoop".to_string(), None, three).unwrap();
+        assert_ne!(s2.status, "stale");
+        assert_eq!(s3.status, "stale");
+        let _ = fs::remove_file(path);
+    }
+
+    /// Live smoke against the real NOOP store (read-only). Prints only row
+    /// counts, latestDay, the chosen candidate kind and elapsed ms — never
+    /// health values. Run:
+    /// cargo test --manifest-path src-tauri/Cargo.toml noop_live -- --ignored --nocapture
+    #[test]
+    #[ignore = "reads the real NOOP store"]
+    fn noop_live_smoke() {
+        let started = std::time::Instant::now();
+        let snapshot = health_snapshot();
+        let elapsed = started.elapsed().as_millis();
+        let device_id =
+            env::var("NOOP_DEVICE_ID").unwrap_or_else(|_| DEFAULT_DEVICE_ID.to_string());
+        let (kind, path) = NoopPaths::from_environment().resolve(&device_id).unwrap();
+        let conn = open_store(&path).unwrap();
+        let count = |table: &str| -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap_or(-1)
+        };
+        println!(
+            "noop_live_smoke: kind={} dailyMetric={} sleepSession={} battery={} recentDays={} latestDay={} status={} elapsed_ms={}",
+            kind.label(),
+            count("dailyMetric"),
+            count("sleepSession"),
+            count("battery"),
+            snapshot.recent_days.len(),
+            snapshot.latest_day.as_deref().unwrap_or("none"),
+            snapshot.status,
+            elapsed
+        );
+        let latest =
+            NaiveDate::parse_from_str(snapshot.latest_day.as_deref().unwrap(), "%Y-%m-%d").unwrap();
+        let age = (Local::now().date_naive() - latest).num_days();
+        assert!(age <= 2, "latestDay is {age} days old");
+        assert!(elapsed < 500, "snapshot took {elapsed} ms");
     }
 
     #[test]

@@ -99,10 +99,20 @@ describe("Fitness (HealthField)", () => {
     expect(screen.queryByRole("meter", { name: "Recovery" })).toBeNull();
   });
 
-  it("stale: badge with age and callout", () => {
-    render(<HealthField data={snap({ ...ready, status: "stale", dataAgeDays: 3 })} />);
-    expect(screen.getByText("Stale · 3d")).toBeInTheDocument();
-    expect(screen.getByText("Showing the last NOOP record.")).toBeInTheDocument();
+  it("stale: warning badge, last NOOP data date and sync hint", () => {
+    render(<HealthField data={snap({ ...ready, status: "stale", dataAgeDays: 38, latestDay: "2026-09-20" })} />);
+    const badge = screen.getByText("Stale");
+    expect(badge.closest("[data-tone]")?.getAttribute("data-tone") ?? badge.getAttribute("data-tone")).toBe("warning");
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent("Last NOOP data Sep 20.");
+    expect(note).toHaveTextContent("Open NOOP to sync.");
+    expect(screen.getByText("38d old", { exact: false })).toBeInTheDocument();
+  });
+
+  it("ready data shows no stale note", () => {
+    render(<HealthField data={snap(ready)} />);
+    expect(screen.queryByText("Open NOOP to sync.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stale")).not.toBeInTheDocument();
   });
 
   it("trend with fewer than 2 points says so", () => {
