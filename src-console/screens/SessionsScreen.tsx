@@ -1,24 +1,90 @@
-import { useState } from "react";
-import { EmptyState, Metric, PageHeading, SectionHeading, StatusIndicator } from "../design/ProductUI";
-import { number, date, time } from "../lib/format";
-import type { SystemSnapshot } from "../types";
-import { BrainCircuit, HeartPulse, History } from "lucide-react";
+import { useState, type KeyboardEvent } from "react";
+import { BrainCircuit, HeartPulse, RefreshCw } from "lucide-react";
+import { Badge, Button, Card, InsetGroup, ListRow, StatTile } from "../ui";
+import { date, number, time } from "../lib/format";
+import type { RecordedSession, SystemSnapshot } from "../types";
+import "./SessionsScreen.css";
 
-export function SessionsField({ data }: { data: SystemSnapshot }) {
+/** Sessions → Neuro › History (screen-specs §5): source list + detail, like Voice Memos. */
+const SESSIONS_COMMAND = "list_sessions";
+const title = (s: RecordedSession) => (s.device_type === "muse" ? "Muse session" : `${s.device_type} session`);
+const minutes = (s: RecordedSession) => Math.max(1, Math.round(s.duration_secs / 60));
+const pct = (v: number | null | undefined) => (v == null ? null : Math.round(v));
+
+export function SessionsField({ data, onRetry, onStartSession }: { data: SystemSnapshot; onRetry?: () => void; onStartSession?: () => void }) {
   const sessions = data.sessions;
   const [selectedId, setSelectedId] = useState<string | null>(sessions[0]?.id ?? null);
-  const selected = sessions.find((session) => session.id === selectedId) ?? sessions[0] ?? null;
-  const museSessions = sessions.filter((session) => session.device_type === "muse");
-  const totalMinutes = sessions.reduce((sum, session) => sum + session.duration_secs / 60, 0);
+  const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0] ?? null;
+  const failed = data.unavailableSources.some((s) => s.command === SESSIONS_COMMAND);
 
-  return <div className="system-field sessions-field">
-    <PageHeading eyebrow="History" title="Sessions" description="Your recordings and session summaries." />
-    {sessions.length === 0 ? <EmptyState icon={History} title="No sessions yet" detail="Complete a Muse session and Amara OS will keep the recording and summary here." /> : <>
-      <section className="session-summary-strip"><Metric label="Recorded" value={sessions.length} detail="All devices" /><Metric label="Muse sessions" value={museSessions.length} detail="Neural recordings" /><Metric label="Total time" value={Math.round(totalMinutes)} unit="min" detail="Across history" /></section>
-      <div className="sessions-workspace">
-        <section className="session-list"><SectionHeading title="History" detail="Most recent first" />{sessions.map((session) => <button key={session.id} type="button" className={session.id === selected?.id ? "is-selected" : ""} onClick={() => setSelectedId(session.id)}><span className="session-device-icon">{session.device_type === "muse" ? <BrainCircuit size={17} /> : <HeartPulse size={17} />}</span><span><strong>{session.device_type === "muse" ? "Muse session" : `${session.device_type} session`}</strong><small>{date(session.start)}</small></span><em>{Math.max(1, Math.round(session.duration_secs / 60))} min</em></button>)}</section>
-        {selected && <section className="session-detail"><SectionHeading title={selected.device_type === "muse" ? "Muse session" : `${selected.device_type} session`} detail={date(selected.start)} action={<StatusIndicator tone="success">Saved locally</StatusIndicator>} /><div className="session-detail-metrics"><Metric label="Duration" value={Math.max(1, Math.round(selected.duration_secs / 60))} unit="min" /><Metric label="Data points" value={selected.data_points.toLocaleString()} /><Metric label="Average focus" value={number(selected.summary.avg_focus)} /><Metric label="Average relaxation" value={number(selected.summary.avg_relaxation)} /></div><div className="session-timeline"><span>Session window</span><div><time>{time(selected.start)}</time><i /><time>{time(selected.end)}</time></div></div><p className="session-caveat">Session scores summarize the recorded signal for reflection. They are not clinical measurements.</p></section>}
+  if (failed && sessions.length === 0) {
+    return (
+      <div className="sessions">
+        <Card title="Sensor sessions unavailable" headingLevel={2}>
+          {onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
+        </Card>
       </div>
-    </>}
-  </div>;
+    );
+  }
+  if (sessions.length === 0) {
+    return (
+      <div className="sessions">
+        <Card title="No sessions yet" headingLevel={2}>
+          <p className="sessions__copy">Finish a Muse session and Amara OS keeps the recording and summary here.</p>
+          {onStartSession && <div><Button variant="primary" onClick={onStartSession}>Start a Session</Button></div>}
+        </Card>
+      </div>
+    );
+  }
+
+  const museCount = sessions.filter((s) => s.device_type === "muse").length;
+  const totalMin = Math.round(sessions.reduce((sum, s) => sum + s.duration_secs / 60, 0));
+  const onListKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const index = Math.max(0, sessions.findIndex((s) => s.id === selected?.id));
+    const next = sessions[Math.min(sessions.length - 1, Math.max(0, index + (event.key === "ArrowDown" ? 1 : -1)))];
+    if (!next) return;
+    event.preventDefault();
+    setSelectedId(next.id);
+  };
+
+  return (
+    <div className="sessions">
+      <div className="sessions__tiles">
+        <StatTile label="Sessions" value={sessions.length} />
+        <StatTile label="Muse sessions" value={museCount} />
+        <StatTile label="Total time" value={totalMin} unit="min" />
+      </div>
+      <div className="sessions__split">
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- ↑/↓ moves the selection between the row buttons inside */}
+        <div className="sessions__list" onKeyDown={onListKey}>
+          <InsetGroup title="History" footer="Most recent first">
+            {sessions.map((s) => (
+              <ListRow key={s.id} icon={s.device_type === "muse" ? BrainCircuit : HeartPulse} title={title(s)} subtitle={date(s.start)} value={`${minutes(s)} min`} onSelect={() => setSelectedId(s.id)} selected={s.id === selected?.id} />
+            ))}
+          </InsetGroup>
+        </div>
+        {selected ? (
+          <Card className="sessions__detail" title={title(selected)} headingLevel={2} accessory={<Badge tone="success">Saved locally</Badge>}>
+            <div className="sessions__metrics">
+              <StatTile label="Duration" value={minutes(selected)} unit="min" />
+              <StatTile label="Data points" value={selected.data_points.toLocaleString()} />
+              <StatTile label="Avg focus" value={selected.summary.avg_focus == null ? null : number(selected.summary.avg_focus)} />
+              <StatTile label="Avg relaxation" value={selected.summary.avg_relaxation == null ? null : number(selected.summary.avg_relaxation)} />
+            </div>
+            <div className="sessions__metrics sessions__metrics--beta">
+              <StatTile label={<>Calm <Badge>BETA</Badge></>} value={pct(selected.summary.calm_pct)} unit={selected.summary.calm_pct == null ? undefined : "%"} />
+              <StatTile label={<>Time in target <Badge>BETA</Badge></>} value={pct(selected.summary.time_in_target_pct)} unit={selected.summary.time_in_target_pct == null ? undefined : "%"} />
+            </div>
+            <InsetGroup>
+              <ListRow title="Session window" value={<><time dateTime={selected.start}>{time(selected.start)}</time> → <time dateTime={selected.end}>{time(selected.end)}</time></>} />
+            </InsetGroup>
+            <p className="sessions__callout">Scores summarize the recorded signal for reflection. They aren&apos;t clinical measurements.</p>
+          </Card>
+        ) : (
+          <Card className="sessions__detail"><p className="sessions__copy">Select a session</p></Card>
+        )}
+      </div>
+    </div>
+  );
 }
