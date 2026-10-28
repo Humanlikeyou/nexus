@@ -1,0 +1,32 @@
+.ui-ring {
+  --ui-ring-color: var(--accent);
+  --ui-ring-size: 112px;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--ui-ring-size);
+  height: var(--ui-ring-size);
+  flex: none;
+}
+.ui-ring[data-size="sm"] { --ui-ring-size: 64px; }
+.ui-ring[data-size="lg"] { --ui-ring-size: 148px; }
+.ui-ring__svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.ui-ring__track, .ui-ring__fill { fill: none; stroke-width: 10; }
+.ui-ring[data-size="sm"] .ui-ring__track, .ui-ring[data-size="sm"] .ui-ring__fill { stroke-width: 12; }
+.ui-ring__track { stroke: var(--fill-secondary); }
+.ui-ring__fill {
+  stroke: var(--ui-ring-color);
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--dur-page) var(--ease-standard);
+}
+.ui-ring__center {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  color: var(--label);
+  font: var(--type-headline);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) { .ui-ring__fill { transition: none; } }
+:root[data-reduce-motion="true"] .ui-ring__fill { transition: none; }

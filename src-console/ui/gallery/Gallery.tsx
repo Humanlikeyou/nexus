@@ -1,6 +1,6 @@
 import { Bluetooth, ChevronRight, HeartPulse, Moon, Plus, Search, Settings2, Sun, SunMoon, Trash2, Wifi } from "lucide-react";
 import { useState } from "react";
-import { Badge, Button, Card, InsetGroup, ListRow, SegmentedControl, StatTile, StatusDot, TextField, Toggle, type Tone } from "../index";
+import { Badge, Button, Card, InsetGroup, ListRow, Meter, Ring, SegmentedControl, Sparkline, StatTile, StatusDot, TextField, Toggle, type Tone } from "../index";
 
 const TONES: Tone[] = ["neutral", "accent", "info", "success", "warning", "danger"];
 
@@ -80,6 +80,29 @@ export function Gallery({ theme }: { theme: "light" | "dark" }) {
         <StatTile label="HRV" value={62} unit="ms" trend={{ direction: "down", value: "−4 ms", label: "Down 4 ms from yesterday", sentiment: "negative" }} />
         <StatTile label="Strain" value="10.2" trend={{ direction: "flat", value: "0.0", label: "No change from yesterday" }} />
         <StatTile label="Focus sessions" value={128} />
+      </div>
+
+      <div className="ui-gallery__grid">
+        <Card title="Ring" elevation={0}>
+          <div className="ui-gallery__row">
+            <Ring value={74} label="Recovery" valueText="74%, High" color="var(--data-recovery-high)"><strong>74%</strong><small>High</small></Ring>
+            <Ring value={12.4} max={21} label="Strain" color="var(--data-strain)"><strong>12.4</strong><small>of 21</small></Ring>
+            <Ring value={null} label="Recovery (no data)" size="sm" />
+          </div>
+        </Card>
+        <Card title="Meter" elevation={0}>
+          <div className="ui-gallery__stack">
+            <Meter value={84} label="Efficiency" />
+            <Meter value={40} label="Calibration" size="sm" />
+            <Meter label="Sleep stages" format={(v) => `${v}m`} segments={[{ label: "Deep", value: 92, color: "var(--data-sleep)" }, { label: "REM", value: 104, color: "color-mix(in srgb, var(--data-sleep) 70%, white)" }, { label: "Light", value: 230, color: "color-mix(in srgb, var(--data-sleep) 40%, white)" }, { label: "Awake", value: 22, color: "var(--fill-secondary)" }]} />
+          </div>
+        </Card>
+        <Card title="Sparkline" elevation={0}>
+          <div className="ui-gallery__stack">
+            <Sparkline values={[58, 61, 64, null, 70, 66, 72, 69]} label="HRV" format={(v) => `${v} ms`} />
+            <Sparkline values={[62, 70, 55, 81, null, null, 74, 77, 68, 90, 85, 79, 72, 74]} label="Recovery" size="lg" showMean color="var(--data-recovery-high)" />
+          </div>
+        </Card>
       </div>
 
       <div className="ui-gallery__grid">

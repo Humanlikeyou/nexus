@@ -15,3 +15,4 @@ button, input { font: inherit; }
 .ui-gallery__stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(var(--sidebar-w) * .7), 1fr)); gap: var(--space-3); }
 .ui-gallery__note { margin: 0; color: var(--label-secondary); }
 .ui-gallery__note--padded { padding: 0 var(--pad-card) var(--pad-card); }
+.ui-gallery__stack > .ui-meter, .ui-gallery__stack > .ui-sparkline { justify-self: stretch; }
