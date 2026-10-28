@@ -19,7 +19,7 @@
 use std::collections::HashSet;
 use std::sync::{LazyLock, Mutex};
 
-pub const APPROVAL_DIALOG_TITLE: &str = "Nexus — Approve Action";
+pub const APPROVAL_DIALOG_TITLE: &str = "Amara OS — Approve Action";
 /// Longer text is refused rather than truncated.
 pub const MAX_APPROVAL_TEXT_CHARS: usize = 2_000;
 /// Prefix for a Deny outcome.
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn text_puts_operation_first_and_refuses_oversize() {
-        let t = approval_text("Run: docker restart n8n", "Why: requested by Nexus").unwrap();
+        let t = approval_text("Run: docker restart n8n", "Why: requested by Amara OS").unwrap();
         assert!(t.starts_with("Run: docker restart n8n"));
         let err = approval_text("Run: x", &"y".repeat(MAX_APPROVAL_TEXT_CHARS)).unwrap_err();
         assert!(err.starts_with(REFUSED_PREFIX), "{err}");

@@ -65,6 +65,6 @@ export function readableError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   if (message.toLowerCase().includes("bluetooth adapter")) return "Bluetooth is unavailable. Check that Bluetooth is on, then try again.";
   if (message.toLowerCase().includes("not found") || message.toLowerCase().includes("not in discovered")) return "That Muse is no longer available. Put it back in pairing mode and scan again.";
-  if (message.toLowerCase().includes("permission")) return "Nexus needs Bluetooth permission in System Settings before it can connect.";
+  if (message.toLowerCase().includes("permission")) return "Amara OS needs Bluetooth permission in System Settings before it can connect.";
   return message.replace(/^Error:\s*/i, "") || "The device request could not be completed.";
 }

@@ -1,5 +1,5 @@
 {
-  "productName": "Nexus",
+  "productName": "Amara OS",
   "version": "0.1.0",
   "identifier": "com.taisun.nexus",
   "build": {
@@ -11,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "Nexus",
+        "title": "Amara OS",
         "width": 1400,
         "height": 900,
         "minWidth": 900,
@@ -47,7 +47,7 @@
     ],
     "category": "Productivity",
     "shortDescription": "Local intelligence and sensing workspace",
-    "longDescription": "Nexus brings local intelligence, neural sessions, health signals, and deliberate execution into one private workspace.",
+    "longDescription": "Amara OS brings local intelligence, neural sessions, health signals, and deliberate execution into one private workspace.",
     "copyright": "2026 Taisun",
     "macOS": {
       "entitlements": null,

@@ -1,4 +1,4 @@
-# Terrance Build Stages
+# Amara Build Stages
 
 > The roadmap from local runtime to personal operating system.
 
@@ -25,7 +25,7 @@
 
 ## Stage 1 — Core Brain (Chat + Routing)
 
-**Objective:** Make Terrance think properly.
+**Objective:** Make Amara think properly.
 
 **Completed:**
 - LLM Router (model selection logic)
@@ -36,7 +36,7 @@
 - Provider escalation ordering fix
 - Routing reason transparency
 
-**Result:** Terrance can think consistently and switch engines intelligently. The cognitive layer.
+**Result:** Amara can think consistently and switch engines intelligently. The cognitive layer.
 
 ---
 
@@ -75,11 +75,11 @@
 **Built:**
 - n8n ingress gateway
 - 5 event types: health.ping, memory.write, memory.query, kb.ingest, kb.query
-- Terrance identity canonical definition
+- Amara identity canonical definition
 - 67 Tauri commands across 19 Rust modules (at the time; working tree now ~136 commands across 28 modules)
 - OpenClaw health monitor + Telegram alerting
 
-**Result:** Terrance gained long-term memory (Letta), semantic knowledge retrieval (Weaviate), workflow routing (n8n), and observability (health monitor). The "external brain" stage.
+**Result:** Amara gained long-term memory (Letta), semantic knowledge retrieval (Weaviate), workflow routing (n8n), and observability (health monitor). The "external brain" stage.
 
 ---
 
@@ -145,7 +145,7 @@
 *Approach: Built on existing TypeScript/Rust stack first (5A-5D), CrewAI Python service last (5E).*
 *Local model: qwen3.5 (9.7B). OpenClaw primary: MiniMax-M2.5, fallback: ollama/qwen3.5.*
 
-This stage turns Terrance from semi-autonomous to fully autonomous.
+This stage turns Amara from semi-autonomous to fully autonomous.
 
 ---
 
@@ -153,7 +153,7 @@ This stage turns Terrance from semi-autonomous to fully autonomous.
 
 - Live UI moved to `src-console/` (old `src/App.tsx` + `src/components/*` deleted; Tailwind/Radix/ECharts/framer-motion removed)
 - Whoop BLE integration removed (`whoop.rs`); health is read-only from NOOP via `noop.rs`
-- Terrence runtime modules: `terrence_actions/automations/context/priorities/projects/runtime/runtime_bridge.rs`
+- Amara runtime modules: `terrence_actions/automations/context/priorities/projects/runtime/runtime_bridge.rs`
 - [x] Rename electron → Nexus (`com.taisun.nexus`) done (80276f9), with one-time non-destructive app-data copy from `com.taisun.electron` (f30acbb)
 
 ---

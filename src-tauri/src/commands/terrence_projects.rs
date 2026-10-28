@@ -103,7 +103,7 @@ fn init_project_db(conn: &Connection) -> Result<(), String> {
             ON terrence_projects(title COLLATE NOCASE);
         ",
     )
-    .map_err(|error| format!("Failed to initialize Terrence project schema: {error}"))
+    .map_err(|error| format!("Failed to initialize Amara project schema: {error}"))
 }
 
 fn clean_required(value: &str, label: &str, max_chars: usize) -> Result<String, String> {
@@ -208,7 +208,7 @@ fn selected_project_id(
         |row| row.get(0),
     )
     .optional()
-    .map_err(|error| format!("Failed to look up Terrence project: {error}"))
+    .map_err(|error| format!("Failed to look up Amara project: {error}"))
     .map(|id| id.unwrap_or_else(|| Uuid::new_v4().to_string()))
 }
 
@@ -268,9 +268,9 @@ fn upsert_project_in(
             completed_at,
         ],
     )
-    .map_err(|error| format!("Failed to persist Terrence project: {error}"))?;
+    .map_err(|error| format!("Failed to persist Amara project: {error}"))?;
     get_project_in(conn, &id)?
-        .ok_or_else(|| "Saved Terrence project could not be read.".to_string())
+        .ok_or_else(|| "Saved Amara project could not be read.".to_string())
 }
 
 fn get_project_in(conn: &Connection, id: &str) -> Result<Option<TerrenceProject>, String> {
@@ -282,7 +282,7 @@ fn get_project_in(conn: &Connection, id: &str) -> Result<Option<TerrenceProject>
         project_from_row,
     )
     .optional()
-    .map_err(|error| format!("Failed to read Terrence project: {error}"))
+    .map_err(|error| format!("Failed to read Amara project: {error}"))
 }
 
 fn hermes_project_inbox_dir() -> Option<PathBuf> {
@@ -349,12 +349,12 @@ pub(crate) fn list_priority_projects() -> Result<Vec<TerrenceProject>, String> {
                     dependencies, context_item_ids, provenance_source, created_at, updated_at, completed_at
              FROM terrence_projects WHERE status IN ('active', 'blocked', 'paused') ORDER BY updated_at DESC LIMIT ?1",
         )
-        .map_err(|error| format!("Failed to prepare Terrence project priorities: {error}"))?;
+        .map_err(|error| format!("Failed to prepare Amara project priorities: {error}"))?;
     let projects = statement
         .query_map(params![MAX_PROJECTS], project_from_row)
-        .map_err(|error| format!("Failed to read Terrence project priorities: {error}"))?
+        .map_err(|error| format!("Failed to read Amara project priorities: {error}"))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("Failed to collect Terrence project priorities: {error}"))?;
+        .map_err(|error| format!("Failed to collect Amara project priorities: {error}"))?;
     Ok(projects)
 }
 
@@ -434,12 +434,12 @@ pub fn list_terrence_projects(
     ));
     let mut statement = conn
         .prepare(&sql)
-        .map_err(|error| format!("Failed to prepare Terrence projects: {error}"))?;
+        .map_err(|error| format!("Failed to prepare Amara projects: {error}"))?;
     let projects = statement
         .query_map(rusqlite::params_from_iter(values), project_from_row)
-        .map_err(|error| format!("Failed to read Terrence projects: {error}"))?
+        .map_err(|error| format!("Failed to read Amara projects: {error}"))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("Failed to collect Terrence projects: {error}"))?;
+        .map_err(|error| format!("Failed to collect Amara projects: {error}"))?;
     Ok(projects)
 }
 

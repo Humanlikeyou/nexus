@@ -106,7 +106,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
       <div className="neuro" data-state="error">
         {header}
         <Card className="neuro__alert" data-tone="danger" role="alert" title="Muse status couldn't be read" headingLevel={2}>
-          <p className="neuro__callout">Nexus couldn't reach the Muse bridge. Try again in a moment.</p>
+          <p className="neuro__callout">Amara OS couldn't reach the Muse bridge. Try again in a moment.</p>
           {onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Try Again</Button>}
         </Card>
       </div>
@@ -137,7 +137,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
       )}
       {pendingSave && (
         <Card className="neuro__alert" data-tone="warning" role="status">
-          <p className="neuro__callout">Recording stopped at <span className="neuro__num">{elapsed}</span>. Saving is pending; keep Nexus open.</p>
+          <p className="neuro__callout">Recording stopped at <span className="neuro__num">{elapsed}</span>. Saving is pending; keep Amara OS open.</p>
         </Card>
       )}
 

@@ -6,7 +6,7 @@
  *  - Head: system prompt + first exchange (sets identity)
  *  - Tail: most recent messages (current context)
  *
- * Inspired by Hermes Agent's compressor, adapted for Terrance's
+ * Inspired by Hermes Agent's compressor, adapted for Amara's
  * OpenClaw gateway routing.
  *
  * Algorithm:
@@ -184,7 +184,7 @@ function pruneVerboseMiddle(messages: CompressibleMessage[]): CompressibleMessag
 
 async function summarizeMiddle(middle: CompressibleMessage[]): Promise<string | null> {
   const transcript = middle
-    .map((m) => `${m.role === "user" ? "User" : m.role === "system" ? "System" : "Terrance"}: ${m.text}`)
+    .map((m) => `${m.role === "user" ? "User" : m.role === "system" ? "System" : "Amara"}: ${m.text}`)
     .join("\n\n");
 
   const iterativeNote = _previousSummary

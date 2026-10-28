@@ -173,13 +173,13 @@ pub(crate) fn open_terrence_core_db() -> Result<Connection, String> {
     let path = db_path();
     let parent = path
         .parent()
-        .ok_or_else(|| "Terrence context database has no parent directory.".to_string())?;
+        .ok_or_else(|| "Amara context database has no parent directory.".to_string())?;
     fs::create_dir_all(parent)
-        .map_err(|error| format!("Failed to create Terrence context directory: {error}"))?;
+        .map_err(|error| format!("Failed to create Amara context directory: {error}"))?;
     let conn = Connection::open(path)
-        .map_err(|error| format!("Failed to open Terrence context database: {error}"))?;
+        .map_err(|error| format!("Failed to open Amara context database: {error}"))?;
     conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|error| format!("Failed to configure Terrence context database: {error}"))?;
+        .map_err(|error| format!("Failed to configure Amara context database: {error}"))?;
     init_db(&conn)?;
     Ok(conn)
 }
@@ -219,7 +219,7 @@ fn init_db(conn: &Connection) -> Result<(), String> {
         );
         ",
     )
-    .map_err(|error| format!("Failed to initialize Terrence context schema: {error}"))
+    .map_err(|error| format!("Failed to initialize Amara context schema: {error}"))
 }
 
 #[cfg(test)]
@@ -337,7 +337,7 @@ fn get_context_item_by_provenance_ref(
         item_from_row,
     )
     .optional()
-    .map_err(|error| format!("Failed to read Terrence context provenance: {error}"))
+    .map_err(|error| format!("Failed to read Amara context provenance: {error}"))
 }
 
 pub(crate) fn record_action_outcome_observation_in(
@@ -371,9 +371,9 @@ pub(crate) fn record_action_outcome_observation_in(
         .take(MAX_TITLE_CHARS)
         .collect::<String>();
     let default_detail = match outcome_status.as_str() {
-        "succeeded" => "Terrence recorded a verified completed action from the action ledger.",
-        "failed" => "Terrence recorded that the action did not complete.",
-        _ => "Terrence recorded that the action needs follow-up.",
+        "succeeded" => "Amara recorded a verified completed action from the action ledger.",
+        "failed" => "Amara recorded that the action did not complete.",
+        _ => "Amara recorded that the action needs follow-up.",
     };
     let detail = clean_optional(
         input.detail.or_else(|| Some(default_detail.to_string())),

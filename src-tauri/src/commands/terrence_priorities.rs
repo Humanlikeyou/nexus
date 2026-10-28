@@ -178,7 +178,7 @@ fn init_priority_db(conn: &Connection) -> Result<(), String> {
             ON terrence_decisions(status, updated_at DESC);
         ",
     )
-    .map_err(|error| format!("Failed to initialize Terrence priority schema: {error}"))
+    .map_err(|error| format!("Failed to initialize Amara priority schema: {error}"))
 }
 
 fn clean_required(value: &str, label: &str, max_chars: usize) -> Result<String, String> {
@@ -567,7 +567,7 @@ fn priority_input_fingerprint(
         "actions": actions,
         "projects": projects,
     }))
-    .map_err(|error| format!("Failed to prepare Terrence priority inputs: {error}"))?;
+    .map_err(|error| format!("Failed to prepare Amara priority inputs: {error}"))?;
     let mut hasher = Sha256::new();
     hasher.update(serialized);
     Ok(hex::encode(hasher.finalize()))
@@ -601,7 +601,7 @@ fn snapshot_by_fingerprint(
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()
-        .map_err(|error| format!("Failed to read Terrence priority snapshot: {error}"))?;
+        .map_err(|error| format!("Failed to read Amara priority snapshot: {error}"))?;
     let Some((id, generated_at)) = snapshot else {
         return Ok(None);
     };
@@ -611,12 +611,12 @@ fn snapshot_by_fingerprint(
                     reasons, context_item_ids, action_id
              FROM terrence_priority_items WHERE snapshot_id = ?1 ORDER BY rank ASC",
         )
-        .map_err(|error| format!("Failed to prepare Terrence priority items: {error}"))?;
+        .map_err(|error| format!("Failed to prepare Amara priority items: {error}"))?;
     let items = statement
         .query_map(params![id], priority_from_row)
-        .map_err(|error| format!("Failed to read Terrence priority items: {error}"))?
+        .map_err(|error| format!("Failed to read Amara priority items: {error}"))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("Failed to collect Terrence priority items: {error}"))?;
+        .map_err(|error| format!("Failed to collect Amara priority items: {error}"))?;
     Ok(Some(TerrencePrioritySnapshot {
         id,
         generated_at,
@@ -635,7 +635,7 @@ fn persist_snapshot(
         "INSERT INTO terrence_priority_snapshots (id, input_fingerprint, generated_at) VALUES (?1, ?2, ?3)",
         params![id, fingerprint, generated_at],
     )
-    .map_err(|error| format!("Failed to persist Terrence priority snapshot: {error}"))?;
+    .map_err(|error| format!("Failed to persist Amara priority snapshot: {error}"))?;
     for item in items {
         conn.execute(
             "INSERT INTO terrence_priority_items (
@@ -656,7 +656,7 @@ fn persist_snapshot(
                 item.action_id,
             ],
         )
-        .map_err(|error| format!("Failed to persist Terrence priority item: {error}"))?;
+        .map_err(|error| format!("Failed to persist Amara priority item: {error}"))?;
     }
     Ok(TerrencePrioritySnapshot {
         id,
@@ -721,12 +721,12 @@ pub(crate) fn runtime_decision_brief(max_chars: usize) -> Result<String, String>
              WHERE status IN ('open', 'decided', 'observing')
              ORDER BY updated_at DESC LIMIT 6",
         )
-        .map_err(|error| format!("Failed to prepare Terrence decision context: {error}"))?;
+        .map_err(|error| format!("Failed to prepare Amara decision context: {error}"))?;
     let decisions = statement
         .query_map([], decision_from_row)
-        .map_err(|error| format!("Failed to read Terrence decision context: {error}"))?
+        .map_err(|error| format!("Failed to read Amara decision context: {error}"))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("Failed to collect Terrence decision context: {error}"))?;
+        .map_err(|error| format!("Failed to collect Amara decision context: {error}"))?;
     if decisions.is_empty() {
         return Ok(String::new());
     }
@@ -789,7 +789,7 @@ fn get_decision(conn: &Connection, id: &str) -> Result<Option<TerrenceDecision>,
         decision_from_row,
     )
     .optional()
-    .map_err(|error| format!("Failed to read Terrence decision: {error}"))
+    .map_err(|error| format!("Failed to read Amara decision: {error}"))
 }
 
 fn clean_evidence(values: Option<Vec<DecisionEvidence>>) -> Result<Vec<DecisionEvidence>, String> {
@@ -908,9 +908,9 @@ fn create_terrence_decision_in(
             now,
         ],
     )
-    .map_err(|error| format!("Failed to record Terrence decision: {error}"))?;
+    .map_err(|error| format!("Failed to record Amara decision: {error}"))?;
     get_decision(conn, &id)?
-        .ok_or_else(|| "Recorded Terrence decision could not be read.".to_string())
+        .ok_or_else(|| "Recorded Amara decision could not be read.".to_string())
 }
 
 #[tauri::command]
@@ -931,12 +931,12 @@ pub fn list_terrence_decisions(limit: Option<u32>) -> Result<Vec<TerrenceDecisio
                     provenance_source, created_at, updated_at, decided_at, outcome_recorded_at
              FROM terrence_decisions ORDER BY updated_at DESC LIMIT ?1",
         )
-        .map_err(|error| format!("Failed to prepare Terrence decision list: {error}"))?;
+        .map_err(|error| format!("Failed to prepare Amara decision list: {error}"))?;
     let decisions = statement
         .query_map(params![limit.unwrap_or(20).min(100)], decision_from_row)
-        .map_err(|error| format!("Failed to read Terrence decisions: {error}"))?
+        .map_err(|error| format!("Failed to read Amara decisions: {error}"))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("Failed to collect Terrence decisions: {error}"))?;
+        .map_err(|error| format!("Failed to collect Amara decisions: {error}"))?;
     Ok(decisions)
 }
 
@@ -966,9 +966,9 @@ fn resolve_terrence_decision_in(
     }
     let now = Utc::now().to_rfc3339();
     let existing =
-        get_decision(conn, &id)?.ok_or_else(|| "Terrence decision was not found.".to_string())?;
+        get_decision(conn, &id)?.ok_or_else(|| "Amara decision was not found.".to_string())?;
     if matches!(existing.status.as_str(), "closed" | "cancelled") {
-        return Err("This Terrence decision is already closed.".to_string());
+        return Err("This Amara decision is already closed.".to_string());
     }
     conn.execute(
         "UPDATE terrence_decisions
@@ -981,9 +981,9 @@ fn resolve_terrence_decision_in(
          WHERE id = ?5",
         params![status, decision, outcome, now, id],
     )
-    .map_err(|error| format!("Failed to resolve Terrence decision: {error}"))?;
+    .map_err(|error| format!("Failed to resolve Amara decision: {error}"))?;
     get_decision(conn, &id)?
-        .ok_or_else(|| "Resolved Terrence decision could not be read.".to_string())
+        .ok_or_else(|| "Resolved Amara decision could not be read.".to_string())
 }
 
 #[tauri::command]
@@ -1162,11 +1162,11 @@ mod tests {
                         tradeoffs: Some("Lower setup, less automation".to_string()),
                     },
                     DecisionAlternative {
-                        label: "Use the Nexus review".to_string(),
+                        label: "Use the Amara OS review".to_string(),
                         tradeoffs: Some("More setup, preserves context".to_string()),
                     },
                 ]),
-                recommendation: "Use the Nexus review for a two-week trial.".to_string(),
+                recommendation: "Use the Amara OS review for a two-week trial.".to_string(),
                 uncertainty: Some("Consistency is still unproven.".to_string()),
                 conversation_id: Some("conversation-1".to_string()),
                 context_item_ids: Some(vec!["goal-1".to_string()]),
@@ -1180,7 +1180,7 @@ mod tests {
             ResolveTerrenceDecisionInput {
                 id: recorded.id,
                 status: "observing".to_string(),
-                decision: Some("Run the two-week Nexus review trial.".to_string()),
+                decision: Some("Run the two-week Amara OS review trial.".to_string()),
                 outcome: Some("First review was completed on time.".to_string()),
             },
         )
@@ -1189,7 +1189,7 @@ mod tests {
         assert_eq!(resolved.status, "observing");
         assert_eq!(
             resolved.decision.as_deref(),
-            Some("Run the two-week Nexus review trial.")
+            Some("Run the two-week Amara OS review trial.")
         );
         assert_eq!(
             resolved.outcome.as_deref(),

@@ -1,4 +1,4 @@
-//! Terrance Research Commands
+//! Amara Research Commands
 //!
 //! Provides web search and URL fetching capabilities for background research.
 //! Uses Brave Search API (or falls back to DuckDuckGo HTML scraping).
@@ -83,7 +83,7 @@ async fn duckduckgo_search(
     let resp = client
         .get("https://html.duckduckgo.com/html/")
         .query(&[("q", query)])
-        .header("User-Agent", "Mozilla/5.0 (Nexus/Terrance Research Agent)")
+        .header("User-Agent", "Mozilla/5.0 (Amara OS Research Agent)")
         .send()
         .await
         .map_err(|e| format!("DuckDuckGo error: {}", e))?;
@@ -179,7 +179,7 @@ pub async fn fetch_url(url: String, max_chars: Option<usize>) -> Result<String, 
         let client = builder.build().map_err(|e| e.to_string())?;
         let resp = client
             .get(current.clone())
-            .header("User-Agent", "Mozilla/5.0 (Nexus/Terrance Research Agent)")
+            .header("User-Agent", "Mozilla/5.0 (Amara OS Research Agent)")
             .send()
             .await
             .map_err(|e| format!("Fetch error: {}", e))?;

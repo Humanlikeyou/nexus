@@ -4,16 +4,16 @@
 
 ## Context
 
-Stage 4 (Activation) for the Nexus/Terrance project was just implemented and committed (`0db686f`). The production app was deployed to `/Applications/Electron.app` at the time (pre-rename; the app is now `Nexus`, `com.taisun.nexus`). Four features were added:
+Stage 4 (Activation) for the Amara OS project was just implemented and committed (`0db686f`). The production app was deployed to `/Applications/Electron.app` at the time (pre-rename; the app is now `Nexus`, `com.taisun.nexus`). Four features were added:
 
 1. **Automatic Memory Capture** — TelegramChat.tsx has a 2-minute idle timer that auto-saves sessions with 4+ messages. Coordinates with the manual "Save to memory" button.
 2. **Scheduled Memory Consolidation** — `src/terrance/system/scheduler.ts` runs every 6 hours, consolidates last 24h session logs into a single Letta memory write via n8n ingress.
-3. **Autonomous Reasoning Loops** — Every 12 hours, Terrance reviews goals vs recent sessions, generates a reflection stored to session logs + Letta.
+3. **Autonomous Reasoning Loops** — Every 12 hours, Amara reviews goals vs recent sessions, generates a reflection stored to session logs + Letta.
 4. **Gateway Authentication** — n8n ingress workflow validates `X-Nexus-Secret` header against `NEXUS_SECRET` env var. Open mode when unconfigured.
 
 ## Outstanding Issue
 
-After deploying Stage 4, the production app shows a crash on the Terrance page:
+After deploying Stage 4, the production app shows a crash on the Amara page:
 ```
 Something went wrong
 This page encountered an error. Your data is safe.
@@ -35,8 +35,8 @@ Key context for debugging:
 
 ## What to do next
 
-1. **Verify the crash is fixed** — Launch the app, confirm the Terrance page loads without errors
-2. **Test auto-save** — Send 4+ messages to Terrance, wait 2 minutes, check `memory/session_logs/` for a new JSON file
+1. **Verify the crash is fixed** — Launch the app, confirm the Amara page loads without errors
+2. **Test auto-save** — Send 4+ messages to Amara, wait 2 minutes, check `memory/session_logs/` for a new JSON file
 3. **Test gateway auth** — Set `NEXUS_SECRET` in `stack/.env`, restart n8n (`docker compose restart n8n`), set the same secret in Nexus Settings > Webhook Secret, verify requests work with header and fail without
 4. **Test consolidation** — Temporarily lower the interval in `scheduler.ts` (e.g., 30 seconds), verify Letta memory updated: `curl -s http://localhost:8283/v1/agents/agent-5efd68f1-6976-4af5-a677-b82f668d6843/memory`
 5. **Test reasoning** — Same approach, check session logs for `reasoning-*` entries

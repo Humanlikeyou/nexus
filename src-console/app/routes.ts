@@ -2,7 +2,7 @@ import type { ModuleId } from "../types";
 import { Activity, BriefcaseBusiness, Bluetooth, Bot, CircleDollarSign, HeartPulse, History, MessagesSquare, Radio, Route, Settings2, type LucideIcon } from "lucide-react";
 
 export const SYSTEM_GROUPS: Array<{ label: string; systems: Array<{ id: ModuleId; label: string; signal: string; icon: LucideIcon }> }> = [
-  { label: "Nexus", systems: [
+  { label: "Amara OS", systems: [
     { id: "terrance", label: "Home", signal: "AI", icon: Bot },
     { id: "chat", label: "Chat & Agents", signal: "CHAT", icon: MessagesSquare },
     { id: "neuro", label: "Neuro", signal: "EEG", icon: Radio },

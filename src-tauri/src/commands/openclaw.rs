@@ -818,7 +818,7 @@ pub fn read_daily_log(date: Option<String>) -> Result<String, String> {
 
     let content = read_capped(&path, MAX_READ_BYTES).unwrap_or_else(|_| {
         format!(
-            "# Daily Log — {}\n\nNo log entry found for this date. Logs are created automatically by Terrance during daily operations.\n\n## Notes\n- Start your day with intention\n- Review yesterday's accomplishments\n- Set today's priorities",
+            "# Daily Log — {}\n\nNo log entry found for this date. Logs are created automatically by Amara during daily operations.\n\n## Notes\n- Start your day with intention\n- Review yesterday's accomplishments\n- Set today's priorities",
             date_str
         )
     });

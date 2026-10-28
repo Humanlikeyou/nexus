@@ -4,7 +4,7 @@ import { goalToEvents } from "@/lib/events";
 import { loadContext, saveContext } from "@/terrance/system/continuity";
 import type { Goal } from "@/lib/types";
 
-/** Sync goal titles into TerranceContext so Terrance is goal-aware in every prompt */
+/** Sync goal titles into TerranceContext so Amara is goal-aware in every prompt */
 async function syncGoalsToTerrance(goals: Goal[]): Promise<void> {
   try {
     const ctx = await loadContext();

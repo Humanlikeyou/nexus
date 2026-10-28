@@ -113,7 +113,7 @@ impl NexusActionProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_action_proposals");
         fs::create_dir_all(&directory)
-            .map_err(|error| format!("Failed to prepare Nexus action proposal store: {error}"))?;
+            .map_err(|error| format!("Failed to prepare Amara OS action proposal store: {error}"))?;
         Ok(Self {
             path: directory.join(format!("{}.json", Uuid::new_v4())),
         })
@@ -124,16 +124,16 @@ impl NexusActionProposalFile {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => {
-                return Err(format!("Failed to read Nexus action proposal: {error}"));
+                return Err(format!("Failed to read Amara OS action proposal: {error}"));
             }
         };
         let _ = fs::remove_file(&self.path);
         if contents.chars().count() > MAX_NEXUS_ACTION_PROTOCOL_CHARS {
-            return Err("Nexus action proposal exceeded the allowed size.".to_string());
+            return Err("Amara OS action proposal exceeded the allowed size.".to_string());
         }
         serde_json::from_str(&contents)
             .map(Some)
-            .map_err(|_| "Nexus action proposal was invalid.".to_string())
+            .map_err(|_| "Amara OS action proposal was invalid.".to_string())
     }
 }
 
@@ -151,7 +151,7 @@ impl NexusDecisionProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_decision_proposals");
         fs::create_dir_all(&directory)
-            .map_err(|error| format!("Failed to prepare Nexus decision proposal store: {error}"))?;
+            .map_err(|error| format!("Failed to prepare Amara OS decision proposal store: {error}"))?;
         Ok(Self {
             path: directory.join(format!("{}.json", Uuid::new_v4())),
         })
@@ -162,16 +162,16 @@ impl NexusDecisionProposalFile {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => {
-                return Err(format!("Failed to read Nexus decision proposal: {error}"));
+                return Err(format!("Failed to read Amara OS decision proposal: {error}"));
             }
         };
         let _ = fs::remove_file(&self.path);
         if contents.chars().count() > MAX_NEXUS_ACTION_PROTOCOL_CHARS {
-            return Err("Nexus decision proposal exceeded the allowed size.".to_string());
+            return Err("Amara OS decision proposal exceeded the allowed size.".to_string());
         }
         serde_json::from_str(&contents)
             .map(Some)
-            .map_err(|_| "Nexus decision proposal was invalid.".to_string())
+            .map_err(|_| "Amara OS decision proposal was invalid.".to_string())
     }
 }
 
@@ -189,7 +189,7 @@ impl NexusDecisionResolutionProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_decision_resolutions");
         fs::create_dir_all(&directory).map_err(|error| {
-            format!("Failed to prepare Nexus decision resolution store: {error}")
+            format!("Failed to prepare Amara OS decision resolution store: {error}")
         })?;
         Ok(Self {
             path: directory.join(format!("{}.json", Uuid::new_v4())),
@@ -201,16 +201,16 @@ impl NexusDecisionResolutionProposalFile {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => {
-                return Err(format!("Failed to read Nexus decision resolution: {error}"));
+                return Err(format!("Failed to read Amara OS decision resolution: {error}"));
             }
         };
         let _ = fs::remove_file(&self.path);
         if contents.chars().count() > MAX_NEXUS_ACTION_PROTOCOL_CHARS {
-            return Err("Nexus decision resolution exceeded the allowed size.".to_string());
+            return Err("Amara OS decision resolution exceeded the allowed size.".to_string());
         }
         serde_json::from_str(&contents)
             .map(Some)
-            .map_err(|_| "Nexus decision resolution was invalid.".to_string())
+            .map_err(|_| "Amara OS decision resolution was invalid.".to_string())
     }
 }
 
@@ -228,7 +228,7 @@ impl NexusProjectProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_project_proposals");
         fs::create_dir_all(&directory)
-            .map_err(|error| format!("Failed to prepare Nexus project proposal store: {error}"))?;
+            .map_err(|error| format!("Failed to prepare Amara OS project proposal store: {error}"))?;
         Ok(Self {
             path: directory.join(format!("{}.json", Uuid::new_v4())),
         })
@@ -238,15 +238,15 @@ impl NexusProjectProposalFile {
         let contents = match fs::read_to_string(&self.path) {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("Failed to read Nexus project proposal: {error}")),
+            Err(error) => return Err(format!("Failed to read Amara OS project proposal: {error}")),
         };
         let _ = fs::remove_file(&self.path);
         if contents.chars().count() > MAX_NEXUS_ACTION_PROTOCOL_CHARS {
-            return Err("Nexus project proposal exceeded the allowed size.".to_string());
+            return Err("Amara OS project proposal exceeded the allowed size.".to_string());
         }
         serde_json::from_str(&contents)
             .map(Some)
-            .map_err(|_| "Nexus project proposal was invalid.".to_string())
+            .map_err(|_| "Amara OS project proposal was invalid.".to_string())
     }
 }
 
@@ -264,7 +264,7 @@ impl NexusContextProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_context_proposals");
         fs::create_dir_all(&directory)
-            .map_err(|error| format!("Failed to prepare Nexus context proposal store: {error}"))?;
+            .map_err(|error| format!("Failed to prepare Amara OS context proposal store: {error}"))?;
         Ok(Self {
             path: directory.join(format!("{}.json", Uuid::new_v4())),
         })
@@ -274,15 +274,15 @@ impl NexusContextProposalFile {
         let contents = match fs::read_to_string(&self.path) {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("Failed to read Nexus context proposal: {error}")),
+            Err(error) => return Err(format!("Failed to read Amara OS context proposal: {error}")),
         };
         let _ = fs::remove_file(&self.path);
         if contents.chars().count() > MAX_NEXUS_CONTEXT_PROTOCOL_CHARS {
-            return Err("Nexus context proposal exceeded the allowed size.".to_string());
+            return Err("Amara OS context proposal exceeded the allowed size.".to_string());
         }
         serde_json::from_str(&contents)
             .map(Some)
-            .map_err(|_| "Nexus context proposal was invalid.".to_string())
+            .map_err(|_| "Amara OS context proposal was invalid.".to_string())
     }
 }
 
@@ -309,7 +309,7 @@ fn hermes_python_path(home: &Path) -> Result<PathBuf, String> {
         Ok(path)
     } else {
         Err(
-            "Hermes Python runtime was not found. Re-run Hermes setup before using Nexus chat."
+            "Hermes Python runtime was not found. Re-run Hermes setup before using Amara OS chat."
                 .to_string(),
         )
     }
@@ -541,13 +541,13 @@ fn extract_nexus_action_proposal(output: &str) -> (String, Option<NexusActionPro
 }
 
 fn nexus_runtime_system_instruction() -> &'static str {
-    r#"You are Amara, Taisun's calm, perceptive operating partner inside Nexus. Taisun is the center: support his focus, health, relationships, craft, leadership, money, and projects without making any one business the default. Be direct, natural, warm, and brief unless depth is useful. Notice pressure, drift, avoidance, fatigue, confidence, and momentum without diagnosing or acting as a clinician. Help turn intentions into a clear next move.
+    r#"You are Amara, Taisun's calm, perceptive operating partner inside Amara OS. Taisun is the center: support his focus, health, relationships, craft, leadership, money, and projects without making any one business the default. Be direct, natural, warm, and brief unless depth is useful. Notice pressure, drift, avoidance, fatigue, confidence, and momentum without diagnosing or acting as a clinician. Help turn intentions into a clear next move.
 
 Nexus policy: you cannot directly change the Mac from this conversation. nexus_observe is read-only. When the user explicitly requests a supported local change and all values are known, call nexus_request_action once to prepare it for approval. It does not execute anything. Never claim an app, browser, file, volume, message, or other external state changed until Nexus reports a verified outcome. Do not give terminal commands or a manual workaround for an available Nexus action. Ask a concise question when required values are missing.
 
 For a substantive choice with viable alternatives, give a recommendation and call nexus_record_decision once. Use nexus_update_decision only when the user reports a choice or outcome for the supplied decision ID. For a meaningful personal, work, health, or creative project change, call nexus_upsert_project once using known facts only. For a durable user-stated goal, preference, commitment, observation, or identity fact, call the relevant nexus context tool once; do not store guesses, diagnoses, or casual chat.
 
-Supported prepared actions: open an http(s) URL; open an application; reveal an inspected absolute path; set, adjust, or mute volume; organize an inspected Desktop, Documents, or Downloads root; or a bounded macOS workflow using the documented action schema. Use nexus_observe before directory organization or a workflow that needs filesystem details. Prepare at most one action after required observation. The user must approve it in Nexus before it runs."#
+Supported prepared actions: open an http(s) URL; open an application; reveal an inspected absolute path; set, adjust, or mute volume; organize an inspected Desktop, Documents, or Downloads root; or a bounded macOS workflow using the documented action schema. Use nexus_observe before directory organization or a workflow that needs filesystem details. Prepare at most one action after required observation. The user must approve it in Amara OS before it runs."#
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -728,7 +728,7 @@ fn append_runtime_notice(message: String, notice: String) -> String {
 }
 
 fn prepared_action_message(title: &str) -> String {
-    format!("I prepared {title} for your approval in Nexus. It will not run unless you approve it.")
+    format!("I prepared {title} for your approval in Amara OS. It will not run unless you approve it.")
 }
 
 fn user_facing_runtime_error(error: &str, fallback: &str) -> String {
@@ -1240,7 +1240,7 @@ mod tests {
     fn prepared_action_message_does_not_claim_execution() {
         assert_eq!(
             prepared_action_message("Open https://example.com"),
-            "I prepared Open https://example.com for your approval in Nexus. It will not run unless you approve it."
+            "I prepared Open https://example.com for your approval in Amara OS. It will not run unless you approve it."
         );
     }
 

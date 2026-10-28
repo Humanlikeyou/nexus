@@ -1,5 +1,5 @@
 /**
- * Terrance Self-Diagnosis + Auto-Healing
+ * Amara Self-Diagnosis + Auto-Healing
  *
  * Checks health of:
  *  - OpenClaw gateway (port 18789)

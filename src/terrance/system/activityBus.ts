@@ -1,7 +1,7 @@
 /**
  * Activity Bus + Task Registry
  *
- * Central event system for tracking all Terrance background operations.
+ * Central event system for tracking all Amara background operations.
  * Uses Tauri's event system to bridge backend activity to the frontend UI.
  *
  * Usage:

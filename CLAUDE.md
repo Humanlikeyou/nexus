@@ -1,6 +1,6 @@
 # Nexus — Project Brief for Claude Coders
 
-> **Central Goal**: Nexus is a local, private command center — a Tauri 2 desktop app combining Terrence (AI agent runtime + OpenClaw gateway), neuro sessions (Muse EEG), health signals (read-only from NOOP), business/ARM data, and goals, with n8n automation behind it.
+> **Central Goal**: Nexus is a local, private command center — a Tauri 2 desktop app combining Amara (AI agent runtime + OpenClaw gateway), neuro sessions (Muse EEG), health signals (read-only from NOOP), business/ARM data, and goals, with n8n automation behind it.
 
 > **Rename: done** (80276f9, f30acbb). `electron` → **Nexus**: npm package `nexus`, Cargo package `nexus`, Rust lib `nexus_lib` (`main.rs` calls `nexus_lib::run()`), `productName` `Nexus`, identifier `com.taisun.nexus`, favicon `public/nexus.svg`. Backups are `nexus-backup-*.tar.gz` (staging `nexus-pack-*`, config dir `nexus-config`); older `electron-pack`/`electron-config` backups still unpack. App data moves from `com.taisun.electron` to `com.taisun.nexus` via a one-time, non-destructive copy on first launch (`src-tauri/src/app_paths.rs`).
 
@@ -10,7 +10,7 @@
 
 ```
 nexus/
-├── index.html                  # Loads /src-console/main.tsx (title "Terrence Nexus")
+├── index.html                  # Loads /src-console/main.tsx (title "Amara Nexus")
 ├── src-console/                # LIVE UI (React 19 + TS, plain CSS, lucide-react icons)
 │   ├── App.tsx                 # Shell + navigation: Overview, Live, Sessions, Health, Trajectory,
 │   │                           #   Business, Revenue, Devices, Activity, Settings
@@ -85,7 +85,7 @@ npm run outbox-status
 | OpenClaw AI gateway | `127.0.0.1:18789` | LaunchAgent `ai.openclaw.gateway`, module at `/opt/homebrew/lib/node_modules/openclaw/openclaw.mjs` |
 | n8n automation | Docker: `stack-n8n-1` | Backed by `stack-postgres-1`, db `n8n_db`, user `terrance` |
 | Postgres | Docker: `stack-postgres-1` | `psql -U terrance -d n8n_db` |
-| Terrance integrations | `stack/integrations/` (in this repo) | n8n workflow JSON files in `stack/integrations/n8n/` |
+| Amara integrations | `stack/integrations/` (in this repo) | n8n workflow JSON files in `stack/integrations/n8n/` |
 
 ### OpenClaw Health Check Logic (Rust)
 `src-tauri/src/commands/openclaw.rs` — `check_memory_search()`:
@@ -108,7 +108,7 @@ This was needed because `openclaw memory status --deep` downloads the model but 
 - **Status**: Active in n8n
 
 ### terrance_ingress_workflow.json
-- General Terrance AI agent ingress workflow
+- General Amara AI agent ingress workflow
 
 ---
 
@@ -128,7 +128,7 @@ The live design system is `src-console/styles.css` + `src-console/design/`. The 
 - [x] Fixed `check_memory_search()` to probe `~/.node-llama-cpp/models/*.gguf` (config key absent bug)
 - [x] Built `OpenClawStatusCard.tsx` — real-time health display with restart/kill controls
 - [x] Built `openclawHealth.ts` — `pushHealthToN8n()` sends health payload to n8n webhook
-- [x] Wired `OpenClawStatusCard` into Terrance page in App.tsx (2-col grid with GatewayStatus)
+- [x] Wired `OpenClawStatusCard` into Amara page in App.tsx (2-col grid with GatewayStatus)
 - [x] Fixed duplicate import bug in App.tsx (TS2300 → 0 errors)
 
 ### n8n Health Monitor Workflow
@@ -162,7 +162,7 @@ The live design system is `src-console/styles.css` + `src-console/design/`. The 
 - [x] `src/components/settings/SettingsPage.tsx` — Compute Mode section: mode selector, model inputs, API key, budget caps, cost toggle, usage summary
 - [x] `src/components/terrance/TelegramChat.tsx` — Wired to `chatWithRouter`; shows provider badge + cost estimate per message
 
-### Terrance Continuity Architecture (Session Feb 2026)
+### Amara Continuity Architecture (Session Feb 2026)
 - [x] `config/terrance.identity.md` — Canonical identity: operating principles, communication style, decision priorities, tone constraints, mission alignment. Prepended to ALL model calls regardless of provider.
 - [x] `src/terrance/system/continuity.ts` — `buildSystemPrompt()` (identity + context primer), `summarizeAndStoreSession()` (post-session memory), `loadContext()` / `saveContext()`, `INFERENCE_PARAMS` (shared temperature/top_p/repeat_penalty)
 - [x] `src-tauri/src/commands/continuity.rs` — `read_identity_file`, `load_terrance_context`, `save_terrance_context`, `store_session_log`, `list_session_logs`
@@ -174,7 +174,7 @@ The live design system is `src-console/styles.css` + `src-console/design/`. The 
 - Identity file is always prepended regardless of mode (local/hybrid/api)
 - Context (goals + last summary) loaded from external storage before every session
 - Session summaries stored to `memory/session_logs/` after each conversation
-- Fallback identity inline if file read fails — Terrance never loses its identity
+- Fallback identity inline if file read fails — Amara never loses its identity
 - Routing never alters the identity prompt — only the compute engine changes
 
 #### LLM Router Test Checklist
@@ -204,7 +204,7 @@ The live design system is `src-console/styles.css` + `src-console/design/`. The 
 - [x] **Shell.tsx** — Removed vignette overlay div, reduced padding (p-6→px-4 py-3)
 - [x] **Header.tsx** — Removed glass-subtle, smaller typography (text-xs), mono uppercase tracked headings, tighter layout
 - [x] **Sidebar.tsx** — Removed glass class, dark bg (#0A0E13), narrower (56px collapsed/200px expanded), mono uppercase labels, reduced border-radius
-- [x] **Terrance page** — Full redesign: SYSTEM CORE dominant full-width panel at top, 3-col secondary modules (Token/Gateway/Skills), 2-col tertiary (OpenClaw/Schedule), full-width chat. All components use `.panel`/`.heading-section`/`.metric-value`/`.metric-label`
+- [x] **Amara page** — Full redesign: SYSTEM CORE dominant full-width panel at top, 3-col secondary modules (Token/Gateway/Skills), 2-col tertiary (OpenClaw/Schedule), full-width chat. All components use `.panel`/`.heading-section`/`.metric-value`/`.metric-label`
 - [x] **Business page** — TaskBoard, ContentPipeline, RevenueCard: glass→panel, reduced padding, mono fonts, tighter spacing
 - [x] **Assistant page** — CalendarView/EmailSummary use `.subsystem-inactive` (dimmed, dashed border), DailyLog uses `.terminal-readout`
 - [x] **Fitness page** — RecoveryScore/SleepChart/StrainChart/HrvTrend: glass→panel, thinner gauge arcs via CHART_THEME
@@ -219,7 +219,7 @@ The live design system is `src-console/styles.css` + `src-console/design/`. The 
 ### Contrast Calibration Pass (Session Mar 2026)
 - [x] **globals.css** — Lifted all CSS custom properties: card #0F1318→#131921, foreground #C8CCD4→#E0E3E9, muted-foreground #5C6370→#737D8C, accent #3D8B6E→#4A9E7E (+15% saturation), border #1E2530→#263040 (higher opacity), panel-primary glow strengthened, heading color #5C6370→#8B95A3, metric-value #F0F2F5 (brightest tier), metric-label #454D58→#6B7585, all semantic colors lifted ~15%
 - [x] **chart-theme.ts** — Axis labels rgba(92,99,112)→rgba(139,149,163), splitLine rgba(30,37,48)→rgba(38,48,64), tooltip text lifted to match new foreground, chart colors aligned to new accent (#4A9E7E, #A3923D, #4A80A3)
-- [x] **Terrance page** — All 6 components manually calibrated: StatusCard (model text /90→100%, heartbeat /70→/85), TokenUsage (chart bar colors updated to new accent), SkillsList (skill names /70→/85, badges /70→100%), GatewayStatus (metric values /50→/75, destructive /60→/80), CronSchedule (job names /70→/85, borders /20→/35), TelegramChat (comprehensive overhaul: timestamps /20→/40, meta /15→/35, bot icons /60→/80, message borders /10→/18, input bg #080B0F→#0C1018, placeholder /20→/35, send button /70→/85, typing dots /30→/45)
+- [x] **Amara page** — All 6 components manually calibrated: StatusCard (model text /90→100%, heartbeat /70→/85), TokenUsage (chart bar colors updated to new accent), SkillsList (skill names /70→/85, badges /70→100%), GatewayStatus (metric values /50→/75, destructive /60→/80), CronSchedule (job names /70→/85, borders /20→/35), TelegramChat (comprehensive overhaul: timestamps /20→/40, meta /15→/35, bot icons /60→/80, message borders /10→/18, input bg #080B0F→#0C1018, placeholder /20→/35, send button /70→/85, typing dots /30→/45)
 - [x] **Header.tsx** — Page title /80→/90, description /50→/65, buttons /50→/65, hover states /70→/80, header border /40→/55
 - [x] **Sidebar.tsx** — Sidebar bg #0A0E13→#0C1018, borders /20→/35 and /40→/55, title /70→/85, subtitle /40→/55, version /25→/40, BLE dots /20→/35, tooltip arrow fill #121820→#172030
 - [x] **System-wide bulk uplift** — All remaining components (~50 files): text-muted-foreground (/15→/30, /20→/35, /25→/45, /30→/50, /40→/60), text-foreground (/50→/70, /60→/80, /70→/85), border-border (/10→/18, /12→/20, /15→/25, /20→/35, /30→/45), semantic colors (text-accent/destructive/success/warning /50→/70 and /60→/80), semantic bg (/8→/12, /10→/15), semantic borders (accent/warning/destructive /15→/25, success /20→/30)

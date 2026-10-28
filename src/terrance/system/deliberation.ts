@@ -44,7 +44,7 @@ const BEAR_PROMPT =
   `not blindly pessimistic. Keep your analysis to 5-8 bullet points.`;
 
 const SYNTHESIS_PROMPT =
-  `You are Terrance, synthesizing two opposing analyses into a balanced assessment. ` +
+  `You are Amara, synthesizing two opposing analyses into a balanced assessment. ` +
   `You have a bull case (optimistic) and a bear case (skeptical). ` +
   `Weigh both perspectives and produce:\n` +
   `1. **Verdict**: The most likely outcome given both views\n` +

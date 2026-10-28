@@ -18,7 +18,7 @@ fn crew_token() -> Result<String, String> {
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
-        .ok_or_else(|| "CREW_SERVICE_TOKEN is not set for the Nexus app".to_string())
+        .ok_or_else(|| "CREW_SERVICE_TOKEN is not set for the Amara OS app".to_string())
 }
 
 #[derive(Debug, Deserialize)]

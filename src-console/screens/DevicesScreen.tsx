@@ -6,7 +6,7 @@ import { BrainCircuit, Bluetooth, HeartPulse, RefreshCw, Unplug } from "lucide-r
 export function DevicesField({ data, devices, operation, error, onScan, onConnect, onDisconnect }: Omit<MuseScreenProps, "sessionStartedAt" | "sessionEndedAt" | "onStart" | "onStop">) {
   const noopReady = data.noop.status === "ready" || data.noop.status === "waiting_for_nightly_data" || data.noop.status === "stale";
   return <div className="system-field devices-field">
-    <PageHeading eyebrow="Connections" title="Devices" description="Manage the sensors Nexus reads from and understand their current state." actions={<ActionButton icon={RefreshCw} onClick={onScan} disabled={operation !== null}>{operation === "scanning" ? "Searching..." : "Scan for Muse"}</ActionButton>} />
+    <PageHeading eyebrow="Connections" title="Devices" description="Manage the sensors Amara OS reads from and understand their current state." actions={<ActionButton icon={RefreshCw} onClick={onScan} disabled={operation !== null}>{operation === "scanning" ? "Searching..." : "Scan for Muse"}</ActionButton>} />
     {error && <div className="inline-alert inline-alert--danger" role="alert">{error}</div>}
     <section className="integration-list">
       <article className="integration-row">
@@ -17,7 +17,7 @@ export function DevicesField({ data, devices, operation, error, onScan, onConnec
       </article>
       <article className="integration-row">
         <div className="integration-icon"><HeartPulse size={22} /></div>
-        <div className="integration-main"><div><span>WHOOP via NOOP</span><h2>{data.noop.deviceId || "WHOOP"}</h2></div><p>{noopReady ? "Nexus is reading your local NOOP health record. Pairing remains managed by NOOP." : data.noop.message || "No current NOOP record is available."}</p><div className="integration-capabilities">Recovery · HRV · Sleep · Strain · Battery</div></div>
+        <div className="integration-main"><div><span>WHOOP via NOOP</span><h2>{data.noop.deviceId || "WHOOP"}</h2></div><p>{noopReady ? "Amara OS is reading your local NOOP health record. Pairing remains managed by NOOP." : data.noop.message || "No current NOOP record is available."}</p><div className="integration-capabilities">Recovery · HRV · Sleep · Strain · Battery</div></div>
         <div className="integration-state"><StatusIndicator tone={data.noop.status === "ready" ? "success" : data.noop.status === "stale" || data.noop.status === "waiting_for_nightly_data" ? "warning" : "neutral"}>{data.noop.status === "ready" ? "Current" : data.noop.status === "waiting_for_nightly_data" ? "Syncing" : data.noop.status === "stale" ? "Data stale" : "Unavailable"}</StatusIndicator><span>{data.noop.generatedAt ? `Updated ${date(data.noop.generatedAt)}` : "No local update"}</span></div>
         <div className="integration-actions"><span className="battery-readout">{data.noop.battery ? `${number(data.noop.battery.percentage)}% battery` : "Battery unavailable"}</span></div>
       </article>

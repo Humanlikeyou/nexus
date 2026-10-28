@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { interactWithTerrence, listTerrenceInteractions } from "../bridge";
 import { type ConversationMessage, CONVERSATION_KEY, HERMES_SESSION_KEY, HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE, createConversationId, messagesFromInteractions } from "./conversation";
 
-/** Terrance chat state: conversation id, Hermes session, transcript, send / new conversation. */
+/** Amara chat state: conversation id, Hermes session, transcript, send / new conversation. */
 export function useConversation(refresh: () => Promise<void>) {
   const [conversationId, setConversationId] = useState(() => {
     const existing = window.localStorage.getItem(CONVERSATION_KEY);

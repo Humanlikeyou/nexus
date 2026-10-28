@@ -51,7 +51,7 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     if config_src.exists() {
         let dest = staging.join("nexus-config");
         copy_dir_recursive(&config_src, &dest, Some(MAX_PACK_FILE_BYTES), &mut skipped)?;
-        includes.push("Nexus settings & config".to_string());
+        includes.push("Amara OS settings & config".to_string());
     }
 
     // 2. Copy OpenClaw data
@@ -113,7 +113,7 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
         "hostname": hostname::get().map(|h| h.to_string_lossy().to_string()).unwrap_or_default(),
         "includes": &includes,
         "skipped": &skipped,
-        "restore_instructions": "To restore: Open Nexus on the new machine, go to Settings, click 'Unpack', and select this file."
+        "restore_instructions": "To restore: Open Amara OS on the new machine, go to Settings, click 'Unpack', and select this file."
     });
     let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
     fs::write(staging.join("manifest.json"), &manifest_json)
@@ -235,7 +235,7 @@ pub async fn unpack_backup(
         &[RESTORE_LOCK_KEY.to_string()],
         super::approval_gate::approval_text(
             &restore_operation(&archive_name, &plan, &replaced, &roots, &stamp),
-            "Only files Nexus backups contain are restored; everything else in the archive is skipped. Replaced files are copied to the backup folder first.",
+            "Only files Amara OS backups contain are restored; everything else in the archive is skipped. Replaced files are copied to the backup folder first.",
         )?,
     )
     .await?;
@@ -247,7 +247,7 @@ pub async fn unpack_backup(
     }
     // What gets replaced must still be what the dialog showed.
     if replaced_files(&plan, &roots) != replaced {
-        return Err("changed: files in ~/.openclaw or the Nexus data folder changed while the dialog was open; nothing was restored".to_string());
+        return Err("changed: files in ~/.openclaw or the Amara OS data folder changed while the dialog was open; nothing was restored".to_string());
     }
 
     let mut restored = apply_restore(&plan, &roots, &stamp)?;
@@ -386,7 +386,7 @@ fn plan_restore(pack_root: &Path) -> Result<RestorePlan, String> {
                     }
                     _ => plan
                         .skipped
-                        .push(format!("{} (not part of a Nexus backup)", rel.join("/"))),
+                        .push(format!("{} (not part of a Amara OS backup)", rel.join("/"))),
                 }
             } else {
                 plan.skipped
@@ -533,7 +533,7 @@ fn apply_restore(
         out.push(format!("OpenClaw: {n} files restored"));
     }
     if let Some(n) = counts.get(&RestoreRoot::Data) {
-        out.push(format!("Nexus data: {n} files restored"));
+        out.push(format!("Amara OS data: {n} files restored"));
     }
     if backed_up > 0 {
         out.push(format!(

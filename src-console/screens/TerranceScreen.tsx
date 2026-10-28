@@ -207,7 +207,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
 
       <Card title="Agents" accessory={<OpenLink to="chat" label="Open Chat & Agents" onNavigate={onNavigate} />}>
         {down("get_terrence_runtime_health")
-          ? <Unavailable label="Terrence runtime" onRetry={onRetry} />
+          ? <Unavailable label="Amara runtime" onRetry={onRetry} />
           : (
             <InsetGroup>
               <ListRow icon={Bot} title="Hermes" subtitle={[hermes.model, hermes.provider].filter(Boolean).join(" · ") || DASH}

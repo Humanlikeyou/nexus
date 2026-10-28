@@ -15,7 +15,7 @@ function snap(extra: Partial<SystemSnapshot> = {}): SystemSnapshot {
 const full = snap({
   hermes: { ...INITIAL_SNAPSHOT.hermes, status: "online", model: "qwen3", provider: "ollama", gatewayRunning: true, telegramStatus: "connected" },
   noop: { ...INITIAL_SNAPSHOT.noop, status: "ready", today: { day: "2026-10-28", source: "noop", totalSleepMin: 452, efficiency: 0.9, deepMin: 90, remMin: 100, lightMin: 230, restingHr: 52, avgHrv: 64, recovery: 74, strain: 9, spo2Pct: null, skinTempDevC: null, respRateBpm: null }, insights: [{ metric: "hrv", fact: "HRV is up 8%", context: "Above your 14-day mean." }] },
-  prioritySnapshot: { ...INITIAL_SNAPSHOT.prioritySnapshot, items: [{ rank: 1, sourceKind: "project", sourceId: "p1", title: "Ship Nexus v2", sourceStatus: "active" } as SystemSnapshot["prioritySnapshot"]["items"][number]] },
+  prioritySnapshot: { ...INITIAL_SNAPSHOT.prioritySnapshot, items: [{ rank: 1, sourceKind: "project", sourceId: "p1", title: "Ship Amara OS v2", sourceStatus: "active" } as SystemSnapshot["prioritySnapshot"]["items"][number]] },
   sessions: [{ id: "s1", device_type: "muse", start: "2026-10-27T21:00:00+09:00", end: "2026-10-27T21:20:00+09:00", duration_secs: 1200, data_points: 10, summary: {} }],
 });
 
@@ -54,7 +54,7 @@ describe("Home (TerranceField)", () => {
     const agents = screen.getByRole("region", { name: "Agents" });
     expect(within(agents).getByText("qwen3 · ollama")).toBeInTheDocument();
     expect(within(agents).getByText("Not connected")).toBeInTheDocument();
-    expect(screen.getByText("Ship Nexus v2")).toBeInTheDocument();
+    expect(screen.getByText("Ship Amara OS v2")).toBeInTheDocument();
     const neuro = screen.getByRole("region", { name: "Neuro" });
     expect(neuro).toHaveTextContent("Last session20min");
     // A session saved before calm_pct existed: Calm shows "—" + BETA (Decision 5).
@@ -86,10 +86,10 @@ describe("Home (TerranceField)", () => {
 
   it("error: per-card unavailable with Retry and a header count", () => {
     const onRetry = vi.fn();
-    render(<TerranceField onRetry={onRetry} now={NOW} scheduler={running} data={snap({ unavailableSources: [{ command: "get_noop_health_snapshot", label: "NOOP health" }, { command: "get_terrence_runtime_health", label: "Terrence runtime" }] })} />);
-    expect(screen.getByText("2 sources unavailable")).toHaveAttribute("title", "NOOP health, Terrence runtime");
+    render(<TerranceField onRetry={onRetry} now={NOW} scheduler={running} data={snap({ unavailableSources: [{ command: "get_noop_health_snapshot", label: "NOOP health" }, { command: "get_terrence_runtime_health", label: "Amara runtime" }] })} />);
+    expect(screen.getByText("2 sources unavailable")).toHaveAttribute("title", "NOOP health, Amara runtime");
     expect(screen.getAllByText("NOOP health unavailable")).toHaveLength(2);
-    expect(screen.getByText("Terrence runtime unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Amara runtime unavailable")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "Retry" })[0]);
     expect(onRetry).toHaveBeenCalledOnce();
   });

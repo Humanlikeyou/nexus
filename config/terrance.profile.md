@@ -1,6 +1,6 @@
 # Taisun V. Smith — Operational Profile
 
-> Loaded by Terrance as supplementary context. This is who I serve.
+> Loaded by Amara as supplementary context. This is who I serve.
 > Updated from onboarding profile + psychological audit (Feb 2026).
 
 ---

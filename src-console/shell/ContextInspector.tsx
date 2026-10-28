@@ -110,18 +110,18 @@ export function ContextInspector({ visible, onClose, onChanged }: { visible: boo
   };
 
   return <div className="context-inspector-backdrop">
-    <section className="context-inspector" role="dialog" aria-modal="true" aria-label="Terrence context">
-      <header><div><span className="system-kicker">Terrence context</span><h2>What Terrence knows</h2></div><button type="button" onClick={onClose} title="Close context"><X size={18} /></button></header>
+    <section className="context-inspector" role="dialog" aria-modal="true" aria-label="Amara context">
+      <header><div><span className="system-kicker">Amara context</span><h2>What Amara knows</h2></div><button type="button" onClick={onClose} title="Close context"><X size={18} /></button></header>
       <div className={`context-inspector-body${editing ? " is-editing" : ""}`}>
         <div className="context-item-list" aria-live="polite">
-          <div className="context-scope-tabs" role="tablist" aria-label="Terrence context view"><button type="button" role="tab" aria-selected={scope === "current"} className={scope === "current" ? "is-selected" : ""} onClick={() => selectScope("current")}>Current</button><button type="button" role="tab" aria-selected={scope === "history"} className={scope === "history" ? "is-selected" : ""} onClick={() => selectScope("history")}>History</button></div>
+          <div className="context-scope-tabs" role="tablist" aria-label="Amara context view"><button type="button" role="tab" aria-selected={scope === "current"} className={scope === "current" ? "is-selected" : ""} onClick={() => selectScope("current")}>Current</button><button type="button" role="tab" aria-selected={scope === "history"} className={scope === "history" ? "is-selected" : ""} onClick={() => selectScope("history")}>History</button></div>
           {loading && <p className="context-empty">Loading context.</p>}
           {!loading && !error && items.length === 0 && <p className="context-empty">No {scope === "current" ? "current" : "historical"} context is recorded.</p>}
           {items.map((item) => <article key={item.id} className={editing?.item.id === item.id ? "is-editing" : ""}>
             <div className="context-item-heading"><strong>{item.title}</strong><span>{item.kind}</span></div>
             {item.content && <p>{item.content}</p>}
             <footer><span>{item.status} · {Math.round(item.confidence * 100)}% confidence</span><span>{item.provenanceSource}</span><time>{date(item.updatedAt)}</time></footer>
-            {scope === "current" && <><div className="context-item-actions"><button type="button" onClick={() => startCorrection(item)} disabled={saving} title={`Correct ${item.title}`}><Pencil size={14} /></button><button type="button" onClick={() => setPendingDeletion(item.id)} disabled={saving} title={`Hide ${item.title}`}><Trash2 size={14} /></button></div>{pendingDeletion === item.id && <div className="context-delete-confirm"><span>Hide this from Terrence?</span><button type="button" onClick={() => void hideItem(item)} disabled={saving}>Hide</button><button type="button" onClick={() => setPendingDeletion(null)} disabled={saving} title="Cancel"><X size={14} /></button></div>}</>}
+            {scope === "current" && <><div className="context-item-actions"><button type="button" onClick={() => startCorrection(item)} disabled={saving} title={`Correct ${item.title}`}><Pencil size={14} /></button><button type="button" onClick={() => setPendingDeletion(item.id)} disabled={saving} title={`Hide ${item.title}`}><Trash2 size={14} /></button></div>{pendingDeletion === item.id && <div className="context-delete-confirm"><span>Hide this from Amara?</span><button type="button" onClick={() => void hideItem(item)} disabled={saving}>Hide</button><button type="button" onClick={() => setPendingDeletion(null)} disabled={saving} title="Cancel"><X size={14} /></button></div>}</>}
           </article>)}
           {error && <p className="context-inspector-error">{error}</p>}
         </div>

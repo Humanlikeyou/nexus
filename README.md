@@ -1,7 +1,7 @@
 # Nexus
 
 Local, private command center — Tauri 2 + React 19 (`src-console/`) + Rust (`src-tauri/`).
-Covers Terrence (AI runtime + OpenClaw), Muse EEG sessions, health signals read from NOOP, business/ARM and goals.
+Covers Amara (AI runtime + OpenClaw), Muse EEG sessions, health signals read from NOOP, business/ARM and goals.
 
 > Formerly named `electron`; the rename to **Nexus** (`com.taisun.nexus`, Rust lib `nexus_lib`) is complete. Existing app data in `com.taisun.electron` is copied over once on first launch, and old `electron-*` backups still restore.
 
@@ -19,9 +19,9 @@ cargo test --manifest-path src-tauri/Cargo.toml
 - [BUILD.md](BUILD.md) — prerequisites, build, troubleshooting
 - [CLAUDE.md](CLAUDE.md) — architecture and conventions
 - [STAGES.md](STAGES.md) — roadmap
-- `docs/` — product verification and Terrence architecture audit
+- `docs/` — product verification and Amara architecture audit
 - `stack/` — Docker stack (n8n, Postgres, Letta, Weaviate)
 
 ## Layout
 
-`src-console/` live UI · `src/` legacy helpers · `src-tauri/` Rust backend · `config/` Terrence identity & skills · `scripts/` dev helpers · `stack/` services
+`src-console/` live UI · `src/` legacy helpers · `src-tauri/` Rust backend · `config/` Amara identity & skills · `scripts/` dev helpers · `stack/` services

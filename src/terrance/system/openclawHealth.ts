@@ -5,7 +5,7 @@
  *   - Individual check functions for granular use
  *   - getOpenClawHealth()  — full JSON health snapshot
  *   - generateSystemReport() — human-readable text report
- *   - pushHealthToN8n()    — POST health data to Terrance n8n ingress
+ *   - pushHealthToN8n()    — POST health data to Amara n8n ingress
  *
  * All heavy lifting (port check, process probe, config parsing) is done
  * in Rust via the Tauri command; this module is purely orchestration.
@@ -67,7 +67,7 @@ export async function getChannelStatus(): Promise<OpenClawHealth["channels"]> {
  * Generates a plain-text daily system status report.
  *
  * Example output:
- *   SYSTEM STATUS — TERRANCE
+ *   SYSTEM STATUS — AMARA
  *   OpenClaw: HEALTHY
  *   Version: 2026.2.22-2
  *   Gateway: reachable
@@ -82,7 +82,7 @@ export async function generateSystemReport(): Promise<string> {
   const ts = new Date(h.timestamp).toLocaleString();
 
   return [
-    "SYSTEM STATUS — TERRANCE",
+    "SYSTEM STATUS — AMARA",
     "─".repeat(32),
     `OpenClaw:      ${statusLine}`,
     `Version:       ${h.version ?? "unknown"}`,
@@ -100,7 +100,7 @@ export async function generateSystemReport(): Promise<string> {
 const N8N_HEALTH_MONITOR = "http://localhost:5678/webhook/terrance/openclaw/health";
 
 /**
- * Pushes a health snapshot to the Terrance n8n ingress gateway
+ * Pushes a health snapshot to the Amara n8n ingress gateway
  * as an `openclaw.health` event.  n8n routes it through the
  * OpenClaw Health Monitor workflow for alerting and logging.
  *

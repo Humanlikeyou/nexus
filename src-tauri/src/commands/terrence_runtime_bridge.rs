@@ -88,25 +88,25 @@ impl NexusRuntimeBridge {
         }
 
         let encoded = serde_json::to_string(&request)
-            .map_err(|_| "Nexus could not prepare the local Hermes request.".to_string())?;
+            .map_err(|_| "Amara OS could not prepare the local Hermes request.".to_string())?;
         let expected_id = request.id.clone();
         let bridge = process.as_mut().expect("bridge process was initialized");
         if let Err(error) = bridge.stdin.write_all(encoded.as_bytes()).await {
             reset_process(&mut process);
             return Err(format!(
-                "Nexus local Hermes runtime stopped before the request: {error}"
+                "Amara OS local Hermes runtime stopped before the request: {error}"
             ));
         }
         if let Err(error) = bridge.stdin.write_all(b"\n").await {
             reset_process(&mut process);
             return Err(format!(
-                "Nexus local Hermes runtime stopped before the request: {error}"
+                "Amara OS local Hermes runtime stopped before the request: {error}"
             ));
         }
         if let Err(error) = bridge.stdin.flush().await {
             reset_process(&mut process);
             return Err(format!(
-                "Nexus local Hermes runtime stopped before the request: {error}"
+                "Amara OS local Hermes runtime stopped before the request: {error}"
             ));
         }
 
@@ -115,12 +115,12 @@ impl NexusRuntimeBridge {
                 Ok(Ok(Some(line))) => line,
                 Ok(Ok(None)) => {
                     reset_process(&mut process);
-                    return Err("Nexus local Hermes runtime ended without a response.".to_string());
+                    return Err("Amara OS local Hermes runtime ended without a response.".to_string());
                 }
                 Ok(Err(error)) => {
                     reset_process(&mut process);
                     return Err(format!(
-                        "Nexus could not read the local Hermes response: {error}"
+                        "Amara OS could not read the local Hermes response: {error}"
                     ));
                 }
                 Err(_) => {
@@ -132,12 +132,12 @@ impl NexusRuntimeBridge {
             Ok(response) => response,
             Err(_) => {
                 reset_process(&mut process);
-                return Err("Nexus local Hermes runtime returned an invalid response.".to_string());
+                return Err("Amara OS local Hermes runtime returned an invalid response.".to_string());
             }
         };
         if response.id.as_deref() != Some(expected_id.as_str()) {
             reset_process(&mut process);
-            return Err("Nexus local Hermes runtime returned a mismatched response.".to_string());
+            return Err("Amara OS local Hermes runtime returned a mismatched response.".to_string());
         }
         if !response.ok {
             return Err(response
@@ -172,11 +172,11 @@ fn spawn_bridge(python: &Path, hermes_home: &Path) -> Result<BridgeProcess, Stri
     let stdin = child
         .stdin
         .take()
-        .ok_or_else(|| "Nexus could not open the local Hermes input channel.".to_string())?;
+        .ok_or_else(|| "Amara OS could not open the local Hermes input channel.".to_string())?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| "Nexus could not open the local Hermes output channel.".to_string())?;
+        .ok_or_else(|| "Amara OS could not open the local Hermes output channel.".to_string())?;
     Ok(BridgeProcess {
         child,
         stdin,
@@ -200,8 +200,8 @@ mod tests {
             id: "request-1".to_string(),
             conversation_id: "conversation-1".to_string(),
             message: "Hello".to_string(),
-            query: "Nexus context\n\nUser message: Hello".to_string(),
-            system_instruction: "Nexus system instruction".to_string(),
+            query: "Amara OS context\n\nUser message: Hello".to_string(),
+            system_instruction: "Amara OS system instruction".to_string(),
             proposal_paths: NexusProposalPaths {
                 action: Some(PathBuf::from("/tmp/action.json")),
                 decision: None,
@@ -213,7 +213,7 @@ mod tests {
 
         let value = serde_json::to_value(request).expect("serialize bridge request");
         assert_eq!(value["conversationId"], "conversation-1");
-        assert_eq!(value["systemInstruction"], "Nexus system instruction");
+        assert_eq!(value["systemInstruction"], "Amara OS system instruction");
         assert_eq!(value["proposalPaths"]["action"], "/tmp/action.json");
         assert!(value.get("conversation_id").is_none());
     }

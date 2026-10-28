@@ -1,5 +1,5 @@
 // ============================================================
-// Terrance / OpenClaw types
+// Amara / OpenClaw types
 // ============================================================
 
 export interface OpenClawStatus {
@@ -769,7 +769,7 @@ export interface ArmConfig {
 }
 
 // ============================================================
-// Terrance Continuity
+// Amara Continuity
 // ============================================================
 
 export interface TerranceContext {

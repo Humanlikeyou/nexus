@@ -1,4 +1,4 @@
-# Terrance OS Visual Doctrine
+# Amara OS Visual Doctrine
 
 The legacy card, tile, bento, widget, and admin-dashboard aesthetic is permanently deprecated.
 

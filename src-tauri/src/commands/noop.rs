@@ -1,8 +1,8 @@
 //! Read-only bridge to NOOP's authoritative local health store.
 //!
-//! Terrence deliberately does not pair with the strap, calculate WHOOP metrics, or
+//! Amara deliberately does not pair with the strap, calculate WHOOP metrics, or
 //! maintain a second health database. NOOP owns those jobs. This module only opens
-//! NOOP's SQLite database read-only and exposes a bounded snapshot for Terrence.
+//! NOOP's SQLite database read-only and exposes a bounded snapshot for Amara.
 
 use chrono::{DateTime, Local, NaiveDate, Timelike, Utc};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
@@ -191,7 +191,7 @@ impl NoopPaths {
             .into_iter()
             .find(|candidate| candidate.is_file())
             .ok_or_else(|| {
-                "NOOP has not created its local health store yet. Open NOOP, pair or import your data, then Terrence will read it locally.".to_string()
+                "NOOP has not created its local health store yet. Open NOOP, pair or import your data, then Amara will read it locally.".to_string()
             })
     }
 }
@@ -776,7 +776,7 @@ fn snapshot_from_database(
         .map_err(|error| format!("NOOP health store is unavailable: {error}"))?;
     let tables = table_names(&conn)?;
     if !tables.contains("grdb_migrations") {
-        return Err("The NOOP database is missing its migration metadata. Open NOOP to repair it before Terrence reads it.".to_string());
+        return Err("The NOOP database is missing its migration metadata. Open NOOP to repair it before Amara reads it.".to_string());
     }
     if !tables.contains("dailyMetric") {
         return Err("NOOP has not created daily health metrics yet. Let NOOP finish a sync or import your history first.".to_string());
@@ -849,11 +849,11 @@ fn snapshot_from_database(
     let message = match status {
         "ready" => None,
         "stale" => Some(
-            "NOOP health data is older than yesterday, so Terrence will not present it as current."
+            "NOOP health data is older than yesterday, so Amara will not present it as current."
                 .to_string(),
         ),
         "waiting_for_nightly_data" => Some(
-            "NOOP is connected, but its latest daily row has not synchronized an overnight sleep record yet. Terrence will wait rather than infer a recovery summary."
+            "NOOP is connected, but its latest daily row has not synchronized an overnight sleep record yet. Amara will wait rather than infer a recovery summary."
                 .to_string(),
         ),
         _ => Some("NOOP is connected, but it has not recorded daily health data yet.".to_string()),

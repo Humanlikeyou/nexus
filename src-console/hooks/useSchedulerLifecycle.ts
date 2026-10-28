@@ -1,5 +1,5 @@
 /**
- * Starts the Terrance scheduler once for the console shell and stops it on
+ * Starts the Amara scheduler once for the console shell and stops it on
  * unmount. A window-level guard keeps StrictMode double-mounts, duplicate
  * mounts and HMR re-evaluation from starting a second instance.
  */

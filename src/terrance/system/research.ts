@@ -1,5 +1,5 @@
 /**
- * Terrance Background Research
+ * Amara Background Research
  *
  * Autonomous web research triggered by /research command or goals.
  * Searches web → reads top results → LLM synthesizes → stores as session log.
@@ -65,7 +65,7 @@ export async function runResearchTask(
     task.status = "synthesizing";
     activityBus.update(busId, "running", "Synthesizing findings...", 70);
     const synthesisPrompt =
-      `You are Terrance, conducting research on: "${topic}"` +
+      `You are Amara, conducting research on: "${topic}"` +
       (context ? `\n\nContext: ${context}` : "") +
       `\n\nHere are the web sources I found:\n\n${pageContents.join("\n\n---\n\n")}` +
       `\n\nSynthesize a clear, actionable research summary:\n` +

@@ -27,8 +27,8 @@ pub fn run() {
             let _ = terrence_actions::reconcile_interrupted_conversations();
 
             // System tray
-            let quit = MenuItem::with_id(app, "quit", "Quit Nexus", true, None::<&str>)?;
-            let open = MenuItem::with_id(app, "open", "Open Nexus", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Amara OS", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Open Amara OS", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
 
             TrayIconBuilder::new()
@@ -62,7 +62,7 @@ pub fn run() {
             system::restart_docker_service,
             restart_services::restart_services,
             system::check_service_port,
-            // OpenClaw / Terrance
+            // OpenClaw / Amara
             openclaw::read_openclaw_status,
             openclaw::read_cron_jobs,
             openclaw::read_skills,
@@ -167,32 +167,32 @@ pub fn run() {
             llm_router::get_cost_estimate,
             llm_router::get_llm_usage,
             llm_router::clear_llm_usage,
-            // Terrence action registry and approval ledger
+            // Amara action registry and approval ledger
             terrence_actions::list_terrence_tools,
             terrence_actions::request_terrence_action,
             terrence_actions::list_terrence_actions,
             terrence_actions::approve_terrence_action,
             terrence_actions::retry_terrence_action,
             terrence_actions::cancel_terrence_action,
-            // Terrence automation records from the persistent Hermes runner
+            // Amara automation records from the persistent Hermes runner
             terrence_automations::list_terrence_automations,
             terrence_automations::list_terrence_automation_runs,
-            // Terrence canonical context
+            // Amara canonical context
             terrence_context::create_context_item,
             terrence_context::list_context_items,
             terrence_context::correct_context_item,
             terrence_context::delete_context_item,
             terrence_context::get_terrence_context_snapshot,
             terrence_context::migrate_legacy_terrence_context,
-            // Terrence current-priority and decision loop
+            // Amara current-priority and decision loop
             terrence_priorities::get_current_terrence_priority_snapshot,
             terrence_priorities::record_terrence_decision,
             terrence_priorities::list_terrence_decisions,
             terrence_priorities::resolve_terrence_decision,
-            // Terrence project intelligence
+            // Amara project intelligence
             terrence_projects::upsert_terrence_project,
             terrence_projects::list_terrence_projects,
-            // Terrence runtime (Hermes)
+            // Amara runtime (Hermes)
             terrence_runtime::get_terrence_runtime_health,
             terrence_runtime::list_terrence_capabilities,
             terrence_runtime::interact_with_terrence,
@@ -222,5 +222,5 @@ pub fn run() {
             crew::crew_health,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Nexus");
+        .expect("error while running Amara OS");
 }

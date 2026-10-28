@@ -49,7 +49,7 @@ describe("Fitness (HealthField)", () => {
     expect(container.querySelectorAll(".ui-stat__value[data-empty]")).toHaveLength(3);
     expect(screen.queryByText("ms")).toBeNull();
     expect(screen.getByText("Store missing")).toHaveClass("ui-badge");
-    expect(screen.getByText("Terrence has no NOOP daily record to read yet.")).toBeInTheDocument();
+    expect(screen.getByText("Amara has no NOOP daily record to read yet.")).toBeInTheDocument();
   });
 
   it("error: NOOP command unavailable shows Unavailable badge and Retry", () => {

@@ -1,4 +1,4 @@
-# Terrence Architecture Audit
+# Amara Architecture Audit
 
 Audited: 2026-08-21
 
@@ -8,7 +8,7 @@ This audit is based on the active Nexus worktree, the locally running services, 
 
 Nexus has several worthwhile foundations: a Tauri desktop shell, typed Rust commands, a robust local event/outbox pipeline, a local/API model router, identity material, a modular device layer, and a real Hermes agent runtime. It is not yet one coherent personal operating intelligence.
 
-The immediate architectural problem is runtime fragmentation. The current product runs Hermes for Amara and Telegram, while Nexus is still primarily wired to OpenClaw. It also contains three separate model/chat paths and several unrelated stores for goals, context, sessions, and task-like data. The new console is a visually coherent monitoring surface, but it has removed the conversation and scheduler startup paths that previously connected much of the Terrance logic to a user workflow.
+The immediate architectural problem is runtime fragmentation. The current product runs Hermes for Amara and Telegram, while Nexus is still primarily wired to OpenClaw. It also contains three separate model/chat paths and several unrelated stores for goals, context, sessions, and task-like data. The new console is a visually coherent monitoring surface, but it has removed the conversation and scheduler startup paths that previously connected much of the Amara logic to a user workflow.
 
 Do not add more specialist agents, dashboards, or automations until one runtime, one interaction path, one context model, and one action record exist.
 
@@ -18,8 +18,8 @@ Do not add more specialist agents, dashboards, or automations until one runtime,
 
 - Tauri 2 hosts the app in `src-tauri/`.
 - The active entry point is `index.html -> src-console/main.tsx -> src-console/App.tsx`.
-- `src-console` polls bounded Tauri commands every 15 seconds and renders seven system views: Terrance, Health (NOOP), Muse, Business, ARM, Activity, and Trajectory.
-- The console provides an in-app Terrance conversation, action approval controls, and a read-only NOOP health view.
+- `src-console` polls bounded Tauri commands every 15 seconds and renders seven system views: Amara, Health (NOOP), Muse, Business, ARM, Activity, and Trajectory.
+- The console provides an in-app Amara conversation, action approval controls, and a read-only NOOP health view.
 - The legacy `src/` application and its component tree are deleted in the current worktree, but most system modules remain under `src/terrance/system/`, `src/lib/`, and `src/hooks/`.
 
 ### Tauri/Rust backend
@@ -59,7 +59,7 @@ The app currently persists state in several independent places:
 ### Tools, actions, and automation
 
 - External capability is represented as many direct Tauri commands, OpenClaw functions, Hermes tools, and n8n workflows. There is no central tool registry or action router.
-- The Rust event outbox tracks telemetry delivery to a `/events` gateway and verifies acknowledgements. It does not represent Terrence actions or their approval/verification state.
+- The Rust event outbox tracks telemetry delivery to a `/events` gateway and verifies acknowledgements. It does not represent Amara actions or their approval/verification state.
 - The TypeScript scheduler includes daily briefs, health checks, memory work, research, jobs, rituals, and subagents. There is no active `startScheduler()` call in the current entry point, so these routines do not start in the active console build. Even if started from a UI, they stop when the app closes.
 - Hermes has its own persistent gateway cron scheduler, which is distinct from the Nexus scheduler.
 
@@ -68,7 +68,7 @@ The app currently persists state in several independent places:
 - Goals are structured JSON, but project state is not modeled.
 - The console reads tasks and content from OpenClaw markdown files. The parser generates hardcoded TaiyoSkin placeholder tasks when no task source is present.
 - The Rust backend provides Muse and a read-only NOOP health bridge. NOOP is the exclusive WHOOP source.
-- Research, CrewAI, ARM, Telegram, n8n, and local shell controls exist as separate integrations, not as a unified Terrence capability layer.
+- Research, CrewAI, ARM, Telegram, n8n, and local shell controls exist as separate integrations, not as a unified Amara capability layer.
 
 ## B. Current User Flow
 
@@ -77,7 +77,7 @@ The app currently persists state in several independent places:
 1. Nexus launches Tauri and starts the Rust event outbox worker.
 2. The webview loads `src-console/main.tsx` and mounts the console.
 3. The console polls direct commands for OpenClaw health, files, goals, sensors, ARM, and activity state every 15 seconds.
-4. The user can inspect those values, converse with Terrance, and approve prepared Mac actions.
+4. The user can inspect those values, converse with Amara, and approve prepared Mac actions.
 5. The runtime persists interaction and action records for inspection and follow-through.
 
 ### Actual Amara path outside Nexus
@@ -95,7 +95,7 @@ The app currently persists state in several independent places:
 - The identity/profile material is useful source content, although it needs to be separated from runtime-specific claims and rebalanced around Taisun rather than one business.
 - Hermes is an active, local agentic runtime with Telegram and tool calling. It should be integrated, not duplicated.
 - The Muse and read-only NOOP integrations are separated from the main UI and can remain contextual providers.
-- The console visual language can remain as a presentation direction after it is connected to real Terrence state and actions.
+- The console visual language can remain as a presentation direction after it is connected to real Amara state and actions.
 
 ## D. Incomplete or Placeholder Functionality
 
@@ -124,7 +124,7 @@ The app currently persists state in several independent places:
 ## F. Architectural Debt
 
 - The large uncommitted UI migration deletes approximately 15,794 lines across the legacy UI while adding an untracked `src-console` replacement. It currently builds, but it has not been committed as an intentional product boundary or verified end-to-end.
-- Names are inconsistent: Terrence/Terrance and OpenClaw/Hermes (Nexus/Electron was resolved by the rename). These make operating state and future migration decisions ambiguous.
+- Names are inconsistent: Amara/Terrance and OpenClaw/Hermes (Nexus/Electron was resolved by the rename). These make operating state and future migration decisions ambiguous.
 - `src-tauri/tauri.conf.json` sets `csp` to `null` and the app has broad command exposure. Future tool execution needs narrower, explicit IPC boundaries.
 - `NexusConfig` persists sensitive provider and integration configuration in an application JSON file. This needs a defined secret-storage policy before more external integrations are added.
 - Identity text asserts behaviors such as continuous operation, Telegram processing, and comprehensive tracking that the active Nexus application does not currently guarantee.
@@ -137,13 +137,13 @@ The app currently persists state in several independent places:
 2. **The active UI removed its core interaction.** The console does not call the model router, Hermes, or the continuity layer.
 3. **Proactivity is inactive from Nexus.** No active entry point starts `startScheduler()`, and a frontend scheduler would not survive app closure.
 4. **Task data can be fake.** `read_tasks` returns fabricated TaiyoSkin tasks when its file is absent; this is displayed as current operational data.
-5. **Model selection can fail or drift.** The router defaults to absent `qwen3.5`; a separate direct caller selects whatever model is first installed and omits Terrence context.
+5. **Model selection can fail or drift.** The router defaults to absent `qwen3.5`; a separate direct caller selects whatever model is first installed and omits Amara context.
 6. **Failure state is obscured.** Console snapshot reads catch errors and render fallbacks, which can make an offline dependency look like valid zero/empty data.
 7. **The Docker-backed intelligence stack is presently unavailable.** The stack smoke test could not connect to Docker.
 
 ## H. Missing Foundation
 
-The missing foundation is a small Terrence Core, not another screen or another autonomous agent. It needs four explicit contracts:
+The missing foundation is a small Amara Core, not another screen or another autonomous agent. It needs four explicit contracts:
 
 1. **Runtime adapter:** one selected agent runtime, initially Hermes, behind a stable interface for health, interaction, tool capability, and execution events.
 2. **Canonical context store:** typed entities for facts, preferences, goals, projects, commitments, events, and inferences, including timestamps, provenance, confidence, correction, and deletion.
@@ -154,7 +154,7 @@ The missing foundation is a small Terrence Core, not another screen or another a
 
 ```text
 Nexus desktop UI
-  -> Terrence Core (Tauri commands / typed domain API)
+  -> Amara Core (Tauri commands / typed domain API)
       -> Context assembler <- canonical local state store
       -> Runtime router <- Hermes adapter (initial), future local/API adapters
       -> Tool router <- registered tools + approval policy
@@ -165,7 +165,7 @@ Nexus desktop UI
 
 The desktop UI should only display and operate on these typed Core contracts. It should not poll unrelated implementation-specific files or independently recreate model, memory, or scheduler behavior.
 
-Hermes should be the initial runtime adapter because it is the working Telegram agent with tool calling. OpenClaw should be treated as a legacy integration until an explicit decision is made to retire or migrate it. Keep the existing Tauri event/outbox subsystem, but repurpose its delivery principles for an action ledger rather than using it as the definition of Terrence activity.
+Hermes should be the initial runtime adapter because it is the working Telegram agent with tool calling. OpenClaw should be treated as a legacy integration until an explicit decision is made to retire or migrate it. Keep the existing Tauri event/outbox subsystem, but repurpose its delivery principles for an action ledger rather than using it as the definition of Amara activity.
 
 ## J. Staged Migration Plan
 
@@ -177,10 +177,10 @@ Hermes should be the initial runtime adapter because it is the working Telegram 
 - **Risk:** Accidental loss of working legacy behavior if files are removed without an inventory.
 - **Acceptance:** One documented active entry point; no fabricated task data; visible unavailable/error state; a clear decision to retain, migrate, or remove each deleted legacy capability.
 
-### Stage 1: Unify the Terrence runtime and interaction path
+### Stage 1: Unify the Amara runtime and interaction path
 
 - **Objective:** Create the single path for conversation and runtime health, with Hermes as the first adapter.
-- **Modules:** new Terrence Core boundary in Tauri, Hermes adapter, model routing boundary, `src-console` conversation surface, old OpenClaw-specific commands.
+- **Modules:** new Amara Core boundary in Tauri, Hermes adapter, model routing boundary, `src-console` conversation surface, old OpenClaw-specific commands.
 - **Dependencies:** Hermes CLI/gateway interface and a stable local transport contract.
 - **Risk:** Session continuity can be lost if the adapter creates unrelated Hermes sessions.
 - **Acceptance:** A message sent from Nexus reaches Hermes/Amara, produces a typed response, records the selected runtime/model, and appears in a persisted interaction record. Nexus health reflects Hermes, not a stale parallel runtime.
@@ -203,11 +203,11 @@ Hermes should be the initial runtime adapter because it is the working Telegram 
 
 ### Stage 4: Prioritization and planning loop
 
-- **Objective:** Make Terrence determine what matters and turn goals/projects into next actions.
+- **Objective:** Make Amara determine what matters and turn goals/projects into next actions.
 - **Modules:** context assembler, priority service, decision records, project views.
 - **Dependencies:** Canonical context and action ledger.
 - **Risk:** Overconfident recommendations presented as facts.
-- **Acceptance:** Terrence can state its evidence, constraints, alternatives, recommendation, uncertainty, and follow-up outcome for a decision.
+- **Acceptance:** Amara can state its evidence, constraints, alternatives, recommendation, uncertainty, and follow-up outcome for a decision.
 
 ### Stage 5: Persistent automation and proactivity
 

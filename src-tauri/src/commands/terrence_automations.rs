@@ -118,7 +118,7 @@ fn init_automation_db(conn: &Connection) -> Result<(), String> {
             ON terrence_automation_runs(automation_id, completed_at DESC);
         ",
     )
-    .map_err(|error| format!("Failed to initialize Terrence automation schema: {error}"))
+    .map_err(|error| format!("Failed to initialize Amara automation schema: {error}"))
 }
 
 fn clean_required(value: &str, label: &str, max_chars: usize) -> Result<String, String> {
@@ -211,7 +211,7 @@ fn upsert_automation(
             updated_at = excluded.updated_at",
         params![id, source, source_id, name, trigger, enabled as i64, status, next_run_at, now],
     )
-    .map_err(|error| format!("Failed to update Terrence automation: {error}"))?;
+    .map_err(|error| format!("Failed to update Amara automation: {error}"))?;
     Ok(id)
 }
 
@@ -379,7 +379,7 @@ fn ingest_hermes_automation_inbox_in(conn: &Connection, directory: &Path) -> usi
                         provenance_source
                     ],
                 )
-                .map_err(|error| format!("Failed to record Terrence automation run: {error}"))?;
+                .map_err(|error| format!("Failed to record Amara automation run: {error}"))?;
             if inserted > 0 {
                 let automation_status = if status == "failed" || delivery_status == "failed" {
                     "attention"
@@ -403,7 +403,7 @@ fn ingest_hermes_automation_inbox_in(conn: &Connection, directory: &Path) -> usi
                     ],
                 )
                 .map_err(|error| {
-                    format!("Failed to update Terrence automation outcome: {error}")
+                    format!("Failed to update Amara automation outcome: {error}")
                 })?;
             }
             Ok(())
@@ -479,12 +479,12 @@ pub fn list_terrence_automations(limit: Option<u32>) -> Result<Vec<TerrenceAutom
                 CASE status WHEN 'attention' THEN 0 WHEN 'active' THEN 1 ELSE 2 END,
                 next_run_at ASC LIMIT ?1",
         )
-        .map_err(|error| format!("Failed to prepare Terrence automations: {error}"))?;
+        .map_err(|error| format!("Failed to prepare Amara automations: {error}"))?;
     let automations = statement
         .query_map(params![limit.unwrap_or(20).min(100)], automation_from_row)
-        .map_err(|error| format!("Failed to read Terrence automations: {error}"))?
+        .map_err(|error| format!("Failed to read Amara automations: {error}"))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("Failed to collect Terrence automations: {error}"))?;
+        .map_err(|error| format!("Failed to collect Amara automations: {error}"))?;
     Ok(automations)
 }
 
@@ -503,15 +503,15 @@ pub fn list_terrence_automation_runs(
              WHERE (?1 IS NULL OR automation_id = ?1)
              ORDER BY completed_at DESC LIMIT ?2",
         )
-        .map_err(|error| format!("Failed to prepare Terrence automation runs: {error}"))?;
+        .map_err(|error| format!("Failed to prepare Amara automation runs: {error}"))?;
     let runs = statement
         .query_map(
             params![automation_id, limit.unwrap_or(20).min(100)],
             run_from_row,
         )
-        .map_err(|error| format!("Failed to read Terrence automation runs: {error}"))?
+        .map_err(|error| format!("Failed to read Amara automation runs: {error}"))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("Failed to collect Terrence automation runs: {error}"))?;
+        .map_err(|error| format!("Failed to collect Amara automation runs: {error}"))?;
     Ok(runs)
 }
 

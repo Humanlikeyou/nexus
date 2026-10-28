@@ -8,7 +8,7 @@ import "./shell.css";
 export function Toolbar({ label, busy, onRefresh }: { label: string; busy: boolean; onRefresh: () => void }) {
   return (
     <IntelligenceOverlay>
-      <header className="nexus-mark" data-tauri-drag-region><span className="nexus-symbol"><Zap size={16} /></span><strong className="nexus-wordmark">Nexus</strong></header>
+      <header className="nexus-mark" data-tauri-drag-region><span className="nexus-symbol"><Zap size={16} /></span><strong className="nexus-wordmark">Amara OS</strong></header>
       <div className="field-clock" data-tauri-drag-region><span className="toolbar-location">{label}</span><Clock /><button onClick={onRefresh} disabled={busy} aria-label="Refresh all systems" title="Refresh all systems"><RefreshCw size={15} /></button></div>
     </IntelligenceOverlay>
   );

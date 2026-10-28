@@ -105,7 +105,7 @@ describe("Neuro screen", () => {
   it("save pending: Retry Save is the primary action and a warning explains it", () => {
     renderNeuro({ data: snap({ muse: connected }), sessionStartedAt: NOW - 125_000, sessionEndedAt: NOW - 5_000 });
     expect(screen.getByRole("button", { name: "Retry Save" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Recording stopped at 02:00. Saving is pending; keep Nexus open.");
+    expect(screen.getByRole("status")).toHaveTextContent("Recording stopped at 02:00. Saving is pending; keep Amara OS open.");
   });
 
   it("streaming: Stop Session (destructive), elapsed time, live bands, signal trace and diagnostics", () => {

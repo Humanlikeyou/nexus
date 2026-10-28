@@ -147,7 +147,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       sessionFinalizer.current = null;
       setNotice(saved ? "Muse session saved" : "Muse stream stopped");
     } catch (error) {
-      setMuseError(`Session could not be finalized. Keep Nexus open and retry. ${readableError(error)}`);
+      setMuseError(`Session could not be finalized. Keep Amara OS open and retry. ${readableError(error)}`);
     } finally {
       sessionOperation.current = false;
       setMuseOperation(null);

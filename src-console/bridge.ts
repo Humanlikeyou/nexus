@@ -36,10 +36,10 @@ interface SnapshotRead<T> {
 }
 
 const SOURCE_LABELS: Record<string, string> = {
-  get_terrence_runtime_health: "Terrence runtime",
-  list_terrence_capabilities: "Terrence capabilities",
-  get_terrence_context_snapshot: "Terrence context",
-  get_current_terrence_priority_snapshot: "Terrence priorities",
+  get_terrence_runtime_health: "Amara runtime",
+  list_terrence_capabilities: "Amara capabilities",
+  get_terrence_context_snapshot: "Amara context",
+  get_current_terrence_priority_snapshot: "Amara priorities",
   list_terrence_decisions: "Decision records",
   list_terrence_actions: "Action ledger",
   list_terrence_automations: "Automations",

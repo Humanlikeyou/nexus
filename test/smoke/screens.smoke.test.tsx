@@ -55,7 +55,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const nav = () => screen.getByRole("navigation", { name: "Nexus navigation" });
+const nav = () => screen.getByRole("navigation", { name: "Amara OS navigation" });
 const go = (label: string) => fireEvent.click(within(nav()).getByTitle(new RegExp(`^${label}( \\(|$)`)));
 // Match by attribute value, not a CSS selector: labels like "Chat & Agents" break selector parsing.
 const field = (label: string) => (Array.from(document.querySelectorAll<HTMLElement>("section.active-field")).find((el) => el.getAttribute("aria-label") === `${label} system`) ?? null);

@@ -1,5 +1,5 @@
 /**
- * Terrance Continuity System
+ * Amara Continuity System
  *
  * Manages:
  *  - Identity injection (system prompt prepend)
@@ -59,7 +59,7 @@ export async function loadIdentity(): Promise<string> {
     _identityCache = await invoke<string>("read_identity_file");
   } catch {
     // Fallback inline identity if file read fails
-    _identityCache = `You are Terrance — a persistent cognitive AI. ` +
+    _identityCache = `You are Amara — a persistent cognitive AI. ` +
       `Maintain continuity across sessions. Be direct, action-oriented, and transparent. ` +
       `Identity persists regardless of the underlying model.`;
   }
@@ -83,7 +83,7 @@ export function invalidateIdentityCache(): void {
   _profileCache = null;
 }
 
-// ─── Terrance Context (external memory store) ─────────────────────────────────
+// ─── Amara Context (external memory store) ─────────────────────────────────
 
 export interface TerranceContext {
   activeGoals: string[];
@@ -141,7 +141,7 @@ export async function loadContext(): Promise<TerranceContext> {
     throw new ContextLoadError(e);
   }
 
-  // Sync goals from goals.json into activeGoals so Terrance is always goal-aware
+  // Sync goals from goals.json into activeGoals so Amara is always goal-aware
   let goalTitles: string[] = ctx.activeGoals ?? [];
   try {
     const goals = await invoke<{ title: string }[]>("read_goals");
@@ -226,7 +226,7 @@ export async function buildSystemPrompt(ctx?: TerranceContext): Promise<string> 
 
   // Continuity primer block
   parts.push("## Session Context");
-  parts.push("Load Terrance identity. ✓");
+  parts.push("Load Amara identity. ✓");
 
   const goals = context.activeGoals ?? [];
   if (goals.length > 0) {
@@ -270,7 +270,7 @@ export async function summarizeAndStoreSession(
   if (messages.length < 2) return null;
 
   const transcript = messages
-    .map((m) => `${m.role === "user" ? "User" : "Terrance"}: ${m.text}`)
+    .map((m) => `${m.role === "user" ? "User" : "Amara"}: ${m.text}`)
     .join("\n");
 
   const summaryPrompt =
@@ -423,7 +423,7 @@ export async function generateDailySummary(): Promise<{ sent: boolean; summary: 
     const dateStr = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
     const summaryPrompt =
-      `You are Terrance, generating your morning briefing for ${dayName}, ${dateStr}.\n\n` +
+      `You are Amara, generating your morning briefing for ${dayName}, ${dateStr}.\n\n` +
       `Active Goals:\n${goalsText}\n\n` +
       `Yesterday's Sessions:\n${sessionSummaries}\n\n` +
       `Relevant Memory:\n${memoryText}\n\n` +
@@ -500,7 +500,7 @@ export async function generateMiddayCorrection(): Promise<{ sent: boolean; messa
     const lastSummary = ctx.lastSessionSummary ?? "No morning summary available.";
 
     const middayPrompt =
-      `You are Terrance, delivering a midday correction at ${new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}.\n\n` +
+      `You are Amara, delivering a midday correction at ${new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}.\n\n` +
       `Active Goals:\n${goalsText}\n\n` +
       `Morning Context:\n${lastSummary}\n\n` +
       `Generate a brief midday check-in (3-5 lines max). Purpose:\n` +
@@ -572,7 +572,7 @@ export async function generateEveningIntegration(): Promise<{ sent: boolean; mes
     const dayName = now.toLocaleDateString("en-US", { weekday: "long" });
 
     const eveningPrompt =
-      `You are Terrance, delivering the evening integration for ${dayName}.\n\n` +
+      `You are Amara, delivering the evening integration for ${dayName}.\n\n` +
       `Active Goals:\n${goalsText}\n\n` +
       `Today's Activity:\n${sessionSummaries}\n\n` +
       `Generate a brief evening reflection (5-8 lines). Cover:\n` +
@@ -652,7 +652,7 @@ export async function pruneMemory(): Promise<{ archived: number; pruned: number;
         .join("\n\n");
 
       const consolidationPrompt =
-        `You are Terrance, consolidating ${oldLogs.length} old session logs (>30 days) ` +
+        `You are Amara, consolidating ${oldLogs.length} old session logs (>30 days) ` +
         `into a single archival summary. Extract the most important long-term patterns, ` +
         `decisions, and context worth retaining. Be concise (10-15 bullet points max).\n\n${summaries}`;
 
@@ -739,7 +739,7 @@ export async function consolidateRecentSessions(): Promise<{ consolidated: boole
     const summaries = recent.map((l, i) => `Session ${i + 1} (${new Date(l.timestamp).toLocaleString()}):\n${l.summary}`).join("\n\n");
 
     const consolidationPrompt =
-      `You are Terrance, consolidating your recent session memories. ` +
+      `You are Amara, consolidating your recent session memories. ` +
       `Combine these ${recent.length} session summaries into a single cohesive memory update. ` +
       `Focus on: key themes, decisions made, progress on goals, important context to retain. ` +
       `Be concise (5-10 bullet points).\n\n${summaries}`;
@@ -796,7 +796,7 @@ export async function consolidateRecentSessions(): Promise<{ consolidated: boole
 // ─── Autonomous Reasoning Loop ────────────────────────────────────────────────
 
 /**
- * Terrance reviews active goals against recent sessions and generates
+ * Amara reviews active goals against recent sessions and generates
  * a daily brief — a proactive self-reflection stored to memory.
  */
 export async function runReasoningLoop(): Promise<{ reasoned: boolean; reflection: string | null }> {
@@ -818,7 +818,7 @@ export async function runReasoningLoop(): Promise<{ reasoned: boolean; reflectio
       : "No active goals.";
 
     const reasoningPrompt =
-      `You are Terrance, reviewing your recent activity.\n\n` +
+      `You are Amara, reviewing your recent activity.\n\n` +
       `Active Goals:\n${goalsText}\n\n` +
       `Recent Sessions (last 24h):\n${sessionSummaries}\n\n` +
       `Generate a brief daily reflection:\n` +

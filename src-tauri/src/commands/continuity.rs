@@ -1,5 +1,5 @@
 /**
- * Terrance Continuity Commands
+ * Amara Continuity Commands
  *
  * Provides Tauri commands for:
  *  - read_identity_file     — loads config/terrance.identity.md from the app bundle
@@ -45,7 +45,7 @@ fn session_logs_dir() -> PathBuf {
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
 
-/// Read the canonical Terrance identity file from config/terrance.identity.md.
+/// Read the canonical Amara identity file from config/terrance.identity.md.
 /// Walks up from the binary to find the project root.
 #[tauri::command]
 pub fn read_identity_file() -> Result<String, String> {

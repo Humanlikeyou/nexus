@@ -29,11 +29,11 @@ export default function App() {
   const { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession } = useMuseSession(data, refresh, setNotice);
   const [contextInspectorOpen, setContextInspectorOpen] = useState(false);
   const { theme, setTheme, reduceMotion, setReduceMotion } = useAppearance();
-  // Terrance background scheduler: started once for the shell, stopped on unmount.
+  // Amara background scheduler: started once for the shell, stopped on unmount.
   useSchedulerLifecycle();
 
   const { conversationId, messages, sending, sendToTerrence, startNewConversation } = useConversation(refresh);
-  // Session continuity: summarize the Terrance chat after idle / on new chat / on close (bug 6).
+  // Session continuity: summarize the Amara chat after idle / on new chat / on close (bug 6).
   const autoSave = useIdleAutoSave(messages, conversationId);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {

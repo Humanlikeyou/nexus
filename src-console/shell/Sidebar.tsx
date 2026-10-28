@@ -76,7 +76,7 @@ function Resizer({ width, setWidth }: { width: number; setWidth: (w: number) => 
 export function Sidebar({ active, onSelect, data }: { active: ModuleId; onSelect: (id: ModuleId) => void; data: SystemSnapshot }) {
   const [width, setWidth] = useSidebarWidth();
   return (
-    <nav className="system-constellation" aria-label="Nexus navigation">
+    <nav className="system-constellation" aria-label="Amara OS navigation">
       {SYSTEM_GROUPS.map((group) => (
         <section className="nav-group" key={group.label}>
           <h2>{group.label}</h2>
@@ -92,7 +92,7 @@ export function Sidebar({ active, onSelect, data }: { active: ModuleId; onSelect
           })}
         </section>
       ))}
-      <div className="sidebar-status"><StatusIndicator tone={data.hermes.status === "online" ? "success" : "danger"}>{data.hermes.status === "online" ? "Nexus ready" : "Nexus offline"}</StatusIndicator><span>{data.hermes.model}</span></div>
+      <div className="sidebar-status"><StatusIndicator tone={data.hermes.status === "online" ? "success" : "danger"}>{data.hermes.status === "online" ? "Amara ready" : "Amara offline"}</StatusIndicator><span>{data.hermes.model}</span></div>
       <Resizer width={width} setWidth={setWidth} />
     </nav>
   );

@@ -1,6 +1,6 @@
 # Stage 3 — n8n Gateway Contracts + Health Verification
 
-**Goal:** A single localhost ingress endpoint that routes Nexus/Terrance events to
+**Goal:** A single localhost ingress endpoint that routes Amara OS events to
 Letta (memory) and Verba/Weaviate (knowledge base) with a stable `trace_id` contract.
 
 ---

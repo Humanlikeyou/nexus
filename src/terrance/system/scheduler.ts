@@ -1,5 +1,5 @@
 /**
- * Terrance Scheduler
+ * Amara Scheduler
  *
  * Manages periodic background tasks:
  *  - Memory consolidation (every 6 hours)

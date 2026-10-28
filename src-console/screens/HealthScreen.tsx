@@ -181,7 +181,7 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
         <Card className="fitness__empty" title={failed ? "NOOP health is unavailable" : "Waiting for the first NOOP record"} headingLevel={2}>
           <div className="fitness__empty-lead">
             <Inbox className="fitness__empty-icon" aria-hidden="true" />
-            <p className="fitness__callout">{failed ? "Nexus couldn't read the local NOOP store. Try again in a moment." : health.message || "NOOP health data is not available yet."}</p>
+            <p className="fitness__callout">{failed ? "Amara OS couldn't read the local NOOP store. Try again in a moment." : health.message || "NOOP health data is not available yet."}</p>
             {!failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Check Again</Button>}
           </div>
           <div className="fitness__tiles fitness__tiles--3">
@@ -190,7 +190,7 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
             <StatTile label="Sleep" value={null} />
           </div>
           <InsetGroup title="Readiness" className="fitness__readiness">
-            <ListRow icon={HeartPulse} title="Data access" subtitle="Terrence has no NOOP daily record to read yet." accessory={<Badge tone="neutral">Store missing</Badge>} />
+            <ListRow icon={HeartPulse} title="Data access" subtitle="Amara has no NOOP daily record to read yet." accessory={<Badge tone="neutral">Store missing</Badge>} />
             <ListRow icon={Sparkles} title="Morning briefing" subtitle="Amara stays quiet until a fresh sleep session is available." accessory={<Badge tone="neutral">Waiting</Badge>} />
             <ListRow icon={BatteryMedium} title="Battery watch" subtitle={health.battery ? "A current NOOP band reading is available." : "No NOOP band battery reading is available locally."} accessory={<Badge tone="neutral">{health.battery ? `${number(health.battery.percentage)}%` : "No reading"}</Badge>} />
           </InsetGroup>

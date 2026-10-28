@@ -24,7 +24,7 @@ export interface ApprovalDeps<R> {
 }
 
 /**
- * Approve flow for a Terrance action. On any error (including a Deny that
+ * Approve flow for a Amara action. On any error (including a Deny that
  * rejects with "declined:") the snapshot is still refreshed so the row stops
  * showing "awaiting approval" with live buttons; a refresh failure is swallowed.
  */

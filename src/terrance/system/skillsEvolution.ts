@@ -1,7 +1,7 @@
 /**
  * Skills Self-Improvement Loop
  *
- * Terrance autonomously detects patterns in session logs and creates
+ * Amara autonomously detects patterns in session logs and creates
  * or updates reusable skill files that get loaded into future prompts.
  *
  * Inspired by Hermes Agent's skills_tool.py.
@@ -142,7 +142,7 @@ async function identifyPatterns(
     : "None";
 
   const prompt =
-    `You are Terrance's skill evolution engine. Analyze these recent session summaries ` +
+    `You are Amara's skill evolution engine. Analyze these recent session summaries ` +
     `and identify repeating patterns, topics, or workflows that appear 3+ times.\n\n` +
     `Existing skills:\n${existingList}\n\n` +
     `Recent sessions:\n${summaries}\n\n` +
@@ -195,8 +195,8 @@ async function generateSkillContent(
     : "";
 
   const prompt =
-    `Generate a skill file for Terrance (a personal AI assistant). ` +
-    `This skill will be injected into Terrance's system prompt when active.\n\n` +
+    `Generate a skill file for Amara (a personal AI assistant). ` +
+    `This skill will be injected into Amara's system prompt when active.\n\n` +
     `Skill: ${proposal.name}\n` +
     `Description: ${proposal.description}\n` +
     `Reason: ${proposal.reason}\n${updateNote}\n\n` +

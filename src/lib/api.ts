@@ -43,7 +43,7 @@ export const getSystemInfo = () => invoke<SystemInfo>("get_system_info");
 export const healthCheck = () => invoke<string>("health_check");
 
 // ============================================================
-// OpenClaw / Terrance
+// OpenClaw / Amara
 // ============================================================
 
 export const readOpenClawStatus = () =>
@@ -378,7 +378,7 @@ export const clearLlmUsage = () =>
   invoke<void>("clear_llm_usage");
 
 // ============================================================
-// Terrance Continuity
+// Amara Continuity
 // ============================================================
 
 export const readIdentityFile = () =>
