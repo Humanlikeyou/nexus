@@ -1,0 +1,48 @@
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(var(--text-badge) + var(--space-2));
+  padding: 0 calc(var(--space-1) + var(--space-0_5));
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--ui-tone) 16%, transparent);
+  color: var(--ui-tone-text);
+  font: 600 var(--text-badge)/1 var(--font-text);
+  letter-spacing: var(--tracking-badge);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ui-status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--space-1) + var(--space-0_5));
+  color: var(--label-secondary);
+  font: var(--type-callout);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ui-status-dot__dot {
+  position: relative;
+  flex: none;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--ui-tone);
+}
+.ui-status-dot[data-pulse] .ui-status-dot__dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  animation: ui-status-pulse 1.6s var(--ease-standard) infinite;
+}
+@keyframes ui-status-pulse {
+  from { opacity: .6; transform: scale(1); }
+  to { opacity: 0; transform: scale(2.4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-status-dot[data-pulse] .ui-status-dot__dot::after { animation: none; display: none; }
+}
+:root[data-reduce-motion="true"] .ui-status-dot[data-pulse] .ui-status-dot__dot::after { animation: none; display: none; }

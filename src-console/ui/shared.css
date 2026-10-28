@@ -1,0 +1,21 @@
+/* Shared by every ui/ primitive. Tokens only: see styles/tokens.css. */
+
+.ui-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Tone → color. Text tones are mixed toward --label so tinted text stays legible on light fills. */
+[data-tone="neutral"] { --ui-tone: var(--label-secondary); --ui-tone-text: var(--label-secondary); }
+[data-tone="accent"]  { --ui-tone: var(--accent);  --ui-tone-text: var(--accent-strong); }
+[data-tone="info"]    { --ui-tone: var(--sys-blue);  --ui-tone-text: color-mix(in srgb, var(--sys-blue) 78%, var(--label)); }
+[data-tone="success"] { --ui-tone: var(--sys-green); --ui-tone-text: color-mix(in srgb, var(--sys-green) 62%, var(--label)); }
+[data-tone="warning"] { --ui-tone: var(--sys-orange); --ui-tone-text: color-mix(in srgb, var(--sys-orange) 62%, var(--label)); }
+[data-tone="danger"]  { --ui-tone: var(--sys-red);   --ui-tone-text: color-mix(in srgb, var(--sys-red) 78%, var(--label)); }

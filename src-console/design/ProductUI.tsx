@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 export type ProductTone = "success" | "warning" | "danger" | "neutral" | "accent";
 
@@ -22,9 +22,8 @@ export function EmptyState({ icon: Icon, title, detail, action }: { icon: Lucide
   return <div className="empty-state"><Icon size={24} aria-hidden="true" /><div><h2>{title}</h2><p>{detail}</p></div>{action}</div>;
 }
 
-export function ActionButton({ icon: Icon, children, variant = "secondary", ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { icon?: LucideIcon; variant?: "primary" | "secondary" | "danger" | "quiet" }) {
-  return <button {...props} className={`action-button action-button--${variant}${props.className ? ` ${props.className}` : ""}`}>{Icon && <Icon size={15} aria-hidden="true" />}{children}</button>;
-}
+// Migrated: ActionButton is now ui/Button (legacy "danger"/"quiet" variants still accepted).
+export { ActionButton } from "../ui/Button";
 
 export function SegmentedControl<T extends string>({ value, options, onChange, label }: { value: T; options: Array<{ value: T; label: string }>; onChange: (value: T) => void; label: string }) {
   return <div className="segmented-control" role="group" aria-label={label}>{options.map((option) => <button key={option.value} type="button" className={value === option.value ? "is-selected" : ""} aria-pressed={value === option.value} onClick={() => onChange(option.value)}>{option.label}</button>)}</div>;
