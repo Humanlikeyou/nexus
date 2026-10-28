@@ -140,9 +140,13 @@ services:
       retries: 5
 
   # ── Verba — RAG Knowledge Base ──────────────────────────────────────────────
+  # Optional: `docker compose --profile kb up -d`. The core stack starts without it;
+  # kb.query then returns "knowledge base not running". Source: VERBA_SRC (default: the
+  # archived checkout in ~/projects/terrance-integrations/Verba).
   verba:
+    profiles: ["kb"]
     build:
-      context: ../Verba
+      context: ${VERBA_SRC:-../../terrance-integrations/Verba}
       dockerfile: Dockerfile
     restart: unless-stopped
     logging: *log
