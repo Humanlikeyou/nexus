@@ -10,7 +10,7 @@ import "./TerranceScreen.css";
 
 const DASH = "—";
 const HOUR = 3_600_000;
-// TODO(scheduler): switch to SchedulerStatus.nextConsolidationAt / nextReasoningAt once they land in HEAD (Decision 3).
+// SchedulerStatus.next*At (Decision 3) wins; last + interval is only the fallback when they are null.
 const CONSOLIDATION_MS = 6 * HOUR;
 const REASONING_MS = 12 * HOUR;
 
@@ -215,7 +215,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           )}
       </Card>
 
-      <Card title="Priorities" accessory={onNavigate && <Button variant="plain" size="small" onClick={() => onNavigate("chat" as ModuleId)}>Open Chat</Button>}>
+      <Card title="Priorities" accessory={onNavigate && <Button variant="plain" size="small" onClick={() => onNavigate("chat")}>Open Chat</Button>}>
         {priorities.length === 0
           ? <p className="home__note">No current priorities</p>
           : (
