@@ -14,8 +14,9 @@ describe("navigation (6 items, 4 groups)", () => {
     expect(resolveRoute("assistant")).toEqual({ id: "chat", view: "activity" });
     expect(resolveRoute("devices")).toEqual({ id: "settings", view: "devices" });
     expect(screenFor(resolveRoute("trajectory"))).toBe("terrance");
+    expect(screenFor(resolveRoute("devices"))).toBe("settings");
     for (const [old, target] of Object.entries(ROUTE_ALIASES)) {
-      if (old === "trajectory") continue;
+      if (old === "trajectory" || old === "devices") continue;
       expect(screenFor(resolveRoute(old as never))).toBe(old);
       expect(HOST_VIEWS[target!.id]?.some((v) => v.view === target!.view)).toBe(true);
     }

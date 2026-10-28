@@ -1,0 +1,12 @@
+.settings { display: grid; gap: var(--space-5, 20px); max-width: 640px; margin: 0 auto; width: 100%; }
+.settings__title { margin: 0; font: var(--type-title1, 600 22px/1.2 system-ui); color: var(--label); }
+.settings__devices { display: grid; gap: var(--space-3, 12px); scroll-margin-top: var(--space-4, 16px); }
+.settings__row-actions { display: inline-flex; align-items: center; gap: var(--space-2, 8px); }
+.settings__alert { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 12px); margin: 0; padding: var(--space-2, 8px) var(--space-3, 12px); border-radius: 8px; color: var(--system-red, #ff3b30); font: var(--type-callout); background: color-mix(in srgb, var(--system-red, #ff3b30) 8%, transparent); }
+.settings__alert p { margin: 0; }
+.backup-section { display: grid; gap: var(--space-2, 8px); }
+.backup-skipped { font: var(--type-callout); color: var(--label-secondary); padding: 0 var(--space-3, 12px); }
+.about { display: grid; justify-items: center; padding-top: calc(var(--space-4, 16px) + 2px); padding-bottom: var(--space-2, 8px); scroll-margin-top: var(--space-4, 16px); }
+.wordmark--about { font-size: 44px; line-height: 1.05; letter-spacing: -0.015em; }
+.about__version { margin: 8px 0 0; font-size: 13px; color: var(--label-secondary); }
+.about__credits { margin: 2px 0 0; font-size: 11px; color: var(--label-tertiary, var(--label-secondary)); }

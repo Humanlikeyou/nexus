@@ -7,7 +7,7 @@ import { useMuseSession } from "./app/useMuseSession";
 import { runApproval } from "./lib/approval";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
-import { ActivityField, BusinessField, DevicesField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, retryLazyScreens } from "./app/lazyScreens";
+import { ActivityField, BusinessField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, retryLazyScreens } from "./app/lazyScreens";
 import { ScreenErrorBoundary } from "./shell/ScreenErrorBoundary";
 import { approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";
 import { CommandSurface } from "./design/SystemPrimitives";
@@ -36,9 +36,12 @@ export default function App() {
   const active = route.id;
   const screenId = screenFor(route);
   // §6: Trajectory folded into Home as the Goals card; the alias lands on Home and scrolls to it.
+  // §9/§11: Devices and About live inside Settings; their aliases scroll to the anchor.
   useEffect(() => {
-    if (route.id !== "terrance" || route.view !== "goals") return;
-    const frame = requestAnimationFrame(() => document.getElementById("goals")?.scrollIntoView?.({ block: "start", behavior: "smooth" }));
+    const anchor = route.id === "terrance" && route.view === "goals" ? "goals"
+      : route.id === "settings" && (route.view === "devices" || route.view === "about") ? route.view : null;
+    if (!anchor) return;
+    const frame = requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView?.({ block: "start", behavior: "smooth" }));
     return () => cancelAnimationFrame(frame);
   }, [route]);
   // Old ids (sessions, trajectory, revenue, assistant, devices) resolve to their host + sub-view.
@@ -99,12 +102,11 @@ export default function App() {
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
     : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => setRoute({ id: "neuro", view: "main" })} />
-    : screenId === "devices" ? <DevicesField data={data} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} />
     : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} />
     : screenId === "revenue" ? <RevenueField data={data} onRetry={retrySnapshot} />
     : screenId === "assistant" ? <ActivityField data={data} />
     : screenId === "chat" ? <ChatField data={data} messages={messages} sending={sending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
-    : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} />;
+    : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} />;
 
   return (
     <CommandSurface mode={screenId}>

@@ -1,20 +1,87 @@
-import { PageHeading, SectionHeading, SegmentedControl, StatusIndicator } from "../design/ProductUI";
+import { Info, RefreshCw } from "lucide-react";
 import type { ThemePreference } from "../design/useAppearance";
-import { date } from "../lib/format";
+import { APP_NAME, APP_VERSION } from "../app/version";
+import { date, humanize } from "../lib/format";
 import { BackupSection } from "../settings/BackupSection";
-import type { SystemSnapshot } from "../types";
-import { HardDrive, SlidersHorizontal, Sun } from "lucide-react";
+import type { MuseDevice, SystemSnapshot } from "../types";
+import { Button, InsetGroup, ListRow, SegmentedControl, Toggle } from "../ui";
+import { DevicesGroup } from "./DevicesScreen";
+import type { MuseOperation } from "./muse";
+import { nextRuns, relative, useSchedulerStatus } from "./TerranceScreen";
+import { INITIAL_SNAPSHOT } from "../bridge";
+import { useNow } from "../shell/useNow";
+import "./SettingsScreen.css";
 
-export function SettingsField({ data, theme, setTheme, reduceMotion, setReduceMotion }: { data: SystemSnapshot; theme: ThemePreference; setTheme: (theme: ThemePreference) => void; reduceMotion: boolean; setReduceMotion: (value: boolean) => void }) {
-  return <div className="system-field settings-field">
-    <PageHeading eyebrow="Amara OS" title="Settings" description="Appearance and local application behavior." />
-    <div className="settings-layout">
-      <nav className="settings-index" aria-label="Settings sections"><a href="#appearance"><Sun size={15} />Appearance</a><a href="#general"><SlidersHorizontal size={15} />General</a><a href="#advanced"><HardDrive size={15} />Advanced</a></nav>
-      <div className="settings-content">
-        <section id="appearance" className="settings-section"><SectionHeading title="Appearance" detail="Choose how Amara OS looks on this Mac." /><div className="setting-row"><div><strong>Theme</strong><p>Follow macOS or keep a consistent appearance.</p></div><SegmentedControl value={theme} label="Theme" onChange={setTheme} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} /></div><label className="setting-row setting-toggle"><div><strong>Reduce motion</strong><p>Minimize interface transitions and live state animation.</p></div><input type="checkbox" checked={reduceMotion} onChange={(event) => setReduceMotion(event.target.checked)} /><span aria-hidden="true" /></label></section>
-        <section id="general" className="settings-section"><SectionHeading title="General" detail="Current application behavior." /><div className="setting-row"><div><strong>Automatic refresh</strong><p>Health, action, and runtime status refresh every 15 seconds.</p></div><StatusIndicator tone="success">On</StatusIndicator></div><div className="setting-row"><div><strong>Local-first data</strong><p>Sessions, context, and preferences stay in local Amara OS stores.</p></div><StatusIndicator tone="success">Active</StatusIndicator></div></section>
-        <section id="advanced" className="settings-section"><SectionHeading title="Advanced" detail="Runtime details for troubleshooting." /><BackupSection /><details className="diagnostics-disclosure" open><summary>Diagnostics</summary><dl><div><dt>Application</dt><dd>Amara OS 0.1.0</dd></div><div><dt>Runtime</dt><dd>{data.hermes.runtime} · {data.hermes.model}</dd></div><div><dt>Gateway</dt><dd>{data.hermes.gatewayRunning ? "Running" : "Offline"}</dd></div><div><dt>Muse</dt><dd>{data.muse.streaming ? "Streaming" : data.muse.connected ? "Connected" : "Disconnected"}</dd></div><div><dt>NOOP health</dt><dd>{data.noop.status.replace(/_/g, " ")}</dd></div><div><dt>Last refresh</dt><dd>{date(data.refreshedAt)}</dd></div></dl></details></section>
-      </div>
+export type SettingsFieldProps = {
+  data: SystemSnapshot;
+  theme: ThemePreference;
+  setTheme: (theme: ThemePreference) => void;
+  reduceMotion: boolean;
+  setReduceMotion: (value: boolean) => void;
+  devices?: MuseDevice[];
+  operation?: MuseOperation;
+  error?: string | null;
+  onScan?: () => void;
+  onConnect?: (device: MuseDevice) => void;
+  onDisconnect?: () => void;
+  onRetry?: () => void;
+};
+
+const noop = () => {};
+
+/** About header (Shell › Wordmark: 44px Cormorant, "Version {v}" below). "Amara" alone; accessible name "Amara OS". */
+export function AboutHeader() {
+  return (
+    <div className="about" id="about">
+      <span className="wordmark wordmark--about" role="img" aria-label={APP_NAME}>Amara</span>
+      <p className="about__version">{APP_NAME} · Version {APP_VERSION}</p>
+      <p className="about__credits">Wordmark set in Cormorant Garamond (SIL Open Font License 1.1).</p>
     </div>
-  </div>;
+  );
+}
+
+/** Settings (screen-specs §11): one 640px column of System Settings style groups. Changes apply immediately. */
+export function SettingsField({ data, theme, setTheme, reduceMotion, setReduceMotion, devices = [], operation = null, error = null, onScan = noop, onConnect = noop, onDisconnect = noop, onRetry }: SettingsFieldProps) {
+  const scheduler = useSchedulerStatus();
+  const now = useNow(30_000).getTime();
+  const next = nextRuns(scheduler).consolidation;
+  const loaded = data.refreshedAt !== INITIAL_SNAPSHOT.refreshedAt;
+  const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
+  const diag = (value: string, command?: string) => (!loaded ? "—" : command && down(command) ? "Unavailable" : value);
+  const h = data.hermes;
+  return (
+    <div className="settings">
+      <h1 className="settings__title">Settings</h1>
+
+      <InsetGroup title="Appearance">
+        <ListRow title="Appearance" accessory={<SegmentedControl label="Appearance" size="small" value={theme} onChange={setTheme} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} />} />
+        <ListRow title="Reduce motion" subtitle="Minimizes transitions and live animation." accessory={<Toggle aria-label="Reduce motion" checked={reduceMotion} onCheckedChange={setReduceMotion} />} />
+      </InsetGroup>
+
+      <DevicesGroup data={data} devices={devices} operation={operation} error={error} onScan={onScan} onConnect={onConnect} onDisconnect={onDisconnect} onRetry={onRetry} />
+
+      <InsetGroup title="General">
+        <ListRow title="Refresh" value="Every 15 seconds" />
+        <ListRow title="Data" value="Stored on this Mac" />
+        <ListRow title="Background jobs" value={scheduler.running ? "Running" : "Stopped"}
+          subtitle={scheduler.running && next != null ? `Next consolidation ${relative(next, now)}` : undefined} />
+      </InsetGroup>
+
+      <BackupSection />
+
+      <AboutHeader />
+      <InsetGroup title="About & Diagnostics" footer="For troubleshooting.">
+        <ListRow icon={Info} title="Application" value={`${APP_NAME} ${APP_VERSION}`} />
+        <ListRow title="Assistant" subtitle={loaded ? `Hermes Agent · ${h.runtime} · ${h.model}` : undefined} value="Amara" />
+        <ListRow title="Gateway" value={diag(h.gatewayRunning ? "Running" : "Offline", "get_terrence_runtime_health")} />
+        <ListRow title="Muse" value={diag(data.muse.streaming ? "Streaming" : data.muse.connected ? "Connected" : "Disconnected", "get_muse_state")} />
+        <ListRow title="NOOP" value={diag(humanize(data.noop.status), "get_noop_health_snapshot")} />
+        <ListRow title="Unavailable sources" value={diag(data.unavailableSources.length ? data.unavailableSources.map((s) => s.label).join(", ") : "None")} />
+        <ListRow title="Last refresh" value={diag(date(data.refreshedAt))} />
+      </InsetGroup>
+      {loaded && data.unavailableSources.length > 0 && onRetry && (
+        <div><Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button></div>
+      )}
+    </div>
+  );
 }

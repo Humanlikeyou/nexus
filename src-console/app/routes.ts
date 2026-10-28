@@ -34,7 +34,6 @@ export const HOST_VIEWS: Partial<Record<ModuleId, SubView[]>> = {
   chat: [{ view: "main", label: "Chat", screen: "chat" }, { view: "activity", label: "Activity", screen: "assistant" }],
   neuro: [{ view: "main", label: "Live", screen: "neuro" }, { view: "history", label: "History", screen: "sessions" }],
   business: [{ view: "main", label: "Work", screen: "business" }, { view: "revenue", label: "Revenue", screen: "revenue" }],
-  settings: [{ view: "main", label: "General", screen: "settings" }, { view: "devices", label: "Devices", screen: "devices" }],
 };
 
 /** Folded ids stay valid ModuleIds (stored state, ⌘K, onNavigate) and resolve to their host. */
@@ -44,6 +43,7 @@ export const ROUTE_ALIASES: Partial<Record<ModuleId, { id: ModuleId; view: strin
   trajectory: { id: "terrance", view: "goals" },
   revenue: { id: "business", view: "revenue" },
   assistant: { id: "chat", view: "activity" },
+  // Anchor alias: Settings renders Devices inline (§9) and App scrolls to #devices.
   devices: { id: "settings", view: "devices" },
 };
 

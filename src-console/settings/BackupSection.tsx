@@ -1,6 +1,9 @@
 import { useState } from "react";
+import { Archive } from "lucide-react";
 import { packItUp } from "@/lib/api";
 import type { PackageInfo } from "@/lib/types";
+import { readableError } from "../lib/format";
+import { Button, InsetGroup, ListRow } from "../ui";
 
 /** Older backends may omit `skipped`, or send something unexpected. */
 export function skippedFiles(info: Partial<PackageInfo> | null | undefined): string[] {
@@ -8,7 +11,7 @@ export function skippedFiles(info: Partial<PackageInfo> | null | undefined): str
   return Array.isArray(s) ? s.filter((x): x is string => typeof x === "string") : [];
 }
 
-/** Quiet, collapsible list of files left out of a backup. Renders nothing when empty. */
+/** Quiet, collapsible list of files left out of a backup (paths only). Renders nothing when empty. */
 export function SkippedFilesList({ info }: { info: Partial<PackageInfo> | null | undefined }) {
   const skipped = skippedFiles(info);
   if (skipped.length === 0) return null;
@@ -20,6 +23,15 @@ export function SkippedFilesList({ info }: { info: Partial<PackageInfo> | null |
   );
 }
 
+/** "/Users/me/very/long/path/archive.tar.gz" → "/Users/me/ve…/archive.tar.gz" */
+export function middleTruncate(text: string, max = 44): string {
+  if (text.length <= max) return text;
+  const tail = Math.ceil((max - 1) * 0.6);
+  return `${text.slice(0, max - 1 - tail)}…${text.slice(-tail)}`;
+}
+
+/** Settings › Backup (screen-specs §11). Shows only paths, sizes and counts, never file contents
+ *  or config values (the archive may hold keys). No restore yet, so nothing destructive here. */
 export function BackupSection({ pack = packItUp }: { pack?: () => Promise<PackageInfo> }) {
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<PackageInfo | null>(null);
@@ -31,24 +43,22 @@ export function BackupSection({ pack = packItUp }: { pack?: () => Promise<Packag
     try {
       setInfo(await pack());
     } catch (e) {
-      setError(String(e));
+      setError(readableError(e));
     } finally {
       setBusy(false);
     }
   };
 
+  const includes = Array.isArray(info?.includes) ? info!.includes.length : 0;
   return (
-    <div className="setting-row backup-section">
-      <div>
-        <strong>Backup</strong>
-        <p>Package config and local data into an archive.</p>
-        {info && <p className="backup-result">Saved {info.size_mb.toFixed(1)} MB to <code>{info.path}</code></p>}
-        {error && <p className="backup-error" role="status">Backup unavailable: {error}</p>}
-        <SkippedFilesList info={info} />
-      </div>
-      <button type="button" className="action-button" onClick={() => void run()} disabled={busy}>
-        {busy ? "Packing…" : "Create backup"}
-      </button>
+    <div className="backup-section">
+      <InsetGroup title="Backup" footer={info ? `${includes} item${includes === 1 ? "" : "s"} included` : undefined}>
+        <ListRow icon={Archive} title="Back Up Amara OS" subtitle="Packages config and local data into an archive."
+          accessory={<Button variant="secondary" size="small" loading={busy} onClick={() => void run()}>{busy ? "Packing…" : "Create Backup"}</Button>} />
+        {info && <ListRow title="Last backup" subtitle={<span title={info.path}>{middleTruncate(info.path)}</span>} value={`${info.size_mb.toFixed(1)} MB`} />}
+      </InsetGroup>
+      <SkippedFilesList info={info} />
+      {error && <p className="settings__alert" role="alert">Backup didn&apos;t finish: {error}</p>}
     </div>
   );
 }

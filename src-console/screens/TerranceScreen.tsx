@@ -56,7 +56,7 @@ function readScheduler(): SchedulerView {
   try { return getSchedulerStatus(); } catch { return STOPPED; }
 }
 
-function useSchedulerStatus(override?: SchedulerView): SchedulerView {
+export function useSchedulerStatus(override?: SchedulerView): SchedulerView {
   // An override wins outright (derived, not mirrored into state); otherwise poll every 30s.
   const [polled, setPolled] = useState<SchedulerView>(() => override ?? readScheduler());
   useEffect(() => {
