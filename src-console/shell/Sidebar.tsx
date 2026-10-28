@@ -78,8 +78,8 @@ export function Sidebar({ active, onSelect, data }: { active: ModuleId; onSelect
   return (
     <nav className="system-constellation" aria-label="Amara OS navigation">
       {SYSTEM_GROUPS.map((group) => (
-        <section className="nav-group" key={group.label}>
-          <h2>{group.label}</h2>
+        <section className="nav-group" key={group.label || "main"} aria-label={group.label || undefined}>
+          {group.label && <h2>{group.label}</h2>}
           {group.systems.map((system) => {
             const Icon = system.icon;
             const index = SYSTEMS.findIndex((entry) => entry.id === system.id);

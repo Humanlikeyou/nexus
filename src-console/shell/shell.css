@@ -101,3 +101,6 @@ main.command-surface > .field-footer {
   main.command-surface > .intelligence-overlay > .nexus-mark > * { visibility: hidden; }
   .shell-sidebar-resizer { display: none; }
 }
+
+/* Host sub-views (interim, screen-specs Part 2): folded screens sit behind a small SegmentedControl. */
+main.command-surface > .active-field > .subview-bar { display: flex; justify-content: flex-start; margin: 0 0 16px; }

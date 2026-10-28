@@ -90,6 +90,22 @@ describe("lazy screens", () => {
     expect(errorSpy.mock.calls.map((c) => String(c[0]).slice(0, 200))).toEqual([]);
   });
 
+  it("folded screens stay reachable as host sub-views (ROUTE_ALIASES)", async () => {
+    vi.useFakeTimers();
+    render(<App />);
+    await flush();
+    for (const [host, view] of [["Home", "Goals"], ["Chat & Agents", "Activity"], ["Neuro", "History"], ["Business", "Revenue"], ["Settings", "Devices"]] as const) {
+      go(host);
+      await settle(host);
+      fireEvent.click(within(field(host)!).getByRole("radio", { name: view }));
+      await settle(host);
+      const f = field(host)!;
+      expect(within(f).getByRole("radio", { name: view }), `${host} › ${view}`).toHaveAttribute("aria-checked", "true");
+      expect(f.textContent!.trim().length, `${host} › ${view}: blank`).toBeGreaterThan(20);
+    }
+    expect(errorSpy.mock.calls.map((c) => String(c[0]).slice(0, 200))).toEqual([]);
+  });
+
   it("revisiting a screen renders synchronously (no fallback flash)", async () => {
     vi.useFakeTimers();
     render(<App />);

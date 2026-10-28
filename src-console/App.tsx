@@ -1,5 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { SYSTEMS } from "./app/routes";
+import { HOST_VIEWS, SYSTEMS, resolveRoute, screenFor, type Route } from "./app/routes";
+import { SegmentedControl } from "./ui";
 import { useConversation } from "./app/useConversation";
 import { useSnapshot } from "./app/useSnapshot";
 import { useMuseSession } from "./app/useMuseSession";
@@ -23,7 +24,11 @@ import { Toolbar } from "./shell/Toolbar";
 import type { ModuleId } from "./types";
 
 export default function App() {
-  const [active, setActive] = useState<ModuleId>("terrance");
+  const [route, setRoute] = useState<Route>({ id: "terrance", view: "main" });
+  const active = route.id;
+  const screenId = screenFor(route);
+  // Old ids (sessions, trajectory, revenue, assistant, devices) resolve to their host + sub-view.
+  const setActive = useCallback((id: ModuleId) => setRoute(resolveRoute(id)), []);
   const { data, busy, setBusy, refresh } = useSnapshot();
   const [notice, setNotice] = useState<string | null>(null);
   const { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession } = useMuseSession(data, refresh, setNotice);
@@ -45,7 +50,7 @@ export default function App() {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, []);
+  }, [setActive]);
 
   const act = useCallback(async (name: string, action: () => Promise<unknown>) => { setBusy(true); setNotice(`${name} in progress`); try { await action(); setNotice(`${name} complete`); await refresh(); } catch { setBusy(false); setNotice(`${name} unavailable`); } window.setTimeout(() => setNotice(null), 3500); }, [refresh]);
 
@@ -69,24 +74,25 @@ export default function App() {
   }, []);
 
   const selected = useMemo(() => SYSTEMS.find((system) => system.id === active)!, [active]);
+  const subViews = HOST_VIEWS[active];
   const retrySnapshot = () => { void refresh(); };
-  const view = active === "terrance" ? <TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} />
-    : active === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
-    : active === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
-    : active === "sessions" ? <SessionsField data={data} />
-    : active === "devices" ? <DevicesField data={data} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} />
-    : active === "business" ? <BusinessField data={data} />
-    : active === "revenue" ? <RevenueField data={data} />
-    : active === "assistant" ? <ActivityField data={data} />
-    : active === "trajectory" ? <TrajectoryField data={data} />
-    : active === "chat" ? <ChatField data={data} messages={messages} sending={sending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
+  const view = screenId === "terrance" ? <TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} />
+    : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
+    : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
+    : screenId === "sessions" ? <SessionsField data={data} />
+    : screenId === "devices" ? <DevicesField data={data} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} />
+    : screenId === "business" ? <BusinessField data={data} />
+    : screenId === "revenue" ? <RevenueField data={data} />
+    : screenId === "assistant" ? <ActivityField data={data} />
+    : screenId === "trajectory" ? <TrajectoryField data={data} />
+    : screenId === "chat" ? <ChatField data={data} messages={messages} sending={sending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
     : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} />;
 
   return (
-    <CommandSurface mode={active}>
+    <CommandSurface mode={screenId}>
       <Toolbar label={selected.label} busy={busy} onRefresh={refresh} />
       <Sidebar active={active} onSelect={setActive} data={data} />
-      <section className="active-field" aria-label={`${selected.label} system`}><ScreenErrorBoundary resetKey={active} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
+      <section className="active-field" aria-label={`${selected.label} system`}>{subViews && <div className="subview-bar"><SegmentedControl label={`${selected.label} view`} size="small" value={route.view} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => setRoute({ id: active, view })} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
       <Footer data={data} busy={busy} />
       {notice && <div className="field-notice"><i />{notice}</div>}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />

@@ -40,8 +40,7 @@ describe("Sidebar", () => {
     expect(screen.queryByText("HISTORY")).toBeNull();
     expect(screen.queryByText("NOOP")).toBeNull();
     const hints = [...container.querySelectorAll(".nav-shortcut")].map((n) => n.textContent);
-    expect(hints.slice(0, 3)).toEqual(["⌘1", "⌘2", "⌘3"]);
-    expect(hints.length).toBe(9);
+    expect(hints).toEqual(["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6"]);
   });
 
   it("clamps", () => {
