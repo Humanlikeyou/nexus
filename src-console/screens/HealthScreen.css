@@ -1,0 +1,58 @@
+/* Fitness (NOOP). Tokens only; see styles/tokens.css and ui/. */
+.fitness {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  max-width: 1120px;
+  margin: 0 auto;
+  color: var(--label);
+}
+.fitness__header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.fitness__heading { display: grid; gap: var(--space-1); min-width: 0; }
+.fitness__title-row { display: flex; align-items: center; gap: var(--space-2); }
+.fitness__title-row h1, .fitness__heading h1 { margin: 0; font: var(--type-large-title); letter-spacing: -.01em; }
+.fitness__meta { margin: 0; color: var(--label-secondary); font: var(--type-subheadline); font-variant-numeric: tabular-nums; }
+.fitness__header-trailing { display: flex; align-items: center; gap: var(--space-2); }
+.fitness__callout { margin: 0; color: var(--label-secondary); font: var(--type-callout); }
+.fitness__pending { margin: 0; color: var(--label-secondary); font: var(--type-callout); }
+
+.fitness__row { display: grid; gap: var(--space-4); grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fitness__ring-body { display: grid; justify-items: center; gap: var(--space-2); padding-block: var(--space-2); }
+.fitness__ring-value { font: var(--type-title1); font-variant-numeric: tabular-nums; }
+.fitness__ring-unit { color: var(--label-secondary); font: var(--type-subheadline); }
+.fitness__band { font: var(--type-headline); color: var(--label-secondary); }
+.fitness__band[data-band="high"] { color: color-mix(in srgb, var(--data-recovery-high) 70%, var(--label)); }
+.fitness__band[data-band="medium"] { color: var(--data-recovery-mid-text); }
+.fitness__band[data-band="low"] { color: color-mix(in srgb, var(--data-recovery-low) 78%, var(--label)); }
+
+.fitness__sleep-body { display: grid; gap: var(--space-3); }
+.fitness__display { margin: 0; font: var(--type-display); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.fitness__labelled-meter { display: grid; grid-template-columns: 1fr auto; gap: var(--space-1); color: var(--label-secondary); font: var(--type-subheadline); }
+.fitness__labelled-meter > .ui-meter { grid-column: 1 / -1; }
+.fitness__num { font-variant-numeric: tabular-nums; color: var(--label); }
+.fitness__legend { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: 0; padding: 0; list-style: none; color: var(--label-secondary); font: var(--type-subheadline); }
+.fitness__legend li { display: inline-flex; align-items: center; gap: var(--space-1); }
+.fitness__legend i { width: 8px; height: 8px; border-radius: var(--radius-pill); }
+.fitness__night-meter { margin-block: var(--space-3) var(--space-2); }
+
+.fitness__tiles { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.fitness__tiles--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-block: var(--space-4); }
+.fitness__tiles--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: var(--space-3); }
+.fitness .ui-card .ui-stat { box-shadow: none; background: var(--fill-tertiary); border-color: transparent; }
+
+.fitness__trend { display: grid; gap: var(--space-2); margin: var(--space-4) 0 0; }
+.fitness__axis { display: flex; justify-content: space-between; color: var(--label-secondary); font: var(--type-subheadline); font-variant-numeric: tabular-nums; }
+.fitness__caption { color: var(--label-secondary); font: var(--type-subheadline); font-variant-numeric: tabular-nums; }
+
+.fitness__skel { display: block; border-radius: var(--radius-md); background: var(--fill-tertiary); animation: fitness-pulse 1.4s ease-in-out infinite; }
+.fitness__skel--line { width: 220px; height: 14px; }
+.fitness__skel--ring { width: 148px; height: 148px; border-radius: var(--radius-pill); }
+.fitness__skel--tile { height: 96px; }
+@keyframes fitness-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .fitness__skel { animation: none; } }
+:root[data-reduce-motion="true"] .fitness__skel { animation: none; }
+
+@media (max-width: 860px) {
+  .fitness__row { grid-template-columns: 1fr; }
+  .fitness__tiles--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
