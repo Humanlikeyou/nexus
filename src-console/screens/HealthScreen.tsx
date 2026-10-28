@@ -49,19 +49,23 @@ const pct = (fraction: number | null | undefined) => (typeof fraction === "numbe
 const Missing = () => <span title="unavailable">{DASH}</span>;
 const val = (text: string) => (text === DASH ? <Missing /> : text);
 
+/** NOOP stores daily strain as "Effort" on its native 0–100 axis (StrainScorer.maxStrain = 100). */
+const EFFORT_MAX = 100;
+const clampEffort = (v: number) => Math.min(EFFORT_MAX, Math.max(0, v));
+
 type TrendKey = "recovery" | "sleep" | "hrv" | "rhr" | "strain" | "skin" | "resp";
 const TRENDS: Record<TrendKey, { label: string; unit: string; digits: number; color: string; pick: (d: NoopDailyMetric) => number | null }> = {
   recovery: { label: "Recovery", unit: "%", digits: 0, color: "var(--data-recovery-high)", pick: (d) => d.recovery },
   sleep: { label: "Sleep", unit: "h", digits: 1, color: "var(--data-sleep)", pick: (d) => (d.totalSleepMin == null ? null : d.totalSleepMin / 60) },
   hrv: { label: "HRV", unit: "ms", digits: 0, color: "var(--data-hrv)", pick: (d) => d.avgHrv },
   rhr: { label: "RHR", unit: "bpm", digits: 0, color: "var(--sys-red)", pick: (d) => d.restingHr },
-  strain: { label: "Strain", unit: "", digits: 1, color: "var(--data-strain)", pick: (d) => (d.strain == null ? null : Math.min(21, Math.max(0, d.strain))) },
+  strain: { label: "Effort", unit: "", digits: 1, color: "var(--data-strain)", pick: (d) => (d.strain == null ? null : clampEffort(d.strain)) },
   skin: { label: "Skin temp", unit: "°C", digits: 1, color: "var(--sys-orange)", pick: (d) => d.skinTempDevC },
   resp: { label: "Resp", unit: "br/min", digits: 1, color: "var(--sys-teal)", pick: (d) => d.respRateBpm },
 };
 
 const INSIGHT_ICON: Array<[RegExp, LucideIcon]> = [
-  [/sleep/, Moon], [/hrv|heart|overnight|rhr/, HeartPulse], [/battery/, BatteryMedium], [/resp/, Wind], [/recovery|strain/, Activity],
+  [/sleep/, Moon], [/hrv|heart|overnight|rhr/, HeartPulse], [/battery/, BatteryMedium], [/resp/, Wind], [/recovery|strain|effort/, Activity],
 ];
 const insightIcon = (metric: string) => INSIGHT_ICON.find(([re]) => re.test(metric))?.[1] ?? Sparkles;
 
@@ -194,7 +198,7 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
   const eff = pct(overnight?.efficiency ?? today?.efficiency ?? null);
   const recovery = today?.recovery ?? null;
   const band = recoveryBand(recovery);
-  const strain = today?.strain == null ? null : Math.min(21, Math.max(0, today.strain));
+  const strain = today?.strain == null ? null : clampEffort(today.strain);
   const days = health.recentDays;
   const everNull = (pick: (d: NoopDailyMetric) => number | null) => days.every((d) => pick(d) == null) && (today == null || pick(today) == null);
   const pending = "Arrives after the sleep record closes";
@@ -235,11 +239,11 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
               </div>
             )}
         </Card>
-        <Card title="Strain" className="fitness__ring-card">
+        <Card title="Effort" className="fitness__ring-card">
           <div className="fitness__ring-body">
-            <Ring value={strain} max={21} label="Strain" size="lg" color="var(--data-strain)" valueText={strain == null ? undefined : `${fmt(strain, 1)} of 21`}>
+            <Ring value={strain} max={EFFORT_MAX} label="Effort" size="lg" color="var(--data-strain)" valueText={strain == null ? undefined : `${fmt(strain, 1)} of ${EFFORT_MAX}`}>
               <span className="fitness__ring-value">{strain == null ? <Missing /> : fmt(strain, 1)}</span>
-              <span className="fitness__ring-unit">of 21</span>
+              <span className="fitness__ring-unit">of {EFFORT_MAX}</span>
             </Ring>
           </div>
         </Card>
@@ -318,7 +322,7 @@ function FitnessSkeleton() {
     <div className="fitness" data-state="loading" aria-busy="true" aria-label="Loading Fitness">
       <header className="fitness__header"><div className="fitness__heading"><h1>Fitness</h1><span className="fitness__skel fitness__skel--line" /></div></header>
       <div className="fitness__row fitness__row--today">
-        {["Recovery", "Strain", "Sleep"].map((t) => (
+        {["Recovery", "Effort", "Sleep"].map((t) => (
           <Card key={t} title={t} className="fitness__ring-card"><div className="fitness__ring-body"><span className="fitness__skel fitness__skel--ring" /></div></Card>
         ))}
       </div>

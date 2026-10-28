@@ -15,7 +15,7 @@ function snap(noop: Partial<NoopHealthSnapshot>, extra: Partial<SystemSnapshot> 
 
 const ready: Partial<NoopHealthSnapshot> = {
   status: "ready", generatedAt: "2026-10-28T07:30:00+09:00", dataAgeDays: 0, deviceId: "noop-1", latestDay: "2026-10-28",
-  today: day("2026-10-28", { strain: 25 }),
+  today: day("2026-10-28", { strain: 125 }),
   recentDays: [day("2026-10-26", { recovery: 60 }), day("2026-10-27", { recovery: null }), day("2026-10-28")],
   latestNight: { day: "2026-10-28", startedAt: "2026-10-27T23:41:00+09:00", endedAt: "2026-10-28T07:13:00+09:00", durationMin: 452, efficiency: 0.91, deepMin: 92, remMin: 104, lightMin: 230, awakeMin: 26, sessionCount: 2, restingHr: 51, avgHrv: 66 },
   latestSleep: null,
@@ -50,14 +50,17 @@ describe("Fitness (HealthField)", () => {
     expect(screen.queryByRole("meter")).toBeNull();
   });
 
-  it("ready: rings, band word, clamped strain, NOOP band battery, merged sessions, insights", () => {
+  it("ready: rings, band word, clamped effort, NOOP band battery, merged sessions, insights", () => {
     const { container } = render(<HealthField data={snap(ready)} />);
     expect(screen.getByText("Up to date")).toBeInTheDocument();
     const recovery = screen.getByRole("meter", { name: "Recovery" });
     expect(recovery).toHaveAttribute("aria-valuenow", "74");
     expect(recovery).toHaveAttribute("aria-valuetext", "74%, High");
     expect(screen.getByText("High")).toBeInTheDocument();
-    expect(screen.getByRole("meter", { name: "Strain" })).toHaveAttribute("aria-valuenow", "21");
+    const effort = screen.getByRole("meter", { name: "Effort" });
+    expect(effort).toHaveAttribute("aria-valuenow", "100");
+    expect(effort).toHaveAttribute("aria-valuetext", "100.0 of 100");
+    expect(screen.getByRole("radio", { name: "Effort" })).toBeInTheDocument();
     expect(screen.getByText(/NOOP band 82% · On strap/)).toBeInTheDocument();
     expect(screen.getByText("2 sessions merged")).toBeInTheDocument();
     expect(screen.getByText("23:41 → 07:13")).toBeInTheDocument();
@@ -73,11 +76,11 @@ describe("Fitness (HealthField)", () => {
     expect(screen.getByText("NOOP band battery is 82%")).toBeInTheDocument();
   });
 
-  it("waiting_for_nightly_data: strain shown, recovery/sleep pending", () => {
+  it("waiting_for_nightly_data: effort shown, recovery/sleep pending", () => {
     render(<HealthField data={snap({ ...ready, status: "waiting_for_nightly_data", latestNight: null })} />);
     expect(screen.getByText("Syncing overnight")).toBeInTheDocument();
     expect(screen.getAllByText("Arrives after the sleep record closes")).toHaveLength(2);
-    expect(screen.getByRole("meter", { name: "Strain" })).toBeInTheDocument();
+    expect(screen.getByRole("meter", { name: "Effort" })).toBeInTheDocument();
     expect(screen.queryByRole("meter", { name: "Recovery" })).toBeNull();
   });
 
