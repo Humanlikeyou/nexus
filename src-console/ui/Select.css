@@ -1,0 +1,15 @@
+.ui-select__input {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: calc(var(--space-2) * 2 + var(--text-body));
+  cursor: default;
+}
+.ui-select__chevron {
+  position: absolute;
+  right: var(--space-2);
+  width: var(--text-body);
+  height: var(--text-body);
+  color: var(--label-secondary);
+  pointer-events: none;
+}
+.ui-select__input:disabled + .ui-select__chevron { opacity: .45; }

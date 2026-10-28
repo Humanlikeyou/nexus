@@ -105,7 +105,7 @@ describe("lazy screens", () => {
 describe("Neuro (Live) session timer (fake timers)", () => {
   const T0 = new Date("2026-10-21T10:00:00+09:00");
   const flush = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
-  const readout = () => document.querySelector(".live-readout strong")?.textContent;
+  const readout = () => document.querySelector(".neuro__session-time .ui-stat__value")?.textContent;
   const click = async (name: RegExp) => { fireEvent.click(screen.getByRole("button", { name })); await flush(); await flush(); };
 
   async function openLive() {
@@ -115,13 +115,13 @@ describe("Neuro (Live) session timer (fake timers)", () => {
     render(<App />);
     await flush(); await flush();
     go("Neuro");
-    for (let i = 0; i < 5 && !document.querySelector(".live-readout"); i++) await flush();
+    for (let i = 0; i < 5 && !document.querySelector(".neuro__session-time"); i++) await flush();
     expect(readout()).toBe("Ready");
   }
 
   it("ticks once per second from 00:00 without drift or double-ticks", async () => {
     await openLive();
-    await click(/Start session/);
+    await click(/Start Session/);
     expect(readout()).toBe("00:00");
     const seen: string[] = [];
     for (let i = 0; i < 5; i++) { await flush(1000); seen.push(readout()!); }
@@ -132,7 +132,7 @@ describe("Neuro (Live) session timer (fake timers)", () => {
 
   it("keeps time across screen switches and re-renders (derived from start, no reset)", async () => {
     await openLive();
-    await click(/Start session/);
+    await click(/Start Session/);
     await flush(15_000);
     expect(readout()).toBe("00:15");
     go("Fitness"); await flush(); await flush();
@@ -145,15 +145,15 @@ describe("Neuro (Live) session timer (fake timers)", () => {
 
   it("stops on Stop session and resets to 00:00 on the next start", async () => {
     await openLive();
-    await click(/Start session/);
+    await click(/Start Session/);
     await flush(7_000);
     expect(readout()).toBe("00:07");
-    await click(/Stop session/);
+    await click(/Stop Session/);
     expect(readout()).toBe("Ready");
     await flush(5_000);
     expect(readout()).toBe("Ready");
     expect(h.invoke.mock.calls.filter(([c]) => c === "save_session")).toHaveLength(1);
-    await click(/Start session/);
+    await click(/Start Session/);
     expect(readout()).toBe("00:00");
     await flush(3_000);
     expect(readout()).toBe("00:03");

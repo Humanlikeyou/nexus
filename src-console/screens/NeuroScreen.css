@@ -1,0 +1,65 @@
+/* Neuro (Muse). Tokens only; see styles/tokens.css and ui/. Matches Fitness (HealthScreen.css). */
+.neuro {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  max-width: 1120px;
+  margin: 0 auto;
+  color: var(--label);
+}
+.neuro__header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.neuro__title-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
+.neuro__title-row h1 { margin: 0; font: var(--type-large-title); letter-spacing: -.01em; }
+.neuro__actions { display: flex; align-items: center; gap: var(--space-2); }
+.neuro__callout, .neuro__pending { margin: 0; color: var(--label-secondary); font: var(--type-callout); }
+.neuro__footnote { margin: var(--space-2) 0 0; color: var(--label-secondary); font: var(--type-subheadline); }
+.neuro__num { font-variant-numeric: tabular-nums; }
+
+/* Inline alerts: tinted cards, the text says what happened (color is not the only signal). */
+.neuro__alert > * { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.neuro__alert[data-tone="danger"] { background: color-mix(in srgb, var(--sys-red) 10%, var(--bg-content)); border-color: color-mix(in srgb, var(--sys-red) 35%, transparent); }
+.neuro__alert[data-tone="warning"] { background: color-mix(in srgb, var(--sys-orange) 12%, var(--bg-content)); border-color: color-mix(in srgb, var(--sys-orange) 35%, transparent); }
+.neuro__alert .neuro__callout { color: var(--label); }
+
+.neuro__empty-lead { display: grid; justify-items: start; gap: var(--space-2); margin-bottom: var(--space-4); }
+.neuro__empty-icon { width: 28px; height: 28px; color: var(--label-tertiary); }
+.neuro__group .ui-inset-group__title, .neuro__group .ui-inset-group__footer { padding-inline: 0; }
+
+/* Session strip: one row. */
+.neuro__strip > * { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.neuro__protocol { width: 240px; }
+.neuro__calibration { flex: 1 1 160px; max-width: 280px; }
+
+.neuro__hero { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.neuro__hero .ui-stat__value { font: var(--type-display); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.neuro__calm > * { display: grid; justify-items: center; }
+.neuro__ring-value { font: var(--type-title2); font-variant-numeric: tabular-nums; }
+
+.neuro__row { display: grid; gap: var(--space-4); grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; }
+.neuro__row--sessions { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.neuro__row--sessions:not(:has(.neuro__panel)) { grid-template-columns: minmax(0, 1fr); }
+.neuro__band-symbol { display: inline-block; width: 1.4em; color: var(--accent-strong); }
+.neuro__band .ui-list-row__subtitle { display: block; width: 100%; margin-top: var(--space-1); }
+.neuro__band-trend { width: 96px; }
+
+.neuro__disclosure { margin-top: var(--space-3); }
+.neuro__disclosure summary { cursor: default; color: var(--label-secondary); font: var(--type-subheadline); }
+.neuro__disclosure summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-sm); }
+.neuro__disclosure[open] summary { margin-bottom: var(--space-2); }
+
+.neuro__panel-tiles { display: grid; gap: var(--space-3); grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: var(--space-3); }
+.neuro__panel-tiles .ui-stat__value { font: var(--type-title1); }
+.neuro .ui-card .ui-stat { box-shadow: none; background: var(--fill-tertiary); border-color: transparent; }
+
+.neuro__skel { display: block; border-radius: var(--radius-md); background: var(--fill-tertiary); animation: neuro-pulse 1.4s ease-in-out infinite; }
+.neuro__skel--badge { width: 160px; height: 20px; border-radius: var(--radius-pill); }
+.neuro__skel--strip { height: 60px; }
+.neuro__skel--tile { height: 96px; }
+.neuro__skel--block { height: 220px; }
+@keyframes neuro-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .neuro__skel { animation: none; } }
+:root[data-reduce-motion="true"] .neuro__skel { animation: none; }
+
+@media (max-width: 860px) {
+  .neuro__row, .neuro__row--sessions { grid-template-columns: 1fr; }
+}

@@ -2,6 +2,8 @@ export { ActionButton, Button } from "./Button";
 export type { ActionButtonProps, ButtonProps, ButtonSize, ButtonVariant } from "./Button";
 export { TextField } from "./TextField";
 export type { TextFieldProps } from "./TextField";
+export { Select } from "./Select";
+export type { SelectOption, SelectProps } from "./Select";
 export { SegmentedControl } from "./SegmentedControl";
 export type { SegmentedControlProps, SegmentedOption } from "./SegmentedControl";
 export { Toggle } from "./Toggle";

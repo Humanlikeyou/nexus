@@ -25,7 +25,7 @@ export function InsetGroup({ title, footer, className, children, ...rest }: Inse
   );
 }
 
-export type ListRowProps = Omit<ComponentPropsWithRef<"li">, "title" | "onSelect"> & {
+export type ListRowProps = Omit<ComponentPropsWithRef<"li">, "title" | "onSelect" | "value"> & {
   icon?: LucideIcon;
   title: ReactNode;
   subtitle?: ReactNode;
