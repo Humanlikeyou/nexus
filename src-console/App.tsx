@@ -9,7 +9,7 @@ import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
 import { ActivityField, BusinessField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, retryLazyScreens } from "./app/lazyScreens";
 import { ScreenErrorBoundary } from "./shell/ScreenErrorBoundary";
-import { approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";
+import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";
 import { CommandSurface } from "./design/SystemPrimitives";
 import { useAppearance } from "./design/useAppearance";
 import { useIdleAutoSave } from "./hooks/useIdleAutoSave";
@@ -22,6 +22,7 @@ import { Sidebar } from "./shell/Sidebar";
 import { ScreenSkeleton } from "./shell/ScreenSkeleton";
 import { Toolbar } from "./shell/Toolbar";
 import { CommandPalette } from "./shell/CommandPalette";
+import { Splash } from "./shell/Splash";
 import type { ModuleId } from "./types";
 
 const BUSINESS_VIEW_KEY = "amara.business.view";
@@ -123,6 +124,7 @@ export default function App() {
   return (
     <CommandSurface mode={screenId}>
       <Toolbar label={selected.label} busy={busy} onRefresh={refresh} onSearch={() => setPaletteOpen(true)} />
+      <Splash loaded={data.refreshedAt !== INITIAL_SNAPSHOT.refreshedAt} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={setRoute}
         onAsk={(text) => { setAskDraft((d) => ({ text, n: d.n + 1 })); setRoute({ id: "chat", view: "main" }); }} />
       <Sidebar active={active} onSelect={setActive} data={data} />
