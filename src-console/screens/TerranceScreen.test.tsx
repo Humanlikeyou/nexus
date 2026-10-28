@@ -20,6 +20,13 @@ const full = snap({
 });
 
 describe("Home (TerranceField)", () => {
+  it("revenue uses grouped currency", () => {
+    render(<TerranceField data={{ ...full, revenue: { ...full.revenue, today_revenue: 1820, net_income: -12345.6 } }} now={NOW} scheduler={running} />);
+    const revenue = screen.getByRole("region", { name: "Revenue today" });
+    expect(revenue).toHaveTextContent("$1,820");
+    expect(revenue).toHaveTextContent("-$12,346");
+  });
+
   it("loading: skeleton cards, heading, no dashes", () => {
     const { container } = render(<TerranceField data={INITIAL_SNAPSHOT} now={NOW} scheduler={running} />);
     expect(screen.getByRole("heading", { level: 1, name: "Good afternoon, Taisun" })).toBeInTheDocument();
@@ -40,10 +47,20 @@ describe("Home (TerranceField)", () => {
     expect(within(agents).getByText("qwen3 · ollama")).toBeInTheDocument();
     expect(within(agents).getByText("Not connected")).toBeInTheDocument();
     expect(screen.getByText("Ship Nexus v2")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Neuro" })).toHaveTextContent("Last session20min");
-    expect(screen.queryByText(/Calm/)).toBeNull();
+    const neuro = screen.getByRole("region", { name: "Neuro" });
+    expect(neuro).toHaveTextContent("Last session20min");
+    // calm_pct isn't in the session summary yet: Calm shows "—" + BETA (Decision 5).
+    expect(neuro).toHaveTextContent("Calm BETA—");
+    expect(within(neuro).getByText("BETA")).toBeInTheDocument();
+    // Recovery band word is colored by band; header status is sentence-case text, not a badge.
+    expect(screen.getByText("High")).toHaveAttribute("data-band", "high");
+    expect(screen.getByText("Gateway online").closest(".home__status")).toHaveAttribute("data-tone", "success");
+    // Every linkable card uses the same "Open ›" header accessory; no in-body buttons.
+    for (const name of ["Open Fitness", "Open insights in Fitness", "Open Chat & Agents", "Open Chat", "Open Neuro", "Open Revenue"]) {
+      expect(screen.getByRole("button", { name })).toHaveTextContent("Open");
+    }
     expect(screen.getByText(/Scheduler · next consolidation 2h 14m · next reasoning 6h 12m/)).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "Open Fitness" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Fitness" }));
     expect(onNavigate).toHaveBeenCalledWith("health");
     expect(document.body.textContent).not.toMatch(/whoop/i);
   });

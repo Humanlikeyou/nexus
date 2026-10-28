@@ -4,6 +4,7 @@ import { getSchedulerStatus, type SchedulerStatus } from "@/terrance/system/sche
 import type { ConversationMessage } from "../app/conversation";
 import { openClawBadge } from "../app/openclaw";
 import { INITIAL_SNAPSHOT } from "../bridge";
+import { money } from "../lib/format";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, type Tone } from "../ui";
 import { recoveryBand } from "./HealthScreen";
@@ -128,10 +129,11 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
         <p className="home__date">{tokyo(now, { weekday: "long", day: "numeric", month: "long" })}</p>
       </div>
       <div className="home__header-badges">
-        {unavailable.length > 0 && <Badge tone="warning" title={unavailable.map((s) => s.label).join(", ")}>{unavailable.length} source{unavailable.length === 1 ? "" : "s"} unavailable</Badge>}
+        {/* Sentence-case status text with a dot; Badges stay for 1–2 word tags. */}
+        {unavailable.length > 0 && <span className="home__status" data-tone="warning" title={unavailable.map((s) => s.label).join(", ")}><i className="home__dot" aria-hidden="true" />{unavailable.length} source{unavailable.length === 1 ? "" : "s"} unavailable</span>}
         {!isLoading && (data.outbox.gateway_online || data.hermes.gatewayRunning
-          ? <Badge tone="success">Gateway online</Badge>
-          : <Badge tone="neutral">Gateway offline</Badge>)}
+          ? <span className="home__status" data-tone="success"><i className="home__dot" aria-hidden="true" />Gateway online</span>
+          : <span className="home__status" data-tone="neutral"><i className="home__dot" aria-hidden="true" />Gateway offline</span>)}
       </div>
     </header>
   );
@@ -169,7 +171,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
     <div className="home__recovery">
       <Ring value={recovery} label="Recovery" color={band?.color} valueText={band ? `${recovery}%, ${band.word}` : undefined}>
         <span className="home__ring-value">{recovery == null ? DASH : `${Math.round(recovery)}%`}</span>
-        {band && <span className="home__ring-band">{band.word}</span>}
+        {band && <span className="home__ring-band" data-band={band.word.toLowerCase()}>{band.word}</span>}
       </Ring>
       <div className="home__recovery-stats">
         <StatTile label="Sleep" value={sleepMin == null ? DASH : `${Math.floor(sleepMin / 60)}h ${Math.round(sleepMin % 60)}m`} />
@@ -194,17 +196,16 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           {!scheduler.running && <p className="home__note" role="note">Background jobs aren&apos;t running.</p>}
         </Card>
 
-        <Card title="Latest insight">
+        <Card title="Latest insight" accessory={<OpenLink to="health" label="Open insights in Fitness" onNavigate={onNavigate} />}>
           {down("get_noop_health_snapshot")
             ? <Unavailable label="NOOP health" onRetry={onRetry} />
             : insight
               ? <div className="home__insight"><p className="home__insight-fact">{insight.fact}</p>{insight.context && <p className="home__note">{insight.context}</p>}</div>
               : <p className="home__note">Insights appear after NOOP&apos;s nightly sync.</p>}
-          {onNavigate && <Button variant="plain" onClick={() => onNavigate("health")}>Open Fitness</Button>}
         </Card>
       </div>
 
-      <Card title="Agents">
+      <Card title="Agents" accessory={<OpenLink to="chat" label="Open Chat & Agents" onNavigate={onNavigate} />}>
         {down("get_terrence_runtime_health")
           ? <Unavailable label="Terrence runtime" onRetry={onRetry} />
           : (
@@ -217,7 +218,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           )}
       </Card>
 
-      <Card title="Priorities" accessory={onNavigate && <Button variant="plain" size="small" onClick={() => onNavigate("chat")}>Open Chat</Button>}>
+      <Card title="Priorities" accessory={<OpenLink to="chat" label="Open Chat" onNavigate={onNavigate} />}>
         {priorities.length === 0
           ? <p className="home__note">No current priorities</p>
           : (
@@ -233,13 +234,19 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
       <div className="home__half">
         <Card title="Neuro" accessory={<OpenLink to="neuro" label="Open Neuro" onNavigate={onNavigate} />}>
           {muse
-            ? <StatTile label="Last session" value={Math.round(muse.duration_secs / 60)} unit="min" />
+            ? (
+              <div className="home__pair">
+                <StatTile label="Last session" value={Math.round(muse.duration_secs / 60)} unit="min" />
+                {/* Decision 5: Calm % isn't in the session summary yet (no calm_pct), so "—" + BETA. */}
+                <StatTile label={<>Calm <Badge tone="neutral">BETA</Badge></>} value={null} />
+              </div>
+            )
             : <p className="home__note"><Brain className="home__inline-icon" aria-hidden="true" /> Your first completed session will appear here.</p>}
         </Card>
         <Card title="Revenue today" accessory={<OpenLink to="revenue" label="Open Revenue" onNavigate={onNavigate} />}>
           <div className="home__pair">
-            <StatTile label="Today" value={`$${data.revenue.today_revenue.toFixed(0)}`} />
-            <StatTile label="Net income" value={`$${data.revenue.net_income.toFixed(0)}`} />
+            <StatTile label="Today" value={money(data.revenue.today_revenue)} />
+            <StatTile label="Net income" value={money(data.revenue.net_income)} />
           </div>
           <CircleDollarSign className="home__ghost-icon" aria-hidden="true" />
         </Card>

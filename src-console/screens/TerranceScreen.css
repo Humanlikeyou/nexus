@@ -3,7 +3,11 @@
 .home__header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
 .home__header h1 { margin: 0; font: var(--type-large-title); letter-spacing: -.01em; }
 .home__date { margin: var(--space-1) 0 0; color: var(--label-secondary); font: var(--type-subheadline); }
-.home__header-badges { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.home__header-badges { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.home__status { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--label-secondary); font: var(--type-subheadline); }
+.home__dot { width: 8px; height: 8px; border-radius: var(--radius-pill); background: var(--label-tertiary); }
+.home__status[data-tone="success"] .home__dot { background: var(--data-recovery-high); }
+.home__status[data-tone="warning"] .home__dot { background: var(--sys-orange); }
 .home__top { display: grid; gap: var(--space-4); grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .home__half { display: grid; gap: var(--space-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .home__recovery { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: var(--space-4); }
@@ -13,12 +17,15 @@
 .home .ui-card .ui-stat { box-shadow: none; background: var(--fill-tertiary); border-color: transparent; padding: var(--space-3); }
 .home .ui-card .ui-stat .ui-stat__value { font: var(--type-title2); font-variant-numeric: tabular-nums; }
 .home__ring-value { font: var(--type-title2); font-variant-numeric: tabular-nums; }
-.home__ring-band { color: var(--label-secondary); font: var(--type-subheadline); }
+.home__ring-band { color: var(--label-secondary); font: var(--type-headline); }
+.home__ring-band[data-band="high"] { color: var(--data-recovery-high); }
+.home__ring-band[data-band="medium"] { color: var(--data-recovery-mid-text); }
+.home__ring-band[data-band="low"] { color: var(--data-recovery-low); }
 .home__insight { display: grid; gap: var(--space-1); margin-bottom: var(--space-2); }
 .home__insight-fact { margin: 0; font: var(--type-headline); }
 .home__note { margin: var(--space-2) 0 0; color: var(--label-secondary); font: var(--type-callout); }
 .home__inline-icon { width: 14px; height: 14px; vertical-align: -2px; }
-.home__chevron { width: 14px; height: 14px; margin-left: 2px; }
+.home__chevron { width: 12px; height: 12px; margin-left: 2px; color: var(--accent-strong); }
 .home__ghost-icon { display: none; }
 .home__unavailable { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--label-secondary); font: var(--type-callout); }
 .home__unavailable p { margin: 0; }
