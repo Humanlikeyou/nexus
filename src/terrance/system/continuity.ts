@@ -760,13 +760,18 @@ export function memoryWriteFailure(result: MemoryWriteResult): string | null {
  * Consolidates recent session logs (last 24h) into a single summary
  * and writes it to Letta via the n8n memory.write gateway.
  */
-export async function consolidateRecentSessions(): Promise<{ consolidated: boolean; summary: string | null; stored?: MemoryWriteResult; error?: boolean }> {
+export async function consolidateRecentSessions(): Promise<{ consolidated: boolean; summary: string | null; stored?: MemoryWriteResult; error?: boolean; skipped?: boolean }> {
   try {
     const allLogs = await invoke<import("@/lib/types").SessionLogEntry[]>("list_session_logs");
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     const recent = allLogs.filter((l) => l.timestamp >= cutoff);
 
-    if (recent.length < 2) return { consolidated: false, summary: null };
+    if (recent.length < 2) {
+      // Record the attempt so the next run is 6h out (not every 5-min tick) and Home doesn't
+      // read it as overdue. Live check 2026-10-29: last recorded run was 2026-07-06.
+      await patchContext({ lastConsolidationTimestamp: Date.now() });
+      return { consolidated: false, summary: null, skipped: true };
+    }
 
     const summaries = recent.map((l, i) => `Session ${i + 1} (${new Date(l.timestamp).toLocaleString()}):\n${l.summary}`).join("\n\n");
 

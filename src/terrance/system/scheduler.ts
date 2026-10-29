@@ -266,7 +266,7 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
   ]);
 }
 
-interface JobOutcome {
+export interface JobOutcome {
   ok: boolean;
   detail: string;
 }
@@ -302,9 +302,13 @@ async function runJob(
 }
 
 async function consolidationJob(): Promise<JobOutcome> {
-  const result = await consolidateRecentSessions();
+  return consolidationOutcome(await consolidateRecentSessions());
+}
+
+/** Activity outcome for a consolidation result (a skip is a normal, recorded run). */
+export function consolidationOutcome(result: Awaited<ReturnType<typeof consolidateRecentSessions>>): JobOutcome {
   if (result.error) return { ok: false, detail: "Consolidation failed" };
-  if (!result.consolidated) return { ok: true, detail: "Skipped (not enough sessions)" };
+  if (!result.consolidated) return { ok: true, detail: "skipped: not enough sessions" };
   const failure = result.stored ? memoryWriteFailure(result.stored) : null;
   return failure ? { ok: false, detail: `Consolidated locally; ${failure}` } : { ok: true, detail: "Consolidated recent sessions" };
 }
