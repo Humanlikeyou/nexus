@@ -28,7 +28,7 @@ fn get_db() -> Result<Connection, String> {
     Ok(conn)
 }
 
-fn init_db(conn: &Connection) -> Result<(), String> {
+pub(crate) fn init_db(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS events (
