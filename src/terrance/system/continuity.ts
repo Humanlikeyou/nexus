@@ -653,7 +653,11 @@ export async function generateEveningIntegration(): Promise<{ sent: boolean; mes
  * Archives old session logs and trims the relevantMemory array.
  * Consolidates old logs into a summary before archiving.
  */
-export async function pruneMemory(): Promise<{ archived: number; pruned: number; consolidatedSummary: string | null }> {
+/** Activity log retention, applied by the daily prune job (see archive_activity_log in Rust). */
+export const ACTIVITY_KEEP_DAYS = 30;
+export const ACTIVITY_MAX_FILES = 5000;
+
+export async function pruneMemory(): Promise<{ archived: number; pruned: number; consolidatedSummary: string | null; activityArchived: number }> {
   try {
     // Step 1: Get old logs that will be archived (>30 days)
     const allLogs = await invoke<import("@/lib/types").SessionLogEntry[]>("list_session_logs");
@@ -711,14 +715,28 @@ export async function pruneMemory(): Promise<{ archived: number; pruned: number;
     // Step 4: Trim relevantMemory to 20 items
     const pruned = await invoke<number>("prune_context_memory", { maxItems: 20 });
 
+    // Step 4b: Retire activity log files older than 30 days (and beyond 5000 files)
+    // into verified monthly archives. Non-fatal: files stay in place on any error.
+    let activityArchived = 0;
+    try {
+      const report = await invoke<{ archived: number }>("archive_activity_log", {
+        keepDays: ACTIVITY_KEEP_DAYS,
+        maxFiles: ACTIVITY_MAX_FILES,
+        dryRun: false,
+      });
+      activityArchived = report?.archived ?? 0;
+    } catch (e) {
+      console.error("[prune-memory] activity archive failed (files kept):", e);
+    }
+
     // Step 5: Update prune timestamp
     const freshCtx = await loadContext();
     await saveContext({ ...freshCtx, lastPruneTimestamp: Date.now() });
 
-    return { archived, pruned, consolidatedSummary };
+    return { archived, pruned, consolidatedSummary, activityArchived };
   } catch (e) {
     console.error("[prune-memory] Error:", e);
-    return { archived: 0, pruned: 0, consolidatedSummary: null };
+    return { archived: 0, pruned: 0, consolidatedSummary: null, activityArchived: 0 };
   }
 }
 

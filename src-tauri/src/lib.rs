@@ -239,6 +239,7 @@ pub fn run() {
             continuity::store_activity_entry,
             continuity::list_activity_entries,
             continuity::prune_activity_log,
+            continuity::archive_activity_log,
             // Subagents
             continuity::load_subagents,
             continuity::save_subagents,

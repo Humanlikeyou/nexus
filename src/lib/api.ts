@@ -466,6 +466,17 @@ export const listActivityEntries = (limit?: number) =>
 
 export const pruneActivityLog = (days: number) =>
   invoke<number>("prune_activity_log", { days });
+export interface ActivityArchiveReport {
+  dryRun: boolean;
+  scanned: number;
+  selected: number;
+  archived: number;
+  skipped: number;
+  kept: number;
+  months: [string, number][];
+}
+export const archiveActivityLog = (opts: { keepDays?: number; maxFiles?: number; dryRun?: boolean } = {}) =>
+  invoke<ActivityArchiveReport>("archive_activity_log", opts);
 
 // ============================================================
 // Subagents

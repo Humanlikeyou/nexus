@@ -565,12 +565,11 @@ pub fn list_activity_entries(limit: Option<u32>) -> Result<Vec<ActivityEntry>, S
     }
     let max = limit.unwrap_or(100) as usize;
 
-    let mut entries: Vec<ActivityEntry> = fs::read_dir(&dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|x| x == "json").unwrap_or(false))
-        .filter_map(|e| {
-            let path = e.path();
+    // Only the newest files are read (by the timestamp in the file name), not the whole dir.
+    let mut entries: Vec<ActivityEntry> = activity_files_newest_first(&dir)
+        .into_iter()
+        .take(max.saturating_add(20))
+        .filter_map(|(_, path)| {
             fs::read_to_string(&path)
                 .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
@@ -595,6 +594,128 @@ pub fn list_activity_entries(limit: Option<u32>) -> Result<Vec<ActivityEntry>, S
 mod tests {
     use super::redact_sensitive_text;
     use super::*;
+
+    fn activity_at(dir: &std::path::Path, ms: u64, n: u32) -> String {
+        let id = format!("task-{ms}-{n}");
+        let e = ActivityEntry {
+            id: id.clone(),
+            entry_type: "t".into(),
+            name: "Job".into(),
+            status: "completed".into(),
+            started_at: ms,
+            completed_at: ms + 5,
+            duration_ms: 5,
+            detail: None,
+            outcome: Some("ok".into()),
+        };
+        fs::create_dir_all(dir).unwrap();
+        fs::write(
+            dir.join(format!("{id}.json")),
+            serde_json::to_string(&e).unwrap(),
+        )
+        .unwrap();
+        id
+    }
+
+    const NOW: u64 = 1_793_000_000_000; // 2026-10-27
+
+    #[test]
+    fn archive_dry_run_counts_without_touching_files() {
+        let dir = temp_dir("act-dry");
+        for i in 0..3 {
+            activity_at(&dir, NOW - 40 * DAY_MS - i, 1);
+        }
+        for i in 0..2 {
+            activity_at(&dir, NOW - DAY_MS - i, 1);
+        }
+        let r = archive_activity_log_in(&dir, NOW, 30, 5000, true).unwrap();
+        assert_eq!((r.scanned, r.selected, r.archived, r.kept), (5, 3, 0, 2));
+        assert_eq!(r.months, vec![("2026-09".to_string(), 3)]);
+        assert_eq!(activity_files_newest_first(&dir).len(), 5);
+        assert!(!dir.join("archive").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn archive_moves_old_entries_into_verified_monthly_gz_and_appends() {
+        let dir = temp_dir("act-arch");
+        let old_ids: Vec<String> = (0..3)
+            .map(|i| activity_at(&dir, NOW - 40 * DAY_MS - i, 1))
+            .collect();
+        let recent = activity_at(&dir, NOW - DAY_MS, 1);
+        fs::write(dir.join("task-1700000000000-9.json"), "not json").unwrap();
+        let r = archive_activity_log_in(&dir, NOW, 30, 5000, false).unwrap();
+        assert_eq!((r.archived, r.skipped), (3, 1));
+        let gz = dir.join("archive").join("2026-09.jsonl.gz");
+        let lines = read_archive_lines(&gz).unwrap();
+        assert_eq!(lines.len(), 3);
+        for id in &old_ids {
+            assert!(!dir.join(format!("{id}.json")).exists());
+            assert!(lines.iter().any(|l| l.contains(id.as_str())));
+        }
+        assert!(dir.join(format!("{recent}.json")).exists());
+        assert!(
+            dir.join("task-1700000000000-9.json").exists(),
+            "unparsable file kept"
+        );
+        // A second run appends to the same month without losing earlier lines.
+        activity_at(&dir, NOW - 41 * DAY_MS, 2);
+        archive_activity_log_in(&dir, NOW, 30, 5000, false).unwrap();
+        assert_eq!(read_archive_lines(&gz).unwrap().len(), 4);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn archive_enforces_file_cap_oldest_first() {
+        let dir = temp_dir("act-cap");
+        for i in 0..6u64 {
+            activity_at(&dir, NOW - i * 1000, 1);
+        }
+        let r = archive_activity_log_in(&dir, NOW, 30, 4, false).unwrap();
+        assert_eq!((r.archived, r.kept), (2, 4));
+        let left: Vec<u64> = activity_files_newest_first(&dir)
+            .iter()
+            .map(|f| f.0)
+            .collect();
+        assert_eq!(left, vec![NOW, NOW - 1000, NOW - 2000, NOW - 3000]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn newest_first_orders_by_file_name_timestamp() {
+        let dir = temp_dir("act-order");
+        activity_at(&dir, NOW - 5000, 1);
+        activity_at(&dir, NOW, 1);
+        activity_at(&dir, NOW - 1000, 1);
+        let ms: Vec<u64> = activity_files_newest_first(&dir)
+            .iter()
+            .map(|f| f.0)
+            .collect();
+        assert_eq!(ms, vec![NOW, NOW - 1000, NOW - 5000]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Dry run against a real dir: NEXUS_ACTIVITY_DRY_RUN_DIR=... cargo test -- --ignored dry_run_real
+    #[test]
+    #[ignore]
+    fn dry_run_real_activity_dir() {
+        let Ok(d) = std::env::var("NEXUS_ACTIVITY_DRY_RUN_DIR") else {
+            return;
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let r = archive_activity_log_in(
+            std::path::Path::new(&d),
+            now,
+            ACTIVITY_KEEP_DAYS,
+            ACTIVITY_MAX_FILES,
+            true,
+        )
+        .unwrap();
+        println!("DRYRUN {}", serde_json::to_string(&r).unwrap());
+    }
 
     fn temp_dir(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!(
@@ -815,33 +936,222 @@ mod tests {
     }
 }
 
-/// Prune activity log entries older than `days` days. Returns count removed.
+/// Retire activity log entries older than `days` days (and beyond the 5000-file cap)
+/// into monthly archives; nothing is deleted without a verified archive copy.
+/// Returns the number of files archived.
 #[tauri::command]
 pub fn prune_activity_log(days: u32) -> Result<u32, String> {
-    let dir = activity_log_dir();
-    if !dir.exists() {
-        return Ok(0);
+    archive_activity_log(Some(days), None, Some(false)).map(|r| r.archived as u32)
+}
+
+// ─── Activity log retention ─────────────────────────────────────────────────
+// Recent entries stay as one JSON file each; older ones move into monthly
+// `activity_log/archive/YYYY-MM.jsonl.gz` (UTC month of startedAt). A source file
+// is removed only after its month archive was rewritten, re-read and verified.
+
+pub const ACTIVITY_KEEP_DAYS: u32 = 30;
+pub const ACTIVITY_MAX_FILES: usize = 5_000;
+const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+
+/// Millisecond timestamp from an activity file name (`task-<ms>-<n>.json`), else the file mtime.
+fn activity_file_ms(path: &std::path::Path) -> Option<u64> {
+    let stem = path.file_stem()?.to_str()?;
+    let from_name = stem.split('-').find_map(|part| {
+        part.parse::<u64>()
+            .ok()
+            .filter(|ms| *ms > 1_000_000_000_000)
+    });
+    from_name.or_else(|| {
+        fs::metadata(path)
+            .ok()?
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_millis() as u64)
+    })
+}
+
+/// Activity JSON files in `dir` with their timestamp, newest first.
+fn activity_files_newest_first(dir: &std::path::Path) -> Vec<(u64, PathBuf)> {
+    let mut files: Vec<(u64, PathBuf)> = fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && p.extension().map(|x| x == "json").unwrap_or(false))
+                .filter_map(|p| activity_file_ms(&p).map(|ms| (ms, p)))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    files
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityArchiveReport {
+    pub dry_run: bool,
+    pub scanned: usize,
+    /// Files selected for the archive (older than keep_days, or beyond the file cap).
+    pub selected: usize,
+    /// Files actually moved into an archive and removed (0 on a dry run).
+    pub archived: usize,
+    /// Files left in place because they could not be parsed.
+    pub skipped: usize,
+    /// Files left as JSON after the run (or that would be, on a dry run).
+    pub kept: usize,
+    /// (YYYY-MM, entries) per month archive.
+    pub months: Vec<(String, usize)>,
+}
+
+fn read_archive_lines(path: &std::path::Path) -> Result<Vec<String>, String> {
+    use std::io::Read;
+    if !path.exists() {
+        return Ok(Vec::new());
     }
-    let cutoff_ms = (days as u64) * 24 * 60 * 60 * 1000;
+    let mut text = String::new();
+    flate2::read::MultiGzDecoder::new(fs::File::open(path).map_err(|e| e.to_string())?)
+        .read_to_string(&mut text)
+        .map_err(|e| e.to_string())?;
+    Ok(text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(String::from)
+        .collect())
+}
+
+fn month_of(ms: u64) -> String {
+    chrono::DateTime::from_timestamp((ms / 1000) as i64, 0)
+        .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap())
+        .format("%Y-%m")
+        .to_string()
+}
+
+/// Archive activity files older than `keep_days`, and the oldest files beyond
+/// `max_files`, into monthly gzip JSONL files under `dir/archive/`.
+pub(crate) fn archive_activity_log_in(
+    dir: &std::path::Path,
+    now_ms: u64,
+    keep_days: u32,
+    max_files: usize,
+    dry_run: bool,
+) -> Result<ActivityArchiveReport, String> {
+    use std::collections::BTreeMap;
+    use std::io::Write;
+    let mut report = ActivityArchiveReport {
+        dry_run,
+        ..Default::default()
+    };
+    if !dir.exists() {
+        return Ok(report);
+    }
+    let files = activity_files_newest_first(dir);
+    report.scanned = files.len();
+    let cutoff = now_ms.saturating_sub(keep_days as u64 * DAY_MS);
+    let selected: Vec<&(u64, PathBuf)> = files
+        .iter()
+        .enumerate()
+        .filter(|(i, (ms, _))| *ms < cutoff || *i >= max_files)
+        .map(|(_, f)| f)
+        .collect();
+    report.selected = selected.len();
+
+    // Group parsed entries by month; unparsable files stay where they are.
+    let mut by_month: BTreeMap<String, Vec<(PathBuf, ActivityEntry)>> = BTreeMap::new();
+    for (ms, path) in selected {
+        match fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<ActivityEntry>(&s).ok())
+        {
+            Some(entry) => {
+                let at = if entry.started_at > 0 {
+                    entry.started_at
+                } else {
+                    *ms
+                };
+                by_month
+                    .entry(month_of(at))
+                    .or_default()
+                    .push((path.clone(), redact_activity_entry(entry)));
+            }
+            None => report.skipped += 1,
+        }
+    }
+    report.months = by_month.iter().map(|(m, v)| (m.clone(), v.len())).collect();
+    if dry_run {
+        report.kept = report.scanned - (report.selected - report.skipped);
+        return Ok(report);
+    }
+
+    let archive_dir = dir.join("archive");
+    fs::create_dir_all(&archive_dir).map_err(|e| e.to_string())?;
+    for (month, items) in &by_month {
+        let target = archive_dir.join(format!("{month}.jsonl.gz"));
+        let mut lines = read_archive_lines(&target)?;
+        let before = lines.len();
+        for (_, entry) in items {
+            lines.push(serde_json::to_string(entry).map_err(|e| e.to_string())?);
+        }
+        let tmp = archive_dir.join(format!(".{month}.jsonl.gz.tmp"));
+        {
+            let mut enc = flate2::write::GzEncoder::new(
+                fs::File::create(&tmp).map_err(|e| e.to_string())?,
+                flate2::Compression::default(),
+            );
+            for line in &lines {
+                enc.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+                enc.write_all(b"\n").map_err(|e| e.to_string())?;
+            }
+            enc.finish()
+                .map_err(|e| e.to_string())?
+                .sync_all()
+                .map_err(|e| e.to_string())?;
+        }
+        // Verify: every line parses, the count matches, and each new id is present.
+        let check = read_archive_lines(&tmp)?;
+        let parsed: Vec<ActivityEntry> = check
+            .iter()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+        let ids: std::collections::HashSet<&str> = parsed.iter().map(|e| e.id.as_str()).collect();
+        let ok = check.len() == before + items.len()
+            && parsed.len() == check.len()
+            && items.iter().all(|(_, e)| ids.contains(e.id.as_str()));
+        if !ok {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!(
+                "activity archive {month} failed verification; sources kept"
+            ));
+        }
+        fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
+        for (path, _) in items {
+            if fs::remove_file(path).is_ok() {
+                report.archived += 1;
+            }
+        }
+    }
+    report.kept = report.scanned - report.archived;
+    Ok(report)
+}
+
+/// Archive old activity entries (see `archive_activity_log_in`). Defaults: 30 days, 5000 files.
+#[tauri::command]
+pub fn archive_activity_log(
+    keep_days: Option<u32>,
+    max_files: Option<u32>,
+    dry_run: Option<bool>,
+) -> Result<ActivityArchiveReport, String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis() as u64;
-    let mut removed = 0u32;
-
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
-        let path = entry.path();
-        if path.extension().map(|x| x == "json").unwrap_or(false) {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(log) = serde_json::from_str::<ActivityEntry>(&content) {
-                    if now - log.started_at > cutoff_ms && fs::remove_file(&path).is_ok() {
-                        removed += 1;
-                    }
-                }
-            }
-        }
-    }
-    Ok(removed)
+    archive_activity_log_in(
+        &activity_log_dir(),
+        now,
+        keep_days.unwrap_or(ACTIVITY_KEEP_DAYS),
+        max_files.map(|m| m as usize).unwrap_or(ACTIVITY_MAX_FILES),
+        dry_run.unwrap_or(false),
+    )
 }
 
 // ─── Subagents ──────────────────────────────────────────────────────────────
