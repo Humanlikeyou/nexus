@@ -50,6 +50,29 @@ export function greeting(now: number) {
   return hour >= 5 && hour < 12 ? "Good morning" : hour >= 12 && hour < 18 ? "Good afternoon" : "Good evening";
 }
 
+/** Home subline date, e.g. "Thursday, Oct 29" (Asia/Tokyo; Decision 13). */
+export function homeDate(now: number) {
+  return new Date(now).toLocaleDateString("en-US", { timeZone: "Asia/Tokyo", weekday: "long", month: "short", day: "numeric" });
+}
+
+export type HomeSummary = { kind: "actions" | "priorities" | "clear"; text: string };
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * Second Home subline (screen-specs › Home › Greeting): the first that applies of
+ * actions awaiting approval, priorities being tracked, or "All clear". Returns null when
+ * the sources it would read are unavailable, so Home never claims "All clear" on missing data.
+ */
+export function homeSummary(data: SystemSnapshot): HomeSummary | null {
+  const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
+  const waiting = data.actions.filter((a) => a.status === "awaiting_approval").length;
+  if (waiting > 0) return { kind: "actions", text: `Amara has ${plural(waiting, "action", "actions")} waiting for approval` };
+  const tracking = data.prioritySnapshot.items.length;
+  if (tracking > 0) return { kind: "priorities", text: `Amara is tracking ${plural(tracking, "priority", "priorities")} today` };
+  if (down("list_terrence_actions") || down("get_current_terrence_priority_snapshot")) return null;
+  return { kind: "clear", text: "All clear. Amara is standing by." };
+}
+
 const STOPPED: SchedulerView = { running: false, lastConsolidation: null, lastReasoning: null };
 /** A scheduler read must never take Home down (it is renderer-side module state). */
 function readScheduler(): SchedulerView {
@@ -122,13 +145,22 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
   const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
   const unavailable = data.unavailableSources;
+  // Nothing to say until the first snapshot lands (no "All clear" flash while loading).
+  const summary = isLoading ? null : homeSummary(data);
 
   const header = (
     <header className="home__header">
       <div>
-        {/* Naming (Decision 13): h1 "Command Center"; the greeting + date move to the subline. */}
+        {/* Naming (Decision 13): h1 "Command Center"; greeting, then what Amara has for you · date. */}
         <h1>Command Center</h1>
-        <p className="home__date">{greeting(now)}, Taisun · {tokyo(now, { weekday: "long", day: "numeric", month: "long" })}</p>
+        <p className="home__date">{greeting(now)}, Taisun</p>
+        <p className="home__date home__summary">
+          {summary && (summary.kind === "actions" && onNavigate
+            ? <button type="button" className="home__summary-link" onClick={() => onNavigate("chat")}>{summary.text}</button>
+            : <span>{summary.text}</span>)}
+          {summary && " · "}
+          <time dateTime={new Date(now).toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" })}>{homeDate(now)}</time>
+        </p>
       </div>
       <div className="home__header-badges">
         {/* Sentence-case status text with a dot; Badges stay for 1–2 word tags. */}

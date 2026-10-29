@@ -3,6 +3,11 @@
 .home__header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
 .home__header h1 { margin: 0; font: var(--type-large-title); letter-spacing: -.01em; }
 .home__date { margin: var(--space-1) 0 0; color: var(--label-secondary); font: var(--type-subheadline); }
+.home__summary { margin-top: 0; }
+/* "Amara has N actions waiting for approval" opens Chat: solid accent text token (≥4.6:1). */
+.home__summary-link { padding: 0; border: 0; background: none; color: var(--tone-accent-text); font: inherit; cursor: pointer; }
+.home__summary-link:hover { text-decoration: underline; }
+.home__summary-link:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 2px; border-radius: 2px; }
 .home__header-badges { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .home__status { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--label-secondary); font: var(--type-subheadline); }
 .home__dot { width: 8px; height: 8px; border-radius: var(--radius-pill); background: var(--label-quaternary); }

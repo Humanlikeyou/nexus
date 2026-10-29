@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot } from "../types";
-import { TerranceField, greeting, nextRuns, relative } from "./TerranceScreen";
+import { TerranceField, greeting, homeDate, homeSummary, nextRuns, relative } from "./TerranceScreen";
 
 const NOW = new Date("2026-10-28T14:00:00+09:00").getTime();
 const H = 3_600_000;
@@ -38,7 +38,10 @@ describe("Home (TerranceField)", () => {
   it("loading: skeleton cards, heading, no dashes", () => {
     const { container } = render(<TerranceField data={INITIAL_SNAPSHOT} now={NOW} scheduler={running} />);
     expect(screen.getByRole("heading", { level: 1, name: "Command Center" })).toBeInTheDocument();
-    expect(screen.getByText(/^Good afternoon, Taisun · /)).toBeInTheDocument();
+    expect(screen.getByText("Good afternoon, Taisun")).toBeInTheDocument();
+    // Loading: date only, no "All clear" before data lands.
+    expect(screen.getByText("Wednesday, Oct 28")).toBeInTheDocument();
+    expect(container.textContent).not.toContain("All clear");
     expect(container.querySelector("[aria-busy=true]")).not.toBeNull();
     expect(container.textContent).not.toContain("—");
   });
@@ -102,5 +105,35 @@ describe("Home (TerranceField)", () => {
     expect(relative(NOW - 2 * H, NOW)).toBe("2h 0m ago");
     expect(greeting(new Date("2026-10-28T08:00:00+09:00").getTime())).toBe("Good morning");
     expect(greeting(new Date("2026-10-28T20:00:00+09:00").getTime())).toBe("Good evening");
+  });
+
+  describe("subline (Decision 13)", () => {
+    const action = (status: string) => ({ id: status, toolId: "mac.open_app", title: "Open Notes", status }) as unknown as SystemSnapshot["actions"][number];
+
+    it("formats the date as weekday, short month and day in Tokyo, from the given clock", () => {
+      expect(homeDate(new Date("2026-10-29T10:21:00+09:00").getTime())).toBe("Thursday, Oct 29");
+      // 23:30 UTC on the 28th is already the 29th in Tokyo.
+      expect(homeDate(Date.parse("2026-10-28T23:30:00Z"))).toBe("Thursday, Oct 29");
+    });
+
+    it("picks actions waiting, then priorities, then all clear; nothing when sources are down", () => {
+      expect(homeSummary(snap({ actions: [action("awaiting_approval"), action("awaiting_approval"), action("succeeded")] }))).toEqual({ kind: "actions", text: "Amara has 2 actions waiting for approval" });
+      expect(homeSummary(snap({ actions: [action("awaiting_approval")] }))?.text).toBe("Amara has 1 action waiting for approval");
+      expect(homeSummary(full)).toEqual({ kind: "priorities", text: "Amara is tracking 1 priority today" });
+      expect(homeSummary(snap())).toEqual({ kind: "clear", text: "All clear. Amara is standing by." });
+      expect(homeSummary(snap({ unavailableSources: [{ command: "list_terrence_actions", label: "Action ledger" }] }))).toBeNull();
+    });
+
+    it("renders the status · date line; actions waiting is a button to Chat", () => {
+      const onNavigate = vi.fn();
+      const { rerender, container } = render(<TerranceField data={full} now={NOW} scheduler={running} onNavigate={onNavigate} />);
+      expect(container.querySelector(".home__summary")?.textContent).toBe("Amara is tracking 1 priority today · Wednesday, Oct 28");
+      expect(container.querySelector(".home__summary time")).toHaveAttribute("dateTime", "2026-10-28");
+      rerender(<TerranceField data={{ ...full, actions: [action("awaiting_approval")] }} now={NOW} scheduler={running} onNavigate={onNavigate} />);
+      fireEvent.click(screen.getByRole("button", { name: "Amara has 1 action waiting for approval" }));
+      expect(onNavigate).toHaveBeenCalledWith("chat");
+      rerender(<TerranceField data={snap()} now={NOW} scheduler={running} onNavigate={onNavigate} />);
+      expect(container.querySelector(".home__summary")?.textContent).toBe("All clear. Amara is standing by. · Wednesday, Oct 28");
+    });
   });
 });
