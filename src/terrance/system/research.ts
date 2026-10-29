@@ -10,6 +10,7 @@ import type { ResearchTask, ResearchResult, RouterResponse } from "@/lib/types";
 import { getConfig } from "@/lib/api";
 import { buildRouterConfig } from "@/lib/llm-router";
 import { activityBus } from "./activityBus";
+import { jobFailureReason } from "./continuity";
 
 export async function runResearchTask(
   topic: string,
@@ -108,8 +109,9 @@ export async function runResearchTask(
     return task;
   } catch (e) {
     task.status = "error";
-    task.summary = `Research failed: ${String(e)}`;
-    activityBus.fail(busId, String(e));
+    console.error("[research] failed:", e);
+    task.summary = `Research failed: ${jobFailureReason(e)}`;
+    activityBus.fail(busId, jobFailureReason(e));
     return task;
   }
 }

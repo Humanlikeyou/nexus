@@ -13,6 +13,7 @@ const c = vi.hoisted(() => ({
   generateEveningIntegration: vi.fn(async () => ({ sent: true })),
   pruneMemory: vi.fn(async () => ({ archived: 0, pruned: 0 })),
   patchContext: vi.fn(async () => true),
+  jobFailureReason: vi.fn(() => "generation failed"),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ emit: vi.fn(), listen: vi.fn() }));

@@ -17,7 +17,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getConfig } from "@/lib/api";
 import { buildRouterConfig } from "@/lib/llm-router";
 import { parseSchedule, shouldRunNow, type ParsedSchedule } from "./cronParser";
-import { loadIdentity } from "./continuity";
+import { jobFailureReason, loadIdentity } from "./continuity";
 import { activityBus } from "./activityBus";
 import type { RouterResponse } from "@/lib/types";
 
@@ -284,7 +284,7 @@ async function runSubagent(agent: Subagent): Promise<void> {
       activityBus.complete(taskId, "Silent (suppressed)");
     }
   } catch (e) {
-    activityBus.fail(taskId, String(e));
+    activityBus.fail(taskId, jobFailureReason(e));
     console.error(`[subagents] Run failed for "${agent.name}":`, e);
   }
 }
@@ -340,7 +340,7 @@ async function runSubagentJob(agent: Subagent, job: SubagentJob): Promise<void> 
       activityBus.complete(taskId, "Silent (suppressed)");
     }
   } catch (e) {
-    activityBus.fail(taskId, String(e));
+    activityBus.fail(taskId, jobFailureReason(e));
   }
 }
 

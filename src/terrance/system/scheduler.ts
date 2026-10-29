@@ -23,6 +23,7 @@ import {
   generateEveningIntegration,
   pruneMemory,
   memoryWriteFailure,
+  jobFailureReason,
 } from "./continuity";
 import { runDiagnostics, autoHeal } from "./selfDiagnosis";
 import { tickRituals } from "./rituals";
@@ -298,6 +299,15 @@ export interface JobOutcome {
   suppressed?: boolean;
 }
 
+/**
+ * Activity outcome for a job that threw or timed out. Never the raw error: it can carry URLs with
+ * tokens, auth headers, file paths or a stack trace. The timeout text is our own.
+ */
+export function thrownOutcome(e: unknown, label: string): JobOutcome {
+  if (e instanceof TaskTimeoutError) return { ok: false, detail: e.message };
+  return { ok: false, detail: `${label} failed: ${jobFailureReason(e)}` };
+}
+
 /** Run one job with its own try/catch so a throw never skips the rest of the tick. */
 async function runJob(
   id: JobId,
@@ -315,7 +325,7 @@ async function runJob(
   try {
     outcome = await withTimeout(fn(), TASK_TIMEOUTS_MS[id], label);
   } catch (e) {
-    outcome = { ok: false, detail: String(e) };
+    outcome = thrownOutcome(e, label);
   }
   if (outcome.ok) {
     backoff.recordSuccess(id);

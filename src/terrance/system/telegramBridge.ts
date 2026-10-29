@@ -24,7 +24,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getConfig, pollTelegramUpdates, readGoals, saveGoals, deleteGoal } from "@/lib/api";
 import { buildRouterConfig } from "@/lib/llm-router";
-import { loadContext, saveContext, buildSystemPrompt, generateDailySummary, generateMiddayCorrection, generateEveningIntegration } from "./continuity";
+import { loadContext, saveContext, buildSystemPrompt, generateDailySummary, generateMiddayCorrection, generateEveningIntegration, jobFailureReason } from "./continuity";
 import { listCustomJobs, createCustomJob, deleteCustomJob, toggleCustomJob } from "./customJobs";
 import {
   listSubagents,
@@ -156,11 +156,11 @@ async function processMessage(update: TelegramUpdate): Promise<void> {
     await invoke<void>("send_telegram_message", { text: reply });
     activityBus.complete(taskId, "Replied");
   } catch (e) {
-    activityBus.fail(taskId, String(e));
+    activityBus.fail(taskId, jobFailureReason(e));
     console.error("[telegram-bridge] Process error:", e);
     try {
       await invoke<void>("send_telegram_message", {
-        text: `Error processing message: ${String(e).slice(0, 200)}`,
+        text: `Error processing message: ${jobFailureReason(e)}`,
       });
     } catch {}
   }
@@ -436,7 +436,8 @@ async function handleFreeText(text: string): Promise<string> {
 
     return resp.content.trim();
   } catch (e) {
-    return `I couldn't process that: ${String(e).slice(0, 200)}`;
+    console.error("[telegram-bridge] chat error:", e);
+    return `I couldn't process that: ${jobFailureReason(e)}`;
   }
 }
 

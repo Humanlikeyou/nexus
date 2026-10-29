@@ -317,10 +317,10 @@ async function runAutoHeal(report: DiagnosticReport, now: number): Promise<AutoH
       case "refused":
       case "changed":
         console.error(`[self-diagnosis] BUG: restart_services refused the request: ${String(e)}`);
-        activityBus.fail(taskId, String(e));
+        activityBus.fail(taskId, `Restart ${outcome} (details in the local log)`);
         return { status: "failed", actions: [] };
       default: {
-        activityBus.fail(taskId, String(e));
+        activityBus.fail(taskId, "Restart failed (details in the local log)");
         // Full error stays in the local log; Telegram gets a fixed category + service ids only.
         console.error(`[self-diagnosis] restart_services failed for ${services.join(", ")}:`, e);
         await telegramAlert(`Auto-heal: restart failed (${services.join(", ")})`);
@@ -357,7 +357,8 @@ async function runAutoHeal(report: DiagnosticReport, now: number): Promise<AutoH
         id: `heal-${Date.now()}`,
         timestamp: Date.now(),
         messageCount: 0,
-        summary: `[Auto-Heal Report]\n${actions.map((a) => `${a.service}: ${a.action} → ${a.success ? "OK" : "FAILED"} (${a.message})`).join("\n")}`,
+        // The raw restart error stays in the console log; the saved report gets a fixed word.
+        summary: `[Auto-Heal Report]\n${actions.map((a) => `${a.service}: ${a.action} → ${a.success ? "OK (restarted)" : "FAILED (see local log)"}`).join("\n")}`,
         provider: "system",
         model: "self-diagnosis",
       },
