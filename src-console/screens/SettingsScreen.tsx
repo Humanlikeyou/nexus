@@ -35,7 +35,6 @@ export function AboutHeader() {
     <div className="about" id="about">
       <Wordmark size="about" label={APP_NAME} />
       <p className="about__version">{APP_NAME} · Version {APP_VERSION}</p>
-      <p className="about__credits">Wordmark drawn after the Taiyo Skin logo.</p>
     </div>
   );
 }
