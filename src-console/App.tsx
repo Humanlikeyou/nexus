@@ -90,12 +90,12 @@ export default function App() {
     return () => window.removeEventListener("keydown", key);
   }, [setActive]);
 
-  const act = useCallback(async (name: string, action: () => Promise<unknown>) => { setBusy(true); setNotice(`${name} in progress`); try { await action(); setNotice(`${name} complete`); await refresh(); } catch { setBusy(false); setNotice(`${name} unavailable`); } window.setTimeout(() => setNotice(null), 3500); }, [refresh]);
+  const act = useCallback(async (name: string, action: () => Promise<unknown>) => { setBusy(true); setNotice(`${name} in progress`); try { await action(); setNotice(`${name} complete`); await refresh(); } catch { setBusy(false); setNotice(`${name} unavailable`); } window.setTimeout(() => setNotice(null), 3500); }, [refresh, setBusy]);
 
   const approveAction = useCallback(async (action: TerrenceAction) => {
     await runApproval(action.title, { approve: () => approveTerrenceAction(action.id), refresh, setBusy, setNotice });
     window.setTimeout(() => setNotice(null), 3500);
-  }, [refresh]);
+  }, [refresh, setBusy]);
 
   // Quiet in-app notices from background work (e.g. auto-heal "Restart declined").
   useEffect(() => {

@@ -27,6 +27,8 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
   const resetTelemetry = museTelemetry.reset;
   const readCounters = museTelemetry.readCounters;
   const training = useTraining(museTelemetry.getSnapshot, sessionStartedAt !== null && sessionEndedAt === null && data.muse.streaming);
+  // Stable callbacks from useTraining, pulled out so the hooks below can list them as deps.
+  const { summary: summarizeTraining, begin: beginTraining, finish: finishTraining } = training;
 
   const scanForMuse = useCallback(async () => {
     setMuseOperation("scanning");
@@ -42,7 +44,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       window.setTimeout(() => setNotice(null), 3000);
       await refresh();
     }
-  }, [refresh]);
+  }, [refresh, setNotice]);
 
   const connectToMuse = useCallback(async (device: MuseDevice) => {
     if (sessionStartedAt !== null || sessionOperation.current) {
@@ -62,7 +64,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       setMuseOperation(null);
       window.setTimeout(() => setNotice(null), 3000);
     }
-  }, [refresh, sessionStartedAt]);
+  }, [refresh, sessionStartedAt, setNotice]);
 
   const persistMuseSession = useCallback(async () => {
     if (sessionStartedAt === null || !recordingFile) {
@@ -81,7 +83,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       snapshot: () => {
         const endedAt = sessionStopTime.current ?? Date.now();
         const counters = readCounters();
-        const trainingSummary = training.summary();
+        const trainingSummary = summarizeTraining();
         const session: RecordedSession & { file_path: string } = {
           id: typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `muse-${sessionStartedAt}`,
           device_type: "muse",
@@ -92,7 +94,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
           file_path: recordingFile,
           summary: { avg_focus: trainingSummary?.avg_focus ?? null, avg_relaxation: trainingSummary?.avg_relaxation ?? null, avg_hr: null, max_hr: null, avg_hrv: null, calm_pct: trainingSummary?.calm_pct ?? null, time_in_target_pct: trainingSummary?.time_in_target_pct ?? null },
         };
-        training.finish();
+        finishTraining();
         return { session, data: {
           source: "live_muse",
           replay_file: recordingFile,
@@ -104,7 +106,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       save: (payload) => saveMuseSession(payload.session, payload.data),
     });
     return true;
-  }, [recordingFile, sessionStartedAt, readCounters, training.summary, training.finish]);
+  }, [recordingFile, sessionStartedAt, readCounters, summarizeTraining, finishTraining]);
 
   const startMuseSession = useCallback(async () => {
     if (sessionOperation.current || sessionStartedAt !== null || sessionFinalizer.current) return;
@@ -120,7 +122,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       setRecordingFile(file);
       sessionStopTime.current = null;
       setSessionStartedAt(startedAt);
-      training.begin();
+      beginTraining();
       setNotice("Muse session started");
       await refresh();
     } catch (error) {
@@ -131,7 +133,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       setMuseOperation(null);
       window.setTimeout(() => setNotice(null), 3000);
     }
-  }, [refresh, resetTelemetry, training.begin, sessionStartedAt]);
+  }, [refresh, resetTelemetry, beginTraining, sessionStartedAt, setNotice]);
 
   const stopMuseSession = useCallback(async () => {
     if (sessionOperation.current) return;
@@ -140,7 +142,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     setMuseError(null);
     try {
       const saved = await persistMuseSession();
-      training.finish();
+      finishTraining();
       setSessionStartedAt(null);
       setRecordingFile(null);
       setSessionEndedAt(null);
@@ -154,7 +156,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       await refresh();
       window.setTimeout(() => setNotice(null), 3000);
     }
-  }, [persistMuseSession, refresh, training.finish]);
+  }, [persistMuseSession, refresh, finishTraining, setNotice]);
 
   const disconnectFromMuse = useCallback(async () => {
     if (sessionOperation.current) return;
@@ -166,7 +168,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
         await persistMuseSession();
       }
       await disconnectMuse();
-      training.finish();
+      finishTraining();
       setSessionStartedAt(null);
       setRecordingFile(null);
       setSessionEndedAt(null);
@@ -181,7 +183,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       await refresh();
       window.setTimeout(() => setNotice(null), 3000);
     }
-  }, [data.muse.streaming, sessionStartedAt, persistMuseSession, refresh, resetTelemetry, training.finish]);
+  }, [data.muse.streaming, sessionStartedAt, persistMuseSession, refresh, resetTelemetry, finishTraining, setNotice]);
 
   return { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession };
 }
