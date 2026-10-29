@@ -1,4 +1,4 @@
-.biz { display: grid; gap: var(--space-4, 16px); }
+.biz { display: grid; gap: var(--space-4, 16px); container: biz / inline-size; }
 .biz__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 12px); }
 .biz__title { margin: 0; font: var(--type-title1, 600 22px/1.2 system-ui); color: var(--label); }
 .biz__tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3, 12px); }
@@ -15,5 +15,11 @@
 .biz__at-risk { display: flex; flex-wrap: wrap; gap: var(--space-2, 8px); }
 .biz__mix-meter { width: 120px; }
 @media (max-width: 900px) {
-  .biz__stages, .biz__hero { grid-template-columns: 1fr; }
+  .biz__hero { grid-template-columns: 1fr; }
+}
+/* Content pipeline (screen-specs › Business): below 900px of content width the 5 stage columns become one
+ * list grouped by stage; empty stages drop out (their count is still in the card's total badge). */
+@container biz (max-width: 900px) {
+  .biz__stages { grid-template-columns: 1fr; gap: var(--space-2, 8px); }
+  .biz__stage--empty { display: none; }
 }

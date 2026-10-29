@@ -50,7 +50,7 @@ export function BusinessField({ data, onRetry }: { data: SystemSnapshot; onRetry
                 {STAGES.map((stage) => {
                   const items = data.pipeline.filter((item) => item.stage === stage);
                   return (
-                    <InsetGroup key={stage} title={`${humanize(stage)} · ${items.length}`}>
+                    <InsetGroup key={stage} className={items.length === 0 ? "biz__stage biz__stage--empty" : "biz__stage"} title={`${humanize(stage)} · ${items.length}`}>
                       {items.slice(0, 5).map((item, i) => <ListRow key={`${item.title}-${i}`} title={<span title={item.notes ?? undefined}>{plainText(item.title)}</span>} subtitle={humanize(item.content_type)} />)}
                     </InsetGroup>
                   );
