@@ -15,6 +15,9 @@ async function syncGoalsToTerrance(goals: Goal[]): Promise<void> {
   }
 }
 
+/** User-safe banner text for a failed goals save (never the raw error). */
+export const GOALS_SAVE_ERROR = "Failed to save goals. Please try again.";
+
 export function useGoals() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,8 +45,9 @@ export function useGoals() {
       setSaveError(null);
       return true;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setSaveError(`Failed to save goals: ${msg}`);
+      // The raw error can carry file paths or provider text: log it locally, show fixed text.
+      console.error("[goals] save failed:", e);
+      setSaveError(GOALS_SAVE_ERROR);
       return false;
     }
   }, []);
