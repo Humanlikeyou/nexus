@@ -145,6 +145,14 @@ describe("ChatField", () => {
     expect(props.onOpenContext).toHaveBeenCalledTimes(2);
   });
 
+  it("Amara's subtitle is just 'Hermes Agent'; the model is in the tooltip", () => {
+    setup();
+    const agents = screen.getByLabelText("Agents and conversations");
+    const sub = within(agents).getByText("Hermes Agent");
+    expect(sub).toHaveAttribute("title", "hermes-3");
+    expect(within(agents).queryByText(/Hermes Agent ·/)).toBeNull();
+  });
+
   it("agent search filters the list", async () => {
     setup();
     await userEvent.type(screen.getByLabelText("Search agents"), "open");

@@ -94,9 +94,9 @@ export function ChatField({
   const startedAt = messages[0]?.timestamp;
 
   const agents = [
-    { id: "hermes", icon: Bot, title: "Amara", subtitle: hermesUnavailable ? "Status unavailable" : `Hermes Agent · ${hermes.model}`, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
-    { id: "openclaw", icon: Workflow, title: "OpenClaw", subtitle: openclaw.subtitle, tone: openclaw.tone, label: openclaw.label },
-  ].filter((a) => !query.trim() || `${a.title} ${a.subtitle}`.toLowerCase().includes(query.trim().toLowerCase()));
+    { id: "hermes", icon: Bot, title: "Amara", subtitle: hermesUnavailable ? "Status unavailable" : <span title={hermes.model}>Hermes Agent</span>, searchText: hermesUnavailable ? "Status unavailable" : `Hermes Agent ${hermes.model}`, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
+    { id: "openclaw", icon: Workflow, title: "OpenClaw", subtitle: openclaw.subtitle, searchText: String(openclaw.subtitle), tone: openclaw.tone, label: openclaw.label },
+  ].filter((a) => !query.trim() || `${a.title} ${a.searchText}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   // Keep the newest message in view.
   useEffect(() => {
