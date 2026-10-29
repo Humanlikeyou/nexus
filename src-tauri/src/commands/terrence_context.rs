@@ -157,12 +157,9 @@ struct LegacyGoal {
     updated_at: String,
 }
 
-fn nexus_data_dir() -> PathBuf {
-    dirs::data_dir()
-        .or_else(|| dirs::home_dir().map(|home| home.join("Library/Application Support")))
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        // Preserve the established local store while the native application identity becomes Nexus.
-        .join(crate::app_paths::DATA_DIR_NAME)
+/// App data dir; honours NEXUS_DATA_DIR (app_paths::data_dir). Same com.taisun.nexus store as before.
+pub(crate) fn nexus_data_dir() -> PathBuf {
+    crate::app_paths::data_dir()
 }
 
 fn db_path() -> PathBuf {

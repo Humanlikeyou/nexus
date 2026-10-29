@@ -25,6 +25,24 @@ pub mod test_support {
     pub use crate::commands::onboarding::{check_onboarding, complete_onboarding};
     pub use crate::commands::outbox::get_outbox_status;
 
+    /// Data paths of the modules moved onto app_paths::data_dir() (notifications.rs is not in
+    /// the module tree, so it is not compiled or listed), as
+    /// (module, path): the dir itself, or kv/ and llm_usage.json for kv and llm_router.
+    pub fn module_data_paths() -> Vec<(&'static str, std::path::PathBuf)> {
+        use crate::commands::*;
+        vec![
+            ("replay", replay::nexus_data_dir()),
+            ("terrence_context", terrence_context::nexus_data_dir()),
+            ("arm", arm::nexus_data_dir()),
+            ("terrence_runtime", terrence_runtime::app_data_dir()),
+            ("snapshots", snapshots::nexus_data_dir()),
+            ("llm_router", llm_router::usage_log_path()),
+            ("sessions", sessions::nexus_data_dir()),
+            ("kv", kv::kv_root()),
+            ("assistant", assistant::nexus_data_dir()),
+        ]
+    }
+
     /// Data dir the packager packs from and restores into.
     pub fn packager_data_dir() -> std::path::PathBuf {
         crate::commands::packager::nexus_data_dir()

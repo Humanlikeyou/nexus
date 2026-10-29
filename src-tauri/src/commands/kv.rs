@@ -3,11 +3,13 @@ use std::fs;
 // Simple key-value store persisted to the app data directory.
 // Each key maps to a file: {app_data}/kv/{key}.json
 
+/// `{app data}/kv`; honours NEXUS_DATA_DIR (app_paths::data_dir).
+pub(crate) fn kv_root() -> std::path::PathBuf {
+    crate::app_paths::data_dir().join("kv")
+}
+
 fn kv_dir() -> Result<std::path::PathBuf, String> {
-    let dir = dirs::data_dir()
-        .ok_or("No data directory found")?
-        .join(crate::app_paths::DATA_DIR_NAME)
-        .join("kv");
+    let dir = kv_root();
     if !dir.exists() {
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     }

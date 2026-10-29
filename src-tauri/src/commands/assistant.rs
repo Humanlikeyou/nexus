@@ -3,14 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-fn nexus_data_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap()
-                .join("Library/Application Support")
-        })
-        .join(crate::app_paths::DATA_DIR_NAME)
+/// App data dir; honours NEXUS_DATA_DIR (app_paths::data_dir).
+pub(crate) fn nexus_data_dir() -> PathBuf {
+    crate::app_paths::data_dir()
 }
 
 fn db_path() -> PathBuf {

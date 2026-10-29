@@ -78,12 +78,9 @@ pub struct CostEstimate {
 
 // ─── Storage helpers ──────────────────────────────────────────────────────────
 
-fn usage_log_path() -> PathBuf {
-    dirs::data_dir()
-        .or_else(|| dirs::home_dir().map(|h| h.join("Library/Application Support")))
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("com.taisun.nexus")
-        .join("llm_usage.json")
+/// `{app data}/llm_usage.json`; honours NEXUS_DATA_DIR (app_paths::data_dir).
+pub(crate) fn usage_log_path() -> PathBuf {
+    crate::app_paths::data_dir().join("llm_usage.json")
 }
 
 fn load_usage_records() -> Vec<LlmUsageRecord> {

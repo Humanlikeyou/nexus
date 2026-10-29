@@ -323,11 +323,9 @@ fn hermes_python_path(home: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn app_data_dir() -> PathBuf {
-    dirs::data_dir()
-        .or_else(|| dirs::home_dir().map(|home| home.join("Library/Application Support")))
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join(crate::app_paths::DATA_DIR_NAME)
+/// App data dir; honours NEXUS_DATA_DIR (app_paths::data_dir).
+pub(crate) fn app_data_dir() -> PathBuf {
+    crate::app_paths::data_dir()
 }
 
 fn interaction_dir() -> PathBuf {
