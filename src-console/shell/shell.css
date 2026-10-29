@@ -90,6 +90,18 @@ main.command-surface .nav-group button:focus-visible > small.nav-shortcut { opac
  * solid under Reduce transparency). Only the sidebar column and its toolbar header let it through;
  * the content pane, its toolbar and the footer stay opaque. The sidebar keeps --material-sidebar
  * as its tint. */
+/* html too: with color-scheme: dark WebKit may paint an opaque dark canvas under a bare root.
+ * The sidebar and its header drop the 72% CSS tint and the backdrop-filter in this mode: there is
+ * nothing in the page behind them to blur, and the opaque tint flattened the native material to
+ * ~rgb(38,38,39). The native "sidebar" material supplies the tint. */
+:root[data-vibrancy="true"],
+:root[data-vibrancy="true"] #root,
+:root[data-vibrancy="true"] main.command-surface > nav.system-constellation,
+:root[data-vibrancy="true"] main.command-surface > .intelligence-overlay > .nexus-mark {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
 :root[data-vibrancy="true"] body,
 :root[data-vibrancy="true"] main.command-surface { background: transparent; }
 :root[data-vibrancy="true"] main.command-surface > .active-field,
