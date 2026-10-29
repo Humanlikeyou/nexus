@@ -1206,13 +1206,28 @@ pub fn archive_activity_log(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis() as u64;
-    archive_activity_log_in(
+    let started = std::time::Instant::now();
+    let result = archive_activity_log_in(
         &activity_log_dir(),
         now,
         keep_days.unwrap_or(ACTIVITY_KEEP_DAYS),
         max_files.map(|m| m as usize).unwrap_or(ACTIVITY_MAX_FILES),
         dry_run.unwrap_or(false),
-    )
+    );
+    let ms = started.elapsed().as_millis();
+    match &result {
+        Ok(r) => eprintln!(
+            "[activity-archive] {}scanned {}, archived {}, skipped {}, kept {}, months {:?} in {ms} ms",
+            if r.dry_run { "dry run: " } else { "" },
+            r.scanned,
+            r.archived,
+            r.skipped,
+            r.kept,
+            r.months
+        ),
+        Err(e) => eprintln!("[activity-archive] failed after {ms} ms: {e}"),
+    }
+    result
 }
 
 // ─── Subagents ──────────────────────────────────────────────────────────────
