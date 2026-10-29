@@ -1,0 +1,58 @@
+/* Emerald wash (Taisun, Oct 29): a small smidge of dark-emerald gradient, harmonised with the
+ * copper wordmark (#8C6239 / #B4864E) and the teal accent. Sparingly: content pane wash, toolbar
+ * bottom edge, Home "Command Center" header. Never on html, #root, body, the sidebar or the
+ * sidebar header (.nexus-mark): those stay transparent under [data-vibrancy] (6fe246e).
+ * Cards keep --bg-card. Reduce transparency → solid equivalents. */
+:root {
+  --emerald-900: #0B2A22;
+  --emerald-800: #0F3D2E;
+  --wash-emerald: linear-gradient(180deg, rgba(15, 61, 46, .08) 0%, rgba(15, 61, 46, 0) 320px);
+  --wash-emerald-solid: #eef1f0;
+  --toolbar-edge-emerald: rgba(15, 61, 46, .22);
+  --hero-emerald: linear-gradient(135deg, rgba(15, 61, 46, .10) 0%, rgba(15, 61, 46, .03) 55%, rgba(140, 98, 57, .05) 100%);
+  --hero-emerald-solid: #ebefed;
+  --active-emerald: rgba(15, 139, 119, .12);
+}
+:root[data-theme="dark"] {
+  --wash-emerald: linear-gradient(180deg, rgba(15, 61, 46, .55) 0%, rgba(11, 42, 34, 0) 320px);
+  --wash-emerald-solid: #1a2622;
+  --toolbar-edge-emerald: rgba(46, 196, 166, .22);
+  --hero-emerald: linear-gradient(135deg, rgba(15, 61, 46, .70) 0%, rgba(11, 42, 34, .35) 60%, rgba(180, 134, 78, .08) 100%);
+  --hero-emerald-solid: #15302a;
+  --active-emerald: rgba(46, 196, 166, .14);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wash-emerald: linear-gradient(180deg, rgba(15, 61, 46, .55) 0%, rgba(11, 42, 34, 0) 320px);
+    --wash-emerald-solid: #1a2622;
+    --toolbar-edge-emerald: rgba(46, 196, 166, .22);
+    --hero-emerald: linear-gradient(135deg, rgba(15, 61, 46, .70) 0%, rgba(11, 42, 34, .35) 60%, rgba(180, 134, 78, .08) 100%);
+    --hero-emerald-solid: #15302a;
+    --active-emerald: rgba(46, 196, 166, .14);
+  }
+}
+/* Reduce transparency: gradients become flat, solid equivalents. */
+@media (prefers-reduced-transparency: reduce) {
+  :root, :root:not([data-theme="light"]) { --wash-emerald: linear-gradient(var(--wash-emerald-solid), var(--wash-emerald-solid)); --hero-emerald: linear-gradient(var(--hero-emerald-solid), var(--hero-emerald-solid)); }
+}
+:root[data-reduce-transparency="true"] { --wash-emerald: linear-gradient(var(--wash-emerald-solid), var(--wash-emerald-solid)); --hero-emerald: linear-gradient(var(--hero-emerald-solid), var(--hero-emerald-solid)); }
+
+/* Content pane (also under [data-vibrancy], where the pane is opaque --bg-window). */
+:root main.command-surface > .active-field.active-field,
+:root[data-vibrancy="true"] main.command-surface > .active-field.active-field {
+  background: var(--wash-emerald), var(--bg-window);
+}
+/* Content toolbar only (.field-clock), never the sidebar header (.nexus-mark). */
+:root main.command-surface > .intelligence-overlay > .field-clock.field-clock {
+  border-bottom-color: var(--toolbar-edge-emerald);
+}
+/* Home header hero. */
+.active-field .home__header {
+  background: var(--hero-emerald);
+  border-radius: var(--radius-lg, 12px);
+  padding: var(--space-4, 16px) var(--space-5, 20px);
+  /* Negative margin keeps the h1 on the shared content edge. */
+  margin: calc(-1 * var(--space-4, 16px)) calc(-1 * var(--space-5, 20px)) 0;
+}
+/* Active sidebar row: emerald tint, not a fill (sidebar background itself untouched). */
+:root main.command-surface .nav-group button.is-active { background: var(--active-emerald); }
