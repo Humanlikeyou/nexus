@@ -22,6 +22,7 @@ import {
   generateMiddayCorrection,
   generateEveningIntegration,
   pruneMemory,
+  memoryWriteFailure,
 } from "./continuity";
 import { runDiagnostics, autoHeal } from "./selfDiagnosis";
 import { tickRituals } from "./rituals";
@@ -302,7 +303,10 @@ async function runJob(
 
 async function consolidationJob(): Promise<JobOutcome> {
   const result = await consolidateRecentSessions();
-  return { ok: true, detail: result.consolidated ? "Consolidated recent sessions" : "Skipped (not enough sessions)" };
+  if (result.error) return { ok: false, detail: "Consolidation failed" };
+  if (!result.consolidated) return { ok: true, detail: "Skipped (not enough sessions)" };
+  const failure = result.stored ? memoryWriteFailure(result.stored) : null;
+  return failure ? { ok: false, detail: `Consolidated locally; ${failure}` } : { ok: true, detail: "Consolidated recent sessions" };
 }
 
 export type RunNowResult = { started: true } | { started: false; reason: "busy" };
@@ -401,6 +405,8 @@ async function tick() {
         label: "Reasoning Loop", kind: "reasoning", heavy: true,
         fn: async () => {
           const result = await runReasoningLoop();
+          const failure = result.reasoned && result.stored ? memoryWriteFailure(result.stored) : null;
+          if (failure) return { ok: false, detail: `Reflection saved locally; ${failure}` };
           return { ok: true, detail: result.reasoned ? "Reflection complete" : "Skipped" };
         },
       },

@@ -724,11 +724,43 @@ function buildIngressHeaders(secret?: string): Record<string, string> {
   return headers;
 }
 
+/** The ingress rejects memory.write content over 8000 characters (MW Prepare). */
+export const MEMORY_WRITE_MAX_CHARS = 8000;
+
+export type MemoryWriteResult = { ok: true } | { ok: false; status: number | null };
+
+/**
+ * Appends `content` to the Letta `human` block through the n8n ingress and reports whether it
+ * actually landed. The ingress answers 403 without the secret, 400 for a bad request, and
+ * 200 with `ok:false` when Letta fails, so both the status and the body's `ok` are checked.
+ */
+export async function postMemoryWrite(content: string, traceId: string, secret?: string): Promise<MemoryWriteResult> {
+  const capped = content.length > MEMORY_WRITE_MAX_CHARS ? `${content.slice(0, MEMORY_WRITE_MAX_CHARS - 1)}…` : content;
+  try {
+    const res = await fetch(N8N_INGRESS, {
+      method: "POST",
+      headers: buildIngressHeaders(secret),
+      body: JSON.stringify({ trace_id: traceId, event: { type: "memory.write", payload: { content: capped, mode: "append", block: "human" } } }),
+    });
+    if (!res.ok) return { ok: false, status: res.status };
+    const body = (await res.json().catch(() => null)) as { ok?: unknown } | null;
+    return body?.ok === true ? { ok: true } : { ok: false, status: res.status };
+  } catch {
+    return { ok: false, status: null };
+  }
+}
+
+/** Activity detail for a write that did not land. */
+export function memoryWriteFailure(result: MemoryWriteResult): string | null {
+  if (result.ok) return null;
+  return `Letta write failed${result.status != null ? ` (HTTP ${result.status})` : " (n8n unreachable)"}`;
+}
+
 /**
  * Consolidates recent session logs (last 24h) into a single summary
  * and writes it to Letta via the n8n memory.write gateway.
  */
-export async function consolidateRecentSessions(): Promise<{ consolidated: boolean; summary: string | null }> {
+export async function consolidateRecentSessions(): Promise<{ consolidated: boolean; summary: string | null; stored?: MemoryWriteResult; error?: boolean }> {
   try {
     const allLogs = await invoke<import("@/lib/types").SessionLogEntry[]>("list_session_logs");
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
@@ -761,21 +793,11 @@ export async function consolidateRecentSessions(): Promise<{ consolidated: boole
     const consolidated = resp.content.trim();
     const secret = cfg.n8n_webhook_secret ?? undefined;
 
-    await fetch(N8N_INGRESS, {
-      method: "POST",
-      headers: buildIngressHeaders(secret),
-      body: JSON.stringify({
-        trace_id: `consolidation-${Date.now()}`,
-        event: {
-          type: "memory.write",
-          payload: {
-            content: `[Memory Consolidation — ${new Date().toLocaleDateString()}]\n${consolidated}`,
-            mode: "append",
-            block: "human",
-          },
-        },
-      }),
-    });
+    const stored = await postMemoryWrite(
+      `[Memory Consolidation — ${new Date().toLocaleDateString()}]\n${consolidated}`,
+      `consolidation-${Date.now()}`,
+      secret,
+    );
 
     // Feed consolidated insights back into relevantMemory
     const freshCtx = await loadContext();
@@ -787,9 +809,9 @@ export async function consolidateRecentSessions(): Promise<{ consolidated: boole
       lastConsolidationTimestamp: Date.now(),
     });
 
-    return { consolidated: true, summary: consolidated };
+    return { consolidated: true, summary: consolidated, stored };
   } catch {
-    return { consolidated: false, summary: null };
+    return { consolidated: false, summary: null, error: true };
   }
 }
 
@@ -799,7 +821,7 @@ export async function consolidateRecentSessions(): Promise<{ consolidated: boole
  * Amara reviews active goals against recent sessions and generates
  * a daily brief — a proactive self-reflection stored to memory.
  */
-export async function runReasoningLoop(): Promise<{ reasoned: boolean; reflection: string | null }> {
+export async function runReasoningLoop(): Promise<{ reasoned: boolean; reflection: string | null; stored?: MemoryWriteResult }> {
   try {
     const [ctx, allLogs] = await Promise.all([
       loadContext(),
@@ -876,21 +898,11 @@ export async function runReasoningLoop(): Promise<{ reasoned: boolean; reflectio
 
     // Write to Letta
     const secret = cfg.n8n_webhook_secret ?? undefined;
-    await fetch(N8N_INGRESS, {
-      method: "POST",
-      headers: buildIngressHeaders(secret),
-      body: JSON.stringify({
-        trace_id: `reasoning-${Date.now()}`,
-        event: {
-          type: "memory.write",
-          payload: {
-            content: `[Daily Reflection — ${new Date().toLocaleDateString()}]\n${fullReflection}`,
-            mode: "append",
-            block: "human",
-          },
-        },
-      }),
-    });
+    const stored = await postMemoryWrite(
+      `[Daily Reflection — ${new Date().toLocaleDateString()}]\n${fullReflection}`,
+      `reasoning-${Date.now()}`,
+      secret,
+    );
 
     // Feed reasoning insights back into relevantMemory
     const freshCtx = await loadContext();
@@ -902,7 +914,7 @@ export async function runReasoningLoop(): Promise<{ reasoned: boolean; reflectio
       lastReasoningTimestamp: Date.now(),
     });
 
-    return { reasoned: true, reflection: fullReflection };
+    return { reasoned: true, reflection: fullReflection, stored };
   } catch {
     return { reasoned: false, reflection: null };
   }
