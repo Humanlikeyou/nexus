@@ -9,7 +9,7 @@ Stage 4 (Activation) for the Amara OS project was just implemented and committed
 1. **Automatic Memory Capture** — TelegramChat.tsx has a 2-minute idle timer that auto-saves sessions with 4+ messages. Coordinates with the manual "Save to memory" button.
 2. **Scheduled Memory Consolidation** — `src/terrance/system/scheduler.ts` runs every 6 hours, consolidates last 24h session logs into a single Letta memory write via n8n ingress.
 3. **Autonomous Reasoning Loops** — Every 12 hours, Amara reviews goals vs recent sessions, generates a reflection stored to session logs + Letta.
-4. **Gateway Authentication** — n8n ingress workflow validates `X-Nexus-Secret` header against `NEXUS_SECRET` env var. Open mode when unconfigured.
+4. **Gateway Authentication** — n8n ingress workflow validates `X-Nexus-Secret` via Header Auth (credential synced from `NEXUS_SECRET`). No open mode: missing/invalid header → 403.
 
 ## Outstanding Issue
 

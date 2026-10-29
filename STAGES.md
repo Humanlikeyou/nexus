@@ -97,7 +97,7 @@
 - Automatic memory capture — TelegramChat idle timer (2min, 4+ msgs), silent background save via `summarizeAndStoreSessionSilent()`, cleanup save on unmount
 - Scheduled consolidation — `scheduler.ts` runs every 5min, consolidation every 6h, summarizes last 24h of sessions via LLM router, posts to n8n
 - Autonomous reasoning loops — `runReasoningLoop()` every 12h, goal-driven reflection, pattern recognition, generates proactive briefs, writes to n8n memory
-- Gateway authentication — n8n ingress validates `X-Nexus-Secret` header against `$env.NEXUS_SECRET`, client sends secret from NexusConfig, optional open mode when unconfigured
+- Gateway authentication — n8n ingress webhook uses Header Auth (credential `nxIngressSecret1`, header `X-Nexus-Secret`, value synced from `NEXUS_SECRET` by `stack/scripts/n8n_sync_credentials.sh`); client sends the secret from NexusConfig. There is no open mode: requests without a valid header get 403
 
 **Result:** The nervous system is alive. It remembers automatically, consolidates on schedule, reasons proactively, and authenticates its communications. It moves on its own.
 
