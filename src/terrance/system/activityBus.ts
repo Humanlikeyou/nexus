@@ -17,8 +17,11 @@ import { invoke } from "@tauri-apps/api/core";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-/** "suppressed": deliberately not sent (kill switch). Neutral: neither a success nor a failure. */
-export type ActivityStatus = "pending" | "running" | "complete" | "error" | "cancelled" | "suppressed";
+/**
+ * "suppressed": deliberately not sent (kill switch). "skipped": not run because its window passed.
+ * Both neutral: neither a success nor a failure.
+ */
+export type ActivityStatus = "pending" | "running" | "complete" | "error" | "cancelled" | "suppressed" | "skipped";
 
 export type ActivityType =
   | "scheduler"
@@ -78,7 +81,7 @@ async function emitActivity(event: ActivityEvent): Promise<void> {
 }
 
 async function persistEntry(event: ActivityEvent): Promise<void> {
-  if (event.status !== "complete" && event.status !== "error" && event.status !== "suppressed") return;
+  if (event.status !== "complete" && event.status !== "error" && event.status !== "suppressed" && event.status !== "skipped") return;
   try {
     await invoke<void>("store_activity_entry", {
       entry: {
@@ -90,7 +93,7 @@ async function persistEntry(event: ActivityEvent): Promise<void> {
         completedAt: event.completedAt ?? Date.now(),
         durationMs: (event.completedAt ?? Date.now()) - event.startedAt,
         detail: event.detail ?? null,
-        outcome: event.status === "complete" ? "success" : event.status === "suppressed" ? "suppressed" : "failure",
+        outcome: event.status === "complete" ? "success" : event.status === "suppressed" || event.status === "skipped" ? event.status : "failure",
       },
     });
   } catch {
@@ -140,7 +143,7 @@ export const activityBus = {
     task.status = status;
     if (detail !== undefined) task.detail = detail;
     if (progress !== undefined) task.progress = progress;
-    if (status === "complete" || status === "error" || status === "cancelled" || status === "suppressed") {
+    if (status === "complete" || status === "error" || status === "cancelled" || status === "suppressed" || status === "skipped") {
       task.completedAt = Date.now();
     }
     emitActivity(task);
@@ -164,6 +167,11 @@ export const activityBus = {
   /** Mark a task as deliberately not sent (kill switch): neutral, not a failure. */
   suppress(id: string, detail?: string): void {
     this.update(id, "suppressed", detail);
+  },
+
+  /** Mark a task as not run because its window passed: neutral, not a failure. */
+  skip(id: string, detail?: string): void {
+    this.update(id, "skipped", detail);
   },
 
   /**

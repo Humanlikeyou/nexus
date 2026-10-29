@@ -46,3 +46,35 @@ test("no Expired row when nothing has expired", async ({ page, theme }) => {
   await expect(field.getByText("Last delivered")).toBeVisible();
   await expect(field.getByText("Older than 24h, kept, not sent")).toHaveCount(0);
 });
+
+/** Rituals whose 30-min window passed are stored as status "skipped" (neutral), one row each. */
+test("skipped rituals render one neutral 'Skipped' row each, labelled Ritual", async ({ page, theme, consoleErrors }) => {
+  const base = responses() as Record<string, unknown>;
+  const skipped = (id: string, name: string, iso: string) => ({
+    id, type: "ritual", name: `Ritual: ${name}`, status: "skipped", startedAt: at(iso), completedAt: at(iso), durationMs: 0,
+    detail: "Skipped (missed window)", outcome: "skipped",
+  });
+  await openApp(page, {
+    theme,
+    data: {
+      ...base,
+      list_activity_entries: [
+        skipped("r1", "Presence Drill", "2026-10-29T10:39:00+09:00"),
+        skipped("r2", "Command Phrase + Intent", "2026-10-29T10:39:00+09:00"),
+        skipped("r3", "Alpha Breathing", "2026-10-29T10:39:00+09:00"),
+      ],
+    },
+  });
+  await navButton(page, "Chat & Agents").click();
+  const field = activeField(page, "Chat & Agents");
+  await field.getByRole("radio", { name: "Activity" }).click();
+  const rows = field.getByRole("listitem").filter({ hasText: "Skipped (missed window)" });
+  await expect(rows).toHaveCount(3);
+  for (const row of await rows.all()) {
+    await expect(row).toContainText("Ritual");
+    const badge = row.locator(".ui-badge");
+    await expect(badge).toHaveText("Skipped");
+    await expect(badge).toHaveAttribute("data-tone", "neutral");
+  }
+  expect(consoleErrors).toEqual([]);
+});

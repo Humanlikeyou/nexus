@@ -321,9 +321,12 @@ export async function tickRituals(): Promise<void> {
 
   for (const ritual of plan.skip) {
     state.skippedDays = { ...(state.skippedDays ?? {}), [ritual.id]: today };
-    const taskId = activityBus.register(`Ritual: ${ritual.name}`, "ritual");
-    activityBus.complete(taskId, "Skipped (missed window)");
     changed = true;
+    // Retried inside its window and failed again: both failures are already in Activity, so the
+    // window closing is not a second "missed" entry (one follow-up per failure, never both).
+    if (sendBackoff.failureCount(ritual.id, today) >= 2) continue;
+    const taskId = activityBus.register(`Ritual: ${ritual.name}`, "ritual");
+    activityBus.skip(taskId, "Skipped (missed window)");
   }
 
   const ritual = plan.fire;

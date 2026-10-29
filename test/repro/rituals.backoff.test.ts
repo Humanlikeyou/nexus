@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("../../src/terrance/system/activityBus", () => ({
-  activityBus: { register: vi.fn(() => "t"), complete: vi.fn(), fail: vi.fn(), update: vi.fn(), prune: vi.fn() },
+  activityBus: { register: vi.fn(() => "t"), complete: vi.fn(), fail: vi.fn(), skip: vi.fn(), update: vi.fn(), prune: vi.fn() },
 }));
 
 let rituals: typeof import("../../src/terrance/system/rituals");

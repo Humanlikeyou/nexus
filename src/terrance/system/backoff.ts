@@ -32,6 +32,12 @@ export class Backoff<K extends string = string> {
     this.failures.set(id, { count, nextAt: now + delay, window });
   }
 
+  /** Failures recorded for `id` in `window` (0 for none, or for another window). */
+  failureCount(id: K, window: string): number {
+    const f = this.failures.get(id);
+    return f && f.window === window ? f.count : 0;
+  }
+
   recordSuccess(id: K): void {
     this.failures.delete(id);
   }
