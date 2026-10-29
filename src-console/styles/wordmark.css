@@ -7,14 +7,7 @@
   --wordmark-os-nudge: 1.5px; /* spec starts at −1px; measured: "OS" line box bottom sits ~2.5px under its baseline, so +1.5px lands it on the cap baseline */
 }
 
-.wordmark {
-  display: block;
-  flex: none;
-  color: var(--wordmark);
-  overflow: visible;
-  user-select: none;
-  -webkit-user-select: none;
-}
+/* The .wordmark SVG base rule lives with the component (ui/Wordmark.css) so the gallery gets it too. */
 
 /* Sidebar lockup: 12px caps centred on the traffic lights (cap box y 20–32 in the 52px toolbar),
  * "OS" 6px after it with its baseline on the cap baseline. */

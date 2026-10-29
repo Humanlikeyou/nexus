@@ -1,0 +1,9 @@
+/* Drawn AMARA wordmark (ui/Wordmark.tsx): colour from --wordmark (#8c6239 light / #b4864e dark). */
+.wordmark {
+  display: block;
+  flex: none;
+  color: var(--wordmark);
+  overflow: visible;
+  user-select: none;
+  -webkit-user-select: none;
+}

@@ -1,4 +1,5 @@
 import { cx } from "./shared";
+import "./Wordmark.css";
 
 /**
  * Amara wordmark (screen-specs › Shell › Wordmark, Decision 17): "AMARA" drawn as monoline stroked
