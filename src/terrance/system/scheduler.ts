@@ -356,6 +356,19 @@ export async function runConsolidationNow(): Promise<RunNowResult> {
   }
 }
 
+function updateStatusCache(ctx: TerranceContext, now: number): void {
+  _lastStatus = {
+    running: true,
+    lastConsolidation: ctx.lastConsolidationTimestamp ?? null,
+    lastReasoning: ctx.lastReasoningTimestamp ?? null,
+    lastDailySummary: ctx.lastDailySummaryTimestamp ?? null,
+    lastHealthCheck: ctx.lastHealthCheckTimestamp ?? null,
+    lastPrune: ctx.lastPruneTimestamp ?? null,
+    dailySummaryHour: clampSummaryHour(ctx.dailySummaryHour),
+    ...computeNextRuns(ctx, now),
+  };
+}
+
 async function tick() {
   if (running) {
     if (Date.now() - tickStartedAt < TICK_WATCHDOG_MS) return;
@@ -389,19 +402,8 @@ async function tick() {
         console.error("[scheduler] could not persist seeded timestamps:", e);
       }
     }
-    const summaryHour = clampSummaryHour(ctx.dailySummaryHour);
-
     // Update status cache
-    _lastStatus = {
-      running: true,
-      lastConsolidation: ctx.lastConsolidationTimestamp ?? null,
-      lastReasoning: ctx.lastReasoningTimestamp ?? null,
-      lastDailySummary: ctx.lastDailySummaryTimestamp ?? null,
-      lastHealthCheck: ctx.lastHealthCheckTimestamp ?? null,
-      lastPrune: ctx.lastPruneTimestamp ?? null,
-      dailySummaryHour: summaryHour,
-      ...computeNextRuns(ctx, now),
-    };
+    updateStatusCache(ctx, now);
 
     const sentOutcome = (r: { sent: boolean; reason?: string }): JobOutcome =>
       r.sent ? { ok: true, detail: "Sent via Telegram" } : { ok: false, detail: r.reason ? `Not sent: ${r.reason}` : "Generation or delivery failed" };
@@ -485,6 +487,14 @@ async function tick() {
           console.error("[scheduler] Skills evolution error:", e);
         }
       }
+    }
+
+    // Jobs above may have advanced their timestamps: refresh the cache so Home doesn't keep
+    // showing e.g. "Consolidation due now" for another 5 min (live check 2026-10-29).
+    try {
+      updateStatusCache(await loadContext(), Date.now());
+    } catch (e) {
+      console.error("[scheduler] status refresh error:", e);
     }
 
     // Custom user-defined jobs

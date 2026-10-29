@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 const m = vi.hoisted(() => ({
   ctx: {} as Record<string, unknown>,
   daily: vi.fn(async () => ({ sent: true, summary: "s" })),
+  consolidate: vi.fn(async () => ({ consolidated: true, summary: "s" })),
   patch: vi.fn(async (_p: Record<string, unknown>) => true),
   bus: { register: vi.fn(() => "t"), complete: vi.fn(), fail: vi.fn(), update: vi.fn(), prune: vi.fn() },
 }));
@@ -10,7 +11,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ emit: vi.fn() }));
 vi.mock("./continuity", () => ({
   loadContext: vi.fn(async () => m.ctx), patchContext: m.patch,
-  consolidateRecentSessions: vi.fn(), runReasoningLoop: vi.fn(), generateDailySummary: m.daily,
+  consolidateRecentSessions: m.consolidate, runReasoningLoop: vi.fn(), generateDailySummary: m.daily,
   generateMiddayCorrection: vi.fn(), generateEveningIntegration: vi.fn(), pruneMemory: vi.fn(), memoryWriteFailure: vi.fn(),
 }));
 vi.mock("./selfDiagnosis", () => ({ runDiagnostics: vi.fn(async () => ({ issues: [] })), autoHeal: vi.fn() }));
@@ -78,6 +79,30 @@ describe("tick on a 2.5h-late launch", () => {
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(m.patch).not.toHaveBeenCalledWith({ dailySummarySkippedSlot: today8 });
     expect(m.daily).not.toHaveBeenCalled();
+    sched.stopScheduler();
+  });
+});
+
+// Live check 2026-10-29: consolidation finished at 11:25 but Home kept "Consolidation due now"
+// until the next 5-min tick, because the status cache was only built before the jobs ran.
+describe("status cache after a tick", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("reflects a consolidation that just ran", async () => {
+    const start = today8 + 3 * H;
+    vi.useFakeTimers({ now: start });
+    const now = start + 30_000;
+    m.ctx = { ...recent(now), lastConsolidationTimestamp: now - 7 * H, dailySummarySkippedSlot: today8 };
+    m.consolidate.mockImplementation(async () => {
+      m.ctx = { ...m.ctx, lastConsolidationTimestamp: Date.now() };
+      return { consolidated: true, summary: "s" };
+    });
+    vi.resetModules();
+    const sched = await import("./scheduler");
+    sched.startScheduler();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(m.consolidate).toHaveBeenCalledTimes(1);
+    expect(sched.getSchedulerStatus().nextConsolidationAt).toBe(now + 6 * H);
     sched.stopScheduler();
   });
 });
