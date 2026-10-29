@@ -81,7 +81,7 @@ describe("Home (TerranceField)", () => {
     expect(screen.getByText("No recovery yet · No local store yet.")).toBeInTheDocument();
     expect(screen.getByText("Insights appear after NOOP's nightly sync.")).toBeInTheDocument();
     expect(screen.getByText("No current priorities")).toBeInTheDocument();
-    expect(screen.getByText("Stopped")).toBeInTheDocument();
+    expect(screen.queryByText("Stopped")).toBeNull(); // no duplicate badge under the strip
     expect(screen.getByText("Background jobs aren't running.")).toBeInTheDocument();
     expect(screen.getByText("Your first completed session will appear here.")).toBeInTheDocument();
     expect(screen.queryByRole("contentinfo")).toBeNull();

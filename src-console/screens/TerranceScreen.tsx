@@ -307,7 +307,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
       <div className="home__top">
         <Card title="Recovery & sleep" accessory={<OpenLink to="health" label="Open Fitness" onNavigate={onNavigate} />}>{recoveryBody}</Card>
 
-        <Card title="Scheduler" accessory={scheduler.running ? <Badge tone="success">Running</Badge> : <Badge tone="danger">Stopped</Badge>}>
+        <Card title="Scheduler" accessory={scheduler.running ? <Badge tone="success">Running</Badge> : undefined /* stopped is already stated by the status strip */}>
           <InsetGroup>
             <ListRow title={<span title={exact(next.consolidation)}>{nextConsolidation ? `Next: Consolidation ${nextConsolidation}` : "Next: Consolidation not scheduled yet"}</span>} />
             <ListRow title={<span title={exact(lastReasoning)}>{lastReasoning == null ? "Last: No reasoning run yet" : `Last: Reasoning ${lastRunLabel(lastReasoning, now)}`}</span>} />
