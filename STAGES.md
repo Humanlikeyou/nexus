@@ -136,11 +136,12 @@
 - "/research [topic]" command in TelegramChat triggers background research
 - New Rust module: `src-tauri/src/commands/research.rs`
 
-**Phase 5E — CrewAI Integration** (started — Rust client only)
-- Python FastAPI service with CrewAI in Docker
+**Phase 5E — CrewAI Integration** (running)
+- Python FastAPI service with CrewAI in Docker on 127.0.0.1:8400. The LLM is local Ollama gemma4 (`CREW_OLLAMA_MODEL`, default `gemma4`); MiniMax is used only if a key is set.
 - [x] `src-tauri/src/commands/crew.rs` — crew_list/start/status/stop/health against http://127.0.0.1:8400 (WIP commit 4a33ff6)
-- [x] Python FastAPI CrewAI service code imported to `stack/crew-service/` (a71e91f); not yet verified running
-- [ ] Crew monitoring UI (planned in `src-console/`; the old CrewDashboard.tsx plan targeted the deleted `src/components`)
+- [x] Python FastAPI CrewAI service in `stack/crew-service/` (a71e91f), running in Docker; `/health` answers ok
+- [x] Service token (dc7e5b2): `crew.rs` reads it from the `CREW_SERVICE_TOKEN` env var, or else from `<app data dir>/crew_service_token`. That file must be mode 0600, and symlinks are refused. `scripts/sync-crew-token.sh` copies it from `stack/.env` (umask 077, prints only "written"/"unchanged", never the value). `crew_health` reports `not_configured` (no token), `offline`, `degraded` or `operational`.
+- [x] Crews UI (9e36a1e): Chat & Agents › Crews has a service card (Online/Offline/Not configured), a runs list, a New Run form behind a confirm dialog, Stop behind a destructive dialog, 5s polling while a run is running, and a ⌘K entry
 
 *Approach: Built on existing TypeScript/Rust stack first (5A-5D), CrewAI Python service last (5E).*
 *Local model at the time: qwen3.5 (9.7B). OpenClaw primary: MiniMax-M2.5, fallback: ollama/qwen3.5. Since 68f2b49 the router defaults to local Ollama `gemma4:latest`.*
@@ -156,7 +157,8 @@ This stage turns Amara from semi-autonomous to fully autonomous.
 - Amara runtime modules: `terrence_actions/automations/context/priorities/projects/runtime/runtime_bridge.rs`
 - [x] Rename electron → Nexus (`com.taisun.nexus`) done (80276f9), with one-time non-destructive app-data copy from `com.taisun.electron` (f30acbb)
 - [x] User-facing name **Amara OS**, assistant **Amara**, title "Amara OS — Command Center" (de94dfa, ec12efa); internal ids stay `nexus`
-- [x] LLM router defaults: local Ollama `gemma4:latest` (68f2b49)
+- [x] LLM router defaults: local Ollama `gemma4:latest` (68f2b49); Telegram chat is gemma4-only with no fallback (576e5a2)
+- [x] Neutral `Suppressed` activity status for sends refused by the kill switch (8041224)
 - [x] `NEXUS_OUTBOUND_DISABLED=1` session kill switch for Telegram + outbox (14cdf7c)
 - [x] Outbox: pending items older than 24h become `expired` (kept, never sent) (46fa421)
 - [x] Activity-log retention: 30 days / 5000 files, older entries archived to monthly `.jsonl.gz` (6a076f8)

@@ -55,7 +55,7 @@ There is **no Whoop integration** any more: `whoop.rs`, `useWhoop*`, `src/lib/wh
 | LLM | Local Ollama, default `gemma4:latest` (`mode: "local"`) |
 | AI gateway | OpenClaw (Node.js, port 18789, LaunchAgent) |
 | Biometrics | Muse EEG via BLE; health via NOOP (read-only SQLite) |
-| Agents | CrewAI service via `crew.rs` (port 8400) |
+| Agents | CrewAI service (`stack/crew-service`, Docker, 127.0.0.1:8400, local Ollama gemma4) via `crew.rs`; UI in Chat & Agents › Crews |
 | Trading | ARM system via local HTTP |
 | Notifications | Telegram Bot API |
 
@@ -83,8 +83,9 @@ npm run outbox-status
 
 ## Runtime behaviour (2026-10-29)
 
-- **LLM defaults** (68f2b49): `llm_router.rs` defaults to `mode: "local"` with `DEFAULT_OLLAMA_MODEL = "gemma4:latest"` (was hybrid + qwen3.5). Telegram chat picks gemma4 first, then qwen3.5, llama3.3, llama3.2 and mistral.
+- **LLM defaults** (68f2b49): `llm_router.rs` defaults to `mode: "local"` with `DEFAULT_OLLAMA_MODEL = "gemma4:latest"` (was hybrid + qwen3.5). Telegram chat is **gemma4-only** (576e5a2): there is no fallback to any other model. If Ollama is down or gemma4 is missing, it fails cleanly with a logged reason.
 - **`NEXUS_OUTBOUND_DISABLED`** (14cdf7c): set to `1`/`true`/`yes` at launch to stop all outbound sends for that session. `send_telegram_message` refuses, the outbox pauses delivery to the gateway (`Delivery paused`), and Activity shows "delivery paused". Reads and health checks still work. Use it for QA launches, because a normal launch with `telegram_chat_id` set **will** send.
+- **`suppressed` status** (8041224): an activity outcome meaning "deliberately not sent" (for example a ritual refused by the `NEXUS_OUTBOUND_DISABLED` kill switch). It is neutral, neither success nor failure, and shows as "Suppressed" in Activity. `terrence_automations.rs` also uses `suppressed` as a run and delivery status.
 - **Outbox expiry** (46fa421): pending outbox items older than `OUTBOX_EXPIRY_HOURS = 24` are marked `expired`. They are kept, never sent and not deleted, and the delivery card shows "Expired".
 - **Activity-log retention** (6a076f8, be271f5): `archive_activity_log` keeps 30 days (`ACTIVITY_KEEP_DAYS`) as files, capped at 5000 files (`ACTIVITY_MAX_FILES`). Older entries move into `activity_log/archive/YYYY-MM.jsonl.gz` (UTC month). Each archive is written via a temp file and verified before the sources are removed, and unparsable files are left in place. It runs from `pruneMemory()` in the prune job (every 7 days) and failures are non-fatal. `list_activity_entries` reads only the newest files.
 - **Prune fix** (c90435a, be271f5): from 2026-07-06 the weekly prune never ran. `runReasoningLoop` swallowed errors, so reasoning logged "Skipped" with no backoff and held the single heavy-job slot every tick. Reasoning and prune failures now count as failures with backoff and a reason (`scheduler.pruneStarvation.test.ts`). The first prune after launch archives about 16.6k old activity files.
@@ -246,7 +247,7 @@ The live design system is `src-console/styles.css` + `src-console/design/`. The 
 - [ ] **Legacy `src/`** — decide what remains (not type-checked or imported by the entry point)
 - [x] **`notifications.rs`** — removed (d6fd108)
 - [x] **CI** — Node 22 via `.nvmrc`, `test:neuro`, `cargo test --locked`, fmt/clippy (non-blocking), macOS job; tag-triggered draft release in `release.yml`
-- [ ] **CrewAI service** — `crew.rs` expects a service at 127.0.0.1:8400; service code imported to `stack/crew-service/` (Dockerfile, main.py); wiring/UI still pending
+- [x] **CrewAI service** — running on 127.0.0.1:8400; Crews UI (9e36a1e); bearer token (dc7e5b2), see STAGES.md Phase 5E
 - [ ] **End-to-end Telegram alert test**, **OpenClaw auto-restart**, **n8n webhook auth** (from earlier list)
 
 ---
