@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { HermesSubtitle } from "./agentLabels";
 import { Activity, Bot, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
 import { openClawBadge } from "../app/openclaw";
@@ -94,7 +95,7 @@ export function ChatField({
   const startedAt = messages[0]?.timestamp;
 
   const agents = [
-    { id: "hermes", icon: Bot, title: "Amara", subtitle: hermesUnavailable ? "Status unavailable" : <span title={hermes.model}>Hermes Agent</span>, searchText: hermesUnavailable ? "Status unavailable" : `Hermes Agent ${hermes.model}`, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
+    { id: "hermes", icon: Bot, title: "Amara", subtitle: hermesUnavailable ? "Status unavailable" : <HermesSubtitle model={hermes.model} />, searchText: hermesUnavailable ? "Status unavailable" : `Hermes Agent ${hermes.model}`, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
     { id: "openclaw", icon: Workflow, title: "OpenClaw", subtitle: openclaw.subtitle, searchText: String(openclaw.subtitle), tone: openclaw.tone, label: openclaw.label },
   ].filter((a) => !query.trim() || `${a.title} ${a.searchText}`.toLowerCase().includes(query.trim().toLowerCase()));
 

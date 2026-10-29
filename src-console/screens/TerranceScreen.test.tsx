@@ -56,7 +56,8 @@ describe("Home (TerranceField)", () => {
     expect(screen.getByText("HRV is up 8%")).toBeInTheDocument();
     expect(screen.queryByText("Gateway online")).toBeNull(); // folded into the status strip's Agents segment
     const agents = screen.getByRole("region", { name: "Agents" });
-    expect(within(agents).getByText("Hermes Agent · qwen3")).toBeInTheDocument();
+    expect(within(agents).getByText("Hermes Agent")).toHaveAttribute("title", "qwen3");
+    expect(within(agents).queryByText(/Hermes Agent ·/)).toBeNull();
     expect(within(agents).getByText("Not connected")).toBeInTheDocument();
     expect(screen.getByText("Ship Amara OS v2")).toBeInTheDocument();
     const neuro = screen.getByRole("region", { name: "Neuro" });

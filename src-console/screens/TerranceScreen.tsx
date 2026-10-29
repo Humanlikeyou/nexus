@@ -1,4 +1,5 @@
 import { Bot, Brain, ChevronRight, CircleDollarSign, Cpu, RefreshCw, Sparkles } from "lucide-react";
+import { HermesSubtitle } from "./agentLabels";
 import { useEffect, useState, type ReactNode } from "react";
 import { getSchedulerStatus, type SchedulerStatus } from "@/terrance/system/scheduler";
 import type { ConversationMessage } from "../app/conversation";
@@ -329,7 +330,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           ? <Unavailable label="Amara runtime" onRetry={onRetry} />
           : (
             <InsetGroup>
-              <ListRow icon={Bot} title="Amara" subtitle={["Hermes Agent", hermes.model].filter(Boolean).join(" · ") || DASH}
+              <ListRow icon={Bot} title="Amara" subtitle={<HermesSubtitle model={hermes.model} />}
                 accessory={<Badge tone={hermesOnline ? "success" : "warning"}>{hermesOnline ? "Online" : hermes.status ? hermes.status.replace(/_/g, " ") : "Offline"}</Badge>}
                 value={hermes.telegramStatus ? `Telegram ${hermes.telegramStatus}` : `Checked ${clock(hermes.checkedAt)}`} />
               <ListRow icon={Cpu} title="OpenClaw" subtitle={openClawBadge(data.openclaw).subtitle} accessory={<Badge tone={openClawBadge(data.openclaw).tone}>{openClawBadge(data.openclaw).label}</Badge>} />
