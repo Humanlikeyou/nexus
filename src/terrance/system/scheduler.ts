@@ -43,7 +43,12 @@ const DEFAULT_MIDDAY_HOUR = 12;
 const DEFAULT_MIDDAY_MINUTE = 30;                          // 12:30 PM local time
 const DEFAULT_EVENING_HOUR = 21;                           // 9 PM local time
 const HOUR_MS = 60 * 60 * 1000;
-/** Daily-summary catch-up ends at the midday slot (12:30). */
+/**
+ * The daily summary only goes out within this long after its slot (same rule as rituals);
+ * later it is skipped for the day instead of caught up.
+ */
+export const DAILY_SUMMARY_WINDOW_MS = 30 * 60_000; // = RITUAL_WINDOW_MS in ./rituals
+/** Slot boundary used by the midday window below (12:30). */
 const DAILY_CATCHUP_UNTIL_MIN = DEFAULT_MIDDAY_HOUR * 60 + DEFAULT_MIDDAY_MINUTE;
 /** Midday catch-up ends at the evening slot (21:00). */
 const MIDDAY_WINDOW_MS = (DEFAULT_EVENING_HOUR * 60 - DAILY_CATCHUP_UNTIL_MIN) * 60_000;
@@ -130,7 +135,8 @@ export function computeNextRuns(
   return {
     nextConsolidationAt: next(ctx.lastConsolidationTimestamp, CONSOLIDATION_INTERVAL_MS),
     nextReasoningAt: next(ctx.lastReasoningTimestamp, REASONING_INTERVAL_MS),
-    nextDailySummaryAt: lastDaily != null && lastDaily > 0 && lastDaily < slot ? slot : nextSlot(now, hour),
+    nextDailySummaryAt:
+      lastDaily != null && lastDaily > 0 && lastDaily < slot && now - slot < DAILY_SUMMARY_WINDOW_MS ? slot : nextSlot(now, hour),
   };
 }
 
@@ -165,6 +171,7 @@ export type SchedulerTimestamps = Pick<
   | "lastConsolidationTimestamp"
   | "lastReasoningTimestamp"
   | "lastPruneTimestamp"
+  | "dailySummarySkippedSlot"
 >;
 
 export interface DueTask {
@@ -183,10 +190,9 @@ export interface DueTask {
 export function decideDueTasks(ctx: SchedulerTimestamps, now: number): DueTask[] {
   const due: DueTask[] = [];
   const summaryHour = clampSummaryHour(ctx.dailySummaryHour);
-  const dailyWindowMs = Math.max((DAILY_CATCHUP_UNTIL_MIN - summaryHour * 60) * 60_000, HOUR_MS);
 
   const touches: [JobId, number | undefined, number, number, number][] = [
-    ["daily", ctx.lastDailySummaryTimestamp, summaryHour, 0, dailyWindowMs],
+    ["daily", ctx.lastDailySummaryTimestamp, summaryHour, 0, DAILY_SUMMARY_WINDOW_MS],
     ["midday", ctx.lastMiddayTimestamp, DEFAULT_MIDDAY_HOUR, DEFAULT_MIDDAY_MINUTE, MIDDAY_WINDOW_MS],
     ["evening", ctx.lastEveningTimestamp, DEFAULT_EVENING_HOUR, 0, EVENING_WINDOW_MS],
   ];
@@ -212,6 +218,21 @@ export function decideDueTasks(ctx: SchedulerTimestamps, now: number): DueTask[]
     due.push({ id, catchUp: false, window: `interval:${last + interval}:${windowIdx}` });
   }
   return due;
+}
+
+/**
+ * Today's daily-summary slot when it was missed: not sent since the slot, the 30-min window
+ * has passed and the skip isn't recorded yet. Null otherwise (also when never seeded).
+ */
+export function missedDailySummarySlot(
+  ctx: Pick<SchedulerTimestamps, "dailySummaryHour" | "lastDailySummaryTimestamp" | "dailySummarySkippedSlot">,
+  now: number,
+): number | null {
+  const slot = lastSlot(now, clampSummaryHour(ctx.dailySummaryHour));
+  const last = ctx.lastDailySummaryTimestamp;
+  if (last == null || last <= 0 || last >= slot) return null;
+  if (now - slot < DAILY_SUMMARY_WINDOW_MS || ctx.dailySummarySkippedSlot === slot) return null;
+  return slot;
 }
 
 // ─── Failure backoff (bug 3) ──────────────────────────────────────────────────
@@ -429,6 +450,17 @@ async function tick() {
       await withTimeout(Promise.resolve(tickRituals()), AUX_TIMEOUT_MS, "rituals");
     } catch (e) {
       console.error("[scheduler] Rituals tick error:", e);
+    }
+
+    // Daily summary missed its 30-min window (e.g. late start): record the skip, send nothing.
+    const missedDaily = missedDailySummarySlot(ctx, now);
+    if (missedDaily != null) {
+      try {
+        await patchContext({ dailySummarySkippedSlot: missedDaily });
+        activityBus.complete(activityBus.register("Daily Summary", "daily_summary"), "Skipped (missed window)");
+      } catch (e) {
+        console.error("[scheduler] Daily summary skip error:", e);
+      }
     }
 
     for (const task of decideDueTasks(ctx, now)) {

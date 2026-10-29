@@ -36,7 +36,9 @@ describe("computeNextRuns", () => {
     const today8 = new Date(2026, 9, 28, 8, 0, 0).getTime();
     const tomorrow8 = new Date(2026, 9, 29, 8, 0, 0).getTime();
     expect(computeNextRuns({ dailySummaryHour: 8, lastDailySummaryTimestamp: today8 + 1000 }, now).nextDailySummaryAt).toBe(tomorrow8);
-    expect(computeNextRuns({ dailySummaryHour: 8, lastDailySummaryTimestamp: today8 - 2 * H }, now).nextDailySummaryAt).toBe(today8);
+    // 14:00 is past today's 30-min window: it is skipped, so the next one is tomorrow.
+    expect(computeNextRuns({ dailySummaryHour: 8, lastDailySummaryTimestamp: today8 - 2 * H }, now).nextDailySummaryAt).toBe(tomorrow8);
+    expect(computeNextRuns({ dailySummaryHour: 8, lastDailySummaryTimestamp: today8 - 2 * H }, today8 + 10 * 60_000).nextDailySummaryAt).toBe(today8);
   });
 
   it("unseeded interval jobs have no next time", () => {

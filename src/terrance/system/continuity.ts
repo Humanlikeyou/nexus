@@ -93,6 +93,8 @@ export interface TerranceContext {
   lastConsolidationTimestamp?: number;
   lastReasoningTimestamp?: number;
   lastDailySummaryTimestamp?: number;
+  /** Slot (ms) of a daily summary skipped for missing its window; prevents re-logging the skip. */
+  dailySummarySkippedSlot?: number;
   dailySummaryHour?: number;
   lastHealthCheckTimestamp?: number;
   lastPruneTimestamp?: number;

@@ -96,12 +96,16 @@ describe("scheduler repros", () => {
       return { sent: false } as any;
     });
     await firstTick();
-    // Run through the rest of the daily window (it ends at 12:30) and past it.
+    // Run through the rest of the daily window and past it. Since 2026-10-29 the daily
+    // summary only fires within 30 min of its 07:00 slot, so a 07:05 start fits two tries
+    // (07:05:30, then +5 min; the +15 min retry would land after 07:30).
     await vi.advanceTimersByTimeAsync(6 * H);
 
     expect(MAX_ATTEMPTS_PER_WINDOW).toBe(3);
     expect(BACKOFF_DELAYS_MS).toEqual([5 * 60_000, 15 * 60_000, 60 * 60_000]);
-    expect(callTimes.length).toBe(MAX_ATTEMPTS_PER_WINDOW);
+    expect(callTimes.length).toBe(2);
+    const slot = at("2026-10-21T07:00:00+09:00");
+    for (const t of callTimes) expect(t - slot).toBeLessThan(30 * 60_000);
     expect(callTimes[0]).toBe(now + 30_000); // first tick
     const CHECK = 5 * 60_000;                 // tick granularity
     for (let i = 1; i < callTimes.length; i++) {
@@ -118,7 +122,8 @@ describe("scheduler repros", () => {
     c.generateDailySummary.mockResolvedValue({ sent: false } as any);
     await firstTick();
     await vi.advanceTimersByTimeAsync(30 * H); // through 2026-10-22 13:05 (day-2 window closed)
-    expect(c.generateDailySummary.mock.calls.length).toBe(2 * MAX_ATTEMPTS_PER_WINDOW);
+    // Day 1 (07:05 start): 2 tries inside the 30-min window; day 2 gets a fresh budget of 3.
+    expect(c.generateDailySummary.mock.calls.length).toBe(2 + MAX_ATTEMPTS_PER_WINDOW);
   });
 
   it("interval job that fails 3 times is retried after a later interval (not blocked until restart)", async () => {

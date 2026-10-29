@@ -70,7 +70,8 @@ describe("decideDueTasks: daily touches", () => {
   const rows: Row[] = [
     ["daily: due at 07:00 when last ran yesterday", `${TODAY}07:00:00`, { lastDailySummaryTimestamp: T(`${YDAY}07:01:00`) }, ["daily"], false],
     ["daily: not due at 06:59", `${TODAY}06:59:00`, { lastDailySummaryTimestamp: T(`${YDAY}07:01:00`) }, []],
-    ["daily: catch-up at 11:00", `${TODAY}11:00:00`, { lastDailySummaryTimestamp: T(`${YDAY}07:01:00`) }, ["daily"], true],
+    ["daily: catch-up at 07:29 (inside the 30-min window)", `${TODAY}07:29:00`, { lastDailySummaryTimestamp: T(`${YDAY}07:01:00`) }, ["daily"], true],
+    ["daily: 07:30 and later is skipped, no catch-up (2026-10-29)", `${TODAY}11:00:00`, { lastDailySummaryTimestamp: T(`${YDAY}07:01:00`) }, []],
     ["daily: catch-up ends at 12:30", `${TODAY}12:30:00`, { lastDailySummaryTimestamp: T(`${YDAY}07:01:00`), lastMiddayTimestamp: T(`${TODAY}12:30:00`) }, []],
     ["daily: cooldown, already ran today", `${TODAY}09:00:00`, { lastDailySummaryTimestamp: T(`${TODAY}07:02:00`) }, []],
     ["daily: custom hour 9", `${TODAY}09:00:00`, { dailySummaryHour: 9, lastDailySummaryTimestamp: T(`${YDAY}09:01:00`) }, ["daily"], false],
