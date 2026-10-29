@@ -1,4 +1,5 @@
 import { useLayoutEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -19,7 +20,10 @@ function storedTheme(): ThemePreference {
 export function syncWindowTheme(theme: ThemePreference): void {
   if (!("__TAURI_INTERNALS__" in window)) return;
   try {
-    getCurrentWindow().setTheme(theme === "system" ? null : theme).catch(() => { /* CSS theme still applies */ });
+    getCurrentWindow().setTheme(theme === "system" ? null : theme)
+      // The Dock icon follows the window's effective appearance (dark icon in dark mode).
+      .then(() => invoke("sync_dock_icon"))
+      .catch(() => { /* CSS theme still applies */ });
   } catch {
     /* not running inside Tauri */
   }

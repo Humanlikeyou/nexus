@@ -1,5 +1,6 @@
 mod app_paths;
 mod commands;
+mod dock_icon;
 
 use commands::{
     arm, assistant, ble_common, continuity, crew, events, goals, kv, llm_router, muse, noop,
@@ -146,7 +147,18 @@ pub fn run() {
             // Start outbox delivery worker
             outbox::start_delivery_worker(app.handle().clone());
 
+            if let Some(window) = app.get_webview_window("main") {
+                dock_icon::sync(&window);
+            }
+
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::ThemeChanged(_) = event {
+                if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+                    dock_icon::sync(&webview);
+                }
+            }
         })
         // Unregistered 2026-10-29: no live frontend caller (docs/terrance-merge-inventory.md).
         // The fns stay; re-add the `module::fn` line to restore one:
@@ -314,6 +326,8 @@ pub fn run() {
             crew::crew_status,
             crew::crew_stop,
             crew::crew_health,
+            // Appearance
+            dock_icon::sync_dock_icon,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Amara OS");

@@ -36,5 +36,11 @@ rand = "0.8"
 tar = "0.4"
 flate2 = "1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Already in the tree via tauri/tao; used only to set the Dock icon (dock_icon.rs).
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]
