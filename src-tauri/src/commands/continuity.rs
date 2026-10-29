@@ -186,7 +186,9 @@ pub(crate) fn save_context_to(
 ) -> Result<(), String> {
     crate::app_paths::create_private_dir_all(dir).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(context).map_err(|e| e.to_string())?;
-    atomic_write(&dir.join(CONTEXT_FILE), json.as_bytes()).map_err(|e| e.to_string())
+    // Private data: always 0600, even when replacing an older 0644 file.
+    atomic_write_with_mode(&dir.join(CONTEXT_FILE), json.as_bytes(), Some(0o600))
+        .map_err(|e| e.to_string())
 }
 
 /// Write `bytes` to `path` atomically: write a uniquely named temp file in the
@@ -1177,6 +1179,29 @@ mod tests {
             b"{\"activeGoals\": ["
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_context_to_rewrites_an_existing_0644_context_as_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("nexus-ctx-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(CONTEXT_FILE);
+        fs::write(&path, b"{}").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        save_context_to(&dir, &TerranceContext::default()).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        fs::remove_file(&path).unwrap();
+        save_context_to(&dir, &TerranceContext::default()).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

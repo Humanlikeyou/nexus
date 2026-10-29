@@ -195,6 +195,35 @@ pub fn ensure_private_file(path: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Set an SQLite database and its `-wal`/`-shm` sidecars (those that exist) to 0600. Call after
+/// opening the db in WAL mode: SQLite gives the sidecars the db file's mode, so an older 0644 db
+/// would otherwise keep producing 0644 sidecars. Never follows or changes a symlink.
+pub fn restrict_sqlite_files(db: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let name = db.as_os_str().to_os_string();
+        for suffix in ["", "-wal", "-shm"] {
+            let mut p = name.clone();
+            p.push(suffix);
+            let p = PathBuf::from(p);
+            match fs::symlink_metadata(&p) {
+                Ok(m) if m.file_type().is_file() => {
+                    if m.permissions().mode() & 0o777 != 0o600 {
+                        fs::set_permissions(&p, fs::Permissions::from_mode(0o600))?;
+                    }
+                }
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = db;
+    Ok(())
+}
+
 pub fn data_dir() -> PathBuf {
     data_dir_with_override(std::env::var_os(DATA_DIR_ENV))
 }
@@ -257,6 +286,53 @@ mod tests {
         write_private(&oldf, b"2").unwrap();
         assert_eq!(
             fs::metadata(&oldf).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restrict_sqlite_files_sets_db_wal_shm_to_0600_and_skips_missing_and_symlinks() {
+        use std::os::unix::fs::PermissionsExt;
+        let base =
+            std::env::temp_dir().join(format!("nexus-sqlite-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(&base).unwrap();
+        let db = base.join("chat_history.db");
+        {
+            let conn = rusqlite::Connection::open(&db).unwrap();
+            fs::set_permissions(&db, fs::Permissions::from_mode(0o644)).unwrap();
+            conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+            conn.execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES (1);")
+                .unwrap();
+            for s in ["", "-wal", "-shm"] {
+                let p = PathBuf::from(format!("{}{s}", db.display()));
+                fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+            }
+            restrict_sqlite_files(&db).unwrap();
+            for s in ["", "-wal", "-shm"] {
+                let p = PathBuf::from(format!("{}{s}", db.display()));
+                assert_eq!(
+                    fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+                    0o600,
+                    "{s}"
+                );
+            }
+        }
+        // Missing sidecars are fine; a symlinked sidecar is left alone (target unchanged).
+        let other = base.join("other.db");
+        fs::write(&other, b"").unwrap();
+        let target = base.join("target");
+        fs::write(&target, b"").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).unwrap();
+        std::os::unix::fs::symlink(&target, base.join("other.db-wal")).unwrap();
+        restrict_sqlite_files(&other).unwrap();
+        assert_eq!(
+            fs::metadata(&other).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
             0o644
         );
         fs::remove_dir_all(&base).unwrap();
