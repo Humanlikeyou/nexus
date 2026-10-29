@@ -22,6 +22,13 @@ describe("installVibrancy", () => {
     expect(root.dataset.vibrancy).toBeUndefined();
   });
 
+  it("keeps the opaque fallback for the e2e Tauri mock in Chromium on a Mac (no native material)", () => {
+    w.__TAURI_INTERNALS__ = {};
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(`${MAC} Chrome/131.0.0.0 Safari/537.36`);
+    installVibrancy();
+    expect(root.dataset.vibrancy).toBeUndefined();
+  });
+
   it("keeps the opaque fallback inside Tauri off macOS", () => {
     w.__TAURI_INTERNALS__ = {};
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
