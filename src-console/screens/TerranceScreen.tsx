@@ -126,8 +126,9 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
   const header = (
     <header className="home__header">
       <div>
-        <h1>{greeting(now)}, Taisun</h1>
-        <p className="home__date">{tokyo(now, { weekday: "long", day: "numeric", month: "long" })}</p>
+        {/* Naming (Decision 13): h1 "Command Center"; the greeting + date move to the subline. */}
+        <h1>Command Center</h1>
+        <p className="home__date">{greeting(now)}, Taisun · {tokyo(now, { weekday: "long", day: "numeric", month: "long" })}</p>
       </div>
       <div className="home__header-badges">
         {/* Sentence-case status text with a dot; Badges stay for 1–2 word tags. */}

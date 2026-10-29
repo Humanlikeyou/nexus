@@ -12,11 +12,11 @@
 }
 /* Splash + Dialog: no animation at all; final state immediately. */
 @media (prefers-reduced-motion: reduce) {
-  .splash, .wordmark--splash, .ui-dialog[open], .ui-dialog::backdrop { animation: none !important; transition: none !important; }
-  .wordmark--splash, .ui-dialog[open] { opacity: 1 !important; transform: none !important; }
+  .splash, .wordmark--splash, .splash__subtitle, .ui-dialog[open], .ui-dialog::backdrop { animation: none !important; transition: none !important; }
+  .wordmark--splash, .splash__subtitle, .ui-dialog[open] { opacity: 1 !important; transform: none !important; }
   .splash[data-fading] { display: none !important; }
 }
-:root[data-reduce-motion="true"] .splash, :root[data-reduce-motion="true"] .wordmark--splash,
+:root[data-reduce-motion="true"] .splash, :root[data-reduce-motion="true"] .wordmark--splash, :root[data-reduce-motion="true"] .splash__subtitle,
 :root[data-reduce-motion="true"] .ui-dialog[open], :root[data-reduce-motion="true"] .ui-dialog::backdrop { animation: none !important; transition: none !important; }
-:root[data-reduce-motion="true"] .wordmark--splash, :root[data-reduce-motion="true"] .ui-dialog[open] { opacity: 1 !important; transform: none !important; }
+:root[data-reduce-motion="true"] .wordmark--splash, :root[data-reduce-motion="true"] .splash__subtitle, :root[data-reduce-motion="true"] .ui-dialog[open] { opacity: 1 !important; transform: none !important; }
 :root[data-reduce-motion="true"] .splash[data-fading] { display: none !important; }

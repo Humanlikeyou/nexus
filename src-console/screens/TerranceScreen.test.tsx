@@ -37,7 +37,8 @@ describe("Home (TerranceField)", () => {
 
   it("loading: skeleton cards, heading, no dashes", () => {
     const { container } = render(<TerranceField data={INITIAL_SNAPSHOT} now={NOW} scheduler={running} />);
-    expect(screen.getByRole("heading", { level: 1, name: "Good afternoon, Taisun" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Command Center" })).toBeInTheDocument();
+    expect(screen.getByText(/^Good afternoon, Taisun · /)).toBeInTheDocument();
     expect(container.querySelector("[aria-busy=true]")).not.toBeNull();
     expect(container.textContent).not.toContain("—");
   });

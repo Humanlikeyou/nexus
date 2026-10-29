@@ -18,6 +18,9 @@ describe("boot splash", () => {
     const { rerender } = render(<Splash loaded={false} />);
     act(() => { vi.advanceTimersByTime(350); });
     expect(screen.getByRole("status", { name: "Amara OS is loading" })).toBeInTheDocument();
+    const subtitle = screen.getByText("Command Center");
+    expect(subtitle).toHaveClass("splash__subtitle");
+    expect(subtitle).toHaveAttribute("aria-hidden", "true");
     rerender(<Splash loaded />);
     expect(screen.getByRole("status")).toHaveAttribute("data-fading");
     act(() => { vi.advanceTimersByTime(200); });

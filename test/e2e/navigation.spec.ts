@@ -1,7 +1,7 @@
 import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
 
 const SECTIONS: { label: string; h1: RegExp }[] = [
-  { label: "Home", h1: /^Good (morning|afternoon|evening)/ },
+  { label: "Home", h1: /^Command Center$/ },
   { label: "Chat & Agents", h1: /^Amara$/ },
   { label: "Fitness", h1: /^Fitness$/ },
   { label: "Neuro", h1: /^Neuro$/ },

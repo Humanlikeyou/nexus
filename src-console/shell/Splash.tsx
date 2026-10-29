@@ -32,7 +32,11 @@ export function Splash({ loaded }: { loaded: boolean }) {
   if (phase === "wait" || phase === "done" || (fading && reducedMotion())) return null;
   return (
     <div className="splash" data-fading={fading || undefined} role="status" aria-label="Amara OS is loading">
-      <Wordmark size="splash" decorative />
+      <div className="splash__lockup">
+        <Wordmark size="splash" decorative />
+        {/* Decision 13: subtitle under the mark; decorative, the status keeps its aria-label. */}
+        <p className="splash__subtitle" aria-hidden="true">Command Center</p>
+      </div>
     </div>
   );
 }

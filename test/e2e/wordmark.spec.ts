@@ -62,3 +62,28 @@ test("(w) inactive window: toolbar mark dims to solid bronze, OS stays secondary
   await expect(lockup.locator("svg.wordmark--sidebar")).toHaveCSS("color", BRONZE[theme]);
   await expect(icon).toHaveCSS("color", iconActive);
 });
+
+test("(w) splash: \"Command Center\" subtitle 16px under the mark, SF 13px secondary, aria-hidden (Decision 13)", async ({ page, theme }) => {
+  await openApp(page, { theme, reduceMotion: true, delays: { get_terrence_runtime_health: 900 } }).catch(() => {});
+  const splash = page.locator(".splash");
+  await expect(splash).toBeVisible();
+  await expect(splash).toHaveAttribute("aria-label", "Amara OS is loading");
+  const subtitle = splash.locator(".splash__subtitle");
+  await expect(subtitle).toHaveText("Command Center");
+  await expect(subtitle).toHaveAttribute("aria-hidden", "true");
+  await expect(subtitle).toHaveCSS("font-size", "13px");
+  await expect(subtitle).toHaveCSS("font-weight", "400");
+  const [mark, sub, secondary] = await page.evaluate(() => {
+    const m = document.querySelector(".splash svg.wordmark--splash")!.getBoundingClientRect();
+    const s = document.querySelector(".splash__subtitle")!;
+    const probe = document.createElement("span");
+    probe.style.color = "var(--label-secondary)";
+    document.body.append(probe);
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    return [{ bottom: m.bottom }, { top: s.getBoundingClientRect().top, color: getComputedStyle(s).color }, c] as const;
+  });
+  expect(sub.color).toBe(secondary);
+  expect(Math.round(sub.top - mark.bottom)).toBe(16);
+  await expect(splash).toBeHidden();
+});
