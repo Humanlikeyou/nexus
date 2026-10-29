@@ -45,6 +45,8 @@ These 30 non-test files are not reachable from `main.tsx`. They're split by how 
 
 **Tier 1: no importers anywhere. Safe to archive as-is.**
 
+> Archived 2026-10-29: all Tier 1 files moved with `git mv` to `archive/terrance-legacy/` (same folder structure, e.g. `archive/terrance-legacy/src/hooks/useArm.ts`). Build, tests and e2e pass without them.
+
 | File | Reason |
 |---|---|
 | `src/build-stamp.d.ts` | Ambient types for `__BUILD_HASH__`/`__BUILD_TIME__`; nothing in src-console references them and tsconfig only includes src-console. |
