@@ -135,6 +135,9 @@ pub struct TerranceContext {
     pub last_midday_timestamp: Option<u64>,
     #[serde(default)]
     pub last_evening_timestamp: Option<u64>,
+    /// Daily Summary slot (ms) recorded as "Skipped (missed window)" so the skip isn't re-logged every tick.
+    #[serde(default)]
+    pub daily_summary_skipped_slot: Option<u64>,
 }
 
 /// Accept any JSON value for `dailySummaryHour`. Valid hours (0-23, integer or
@@ -649,6 +652,7 @@ mod tests {
             active_goals: vec!["ship nexus-v2".into()],
             daily_summary_hour: Some(6),
             last_evening_timestamp: Some(42),
+            daily_summary_skipped_slot: Some(7),
             ..Default::default()
         };
         save_context_to(&dir, &ctx).unwrap();
@@ -658,6 +662,8 @@ mod tests {
         assert_eq!(back.active_goals, ctx.active_goals);
         assert_eq!(back.daily_summary_hour, Some(6));
         assert_eq!(back.last_evening_timestamp, Some(42));
+        assert!(raw.contains("\"dailySummarySkippedSlot\": 7"));
+        assert_eq!(back.daily_summary_skipped_slot, Some(7));
         let _ = fs::remove_dir_all(&dir);
     }
 
