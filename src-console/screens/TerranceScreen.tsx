@@ -50,6 +50,14 @@ export function nextIn(target: number | null, now: number) {
 
 const tokyo = (ms: number | string, opts: Intl.DateTimeFormatOptions) => new Date(ms).toLocaleString("en-GB", { timeZone: "Asia/Tokyo", ...opts });
 const clock = (ms: number | string | null | undefined) => (ms == null || Number.isNaN(new Date(ms).getTime()) ? DASH : tokyo(ms, { hour: "2-digit", minute: "2-digit", hour12: false }));
+/** A past run time: "13:54" today (Tokyo), "6 Jul 13:54" on another day, with the year when it differs.
+ *  Live check 2026-10-29: "Last: Reasoning 13:54" was July 6 and read like today. */
+export function lastRunLabel(ms: number, now: number) {
+  const day = (t: number) => tokyo(t, { year: "numeric", month: "2-digit", day: "2-digit" });
+  if (day(ms) === day(now)) return clock(ms);
+  const sameYear = tokyo(ms, { year: "numeric" }) === tokyo(now, { year: "numeric" });
+  return `${tokyo(ms, { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) })} ${clock(ms)}`;
+}
 const exact = (ms: number | null) => (ms == null ? undefined : tokyo(ms, { dateStyle: "medium", timeStyle: "short", hour12: false }));
 
 export function greeting(now: number) {
@@ -232,7 +240,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
         <Card title="Scheduler" accessory={scheduler.running ? <Badge tone="success">Running</Badge> : <Badge tone="danger">Stopped</Badge>}>
           <InsetGroup>
             <ListRow title={<span title={exact(next.consolidation)}>{nextConsolidation ? `Next: Consolidation ${nextConsolidation}` : "Next: Consolidation not scheduled yet"}</span>} />
-            <ListRow title={<span title={exact(lastReasoning)}>{lastReasoning == null ? "Last: No reasoning run yet" : `Last: Reasoning ${clock(lastReasoning)}`}</span>} />
+            <ListRow title={<span title={exact(lastReasoning)}>{lastReasoning == null ? "Last: No reasoning run yet" : `Last: Reasoning ${lastRunLabel(lastReasoning, now)}`}</span>} />
           </InsetGroup>
           {!scheduler.running && <p className="home__note" role="note">Background jobs aren&apos;t running.</p>}
         </Card>

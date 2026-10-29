@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot } from "../types";
-import { TerranceField, greeting, homeDate, homeSummary, nextIn, nextRuns, relative } from "./TerranceScreen";
+import { TerranceField, greeting, homeDate, homeSummary, lastRunLabel, nextIn, nextRuns, relative } from "./TerranceScreen";
 
 const NOW = new Date("2026-10-28T14:00:00+09:00").getTime();
 const H = 3_600_000;
@@ -108,6 +108,13 @@ describe("Home (TerranceField)", () => {
     expect(nextIn(NOW + 30_000, NOW)).toBe("due now");
     expect(nextIn(NOW + 2 * H + 14 * 60_000, NOW)).toBe("in 2h 14m");
     expect(nextIn(null, NOW)).toBeNull();
+    // Last runs on another day carry the date (live check: July 6 read as "Last: Reasoning 13:54").
+    const at = (iso: string) => Date.parse(iso);
+    const today = at("2026-10-29T10:58:00+09:00");
+    expect(lastRunLabel(at("2026-10-29T08:05:00+09:00"), today)).toBe("08:05");
+    expect(lastRunLabel(at("2026-07-06T13:54:00+09:00"), today)).toBe("6 Jul 13:54");
+    expect(lastRunLabel(at("2026-10-28T23:30:00+09:00"), today)).toBe("28 Oct 23:30");
+    expect(lastRunLabel(at("2025-12-31T09:00:00+09:00"), today)).toBe("31 Dec 2025 09:00");
     expect(greeting(new Date("2026-10-28T08:00:00+09:00").getTime())).toBe("Good morning");
     expect(greeting(new Date("2026-10-28T20:00:00+09:00").getTime())).toBe("Good evening");
   });
