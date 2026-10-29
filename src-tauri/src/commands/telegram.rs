@@ -201,7 +201,7 @@ pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMes
 }
 
 /// Session kill switch for every outbound send (Telegram messages and outbox
-/// delivery to the gateway): set `NEXUS_OUTBOUND_DISABLED=1` (or `true`/`yes`)
+/// delivery to the gateway): set `NEXUS_OUTBOUND_DISABLED=1` (or `true`/`yes`/`on`)
 /// when launching for QA. Reads (getUpdates, getMe, health checks) still work.
 pub const OUTBOUND_DISABLED_ENV: &str = "NEXUS_OUTBOUND_DISABLED";
 
@@ -209,12 +209,12 @@ pub fn outbound_disabled() -> bool {
     parse_outbound_disabled(std::env::var(OUTBOUND_DISABLED_ENV).ok().as_deref())
 }
 
-/// NEXUS_OUTBOUND_DISABLED value → kill switch on? Trimmed, case-insensitive "1", "true" or
-/// "yes"; anything else (including "on") and unset are off.
+/// NEXUS_OUTBOUND_DISABLED value → kill switch on? Trimmed, case-insensitive "1", "true", "yes"
+/// or "on"; anything else and unset are off.
 pub(crate) fn parse_outbound_disabled(value: Option<&str>) -> bool {
     matches!(
         value.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
-        Some("1" | "true" | "yes")
+        Some("1" | "true" | "yes" | "on")
     )
 }
 
@@ -620,7 +620,7 @@ mod tests {
 mod outbound_tests {
     use super::*;
 
-    /// Pinned semantics (no env access: the pure parser only). Note "on" is OFF today.
+    /// Pinned semantics (no env access: the pure parser only). "on" counts as on (lead decision 2026-10-29).
     #[test]
     fn outbound_kill_switch_values() {
         let table: &[(Option<&str>, bool)] = &[
@@ -633,7 +633,11 @@ mod outbound_tests {
             (Some(" 1 "), true),
             (Some(" yes "), true),
             (Some("\ttrue\n"), true),
-            (Some("on"), false),
+            (Some("on"), true),
+            (Some("ON"), true),
+            (Some(" On "), true),
+            (Some("onn"), false),
+            (Some("o"), false),
             (Some(""), false),
             (Some("   "), false),
             (Some("0"), false),
