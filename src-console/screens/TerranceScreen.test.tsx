@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot } from "../types";
-import { TerranceField, greeting, homeDate, homeSummary, lastRunLabel, nextIn, nextRuns, relative } from "./TerranceScreen";
+import { TerranceField, greeting, homeDate, homeSummary, lastRunLabel, nextIn, nextRuns, relative, statusStrip } from "./TerranceScreen";
 
 const NOW = new Date("2026-10-28T14:00:00+09:00").getTime();
 const H = 3_600_000;
@@ -50,11 +50,11 @@ describe("Home (TerranceField)", () => {
     const onNavigate = vi.fn();
     render(<TerranceField data={full} now={NOW} scheduler={running} onNavigate={onNavigate} />);
     expect(screen.getByRole("meter", { name: "Recovery" })).toHaveAttribute("aria-valuenow", "74");
-    expect(screen.getByText("Next: Consolidation in 2h 14m")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Scheduler" })).getByText("Next: Consolidation in 2h 14m")).toBeInTheDocument();
     expect(screen.getByText("Last: Reasoning 8:12 AM")).toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.getByText("HRV is up 8%")).toBeInTheDocument();
-    expect(screen.getByText("Gateway online")).toBeInTheDocument();
+    expect(screen.queryByText("Gateway online")).toBeNull(); // folded into the status strip's Agents segment
     const agents = screen.getByRole("region", { name: "Agents" });
     expect(within(agents).getByText("Hermes Agent · qwen3")).toBeInTheDocument();
     expect(within(agents).getByText("Not connected")).toBeInTheDocument();
@@ -66,7 +66,6 @@ describe("Home (TerranceField)", () => {
     expect(within(neuro).getByText("BETA")).toBeInTheDocument();
     // Recovery band word is colored by band; header status is sentence-case text, not a badge.
     expect(screen.getByText("High")).toHaveAttribute("data-band", "high");
-    expect(screen.getByText("Gateway online").closest(".home__status")).toHaveAttribute("data-tone", "success");
     // Every linkable card uses the same "Open ›" header accessory; no in-body buttons.
     for (const name of ["Open Fitness", "Open insights in Fitness", "Open Chat & Agents", "Open Chat", "Open Neuro", "Open Revenue"]) {
       expect(screen.getByRole("button", { name })).toHaveTextContent("Open");
@@ -147,5 +146,50 @@ describe("Home (TerranceField)", () => {
       rerender(<TerranceField data={snap()} now={NOW} scheduler={running} onNavigate={onNavigate} />);
       expect(container.querySelector(".home__summary")?.textContent).toBe("All clear. Amara is standing by. · Wednesday, Oct 28");
     });
+  });
+});
+
+describe("Home status strip (Command center feel)", () => {
+  const strip = () => screen.getByRole("group", { name: "Status" });
+  const segment = (key: string) => strip().querySelector<HTMLButtonElement>(`[data-key="${key}"]`)!;
+  const fresh = { ...full, noop: { ...full.noop, generatedAt: new Date(NOW - 6 * 60_000).toISOString() } };
+
+  it("three plain-text segments with dots, no Badge inside; live ones pulse", () => {
+    render(<TerranceField data={fresh} now={NOW} scheduler={running} onNavigate={vi.fn()} />);
+    expect(strip().querySelector(".ui-badge")).toBeNull();
+    expect(segment("agents")).toHaveTextContent("Amara online · OpenClaw not connected");
+    expect(segment("scheduler")).toHaveTextContent("Next: Consolidation in 2h 14m");
+    expect(segment("scheduler")).toHaveAttribute("title", "Oct 28, 4:14 PM");
+    expect(segment("noop")).toHaveTextContent("NOOP synced 6 min ago");
+    expect(segment("noop")).toHaveAttribute("title", "Oct 28, 1:54 PM");
+    for (const key of ["agents", "scheduler", "noop"]) {
+      expect(segment(key).tagName).toBe("BUTTON");
+      expect(segment(key)).toHaveAttribute("data-live");
+      expect(segment(key).querySelector(".ui-status-dot")).toHaveAttribute("data-tone", "success");
+    }
+  });
+
+  it("deep links: Agents → Chat & Agents, Scheduler → Settings, NOOP → Fitness", () => {
+    const onNavigate = vi.fn();
+    render(<TerranceField data={fresh} now={NOW} scheduler={running} onNavigate={onNavigate} />);
+    for (const key of ["agents", "scheduler", "noop"]) fireEvent.click(segment(key));
+    expect(onNavigate.mock.calls.map((c) => c[0])).toEqual(["chat", "settings", "health"]);
+  });
+
+  it("Background jobs stopped; Amara offline; NOOP stale (yellow) and unavailable (red), always with the word", () => {
+    const offline = { ...full, hermes: { ...full.hermes, status: "offline" as const }, noop: { ...full.noop, status: "stale" as const, generatedAt: new Date(NOW - 2 * 86_400_000).toISOString() } };
+    const segs = statusStrip(offline, { running: false, lastConsolidation: null, lastReasoning: null }, NOW);
+    expect(segs.map((x) => [x.key, x.text, x.tone, x.live])).toEqual([
+      ["agents", "Amara offline · OpenClaw not connected", "danger", false],
+      ["scheduler", "Background jobs stopped", "danger", false],
+      ["noop", "NOOP stale · synced 2 d ago", "warning", false],
+    ]);
+    const down = statusStrip({ ...full, noop: { ...full.noop, status: "unavailable" } }, running, NOW)[2];
+    expect([down.text, down.tone, down.live]).toEqual(["NOOP unavailable", "danger", false]);
+  });
+
+  it("the soonest of consolidation, reasoning and daily summary is shown", () => {
+    const s = { ...running, nextConsolidationAt: NOW + 3 * H, nextReasoningAt: NOW + 5 * H, nextDailySummaryAt: NOW + 40 * 60_000 };
+    expect(statusStrip(full, s, NOW)[1].text).toBe("Next: Daily summary in 40m");
   });
 });

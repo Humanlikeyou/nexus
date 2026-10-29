@@ -6,7 +6,7 @@ import { openClawBadge } from "../app/openclaw";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import { dateTime, money, time } from "../lib/format";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, type Tone } from "../ui";
+import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, StatusDot, type Tone } from "../ui";
 import { recoveryBand } from "./HealthScreen";
 import { GoalsCard } from "./GoalsCard";
 import "./TerranceScreen.css";
@@ -20,6 +20,7 @@ const REASONING_MS = 12 * HOUR;
 type SchedulerView = Pick<SchedulerStatus, "running" | "lastConsolidation" | "lastReasoning"> & {
   nextConsolidationAt?: number | null;
   nextReasoningAt?: number | null;
+  nextDailySummaryAt?: number | null;
 };
 
 export function nextRuns(s: SchedulerView) {
@@ -110,10 +111,76 @@ function useNow(fixed?: number) {
   const [now, setNow] = useState(() => fixed ?? Date.now());
   useEffect(() => {
     if (fixed != null) return;
-    const id = window.setInterval(() => setNow(Date.now()), 60_000);
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(id);
   }, [fixed]);
   return now;
+}
+
+/** "6 min ago" / "3 h ago" / "2 d ago" for the status strip. */
+function ago(ms: number, now: number) {
+  const min = Math.max(0, Math.round((now - ms) / 60_000));
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  const h = Math.floor(min / 60);
+  return h < 24 ? `${h} h ago` : `${Math.floor(h / 24)} d ago`;
+}
+
+export interface StripSegment {
+  key: "agents" | "scheduler" | "noop";
+  text: string;
+  tone: Tone;
+  /** Live and healthy: the dot pulses. */
+  live: boolean;
+  /** Exact time for the title attribute. */
+  title?: string;
+  to: ModuleId;
+}
+
+/** Home status strip (screen-specs › Command center feel): plain text segments, not Badges. */
+export function statusStrip(data: SystemSnapshot, scheduler: SchedulerView, now: number): StripSegment[] {
+  const amaraOnline = data.hermes.status === "online";
+  const openclaw = openClawBadge(data.openclaw).label.toLowerCase();
+  const agents: StripSegment = {
+    key: "agents", to: "chat", tone: amaraOnline ? "success" : "danger", live: amaraOnline,
+    text: `Amara ${amaraOnline ? "online" : "offline"} · OpenClaw ${openclaw === "online" ? "connected" : openclaw}`,
+  };
+
+  const runs = nextRuns(scheduler);
+  const next = ([["Consolidation", runs.consolidation], ["Reasoning", runs.reasoning], ["Daily summary", scheduler.nextDailySummaryAt ?? null]] as [string, number | null][])
+    .filter((r): r is [string, number] => r[1] != null)
+    .sort((a, b) => a[1] - b[1])[0];
+  const sched: StripSegment = !scheduler.running
+    ? { key: "scheduler", to: "settings", tone: "danger", live: false, text: "Background jobs stopped" }
+    : next
+      ? { key: "scheduler", to: "settings", tone: "success", live: true, text: `Next: ${next[0]} ${nextIn(next[1], now)}`, title: dateTime(next[1]) }
+      : { key: "scheduler", to: "settings", tone: "neutral", live: false, text: "Background jobs running" };
+
+  const noop = data.noop;
+  const noopDown = data.unavailableSources.some((s) => s.command === "get_noop_health_snapshot") || noop.status === "unavailable";
+  const synced = noop.generatedAt ? Date.parse(noop.generatedAt) : NaN;
+  const syncedText = Number.isNaN(synced) ? null : `synced ${ago(synced, now)}`;
+  const health: StripSegment = noopDown
+    ? { key: "noop", to: "health", tone: "danger", live: false, text: "NOOP unavailable" }
+    : noop.status === "stale"
+      ? { key: "noop", to: "health", tone: "warning", live: false, text: `NOOP stale${syncedText ? ` · ${syncedText}` : ""}`, title: dateTime(synced) }
+      : noop.status === "ready"
+        ? { key: "noop", to: "health", tone: "success", live: true, text: `NOOP ${syncedText ?? "synced"}`, title: dateTime(synced) }
+        : { key: "noop", to: "health", tone: "neutral", live: false, text: noop.status === "waiting_for_nightly_data" ? "NOOP waiting for tonight's data" : "NOOP waiting for data" };
+  return [agents, sched, health];
+}
+
+function StatusStrip({ segments, onNavigate }: { segments: StripSegment[]; onNavigate?: (id: ModuleId) => void }) {
+  return (
+    <div className="home__strip" role="group" aria-label="Status">
+      {segments.map((s) => (
+        <button key={s.key} type="button" className="home__strip-item" data-key={s.key} data-live={s.live || undefined}
+          title={s.title} disabled={!onNavigate} onClick={() => onNavigate?.(s.to)}>
+          <StatusDot tone={s.tone}>{s.text}</StatusDot>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 const PRIORITY_TONE: Record<string, Tone> = { active: "accent", in_progress: "accent", blocked: "danger", attention: "warning", awaiting_approval: "warning", done: "success", completed: "success" };
@@ -177,13 +244,11 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           {summary && " · "}
           <time dateTime={new Date(now).toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" })}>{homeDate(now)}</time>
         </p>
+        {!isLoading && <StatusStrip segments={statusStrip(data, scheduler, now)} onNavigate={onNavigate} />}
       </div>
       <div className="home__header-badges">
-        {/* Sentence-case status text with a dot; Badges stay for 1–2 word tags. */}
+        {/* Sentence-case status text with a dot; Badges stay for 1–2 word tags. Gateway state is in the strip (Agents). */}
         {unavailable.length > 0 && <span className="home__status" data-tone="warning" title={unavailable.map((s) => s.label).join(", ")}><i className="home__dot" aria-hidden="true" />{unavailable.length} source{unavailable.length === 1 ? "" : "s"} unavailable</span>}
-        {!isLoading && (data.outbox.gateway_online || data.hermes.gatewayRunning
-          ? <span className="home__status" data-tone="success"><i className="home__dot" aria-hidden="true" />Gateway online</span>
-          : <span className="home__status" data-tone="neutral"><i className="home__dot" aria-hidden="true" />Gateway offline</span>)}
       </div>
     </header>
   );

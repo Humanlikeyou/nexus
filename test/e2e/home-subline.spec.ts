@@ -11,3 +11,28 @@ test("(h) Home subline: greeting, status from data, and today's date from the cl
   await expect(line).toHaveText(new RegExp(`^(Amara has \\d+ actions? waiting for approval|Amara is tracking \\d+ priorit(y|ies) today|All clear\\. Amara is standing by\\.) · ${today}$`));
   await expect(home.locator(".home__date").first()).toHaveText(/^Good (morning|afternoon|evening), Taisun$/);
 });
+
+// screen-specs › Command center feel: one 28px status strip under the subline, plain text, no Badges.
+test("(i) Home status strip: three text segments under the subline, deep links, no Badge", async ({ page, theme }) => {
+  await openApp(page, { theme, reduceMotion: true });
+  const home = activeField(page, "Home");
+  const strip = home.getByRole("group", { name: "Status" });
+  await expect(strip).toBeVisible();
+  const buttons = strip.getByRole("button");
+  await expect(buttons).toHaveCount(3);
+  await expect(buttons.nth(0)).toHaveText(/^Amara (online|offline) · OpenClaw .+$/);
+  await expect(buttons.nth(1)).toHaveText(/^(Next: (Consolidation|Reasoning|Daily summary) (in .+|due now)|Background jobs (stopped|running))$/);
+  await expect(buttons.nth(2)).toHaveText(/^NOOP /);
+  await expect(strip.locator(".ui-badge")).toHaveCount(0);
+  const box = (await strip.boundingBox())!;
+  expect(box.height).toBeGreaterThanOrEqual(28);
+  expect(box.height).toBeLessThan(40);
+  const subline = (await home.locator(".home__summary").boundingBox())!;
+  expect(box.y).toBeGreaterThan(subline.y);
+  // Reduced motion: the dots are static.
+  const anim = await strip.locator(".ui-status-dot__dot").first().evaluate((el) => getComputedStyle(el).animationName);
+  expect(anim).toBe("none");
+  await expect(home.getByText("Gateway online")).toHaveCount(0);
+  await buttons.nth(2).click();
+  await expect(activeField(page, "Fitness").getByRole("heading", { level: 1 })).toHaveText("Fitness");
+});
