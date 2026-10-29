@@ -198,6 +198,8 @@ export function decideDueTasks(ctx: SchedulerTimestamps, now: number): DueTask[]
   ];
   for (const [id, last, h, m, w] of touches) {
     const t = isTouchDue(last, now, h, m, w);
+    // A daily summary suppressed by the kill switch is done for its slot (persisted, survives a relaunch).
+    if (id === "daily" && ctx.dailySummarySkippedSlot === t.slot) continue;
     if (t.due) due.push({ id, catchUp: t.catchUp, window: String(t.slot) });
   }
 
@@ -243,6 +245,8 @@ export type JobId = "daily" | "midday" | "evening" | "consolidation" | "reasonin
 
 export { BACKOFF_DELAYS_MS, MAX_ATTEMPTS_PER_WINDOW } from "./backoff";
 const backoff = new Backoff<JobId>();
+/** Window each job was last Suppressed in: not retried in that window (in memory; daily also persists its slot). */
+const suppressedWindows = new Map<JobId, string>();
 
 /**
  * A heavy job that fails this fast did no real (LLM) work, e.g. a missing
@@ -290,6 +294,8 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
 export interface JobOutcome {
   ok: boolean;
   detail: string;
+  /** Deliberately not sent (NEXUS_OUTBOUND_DISABLED): neutral, no backoff, not retried in this window. */
+  suppressed?: boolean;
 }
 
 /** Run one job with its own try/catch so a throw never skips the rest of the tick. */
@@ -301,7 +307,7 @@ async function runJob(
   now: number,
   window: string,
   detail?: string,
-): Promise<{ ok: boolean; ms: number }> {
+): Promise<{ ok: boolean; ms: number; suppressed: boolean }> {
   const startedAt = Date.now();
   const taskId = activityBus.register(label, kind, detail ? { detail } : undefined);
   console.log(`[scheduler] Running ${label}${detail ? ` (${detail})` : ""}...`);
@@ -314,12 +320,29 @@ async function runJob(
   if (outcome.ok) {
     backoff.recordSuccess(id);
     activityBus.complete(taskId, outcome.detail);
+  } else if (outcome.suppressed) {
+    backoff.recordSuccess(id);
+    suppressedWindows.set(id, window);
+    activityBus.suppress(taskId, outcome.detail);
   } else {
     backoff.recordFailure(id, now, window);
     activityBus.fail(taskId, outcome.detail);
     console.error(`[scheduler] ${label} failed: ${outcome.detail}`);
   }
-  return { ok: outcome.ok, ms: Date.now() - startedAt };
+  return { ok: outcome.ok, ms: Date.now() - startedAt, suppressed: !!outcome.suppressed };
+}
+
+/**
+ * Activity outcome for a daily touch. A kill-switch refusal is Suppressed, not a failure: as a
+ * failure it backed off and regenerated (live: 29 s of LLM per try) on the single heavy slot,
+ * delaying overdue jobs such as the weekly prune (live check 2026-10-29).
+ */
+export function sentOutcome(r: { sent: boolean; reason?: string }): JobOutcome {
+  if (r.sent) return { ok: true, detail: "Sent via Telegram" };
+  if (r.reason?.includes("NEXUS_OUTBOUND_DISABLED")) {
+    return { ok: false, suppressed: true, detail: "Outbound sends disabled (NEXUS_OUTBOUND_DISABLED)" };
+  }
+  return { ok: false, detail: r.reason ? `Not sent: ${r.reason}` : "Generation or delivery failed" };
 }
 
 async function consolidationJob(): Promise<JobOutcome> {
@@ -424,9 +447,6 @@ async function tick() {
     // Update status cache
     updateStatusCache(ctx, now);
 
-    const sentOutcome = (r: { sent: boolean; reason?: string }): JobOutcome =>
-      r.sent ? { ok: true, detail: "Sent via Telegram" } : { ok: false, detail: r.reason ? `Not sent: ${r.reason}` : "Generation or delivery failed" };
-
     const jobs: Record<JobId, { label: string; kind: Parameters<typeof activityBus.register>[1]; heavy: boolean; fn: () => Promise<JobOutcome> }> = {
       daily: { label: "Daily Summary", kind: "daily_summary", heavy: true, fn: async () => sentOutcome(await generateDailySummary()) },
       midday: { label: "Midday Correction", kind: "daily_summary", heavy: true, fn: async () => sentOutcome(await generateMiddayCorrection()) },
@@ -478,6 +498,7 @@ async function tick() {
 
     for (const task of decideDueTasks(ctx, now)) {
       const job = jobs[task.id];
+      if (suppressedWindows.get(task.id) === task.window) continue;
       if (backoff.inBackoff(task.id, now, task.window)) continue;
       if (job.heavy) {
         if (heavyBudget <= 0) continue;
@@ -485,6 +506,13 @@ async function tick() {
       }
       const result = await runJob(task.id, job.label, job.kind, job.fn, now, task.window, task.catchUp ? "catch-up" : undefined);
       if (job.heavy && !result.ok && result.ms < FAST_FAIL_MS) heavyBudget++;
+      if (task.id === "daily" && result.suppressed) {
+        try {
+          await withTimeout(patchContext({ dailySummarySkippedSlot: Number(task.window) }), LOAD_TIMEOUT_MS, "record suppressed daily slot");
+        } catch (e) {
+          console.error("[scheduler] could not persist suppressed daily slot:", e);
+        }
+      }
 
       // Skills self-improvement runs on the consolidation cadence
       if (task.id === "consolidation") {
