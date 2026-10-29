@@ -138,7 +138,7 @@ export function BackupSection({ pack = packItUp, restore = unpackBackup, pick = 
         <ListRow icon={RotateCcw} title="Restore from Backup" subtitle="Replaces local data with a backup made by Create Backup."
           accessory={<Button variant="secondary" size="small" onClick={() => void choose()} disabled={restoring}>Choose…</Button>} />
         <li className="backup-restore__path">
-          <TextField label="Backup file" value={archive} placeholder="~/Desktop/nexus-backup-20261029_101500.tar.gz"
+          <TextField label="Backup file" value={archive} placeholder="Choose… or paste the path of a .tar.gz backup"
             onChange={(e) => { setArchive(e.target.value); setRestored(null); setRestoreNote(null); setRestoreError(null); }}
             error={pathError ?? undefined} spellCheck={false} autoComplete="off" />
           <Button variant="destructive" size="small" disabled={!canRestore} loading={restoring} onClick={() => setConfirming(true)}>Restore…</Button>
