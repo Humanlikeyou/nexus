@@ -31,6 +31,16 @@ const D = 24 * H;
 describe("weekly prune is not starved by a failing reasoning loop", () => {
   afterEach(() => vi.useRealTimers());
 
+  it("a prune failure is reported as a failure (backoff), not '0 archived'", async () => {
+    const { pruneOutcome } = await import("./scheduler");
+    expect(pruneOutcome({ archived: 0, pruned: 0, consolidatedSummary: null, activityArchived: 0, error: true, reason: "disk full" }))
+      .toEqual({ ok: false, detail: "Pruning failed: disk full" });
+    expect(pruneOutcome({ archived: 2, pruned: 1, consolidatedSummary: null, activityArchived: 16589 }))
+      .toEqual({ ok: true, detail: "2 sessions archived, 1 trimmed, 16589 activity entries archived" });
+    expect(pruneOutcome({ archived: 0, pruned: 0, consolidatedSummary: null, activityArchived: 0, activityError: "verify failed" }))
+      .toEqual({ ok: true, detail: "0 sessions archived, 0 trimmed, activity archive failed (files kept): verify failed" });
+  });
+
   it("a reasoning failure is reported as a failure, not 'Skipped'", async () => {
     const { reasoningOutcome } = await import("./scheduler");
     expect(reasoningOutcome({ reasoned: false, reflection: null, error: true, reason: "LLM gateway error" }))

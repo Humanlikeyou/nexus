@@ -341,6 +341,18 @@ export function reasoningOutcome(result: Awaited<ReturnType<typeof runReasoningL
   return failure ? { ok: false, detail: `Reflection saved locally; ${failure}` } : { ok: true, detail: "Reflection complete" };
 }
 
+/**
+ * Activity outcome for a prune run. A failed run is a failure (backoff applies): reporting it as
+ * success left lastPruneTimestamp unchanged, so prune stayed due and re-ran every tick.
+ */
+export function pruneOutcome(result: Awaited<ReturnType<typeof pruneMemory>>): JobOutcome {
+  if (result.error) return { ok: false, detail: result.reason ? `Pruning failed: ${result.reason}` : "Pruning failed" };
+  const activity = result.activityError
+    ? `activity archive failed (files kept): ${result.activityError}`
+    : `${result.activityArchived} activity entries archived`;
+  return { ok: true, detail: `${result.archived} sessions archived, ${result.pruned} trimmed, ${activity}` };
+}
+
 export type RunNowResult = { started: true } | { started: false; reason: "busy" };
 
 /**
@@ -442,10 +454,7 @@ async function tick() {
       },
       prune: {
         label: "Memory Pruning", kind: "prune", heavy: true,
-        fn: async () => {
-          const result = await pruneMemory();
-          return { ok: true, detail: `${result.archived} archived, ${result.pruned} trimmed` };
-        },
+        fn: async () => pruneOutcome(await pruneMemory()),
       },
     };
 

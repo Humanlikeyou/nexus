@@ -403,13 +403,13 @@ function formatRelativeTime(ts: number): string {
  * error (it may carry URLs or provider text). Live check 2026-10-29: with compute mode
  * "gateway" and OpenClaw not installed, every LLM job read just "failed".
  */
-export function jobFailureReason(e: unknown): string {
+export function jobFailureReason(e: unknown, fallback = "generation failed"): string {
   const m = e instanceof Error ? e.message : String(e);
   if (m.includes("NEXUS_OUTBOUND_DISABLED")) return "delivery paused (NEXUS_OUTBOUND_DISABLED)";
   if (m.startsWith("OpenClaw gateway unreachable")) return "LLM gateway (OpenClaw) unreachable; check compute mode";
   if (m.startsWith("OpenClaw")) return "LLM gateway error";
   if (/ollama/i.test(m)) return "local model (Ollama) error";
-  return "generation failed";
+  return fallback;
 }
 
 export async function generateDailySummary(): Promise<{ sent: boolean; summary: string | null; reason?: string }> {
@@ -506,7 +506,7 @@ export async function generateDailySummary(): Promise<{ sent: boolean; summary: 
  * Midday touch — lightweight course correction.
  * Are you still on the morning's priority? Drifting into reactive work?
  */
-export async function generateMiddayCorrection(): Promise<{ sent: boolean; message: string | null }> {
+export async function generateMiddayCorrection(): Promise<{ sent: boolean; message: string | null; reason?: string }> {
   try {
     const ctx = await loadContext();
     const ctxGoals = ctx.activeGoals ?? [];
@@ -547,7 +547,7 @@ export async function generateMiddayCorrection(): Promise<{ sent: boolean; messa
       await invoke<void>("send_telegram_message", { text: message });
     } catch (e) {
       console.error("[midday-correction] Telegram send failed:", e);
-      return { sent: false, message };
+      return { sent: false, message, reason: jobFailureReason(e) };
     }
 
     // Update timestamp
@@ -557,7 +557,7 @@ export async function generateMiddayCorrection(): Promise<{ sent: boolean; messa
     return { sent: true, message };
   } catch (e) {
     console.error("[midday-correction] Error:", e);
-    return { sent: false, message: null };
+    return { sent: false, message: null, reason: jobFailureReason(e) };
   }
 }
 
@@ -567,7 +567,7 @@ export async function generateMiddayCorrection(): Promise<{ sent: boolean; messa
  * Evening touch — integration and reflection.
  * What worked today, what didn't, what patterns emerged.
  */
-export async function generateEveningIntegration(): Promise<{ sent: boolean; message: string | null }> {
+export async function generateEveningIntegration(): Promise<{ sent: boolean; message: string | null; reason?: string }> {
   try {
     const [ctx, allLogs] = await Promise.all([
       loadContext(),
@@ -621,7 +621,7 @@ export async function generateEveningIntegration(): Promise<{ sent: boolean; mes
       await invoke<void>("send_telegram_message", { text: message });
     } catch (e) {
       console.error("[evening-integration] Telegram send failed:", e);
-      return { sent: false, message };
+      return { sent: false, message, reason: jobFailureReason(e) };
     }
 
     // Store as session log
@@ -643,7 +643,7 @@ export async function generateEveningIntegration(): Promise<{ sent: boolean; mes
     return { sent: true, message };
   } catch (e) {
     console.error("[evening-integration] Error:", e);
-    return { sent: false, message: null };
+    return { sent: false, message: null, reason: jobFailureReason(e) };
   }
 }
 
@@ -657,7 +657,17 @@ export async function generateEveningIntegration(): Promise<{ sent: boolean; mes
 export const ACTIVITY_KEEP_DAYS = 30;
 export const ACTIVITY_MAX_FILES = 5000;
 
-export async function pruneMemory(): Promise<{ archived: number; pruned: number; consolidatedSummary: string | null; activityArchived: number }> {
+export async function pruneMemory(): Promise<{
+  archived: number;
+  pruned: number;
+  consolidatedSummary: string | null;
+  activityArchived: number;
+  /** Set when the activity-log archive step failed (non-fatal; files kept). */
+  activityError?: string;
+  /** Set when the run failed: lastPruneTimestamp was not advanced. */
+  error?: true;
+  reason?: string;
+}> {
   try {
     // Step 1: Get old logs that will be archived (>30 days)
     const allLogs = await invoke<import("@/lib/types").SessionLogEntry[]>("list_session_logs");
@@ -718,6 +728,7 @@ export async function pruneMemory(): Promise<{ archived: number; pruned: number;
     // Step 4b: Retire activity log files older than 30 days (and beyond 5000 files)
     // into verified monthly archives. Non-fatal: files stay in place on any error.
     let activityArchived = 0;
+    let activityError: string | undefined;
     try {
       const report = await invoke<{ archived: number }>("archive_activity_log", {
         keepDays: ACTIVITY_KEEP_DAYS,
@@ -727,16 +738,17 @@ export async function pruneMemory(): Promise<{ archived: number; pruned: number;
       activityArchived = report?.archived ?? 0;
     } catch (e) {
       console.error("[prune-memory] activity archive failed (files kept):", e);
+      activityError = jobFailureReason(e, "archive step failed");
     }
 
     // Step 5: Update prune timestamp
     const freshCtx = await loadContext();
     await saveContext({ ...freshCtx, lastPruneTimestamp: Date.now() });
 
-    return { archived, pruned, consolidatedSummary, activityArchived };
+    return { archived, pruned, consolidatedSummary, activityArchived, ...(activityError ? { activityError } : {}) };
   } catch (e) {
     console.error("[prune-memory] Error:", e);
-    return { archived: 0, pruned: 0, consolidatedSummary: null, activityArchived: 0 };
+    return { archived: 0, pruned: 0, consolidatedSummary: null, activityArchived: 0, error: true, reason: jobFailureReason(e, "storage step failed") };
   }
 }
 
