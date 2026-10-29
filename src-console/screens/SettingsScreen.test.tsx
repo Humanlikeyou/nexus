@@ -13,7 +13,10 @@ describe("Settings (§11) + Devices (§9)", () => {
     render(<SettingsField data={snap()} {...base} />);
     const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
     expect(titles).toEqual(["Appearance", "Devices", "General", "Backup", "Restore", "About & Diagnostics"]);
-    expect(screen.getByRole("img", { name: "Amara OS" })).toHaveTextContent("Amara");
+    const mark = screen.getByRole("img", { name: "Amara OS" });
+    expect(mark.tagName.toLowerCase()).toBe("svg");
+    expect(mark).toHaveClass("wordmark--about");
+    expect(screen.getByText("Wordmark drawn after the Taiyo Skin logo.")).toBeInTheDocument();
     expect(screen.getByText(/Version 0\.1\.0/)).toBeInTheDocument();
     expect(screen.queryByRole("navigation")).toBeNull();
   });

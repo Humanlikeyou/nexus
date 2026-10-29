@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Wordmark } from "../ui/Wordmark";
 import "./Splash.css";
 
 type Phase = "wait" | "show" | "fade" | "done";
@@ -31,7 +32,7 @@ export function Splash({ loaded }: { loaded: boolean }) {
   if (phase === "wait" || phase === "done" || (fading && reducedMotion())) return null;
   return (
     <div className="splash" data-fading={fading || undefined} role="status" aria-label="Amara OS is loading">
-      <span className="wordmark wordmark--splash" aria-hidden="true">Amara</span>
+      <Wordmark size="splash" decorative />
     </div>
   );
 }

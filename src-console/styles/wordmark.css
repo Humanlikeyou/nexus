@@ -1,62 +1,51 @@
-/* Amara wordmark (screen-specs › Shell › Wordmark). Cormorant Garamond SemiBold 600, Latin subset,
- * self-hosted under SIL OFL 1.1 (assets/fonts/OFL.txt). Used ONLY for the "Amara" wordmark;
- * the rest of the UI stays on the system font. No external font requests (CSP font-src 'self'). */
-@font-face {
-  font-family: "Amara Wordmark";
-  src: url("../assets/fonts/CormorantGaramond-SemiBold-latin.woff2") format("woff2");
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2212, U+FEFF, U+FFFD;
-}
-
+/* Amara wordmark (screen-specs › Shell › Wordmark, Decision 17). "AMARA" is an inline SVG of stroked
+ * paths (ui/Wordmark.tsx), so no font file is bundled. Colour: --wordmark (#8c6239 light / #b4864e dark),
+ * never a gradient, glow or accent. If the SVG ever fails, the only text fallback is the accessible name. */
 :root {
-  --font-wordmark: "Amara Wordmark", ui-serif, Georgia, serif;
-  --wordmark-nudge: 1px;
+  /* Vertical optical nudges (spec: check the apexes at 2x; nudge −0.5px if they read low). */
+  --wordmark-nudge: 0px;
+  --wordmark-os-nudge: 1.5px; /* spec starts at −1px; measured: "OS" line box bottom sits ~2.5px under its baseline, so +1.5px lands it on the cap baseline */
 }
 
+.wordmark {
+  display: block;
+  flex: none;
+  color: var(--wordmark);
+  overflow: visible;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Sidebar lockup: 12px caps centred on the traffic lights (cap box y 20–32 in the 52px toolbar),
+ * "OS" 6px after it with its baseline on the cap baseline. */
 .wordmark-lockup {
   display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
+  align-items: flex-end;
+  gap: 6px;
   white-space: nowrap;
   user-select: none;
   -webkit-user-select: none;
   transform: translateY(var(--wordmark-nudge));
 }
+/* The lockup is the header's last child: undo the legacy `.nexus-mark span:last-child` clip (styles.css). */
+.nexus-mark > .wordmark-lockup:last-child { overflow: visible; }
 
-.wordmark {
-  font-family: var(--font-wordmark);
-  font-weight: 600;
-  font-size: 22px;
-  line-height: 1;
-  letter-spacing: -0.01em;
-  font-synthesis: none;
-  font-kerning: normal;
-  font-feature-settings: "kern", "liga";
-  -webkit-font-smoothing: antialiased;
-  color: var(--label, var(--text));
-}
-
-/* "OS" suffix: system font, 11px / 500, uppercase, +.08em, secondary label colour. */
-.wordmark-os {
+/* "OS" suffix: system font, 11px / 500, uppercase, +.08em, secondary label colour.
+ * Selector is specific enough to beat the legacy `.nexus-mark span:last-child` rule in styles.css. */
+.nexus-mark .wordmark-lockup > .wordmark-os,
+.wordmark-lockup > .wordmark-os {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   font-size: 11px;
   font-weight: 500;
+  line-height: 1;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--label-secondary);
+  overflow: visible;
+  position: relative;
+  top: var(--wordmark-os-nudge);
 }
 
-[data-window-active="false"] .wordmark { color: var(--label-secondary); }
-
-/* Splash only (screen-specs › Shell › Wordmark › Splash): same file, font-display: block so the
- * 64px wordmark never flashes in the fallback serif during the ≤1.5 s boot splash. */
-@font-face {
-  font-family: "Amara Wordmark Splash";
-  src: url("../assets/fonts/CormorantGaramond-SemiBold-latin.woff2") format("woff2");
-  font-weight: 600;
-  font-style: normal;
-  font-display: block;
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2212, U+FEFF, U+FFFD;
-}
+/* Inactive window: the wordmark stays bronze (brand); only "OS" recedes. */
+[data-window-active="false"] .nexus-mark .wordmark-lockup > .wordmark-os,
+[data-window-active="false"] .wordmark-lockup > .wordmark-os { color: var(--label-tertiary); }

@@ -25,6 +25,7 @@
   --label-secondary: #5e5e63;
   --label-tertiary: #7a7a7f;
   --label-quaternary: #b4b4b9; /* decorative only, never text */
+  --wordmark: #8c6239; /* Taiyo Skin logo bronze (Decision 17) */
   --bg-window: #f5f5f7;
   --bg-content: #ffffff;
   --bg-rgb: 245, 245, 247;
@@ -83,6 +84,7 @@
   --d-label-secondary: #aeaeb3;
   --d-label-tertiary: #8d8d92;
   --d-label-quaternary: #5c5c61;
+  --d-wordmark: #b4864e; /* Taiyo favicon dark variant */
   --d-bg-window: #1c1c1e;
   --d-bg-content: #232325;
   --d-bg-rgb: 28, 28, 30;
@@ -185,6 +187,7 @@
   --label-secondary: var(--d-label-secondary);
   --label-tertiary: var(--d-label-tertiary);
   --label-quaternary: var(--d-label-quaternary);
+  --wordmark: var(--d-wordmark);
   --bg-window: var(--d-bg-window);
   --bg-content: var(--d-bg-content);
   --bg-rgb: var(--d-bg-rgb);
@@ -225,6 +228,7 @@
     --label-secondary: var(--d-label-secondary);
     --label-tertiary: var(--d-label-tertiary);
     --label-quaternary: var(--d-label-quaternary);
+    --wordmark: var(--d-wordmark);
     --bg-window: var(--d-bg-window);
     --bg-content: var(--d-bg-content);
     --bg-rgb: var(--d-bg-rgb);

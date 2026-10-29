@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
 
-const KNOWN_CONTRAST_EXCLUSIONS = [".wordmark-os", ".ui-badge[data-tone]"];
+const KNOWN_CONTRAST_EXCLUSIONS = [".ui-badge[data-tone]"];
 
 const SECTIONS = ["Home", "Chat & Agents", "Fitness", "Neuro", "Business", "Settings"];
 
@@ -29,9 +29,8 @@ for (const label of SECTIONS) {
     expect(await blockingViolations(page, ["color-contrast"])).toEqual([]);
   });
 
-  // Label tiers are solid hex now (screen-specs Decision 18). Still excluded, each waiting on a decision:
-  // - .wordmark-os: inactive-window "OS" is --label-tertiary per the wordmark spec (11px, 3.95:1);
-  //   the wordmark is on hold for Taisun's OK of the new SVG.
+  // Label tiers are solid hex now (screen-specs Decision 18); the wordmark is the drawn SVG (Decision 17).
+  // Still excluded, waiting on a decision:
   // - tinted Badge text (success 4.01, danger 4.11, info/warning similar, at 10px): needs tone values from Design Lead.
   test(`(g) ${label}: no serious or critical axe violations at all`, async ({ page, theme }) => {
     await openSection(page, theme, label);

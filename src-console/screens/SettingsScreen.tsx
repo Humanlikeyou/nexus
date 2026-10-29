@@ -4,7 +4,7 @@ import { APP_NAME, APP_VERSION } from "../app/version";
 import { date, humanize } from "../lib/format";
 import { BackupSection } from "../settings/BackupSection";
 import type { MuseDevice, SystemSnapshot } from "../types";
-import { Button, InsetGroup, ListRow, SegmentedControl, Toggle } from "../ui";
+import { Button, InsetGroup, ListRow, SegmentedControl, Toggle, Wordmark } from "../ui";
 import { DevicesGroup } from "./DevicesScreen";
 import type { MuseOperation } from "./muse";
 import { nextRuns, relative, useSchedulerStatus } from "./TerranceScreen";
@@ -29,13 +29,13 @@ export type SettingsFieldProps = {
 
 const noop = () => {};
 
-/** About header (Shell › Wordmark: 44px Cormorant, "Version {v}" below). "Amara" alone; accessible name "Amara OS". */
+/** About header (Shell › Wordmark: 32px-cap drawn AMARA, "Version {v}" 12px below). Accessible name "Amara OS". */
 export function AboutHeader() {
   return (
     <div className="about" id="about">
-      <span className="wordmark wordmark--about" role="img" aria-label={APP_NAME}>Amara</span>
+      <Wordmark size="about" label={APP_NAME} />
       <p className="about__version">{APP_NAME} · Version {APP_VERSION}</p>
-      <p className="about__credits">Wordmark set in Cormorant Garamond (SIL Open Font License 1.1).</p>
+      <p className="about__credits">Wordmark drawn after the Taiyo Skin logo.</p>
     </div>
   );
 }
