@@ -789,6 +789,62 @@ mod tests {
     }
 
     #[test]
+    fn daily_summary_skipped_slot_round_trips_and_defaults() {
+        let dir = temp_dir("skipped-slot");
+        let write_with = |slot: Option<serde_json::Value>| {
+            let mut v = serde_json::to_value(TerranceContext {
+                last_daily_summary_timestamp: Some(5),
+                ..Default::default()
+            })
+            .unwrap();
+            let obj = v.as_object_mut().unwrap();
+            obj.remove("dailySummarySkippedSlot");
+            if let Some(slot) = slot {
+                obj.insert("dailySummarySkippedSlot".into(), slot);
+            }
+            fs::write(dir.join(CONTEXT_FILE), v.to_string()).unwrap();
+        };
+        // Older context files have no key: loads as None, other fields intact.
+        write_with(None);
+        let ctx = load_context_from(&dir).unwrap();
+        assert_eq!(ctx.daily_summary_skipped_slot, None);
+        assert_eq!(ctx.last_daily_summary_timestamp, Some(5));
+
+        // Explicit null is also None.
+        write_with(Some(serde_json::Value::Null));
+        assert_eq!(
+            load_context_from(&dir).unwrap().daily_summary_skipped_slot,
+            None
+        );
+
+        // A real ms slot survives save -> load exactly, and saving None clears it.
+        let slot: u64 = 1_793_232_000_000; // a realistic ms timestamp (2026)
+        let mut ctx = TerranceContext {
+            daily_summary_skipped_slot: Some(slot),
+            ..Default::default()
+        };
+        save_context_to(&dir, &ctx).unwrap();
+        assert_eq!(
+            load_context_from(&dir).unwrap().daily_summary_skipped_slot,
+            Some(slot)
+        );
+        let raw = fs::read_to_string(dir.join(CONTEXT_FILE)).unwrap();
+        assert!(raw.contains(&format!("\"dailySummarySkippedSlot\": {slot}")));
+        assert!(!raw.contains("daily_summary_skipped_slot"));
+        ctx.daily_summary_skipped_slot = None;
+        save_context_to(&dir, &ctx).unwrap();
+        assert_eq!(
+            load_context_from(&dir).unwrap().daily_summary_skipped_slot,
+            None
+        );
+
+        // Wrong type is a load error, and the file is left as-is.
+        write_with(Some(serde_json::json!("soon")));
+        assert!(load_context_from(&dir).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn corrupt_context_errors_and_is_not_overwritten_by_load() {
         let dir = temp_dir("corrupt");
         fs::write(dir.join(CONTEXT_FILE), b"{\"activeGoals\": [").unwrap();

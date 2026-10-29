@@ -1419,6 +1419,49 @@ mod tests {
     }
 
     #[test]
+    fn telegram_log_tail_is_capped_at_512_kb_and_keeps_the_newest_bytes() {
+        let dir = std::env::temp_dir().join(format!("nexus-tg-512-{}", Uuid::new_v4()));
+        fs::create_dir_all(dir.join("logs")).unwrap();
+        let path = dir.join("logs").join("gateway.log");
+        let noise =
+            "WARNING [Telegram] Dual-stack api.telegram.org path failed (ConnectTimeout(''))\n";
+        let window = TELEGRAM_LOG_TAIL_BYTES as usize;
+        assert_eq!(window, 512 * 1024);
+
+        // Connect marker ~600 KB from the end: outside the window, so not seen.
+        let mut log = String::from("[Telegram] Connected to Telegram (polling mode)\n");
+        while log.len() < 600 * 1024 {
+            log.push_str(noise);
+        }
+        fs::write(&path, &log).unwrap();
+        let tail = read_log_tail(&path, TELEGRAM_LOG_TAIL_BYTES);
+        assert_eq!(tail.len(), window);
+        assert!(log.ends_with(&tail), "tail must be the newest bytes");
+        assert!(!tail.contains("Connected to Telegram"));
+        assert_ne!(telegram_status(&dir, true), "connected");
+
+        // Marker ~500 KB from the end: inside the window, so connected.
+        let mut log = String::new();
+        while log.len() < 300 * 1024 {
+            log.push_str(noise);
+        }
+        log.push_str("[Telegram] Connected to Telegram (polling mode)\n");
+        while log.len() < 800 * 1024 {
+            log.push_str(noise);
+        }
+        fs::write(&path, &log).unwrap();
+        assert_eq!(telegram_status(&dir, true), "connected");
+
+        // Window boundary inside a multi-byte char: lossy decode, no panic.
+        let mut log = String::from("é");
+        log.push_str(&"x".repeat(window - 1));
+        fs::write(&path, &log).unwrap();
+        let tail = read_log_tail(&path, TELEGRAM_LOG_TAIL_BYTES);
+        assert!(tail.starts_with('\u{FFFD}'));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn telegram_health_reads_past_chatty_transport_warnings() {
         let dir = std::env::temp_dir().join(format!("nexus-tg-tail-{}", Uuid::new_v4()));
         fs::create_dir_all(dir.join("logs")).unwrap();
