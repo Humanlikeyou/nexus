@@ -747,7 +747,13 @@ mod tests {
         let (sep, oct, before) = seed_two_months(&dir);
         fs::create_dir_all(dir.join("archive").join(".2026-10.jsonl.gz.tmp")).unwrap();
         let err = archive_activity_log_in(&dir, LATER, 30, 5000, false).unwrap_err();
-        assert!(!err.is_empty());
+        assert!(
+            err.starts_with(&format!(
+                "Archived {} files from 1 months; stopped at 2026-10: ",
+                sep.len()
+            )) && err.ends_with("; remaining files kept."),
+            "{err}"
+        );
         assert_failed_month_kept(&dir, &oct, &before);
         for id in &sep {
             assert!(
@@ -807,7 +813,7 @@ mod tests {
         let before = fs::read(&gz).unwrap();
         let err = archive_activity_log_in(&dir, LATER, 30, 5000, false).unwrap_err();
         assert!(
-            err.contains("2026-10 failed verification; sources kept"),
+            err.contains("stopped at 2026-10: archive failed verification; remaining files kept."),
             "{err}"
         );
         assert_failed_month_kept(&dir, &oct, &before);
@@ -1458,54 +1464,69 @@ pub(crate) fn archive_activity_log_in(
 
     let archive_dir = dir.join("archive");
     crate::app_paths::create_private_dir_all(&archive_dir).map_err(|e| e.to_string())?;
-    for (month, items) in &by_month {
-        let target = archive_dir.join(format!("{month}.jsonl.gz"));
-        let mut lines = read_archive_lines(&target)?;
-        let before = lines.len();
-        for (_, entry) in items {
-            lines.push(serde_json::to_string(entry).map_err(|e| e.to_string())?);
-        }
-        let tmp = archive_dir.join(format!(".{month}.jsonl.gz.tmp"));
-        {
-            let mut enc = flate2::write::GzEncoder::new(
-                crate::app_paths::private_open_options()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(&tmp)
-                    .map_err(|e| e.to_string())?,
-                flate2::Compression::default(),
-            );
-            for line in &lines {
-                enc.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
-                enc.write_all(b"\n").map_err(|e| e.to_string())?;
+    for (done_months, (month, items)) in by_month.iter().enumerate() {
+        // Per-month step; on failure earlier months are already archived, so say so.
+        let step = (|| -> Result<(), String> {
+            let target = archive_dir.join(format!("{month}.jsonl.gz"));
+            let mut lines = read_archive_lines(&target)?;
+            let before = lines.len();
+            for (_, entry) in items {
+                lines.push(serde_json::to_string(entry).map_err(|e| e.to_string())?);
             }
-            enc.finish()
-                .map_err(|e| e.to_string())?
-                .sync_all()
-                .map_err(|e| e.to_string())?;
-        }
-        // Verify: every line parses, the count matches, and each new id is present.
-        let check = read_archive_lines(&tmp)?;
-        let parsed: Vec<ActivityEntry> = check
-            .iter()
-            .filter_map(|l| serde_json::from_str(l).ok())
-            .collect();
-        let ids: std::collections::HashSet<&str> = parsed.iter().map(|e| e.id.as_str()).collect();
-        let ok = check.len() == before + items.len()
-            && parsed.len() == check.len()
-            && items.iter().all(|(_, e)| ids.contains(e.id.as_str()));
-        if !ok {
-            let _ = fs::remove_file(&tmp);
+            let tmp = archive_dir.join(format!(".{month}.jsonl.gz.tmp"));
+            {
+                let mut enc = flate2::write::GzEncoder::new(
+                    crate::app_paths::private_open_options()
+                        .write(true)
+                        .create(true)
+                        .truncate(true)
+                        .open(&tmp)
+                        .map_err(|e| e.to_string())?,
+                    flate2::Compression::default(),
+                );
+                for line in &lines {
+                    enc.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+                    enc.write_all(b"\n").map_err(|e| e.to_string())?;
+                }
+                enc.finish()
+                    .map_err(|e| e.to_string())?
+                    .sync_all()
+                    .map_err(|e| e.to_string())?;
+            }
+            // Verify: every line parses, the count matches, and each new id is present.
+            let check = read_archive_lines(&tmp)?;
+            let parsed: Vec<ActivityEntry> = check
+                .iter()
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect();
+            let ids: std::collections::HashSet<&str> =
+                parsed.iter().map(|e| e.id.as_str()).collect();
+            let ok = check.len() == before + items.len()
+                && parsed.len() == check.len()
+                && items.iter().all(|(_, e)| ids.contains(e.id.as_str()));
+            if !ok {
+                let _ = fs::remove_file(&tmp);
+                return Err("archive failed verification".to_string());
+            }
+            fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
+            for (path, _) in items {
+                if fs::remove_file(path).is_ok() {
+                    report.archived += 1;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(e) = step {
+            // Raw io errors can carry paths; only the verification reason is passed through.
+            let e = if e == "archive failed verification" {
+                e
+            } else {
+                "archive write failed".to_string()
+            };
             return Err(format!(
-                "activity archive {month} failed verification; sources kept"
+                "Archived {} files from {done_months} months; stopped at {month}: {e}; remaining files kept.",
+                report.archived
             ));
-        }
-        fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
-        for (path, _) in items {
-            if fs::remove_file(path).is_ok() {
-                report.archived += 1;
-            }
         }
     }
     report.kept = report.scanned - report.archived;

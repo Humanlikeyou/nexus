@@ -743,7 +743,9 @@ export async function pruneMemory(): Promise<{
       activityArchived = report?.archived ?? 0;
     } catch (e) {
       console.error("[prune-memory] activity archive failed (files kept):", e);
-      activityError = jobFailureReason(e, "archive step failed");
+      // The Rust side reports partial progress with an already-safe reason; keep it as is.
+      const msg = e instanceof Error ? e.message : String(e);
+      activityError = msg.startsWith("Archived ") ? msg : jobFailureReason(e, "archive step failed");
     }
 
     // Step 5: Update prune timestamp

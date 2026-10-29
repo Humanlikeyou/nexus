@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const m = vi.hoisted(() => ({
   calls: [] as { cmd: string; args?: unknown }[],
   archiveFails: false,
+  archivePartial: false,
   sessionArchiveFails: false,
   saved: 0,
 }));
@@ -14,6 +15,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "prune_context_memory") return 0;
     if (cmd === "archive_activity_log") {
       if (m.archiveFails) throw "activity archive 2026-04 failed verification; sources kept";
+      if (m.archivePartial) throw "Archived 43 files from 1 months; stopped at 2026-04: archive failed verification; remaining files kept.";
       return { archived: 12, scanned: 20, selected: 12, kept: 8, skipped: 0, dryRun: false, months: [] };
     }
     if (cmd === "load_terrance_context") return { activeGoals: [], relevantMemory: [] };
@@ -30,7 +32,7 @@ vi.mock("./activityBus", () => ({ activityBus: { register: vi.fn(), complete: vi
 import { pruneMemory, ACTIVITY_KEEP_DAYS, ACTIVITY_MAX_FILES } from "./continuity";
 
 describe("weekly prune archives the activity log", () => {
-  beforeEach(() => { m.calls = []; m.archiveFails = false; m.sessionArchiveFails = false; m.saved = 0; vi.spyOn(console, "error").mockImplementation(() => {}); });
+  beforeEach(() => { m.calls = []; m.archiveFails = false; m.archivePartial = false; m.sessionArchiveFails = false; m.saved = 0; vi.spyOn(console, "error").mockImplementation(() => {}); });
 
   it("asks Rust to archive files older than 30 days with a 5000-file cap (not a dry run)", async () => {
     const r = await pruneMemory();
@@ -49,6 +51,13 @@ describe("weekly prune archives the activity log", () => {
     expect(r.activityError).toBe("archive step failed");
     expect(r.error).toBeUndefined();
     expect(m.saved).toBe(1);
+  });
+
+  it("a partial archive failure keeps Rust's progress message (earlier months were archived)", async () => {
+    m.archivePartial = true;
+    const r = await pruneMemory();
+    expect(r.activityError).toBe("Archived 43 files from 1 months; stopped at 2026-04: archive failed verification; remaining files kept.");
+    expect(r.error).toBeUndefined();
   });
 
   it("a failed run reports error + reason and leaves lastPruneTimestamp unchanged", async () => {

@@ -381,7 +381,9 @@ export function reasoningOutcome(result: Awaited<ReturnType<typeof runReasoningL
 export function pruneOutcome(result: Awaited<ReturnType<typeof pruneMemory>>): JobOutcome {
   if (result.error) return { ok: false, detail: result.reason ? `Pruning failed: ${result.reason}` : "Pruning failed" };
   const activity = result.activityError
-    ? `activity archive failed (files kept): ${result.activityError}`
+    ? result.activityError.startsWith("Archived ")
+      ? `activity archive: ${result.activityError}`
+      : `activity archive failed (files kept): ${result.activityError}`
     : `${result.activityArchived} activity entries archived`;
   return { ok: true, detail: `${result.archived} sessions archived, ${result.pruned} trimmed, ${activity}` };
 }
