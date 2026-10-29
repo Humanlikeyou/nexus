@@ -94,7 +94,7 @@ export function ChatField({
   const startedAt = messages[0]?.timestamp;
 
   const agents = [
-    { id: "hermes", icon: Bot, title: "Amara", subtitle: hermesUnavailable ? "Status unavailable" : hermes.model, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
+    { id: "hermes", icon: Bot, title: "Amara", subtitle: hermesUnavailable ? "Status unavailable" : `Hermes Agent · ${hermes.model}`, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
     { id: "openclaw", icon: Workflow, title: "OpenClaw", subtitle: openclaw.subtitle, tone: openclaw.tone, label: openclaw.label },
   ].filter((a) => !query.trim() || `${a.title} ${a.subtitle}`.toLowerCase().includes(query.trim().toLowerCase()));
 

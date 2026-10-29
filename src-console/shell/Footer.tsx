@@ -14,7 +14,7 @@ export function Footer({ data, busy }: { data: SystemSnapshot; busy: boolean }) 
   return (
     <footer className="field-footer">
       <i className={online ? "is-live" : ""} aria-hidden="true" />
-      <span>{online ? data.hermes.model : "Hermes offline"}</span>
+      <span>{online ? data.hermes.model : "Amara offline"}</span>
       {data.unavailableSources.length > 0 && <span className="footer-unavailable" title={data.unavailableSources.map((source) => source.label).join(", ")}>{data.unavailableSources.length} unavailable</span>}
       <span className="footer-spacer" />
       <span>{busy ? "Refreshing…" : `Updated ${time(data.refreshedAt)}`}</span>

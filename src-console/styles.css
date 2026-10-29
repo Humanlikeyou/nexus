@@ -98,16 +98,16 @@ a { color: inherit; }
 }
 .nav-group button > i { width: 25px; height: 25px; display: grid; place-items: center; color: var(--text-tertiary); font-style: normal; }
 .nav-group button > span { overflow: hidden; font-size: var(--text-body); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
-.nav-group button > small { color: var(--text-tertiary); font: var(--text-subheadline)/1 var(--font-mono); }
+.nav-group button > small { color: var(--label-secondary); font: 400 11px/1 var(--font-text); }
 .nav-group button:hover { color: var(--text); background: color-mix(in srgb, var(--surface) 55%, transparent); }
 .nav-group button.is-active { color: var(--text); background: var(--sidebar-selection); }
 .nav-group button.is-active > i { color: var(--accent); }
 .sidebar-status { display: grid; gap: 6px; margin-top: auto; padding: 12px 10px 2px; border-top: 1px solid var(--separator); }
-.sidebar-status > span:last-child { overflow: hidden; color: var(--text-tertiary); font: var(--text-subheadline)/1.25 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-status > span:last-child { overflow: hidden; color: var(--label-secondary); font: 400 11px/1.25 var(--font-text); text-overflow: ellipsis; white-space: nowrap; }
 
 .active-field { grid-column: 2; grid-row: 2; min-width: 0; min-height: 0; overflow: auto; padding: 26px 30px 32px; scrollbar-color: var(--separator-strong) transparent; }
 .system-field { width: min(100%, 1540px); min-height: 100%; margin: 0 auto; }
-.field-footer { grid-column: 2; grid-row: 3; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 20px; overflow: hidden; color: var(--text-tertiary); border-top: 1px solid var(--separator); background: var(--window); font: var(--text-subheadline)/1 var(--font-mono); white-space: nowrap; }
+.field-footer { grid-column: 2; grid-row: 3; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 20px; overflow: hidden; color: var(--label-secondary); border-top: 1px solid var(--separator); background: var(--window); font: 400 11px/1 var(--font-text); white-space: nowrap; }
 .field-footer i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--danger); }
 .field-footer i.is-live { background: var(--success); }
 .field-footer .footer-spacer { flex: 1; }

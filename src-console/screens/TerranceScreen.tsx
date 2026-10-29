@@ -259,7 +259,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           ? <Unavailable label="Amara runtime" onRetry={onRetry} />
           : (
             <InsetGroup>
-              <ListRow icon={Bot} title="Hermes" subtitle={[hermes.model, hermes.provider].filter(Boolean).join(" · ") || DASH}
+              <ListRow icon={Bot} title="Amara" subtitle={["Hermes Agent", hermes.model].filter(Boolean).join(" · ") || DASH}
                 accessory={<Badge tone={hermesOnline ? "success" : "warning"}>{hermesOnline ? "Online" : hermes.status ? hermes.status.replace(/_/g, " ") : "Offline"}</Badge>}
                 value={hermes.telegramStatus ? `Telegram ${hermes.telegramStatus}` : `Checked ${clock(hermes.checkedAt)}`} />
               <ListRow icon={Cpu} title="OpenClaw" subtitle={openClawBadge(data.openclaw).subtitle} accessory={<Badge tone={openClawBadge(data.openclaw).tone}>{openClawBadge(data.openclaw).label}</Badge>} />

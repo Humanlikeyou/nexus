@@ -55,12 +55,12 @@ describe("Footer", () => {
     expect(footerHasLiveStatus(online, false)).toBe(false);
   });
 
-  it("shows refreshing, unavailable sources and Hermes offline", () => {
+  it("shows refreshing, unavailable sources and Amara offline", () => {
     const { rerender } = render(<Footer data={online} busy />);
     expect(screen.getByRole("contentinfo")).toHaveTextContent("Refreshing…");
     rerender(<Footer data={{ ...online, unavailableSources: [{ command: "x", label: "X" }] }} busy={false} />);
     expect(screen.getByText("1 unavailable")).toHaveAttribute("title", "X");
     rerender(<Footer data={INITIAL_SNAPSHOT} busy={false} />);
-    expect(screen.getByRole("contentinfo")).toHaveTextContent("Hermes offline");
+    expect(screen.getByRole("contentinfo")).toHaveTextContent("Amara offline");
   });
 });

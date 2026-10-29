@@ -56,7 +56,7 @@ describe("Home (TerranceField)", () => {
     expect(screen.getByText("HRV is up 8%")).toBeInTheDocument();
     expect(screen.getByText("Gateway online")).toBeInTheDocument();
     const agents = screen.getByRole("region", { name: "Agents" });
-    expect(within(agents).getByText("qwen3 · ollama")).toBeInTheDocument();
+    expect(within(agents).getByText("Hermes Agent · qwen3")).toBeInTheDocument();
     expect(within(agents).getByText("Not connected")).toBeInTheDocument();
     expect(screen.getByText("Ship Amara OS v2")).toBeInTheDocument();
     const neuro = screen.getByRole("region", { name: "Neuro" });
