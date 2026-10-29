@@ -97,7 +97,7 @@ These 30 non-test files are not reachable from `main.tsx`. They're split by how 
 `src/components/{arm,assistant,business,fitness,layout,neuro,settings,system,terrance,trajectory,ui}`.
 `src-next/` contains no files at all.
 
-`src-console/screens/TrajectoryScreen.tsx` is handled by the team and left out of this list.
+`src-console/screens/TrajectoryScreen.tsx` was deleted on 2026-10-29 (Trajectory folded into the Home Goals card).
 
 ## (a) Commands and their callers (after the trim)
 
