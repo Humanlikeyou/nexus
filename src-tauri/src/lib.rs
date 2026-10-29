@@ -26,6 +26,25 @@ pub mod test_support {
     pub use crate::commands::outbox::get_outbox_status;
     pub use crate::commands::sessions::list_sessions;
 
+    /// Open events.db (events + arm) and terrence_core.db through their real open paths, so
+    /// tests can check the db and -wal/-shm modes.
+    pub fn open_private_dbs() -> Result<(), String> {
+        use crate::commands::*;
+        let e = events::get_events_db()?;
+        e.execute_batch(
+            "CREATE TABLE IF NOT EXISTS _mode_probe(x); INSERT INTO _mode_probe VALUES (1);",
+        )
+        .map_err(|err| err.to_string())?;
+        arm::arm_list_strategies()?;
+        let t = terrence_context::open_terrence_core_db()?;
+        t.execute_batch(
+            "CREATE TABLE IF NOT EXISTS _mode_probe(x); INSERT INTO _mode_probe VALUES (1);",
+        )
+        .map_err(|err| err.to_string())?;
+        drop((e, t));
+        Ok(())
+    }
+
     /// Data paths of the modules moved onto app_paths::data_dir(), as
     /// (module, path): the dir itself, or kv/ and llm_usage.json for kv and llm_router.
     pub fn module_data_paths() -> Vec<(&'static str, std::path::PathBuf)> {

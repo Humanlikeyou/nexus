@@ -23,6 +23,8 @@ fn get_db() -> Result<Connection, String> {
 
     conn.pragma_update(None, "journal_mode", "WAL")
         .map_err(|e| format!("Failed to set WAL mode: {}", e))?;
+    crate::app_paths::restrict_sqlite_files(&path)
+        .map_err(|e| format!("Failed to secure events.db: {}", e))?;
 
     init_db(&conn)?;
     Ok(conn)

@@ -175,10 +175,12 @@ pub(crate) fn open_terrence_core_db() -> Result<Connection, String> {
         .map_err(|error| format!("Failed to create Amara context directory: {error}"))?;
     crate::app_paths::ensure_private_file(&path)
         .map_err(|error| format!("Failed to create Amara context database: {error}"))?;
-    let conn = Connection::open(path)
+    let conn = Connection::open(&path)
         .map_err(|error| format!("Failed to open Amara context database: {error}"))?;
     conn.pragma_update(None, "journal_mode", "WAL")
         .map_err(|error| format!("Failed to configure Amara context database: {error}"))?;
+    crate::app_paths::restrict_sqlite_files(&path)
+        .map_err(|error| format!("Failed to secure Amara context database: {error}"))?;
     init_db(&conn)?;
     Ok(conn)
 }
