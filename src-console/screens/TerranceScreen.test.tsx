@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot } from "../types";
@@ -201,5 +202,20 @@ describe("Home status strip (Command center feel)", () => {
   it("the soonest of consolidation, reasoning and daily summary is shown", () => {
     const s = { ...running, nextConsolidationAt: NOW + 3 * H, nextReasoningAt: NOW + 5 * H, nextDailySummaryAt: NOW + 40 * 60_000 };
     expect(statusStrip(full, s, NOW)[1].text).toBe("Next: Daily summary in 40m");
+  });
+});
+
+describe("NOOP stale tone on the strip's own 30s tick", () => {
+  it("turns warning once the sync passes 2 h, without a parent re-render", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(NOW);
+      const data = { ...full, noop: { ...full.noop, status: "ready" as const, generatedAt: new Date(NOW - 2 * H + 20_000).toISOString() } };
+      render(<TerranceField data={data} scheduler={running} onNavigate={vi.fn()} />);
+      const dot = () => screen.getByRole("group", { name: "Status" }).querySelector('[data-key="noop"] .ui-status-dot')!;
+      expect(dot()).toHaveAttribute("data-tone", "success");
+      act(() => { vi.advanceTimersByTime(30_000); });
+      expect(dot()).toHaveAttribute("data-tone", "warning");
+    } finally { vi.useRealTimers(); }
   });
 });

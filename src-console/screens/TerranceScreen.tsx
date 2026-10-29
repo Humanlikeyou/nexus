@@ -175,7 +175,10 @@ export function statusStrip(data: SystemSnapshot, scheduler: SchedulerView, now:
   return [agents, sched, health];
 }
 
-function StatusStrip({ segments, onNavigate }: { segments: StripSegment[]; onNavigate?: (id: ModuleId) => void }) {
+/** Owns its own 30s tick so NOOP staleness (and "synced N ago") re-evaluates without re-rendering the screen. */
+function StatusStrip({ data, scheduler, fixedNow, onNavigate }: { data: SystemSnapshot; scheduler: SchedulerView; fixedNow?: number; onNavigate?: (id: ModuleId) => void }) {
+  const now = useNow(fixedNow);
+  const segments = statusStrip(data, scheduler, now);
   return (
     <div className="home__strip" role="group" aria-label="Status">
       {segments.map((s) => (
@@ -249,7 +252,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           {summary && " · "}
           <time dateTime={new Date(now).toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" })}>{homeDate(now)}</time>
         </p>
-        {!isLoading && <StatusStrip segments={statusStrip(data, scheduler, now)} onNavigate={onNavigate} />}
+        {!isLoading && <StatusStrip data={data} scheduler={scheduler} fixedNow={fixedNow} onNavigate={onNavigate} />}
       </div>
       <div className="home__header-badges">
         {/* Sentence-case status text with a dot; Badges stay for 1–2 word tags. Gateway state is in the strip (Agents). */}
