@@ -63,40 +63,56 @@ test("(w) inactive window: toolbar mark dims to solid bronze, OS stays secondary
   await expect(icon).toHaveCSS("color", iconActive);
 });
 
-test("(w) splash: \"Command Center\" subtitle 16px (visible) under the mark, SF 13px secondary, aria-hidden (Decision 13)", async ({ page, theme }) => {
-  await openApp(page, { theme, reduceMotion: true, delays: { get_terrence_runtime_health: 900 } }).catch(() => {});
-  const splash = page.locator(".splash");
-  await expect(splash).toBeVisible();
-  await expect(splash).toHaveAttribute("aria-label", "Amara OS is loading");
-  const subtitle = splash.locator(".splash__subtitle");
-  await expect(subtitle).toHaveText("Command Center");
-  await expect(subtitle).toHaveAttribute("aria-hidden", "true");
-  await expect(subtitle).toHaveCSS("font-size", "13px");
-  await expect(subtitle).toHaveCSS("font-weight", "400");
-  const { gap, color, secondary } = await page.evaluate(() => {
-    // Visible (ink) gap: bottom of the AMARA strokes → cap height of "Command Center".
-    const svg = document.querySelector(".splash svg.wordmark--splash") as SVGSVGElement;
-    const box = svg.getBoundingClientRect();
-    const vb = svg.viewBox.baseVal;
-    const shapes = [...svg.querySelectorAll("path, line, polyline")] as SVGGraphicsElement[];
-    const maxY = Math.max(...shapes.map((el) => { const b = el.getBBox(); return b.y + b.height; }));
-    const stroke = parseFloat(getComputedStyle(shapes[0]).strokeWidth);
-    const inkBottom = box.top + (maxY + stroke / 2 - vb.y) * (box.height / vb.height);
-    const s = document.querySelector(".splash__subtitle") as HTMLElement;
-    const cs = getComputedStyle(s);
-    const ctx = document.createElement("canvas").getContext("2d")!;
-    ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-    const m = ctx.measureText("Command Center");
-    const halfLeading = (parseFloat(cs.lineHeight) - (m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)) / 2;
-    const inkTop = s.getBoundingClientRect().top + halfLeading + m.fontBoundingBoxAscent - m.actualBoundingBoxAscent;
-    const probe = document.createElement("span");
-    probe.style.color = "var(--label-secondary)";
-    document.body.append(probe);
-    const c = getComputedStyle(probe).color;
-    probe.remove();
-    return { gap: inkTop - inkBottom, color: cs.color, secondary: c };
+test.describe("splash at 2x", () => {
+  test.use({ deviceScaleFactor: 2 });
+  test("(w) splash: \"Command Center\" subtitle 16px (visible) under the mark, SF 13px secondary, aria-hidden (Decision 13)", async ({ page, theme }) => {
+    await openApp(page, { theme, reduceMotion: true, delays: { get_terrence_runtime_health: 900 } }).catch(() => {});
+    const splash = page.locator(".splash");
+    await expect(splash).toBeVisible();
+    await expect(splash).toHaveAttribute("aria-label", "Amara OS is loading");
+    const subtitle = splash.locator(".splash__subtitle");
+    await expect(subtitle).toHaveText("Command Center");
+    await expect(subtitle).toHaveAttribute("aria-hidden", "true");
+    await expect(subtitle).toHaveCSS("font-size", "13px");
+    await expect(subtitle).toHaveCSS("font-weight", "400");
+    const { color, secondary } = await page.evaluate(() => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--label-secondary)";
+      document.body.append(probe);
+      const c = getComputedStyle(probe).color;
+      probe.remove();
+      return { color: getComputedStyle(document.querySelector(".splash__subtitle")!).color, secondary: c };
+    });
+    expect(color).toBe(secondary);
+    // Visible gap, measured on rendered pixels (2x): blank rows between the AMARA strokes and the subtitle caps.
+    const png = await page.locator(".splash__lockup").screenshot({ animations: "disabled" });
+    const gap = await page.evaluate(async (b64) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${b64}`;
+      await img.decode();
+      const c = document.createElement("canvas");
+      c.width = img.width;
+      c.height = img.height;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      const { data } = ctx.getImageData(0, 0, c.width, c.height);
+      const bg = [data[0], data[1], data[2]];
+      const inked = (y: number) => {
+        for (let x = 0; x < c.width; x++) {
+          const i = (y * c.width + x) * 4;
+          if (Math.abs(data[i] - bg[0]) + Math.abs(data[i + 1] - bg[1]) + Math.abs(data[i + 2] - bg[2]) > 60) return true;
+        }
+        return false;
+      };
+      let y = 0;
+      while (y < c.height && !inked(y)) y++; // top of the mark
+      while (y < c.height && inked(y)) y++; // through the mark
+      const start = y;
+      while (y < c.height && !inked(y)) y++; // blank rows = the visible gap
+      return (y - start) / (window.devicePixelRatio || 1);
+    }, png.toString("base64"));
+    expect(gap).toBeGreaterThanOrEqual(15.5);
+    expect(gap).toBeLessThanOrEqual(16.5);
+    await expect(splash).toBeHidden();
   });
-  expect(color).toBe(secondary);
-  expect(Math.abs(gap - 16)).toBeLessThanOrEqual(0.5);
-  await expect(splash).toBeHidden();
 });
