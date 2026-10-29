@@ -26,8 +26,7 @@ pub mod test_support {
     pub use crate::commands::outbox::get_outbox_status;
     pub use crate::commands::sessions::list_sessions;
 
-    /// Data paths of the modules moved onto app_paths::data_dir() (notifications.rs is not in
-    /// the module tree, so it is not compiled or listed), as
+    /// Data paths of the modules moved onto app_paths::data_dir(), as
     /// (module, path): the dir itself, or kv/ and llm_usage.json for kv and llm_router.
     pub fn module_data_paths() -> Vec<(&'static str, std::path::PathBuf)> {
         use crate::commands::*;
