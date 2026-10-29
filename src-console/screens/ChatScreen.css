@@ -8,7 +8,8 @@
   color: var(--label);
   /* One surface for all three columns, like Cards on Home/Fitness. */
   background: var(--bg-card, var(--bg-content));
-  border: 1px solid var(--separator);
+  /* Hairline as an inset shadow, not a border: a border would shift the first column 1px off the page edge. */
+  box-shadow: inset 0 0 0 1px var(--separator);
   border-radius: 12px;
   overflow: hidden;
 }
