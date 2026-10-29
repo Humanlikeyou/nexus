@@ -3,7 +3,7 @@
 // ============================================================
 
 export interface OpenClawStatus {
-  status: "online" | "configured" | "offline";
+  status: "online" | "configured" | "not_installed" | "offline";
   online: boolean;
   model: string;
   gateway_url: string;
@@ -23,6 +23,8 @@ export interface OpenClawHealth {
   memory_search: "configured" | "missing";
   channels: OpenClawChannels;
   timestamp: string;
+  /** False when no gateway listens and launchd has no ai.openclaw.gateway job (absent from older builds). */
+  installed?: boolean;
 }
 
 export interface CronJob {
@@ -796,6 +798,8 @@ export interface DiagnosticReport {
   ollamaReachable: boolean;
   diskSpaceOk: boolean;
   issues: DiagnosticIssue[];
+  /** False: OpenClaw isn't installed here. Neutral, not an issue, never auto-healed. */
+  openclawInstalled?: boolean;
 }
 
 export interface DiagnosticIssue {

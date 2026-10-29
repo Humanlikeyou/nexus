@@ -72,3 +72,20 @@ describe("scheduler status before the first tick", () => {
     expect(sched.getSchedulerStatus().running).toBe(false);
   });
 });
+
+describe("health job with OpenClaw not installed", () => {
+  it("reports it neutrally and does not auto-heal", async () => {
+    m.runDiagnostics.mockResolvedValueOnce({ issues: [], openclawInstalled: false } as never);
+    m.autoHeal.mockClear(); m.bus.complete.mockClear(); m.bus.fail.mockClear();
+    vi.resetModules();
+    const sched = await import("./scheduler");
+    stopScheduler = sched.stopScheduler;
+    sched.startScheduler();
+    await vi.advanceTimersByTimeAsync(30_000);
+    stopScheduler();
+    const done = m.bus.complete.mock.calls.map((c) => String(c[1]));
+    expect(done).toContain("All systems healthy; OpenClaw not installed");
+    expect(m.bus.fail.mock.calls.map((c) => String(c[1])).filter((d) => d.includes("issue"))).toEqual([]);
+    expect(m.autoHeal).not.toHaveBeenCalled();
+  });
+});

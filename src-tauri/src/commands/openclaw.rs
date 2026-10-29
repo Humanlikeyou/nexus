@@ -14,7 +14,8 @@ fn openclaw_dir() -> PathBuf {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct OpenClawStatus {
     /// "online" (fresh heartbeat or gateway reachable), "configured" (config present,
-    /// no live signal) or "offline" (no config).
+    /// no live signal), "not_installed" (config present but nothing listens on the
+    /// gateway port and no launchd job exists) or "offline" (no config).
     pub status: OpenClawState,
     /// `status == online`, kept for older callers.
     pub online: bool,
@@ -30,6 +31,8 @@ pub struct OpenClawStatus {
 pub enum OpenClawState {
     Online,
     Configured,
+    #[serde(rename = "not_installed")]
+    NotInstalled,
     Offline,
 }
 
@@ -319,7 +322,27 @@ pub async fn read_openclaw_status() -> Result<OpenClawStatus, String> {
     if !status.online && config.is_some() && loopback_reachable(&status.gateway_url).await {
         status = build_status(config.as_ref(), heartbeat.as_ref(), now, true);
     }
+    // Configured but silent: without a launchd job it is simply not installed here
+    // (neutral), not a dead gateway.
+    if status.status == OpenClawState::Configured
+        && !openclaw_installed(false, openclaw_launchd_job().await)
+    {
+        status.status = OpenClawState::NotInstalled;
+    }
     Ok(status)
+}
+
+#[cfg(test)]
+mod not_installed_state_tests {
+    use super::*;
+
+    #[test]
+    fn serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_value(OpenClawState::NotInstalled).unwrap(),
+            "not_installed"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1061,6 +1084,33 @@ pub struct OpenClawHealth {
     pub memory_search: String, // "configured" | "missing"
     pub channels: OpenClawChannels,
     pub timestamp: String,
+    /// False only when nothing listens on the gateway port AND launchd has no
+    /// `ai.openclaw.gateway` job: there is nothing to restart, so this is not a failure.
+    pub installed: bool,
+}
+
+pub(super) const OPENCLAW_LAUNCHD_LABEL: &str = "ai.openclaw.gateway";
+
+/// `Some(true)` if launchd knows the gateway job for this user, `Some(false)` if it
+/// says it doesn't, `None` if launchctl couldn't be asked (treated as installed).
+async fn openclaw_launchd_job() -> Option<bool> {
+    let uid_out = tokio::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .await
+        .ok()?;
+    let uid = parse_uid(&String::from_utf8_lossy(&uid_out.stdout)).ok()?;
+    let out = tokio::process::Command::new("launchctl")
+        .args(["print", &format!("gui/{}/{}", uid, OPENCLAW_LAUNCHD_LABEL)])
+        .output()
+        .await
+        .ok()?;
+    Some(out.status.success())
+}
+
+/// Not installed only when both signals agree: no listener and launchd reports no job.
+fn openclaw_installed(gateway_listening: bool, launchd_job: Option<bool>) -> bool {
+    gateway_listening || launchd_job != Some(false)
 }
 
 async fn get_openclaw_version() -> Option<String> {
@@ -1230,6 +1280,8 @@ pub async fn get_openclaw_health() -> Result<OpenClawHealth, String> {
     let memory_search = check_memory_search(&config);
     let channels = get_channel_status(&config);
 
+    let installed = gateway || openclaw_installed(false, openclaw_launchd_job().await);
+
     let status = if !gateway || !rpc {
         "offline"
     } else if memory_search == "missing" || channels.telegram == "disconnected" {
@@ -1246,7 +1298,24 @@ pub async fn get_openclaw_health() -> Result<OpenClawHealth, String> {
         memory_search,
         channels,
         timestamp: chrono::Utc::now().to_rfc3339(),
+        installed,
     })
+}
+
+#[cfg(test)]
+mod installed_tests {
+    use super::*;
+
+    #[test]
+    fn not_installed_only_without_listener_and_without_launchd_job() {
+        assert!(!openclaw_installed(false, Some(false)));
+        assert!(openclaw_installed(false, Some(true)));
+        assert!(openclaw_installed(true, Some(false)));
+        // launchctl unavailable: assume installed (keeps the old restart behaviour)
+        assert!(openclaw_installed(false, None));
+        assert_eq!(OPENCLAW_LAUNCHD_LABEL, "ai.openclaw.gateway");
+        assert!(OPENCLAW_RESTART_OPERATION.contains(OPENCLAW_LAUNCHD_LABEL));
+    }
 }
 
 #[cfg(test)]

@@ -97,7 +97,7 @@ const EMPTY_OPENCLAW: OpenClawStatus = { status: "offline", online: false, model
 
 /** Keep only the typed fields (defence in depth; the Rust command already returns just these). */
 function pickOpenClaw(s: OpenClawStatus): OpenClawStatus {
-  const status = s?.status === "online" || s?.status === "configured" || s?.status === "offline" ? s.status : s?.online ? "online" : "offline";
+  const status = s?.status === "online" || s?.status === "configured" || s?.status === "not_installed" || s?.status === "offline" ? s.status : s?.online ? "online" : "offline";
   return { status, online: status === "online", model: s?.model ?? "unknown", gateway_url: s?.gateway_url ?? "", last_heartbeat: s?.last_heartbeat ?? null };
 }
 

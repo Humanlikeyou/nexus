@@ -9,6 +9,7 @@ describe("openClawBadge", () => {
     expect(openClawBadge({ ...base, status: "online", online: true }).subtitle).toBe("Gateway reachable");
     expect(openClawBadge({ ...base, status: "configured" })).toMatchObject({ tone: "warning", label: "No heartbeat" });
     expect(openClawBadge({ ...base, status: "offline" })).toMatchObject({ tone: "neutral", label: "Not connected" });
+    expect(openClawBadge({ ...base, status: "not_installed" })).toMatchObject({ tone: "neutral", label: "Not installed" });
   });
   it("falls back to `online` when status is missing", () => {
     expect(openClawBadge({ ...base, online: true }).label).toBe("Online");

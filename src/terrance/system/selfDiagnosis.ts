@@ -172,15 +172,22 @@ export async function runDiagnostics(): Promise<DiagnosticReport> {
   // Check OpenClaw gateway
   let openclawOnline = false;
   let openclawGateway = false;
+  let openclawInstalled = true;
   try {
     const health = await invoke<{
       status: string;
       gateway: boolean;
       rpc: boolean;
+      installed?: boolean;
     }>("get_openclaw_health");
     openclawOnline = health.status !== "offline";
     openclawGateway = health.gateway;
-    if (!openclawGateway) {
+    // Nothing listening and no launchd job: not installed, so nothing to restart or report as
+    // down (live check 2026-10-29: every health check failed a launchctl kickstart).
+    openclawInstalled = openclawGateway || health.installed !== false;
+    if (!openclawInstalled) {
+      console.log("[self-diagnosis] OpenClaw not installed (no listener on 18789, no launchd job); skipping");
+    } else if (!openclawGateway) {
       issues.push({
         service: "openclaw",
         status: "down",
@@ -257,6 +264,7 @@ export async function runDiagnostics(): Promise<DiagnosticReport> {
     ollamaReachable,
     diskSpaceOk: true, // Simplified — could add disk space check later
     issues,
+    openclawInstalled,
   };
 }
 

@@ -10,7 +10,7 @@ vi.mock("./activityBus", () => ({
 }));
 
 import {
-  autoHeal, __resetAutoHealForTests, loadDeclinedUntil, DECLINE_COOLDOWN_MS, DECLINE_COOLDOWN_KV_KEY, NEXUS_NOTICE_EVENT,
+  autoHeal, runDiagnostics, __resetAutoHealForTests, loadDeclinedUntil, DECLINE_COOLDOWN_MS, DECLINE_COOLDOWN_KV_KEY, NEXUS_NOTICE_EVENT,
   RESTART_DEADLINE_MS, RESTART_DECLINED_NOTICE,
 } from "./selfDiagnosis";
 import { approvalOutcome } from "./approvalErrors";
@@ -257,5 +257,38 @@ describe("cooldown resilience", () => {
     // kv is still corrupted, but the in-memory deadline from the first repair (NOW+4h) holds.
     expect((await autoHeal(report("openclaw"), NOW + DECLINE_COOLDOWN_MS + 1)).status).toBe("addressed");
     expect(calls("restart_services")).toHaveLength(1);
+  });
+});
+
+// Live check 2026-10-29: OpenClaw isn't installed on this Mac (no listener on 18789, no
+// ai.openclaw.gateway launchd job), yet every health check proposed and failed a restart.
+describe("runDiagnostics: OpenClaw not installed", () => {
+  const health = (h: Record<string, unknown>) => {
+    invoke.mockImplementation(async (cmd: string) => {
+      switch (cmd) {
+        case "get_openclaw_health": return { status: "offline", rpc: false, ...h };
+        case "check_docker_service": return "running";
+        case "check_service_port": return "open";
+        default: return undefined;
+      }
+    });
+  };
+
+  it("is neutral: no issue, nothing to auto-heal, no restart", async () => {
+    health({ gateway: false, installed: false });
+    const r = await runDiagnostics();
+    expect(r.openclawInstalled).toBe(false);
+    expect(r.issues).toEqual([]);
+    expect(await autoHeal(r, NOW)).toEqual({ status: "none", actions: [] });
+    expect(calls("restart_services")).toHaveLength(0);
+  });
+
+  it("installed but down (or an older backend without the flag) is still a healable issue", async () => {
+    for (const h of [{ gateway: false, installed: true }, { gateway: false }]) {
+      health(h);
+      const r = await runDiagnostics();
+      expect(r.openclawInstalled).toBe(true);
+      expect(r.issues).toEqual([expect.objectContaining({ service: "openclaw", status: "down", canAutoHeal: true })]);
+    }
   });
 });

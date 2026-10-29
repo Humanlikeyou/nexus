@@ -394,14 +394,15 @@ async function tick() {
         fn: async () => {
           const startedAt = Date.now(); // job start: drives the restart deadline and cooldown checks
           const report = await runDiagnostics();
+          const note = report.openclawInstalled === false ? "; OpenClaw not installed" : "";
           if (report.issues.length > 0) {
             // "addressed" only when every restart tried was allowed and succeeded.
             const healed = await autoHeal(report, startedAt);
             const status = healed?.status ?? "awaiting";
             const label = status === "none" ? "awaiting" : status;
-            return { ok: status !== "failed", detail: `${report.issues.length} issue(s) ${label}` };
+            return { ok: status !== "failed", detail: `${report.issues.length} issue(s) ${label}${note}` };
           }
-          return { ok: true, detail: "All systems healthy" };
+          return { ok: true, detail: `All systems healthy${note}` };
         },
       },
       consolidation: { label: "Memory Consolidation", kind: "consolidation", heavy: true, fn: consolidationJob },

@@ -1,6 +1,6 @@
 export type ModuleId = "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings";
 
-export type OpenClawState = "online" | "configured" | "offline";
+export type OpenClawState = "online" | "configured" | "not_installed" | "offline";
 
 export interface OpenClawStatus {
   /** online = fresh heartbeat (<5 min) or reachable loopback gateway; configured = config only. Optional for older backends. */
@@ -19,6 +19,7 @@ export interface OpenClawHealth {
   memory_search: string;
   channels: { telegram: string; whatsapp: string };
   timestamp: string;
+  installed?: boolean;
 }
 
 export interface HermesRuntimeHealth {
