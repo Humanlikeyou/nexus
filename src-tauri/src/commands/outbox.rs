@@ -35,16 +35,60 @@ pub struct OutboxStatus {
 pub const OUTBOX_EXPIRY_HOURS: i64 = 24;
 
 /// Mark pending items created before `now - OUTBOX_EXPIRY_HOURS` as expired. Returns the count.
-/// `created_at` is chrono RFC 3339 UTC, so string comparison orders correctly.
+/// `created_at` is parsed as a timestamp (RFC 3339 with any offset, or SQLite
+/// `YYYY-MM-DD HH:MM:SS` as UTC); it is never compared as a string, since mixed offsets
+/// or formats do not order lexically. Unparsable rows are left pending.
 pub(crate) fn expire_stale(
     conn: &rusqlite::Connection,
     now: chrono::DateTime<chrono::Utc>,
 ) -> rusqlite::Result<usize> {
-    let cutoff = (now - chrono::Duration::hours(OUTBOX_EXPIRY_HOURS)).to_rfc3339();
-    conn.execute(
-        "UPDATE outbox SET status = 'expired' WHERE status = 'pending' AND created_at < ?1",
-        rusqlite::params![cutoff],
-    )
+    let cutoff = now - chrono::Duration::hours(OUTBOX_EXPIRY_HOURS);
+    let stale: Vec<i64> = {
+        let mut stmt =
+            conn.prepare("SELECT outbox_id, created_at FROM outbox WHERE status = 'pending'")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.filter_map(|r| r.ok())
+            .filter(|(_, created)| parse_created_at(created).is_some_and(|t| t < cutoff))
+            .map(|(id, _)| id)
+            .collect()
+    };
+    let mut n = 0;
+    for id in stale {
+        n += conn.execute(
+            "UPDATE outbox SET status = 'expired' WHERE outbox_id = ?1 AND status = 'pending'",
+            rusqlite::params![id],
+        )?;
+    }
+    Ok(n)
+}
+
+/// Parse a stored `created_at`: RFC 3339 (any offset, any fraction) or SQLite
+/// `datetime('now')` format, which is UTC.
+pub(crate) fn parse_created_at(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let s = s.trim();
+    if let Ok(t) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Some(t.with_timezone(&chrono::Utc));
+    }
+    for fmt in ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.f"] {
+        if let Ok(t) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
+            return Some(t.and_utc());
+        }
+    }
+    None
+}
+
+/// Why delivery must not POST this tick, if any. Checked before any row is loaded, so a
+/// paused tick never posts, never changes a row's status, and never bumps `attempts`.
+pub(crate) fn delivery_pause_reason(online: bool, outbound_disabled: bool) -> Option<&'static str> {
+    if !online {
+        Some("Gateway offline")
+    } else if outbound_disabled {
+        Some("Delivery paused (NEXUS_OUTBOUND_DISABLED)")
+    } else {
+        None
+    }
 }
 
 fn count_status(conn: &rusqlite::Connection, status: &str) -> u64 {
@@ -139,25 +183,12 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
 
-    if !online {
+    if let Some(reason) = delivery_pause_reason(online, super::telegram::outbound_disabled()) {
         let status = OutboxStatus {
-            gateway_online: false,
+            gateway_online: online,
             queue_depth,
             last_delivered_at,
-            last_error: Some("Gateway offline".to_string()),
-            total_delivered,
-            expired,
-        };
-        let _ = app.emit("outbox-status", &status);
-        return Ok(());
-    }
-
-    if super::telegram::outbound_disabled() {
-        let status = OutboxStatus {
-            gateway_online: true,
-            queue_depth,
-            last_delivered_at,
-            last_error: Some("Delivery paused (NEXUS_OUTBOUND_DISABLED)".to_string()),
+            last_error: Some(reason.to_string()),
             total_delivered,
             expired,
         };
@@ -546,5 +577,68 @@ mod expiry_tests {
             .unwrap();
         assert_eq!(total, 4, "nothing deleted");
         assert_eq!(expire_stale(&c, now).unwrap(), 0, "idempotent");
+    }
+
+    fn at(s: &str) -> chrono::DateTime<chrono::Utc> {
+        parse_created_at(s).unwrap()
+    }
+
+    #[test]
+    fn expire_stale_parses_real_and_mixed_created_at_formats() {
+        let now = at("2026-10-29T02:00:00Z");
+        // Real saved format (events.rs: Utc::now().to_rfc3339(), e.g. the live
+        // "2026-03-05T10:53:07.732766+00:00") plus Z, +09:00 and SQLite datetime('now').
+        let real_new = chrono::Utc::now().to_rfc3339();
+        let c = db(&[
+            ("2026-10-28T01:59:59.732766+00:00", "pending"), // 24h00m01s old: expire
+            ("2026-10-28T02:00:59.000001+00:00", "pending"), // 23h59m: keep
+            ("2026-10-28T10:30:00+09:00", "pending"),        // 01:30Z, 24.5h: expire
+            ("2026-10-28T11:30:00+09:00", "pending"), // 02:30Z, 23.5h: keep (lexically < cutoff!)
+            ("2026-10-28 01:00:00", "pending"),       // SQLite UTC, 25h: expire
+            ("2026-10-28 03:00:00", "pending"),       // 23h: keep
+            ("2026-10-28T01:00:00Z", "pending"),      // 25h: expire
+            ("not a date", "pending"),                // unparsable: left pending
+            (real_new.as_str(), "pending"),           // just enqueued: keep
+        ]);
+        assert_eq!(expire_stale(&c, now).unwrap(), 4);
+        let expired: Vec<String> = c
+            .prepare("SELECT created_at FROM outbox WHERE status='expired' ORDER BY outbox_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(
+            expired,
+            vec![
+                "2026-10-28T01:59:59.732766+00:00",
+                "2026-10-28T10:30:00+09:00",
+                "2026-10-28 01:00:00",
+                "2026-10-28T01:00:00Z"
+            ]
+        );
+        assert_eq!(count_status(&c, "pending"), 5);
+    }
+
+    #[test]
+    fn kill_switch_pauses_delivery_before_any_row_is_touched() {
+        assert_eq!(delivery_pause_reason(true, false), None);
+        assert_eq!(
+            delivery_pause_reason(true, true),
+            Some("Delivery paused (NEXUS_OUTBOUND_DISABLED)")
+        );
+        assert_eq!(delivery_pause_reason(false, true), Some("Gateway offline"));
+        // The gate sits before row loading and POSTs in delivery_tick (source check), so a
+        // paused tick sends nothing, rows stay pending, and attempts are not counted.
+        let src = include_str!("outbox.rs");
+        let tick = &src[src.find("async fn delivery_tick").expect("delivery_tick")..];
+        let gate = tick.find("delivery_pause_reason(online").expect("gate");
+        let load = tick.find("Load pending outbox items").expect("load");
+        let post = tick.find(".post(").expect("post");
+        let bump = tick
+            .find("attempts = attempts + 1")
+            .or_else(|| tick.find("attempts + 1"))
+            .expect("attempts bump");
+        assert!(gate < load && gate < post && gate < bump);
     }
 }

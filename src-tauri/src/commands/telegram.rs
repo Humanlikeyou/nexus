@@ -218,7 +218,16 @@ fn outbound_disabled_value(value: Option<&str>) -> bool {
 
 #[tauri::command]
 pub async fn send_telegram_message(text: String) -> Result<TelegramMessage, String> {
-    if outbound_disabled() {
+    send_telegram_message_gated(text, outbound_disabled()).await
+}
+
+/// The send with the kill switch injected, so tests never touch process env (set_var is
+/// process-wide and races other tests under cargo's parallel runner).
+async fn send_telegram_message_gated(
+    text: String,
+    disabled: bool,
+) -> Result<TelegramMessage, String> {
+    if disabled {
         println!(
             "[telegram] send suppressed ({OUTBOUND_DISABLED_ENV}), {} chars",
             text.chars().count()
@@ -601,10 +610,9 @@ mod outbound_tests {
 
     #[test]
     fn send_is_refused_without_network_when_disabled() {
-        // set_var is process-wide; this is the only test that touches the variable.
-        std::env::set_var(OUTBOUND_DISABLED_ENV, "1");
-        let err = tauri::async_runtime::block_on(send_telegram_message("qa".into())).err();
-        std::env::remove_var(OUTBOUND_DISABLED_ENV);
+        // Flag injected; no set_var, so nothing leaks to parallel tests.
+        let err =
+            tauri::async_runtime::block_on(send_telegram_message_gated("qa".into(), true)).err();
         assert_eq!(
             err.as_deref(),
             Some("Outbound sends are disabled for this session (NEXUS_OUTBOUND_DISABLED).")
