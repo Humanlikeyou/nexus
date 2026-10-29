@@ -175,7 +175,7 @@ def _row_to_info(r) -> CrewInfo:
     return CrewInfo(
         id=r[0], name=r[1], status=r[2], agents=list(r[3]),
         started_at=r[4].strftime("%Y-%m-%dT%H:%M:%SZ") if r[4] else None,
-        task=r[5], result=r[6],
+        task=r[5], result=safe_result(r[2], r[6]),
     )
 
 
@@ -194,7 +194,7 @@ def db_finish(crew_id: str, status: str, result: Optional[str], llm: Optional[st
         c.execute(
             "UPDATE crew_runs SET status=%s, result=%s, llm=COALESCE(%s, llm), finished_at=now() "
             "WHERE id=%s AND status='running'",
-            (status, result, llm, crew_id),
+            (status, safe_result(status, result), llm, crew_id),
         )
 
 
@@ -207,9 +207,9 @@ _PATH = re.compile(rf"(?<![\w.:/])(?:(?:~|\.{{1,2}})(?:{_SEG})+|(?:{_SEG}){{2,}}
 MAX_ERR_CHARS = 300
 
 
-def sanitize_error(exc: BaseException) -> str:
-    """Exception type + a short, redacted message. Never the raw upstream body."""
-    msg = str(exc).splitlines()[0] if str(exc) else ""
+def sanitize_text(text: Optional[str]) -> str:
+    """First line only, stack traces dropped, URL creds/paths/secrets redacted, capped."""
+    msg = str(text).splitlines()[0] if text else ""
     if msg.lstrip().startswith(("Traceback", 'File "')):  # an embedded stack trace
         msg = ""
     msg = _URL_CREDS.sub(r"\1***@", msg)
@@ -218,7 +218,21 @@ def sanitize_error(exc: BaseException) -> str:
     msg = "".join(ch for ch in msg if ch.isprintable())
     if len(msg) > MAX_ERR_CHARS:
         msg = msg[:MAX_ERR_CHARS] + "…"
+    return msg
+
+
+def sanitize_error(exc: BaseException) -> str:
+    """Exception type + a short, redacted message. Never the raw upstream body."""
+    msg = sanitize_text(str(exc))
     return f"{type(exc).__name__}: {msg}" if msg else type(exc).__name__
+
+
+def safe_result(status: Optional[str], result: Optional[str]) -> Optional[str]:
+    """Error results (failed/interrupted) are re-sanitized on write and read, so rows stored
+    before sanitizing existed never reach clients raw. Completed output is left as is."""
+    if result is None or status not in ("failed", "interrupted"):
+        return result
+    return sanitize_text(result) or "error"
 
 
 # ── Crew execution (child process) ──────────────────────────────────────────

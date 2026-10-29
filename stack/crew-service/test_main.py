@@ -94,6 +94,56 @@ class SanitizeErrorTests(unittest.TestCase):
                          "RuntimeError: ollama/gemma4 timed out")
 
 
+class SafeResultTests(unittest.TestCase):
+    """Error results are sanitized on write (db_finish) and on read (_row_to_info)."""
+
+    RAW = ('Traceback (most recent call last):\n  File "/app/main.py", line 9\n'
+           'ConnectionError: http://user:hunter2@db:5432 at /Users/someone/secret/key.pem')
+
+    def test_failed_and_interrupted_results_are_sanitized(self):
+        for status in ("failed", "interrupted"):
+            out = main.safe_result(status, "OSError: open /home/app/.config/x.json failed\nmore detail")
+            self.assertNotIn("/home/app", out)
+            self.assertNotIn("more detail", out)
+            self.assertIn("[path]", out)
+
+    def test_legacy_raw_traceback_row_never_leaks(self):
+        out = main.safe_result("failed", self.RAW)
+        self.assertNotIn("/app/main.py", out)
+        self.assertNotIn("hunter2", out)
+        self.assertNotIn("/Users/someone", out)
+        self.assertEqual(out, "error")  # first line is the traceback header, so nothing survives
+
+    def test_row_to_info_sanitizes_stored_error(self):
+        info = main._row_to_info(("id1", "n", "failed", ["a"], None, "t", "boom at /var/lib/crew/run.log\nsecond"))
+        self.assertEqual(info.result, "boom at [path]")
+
+    def test_completed_and_missing_results_untouched(self):
+        self.assertEqual(main.safe_result("completed", "see /docs/a/b\nline2"), "see /docs/a/b\nline2")
+        self.assertIsNone(main.safe_result("failed", None))
+
+    def test_db_finish_stores_sanitized_error(self):
+        captured = []
+
+        class Conn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def execute(self, _sql, params):
+                captured.append(params)
+
+        orig = main.db
+        main.db = Conn
+        try:
+            main.db_finish("id1", "failed", "ValueError: /srv/app/secret.txt\ntrace")
+        finally:
+            main.db = orig
+        self.assertEqual(captured[0][1], "ValueError: [path]")
+
+
 class KillGroupTests(unittest.TestCase):
     def _start(self, ignore_term: bool):
         parent, child = main._ctx.Pipe(duplex=False)

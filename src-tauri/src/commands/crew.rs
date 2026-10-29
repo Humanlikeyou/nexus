@@ -99,17 +99,16 @@ pub async fn crew_list() -> Result<Vec<CrewInfo>, String> {
         .timeout(std::time::Duration::from_secs(5))
         .send()
         .await
-        .map_err(|e| format!("Crew service unreachable: {}", e))?;
+        .map_err(|_| "Crew service unreachable.".to_string())?;
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("Crew list failed ({}): {}", status, text));
+        return Err(http_error("list", status));
     }
 
     resp.json::<Vec<CrewInfo>>()
         .await
-        .map_err(|e| format!("Failed to parse crew list: {}", e))
+        .map_err(|_| "Unexpected crew list from the crew service.".to_string())
 }
 
 #[tauri::command]
@@ -127,17 +126,16 @@ pub async fn crew_start(
         .timeout(std::time::Duration::from_secs(30))
         .send()
         .await
-        .map_err(|e| format!("Crew service unreachable: {}", e))?;
+        .map_err(|_| "Crew service unreachable.".to_string())?;
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("Crew start failed ({}): {}", status, text));
+        return Err(http_error("start", status));
     }
 
     resp.json::<CrewInfo>()
         .await
-        .map_err(|e| format!("Failed to parse crew start response: {}", e))
+        .map_err(|_| "Unexpected crew start response from the crew service.".to_string())
 }
 
 #[tauri::command]
@@ -150,17 +148,16 @@ pub async fn crew_status(id: String) -> Result<CrewInfo, String> {
         .timeout(std::time::Duration::from_secs(5))
         .send()
         .await
-        .map_err(|e| format!("Crew service unreachable: {}", e))?;
+        .map_err(|_| "Crew service unreachable.".to_string())?;
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("Crew status failed ({}): {}", status, text));
+        return Err(http_error("status", status));
     }
 
     resp.json::<CrewInfo>()
         .await
-        .map_err(|e| format!("Failed to parse crew status: {}", e))
+        .map_err(|_| "Unexpected crew status from the crew service.".to_string())
 }
 
 #[tauri::command]
@@ -173,18 +170,17 @@ pub async fn crew_stop(id: String) -> Result<String, String> {
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(|e| format!("Crew service unreachable: {}", e))?;
+        .map_err(|_| "Crew service unreachable.".to_string())?;
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("Crew stop failed ({}): {}", status, text));
+        return Err(http_error("stop", status));
     }
 
     let stop = resp
         .json::<CrewStopResponse>()
         .await
-        .map_err(|e| format!("Failed to parse crew stop response: {}", e))?;
+        .map_err(|_| "Unexpected crew stop response from the crew service.".to_string())?;
     if stop.stopped {
         Ok("stopped".to_string())
     } else {
@@ -219,9 +215,32 @@ pub async fn crew_health() -> Result<String, String> {
     }
 }
 
+/// Fixed text plus the HTTP status only: the response body may echo paths or upstream errors.
+fn http_error(op: &str, status: reqwest::StatusCode) -> String {
+    format!("Crew {op} failed (HTTP {}).", status.as_u16())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn http_error_is_fixed_text_with_status_only() {
+        let msg = http_error("list", reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(msg, "Crew list failed (HTTP 500).");
+    }
+
+    #[test]
+    fn crew_errors_never_embed_raw_errors_or_bodies() {
+        let src = include_str!("crew.rs");
+        let code = &src[..src.find("#[cfg(test)]").unwrap()];
+        for banned in [".text().await", "|e| format!", "{}\", e)", "{e}"] {
+            assert!(
+                !code.contains(banned),
+                "crew.rs error path contains {banned}"
+            );
+        }
+    }
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
