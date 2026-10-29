@@ -331,7 +331,11 @@ fn archive_dir() -> PathBuf {
 /// Move session logs older than `days_threshold` days to memory/archive/.
 /// Returns the number of files moved.
 #[tauri::command]
-pub fn archive_old_session_logs(days_threshold: u32) -> Result<u32, String> {
+pub async fn archive_old_session_logs(days_threshold: u32) -> Result<u32, String> {
+    run_blocking(move || archive_old_session_logs_sync(days_threshold)).await
+}
+
+fn archive_old_session_logs_sync(days_threshold: u32) -> Result<u32, String> {
     let dir = session_logs_dir();
     if !dir.exists() {
         return Ok(0);
@@ -366,7 +370,11 @@ pub fn archive_old_session_logs(days_threshold: u32) -> Result<u32, String> {
 
 /// Trim the relevantMemory array in terrance_context.json to at most `max_items` entries.
 #[tauri::command]
-pub fn prune_context_memory(max_items: u32) -> Result<u32, String> {
+pub async fn prune_context_memory(max_items: u32) -> Result<u32, String> {
+    run_blocking(move || prune_context_memory_sync(max_items)).await
+}
+
+fn prune_context_memory_sync(max_items: u32) -> Result<u32, String> {
     let path = context_path();
     if !path.exists() {
         return Ok(0);
@@ -626,6 +634,40 @@ mod tests {
     }
 
     const NOW: u64 = 1_793_000_000_000; // 2026-10-27
+
+    #[tokio::test]
+    async fn archive_on_blocking_pool_matches_sync_result() {
+        let seed = |dir: &std::path::Path| {
+            for i in 0..3 {
+                activity_at(dir, NOW - 40 * DAY_MS - i, 1);
+            }
+            activity_at(dir, NOW - DAY_MS, 1);
+        };
+        let a = temp_dir("act-async");
+        let b = temp_dir("act-sync");
+        seed(&a);
+        seed(&b);
+        let dir = a.clone();
+        let r_async = run_blocking(move || archive_activity_log_in(&dir, NOW, 30, 5000, false))
+            .await
+            .unwrap();
+        let r_sync = archive_activity_log_in(&b, NOW, 30, 5000, false).unwrap();
+        assert_eq!(
+            (
+                r_async.scanned,
+                r_async.archived,
+                r_async.kept,
+                &r_async.months
+            ),
+            (r_sync.scanned, r_sync.archived, r_sync.kept, &r_sync.months)
+        );
+        assert_eq!(r_async.archived, 3);
+        assert_eq!(activity_files_newest_first(&a).len(), 1);
+        let panicked: Result<u32, String> = run_blocking(|| panic!("boom")).await;
+        assert!(panicked.unwrap_err().starts_with("background task failed"));
+        let _ = fs::remove_dir_all(&a);
+        let _ = fs::remove_dir_all(&b);
+    }
 
     #[test]
     fn archive_dry_run_counts_without_touching_files() {
@@ -1344,8 +1386,23 @@ mod tests {
 /// into monthly archives; nothing is deleted without a verified archive copy.
 /// Returns the number of files archived.
 #[tauri::command]
-pub fn prune_activity_log(days: u32) -> Result<u32, String> {
-    archive_activity_log(Some(days), None, Some(false)).map(|r| r.archived as u32)
+pub async fn prune_activity_log(days: u32) -> Result<u32, String> {
+    run_blocking(move || {
+        archive_activity_log_sync(Some(days), None, Some(false)).map(|r| r.archived as u32)
+    })
+    .await
+}
+
+/// Run file-heavy archive/prune work on the blocking pool so the Tauri main
+/// thread (and the UI) never waits on it. A panic in the job becomes an Err.
+async fn run_blocking<T, F>(job: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(job)
+        .await
+        .map_err(|e| format!("background task failed: {e}"))?
 }
 
 // ─── Activity log retention ─────────────────────────────────────────────────
@@ -1560,7 +1617,15 @@ pub(crate) fn archive_activity_log_in(
 
 /// Archive old activity entries (see `archive_activity_log_in`). Defaults: 30 days, 5000 files.
 #[tauri::command]
-pub fn archive_activity_log(
+pub async fn archive_activity_log(
+    keep_days: Option<u32>,
+    max_files: Option<u32>,
+    dry_run: Option<bool>,
+) -> Result<ActivityArchiveReport, String> {
+    run_blocking(move || archive_activity_log_sync(keep_days, max_files, dry_run)).await
+}
+
+fn archive_activity_log_sync(
     keep_days: Option<u32>,
     max_files: Option<u32>,
     dry_run: Option<bool>,
