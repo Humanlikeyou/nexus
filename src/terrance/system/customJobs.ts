@@ -14,6 +14,7 @@ import { buildRouterConfig } from "@/lib/llm-router";
 import { parseSchedule, shouldRunNow, type ParsedSchedule } from "./cronParser";
 import type { RouterResponse } from "@/lib/types";
 import { activityBus } from "./activityBus";
+import { jobFailureReason } from "./continuity";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -150,7 +151,7 @@ function isTrivialOutput(text: string): boolean {
 /**
  * Run a single custom job: send prompt to LLM, optionally deliver via Telegram.
  */
-async function runJob(job: CustomJob): Promise<JobRunResult> {
+export async function runJob(job: CustomJob): Promise<JobRunResult> {
   const now = Date.now();
   const taskId = activityBus.register(`Job: ${job.name}`, "custom_job", {
     detail: job.prompt.slice(0, 80),
@@ -177,6 +178,7 @@ async function runJob(job: CustomJob): Promise<JobRunResult> {
 
     // Deliver via Telegram unless suppressed
     let delivered = false;
+    let deliveryError: string | null = null;
     if (!shouldSuppress) {
       try {
         activityBus.update(taskId, "running", "Sending to Telegram...");
@@ -186,17 +188,22 @@ async function runJob(job: CustomJob): Promise<JobRunResult> {
         delivered = true;
       } catch (e) {
         console.error(`[custom-jobs] Telegram delivery failed for "${job.name}":`, e);
+        deliveryError = jobFailureReason(e, "delivery failed");
       }
     } else {
       console.log(`[custom-jobs] Suppressed silent output for "${job.name}"`);
     }
 
-    activityBus.complete(taskId, shouldSuppress ? "Silent (suppressed)" : delivered ? "Delivered" : "LLM complete");
+    // Activity never shows raw errors (they may carry URLs or provider text); a failed
+    // delivery is a failure, not "LLM complete".
+    if (deliveryError) activityBus.fail(taskId, `Not delivered: ${deliveryError}`);
+    else activityBus.complete(taskId, shouldSuppress ? "Silent (suppressed)" : "Delivered");
     return { jobId: job.id, output, delivered, silent: shouldSuppress, timestamp: now };
   } catch (e) {
-    activityBus.fail(taskId, String(e));
+    const reason = jobFailureReason(e);
+    activityBus.fail(taskId, reason);
     console.error(`[custom-jobs] Run failed for "${job.name}":`, e);
-    return { jobId: job.id, output: `Error: ${e}`, delivered: false, silent: false, timestamp: now };
+    return { jobId: job.id, output: `Error: ${reason}`, delivered: false, silent: false, timestamp: now };
   }
 }
 
