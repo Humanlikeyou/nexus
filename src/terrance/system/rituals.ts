@@ -10,7 +10,7 @@ import { Backoff } from "./backoff";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
-interface Ritual {
+export interface Ritual {
   id: string;
   name: string;
   message: string;
@@ -26,9 +26,14 @@ interface Ritual {
   enabled: boolean;
 }
 
-interface RitualState {
+export interface RitualState {
   lastRunTimestamps: Record<string, number>;
+  /** Ritual id -> local day (dayWindow) it was skipped because its window had passed. */
+  skippedDays?: Record<string, string>;
 }
+
+/** A ritual only fires within this long after its scheduled time; later it is skipped for the day. */
+export const RITUAL_WINDOW_MS = 30 * 60_000;
 
 // ─── Ritual Definitions ─────────────────────────────────────────────────────────
 
@@ -238,7 +243,8 @@ async function loadState(): Promise<void> {
   try {
     const raw = await invoke<string | null>("load_kv", { key: STATE_KEY });
     if (raw) {
-      state = JSON.parse(raw);
+      const parsed = JSON.parse(raw) as Partial<RitualState>;
+      state = { ...parsed, lastRunTimestamps: parsed.lastRunTimestamps ?? {} };
     }
   } catch {
     // First run — no state yet, use defaults
@@ -255,37 +261,41 @@ async function saveState(): Promise<void> {
 
 // ─── Tick Logic ─────────────────────────────────────────────────────────────────
 
-/** Check if a ritual should fire right now */
-function shouldFire(ritual: Ritual, now: Date): boolean {
-  if (!ritual.enabled) return false;
-
-  const lastRun = state.lastRunTimestamps[ritual.id] ?? 0;
-  const hoursSinceRun = (now.getTime() - lastRun) / (1000 * 60 * 60);
-
-  // Monthly rituals — check day of month
-  if (ritual.dayOfMonth !== undefined) {
-    if (now.getDate() !== ritual.dayOfMonth) return false;
-    if (hoursSinceRun < 22) return false; // Prevent double-fire
-    if (now.getHours() < ritual.hour) return false;
-    return true;
-  }
-
-  // Weekly rituals — check day of week
-  if (ritual.days && ritual.days.length > 0) {
-    if (!ritual.days.includes(now.getDay())) return false;
-    if (hoursSinceRun < 22) return false;
-    if (now.getHours() < ritual.hour) return false;
-    return true;
-  }
-
-  // Daily rituals — check hour window
-  // Fire if current hour matches and we haven't fired in 22+ hours
-  if (hoursSinceRun < 22) return false;
-  if (now.getHours() < ritual.hour) return false;
-  // Don't fire if we're more than 2 hours past the window (stale)
-  if (now.getHours() > ritual.hour + 2) return false;
-
+/** Whether the ritual is scheduled on `now`'s local day (daily, weekly day, or monthly date). */
+function scheduledToday(ritual: Ritual, now: Date): boolean {
+  if (ritual.dayOfMonth !== undefined) return now.getDate() === ritual.dayOfMonth;
+  if (ritual.days && ritual.days.length > 0) return ritual.days.includes(now.getDay());
   return true;
+}
+
+export interface RitualPlan {
+  /** At most one ritual to send this tick: the earliest one still inside its 30-min window. */
+  fire: Ritual | null;
+  /** Rituals whose window passed today without a send: mark skipped, send nothing. */
+  skip: Ritual[];
+}
+
+/**
+ * Decide what this tick does. Never a backlog: a ritual fires only within 30 min of its
+ * scheduled time today; past that it is skipped for the day (live check 2026-10-29: a 10:39
+ * launch fired all three 08:00-08:10 rituals at once). One send per tick at most.
+ */
+export function planRituals(rituals: Ritual[], st: RitualState, now: Date, isBackedOff: (id: string) => boolean = () => false): RitualPlan {
+  const today = dayWindow(now);
+  const plan: RitualPlan = { fire: null, skip: [] };
+  const due = rituals
+    .filter((r) => r.enabled && scheduledToday(r, now))
+    .map((r) => ({ r, at: new Date(now.getFullYear(), now.getMonth(), now.getDate(), r.hour, r.minute).getTime() }))
+    .sort((a, b) => a.at - b.at);
+  for (const { r, at } of due) {
+    const last = st.lastRunTimestamps[r.id];
+    if (last != null && dayWindow(new Date(last)) === today) continue;
+    if (st.skippedDays?.[r.id] === today) continue;
+    if (now.getTime() < at) continue;
+    if (now.getTime() - at > RITUAL_WINDOW_MS) plan.skip.push(r);
+    else if (!plan.fire && !isBackedOff(r.id)) plan.fire = r;
+  }
+  return plan;
 }
 
 // Failed sends back off (5/15/60 min, max 3 per day) instead of retrying
@@ -298,17 +308,25 @@ function dayWindow(now: Date): string {
 }
 
 /**
- * Called every scheduler tick (5 min). Fires any due rituals.
+ * Called every scheduler tick (5 min). Sends at most one ritual that is inside its window and
+ * records missed ones as "Skipped (missed window)" without sending anything.
  */
 export async function tickRituals(): Promise<void> {
   await loadState();
   const now = new Date();
-  let fired = 0;
+  const today = dayWindow(now);
+  const plan = planRituals(RITUALS, state, now, (id) => sendBackoff.inBackoff(id, now.getTime(), today));
+  let changed = false;
 
-  for (const ritual of RITUALS) {
-    if (!shouldFire(ritual, now)) continue;
-    if (sendBackoff.inBackoff(ritual.id, now.getTime(), dayWindow(now))) continue;
+  for (const ritual of plan.skip) {
+    state.skippedDays = { ...(state.skippedDays ?? {}), [ritual.id]: today };
+    const taskId = activityBus.register(`Ritual: ${ritual.name}`, "daily_summary");
+    activityBus.complete(taskId, "Skipped (missed window)");
+    changed = true;
+  }
 
+  const ritual = plan.fire;
+  if (ritual) {
     const taskId = activityBus.register(`Ritual: ${ritual.name}`, "daily_summary");
 
     let message = ritual.message;
@@ -324,18 +342,16 @@ export async function tickRituals(): Promise<void> {
       state.lastRunTimestamps[ritual.id] = now.getTime();
       sendBackoff.recordSuccess(ritual.id);
       activityBus.complete(taskId, `Sent: ${ritual.name}`);
-      fired++;
+      changed = true;
+      console.log(`[rituals] Fired ${ritual.id}.`);
     } catch (e) {
-      sendBackoff.recordFailure(ritual.id, now.getTime(), dayWindow(now));
+      sendBackoff.recordFailure(ritual.id, now.getTime(), today);
       console.error(`[rituals] Failed to send ${ritual.id}:`, e);
       activityBus.fail(taskId, String(e));
     }
   }
 
-  if (fired > 0) {
-    await saveState();
-    console.log(`[rituals] Fired ${fired} ritual(s).`);
-  }
+  if (changed) await saveState();
 }
 
 /**
