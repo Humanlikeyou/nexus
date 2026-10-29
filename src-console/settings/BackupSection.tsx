@@ -37,7 +37,9 @@ export function backupError(error: unknown): string {
   return message.replace(/^Error:\s*/i, "").trim() || "Something went wrong.";
 }
 
-export const RESTORE_WARNING = "This replaces your local Amara OS data with the backup. This can't be undone.";
+export const RESTORE_WARNING = "This replaces current Amara OS config and local data with the archive's contents. This can't be undone.";
+/** Always under the Backup group: what Restore does before it replaces anything. */
+export const RESTORE_SAFETY_NOTE = "Your current data is saved to a safety backup in the Amara OS data folder before anything is replaced.";
 
 /** Only archives pack_it_up can produce; the backend re-checks everything (allow-list + tar-slip guard). */
 export function restorePathError(path: string): string | null {
@@ -126,24 +128,22 @@ export function BackupSection({ pack = packItUp, restore = unpackBackup, pick = 
   const includes = Array.isArray(info?.includes) ? info!.includes.length : 0;
   return (
     <div className="backup-section">
-      <InsetGroup title="Backup" footer={info ? `${includes} item${includes === 1 ? "" : "s"} included` : undefined}>
+      {/* Restore lives inside Backup (screen-specs §11): Choose…, the path, then the destructive button. */}
+      <InsetGroup title="Backup" footer={info ? `${includes} item${includes === 1 ? "" : "s"} included. ${RESTORE_SAFETY_NOTE}` : RESTORE_SAFETY_NOTE}>
         <ListRow icon={Archive} title="Back Up Amara OS" subtitle="Packages config and local data into an archive."
           accessory={<Button variant="secondary" size="small" loading={busy} onClick={() => void run()}>{busy ? "Packing…" : "Create Backup"}</Button>} />
         {info && <ListRow title="Last backup" subtitle={<span title={info.path}>{middleTruncate(info.path)}</span>} value={`${info.size_mb.toFixed(1)} MB`} />}
-      </InsetGroup>
-      <SkippedFilesList info={info} />
-      {error && <p className="settings__alert" role="alert">Backup didn&apos;t finish: {error}</p>}
-
-      <InsetGroup title="Restore" footer="Your current data is saved to a safety backup in the Amara OS data folder before anything is replaced.">
         <ListRow icon={RotateCcw} title="Restore from Backup" subtitle="Replaces local data with a backup made by Create Backup."
           accessory={<Button variant="secondary" size="small" onClick={() => void choose()} disabled={restoring}>Choose…</Button>} />
         <li className="backup-restore__path">
           <TextField label="Backup file" value={archive} placeholder="Choose… or paste the path of a .tar.gz backup"
             onChange={(e) => { setArchive(e.target.value); setRestored(null); setRestoreNote(null); setRestoreError(null); }}
             error={pathError ?? undefined} spellCheck={false} autoComplete="off" />
-          <Button variant="destructive" size="small" disabled={!canRestore} loading={restoring} onClick={() => setConfirming(true)}>Restore…</Button>
+          <Button variant="destructive" size="small" disabled={!canRestore} loading={restoring} onClick={() => setConfirming(true)}>Restore from Backup…</Button>
         </li>
       </InsetGroup>
+      <SkippedFilesList info={info} />
+      {error && <p className="settings__alert" role="alert">Backup didn&apos;t finish: {error}</p>}
       {restored && (
         <div className="backup-restore__result" role="status">
           <p>Restore finished. Restart Amara OS to load the restored data.</p>

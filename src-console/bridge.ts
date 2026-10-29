@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { EMPTY_DEVICE_ID } from "./lib/devices";
 import type {
   CrewInfo,
   CrewServiceHealth,
@@ -81,7 +82,7 @@ const EMPTY_NOOP: NoopHealthSnapshot = {
   source: "noop",
   status: "unavailable",
   generatedAt: "",
-  deviceId: "my-whoop",
+  deviceId: EMPTY_DEVICE_ID,
   latestDay: null,
   dataAgeDays: null,
   today: null,

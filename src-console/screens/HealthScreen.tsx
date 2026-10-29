@@ -2,6 +2,7 @@ import { Activity, BatteryCharging, BatteryLow, BatteryMedium, HeartPulse, Inbox
 import type { LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { INITIAL_SNAPSHOT } from "../bridge";
+import { EMPTY_DEVICE_ID } from "../lib/devices";
 import { date, formatMinutes, number } from "../lib/format";
 import type { NoopDailyMetric, NoopHealthInsight, NoopHealthSnapshot, SystemSnapshot } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, Ring, SegmentedControl, Sparkline, StatTile, type Tone } from "../ui";
@@ -10,7 +11,6 @@ import "./HealthScreen.css";
 const NOOP_COMMAND = "get_noop_health_snapshot";
 const DASH = "—";
 /** bridge EMPTY_NOOP default; an internal placeholder, not a real device name. */
-const EMPTY_DEVICE_ID = "my-whoop";
 
 type Band = { word: "High" | "Medium" | "Low"; color: string; tone: Tone };
 

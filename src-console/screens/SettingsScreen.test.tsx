@@ -12,7 +12,7 @@ describe("Settings (§11) + Devices (§9)", () => {
   it("groups in order with the About wordmark and version", () => {
     render(<SettingsField data={snap()} {...base} />);
     const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(titles).toEqual(["Appearance", "Devices", "General", "Backup", "Restore", "About & Diagnostics"]);
+    expect(titles).toEqual(["Appearance", "Devices", "General", "Backup", "About & Diagnostics"]); // Restore lives inside Backup
     const mark = screen.getByRole("img", { name: "Amara OS" });
     expect(mark.tagName.toLowerCase()).toBe("svg");
     expect(mark).toHaveClass("wordmark--about");

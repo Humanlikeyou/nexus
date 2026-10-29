@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { BrainCircuit, HeartPulse, RefreshCw } from "lucide-react";
+import { deviceTitle } from "../lib/devices";
 import { dateTime } from "../lib/format";
 import type { MuseDevice, SystemSnapshot } from "../types";
 import { Badge, Button, InsetGroup, ListRow, type Tone } from "../ui";
@@ -47,7 +48,7 @@ export function DevicesGroup({ data, devices, operation, error, onScan: scan, on
                 : <Button variant="primary" size="small" onClick={onScan} disabled={operation !== null}>{operation === "scanning" ? "Searching…" : "Find Muse"}</Button>}
             </span>
           } />
-        <ListRow icon={HeartPulse} title={noop.deviceId || "NOOP band"}
+        <ListRow icon={HeartPulse} title={deviceTitle(noop.deviceId)}
           subtitle={noopDown ? "NOOP health unavailable" : noop.generatedAt ? `Updated ${dateTime(noop.generatedAt)} · Recovery, HRV, sleep, Effort` : noop.message || "No local NOOP record"}
           value={battery}
           accessory={noopDown && onRetry
