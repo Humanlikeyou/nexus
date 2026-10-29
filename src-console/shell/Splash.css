@@ -1,7 +1,9 @@
 .splash { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: var(--bg-window); transition: opacity 200ms ease-out; }
 .splash[data-fading] { opacity: 0; pointer-events: none; }
 /* 48px caps, centred 4% above geometric centre; "Command Center" subtitle 16px below (Decision 13). */
-.splash__lockup { display: flex; flex-direction: column; align-items: center; gap: 16px; margin-bottom: 8vh; }
+/* Visible gap = 16px ink to ink: 12px box gap + 0.72px SVG pad under the stroke + ~3.24px from the
+ * 13px line box top to the cap height of "Command Center" (measured in test/e2e/wordmark.spec.ts). */
+.splash__lockup { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 8vh; }
 .wordmark.wordmark--splash, .splash__subtitle { animation: splash-in 600ms cubic-bezier(.2, .8, .2, 1) both; }
 .splash__subtitle { margin: 0; color: var(--label-secondary); font: 400 13px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
 @keyframes splash-in { from { opacity: 0; transform: scale(.98); } to { opacity: 1; transform: none; } }

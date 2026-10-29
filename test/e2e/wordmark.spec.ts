@@ -63,7 +63,7 @@ test("(w) inactive window: toolbar mark dims to solid bronze, OS stays secondary
   await expect(icon).toHaveCSS("color", iconActive);
 });
 
-test("(w) splash: \"Command Center\" subtitle 16px under the mark, SF 13px secondary, aria-hidden (Decision 13)", async ({ page, theme }) => {
+test("(w) splash: \"Command Center\" subtitle 16px (visible) under the mark, SF 13px secondary, aria-hidden (Decision 13)", async ({ page, theme }) => {
   await openApp(page, { theme, reduceMotion: true, delays: { get_terrence_runtime_health: 900 } }).catch(() => {});
   const splash = page.locator(".splash");
   await expect(splash).toBeVisible();
@@ -73,17 +73,30 @@ test("(w) splash: \"Command Center\" subtitle 16px under the mark, SF 13px secon
   await expect(subtitle).toHaveAttribute("aria-hidden", "true");
   await expect(subtitle).toHaveCSS("font-size", "13px");
   await expect(subtitle).toHaveCSS("font-weight", "400");
-  const [mark, sub, secondary] = await page.evaluate(() => {
-    const m = document.querySelector(".splash svg.wordmark--splash")!.getBoundingClientRect();
-    const s = document.querySelector(".splash__subtitle")!;
+  const { gap, color, secondary } = await page.evaluate(() => {
+    // Visible (ink) gap: bottom of the AMARA strokes → cap height of "Command Center".
+    const svg = document.querySelector(".splash svg.wordmark--splash") as SVGSVGElement;
+    const box = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const shapes = [...svg.querySelectorAll("path, line, polyline")] as SVGGraphicsElement[];
+    const maxY = Math.max(...shapes.map((el) => { const b = el.getBBox(); return b.y + b.height; }));
+    const stroke = parseFloat(getComputedStyle(shapes[0]).strokeWidth);
+    const inkBottom = box.top + (maxY + stroke / 2 - vb.y) * (box.height / vb.height);
+    const s = document.querySelector(".splash__subtitle") as HTMLElement;
+    const cs = getComputedStyle(s);
+    const ctx = document.createElement("canvas").getContext("2d")!;
+    ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const m = ctx.measureText("Command Center");
+    const halfLeading = (parseFloat(cs.lineHeight) - (m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)) / 2;
+    const inkTop = s.getBoundingClientRect().top + halfLeading + m.fontBoundingBoxAscent - m.actualBoundingBoxAscent;
     const probe = document.createElement("span");
     probe.style.color = "var(--label-secondary)";
     document.body.append(probe);
     const c = getComputedStyle(probe).color;
     probe.remove();
-    return [{ bottom: m.bottom }, { top: s.getBoundingClientRect().top, color: getComputedStyle(s).color }, c] as const;
+    return { gap: inkTop - inkBottom, color: cs.color, secondary: c };
   });
-  expect(sub.color).toBe(secondary);
-  expect(Math.round(sub.top - mark.bottom)).toBe(16);
+  expect(color).toBe(secondary);
+  expect(Math.abs(gap - 16)).toBeLessThanOrEqual(0.5);
   await expect(splash).toBeHidden();
 });
