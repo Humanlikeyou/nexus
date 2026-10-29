@@ -29,7 +29,7 @@ vi.mock("./activityBus", () => ({ activityBus: { register: vi.fn(), complete: vi
 
 import { pruneMemory, ACTIVITY_KEEP_DAYS, ACTIVITY_MAX_FILES } from "./continuity";
 
-describe("daily prune archives the activity log", () => {
+describe("weekly prune archives the activity log", () => {
   beforeEach(() => { m.calls = []; m.archiveFails = false; m.sessionArchiveFails = false; m.saved = 0; vi.spyOn(console, "error").mockImplementation(() => {}); });
 
   it("asks Rust to archive files older than 30 days with a 5000-file cap (not a dry run)", async () => {

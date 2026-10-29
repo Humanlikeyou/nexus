@@ -653,7 +653,7 @@ export async function generateEveningIntegration(): Promise<{ sent: boolean; mes
  * Archives old session logs and trims the relevantMemory array.
  * Consolidates old logs into a summary before archiving.
  */
-/** Activity log retention, applied by the daily prune job (see archive_activity_log in Rust). */
+/** Activity log retention, applied by the weekly prune job (PRUNE_INTERVAL_MS = 7 days) (see archive_activity_log in Rust). */
 export const ACTIVITY_KEEP_DAYS = 30;
 export const ACTIVITY_MAX_FILES = 5000;
 

@@ -435,49 +435,51 @@ pub async fn poll_telegram_updates(last_update_id: i64) -> Result<Vec<TelegramUp
     Ok(updates)
 }
 
-/// Pick the best available Ollama model for chat (prefers smaller/faster models).
-/// Returns the first model found from the preference list, falls back to whatever is installed.
-async fn pick_ollama_model(client: &reqwest::Client) -> String {
-    let preferred = [
-        super::llm_router::DEFAULT_OLLAMA_MODEL,
-        "qwen3.5",
-        "llama3.3",
-        "llama3.2",
-        "mistral",
-    ];
+/// The only model the Telegram path may use (rule: Ollama gemma4 only). No fallback to any
+/// other installed model: if gemma4 is missing or Ollama is down, fail cleanly with a reason.
+fn select_ollama_model(installed: &[String]) -> Result<String, String> {
+    let want = super::llm_router::DEFAULT_OLLAMA_MODEL; // "gemma4:latest"
+    let family = want.split(':').next().unwrap_or(want);
+    if installed.iter().any(|m| m == want) {
+        return Ok(want.to_string());
+    }
+    installed
+        .iter()
+        .find(|m| *m == family || m.starts_with(&format!("{family}:")))
+        .cloned()
+        .ok_or_else(|| {
+            format!("Ollama model {family} is not installed (no fallback model is used)")
+        })
+}
 
-    let Ok(resp) = client.get("http://127.0.0.1:11434/api/tags").send().await else {
-        return "deepseek-r1:32b".to_string();
-    };
-    let Ok(body) = resp.json::<serde_json::Value>().await else {
-        return "deepseek-r1:32b".to_string();
-    };
-
+async fn pick_ollama_model(client: &reqwest::Client) -> Result<String, String> {
+    let resp = client
+        .get("http://127.0.0.1:11434/api/tags")
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|_| "Ollama unreachable (is it running?)".to_string())?;
+    let body = resp
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|_| "Bad model list from Ollama".to_string())?;
     let installed: Vec<String> = body["models"]
         .as_array()
-        .unwrap_or(&vec![])
-        .iter()
-        .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
-        .collect();
-
-    // Return first preferred model that's installed
-    for pref in &preferred {
-        if installed.iter().any(|m| m.starts_with(pref)) {
-            return pref.to_string();
-        }
-    }
-
-    // Fall back to whatever is installed first
-    installed
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| "deepseek-r1:32b".to_string())
+        .map(|a| {
+            a.iter()
+                .filter_map(|m| m["name"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    select_ollama_model(&installed)
 }
 
 #[tauri::command]
 pub async fn send_to_terrance(text: String) -> Result<String, String> {
     let client = reqwest::Client::new();
-    let model = pick_ollama_model(&client).await;
+    let model = pick_ollama_model(&client).await.inspect_err(|reason| {
+        eprintln!("[telegram] send_to_terrance: {reason}");
+    })?;
 
     let resp = client
         .post("http://127.0.0.1:11434/api/chat")
@@ -525,6 +527,31 @@ pub async fn send_to_terrance(text: String) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn telegram_model_is_gemma4_only_with_no_fallback() {
+        let want = crate::commands::llm_router::DEFAULT_OLLAMA_MODEL;
+        assert_eq!(want, "gemma4:latest");
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            select_ollama_model(&names(&["llama3.2:latest", "gemma4:latest"])).unwrap(),
+            "gemma4:latest"
+        );
+        assert_eq!(
+            select_ollama_model(&names(&["gemma4:12b"])).unwrap(),
+            "gemma4:12b"
+        );
+        for other in [
+            &["deepseek-r1:14b"][..],
+            &["qwen3.5:latest", "llama3.3"],
+            &["gemma4b-other"],
+            &[],
+        ] {
+            let err = select_ollama_model(&names(other)).unwrap_err();
+            assert!(err.contains("gemma4 is not installed"), "{err}");
+        }
+        assert!(!include_str!("telegram.rs").contains(concat!("deepseek", "-r1:32b")));
+    }
 
     #[test]
     fn save_config_writes_0600_atomically_over_a_0644_file() {
