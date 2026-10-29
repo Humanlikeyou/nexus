@@ -6,6 +6,10 @@ import "./styles/legacy-aliases.css";
 import "./styles/wordmark.css";
 import App from "./App";
 import "./styles.css";
+import { installVibrancy } from "./shell/vibrancy";
+
+// Before the first render, so the transparent window never paints a frame with the wrong background.
+installVibrancy();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

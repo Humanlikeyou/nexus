@@ -85,6 +85,19 @@ main.command-surface .nav-group button:focus-visible > small.nav-shortcut { opac
   outline: none;
 }
 
+/* Native vibrancy (data-vibrancy, see vibrancy.ts): the window is transparent over a macOS
+ * "sidebar" NSVisualEffectView (followsWindowActiveState, so it flattens when inactive and goes
+ * solid under Reduce transparency). Only the sidebar column and its toolbar header let it through;
+ * the content pane, its toolbar and the footer stay opaque. The sidebar keeps --material-sidebar
+ * as its tint. */
+:root[data-vibrancy="true"] body,
+:root[data-vibrancy="true"] main.command-surface { background: transparent; }
+:root[data-vibrancy="true"] main.command-surface > .active-field,
+:root[data-vibrancy="true"] main.command-surface > .field-footer { background: var(--bg-window); }
+:root[data-vibrancy="true"] main.command-surface > .intelligence-overlay > .field-clock {
+  background: linear-gradient(var(--shell-toolbar-bg), var(--shell-toolbar-bg)), var(--bg-window);
+}
+
 /* 20px content inset at every width. */
 main.command-surface > .active-field { padding: var(--inset-content, 20px); }
 
