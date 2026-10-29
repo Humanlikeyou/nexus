@@ -72,7 +72,8 @@
   color: var(--label);
   animation: chat-in var(--dur-state, 200ms) var(--ease-standard, cubic-bezier(.2,.8,.2,1));
 }
-.chat-bubble[data-role="user"] { background: var(--accent-strong); color: var(--on-accent); }
+/* User: accent tint; assistant: neutral secondary gray (base .chat-bubble). */
+.chat-bubble[data-role="user"] { background: color-mix(in srgb, var(--accent) 18%, var(--bg-content)); color: var(--label); }
 .chat-bubble[data-failed] { background: color-mix(in srgb, var(--sys-red) 14%, var(--bg-content)); color: var(--label); }
 .chat-bubble--pending { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--label-secondary); }
 .chat-bubble--skeleton { width: 46%; height: 40px; background: var(--fill-tertiary); animation: chat-pulse 1.2s ease-in-out infinite; }
