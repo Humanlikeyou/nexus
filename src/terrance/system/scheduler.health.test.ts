@@ -73,19 +73,43 @@ describe("scheduler status before the first tick", () => {
   });
 });
 
+// Lead decision: OpenClaw not installed is healthy (consolidation/reasoning run on local Ollama
+// gemma4); the Health Check completes OK with a note and never counts or auto-heals it.
 describe("health job with OpenClaw not installed", () => {
-  it("reports it neutrally and does not auto-heal", async () => {
-    m.runDiagnostics.mockResolvedValueOnce({ issues: [], openclawInstalled: false } as never);
-    m.autoHeal.mockClear(); m.bus.complete.mockClear(); m.bus.fail.mockClear();
+  async function runHealth(report: Record<string, unknown>) {
+    m.runDiagnostics.mockResolvedValueOnce(report as never);
+    m.autoHeal.mockReset(); m.autoHeal.mockResolvedValue({ status: "awaiting", actions: [] });
+    m.bus.complete.mockClear(); m.bus.fail.mockClear();
     vi.resetModules();
     const sched = await import("./scheduler");
     stopScheduler = sched.stopScheduler;
     sched.startScheduler();
     await vi.advanceTimersByTimeAsync(30_000);
     stopScheduler();
-    const done = m.bus.complete.mock.calls.map((c) => String(c[1]));
-    expect(done).toContain("All systems healthy; OpenClaw not installed");
-    expect(m.bus.fail.mock.calls.map((c) => String(c[1])).filter((d) => d.includes("issue"))).toEqual([]);
+    return {
+      done: m.bus.complete.mock.calls.map((c) => String(c[1])),
+      failed: m.bus.fail.mock.calls.map((c) => String(c[1])),
+    };
+  }
+
+  it("no other issue: completes OK with the gemma4 note, no auto-heal", async () => {
+    const { done, failed } = await runHealth({ issues: [], openclawInstalled: false });
+    expect(done).toContain("All systems healthy; OpenClaw not installed (local gemma4 in use)");
+    expect(failed).toEqual([]);
     expect(m.autoHeal).not.toHaveBeenCalled();
+  });
+
+  it("plus another issue: the count is that issue only, with the note", async () => {
+    const n8n = { service: "n8n", status: "down", message: "x", canAutoHeal: true };
+    const { done } = await runHealth({ issues: [n8n], openclawInstalled: false });
+    expect(done).toContain("1 issue(s) awaiting; OpenClaw not installed (local gemma4 in use)");
+    expect(m.autoHeal).toHaveBeenCalledTimes(1);
+    expect((m.autoHeal.mock.calls[0] as unknown[])[0]).toMatchObject({ issues: [n8n] });
+  });
+
+  it("OpenClaw installed: no note", async () => {
+    const { done } = await runHealth({ issues: [], openclawInstalled: true });
+    expect(done).toContain("All systems healthy");
+    expect(done.join(" ")).not.toContain("OpenClaw");
   });
 });
