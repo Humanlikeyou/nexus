@@ -62,7 +62,7 @@ export function Dialog({ open, title, children, confirmLabel, cancelLabel = "Can
       {children && <div id={bodyId} className="ui-dialog__body">{children}</div>}
       {confirmLabel && onConfirm && (
         <div className="ui-dialog__actions">
-          <Button ref={cancelRef} variant="secondary" onClick={onCancel} disabled={busy}>{cancelLabel}</Button>
+          <Button ref={cancelRef} data-initial-focus="" variant="secondary" onClick={onCancel} disabled={busy}>{cancelLabel}</Button>
           <Button variant={destructive ? "destructive" : "primary"} onClick={onConfirm} loading={busy}>{confirmLabel}</Button>
         </div>
       )}

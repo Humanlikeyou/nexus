@@ -13,4 +13,7 @@
 .ui-dialog__body { color: var(--label-secondary); font: var(--type-body, 13px/1.45 -apple-system, system-ui, sans-serif); }
 .ui-dialog__body > p { margin: 0; }
 .ui-dialog__actions { display: flex; justify-content: flex-end; gap: var(--space-2, 8px); margin-top: var(--space-2, 8px); }
+/* Ring for keyboard focus, and for the programmatic initial focus on Cancel (WebKit hides it otherwise). */
+.ui-dialog__actions .ui-button:focus-visible,
+.ui-dialog__actions .ui-button[data-initial-focus]:focus { outline: var(--space-0_5, 2px) solid var(--focus-ring); outline-offset: var(--space-0_5, 2px); }
 @keyframes ui-dialog-in { from { opacity: 0; transform: scale(.98); } to { opacity: 1; transform: none; } }

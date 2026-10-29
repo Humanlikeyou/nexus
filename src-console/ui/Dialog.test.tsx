@@ -24,6 +24,8 @@ describe("Dialog", () => {
     expect(dialog).toHaveAttribute("open");
     expect(dialog).toHaveAccessibleDescription("This replaces local data.");
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    // the programmatic initial focus is marked so Dialog.css can draw the focus ring
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveAttribute("data-initial-focus");
   });
 
   it("Cancel closes and returns focus to the opener; confirm fires once", async () => {
