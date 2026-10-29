@@ -11,7 +11,7 @@ const outbox = { gateway_online: true, queue_depth: 2, last_delivered_at: "2026-
 describe("Chat & Agents › Activity (§10)", () => {
   it("delivery card and activity rows", () => {
     render(<ActivityField data={snap({ outbox, activity: [{ id: "a1", type: "mac_action", name: "open_app", status: "completed", startedAt: Date.parse("2026-10-28T13:00:00+09:00"), completedAt: 0, durationMs: 1200, detail: "Opened Notes", outcome: null }] })} />);
-    expect(screen.getByRole("region", { name: "Telegram delivery" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Gateway delivery" })).toBeInTheDocument();
     expect(screen.getByText("Gateway online")).toBeInTheDocument();
     expect(screen.getByText("timeout")).toBeInTheDocument();
     expect(screen.getByText("open app")).toBeInTheDocument();

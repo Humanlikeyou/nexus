@@ -23,7 +23,7 @@ export function ActivityField({ data, onRetry }: { data: SystemSnapshot; onRetry
   return (
     <div className="activity">
       <h1 className="activity__title">Activity</h1>
-      <Card title="Telegram delivery" accessory={outboxDown ? undefined : <Badge tone={outbox.gateway_online ? "success" : "warning"}>{outbox.gateway_online ? "Gateway online" : "Gateway waiting"}</Badge>}>
+      <Card title="Gateway delivery" accessory={outboxDown ? undefined : <Badge tone={outbox.gateway_online ? "success" : "warning"}>{outbox.gateway_online ? "Gateway online" : "Gateway waiting"}</Badge>}>
         {outboxDown ? <Unavailable label="Delivery outbox" onRetry={onRetry} /> : (
           <>
             <div className="activity__tiles">
