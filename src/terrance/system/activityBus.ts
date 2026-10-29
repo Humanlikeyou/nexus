@@ -17,13 +17,15 @@ import { invoke } from "@tauri-apps/api/core";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export type ActivityStatus = "pending" | "running" | "complete" | "error" | "cancelled";
+/** "suppressed": deliberately not sent (kill switch). Neutral: neither a success nor a failure. */
+export type ActivityStatus = "pending" | "running" | "complete" | "error" | "cancelled" | "suppressed";
 
 export type ActivityType =
   | "scheduler"
   | "consolidation"
   | "reasoning"
   | "daily_summary"
+  | "ritual"
   | "health_check"
   | "prune"
   | "custom_job"
@@ -76,7 +78,7 @@ async function emitActivity(event: ActivityEvent): Promise<void> {
 }
 
 async function persistEntry(event: ActivityEvent): Promise<void> {
-  if (event.status !== "complete" && event.status !== "error") return;
+  if (event.status !== "complete" && event.status !== "error" && event.status !== "suppressed") return;
   try {
     await invoke<void>("store_activity_entry", {
       entry: {
@@ -88,7 +90,7 @@ async function persistEntry(event: ActivityEvent): Promise<void> {
         completedAt: event.completedAt ?? Date.now(),
         durationMs: (event.completedAt ?? Date.now()) - event.startedAt,
         detail: event.detail ?? null,
-        outcome: event.status === "complete" ? "success" : "failure",
+        outcome: event.status === "complete" ? "success" : event.status === "suppressed" ? "suppressed" : "failure",
       },
     });
   } catch {
@@ -138,7 +140,7 @@ export const activityBus = {
     task.status = status;
     if (detail !== undefined) task.detail = detail;
     if (progress !== undefined) task.progress = progress;
-    if (status === "complete" || status === "error" || status === "cancelled") {
+    if (status === "complete" || status === "error" || status === "cancelled" || status === "suppressed") {
       task.completedAt = Date.now();
     }
     emitActivity(task);
@@ -157,6 +159,11 @@ export const activityBus = {
    */
   fail(id: string, detail?: string): void {
     this.update(id, "error", detail);
+  },
+
+  /** Mark a task as deliberately not sent (kill switch): neutral, not a failure. */
+  suppress(id: string, detail?: string): void {
+    this.update(id, "suppressed", detail);
   },
 
   /**

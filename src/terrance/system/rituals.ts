@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { activityBus } from "./activityBus";
 import { Backoff } from "./backoff";
+import { isOutboundSuppressed, jobFailureReason } from "./continuity";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -320,14 +321,14 @@ export async function tickRituals(): Promise<void> {
 
   for (const ritual of plan.skip) {
     state.skippedDays = { ...(state.skippedDays ?? {}), [ritual.id]: today };
-    const taskId = activityBus.register(`Ritual: ${ritual.name}`, "daily_summary");
+    const taskId = activityBus.register(`Ritual: ${ritual.name}`, "ritual");
     activityBus.complete(taskId, "Skipped (missed window)");
     changed = true;
   }
 
   const ritual = plan.fire;
   if (ritual) {
-    const taskId = activityBus.register(`Ritual: ${ritual.name}`, "daily_summary");
+    const taskId = activityBus.register(`Ritual: ${ritual.name}`, "ritual");
 
     let message = ritual.message;
 
@@ -345,9 +346,17 @@ export async function tickRituals(): Promise<void> {
       changed = true;
       console.log(`[rituals] Fired ${ritual.id}.`);
     } catch (e) {
-      sendBackoff.recordFailure(ritual.id, now.getTime(), today);
-      console.error(`[rituals] Failed to send ${ritual.id}:`, e);
-      activityBus.fail(taskId, String(e));
+      if (isOutboundSuppressed(e)) {
+        // Lead decision 2026-10-29: a kill-switch suppression is neutral ("Suppressed"), not a
+        // failure: no backoff, and done for today so it isn't re-suppressed every tick.
+        state.skippedDays = { ...(state.skippedDays ?? {}), [ritual.id]: today };
+        activityBus.suppress(taskId, "Outbound sends disabled (NEXUS_OUTBOUND_DISABLED)");
+        changed = true;
+      } else {
+        sendBackoff.recordFailure(ritual.id, now.getTime(), today);
+        console.error(`[rituals] Failed to send ${ritual.id}:`, e);
+        activityBus.fail(taskId, jobFailureReason(e, "delivery failed"));
+      }
     }
   }
 

@@ -403,6 +403,11 @@ function formatRelativeTime(ts: number): string {
  * error (it may carry URLs or provider text). Live check 2026-10-29: with compute mode
  * "gateway" and OpenClaw not installed, every LLM job read just "failed".
  */
+/** True when a send was refused by the NEXUS_OUTBOUND_DISABLED kill switch (deliberate, not a failure). */
+export function isOutboundSuppressed(e: unknown): boolean {
+  return (e instanceof Error ? e.message : String(e)).includes("NEXUS_OUTBOUND_DISABLED");
+}
+
 export function jobFailureReason(e: unknown, fallback = "generation failed"): string {
   const m = e instanceof Error ? e.message : String(e);
   if (m.includes("NEXUS_OUTBOUND_DISABLED")) return "delivery paused (NEXUS_OUTBOUND_DISABLED)";
