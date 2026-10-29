@@ -35,6 +35,9 @@ const DEFAULT_STATE: ElectrodeState = {
  * The hook reads the current Muse connection state to determine if we're
  * in "read" mode. The Myndlift adapter is a stub for now.
  */
+/** User-safe text for a failed device scan (never the raw error). */
+export const ELECTRODE_SCAN_ERROR = "Device scan failed. Please try again.";
+
 export function useElectrode(
   /** Whether the primary Muse is connected */
   museConnected: boolean,
@@ -93,7 +96,9 @@ export function useElectrode(
       const devices = await adapterRef.current.scan();
       setDiscoveredDevices(devices);
     } catch (e) {
-      setState((prev) => ({ ...prev, lastError: String(e) }));
+      // The raw error can carry device or system detail: log it locally, show fixed text.
+      console.error("[electrode] scan failed:", e);
+      setState((prev) => ({ ...prev, lastError: ELECTRODE_SCAN_ERROR }));
     } finally {
       setScanning(false);
     }
