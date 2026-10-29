@@ -163,4 +163,15 @@ describe("groupStarts", () => {
       msg("4", "assistant", "d", "2026-10-28T05:04:10Z"),
     ])).toEqual([true, false, true, true]);
   });
+
+  it("'Ask Amara anything' only for a thread with zero items: hidden once an action card exists", () => {
+    setup({ data: { ...loaded, actions: [action()] } });
+    expect(screen.queryByRole("heading", { name: "Ask Amara anything" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Actions")).toBeInTheDocument();
+  });
+
+  it("an action that isn't shown (Hermes chat turn) doesn't count as an item", () => {
+    setup({ data: { ...loaded, actions: [action({ id: "h", toolId: "agent.hermes_chat", status: "succeeded" })] } });
+    expect(screen.getByRole("heading", { name: "Ask Amara anything" })).toBeInTheDocument();
+  });
 });

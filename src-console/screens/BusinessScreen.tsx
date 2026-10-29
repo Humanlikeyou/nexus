@@ -23,7 +23,7 @@ export function BusinessField({ data, onRetry }: { data: SystemSnapshot; onRetry
   const tasks = data.tasks;
   const other = tasks.filter((t) => !(STATES as readonly string[]).includes(t.status)).length;
   return (
-    <div className="biz">
+    <div className="biz page-inset">
       <h1 className="biz__title">Business</h1>
       <div className="biz__tiles">
         {STATES.map((state) => <StatTile key={state} label={humanize(state)} value={tasks.filter((t) => t.status === state).length} />)}

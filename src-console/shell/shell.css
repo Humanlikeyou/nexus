@@ -118,4 +118,7 @@ main.command-surface > .field-footer {
 }
 
 /* Host sub-views (interim, screen-specs Part 2): folded screens sit behind a small SegmentedControl. */
-main.command-surface > .active-field > .subview-bar { display: flex; justify-content: flex-start; margin: 0 0 16px; }
+main.command-surface > .active-field > .subview-bar { display: flex; justify-content: flex-start; width: 100%; max-width: 1120px; margin: 0 auto 16px; padding-inline: var(--space-5); }
+/* Chat is full height: the field becomes a column so Chat takes what's left under the bar
+ * (no page scroll, the composer never touches the window edge). */
+main.command-surface > .active-field:has(> .chat-screen) { display: flex; flex-direction: column; overflow: hidden; }

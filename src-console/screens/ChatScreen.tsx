@@ -140,7 +140,7 @@ export function ChatField({
   };
 
   return (
-    <div className="chat-screen">
+    <div className="chat-screen page-inset">
       <aside className="chat-screen__agents" aria-label="Agents and conversations">
         <TextField label="Search agents" hideLabel placeholder="Search" leadingIcon={Search} value={query} onChange={(e) => setQuery(e.target.value)} />
         <InsetGroup title="Agents">
@@ -180,7 +180,7 @@ export function ChatField({
           </div>
         ) : (
           <ol ref={listRef} className="chat-screen__messages" aria-live="polite" aria-label="Messages">
-            {messages.length === 0 && !sending && (
+            {messages.length === 0 && !sending && actions.length === 0 && !actionsUnavailable && (
               <li className="chat-screen__empty">
                 <Card title="Ask Amara anything" headingLevel={2}>
                   <p>Amara knows your priorities, projects and recent activity.</p>

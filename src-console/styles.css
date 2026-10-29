@@ -462,3 +462,7 @@ a { color: inherit; }
 }
 .screen-error-retry:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
+
+/* Shared page inset: one content column and one left edge for the h1 and the first control.
+ * Same values as the .home / .fitness / .neuro roots (max-width 1120, centred, 20px inset). */
+.page-inset { width: 100%; max-width: 1120px; margin-inline: auto; padding: var(--space-5); }
