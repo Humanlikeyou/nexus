@@ -31,3 +31,34 @@ test("(w) no Cormorant / font file is requested for the wordmark", async ({ page
   await expect(page.getByRole("img", { name: "Amara OS" }).first()).toBeVisible();
   expect(fonts).toEqual([]);
 });
+
+const INACTIVE = { light: "rgb(145, 120, 95)", dark: "rgb(147, 125, 97)" };
+
+test("(w) inactive window: toolbar mark dims to solid bronze, OS stays secondary, selected icon goes neutral", async ({ page, theme }) => {
+  await openApp(page, { theme, reduceMotion: true });
+  await expect(page.locator("html")).toHaveAttribute("data-window-active", "true");
+  const lockup = page.getByRole("img", { name: "Amara OS" }).first();
+  const os = lockup.locator(".wordmark-os");
+  const icon = page.locator("main.command-surface .nav-group button.is-active > i").first();
+  const osActive = await os.evaluate((el) => getComputedStyle(el).color);
+  const iconActive = await icon.evaluate((el) => getComputedStyle(el).color);
+
+  await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await expect(page.locator("html")).toHaveAttribute("data-window-active", "false");
+  await expect(lockup.locator("svg.wordmark--sidebar")).toHaveCSS("color", INACTIVE[theme]);
+  await expect(os).toHaveCSS("color", osActive);
+  const secondary = await page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--label-secondary)";
+    document.body.append(probe);
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    return c;
+  });
+  await expect(icon).toHaveCSS("color", secondary);
+  expect(secondary).not.toBe(iconActive);
+
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(lockup.locator("svg.wordmark--sidebar")).toHaveCSS("color", BRONZE[theme]);
+  await expect(icon).toHaveCSS("color", iconActive);
+});

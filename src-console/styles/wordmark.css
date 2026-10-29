@@ -39,6 +39,6 @@
   top: var(--wordmark-os-nudge);
 }
 
-/* Inactive window: the wordmark stays bronze (brand); only "OS" recedes. */
-[data-window-active="false"] .nexus-mark .wordmark-lockup > .wordmark-os,
-[data-window-active="false"] .wordmark-lockup > .wordmark-os { color: var(--label-tertiary); }
+/* Inactive window (Decision 21): toolbar mark only (About/Splash never dim). Solid half-saturation
+ * bronze, not opacity (70% fails 3:1). "OS" stays --label-secondary: no inactive override. */
+[data-window-active="false"] .nexus-mark .wordmark { color: var(--wordmark-inactive); }

@@ -52,6 +52,8 @@ main.command-surface .nav-group button.is-active {
   box-shadow: none;
 }
 main.command-surface .nav-group button.is-active > i { color: var(--accent-strong, var(--accent)); }
+/* Inactive window (Decision 21): selected icon goes neutral, like an inactive NSOutlineView; --selection stays. */
+[data-window-active="false"] main.command-surface .nav-group button.is-active > i { color: var(--label-secondary); }
 /* ⌘-number hint: normal text, secondary label (small text never uses tertiary), only on hover/keyboard focus. */
 main.command-surface .nav-group button > small.nav-shortcut {
   color: var(--label-secondary, var(--text-secondary));

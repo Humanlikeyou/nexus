@@ -26,6 +26,7 @@
   --label-tertiary: #7a7a7f;
   --label-quaternary: #b4b4b9; /* decorative only, never text */
   --wordmark: #8c6239; /* Taiyo Skin logo bronze (Decision 17) */
+  --wordmark-inactive: #91785f; /* inactive window (Decision 21) */
   /* Badge / tone text (Decision 20): same hue as the tone, lightness solved for ≥4.6:1 on the 14% tint. */
   --tone-neutral-text: #59595e; --tone-accent-text: #0b6758; --tone-info-text: #0058b9;
   --tone-success-text: #1d6e31; --tone-warning-text: #8d5200; --tone-danger-text: #b80a00;
@@ -88,6 +89,7 @@
   --d-label-tertiary: #8d8d92;
   --d-label-quaternary: #5c5c61;
   --d-wordmark: #b4864e; /* Taiyo favicon dark variant */
+  --d-wordmark-inactive: #937d61;
   --d-tone-neutral-text: #b5b5b9; --d-tone-accent-text: #2fcaab; --d-tone-info-text: #61b0ff;
   --d-tone-success-text: #7bdf94; --d-tone-warning-text: #fbc064; --d-tone-danger-text: #ff8780;
   --d-bg-window: #1c1c1e;
@@ -193,6 +195,7 @@
   --label-tertiary: var(--d-label-tertiary);
   --label-quaternary: var(--d-label-quaternary);
   --wordmark: var(--d-wordmark);
+  --wordmark-inactive: var(--d-wordmark-inactive);
   --tone-neutral-text: var(--d-tone-neutral-text); --tone-accent-text: var(--d-tone-accent-text); --tone-info-text: var(--d-tone-info-text);
   --tone-success-text: var(--d-tone-success-text); --tone-warning-text: var(--d-tone-warning-text); --tone-danger-text: var(--d-tone-danger-text);
   --bg-window: var(--d-bg-window);
@@ -236,6 +239,7 @@
     --label-tertiary: var(--d-label-tertiary);
     --label-quaternary: var(--d-label-quaternary);
     --wordmark: var(--d-wordmark);
+    --wordmark-inactive: var(--d-wordmark-inactive);
     --tone-neutral-text: var(--d-tone-neutral-text); --tone-accent-text: var(--d-tone-accent-text); --tone-info-text: var(--d-tone-info-text);
     --tone-success-text: var(--d-tone-success-text); --tone-warning-text: var(--d-tone-warning-text); --tone-danger-text: var(--d-tone-danger-text);
     --bg-window: var(--d-bg-window);

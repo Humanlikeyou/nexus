@@ -12,6 +12,7 @@ import { ScreenErrorBoundary } from "./shell/ScreenErrorBoundary";
 import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";
 import { CommandSurface } from "./design/SystemPrimitives";
 import { useAppearance } from "./design/useAppearance";
+import { useWindowActive } from "./shell/useWindowActive";
 import { useIdleAutoSave } from "./hooks/useIdleAutoSave";
 import { useSchedulerLifecycle } from "./hooks/useSchedulerLifecycle";
 import { ChatField } from "./screens/ChatScreen";
@@ -58,6 +59,8 @@ export default function App() {
   const { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession } = useMuseSession(data, refresh, setNotice);
   const [contextInspectorOpen, setContextInspectorOpen] = useState(false);
   const { theme, setTheme, reduceMotion, setReduceMotion } = useAppearance();
+  // Key-window state → <html data-window-active> (Decision 21).
+  useWindowActive();
   // Amara background scheduler: started once for the shell, stopped on unmount.
   useSchedulerLifecycle();
 
