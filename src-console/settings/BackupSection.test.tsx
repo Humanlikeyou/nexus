@@ -56,6 +56,7 @@ describe("restore from backup", () => {
     setup();
     const restoreBtn = screen.getByRole("button", { name: "Restore from Backup…" });
     expect(restoreBtn).toBeDisabled();
+    expect(restoreBtn).toHaveAttribute("aria-disabled", "true");
     fireEvent.change(screen.getByLabelText("Backup file"), { target: { value: "notes.txt" } });
     expect(screen.getByText("Use a full path, like ~/Desktop/nexus-backup.tar.gz")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Backup file"), { target: { value: "/tmp/notes.txt" } });

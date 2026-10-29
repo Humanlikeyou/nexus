@@ -27,7 +27,9 @@
 .ui-button:hover:not(:disabled) { background: var(--ui-button-bg-hover); }
 .ui-button:active:not(:disabled):not([data-loading]) { transform: scale(.97); }
 .ui-button:focus-visible { outline: var(--space-0_5) solid var(--focus-ring); outline-offset: var(--space-0_5); }
-.ui-button:disabled { cursor: default; opacity: .45; }
+.ui-button:disabled { cursor: default; opacity: .45; box-shadow: none; }
+/* Destructive tint fades further so a disabled Restore never reads as armed. */
+.ui-button[data-variant="destructive"]:disabled { opacity: .38; filter: saturate(.4); }
 .ui-button[data-loading] { cursor: progress; }
 
 .ui-button[data-variant="primary"] {
