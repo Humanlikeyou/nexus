@@ -25,6 +25,26 @@ pub struct SessionSummary {
     pub time_in_target_pct: Option<f64>,
 }
 
+impl SessionSummary {
+    /// Sessions recorded before the 0–100 score scale stored Avg focus / relaxation as 0–1.
+    /// On read, a summary whose present scores all lie in 0..=1 is treated as legacy and scaled
+    /// to 0–100. A real 0–100 average of ≤1 on every score is not a plausible session, so the
+    /// heuristic cannot misfire on new files in practice; nothing is rewritten on disk.
+    pub fn normalize_legacy_scores(&mut self) {
+        let scores = [self.avg_focus, self.avg_relaxation];
+        let present: Vec<f64> = scores.iter().flatten().copied().collect();
+        let legacy = !present.is_empty()
+            && present
+                .iter()
+                .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+            && present.iter().any(|v| *v > 0.0);
+        if legacy {
+            self.avg_focus = self.avg_focus.map(|v| v * 100.0);
+            self.avg_relaxation = self.avg_relaxation.map(|v| v * 100.0);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordedSession {
     pub id: String,
@@ -85,7 +105,9 @@ pub fn list_sessions() -> Result<Vec<RecordedSession>, String> {
         };
 
         if let Some(session_val) = parsed.get("session") {
-            if let Ok(session) = serde_json::from_value::<RecordedSession>(session_val.clone()) {
+            if let Ok(mut session) = serde_json::from_value::<RecordedSession>(session_val.clone())
+            {
+                session.summary.normalize_legacy_scores();
                 sessions.push(session);
             }
         }
@@ -126,6 +148,55 @@ mod tests {
         let summary: SessionSummary = serde_json::from_value(old).unwrap();
         assert_eq!(summary.calm_pct, None);
         assert_eq!(summary.time_in_target_pct, None);
+    }
+
+    fn summary(focus: Option<f64>, relaxation: Option<f64>) -> SessionSummary {
+        SessionSummary {
+            avg_focus: focus,
+            avg_relaxation: relaxation,
+            avg_hr: None,
+            max_hr: None,
+            avg_hrv: None,
+            calm_pct: None,
+            time_in_target_pct: None,
+        }
+    }
+
+    #[test]
+    fn legacy_unit_scores_are_scaled_to_0_100_on_read() {
+        let mut old = summary(Some(0.4), Some(0.62));
+        old.normalize_legacy_scores();
+        assert!((old.avg_focus.unwrap() - 40.0).abs() < 1e-9);
+        assert!((old.avg_relaxation.unwrap() - 62.0).abs() < 1e-9);
+
+        let mut one_sided = summary(None, Some(1.0));
+        one_sided.normalize_legacy_scores();
+        assert_eq!(one_sided.avg_focus, None);
+        assert_eq!(one_sided.avg_relaxation, Some(100.0));
+    }
+
+    #[test]
+    fn new_scale_and_empty_scores_are_left_alone() {
+        for (f, r) in [
+            (Some(62.0), Some(71.0)),
+            (Some(0.5), Some(71.0)),
+            (None, None),
+            (Some(0.0), Some(0.0)),
+        ] {
+            let mut s = summary(f, r);
+            s.normalize_legacy_scores();
+            assert_eq!((s.avg_focus, s.avg_relaxation), (f, r));
+        }
+    }
+
+    #[test]
+    fn legacy_session_file_body_normalizes() {
+        // Old-format file body; list_sessions itself is covered in tests/data_dir_env.rs.
+        let file = serde_json::json!({ "session": { "id": "a", "device_type": "muse", "start": "2026-01-01T00:00:00Z", "end": "2026-01-01T00:10:00Z", "duration_secs": 600, "data_points": 10, "file_path": "", "summary": { "avg_focus": 0.55, "avg_relaxation": 0.7, "avg_hr": null, "max_hr": null, "avg_hrv": null } }, "data": [] });
+        let mut session: RecordedSession = serde_json::from_value(file["session"].clone()).unwrap();
+        session.summary.normalize_legacy_scores();
+        assert!((session.summary.avg_focus.unwrap() - 55.0).abs() < 1e-9);
+        assert!((session.summary.avg_relaxation.unwrap() - 70.0).abs() < 1e-9);
     }
 
     #[test]

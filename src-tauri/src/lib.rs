@@ -24,6 +24,7 @@ pub mod test_support {
     pub use crate::commands::noop::health_snapshot;
     pub use crate::commands::onboarding::{check_onboarding, complete_onboarding};
     pub use crate::commands::outbox::get_outbox_status;
+    pub use crate::commands::sessions::list_sessions;
 
     /// Data paths of the modules moved onto app_paths::data_dir() (notifications.rs is not in
     /// the module tree, so it is not compiled or listed), as
