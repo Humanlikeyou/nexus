@@ -1,6 +1,6 @@
 # Build Guide — Nexus
 
-> App: `Nexus` (`com.taisun.nexus`), npm package `nexus`, Rust lib `nexus_lib`. Formerly `electron` (rename done in 80276f9).
+> App: shown as **Amara OS** (`productName`; window title "Amara OS — Command Center"), internally `Nexus` (`com.taisun.nexus`), npm package `nexus`, Rust lib `nexus_lib`. Formerly `electron` (rename done in 80276f9).
 
 ## Prerequisites
 
@@ -79,11 +79,19 @@ npm run outbox-status       # scripts/outbox-status.sh
 
 CI (`.github/workflows/ci.yml`) uses Node 22 from `.nvmrc`: `npm ci`, `npx tsc --noEmit`, `npm run test:neuro`, `npm run build`; Rust on Linux (`cargo fmt --check`, `cargo clippy`, `cargo test --locked`) and macOS (`cargo build --locked`, `cargo test --locked`). `release.yml` builds a draft macOS release on `v*` tags.
 
+## Local runtime
+
+- **LLM:** the default is local Ollama with `gemma4:latest` (`ollama pull gemma4`). Set `compute_mode` to `local`, because `gateway` routes LLM jobs to OpenClaw on :18789.
+- **QA launches:** `NEXUS_OUTBOUND_DISABLED=1 npm run tauri -- dev` (also `true`/`yes`) blocks Telegram sends and outbox delivery for that session. Without it, a launch with `telegram_chat_id` configured sends real messages.
+- **Outbox:** pending items older than 24h are marked `expired` and are never sent.
+
 ## App data & backups
 
 App data lives in `~/Library/Application Support/com.taisun.nexus`. On first launch after the rename, Nexus copies `~/Library/Application Support/com.taisun.electron` into it once (marker file; never deletes or overwrites existing files). The old directory is left in place.
 
 Backups (`pack_it_up`) are written to `~/Desktop/nexus-backup-<timestamp>.tar.gz` (staging dir `nexus-pack-*`, config in `nexus-config`). Restore also accepts legacy `electron-pack*` / `electron-config` backups.
+
+Activity log: `activity_log/` keeps 30 days (max 5000 files). The prune job (every 7 days) archives older entries into `activity_log/archive/YYYY-MM.jsonl.gz` after verifying them, so expect a one-time archive of about 16.6k files on the first prune after updating.
 
 ---
 

@@ -2,6 +2,8 @@
 
 > **Central Goal**: Nexus is a local, private command center — a Tauri 2 desktop app combining Amara (AI agent runtime + OpenClaw gateway), neuro sessions (Muse EEG), health signals (read-only from NOOP), business/ARM data, and goals, with n8n automation behind it.
 
+> **Naming (Decision 13, ec12efa / de94dfa):** the user-facing app is **Amara OS** (`productName`), the window and page title is "Amara OS — Command Center", and the assistant is **Amara**. Internal ids are unchanged: repo/npm/Cargo `nexus`, `nexus_lib`, `com.taisun.nexus`, Tauri command names, `terrance*` module ids, tables and file names.
+
 > **Rename: done** (80276f9, f30acbb). `electron` → **Nexus**: npm package `nexus`, Cargo package `nexus`, Rust lib `nexus_lib` (`main.rs` calls `nexus_lib::run()`), `productName` `Nexus`, identifier `com.taisun.nexus`, favicon `public/nexus.svg`. Backups are `nexus-backup-*.tar.gz` (staging `nexus-pack-*`, config dir `nexus-config`); older `electron-pack`/`electron-config` backups still unpack. App data moves from `com.taisun.electron` to `com.taisun.nexus` via a one-time, non-destructive copy on first launch (`src-tauri/src/app_paths.rs`).
 
 ---
@@ -10,7 +12,7 @@
 
 ```
 nexus/
-├── index.html                  # Loads /src-console/main.tsx (title "Amara Nexus")
+├── index.html                  # Loads /src-console/main.tsx (title "Amara OS — Command Center")
 ├── src-console/                # LIVE UI (React 19 + TS, plain CSS, lucide-react icons)
 │   ├── App.tsx                 # Shell + navigation: Overview, Live, Sessions, Health, Trajectory,
 │   │                           #   Business, Revenue, Devices, Activity, Settings
@@ -50,6 +52,7 @@ There is **no Whoop integration** any more: `whoop.rs`, `useWhoop*`, `src/lib/wh
 | Frontend | React 19, TypeScript, Vite 6, plain CSS (`src-console/styles.css`), lucide-react |
 | Rust backend | Tauri commands, `tokio`, `reqwest`, `rusqlite`, `dirs`, `serde_json` |
 | Automation | n8n (self-hosted, Docker stack) |
+| LLM | Local Ollama, default `gemma4:latest` (`mode: "local"`) |
 | AI gateway | OpenClaw (Node.js, port 18789, LaunchAgent) |
 | Biometrics | Muse EEG via BLE; health via NOOP (read-only SQLite) |
 | Agents | CrewAI service via `crew.rs` (port 8400) |
@@ -77,6 +80,14 @@ npm run outbox-status
 ```
 
 ---
+
+## Runtime behaviour (2026-10-29)
+
+- **LLM defaults** (68f2b49): `llm_router.rs` defaults to `mode: "local"` with `DEFAULT_OLLAMA_MODEL = "gemma4:latest"` (was hybrid + qwen3.5). Telegram chat picks gemma4 first, then qwen3.5, llama3.3, llama3.2 and mistral.
+- **`NEXUS_OUTBOUND_DISABLED`** (14cdf7c): set to `1`/`true`/`yes` at launch to stop all outbound sends for that session. `send_telegram_message` refuses, the outbox pauses delivery to the gateway (`Delivery paused`), and Activity shows "delivery paused". Reads and health checks still work. Use it for QA launches, because a normal launch with `telegram_chat_id` set **will** send.
+- **Outbox expiry** (46fa421): pending outbox items older than `OUTBOX_EXPIRY_HOURS = 24` are marked `expired`. They are kept, never sent and not deleted, and the delivery card shows "Expired".
+- **Activity-log retention** (6a076f8, be271f5): `archive_activity_log` keeps 30 days (`ACTIVITY_KEEP_DAYS`) as files, capped at 5000 files (`ACTIVITY_MAX_FILES`). Older entries move into `activity_log/archive/YYYY-MM.jsonl.gz` (UTC month). Each archive is written via a temp file and verified before the sources are removed, and unparsable files are left in place. It runs from `pruneMemory()` in the prune job (every 7 days) and failures are non-fatal. `list_activity_entries` reads only the newest files.
+- **Prune fix** (c90435a, be271f5): from 2026-07-06 the weekly prune never ran. `runReasoningLoop` swallowed errors, so reasoning logged "Skipped" with no backoff and held the single heavy-job slot every tick. Reasoning and prune failures now count as failures with backoff and a reason (`scheduler.pruneStarvation.test.ts`). The first prune after launch archives about 16.6k old activity files.
 
 ## Services & Infrastructure
 
@@ -233,7 +244,7 @@ The live design system is `src-console/styles.css` + `src-console/design/`. The 
 - [x] **Rename to Nexus** — done in 80276f9 (names) and f30acbb (app-data migration)
 - [ ] **Clean up after the src-console migration** (WIP snapshot commit 4a33ff6): remove empty legacy dirs (`src/components/*`, `src/styles`, `src-next/`, `src-console/system/`)
 - [ ] **Legacy `src/`** — decide what remains (not type-checked or imported by the entry point)
-- [ ] **`notifications.rs`** — re-declare in `mod.rs` or delete
+- [x] **`notifications.rs`** — removed (d6fd108)
 - [x] **CI** — Node 22 via `.nvmrc`, `test:neuro`, `cargo test --locked`, fmt/clippy (non-blocking), macOS job; tag-triggered draft release in `release.yml`
 - [ ] **CrewAI service** — `crew.rs` expects a service at 127.0.0.1:8400; service code imported to `stack/crew-service/` (Dockerfile, main.py); wiring/UI still pending
 - [ ] **End-to-end Telegram alert test**, **OpenClaw auto-restart**, **n8n webhook auth** (from earlier list)

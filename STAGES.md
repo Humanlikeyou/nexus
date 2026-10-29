@@ -143,7 +143,7 @@
 - [ ] Crew monitoring UI (planned in `src-console/`; the old CrewDashboard.tsx plan targeted the deleted `src/components`)
 
 *Approach: Built on existing TypeScript/Rust stack first (5A-5D), CrewAI Python service last (5E).*
-*Local model: qwen3.5 (9.7B). OpenClaw primary: MiniMax-M2.5, fallback: ollama/qwen3.5.*
+*Local model at the time: qwen3.5 (9.7B). OpenClaw primary: MiniMax-M2.5, fallback: ollama/qwen3.5. Since 68f2b49 the router defaults to local Ollama `gemma4:latest`.*
 
 This stage turns Amara from semi-autonomous to fully autonomous.
 
@@ -155,6 +155,12 @@ This stage turns Amara from semi-autonomous to fully autonomous.
 - Whoop BLE integration removed (`whoop.rs`); health is read-only from NOOP via `noop.rs`
 - Amara runtime modules: `terrence_actions/automations/context/priorities/projects/runtime/runtime_bridge.rs`
 - [x] Rename electron → Nexus (`com.taisun.nexus`) done (80276f9), with one-time non-destructive app-data copy from `com.taisun.electron` (f30acbb)
+- [x] User-facing name **Amara OS**, assistant **Amara**, title "Amara OS — Command Center" (de94dfa, ec12efa); internal ids stay `nexus`
+- [x] LLM router defaults: local Ollama `gemma4:latest` (68f2b49)
+- [x] `NEXUS_OUTBOUND_DISABLED=1` session kill switch for Telegram + outbox (14cdf7c)
+- [x] Outbox: pending items older than 24h become `expired` (kept, never sent) (46fa421)
+- [x] Activity-log retention: 30 days / 5000 files, older entries archived to monthly `.jsonl.gz` (6a076f8)
+- [x] Prune fix: reasoning and prune failures now back off, so the weekly prune that had been stuck since 2026-07-06 runs again (c90435a, be271f5)
 
 ---
 
