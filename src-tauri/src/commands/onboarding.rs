@@ -1,14 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
 
+/// App data dir; honours NEXUS_DATA_DIR (app_paths::data_dir).
 fn nexus_data_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap()
-                .join("Library/Application Support")
-        })
-        .join(crate::app_paths::DATA_DIR_NAME)
+    crate::app_paths::data_dir()
 }
 
 fn onboarding_path() -> PathBuf {

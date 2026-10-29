@@ -20,8 +20,15 @@ pub mod test_support {
     pub use crate::app_paths::{
         data_dir, merge_legacy_config_in, migrate_legacy_data_dir_in, DATA_DIR_ENV, DATA_DIR_NAME,
     };
+    pub use crate::commands::goals::{read_goals, save_goals};
     pub use crate::commands::noop::health_snapshot;
+    pub use crate::commands::onboarding::{check_onboarding, complete_onboarding};
     pub use crate::commands::outbox::get_outbox_status;
+
+    /// Data dir the packager packs from and restores into.
+    pub fn packager_data_dir() -> std::path::PathBuf {
+        crate::commands::packager::nexus_data_dir()
+    }
     pub use crate::commands::path_safety::{safe_join, validate_file_name, validate_name};
 
     pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {

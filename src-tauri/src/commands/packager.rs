@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
 /// Shared app-data dir (honours `NEXUS_DATA_DIR`).
-fn nexus_data_dir() -> PathBuf {
+pub(crate) fn nexus_data_dir() -> PathBuf {
     crate::app_paths::data_dir()
 }
 
