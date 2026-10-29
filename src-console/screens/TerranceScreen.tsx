@@ -138,6 +138,9 @@ export interface StripSegment {
 }
 
 /** Home status strip (screen-specs › Command center feel): plain text segments, not Badges. */
+/** A "ready" NOOP sync older than this shows the warning tone. */
+export const NOOP_STALE_AFTER_MS = 2 * 60 * 60 * 1000;
+
 export function statusStrip(data: SystemSnapshot, scheduler: SchedulerView, now: number): StripSegment[] {
   const amaraOnline = data.hermes.status === "online";
   const openclaw = openClawBadge(data.openclaw).label.toLowerCase();
@@ -165,7 +168,8 @@ export function statusStrip(data: SystemSnapshot, scheduler: SchedulerView, now:
     : noop.status === "stale"
       ? { key: "noop", to: "health", tone: "warning", live: false, text: `NOOP stale${syncedText ? ` · ${syncedText}` : ""}`, title: dateTime(synced) }
       : noop.status === "ready"
-        ? { key: "noop", to: "health", tone: "success", live: true, text: `NOOP ${syncedText ?? "synced"}`, title: dateTime(synced) }
+        // NOOP is a nightly sync, not a live feed: never pulses; an old sync reads as a warning.
+        ? { key: "noop", to: "health", tone: !Number.isNaN(synced) && now - synced > NOOP_STALE_AFTER_MS ? "warning" : "success", live: false, text: `NOOP ${syncedText ?? "synced"}`, title: dateTime(synced) }
         : { key: "noop", to: "health", tone: "neutral", live: false, text: noop.status === "waiting_for_nightly_data" ? "NOOP waiting for tonight's data" : "NOOP waiting for data" };
   return [agents, sched, health];
 }

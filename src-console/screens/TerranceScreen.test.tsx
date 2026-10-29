@@ -164,9 +164,18 @@ describe("Home status strip (Command center feel)", () => {
     expect(segment("noop")).toHaveAttribute("title", "Oct 28, 1:54 PM");
     for (const key of ["agents", "scheduler", "noop"]) {
       expect(segment(key).tagName).toBe("BUTTON");
-      expect(segment(key)).toHaveAttribute("data-live");
       expect(segment(key).querySelector(".ui-status-dot")).toHaveAttribute("data-tone", "success");
     }
+    for (const key of ["agents", "scheduler"]) expect(segment(key)).toHaveAttribute("data-live");
+    expect(segment("noop")).not.toHaveAttribute("data-live"); // nightly sync, not a live item
+  });
+
+  it("a ready NOOP sync older than 2 h uses the warning tone and never pulses", () => {
+    const old = { ...full, noop: { ...full.noop, status: "ready" as const, generatedAt: new Date(NOW - 6 * H).toISOString() } };
+    const seg = statusStrip(old, running, NOW)[2];
+    expect([seg.text, seg.tone, seg.live]).toEqual(["NOOP synced 6 h ago", "warning", false]);
+    const recent = statusStrip(fresh, running, NOW)[2];
+    expect([recent.tone, recent.live]).toEqual(["success", false]);
   });
 
   it("deep links: Agents → Chat & Agents, Scheduler → Settings, NOOP → Fitness", () => {
