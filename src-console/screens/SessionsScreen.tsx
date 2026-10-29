@@ -20,6 +20,7 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
   if (failed && sessions.length === 0) {
     return (
       <div className="sessions">
+        <h1 className="sessions__title">History</h1>
         <Card title="Sensor sessions unavailable" headingLevel={2}>
           {onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
         </Card>
@@ -29,6 +30,7 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
   if (sessions.length === 0) {
     return (
       <div className="sessions">
+        <h1 className="sessions__title">History</h1>
         <Card title="No sessions yet" headingLevel={2}>
           <p className="sessions__copy">Finish a Muse session and Amara OS keeps the recording and summary here.</p>
           {onStartSession && <div><Button variant="primary" onClick={onStartSession}>Start a Session</Button></div>}
@@ -50,6 +52,7 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
 
   return (
     <div className="sessions">
+        <h1 className="sessions__title">History</h1>
       <div className="sessions__tiles">
         <StatTile label="Sessions" value={sessions.length} />
         <StatTile label="Muse sessions" value={museCount} />

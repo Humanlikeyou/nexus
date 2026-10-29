@@ -25,8 +25,7 @@ test.describe("sub-views and anchors", () => {
   const SUBVIEWS: [string, string, (f: Field) => Promise<void>][] = [
     ["Chat & Agents", "Activity", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Activity")],
     ["Chat & Agents", "Crews", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Crews")],
-    // Neuro › History (SessionsScreen) has no h1; its session list is the landmark.
-    ["Neuro", "History", (f) => expect(f.getByRole("list", { name: "History" })).toBeVisible()],
+    ["Neuro", "History", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("History"); await expect(f.getByRole("list", { name: "History" })).toBeVisible(); }],
     ["Business", "Revenue", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Business")],
   ];
   for (const [host, view, check] of SUBVIEWS) {
