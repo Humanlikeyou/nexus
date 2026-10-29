@@ -1,7 +1,7 @@
 import { Info, RefreshCw } from "lucide-react";
 import type { ThemePreference } from "../design/useAppearance";
 import { APP_NAME, APP_VERSION } from "../app/version";
-import { date, humanize } from "../lib/format";
+import { dateTime, humanize } from "../lib/format";
 import { BackupSection } from "../settings/BackupSection";
 import type { MuseDevice, SystemSnapshot } from "../types";
 import { Button, InsetGroup, ListRow, SegmentedControl, Toggle, Wordmark } from "../ui";
@@ -76,7 +76,7 @@ export function SettingsField({ data, theme, setTheme, reduceMotion, setReduceMo
         <ListRow title="Muse" value={diag(data.muse.streaming ? "Streaming" : data.muse.connected ? "Connected" : "Disconnected", "get_muse_state")} />
         <ListRow title="NOOP" value={diag(humanize(data.noop.status), "get_noop_health_snapshot")} />
         <ListRow title="Unavailable sources" value={diag(data.unavailableSources.length ? data.unavailableSources.map((s) => s.label).join(", ") : "None")} />
-        <ListRow title="Last refresh" value={diag(date(data.refreshedAt))} />
+        <ListRow title="Last refresh" value={diag(dateTime(data.refreshedAt))} />
       </InsetGroup>
       {loaded && data.unavailableSources.length > 0 && onRetry && (
         <div><Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button></div>

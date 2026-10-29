@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { correctTerrenceContextItem, deleteTerrenceContextItem, listTerrenceContextItems } from "../bridge";
-import { date } from "../lib/format";
+import { dateTime } from "../lib/format";
 import type { TerrenceContextItem } from "../types";
 import { Check, Pencil, Trash2, X } from "lucide-react";
 
@@ -120,7 +120,7 @@ export function ContextInspector({ visible, onClose, onChanged }: { visible: boo
           {items.map((item) => <article key={item.id} className={editing?.item.id === item.id ? "is-editing" : ""}>
             <div className="context-item-heading"><strong>{item.title}</strong><span>{item.kind}</span></div>
             {item.content && <p>{item.content}</p>}
-            <footer><span>{item.status} · {Math.round(item.confidence * 100)}% confidence</span><span>{item.provenanceSource}</span><time>{date(item.updatedAt)}</time></footer>
+            <footer><span>{item.status} · {Math.round(item.confidence * 100)}% confidence</span><span>{item.provenanceSource}</span><time>{dateTime(item.updatedAt)}</time></footer>
             {scope === "current" && <><div className="context-item-actions"><button type="button" onClick={() => startCorrection(item)} disabled={saving} title={`Correct ${item.title}`}><Pencil size={14} /></button><button type="button" onClick={() => setPendingDeletion(item.id)} disabled={saving} title={`Hide ${item.title}`}><Trash2 size={14} /></button></div>{pendingDeletion === item.id && <div className="context-delete-confirm"><span>Hide this from Amara?</span><button type="button" onClick={() => void hideItem(item)} disabled={saving}>Hide</button><button type="button" onClick={() => setPendingDeletion(null)} disabled={saving} title="Cancel"><X size={14} /></button></div>}</>}
           </article>)}
           {error && <p className="context-inspector-error">{error}</p>}

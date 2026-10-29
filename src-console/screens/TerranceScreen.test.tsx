@@ -51,7 +51,7 @@ describe("Home (TerranceField)", () => {
     render(<TerranceField data={full} now={NOW} scheduler={running} onNavigate={onNavigate} />);
     expect(screen.getByRole("meter", { name: "Recovery" })).toHaveAttribute("aria-valuenow", "74");
     expect(screen.getByText("Next: Consolidation in 2h 14m")).toBeInTheDocument();
-    expect(screen.getByText("Last: Reasoning 08:12")).toBeInTheDocument();
+    expect(screen.getByText("Last: Reasoning 8:12 AM")).toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.getByText("HRV is up 8%")).toBeInTheDocument();
     expect(screen.getByText("Gateway online")).toBeInTheDocument();
@@ -111,10 +111,10 @@ describe("Home (TerranceField)", () => {
     // Last runs on another day carry the date (live check: July 6 read as "Last: Reasoning 13:54").
     const at = (iso: string) => Date.parse(iso);
     const today = at("2026-10-29T10:58:00+09:00");
-    expect(lastRunLabel(at("2026-10-29T08:05:00+09:00"), today)).toBe("08:05");
-    expect(lastRunLabel(at("2026-07-06T13:54:00+09:00"), today)).toBe("6 Jul 13:54");
-    expect(lastRunLabel(at("2026-10-28T23:30:00+09:00"), today)).toBe("28 Oct 23:30");
-    expect(lastRunLabel(at("2025-12-31T09:00:00+09:00"), today)).toBe("31 Dec 2025 09:00");
+    expect(lastRunLabel(at("2026-10-29T08:05:00+09:00"), today)).toBe("8:05 AM");
+    expect(lastRunLabel(at("2026-07-06T13:54:00+09:00"), today)).toBe("Jul 6, 1:54 PM");
+    expect(lastRunLabel(at("2026-10-28T23:30:00+09:00"), today)).toBe("Oct 28, 11:30 PM");
+    expect(lastRunLabel(at("2025-12-31T09:00:00+09:00"), today)).toBe("Dec 31, 2025, 9:00 AM");
     expect(greeting(new Date("2026-10-28T08:00:00+09:00").getTime())).toBe("Good morning");
     expect(greeting(new Date("2026-10-28T20:00:00+09:00").getTime())).toBe("Good evening");
   });

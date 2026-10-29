@@ -12,9 +12,16 @@ export function tone(value: string | boolean | null | undefined): Tone {
   return "quiet";
 }
 
+/** Whole-word tokens kept upper case after sentence-casing ("qa" → "QA", "api_service" → "API service"). */
+const ACRONYMS = new Set(["qa", "ui", "api", "ai", "llm", "seo"]);
+
 export function humanize(value: string | null | undefined) {
   const text = String(value ?? "unknown").replace(/[_-]+/g, " ").trim();
-  return text ? text.charAt(0).toUpperCase() + text.slice(1).toLowerCase() : "Unknown";
+  if (!text) return "Unknown";
+  const sentence = text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+  return sentence
+    .replace(/\b[a-z]+\b/gi, (word) => (ACRONYMS.has(word.toLowerCase()) ? word.toUpperCase() : word))
+    .replace(/\be commerce\b/i, (m) => (m[0] === "E" ? "E-commerce" : "e-commerce"));
 }
 
 export function plainText(value: string) {
@@ -34,18 +41,34 @@ export function money(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value || 0);
 }
 
-export function date(value: string | number | null | undefined) {
-  if (!value) return "No record";
-  const parsed = new Date(typeof value === "number" && value < 1e12 ? value * 1000 : value);
-  if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+type Instant = string | number | Date | null | undefined;
+
+/** Seconds (< 1e12) or milliseconds, ISO strings and Dates. Null when missing or unparsable. */
+function instant(value: Instant): Date | null {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(typeof value === "number" && value < 1e12 ? value * 1000 : value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-export function time(value: string | number | null | undefined) {
-  if (!value) return "--";
-  const parsed = new Date(typeof value === "number" && value < 1e12 ? value * 1000 : value);
-  if (Number.isNaN(parsed.getTime())) return "--";
-  return parsed.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const DATE = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const TIME = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
+/** "Oct 28": a calendar date, no time. */
+export function date(value: Instant) {
+  const parsed = instant(value);
+  return parsed ? DATE.format(parsed) : value ? String(value) : "No record";
+}
+
+/** "9:00 PM": numeric hour (no leading zero), two-digit minute. */
+export function time(value: Instant) {
+  const parsed = instant(value);
+  return parsed ? TIME.format(parsed) : "--";
+}
+
+/** "Oct 28, 1:38 PM": the one timestamp format (never "Oct 28 at 01:38 PM"). */
+export function dateTime(value: Instant) {
+  const parsed = instant(value);
+  return parsed ? `${DATE.format(parsed)}, ${TIME.format(parsed)}` : value ? String(value) : "No record";
 }
 
 export function formatMinutes(value: number | null | undefined) {

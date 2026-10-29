@@ -15,6 +15,7 @@ test("activity shows Suppressed as neutral, the Expired outbox row and the activ
         { id: "s1", type: "ritual", name: "morning_ritual", status: "suppressed", startedAt: at("2026-10-29T07:00:00+09:00"), completedAt: at("2026-10-29T07:00:01+09:00"), durationMs: 300, detail: "Outbound sends disabled (NEXUS_OUTBOUND_DISABLED)", outcome: "suppressed" },
         { id: "p1", type: "maintenance", name: "memory_prune", status: "completed", startedAt: at("2026-10-29T06:00:00+09:00"), completedAt: at("2026-10-29T06:00:05+09:00"), durationMs: 5000, detail: "2 sessions archived, 1 trimmed, 16589 activity entries archived", outcome: null },
         { id: "f1", type: "agent_task", name: "daily_brief", status: "failed", startedAt: at("2026-10-28T07:30:00+09:00"), completedAt: at("2026-10-28T07:30:42+09:00"), durationMs: 42000, detail: "Delivery failed", outcome: null },
+        { id: "k1", type: "daily_summary", name: "weekly_review", status: "skipped", startedAt: at("2026-10-27T21:40:00+09:00"), completedAt: at("2026-10-27T21:40:00+09:00"), durationMs: 0, detail: "Missed window", outcome: "skipped" },
       ],
     },
   });
@@ -34,7 +35,16 @@ test("activity shows Suppressed as neutral, the Expired outbox row and the activ
   await expect(badge).toHaveAttribute("data-tone", "neutral");
 
   await expect(field.getByRole("listitem").filter({ hasText: "memory prune" })).toContainText("16589 activity entries archived");
-  await expect(field.getByRole("listitem").filter({ hasText: "daily brief" }).locator(".ui-badge")).toHaveAttribute("data-tone", "danger");
+  const failed = field.getByRole("listitem").filter({ hasText: "daily brief" });
+  await expect(failed.locator(".ui-badge")).toHaveAttribute("data-tone", "danger");
+  await expect(failed.locator(".ui-badge")).toHaveText("Failed");
+  // One timestamp format: "Oct 28, 7:30 AM" (no " at ", no leading zero).
+  await expect(failed).toContainText("42.0s · Oct 28, 7:30 AM");
+
+  const skipped = field.getByRole("listitem").filter({ hasText: "weekly review" });
+  await expect(skipped.locator(".ui-badge")).toHaveText("Skipped");
+  await expect(skipped.locator(".ui-badge")).toHaveAttribute("data-tone", "neutral");
+  await expect(field.getByRole("listitem").filter({ hasText: "Last delivered" })).toContainText("Oct 28, 1:40 PM");
   expect(consoleErrors).toEqual([]);
 });
 

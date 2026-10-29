@@ -1,7 +1,7 @@
 import { BrainCircuit, Bluetooth, Inbox, Play, RefreshCw, Square, Unplug, X } from "lucide-react";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { INITIAL_SNAPSHOT } from "../bridge";
-import { date } from "../lib/format";
+import { dateTime } from "../lib/format";
 import { BAND_KEYS, MIN_SAMPLES, createBandHistory, type BandKey } from "../neuro/bandHistory";
 import { useMuseTelemetry } from "../neuro/useMuseTelemetry";
 import type { useTraining } from "../neuro/useTraining";
@@ -218,7 +218,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
         <InsetGroup title="Recent sessions" className="neuro__sessions"
           footer={sessionsFailed ? "Saved sessions couldn't be read." : sessions.length ? undefined : "Your first completed session will appear here."}>
           {sessions.slice(0, 5).map((s) => (
-            <ListRow key={s.id} icon={Inbox} title={date(s.start)} onSelect={() => setSelectedId(s.id === selectedId ? null : s.id)} selected={s.id === selectedId}
+            <ListRow key={s.id} icon={Inbox} title={dateTime(s.start)} onSelect={() => setSelectedId(s.id === selectedId ? null : s.id)} selected={s.id === selectedId}
               subtitle={<span className="neuro__num">{Math.max(1, Math.round(s.duration_secs / 60))} min · {s.data_points.toLocaleString()} samples · relax {whole(s.summary.avg_relaxation) ?? DASH}</span>} />
           ))}
         </InsetGroup>
@@ -233,7 +233,7 @@ function SessionPanel({ session, onClose }: { session: RecordedSession; onClose:
   return (
     <Card as="aside" className="neuro__panel" title="Session summary" headingLevel={2}
       accessory={<Button variant="plain" size="small" iconOnly icon={X} aria-label="Close session summary" onClick={onClose} />}>
-      <p className="neuro__callout">{date(session.start)} · <span className="neuro__num">{mmss(session.duration_secs)}</span></p>
+      <p className="neuro__callout">{dateTime(session.start)} · <span className="neuro__num">{mmss(session.duration_secs)}</span></p>
       <div className="neuro__panel-tiles">
         <StatTile label={<>Calm <Badge tone="neutral">BETA</Badge></>} value={whole(s.calm_pct)} unit="%" />
         <StatTile label="In target" value={whole(s.time_in_target_pct)} unit="%" />

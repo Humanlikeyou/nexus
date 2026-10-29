@@ -1,7 +1,7 @@
 import { Play, RefreshCw, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { INITIAL_SNAPSHOT, getCrewStatus, startCrew, stopCrew } from "../bridge";
-import { date, humanize, plainText } from "../lib/format";
+import { dateTime, humanize, plainText } from "../lib/format";
 import type { CrewInfo, CrewServiceHealth, SystemSnapshot } from "../types";
 import { Badge, Button, Card, Dialog, InsetGroup, ListRow, TextField, type Tone } from "../ui";
 import "./CrewsScreen.css";
@@ -154,7 +154,7 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
               {runs.map((run) => (
                 <ListRow key={run.id} title={run.name} selected={run.id === selectedId} onSelect={() => setSelectedId(run.id === selectedId ? null : run.id)}
                   subtitle={<span className="crews__clamp" title={run.task ?? undefined}>{run.task ?? "No task text"}</span>}
-                  value={[run.started_at ? date(run.started_at) : null, run.agents.length ? run.agents.join(", ") : null].filter(Boolean).join(" · ")}
+                  value={[run.started_at ? dateTime(run.started_at) : null, run.agents.length ? run.agents.join(", ") : null].filter(Boolean).join(" · ")}
                   accessory={<Badge tone={STATUS_TONE[run.status] ?? "neutral"}>{humanize(run.status)}</Badge>} />
               ))}
             </InsetGroup>

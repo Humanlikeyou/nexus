@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEven
 import { Activity, Bot, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
 import { openClawBadge } from "../app/openclaw";
-import { time } from "../lib/format";
+import { dateTime, time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, StatTile, TextField, type Tone } from "../ui";
@@ -166,7 +166,7 @@ export function ChatField({
             <Badge tone={online ? "success" : "warning"}>{online ? "Online" : "Offline"}</Badge>
             <span className="chat-screen__model">{hermes.model}</span>
             {/* eslint-disable-next-line react-hooks/purity -- the 'Saved …' label is read at render on purpose; it re-renders on every save */}
-            {lastSavedAt != null && <span className="chat-screen__saved" title={new Date(lastSavedAt).toLocaleString()}>Saved {relative(lastSavedAt, Date.now())}</span>}
+            {lastSavedAt != null && <span className="chat-screen__saved" title={dateTime(lastSavedAt)}>Saved {relative(lastSavedAt, Date.now())}</span>}
           </div>
           <div className="chat-screen__tools">
             <Button variant="plain" icon={SquarePen} iconOnly aria-label="New chat" title="New chat (⌘N)" onClick={onNewConversation} />

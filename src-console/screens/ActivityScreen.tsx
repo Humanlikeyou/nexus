@@ -1,8 +1,8 @@
 import { RefreshCw } from "lucide-react";
-import { date, humanize, plainText, shortDuration } from "../lib/format";
+import { dateTime, humanize, plainText, shortDuration } from "../lib/format";
 import type { SystemSnapshot } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, StatTile } from "../ui";
-import { badgeTone } from "./businessTone";
+import { activityBadge } from "./businessTone";
 import "./ActivityScreen.css";
 
 /** Chat & Agents › Activity (screen-specs §10): delivery outbox health + Amara's operation log.
@@ -31,7 +31,7 @@ export function ActivityField({ data, onRetry }: { data: SystemSnapshot; onRetry
               <StatTile label="Delivered" value={outbox.total_delivered} />
             </div>
             <InsetGroup>
-              <ListRow title="Last delivered" value={outbox.last_delivered_at ? date(outbox.last_delivered_at) : "Never"} />
+              <ListRow title="Last delivered" value={outbox.last_delivered_at ? dateTime(outbox.last_delivered_at) : "Never"} />
               {(outbox.expired ?? 0) > 0 && <ListRow title="Expired" subtitle="Older than 24h, kept, not sent" value={String(outbox.expired)} />}
               {outbox.last_error && <ListRow title="Last error" subtitle={<span className="activity__error">{outbox.last_error}</span>} />}
             </InsetGroup>
@@ -46,11 +46,12 @@ export function ActivityField({ data, onRetry }: { data: SystemSnapshot; onRetry
           <InsetGroup title="Recent activity" footer="Last 30 operations">
             {activity.map((item) => {
               const detail = item.detail || item.outcome || "";
+              const badge = activityBadge(item.status);
               return (
                 <ListRow key={item.id} title={plainText(item.name.replace(/_/g, " "))}
                   subtitle={<span className="activity__clamp" title={detail || undefined}>{humanize(item.type)}{detail ? ` · ${detail}` : ""}</span>}
-                  value={`${shortDuration(item.durationMs)} · ${date(item.startedAt)}`}
-                  accessory={<Badge tone={badgeTone(item.status)}>{humanize(item.status)}</Badge>} />
+                  value={`${shortDuration(item.durationMs)} · ${dateTime(item.startedAt)}`}
+                  accessory={<Badge tone={badge.tone}>{badge.label}</Badge>} />
               );
             })}
           </InsetGroup>

@@ -4,7 +4,7 @@ import { getSchedulerStatus, type SchedulerStatus } from "@/terrance/system/sche
 import type { ConversationMessage } from "../app/conversation";
 import { openClawBadge } from "../app/openclaw";
 import { INITIAL_SNAPSHOT } from "../bridge";
-import { money } from "../lib/format";
+import { dateTime, money, time } from "../lib/format";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, type Tone } from "../ui";
 import { recoveryBand } from "./HealthScreen";
@@ -49,16 +49,17 @@ export function nextIn(target: number | null, now: number) {
 }
 
 const tokyo = (ms: number | string, opts: Intl.DateTimeFormatOptions) => new Date(ms).toLocaleString("en-GB", { timeZone: "Asia/Tokyo", ...opts });
-const clock = (ms: number | string | null | undefined) => (ms == null || Number.isNaN(new Date(ms).getTime()) ? DASH : tokyo(ms, { hour: "2-digit", minute: "2-digit", hour12: false }));
-/** A past run time: "13:54" today (Tokyo), "6 Jul 13:54" on another day, with the year when it differs.
+const clock = (ms: number | string | null | undefined) => (ms == null || Number.isNaN(new Date(ms).getTime()) ? DASH : time(ms));
+const DATE_WITH_YEAR = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+/** A past run time: "1:54 PM" today (Tokyo), "Jul 6, 1:54 PM" on another day, with the year when it differs.
  *  Live check 2026-10-29: "Last: Reasoning 13:54" was July 6 and read like today. */
 export function lastRunLabel(ms: number, now: number) {
   const day = (t: number) => tokyo(t, { year: "numeric", month: "2-digit", day: "2-digit" });
-  if (day(ms) === day(now)) return clock(ms);
+  if (day(ms) === day(now)) return time(ms);
   const sameYear = tokyo(ms, { year: "numeric" }) === tokyo(now, { year: "numeric" });
-  return `${tokyo(ms, { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) })} ${clock(ms)}`;
+  return sameYear ? dateTime(ms) : `${DATE_WITH_YEAR.format(ms)}, ${time(ms)}`;
 }
-const exact = (ms: number | null) => (ms == null ? undefined : tokyo(ms, { dateStyle: "medium", timeStyle: "short", hour12: false }));
+const exact = (ms: number | null) => (ms == null ? undefined : dateTime(ms));
 
 export function greeting(now: number) {
   const hour = Number(tokyo(now, { hour: "2-digit", hour12: false }));

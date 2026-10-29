@@ -1,7 +1,7 @@
 import { useState, type KeyboardEvent } from "react";
 import { BrainCircuit, HeartPulse, RefreshCw } from "lucide-react";
 import { Badge, Button, Card, InsetGroup, ListRow, StatTile } from "../ui";
-import { date, number, time } from "../lib/format";
+import { dateTime, number, time } from "../lib/format";
 import type { RecordedSession, SystemSnapshot } from "../types";
 import "./SessionsScreen.css";
 
@@ -63,7 +63,7 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
         <div className="sessions__list" onKeyDown={onListKey}>
           <InsetGroup title="History" footer="Most recent first">
             {sessions.map((s) => (
-              <ListRow key={s.id} icon={s.device_type === "muse" ? BrainCircuit : HeartPulse} title={title(s)} subtitle={date(s.start)} value={`${minutes(s)} min`} onSelect={() => setSelectedId(s.id)} selected={s.id === selected?.id} />
+              <ListRow key={s.id} icon={s.device_type === "muse" ? BrainCircuit : HeartPulse} title={title(s)} subtitle={dateTime(s.start)} value={`${minutes(s)} min`} onSelect={() => setSelectedId(s.id)} selected={s.id === selected?.id} />
             ))}
           </InsetGroup>
         </div>

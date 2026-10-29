@@ -52,8 +52,10 @@ const pct = (fraction: number | null | undefined) => (typeof fraction === "numbe
 /** "2026-09-20" → "Sep 20" (a calendar day, not an instant: no time, no UTC shift). */
 export function dayLabel(day: string): string {
   const parsed = new Date(`${day}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? day : parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return Number.isNaN(parsed.getTime()) ? day : date(parsed);
 }
+/** Fitness keeps 24-hour times: "Oct 28, 13:38". */
+const observed = (iso: string | null | undefined) => (iso ? `${date(iso)}, ${clock(iso)}` : "No record");
 
 const Missing = () => <span title="unavailable">{DASH}</span>;
 const val = (text: string) => (text === DASH ? <Missing /> : text);
@@ -119,7 +121,7 @@ export function buildInsights(health: NoopHealthSnapshot): NoopHealthInsight[] {
       // Internal id kept from the WHOOP era; user-facing copy says NOOP band.
       metric: "whoop_battery",
       fact: `NOOP band battery is ${number(health.battery.percentage)}%`,
-      context: `${health.battery.charging === true ? "Charging" : health.battery.charging === false ? "On strap" : "Charge state unavailable"}; last observed ${date(health.battery.observedAt)}.`,
+      context: `${health.battery.charging === true ? "Charging" : health.battery.charging === false ? "On strap" : "Charge state unavailable"}; last observed ${observed(health.battery.observedAt)}.`,
     });
   }
   const visible = [...health.insights];
@@ -134,7 +136,7 @@ function BatteryStatus({ battery }: { battery: NoopHealthSnapshot["battery"] }) 
   const low = battery.percentage <= 15 && battery.charging !== true;
   const Icon = battery.charging === true ? BatteryCharging : low ? BatteryLow : BatteryMedium;
   return (
-    <span className="fitness__status" data-tone={low ? "danger" : undefined} title={`Observed ${date(battery.observedAt)}`}>
+    <span className="fitness__status" data-tone={low ? "danger" : undefined} title={`Observed ${observed(battery.observedAt)}`}>
       <Icon className="fitness__status-icon" aria-hidden="true" />NOOP band {number(battery.percentage)}% · {state}
     </span>
   );
