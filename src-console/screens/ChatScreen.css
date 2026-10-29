@@ -117,10 +117,8 @@
 @keyframes chat-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .chat-bubble { animation-name: chat-fade; }
-  .chat-dots i, .chat-bubble--skeleton { animation-duration: 2.4s; }
 }
 :root[data-reduce-motion="true"] .chat-bubble { animation-name: chat-fade; }
-:root[data-reduce-motion="true"] .chat-dots i, :root[data-reduce-motion="true"] .chat-bubble--skeleton { animation-duration: 2.4s; }
 
 @media (max-width: 980px) {
   .chat-screen { grid-template-columns: var(--agent-list-w, 260px) minmax(0, 1fr); }

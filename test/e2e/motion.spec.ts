@@ -45,7 +45,7 @@ test.describe("(f) reduced motion (data-reduce-motion)", () => {
   // dialog a 200 ms opacity fade (src-console/shell/Splash.css:7,
   // src-console/ui/Dialog.css:18 switch animation-name only; durations stay).
   // Spec (f) asks for no animation longer than 0 ms. Needs a product decision.
-  test.fixme("no splash/dialog animation is longer than 0 ms", async ({ page, theme }) => {
+  test("no splash/dialog animation is longer than 0 ms", async ({ page, theme }) => {
     await openApp(page, { theme, reduceMotion: true, delays: SPLASH_DELAY }).catch(() => {});
     await expect(page.locator(".splash")).toBeVisible();
     const splash = await animationsIn(page, ".splash");

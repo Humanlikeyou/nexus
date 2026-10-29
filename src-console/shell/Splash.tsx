@@ -3,8 +3,15 @@ import "./Splash.css";
 
 type Phase = "wait" | "show" | "fade" | "done";
 
+/** Either reduced-motion switch (OS setting or Settings › Appearance › Reduce motion). */
+export function reducedMotion(): boolean {
+  if (typeof document !== "undefined" && document.documentElement.dataset.reduceMotion === "true") return true;
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 /** Boot splash (screen-specs › Shell › Wordmark › Splash). No artificial delay: it appears only if the
- *  first snapshot takes longer than 300 ms, fades out (200 ms) as soon as it lands, and never stays past 1.5 s. */
+ *  first snapshot takes longer than 300 ms, fades out (200 ms) as soon as it lands, and never stays past 1.5 s.
+ *  Under reduced motion it skips the fade and is gone in the same frame (Decision 19). */
 export function Splash({ loaded }: { loaded: boolean }) {
   const [phase, setPhase] = useState<Phase>("wait");
   const loadedRef = useRef(loaded);
@@ -20,7 +27,8 @@ export function Splash({ loaded }: { loaded: boolean }) {
     const t = window.setTimeout(() => setPhase("done"), 200);
     return () => window.clearTimeout(t);
   }, [fading]);
-  if (phase === "wait" || phase === "done") return null;
+  // Reduced motion: no fade phase to watch, so it is gone in the same frame.
+  if (phase === "wait" || phase === "done" || (fading && reducedMotion())) return null;
   return (
     <div className="splash" data-fading={fading || undefined} role="status" aria-label="Amara OS is loading">
       <span className="wordmark wordmark--splash" aria-hidden="true">Amara</span>

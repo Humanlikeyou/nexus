@@ -76,10 +76,8 @@
 @keyframes ui-button-spin { to { transform: rotate(1turn); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .ui-button { transition: background-color var(--dur-fast) var(--ease-standard); }
   .ui-button:active:not(:disabled) { transform: none; }
   .ui-button__spinner { animation: none; border-right-color: currentColor; opacity: .6; }
 }
-:root[data-reduce-motion="true"] .ui-button { transition: background-color var(--dur-fast) var(--ease-standard); }
 :root[data-reduce-motion="true"] .ui-button:active:not(:disabled) { transform: none; }
 :root[data-reduce-motion="true"] .ui-button__spinner { animation: none; border-right-color: currentColor; opacity: .6; }

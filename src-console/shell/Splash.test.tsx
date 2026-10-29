@@ -31,4 +31,17 @@ describe("boot splash", () => {
     act(() => { vi.advanceTimersByTime(200); });
     expect(screen.queryByRole("status")).toBeNull();
   });
+
+  it("under reduced motion it shows at once and leaves in the same frame (no fade)", () => {
+    document.documentElement.dataset.reduceMotion = "true";
+    try {
+      const { rerender } = render(<Splash loaded={false} />);
+      act(() => { vi.advanceTimersByTime(350); });
+      expect(screen.getByRole("status")).not.toHaveAttribute("data-fading");
+      rerender(<Splash loaded />);
+      expect(screen.queryByRole("status")).toBeNull();
+    } finally {
+      delete document.documentElement.dataset.reduceMotion;
+    }
+  });
 });

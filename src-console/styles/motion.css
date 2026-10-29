@@ -1,0 +1,22 @@
+/* Reduced motion (screen-specs Decision 19, Shell › Reduced motion): under either switch every
+ * transition and animation is 0 ms, including fades. 0.01ms (not `none`) so end events still fire. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important; transition-delay: 0ms !important; scroll-behavior: auto !important;
+  }
+}
+:root[data-reduce-motion="true"] *, :root[data-reduce-motion="true"] *::before, :root[data-reduce-motion="true"] *::after {
+  animation-duration: 0.01ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important; transition-delay: 0ms !important; scroll-behavior: auto !important;
+}
+/* Splash + Dialog: no animation at all; final state immediately. */
+@media (prefers-reduced-motion: reduce) {
+  .splash, .wordmark--splash, .ui-dialog[open], .ui-dialog::backdrop { animation: none !important; transition: none !important; }
+  .wordmark--splash, .ui-dialog[open] { opacity: 1 !important; transform: none !important; }
+  .splash[data-fading] { display: none !important; }
+}
+:root[data-reduce-motion="true"] .splash, :root[data-reduce-motion="true"] .wordmark--splash,
+:root[data-reduce-motion="true"] .ui-dialog[open], :root[data-reduce-motion="true"] .ui-dialog::backdrop { animation: none !important; transition: none !important; }
+:root[data-reduce-motion="true"] .wordmark--splash, :root[data-reduce-motion="true"] .ui-dialog[open] { opacity: 1 !important; transform: none !important; }
+:root[data-reduce-motion="true"] .splash[data-fading] { display: none !important; }
