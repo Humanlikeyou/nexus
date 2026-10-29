@@ -616,7 +616,7 @@ pub fn save_skill(name: String, content: String) -> Result<(), String> {
         return Err(format!("Skill is larger than {MAX_SKILL_BYTES} bytes"));
     }
     let path = skill_path(&dir, &name)?;
-    fs::write(&path, content).map_err(|e| e.to_string())
+    crate::app_paths::write_private(&path, content).map_err(|e| e.to_string())
 }
 
 /// Map a user-facing skill name ("Daily Brief") to `<dir>/daily-brief.md`,

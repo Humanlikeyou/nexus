@@ -112,7 +112,7 @@ struct NexusActionProposalFile {
 impl NexusActionProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_action_proposals");
-        fs::create_dir_all(&directory).map_err(|error| {
+        crate::app_paths::create_private_dir_all(&directory).map_err(|error| {
             format!("Failed to prepare Amara OS action proposal store: {error}")
         })?;
         Ok(Self {
@@ -151,7 +151,7 @@ struct NexusDecisionProposalFile {
 impl NexusDecisionProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_decision_proposals");
-        fs::create_dir_all(&directory).map_err(|error| {
+        crate::app_paths::create_private_dir_all(&directory).map_err(|error| {
             format!("Failed to prepare Amara OS decision proposal store: {error}")
         })?;
         Ok(Self {
@@ -192,7 +192,7 @@ struct NexusDecisionResolutionProposalFile {
 impl NexusDecisionResolutionProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_decision_resolutions");
-        fs::create_dir_all(&directory).map_err(|error| {
+        crate::app_paths::create_private_dir_all(&directory).map_err(|error| {
             format!("Failed to prepare Amara OS decision resolution store: {error}")
         })?;
         Ok(Self {
@@ -233,7 +233,7 @@ struct NexusProjectProposalFile {
 impl NexusProjectProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_project_proposals");
-        fs::create_dir_all(&directory).map_err(|error| {
+        crate::app_paths::create_private_dir_all(&directory).map_err(|error| {
             format!("Failed to prepare Amara OS project proposal store: {error}")
         })?;
         Ok(Self {
@@ -270,7 +270,7 @@ struct NexusContextProposalFile {
 impl NexusContextProposalFile {
     fn create() -> Result<Self, String> {
         let directory = app_data_dir().join("nexus_context_proposals");
-        fs::create_dir_all(&directory).map_err(|error| {
+        crate::app_paths::create_private_dir_all(&directory).map_err(|error| {
             format!("Failed to prepare Amara OS context proposal store: {error}")
         })?;
         Ok(Self {
@@ -503,13 +503,14 @@ fn active_schedule_count(home: &Path) -> u64 {
 
 fn persist_interaction(interaction: &TerrenceInteraction) -> Result<(), String> {
     let directory = interaction_dir();
-    fs::create_dir_all(&directory)
+    crate::app_paths::create_private_dir_all(&directory)
         .map_err(|error| format!("Failed to create interaction store: {error}"))?;
     let path = directory.join(format!("{}.json", interaction.id));
     let temporary = directory.join(format!("{}.tmp", interaction.id));
     let json = serde_json::to_vec_pretty(interaction)
         .map_err(|error| format!("Failed to serialize interaction: {error}"))?;
-    fs::write(&temporary, json).map_err(|error| format!("Failed to write interaction: {error}"))?;
+    crate::app_paths::write_private(&temporary, json)
+        .map_err(|error| format!("Failed to write interaction: {error}"))?;
     fs::rename(&temporary, &path)
         .map_err(|error| format!("Failed to finalize interaction: {error}"))
 }

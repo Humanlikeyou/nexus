@@ -184,7 +184,7 @@ pub(crate) fn save_context_to(
     dir: &std::path::Path,
     context: &TerranceContext,
 ) -> Result<(), String> {
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    crate::app_paths::create_private_dir_all(dir).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(context).map_err(|e| e.to_string())?;
     atomic_write(&dir.join(CONTEXT_FILE), json.as_bytes()).map_err(|e| e.to_string())
 }
@@ -290,11 +290,11 @@ pub struct SessionLogEntry {
 #[tauri::command]
 pub fn store_session_log(entry: SessionLogEntry) -> Result<(), String> {
     let dir = session_logs_dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;
     super::path_safety::validate_name(&entry.id)?;
     let path = super::path_safety::safe_join(&dir, &format!("{}.json", entry.id))?;
     let json = serde_json::to_string_pretty(&entry).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
+    crate::app_paths::write_private(&path, json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -335,7 +335,7 @@ pub fn archive_old_session_logs(days_threshold: u32) -> Result<u32, String> {
         return Ok(0);
     }
     let archive = archive_dir();
-    fs::create_dir_all(&archive).map_err(|e| e.to_string())?;
+    crate::app_paths::create_private_dir_all(&archive).map_err(|e| e.to_string())?;
 
     let cutoff_ms = (days_threshold as u64) * 24 * 60 * 60 * 1000;
     let now = std::time::SystemTime::now()
@@ -378,7 +378,7 @@ pub fn prune_context_memory(max_items: u32) -> Result<u32, String> {
     }
     let after = ctx.relevant_memory.len() as u32;
     let json = serde_json::to_string_pretty(&ctx).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| e.to_string())?;
+    crate::app_paths::write_private(&path, json).map_err(|e| e.to_string())?;
     Ok(before - after)
 }
 
@@ -402,8 +402,8 @@ pub fn load_custom_jobs() -> Result<String, String> {
 #[tauri::command]
 pub fn save_custom_jobs(data: String) -> Result<(), String> {
     let dir = data_dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    fs::write(custom_jobs_path(), data).map_err(|e| e.to_string())
+    crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;
+    crate::app_paths::write_private(&custom_jobs_path(), data).map_err(|e| e.to_string())
 }
 
 // ─── Session Insights ───────────────────────────────────────────────────────
@@ -547,12 +547,12 @@ fn redact_activity_entry(mut entry: ActivityEntry) -> ActivityEntry {
 #[tauri::command]
 pub fn store_activity_entry(entry: ActivityEntry) -> Result<(), String> {
     let dir = activity_log_dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;
     let entry = redact_activity_entry(entry);
     super::path_safety::validate_name(&entry.id)?;
     let path = super::path_safety::safe_join(&dir, &format!("{}.json", entry.id))?;
     let json = serde_json::to_string_pretty(&entry).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
+    crate::app_paths::write_private(&path, json).map_err(|e| e.to_string())
 }
 
 /// List recent activity entries. Returns entries from the last 24 hours
@@ -577,7 +577,7 @@ pub fn list_activity_entries(limit: Option<u32>) -> Result<Vec<ActivityEntry>, S
                     let redacted = redact_activity_entry(entry.clone());
                     if redacted != entry {
                         if let Ok(json) = serde_json::to_string_pretty(&redacted) {
-                            let _ = fs::write(&path, json);
+                            let _ = crate::app_paths::write_private(&path, json);
                         }
                     }
                     redacted
@@ -1140,7 +1140,7 @@ pub(crate) fn archive_activity_log_in(
     }
 
     let archive_dir = dir.join("archive");
-    fs::create_dir_all(&archive_dir).map_err(|e| e.to_string())?;
+    crate::app_paths::create_private_dir_all(&archive_dir).map_err(|e| e.to_string())?;
     for (month, items) in &by_month {
         let target = archive_dir.join(format!("{month}.jsonl.gz"));
         let mut lines = read_archive_lines(&target)?;
@@ -1151,7 +1151,12 @@ pub(crate) fn archive_activity_log_in(
         let tmp = archive_dir.join(format!(".{month}.jsonl.gz.tmp"));
         {
             let mut enc = flate2::write::GzEncoder::new(
-                fs::File::create(&tmp).map_err(|e| e.to_string())?,
+                crate::app_paths::private_open_options()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&tmp)
+                    .map_err(|e| e.to_string())?,
                 flate2::Compression::default(),
             );
             for line in &lines {
@@ -1230,8 +1235,8 @@ pub fn load_subagents() -> Result<String, String> {
 #[tauri::command]
 pub fn save_subagents(data: String) -> Result<(), String> {
     let dir = data_dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    fs::write(subagents_path(), data).map_err(|e| e.to_string())
+    crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;
+    crate::app_paths::write_private(&subagents_path(), data).map_err(|e| e.to_string())
 }
 
 /// Failing repros for TEST_PLAN bugs #1 and #9 (see /workspace/nexus-qa/TEST_PLAN.md).

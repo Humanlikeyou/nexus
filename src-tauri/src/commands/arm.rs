@@ -16,9 +16,11 @@ fn db_path() -> PathBuf {
 
 fn get_db() -> Result<Connection, String> {
     let path = db_path();
-    fs::create_dir_all(path.parent().unwrap())
+    crate::app_paths::create_private_dir_all(path.parent().unwrap())
         .map_err(|e| format!("Failed to create data dir: {}", e))?;
 
+    crate::app_paths::ensure_private_file(&path)
+        .map_err(|e| format!("Failed to create events.db: {}", e))?;
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open events.db: {}", e))?;
 
     conn.pragma_update(None, "journal_mode", "WAL")
@@ -308,7 +310,8 @@ fn save_arm_config_to_disk(config: &ArmConfig) -> Result<(), String> {
     let path = arm_config_path();
     let data = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    fs::write(&path, data).map_err(|e| format!("Failed to write config: {}", e))?;
+    crate::app_paths::write_private(&path, data)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
     Ok(())
 }
 
