@@ -21,8 +21,10 @@
 
   /* ── Light palette (semantic) ──────────────────────────────────── */
   --label: #1d1d1f;
-  --label-secondary: rgba(60, 60, 67, .60);
-  --label-tertiary: rgba(60, 60, 67, .30);
+  /* Solid label tiers (screen-specs Decision 18, Shell › Contrast). Small text never uses tertiary. */
+  --label-secondary: #5e5e63;
+  --label-tertiary: #7a7a7f;
+  --label-quaternary: #b4b4b9; /* decorative only, never text */
   --bg-window: #f5f5f7;
   --bg-content: #ffffff;
   --bg-rgb: 245, 245, 247;
@@ -78,8 +80,9 @@
 
   /* ── Dark palette, written once ────────────────────────────────── */
   --d-label: #f5f5f7;
-  --d-label-secondary: rgba(235, 235, 245, .60);
-  --d-label-tertiary: rgba(235, 235, 245, .30);
+  --d-label-secondary: #aeaeb3;
+  --d-label-tertiary: #8d8d92;
+  --d-label-quaternary: #5c5c61;
   --d-bg-window: #1c1c1e;
   --d-bg-content: #232325;
   --d-bg-rgb: 28, 28, 30;
@@ -181,6 +184,7 @@
   --label: var(--d-label);
   --label-secondary: var(--d-label-secondary);
   --label-tertiary: var(--d-label-tertiary);
+  --label-quaternary: var(--d-label-quaternary);
   --bg-window: var(--d-bg-window);
   --bg-content: var(--d-bg-content);
   --bg-rgb: var(--d-bg-rgb);
@@ -220,6 +224,7 @@
     --label: var(--d-label);
     --label-secondary: var(--d-label-secondary);
     --label-tertiary: var(--d-label-tertiary);
+    --label-quaternary: var(--d-label-quaternary);
     --bg-window: var(--d-bg-window);
     --bg-content: var(--d-bg-content);
     --bg-rgb: var(--d-bg-rgb);

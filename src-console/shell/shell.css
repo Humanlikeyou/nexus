@@ -52,9 +52,9 @@ main.command-surface .nav-group button.is-active {
   box-shadow: none;
 }
 main.command-surface .nav-group button.is-active > i { color: var(--accent-strong, var(--accent)); }
-/* ⌘-number hint: normal text, tertiary label, only on hover/keyboard focus. */
+/* ⌘-number hint: normal text, secondary label (small text never uses tertiary), only on hover/keyboard focus. */
 main.command-surface .nav-group button > small.nav-shortcut {
-  color: var(--label-tertiary, var(--text-tertiary));
+  color: var(--label-secondary, var(--text-secondary));
   font-family: inherit;
   font-size: var(--text-subheadline);
   font-weight: 400;

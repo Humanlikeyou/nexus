@@ -84,5 +84,6 @@ button.ui-list-row__main:focus-visible { outline: var(--space-0_5) solid var(--f
 .ui-list-row__title { overflow: hidden; color: var(--label); text-overflow: ellipsis; white-space: nowrap; }
 .ui-list-row__subtitle { overflow: hidden; color: var(--label-secondary); font: var(--type-callout); text-overflow: ellipsis; white-space: nowrap; }
 .ui-list-row__value { flex: none; color: var(--label-secondary); font-variant-numeric: tabular-nums; }
-.ui-list-row__accessory { display: inline-flex; flex: none; align-items: center; gap: var(--space-2); color: var(--label-tertiary); }
+.ui-list-row__accessory { display: inline-flex; flex: none; align-items: center; gap: var(--space-2); color: var(--label-secondary); }
+.ui-list-row__accessory svg { color: var(--label-tertiary); }
 .ui-list-row__main + .ui-list-row__accessory { margin-left: calc(var(--space-1) * -1); }

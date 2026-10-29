@@ -7,7 +7,7 @@
 :root, :root[data-theme="dark"] {
   --text: var(--label);
   --text-secondary: var(--label-secondary);
-  --text-tertiary: var(--label-tertiary);
+  --text-tertiary: var(--label-secondary); /* legacy text-* is always text; small text never uses tertiary (Decision 18) */
   --window: var(--bg-window);
   --surface: var(--bg-content);
   --surface-subtle: var(--fill-tertiary);

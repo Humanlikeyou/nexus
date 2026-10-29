@@ -17,7 +17,7 @@
   box-shadow: var(--elev-1);
   transition: border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
 }
-.ui-text-field__input::placeholder { color: var(--label-tertiary); }
+.ui-text-field__input::placeholder { color: var(--label-secondary); }
 .ui-text-field__input:focus-visible {
   outline: none;
   border-color: var(--focus-ring);
