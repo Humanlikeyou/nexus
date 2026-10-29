@@ -1,6 +1,6 @@
 import { Bluetooth, ChevronRight, HeartPulse, Moon, Plus, Search, Settings2, Sun, SunMoon, Trash2, Wifi } from "lucide-react";
 import { useState } from "react";
-import { Badge, Button, Card, InsetGroup, ListRow, Meter, Ring, SegmentedControl, Sparkline, StatTile, StatusDot, TextField, Toggle, type Tone } from "../index";
+import { Badge, Button, Card, Dialog, InsetGroup, ListRow, Meter, Ring, SegmentedControl, Sparkline, StatTile, StatusDot, TextField, Toggle, Wordmark, type Tone } from "../index";
 
 const TONES: Tone[] = ["neutral", "accent", "info", "success", "warning", "danger"];
 
@@ -12,6 +12,8 @@ export function Gallery({ theme }: { theme: "light" | "dark" }) {
   const [motion, setMotion] = useState(false);
   const [source, setSource] = useState("muse");
   const [loading, setLoading] = useState(true);
+  const [dialog, setDialog] = useState<"none" | "confirm" | "destructive" | "busy">("none");
+  const closeDialog = () => setDialog("none");
 
   return (
     <main className="ui-gallery">
@@ -101,6 +103,26 @@ export function Gallery({ theme }: { theme: "light" | "dark" }) {
           <div className="ui-gallery__stack">
             <Sparkline values={[58, 61, 64, null, 70, 66, 72, 69]} label="HRV" format={(v) => `${v} ms`} />
             <Sparkline values={[62, 70, 55, 81, null, null, 74, 77, 68, 90, 85, 79, 72, 74]} label="Recovery" size="lg" showMean color="var(--data-recovery-high)" />
+          </div>
+        </Card>
+      </div>
+
+      <div className="ui-gallery__grid">
+        <Card title="Dialog" elevation={0}>
+          <p className="ui-gallery__note">Native &lt;dialog&gt;: Cancel has initial focus, Esc = Cancel, focus returns to the opener.</p>
+          <div className="ui-gallery__row">
+            <Button onClick={() => setDialog("confirm")}>Confirm…</Button>
+            <Button variant="destructive" icon={Trash2} onClick={() => setDialog("destructive")}>Destructive…</Button>
+            <Button onClick={() => setDialog("busy")}>Busy…</Button>
+          </div>
+          <Dialog open={dialog === "confirm"} title="Start a focus session?" confirmLabel="Start" onConfirm={closeDialog} onCancel={closeDialog}>Muse S will record for 25 minutes.</Dialog>
+          <Dialog open={dialog === "destructive"} title="Restore from backup?" confirmLabel="Restore" destructive onConfirm={closeDialog} onCancel={closeDialog}>This replaces your local Amara OS data with the backup. This can't be undone.</Dialog>
+          <Dialog open={dialog === "busy"} title="Restoring…" confirmLabel="Restore" destructive busy onConfirm={closeDialog} onCancel={closeDialog}>Both buttons are disabled while work runs.</Dialog>
+        </Card>
+        <Card title="Wordmark" elevation={0}>
+          <div className="ui-gallery__stack">
+            <Wordmark size="sidebar" label="Amara OS (sidebar, 12px caps)" />
+            <Wordmark size="about" label="Amara OS (About, 32px caps)" />
           </div>
         </Card>
       </div>
