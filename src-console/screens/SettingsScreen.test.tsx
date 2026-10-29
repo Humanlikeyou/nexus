@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-vi.mock("@/lib/api", () => ({ packItUp: vi.fn() }));
+vi.mock("@/lib/api", () => ({ packItUp: vi.fn(), unpackBackup: vi.fn(), pickBackupArchive: vi.fn() }));
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot } from "../types";
 import { SettingsField } from "./SettingsScreen";
@@ -12,7 +12,7 @@ describe("Settings (§11) + Devices (§9)", () => {
   it("groups in order with the About wordmark and version", () => {
     render(<SettingsField data={snap()} {...base} />);
     const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(titles).toEqual(["Appearance", "Devices", "General", "Backup", "About & Diagnostics"]);
+    expect(titles).toEqual(["Appearance", "Devices", "General", "Backup", "Restore", "About & Diagnostics"]);
     expect(screen.getByRole("img", { name: "Amara OS" })).toHaveTextContent("Amara");
     expect(screen.getByText(/Version 0\.1\.0/)).toBeInTheDocument();
     expect(screen.queryByRole("navigation")).toBeNull();

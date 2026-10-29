@@ -176,6 +176,15 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     })
 }
 
+/// `~/x` → `$HOME/x` (the Settings path field accepts it); anything else unchanged.
+pub(crate) fn expand_home(path: &str) -> PathBuf {
+    match (path.strip_prefix("~/"), dirs::home_dir()) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ if path == "~" => dirs::home_dir().unwrap_or_else(|| PathBuf::from(path)),
+        _ => PathBuf::from(path),
+    }
+}
+
 /// How long the restore dialog may stay open before Allow no longer counts.
 const RESTORE_APPROVAL_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 const RESTORE_LOCK_KEY: &str = "restore:backup";
@@ -186,7 +195,7 @@ pub async fn unpack_backup(
     app: tauri::AppHandle,
     archive_path: String,
 ) -> Result<Vec<String>, String> {
-    let archive = PathBuf::from(&archive_path);
+    let archive = expand_home(archive_path.trim());
     if !archive.is_file() {
         return Err("Archive file not found".to_string());
     }
@@ -235,7 +244,7 @@ pub async fn unpack_backup(
         &[RESTORE_LOCK_KEY.to_string()],
         super::approval_gate::approval_text(
             &restore_operation(&archive_name, &plan, &replaced, &roots, &stamp),
-            "Only files Amara OS backups contain are restored; everything else in the archive is skipped. Replaced files are copied to the backup folder first.",
+            "Only files Amara OS backups contain are restored; everything else in the archive is skipped. Your current data is copied to restore-backups/<stamp>-full first, and replaced files to restore-backups/<stamp>.",
         )?,
     )
     .await?;
@@ -250,9 +259,63 @@ pub async fn unpack_backup(
         return Err("changed: files in ~/.openclaw or the Amara OS data folder changed while the dialog was open; nothing was restored".to_string());
     }
 
-    let mut restored = apply_restore(&plan, &roots, &stamp)?;
+    // Full safety copy of the current data before anything is overwritten.
+    let (snapshot, snapshot_skipped) = snapshot_before_restore(&roots, &stamp)?;
+    let mut restored = vec![format!(
+        "Safety backup of current data saved to {}",
+        snapshot.display()
+    )];
+    restored.extend(
+        snapshot_skipped
+            .iter()
+            .map(|s| format!("Not in safety backup: {s}")),
+    );
+    restored.extend(apply_restore(&plan, &roots, &stamp)?);
     restored.extend(plan.skipped.iter().map(|s| format!("Skipped: {s}")));
     Ok(restored)
+}
+
+/// Copy the current data dir (minus earlier restore backups) and the
+/// OpenClaw files a backup covers into `<data>/restore-backups/<stamp>-full/`
+/// (0700), so a restore can be undone by hand. Symlinks are listed, not followed.
+fn snapshot_before_restore(
+    roots: &RestoreRoots,
+    stamp: &str,
+) -> Result<(PathBuf, Vec<String>), String> {
+    fs::create_dir_all(&roots.data).map_err(|e| e.to_string())?;
+    let backups = roots.data.join(RESTORE_BACKUP_DIR);
+    match backups.symlink_metadata() {
+        Ok(m) if m.file_type().is_symlink() || !m.is_dir() => {
+            return Err(format!("Not a real folder: {}", backups.display()))
+        }
+        Ok(_) => {}
+        Err(_) => create_private_dir(&backups).map_err(|e| e.to_string())?,
+    }
+    let target = backups.join(format!("{stamp}-full"));
+    create_private_dir(&target)
+        .map_err(|e| format!("Failed to create safety backup folder: {e}"))?;
+    let mut skipped = Vec::new();
+    if roots.data.is_dir() {
+        let mut names: Vec<String> = fs::read_dir(&roots.data)
+            .map_err(|e| e.to_string())?
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n != RESTORE_BACKUP_DIR && !is_os_junk(n))
+            .collect();
+        names.sort();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        copy_dir_selective(&roots.data, &target.join("data"), &refs, None, &mut skipped)?;
+    }
+    if roots.openclaw.is_dir() {
+        copy_dir_selective(
+            &roots.openclaw,
+            &target.join("openclaw"),
+            &["openclaw.json", "cron", "skills", "memory", "workspace"],
+            None,
+            &mut skipped,
+        )?;
+    }
+    Ok((target, skipped))
 }
 
 /// The `nexus-pack-*` (or legacy `electron-pack-*`) folder inside staging, else staging.
@@ -1056,6 +1119,79 @@ mod restore_tests {
 
     fn s(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|p| p.to_string()).collect()
+    }
+
+    #[test]
+    fn expand_home_only_touches_a_leading_tilde_slash() {
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(
+            expand_home("~/Desktop/b.tar.gz"),
+            home.join("Desktop/b.tar.gz")
+        );
+        assert_eq!(
+            expand_home("/tmp/~/b.tar.gz"),
+            PathBuf::from("/tmp/~/b.tar.gz")
+        );
+        assert_eq!(
+            expand_home("~other/b.tar.gz"),
+            PathBuf::from("~other/b.tar.gz")
+        );
+    }
+
+    #[test]
+    fn snapshot_before_restore_copies_current_data_but_not_old_backups() {
+        let base = tmp("snapshot");
+        let roots = RestoreRoots {
+            openclaw: base.join("openclaw"),
+            data: base.join("data"),
+        };
+        put(&roots.data, "goals.json", "[1]");
+        put(&roots.data, "sessions/a.ndjson", "x");
+        put(&roots.data, "restore-backups/old/goals.json", "old");
+        put(&roots.openclaw, "openclaw.json", "{}");
+        put(&roots.openclaw, "skills/s.md", "s");
+        put(&roots.openclaw, "secrets/not-in-backups.txt", "no");
+
+        let (dir, skipped) = snapshot_before_restore(&roots, "20261029_100000").unwrap();
+        assert_eq!(dir, roots.data.join("restore-backups/20261029_100000-full"));
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert_eq!(
+            fs::read_to_string(dir.join("data/goals.json")).unwrap(),
+            "[1]"
+        );
+        assert!(dir.join("data/sessions/a.ndjson").is_file());
+        assert!(!dir.join("data/restore-backups").exists());
+        assert!(dir.join("openclaw/openclaw.json").is_file());
+        assert!(dir.join("openclaw/skills/s.md").is_file());
+        assert!(!dir.join("openclaw/secrets").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700);
+        }
+        // Same stamp twice never overwrites an earlier safety copy.
+        assert!(snapshot_before_restore(&roots, "20261029_100000").is_err());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn snapshot_refuses_a_symlinked_backup_folder() {
+        let base = tmp("snapshot-link");
+        let roots = RestoreRoots {
+            openclaw: base.join("openclaw"),
+            data: base.join("data"),
+        };
+        fs::create_dir_all(&roots.data).unwrap();
+        fs::create_dir_all(base.join("elsewhere")).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(base.join("elsewhere"), roots.data.join("restore-backups"))
+                .unwrap();
+            assert!(snapshot_before_restore(&roots, "s").is_err());
+            assert_eq!(fs::read_dir(base.join("elsewhere")).unwrap().count(), 0);
+        }
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]

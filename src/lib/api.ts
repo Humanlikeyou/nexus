@@ -119,6 +119,20 @@ export const packItUp = () => invoke<PackageInfo>("pack_it_up");
 export const unpackBackup = (archivePath: string) =>
   invoke<string[]>("unpack_backup", { archivePath });
 
+/** Native file picker (tauri-plugin-dialog, already registered in lib.rs; capability dialog:default).
+ *  Resolves the chosen path, or null when the user cancels. */
+export const pickBackupArchive = async (): Promise<string | null> => {
+  const picked = await invoke<string | string[] | null>("plugin:dialog|open", {
+    options: {
+      title: "Choose an Amara OS backup",
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Amara OS backup", extensions: ["gz", "tgz"] }],
+    },
+  });
+  return Array.isArray(picked) ? (picked[0] ?? null) : picked;
+};
+
 export const getAppPaths = () =>
   invoke<Record<string, string>>("get_app_paths");
 

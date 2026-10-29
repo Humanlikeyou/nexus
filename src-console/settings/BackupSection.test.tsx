@@ -2,8 +2,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-vi.mock("@/lib/api", () => ({ packItUp: vi.fn() }));
-import { BackupSection, SkippedFilesList, middleTruncate, skippedFiles } from "./BackupSection";
+vi.mock("@/lib/api", () => ({ packItUp: vi.fn(), unpackBackup: vi.fn(), pickBackupArchive: vi.fn() }));
+import { BackupSection, RESTORE_WARNING, SkippedFilesList, middleTruncate, restorePathError, skippedFiles } from "./BackupSection";
 
 const base = { path: "/tmp/nexus.tar.gz", size_mb: 1.5, includes: ["config"] };
 
@@ -41,5 +41,72 @@ describe("backup skipped files", () => {
 
   it("middle-truncates long archive paths", () => {
     expect(middleTruncate("/Users/someone/Library/Application Support/amara/backups/amara-2026-10-28.tar.gz", 30)).toMatch(/^\/Users.*….*tar\.gz$/);
+  });
+});
+
+describe("restore from backup", () => {
+  const setup = (over: Partial<Parameters<typeof BackupSection>[0]> = {}) => {
+    const restore = vi.fn(async (_p: string) => ["Safety backup of current data saved to /data/restore-backups/x-full", "Amara OS data: 3 files restored"]);
+    const pick = vi.fn(async () => "/Users/me/Desktop/nexus-backup-1.tar.gz");
+    render(<BackupSection pack={vi.fn()} restore={restore} pick={pick} {...over} />);
+    return { restore, pick };
+  };
+
+  it("validates the path before Restore is enabled", () => {
+    setup();
+    const restoreBtn = screen.getByRole("button", { name: "Restore…" });
+    expect(restoreBtn).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Backup file"), { target: { value: "notes.txt" } });
+    expect(screen.getByText("Use a full path, like ~/Desktop/nexus-backup.tar.gz")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Backup file"), { target: { value: "/tmp/notes.txt" } });
+    expect(screen.getByText("Choose a .tar.gz backup made by Amara OS")).toBeTruthy();
+    expect(restoreBtn).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Backup file"), { target: { value: "~/Desktop/b.tar.gz" } });
+    expect(restoreBtn).not.toBeDisabled();
+  });
+
+  it("Choose… fills the path from the picker", async () => {
+    const { pick } = setup();
+    fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    await vi.waitFor(() => expect((screen.getByLabelText("Backup file") as HTMLInputElement).value).toBe("/Users/me/Desktop/nexus-backup-1.tar.gz"));
+    expect(pick).toHaveBeenCalledOnce();
+  });
+
+  it("asks with a destructive dialog first and only restores on confirm", async () => {
+    const { restore } = setup();
+    fireEvent.change(screen.getByLabelText("Backup file"), { target: { value: "/tmp/b.tar.gz" } });
+    fireEvent.click(screen.getByRole("button", { name: "Restore…" }));
+    expect(screen.getByText(RESTORE_WARNING)).toBeTruthy();
+    expect(restore).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(restore).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Restore…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    expect(await screen.findByText("Amara OS data: 3 files restored")).toBeTruthy();
+    expect(restore).toHaveBeenCalledWith("/tmp/b.tar.gz");
+    expect(screen.getByText(/Safety backup of current data/)).toBeTruthy();
+  });
+
+  it("a Deny in the native approval gate is a quiet note, not an error", async () => {
+    setup({ restore: vi.fn(async () => { throw new Error("declined: denied by user"); }) });
+    fireEvent.change(screen.getByLabelText("Backup file"), { target: { value: "/tmp/b.tar.gz" } });
+    fireEvent.click(screen.getByRole("button", { name: "Restore…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    expect(await screen.findByText("Restore cancelled. Nothing was changed.")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows other failures as a readable alert", async () => {
+    setup({ restore: vi.fn(async () => { throw new Error("Archive file not found"); }) });
+    fireEvent.change(screen.getByLabelText("Backup file"), { target: { value: "/tmp/b.tar.gz" } });
+    fireEvent.click(screen.getByRole("button", { name: "Restore…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Restore didn't finish: Archive file not found");
+  });
+
+  it("restorePathError", () => {
+    expect(restorePathError("")).toBeNull();
+    expect(restorePathError("/a/b.TGZ")).toBeNull();
+    expect(restorePathError("b.tar.gz")).not.toBeNull();
   });
 });
