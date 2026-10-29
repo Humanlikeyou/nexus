@@ -266,7 +266,8 @@ pub(crate) async fn delivery_tick_with<S: FnMut(&OutboxStatus)>(
     if result.is_empty() {
         let status = OutboxStatus {
             gateway_online: true,
-            queue_depth: 0,
+            // Nothing due this tick, but rows waiting on retry backoff are still queued.
+            queue_depth,
             last_delivered_at,
             last_error: None,
             total_delivered,
@@ -981,6 +982,25 @@ mod delivery_tests {
     }
 
     #[tokio::test]
+    async fn queue_depth_counts_rows_waiting_on_backoff_but_not_expired() {
+        let later = (now() + chrono::Duration::minutes(10)).to_rfc3339();
+        let db = db(&[
+            (&["e1"], &ago(600), Some(later.as_str()), "pending"),
+            (&["e2"], &ago(300), Some(later.as_str()), "pending"),
+            (&["e3"], &ago(60 * 60 * 30), None, "pending"),
+        ]);
+        let m = mock(200, (200, r#"{"received":[]}"#));
+        let s = run(&db, tick(&m.url)).await;
+        let st = s.last().unwrap();
+        assert_eq!(st.expired, 1, "30h-old row expired");
+        assert_eq!(
+            st.queue_depth, 2,
+            "both backed-off rows still count as queued"
+        );
+        assert!(m.posts().is_empty(), "nothing due, nothing posted");
+    }
+
+    #[tokio::test]
     async fn full_ack_delivers_every_row() {
         let db = db(&[
             (&["e0"], &ago(7200), None, "delivered"),
@@ -1221,11 +1241,10 @@ mod delivery_tests {
         assert_eq!(r[1].status, "delivered");
     }
 
-    /// Pinned oddity (reported, not changed): when every pending row is waiting for its retry the
-    /// batch is empty, and the status says queue_depth 0 although rows are still pending
-    /// (get_outbox_status counts them).
+    /// When every pending row is waiting for its retry the batch is empty, but the status still
+    /// reports the real pending count (matching get_outbox_status), not 0.
     #[tokio::test]
-    async fn empty_batch_reports_queue_depth_zero_with_backed_off_rows_pending() {
+    async fn empty_batch_reports_real_queue_depth_with_backed_off_rows_pending() {
         let soon = (now() + chrono::Duration::seconds(60)).to_rfc3339();
         let db = db(&[
             (&["e1"], &ago(60), Some(&soon), "pending"),
@@ -1238,7 +1257,7 @@ mod delivery_tests {
             rows(&db).iter().filter(|r| r.status == "pending").count(),
             2
         );
-        assert_eq!(st.queue_depth, 0);
+        assert_eq!(st.queue_depth, 2, "backed-off rows are still queued");
         assert_eq!(st.last_error, None);
     }
 
