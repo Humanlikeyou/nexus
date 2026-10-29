@@ -32,6 +32,7 @@ export function ActivityField({ data, onRetry }: { data: SystemSnapshot; onRetry
             </div>
             <InsetGroup>
               <ListRow title="Last delivered" value={outbox.last_delivered_at ? date(outbox.last_delivered_at) : "Never"} />
+              {(outbox.expired ?? 0) > 0 && <ListRow title="Expired" subtitle="Older than 24h, kept, not sent" value={String(outbox.expired)} />}
               {outbox.last_error && <ListRow title="Last error" subtitle={<span className="activity__error">{outbox.last_error}</span>} />}
             </InsetGroup>
           </>

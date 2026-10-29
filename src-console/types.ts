@@ -411,6 +411,8 @@ export interface OutboxStatus {
   last_delivered_at: string | null;
   last_error: string | null;
   total_delivered: number;
+  /** Items older than 24h: kept on disk, never sent. Older backends omit it. */
+  expired?: number;
 }
 
 export interface ActivityEntry {

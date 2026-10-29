@@ -27,6 +27,33 @@ pub struct OutboxStatus {
     pub last_delivered_at: Option<String>,
     pub last_error: Option<String>,
     pub total_delivered: u64,
+    /// Items older than OUTBOX_EXPIRY_HOURS: kept on disk, never sent.
+    pub expired: u64,
+}
+
+/// Pending items older than this are marked `expired` (kept, not sent, not deleted).
+pub const OUTBOX_EXPIRY_HOURS: i64 = 24;
+
+/// Mark pending items created before `now - OUTBOX_EXPIRY_HOURS` as expired. Returns the count.
+/// `created_at` is chrono RFC 3339 UTC, so string comparison orders correctly.
+pub(crate) fn expire_stale(
+    conn: &rusqlite::Connection,
+    now: chrono::DateTime<chrono::Utc>,
+) -> rusqlite::Result<usize> {
+    let cutoff = (now - chrono::Duration::hours(OUTBOX_EXPIRY_HOURS)).to_rfc3339();
+    conn.execute(
+        "UPDATE outbox SET status = 'expired' WHERE status = 'pending' AND created_at < ?1",
+        rusqlite::params![cutoff],
+    )
+}
+
+fn count_status(conn: &rusqlite::Connection, status: &str) -> u64 {
+    conn.query_row(
+        "SELECT COUNT(*) FROM outbox WHERE status = ?1",
+        rusqlite::params![status],
+        |row| row.get(0),
+    )
+    .unwrap_or(0)
 }
 
 /// Start the background delivery worker (called once from setup).
@@ -79,9 +106,12 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
     };
 
     // Load queue stats
-    let (queue_depth, total_delivered, last_delivered_at) =
-        tokio::task::spawn_blocking(|| -> Result<(u64, u64, Option<String>), String> {
+    let (queue_depth, total_delivered, last_delivered_at, expired) =
+        tokio::task::spawn_blocking(|| -> Result<(u64, u64, Option<String>, u64), String> {
             let conn = get_events_db()?;
+            // Stale items are expired (kept, not sent) before anything else; works while paused too.
+            let _ = expire_stale(&conn, chrono::Utc::now());
+            let expired = count_status(&conn, "expired");
             let pending: u64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM outbox WHERE status = 'pending'",
@@ -103,7 +133,7 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
                     |row| row.get(0),
                 )
                 .ok();
-            Ok((pending, delivered, last))
+            Ok((pending, delivered, last, expired))
         })
         .await
         .map_err(|e| e.to_string())?
@@ -116,6 +146,7 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
             last_delivered_at,
             last_error: Some("Gateway offline".to_string()),
             total_delivered,
+            expired,
         };
         let _ = app.emit("outbox-status", &status);
         return Ok(());
@@ -128,6 +159,7 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
             last_delivered_at,
             last_error: Some("Delivery paused (NEXUS_OUTBOUND_DISABLED)".to_string()),
             total_delivered,
+            expired,
         };
         let _ = app.emit("outbox-status", &status);
         return Ok(());
@@ -165,6 +197,7 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
             last_delivered_at,
             last_error: None,
             total_delivered,
+            expired,
         };
         let _ = app.emit("outbox-status", &status);
         return Ok(());
@@ -244,6 +277,7 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
                     last_delivered_at,
                     last_error: Some(error_text),
                     total_delivered,
+                    expired,
                 };
                 let _ = app.emit("outbox-status", &status);
             } else {
@@ -318,6 +352,7 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
                         None
                     },
                     total_delivered: total_delivered + acked_count,
+                    expired,
                 };
                 let _ = app.emit("outbox-status", &status);
             }
@@ -332,6 +367,7 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
                 last_delivered_at,
                 last_error: Some(error_text),
                 total_delivered,
+                expired,
             };
             let _ = app.emit("outbox-status", &status);
         }
@@ -345,6 +381,7 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
                 last_delivered_at,
                 last_error: Some(error_text),
                 total_delivered,
+                expired,
             };
             let _ = app.emit("outbox-status", &status);
         }
@@ -407,6 +444,12 @@ fn rand_simple() -> f64 {
 pub async fn get_outbox_status() -> Result<OutboxStatus, String> {
     tokio::task::spawn_blocking(|| -> Result<OutboxStatus, String> {
         let conn = get_events_db()?;
+        if let Ok(n) = expire_stale(&conn, chrono::Utc::now()) {
+            if n > 0 {
+                println!("[outbox] expired {n} item(s) older than {OUTBOX_EXPIRY_HOURS}h (kept, not sent)");
+            }
+        }
+        let expired = count_status(&conn, "expired");
         let pending: u64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM outbox WHERE status = 'pending'",
@@ -443,6 +486,7 @@ pub async fn get_outbox_status() -> Result<OutboxStatus, String> {
             last_delivered_at: last,
             last_error,
             total_delivered: delivered,
+            expired,
         })
     })
     .await
@@ -463,4 +507,44 @@ pub async fn simulate_gateway_up() -> Result<(), String> {
     *sim = false;
     println!("[outbox] simulate: gateway_down=false");
     Ok(())
+}
+
+#[cfg(test)]
+mod expiry_tests {
+    use super::*;
+
+    fn db(rows: &[(&str, &str)]) -> rusqlite::Connection {
+        let c = rusqlite::Connection::open_in_memory().unwrap();
+        c.execute_batch("CREATE TABLE outbox (outbox_id INTEGER PRIMARY KEY AUTOINCREMENT, event_ids TEXT NOT NULL, destination TEXT NOT NULL, payload_hash TEXT NOT NULL, created_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_retry_at TEXT, last_error TEXT, status TEXT NOT NULL DEFAULT 'pending');").unwrap();
+        for (created, status) in rows {
+            c.execute(
+                "INSERT INTO outbox (event_ids, destination, payload_hash, created_at, status) VALUES ('[]', 'gateway', 'h', ?1, ?2)",
+                rusqlite::params![created, status],
+            )
+            .unwrap();
+        }
+        c
+    }
+
+    #[test]
+    fn expires_only_pending_items_older_than_24h_and_keeps_them() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-29T02:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let c = db(&[
+            ("2026-03-05T10:53:07.732766+00:00", "pending"),
+            ("2026-10-28T01:59:59+00:00", "pending"),
+            ("2026-10-28T02:00:01+00:00", "pending"),
+            ("2026-03-01T00:00:00+00:00", "delivered"),
+        ]);
+        assert_eq!(expire_stale(&c, now).unwrap(), 2);
+        assert_eq!(count_status(&c, "expired"), 2);
+        assert_eq!(count_status(&c, "pending"), 1);
+        assert_eq!(count_status(&c, "delivered"), 1);
+        let total: u64 = c
+            .query_row("SELECT COUNT(*) FROM outbox", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(total, 4, "nothing deleted");
+        assert_eq!(expire_stale(&c, now).unwrap(), 0, "idempotent");
+    }
 }

@@ -19,6 +19,15 @@ describe("Chat & Agents › Activity (§10)", () => {
     expect(screen.getByText("Last 30 operations")).toBeInTheDocument();
     expect(document.querySelector(".signal-stream")).toBeNull();
   });
+  it("expired items: shown as Expired, hidden when none", () => {
+    const { unmount } = render(<ActivityField data={snap({ outbox: { ...outbox, queue_depth: 0, last_error: null, expired: 11 }, activity: [] })} />);
+    expect(screen.getByText("Expired")).toBeInTheDocument();
+    expect(screen.getByText("11")).toBeInTheDocument();
+    expect(screen.getByText("Older than 24h, kept, not sent")).toBeInTheDocument();
+    unmount();
+    render(<ActivityField data={snap({ outbox, activity: [] })} />);
+    expect(screen.queryByText("Expired")).toBeNull();
+  });
   it("empty and error states", () => {
     const onRetry = vi.fn();
     render(<ActivityField onRetry={onRetry} data={snap({ outbox, activity: [], unavailableSources: [{ command: "list_activity_entries", label: "Activity log" }] })} />);
