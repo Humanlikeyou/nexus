@@ -397,9 +397,24 @@ async fn gateway_running() -> bool {
         .map(|output| {
             String::from_utf8_lossy(&output.stdout)
                 .lines()
-                .any(|line| line.contains("hermes_cli.main gateway run"))
+                .any(is_hermes_gateway_command)
         })
         .unwrap_or(false)
+}
+
+/// The gateway as started by the old CLI (`python -m hermes_cli.main gateway run`)
+/// or by the Hermes desktop launcher (`…/bin/hermes gateway run --external-supervisor`).
+fn is_hermes_gateway_command(line: &str) -> bool {
+    line.contains("hermes_cli.main gateway run")
+        || line
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .windows(3)
+            .any(|w| {
+                (w[0] == "hermes" || w[0].ends_with("/hermes"))
+                    && w[1] == "gateway"
+                    && w[2] == "run"
+            })
 }
 
 fn telegram_status(home: &Path, running: bool) -> String {
@@ -1369,6 +1384,20 @@ mod tests {
                    [Telegram] Telegram network error (attempt 1/10)\n\
                    [Telegram] Telegram polling resumed after network error (attempt 1)";
         assert_eq!(telegram_status_from_log(log, true), "connected");
+    }
+
+    #[test]
+    fn detects_the_gateway_from_cli_and_desktop_launcher() {
+        assert!(is_hermes_gateway_command(
+            "/usr/bin/python3 -m hermes_cli.main gateway run"
+        ));
+        assert!(is_hermes_gateway_command(
+            "/usr/bin/osascript -e … -- /Users/me/.hermes/hermes-agent/.hermes/bin/hermes gateway run --external-supervisor >> /tmp/g.log"
+        ));
+        assert!(is_hermes_gateway_command("hermes gateway run"));
+        assert!(!is_hermes_gateway_command("/usr/local/bin/hermes chat"));
+        assert!(!is_hermes_gateway_command("grep gateway run"));
+        assert!(!is_hermes_gateway_command("/opt/nothermes gateway status"));
     }
 
     #[test]
