@@ -417,16 +417,33 @@ fn is_hermes_gateway_command(line: &str) -> bool {
             })
 }
 
+/// How much of gateway.log to scan for the latest Telegram connect/failure marker. Transport
+/// warnings are chatty (live check 2026-10-29: ~20 KB of them in 40 minutes pushed the last
+/// "Connected to Telegram" out of a 16k-char window, so Home read "Telegram unknown").
+const TELEGRAM_LOG_TAIL_BYTES: u64 = 512 * 1024;
+
+fn read_log_tail(path: &Path, max_bytes: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = fs::File::open(path) else {
+        return String::new();
+    };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    if file
+        .seek(SeekFrom::Start(len.saturating_sub(max_bytes)))
+        .is_err()
+    {
+        return String::new();
+    }
+    let mut bytes = Vec::new();
+    let _ = file.take(max_bytes).read_to_end(&mut bytes);
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 fn telegram_status(home: &Path, running: bool) -> String {
-    let log = fs::read_to_string(home.join("logs").join("gateway.log")).unwrap_or_default();
-    let tail: String = log
-        .chars()
-        .rev()
-        .take(16_000)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
+    let tail = read_log_tail(
+        &home.join("logs").join("gateway.log"),
+        TELEGRAM_LOG_TAIL_BYTES,
+    );
     telegram_status_from_log(&tail, running)
 }
 
@@ -445,6 +462,7 @@ fn telegram_status_from_log(log: &str, running: bool) -> String {
             "Connected to Telegram",
             "Telegram polling resumed after network error",
             "Telegram polling resumed after conflict retry",
+            "Telegram API transport recovered",
         ],
     );
     let last_failure = latest_log_marker(
@@ -1398,6 +1416,28 @@ mod tests {
         assert!(!is_hermes_gateway_command("/usr/local/bin/hermes chat"));
         assert!(!is_hermes_gateway_command("grep gateway run"));
         assert!(!is_hermes_gateway_command("/opt/nothermes gateway status"));
+    }
+
+    #[test]
+    fn telegram_health_reads_past_chatty_transport_warnings() {
+        let dir = std::env::temp_dir().join(format!("nexus-tg-tail-{}", Uuid::new_v4()));
+        fs::create_dir_all(dir.join("logs")).unwrap();
+        let mut log = String::from("[Telegram] Connected to Telegram (polling mode)\n");
+        for _ in 0..400 {
+            log.push_str(
+                "WARNING [Telegram] Dual-stack api.telegram.org path failed (ConnectTimeout(''))\n",
+            );
+        }
+        fs::write(dir.join("logs").join("gateway.log"), &log).unwrap();
+        assert!(log.len() > 16_000);
+        assert_eq!(telegram_status(&dir, true), "connected");
+        assert!(read_log_tail(&dir.join("logs").join("gateway.log"), 10).len() <= 10);
+        assert_eq!(read_log_tail(&dir.join("missing.log"), 10), "");
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(
+            telegram_status_from_log("[Telegram] Telegram startup failed: x\n[Telegram] Telegram API transport recovered via 1.2.3.4", true),
+            "connected"
+        );
     }
 
     #[test]
