@@ -116,13 +116,19 @@ pub async fn maybe_record_sample(sample: &EegSample) {
 #[tauri::command]
 pub async fn start_eeg_recording() -> Result<String, String> {
     let dir = replays_dir();
-    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create replays dir: {e}"))?;
+    crate::app_paths::create_private_dir_all(&dir)
+        .map_err(|e| format!("Failed to create replays dir: {e}"))?;
 
     let now = chrono::Utc::now();
     let filename = format!("eeg_{}.ndjson", now.format("%Y%m%d_%H%M%S"));
     let path = dir.join(&filename);
 
-    let file = File::create(&path).map_err(|e| format!("Failed to create file: {e}"))?;
+    let file = crate::app_paths::private_open_options()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&path)
+        .map_err(|e| format!("Failed to create file: {e}"))?;
     let mut writer = BufWriter::new(file);
 
     // Write header line

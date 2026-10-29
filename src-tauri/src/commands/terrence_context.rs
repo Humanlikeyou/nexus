@@ -171,8 +171,10 @@ pub(crate) fn open_terrence_core_db() -> Result<Connection, String> {
     let parent = path
         .parent()
         .ok_or_else(|| "Amara context database has no parent directory.".to_string())?;
-    fs::create_dir_all(parent)
+    crate::app_paths::create_private_dir_all(parent)
         .map_err(|error| format!("Failed to create Amara context directory: {error}"))?;
+    crate::app_paths::ensure_private_file(&path)
+        .map_err(|error| format!("Failed to create Amara context database: {error}"))?;
     let conn = Connection::open(path)
         .map_err(|error| format!("Failed to open Amara context database: {error}"))?;
     conn.pragma_update(None, "journal_mode", "WAL")

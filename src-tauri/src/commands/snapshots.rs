@@ -30,7 +30,8 @@ pub struct BrainSnapshot {
 #[tauri::command]
 pub fn save_snapshot(snapshot: BrainSnapshot) -> Result<String, String> {
     let dir = snapshots_dir();
-    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create snapshots dir: {}", e))?;
+    crate::app_paths::create_private_dir_all(&dir)
+        .map_err(|e| format!("Failed to create snapshots dir: {}", e))?;
 
     save_snapshot_in(&dir, &snapshot).map(|path| path.to_string_lossy().to_string())
 }
@@ -64,7 +65,7 @@ fn save_snapshot_in(dir: &std::path::Path, snapshot: &BrainSnapshot) -> Result<P
     // create_new guarantees we never overwrite an existing snapshot.
     for _ in 0..4 {
         let path = dir.join(snapshot_filename(&snapshot.timestamp));
-        match fs::OpenOptions::new()
+        match crate::app_paths::private_open_options()
             .write(true)
             .create_new(true)
             .open(&path)

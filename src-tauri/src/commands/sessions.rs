@@ -60,7 +60,8 @@ pub struct RecordedSession {
 #[tauri::command]
 pub fn save_session(session: RecordedSession, data: serde_json::Value) -> Result<String, String> {
     let dir = sessions_dir();
-    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create sessions dir: {}", e))?;
+    crate::app_paths::create_private_dir_all(&dir)
+        .map_err(|e| format!("Failed to create sessions dir: {}", e))?;
 
     super::path_safety::validate_name(&session.device_type)?;
     super::path_safety::validate_name(&session.id)?;
@@ -74,7 +75,8 @@ pub fn save_session(session: RecordedSession, data: serde_json::Value) -> Result
 
     let json = serde_json::to_string_pretty(&payload)
         .map_err(|e| format!("Failed to serialize: {}", e))?;
-    fs::write(&path, json).map_err(|e| format!("Failed to write session: {}", e))?;
+    crate::app_paths::write_private(&path, json)
+        .map_err(|e| format!("Failed to write session: {}", e))?;
 
     Ok(path.to_string_lossy().to_string())
 }

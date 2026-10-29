@@ -60,7 +60,7 @@
   },
   "plugins": {
     "shell": {
-      "open": true
+      "open": "^https://"
     },
     "autostart": null
   }

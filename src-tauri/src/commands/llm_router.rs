@@ -104,9 +104,9 @@ fn append_usage_record(record: LlmUsageRecord) {
     if let Ok(json) = serde_json::to_string_pretty(&records) {
         let path = usage_log_path();
         if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
+            let _ = crate::app_paths::create_private_dir_all(parent);
         }
-        let _ = fs::write(path, json);
+        let _ = crate::app_paths::write_private(&path, json);
     }
 }
 
@@ -538,9 +538,9 @@ pub fn get_llm_usage() -> Result<Vec<LlmUsageRecord>, String> {
 pub fn clear_llm_usage() -> Result<(), String> {
     let path = usage_log_path();
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        let _ = crate::app_paths::create_private_dir_all(parent);
     }
-    fs::write(path, "[]").map_err(|e| e.to_string())
+    crate::app_paths::write_private(&path, "[]").map_err(|e| e.to_string())
 }
 
 // ─── Unit tests ───────────────────────────────────────────────────────────────

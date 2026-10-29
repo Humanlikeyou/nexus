@@ -11,7 +11,7 @@ pub(crate) fn kv_root() -> std::path::PathBuf {
 fn kv_dir() -> Result<std::path::PathBuf, String> {
     let dir = kv_root();
     if !dir.exists() {
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;
     }
     Ok(dir)
 }
@@ -41,5 +41,5 @@ pub fn load_kv(key: String) -> Result<Option<String>, String> {
 #[tauri::command]
 pub fn save_kv(key: String, value: String) -> Result<(), String> {
     let path = kv_dir()?.join(format!("{}.json", sanitize_key(&key)));
-    fs::write(&path, value).map_err(|e| e.to_string())
+    crate::app_paths::write_private(&path, value).map_err(|e| e.to_string())
 }

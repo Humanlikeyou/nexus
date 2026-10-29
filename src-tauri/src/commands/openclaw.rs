@@ -472,11 +472,11 @@ mod status_tests {
     fn build_status_serialises_only_typed_redacted_fields() {
         let config = json!({
             "model": "anthropic/claude-sonnet-4",
-            "gateway": {"url": "ws://admin:hunter2@127.0.0.1:18789/ws?token=tok_live_123", "auth": {"token": "tok_live_123"}},
-            "env": {"ANTHROPIC_API_KEY": "sk-ant-SECRET"},
+            "gateway": {"url": "ws://admin:FAKE_PASSWORD@127.0.0.1:18789/ws?token=FAKE_TOKEN_NOT_REAL", "auth": {"token": "FAKE_TOKEN_NOT_REAL"}},
+            "env": {"ANTHROPIC_API_KEY": "FAKE_API_KEY_NOT_REAL"},
             "workspace": "/Users/me/.openclaw/workspace"
         });
-        let hb = json!({"last_run": "2026-10-28T05:08:00Z", "notes": "sk-ant-SECRET in /Users/me"});
+        let hb = json!({"last_run": "2026-10-28T05:08:00Z", "notes": "FAKE_API_KEY_NOT_REAL in /Users/me"});
         let status = build_status(Some(&config), Some(&hb), at("2026-10-28T05:10:00Z"), false);
         assert_eq!(status.status, OpenClawState::Online);
         assert!(status.online);
@@ -496,7 +496,13 @@ mod status_tests {
         assert_eq!(v["status"], "online");
         let text = v.to_string();
         for leak in [
-            "hunter2", "admin", "tok_live", "sk-ant", "/Users", "token", "notes",
+            "FAKE_PASSWORD",
+            "admin",
+            "FAKE_TOKEN",
+            "FAKE_API_KEY",
+            "/Users",
+            "token",
+            "notes",
         ] {
             assert!(!text.contains(leak), "{leak} leaked: {text}");
         }

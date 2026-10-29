@@ -145,6 +145,56 @@ pub const DATA_DIR_ENV: &str = "NEXUS_DATA_DIR";
 
 /// The app data directory: `$NEXUS_DATA_DIR` if set and non-empty, else
 /// `<platform data dir>/com.taisun.nexus`.
+/// Create `path` and any missing parents as 0700 (owner only). Existing directories are left
+/// as they are: this never chmods. Security review 2026-10-29 #1: the data dir held EEG
+/// replays, chat history and kv readable by other local users (default umask 0755/0644).
+pub fn create_private_dir_all(path: &Path) -> std::io::Result<()> {
+    let mut b = fs::DirBuilder::new();
+    b.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        b.mode(0o700);
+    }
+    b.create(path)
+}
+
+/// OpenOptions whose newly created files are 0600 (owner only). Existing files keep their mode.
+pub fn private_open_options() -> fs::OpenOptions {
+    let mut o = fs::OpenOptions::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    o
+}
+
+/// `fs::write`, but a newly created file is 0600.
+pub fn write_private(path: &Path, bytes: impl AsRef<[u8]>) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut f = private_open_options()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)?;
+    f.write_all(bytes.as_ref())
+}
+
+/// Create an SQLite database file as 0600 before `Connection::open`, so the db (and its
+/// -wal/-shm, which SQLite creates with the db file's mode) is owner-only.
+pub fn ensure_private_file(path: &Path) -> std::io::Result<()> {
+    match private_open_options()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 pub fn data_dir() -> PathBuf {
     data_dir_with_override(std::env::var_os(DATA_DIR_ENV))
 }
@@ -162,6 +212,55 @@ fn data_dir_with_override(override_dir: Option<std::ffi::OsString>) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn private_helpers_create_0700_dirs_and_0600_files_and_never_chmod_existing() {
+        use std::os::unix::fs::PermissionsExt;
+        let base =
+            std::env::temp_dir().join(format!("nexus-priv-{}", uuid::Uuid::new_v4().simple()));
+        let nested = base.join("a/b");
+        create_private_dir_all(&nested).unwrap();
+        for d in [&base, &base.join("a"), &nested] {
+            assert_eq!(
+                fs::metadata(d).unwrap().permissions().mode() & 0o777,
+                0o700,
+                "{}",
+                d.display()
+            );
+        }
+        let f = nested.join("x.json");
+        write_private(&f, b"{}").unwrap();
+        assert_eq!(
+            fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let db = nested.join("x.db");
+        ensure_private_file(&db).unwrap();
+        ensure_private_file(&db).unwrap();
+        assert_eq!(
+            fs::metadata(&db).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        // Existing paths keep their mode (no chmod of existing data).
+        let old = base.join("old");
+        fs::create_dir(&old).unwrap();
+        fs::set_permissions(&old, fs::Permissions::from_mode(0o755)).unwrap();
+        create_private_dir_all(&old).unwrap();
+        assert_eq!(
+            fs::metadata(&old).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        let oldf = base.join("old.json");
+        fs::write(&oldf, b"1").unwrap();
+        fs::set_permissions(&oldf, fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&oldf, b"2").unwrap();
+        assert_eq!(
+            fs::metadata(&oldf).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        fs::remove_dir_all(&base).unwrap();
+    }
 
     #[test]
     fn data_dir_honours_override() {

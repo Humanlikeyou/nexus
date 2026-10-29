@@ -40,10 +40,12 @@ pub fn read_goals() -> Result<Vec<Goal>, String> {
 pub fn save_goals(goals: Vec<Goal>) -> Result<(), String> {
     let path = goals_path();
     let dir = path.parent().unwrap();
-    fs::create_dir_all(dir).map_err(|e| format!("Failed to create dir: {}", e))?;
+    crate::app_paths::create_private_dir_all(dir)
+        .map_err(|e| format!("Failed to create dir: {}", e))?;
     let data =
         serde_json::to_string_pretty(&goals).map_err(|e| format!("Failed to serialize: {}", e))?;
-    fs::write(&path, data).map_err(|e| format!("Failed to write goals: {}", e))?;
+    crate::app_paths::write_private(&path, data)
+        .map_err(|e| format!("Failed to write goals: {}", e))?;
     Ok(())
 }
 

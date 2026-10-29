@@ -1,6 +1,5 @@
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
 
 /// App data dir; honours NEXUS_DATA_DIR (app_paths::data_dir).
@@ -14,8 +13,10 @@ fn db_path() -> PathBuf {
 
 fn get_db() -> Result<Connection, String> {
     let path = db_path();
-    fs::create_dir_all(path.parent().unwrap())
+    crate::app_paths::create_private_dir_all(path.parent().unwrap())
         .map_err(|e| format!("Failed to create data dir: {}", e))?;
+    crate::app_paths::ensure_private_file(&path)
+        .map_err(|e| format!("Failed to create chat_history.db: {}", e))?;
 
     let conn =
         Connection::open(&path).map_err(|e| format!("Failed to open chat_history.db: {}", e))?;
