@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { connectMuse, disconnectMuse, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "../bridge";
 import { readableError } from "../lib/format";
+import { RecordingSummarizer } from "../neuro/recordingSummary";
 import { SessionFinalizer } from "../neuro/sessionFinalizer";
 import { museTelemetry } from "../neuro/telemetryStore";
 import { useTraining } from "../neuro/useTraining";
@@ -22,6 +23,8 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
   const sessionFinalizer = useRef<SessionFinalizer<{ session: RecordedSession & { file_path: string }; data: Record<string, unknown> }> | null>(null);
   const sessionOperation = useRef(false);
   const sessionStopTime = useRef<number | null>(null);
+  // Plain-recording summary (no training protocol): sampled from live telemetry while recording.
+  const recordingSummarizer = useRef<RecordingSummarizer | null>(null);
   // Live telemetry lives in an external store; this hook never re-renders on packets.
   useEffect(() => museTelemetry.start(), []);
   const resetTelemetry = museTelemetry.reset;
@@ -29,6 +32,12 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
   const training = useTraining(museTelemetry.getSnapshot, sessionStartedAt !== null && sessionEndedAt === null && data.muse.streaming);
   // Stable callbacks from useTraining, pulled out so the hooks below can list them as deps.
   const { summary: summarizeTraining, begin: beginTraining, finish: finishTraining } = training;
+  const recording = sessionStartedAt !== null && sessionEndedAt === null;
+  useEffect(() => {
+    if (!recording) return;
+    const timer = window.setInterval(() => recordingSummarizer.current?.tick(museTelemetry.getSnapshot(), Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [recording]);
 
   const scanForMuse = useCallback(async () => {
     setMuseOperation("scanning");
@@ -84,6 +93,8 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
         const endedAt = sessionStopTime.current ?? Date.now();
         const counters = readCounters();
         const trainingSummary = summarizeTraining();
+        const plain = recordingSummarizer.current?.summary() ?? null;
+        const pick = <K extends "avg_focus" | "avg_relaxation" | "calm_pct">(key: K) => trainingSummary?.[key] ?? plain?.[key] ?? null;
         const session: RecordedSession & { file_path: string } = {
           id: typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `muse-${sessionStartedAt}`,
           device_type: "muse",
@@ -92,7 +103,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
           duration_secs: Math.max(1, Math.round((endedAt - sessionStartedAt) / 1000)),
           data_points: counters.sampleCount,
           file_path: recordingFile,
-          summary: { avg_focus: trainingSummary?.avg_focus ?? null, avg_relaxation: trainingSummary?.avg_relaxation ?? null, avg_hr: null, max_hr: null, avg_hrv: null, calm_pct: trainingSummary?.calm_pct ?? null, time_in_target_pct: trainingSummary?.time_in_target_pct ?? null },
+          summary: { avg_focus: pick("avg_focus"), avg_relaxation: pick("avg_relaxation"), avg_hr: null, max_hr: null, avg_hrv: null, calm_pct: pick("calm_pct"), time_in_target_pct: trainingSummary?.time_in_target_pct ?? null },
         };
         finishTraining();
         return { session, data: {
@@ -101,6 +112,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
           packets: counters.packetCount,
           channel_samples: counters.channelSamples,
           neurofeedback: trainingSummary,
+          recording_summary: trainingSummary ? null : plain,
         } };
       },
       save: (payload) => saveMuseSession(payload.session, payload.data),
@@ -121,6 +133,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       const startedAt = Date.now();
       setRecordingFile(file);
       sessionStopTime.current = null;
+      recordingSummarizer.current = new RecordingSummarizer();
       setSessionStartedAt(startedAt);
       beginTraining();
       setNotice("Muse session started");
