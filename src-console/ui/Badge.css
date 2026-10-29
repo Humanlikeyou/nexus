@@ -4,7 +4,7 @@
   min-height: calc(var(--text-badge) + var(--space-2));
   padding: 0 calc(var(--space-1) + var(--space-0_5));
   border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--ui-tone) 16%, transparent);
+  background: color-mix(in srgb, var(--ui-tone) 14%, transparent);
   color: var(--ui-tone-text);
   font: 600 var(--text-badge)/1 var(--font-text);
   letter-spacing: var(--tracking-badge);

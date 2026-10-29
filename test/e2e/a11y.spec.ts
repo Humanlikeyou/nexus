@@ -2,8 +2,6 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
 
-const KNOWN_CONTRAST_EXCLUSIONS = [".ui-badge[data-tone]"];
-
 const SECTIONS = ["Home", "Chat & Agents", "Fitness", "Neuro", "Business", "Settings"];
 
 async function blockingViolations(page: Page, disableRules: string[] = [], exclude: string[] = []) {
@@ -29,11 +27,10 @@ for (const label of SECTIONS) {
     expect(await blockingViolations(page, ["color-contrast"])).toEqual([]);
   });
 
-  // Label tiers are solid hex now (screen-specs Decision 18); the wordmark is the drawn SVG (Decision 17).
-  // Still excluded, waiting on a decision:
-  // - tinted Badge text (success 4.01, danger 4.11, info/warning similar, at 10px): needs tone values from Design Lead.
+  // Label tiers are solid hex (Decision 18), the wordmark is the drawn SVG (Decision 17) and Badge text uses
+  // solid tone tokens on a 14% tint (Decision 20), so nothing is excluded from color-contrast any more.
   test(`(g) ${label}: no serious or critical axe violations at all`, async ({ page, theme }) => {
     await openSection(page, theme, label);
-    expect(await blockingViolations(page, [], KNOWN_CONTRAST_EXCLUSIONS)).toEqual([]);
+    expect(await blockingViolations(page)).toEqual([]);
   });
 }

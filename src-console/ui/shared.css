@@ -12,10 +12,11 @@
   border: 0;
 }
 
-/* Tone → color. Text tones are mixed toward --label so tinted text stays legible on light fills. */
-[data-tone="neutral"] { --ui-tone: var(--label-secondary); --ui-tone-text: var(--label-secondary); }
-[data-tone="accent"]  { --ui-tone: var(--accent);  --ui-tone-text: var(--accent-strong); }
-[data-tone="info"]    { --ui-tone: var(--sys-blue);  --ui-tone-text: color-mix(in srgb, var(--sys-blue) 78%, var(--label)); }
-[data-tone="success"] { --ui-tone: var(--sys-green); --ui-tone-text: color-mix(in srgb, var(--sys-green) 62%, var(--label)); }
-[data-tone="warning"] { --ui-tone: var(--sys-orange); --ui-tone-text: color-mix(in srgb, var(--sys-orange) 62%, var(--label)); }
-[data-tone="danger"]  { --ui-tone: var(--sys-red);   --ui-tone-text: color-mix(in srgb, var(--sys-red) 78%, var(--label)); }
+/* Tone → color (screen-specs › Shell › Badge tones, Decision 20). --ui-tone is the dot + tint hue;
+ * the text is a solid same-hue token per tone and theme (≥4.61:1 on every surface, both themes). */
+[data-tone="neutral"] { --ui-tone: var(--label-secondary); --ui-tone-text: var(--tone-neutral-text); }
+[data-tone="accent"]  { --ui-tone: var(--accent);   --ui-tone-text: var(--tone-accent-text); }
+[data-tone="info"]    { --ui-tone: var(--sys-blue);   --ui-tone-text: var(--tone-info-text); }
+[data-tone="success"] { --ui-tone: var(--sys-green);  --ui-tone-text: var(--tone-success-text); }
+[data-tone="warning"] { --ui-tone: var(--sys-orange); --ui-tone-text: var(--tone-warning-text); }
+[data-tone="danger"]  { --ui-tone: var(--sys-red);    --ui-tone-text: var(--tone-danger-text); }
