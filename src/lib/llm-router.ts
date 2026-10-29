@@ -54,6 +54,8 @@ export function formatLatency(ms: number): string {
 
 // ─── Config builder ───────────────────────────────────────────────────────────
 /** Build a RouterConfig from NexusConfig (with sensible defaults). */
+export const DEFAULT_OLLAMA_MODEL = "gemma4:latest";
+
 export function buildRouterConfig(cfg: {
   compute_mode?: string | null;
   llm_ollama_model?: string | null;
@@ -64,8 +66,9 @@ export function buildRouterConfig(cfg: {
   llm_show_cost_estimate?: boolean | null;
 }): LlmRouterConfig {
   return {
-    mode: (cfg.compute_mode as ComputeMode) ?? "hybrid",
-    ollama_model: cfg.llm_ollama_model ?? "qwen3.5",
+    // Standing rule: local Ollama only, gemma4 primary.
+    mode: (cfg.compute_mode as ComputeMode) ?? "local",
+    ollama_model: cfg.llm_ollama_model ?? DEFAULT_OLLAMA_MODEL,
     anthropic_model: cfg.llm_anthropic_model ?? "claude-haiku-4-5-20251001",
     token_threshold: cfg.llm_token_threshold ?? 8000,
     daily_cap_usd: cfg.llm_daily_cap_usd ?? 5.0,

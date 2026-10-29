@@ -438,7 +438,13 @@ pub async fn poll_telegram_updates(last_update_id: i64) -> Result<Vec<TelegramUp
 /// Pick the best available Ollama model for chat (prefers smaller/faster models).
 /// Returns the first model found from the preference list, falls back to whatever is installed.
 async fn pick_ollama_model(client: &reqwest::Client) -> String {
-    let preferred = ["qwen3.5", "llama3.3", "llama3.2", "mistral"];
+    let preferred = [
+        super::llm_router::DEFAULT_OLLAMA_MODEL,
+        "qwen3.5",
+        "llama3.3",
+        "llama3.2",
+        "mistral",
+    ];
 
     let Ok(resp) = client.get("http://127.0.0.1:11434/api/tags").send().await else {
         return "deepseek-r1:32b".to_string();

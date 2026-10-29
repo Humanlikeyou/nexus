@@ -28,11 +28,14 @@ pub struct RouterConfig {
     pub show_cost_estimate: bool,
 }
 
+pub const DEFAULT_OLLAMA_MODEL: &str = "gemma4:latest";
+
 impl Default for RouterConfig {
     fn default() -> Self {
         Self {
-            mode: "hybrid".to_string(),
-            ollama_model: "qwen3.5".to_string(),
+            // Standing rule: local Ollama only, gemma4 primary.
+            mode: "local".to_string(),
+            ollama_model: DEFAULT_OLLAMA_MODEL.to_string(),
             anthropic_model: "claude-haiku-4-5-20251001".to_string(),
             token_threshold: 8000,
             daily_cap_usd: Some(5.0),
@@ -545,6 +548,15 @@ pub fn clear_llm_usage() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_is_local_gemma4() {
+        let d = RouterConfig::default();
+        assert_eq!(
+            (d.mode.as_str(), d.ollama_model.as_str()),
+            ("local", "gemma4:latest")
+        );
+    }
 
     fn cfg(mode: &str) -> RouterConfig {
         RouterConfig {
