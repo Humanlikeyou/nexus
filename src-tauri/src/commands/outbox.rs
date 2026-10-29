@@ -121,6 +121,18 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
+    if super::telegram::outbound_disabled() {
+        let status = OutboxStatus {
+            gateway_online: true,
+            queue_depth,
+            last_delivered_at,
+            last_error: Some("Delivery paused (NEXUS_OUTBOUND_DISABLED)".to_string()),
+            total_delivered,
+        };
+        let _ = app.emit("outbox-status", &status);
+        return Ok(());
+    }
+
     // Load pending outbox items
     let gateway_url_clone = gateway_url.clone();
     let auth_clone = auth_token.clone();

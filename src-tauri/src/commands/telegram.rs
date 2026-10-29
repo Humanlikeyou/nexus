@@ -200,8 +200,33 @@ pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMes
     Ok(messages)
 }
 
+/// Session kill switch for every outbound send (Telegram messages and outbox
+/// delivery to the gateway): set `NEXUS_OUTBOUND_DISABLED=1` (or `true`/`yes`)
+/// when launching for QA. Reads (getUpdates, getMe, health checks) still work.
+pub const OUTBOUND_DISABLED_ENV: &str = "NEXUS_OUTBOUND_DISABLED";
+
+pub fn outbound_disabled() -> bool {
+    outbound_disabled_value(std::env::var(OUTBOUND_DISABLED_ENV).ok().as_deref())
+}
+
+fn outbound_disabled_value(value: Option<&str>) -> bool {
+    matches!(
+        value.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        Some("1" | "true" | "yes")
+    )
+}
+
 #[tauri::command]
 pub async fn send_telegram_message(text: String) -> Result<TelegramMessage, String> {
+    if outbound_disabled() {
+        println!(
+            "[telegram] send suppressed ({OUTBOUND_DISABLED_ENV}), {} chars",
+            text.chars().count()
+        );
+        return Err(format!(
+            "Outbound sends are disabled for this session ({OUTBOUND_DISABLED_ENV})."
+        ));
+    }
     let config = load_config();
     let token = config.telegram_bot_token.as_deref().unwrap_or("");
     let chat_id = config.telegram_chat_id.as_deref().unwrap_or("");
@@ -523,5 +548,33 @@ mod tests {
             .collect();
         assert_eq!(names, vec![std::ffi::OsString::from("config.json")]);
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod outbound_tests {
+    use super::*;
+
+    #[test]
+    fn outbound_kill_switch_values() {
+        for on in ["1", "true", "TRUE", " yes "] {
+            assert!(outbound_disabled_value(Some(on)), "{on}");
+        }
+        for off in ["", "0", "false", "no", "off"] {
+            assert!(!outbound_disabled_value(Some(off)), "{off}");
+        }
+        assert!(!outbound_disabled_value(None));
+    }
+
+    #[test]
+    fn send_is_refused_without_network_when_disabled() {
+        // set_var is process-wide; this is the only test that touches the variable.
+        std::env::set_var(OUTBOUND_DISABLED_ENV, "1");
+        let err = tauri::async_runtime::block_on(send_telegram_message("qa".into())).err();
+        std::env::remove_var(OUTBOUND_DISABLED_ENV);
+        assert_eq!(
+            err.as_deref(),
+            Some("Outbound sends are disabled for this session (NEXUS_OUTBOUND_DISABLED).")
+        );
     }
 }
