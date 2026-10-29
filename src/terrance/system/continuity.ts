@@ -861,7 +861,7 @@ export async function consolidateRecentSessions(): Promise<{ consolidated: boole
  * Amara reviews active goals against recent sessions and generates
  * a daily brief — a proactive self-reflection stored to memory.
  */
-export async function runReasoningLoop(): Promise<{ reasoned: boolean; reflection: string | null; stored?: MemoryWriteResult }> {
+export async function runReasoningLoop(): Promise<{ reasoned: boolean; reflection: string | null; stored?: MemoryWriteResult; error?: boolean; reason?: string }> {
   try {
     const [ctx, allLogs] = await Promise.all([
       loadContext(),
@@ -955,8 +955,10 @@ export async function runReasoningLoop(): Promise<{ reasoned: boolean; reflectio
     });
 
     return { reasoned: true, reflection: fullReflection, stored };
-  } catch {
-    return { reasoned: false, reflection: null };
+  } catch (e) {
+    // Report the failure: a silent "skipped" left lastReasoningTimestamp stale, kept reasoning
+    // due on every tick, and starved the weekly prune of the single heavy slot (since 2026-07-06).
+    return { reasoned: false, reflection: null, error: true, reason: jobFailureReason(e) };
   }
 }
 

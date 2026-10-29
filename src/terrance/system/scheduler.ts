@@ -334,6 +334,13 @@ export function consolidationOutcome(result: Awaited<ReturnType<typeof consolida
   return failure ? { ok: false, detail: `Consolidated locally; ${failure}` } : { ok: true, detail: "Consolidated recent sessions" };
 }
 
+/** Activity outcome for a reasoning run. A failed run is a failure (backoff applies), never "Skipped". */
+export function reasoningOutcome(result: Awaited<ReturnType<typeof runReasoningLoop>>): JobOutcome {
+  if (result.error || !result.reasoned) return { ok: false, detail: result.reason ? `Reasoning failed: ${result.reason}` : "Reasoning failed" };
+  const failure = result.stored ? memoryWriteFailure(result.stored) : null;
+  return failure ? { ok: false, detail: `Reflection saved locally; ${failure}` } : { ok: true, detail: "Reflection complete" };
+}
+
 export type RunNowResult = { started: true } | { started: false; reason: "busy" };
 
 /**
@@ -431,12 +438,7 @@ async function tick() {
       consolidation: { label: "Memory Consolidation", kind: "consolidation", heavy: true, fn: consolidationJob },
       reasoning: {
         label: "Reasoning Loop", kind: "reasoning", heavy: true,
-        fn: async () => {
-          const result = await runReasoningLoop();
-          const failure = result.reasoned && result.stored ? memoryWriteFailure(result.stored) : null;
-          if (failure) return { ok: false, detail: `Reflection saved locally; ${failure}` };
-          return { ok: true, detail: result.reasoned ? "Reflection complete" : "Skipped" };
-        },
+        fn: async () => reasoningOutcome(await runReasoningLoop()),
       },
       prune: {
         label: "Memory Pruning", kind: "prune", heavy: true,
