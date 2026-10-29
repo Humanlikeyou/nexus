@@ -559,14 +559,20 @@ pub fn store_activity_entry(entry: ActivityEntry) -> Result<(), String> {
 /// or up to `limit` entries, whichever yields more results.
 #[tauri::command]
 pub fn list_activity_entries(limit: Option<u32>) -> Result<Vec<ActivityEntry>, String> {
-    let dir = activity_log_dir();
+    list_activity_entries_in(&activity_log_dir(), limit)
+}
+
+fn list_activity_entries_in(
+    dir: &std::path::Path,
+    limit: Option<u32>,
+) -> Result<Vec<ActivityEntry>, String> {
     if !dir.exists() {
         return Ok(Vec::new());
     }
     let max = limit.unwrap_or(100) as usize;
 
     // Only the newest files are read (by the timestamp in the file name), not the whole dir.
-    let mut entries: Vec<ActivityEntry> = activity_files_newest_first(&dir)
+    let mut entries: Vec<ActivityEntry> = activity_files_newest_first(dir)
         .into_iter()
         .take(max.saturating_add(20))
         .filter_map(|(_, path)| {
@@ -678,6 +684,317 @@ mod tests {
             .map(|f| f.0)
             .collect();
         assert_eq!(left, vec![NOW, NOW - 1000, NOW - 2000, NOW - 3000]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── Archive safety (QA top gap: a bug here loses data) ──────────────────
+
+    fn json_files(dir: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().is_file())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn gz_lines(path: &std::path::Path, lines: &[&str]) {
+        use std::io::Write;
+        let mut enc = flate2::write::GzEncoder::new(
+            fs::File::create(path).unwrap(),
+            flate2::Compression::default(),
+        );
+        for l in lines {
+            enc.write_all(l.as_bytes()).unwrap();
+            enc.write_all(b"\n").unwrap();
+        }
+        enc.finish().unwrap();
+    }
+
+    /// Two months selected, the later month's write fails: the earlier month was archived and
+    /// verified (its sources go), every source of the failed month stays and its old archive is
+    /// unchanged. Failure is per month, after any earlier month already completed.
+    fn assert_failed_month_kept(dir: &std::path::Path, oct_ids: &[String], before: &[u8]) {
+        let gz = dir.join("archive").join("2026-10.jsonl.gz");
+        for id in oct_ids {
+            assert!(dir.join(format!("{id}.json")).exists(), "{id} kept");
+        }
+        assert_eq!(fs::read(&gz).unwrap(), before, "old archive unchanged");
+        assert!(!dir.join("archive").join(".2026-10.jsonl.gz.tmp").is_file());
+    }
+
+    const OCT_5: u64 = 1_791_158_400_000; // 2026-10-05 00:00 UTC
+    const SEP_5: u64 = 1_788_566_400_000; // 2026-09-05 00:00 UTC
+    const LATER: u64 = OCT_5 + 60 * DAY_MS; // both months are past the 30-day window
+
+    fn seed_two_months(dir: &std::path::Path) -> (Vec<String>, Vec<String>, Vec<u8>) {
+        let sep: Vec<String> = (0..3).map(|i| activity_at(dir, SEP_5 + i, 1)).collect();
+        let oct: Vec<String> = (0..3).map(|i| activity_at(dir, OCT_5 + i, 1)).collect();
+        let archive = dir.join("archive");
+        fs::create_dir_all(&archive).unwrap();
+        let existing = r#"{"id":"task-1791100000000-1","type":"t","name":"Old","status":"completed","startedAt":1791100000000,"completedAt":1791100000005,"durationMs":5}"#;
+        gz_lines(&archive.join("2026-10.jsonl.gz"), &[existing]);
+        let before = fs::read(archive.join("2026-10.jsonl.gz")).unwrap();
+        (sep, oct, before)
+    }
+
+    #[test]
+    fn archive_write_failure_keeps_sources_and_old_archive() {
+        // A directory squatting on the temp path: the temp file can't be created.
+        let dir = temp_dir("act-tmpdir");
+        let (sep, oct, before) = seed_two_months(&dir);
+        fs::create_dir_all(dir.join("archive").join(".2026-10.jsonl.gz.tmp")).unwrap();
+        let err = archive_activity_log_in(&dir, LATER, 30, 5000, false).unwrap_err();
+        assert!(!err.is_empty());
+        assert_failed_month_kept(&dir, &oct, &before);
+        for id in &sep {
+            assert!(
+                !dir.join(format!("{id}.json")).exists(),
+                "earlier month done"
+            );
+        }
+        assert_eq!(
+            read_archive_lines(&dir.join("archive").join("2026-09.jsonl.gz"))
+                .unwrap()
+                .len(),
+            3
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn archive_read_only_archive_dir_keeps_every_source() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("act-ro");
+        let (sep, oct, before) = seed_two_months(&dir);
+        let archive = dir.join("archive");
+        fs::set_permissions(&archive, fs::Permissions::from_mode(0o500)).unwrap();
+        let result = archive_activity_log_in(&dir, LATER, 30, 5000, false);
+        fs::set_permissions(&archive, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_err());
+        // The first month (September) already fails: nothing at all is removed.
+        for id in sep.iter().chain(&oct) {
+            assert!(dir.join(format!("{id}.json")).exists(), "{id} kept");
+        }
+        assert_failed_month_kept(&dir, &oct, &before);
+        assert!(!archive.join("2026-09.jsonl.gz").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn archive_corrupt_existing_gz_keeps_sources_and_archive() {
+        let dir = temp_dir("act-corrupt");
+        let (_, oct, _) = seed_two_months(&dir);
+        let gz = dir.join("archive").join("2026-10.jsonl.gz");
+        fs::write(&gz, b"\x1f\x8b\x08\x00 truncated gzip").unwrap();
+        let before = fs::read(&gz).unwrap();
+        assert!(archive_activity_log_in(&dir, LATER, 30, 5000, false).is_err());
+        assert_failed_month_kept(&dir, &oct, &before);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Pinned: a valid gzip with one unparsable line fails verification (every line must parse),
+    /// so that month is never archived again until the bad line is fixed by hand. Safe (nothing
+    /// is lost), but it blocks the month; files keep piling up as JSON.
+    #[test]
+    fn archive_bad_line_in_existing_gz_fails_verification_and_keeps_sources() {
+        let dir = temp_dir("act-badline");
+        let (_, oct, _) = seed_two_months(&dir);
+        let gz = dir.join("archive").join("2026-10.jsonl.gz");
+        gz_lines(&gz, &["not json"]);
+        let before = fs::read(&gz).unwrap();
+        let err = archive_activity_log_in(&dir, LATER, 30, 5000, false).unwrap_err();
+        assert!(
+            err.contains("2026-10 failed verification; sources kept"),
+            "{err}"
+        );
+        assert_failed_month_kept(&dir, &oct, &before);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn archive_over_the_5000_file_cap_moves_the_oldest_10() {
+        let dir = temp_dir("act-5010");
+        // 5,010 files all inside the 30-day window, one second apart.
+        for i in 0..5_010u64 {
+            activity_at(&dir, NOW - i * 1000, 1);
+        }
+        let r = archive_activity_log_in(&dir, NOW, ACTIVITY_KEEP_DAYS, ACTIVITY_MAX_FILES, false)
+            .unwrap();
+        assert_eq!(
+            (r.scanned, r.selected, r.archived, r.kept),
+            (5_010, 10, 10, 5_000)
+        );
+        let left = activity_files_newest_first(&dir);
+        assert_eq!(left.len(), 5_000);
+        assert_eq!(left.first().unwrap().0, NOW);
+        assert_eq!(left.last().unwrap().0, NOW - 4_999 * 1000);
+        let archived: Vec<String> =
+            read_archive_lines(&dir.join("archive").join("2026-10.jsonl.gz"))
+                .unwrap()
+                .iter()
+                .map(|l| serde_json::from_str::<ActivityEntry>(l).unwrap().id)
+                .collect();
+        let mut expected: Vec<String> = (5_000..5_010u64)
+            .map(|i| format!("task-{}-1", NOW - i * 1000))
+            .collect();
+        let mut got = archived.clone();
+        got.sort();
+        expected.sort();
+        assert_eq!(got, expected);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Re-running in the same month appends (line count = sum, distinct ids stay distinct).
+    /// Pinned: there is no dedupe. If a file with an already-archived id reappears, the second
+    /// run appends it again and the month holds that id twice.
+    #[test]
+    fn archive_rerun_same_month_appends_without_dedupe() {
+        let dir = temp_dir("act-rerun");
+        let first: Vec<String> = (0..4).map(|i| activity_at(&dir, SEP_5 + i, 1)).collect();
+        archive_activity_log_in(&dir, LATER, 30, 5000, false).unwrap();
+        let second: Vec<String> = (0..3)
+            .map(|i| activity_at(&dir, SEP_5 + 100 + i, 2))
+            .collect();
+        archive_activity_log_in(&dir, LATER, 30, 5000, false).unwrap();
+        let gz = dir.join("archive").join("2026-09.jsonl.gz");
+        let ids = |gz: &std::path::Path| -> Vec<String> {
+            read_archive_lines(gz)
+                .unwrap()
+                .iter()
+                .map(|l| serde_json::from_str::<ActivityEntry>(l).unwrap().id)
+                .collect()
+        };
+        let got = ids(&gz);
+        assert_eq!(got.len(), first.len() + second.len());
+        let unique: std::collections::HashSet<&String> = got.iter().collect();
+        assert_eq!(unique.len(), got.len(), "no duplicate ids");
+
+        // Same id again: appended, not deduped.
+        activity_at(&dir, SEP_5, 1);
+        archive_activity_log_in(&dir, LATER, 30, 5000, false).unwrap();
+        let got = ids(&gz);
+        assert_eq!(got.len(), 8);
+        assert_eq!(got.iter().filter(|id| **id == first[0]).count(), 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Months are UTC (month_of formats the UTC date): 2026-10-01 00:30 JST is 2026-09-30 15:30
+    /// UTC, so it lands in 2026-09.jsonl.gz, not 2026-10.
+    #[test]
+    fn archive_months_are_utc_not_tokyo() {
+        let dir = temp_dir("act-month");
+        let ms = chrono::DateTime::parse_from_rfc3339("2026-10-01T00:30:00+09:00")
+            .unwrap()
+            .timestamp_millis() as u64;
+        let id = activity_at(&dir, ms, 1);
+        let r = archive_activity_log_in(&dir, LATER, 30, 5000, false).unwrap();
+        assert_eq!(r.months, vec![("2026-09".to_string(), 1)]);
+        let lines = read_archive_lines(&dir.join("archive").join("2026-09.jsonl.gz")).unwrap();
+        assert!(lines[0].contains(&id));
+        assert!(!dir.join("archive").join("2026-10.jsonl.gz").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// After archiving, the list reads only the newest limit+20 files. Proof: list rewrites any
+    /// file it reads that holds a credential (redaction); one just outside the window is untouched.
+    #[test]
+    fn list_after_archive_reads_only_the_newest_limit_plus_20() {
+        let dir = temp_dir("act-list");
+        for i in 0..40u64 {
+            activity_at(&dir, SEP_5 + i, 1); // archived
+        }
+        let newest: Vec<String> = (0..60u64)
+            .map(|i| activity_at(&dir, NOW - i * 1000, 1))
+            .collect();
+        archive_activity_log_in(&dir, NOW, 30, 5000, false).unwrap();
+        assert_eq!(activity_files_newest_first(&dir).len(), 60);
+
+        let with_secret = |id: &str, ms: u64| {
+            let raw = format!(
+                r#"{{"id":"{id}","type":"t","name":"Job","status":"failed","startedAt":{ms},"completedAt":{ms},"durationMs":0,"detail":"token=FAKE_TOKEN_NOT_REAL"}}"#
+            );
+            fs::write(dir.join(format!("{id}.json")), raw).unwrap();
+        };
+        // limit 30 → window = newest 50 files: index 49 is inside, index 50 is outside.
+        with_secret(&newest[49], NOW - 49_000);
+        with_secret(&newest[50], NOW - 50_000);
+        let outside_before = fs::read(dir.join(format!("{}.json", newest[50]))).unwrap();
+
+        let got = list_activity_entries_in(&dir, Some(30)).unwrap();
+        let got_ids: Vec<&str> = got.iter().map(|e| e.id.as_str()).collect();
+        let want: Vec<&str> = newest[..30].iter().map(String::as_str).collect();
+        assert_eq!(got_ids, want, "newest 30, newest first");
+        let inside = fs::read_to_string(dir.join(format!("{}.json", newest[49]))).unwrap();
+        assert!(!inside.contains("FAKE_TOKEN_NOT_REAL"), "read and redacted");
+        assert_eq!(
+            fs::read(dir.join(format!("{}.json", newest[50]))).unwrap(),
+            outside_before,
+            "outside the window: never read"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn archive_leaves_unparsable_and_foreign_files_and_finishes() {
+        let dir = temp_dir("act-foreign");
+        let old: Vec<String> = (0..3).map(|i| activity_at(&dir, SEP_5 + i, 1)).collect();
+        // Old by name, but not activity entries.
+        fs::write(dir.join("task-1788566400100-7.json"), "{ truncated").unwrap();
+        fs::write(
+            dir.join("task-1788566400200-8.json"),
+            r#"{"hello":"world"}"#,
+        )
+        .unwrap();
+        // Foreign: not .json, and a subdirectory with a .json name.
+        fs::write(dir.join("notes.txt"), "keep me").unwrap();
+        fs::write(dir.join(".DS_Store"), [0u8, 1, 2]).unwrap();
+        fs::create_dir_all(dir.join("nested.json")).unwrap();
+        let r = archive_activity_log_in(&dir, LATER, 30, 5000, false).unwrap();
+        assert_eq!((r.archived, r.skipped), (3, 2));
+        for id in &old {
+            assert!(!dir.join(format!("{id}.json")).exists());
+        }
+        for f in [
+            "task-1788566400100-7.json",
+            "task-1788566400200-8.json",
+            "notes.txt",
+            ".DS_Store",
+        ] {
+            assert!(dir.join(f).is_file(), "{f} kept");
+        }
+        assert!(dir.join("nested.json").is_dir());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn archive_dry_run_touches_nothing() {
+        let dir = temp_dir("act-dry-mtime");
+        for i in 0..3 {
+            activity_at(&dir, SEP_5 + i, 1);
+        }
+        activity_at(&dir, NOW, 1);
+        let snapshot = |dir: &std::path::Path| -> Vec<(String, std::time::SystemTime, u64)> {
+            json_files(dir)
+                .into_iter()
+                .map(|n| {
+                    let m = fs::metadata(dir.join(&n)).unwrap();
+                    (n, m.modified().unwrap(), m.len())
+                })
+                .collect()
+        };
+        let before = snapshot(&dir);
+        let dir_mtime = fs::metadata(&dir).unwrap().modified().unwrap();
+        let r = archive_activity_log_in(&dir, LATER + 30 * DAY_MS, 30, 5000, true).unwrap();
+        assert_eq!((r.selected, r.archived), (4, 0));
+        assert_eq!(snapshot(&dir), before, "same files, mtimes and sizes");
+        assert_eq!(fs::metadata(&dir).unwrap().modified().unwrap(), dir_mtime);
+        assert!(
+            !dir.join("archive").exists(),
+            "no archive dir, no temp files"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
