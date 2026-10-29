@@ -291,14 +291,7 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
 
             if received_set.is_empty() {
                 // No valid ACK — do NOT mark delivered
-                let error_text = format!(
-                    "No ACK: gateway returned 2xx but body missing or invalid received[] (body={})",
-                    if body.len() > 200 {
-                        &body[..200]
-                    } else {
-                        &body
-                    }
-                );
+                let error_text = no_ack_error(&body);
                 println!("[outbox] {}", error_text);
                 apply_backoff(&outbox_ids, &error_text, retry_base, retry_max).await?;
 
@@ -419,6 +412,13 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Error text for a 2xx without a valid ACK. The body is cut to 200 chars on a char
+/// boundary (byte slicing panicked on multi-byte bodies and killed the delivery tick).
+fn no_ack_error(body: &str) -> String {
+    let shown: String = body.chars().take(200).collect();
+    format!("No ACK: gateway returned 2xx but body missing or invalid received[] (body={shown})")
 }
 
 async fn apply_backoff(
@@ -618,6 +618,19 @@ mod expiry_tests {
             ]
         );
         assert_eq!(count_status(&c, "pending"), 5);
+    }
+
+    #[test]
+    fn no_ack_error_truncates_multibyte_bodies_without_panicking() {
+        let body = format!("{}é{}", "x".repeat(199), "y".repeat(50));
+        let text = no_ack_error(&body);
+        assert!(text.ends_with(&format!("(body={}é)", "x".repeat(199))));
+        assert_eq!(
+            no_ack_error("{}"),
+            "No ACK: gateway returned 2xx but body missing or invalid received[] (body={})"
+        );
+        let emoji = "📦".repeat(300);
+        assert_eq!(no_ack_error(&emoji).matches('📦').count(), 200);
     }
 
     #[test]
