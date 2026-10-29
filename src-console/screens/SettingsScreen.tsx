@@ -7,7 +7,7 @@ import type { MuseDevice, SystemSnapshot } from "../types";
 import { Button, InsetGroup, ListRow, SegmentedControl, Toggle, Wordmark } from "../ui";
 import { DevicesGroup } from "./DevicesScreen";
 import type { MuseOperation } from "./muse";
-import { nextRuns, relative, useSchedulerStatus } from "./TerranceScreen";
+import { nextIn, nextRuns, useSchedulerStatus } from "./TerranceScreen";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import { useNow } from "../shell/useNow";
 import "./SettingsScreen.css";
@@ -63,7 +63,7 @@ export function SettingsField({ data, theme, setTheme, reduceMotion, setReduceMo
         <ListRow title="Refresh" value="Every 15 seconds" />
         <ListRow title="Data" value="Stored on this Mac" />
         <ListRow title="Background jobs" value={scheduler.running ? "Running" : "Stopped"}
-          subtitle={scheduler.running && next != null ? `Next consolidation ${relative(next, now)}` : undefined} />
+          subtitle={scheduler.running && next != null ? `Next consolidation ${nextIn(next, now)}` : undefined} />
       </InsetGroup>
 
       <BackupSection />

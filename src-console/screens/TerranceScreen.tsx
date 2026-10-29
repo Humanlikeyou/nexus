@@ -41,6 +41,13 @@ export function relative(target: number | null, now: number) {
   return diff > 0 ? `in ${span}` : `${span} ago`;
 }
 
+/** A next-run time: "in 2h 14m", or "due now" once it has passed (an overdue job has not run yet;
+ *  it is never "2744h ago"). */
+export function nextIn(target: number | null, now: number) {
+  if (target == null) return null;
+  return target - now < 60_000 ? "due now" : relative(target, now);
+}
+
 const tokyo = (ms: number | string, opts: Intl.DateTimeFormatOptions) => new Date(ms).toLocaleString("en-GB", { timeZone: "Asia/Tokyo", ...opts });
 const clock = (ms: number | string | null | undefined) => (ms == null || Number.isNaN(new Date(ms).getTime()) ? DASH : tokyo(ms, { hour: "2-digit", minute: "2-digit", hour12: false }));
 const exact = (ms: number | null) => (ms == null ? undefined : tokyo(ms, { dateStyle: "medium", timeStyle: "short", hour12: false }));
@@ -196,8 +203,8 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
   const muse = data.sessions.find((s) => s.device_type === "muse");
   const hermes = data.hermes;
   const hermesOnline = hermes.status === "online";
-  const nextConsolidation = relative(next.consolidation, now);
-  const nextReasoning = relative(next.reasoning, now);
+  const nextConsolidation = nextIn(next.consolidation, now);
+  const nextReasoning = nextIn(next.reasoning, now);
 
   let recoveryBody: ReactNode;
   if (down("get_noop_health_snapshot")) recoveryBody = <Unavailable label="NOOP health" onRetry={onRetry} />;

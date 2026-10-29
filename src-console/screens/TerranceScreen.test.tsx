@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot } from "../types";
-import { TerranceField, greeting, homeDate, homeSummary, nextRuns, relative } from "./TerranceScreen";
+import { TerranceField, greeting, homeDate, homeSummary, nextIn, nextRuns, relative } from "./TerranceScreen";
 
 const NOW = new Date("2026-10-28T14:00:00+09:00").getTime();
 const H = 3_600_000;
@@ -103,6 +103,11 @@ describe("Home (TerranceField)", () => {
     expect(nextRuns({ running: true, lastConsolidation: 0, lastReasoning: 0, nextConsolidationAt: 5, nextReasoningAt: 7 })).toEqual({ consolidation: 5, reasoning: 7 });
     expect(relative(NOW + 30_000, NOW)).toBe("now");
     expect(relative(NOW - 2 * H, NOW)).toBe("2h 0m ago");
+    // Next runs never read "ago": an overdue job is due now (live check: "Next: Consolidation 2744h 42m ago").
+    expect(nextIn(NOW - 2744 * H, NOW)).toBe("due now");
+    expect(nextIn(NOW + 30_000, NOW)).toBe("due now");
+    expect(nextIn(NOW + 2 * H + 14 * 60_000, NOW)).toBe("in 2h 14m");
+    expect(nextIn(null, NOW)).toBeNull();
     expect(greeting(new Date("2026-10-28T08:00:00+09:00").getTime())).toBe("Good morning");
     expect(greeting(new Date("2026-10-28T20:00:00+09:00").getTime())).toBe("Good evening");
   });

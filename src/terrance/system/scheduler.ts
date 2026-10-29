@@ -475,6 +475,9 @@ async function tick() {
 
 export function startScheduler(): void {
   if (checkIntervalId) return;
+  // Running from the moment it starts, not only after the first tick (30s later):
+  // Home and Settings read this and showed "Stopped" for the first 30-60s.
+  _lastStatus = { ..._lastStatus, running: true };
   console.log("[scheduler] Started (3-touch daily loop, consolidation=6h, reasoning=12h, health=30m, prune=weekly).");
   // Run first tick after a short delay to let the app fully initialize
   startupTimerId = setTimeout(tick, 30_000);

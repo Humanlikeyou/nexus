@@ -59,3 +59,16 @@ describe("health job status from auto-heal", () => {
     expect(await healthDetail(status as string | undefined)).toBe(expected);
   });
 });
+
+describe("scheduler status before the first tick", () => {
+  it("reports running as soon as it starts and stopped after stop (live check 2026-10-29: Home said Stopped for 30-60s)", async () => {
+    vi.resetModules();
+    const sched = await import("./scheduler");
+    stopScheduler = sched.stopScheduler;
+    expect(sched.getSchedulerStatus().running).toBe(false);
+    sched.startScheduler();
+    expect(sched.getSchedulerStatus().running).toBe(true);
+    sched.stopScheduler();
+    expect(sched.getSchedulerStatus().running).toBe(false);
+  });
+});
