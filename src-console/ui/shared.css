@@ -17,6 +17,6 @@
 [data-tone="neutral"] { --ui-tone: var(--label-secondary); --ui-tone-text: var(--tone-neutral-text); }
 [data-tone="accent"]  { --ui-tone: var(--accent);   --ui-tone-text: var(--tone-accent-text); }
 [data-tone="info"]    { --ui-tone: var(--sys-blue);   --ui-tone-text: var(--tone-info-text); }
-[data-tone="success"] { --ui-tone: var(--sys-green);  --ui-tone-text: var(--tone-success-text); }
-[data-tone="warning"] { --ui-tone: var(--sys-orange); --ui-tone-text: var(--tone-warning-text); }
-[data-tone="danger"]  { --ui-tone: var(--sys-red);    --ui-tone-text: var(--tone-danger-text); }
+[data-tone="success"] { --ui-tone: var(--tone-success); --ui-tone-text: var(--tone-success-text); }
+[data-tone="warning"] { --ui-tone: var(--tone-warning); --ui-tone-text: var(--tone-warning-text); }
+[data-tone="danger"]  { --ui-tone: var(--tone-danger);  --ui-tone-text: var(--tone-danger-text); }

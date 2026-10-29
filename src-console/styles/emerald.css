@@ -56,3 +56,7 @@
 }
 /* Active sidebar row: emerald tint, not a fill (sidebar background itself untouched). */
 :root main.command-surface .nav-group button.is-active { background: var(--active-emerald); }
+
+/* Palette revamp: text selection and inline links in emerald. */
+::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+a[href]:not([class]) { color: var(--accent-strong); text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); }

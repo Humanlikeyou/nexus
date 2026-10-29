@@ -21,30 +21,44 @@
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  transition: background-color var(--dur-fast) var(--ease-standard), transform var(--dur-state) var(--ease-standard);
+  transition: background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard), transform var(--dur-state) var(--ease-standard);
 }
 
+/* Palette revamp (Oct 29): emerald primary with a soft top-lit gradient and inner highlight,
+ * glass secondary with a copper-tinted hairline, emerald plain, warm-red destructive. */
+.ui-button { box-shadow: inset 0 0 0 1px var(--ui-button-line, transparent), inset 0 1px 0 var(--ui-button-highlight, transparent); }
 .ui-button:hover:not(:disabled) { background: var(--ui-button-bg-hover); }
-.ui-button:active:not(:disabled):not([data-loading]) { transform: scale(.97); }
-.ui-button:focus-visible { outline: var(--space-0_5) solid var(--focus-ring); outline-offset: var(--space-0_5); }
-.ui-button:disabled { cursor: default; opacity: .45; box-shadow: none; }
-/* Destructive tint fades further so a disabled Restore never reads as armed. */
-.ui-button[data-variant="destructive"]:disabled { opacity: .38; filter: saturate(.4); }
+.ui-button:active:not(:disabled):not([data-loading]) { background: var(--ui-button-bg-pressed, var(--ui-button-bg-hover)); transform: scale(.98); }
+.ui-button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.ui-button:disabled { cursor: default; opacity: .38; filter: saturate(.3); }
 .ui-button[data-loading] { cursor: progress; }
 
+/* Secondary (default): neutral glass, emerald label, copper hairline. */
+.ui-button:not([data-variant]), .ui-button[data-variant="secondary"] {
+  --ui-button-bg: color-mix(in srgb, var(--bg-content) 70%, var(--fill-secondary));
+  --ui-button-bg-hover: color-mix(in srgb, var(--accent) 8%, var(--bg-content));
+  --ui-button-bg-pressed: color-mix(in srgb, var(--accent) 14%, var(--bg-content));
+  --ui-button-fg: var(--accent-strong);
+  --ui-button-line: var(--copper-hairline);
+}
 .ui-button[data-variant="primary"] {
-  --ui-button-bg: var(--accent-strong);
-  --ui-button-bg-hover: var(--accent-hover);
+  --ui-button-bg: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, #fff), var(--accent));
+  --ui-button-bg-hover: linear-gradient(180deg, var(--accent), var(--accent-hover));
+  --ui-button-bg-pressed: var(--accent-pressed);
   --ui-button-fg: var(--on-accent);
+  --ui-button-highlight: var(--accent-highlight);
 }
 .ui-button[data-variant="destructive"] {
-  --ui-button-bg: color-mix(in srgb, var(--sys-red) 14%, transparent);
-  --ui-button-bg-hover: color-mix(in srgb, var(--sys-red) 22%, transparent);
-  --ui-button-fg: color-mix(in srgb, var(--sys-red) 78%, var(--label));
+  --ui-button-bg: linear-gradient(180deg, color-mix(in srgb, var(--destructive) 90%, #fff), var(--destructive));
+  --ui-button-bg-hover: var(--destructive-hover);
+  --ui-button-bg-pressed: var(--destructive-pressed);
+  --ui-button-fg: var(--on-destructive);
+  --ui-button-highlight: var(--accent-highlight);
 }
 .ui-button[data-variant="plain"] {
   --ui-button-bg: transparent;
-  --ui-button-bg-hover: var(--fill-tertiary);
+  --ui-button-bg-hover: color-mix(in srgb, var(--accent) 10%, transparent);
+  --ui-button-bg-pressed: color-mix(in srgb, var(--accent) 16%, transparent);
   --ui-button-fg: var(--accent-strong);
   --ui-button-pad: var(--space-2);
 }

@@ -28,8 +28,13 @@
   --wordmark: #8c6239; /* Taiyo Skin logo bronze (Decision 17) */
   --wordmark-inactive: #91785f; /* inactive window (Decision 21) */
   /* Badge / tone text (Decision 20): same hue as the tone, lightness solved for ≥4.6:1 on the 14% tint. */
-  --tone-neutral-text: #59595e; --tone-accent-text: #0b6758; --tone-info-text: #0058b9;
-  --tone-success-text: #1d6e31; --tone-warning-text: #8d5200; --tone-danger-text: #b80a00;
+  --tone-neutral-text: #59595e; --tone-accent-text: #0b5e49; --tone-info-text: #0058b9;
+  --tone-success-text: #1c642b; --tone-warning-text: #87500f; --tone-danger-text: #a3321f;
+  /* Palette (Oct 29, emerald + copper): tone hues for dots/tints. accent = emerald (brand, selection,
+   * primary), success = grass green (distinct, yellower), warning = copper-amber, danger = warm red = destructive. */
+  --tone-success: #2a8a3c; --tone-warning: #b06a1f; --tone-danger: #c2412d;
+  --copper: #8c6239; --copper-hairline: rgba(140, 98, 57, .35);
+  --destructive: #c2412d; --destructive-hover: #ad3826; --destructive-pressed: #97301f; --on-destructive: #ffffff;
   --bg-window: #f5f5f7;
   --bg-content: #ffffff;
   --bg-rgb: 245, 245, 247;
@@ -39,16 +44,18 @@
   --separator-strong: rgba(60, 60, 67, .29);
   --hairline-color: rgba(0, 0, 0, .08);
 
-  --accent: #0f8b77;            /* fills and tints only */
-  --accent-strong: #0b6e5e;     /* text, and fills carrying white labels (≈5.5:1) */
+  --accent: #0e7a5f;            /* emerald: fills, tints, focus ring (≥4.2:1 vs bg) */
+  --accent-strong: #0b5e49;     /* text/links (≥6.1:1), pressed fill */
   --on-accent: #ffffff;         /* label on --accent-strong fills */
   --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
-  --accent-hover: color-mix(in srgb, var(--accent-strong) 88%, #000);
+  --accent-hover: #0d6b53;
+  --accent-pressed: var(--accent-strong);
+  --accent-highlight: rgba(255, 255, 255, .22); /* inner top hairline on emerald fills */
 
   --sidebar-selection: rgba(0, 0, 0, .06);
   /* Gray list/row selection (macOS); the accent tints the icon, not the row. */
   --selection: rgba(0, 0, 0, .06);
-  --focus-ring: var(--sys-blue);
+  --focus-ring: var(--accent);
 
   --sys-blue: #007aff;
   --sys-green: #34c759;
@@ -90,8 +97,11 @@
   --d-label-quaternary: #5c5c61;
   --d-wordmark: #b4864e; /* Taiyo favicon dark variant */
   --d-wordmark-inactive: #937d61;
-  --d-tone-neutral-text: #b5b5b9; --d-tone-accent-text: #2fcaab; --d-tone-info-text: #61b0ff;
-  --d-tone-success-text: #7bdf94; --d-tone-warning-text: #fbc064; --d-tone-danger-text: #ff8780;
+  --d-tone-neutral-text: #b5b5b9; --d-tone-accent-text: #4fd6a9; --d-tone-info-text: #61b0ff;
+  --d-tone-success-text: #86e39a; --d-tone-warning-text: #f0b878; --d-tone-danger-text: #ff8d7b;
+  --d-tone-success: #4cd36a; --d-tone-warning: #e0a458; --d-tone-danger: #ff7a66;
+  --d-copper: #b4864e; --d-copper-hairline: rgba(180, 134, 78, .40);
+  --d-destructive: #ff7a66; --d-destructive-hover: #ff9180; --d-destructive-pressed: #e9654f; --d-on-destructive: #2a0a05;
   --d-bg-window: #1c1c1e;
   --d-bg-content: #232325;
   --d-bg-rgb: 28, 28, 30;
@@ -100,9 +110,9 @@
   --d-separator: rgba(84, 84, 88, .60);
   --d-separator-strong: rgba(84, 84, 88, .90);
   --d-hairline-color: rgba(255, 255, 255, .08);
-  --d-accent: #2ec4a6;
-  --d-accent-strong: #2ec4a6;
-  --d-on-accent: #04201b;
+  --d-accent: #34c79a;
+  --d-accent-strong: #4fd6a9;
+  --d-on-accent: #04251c;
   --d-sidebar-selection: rgba(255, 255, 255, .08);
   --d-selection: rgba(255, 255, 255, .08);
   --d-sys-blue: #0a84ff;
@@ -209,7 +219,12 @@
   --accent: var(--d-accent);
   --accent-strong: var(--d-accent-strong);
   --on-accent: var(--d-on-accent);
-  --accent-hover: color-mix(in srgb, var(--d-accent) 85%, #fff);
+  --accent-hover: #4fd6a9;
+  --tone-success: var(--d-tone-success); --tone-warning: var(--d-tone-warning); --tone-danger: var(--d-tone-danger);
+  --copper: var(--d-copper); --copper-hairline: var(--d-copper-hairline);
+  --destructive: var(--d-destructive); --destructive-hover: var(--d-destructive-hover); --destructive-pressed: var(--d-destructive-pressed); --on-destructive: var(--d-on-destructive);
+  --accent-pressed: #2aa982; --accent-highlight: rgba(255, 255, 255, .28);
+
   --sidebar-selection: var(--d-sidebar-selection);
   --selection: var(--d-selection);
   --sys-blue: var(--d-sys-blue);
@@ -253,7 +268,12 @@
     --accent: var(--d-accent);
     --accent-strong: var(--d-accent-strong);
     --on-accent: var(--d-on-accent);
-    --accent-hover: color-mix(in srgb, var(--d-accent) 85%, #fff);
+    --accent-hover: #4fd6a9;
+  --tone-success: var(--d-tone-success); --tone-warning: var(--d-tone-warning); --tone-danger: var(--d-tone-danger);
+  --copper: var(--d-copper); --copper-hairline: var(--d-copper-hairline);
+  --destructive: var(--d-destructive); --destructive-hover: var(--d-destructive-hover); --destructive-pressed: var(--d-destructive-pressed); --on-destructive: var(--d-on-destructive);
+  --accent-pressed: #2aa982; --accent-highlight: rgba(255, 255, 255, .28);
+
     --sidebar-selection: var(--d-sidebar-selection);
     --selection: var(--d-selection);
     --sys-blue: var(--d-sys-blue);

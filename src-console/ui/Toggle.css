@@ -27,7 +27,7 @@
   background: var(--fill-secondary);
   transition: background-color var(--dur-state) var(--ease-standard);
 }
-.ui-toggle[data-checked] .ui-toggle__track { background: var(--accent-strong); }
+.ui-toggle[data-checked] .ui-toggle__track { background: var(--accent); }
 
 .ui-toggle__thumb {
   position: absolute;

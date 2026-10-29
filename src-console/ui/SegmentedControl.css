@@ -34,6 +34,6 @@
   transition: background-color var(--dur-state) var(--ease-standard), color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-state) var(--ease-standard);
 }
 .ui-segmented__segment:hover:not([data-checked]) { color: var(--label); }
-.ui-segmented__segment[data-checked] { background: var(--bg-content); color: var(--label); box-shadow: var(--elev-1); }
+.ui-segmented__segment[data-checked] { background: var(--bg-content); color: var(--accent-strong); box-shadow: var(--elev-1), inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent); }
 .ui-segmented__segment:focus-visible { outline: var(--space-0_5) solid var(--focus-ring); outline-offset: 0; }
 .ui-segmented__icon { width: var(--ui-seg-icon); height: var(--ui-seg-icon); flex: none; }
