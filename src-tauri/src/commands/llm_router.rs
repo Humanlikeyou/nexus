@@ -547,6 +547,12 @@ pub fn clear_llm_usage() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn default_ollama_model_is_gemma4_latest() {
+        assert_eq!(DEFAULT_OLLAMA_MODEL, "gemma4:latest");
+        assert_eq!(RouterConfig::default().ollama_model, "gemma4:latest");
+    }
+
     use super::*;
 
     #[test]

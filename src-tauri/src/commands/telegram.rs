@@ -206,10 +206,12 @@ pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMes
 pub const OUTBOUND_DISABLED_ENV: &str = "NEXUS_OUTBOUND_DISABLED";
 
 pub fn outbound_disabled() -> bool {
-    outbound_disabled_value(std::env::var(OUTBOUND_DISABLED_ENV).ok().as_deref())
+    parse_outbound_disabled(std::env::var(OUTBOUND_DISABLED_ENV).ok().as_deref())
 }
 
-fn outbound_disabled_value(value: Option<&str>) -> bool {
+/// NEXUS_OUTBOUND_DISABLED value → kill switch on? Trimmed, case-insensitive "1", "true" or
+/// "yes"; anything else (including "on") and unset are off.
+pub(crate) fn parse_outbound_disabled(value: Option<&str>) -> bool {
     matches!(
         value.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
         Some("1" | "true" | "yes")
@@ -550,7 +552,28 @@ mod tests {
             select_ollama_model(&names(&["gemma4:12b"])).unwrap(),
             "gemma4:12b"
         );
+        // This Mac's real tags: gemma4:latest wins over other gemma4 tags; the gemma4-12b-uncensored
+        // family is a different model and never counts as gemma4.
+        assert_eq!(
+            select_ollama_model(&names(&[
+                "gemma4:12b-mlx",
+                "gemma4-12b-uncensored:latest",
+                "gemma4:latest"
+            ]))
+            .unwrap(),
+            "gemma4:latest"
+        );
+        assert_eq!(
+            select_ollama_model(&names(&["gemma4-12b-uncensored:latest", "gemma4:12b-mlx"]))
+                .unwrap(),
+            "gemma4:12b-mlx"
+        );
         for other in [
+            &[
+                "gemma4-12b-uncensored:latest",
+                "qwen3.8-uncensored:latest",
+                "local-gemma-agent:latest",
+            ][..],
             &["deepseek-r1:14b"][..],
             &["qwen3.5:latest", "llama3.3"],
             &["gemma4b-other"],
@@ -597,15 +620,33 @@ mod tests {
 mod outbound_tests {
     use super::*;
 
+    /// Pinned semantics (no env access: the pure parser only). Note "on" is OFF today.
     #[test]
     fn outbound_kill_switch_values() {
-        for on in ["1", "true", "TRUE", " yes "] {
-            assert!(outbound_disabled_value(Some(on)), "{on}");
+        let table: &[(Option<&str>, bool)] = &[
+            (Some("1"), true),
+            (Some("true"), true),
+            (Some("TRUE"), true),
+            (Some("True"), true),
+            (Some("yes"), true),
+            (Some("YES"), true),
+            (Some(" 1 "), true),
+            (Some(" yes "), true),
+            (Some("\ttrue\n"), true),
+            (Some("on"), false),
+            (Some(""), false),
+            (Some("   "), false),
+            (Some("0"), false),
+            (Some("false"), false),
+            (Some("no"), false),
+            (Some("off"), false),
+            (Some("2"), false),
+            (Some("y"), false),
+            (None, false),
+        ];
+        for (value, want) in table {
+            assert_eq!(parse_outbound_disabled(*value), *want, "{value:?}");
         }
-        for off in ["", "0", "false", "no", "off"] {
-            assert!(!outbound_disabled_value(Some(off)), "{off}");
-        }
-        assert!(!outbound_disabled_value(None));
     }
 
     #[test]

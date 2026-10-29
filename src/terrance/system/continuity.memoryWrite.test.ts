@@ -56,3 +56,27 @@ describe("postMemoryWrite", () => {
     expect((init.headers as Record<string, string>)["X-Nexus-Secret"]).toBeUndefined();
   });
 });
+
+// 1b6b2f4: content is capped client-side so the ingress (MW Prepare rejects > 8000) accepts it.
+describe("postMemoryWrite 8000-char boundary", () => {
+  const sent = async (content: string) => {
+    const f = respond(200, { ok: true });
+    vi.stubGlobal("fetch", f);
+    await postMemoryWrite(content, "t");
+    const [, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    return JSON.parse(String(init.body)).event.payload.content as string;
+  };
+
+  it("8000 chars are sent whole", async () => {
+    const content = `${"a".repeat(7999)}Z`;
+    expect(MEMORY_WRITE_MAX_CHARS).toBe(8000);
+    expect(await sent(content)).toBe(content);
+  });
+
+  it("8001 chars: the head is kept and the tail cut to 7999 + '…' = 8000", async () => {
+    const out = await sent(`HEAD${"a".repeat(7996)}TAIL`.slice(0, 8001));
+    expect(out).toHaveLength(8000);
+    expect(out.startsWith("HEAD")).toBe(true);
+    expect(out.endsWith("…")).toBe(true);
+  });
+});
