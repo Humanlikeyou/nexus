@@ -39,8 +39,8 @@ describe("weekly prune is not starved by a failing reasoning loop", () => {
       .toEqual({ ok: true, detail: "2 sessions archived, 1 trimmed, 16589 activity entries archived" });
     expect(pruneOutcome({ archived: 0, pruned: 0, consolidatedSummary: null, activityArchived: 0, activityError: "verify failed" }))
       .toEqual({ ok: true, detail: "0 sessions archived, 0 trimmed, activity archive failed (files kept): verify failed" });
-    const partial = "Archived 43 files from 1 months; stopped at 2026-04: archive failed verification; remaining files kept.";
-    expect(pruneOutcome({ archived: 0, pruned: 0, consolidatedSummary: null, activityArchived: 0, activityError: partial }))
+    const partial = "Archived 43 files from 1 month; stopped at 2026-04: archive failed verification; remaining files kept.";
+    expect(pruneOutcome({ archived: 0, pruned: 0, consolidatedSummary: null, activityArchived: 43, activityError: partial }))
       .toEqual({ ok: true, detail: `0 sessions archived, 0 trimmed, activity archive: ${partial}` });
   });
 

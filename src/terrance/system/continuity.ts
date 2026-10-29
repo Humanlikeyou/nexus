@@ -662,6 +662,26 @@ export async function generateEveningIntegration(): Promise<{ sent: boolean; mes
 export const ACTIVITY_KEEP_DAYS = 30;
 export const ACTIVITY_MAX_FILES = 5000;
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/**
+ * Parses archive_activity_log's partial-failure error
+ * ("Archived N files from M months; stopped at YYYY-MM: <raw>; remaining files kept.").
+ * Returns null for any other error. Only numbers, the month and a known-safe reason are kept.
+ */
+export function parsePartialArchive(e: unknown): { files: number; months: number; stoppedAt: string; reason: string } | null {
+  const msg = e instanceof Error ? e.message : String(e);
+  const m = msg.match(/^Archived (\d+) files? from (\d+) months?; stopped at (\d{4}-\d{2}): /);
+  if (!m) return null;
+  const reason = /failed verification/.test(msg) ? "archive failed verification" : "archive write failed";
+  return { files: Number(m[1]), months: Number(m[2]), stoppedAt: m[3], reason };
+}
+
+/** Safe Activity text for a partial archive run, with correct singular/plural. */
+export function partialArchiveMessage(p: { files: number; months: number; stoppedAt: string; reason: string }): string {
+  return `Archived ${plural(p.files, "file")} from ${plural(p.months, "month")}; stopped at ${p.stoppedAt}: ${p.reason}; remaining files kept.`;
+}
+
 export async function pruneMemory(): Promise<{
   archived: number;
   pruned: number;
@@ -743,9 +763,15 @@ export async function pruneMemory(): Promise<{
       activityArchived = report?.archived ?? 0;
     } catch (e) {
       console.error("[prune-memory] activity archive failed (files kept):", e);
-      // The Rust side reports partial progress with an already-safe reason; keep it as is.
-      const msg = e instanceof Error ? e.message : String(e);
-      activityError = msg.startsWith("Archived ") ? msg : jobFailureReason(e, "archive step failed");
+      // Partial progress: earlier months were archived. Rebuild the line from parsed numbers so
+      // raw Rust/I-O text (paths, OS errors) never reaches Activity.
+      const partial = parsePartialArchive(e);
+      if (partial) {
+        activityArchived = partial.files;
+        activityError = partialArchiveMessage(partial);
+      } else {
+        activityError = jobFailureReason(e, "archive step failed");
+      }
     }
 
     // Step 5: Update prune timestamp
