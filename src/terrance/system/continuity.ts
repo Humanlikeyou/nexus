@@ -396,7 +396,21 @@ function formatRelativeTime(ts: number): string {
  * Generates a proactive morning briefing and sends it via Telegram.
  * Covers: goal progress, yesterday's sessions, upcoming schedule, system health.
  */
-export async function generateDailySummary(): Promise<{ sent: boolean; summary: string | null }> {
+/**
+ * Short, safe reason for a failed LLM/delivery step, for Activity. Never echoes the raw
+ * error (it may carry URLs or provider text). Live check 2026-10-29: with compute mode
+ * "gateway" and OpenClaw not installed, every LLM job read just "failed".
+ */
+export function jobFailureReason(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  if (m.includes("NEXUS_OUTBOUND_DISABLED")) return "delivery paused (NEXUS_OUTBOUND_DISABLED)";
+  if (m.startsWith("OpenClaw gateway unreachable")) return "LLM gateway (OpenClaw) unreachable; check compute mode";
+  if (m.startsWith("OpenClaw")) return "LLM gateway error";
+  if (/ollama/i.test(m)) return "local model (Ollama) error";
+  return "generation failed";
+}
+
+export async function generateDailySummary(): Promise<{ sent: boolean; summary: string | null; reason?: string }> {
   try {
     const [ctx, allLogs] = await Promise.all([
       loadContext(),
@@ -458,7 +472,8 @@ export async function generateDailySummary(): Promise<{ sent: boolean; summary: 
       // Delivery failure counts as a job failure (scheduler backs off and retries);
       // the timestamp is not advanced.
       console.error("[daily-summary] Failed to send via Telegram:", telegramErr);
-      return { sent: false, summary };
+      const reason = jobFailureReason(telegramErr);
+      return { sent: false, summary, reason: reason === "generation failed" ? "Telegram delivery failed" : reason };
     }
 
     // Store as a session log
@@ -479,7 +494,7 @@ export async function generateDailySummary(): Promise<{ sent: boolean; summary: 
     return { sent: true, summary };
   } catch (e) {
     console.error("[daily-summary] Error:", e);
-    return { sent: false, summary: null };
+    return { sent: false, summary: null, reason: jobFailureReason(e) };
   }
 }
 
@@ -760,7 +775,7 @@ export function memoryWriteFailure(result: MemoryWriteResult): string | null {
  * Consolidates recent session logs (last 24h) into a single summary
  * and writes it to Letta via the n8n memory.write gateway.
  */
-export async function consolidateRecentSessions(): Promise<{ consolidated: boolean; summary: string | null; stored?: MemoryWriteResult; error?: boolean; skipped?: boolean }> {
+export async function consolidateRecentSessions(): Promise<{ consolidated: boolean; summary: string | null; stored?: MemoryWriteResult; error?: boolean; skipped?: boolean; reason?: string }> {
   try {
     const allLogs = await invoke<import("@/lib/types").SessionLogEntry[]>("list_session_logs");
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
@@ -815,8 +830,8 @@ export async function consolidateRecentSessions(): Promise<{ consolidated: boole
     });
 
     return { consolidated: true, summary: consolidated, stored };
-  } catch {
-    return { consolidated: false, summary: null, error: true };
+  } catch (e) {
+    return { consolidated: false, summary: null, error: true, reason: jobFailureReason(e) };
   }
 }
 

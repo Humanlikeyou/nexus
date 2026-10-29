@@ -307,7 +307,7 @@ async function consolidationJob(): Promise<JobOutcome> {
 
 /** Activity outcome for a consolidation result (a skip is a normal, recorded run). */
 export function consolidationOutcome(result: Awaited<ReturnType<typeof consolidateRecentSessions>>): JobOutcome {
-  if (result.error) return { ok: false, detail: "Consolidation failed" };
+  if (result.error) return { ok: false, detail: result.reason ? `Consolidation failed: ${result.reason}` : "Consolidation failed" };
   if (!result.consolidated) return { ok: true, detail: "skipped: not enough sessions" };
   const failure = result.stored ? memoryWriteFailure(result.stored) : null;
   return failure ? { ok: false, detail: `Consolidated locally; ${failure}` } : { ok: true, detail: "Consolidated recent sessions" };
@@ -382,8 +382,8 @@ async function tick() {
       ...computeNextRuns(ctx, now),
     };
 
-    const sentOutcome = (r: { sent: boolean }): JobOutcome =>
-      r.sent ? { ok: true, detail: "Sent via Telegram" } : { ok: false, detail: "Generation or delivery failed" };
+    const sentOutcome = (r: { sent: boolean; reason?: string }): JobOutcome =>
+      r.sent ? { ok: true, detail: "Sent via Telegram" } : { ok: false, detail: r.reason ? `Not sent: ${r.reason}` : "Generation or delivery failed" };
 
     const jobs: Record<JobId, { label: string; kind: Parameters<typeof activityBus.register>[1]; heavy: boolean; fn: () => Promise<JobOutcome> }> = {
       daily: { label: "Daily Summary", kind: "daily_summary", heavy: true, fn: async () => sentOutcome(await generateDailySummary()) },
