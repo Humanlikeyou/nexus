@@ -20,3 +20,20 @@
 :root[data-reduce-motion="true"] .ui-dialog[open], :root[data-reduce-motion="true"] .ui-dialog::backdrop { animation: none !important; transition: none !important; }
 :root[data-reduce-motion="true"] .wordmark--splash, :root[data-reduce-motion="true"] .splash__subtitle, :root[data-reduce-motion="true"] .ui-dialog[open] { opacity: 1 !important; transform: none !important; }
 :root[data-reduce-motion="true"] .splash[data-fading] { display: none !important; }
+/* Reduced motion also drops blur (Design + QA, Oct 30): a moving backdrop under blurred chrome reads as
+ * motion. Same solid fills as reduced transparency; under [data-vibrancy] the chrome fills stay
+ * transparent (6fe246e) and the native material follows the OS. */
+@media (prefers-reduced-motion: reduce) {
+  main.command-surface > .intelligence-overlay > :is(.nexus-mark, .field-clock), main.command-surface > nav.system-constellation,
+  main.command-surface > .field-footer, .context-inspector, .context-inspector-backdrop, .ui-dialog, .ui-dialog::backdrop { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+  :root:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > :is(.nexus-mark, .field-clock),
+  :root:not([data-vibrancy="true"]) main.command-surface > :is(nav.system-constellation, .field-footer),
+  .context-inspector, .ui-dialog { background: var(--glass-solid) !important; }
+}
+:root[data-reduce-motion="true"] main.command-surface > .intelligence-overlay > :is(.nexus-mark, .field-clock),
+:root[data-reduce-motion="true"] main.command-surface > :is(nav.system-constellation, .field-footer),
+:root[data-reduce-motion="true"] :is(.context-inspector, .context-inspector-backdrop, .ui-dialog),
+:root[data-reduce-motion="true"] .ui-dialog::backdrop { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+:root[data-reduce-motion="true"]:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > :is(.nexus-mark, .field-clock),
+:root[data-reduce-motion="true"]:not([data-vibrancy="true"]) main.command-surface > :is(nav.system-constellation, .field-footer),
+:root[data-reduce-motion="true"] :is(.context-inspector, .ui-dialog) { background: var(--glass-solid) !important; }

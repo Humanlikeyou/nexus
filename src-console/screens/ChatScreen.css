@@ -141,3 +141,8 @@
   .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 :root[data-reduce-transparency="true"] .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* Reduced motion drops blur too (see styles/motion.css). */
+@media (prefers-reduced-motion: reduce) {
+  .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+:root[data-reduce-motion="true"] .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
