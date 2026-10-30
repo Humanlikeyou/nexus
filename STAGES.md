@@ -83,7 +83,7 @@
 
 ---
 
-## Stage 4 — Activation (Complete)
+## Stage 4 — Activation (Complete, except RAG content)
 
 **Objective:** Make it alive.
 
@@ -91,13 +91,15 @@
 - Continuity system (TS + Rust) — `src/terrance/system/continuity.ts` + `src-tauri/src/commands/continuity.rs`
 - session_logs structure — per-session JSON summaries in `memory/session_logs/`
 - memory.write pipeline — posts to n8n ingress webhook
-- RAG operational — Weaviate + Verba
+- RAG infrastructure — Weaviate + Verba up and healthy (compose healthcheck). **The knowledge base is empty**: it has never been ingested, so kb.query returns "knowledge base is empty" until the ingest plan (`stack/kb/INGEST-PLAN.md`) is applied
 - LLM router implemented — local/hybrid/api modes with budget caps
 - Identity prepended to prompts — `config/terrance.identity.md` always injected
-- Automatic memory capture — TelegramChat idle timer (2min, 4+ msgs), silent background save via `summarizeAndStoreSessionSilent()`, cleanup save on unmount
+- Automatic memory capture: `src-console/hooks/useIdleAutoSave.ts` saves after 10 min idle (`IDLE_AUTOSAVE_MS`) via `summarizeAndStoreSessionSilent()`, and also on new chat and on close. The old TelegramChat 2-min timer is gone with the legacy UI
 - Scheduled consolidation — `scheduler.ts` runs every 5min, consolidation every 6h, summarizes last 24h of sessions via LLM router, posts to n8n
 - Autonomous reasoning loops — `runReasoningLoop()` every 12h, goal-driven reflection, pattern recognition, generates proactive briefs, writes to n8n memory
 - Gateway authentication — n8n ingress webhook uses Header Auth (credential `nxIngressSecret1`, header `X-Nexus-Secret`, value synced from `NEXUS_SECRET` by `stack/scripts/n8n_sync_credentials.sh`); client sends the secret from NexusConfig. There is no open mode: requests without a valid header get 403
+
+- Crew read-only access: `terrance/ingress-crew` (kb.query + memory.query only; 401 bad key, 403 other actions) is in the export but **not yet imported** into live n8n
 
 **Result:** The nervous system is alive. It remembers automatically, consolidates on schedule, reasons proactively, and authenticates its communications. It moves on its own.
 
@@ -117,7 +119,7 @@
 **Phase 5B — Self-Diagnosis + Auto-Healing** (COMPLETE)
 - Health check tick every 30min in scheduler
 - New `selfDiagnosis.ts`: checks OpenClaw gateway, n8n Docker, Ollama port
-- Auto-heal: restart OpenClaw (launchctl), restart Docker containers
+- Auto-heal: restart Docker containers, and OpenClaw (launchctl) in `gateway` mode only. Never in local mode (9f0d8b7), and never when OpenClaw isn't installed (`unavailable:`, no dialog)
 - 1h cooldown per service prevents heal spam
 - Telegram alerts for failures that can't be auto-healed
 - New Rust commands: `check_docker_service`, `restart_docker_service`, `check_service_port`
@@ -147,6 +149,15 @@
 *Local model at the time: qwen3.5 (9.7B). OpenClaw primary: MiniMax-M2.5, fallback: ollama/qwen3.5. Since 68f2b49 the router defaults to local Ollama `gemma4:latest`.*
 
 This stage turns Amara from semi-autonomous to fully autonomous.
+
+**OpenClaw leftovers (follow-ups):**
+- CLAUDE.md "OpenClaw Health Check Logic" still describes `check_memory_search()` reading `~/.openclaw/config.json`; the code reads `openclaw.json`
+- `stack/integrations/n8n/openclaw_health_monitor.json` (inactive) and `src/terrance/system/openclawHealth.ts` still post OpenClaw health to n8n
+- Settings still offers compute mode `gateway`, and `scripts/mock-gateway.mjs` mocks OpenClaw
+- `get_openclaw_health` keeps the `status: "offline"` string for not installed; the typed signal is `installed:false`
+- Gallery (`src-console/ui/gallery/Gallery.tsx`) still shows an "OpenClaw gateway" sample row
+- Crews screen can't list tools: crew-service has no tools endpoint and `CrewSnapshot` has no tool data
+- No KB status reaches the UI, so the KB empty/offline/error states have no surface yet
 
 ---
 

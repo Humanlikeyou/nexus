@@ -71,17 +71,22 @@ Output lands in `src-tauri/target/release/bundle/`.
 ## Tests & helper scripts
 
 ```bash
+npm test                    # all gates: check:secrets, tsc, vitest, test:neuro, cargo test
+npm run check:secrets       # secrets gate: tracked .env files and key patterns (prints file:line + pattern only)
+npm run test:unit           # vitest (incl. test/n8n workflow tests; live crew suite runs only with NEXUS_LIVE_CREW=1)
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust unit tests
 npm run test:neuro          # src-console/neuro/*.test.mjs (node --experimental-strip-types --test)
 npm run mock-gateway        # mock OpenClaw gateway (also :partial, :no-ack, :fail)
 npm run outbox-status       # scripts/outbox-status.sh
 ```
 
-CI (`.github/workflows/ci.yml`) uses Node 22 from `.nvmrc`: `npm ci`, `npx tsc --noEmit`, `npm run test:neuro`, `npm run build`; Rust on Linux (`cargo fmt --check`, `cargo clippy`, `cargo test --locked`) and macOS (`cargo build --locked`, `cargo test --locked`). `release.yml` builds a draft macOS release on `v*` tags.
+Crew service tests: `docker build -t crew-base stack/crew-service && docker build -f stack/crew-service/Dockerfile.test --build-arg BASE=crew-base -t crew-test stack/crew-service && docker run --rm --network none crew-test`.
+
+CI (`.github/workflows/ci.yml`) uses Node 22 from `.nvmrc`: `npm ci`, `npm run check:secrets` (its own step), `npx tsc --noEmit`, `npm run test:unit`, `npm run test:neuro`, `npm run build`; a crew job (pytest in the test image, dummy env only); Rust on Linux (`cargo fmt --check`, `cargo clippy`, `cargo test --locked`) and macOS (`cargo build --locked`, `cargo test --locked`). `release.yml` builds a draft macOS release on `v*` tags.
 
 ## Local runtime
 
-- **LLM:** the default is local Ollama with `gemma4:latest` (`ollama pull gemma4`). Set `compute_mode` to `local`, because `gateway` routes LLM jobs to OpenClaw on :18789.
+- **LLM:** the default is local Ollama with `gemma4:latest` (`ollama pull gemma4`). Keep `compute_mode` at `local`. `gateway` routes LLM jobs to OpenClaw on :18789 and falls back to Ollama when OpenClaw isn't installed or reachable. OpenClaw is not required.
 - **QA launches:** `NEXUS_OUTBOUND_DISABLED=1 npm run tauri -- dev` (also `true`/`yes`) blocks Telegram sends and outbox delivery for that session. Without it, a launch with `telegram_chat_id` configured sends real messages.
 - **Outbox:** pending items older than 24h are marked `expired` and are never sent.
 

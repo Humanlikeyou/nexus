@@ -1,6 +1,6 @@
 # Nexus — Project Brief for Claude Coders
 
-> **Central Goal**: Nexus is a local, private command center — a Tauri 2 desktop app combining Amara (AI agent runtime + OpenClaw gateway), neuro sessions (Muse EEG), health signals (read-only from NOOP), business/ARM data, and goals, with n8n automation behind it.
+> **Central Goal**: Nexus is a local, private command center — a Tauri 2 desktop app combining Amara (AI agent runtime; local Ollama by default, OpenClaw gateway optional), neuro sessions (Muse EEG), health signals (read-only from NOOP), business/ARM data, and goals, with n8n automation behind it.
 
 > **Naming (Decision 13, ec12efa / de94dfa):** the user-facing app is **Amara OS** (`productName`), the window and page title is "Amara OS — Command Center", and the assistant is **Amara**. Internal ids are unchanged: repo/npm/Cargo `nexus`, `nexus_lib`, `com.taisun.nexus`, Tauri command names, `terrance*` module ids, tables and file names.
 
@@ -53,7 +53,7 @@ There is **no Whoop integration** any more: `whoop.rs`, `useWhoop*`, `src/lib/wh
 | Rust backend | Tauri commands, `tokio`, `reqwest`, `rusqlite`, `dirs`, `serde_json` |
 | Automation | n8n (self-hosted, Docker stack) |
 | LLM | Local Ollama, default `gemma4:latest` (`mode: "local"`) |
-| AI gateway | OpenClaw (Node.js, port 18789, LaunchAgent) |
+| AI gateway | OpenClaw (Node.js, port 18789), **optional**: used only in compute mode `gateway`. Not used in local mode, and Nexus works without it installed |
 | Biometrics | Muse EEG via BLE; health via NOOP (read-only SQLite) |
 | Agents | CrewAI service (`stack/crew-service`, Docker, 127.0.0.1:8400, local Ollama gemma4) via `crew.rs`; UI in Chat & Agents › Crews |
 | Trading | ARM system via local HTTP |
@@ -91,13 +91,14 @@ npm run outbox-status
 - **`suppressed` status** (8041224): an activity outcome meaning "deliberately not sent" (for example a ritual refused by the `NEXUS_OUTBOUND_DISABLED` kill switch). It is neutral, neither success nor failure, and shows as "Suppressed" in Activity. `terrence_automations.rs` also uses `suppressed` as a run and delivery status.
 - **Outbox expiry** (46fa421): pending outbox items older than `OUTBOX_EXPIRY_HOURS = 24` are marked `expired`. They are kept, never sent and not deleted, and the delivery card shows "Expired".
 - **Activity-log retention** (6a076f8, be271f5): `archive_activity_log` keeps 30 days (`ACTIVITY_KEEP_DAYS`) as files, capped at 5000 files (`ACTIVITY_MAX_FILES`). Older entries move into `activity_log/archive/YYYY-MM.jsonl.gz` (UTC month). Each archive is written via a temp file and verified before the sources are removed, and unparsable files are left in place. It runs from `pruneMemory()` in the prune job (every 7 days) and failures are non-fatal. `list_activity_entries` reads only the newest files.
+- **OpenClaw is optional** (71bf687, 0a23bcd, 4c55ba7, 514de9b, 95bd46a, da68b7d). In local mode the router never calls it, and Auto-Heal never restarts it (9f0d8b7). In `gateway` mode Auto-Heal can still propose a restart, behind the approval dialog. When OpenClaw isn't installed (no plist or binary: nothing is spawned; plist present but no launchd job: still not installed), `read_openclaw_status` returns `not_installed`, `get_openclaw_health` returns `installed:false`, and `restart_services`/`restart_openclaw` return `unavailable: openclaw not installed` with no dialog. The `gateway` route falls back to local Ollama (if that also fails: `unavailable: openclaw not installed`), and `pack_it_up` records `openclaw not installed` in `skipped`. The UI shows a neutral "Assistant" badge on Home and Chat only while the gateway is reachable, and `jobFailureReason` maps OpenClaw errors to "Assistant backend not reachable".
 - **Prune fix** (c90435a, be271f5): from 2026-07-06 the weekly prune never ran. `runReasoningLoop` swallowed errors, so reasoning logged "Skipped" with no backoff and held the single heavy-job slot every tick. Reasoning and prune failures now count as failures with backoff and a reason (`scheduler.pruneStarvation.test.ts`). The first prune after launch archives about 16.6k old activity files.
 
 ## Services & Infrastructure
 
 | Service | Location | Notes |
 |---------|----------|-------|
-| OpenClaw AI gateway | `127.0.0.1:18789` | LaunchAgent `ai.openclaw.gateway`, module at `/opt/homebrew/lib/node_modules/openclaw/openclaw.mjs` |
+| OpenClaw AI gateway (optional) | `127.0.0.1:18789` | Gateway mode only. Installed = LaunchAgent plist `~/Library/LaunchAgents/ai.openclaw.gateway.plist` + binary (`/opt/homebrew/bin/openclaw` or `/usr/local/bin/openclaw`) + a loaded launchd job. On this Mac it is currently shut down (job not loaded), so status reads `not_installed` |
 | n8n automation | Docker: `stack-n8n-1` | Backed by `stack-postgres-1`, db `n8n_db`, user `terrance` |
 | Postgres | Docker: `stack-postgres-1` | `psql -U terrance -d n8n_db` |
 | Amara integrations | `stack/integrations/` (in this repo) | n8n workflow JSON files in `stack/integrations/n8n/` |
@@ -125,7 +126,11 @@ This was needed because `openclaw memory status --deep` downloads the model but 
 ### terrance_ingress_workflow.json
 - General Amara AI agent ingress workflow
 - **Live workflow ID**: `eYdwlwZKTMV89z2J` ("Terrance Ingress Gateway"), the only active workflow (checked 2026-10-30 with `n8n list:workflow --active=true`). `sMtd9mnMhXid8MQn` and `laKQPqbtCQcWT3XL` share the name but are inactive copies; they are not the live Ingress.
-- **Crew read-only key** (export `stack/n8n/workflows/eYdwlwZKTMV89z2J.json`, not yet imported): a second webhook `terrance/ingress-crew` authenticates `CREW_INGRESS_SECRET` (credential `nxCrewIngress1`, created by `stack/scripts/n8n_sync_credentials.sh`) and routes only `kb.query` and `memory.query`; everything else gets 403. The crew container gets only that key, via `env_file: ./.env.crew` written by `scripts/sync-crew-env.sh` (never `.env` itself). The `kb_query`/`memory_query` tools register only when the key is set and still need `CREW_ALLOWED_TOOLS`.
+- **Crew read-only key** (export `stack/n8n/workflows/eYdwlwZKTMV89z2J.json`, **not yet imported**): a second webhook `terrance/ingress-crew` has no n8n auth, because n8n's Header Auth compares with `!==` and answers 403. Instead its **Crew Auth** Code node compares SHA-256(`X-Nexus-Secret`) with a rendered hash in constant time, then drops the header. A missing or wrong key gets **401**. A valid key may call only `kb.query` (payload reduced to query/labels/document_filter) and `memory.query`; anything else gets **403**. The export holds the placeholder `__CREW_KEY_SHA256__`, which never matches (fail closed). `stack/scripts/n8n_render_crew_auth.sh` writes the importable copy to the git-ignored `stack/n8n/rendered/` (0600): an empty key renders a random hash (revoked), and a key equal to `NEXUS_SECRET` or under 32 bytes is refused. The old `nxCrewIngress1` credential is no longer created.
+- **Crew key file**: `CREW_INGRESS_SECRET` is its own random value in `stack/.env` (not derived from `NEXUS_SECRET`). `scripts/sync-crew-env.sh` copies it alone into `stack/.env.crew` (git-ignored, untracked, umask 077, 0600), which the crew container loads with `env_file` (never `.env`). It refuses a reused or short key, and clearing the key writes an empty one (revoked).
+- **Crew tools**: `stack/crew-service/main.py` keeps a `CrewTool` registry (15s timeout, 4000-char output cap). A tool reaches an agent only if it is both registered and named in `CREW_ALLOWED_TOOLS`; empty means no tools. The live value is `kb_query,memory_query`, and both register only when the crew key is set.
+- **Ingress kb.query errors**: connection refused, DNS failure or timeout returns `ok:false` "knowledge base not running". A Verba 200 with `{error}` returns "knowledge base is empty" (empty-index gRPC error) or "knowledge base query failed". The raw text goes to the n8n log only (`console.error`), never the response.
+- **Verba / knowledge base**: compose healthcheck on `/api/health`; the generator defaults to `OLLAMA_MODEL=gemma4:latest` (the live container still has `qwen3.5` until it is recreated) and embeddings use `nomic-embed-text`. The KB is **empty** (never ingested). The ingest plan is `stack/kb/INGEST-PLAN.md`. `scripts/kb-ingest.sh` defaults to a dry run; `--apply` waits for Taisun's OK.
 
 ---
 
