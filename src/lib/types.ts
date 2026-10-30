@@ -802,6 +802,8 @@ export interface DiagnosticReport {
   issues: DiagnosticIssue[];
   /** False: OpenClaw isn't installed here. Neutral, not an issue, never auto-healed. */
   openclawInstalled?: boolean;
+  /** True: compute_mode is local, so the router never calls OpenClaw. A down gateway is neutral, never auto-healed. */
+  openclawLocalMode?: boolean;
 }
 
 export interface DiagnosticIssue {

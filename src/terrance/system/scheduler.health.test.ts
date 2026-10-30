@@ -112,4 +112,16 @@ describe("health job with OpenClaw not installed", () => {
     expect(done).toContain("All systems healthy");
     expect(done.join(" ")).not.toContain("OpenClaw");
   });
+
+  it("OpenClaw installed but offline in local mode: healthy, with a not-restarted note", async () => {
+    const { done, failed } = await runHealth({ issues: [], openclawInstalled: true, openclawLocalMode: true, openclawGateway: false });
+    expect(done).toContain("All systems healthy; OpenClaw offline, not restarted (local mode)");
+    expect(failed).toEqual([]);
+    expect(m.autoHeal).not.toHaveBeenCalled();
+  });
+
+  it("local mode with the gateway up: no note", async () => {
+    const { done } = await runHealth({ issues: [], openclawInstalled: true, openclawLocalMode: true, openclawGateway: true });
+    expect(done.join(" ")).not.toContain("OpenClaw");
+  });
 });

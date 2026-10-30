@@ -468,7 +468,8 @@ async function tick() {
         fn: async () => {
           const startedAt = Date.now(); // job start: drives the restart deadline and cooldown checks
           const report = await runDiagnostics();
-          const note = report.openclawInstalled === false ? "; OpenClaw not installed (local gemma4 in use)" : "";
+          const note = report.openclawInstalled === false ? "; OpenClaw not installed (local gemma4 in use)"
+            : report.openclawLocalMode && !report.openclawGateway ? "; OpenClaw offline, not restarted (local mode)" : "";
           if (report.issues.length > 0) {
             // "addressed" only when every restart tried was allowed and succeeded.
             const healed = await autoHeal(report, startedAt);

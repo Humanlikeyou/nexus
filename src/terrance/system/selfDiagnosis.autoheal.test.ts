@@ -263,9 +263,10 @@ describe("cooldown resilience", () => {
 // Live check 2026-10-29: OpenClaw isn't installed on this Mac (no listener on 18789, no
 // ai.openclaw.gateway launchd job), yet every health check proposed and failed a restart.
 describe("runDiagnostics: OpenClaw not installed", () => {
-  const health = (h: Record<string, unknown>) => {
+  const health = (h: Record<string, unknown>, cfg: unknown = { compute_mode: "gateway" }) => {
     invoke.mockImplementation(async (cmd: string) => {
       switch (cmd) {
+        case "get_config": return cfg;
         case "get_openclaw_health": return { status: "offline", rpc: false, ...h };
         case "check_docker_service": return "running";
         case "check_service_port": return "open";
@@ -283,12 +284,68 @@ describe("runDiagnostics: OpenClaw not installed", () => {
     expect(calls("restart_services")).toHaveLength(0);
   });
 
-  it("installed but down (or an older backend without the flag) is still a healable issue", async () => {
+  it("installed but down (or an older backend without the flag) is still a healable issue in gateway mode", async () => {
     for (const h of [{ gateway: false, installed: true }, { gateway: false }]) {
       health(h);
       const r = await runDiagnostics();
       expect(r.openclawInstalled).toBe(true);
+      expect(r.openclawLocalMode).toBe(false);
       expect(r.issues).toEqual([expect.objectContaining({ service: "openclaw", status: "down", canAutoHeal: true })]);
     }
+  });
+});
+
+describe("runDiagnostics: local mode skips the OpenClaw restart", () => {
+  const setup = (cfg: () => unknown, openclaw: () => unknown) => {
+    invoke.mockImplementation(async (cmd: string) => {
+      switch (cmd) {
+        case "get_config": return cfg();
+        case "get_openclaw_health": return openclaw();
+        case "check_docker_service": return "running";
+        case "check_service_port": return "open";
+        default: return undefined;
+      }
+    });
+  };
+  const down = () => ({ status: "offline", gateway: false, rpc: false, installed: true });
+
+  it.each([
+    ["compute_mode local", () => ({ compute_mode: "local" })],
+    ["compute_mode unset (router default: local)", () => ({})],
+    ["no config", () => null],
+    ["get_config throws", () => { throw new Error("config unreadable"); }],
+  ])("%s: installed-but-down OpenClaw is no issue and never restarted", async (_label, cfg) => {
+    setup(cfg, down);
+    const r = await runDiagnostics();
+    expect(r.openclawInstalled).toBe(true);
+    expect(r.openclawLocalMode).toBe(true);
+    expect(r.issues).toEqual([]);
+    expect(await autoHeal(r, NOW)).toEqual({ status: "none", actions: [] });
+    expect(calls("restart_services")).toHaveLength(0);
+  });
+
+  it("a failed OpenClaw health check is no issue in local mode", async () => {
+    setup(() => ({ compute_mode: "local" }), () => { throw new Error("health check failed"); });
+    const r = await runDiagnostics();
+    expect(r.issues).toEqual([]);
+    expect(calls("restart_services")).toHaveLength(0);
+  });
+
+  it("n8n is still healed in local mode, without OpenClaw in the batch", async () => {
+    invoke.mockImplementation(async (cmd: string, args: any) => {
+      switch (cmd) {
+        case "get_config": return { compute_mode: "local" };
+        case "get_openclaw_health": return down();
+        case "check_docker_service": return "exited";
+        case "check_service_port": return "open";
+        case "load_kv": return null;
+        case "restart_services": return args.services.map((s: string) => ({ service: s, ok: true, error: null }));
+        default: return undefined;
+      }
+    });
+    const r = await runDiagnostics();
+    expect(r.issues.map((i) => i.service)).toEqual(["n8n"]);
+    await autoHeal(r, NOW);
+    expect(calls("restart_services").map(([, a]) => a.services)).toEqual([["docker:stack-n8n-1"]]);
   });
 });
