@@ -310,7 +310,10 @@ mod crew_url_tests {
         let rest = url.strip_prefix("http://").expect("http scheme");
         let authority = rest.split('/').next().unwrap();
         let (host, port) = authority.rsplit_once(':').expect("explicit port");
-        assert!(matches!(host, "127.0.0.1" | "localhost" | "[::1]"), "host {host} not loopback");
+        assert!(
+            matches!(host, "127.0.0.1" | "localhost" | "[::1]"),
+            "host {host} not loopback"
+        );
         assert_eq!(port, "8400");
         std::env::remove_var("CREW_SERVICE_URL");
     }
