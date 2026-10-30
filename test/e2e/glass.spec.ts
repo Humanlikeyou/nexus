@@ -67,3 +67,22 @@ test("reduced motion: dialog has no transform animation or transition", async ({
     await page.screenshot({ path: `${shots}/focus-${theme}.png` });
   }
 });
+
+test("glass renders with reduced transparency forced off (review shot)", async ({ page, theme }) => {
+  // Playwright's emulateMedia has no reducedTransparency option; force it via CDP (Chromium only).
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "no-preference" }, { name: "prefers-color-scheme", value: theme }] });
+  await openApp(page, { theme, reduceMotion: true });
+  expect(await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches)).toBe(false);
+  await page.keyboard.press("Meta+k");
+  const dialog = page.locator("dialog.ui-dialog[open]").first();
+  await expect(dialog).toBeVisible();
+  const bf = await dialog.evaluate((el) => getComputedStyle(el).backdropFilter);
+  expect(bf).not.toBe("none");
+  const shots = process.env.GLASS_SHOTS;
+  if (shots && theme === "dark") {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.screenshot({ path: `${shots}/home-palette-dark.png` });
+    console.log(`GLASS_BF=${bf}`);
+  }
+});

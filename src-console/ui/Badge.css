@@ -8,7 +8,6 @@
   color: var(--ui-tone-text);
   font: 600 var(--text-badge)/1 var(--font-text);
   letter-spacing: var(--tracking-badge);
-  text-transform: uppercase;
   white-space: nowrap;
 }
 

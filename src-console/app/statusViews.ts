@@ -3,7 +3,7 @@ import type { Tone } from "../ui";
 import { openClawBadge } from "./openclaw";
 
 /** Fixed copy for each knowledge-base state. Backend text (detail, errors) is never shown. */
-export interface KbView { tone: Tone; label: string; body: string; retry: boolean }
+export interface KbView { tone: Tone; label: string; body: string; retry: boolean; title?: string }
 
 export function kbView(kb: KbStatus, unavailable: boolean): KbView {
   if (unavailable) return { tone: "warning", label: "Unavailable", body: "status unavailable", retry: true };
@@ -13,7 +13,7 @@ export function kbView(kb: KbStatus, unavailable: boolean): KbView {
       const parts = [`${docs} ${docs === 1 ? "document" : "documents"}`, kb.model].filter(Boolean);
       return { tone: "success", label: "Ready", body: parts.join(" · "), retry: false };
     }
-    case "empty": return { tone: "neutral", label: "Empty", body: "knowledge base is empty", retry: false };
+    case "empty": return { tone: "neutral", label: "Empty", title: "Knowledge base is empty", body: "Add documents to search them.", retry: false };
     case "not_running": return { tone: "warning", label: "Unavailable", body: "not running", retry: true };
     default: return { tone: "danger", label: "Error", body: "query failed", retry: true };
   }

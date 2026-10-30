@@ -76,8 +76,8 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
               <StatTile label="Avg relaxation" value={selected.summary.avg_relaxation == null ? null : number(selected.summary.avg_relaxation)} />
             </div>
             <div className="sessions__metrics sessions__metrics--beta">
-              <StatTile label={<>Calm <Badge>BETA</Badge></>} value={pct(selected.summary.calm_pct)} unit={selected.summary.calm_pct == null ? undefined : "%"} />
-              <StatTile label={<>Time in target <Badge>BETA</Badge></>} value={pct(selected.summary.time_in_target_pct)} unit={selected.summary.time_in_target_pct == null ? undefined : "%"} />
+              <StatTile label={<>Calm <Badge>Beta</Badge></>} value={pct(selected.summary.calm_pct)} unit={selected.summary.calm_pct == null ? undefined : "%"} />
+              <StatTile label={<>Time in target <Badge>Beta</Badge></>} value={pct(selected.summary.time_in_target_pct)} unit={selected.summary.time_in_target_pct == null ? undefined : "%"} />
             </div>
             <InsetGroup>
               <ListRow title="Session window" value={<><time dateTime={selected.start}>{time(selected.start)}</time> → <time dateTime={selected.end}>{time(selected.end)}</time></>} />

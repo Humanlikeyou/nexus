@@ -358,7 +358,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
       <Card title="Knowledge base" accessory={<Badge tone={kb.tone} aria-label={`Knowledge base status: ${kb.label}`}>{kb.label}</Badge>}>
         {kb.retry
           ? <StatusRetry tone={kb.tone} badge={null} text={`Knowledge base: ${kb.body}`} onRetry={onRetry} />
-          : <InsetGroup><ListRow icon={Library} title="Verba" subtitle={kb.body} /></InsetGroup>}
+          : <InsetGroup><ListRow icon={Library} title={kb.title ?? "Verba"} subtitle={kb.body} /></InsetGroup>}
       </Card>
 
       <Card title="Priorities" accessory={<OpenLink to="chat" label="Open Chat" onNavigate={onNavigate} />}>
@@ -383,7 +383,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
               <div className="home__pair">
                 <StatTile label="Last session" value={Math.round(muse.duration_secs / 60)} unit="min" />
                 {/* Decision 5: sessions saved before calm_pct existed show "—". */}
-                <StatTile label={<>Calm <Badge tone="neutral">BETA</Badge></>} value={muse.summary.calm_pct == null ? null : Math.round(muse.summary.calm_pct)} unit="%" />
+                <StatTile label={<>Calm <Badge tone="neutral">Beta</Badge></>} value={muse.summary.calm_pct == null ? null : Math.round(muse.summary.calm_pct)} unit="%" />
               </div>
             )
             : <p className="home__note"><Brain className="home__inline-icon" aria-hidden="true" /> Your first completed session will appear here.</p>}

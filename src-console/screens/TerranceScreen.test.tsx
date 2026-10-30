@@ -32,8 +32,8 @@ describe("Home (TerranceField)", () => {
     const session = { ...full.sessions[0], summary: { calm_pct: 61.6, time_in_target_pct: 40 } };
     render(<TerranceField data={{ ...full, sessions: [session] }} now={NOW} scheduler={running} />);
     const neuro = screen.getByRole("region", { name: "Neuro" });
-    expect(neuro).toHaveTextContent("Calm BETA62%");
-    expect(within(neuro).getByText("BETA")).toBeInTheDocument();
+    expect(neuro).toHaveTextContent("Calm Beta62%");
+    expect(within(neuro).getByText("Beta")).toBeInTheDocument();
   });
 
   it("loading: skeleton cards, heading, no dashes", () => {
@@ -66,8 +66,8 @@ describe("Home (TerranceField)", () => {
     const neuro = screen.getByRole("region", { name: "Neuro" });
     expect(neuro).toHaveTextContent("Last session20min");
     // A session saved before calm_pct existed: Calm shows "—" + BETA (Decision 5).
-    expect(neuro).toHaveTextContent("Calm BETA—");
-    expect(within(neuro).getByText("BETA")).toBeInTheDocument();
+    expect(neuro).toHaveTextContent("Calm Beta—");
+    expect(within(neuro).getByText("Beta")).toBeInTheDocument();
     // Recovery band word is colored by band; header status is sentence-case text, not a badge.
     expect(screen.getByText("High")).toHaveAttribute("data-band", "high");
     // Every linkable card uses the same "Open ›" header accessory; no in-body buttons.
@@ -259,9 +259,10 @@ describe("Home: Knowledge base card", () => {
     expect(within(kbCard()).getByLabelText("Knowledge base status: Ready")).toBeInTheDocument();
     expect(kbCard()).toHaveTextContent("8 documents · nomic-embed-text");
   });
-  it("empty: 'knowledge base is empty', no Retry", () => {
+  it("empty: 'Knowledge base is empty' + help line, no Retry", () => {
     withKb({ state: "empty", model: "nomic-embed-text", docs: 0, detail: "knowledge base is empty" });
-    expect(kbCard()).toHaveTextContent("knowledge base is empty");
+    expect(kbCard()).toHaveTextContent("Knowledge base is empty");
+    expect(kbCard()).toHaveTextContent("Add documents to search them.");
     expect(within(kbCard()).queryByRole("button", { name: "Retry" })).toBeNull();
   });
   it("not running: warning 'not running' with Retry", () => {

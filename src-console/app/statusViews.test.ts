@@ -10,8 +10,8 @@ describe("kbView: fixed copy per state", () => {
     expect(kbView(kb("running", { docs: 8 }), false)).toEqual({ tone: "success", label: "Ready", body: "8 documents · nomic-embed-text", retry: false });
     expect(kbView(kb("running", { docs: 1, model: null }), false).body).toBe("1 document");
   });
-  it("empty: neutral, 'knowledge base is empty'", () => {
-    expect(kbView(kb("empty"), false)).toEqual({ tone: "neutral", label: "Empty", body: "knowledge base is empty", retry: false });
+  it("empty: neutral, 'Knowledge base is empty' + help line", () => {
+    expect(kbView(kb("empty"), false)).toEqual({ tone: "neutral", label: "Empty", title: "Knowledge base is empty", body: "Add documents to search them.", retry: false });
   });
   it("not_running: warning 'not running' with Retry", () => {
     expect(kbView(kb("not_running"), false)).toEqual({ tone: "warning", label: "Unavailable", body: "not running", retry: true });
