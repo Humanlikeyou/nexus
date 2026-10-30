@@ -5,8 +5,9 @@
  *   local   — always Ollama, never calls any external API
  *   hybrid  — Ollama by default; escalates to Anthropic when warranted
  *   api     — always Anthropic (direct HTTP)
- *   gateway — OpenClaw gateway (routes to whatever model is configured there); when
- *             OpenClaw isn't installed or its gateway is unreachable, local Ollama instead
+ *
+ * The former "gateway" (OpenClaw) mode is retired: a saved or passed "gateway" mode, or
+ * force_provider "gateway", is treated as local (Ollama).
  *
  * Usage logging is written to:
  *   ~/Library/Application Support/com.taisun.nexus/llm_usage.json
@@ -30,6 +31,8 @@ pub struct RouterConfig {
 }
 
 pub const DEFAULT_OLLAMA_MODEL: &str = "gemma4:latest";
+/// Retired OpenClaw compute mode; mapped to local Ollama wherever it appears.
+const RETIRED_GATEWAY_MODE: &str = "gateway";
 
 impl Default for RouterConfig {
     fn default() -> Self {
@@ -168,7 +171,13 @@ pub fn decide_provider(
     force_provider: Option<&str>,
     daily_spent: f64,
 ) -> RoutingDecision {
-    // Explicit override always wins
+    // Explicit override always wins (the retired "gateway" provider means local Ollama).
+    if force_provider == Some(RETIRED_GATEWAY_MODE) {
+        return RoutingDecision {
+            provider: "ollama".to_string(),
+            reason: "force_provider=gateway (retired) → local".to_string(),
+        };
+    }
     if let Some(fp) = force_provider {
         return RoutingDecision {
             provider: fp.to_string(),
@@ -187,9 +196,10 @@ pub fn decide_provider(
             reason: "mode=api".to_string(),
         },
 
-        "gateway" => RoutingDecision {
-            provider: "gateway".to_string(),
-            reason: "mode=gateway".to_string(),
+        // Migration: saved configs may still say "gateway" (OpenClaw, retired) → local.
+        RETIRED_GATEWAY_MODE => RoutingDecision {
+            provider: "ollama".to_string(),
+            reason: "mode=gateway (retired) → local".to_string(),
         },
 
         _ => {
@@ -347,97 +357,6 @@ async fn call_anthropic(
     Ok((content.to_string(), prompt_tokens, completion_tokens))
 }
 
-/// Prefix of `call_openclaw`'s transport error: the gateway isn't there (fall back).
-const GATEWAY_UNREACHABLE: &str = "OpenClaw gateway unreachable:";
-
-type ProviderReply = (String, u32, u32, String, String);
-
-/// The "gateway" route. OpenClaw is not the default path: not installed means local
-/// Ollama without trying it, and an unreachable gateway falls back the same way. If
-/// Ollama fails too: `unavailable: openclaw not installed` (or the gateway error when
-/// it is installed). An OpenClaw API error is returned as before.
-async fn via_gateway<O, OF, L, LF>(
-    openclaw_installed: bool,
-    ollama_model: &str,
-    openclaw: O,
-    ollama: L,
-) -> Result<ProviderReply, String>
-where
-    O: FnOnce() -> OF,
-    OF: std::future::Future<Output = Result<(String, u32, u32, String), String>>,
-    L: FnOnce() -> LF,
-    LF: std::future::Future<Output = Result<(String, u32, u32), String>>,
-{
-    let gateway_err = if openclaw_installed {
-        match openclaw().await {
-            Ok((c, p, o, model)) => return Ok((c, p, o, "gateway".to_string(), model)),
-            Err(e) if e.starts_with(GATEWAY_UNREACHABLE) => e,
-            Err(e) => return Err(e),
-        }
-    } else {
-        super::openclaw::NOT_INSTALLED_ERROR.to_string()
-    };
-    eprintln!("[llm_router] OpenClaw unavailable, using local Ollama");
-    match ollama().await {
-        Ok((c, p, o)) => Ok((c, p, o, "ollama".to_string(), ollama_model.to_string())),
-        Err(_) => Err(gateway_err),
-    }
-}
-
-async fn call_openclaw(
-    gateway_url: &str,
-    gateway_token: &str,
-    text: &str,
-    system_prompt: Option<&str>,
-    client: &reqwest::Client,
-) -> Result<(String, u32, u32, String), String> {
-    let url = format!("{}/v1/chat/completions", gateway_url.trim_end_matches('/'));
-
-    let mut messages = Vec::new();
-    if let Some(sys) = system_prompt {
-        messages.push(serde_json::json!({"role": "system", "content": sys}));
-    }
-    messages.push(serde_json::json!({"role": "user", "content": text}));
-
-    let mut req = client
-        .post(&url)
-        .header("content-type", "application/json")
-        .json(&serde_json::json!({
-            "messages": messages,
-            "max_tokens": 4096
-        }))
-        .timeout(std::time::Duration::from_secs(120));
-
-    if !gateway_token.is_empty() {
-        req = req.header("Authorization", format!("Bearer {}", gateway_token));
-    }
-
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("{GATEWAY_UNREACHABLE} {}", e))?;
-
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("OpenClaw parse error: {}", e))?;
-
-    if let Some(err) = body["error"]["message"].as_str() {
-        return Err(format!("OpenClaw: {}", err));
-    }
-
-    let content = body["choices"][0]["message"]["content"]
-        .as_str()
-        .ok_or_else(|| "OpenClaw: no content in response".to_string())?;
-
-    let model = body["model"].as_str().unwrap_or("unknown").to_string();
-
-    let prompt_tokens = body["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
-    let completion_tokens = body["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
-
-    Ok((content.to_string(), prompt_tokens, completion_tokens, model))
-}
-
 // ─── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -447,8 +366,6 @@ pub async fn chat_with_router(
     tags: Vec<String>,
     force_provider: Option<String>,
     anthropic_api_key: Option<String>,
-    gateway_url: Option<String>,
-    gateway_auth_token: Option<String>,
 ) -> Result<RouterResponse, String> {
     let client = reqwest::Client::new();
     let estimated_tokens = estimate_tokens(&text);
@@ -469,17 +386,6 @@ pub async fn chat_with_router(
     // Dispatch to chosen provider
     let (content, prompt_tokens, completion_tokens, actual_provider, actual_model) =
         match decision.provider.as_str() {
-            "gateway" => {
-                let url = gateway_url.as_deref().unwrap_or("http://127.0.0.1:18789");
-                let token = gateway_auth_token.as_deref().unwrap_or("");
-                via_gateway(
-                    super::openclaw::InstallPaths::system().detect().await,
-                    &config.ollama_model,
-                    || call_openclaw(url, token, &text, None, &client),
-                    || call_ollama(&config.ollama_model, &text, &client),
-                )
-                .await?
-            }
             "anthropic" => {
                 let key = anthropic_api_key.as_deref().unwrap_or("");
                 match call_anthropic(&config.anthropic_model, &text, key, &client).await {
@@ -778,63 +684,28 @@ mod tests {
         assert!((cost - 0.0525).abs() < 1e-9, "cost={}", cost);
     }
 
-    #[tokio::test]
-    async fn gateway_without_openclaw_falls_back_to_ollama_without_calling_it() {
-        let reply = via_gateway(
-            false,
-            "gemma4:latest",
-            || async { panic!("OpenClaw must not be called when not installed") },
-            || async { Ok(("hi".to_string(), 1, 2)) },
-        )
-        .await
-        .unwrap();
+    #[test]
+    fn retired_gateway_mode_routes_to_local_ollama() {
+        let tags = vec!["heavy".to_string(), "research".to_string()];
+        let d = decide_provider(&cfg("gateway"), &tags, 1_000_000, None, 0.0);
+        assert_eq!(d.provider, "ollama");
+        assert!(d.reason.contains("retired"));
+    }
+
+    #[test]
+    fn saved_gateway_config_migrates_to_local_and_forced_gateway_is_ollama() {
+        // A config persisted by an older build with mode "gateway" still deserializes and routes local.
+        let saved = r#"{"mode":"gateway","ollama_model":"gemma4:latest","anthropic_model":"claude-haiku-4-5-20251001","token_threshold":8000,"daily_cap_usd":null,"per_task_cap_usd":null,"show_cost_estimate":false}"#;
+        let c: RouterConfig = serde_json::from_str(saved).unwrap();
+        assert_eq!(decide_provider(&c, &[], 10, None, 0.0).provider, "ollama");
+        for mode in ["local", "hybrid", "api", "gateway"] {
+            let d = decide_provider(&cfg(mode), &[], 10, Some("gateway"), 0.0);
+            assert_eq!(d.provider, "ollama", "{mode}");
+        }
+        // Other overrides are unchanged.
         assert_eq!(
-            reply,
-            ("hi".into(), 1, 2, "ollama".into(), "gemma4:latest".into())
+            decide_provider(&cfg("local"), &[], 10, Some("anthropic"), 0.0).provider,
+            "anthropic"
         );
-    }
-
-    #[tokio::test]
-    async fn gateway_without_openclaw_or_ollama_is_unavailable() {
-        let err = via_gateway(
-            false,
-            "gemma4:latest",
-            || async { panic!("not installed") },
-            || async { Err("Ollama unreachable: refused".to_string()) },
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err, "unavailable: openclaw not installed");
-    }
-
-    #[tokio::test]
-    async fn installed_gateway_is_used_and_unreachable_falls_back() {
-        let ok = via_gateway(
-            true,
-            "m",
-            || async { Ok(("g".to_string(), 3, 4, "minimax".to_string())) },
-            || async { panic!("gateway answered") },
-        )
-        .await
-        .unwrap();
-        assert_eq!(ok.3, "gateway");
-        let fell_back = via_gateway(
-            true,
-            "m",
-            || async { Err(format!("{GATEWAY_UNREACHABLE} connection refused")) },
-            || async { Ok(("l".to_string(), 0, 0)) },
-        )
-        .await
-        .unwrap();
-        assert_eq!(fell_back.3, "ollama");
-        let api_err = via_gateway(
-            true,
-            "m",
-            || async { Err("OpenClaw: model overloaded".to_string()) },
-            || async { panic!("API errors don't fall back") },
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(api_err, "OpenClaw: model overloaded");
     }
 }
