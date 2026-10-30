@@ -312,24 +312,29 @@ fn sanitize_version(raw: &str) -> Option<String> {
 
 #[tauri::command]
 pub async fn read_openclaw_status() -> Result<OpenClawStatus, String> {
-    let base = openclaw_dir();
+    Ok(status_at(&openclaw_dir(), &InstallPaths::system(), chrono::Utc::now()).await)
+}
+
+/// Never fails: a missing install is the typed `not_installed` state, not an error.
+async fn status_at(
+    base: &std::path::Path,
+    paths: &InstallPaths,
+    now: chrono::DateTime<chrono::Utc>,
+) -> OpenClawStatus {
     let config = read_json(&base.join("openclaw.json"));
     let heartbeat = read_json(&base.join("memory").join("heartbeat-state.json"));
-    let now = chrono::Utc::now();
 
     // Only probe the (loopback) gateway when the heartbeat alone does not prove liveness.
     let mut status = build_status(config.as_ref(), heartbeat.as_ref(), now, false);
     if !status.online && config.is_some() && loopback_reachable(&status.gateway_url).await {
         status = build_status(config.as_ref(), heartbeat.as_ref(), now, true);
     }
-    // Configured but silent: without a launchd job it is simply not installed here
-    // (neutral), not a dead gateway.
-    if status.status == OpenClawState::Configured
-        && !openclaw_installed(false, openclaw_launchd_job().await)
-    {
+    // Silent and no LaunchAgent plist or binary: simply not installed here (neutral), not a
+    // dead gateway. Decided from files only; nothing is spawned.
+    if !status.online && !paths.installed() {
         status.status = OpenClawState::NotInstalled;
     }
-    Ok(status)
+    status
 }
 
 #[cfg(test)]
@@ -863,6 +868,10 @@ pub fn read_daily_log(date: Option<String>) -> Result<String, String> {
 /// Works on macOS; returns an error string on failure.
 #[tauri::command]
 pub async fn restart_openclaw(app: tauri::AppHandle) -> Result<String, String> {
+    // Not installed: refuse before any dialog or launchctl.
+    if !InstallPaths::system().installed() {
+        return Err(NOT_INSTALLED_ERROR.to_string());
+    }
     let _approval = super::approval_gate::require_approval(
         &app,
         &[super::approval_gate::service_key("openclaw")],
@@ -881,6 +890,9 @@ pub(super) const OPENCLAW_RESTART_OPERATION: &str =
 
 /// The ungated restart. Only call after approval has been obtained.
 pub(super) async fn kickstart_openclaw() -> Result<String, String> {
+    if !InstallPaths::system().installed() {
+        return Err(NOT_INSTALLED_ERROR.to_string());
+    }
     // Resolve the current user UID so we can address the gui/<uid>/ domain.
     let uid_out = tokio::process::Command::new("id")
         .arg("-u")
@@ -1097,29 +1109,44 @@ pub struct OpenClawHealth {
 
 pub(super) const OPENCLAW_LAUNCHD_LABEL: &str = "ai.openclaw.gateway";
 
-/// `Some(true)` if launchd knows the gateway job for this user, `Some(false)` if it
-/// says it doesn't, `None` if launchctl couldn't be asked (treated as installed).
-async fn openclaw_launchd_job() -> Option<bool> {
-    let uid_out = tokio::process::Command::new("id")
-        .arg("-u")
-        .output()
-        .await
-        .ok()?;
-    let uid = parse_uid(&String::from_utf8_lossy(&uid_out.stdout)).ok()?;
-    let out = tokio::process::Command::new("launchctl")
-        .args(["print", &format!("gui/{}/{}", uid, OPENCLAW_LAUNCHD_LABEL)])
-        .output()
-        .await
-        .ok()?;
-    Some(out.status.success())
+/// Returned wherever OpenClaw is asked for but not installed (restart, router).
+pub const NOT_INSTALLED_ERROR: &str = "unavailable: openclaw not installed";
+
+/// Where an OpenClaw install lives. Injectable so tests use temp dirs, never the real ~.
+pub(super) struct InstallPaths {
+    pub plist: PathBuf,
+    pub binaries: Vec<PathBuf>,
 }
 
-/// Not installed only when both signals agree: no listener and launchd reports no job.
-fn openclaw_installed(gateway_listening: bool, launchd_job: Option<bool>) -> bool {
-    gateway_listening || launchd_job != Some(false)
+impl InstallPaths {
+    pub(super) fn system() -> Self {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        InstallPaths {
+            plist: home
+                .join("Library/LaunchAgents")
+                .join(format!("{OPENCLAW_LAUNCHD_LABEL}.plist")),
+            binaries: vec![
+                PathBuf::from("/opt/homebrew/bin/openclaw"),
+                PathBuf::from("/usr/local/bin/openclaw"),
+            ],
+        }
+    }
+
+    /// First binary that exists (a symlink counts only if its target does).
+    pub(super) fn binary(&self) -> Option<&std::path::Path> {
+        self.binaries
+            .iter()
+            .map(PathBuf::as_path)
+            .find(|p| p.exists())
+    }
+
+    /// Installed = LaunchAgent plist and binary both present. Files only: no launchctl.
+    pub(super) fn installed(&self) -> bool {
+        self.plist.is_file() && self.binary().is_some()
+    }
 }
 
-async fn get_openclaw_version() -> Option<String> {
+async fn get_openclaw_version(binary: Option<&std::path::Path>) -> Option<String> {
     // Prefer reading from config metadata (always available, no PATH issues)
     let config_path = openclaw_dir().join("openclaw.json");
     if let Some(ver) = read_json(&config_path).as_ref().and_then(|v| {
@@ -1131,9 +1158,10 @@ async fn get_openclaw_version() -> Option<String> {
         return Some(ver);
     }
     // Fallback to CLI (fixed binary and args; bounded so a hung CLI cannot stall health).
+    // No binary: nothing to run.
     let out = tokio::time::timeout(
         Duration::from_secs(3),
-        tokio::process::Command::new("/opt/homebrew/bin/openclaw")
+        tokio::process::Command::new(binary?)
             .arg("--version")
             .kill_on_drop(true)
             .output(),
@@ -1274,19 +1302,24 @@ fn get_channel_status(config: &Option<serde_json::Value>) -> OpenClawChannels {
 
 #[tauri::command]
 pub async fn get_openclaw_health() -> Result<OpenClawHealth, String> {
+    let paths = InstallPaths::system();
     let base = openclaw_dir();
 
     // Read main config
     let config = read_json(&base.join("openclaw.json"));
 
-    // Port + RPC checks run concurrently to minimise latency
-    let (gateway, rpc) = tokio::join!(check_gateway_port(), probe_gateway_rpc());
+    // Not installed and nothing listening: report it without spawning anything.
+    let gateway = check_gateway_port().await;
+    if !gateway && !paths.installed() {
+        return Ok(not_installed_health(&config));
+    }
+    let rpc = probe_gateway_rpc().await;
 
-    let version = get_openclaw_version().await;
+    let version = get_openclaw_version(paths.binary()).await;
     let memory_search = check_memory_search(&config);
     let channels = get_channel_status(&config);
 
-    let installed = gateway || openclaw_installed(false, openclaw_launchd_job().await);
+    let installed = openclaw_installed(gateway, paths.installed());
 
     let status = if !gateway || !rpc {
         "offline"
@@ -1308,19 +1341,127 @@ pub async fn get_openclaw_health() -> Result<OpenClawHealth, String> {
     })
 }
 
+/// Installed when something listens on the gateway port or the plist and binary exist.
+fn openclaw_installed(gateway_listening: bool, files_present: bool) -> bool {
+    gateway_listening || files_present
+}
+
+fn not_installed_health(config: &Option<serde_json::Value>) -> OpenClawHealth {
+    OpenClawHealth {
+        status: "offline".to_string(),
+        version: None,
+        gateway: false,
+        rpc: false,
+        memory_search: check_memory_search(config),
+        channels: get_channel_status(config),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        installed: false,
+    }
+}
+
 #[cfg(test)]
 mod installed_tests {
     use super::*;
 
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "nexus-openclaw-install-{tag}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn paths_in(dir: &std::path::Path) -> InstallPaths {
+        InstallPaths {
+            plist: dir.join("LaunchAgents/ai.openclaw.gateway.plist"),
+            binaries: vec![dir.join("bin/openclaw")],
+        }
+    }
+
     #[test]
-    fn not_installed_only_without_listener_and_without_launchd_job() {
-        assert!(!openclaw_installed(false, Some(false)));
-        assert!(openclaw_installed(false, Some(true)));
-        assert!(openclaw_installed(true, Some(false)));
-        // launchctl unavailable: assume installed (keeps the old restart behaviour)
-        assert!(openclaw_installed(false, None));
+    fn installed_needs_plist_and_binary() {
+        let dir = tmp("files");
+        let paths = paths_in(&dir);
+        assert!(!paths.installed());
+        fs::create_dir_all(dir.join("LaunchAgents")).unwrap();
+        fs::write(&paths.plist, "<plist/>").unwrap();
+        assert!(!paths.installed(), "plist without binary");
+        fs::create_dir_all(dir.join("bin")).unwrap();
+        fs::write(&paths.binaries[0], "#!/bin/sh").unwrap();
+        assert!(paths.installed());
+        assert_eq!(paths.binary(), Some(paths.binaries[0].as_path()));
+        fs::remove_file(&paths.plist).unwrap();
+        assert!(!paths.installed(), "binary without plist");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn listener_or_files_count_as_installed() {
+        assert!(!openclaw_installed(false, false));
+        assert!(openclaw_installed(true, false));
+        assert!(openclaw_installed(false, true));
         assert_eq!(OPENCLAW_LAUNCHD_LABEL, "ai.openclaw.gateway");
         assert!(OPENCLAW_RESTART_OPERATION.contains(OPENCLAW_LAUNCHD_LABEL));
+        assert!(NOT_INSTALLED_ERROR.starts_with("unavailable:"));
+    }
+
+    #[tokio::test]
+    async fn status_is_not_installed_without_files_never_an_error() {
+        let dir = tmp("status");
+        let now = chrono::Utc::now();
+        // No ~/.openclaw at all.
+        let s = status_at(&dir.join("missing"), &paths_in(&dir), now).await;
+        assert_eq!(s.status, OpenClawState::NotInstalled);
+        assert!(!s.online);
+        // Config present but no plist/binary and nothing on the (closed) port.
+        let base = dir.join(".openclaw");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(
+            base.join("openclaw.json"),
+            r#"{"gateway":{"url":"ws://127.0.0.1:1"}}"#,
+        )
+        .unwrap();
+        let s = status_at(&base, &paths_in(&dir), now).await;
+        assert_eq!(s.status, OpenClawState::NotInstalled);
+        assert_eq!(
+            serde_json::to_value(s.status).unwrap(),
+            serde_json::json!("not_installed")
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn installed_but_silent_keeps_the_existing_states() {
+        let dir = tmp("silent");
+        let paths = paths_in(&dir);
+        fs::create_dir_all(dir.join("LaunchAgents")).unwrap();
+        fs::create_dir_all(dir.join("bin")).unwrap();
+        fs::write(&paths.plist, "<plist/>").unwrap();
+        fs::write(&paths.binaries[0], "#!/bin/sh").unwrap();
+        let now = chrono::Utc::now();
+        let s = status_at(&dir.join("missing"), &paths, now).await;
+        assert_eq!(s.status, OpenClawState::Offline);
+        let base = dir.join(".openclaw");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(
+            base.join("openclaw.json"),
+            r#"{"gateway":{"url":"ws://127.0.0.1:1"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            status_at(&base, &paths, now).await.status,
+            OpenClawState::Configured
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn not_installed_health_is_offline_and_not_installed() {
+        let h = not_installed_health(&None);
+        assert_eq!(h.status, "offline");
+        assert!(!h.installed && !h.gateway && !h.rpc);
+        assert_eq!(h.version, None);
     }
 }
 
