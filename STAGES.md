@@ -150,14 +150,13 @@
 
 This stage turns Amara from semi-autonomous to fully autonomous.
 
-**OpenClaw leftovers (follow-ups):**
-- CLAUDE.md "OpenClaw Health Check Logic" still describes `check_memory_search()` reading `~/.openclaw/config.json`; the code reads `openclaw.json`
-- `stack/integrations/n8n/openclaw_health_monitor.json` (inactive) and `src/terrance/system/openclawHealth.ts` still post OpenClaw health to n8n
-- Settings still offers compute mode `gateway`, and `scripts/mock-gateway.mjs` mocks OpenClaw
-- `get_openclaw_health` keeps the `status: "offline"` string for not installed; the typed signal is `installed:false`
-- Gallery (`src-console/ui/gallery/Gallery.tsx`) still shows an "OpenClaw gateway" sample row
-- Crews screen can't list tools: crew-service has no tools endpoint and `CrewSnapshot` has no tool data
-- No KB status reaches the UI, so the KB empty/offline/error states have no surface yet
+**OpenClaw leftovers (status checked 2026-10-30). Local mode never runs OpenClaw:**
+- [x] CLAUDE.md "OpenClaw Health Check Logic" now says `check_memory_search()` reads `~/.openclaw/openclaw.json`
+- [x] `src/terrance/system/openclawHealth.ts` (`pushHealthToN8n()`) is archived (3154f28); nothing in the app posts OpenClaw health to n8n now
+- [x] Gallery no longer shows an "OpenClaw gateway" sample row (dfa35dc)
+- [x] Not installed is a typed state: `get_openclaw_health` returns `not_installed`; `offline` now means "no config"
+- [ ] `stack/integrations/n8n/openclaw_health_monitor.json` is still in the repo (inactive in n8n). Keep it off, or archive it
+- [ ] The Rust router still supports compute mode `gateway` (OpenClaw on :18789), though the console Settings screen no longer offers it; `scripts/mock-gateway.mjs` (`npm run mock-gateway`) still mocks the gateway for outbox tests
 
 ---
 

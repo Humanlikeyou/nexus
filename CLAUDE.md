@@ -23,7 +23,7 @@ nexus/
 │   └── neuro/                  # fft, training, sessionFinalizer, useMuseTelemetry (+ *.test.mjs)
 ├── src/                        # LEGACY — not type-checked (tsconfig includes only src-console)
 │   ├── context/, hooks/, lib/  # Remaining helpers (neurofeedback, electrode, llm-router, api.ts)
-│   └── terrance/system/        # continuity.ts, rituals.ts, openclawHealth.ts, ...
+│   └── terrance/system/        # continuity.ts, rituals.ts, ... (openclawHealth.ts archived in 3154f28)
 │                               # (App.tsx, main.tsx, components/*, styles/globals.css,
 │                               #  whoop hooks/lib are deleted; empty dirs remain)
 ├── src-tauri/
@@ -105,7 +105,7 @@ npm run outbox-status
 
 ### OpenClaw Health Check Logic (Rust)
 `src-tauri/src/commands/openclaw.rs` — `check_memory_search()`:
-1. Reads `~/.openclaw/config.json` — looks for `modelPath` or `localModel` keys
+1. Reads `~/.openclaw/openclaw.json` — looks for `modelPath` or `localModel` keys
 2. **If absent**, probes `~/.node-llama-cpp/models/` for any `.gguf` file as fallback
 3. Returns `"operational"` if found, `"missing"` if not
 
@@ -118,7 +118,7 @@ This was needed because `openclaw memory status --deep` downloads the model but 
 ### openclaw_health_monitor.json
 - **Location**: `stack/integrations/n8n/openclaw_health_monitor.json`
 - **Workflow ID**: `WxCNKfPXqcn6YY4Q` (the old `tAKyEzsax7BoTM7t` no longer exists in n8n)
-- **Trigger**: Webhook POST from Nexus app (via `pushHealthToN8n()` in `openclawHealth.ts`)
+- **Trigger**: Webhook POST. Its old sender, `pushHealthToN8n()` in `openclawHealth.ts`, is archived (3154f28), so nothing in the app calls this webhook now
 - **Flow**: webhook → extract status → switch (healthy/degraded/offline) → 3 conditional branches → Telegram alert → respond
 - **Telegram credentials**: Bot token and Chat ID are hardcoded in the Code node (real values set Feb 2026)
 - **Status**: Inactive (checked 2026-10-30). Keep it off: the "Send Telegram Alert" Code node calls api.telegram.org directly and ignores `NEXUS_OUTBOUND_DISABLED`.
@@ -299,5 +299,5 @@ const response = await helpers.httpRequest({
 | `src-tauri/src/commands/mod.rs` | Command module declarations |
 | `src-tauri/src/commands/noop.rs` | NOOP health bridge (read-only) |
 | `src-tauri/src/commands/openclaw.rs` | OpenClaw health check logic |
-| `~/.openclaw/config.json` | OpenClaw runtime config |
+| `~/.openclaw/openclaw.json` | OpenClaw runtime config (only in `gateway` mode) |
 | `stack/integrations/n8n/` | n8n workflow JSON files |
