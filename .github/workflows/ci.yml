@@ -9,7 +9,7 @@ on:
 jobs:
   # ── Frontend: type-check, tests, build ───────────────────────────────────
   frontend:
-    name: Frontend (tsc + test:neuro + vite build)
+    name: Frontend (check:secrets + tsc + tests + vite build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,8 +19,13 @@ jobs:
           node-version-file: ".nvmrc" # Node 22 (>=22.6 for --experimental-strip-types)
           cache: "npm"
       - run: npm ci
+      - name: Secrets gate
+        run: npm run check:secrets
       - name: Type check
         run: npx tsc --noEmit
+      # npm test minus cargo test (the rust job runs that with the Tauri system deps).
+      - name: Unit tests
+        run: npm run test:unit
       - name: Neuro tests
         run: npm run test:neuro
       - name: Build
@@ -84,6 +89,31 @@ jobs:
         run: cargo build --locked
       - name: cargo test
         run: cargo test --locked
+
+  # ── Crew service: pytest in a test image built from the crew image ───────
+  crew:
+    name: Crew (pytest in Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build crew base image
+        run: docker build -t crew-base stack/crew-service
+      - name: Build crew test image
+        run: docker build -f stack/crew-service/Dockerfile.test --build-arg BASE=crew-base -t crew-test stack/crew-service
+      # Dummy env only (CREW_ALLOWED_TOOLS from the image); no key: the tests assert none is set.
+      - name: pytest
+        run: docker run --rm --network none crew-test pytest -q -p no:cacheprovider
+      # A fake key generated here (never stack/.env.crew): both read-only tools register.
+      - name: Ingress tools register with a key
+        run: |
+          fake="$(openssl rand -base64 48 | tr '+/' '-_' | tr -d '=')"
+          echo "::add-mask::$fake"
+          docker run --rm --network none -e CREW_INGRESS_SECRET="$fake" crew-test python -c "
+          import main
+          assert sorted(main.TOOL_REGISTRY) == ['kb_query', 'memory_query'], sorted(main.TOOL_REGISTRY)
+          assert main.ALLOWED_TOOLS == frozenset({'kb_query', 'memory_query'}), main.ALLOWED_TOOLS
+          print('kb_query + memory_query registered and allowed')
+          "
 
   # ── E2E: built console in Chromium with mocked Tauri IPC ─────────────────
   e2e:
