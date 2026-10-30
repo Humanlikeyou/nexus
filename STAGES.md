@@ -99,7 +99,7 @@
 - Autonomous reasoning loops — `runReasoningLoop()` every 12h, goal-driven reflection, pattern recognition, generates proactive briefs, writes to n8n memory
 - Gateway authentication — n8n ingress webhook uses Header Auth (credential `nxIngressSecret1`, header `X-Nexus-Secret`, value synced from `NEXUS_SECRET` by `stack/scripts/n8n_sync_credentials.sh`); client sends the secret from NexusConfig. There is no open mode: requests without a valid header get 403
 
-- Crew read-only access: `terrance/ingress-crew` (kb.query + memory.query only; 401 bad key, 403 other actions) is in the export but **not yet imported** into live n8n
+- Crew read-only access: `terrance/ingress-crew` (kb.query + memory.query only) is live in its previous form (bad key → 403 from n8n Header Auth). The constant-time Crew Auth version (bad key → 401) is in the export but **not yet imported**
 
 **Result:** The nervous system is alive. It remembers automatically, consolidates on schedule, reasons proactively, and authenticates its communications. It moves on its own.
 
