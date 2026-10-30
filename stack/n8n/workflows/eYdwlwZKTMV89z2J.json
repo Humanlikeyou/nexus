@@ -1,0 +1,764 @@
+{
+  "id": "eYdwlwZKTMV89z2J",
+  "name": "Terrance Ingress Gateway",
+  "active": true,
+  "nodes": [
+    {
+      "id": "wh-terrance-01",
+      "name": "Ingress Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        80,
+        400
+      ],
+      "webhookId": "terrance-ingress-v1",
+      "parameters": {
+        "path": "terrance/ingress",
+        "responseMode": "responseNode",
+        "httpMethod": "POST",
+        "options": {},
+        "authentication": "headerAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nxIngressSecret1",
+          "name": "Nexus Ingress Secret (X-Nexus-Secret)"
+        }
+      }
+    },
+    {
+      "id": "sw-route-01",
+      "name": "Route by event.type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        300,
+        400
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "c-hp",
+                    "leftValue": "={{ $json.body.event.type }}",
+                    "rightValue": "health.ping",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "c-mw",
+                    "leftValue": "={{ $json.body.event.type }}",
+                    "rightValue": "memory.write",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "c-mq",
+                    "leftValue": "={{ $json.body.event.type }}",
+                    "rightValue": "memory.query",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "c-ki",
+                    "leftValue": "={{ $json.body.event.type }}",
+                    "rightValue": "kb.ingest",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "c-kq",
+                    "leftValue": "={{ $json.body.event.type }}",
+                    "rightValue": "kb.query",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      }
+    },
+    {
+      "id": "cd-health-01",
+      "name": "Handle health.ping",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        140
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst trace_id = body.trace_id ?? 'no-trace-id';\nreturn [{\n  json: {\n    ok: true,\n    trace_id,\n    services: {\n      n8n: 'up',\n      letta: 'http://letta:8283',\n      verba: 'http://verba:8000',\n      weaviate: 'http://weaviate:8080'\n    }\n  }\n}];"
+      }
+    },
+    {
+      "id": "cd-kbingest-01",
+      "name": "Handle kb.ingest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        500
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function kbDown(err) {\n  // Connection refused / DNS miss / timeout: the kb profile (verba) or weaviate isn't running.\n  const code = err && (err.code || (err.cause && err.cause.code));\n  return ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED'].includes(code)\n    || /timeout|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(String(err && err.message));\n}\nfunction safeError(node, status) {\n  // Never forward raw upstream text; only a fixed message and the HTTP status.\n  return { message: node + ' failed', node: node, status: (typeof status === 'number') ? status : null };\n}\nconst body = $input.first().json.body ?? $input.first().json;\nconst trace_id = body.trace_id ?? 'no-trace-id';\nconst NODE = 'kb.ingest';\nconst payload = body.event?.payload ?? {};\nconst WEAVIATE_URL = 'http://weaviate:8080';\nconst OLLAMA_URL = 'http://host.docker.internal:11434';\n\ntry {\n  const content = payload.content || '';\n  const filename = payload.filename || ('ingested-' + Date.now() + '.txt');\n  const labels = payload.labels || [];\n\n  if (!content) {\n    return [{ json: { ok: false, trace_id, error: { message: 'No content provided', node: 'kb.ingest' } } }];\n  }\n\n  // Ensure collections exist\n  const ensureCollection = async function(name) {\n    try {\n      await helpers.httpRequest({ url: WEAVIATE_URL + '/v1/schema/' + name, method: 'GET', json: true });\n    } catch (e) {\n      await helpers.httpRequest({\n        url: WEAVIATE_URL + '/v1/schema',\n        method: 'POST',\n        headers: { 'Content-Type': 'application/json' },\n        body: { class: name },\n        json: true\n      });\n    }\n  };\n  await helpers.httpRequest({ url: WEAVIATE_URL + '/v1/.well-known/ready', method: 'GET', timeout: 5000 });\n  await ensureCollection('VERBA_DOCUMENTS');\n  await ensureCollection('VERBA_Embedding_nomic_embed_text');\n\n  // Chunk content (~250 words per chunk, 50 word overlap)\n  const words = content.split(/\\s+/);\n  const CHUNK_SIZE = 250;\n  const OVERLAP = 50;\n  const chunks = [];\n\n  if (words.length <= CHUNK_SIZE) {\n    chunks.push({ content: content, content_without_overlap: content, start_i: 0, end_i: words.length });\n  } else {\n    for (let i = 0; i < words.length; i += (CHUNK_SIZE - OVERLAP)) {\n      const end = Math.min(i + CHUNK_SIZE, words.length);\n      const overlapStart = (i === 0) ? 0 : i + OVERLAP;\n      chunks.push({\n        content: words.slice(i, end).join(' '),\n        content_without_overlap: words.slice(Math.min(overlapStart, end), end).join(' '),\n        start_i: i,\n        end_i: end\n      });\n      if (end >= words.length) break;\n    }\n  }\n\n  // Get embeddings from Ollama\n  const embeddings = [];\n  for (const chunk of chunks) {\n    const embedRes = await helpers.httpRequest({\n      url: OLLAMA_URL + '/api/embed',\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: { model: 'nomic-embed-text', input: chunk.content },\n      json: true\n    });\n    embeddings.push(embedRes.embeddings[0]);\n  }\n\n  // Create document in VERBA_DOCUMENTS\n  const docMeta = JSON.stringify({ Embedder: 'Ollama', Model: 'nomic-embed-text', Chunker: 'Token', ingested_via: 'kb.ingest' });\n  const docRes = await helpers.httpRequest({\n    url: WEAVIATE_URL + '/v1/objects',\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: {\n      class: 'VERBA_DOCUMENTS',\n      properties: { title: filename, content: content, extension: filename.split('.').pop() || 'txt', fileSize: content.length, labels: labels, source: '', meta: docMeta, metadata: '' }\n    },\n    json: true\n  });\n  const docUuid = docRes.id;\n\n  // Create chunks in VERBA_Embedding_nomic_embed_text\n  const chunkIds = [];\n  for (let i = 0; i < chunks.length; i++) {\n    const chunkRes = await helpers.httpRequest({\n      url: WEAVIATE_URL + '/v1/objects',\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: {\n        class: 'VERBA_Embedding_nomic_embed_text',\n        properties: { content: chunks[i].content, chunk_id: i, doc_uuid: docUuid, title: filename, pca: [0, 0, 0], start_i: chunks[i].start_i, end_i: chunks[i].end_i, content_without_overlap: chunks[i].content_without_overlap, labels: labels },\n        vector: embeddings[i]\n      },\n      json: true\n    });\n    chunkIds.push(chunkRes.id);\n  }\n\n  return [{ json: { ok: true, trace_id, result: { doc_uuid: docUuid, filename: filename, chunks_created: chunkIds.length, chunk_ids: chunkIds } } }];\n} catch (err) {\n  if (kbDown(err)) {\n    return [{ json: { ok: false, trace_id, error: { message: 'knowledge base not running', node: NODE, status: null, hint: 'start it with: docker compose --profile kb up -d' } } }];\n  }\n  return [{ json: { ok: false, trace_id, error: safeError('kb.ingest', err && (err.httpCode ? Number(err.httpCode) : (err.response && err.response.status))) } }];\n}"
+      }
+    },
+    {
+      "id": "cd-kbquery-01",
+      "name": "Handle kb.query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        620
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function kbDown(err) {\n  // Connection refused / DNS miss / timeout: the kb profile (verba) or weaviate isn't running.\n  const code = err && (err.code || (err.cause && err.cause.code));\n  return ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED'].includes(code)\n    || /timeout|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(String(err && err.message));\n}\nfunction safeError(node, status) {\n  // Never forward raw upstream text; only a fixed message and the HTTP status.\n  return { message: node + ' failed', node: node, status: (typeof status === 'number') ? status : null };\n}\nconst body = $input.first().json.body ?? $input.first().json;\nconst trace_id = body.trace_id ?? 'no-trace-id';\nconst NODE = 'kb.query';\nconst payload  = body.event?.payload ?? {};\nconst VERBA_URL    = 'http://verba:8000';\nconst WEAVIATE_URL = 'http://weaviate:8080';\n\ntry {\n  const cs = function(t,v,d,vs) { return {type:t,value:v,description:d||'',values:vs||[]}; };\n  const defaultRAG = {\n    Embedder: {\n      selected: 'Ollama',\n      components: {\n        Ollama: { name: 'Ollama', variables: [], library: [], description: '', type: 'FILE', available: true,\n          config: { Model: cs('dropdown','nomic-embed-text','',['nomic-embed-text']) } }\n      }\n    },\n    Retriever: {\n      selected: 'Advanced',\n      components: {\n        Advanced: { name: 'Advanced', variables: [], library: [], description: '', type: 'FILE', available: true,\n          config: {\n            'Search Mode': cs('dropdown','Hybrid Search','',['Hybrid Search']),\n            'Limit Mode': cs('dropdown','Autocut','',['Autocut','Fixed']),\n            'Limit/Sensitivity': cs('number',1,''),\n            'Chunk Window': cs('number',1,''),\n            'Threshold': cs('number',80,'')\n          }\n        }\n      }\n    }\n  };\n\n  const ragConfig = payload.rag_config || defaultRAG;\n\n  const res = await helpers.httpRequest({\n    url: VERBA_URL + '/api/query',\n    method: 'POST',\n    timeout: 30000,\n    headers: {\n      'Content-Type': 'application/json',\n      'Origin':       'http://verba:8000'\n    },\n    body: {\n      query:          payload.query           || '',\n      RAG:            ragConfig,\n      labels:         payload.labels          || [],\n      documentFilter: payload.document_filter || [],\n      credentials: {\n        deployment: 'Docker',\n        url:        WEAVIATE_URL,\n        key:        ''\n      }\n    },\n    json: true\n  });\n\n  return [{ json: { ok: true, trace_id, result: res } }];\n} catch (err) {\n  if (kbDown(err)) {\n    return [{ json: { ok: false, trace_id, error: { message: 'knowledge base not running', node: NODE, status: null, hint: 'start it with: docker compose --profile kb up -d' } } }];\n  }\n  return [{ json: { ok: false, trace_id, error: safeError('kb.query', err && (err.httpCode ? Number(err.httpCode) : (err.response && err.response.status))) } }];\n}"
+      }
+    },
+    {
+      "id": "cd-unknown-01",
+      "name": "Handle unknown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        740
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst trace_id   = body.trace_id    ?? 'no-trace-id';\nconst event_type = String(body.event?.type ?? 'undefined').slice(0, 64).replace(/[^A-Za-z0-9_.\\-]/g, '?');\n\nreturn [{\n  json: {\n    ok: false,\n    trace_id,\n    error: {\n      message: 'Unknown event.type: \"' + event_type + '\"',\n      node:    'router',\n      details: 'Valid types: health.ping, memory.write, memory.query, kb.ingest, kb.query'\n    }\n  }\n}];"
+      }
+    },
+    {
+      "id": "rp-shared-01",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1960,
+        440
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      }
+    },
+    {
+      "id": "mw-prepare",
+      "name": "MW Prepare",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        200
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const NODE = 'memory.write';\nconst body = $input.first().json.body ?? {};\nconst trace_id = String(body.trace_id ?? 'no-trace-id').slice(0, 64);\nconst payload = (body.event && typeof body.event.payload === 'object' && body.event.payload) || {};\n// Configured agent only; a caller-supplied agent_id must be well-formed AND equal to it.\nconst AGENT_ID = 'agent-9972f1c0-0dd2-4ebc-be75-fba370d1f70b';\nconst ID_RE = /^[A-Za-z0-9_-]+$/;\nconst BLOCKS = ['human', 'persona'];\nfunction bad(msg) { return [{ json: { valid: false, ok: false, trace_id, error: { message: msg, node: NODE } } }]; }\nif (payload.agent_id !== undefined) {\n  if (typeof payload.agent_id !== 'string' || !ID_RE.test(payload.agent_id)) return bad('invalid agent_id');\n  if (payload.agent_id !== AGENT_ID) return bad('agent_id not allowed');\n}\nconst content = payload.content;\nconst mode = payload.mode ?? 'append';\nconst block = payload.block ?? 'human';\nif (typeof content !== 'string' || !content.length) return bad('content must be a non-empty string');\nif (content.length > 8000) return bad('content exceeds 8000 characters');\nif (!['append', 'replace'].includes(mode)) return bad('mode must be append or replace');\nif (typeof block !== 'string' || !ID_RE.test(block) || !BLOCKS.includes(block)) return bad('invalid block');\nconst base = 'http://letta:8283/v1/agents/' + encodeURIComponent(AGENT_ID) + '/core-memory';\nreturn [{ json: { valid: true, trace_id, content, mode, block, get_url: base, patch_url: base + '/blocks/' + encodeURIComponent(block) } }];"
+      }
+    },
+    {
+      "id": "mw-valid",
+      "name": "MW Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        760,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c-valid",
+              "leftValue": "={{ $json.valid === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      }
+    },
+    {
+      "id": "mw-letta-get",
+      "name": "MW Letta GET",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        120
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.get_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "lettaBearerAuth1",
+          "name": "Letta API (Bearer)"
+        }
+      }
+    },
+    {
+      "id": "mw-compose",
+      "name": "MW Compose",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const prep = $('MW Prepare').first().json;\nconst res = $input.first().json;\nif (!(res.statusCode >= 200 && res.statusCode < 300)) {\n  return [{ json: { proceed: false, ok: false, trace_id: prep.trace_id, error: { message: 'memory.write failed', node: 'memory.write', status: res.statusCode ?? null } } }];\n}\nlet value = prep.content;\nif (prep.mode === 'append') {\n  const blocks = (res.body && res.body.blocks) || [];\n  const t = blocks.find((b) => b.label === prep.block);\n  value = (t ? t.value : '') + '\\n' + prep.content;\n}\n// Letta blocks reject values over 20000 chars: keep the newest entries under 15000,\n// dropping the oldest lines first (a single oversized entry keeps its newest tail).\nconst MAX_CHARS = 15000;\nlet trimmed = 0;\nif (value.length > MAX_CHARS) {\n  const lines = value.split('\\n');\n  while (lines.length > 1 && lines.join('\\n').length > MAX_CHARS) { lines.shift(); trimmed++; }\n  value = lines.join('\\n');\n  if (value.length > MAX_CHARS) { value = value.slice(-MAX_CHARS); trimmed++; }\n}\nreturn [{ json: { proceed: true, trace_id: prep.trace_id, patch_url: prep.patch_url, value, trimmed } }];"
+      }
+    },
+    {
+      "id": "mw-proceed",
+      "name": "MW Proceed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c-proceed",
+              "leftValue": "={{ $json.proceed === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      }
+    },
+    {
+      "id": "mw-letta-patch",
+      "name": "MW Letta PATCH",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        60
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $json.patch_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ value: $json.value }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "lettaBearerAuth1",
+          "name": "Letta API (Bearer)"
+        }
+      }
+    },
+    {
+      "id": "mw-format",
+      "name": "MW Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        60
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const prep = $('MW Prepare').first().json;\nconst res = $input.first().json;\nif (!(res.statusCode >= 200 && res.statusCode < 300)) {\n  return [{ json: { ok: false, trace_id: prep.trace_id, error: { message: 'memory.write failed', node: 'memory.write', status: res.statusCode ?? null } } }];\n}\nreturn [{ json: { ok: true, trace_id: prep.trace_id, result: { block: prep.block, mode: prep.mode, value: res.body && res.body.value } } }];"
+      }
+    },
+    {
+      "id": "mq-prepare",
+      "name": "MQ Prepare",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        340
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const NODE = 'memory.query';\nconst body = $input.first().json.body ?? {};\nconst trace_id = String(body.trace_id ?? 'no-trace-id').slice(0, 64);\nconst payload = (body.event && typeof body.event.payload === 'object' && body.event.payload) || {};\n// Configured agent only; a caller-supplied agent_id must be well-formed AND equal to it.\nconst AGENT_ID = 'agent-9972f1c0-0dd2-4ebc-be75-fba370d1f70b';\nconst ID_RE = /^[A-Za-z0-9_-]+$/;\nconst BLOCKS = ['human', 'persona'];\nfunction bad(msg) { return [{ json: { valid: false, ok: false, trace_id, error: { message: msg, node: NODE } } }]; }\nif (payload.agent_id !== undefined) {\n  if (typeof payload.agent_id !== 'string' || !ID_RE.test(payload.agent_id)) return bad('invalid agent_id');\n  if (payload.agent_id !== AGENT_ID) return bad('agent_id not allowed');\n}\nreturn [{ json: { valid: true, trace_id, url: 'http://letta:8283/v1/agents/' + encodeURIComponent(AGENT_ID) + '/core-memory' } }];"
+      }
+    },
+    {
+      "id": "mq-valid",
+      "name": "MQ Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        760,
+        340
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c-valid",
+              "leftValue": "={{ $json.valid === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      }
+    },
+    {
+      "id": "mq-letta-get",
+      "name": "MQ Letta GET",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        320
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "lettaBearerAuth1",
+          "name": "Letta API (Bearer)"
+        }
+      }
+    },
+    {
+      "id": "mq-format",
+      "name": "MQ Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        320
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const prep = $('MQ Prepare').first().json;\nconst res = $input.first().json;\nif (!(res.statusCode >= 200 && res.statusCode < 300)) {\n  return [{ json: { ok: false, trace_id: prep.trace_id, error: { message: 'memory.query failed', node: 'memory.query', status: res.statusCode ?? null } } }];\n}\nreturn [{ json: { ok: true, trace_id: prep.trace_id, result: { blocks: (res.body && res.body.blocks) || [] } } }];"
+      }
+    },
+    {
+      "id": "rw-badreq-01",
+      "name": "Reject Bad Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        960,
+        700
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, trace_id: $json.trace_id, error: $json.error } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Ingress Webhook": {
+      "main": [
+        [
+          {
+            "node": "Route by event.type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by event.type": {
+      "main": [
+        [
+          {
+            "node": "Handle health.ping",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MW Prepare",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MQ Prepare",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle kb.ingest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle kb.query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle unknown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle health.ping": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle kb.ingest": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle kb.query": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle unknown": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MW Prepare": {
+      "main": [
+        [
+          {
+            "node": "MW Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MW Valid?": {
+      "main": [
+        [
+          {
+            "node": "MW Letta GET",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject Bad Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MW Letta GET": {
+      "main": [
+        [
+          {
+            "node": "MW Compose",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MW Compose": {
+      "main": [
+        [
+          {
+            "node": "MW Proceed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MW Proceed?": {
+      "main": [
+        [
+          {
+            "node": "MW Letta PATCH",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MW Letta PATCH": {
+      "main": [
+        [
+          {
+            "node": "MW Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MW Format": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQ Prepare": {
+      "main": [
+        [
+          {
+            "node": "MQ Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQ Valid?": {
+      "main": [
+        [
+          {
+            "node": "MQ Letta GET",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject Bad Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQ Letta GET": {
+      "main": [
+        [
+          {
+            "node": "MQ Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MQ Format": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": null,
+  "staticData": null,
+  "tags": []
+}
