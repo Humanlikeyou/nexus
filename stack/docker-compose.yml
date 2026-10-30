@@ -186,6 +186,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # CREW_INGRESS_SECRET only (read-only Ingress key: kb.query + memory.query), written from .env
+    # by scripts/sync-crew-env.sh. Not .env itself: the crew must never see NEXUS_SECRET.
+    # Missing file = no secret = the kb_query/memory_query tools are not registered.
+    env_file:
+      - path: ./.env.crew
+        required: false
     environment:
       # Bind all interfaces *inside* the container; the host port above is 127.0.0.1-only.
       CREW_SERVICE_HOST: "0.0.0.0"
@@ -195,6 +201,9 @@ services:
       CREW_MAX_CONCURRENT: ${CREW_MAX_CONCURRENT:-2}
       CREW_RUN_TIMEOUT_SECONDS: ${CREW_RUN_TIMEOUT_SECONDS:-900}
       CREW_ALLOWED_NAMES: ${CREW_ALLOWED_NAMES:-}
+      # Tools: allowlist (empty = none) and the read-only Ingress webhook they call
+      CREW_ALLOWED_TOOLS: ${CREW_ALLOWED_TOOLS:-}
+      CREW_INGRESS_URL: ${CREW_INGRESS_URL:-http://n8n:5678/webhook/terrance/ingress-crew}
       # LLM — local Ollama (gemma4) primary; MiniMax optional, only if MINIMAX_API_KEY is set
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.io/anthropic}
