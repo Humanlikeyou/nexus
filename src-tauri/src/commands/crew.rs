@@ -1,15 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_CREW_SERVICE_URL: &str = "http://127.0.0.1:8400";
+/// Loopback-only crew-service base URL (no env override, by design).
+const CREW_SERVICE_URL: &str = "http://127.0.0.1:8400";
 const CREW_TOKEN_HEADER: &str = "X-Crew-Token";
 
-/// Base URL from `CREW_SERVICE_URL`, defaulting to the localhost compose port.
+/// Base URL of the local crew-service. Always loopback.
 fn crew_service_url() -> String {
-    std::env::var("CREW_SERVICE_URL")
-        .ok()
-        .map(|v| v.trim().trim_end_matches('/').to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| DEFAULT_CREW_SERVICE_URL.to_string())
+    CREW_SERVICE_URL.to_string()
 }
 
 const CREW_TOKEN_ENV: &str = "CREW_SERVICE_TOKEN";
@@ -299,5 +296,22 @@ mod tests {
             .unwrap_err()
             .contains("regular file"));
         let _ = fs::remove_dir_all(real.parent().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod crew_url_tests {
+    use super::*;
+
+    #[test]
+    fn crew_service_url_is_loopback_8400() {
+        std::env::set_var("CREW_SERVICE_URL", "http://evil.example.com:9999");
+        let url = crew_service_url();
+        let rest = url.strip_prefix("http://").expect("http scheme");
+        let authority = rest.split('/').next().unwrap();
+        let (host, port) = authority.rsplit_once(':').expect("explicit port");
+        assert!(matches!(host, "127.0.0.1" | "localhost" | "[::1]"), "host {host} not loopback");
+        assert_eq!(port, "8400");
+        std::env::remove_var("CREW_SERVICE_URL");
     }
 }
