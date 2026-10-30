@@ -28,7 +28,7 @@
 .nexus-mark .wordmark-lockup > .wordmark-os,
 .wordmark-lockup > .wordmark-os {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-  font-size: 11px;
+  font-size: var(--text-subheadline);
   font-weight: 500;
   line-height: 1;
   letter-spacing: 0.08em;

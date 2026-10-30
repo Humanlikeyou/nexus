@@ -51,12 +51,12 @@
 .home__strip-item {
   display: inline-flex; align-items: center; height: 28px; padding: 0 var(--space-3);
   border: 0; border-left: 1px solid var(--separator); background: none; cursor: pointer;
-  font: 400 12px/1 var(--font-text); color: var(--label-secondary);
+  font: 400 var(--text-callout)/1 var(--font-text); color: var(--label-secondary);
 }
 .home__strip-item:first-child { padding-left: 0; border-left: 0; }
 .home__strip-item:disabled { cursor: default; }
 .home__strip-item:hover:not(:disabled) .ui-status-dot__label { color: var(--label); }
-.home__strip-item:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 2px; border-radius: 4px; }
+.home__strip-item:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 2px; border-radius: var(--radius-xs); }
 .home__strip .ui-status-dot { gap: 6px; font: inherit; color: inherit; }
 .home__strip .ui-status-dot__dot { width: 6px; height: 6px; box-shadow: none; }
 .home__strip-item[data-live] .ui-status-dot__dot { animation: home-strip-pulse 2.4s ease-in-out infinite; }

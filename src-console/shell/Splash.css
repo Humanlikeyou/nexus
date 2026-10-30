@@ -5,5 +5,5 @@
  * 13px line box top to the caps of "Command Center" (measured on pixels in test/e2e/wordmark.spec.ts). */
 .splash__lockup { display: flex; flex-direction: column; align-items: center; gap: 13px; margin-bottom: 8vh; }
 .wordmark.wordmark--splash, .splash__subtitle { animation: splash-in 600ms cubic-bezier(.2, .8, .2, 1) both; }
-.splash__subtitle { margin: 0; color: var(--label-secondary); font: 400 13px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
+.splash__subtitle { margin: 0; color: var(--label-secondary); font: 400 var(--text-body)/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
 @keyframes splash-in { from { opacity: 0; transform: scale(.98); } to { opacity: 1; transform: none; } }
