@@ -506,6 +506,109 @@
           "responseCode": 400
         }
       }
+    },
+    {
+      "parameters": {
+        "path": "terrance/ingress-crew",
+        "responseMode": "responseNode",
+        "httpMethod": "POST",
+        "options": {},
+        "authentication": "headerAuth"
+      },
+      "name": "Crew Ingress Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        80,
+        1000
+      ],
+      "webhookId": "terrance-ingress-crew-v1",
+      "id": "crew-ingress-webhook",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nxCrewIngress1",
+          "name": "Crew Ingress Secret (X-Nexus-Secret, read-only)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cr-kq",
+                    "leftValue": "={{ $json.body.event.type }}",
+                    "rightValue": "kb.query",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cr-mq",
+                    "leftValue": "={{ $json.body.event.type }}",
+                    "rightValue": "memory.query",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "name": "Crew Route (read-only)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        300,
+        1000
+      ],
+      "id": "crew-route-read-only"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, trace_id: $json.body?.trace_id ?? 'no-trace-id', error: { message: 'Forbidden: the crew key may only call kb.query and memory.query', node: 'crew-router' } } }}",
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "name": "Reject Crew Forbidden",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        560,
+        1160
+      ],
+      "id": "reject-crew-forbidden"
     }
   ],
   "connections": {
@@ -746,6 +849,42 @@
         [
           {
             "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crew Ingress Webhook": {
+      "main": [
+        [
+          {
+            "node": "Crew Route (read-only)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crew Route (read-only)": {
+      "main": [
+        [
+          {
+            "node": "Handle kb.query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MQ Prepare",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject Crew Forbidden",
             "type": "main",
             "index": 0
           }

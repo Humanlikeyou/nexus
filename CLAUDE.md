@@ -125,6 +125,7 @@ This was needed because `openclaw memory status --deep` downloads the model but 
 ### terrance_ingress_workflow.json
 - General Amara AI agent ingress workflow
 - **Live workflow ID**: `eYdwlwZKTMV89z2J` ("Terrance Ingress Gateway"), the only active workflow (checked 2026-10-30 with `n8n list:workflow --active=true`). `sMtd9mnMhXid8MQn` and `laKQPqbtCQcWT3XL` share the name but are inactive copies; they are not the live Ingress.
+- **Crew read-only key** (export `stack/n8n/workflows/eYdwlwZKTMV89z2J.json`, not yet imported): a second webhook `terrance/ingress-crew` authenticates `CREW_INGRESS_SECRET` (credential `nxCrewIngress1`, created by `stack/scripts/n8n_sync_credentials.sh`) and routes only `kb.query` and `memory.query`; everything else gets 403. The crew container gets only that key, via `env_file: ./.env.crew` written by `scripts/sync-crew-env.sh` (never `.env` itself). The `kb_query`/`memory_query` tools register only when the key is set and still need `CREW_ALLOWED_TOOLS`.
 
 ---
 
