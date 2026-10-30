@@ -1,9 +1,10 @@
-import { Bot, Brain, ChevronRight, CircleDollarSign, Cpu, RefreshCw, Sparkles } from "lucide-react";
+import { Bot, Brain, ChevronRight, CircleDollarSign, Cpu, Library, RefreshCw, Sparkles } from "lucide-react";
 import { HermesSubtitle } from "./agentLabels";
 import { useEffect, useState, type ReactNode } from "react";
 import { getSchedulerStatus, type SchedulerStatus } from "@/terrance/system/scheduler";
 import type { ConversationMessage } from "../app/conversation";
 import { ASSISTANT_TITLE, assistantBadge } from "../app/openclaw";
+import { assistantView, kbView } from "../app/statusViews";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import { dateTime, money, time } from "../lib/format";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
@@ -225,6 +226,16 @@ function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }
   );
 }
 
+/** Unavailable + Retry with a tone: fixed copy only, never backend error text. */
+function StatusRetry({ tone, badge, text, onRetry }: { tone: Tone; badge: string | null; text: string; onRetry?: () => void }) {
+  return (
+    <div className="home__unavailable" data-tone={tone} role="status">
+      <p>{badge && <Badge tone={tone}>{badge}</Badge>} {text}</p>
+      {onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
+    </div>
+  );
+}
+
 function OpenLink({ to, label, onNavigate }: { to: ModuleId; label: string; onNavigate?: (id: ModuleId) => void }) {
   if (!onNavigate) return null;
   return <Button variant="plain" size="small" onClick={() => onNavigate(to)} aria-label={label}>Open<ChevronRight className="home__chevron" aria-hidden="true" /></Button>;
@@ -285,7 +296,8 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
   const muse = data.sessions.find((s) => s.device_type === "muse");
   const hermes = data.hermes;
   const hermesOnline = hermes.status === "online";
-  const assistant = assistantBadge(data.openclaw);
+  const assistant = assistantView(data.openclaw, { loading: false, unavailable: down("read_openclaw_status") });
+  const kb = kbView(data.kb, down("kb_status"));
   const nextConsolidation = nextIn(next.consolidation, now);
   const nextReasoning = nextIn(next.reasoning, now);
 
@@ -337,9 +349,16 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
               <ListRow icon={Bot} title="Amara" subtitle={<HermesSubtitle model={hermes.model} />}
                 accessory={<Badge tone={hermesOnline ? "success" : "warning"}>{hermesOnline ? "Online" : hermes.status ? hermes.status.replace(/_/g, " ") : "Offline"}</Badge>}
                 value={hermes.telegramStatus ? `Telegram ${hermes.telegramStatus}` : `Checked ${clock(hermes.checkedAt)}`} />
-              {assistant && <ListRow icon={Cpu} title={ASSISTANT_TITLE} subtitle={assistant.subtitle} accessory={<Badge tone={assistant.tone}>{assistant.label}</Badge>} />}
+              {assistant?.kind === "row" && <ListRow icon={Cpu} title={assistant.title} subtitle={assistant.subtitle} accessory={<Badge tone={assistant.tone} aria-label={`${assistant.title} status: ${assistant.label}`}>{assistant.label}</Badge>} />}
             </InsetGroup>
           )}
+        {assistant?.kind === "unreachable" && <StatusRetry tone="warning" badge="Not reachable" text={assistant.message} onRetry={onRetry} />}
+      </Card>
+
+      <Card title="Knowledge base" accessory={<Badge tone={kb.tone} aria-label={`Knowledge base status: ${kb.label}`}>{kb.label}</Badge>}>
+        {kb.retry
+          ? <StatusRetry tone={kb.tone} badge={null} text={`Knowledge base: ${kb.body}`} onRetry={onRetry} />
+          : <InsetGroup><ListRow icon={Library} title="Verba" subtitle={kb.body} /></InsetGroup>}
       </Card>
 
       <Card title="Priorities" accessory={<OpenLink to="chat" label="Open Chat" onNavigate={onNavigate} />}>

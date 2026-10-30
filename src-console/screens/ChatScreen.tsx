@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEven
 import { HermesSubtitle } from "./agentLabels";
 import { Activity, Bot, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
-import { ASSISTANT_TITLE, assistantBadge } from "../app/openclaw";
+import { assistantView } from "../app/statusViews";
 import { dateTime, time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction } from "../types";
@@ -81,7 +81,7 @@ export function ChatField({
   const loading = (loadingProp ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt) && messages.length === 0;
   const hermes = data.hermes;
   const online = hermes.status === "online";
-  const assistant = assistantBadge(data.openclaw);
+  const assistant = assistantView(data.openclaw, { loading, unavailable: data.unavailableSources.some((s) => s.command === "read_openclaw_status") });
   const actionsUnavailable = data.unavailableSources.some((s) => s.command === "list_terrence_actions");
   const hermesUnavailable = data.unavailableSources.some((s) => s.command === "get_terrence_runtime_health");
 
@@ -96,7 +96,8 @@ export function ChatField({
 
   const agents = [
     { id: "hermes", icon: Bot, title: "Amara", subtitle: hermesUnavailable ? "Status unavailable" : <HermesSubtitle model={hermes.model} />, searchText: hermesUnavailable ? "Status unavailable" : `Hermes Agent ${hermes.model}`, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
-    ...(assistant ? [{ id: "assistant", icon: Workflow, title: ASSISTANT_TITLE, subtitle: assistant.subtitle, searchText: String(assistant.subtitle), tone: assistant.tone, label: assistant.label }] : []),
+    ...(assistant?.kind === "row" ? [{ id: "assistant", icon: Workflow, title: assistant.title, subtitle: assistant.subtitle, searchText: `${assistant.title} ${assistant.subtitle}`, tone: assistant.tone, label: assistant.label }] : []),
+    ...(assistant?.kind === "unreachable" ? [{ id: "assistant", icon: Workflow, title: "Assistant", subtitle: assistant.message, searchText: assistant.message, tone: "warning" as Tone, label: "Not reachable" }] : []),
   ].filter((a) => !query.trim() || `${a.title} ${a.searchText}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   // Keep the newest message in view.
@@ -145,10 +146,16 @@ export function ChatField({
       <aside className="chat-screen__agents" aria-label="Agents and conversations">
         <TextField label="Search agents" hideLabel placeholder="Search" leadingIcon={Search} value={query} onChange={(e) => setQuery(e.target.value)} />
         <InsetGroup title="Agents">
-          {agents.map((a) => <ListRow key={a.id} icon={a.icon} title={a.title} subtitle={a.subtitle} accessory={<Badge tone={a.tone}>{a.label}</Badge>} />)}
+          {agents.map((a) => <ListRow key={a.id} icon={a.icon} title={a.title} subtitle={a.subtitle} accessory={<Badge tone={a.tone} aria-label={`${a.title} status: ${a.label}`}>{a.label}</Badge>} />)}
           {agents.length === 0 && <ListRow title="No matching agents" />}
           {onOpenCrews && <ListRow icon={Users} title="Crews" value={crewsValue(data.crew)} onSelect={onOpenCrews} />}
         </InsetGroup>
+        {assistant?.kind === "unreachable" && onRetrySources && (
+          <div className="chat-screen__unavailable" data-tone="warning" role="status">
+            <p>{assistant.message}</p>
+            <Button variant="secondary" size="small" icon={RotateCcw} onClick={onRetrySources}>Retry</Button>
+          </div>
+        )}
         <InsetGroup title="Conversation" footer="Earlier conversations will be listed here later.">
           <ListRow icon={SquarePen} title="Current" subtitle={startedAt ? `Started ${time(startedAt)}` : "No messages yet"} selected onSelect={() => composerRef.current?.focus()} />
         </InsetGroup>

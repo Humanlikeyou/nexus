@@ -43,14 +43,14 @@ describe("ChatField", () => {
       { id: "a", name: "a", status: "running", agents: [], started_at: null, task: null, result: null },
       { id: "b", name: "b", status: "completed", agents: [], started_at: null, task: null, result: null },
     ];
-    setup({ onOpenCrews, data: { ...loaded, crew: { health: "online", runs } } });
+    setup({ onOpenCrews, data: { ...loaded, crew: { health: "online", runs, tools: [] } } });
     fireEvent.click(screen.getByRole("button", { name: /Crews/ }));
     expect(screen.getByText("1 running")).toBeInTheDocument();
     expect(onOpenCrews).toHaveBeenCalled();
   });
 
   it("agent column: Crews row says Not configured without a token", () => {
-    setup({ onOpenCrews: vi.fn(), data: { ...loaded, crew: { health: "not_configured", runs: [] } } });
+    setup({ onOpenCrews: vi.fn(), data: { ...loaded, crew: { health: "not_configured", runs: [], tools: [] } } });
     expect(screen.getByText("Not configured")).toBeInTheDocument();
   });
 
@@ -87,18 +87,29 @@ describe("ChatField", () => {
     expect(screen.queryByText("Not connected")).not.toBeInTheDocument();
   });
 
-  it.each(["configured", "not_installed", "offline"] as const)("OpenClaw %s (not the active backend): no Assistant row, no OpenClaw label", (status) => {
+  it.each(["not_installed", "offline"] as const)("backend %s (local mode): no assistant row, no OpenClaw label", (status) => {
     setup({ data: { ...loaded, openclaw: { status, online: false, model: "unknown", gateway_url: "ws://127.0.0.1:18789", last_heartbeat: null } } });
     const agents = screen.getByLabelText("Agents and conversations");
     expect(within(agents).queryByText("Assistant")).not.toBeInTheDocument();
     expect(within(agents).queryByText(/OpenClaw|No heartbeat|Not installed/)).not.toBeInTheDocument();
   });
 
-  it("OpenClaw reachable (active backend): neutral Assistant row with its model", () => {
+  it("backend installed but silent: 'Assistant backend not reachable' with Retry (warning)", () => {
+    const props = setup({ onRetrySources: vi.fn(), data: { ...loaded, openclaw: { status: "configured", online: false, model: "unknown", gateway_url: "ws://127.0.0.1:18789", last_heartbeat: null } } });
+    const agents = screen.getByLabelText("Agents and conversations");
+    expect(within(agents).getByLabelText("Assistant status: Not reachable")).toBeInTheDocument();
+    const block = within(agents).getByRole("status");
+    expect(block).toHaveAttribute("data-tone", "warning");
+    fireEvent.click(within(block).getByRole("button", { name: "Retry" }));
+    expect(props.onRetrySources).toHaveBeenCalled();
+    expect(agents.textContent).not.toMatch(/18789|OpenClaw/);
+  });
+
+  it("backend reachable: 'Amara' gateway row with its model and an aria-label", () => {
     setup({ data: { ...loaded, openclaw: { status: "online", online: true, model: "minimax-m2.5", gateway_url: "ws://127.0.0.1:18789", last_heartbeat: null } } });
     const agents = screen.getByLabelText("Agents and conversations");
-    expect(within(agents).getByText("Assistant")).toBeInTheDocument();
     expect(within(agents).getByText("minimax-m2.5")).toBeInTheDocument();
+    expect(within(agents).getAllByLabelText("Amara status: Online").length).toBeGreaterThan(0);
     expect(within(agents).queryByText(/OpenClaw/)).not.toBeInTheDocument();
   });
 

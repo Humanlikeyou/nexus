@@ -4,6 +4,7 @@ import { INITIAL_SNAPSHOT, getCrewStatus, startCrew, stopCrew } from "../bridge"
 import { dateTime, humanize, plainText } from "../lib/format";
 import type { CrewInfo, CrewServiceHealth, SystemSnapshot } from "../types";
 import { Badge, Button, Card, Dialog, InsetGroup, ListRow, TextField, type Tone } from "../ui";
+import { CREW_TOOL_OUTPUT_CAP, CREW_TOOL_TIMEOUT_S } from "../app/statusViews";
 import "./CrewsScreen.css";
 
 /** Same rule as crew-service CrewStartRequest._name. */
@@ -143,6 +144,19 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
         ) : (
           <p className="crews__note">Runs use the local model. At most 2 run at once.</p>
         )}
+      </Card>
+
+      <Card title="Tools">
+        {data.unavailableSources.some((s) => s.command === "crew_tools") ? <Unavailable label="Crew tools" onRetry={onRetry} />
+          : data.crew.tools.length === 0 ? <p className="crews__note">No tools enabled</p>
+            : (
+              <InsetGroup>
+                {data.crew.tools.map((t) => (
+                  <ListRow key={t.name} title={t.name} subtitle={`${CREW_TOOL_TIMEOUT_S} s timeout · ${CREW_TOOL_OUTPUT_CAP}-char output cap`}
+                    accessory={<Badge tone={t.allowed ? "success" : "neutral"} aria-label={`${t.name}: ${t.allowed ? "allowed" : "blocked"}`}>{t.allowed ? "Allowed" : "Blocked"}</Badge>} />
+                ))}
+              </InsetGroup>
+            )}
       </Card>
 
       {health === "online" && (

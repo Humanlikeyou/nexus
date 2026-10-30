@@ -223,14 +223,66 @@ describe("NOOP stale tone on the strip's own 30s tick", () => {
 });
 
 describe("Home: Assistant badge", () => {
-  it("shows the neutral Assistant row and strip text only while the backend is reachable", () => {
-    const on = { ...full, openclaw: { status: "online" as const, online: true, model: "minimax-m2.5", gateway_url: "", last_heartbeat: null } };
+  const oc = (status: "online" | "configured" | "not_installed") => ({ status, online: status === "online", model: "minimax-m2.5", gateway_url: "", last_heartbeat: null });
+  it("backend reachable: an 'Amara' row with an aria-label, strip says connected", () => {
+    const on = { ...full, openclaw: oc("online") };
     render(<TerranceField data={on} now={NOW} scheduler={running} onNavigate={vi.fn()} />);
     const agents = screen.getByRole("region", { name: "Agents" });
-    expect(within(agents).getByText("Assistant")).toBeInTheDocument();
-    expect(within(agents).getAllByText("Online")).toHaveLength(2); // Amara + Assistant
+    expect(within(agents).getByLabelText("Amara status: Online")).toBeInTheDocument();
+    expect(within(agents).getByText("minimax-m2.5")).toBeInTheDocument();
     expect(statusStrip(on, running, NOW)[0].text).toBe("Amara online · Assistant connected");
     expect(document.body.textContent).not.toMatch(/OpenClaw/);
+  });
+  it("status unreadable: neutral 'Assistant' (ambiguous)", () => {
+    render(<TerranceField data={{ ...full, unavailableSources: [{ command: "read_openclaw_status", label: "Assistant backend" }] }} now={NOW} scheduler={running} onNavigate={vi.fn()} />);
+    expect(within(screen.getByRole("region", { name: "Agents" })).getByLabelText("Assistant status: Checking")).toBeInTheDocument();
+  });
+  it("installed but silent: 'Assistant backend not reachable' + Retry (warning), no raw error", () => {
+    const onRetry = vi.fn();
+    render(<TerranceField data={{ ...full, openclaw: oc("configured") }} now={NOW} scheduler={running} onNavigate={vi.fn()} onRetry={onRetry} />);
+    const agents = screen.getByRole("region", { name: "Agents" });
+    const block = within(agents).getByRole("status");
+    expect(block).toHaveTextContent("Assistant backend not reachable");
+    expect(block).toHaveAttribute("data-tone", "warning");
+    fireEvent.click(within(block).getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalled();
+    expect(agents.textContent).not.toMatch(/18789|launchd|OpenClaw/);
+  });
+});
+
+describe("Home: Knowledge base card", () => {
+  const kbCard = () => screen.getByRole("region", { name: "Knowledge base" });
+  const withKb = (kb: SystemSnapshot["kb"], extra: Partial<SystemSnapshot> = {}) =>
+    render(<TerranceField data={{ ...full, kb, ...extra }} now={NOW} scheduler={running} onNavigate={vi.fn()} onRetry={vi.fn()} />);
+  it("ready: document count and model", () => {
+    withKb({ state: "running", model: "nomic-embed-text", docs: 8, detail: null });
+    expect(within(kbCard()).getByLabelText("Knowledge base status: Ready")).toBeInTheDocument();
+    expect(kbCard()).toHaveTextContent("8 documents · nomic-embed-text");
+  });
+  it("empty: 'knowledge base is empty', no Retry", () => {
+    withKb({ state: "empty", model: "nomic-embed-text", docs: 0, detail: "knowledge base is empty" });
+    expect(kbCard()).toHaveTextContent("knowledge base is empty");
+    expect(within(kbCard()).queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+  it("not running: warning 'not running' with Retry", () => {
+    withKb({ state: "not_running", model: null, docs: null, detail: null });
+    expect(within(kbCard()).getByRole("status")).toHaveAttribute("data-tone", "warning");
+    expect(kbCard()).toHaveTextContent("Knowledge base: not running");
+    expect(within(kbCard()).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+  it("error: danger 'query failed'; backend detail is never shown", () => {
+    withKb({ state: "error", model: null, docs: null, detail: "AioRpcError StatusCode.UNKNOWN 172.18.0.4" });
+    expect(within(kbCard()).getByRole("status")).toHaveAttribute("data-tone", "danger");
+    expect(kbCard()).toHaveTextContent("Knowledge base: query failed");
+    expect(kbCard().textContent).not.toMatch(/AioRpcError|StatusCode|172\.18/);
+  });
+  it("kb_status unavailable: warning + Retry", () => {
+    withKb({ state: "running", model: null, docs: 3, detail: null }, { unavailableSources: [{ command: "kb_status", label: "Knowledge base" }] });
+    expect(within(kbCard()).getByLabelText("Knowledge base status: Unavailable")).toBeInTheDocument();
+  });
+  it("loading: Home shows its skeleton, no KB card yet", () => {
+    render(<TerranceField data={{ ...INITIAL_SNAPSHOT }} now={NOW} scheduler={running} onNavigate={vi.fn()} />);
+    expect(screen.queryByRole("region", { name: "Knowledge base" })).toBeNull();
   });
 });
 

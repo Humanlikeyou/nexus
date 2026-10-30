@@ -62,7 +62,7 @@ export function Gallery({ theme }: { theme: "light" | "dark" }) {
         <InsetGroup title="Sources" footer="Selectable rows are buttons; the selected row has aria-current.">
           <ListRow icon={Bluetooth} title="Muse S" subtitle="Connected · 82% battery" value="EEG" onSelect={() => setSource("muse")} selected={source === "muse"} accessory={<ChevronRight aria-hidden="true" />} />
           <ListRow icon={HeartPulse} title="NOOP" subtitle="Read-only health store" value="HRV" onSelect={() => setSource("noop")} selected={source === "noop"} accessory={<ChevronRight aria-hidden="true" />} />
-          <ListRow icon={Wifi} title="OpenClaw gateway" subtitle="127.0.0.1:18789" accessory={<StatusDot tone="success">Online</StatusDot>} />
+          <ListRow icon={Wifi} title="Assistant backend" subtitle="Backend reachable" accessory={<StatusDot tone="success">Online</StatusDot>} />
           <ListRow title="Background sync" accessory={<Toggle aria-label="Background sync" checked={sync} onCheckedChange={setSync} />} />
         </InsetGroup>
 

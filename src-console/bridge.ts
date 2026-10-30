@@ -4,6 +4,8 @@ import type {
   CrewInfo,
   CrewServiceHealth,
   CrewSnapshot,
+  CrewToolInfo,
+  KbStatus,
   ActivityEntry,
   CorrectTerrenceContextItemInput,
   Goal,
@@ -60,9 +62,11 @@ const SOURCE_LABELS: Record<string, string> = {
   read_goals: "Legacy goals",
   get_outbox_status: "Delivery outbox",
   list_activity_entries: "Activity log",
-  read_openclaw_status: "OpenClaw",
+  read_openclaw_status: "Assistant backend",
   crew_health: "Crew service",
   crew_list: "Crew runs",
+  crew_tools: "Crew tools",
+  kb_status: "Knowledge base",
 };
 
 function unavailableSource(command: string): NexusUnavailableSource {
@@ -94,6 +98,7 @@ const EMPTY_NOOP: NoopHealthSnapshot = {
   message: "NOOP health data is not available yet.",
 };
 
+const EMPTY_KB: KbStatus = { state: "not_running", model: null, docs: null, detail: null };
 const EMPTY_OPENCLAW: OpenClawStatus = { status: "offline", online: false, model: "unknown", gateway_url: "", last_heartbeat: null };
 
 /** Keep only the typed fields (defence in depth; the Rust command already returns just these). */
@@ -173,11 +178,12 @@ export const INITIAL_SNAPSHOT: SystemSnapshot = {
   outbox: { gateway_online: false, queue_depth: 0, last_delivered_at: null, last_error: null, total_delivered: 0 },
   activity: [],
   openclaw: EMPTY_OPENCLAW,
-  crew: { health: "offline", runs: [] },
+  crew: { health: "offline", runs: [], tools: [] },
+  kb: EMPTY_KB,
 };
 
 export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
-  const [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw, crewHealth, crewRuns] =
+  const [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw, crewHealth, crewRuns, crewTools, kb] =
     await Promise.all([
       read<HermesRuntimeHealth>("get_terrence_runtime_health", INITIAL_SNAPSHOT.hermes),
       read<TerrenceCapability[]>("list_terrence_capabilities", []),
@@ -202,13 +208,15 @@ export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
       read<OpenClawStatus>("read_openclaw_status", EMPTY_OPENCLAW),
       read<string>("crew_health", "offline"),
       read<CrewInfo[]>("crew_list", []),
+      read<CrewToolInfo[]>("crew_tools", []),
+      read<KbStatus>("kb_status", EMPTY_KB),
     ]);
 
-  const crew = crewSnapshot(crewHealth.value, crewRuns.value);
+  const crew = crewSnapshot(crewHealth.value, crewRuns.value, crewTools.value);
   // crew_list can only succeed when the service is configured and up; its
   // failure is expected (not a broken source) otherwise.
   if (crew.health !== "online") crewRuns.unavailable = null;
-  const reads = [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw, crewHealth, crewRuns];
+  const reads = [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw, crewHealth, crewRuns, crewTools, kb];
 
   return {
     refreshedAt: Date.now(),
@@ -235,13 +243,25 @@ export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
     activity: activity.value,
     openclaw: pickOpenClaw(openclaw.value),
     crew,
+    kb: pickKb(kb.value),
   };
 }
 
 /** crew_health → three UI states; "degraded" (reachable but unhealthy) counts as offline. */
-export function crewSnapshot(health: string, runs: CrewInfo[]): CrewSnapshot {
+export function crewSnapshot(health: string, runs: CrewInfo[], tools: CrewToolInfo[] = []): CrewSnapshot {
   const state: CrewServiceHealth = health === "not_configured" ? "not_configured" : health === "operational" ? "online" : "offline";
-  return { health: state, runs: state === "online" ? runs : [] };
+  const safeTools = Array.isArray(tools)
+    ? tools.filter((t) => t && /^[a-z0-9_]{1,40}$/.test(String(t.name))).map((t) => ({ name: t.name, allowed: t.allowed === true }))
+    : [];
+  return { health: state, runs: state === "online" ? runs : [], tools: safeTools };
+}
+
+/** Only the four known states and plain numbers/model ids reach the UI. */
+export function pickKb(k: Partial<KbStatus> | null | undefined): KbStatus {
+  const state = k?.state === "running" || k?.state === "empty" || k?.state === "not_running" || k?.state === "error" ? k.state : "error";
+  const model = typeof k?.model === "string" && /^[A-Za-z0-9.:_-]{1,64}$/.test(k.model) ? k.model : null;
+  const docs = typeof k?.docs === "number" && Number.isFinite(k.docs) && k.docs >= 0 ? Math.floor(k.docs) : null;
+  return { state, model, docs, detail: null };
 }
 
 export const startCrew = (name: string, task: string) => invoke<CrewInfo>("crew_start", { name, task, agents: null });

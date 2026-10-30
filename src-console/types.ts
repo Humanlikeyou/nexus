@@ -1,3 +1,6 @@
+import type { CrewToolInfo, KbStatus } from "../src/lib/types";
+export type { CrewToolInfo, KbState, KbStatus } from "../src/lib/types";
+
 export type ModuleId = "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings";
 
 export type OpenClawState = "online" | "configured" | "not_installed" | "offline";
@@ -454,6 +457,8 @@ export interface SystemSnapshot {
   openclaw: OpenClawStatus;
   /** CrewAI service (stack/crew-service via crew.rs). */
   crew: CrewSnapshot;
+  /** Knowledge base (Verba + Weaviate) via kb_status. */
+  kb: KbStatus;
 }
 
 /** crew-service run states (crew_runs.status). */
@@ -476,6 +481,8 @@ export type CrewServiceHealth = "not_configured" | "offline" | "online";
 export interface CrewSnapshot {
   health: CrewServiceHealth;
   runs: CrewInfo[];
+  /** crew_tools: the allowlist state of each known tool; [] = none enabled. */
+  tools: CrewToolInfo[];
 }
 
 export interface NexusUnavailableSource {

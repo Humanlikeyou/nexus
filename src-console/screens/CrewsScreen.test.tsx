@@ -9,7 +9,7 @@ import type { CrewInfo, SystemSnapshot } from "../types";
 import { CREW_POLL_MS, CrewsField } from "./CrewsScreen";
 
 const snap = (c: Partial<SystemSnapshot["crew"]>, extra: Partial<SystemSnapshot> = {}): SystemSnapshot => ({
-  ...INITIAL_SNAPSHOT, refreshedAt: INITIAL_SNAPSHOT.refreshedAt + 1, crew: { health: "online", runs: [], ...c }, ...extra,
+  ...INITIAL_SNAPSHOT, refreshedAt: INITIAL_SNAPSHOT.refreshedAt + 1, crew: { health: "online", runs: [], tools: [], ...c }, ...extra,
 });
 const run = (over: Partial<CrewInfo> = {}): CrewInfo => ({
   id: "r1", name: "smoke", status: "completed", agents: ["writer"], started_at: "2026-10-28T13:00:00Z",
@@ -21,10 +21,10 @@ describe("Chat & Agents › Crews", () => {
   afterEach(() => vi.useRealTimers());
 
   it("bridge: crew_health maps to three states; runs only when online", () => {
-    expect(crewSnapshot("not_configured", [run()])).toEqual({ health: "not_configured", runs: [] });
-    expect(crewSnapshot("offline", [run()])).toEqual({ health: "offline", runs: [] });
+    expect(crewSnapshot("not_configured", [run()])).toEqual({ health: "not_configured", runs: [], tools: [] });
+    expect(crewSnapshot("offline", [run()])).toEqual({ health: "offline", runs: [], tools: [] });
     expect(crewSnapshot("degraded", [run()]).health).toBe("offline");
-    expect(crewSnapshot("operational", [run()])).toEqual({ health: "online", runs: [run()] });
+    expect(crewSnapshot("operational", [run()])).toEqual({ health: "online", runs: [run()], tools: [] });
   });
 
   it("loading: heading and status, no form", () => {
@@ -142,3 +142,36 @@ describe("Chat & Agents › Crews", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("too many running crews");
   });
 });
+
+describe("Crews › Tools", () => {
+  const tools = (_root: HTMLElement) => within(screen.getByRole("region", { name: "Tools" }));
+  it("lists each tool as allowed or blocked with its limits", () => {
+    render(<CrewsField data={snap({ tools: [{ name: "kb_query", allowed: true }, { name: "memory_query", allowed: false }] })} />);
+    const t = tools(document.body);
+    expect(t.getByText("kb_query")).toBeInTheDocument();
+    expect(t.getByLabelText("kb_query: allowed")).toHaveTextContent("Allowed");
+    expect(t.getByLabelText("memory_query: blocked")).toHaveTextContent("Blocked");
+    expect(t.getAllByText("15 s timeout · 4000-char output cap")).toHaveLength(2);
+  });
+  it("an empty allowlist: No tools enabled", () => {
+    render(<CrewsField data={snap({ tools: [] })} />);
+    expect(tools(document.body).getByText("No tools enabled")).toBeInTheDocument();
+  });
+  it("crew_tools unavailable: Unavailable + Retry", () => {
+    const onRetry = vi.fn();
+    render(<CrewsField data={snap({}, { unavailableSources: [{ command: "crew_tools", label: "Crew tools" }] })} onRetry={onRetry} />);
+    const t = tools(document.body);
+    expect(t.getByText("Crew tools unavailable")).toBeInTheDocument();
+    fireEvent.click(t.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalled();
+  });
+  it("loading: no tool list yet", () => {
+    render(<CrewsField data={{ ...INITIAL_SNAPSHOT }} />);
+    expect(screen.queryByRole("region", { name: "Tools" })).toBeNull();
+  });
+  it("never renders keys, env values or URLs", () => {
+    render(<CrewsField data={snap({ tools: [{ name: "kb_query", allowed: true }] })} />);
+    expect(screen.getByRole("region", { name: "Tools" }).textContent).not.toMatch(/http|CREW_|SECRET|=/);
+  });
+});
+

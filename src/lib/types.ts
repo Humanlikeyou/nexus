@@ -933,3 +933,18 @@ export interface CrewInfo {
   task: string | null;
   result: string | null;
 }
+
+/** kb_status (src-tauri/src/commands/kb_status.rs). `detail` is fixed backend text; the UI uses its own copy. */
+export type KbState = "running" | "empty" | "not_running" | "error";
+export interface KbStatus {
+  state: KbState;
+  model: string | null;
+  docs: number | null;
+  detail: string | null;
+}
+
+/** crew_tools: CREW_ALLOWED_TOOLS from stack/.env.crew. `[]` = no tools enabled. */
+export interface CrewToolInfo {
+  name: string;
+  allowed: boolean;
+}

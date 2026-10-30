@@ -131,3 +131,7 @@
   .chat-screen { grid-template-columns: var(--agent-list-w, 260px) minmax(0, 1fr); }
   .chat-screen__summary { display: none; }
 }
+
+/* Assistant backend not reachable: Unavailable + Retry (fixed copy, warning tone). */
+.chat-screen__unavailable { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-top: var(--space-2); color: var(--label-secondary); font: var(--type-callout); }
+.chat-screen__unavailable p { margin: 0; }
