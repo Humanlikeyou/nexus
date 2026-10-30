@@ -35,6 +35,23 @@ jobs:
 
       - run: npm ci
 
+      # Notarization needs the App Store Connect key as a FILE (APPLE_API_KEY_PATH). The .p8
+      # contents live in the APPLE_API_PRIVATE_KEY secret; write them to a 0600 temp file and
+      # pass its path. Skipped (unsigned build) while the secret is unset.
+      - name: Write App Store Connect API key
+        env:
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          if [ -z "$APPLE_API_PRIVATE_KEY" ]; then
+            echo "APPLE_API_PRIVATE_KEY not set; building without notarization"
+            exit 0
+          fi
+          umask 077
+          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID:-nexus}.p8"
+          printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key_path"
+          echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -45,7 +62,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
           releaseName: "Nexus v__VERSION__"
@@ -54,3 +71,7 @@ jobs:
           prerelease: false
           args: --target ${{ matrix.target }}
           # No updater yet (no updater artifacts / signing key).
+
+      - name: Remove App Store Connect API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8
