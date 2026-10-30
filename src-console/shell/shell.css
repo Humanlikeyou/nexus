@@ -3,13 +3,24 @@
  * traffic-light inset and vibrancy, 24px footer only when there is live status,
  * 20px content inset. `main.command-surface` outranks the legacy rules in styles.css. */
 
+/* Chrome contrast (Design + QA, Oct 30): secondary text on the toolbar band and sidebar is ≥4.5:1
+ * over a worst-case backdrop (white, black, emerald) with a 78% backing and a stronger label tint. */
 :root {
-  --shell-toolbar-bg: rgba(246, 246, 248, .72);
+  --shell-toolbar-bg: rgba(246, 246, 248, .78);
+  --shell-sidebar-bg: rgba(var(--bg-rgb), .78);
+  --chrome-label-secondary: #48484c;
   --shell-traffic-inset: 78px; /* macOS traffic lights: 12px + 3×14px + 2×8px gaps + 8px */
 }
-:root[data-theme="dark"] { --shell-toolbar-bg: rgba(30, 30, 32, .72); }
+:root[data-theme="dark"] { --shell-toolbar-bg: rgba(30, 30, 32, .78); --shell-sidebar-bg: rgba(30, 30, 32, .78); --chrome-label-secondary: #c7c7cc; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --shell-toolbar-bg: rgba(30, 30, 32, .72); }
+  :root:not([data-theme="light"]) { --shell-toolbar-bg: rgba(30, 30, 32, .78); --shell-sidebar-bg: rgba(30, 30, 32, .78); --chrome-label-secondary: #c7c7cc; }
+}
+main.command-surface > .intelligence-overlay > .nexus-mark,
+main.command-surface > .intelligence-overlay > .field-clock,
+main.command-surface > nav.system-constellation {
+  --label-secondary: var(--chrome-label-secondary);
+  --text-secondary: var(--chrome-label-secondary);
+  --text-tertiary: var(--chrome-label-secondary);
 }
 
 main.command-surface {
@@ -41,7 +52,7 @@ main.command-surface > .intelligence-overlay > .nexus-mark { padding-left: calc(
 main.command-surface > nav.system-constellation {
   position: relative;
   grid-row: 2 / 4;
-  background: var(--material-sidebar, var(--sidebar));
+  background: var(--shell-sidebar-bg);
   -webkit-backdrop-filter: var(--material-blur);
   backdrop-filter: var(--material-blur);
   border-right: var(--hairline, 1px solid var(--separator));

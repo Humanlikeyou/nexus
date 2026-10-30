@@ -50,7 +50,8 @@ test("(w) inactive window: toolbar mark dims to solid bronze, OS stays secondary
   const secondary = await page.evaluate(() => {
     const probe = document.createElement("span");
     probe.style.color = "var(--label-secondary)";
-    document.body.append(probe);
+    // Neutral in the sidebar = the chrome's secondary label (shell.css, stronger over vibrancy).
+    document.querySelector("main.command-surface > nav.system-constellation")!.append(probe);
     const c = getComputedStyle(probe).color;
     probe.remove();
     return c;
