@@ -4,7 +4,7 @@
 # container never sees the rest of .env (NEXUS_SECRET, Telegram, Letta, ...).
 # Never prints the value: output is "written", "unchanged" or "cleared (crew key revoked)".
 #
-# Also writes stack/crew-tools.conf (0600) holding only CREW_ALLOWED_TOOLS (not secret).
+# Also writes crew-tools.conf next to --dest (default stack/crew-tools.conf, 0600) holding only CREW_ALLOWED_TOOLS (not secret).
 # Usage: scripts/sync-crew-env.sh [--env <stack/.env>] [--dest <stack/.env.crew>]
 set -euo pipefail
 umask 077
@@ -65,12 +65,12 @@ case "$tools" in
   *[!a-z0-9_,]*) echo "sync-crew-env: CREW_ALLOWED_TOOLS may only hold tool names [a-z0-9_] and commas" >&2; exit 1 ;;
 esac
 # Non-secret copy of the allowlist for the app's crew_tools (it never opens .env.crew).
-tools_conf="$repo/stack/crew-tools.conf"
+tools_conf="$(dirname "$dest")/crew-tools.conf"
 if [ -L "$tools_conf" ]; then
-  echo "sync-crew-env: refusing to write through a symlink: stack/crew-tools.conf" >&2
+  echo "sync-crew-env: refusing to write through a symlink: crew-tools.conf" >&2
   exit 1
 fi
-tools_tmp="$(mktemp "$repo/stack/.crew-tools.conf.XXXXXX")"
+tools_tmp="$(mktemp "$(dirname "$dest")/.crew-tools.conf.XXXXXX")"
 printf 'CREW_ALLOWED_TOOLS=%s\n' "$tools" > "$tools_tmp"
 chmod 600 "$tools_tmp"
 mv -f "$tools_tmp" "$tools_conf"

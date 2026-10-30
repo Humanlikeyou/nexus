@@ -943,7 +943,7 @@ export interface KbStatus {
   detail: string | null;
 }
 
-/** crew_tools: CREW_ALLOWED_TOOLS from stack/.env.crew. `[]` = no tools enabled. */
+/** crew_tools: CREW_ALLOWED_TOOLS from stack/crew-tools.conf (never .env.crew); one entry per known tool (kb_query, memory_query). `[]` = none enabled or config unavailable. */
 export interface CrewToolInfo {
   name: string;
   allowed: boolean;

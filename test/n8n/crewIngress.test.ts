@@ -299,6 +299,18 @@ describe("sync-crew-env.sh: own 32+ byte key, 0600, revoke on clear", () => {
     expect(bad.out).toContain("CREW_ALLOWED_TOOLS may only hold tool names");
   }));
 
+  it("writes crew-tools.conf next to --dest: only CREW_ALLOWED_TOOLS, mode 0600, no key", () => withTmp((dir) => {
+    const key = randomBytes(48).toString("base64url");
+    expect(syncWith(dir, `NEXUS_SECRET=${NEXUS}\nCREW_INGRESS_SECRET=${key}\nCREW_ALLOWED_TOOLS=kb_query\n`).code).toBe(0);
+    const conf = join(dir, "crew-tools.conf");
+    expect(readFileSync(conf, "utf8")).toBe("CREW_ALLOWED_TOOLS=kb_query\n");
+    expect(statSync(conf).mode & 0o777).toBe(0o600);
+  }));
+
+  it("stack/crew-tools.conf is git-ignored", () => {
+    expect(execFileSync("git", ["check-ignore", "stack/crew-tools.conf"], { cwd: REPO, encoding: "utf8" }).trim()).toBe("stack/crew-tools.conf");
+  });
+
   it("stack/.env.crew is git-ignored and untracked", () => {
     expect(execFileSync("git", ["check-ignore", "stack/.env.crew"], { cwd: REPO, encoding: "utf8" }).trim()).toBe("stack/.env.crew");
     expect(execFileSync("git", ["ls-files", "stack/.env.crew"], { cwd: REPO, encoding: "utf8" })).toBe("");

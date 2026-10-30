@@ -62,6 +62,8 @@ fn loopback_url(port: u16) -> String {
 pub async fn kb_status() -> Result<KbStatus, String> {
     let client = reqwest::Client::builder()
         .timeout(TIMEOUT)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "kb status client failed".to_string())?;
     Ok(kb_status_at(
@@ -187,17 +189,17 @@ fn kind(e: &reqwest::Error) -> &'static str {
 
 // ── Crew tools ──────────────────────────────────────────────────────────────
 
+const CREW_TOOLS_MAX_BYTES: u64 = 4096;
+
 /// `~/projects/nexus/stack` (a Finder-launched app has no repo path of its own).
-fn stack_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("projects/nexus/stack")
+fn stack_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join("projects/nexus/stack"))
 }
 
 #[tauri::command]
 pub fn crew_tools() -> Result<Vec<CrewToolInfo>, String> {
-    let stack = stack_dir();
-    crew_tools_at(&stack, &stack.join(CREW_TOOLS_FILE))
+    let stack = stack_dir().ok_or_else(|| CREW_TOOLS_UNAVAILABLE.to_string())?;
+    crew_tools_at(&stack, &stack.join(CREW_TOOLS_FILE), current_uid())
 }
 
 fn current_uid() -> u32 {
@@ -206,21 +208,24 @@ fn current_uid() -> u32 {
 }
 
 /// Reads `file` (normally `<stack>/crew-tools.conf`, written by scripts/sync-crew-env.sh) and
-/// only its CREW_ALLOWED_TOOLS line. Refuses symlinks, files outside `stack`, files not owned
-/// by this user, and files readable by group/other. Missing file or empty value: no tools.
-/// Errors are fixed text: no paths, no contents.
-fn crew_tools_at(stack: &Path, file: &Path) -> Result<Vec<CrewToolInfo>, String> {
-    use std::os::unix::fs::MetadataExt;
+/// only its CREW_ALLOWED_TOOLS line. The file must sit inside `stack`, is opened once with
+/// O_NOFOLLOW|O_NONBLOCK, and that handle must be a regular file owned by `expected_uid`, with
+/// no group/other bits, and at most 4096 bytes. Missing file or no known tool: `[]`.
+/// Errors are fixed text: no paths, no contents. Never opens `.env.crew`.
+fn crew_tools_at(
+    stack: &Path,
+    file: &Path,
+    expected_uid: u32,
+) -> Result<Vec<CrewToolInfo>, String> {
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
     let unavailable = || CREW_TOOLS_UNAVAILABLE.to_string();
-    let meta = match std::fs::symlink_metadata(file) {
-        Ok(m) => m,
+    match std::fs::symlink_metadata(file) {
+        Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(_) => return Err(unavailable()),
-    };
-    if meta.file_type().is_symlink() || !meta.is_file() {
-        return Err(unavailable());
     }
-    // Canonical location must be inside the (existing) stack dir; path_safety does the check.
+    // Location: the canonical path must be `<canonical stack>/<name>` (path_safety).
     let name = file
         .file_name()
         .and_then(|n| n.to_str())
@@ -229,19 +234,38 @@ fn crew_tools_at(stack: &Path, file: &Path) -> Result<Vec<CrewToolInfo>, String>
         return Err(unavailable());
     }
     let inside = crate::commands::path_safety::safe_join(stack, name).map_err(|_| unavailable())?;
-    let canon = file.canonicalize().map_err(|_| unavailable())?;
-    if inside != canon {
+    let parent = file
+        .parent()
+        .and_then(|p| p.canonicalize().ok())
+        .ok_or_else(unavailable)?;
+    if parent.join(name) != inside {
         return Err(unavailable());
     }
-    if meta.uid() != current_uid() || meta.mode() & 0o077 != 0 {
+    // One handle: no symlink follow, no blocking on a FIFO; checks and read use the same fd.
+    let mut f = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&inside)
+        .map_err(|_| unavailable())?;
+    let meta = f.metadata().map_err(|_| unavailable())?;
+    if !meta.is_file() || meta.uid() != expected_uid || meta.mode() & 0o077 != 0 {
         return Err(unavailable());
     }
-    let text = std::fs::read_to_string(&canon).map_err(|_| unavailable())?;
+    let mut buf = Vec::new();
+    (&mut f)
+        .take(CREW_TOOLS_MAX_BYTES + 1)
+        .read_to_end(&mut buf)
+        .map_err(|_| unavailable())?;
+    if buf.len() as u64 > CREW_TOOLS_MAX_BYTES {
+        return Err(unavailable());
+    }
+    let text = String::from_utf8(buf).map_err(|_| unavailable())?;
     let raw = allowlist_value(&text).unwrap_or_default();
+    // Exact, case-sensitive match against the known tools; anything else is ignored.
     let allowed: Vec<&str> = raw
         .split(',')
         .map(str::trim)
-        .filter(|s| !s.is_empty())
+        .filter(|s| KNOWN_CREW_TOOLS.contains(s))
         .collect();
     if allowed.is_empty() {
         return Ok(Vec::new());
@@ -255,8 +279,7 @@ fn crew_tools_at(stack: &Path, file: &Path) -> Result<Vec<CrewToolInfo>, String>
         .collect())
 }
 
-/// Last `CREW_ALLOWED_TOOLS=` value (dotenv semantics), quotes stripped, limited to tool-name
-/// characters so nothing else can leak through.
+/// Last `CREW_ALLOWED_TOOLS=` value (dotenv semantics), surrounding quotes stripped.
 fn allowlist_value(text: &str) -> Option<String> {
     text.lines()
         .rev()
@@ -265,13 +288,7 @@ fn allowlist_value(text: &str) -> Option<String> {
             let line = line.strip_prefix("export ").unwrap_or(line);
             line.strip_prefix(ALLOWLIST_KEY)?.strip_prefix('=')
         })
-        .map(|v| {
-            v.trim()
-                .trim_matches(|c| c == '"' || c == '\'')
-                .chars()
-                .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_' || *c == ',')
-                .collect()
-        })
+        .map(|v| v.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
 }
 
 #[cfg(test)]
@@ -311,7 +328,12 @@ mod tests {
     }
 
     fn client() -> reqwest::Client {
-        reqwest::Client::builder().timeout(TIMEOUT).build().unwrap()
+        reqwest::Client::builder()
+            .timeout(TIMEOUT)
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap()
     }
 
     const ALIVE: &str = r#"{"message":"Alive!"}"#;
@@ -449,7 +471,7 @@ mod tests {
             "# x\nOTHER=memory_query\nCREW_ALLOWED_TOOLS=kb_query\n",
             0o600,
         );
-        let tools = crew_tools_at(&d, &p).unwrap();
+        let tools = crew_tools_at(&d, &p, me()).unwrap();
         assert_eq!(
             tools,
             vec![
@@ -476,14 +498,20 @@ mod tests {
             "CREW_ALLOWED_TOOLS=\nexport CREW_ALLOWED_TOOLS=\"kb_query, memory_query\"\n",
             0o600,
         );
-        assert!(crew_tools_at(&d, &p).unwrap().iter().all(|t| t.allowed));
+        assert!(crew_tools_at(&d, &p, me())
+            .unwrap()
+            .iter()
+            .all(|t| t.allowed));
         let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
     fn missing_empty_or_other_keys_give_no_tools() {
         let d = stack("empty");
-        assert_eq!(crew_tools_at(&d, &d.join(CREW_TOOLS_FILE)).unwrap(), vec![]);
+        assert_eq!(
+            crew_tools_at(&d, &d.join(CREW_TOOLS_FILE), me()).unwrap(),
+            vec![]
+        );
         for body in [
             "",
             "CREW_ALLOWED_TOOLS=\n",
@@ -491,7 +519,7 @@ mod tests {
             "CREW_ALLOWED_TOOLS_OLD=kb_query\nXCREW_ALLOWED_TOOLS=kb_query\n",
         ] {
             let p = conf(&d, body, 0o600);
-            assert_eq!(crew_tools_at(&d, &p).unwrap(), vec![], "{body:?}");
+            assert_eq!(crew_tools_at(&d, &p, me()).unwrap(), vec![], "{body:?}");
         }
         let _ = std::fs::remove_dir_all(d);
     }
@@ -506,19 +534,54 @@ mod tests {
         std::os::unix::fs::symlink(&real, &link).unwrap();
         // Outside the stack dir.
         let errs = [
-            crew_tools_at(&d, &link).unwrap_err(),
-            crew_tools_at(&d, &real).unwrap_err(),
+            crew_tools_at(&d, &link, me()).unwrap_err(),
+            crew_tools_at(&d, &real, me()).unwrap_err(),
         ];
         std::fs::remove_file(&link).unwrap();
         // Group/other readable.
         let loose = conf(&d, "CREW_ALLOWED_TOOLS=kb_query\n", 0o644);
-        let e3 = crew_tools_at(&d, &loose).unwrap_err();
+        let e3 = crew_tools_at(&d, &loose, me()).unwrap_err();
         for e in errs.iter().chain([&e3]) {
             assert_eq!(e, CREW_TOOLS_UNAVAILABLE);
             assert!(!e.contains('/') && !e.contains("kb_query"));
         }
         let _ = std::fs::remove_dir_all(d);
         let _ = std::fs::remove_dir_all(other);
+    }
+
+    fn me() -> u32 {
+        current_uid()
+    }
+
+    #[test]
+    fn wrong_uid_and_oversize_are_refused() {
+        let d = stack("uid");
+        let p = conf(&d, "CREW_ALLOWED_TOOLS=kb_query\n", 0o600);
+        assert_eq!(
+            crew_tools_at(&d, &p, me().wrapping_add(1)).unwrap_err(),
+            CREW_TOOLS_UNAVAILABLE
+        );
+        let big = format!("CREW_ALLOWED_TOOLS=kb_query\n#{}\n", "x".repeat(4096));
+        let p = conf(&d, &big, 0o600);
+        assert_eq!(
+            crew_tools_at(&d, &p, me()).unwrap_err(),
+            CREW_TOOLS_UNAVAILABLE
+        );
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn junk_or_wrong_case_tool_names_give_no_tools() {
+        let d = stack("junk");
+        for body in [
+            "CREW_ALLOWED_TOOLS=kb_query;rm\n",
+            "CREW_ALLOWED_TOOLS=KB_QUERY\n",
+            "CREW_ALLOWED_TOOLS=kb_qu;ery,Memory_Query\n",
+        ] {
+            let p = conf(&d, body, 0o600);
+            assert_eq!(crew_tools_at(&d, &p, me()).unwrap(), vec![], "{body:?}");
+        }
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
