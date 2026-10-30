@@ -12,6 +12,8 @@ LLM: local Ollama gemma4 primary. MiniMax-M2.5 (Anthropic-messages API, same end
 OpenClaw uses) is an optional fallback, enabled only when MINIMAX_API_KEY is non-empty.
 Runs persist to Postgres table crew_runs (created at startup).
 Each crew runs in its own process so /crews/stop can really cancel it.
+Tools: an agent gets a tool only if it is implemented in TOOL_REGISTRY and named in
+CREW_ALLOWED_TOOLS (unset = no tools). Each call has a timeout and an output cap.
 """
 
 from __future__ import annotations
@@ -25,8 +27,11 @@ import signal
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import asynccontextmanager
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional
 
 import psycopg
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
@@ -66,8 +71,90 @@ PG = dict(
 CREW_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,63}$")
 ALLOWED_CREW_NAMES = {n.strip() for n in _env("CREW_ALLOWED_NAMES").split(",") if n.strip()}
 
-# Tools: none are enabled in Phase 1. Add names here AND wire them in _build_tools.
-ALLOWED_TOOLS: Dict[str, str] = {}
+# ── Tool registry ───────────────────────────────────────────────────────────
+# A tool must be both implemented here (TOOL_REGISTRY) and named in CREW_ALLOWED_TOOLS
+# (comma-separated) before any agent receives it. Empty or unset allows none: fail closed.
+DEFAULT_TOOL_TIMEOUT_S = 15.0
+DEFAULT_TOOL_OUTPUT_CHARS = 4000
+
+
+@dataclass(frozen=True)
+class CrewTool:
+    name: str
+    description: str
+    fn: Callable[[str], str]
+    timeout_s: float = DEFAULT_TOOL_TIMEOUT_S
+    max_output_chars: int = DEFAULT_TOOL_OUTPUT_CHARS
+
+
+TOOL_REGISTRY: Dict[str, CrewTool] = {}
+
+
+def register_tool(tool: CrewTool, registry: Optional[Dict[str, CrewTool]] = None) -> None:
+    reg = TOOL_REGISTRY if registry is None else registry
+    if tool.name in reg:
+        raise ValueError(f"tool {tool.name} is already registered")
+    reg[tool.name] = tool
+
+
+def parse_allowed_tools(raw: str, registry: Dict[str, CrewTool]) -> frozenset:
+    """Names from CREW_ALLOWED_TOOLS that are implemented. Unknown names are dropped (logged)."""
+    names = {n.strip() for n in raw.split(",") if n.strip()}
+    unknown = sorted(names - registry.keys())
+    if unknown:
+        log.warning("CREW_ALLOWED_TOOLS names unknown tools %s; ignoring them", unknown)
+    return frozenset(names & registry.keys())
+
+
+ALLOWED_TOOLS = parse_allowed_tools(_env("CREW_ALLOWED_TOOLS"), TOOL_REGISTRY)
+
+
+def tools_for(agent_key: str, allowed: Optional[frozenset] = None,
+              registry: Optional[Dict[str, CrewTool]] = None) -> List[CrewTool]:
+    """The tools an agent may receive: its declared tools that are allowlisted.
+    A declared tool that isn't implemented is a bug and raises."""
+    allowed = ALLOWED_TOOLS if allowed is None else allowed
+    registry = TOOL_REGISTRY if registry is None else registry
+    out = []
+    for name in AGENT_CATALOG[agent_key]["tools"]:
+        if name not in registry:
+            raise ValueError(f"agent {agent_key} declares unknown tool {name}")
+        if name in allowed:
+            out.append(registry[name])
+    return out
+
+
+def run_tool(tool: CrewTool, arg: str) -> str:
+    """Call a tool with its timeout and output cap. Failures come back as a tool error string
+    (sanitized), never an exception, so one bad tool call can't crash the crew."""
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"tool-{tool.name}")
+    try:
+        out = pool.submit(tool.fn, arg).result(timeout=tool.timeout_s)
+    except FutureTimeout:
+        return f"Tool error: {tool.name} timed out after {tool.timeout_s:g}s"
+    except Exception as e:
+        return f"Tool error: {tool.name}: {sanitize_error(e)}"
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    out = "" if out is None else str(out)
+    if len(out) > tool.max_output_chars:
+        out = out[:tool.max_output_chars] + "…[truncated]"
+    return out
+
+
+def _to_crewai_tool(tool: CrewTool):
+    """Wrap a CrewTool as a CrewAI tool (imported lazily: only the crew child needs crewai)."""
+    from crewai.tools import BaseTool
+
+    class _Tool(BaseTool):
+        name: str = tool.name
+        description: str = tool.description
+
+        def _run(self, query: str) -> str:
+            return run_tool(tool, query)
+
+    return _Tool()
+
 
 AGENT_CATALOG: Dict[str, dict] = {
     "researcher": dict(
@@ -90,9 +177,8 @@ AGENT_CATALOG: Dict[str, dict] = {
     ),
 }
 DEFAULT_AGENTS = ["researcher"]
-for _key, _spec in AGENT_CATALOG.items():
-    for _tool in _spec["tools"]:
-        assert _tool in ALLOWED_TOOLS, f"agent {_key} uses non-allowlisted tool {_tool}"
+for _key in AGENT_CATALOG:
+    tools_for(_key)  # raises at import if an agent declares an unimplemented tool
 
 
 # ── Models ──────────────────────────────────────────────────────────────────
@@ -263,7 +349,8 @@ def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
             try:
                 agents = [
                     Agent(role=AGENT_CATALOG[k]["role"], goal=AGENT_CATALOG[k]["goal"],
-                          backstory=AGENT_CATALOG[k]["backstory"], tools=[],
+                          backstory=AGENT_CATALOG[k]["backstory"],
+                          tools=[_to_crewai_tool(t) for t in tools_for(k)],
                           llm=llm, allow_delegation=False, verbose=False)
                     for k in agent_keys
                 ]
@@ -352,6 +439,7 @@ async def lifespan(_app: FastAPI):
         log.info("marked %d orphaned runs as interrupted", n)
     if not MINIMAX_API_KEY:
         log.info("MINIMAX_API_KEY not set; local Ollama only (%s)", CREW_OLLAMA_MODEL)
+    log.info("crew tools allowed: %s", ", ".join(sorted(ALLOWED_TOOLS)) or "none")
     yield
     with _lock:
         for p in _procs.values():

@@ -1,4 +1,4 @@
-"""crew-service tests: error sanitizing and process-group stop.
+"""crew-service tests: error sanitizing, process-group stop and the tool registry.
 
 Run inside the crew image (it has the deps):  python -m unittest -v test_main
 """
@@ -6,8 +6,10 @@ Run inside the crew image (it has the deps):  python -m unittest -v test_main
 import os
 import signal
 import subprocess
+import threading
 import time
 import unittest
+from unittest import mock
 
 import main
 
@@ -188,6 +190,95 @@ class KillGroupTests(unittest.TestCase):
         proc.join(5)
         main.kill_group(proc, grace_s=0.5)
         self.assertFalse(proc.is_alive())
+
+
+def _tool(name: str, fn=lambda q: f"echo:{q}", **kw) -> main.CrewTool:
+    return main.CrewTool(name=name, description=f"{name} test tool", fn=fn, **kw)
+
+
+class ToolRegistryTests(unittest.TestCase):
+    """The allowlist and registry are passed in; no env vars are set."""
+
+    def setUp(self):
+        self.reg = {}
+        for n in ("echo", "other"):
+            main.register_tool(_tool(n), self.reg)
+        agents = dict(main.AGENT_CATALOG)
+        agents["tester"] = dict(role="r", goal="g", backstory="b", tools=["echo", "other"])
+        patcher = mock.patch.object(main, "AGENT_CATALOG", agents)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_default_allowlist_is_empty(self):
+        self.assertEqual(main.parse_allowed_tools("", self.reg), frozenset())
+        self.assertEqual(main.parse_allowed_tools(" , ,", self.reg), frozenset())
+        self.assertEqual(main.ALLOWED_TOOLS, frozenset())  # this image has no CREW_ALLOWED_TOOLS
+        self.assertEqual(main.TOOL_REGISTRY, {})
+
+    def test_empty_allowlist_gives_agents_no_tools(self):
+        self.assertEqual(main.tools_for("tester", frozenset(), self.reg), [])
+        for key in ("researcher", "analyst", "writer"):
+            self.assertEqual(main.tools_for(key), [])
+
+    def test_only_allowlisted_tools_reach_the_agent(self):
+        allowed = main.parse_allowed_tools("echo", self.reg)
+        self.assertEqual([t.name for t in main.tools_for("tester", allowed, self.reg)], ["echo"])
+        allowed = main.parse_allowed_tools("echo, other", self.reg)
+        self.assertEqual([t.name for t in main.tools_for("tester", allowed, self.reg)], ["echo", "other"])
+
+    def test_unknown_allowlist_names_are_ignored(self):
+        with self.assertLogs("crew-service", "WARNING") as logs:
+            allowed = main.parse_allowed_tools("echo,shell,http_get", self.reg)
+        self.assertEqual(allowed, frozenset({"echo"}))
+        self.assertIn("http_get", logs.output[0])
+
+    def test_agent_declaring_an_unknown_tool_is_rejected(self):
+        main.AGENT_CATALOG["bad"] = dict(role="r", goal="g", backstory="b", tools=["shell"])
+        with self.assertRaisesRegex(ValueError, "unknown tool shell"):
+            main.tools_for("bad", frozenset({"shell"}), self.reg)
+
+    def test_duplicate_registration_is_rejected(self):
+        with self.assertRaises(ValueError):
+            main.register_tool(_tool("echo"), self.reg)
+
+    def test_run_tool_returns_output(self):
+        self.assertEqual(main.run_tool(self.reg["echo"], "hi"), "echo:hi")
+
+    def test_timeout_returns_a_tool_error_quickly(self):
+        release = threading.Event()
+        slow = _tool("slow", fn=lambda q: release.wait(10) and "late", timeout_s=0.2)
+        t0 = time.time()
+        out = main.run_tool(slow, "x")
+        release.set()
+        self.assertLess(time.time() - t0, 2)
+        self.assertEqual(out, "Tool error: slow timed out after 0.2s")
+
+    def test_default_timeout_and_cap(self):
+        t = _tool("d")
+        self.assertEqual((t.timeout_s, t.max_output_chars), (15.0, 4000))
+
+    def test_output_is_capped(self):
+        big = _tool("big", fn=lambda q: "x" * 10_000, max_output_chars=100)
+        out = main.run_tool(big, "")
+        self.assertEqual(out, "x" * 100 + "…[truncated]")
+
+    def test_exceptions_become_sanitized_tool_errors(self):
+        tok = "sk-" + "Z9y8X7w6" * 6
+
+        def boom(_q):
+            raise ConnectionError(f"failed at /srv/app/x.py with token={tok}\nmore")
+
+        out = main.run_tool(_tool("boom", fn=boom), "q")
+        self.assertTrue(out.startswith("Tool error: boom: ConnectionError: "), out)
+        self.assertNotIn(tok, out)
+        self.assertNotIn("/srv/app", out)
+        self.assertNotIn("more", out)
+
+    def test_crewai_wrapper_goes_through_run_tool(self):
+        big = _tool("capped", fn=lambda q: q * 50, max_output_chars=10)
+        wrapped = main._to_crewai_tool(big)
+        self.assertEqual(wrapped.name, "capped")
+        self.assertEqual(wrapped._run("ab"), "ababababab…[truncated]")
 
 
 if __name__ == "__main__":
