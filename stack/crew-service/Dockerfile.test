@@ -1,0 +1,15 @@
+# Test image: the crew runtime image plus pinned pytest and the tests. Never used by compose.
+#   docker build -t crew-base stack/crew-service
+#   docker build -f stack/crew-service/Dockerfile.test --build-arg BASE=crew-base -t crew-test stack/crew-service
+#   docker run --rm --network none crew-test
+ARG BASE=crew-base
+FROM ${BASE}
+USER root
+COPY requirements-test.txt .
+RUN pip install --no-cache-dir -r requirements-test.txt
+COPY main.py test_main.py ./
+USER crew
+# Dummy values only; the real key lives in the git-ignored stack/.env.crew and is never used here.
+ENV CREW_ALLOWED_TOOLS=kb_query,memory_query \
+    PYTHONDONTWRITEBYTECODE=1
+CMD ["pytest", "-q", "-p", "no:cacheprovider"]
