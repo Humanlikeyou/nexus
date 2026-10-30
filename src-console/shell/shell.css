@@ -134,3 +134,20 @@ main.command-surface > .active-field > .subview-bar { display: flex; justify-con
 /* Chat is full height: the field becomes a column so Chat takes what's left under the bar
  * (no page scroll, the composer never touches the window edge). */
 main.command-surface > .active-field:has(> .chat-screen) { display: flex; flex-direction: column; overflow: hidden; }
+
+/* Reduced transparency (QA, Oct 30): toolbar band and sidebar drop blur and use the solid glass fill.
+ * Under [data-vibrancy] the fills stay transparent (6fe246e); native vibrancy follows the OS setting. */
+@media (prefers-reduced-transparency: reduce) {
+  main.command-surface > .intelligence-overlay > .nexus-mark,
+  main.command-surface > .intelligence-overlay > .field-clock,
+  main.command-surface > nav.system-constellation { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  :root:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > .nexus-mark,
+  :root:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > .field-clock,
+  :root:not([data-vibrancy="true"]) main.command-surface > nav.system-constellation { background: var(--glass-solid); }
+}
+:root[data-reduce-transparency="true"] main.command-surface > .intelligence-overlay > .nexus-mark,
+:root[data-reduce-transparency="true"] main.command-surface > .intelligence-overlay > .field-clock,
+:root[data-reduce-transparency="true"] main.command-surface > nav.system-constellation { -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > .nexus-mark,
+:root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > .field-clock,
+:root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > nav.system-constellation { background: var(--glass-solid); }

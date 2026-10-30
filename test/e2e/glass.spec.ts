@@ -86,3 +86,13 @@ test("glass renders with reduced transparency forced off (review shot)", async (
     console.log(`GLASS_BF=${bf}`);
   }
 });
+
+test("reduced transparency: shell chrome and composer have no blur", async ({ page, theme }) => {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "reduce" }, { name: "prefers-color-scheme", value: theme }] });
+  await openApp(page, { theme, reduceMotion: true });
+  expect(await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches)).toBe(true);
+  for (const sel of ["main.command-surface > .intelligence-overlay > .nexus-mark", "main.command-surface > .intelligence-overlay > .field-clock", "main.command-surface > nav.system-constellation"]) {
+    expect(await page.locator(sel).first().evaluate((el) => getComputedStyle(el).backdropFilter), sel).toBe("none");
+  }
+});
