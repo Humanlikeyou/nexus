@@ -160,6 +160,61 @@ where
     Ok(results)
 }
 
+/// `{ok:false, error:"unavailable: …"}` for OpenClaw when it isn't installed; `None` otherwise.
+fn unavailable(service: &Service, openclaw_installed: bool) -> Option<ServiceRestartResult> {
+    (*service == Service::OpenClaw && !openclaw_installed).then(|| ServiceRestartResult {
+        service: service.id(),
+        ok: false,
+        error: Some(super::openclaw::NOT_INSTALLED_ERROR.to_string()),
+    })
+}
+
+/// Unavailable services get their result without a dialog; only the rest go through
+/// `approve` (one dialog, held while they run) and `run_sequential`. Results keep the
+/// request's order. Nothing available: no dialog at all.
+async fn restart_available<Ap, ApFut, G, N, R, Fut>(
+    services: &[Service],
+    openclaw_installed: bool,
+    deadline: u64,
+    mut now: N,
+    approve: Ap,
+    restart: R,
+) -> Result<Vec<ServiceRestartResult>, String>
+where
+    Ap: FnOnce(Vec<Service>) -> ApFut,
+    ApFut: std::future::Future<Output = Result<G, String>>,
+    N: FnMut() -> u64,
+    R: FnMut(&Service) -> Fut,
+    Fut: std::future::Future<Output = Result<String, String>>,
+{
+    let runnable: Vec<Service> = services
+        .iter()
+        .filter(|s| unavailable(s, openclaw_installed).is_none())
+        .cloned()
+        .collect();
+    let mut ran = Vec::new().into_iter();
+    if !runnable.is_empty() {
+        check_deadline(deadline, now())?;
+        let _approval = approve(runnable.clone()).await?;
+        check_deadline(deadline, now())?;
+        ran = run_sequential(&runnable, deadline, &mut now, restart, Service::id)
+            .await?
+            .into_iter();
+    }
+    Ok(services
+        .iter()
+        .map(|s| {
+            unavailable(s, openclaw_installed).unwrap_or_else(|| {
+                ran.next().unwrap_or_else(|| ServiceRestartResult {
+                    service: s.id(),
+                    ok: false,
+                    error: Some(format!("{EXPIRED_PREFIX} Not restarted.")),
+                })
+            })
+        })
+        .collect())
+}
+
 #[tauri::command]
 pub async fn restart_services(
     app: tauri::AppHandle,
@@ -168,19 +223,21 @@ pub async fn restart_services(
 ) -> Result<Vec<ServiceRestartResult>, String> {
     let parsed = parse_services(&services)?;
     let deadline = effective_deadline(deadline_ms, now_ms());
-    check_deadline(deadline, now_ms())?;
-    let _approval =
-        approval_gate::require_approval(&app, &lock_keys(&parsed), dialog_text(&parsed)?).await?;
-    check_deadline(deadline, now_ms())?;
-    run_sequential(
+    let openclaw_installed =
+        !parsed.contains(&Service::OpenClaw) || super::openclaw::InstallPaths::system().installed();
+    restart_available(
         &parsed,
+        openclaw_installed,
         deadline,
         now_ms,
+        |runnable| async move {
+            approval_gate::require_approval(&app, &lock_keys(&runnable), dialog_text(&runnable)?)
+                .await
+        },
         |s| {
             let s = s.clone();
             async move { s.restart().await }
         },
-        Service::id,
     )
     .await
 }
@@ -292,5 +349,90 @@ mod tests {
                  "error": "expired: Deadline passed before this service was restarted."}
             ])
         );
+    }
+
+    #[tokio::test]
+    async fn openclaw_not_installed_is_unavailable_without_a_dialog() {
+        let parsed = parse_services(&s(&["openclaw"])).unwrap();
+        let dialogs = std::cell::Cell::new(0);
+        let results = restart_available(
+            &parsed,
+            false,
+            u64::MAX,
+            || 0,
+            |_| {
+                dialogs.set(dialogs.get() + 1);
+                async { Ok(()) }
+            },
+            |_| async { panic!("nothing may be restarted") },
+        )
+        .await
+        .unwrap();
+        assert_eq!(dialogs.get(), 0);
+        assert_eq!(
+            serde_json::to_value(&results).unwrap(),
+            serde_json::json!([{"service": "openclaw", "ok": false,
+                                "error": "unavailable: openclaw not installed"}])
+        );
+    }
+
+    #[tokio::test]
+    async fn mixed_batch_asks_once_for_the_available_services_only() {
+        let parsed = parse_services(&s(&["openclaw", "docker:n8n"])).unwrap();
+        let asked: std::cell::RefCell<Vec<Vec<Service>>> = Default::default();
+        let results = restart_available(
+            &parsed,
+            false,
+            u64::MAX,
+            || 0,
+            |runnable| {
+                asked.borrow_mut().push(runnable.clone());
+                assert_eq!(lock_keys(&runnable), vec!["svc:docker:n8n".to_string()]);
+                async { Ok(()) }
+            },
+            |_| async { Ok("ok".to_string()) },
+        )
+        .await
+        .unwrap();
+        assert_eq!(*asked.borrow(), vec![vec![Service::Docker("n8n".into())]]);
+        assert_eq!(
+            serde_json::to_value(&results).unwrap(),
+            serde_json::json!([
+                {"service": "openclaw", "ok": false, "error": "unavailable: openclaw not installed"},
+                {"service": "docker:n8n", "ok": true, "error": null}
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn installed_openclaw_still_goes_through_the_gate_and_its_errors() {
+        let parsed = parse_services(&s(&["openclaw"])).unwrap();
+        for prefix in ["declined:", "busy:", "refused:", "changed:"] {
+            let err = restart_available(
+                &parsed,
+                true,
+                u64::MAX,
+                || 0,
+                |runnable| {
+                    assert_eq!(lock_keys(&runnable), vec!["svc:openclaw".to_string()]);
+                    async move { Err::<(), _>(format!("{prefix} x")) }
+                },
+                |_| async { panic!("not approved") },
+            )
+            .await
+            .unwrap_err();
+            assert!(err.starts_with(prefix), "{err}");
+        }
+        let err = restart_available(
+            &parsed,
+            true,
+            10,
+            || 11,
+            |_| async { Ok(()) },
+            |_| async { Ok("x".to_string()) },
+        )
+        .await
+        .unwrap_err();
+        assert!(err.starts_with(EXPIRED_PREFIX));
     }
 }
