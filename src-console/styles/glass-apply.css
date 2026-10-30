@@ -1,0 +1,73 @@
+/*
+ * Apple-glass applied to the live UI (design spec Oct 30, prompt 2).
+ * Blur only on chrome and overlays; cards stay solid. Hairlines are inset box-shadow.
+ * Every rule is :root-scoped so it wins over component CSS regardless of import order.
+ * Never touches html/#root/body/sidebar backgrounds under [data-vibrancy] (6fe246e).
+ */
+:root body { -webkit-font-smoothing: antialiased; font-family: var(--font-sans); }
+
+/* Footer (toolbar already blurs in shell.css): ultrathin glass when no native vibrancy. */
+:root:not([data-vibrancy="true"]) main.command-surface > .field-footer {
+  background: linear-gradient(var(--glass-tint), var(--glass-tint)), var(--glass-ultrathin);
+  -webkit-backdrop-filter: blur(var(--blur-ultrathin)) saturate(var(--saturate));
+  backdrop-filter: blur(var(--blur-ultrathin)) saturate(var(--saturate));
+}
+
+/* Inspector sheet: thick glass over a blurred scrim. */
+:root .context-inspector-backdrop {
+  z-index: var(--z-sheet);
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+:root .context-inspector {
+  border-color: transparent;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(var(--glass-tint), var(--glass-tint)), var(--glass-thick);
+  -webkit-backdrop-filter: blur(var(--blur-thick)) saturate(var(--saturate-thick));
+  backdrop-filter: blur(var(--blur-thick)) saturate(var(--saturate-thick));
+  box-shadow: var(--glass-hairline), var(--glass-specular), var(--shadow-3);
+}
+
+/* Native <dialog> sheet + existing command palette (ui/Dialog, shell/CommandPalette). */
+:root .ui-dialog {
+  border-color: transparent;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(var(--glass-tint), var(--glass-tint)), var(--glass-thick);
+  -webkit-backdrop-filter: blur(var(--blur-thick)) saturate(var(--saturate-thick));
+  backdrop-filter: blur(var(--blur-thick)) saturate(var(--saturate-thick));
+  box-shadow: var(--glass-hairline), var(--glass-specular), var(--shadow-3);
+}
+:root .ui-dialog::backdrop {
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+/* Cards: solid surface + specular highlight, lift on hover. No blur. */
+:root .ui-card {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-specular), var(--shadow-1);
+  transition: transform var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+:root .ui-card[data-elevation="0"] { box-shadow: var(--glass-specular); }
+@media (hover: hover) {
+  :root .ui-card:hover { transform: translateY(calc(-1px * var(--motion-scale))); box-shadow: var(--glass-specular), var(--shadow-2); }
+}
+
+/* Stats */
+:root :is(.ui-stat-tile, .ui-meter, .ui-ring) { font-variant-numeric: tabular-nums; }
+
+/* Fallbacks: solid, no blur. */
+@media (prefers-reduced-transparency: reduce) {
+  :root:not([data-vibrancy="true"]) main.command-surface > .field-footer,
+  :root .context-inspector, :root .ui-dialog { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  :root .context-inspector-backdrop, :root .ui-dialog::backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+:root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > .field-footer,
+:root[data-reduce-transparency="true"] .context-inspector,
+:root[data-reduce-transparency="true"] .ui-dialog { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-reduce-transparency="true"] :is(.context-inspector-backdrop, .ui-dialog::backdrop) { -webkit-backdrop-filter: none; backdrop-filter: none; }
+@media (forced-colors: active) {
+  :root .context-inspector, :root .ui-dialog { background: Canvas; -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

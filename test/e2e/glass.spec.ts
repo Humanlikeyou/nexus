@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, openApp, test } from "./fixtures/tauri-mock";
 
 const TOKENS = [
@@ -17,5 +18,30 @@ test("glass and shadow tokens resolve", async ({ page, theme }) => {
   if (shots) {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.screenshot({ path: `${shots}/home-${theme}.png` });
+  }
+});
+
+test("glass applied: palette dialog blurs, cards stay solid, vibrancy layers transparent", async ({ page, theme }) => {
+  await openApp(page, { theme, reduceMotion: true });
+  await page.keyboard.press("Meta+k");
+  const dialog = page.locator("dialog.ui-dialog[open]").first();
+  await expect(dialog).toBeVisible();
+  const bf = await dialog.evaluate((el) => {
+    const s = getComputedStyle(el); return s.backdropFilter || (s as unknown as Record<string, string>).webkitBackdropFilter;
+  });
+  // The e2e browser reports prefers-reduced-transparency: reduce, so the solid fallback is what renders here.
+  const reduced = await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches);
+  if (reduced) expect(bf).toBe("none"); else expect(bf).not.toBe("none");
+  const css = readFileSync("src-console/styles/glass-apply.css", "utf8");
+  expect(css).toMatch(/:root \.ui-dialog \{[^}]*backdrop-filter: blur\(var\(--blur-thick\)\)/);
+  expect(css).toMatch(/:root \.context-inspector \{[^}]*backdrop-filter: blur/);
+  const shots = process.env.GLASS_SHOTS;
+  if (shots) await page.screenshot({ path: `${shots}/palette-${theme}.png` });
+  await page.keyboard.press("Escape");
+  const cardBf = await page.locator(".ui-card").first().evaluate((el) => getComputedStyle(el).backdropFilter).catch(() => "none");
+  expect(cardBf).toBe("none");
+  await page.evaluate(() => document.documentElement.setAttribute("data-vibrancy", "true"));
+  for (const sel of ["html", "#root", "main.command-surface > nav.system-constellation"]) {
+    expect(await page.locator(sel).first().evaluate((el) => getComputedStyle(el).backgroundColor), sel).toBe("rgba(0, 0, 0, 0)");
   }
 });
