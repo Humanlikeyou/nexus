@@ -23,9 +23,17 @@ pub struct PackageInfo {
     pub skipped: Vec<String>,
 }
 
+/// Recorded in `PackageInfo::skipped` when there is no ~/.openclaw to back up.
+pub(crate) const OPENCLAW_NOT_INSTALLED: &str = "openclaw not installed";
+
 #[tauri::command]
 pub async fn pack_it_up() -> Result<PackageInfo, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    pack_at(&home, &nexus_data_dir()).await
+}
+
+/// `pack_it_up` with the home and data dirs injected (tests use temp dirs).
+async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
     let desktop = home.join("Desktop");
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let archive_name = format!("nexus-backup-{}.tar.gz", timestamp);
@@ -47,16 +55,16 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     let mut skipped = Vec::new();
 
     // 1. Copy Nexus config
-    let config_src = nexus_data_dir();
+    let config_src = data_dir.to_path_buf();
     if config_src.exists() {
         let dest = staging.join("nexus-config");
         copy_dir_recursive(&config_src, &dest, Some(MAX_PACK_FILE_BYTES), &mut skipped)?;
         includes.push("Amara OS settings & config".to_string());
     }
 
-    // 2. Copy OpenClaw data
-    let openclaw = openclaw_dir();
-    if openclaw.exists() {
+    // 2. Copy OpenClaw data (optional: no ~/.openclaw is recorded, not an error)
+    let openclaw = home.join(".openclaw");
+    if openclaw.is_dir() {
         let dest = staging.join("openclaw");
         copy_dir_selective(
             &openclaw,
@@ -66,10 +74,12 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
             &mut skipped,
         )?;
         includes.push("OpenClaw workspace & memory".to_string());
+    } else {
+        skipped.push(OPENCLAW_NOT_INSTALLED.to_string());
     }
 
     // 3. Copy local session data
-    let sessions_dir = nexus_data_dir().join("sessions");
+    let sessions_dir = data_dir.join("sessions");
     if sessions_dir.exists() {
         let dest = staging.join("sessions");
         copy_dir_recursive(
@@ -82,7 +92,7 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     }
 
     // 4. Copy goals
-    let goals_file = nexus_data_dir().join("goals.json");
+    let goals_file = data_dir.join("goals.json");
     if goals_file.exists() {
         fs::copy(&goals_file, staging.join("goals.json"))
             .map_err(|e| format!("Failed to copy goals: {}", e))?;
@@ -90,13 +100,13 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
     }
 
     // 5. Copy events database
-    let events_db = nexus_data_dir().join("events.db");
+    let events_db = data_dir.join("events.db");
     if events_db.exists() {
         fs::copy(&events_db, staging.join("events.db"))
             .map_err(|e| format!("Failed to copy events.db: {}", e))?;
         // Also copy WAL/SHM files if they exist
-        let wal = nexus_data_dir().join("events.db-wal");
-        let shm = nexus_data_dir().join("events.db-shm");
+        let wal = data_dir.join("events.db-wal");
+        let shm = data_dir.join("events.db-shm");
         if wal.exists() {
             let _ = fs::copy(&wal, staging.join("events.db-wal"));
         }
@@ -1401,5 +1411,104 @@ mod restore_tests {
         fs::create_dir_all(base.join("nexus-pack-1")).unwrap();
         assert_eq!(find_pack_root(&base).unwrap(), base.join("nexus-pack-1"));
         let _ = fs::remove_dir_all(&base);
+    }
+}
+
+#[cfg(test)]
+mod pack_tests {
+    use super::*;
+
+    /// A fake home with Desktop/ and a data dir holding goals.json (never the real ~).
+    fn fake_home(tag: &str) -> (PathBuf, PathBuf) {
+        let home = std::env::temp_dir().join(format!(
+            "nexus-pack-test-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(home.join("Desktop")).unwrap();
+        let data = home.join("data");
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("goals.json"), "[1]").unwrap();
+        (home.canonicalize().unwrap(), data.canonicalize().unwrap())
+    }
+
+    fn archive_entries(path: &str) -> Vec<String> {
+        let f = fs::File::open(path).unwrap();
+        let mut a = tar::Archive::new(flate2::read::GzDecoder::new(f));
+        a.entries()
+            .unwrap()
+            .map(|e| e.unwrap().path().unwrap().to_string_lossy().to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn without_openclaw_it_skips_and_succeeds() {
+        let (home, data) = fake_home("no-openclaw");
+        let info = pack_at(&home, &data).await.unwrap();
+        assert_eq!(info.skipped, vec![OPENCLAW_NOT_INSTALLED.to_string()]);
+        assert!(!info.includes.iter().any(|i| i.contains("OpenClaw")));
+        let entries = archive_entries(&info.path);
+        assert!(entries.iter().any(|e| e.ends_with("/goals.json")));
+        assert!(!entries.iter().any(|e| e.contains("/openclaw")));
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn with_openclaw_it_packs_the_allow_listed_files() {
+        let (home, data) = fake_home("with-openclaw");
+        let oc = home.join(".openclaw");
+        fs::create_dir_all(oc.join("skills")).unwrap();
+        fs::write(oc.join("openclaw.json"), "{}").unwrap();
+        fs::write(oc.join("skills/s.md"), "s").unwrap();
+        fs::write(oc.join("skills/.DS_Store"), "junk").unwrap();
+        fs::write(oc.join("not-backed-up.txt"), "x").unwrap();
+        let info = pack_at(&home, &data).await.unwrap();
+        assert!(!info.skipped.contains(&OPENCLAW_NOT_INSTALLED.to_string()));
+        assert!(info
+            .includes
+            .contains(&"OpenClaw workspace & memory".to_string()));
+        let entries = archive_entries(&info.path);
+        assert!(entries
+            .iter()
+            .any(|e| e.ends_with("/openclaw/openclaw.json")));
+        assert!(entries.iter().any(|e| e.ends_with("/openclaw/skills/s.md")));
+        assert!(!entries.iter().any(|e| e.ends_with("not-backed-up.txt")));
+        // (macOS bsdtar may add its own ._* xattr entries; unpack skips those.)
+        assert!(!entries.iter().any(|e| e.ends_with(".DS_Store")));
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn a_backup_without_openclaw_restores() {
+        let (home, data) = fake_home("roundtrip");
+        let info = pack_at(&home, &data).await.unwrap();
+
+        let staging = home.join("staging");
+        fs::create_dir(&staging).unwrap();
+        unpack_archive_checked(
+            Path::new(&info.path),
+            &staging,
+            MAX_UNPACK_TOTAL_BYTES,
+            MAX_UNPACK_ENTRIES,
+        )
+        .unwrap();
+        let plan = plan_restore(&find_pack_root(&staging).unwrap()).unwrap();
+        assert!(!plan.items.iter().any(|i| i.root == RestoreRoot::OpenClaw));
+
+        let target = home.join("new-machine");
+        let roots = RestoreRoots {
+            openclaw: target.join(".openclaw"),
+            data: target.join("data"),
+        };
+        fs::create_dir_all(&roots.data).unwrap();
+        snapshot_before_restore(&roots, "20261030_120000").unwrap();
+        let out = apply_restore(&plan, &roots, "20261030_120000").unwrap();
+        assert!(out.iter().any(|l| l.starts_with("Amara OS data:")));
+        assert!(!out.iter().any(|l| l.starts_with("OpenClaw")));
+        assert_eq!(
+            fs::read_to_string(roots.data.join("goals.json")).unwrap(),
+            "[1]"
+        );
+        assert!(!roots.openclaw.exists(), "no ~/.openclaw is created");
+        let _ = fs::remove_dir_all(&home);
     }
 }
