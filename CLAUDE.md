@@ -114,14 +114,15 @@ This was needed because `openclaw memory status --deep` downloads the model but 
 
 ### openclaw_health_monitor.json
 - **Location**: `stack/integrations/n8n/openclaw_health_monitor.json`
-- **Workflow ID**: `tAKyEzsax7BoTM7t`
+- **Workflow ID**: `WxCNKfPXqcn6YY4Q` (the old `tAKyEzsax7BoTM7t` no longer exists in n8n)
 - **Trigger**: Webhook POST from Nexus app (via `pushHealthToN8n()` in `openclawHealth.ts`)
 - **Flow**: webhook → extract status → switch (healthy/degraded/offline) → 3 conditional branches → Telegram alert → respond
 - **Telegram credentials**: Bot token and Chat ID are hardcoded in the Code node (real values set Feb 2026)
-- **Status**: Active in n8n
+- **Status**: Inactive (checked 2026-10-30). Keep it off: the "Send Telegram Alert" Code node calls api.telegram.org directly and ignores `NEXUS_OUTBOUND_DISABLED`.
 
 ### terrance_ingress_workflow.json
 - General Amara AI agent ingress workflow
+- **Live workflow ID**: `eYdwlwZKTMV89z2J` ("Terrance Ingress Gateway"), the only active workflow (checked 2026-10-30 with `n8n list:workflow --active=true`). `sMtd9mnMhXid8MQn` and `laKQPqbtCQcWT3XL` share the name but are inactive copies; they are not the live Ingress.
 
 ---
 
