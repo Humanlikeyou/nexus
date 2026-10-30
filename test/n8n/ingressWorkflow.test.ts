@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { INGRESS_WORKFLOW_PATH } from "./workflowPath";
 
-// Read-only: the ingress workflow JSON in the repo, never n8n itself. Each Code node's jsCode is
+// Read-only: the Ingress export (INGRESS_WORKFLOW_PATH), never n8n itself. Each Code node's jsCode is
 // run with new Function on a fake $input / $('Node'), the same globals n8n gives it.
-const workflow = JSON.parse(readFileSync(resolve(__dirname, "../../stack/integrations/n8n/terrance_ingress_workflow.json"), "utf8")) as {
+const workflow = JSON.parse(readFileSync(INGRESS_WORKFLOW_PATH, "utf8")) as {
   nodes: { name: string; type: string; parameters: { jsCode?: string } }[];
 };
 type Item = { json: Record<string, unknown> };

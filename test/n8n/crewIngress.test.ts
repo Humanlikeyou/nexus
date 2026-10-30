@@ -4,8 +4,9 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { INGRESS_WORKFLOW_PATH } from "./workflowPath";
 
-// Read-only: the exported Ingress (stack/n8n/workflows/eYdwlwZKTMV89z2J.json), never n8n itself.
+// Read-only: the exported Ingress (INGRESS_WORKFLOW_PATH), never n8n itself.
 // The crew key (CREW_INGRESS_SECRET) is checked by the "Crew Auth" node against its SHA-256
 // (rendered in by n8n_render_crew_auth.sh): missing or wrong is 401. Past that, the router sends
 // kb.query and memory.query to the existing read handlers and everything else to a 403. On the
@@ -16,7 +17,7 @@ type Node = {
   credentials?: Record<string, { id: string; name: string }>;
 };
 type Conn = Record<string, { main: { node: string }[][] }>;
-const wf = JSON.parse(readFileSync(resolve(__dirname, "../../stack/n8n/workflows/eYdwlwZKTMV89z2J.json"), "utf8")) as {
+const wf = JSON.parse(readFileSync(INGRESS_WORKFLOW_PATH, "utf8")) as {
   id: string; nodes: Node[]; connections: Conn;
 };
 const node = (name: string) => {
@@ -205,7 +206,7 @@ function run(script: string, args: string[]) {
 
 describe("n8n_render_crew_auth.sh renders the hash; n8n_sync_credentials.sh has no crew credential", () => {
   const render = join(REPO, "stack/scripts/n8n_render_crew_auth.sh");
-  const exportPath = join(REPO, "stack/n8n/workflows/eYdwlwZKTMV89z2J.json");
+  const exportPath = INGRESS_WORKFLOW_PATH;
   const KEY = randomBytes(48).toString("base64url");
   const NEXUS = randomBytes(48).toString("base64url");
   const renderWith = (dir: string, env: string) => {

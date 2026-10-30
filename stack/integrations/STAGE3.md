@@ -68,16 +68,19 @@ docker compose logs -f --tail=50   # watch logs
 
 ## Step 2 — Import the n8n Workflow
 
-The workflow JSON is at:
+The workflow JSON is the live Ingress export (the old `integrations/n8n/terrance_ingress_workflow.json`
+is now a pointer stub):
 ```
-integrations/n8n/terrance_ingress_workflow.json
+n8n/workflows/eYdwlwZKTMV89z2J.json
 ```
+Import the copy rendered by `scripts/n8n_render_crew_auth.sh` (`n8n/rendered/eYdwlwZKTMV89z2J.json`),
+not the export itself: the export's crew key hash is a placeholder that rejects every crew key.
 
 ### Import via n8n UI
 
 1. Open http://localhost:5678 (create an owner account on first visit)
 2. In the top-left menu → **Workflows** → **New** → click the **⋯** menu (top-right) → **Import from file**
-3. Select `integrations/n8n/terrance_ingress_workflow.json`
+3. Select `n8n/rendered/eYdwlwZKTMV89z2J.json`
 4. Click **Save** (top-right)
 5. Toggle the workflow **Active** (top-right switch)
 
@@ -87,7 +90,7 @@ integrations/n8n/terrance_ingress_workflow.json
 curl -s -X POST http://localhost:5678/rest/workflows \
   -H "Content-Type: application/json" \
   -H "Cookie: $(cat ~/.n8n-cookie 2>/dev/null || echo '')" \
-  -d @integrations/n8n/terrance_ingress_workflow.json
+  -d @n8n/rendered/eYdwlwZKTMV89z2J.json
 ```
 
 > n8n's REST API requires a session cookie after initial setup; use the UI import

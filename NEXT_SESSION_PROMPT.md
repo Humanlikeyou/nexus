@@ -50,6 +50,6 @@ Key context for debugging:
 | `src/terrance/system/continuity.ts` | All memory functions (auto-save, consolidation, reasoning) |
 | `src/components/terrance/TelegramChat.tsx` | Chat UI with idle timer auto-save |
 | `src-tauri/src/commands/continuity.rs` | Rust context store + session logs |
-| `stack/integrations/n8n/terrance_ingress_workflow.json` | n8n gateway with auth validation |
+| `stack/n8n/workflows/eYdwlwZKTMV89z2J.json` | n8n Ingress gateway export (live id eYdwlwZKTMV89z2J) |
 | `stack/docker-compose.yml` | NEXUS_SECRET env var for n8n |
 | `STAGES.md` | Full project roadmap |

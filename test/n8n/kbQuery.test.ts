@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { INGRESS_WORKFLOW_PATH } from "./workflowPath";
 
-// Read-only: "Handle kb.query" from the exported Ingress (stack/n8n/workflows/eYdwlwZKTMV89z2J.json),
+// Read-only: "Handle kb.query" from the exported Ingress (INGRESS_WORKFLOW_PATH),
 // run with the globals n8n's task runner gives a Code node ($input, helpers), Verba faked.
-const wf = JSON.parse(readFileSync(resolve(__dirname, "../../stack/n8n/workflows/eYdwlwZKTMV89z2J.json"), "utf8")) as {
+const wf = JSON.parse(readFileSync(INGRESS_WORKFLOW_PATH, "utf8")) as {
   nodes: { name: string; parameters: { jsCode?: string } }[];
 };
 const code = wf.nodes.find((n) => n.name === "Handle kb.query")!.parameters.jsCode!;
