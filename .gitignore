@@ -33,3 +33,6 @@ stack/.venv-crewai/
 # Playwright
 test-results/
 playwright-report/
+
+# Rendered n8n workflows (crew key hash filled in)
+stack/n8n/rendered/

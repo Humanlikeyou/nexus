@@ -2,7 +2,7 @@
 # Write the crew container's own env file (stack/.env.crew, mode 0600) holding ONLY
 # CREW_INGRESS_SECRET from stack/.env. docker-compose.yml loads it with env_file, so the crew
 # container never sees the rest of .env (NEXUS_SECRET, Telegram, Letta, ...).
-# Never prints the value: output is "written" or "unchanged".
+# Never prints the value: output is "written", "unchanged" or "cleared (crew key revoked)".
 #
 # Usage: scripts/sync-crew-env.sh [--env <stack/.env>] [--dest <stack/.env.crew>]
 set -euo pipefail
@@ -22,19 +22,36 @@ done
 
 [ -f "$env_file" ] || { echo "sync-crew-env: env file not found: $env_file" >&2; exit 1; }
 
-# Last CREW_INGRESS_SECRET= line wins (dotenv semantics); strip `export`, surrounding quotes and
-# an unquoted trailing comment (same parsing as sync-crew-token.sh).
-line="$(grep -E '^[[:space:]]*(export[[:space:]]+)?CREW_INGRESS_SECRET=' "$env_file" | tail -n 1 || true)"
-value="${line#*=}"
-case "$value" in
-  \"*) value="${value#\"}"; value="${value%%\"*}" ;;
-  \'*) value="${value#\'}"; value="${value%%\'*}" ;;
-  *) value="${value%%[[:space:]]#*}"; value="${value%"${value##*[![:space:]]}"}" ;;
-esac
-[ -n "$value" ] || { echo "sync-crew-env: CREW_INGRESS_SECRET is missing or empty in $env_file" >&2; exit 1; }
-case "$value" in
-  *[!A-Za-z0-9_.~-]*) echo "sync-crew-env: CREW_INGRESS_SECRET has characters outside [A-Za-z0-9_.~-]" >&2; exit 1 ;;
-esac
+# Last NAME= line wins (dotenv semantics); strip `export`, surrounding quotes and an unquoted
+# trailing comment (same parsing as sync-crew-token.sh).
+env_value() {
+  local line value
+  line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?$1=" "$env_file" | tail -n 1 || true)"
+  value="${line#*=}"
+  case "$value" in
+    \"*) value="${value#\"}"; value="${value%%\"*}" ;;
+    \'*) value="${value#\'}"; value="${value%%\'*}" ;;
+    *) value="${value%%[[:space:]]#*}"; value="${value%"${value##*[![:space:]]}"}" ;;
+  esac
+  printf '%s' "$value"
+}
+value="$(env_value CREW_INGRESS_SECRET)"
+# Empty = revoke: write an empty key so the crew container drops kb_query/memory_query on its next
+# start (n8n_render_crew_auth.sh likewise renders a random hash), instead of keeping the old key.
+if [ -n "$value" ]; then
+  case "$value" in
+    *[!A-Za-z0-9_.~-]*) echo "sync-crew-env: CREW_INGRESS_SECRET has characters outside [A-Za-z0-9_.~-]" >&2; exit 1 ;;
+  esac
+  # Its own random key: never NEXUS_SECRET, at least 32 bytes (43 base64url chars).
+  if [ "$value" = "$(env_value NEXUS_SECRET)" ]; then
+    echo "sync-crew-env: CREW_INGRESS_SECRET must differ from NEXUS_SECRET; generate one with: openssl rand -base64 48 | tr '+/' '-_' | tr -d '='" >&2
+    exit 1
+  fi
+  if [ "${#value}" -lt 43 ]; then
+    echo "sync-crew-env: CREW_INGRESS_SECRET is shorter than 43 chars (32 bytes); generate one with: openssl rand -base64 48 | tr '+/' '-_' | tr -d '='" >&2
+    exit 1
+  fi
+fi
 
 if [ -L "$dest" ]; then
   echo "sync-crew-env: refusing to write through a symlink: $dest" >&2
@@ -52,4 +69,4 @@ tmp="$(mktemp "$(dirname "$dest")/.env.crew.XXXXXX")"
 printf '%s\n' "$content" > "$tmp"
 chmod 600 "$tmp"
 mv -f "$tmp" "$dest"
-echo "written"
+if [ -n "$value" ]; then echo "written"; else echo "cleared (crew key revoked)"; fi
