@@ -1,0 +1,33 @@
+/*
+ * Glass motion and polish (design spec Oct 30, prompt 3). Only transform/opacity animate.
+ * Reduced motion is enforced by styles/motion.css (!important, dialogs get no animation at all).
+ */
+/* Sheet / palette: fade + rise 8px. Fixed transform-origin (no Radix anchors). */
+:root .ui-dialog[open] { transform-origin: top center; animation: glass-sheet-in var(--dur-3) var(--ease-out) both; }
+:root .ui-dialog[open]::backdrop { animation: glass-fade-in var(--dur-2) var(--ease-out) both; }
+@keyframes glass-sheet-in { from { opacity: 0; transform: translateY(calc(8px * var(--motion-scale))); } to { opacity: 1; transform: none; } }
+@keyframes glass-fade-in { from { opacity: 0; } to { opacity: 1; } }
+/* Popover-type overlays (menus/tooltips, when present): scale .96 -> 1 from top center with the spring. */
+@keyframes glass-pop-in { from { opacity: 0; transform: scale(calc(1 - .04 * var(--motion-scale))); } to { opacity: 1; transform: none; } }
+:root :is([role="menu"], [role="tooltip"], [popover]) { transform-origin: top center; animation: glass-pop-in var(--dur-2) var(--ease-spring) both; }
+
+/* Press feedback timing. */
+:root .ui-button { transition: transform var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out); }
+
+/* Disabled destructive: no muddy fill; destructive text at 40% on thin glass. */
+:root .ui-button[data-variant="destructive"]:disabled {
+  --ui-button-bg: var(--glass-thin);
+  --ui-button-fg: color-mix(in srgb, var(--destructive) 40%, transparent);
+  background: var(--glass-thin);
+  color: color-mix(in srgb, var(--destructive) 40%, transparent);
+  box-shadow: var(--glass-hairline);
+  filter: none;
+  opacity: 1;
+}
+
+/* Thin overlay-style scrollbars inside glass panels. */
+:root :is(.ui-dialog, .context-inspector, .palette__list, .context-item-list) { scrollbar-width: thin; }
+:root :is(.ui-dialog, .context-inspector, .palette__list, .context-item-list)::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+:root :is(.ui-dialog, .context-inspector, .palette__list, .context-item-list)::-webkit-scrollbar-thumb {
+  border: 2px solid transparent; border-radius: var(--radius-full); background: var(--label-tertiary, var(--separator)); background-clip: padding-box;
+}

@@ -45,3 +45,25 @@ test("glass applied: palette dialog blurs, cards stay solid, vibrancy layers tra
     expect(await page.locator(sel).first().evaluate((el) => getComputedStyle(el).backgroundColor), sel).toBe("rgba(0, 0, 0, 0)");
   }
 });
+
+test("reduced motion: dialog has no transform animation or transition", async ({ page, theme }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openApp(page, { theme, reduceMotion: true });
+  await page.keyboard.press("Meta+k");
+  const dialog = page.locator("dialog.ui-dialog[open]").first();
+  await expect(dialog).toBeVisible();
+  const s = await dialog.evaluate((el) => {
+    const c = getComputedStyle(el); return { anim: c.animationName, transform: c.transform, tp: c.transitionProperty, td: c.transitionDuration };
+  });
+  expect(s.anim).toBe("none");
+  expect(s.transform).toBe("none");
+  expect(s.tp.includes("transform") && s.td !== "0s" && !s.td.startsWith("1e-05")).toBe(false);
+  const shots = process.env.GLASS_SHOTS;
+  if (shots) {
+    await page.screenshot({ path: `${shots}/dialog-${theme}.png` });
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await page.screenshot({ path: `${shots}/focus-${theme}.png` });
+  }
+});
