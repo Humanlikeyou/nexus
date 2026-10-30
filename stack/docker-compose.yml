@@ -100,14 +100,16 @@ services:
     ports:
       - "127.0.0.1:8283:8283"   # REST API + ADE web UI (both on same port)
     environment:
-      LETTA_PG_URI: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/letta_db"
+      # Dedicated role limited to letta_db (scripts/postgres_letta_role.sh) — not the superuser.
+      LETTA_PG_URI: "postgresql://${LETTA_DB_USER:-letta_app}:${LETTA_DB_PASSWORD:?set LETTA_DB_PASSWORD in .env}@postgres:5432/letta_db"
       # Require a password on the Letta REST API / ADE
       SECURE: "true"
       LETTA_SERVER_SECURE: "true"
       LETTA_SERVER_PASSWORD: ${LETTA_SERVER_PASSWORD:?set LETTA_SERVER_PASSWORD in .env}
-      # LLM backends — fill in what you use; unused keys left blank
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Blank the image's built-in default creds for its bundled (unused) Postgres
+      POSTGRES_USER: ""
+      POSTGRES_PASSWORD: ""
+      # Local LLMs only — no cloud provider keys in Letta's env (tool sandboxes inherit it, CVE-2026-77938)
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       # Telemetry off
       LETTA_TELEMETRY: "false"
