@@ -70,6 +70,8 @@ Run from the repo root.
 ```bash
 npm run tauri -- dev          # Vite (127.0.0.1:1420, strictPort) + Tauri window
 npm run dev                   # Frontend only
+npm test                      # Gates: check:secrets, tsc, vitest, test:neuro, cargo test
+npm run check:secrets         # Tracked files only: no .env (except .env.example/.env.test), no key patterns; prints file:line + pattern, never the value. Fake fixtures go in .secrets-allow
 npx tsc --noEmit              # Type-check (src-console only)
 npm run test:neuro            # node --test src-console/neuro/*.test.mjs
 cargo test --manifest-path src-tauri/Cargo.toml
