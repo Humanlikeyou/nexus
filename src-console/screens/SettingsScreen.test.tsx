@@ -12,7 +12,7 @@ describe("Settings (§11) + Devices (§9)", () => {
   it("groups in order with the About wordmark and version", () => {
     render(<SettingsField data={snap()} {...base} />);
     const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(titles).toEqual(["Appearance", "Devices", "General", "Backup", "About & Diagnostics"]); // Restore lives inside Backup
+    expect(titles).toEqual(["Appearance", "Devices", "General", "Assistant", "Backup", "About & Diagnostics"]); // Restore lives inside Backup
     const mark = screen.getByRole("img", { name: "Amara OS" });
     expect(mark.tagName.toLowerCase()).toBe("svg");
     expect(mark).toHaveClass("wordmark--about");
@@ -25,7 +25,7 @@ describe("Settings (§11) + Devices (§9)", () => {
     render(<SettingsField data={snap()} {...base} setReduceMotion={setReduceMotion} />);
     fireEvent.click(screen.getByRole("switch", { name: "Reduce motion" }));
     expect(setReduceMotion).toHaveBeenCalledWith(true);
-    expect(screen.getAllByRole("switch")).toHaveLength(1);
+    expect(screen.getAllByRole("switch").map((s) => s.getAttribute("aria-label"))).toEqual(["Reduce motion", "Allow Claude"]);
     expect(screen.getByText("Every 15 seconds")).toBeInTheDocument();
   });
   it("Muse: Find Muse scans; nearby headsets show signal words; error offers Retry", () => {

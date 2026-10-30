@@ -297,3 +297,7 @@ export const startEegRecording = () => invoke<string>("start_eeg_recording");
 export const stopEegRecording = () => invoke<string>("stop_eeg_recording");
 export const saveMuseSession = (session: RecordedSession & { file_path: string }, data: unknown) =>
   invoke<string>("save_session", { session, data });
+
+/** Settings › "Allow Claude": only this flag crosses the bridge (no keys). */
+export const getAllowClaude = () => invoke<boolean>("get_allow_claude");
+export const setAllowClaude = (enabled: boolean) => invoke<boolean>("set_allow_claude", { enabled });

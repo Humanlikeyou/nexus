@@ -2,6 +2,7 @@ import { Info, RefreshCw } from "lucide-react";
 import type { ThemePreference } from "../design/useAppearance";
 import { APP_NAME, APP_VERSION } from "../app/version";
 import { dateTime, humanize } from "../lib/format";
+import { AllowClaudeGroup } from "../settings/AllowClaude";
 import { BackupSection } from "../settings/BackupSection";
 import type { MuseDevice, SystemSnapshot } from "../types";
 import { Button, InsetGroup, ListRow, SegmentedControl, Toggle, Wordmark } from "../ui";
@@ -65,6 +66,8 @@ export function SettingsField({ data, theme, setTheme, reduceMotion, setReduceMo
         <ListRow title="Background jobs" value={scheduler.running ? "Running" : "Stopped"}
           subtitle={scheduler.running && next != null ? `Next consolidation ${nextIn(next, now)}` : undefined} />
       </InsetGroup>
+
+      <AllowClaudeGroup />
 
       <BackupSection />
 

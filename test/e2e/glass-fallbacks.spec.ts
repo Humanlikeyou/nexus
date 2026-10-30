@@ -152,3 +152,13 @@ test("segmented control: neutral selected pill, focus ring separated from it", a
   await expect(focused).toHaveCSS("outline-style", "solid");
   await expect(focused).toHaveCSS("outline-offset", "2px");
 });
+
+test("settings: Allow Claude is off by default, notes data leaves the Mac, turns on", async ({ page, theme }) => {
+  await openSection(page, theme, "Settings");
+  const toggle = page.getByRole("switch", { name: "Allow Claude" });
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByText("This sends data off the Mac.", { exact: false })).toBeVisible();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+});

@@ -67,6 +67,8 @@ export function responses(): Responses {
     read_openclaw_status: { status: "online", online: true, model: "sample-model", gateway_url: "http://127.0.0.1:18789", last_heartbeat: NOW },
     crew_health: "operational",
     crew_tools: [{ name: "kb_query", allowed: true }, { name: "memory_query", allowed: true }],
+    get_allow_claude: false,
+    set_allow_claude: true,
     kb_status: { state: "empty", model: "nomic-embed-text", docs: 0, detail: "knowledge base is empty" },
     crew_list: [crewRun("c1", "smoke", "completed", "Reply with the word OK", "OK"), crewRun("c2", "sample research", "failed", "List three sample facts", "LLM unavailable")],
     list_terrence_interactions: [
