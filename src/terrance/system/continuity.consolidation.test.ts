@@ -54,13 +54,13 @@ describe("failure reasons", () => {
     m.logs = [{ timestamp: Date.now() - 60_000, summary: "a" }, { timestamp: Date.now() - 120_000, summary: "b" }];
     const r = await consolidateRecentSessions();
     expect(r).toMatchObject({ consolidated: false, error: true });
-    expect(consolidationOutcome(r)).toEqual({ ok: false, detail: "Consolidation failed: LLM gateway (OpenClaw) unreachable; check compute mode" });
+    expect(consolidationOutcome(r)).toEqual({ ok: false, detail: "Consolidation failed: Assistant backend not reachable" });
     expect(JSON.stringify(r)).not.toContain("http");
   });
 
   it("maps known errors to short reasons", () => {
     expect(jobFailureReason("Outbound sends are disabled for this session (NEXUS_OUTBOUND_DISABLED).")).toBe("delivery paused (NEXUS_OUTBOUND_DISABLED)");
-    expect(jobFailureReason(new Error("OpenClaw: bad token abc"))).toBe("LLM gateway error");
+    expect(jobFailureReason(new Error("OpenClaw: bad token abc"))).toBe("Assistant backend error");
     expect(jobFailureReason("Ollama request failed")).toBe("local model (Ollama) error");
     expect(jobFailureReason("something with https://x?token=1")).toBe("generation failed");
   });

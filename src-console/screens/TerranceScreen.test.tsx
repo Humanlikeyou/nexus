@@ -59,7 +59,9 @@ describe("Home (TerranceField)", () => {
     const agents = screen.getByRole("region", { name: "Agents" });
     expect(within(agents).getByText("Hermes Agent")).toHaveAttribute("title", "qwen3");
     expect(within(agents).queryByText(/Hermes Agent ·/)).toBeNull();
-    expect(within(agents).getByText("Not connected")).toBeInTheDocument();
+    // OpenClaw isn't the active backend here: no Assistant row and no OpenClaw label.
+    expect(within(agents).queryByText("Assistant")).toBeNull();
+    expect(within(agents).queryByText(/OpenClaw|Not connected/)).toBeNull();
     expect(screen.getByText("Ship Amara OS v2")).toBeInTheDocument();
     const neuro = screen.getByRole("region", { name: "Neuro" });
     expect(neuro).toHaveTextContent("Last session20min");
@@ -159,7 +161,7 @@ describe("Home status strip (Command center feel)", () => {
   it("three plain-text segments with dots, no Badge inside; live ones pulse", () => {
     render(<TerranceField data={fresh} now={NOW} scheduler={running} onNavigate={vi.fn()} />);
     expect(strip().querySelector(".ui-badge")).toBeNull();
-    expect(segment("agents")).toHaveTextContent("Amara online · OpenClaw not connected");
+    expect(segment("agents")).toHaveTextContent(/^Amara online$/);
     expect(segment("scheduler")).toHaveTextContent("Next: Consolidation in 2h 14m");
     expect(segment("scheduler")).toHaveAttribute("title", "Oct 28, 4:14 PM");
     expect(segment("noop")).toHaveTextContent("NOOP synced 6 min ago");
@@ -191,7 +193,7 @@ describe("Home status strip (Command center feel)", () => {
     const offline = { ...full, hermes: { ...full.hermes, status: "offline" as const }, noop: { ...full.noop, status: "stale" as const, generatedAt: new Date(NOW - 2 * 86_400_000).toISOString() } };
     const segs = statusStrip(offline, { running: false, lastConsolidation: null, lastReasoning: null }, NOW);
     expect(segs.map((x) => [x.key, x.text, x.tone, x.live])).toEqual([
-      ["agents", "Amara offline · OpenClaw not connected", "danger", false],
+      ["agents", "Amara offline", "danger", false],
       ["scheduler", "Background jobs stopped", "danger", false],
       ["noop", "NOOP stale · synced 2 d ago", "warning", false],
     ]);
@@ -219,3 +221,16 @@ describe("NOOP stale tone on the strip's own 30s tick", () => {
     } finally { vi.useRealTimers(); }
   });
 });
+
+describe("Home: Assistant badge", () => {
+  it("shows the neutral Assistant row and strip text only while the backend is reachable", () => {
+    const on = { ...full, openclaw: { status: "online" as const, online: true, model: "minimax-m2.5", gateway_url: "", last_heartbeat: null } };
+    render(<TerranceField data={on} now={NOW} scheduler={running} onNavigate={vi.fn()} />);
+    const agents = screen.getByRole("region", { name: "Agents" });
+    expect(within(agents).getByText("Assistant")).toBeInTheDocument();
+    expect(within(agents).getAllByText("Online")).toHaveLength(2); // Amara + Assistant
+    expect(statusStrip(on, running, NOW)[0].text).toBe("Amara online · Assistant connected");
+    expect(document.body.textContent).not.toMatch(/OpenClaw/);
+  });
+});
+

@@ -80,18 +80,26 @@ describe("ChatField", () => {
     expect(box).toHaveValue("");
   });
 
-  it("offline: warning badge, offline placeholder, OpenClaw not connected", () => {
+  it("offline: warning badge, offline placeholder, no assistant badge for an idle backend", () => {
     setup({ data: { ...loaded, hermes: { ...loaded.hermes, status: "offline" } } });
     expect(screen.getByLabelText("Message Amara")).toHaveAttribute("placeholder", "Amara is offline — messages may fail");
     expect(screen.getAllByText("Offline").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Not connected").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Not connected")).not.toBeInTheDocument();
   });
 
-  it("OpenClaw configured without a heartbeat is not shown as online", () => {
-    setup({ data: { ...loaded, openclaw: { status: "configured", online: false, model: "unknown", gateway_url: "ws://127.0.0.1:18789", last_heartbeat: null } } });
+  it.each(["configured", "not_installed", "offline"] as const)("OpenClaw %s (not the active backend): no Assistant row, no OpenClaw label", (status) => {
+    setup({ data: { ...loaded, openclaw: { status, online: false, model: "unknown", gateway_url: "ws://127.0.0.1:18789", last_heartbeat: null } } });
     const agents = screen.getByLabelText("Agents and conversations");
-    expect(within(agents).getByText("No heartbeat")).toBeInTheDocument();
-    expect(within(agents).queryByText("Connected")).not.toBeInTheDocument();
+    expect(within(agents).queryByText("Assistant")).not.toBeInTheDocument();
+    expect(within(agents).queryByText(/OpenClaw|No heartbeat|Not installed/)).not.toBeInTheDocument();
+  });
+
+  it("OpenClaw reachable (active backend): neutral Assistant row with its model", () => {
+    setup({ data: { ...loaded, openclaw: { status: "online", online: true, model: "minimax-m2.5", gateway_url: "ws://127.0.0.1:18789", last_heartbeat: null } } });
+    const agents = screen.getByLabelText("Agents and conversations");
+    expect(within(agents).getByText("Assistant")).toBeInTheDocument();
+    expect(within(agents).getByText("minimax-m2.5")).toBeInTheDocument();
+    expect(within(agents).queryByText(/OpenClaw/)).not.toBeInTheDocument();
   });
 
   it("failed reply shows Retry that resends the previous user message; pending shows Thinking", async () => {
@@ -155,10 +163,12 @@ describe("ChatField", () => {
 
   it("agent search filters the list", async () => {
     setup();
-    await userEvent.type(screen.getByLabelText("Search agents"), "open");
+    await userEvent.type(screen.getByLabelText("Search agents"), "hermes");
     const agents = screen.getByLabelText("Agents and conversations");
-    expect(within(agents).getByText("OpenClaw")).toBeInTheDocument();
-    expect(within(agents).queryByText("hermes-3")).not.toBeInTheDocument();
+    expect(within(agents).getByText("Amara")).toBeInTheDocument();
+    await userEvent.clear(screen.getByLabelText("Search agents"));
+    await userEvent.type(screen.getByLabelText("Search agents"), "zzz");
+    expect(within(agents).queryByText("Amara")).not.toBeInTheDocument();
   });
 });
 

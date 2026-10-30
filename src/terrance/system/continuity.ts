@@ -401,18 +401,34 @@ function formatRelativeTime(ts: number): string {
 /**
  * Short, safe reason for a failed LLM/delivery step, for Activity. Never echoes the raw
  * error (it may carry URLs or provider text). Live check 2026-10-29: with compute mode
- * "gateway" and OpenClaw not installed, every LLM job read just "failed".
+ * "gateway" and OpenClaw not installed, every LLM job read just "failed". OpenClaw details
+ * (port, launchd, "not installed") map to backend-neutral copy.
  */
 /** True when a send was refused by the NEXUS_OUTBOUND_DISABLED kill switch (deliberate, not a failure). */
 export function isOutboundSuppressed(e: unknown): boolean {
   return (e instanceof Error ? e.message : String(e)).includes("NEXUS_OUTBOUND_DISABLED");
 }
 
+/** Approval-gate prefixes (Rust approval_gate / restart_services): kept, with fixed copy after them. */
+const GATE_PREFIX_COPY: Record<string, string> = {
+  "declined:": "declined: not approved",
+  "busy:": "busy: already in progress",
+  "expired:": "expired: the request timed out",
+  "refused:": "refused: not allowed",
+  "changed:": "changed: files changed while waiting; nothing was done",
+};
+
+/** OpenClaw-specific failures (not installed, gateway port 18789, launchd) → backend-neutral copy. */
+export const BACKEND_UNREACHABLE = "Assistant backend not reachable";
+const BACKEND_UNREACHABLE_RE = /^unavailable: openclaw not installed|^OpenClaw gateway unreachable|OpenClaw not running|18789|launchd|launchctl|ai\.openclaw\./i;
+
 export function jobFailureReason(e: unknown, fallback = "generation failed"): string {
   const m = e instanceof Error ? e.message : String(e);
   if (m.includes("NEXUS_OUTBOUND_DISABLED")) return "delivery paused (NEXUS_OUTBOUND_DISABLED)";
-  if (m.startsWith("OpenClaw gateway unreachable")) return "LLM gateway (OpenClaw) unreachable; check compute mode";
-  if (m.startsWith("OpenClaw")) return "LLM gateway error";
+  const gate = Object.keys(GATE_PREFIX_COPY).find((p) => m.startsWith(p));
+  if (gate) return GATE_PREFIX_COPY[gate];
+  if (BACKEND_UNREACHABLE_RE.test(m)) return BACKEND_UNREACHABLE;
+  if (/^OpenClaw|openclaw/i.test(m)) return "Assistant backend error";
   if (/ollama/i.test(m)) return "local model (Ollama) error";
   return fallback;
 }

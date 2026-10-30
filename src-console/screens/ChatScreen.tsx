@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEven
 import { HermesSubtitle } from "./agentLabels";
 import { Activity, Bot, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
-import { openClawBadge } from "../app/openclaw";
+import { ASSISTANT_TITLE, assistantBadge } from "../app/openclaw";
 import { dateTime, time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction } from "../types";
@@ -81,7 +81,7 @@ export function ChatField({
   const loading = (loadingProp ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt) && messages.length === 0;
   const hermes = data.hermes;
   const online = hermes.status === "online";
-  const openclaw = openClawBadge(data.openclaw);
+  const assistant = assistantBadge(data.openclaw);
   const actionsUnavailable = data.unavailableSources.some((s) => s.command === "list_terrence_actions");
   const hermesUnavailable = data.unavailableSources.some((s) => s.command === "get_terrence_runtime_health");
 
@@ -96,7 +96,7 @@ export function ChatField({
 
   const agents = [
     { id: "hermes", icon: Bot, title: "Amara", subtitle: hermesUnavailable ? "Status unavailable" : <HermesSubtitle model={hermes.model} />, searchText: hermesUnavailable ? "Status unavailable" : `Hermes Agent ${hermes.model}`, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
-    { id: "openclaw", icon: Workflow, title: "OpenClaw", subtitle: openclaw.subtitle, searchText: String(openclaw.subtitle), tone: openclaw.tone, label: openclaw.label },
+    ...(assistant ? [{ id: "assistant", icon: Workflow, title: ASSISTANT_TITLE, subtitle: assistant.subtitle, searchText: String(assistant.subtitle), tone: assistant.tone, label: assistant.label }] : []),
   ].filter((a) => !query.trim() || `${a.title} ${a.searchText}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   // Keep the newest message in view.

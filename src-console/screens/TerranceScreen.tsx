@@ -3,7 +3,7 @@ import { HermesSubtitle } from "./agentLabels";
 import { useEffect, useState, type ReactNode } from "react";
 import { getSchedulerStatus, type SchedulerStatus } from "@/terrance/system/scheduler";
 import type { ConversationMessage } from "../app/conversation";
-import { openClawBadge } from "../app/openclaw";
+import { ASSISTANT_TITLE, assistantBadge } from "../app/openclaw";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import { dateTime, money, time } from "../lib/format";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
@@ -144,10 +144,10 @@ export const NOOP_STALE_AFTER_MS = 2 * 60 * 60 * 1000;
 
 export function statusStrip(data: SystemSnapshot, scheduler: SchedulerView, now: number): StripSegment[] {
   const amaraOnline = data.hermes.status === "online";
-  const openclaw = openClawBadge(data.openclaw).label.toLowerCase();
+  const assistant = assistantBadge(data.openclaw);
   const agents: StripSegment = {
     key: "agents", to: "chat", tone: amaraOnline ? "success" : "danger", live: amaraOnline,
-    text: `Amara ${amaraOnline ? "online" : "offline"} · OpenClaw ${openclaw === "online" ? "connected" : openclaw}`,
+    text: `Amara ${amaraOnline ? "online" : "offline"}${assistant ? ` · ${ASSISTANT_TITLE} connected` : ""}`,
   };
 
   const runs = nextRuns(scheduler);
@@ -285,6 +285,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
   const muse = data.sessions.find((s) => s.device_type === "muse");
   const hermes = data.hermes;
   const hermesOnline = hermes.status === "online";
+  const assistant = assistantBadge(data.openclaw);
   const nextConsolidation = nextIn(next.consolidation, now);
   const nextReasoning = nextIn(next.reasoning, now);
 
@@ -336,7 +337,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
               <ListRow icon={Bot} title="Amara" subtitle={<HermesSubtitle model={hermes.model} />}
                 accessory={<Badge tone={hermesOnline ? "success" : "warning"}>{hermesOnline ? "Online" : hermes.status ? hermes.status.replace(/_/g, " ") : "Offline"}</Badge>}
                 value={hermes.telegramStatus ? `Telegram ${hermes.telegramStatus}` : `Checked ${clock(hermes.checkedAt)}`} />
-              <ListRow icon={Cpu} title="OpenClaw" subtitle={openClawBadge(data.openclaw).subtitle} accessory={<Badge tone={openClawBadge(data.openclaw).tone}>{openClawBadge(data.openclaw).label}</Badge>} />
+              {assistant && <ListRow icon={Cpu} title={ASSISTANT_TITLE} subtitle={assistant.subtitle} accessory={<Badge tone={assistant.tone}>{assistant.label}</Badge>} />}
             </InsetGroup>
           )}
       </Card>
