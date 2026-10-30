@@ -609,6 +609,20 @@
         1160
       ],
       "id": "reject-crew-forbidden"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Crew path only: forward a kb.query with allow-listed payload fields. Never the caller's\n// rag_config (or anything else): Handle kb.query then always uses its default RAG config.\nconst body = $input.first().json.body ?? {};\nconst p = (body.event && typeof body.event.payload === 'object' && body.event.payload) || {};\nconst strList = (v) => Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 20).map((x) => x.slice(0, 200)) : [];\nconst payload = {\n  query: typeof p.query === 'string' ? p.query.slice(0, 2000) : '',\n  labels: strList(p.labels),\n  document_filter: strList(p.document_filter),\n};\nreturn [{ json: { body: { trace_id: String(body.trace_id ?? 'no-trace-id').slice(0, 64), event: { type: 'kb.query', payload } } } }];"
+      },
+      "name": "Crew KB Sanitize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        920
+      ],
+      "id": "crew-kb-sanitize"
     }
   ],
   "connections": {
@@ -870,7 +884,7 @@
       "main": [
         [
           {
-            "node": "Handle kb.query",
+            "node": "Crew KB Sanitize",
             "type": "main",
             "index": 0
           }
@@ -885,6 +899,17 @@
         [
           {
             "node": "Reject Crew Forbidden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crew KB Sanitize": {
+      "main": [
+        [
+          {
+            "node": "Handle kb.query",
             "type": "main",
             "index": 0
           }

@@ -73,8 +73,23 @@ describe("crew key: separate, read-only webhook", () => {
     expect(crew.parameters.path).not.toBe(main.parameters.path);
   });
 
-  it.each([["kb.query", "Handle kb.query"], ["memory.query", "MQ Prepare"]])("crew key may call %s", (type, handler) => {
+  it.each([["kb.query", "Crew KB Sanitize"], ["memory.query", "MQ Prepare"]])("crew key may call %s", (type, handler) => {
     expect(target("Crew Route (read-only)", type)).toEqual([handler]);
+  });
+
+  it("crew kb.query: Crew KB Sanitize → Handle kb.query, forwarding only query/labels/document_filter", () => {
+    expect(wf.connections["Crew KB Sanitize"].main[0].map((c) => c.node)).toEqual(["Handle kb.query"]);
+    const code = node("Crew KB Sanitize").parameters.jsCode as string;
+    const run = new Function("$input", code) as (i: unknown) => { json: { body: any } }[];
+    const out = (body: unknown) => run({ first: () => ({ json: { body } }) })[0].json.body;
+    const evil = { trace_id: "t", event: { type: "kb.query", payload: {
+      query: "nexus", labels: ["a", 5], document_filter: ["d"],
+      rag_config: { Retriever: { components: { url: "http://169.254.169.254/" } } }, extra: 1,
+    } } };
+    expect(out(evil)).toEqual({ trace_id: "t", event: { type: "kb.query", payload: { query: "nexus", labels: ["a"], document_filter: ["d"] } } });
+    expect(JSON.stringify(out(evil))).not.toContain("169.254");
+    expect(out({}).event.payload).toEqual({ query: "", labels: [], document_filter: [] });
+    expect(out({ event: { payload: { query: "q".repeat(5000) } } }).event.payload.query).toHaveLength(2000);
   });
 
   it.each(["memory.write", "kb.ingest", "health.ping", "admin.reset", "workflow.activate", "KB.QUERY", "", undefined, 42])(
@@ -96,7 +111,7 @@ describe("crew key: separate, read-only webhook", () => {
     for (const n of ["MW Prepare", "MW Letta PATCH", "Handle kb.ingest", "Handle health.ping", "Handle unknown", "Route by event.type"]) {
       expect(r.has(n), n).toBe(false);
     }
-    for (const n of ["Handle kb.query", "MQ Prepare", "MQ Letta GET", "Send Response", "Reject Crew Forbidden"]) {
+    for (const n of ["Crew KB Sanitize", "Handle kb.query", "MQ Prepare", "MQ Letta GET", "Send Response", "Reject Crew Forbidden"]) {
       expect(r.has(n), n).toBe(true);
     }
   });
@@ -111,10 +126,16 @@ describe("crew key: separate, read-only webhook", () => {
 describe("n8n_sync_credentials.sh creates the crew credential the workflow references", () => {
   const sh = readFileSync(resolve(__dirname, "../../stack/scripts/n8n_sync_credentials.sh"), "utf8");
 
-  it("nxCrewIngress1 from CREW_INGRESS_SECRET, refused if it equals NEXUS_SECRET, skipped if unset", () => {
+  it("nxCrewIngress1 from CREW_INGRESS_SECRET, refused if it equals NEXUS_SECRET", () => {
     expect(sh).toContain('"id": "nxCrewIngress1"');
     expect(sh).toContain("env.get('CREW_INGRESS_SECRET')");
     expect(sh).toContain("crew == env['NEXUS_SECRET']");
-    expect(sh).toMatch(/CREW_INGRESS_SECRET is empty in \.env; skipping/);
+  });
+
+  it("an unset key revokes crew access (random value) instead of leaving the old credential", () => {
+    expect(sh).toContain("crew = secrets.token_urlsafe(48)");
+    expect(sh).not.toMatch(/skipping the read-only crew credential/);
+    // The crew credential is appended unconditionally (after the NEXUS_SECRET check).
+    expect(sh).toMatch(/\ncreds\.append\(\{"id": "nxCrewIngress1"/);
   });
 });
