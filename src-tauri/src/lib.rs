@@ -279,6 +279,8 @@ pub fn run() {
             llm_router::get_cost_estimate,
             llm_router::get_llm_usage,
             llm_router::clear_llm_usage,
+            llm_router::get_allow_claude,
+            llm_router::set_allow_claude,
             // Amara action registry and approval ledger
             terrence_actions::list_terrence_actions,
             terrence_actions::approve_terrence_action,

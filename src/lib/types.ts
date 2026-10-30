@@ -241,10 +241,12 @@ export interface LlmRouterConfig {
   show_cost_estimate: boolean;
 }
 
+/** Amara's model tier. Responses carry the tier only, never a model or provider name. */
+export type AmaraTier = "light" | "deep" | "claude";
+
 export interface RouterResponse {
   content: string;
-  provider: "ollama" | "anthropic";
-  model: string;
+  tier: AmaraTier;
   latency_ms: number;
   prompt_tokens: number;
   completion_tokens: number;
@@ -255,8 +257,7 @@ export interface RouterResponse {
 export interface LlmUsageRecord {
   id: string;
   timestamp: number;
-  provider: "ollama" | "anthropic";
-  model: string;
+  tier: AmaraTier;
   prompt_tokens: number;
   completion_tokens: number;
   estimated_cost_usd: number;
@@ -265,8 +266,7 @@ export interface LlmUsageRecord {
 }
 
 export interface CostEstimate {
-  provider: string;
-  model: string;
+  tier: AmaraTier;
   estimated_input_tokens: number;
   estimated_cost_usd: number;
   routing_reason: string;

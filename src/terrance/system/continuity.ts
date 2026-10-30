@@ -16,7 +16,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { LlmRouterConfig, RouterResponse } from "@/lib/types";
-import { buildRouterConfig } from "@/lib/llm-router";
+import { buildRouterConfig, tierSource } from "@/lib/llm-router";
 import { getConfig } from "@/lib/api";
 import { sanitizeMemoryEntries, sanitizeSkillContent } from "./injectionGuard";
 import { deliberate } from "./deliberation";
@@ -300,8 +300,7 @@ export async function summarizeAndStoreSession(
       timestamp: Date.now(),
       messageCount: messages.length,
       summary,
-      provider: resp.provider,
-      model: resp.model,
+      ...tierSource(resp),
     };
 
     // Store session log via Tauri command
@@ -501,8 +500,7 @@ export async function generateDailySummary(): Promise<{ sent: boolean; summary: 
       timestamp: Date.now(),
       messageCount: 0,
       summary,
-      provider: resp.provider,
-      model: resp.model,
+      ...tierSource(resp),
     };
     await invoke<void>("store_session_log", { entry: logEntry });
 
@@ -644,8 +642,7 @@ export async function generateEveningIntegration(): Promise<{ sent: boolean; mes
         timestamp: Date.now(),
         messageCount: 0,
         summary: `[Evening Integration — ${dayName}]\n${message}`,
-        provider: resp.provider,
-        model: resp.model,
+        ...tierSource(resp),
       },
     });
 
@@ -741,8 +738,7 @@ export async function pruneMemory(): Promise<{
             timestamp: Date.now(),
             messageCount: 0,
             summary: `[Consolidated Archive — ${month}]\n${consolidatedSummary}`,
-            provider: resp.provider,
-            model: resp.model,
+            ...tierSource(resp),
           },
         });
       } catch {
@@ -978,8 +974,7 @@ export async function runReasoningLoop(): Promise<{ reasoned: boolean; reflectio
       timestamp: Date.now(),
       messageCount: 0,
       summary: fullReflection,
-      provider: resp.provider,
-      model: resp.model,
+      ...tierSource(resp),
     };
     await invoke<void>("store_session_log", { entry: logEntry });
 

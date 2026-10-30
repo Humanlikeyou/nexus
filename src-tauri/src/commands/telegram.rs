@@ -48,6 +48,9 @@ pub struct NexusConfig {
     pub llm_show_cost_estimate: Option<bool>,
     #[serde(default)]
     pub anthropic_api_key: Option<String>,
+    /// Settings › "Allow Claude" (llm_router claude tier). Off unless set.
+    #[serde(default)]
+    pub allow_claude: Option<bool>,
 }
 
 fn default_gateway_url() -> Option<String> {
@@ -102,6 +105,13 @@ fn save_config_at(path: &std::path::Path, config: &NexusConfig) -> Result<(), St
     let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     crate::commands::continuity::atomic_write_with_mode(path, json.as_bytes(), Some(0o600))
         .map_err(|e| e.to_string())
+}
+
+/// Load, change one thing, save (0600, atomic).
+pub(crate) fn update_config(change: impl FnOnce(&mut NexusConfig)) -> Result<(), String> {
+    let mut config = load_config();
+    change(&mut config);
+    save_config(&config)
 }
 
 #[tauri::command]

@@ -3,7 +3,7 @@
  * Mirrors the pricing tables and token estimation logic in llm_router.rs.
  */
 
-import type { ComputeMode, LlmRouterConfig, CostEstimate, LlmUsageRecord } from "./types";
+import type { ComputeMode, LlmRouterConfig, CostEstimate, LlmUsageRecord, RouterResponse } from "./types";
 
 // ─── Pricing (USD per 1K tokens) ──────────────────────────────────────────────
 // Anthropic models — input / output pricing
@@ -88,13 +88,18 @@ export function aggregateUsage(records: LlmUsageRecord[]) {
   const totalCalls = records.length;
   const todayCalls = todayRecords.length;
 
-  const byProvider = records.reduce(
+  const byTier = records.reduce(
     (acc, r) => {
-      acc[r.provider] = (acc[r.provider] ?? 0) + 1;
+      acc[r.tier] = (acc[r.tier] ?? 0) + 1;
       return acc;
     },
     {} as Record<string, number>,
   );
 
-  return { totalCost, todayCost, totalCalls, todayCalls, byProvider };
+  return { totalCost, todayCost, totalCalls, todayCalls, byTier };
+}
+
+/** Session-log provider/model for a router reply: the tier stands in for the model name. */
+export function tierSource(resp: Pick<RouterResponse, "tier">): { provider: string; model: string } {
+  return { provider: resp.tier === "claude" ? "anthropic" : "ollama", model: resp.tier };
 }

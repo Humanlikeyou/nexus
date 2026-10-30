@@ -8,7 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ResearchTask, ResearchResult, RouterResponse } from "@/lib/types";
 import { getConfig } from "@/lib/api";
-import { buildRouterConfig } from "@/lib/llm-router";
+import { buildRouterConfig, tierSource } from "@/lib/llm-router";
 import { activityBus } from "./activityBus";
 import { jobFailureReason } from "./continuity";
 
@@ -99,8 +99,7 @@ export async function runResearchTask(
         timestamp: Date.now(),
         messageCount: 0,
         summary: `[Research: ${topic}]\n${task.summary}`,
-        provider: resp.provider,
-        model: resp.model,
+        ...tierSource(resp),
       },
     });
 
