@@ -30,11 +30,39 @@ export function middleTruncate(text: string, max = 44): string {
   return `${text.slice(0, max - 1 - tail)}…${text.slice(-tail)}`;
 }
 
-/** Backend message without an "Error:" prefix. (lib/format's readableError is Muse/Bluetooth-specific:
- *  it turns any "not found" into a Muse pairing hint.) */
-export function backupError(error: unknown): string {
+export const BACKUP_COPY = {
+  backup: {
+    declined: "Backup cancelled. Nothing was changed.",
+    busy: "A backup is already running.",
+    expired: "The confirmation timed out. Nothing was backed up; try again.",
+    refused: "Backup isn't allowed right now. Nothing was changed.",
+    disk: "Backup didn't finish: the disk is full. Free up space and try again.",
+    permission: "Backup didn't finish: Amara OS can't write to the backup folder. Check its permissions and try again.",
+    missing: "Backup didn't finish: the backup folder wasn't found. Check that it's available and try again.",
+    generic: "Backup didn't finish. Try again, or check that the backup folder is available.",
+  },
+  restore: {
+    declined: "Restore cancelled. Nothing was changed.",
+    busy: "A restore is already running.",
+    expired: "The confirmation timed out. Nothing was restored; try again.",
+    refused: "Restore isn't allowed right now. Nothing was changed.",
+    disk: "Restore didn't finish: the disk is full. Free up space and try again.",
+    permission: "Restore didn't finish: Amara OS can't read the backup file. Check its permissions and try again.",
+    missing: "Restore didn't finish: the backup file wasn't found. Check the path and try again.",
+    generic: "Restore didn't finish. Try again, or check that the backup file is available.",
+  },
+} as const;
+
+/** Fixed copy only: the raw backend message is classified, never shown (it may hold paths or keys). */
+export function backupError(error: unknown, kind: "backup" | "restore" = "backup"): string {
+  const copy = BACKUP_COPY[kind];
+  const outcome = approvalOutcome(error);
+  if (outcome === "declined" || outcome === "busy" || outcome === "expired" || outcome === "refused") return copy[outcome];
   const message = error instanceof Error ? error.message : String(error ?? "");
-  return message.replace(/^Error:\s*/i, "").trim() || "Something went wrong.";
+  if (/\b(ENOSPC|no space left|disk (is )?full)\b/i.test(message)) return copy.disk;
+  if (/\b(EACCES|EPERM|permission denied|operation not permitted)\b/i.test(message)) return copy.permission;
+  if (/\b(ENOENT|no such file|not found)\b/i.test(message)) return copy.missing;
+  return copy.generic;
 }
 
 export const RESTORE_WARNING = "This replaces current Amara OS config and local data with the archive's contents. This can't be undone.";
@@ -118,7 +146,7 @@ export function BackupSection({ pack = packItUp, restore = unpackBackup, pick = 
     } catch (e) {
       const outcome = restoreOutcomeText(e);
       if (outcome) setRestoreNote(outcome);
-      else setRestoreError(backupError(e));
+      else setRestoreError(backupError(e, "restore"));
     } finally {
       setRestoring(false);
       setConfirming(false);
@@ -143,7 +171,7 @@ export function BackupSection({ pack = packItUp, restore = unpackBackup, pick = 
         </li>
       </InsetGroup>
       <SkippedFilesList info={info} />
-      {error && <p className="settings__alert" role="alert">Backup didn&apos;t finish: {error}</p>}
+      {error && <p className="settings__alert" role="alert">{error}</p>}
       {restored && (
         <div className="backup-restore__result" role="status">
           <p>Restore finished. Restart Amara OS to load the restored data.</p>
@@ -151,7 +179,7 @@ export function BackupSection({ pack = packItUp, restore = unpackBackup, pick = 
         </div>
       )}
       {restoreNote && <p className="backup-restore__note" role="status">{restoreNote}</p>}
-      {restoreError && <p className="settings__alert" role="alert">Restore didn&apos;t finish: {restoreError}</p>}
+      {restoreError && <p className="settings__alert" role="alert">{restoreError}</p>}
       <Dialog open={confirming} title="Restore from backup?" destructive confirmLabel="Restore" busy={restoring}
         onConfirm={() => void runRestore()} onCancel={() => setConfirming(false)}>
         <p>{RESTORE_WARNING}</p>

@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 vi.mock("@/lib/api", () => ({ packItUp: vi.fn(), unpackBackup: vi.fn(), pickBackupArchive: vi.fn() }));
-import { BackupSection, RESTORE_SAFETY_NOTE, RESTORE_WARNING, SkippedFilesList, middleTruncate, restorePathError, skippedFiles } from "./BackupSection";
+import { BACKUP_COPY, BackupSection, backupError, RESTORE_SAFETY_NOTE, RESTORE_WARNING, SkippedFilesList, middleTruncate, restorePathError, skippedFiles } from "./BackupSection";
 
 const base = { path: "/tmp/nexus.tar.gz", size_mb: 1.5, includes: ["config"] };
 
@@ -36,7 +36,7 @@ describe("backup skipped files", () => {
     const pack = vi.fn(async () => { throw new Error("disk full"); });
     render(<BackupSection pack={pack} />);
     fireEvent.click(screen.getByRole("button", { name: "Create Backup" }));
-    expect((await screen.findByRole("alert")).textContent).toBe("Backup didn't finish: disk full");
+    expect((await screen.findByRole("alert")).textContent).toBe(BACKUP_COPY.backup.disk);
   });
 
   it("middle-truncates long archive paths", () => {
@@ -102,7 +102,7 @@ describe("restore from backup", () => {
     fireEvent.change(screen.getByLabelText("Backup file"), { target: { value: "/tmp/b.tar.gz" } });
     fireEvent.click(screen.getByRole("button", { name: "Restore from Backup…" }));
     fireEvent.click(screen.getByRole("button", { name: "Restore" }));
-    expect((await screen.findByRole("alert")).textContent).toBe("Restore didn't finish: Archive file not found");
+    expect((await screen.findByRole("alert")).textContent).toBe(BACKUP_COPY.restore.missing);
   });
 
   it("restorePathError", () => {
@@ -123,5 +123,38 @@ describe("restore copy and layout (Design review nits)", () => {
     for (const name of ["Choose…", "Restore from Backup…"]) expect(screen.getByRole("button", { name })).toBeTruthy();
     expect(document.body.textContent).not.toContain("...");
     expect(RESTORE_WARNING).toBe("This replaces current Amara OS config and local data with the archive's contents. This can't be undone.");
+  });
+});
+
+describe("backup errors: fixed copy only", () => {
+  const RAW = "Error: tar failed at /Users/me/secret-dir/.env token=sk-test-123";
+
+  it("never renders raw backend text (backup and restore)", async () => {
+    const pack = vi.fn(async () => { throw new Error(RAW); });
+    const { container, unmount } = render(<BackupSection pack={pack} />);
+    fireEvent.click(screen.getByRole("button", { name: "Create Backup" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(BACKUP_COPY.backup.generic);
+    expect(container.textContent).not.toContain("secret-dir");
+    expect(container.textContent).not.toContain("sk-test-123");
+    unmount();
+  });
+
+  it.each([
+    ["declined: user said no", "declined"],
+    ["busy: another approval is open", "busy"],
+    ["expired: confirmation timed out", "expired"],
+    ["refused: not allowed", "refused"],
+    ["write failed: ENOSPC no space left on device", "disk"],
+    ["open /x: Permission denied (EACCES)", "permission"],
+    ["ENOENT: no such file or directory", "missing"],
+    ["something odd happened", "generic"],
+  ] as const)("maps %s to %s copy", (raw, key) => {
+    expect(backupError(new Error(raw))).toBe(BACKUP_COPY.backup[key]);
+    expect(backupError(raw, "restore")).toBe(BACKUP_COPY.restore[key]);
+  });
+
+  it("generic fallback for empty or non-Error values", () => {
+    expect(backupError(undefined)).toBe("Backup didn't finish. Try again, or check that the backup folder is available.");
+    expect(backupError({ weird: true }, "restore")).toBe(BACKUP_COPY.restore.generic);
   });
 });
