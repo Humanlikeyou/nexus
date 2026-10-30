@@ -34,6 +34,8 @@
   transition: background-color var(--dur-state) var(--ease-standard), color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-state) var(--ease-standard);
 }
 .ui-segmented__segment:hover:not([data-checked]) { color: var(--label); }
-.ui-segmented__segment[data-checked] { background: var(--bg-content); color: var(--accent-strong); box-shadow: var(--elev-1), inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent); }
-.ui-segmented__segment:focus-visible { outline: var(--space-0_5) solid var(--focus-ring); outline-offset: 0; }
+/* Selected = a neutral raised pill (macOS segmented control): no accent ring, so it never reads as focus. */
+.ui-segmented__segment[data-checked] { background: var(--bg-content); color: var(--label); box-shadow: var(--glass-hairline), var(--elev-1); }
+/* Focus ring stands 2px off the pill (separated from selection) and draws above its neighbours. */
+.ui-segmented__segment:focus-visible { position: relative; z-index: 1; outline: var(--space-0_5) solid var(--focus-ring); outline-offset: var(--space-0_5); }
 .ui-segmented__icon { width: var(--ui-seg-icon); height: var(--ui-seg-icon); flex: none; }

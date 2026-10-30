@@ -130,3 +130,25 @@ test("worst-case backdrop: text on glass chrome is at least 4.5:1 (3:1 large)", 
   expect(res.surfaces).toBeGreaterThan(0);
   expect(res.fails).toEqual([]);
 });
+
+test("segmented control: neutral selected pill, focus ring separated from it", async ({ page, theme }) => {
+  await emulate(page, theme, "no-preference");
+  await openSection(page, theme, "Chat & Agents");
+  const group = page.getByRole("radiogroup").first();
+  const checked = group.locator(".ui-segmented__segment[data-checked]");
+  const label = await page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--label)";
+    document.body.append(probe);
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    return c;
+  });
+  await expect(checked).toHaveCSS("color", label);
+  await checked.focus();
+  await page.keyboard.press("ArrowRight");
+  const focused = group.locator(".ui-segmented__segment:focus-visible");
+  await expect(focused).toHaveCount(1);
+  await expect(focused).toHaveCSS("outline-style", "solid");
+  await expect(focused).toHaveCSS("outline-offset", "2px");
+});
