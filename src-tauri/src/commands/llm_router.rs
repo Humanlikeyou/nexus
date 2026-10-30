@@ -473,7 +473,7 @@ pub async fn chat_with_router(
                 let url = gateway_url.as_deref().unwrap_or("http://127.0.0.1:18789");
                 let token = gateway_auth_token.as_deref().unwrap_or("");
                 via_gateway(
-                    super::openclaw::InstallPaths::system().installed(),
+                    super::openclaw::InstallPaths::system().detect().await,
                     &config.ollama_model,
                     || call_openclaw(url, token, &text, None, &client),
                     || call_ollama(&config.ollama_model, &text, &client),
