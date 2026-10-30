@@ -165,8 +165,6 @@ async function identifyPatterns(
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: cfg.anthropic_api_key ?? undefined,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     // Parse JSON from response
@@ -219,8 +217,6 @@ async function generateSkillContent(
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: cfg.anthropic_api_key ?? undefined,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     return resp.content.trim();

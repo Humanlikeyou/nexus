@@ -229,7 +229,7 @@ export interface NexusConfig {
 // LLM Router
 // ============================================================
 
-export type ComputeMode = "local" | "hybrid" | "api" | "gateway";
+export type ComputeMode = "local" | "hybrid" | "api";
 
 export interface LlmRouterConfig {
   mode: ComputeMode;
@@ -243,7 +243,7 @@ export interface LlmRouterConfig {
 
 export interface RouterResponse {
   content: string;
-  provider: "ollama" | "anthropic" | "gateway";
+  provider: "ollama" | "anthropic";
   model: string;
   latency_ms: number;
   prompt_tokens: number;
@@ -255,7 +255,7 @@ export interface RouterResponse {
 export interface LlmUsageRecord {
   id: string;
   timestamp: number;
-  provider: "ollama" | "anthropic" | "gateway";
+  provider: "ollama" | "anthropic";
   model: string;
   prompt_tokens: number;
   completion_tokens: number;

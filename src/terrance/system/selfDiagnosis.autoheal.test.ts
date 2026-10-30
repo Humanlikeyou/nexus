@@ -284,13 +284,13 @@ describe("runDiagnostics: OpenClaw not installed", () => {
     expect(calls("restart_services")).toHaveLength(0);
   });
 
-  it("installed but down (or an older backend without the flag) is still a healable issue in gateway mode", async () => {
+  it("installed but down is never an issue: the gateway mode is retired, the router never calls OpenClaw", async () => {
     for (const h of [{ gateway: false, installed: true }, { gateway: false }]) {
       health(h);
       const r = await runDiagnostics();
       expect(r.openclawInstalled).toBe(true);
-      expect(r.openclawLocalMode).toBe(false);
-      expect(r.issues).toEqual([expect.objectContaining({ service: "openclaw", status: "down", canAutoHeal: true })]);
+      expect(r.openclawLocalMode).toBe(true);
+      expect(r.issues.filter((i) => i.service === "openclaw")).toEqual([]);
     }
   });
 });

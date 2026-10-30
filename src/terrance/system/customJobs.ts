@@ -169,8 +169,6 @@ export async function runJob(job: CustomJob): Promise<JobRunResult> {
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: apiKey,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     const output = resp.content.trim();

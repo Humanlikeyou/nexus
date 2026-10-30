@@ -86,8 +86,6 @@ export async function runResearchTask(
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: apiKey,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     task.summary = resp.content.trim();

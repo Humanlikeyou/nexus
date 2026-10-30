@@ -16,7 +16,6 @@ import type { DiagnosticReport, DiagnosticIssue, HealingAction } from "@/lib/typ
 import { loadContext, saveContext } from "./continuity";
 import { activityBus } from "./activityBus";
 import { approvalOutcome } from "./approvalErrors";
-import { buildRouterConfig } from "@/lib/llm-router";
 
 // ─── Auto-heal state ──────────────────────────────────────────────────────────
 
@@ -170,13 +169,9 @@ export function __resetAutoHealForTests(): void {
 export async function runDiagnostics(): Promise<DiagnosticReport> {
   const issues: DiagnosticIssue[] = [];
 
-  // Local mode (the router default): the router only calls Ollama, so a down OpenClaw is not an
-  // issue and is never restarted (10-28/10-29: every health check failed an OpenClaw restart).
-  // An unreadable config falls back to the router default, local.
-  let localMode = true;
-  try {
-    localMode = buildRouterConfig((await invoke<Record<string, unknown> | null>("get_config")) ?? {}).mode === "local";
-  } catch { /* router default */ }
+  // The router's OpenClaw "gateway" mode is retired: no compute mode calls OpenClaw, so a down
+  // gateway is never an issue and is never restarted (10-28/10-29: every health check failed an
+  // OpenClaw restart). A degraded but running OpenClaw is still reported.
 
   // Check OpenClaw gateway
   let openclawOnline = false;
@@ -196,15 +191,8 @@ export async function runDiagnostics(): Promise<DiagnosticReport> {
     openclawInstalled = openclawGateway || health.installed !== false;
     if (!openclawInstalled) {
       console.log("[self-diagnosis] OpenClaw not installed (no listener on 18789, no launchd job); skipping");
-    } else if (!openclawGateway && localMode) {
-      console.log("[self-diagnosis] OpenClaw gateway down but compute_mode is local; not restarting");
     } else if (!openclawGateway) {
-      issues.push({
-        service: "openclaw",
-        status: "down",
-        message: "OpenClaw gateway not responding on port 18789",
-        canAutoHeal: true,
-      });
+      console.log("[self-diagnosis] OpenClaw gateway down; the router never calls it, not restarting");
     } else if (health.status === "degraded") {
       issues.push({
         service: "openclaw",
@@ -214,14 +202,7 @@ export async function runDiagnostics(): Promise<DiagnosticReport> {
       });
     }
   } catch {
-    if (!localMode) {
-      issues.push({
-        service: "openclaw",
-        status: "down",
-        message: "Failed to check OpenClaw health",
-        canAutoHeal: true,
-      });
-    }
+    /* unreadable health: not an issue, the router never calls OpenClaw */
   }
 
   // Check n8n (Docker)
@@ -278,7 +259,7 @@ export async function runDiagnostics(): Promise<DiagnosticReport> {
     diskSpaceOk: true, // Simplified — could add disk space check later
     issues,
     openclawInstalled,
-    openclawLocalMode: localMode,
+    openclawLocalMode: true,
   };
 }
 

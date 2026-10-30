@@ -43,7 +43,6 @@ export function formatCost(usd: number): string {
 export function formatProvider(provider: string): string {
   if (provider === "ollama") return "Local";
   if (provider === "anthropic") return "Anthropic";
-  if (provider === "gateway") return "OpenClaw";
   return provider;
 }
 
@@ -67,7 +66,8 @@ export function buildRouterConfig(cfg: {
 }): LlmRouterConfig {
   return {
     // Standing rule: local Ollama only, gemma4 primary.
-    mode: (cfg.compute_mode as ComputeMode) ?? "local",
+    // The retired OpenClaw "gateway" mode (saved by older builds) maps to local.
+    mode: cfg.compute_mode === "gateway" ? "local" : ((cfg.compute_mode as ComputeMode) ?? "local"),
     ollama_model: cfg.llm_ollama_model ?? DEFAULT_OLLAMA_MODEL,
     anthropic_model: cfg.llm_anthropic_model ?? "claude-haiku-4-5-20251001",
     token_threshold: cfg.llm_token_threshold ?? 8000,

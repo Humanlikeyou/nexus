@@ -365,8 +365,6 @@ export const chatWithRouter = (
   tags: string[],
   forceProvider?: string,
   anthropicApiKey?: string,
-  gatewayUrl?: string,
-  gatewayAuthToken?: string,
 ) =>
   invoke<RouterResponse>("chat_with_router", {
     text,
@@ -374,8 +372,6 @@ export const chatWithRouter = (
     tags,
     forceProvider,
     anthropicApiKey,
-    gatewayUrl,
-    gatewayAuthToken,
   });
 
 export const getCostEstimate = (

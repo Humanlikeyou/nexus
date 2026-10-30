@@ -6,6 +6,9 @@ describe("buildRouterConfig defaults", () => {
   it("defaults to local Ollama with gemma4:latest", () => {
     expect(buildRouterConfig({})).toMatchObject({ mode: "local", ollama_model: "gemma4:latest" });
   });
+  it("maps a saved retired \"gateway\" compute_mode to local", () => {
+    expect(buildRouterConfig({ compute_mode: "gateway" }).mode).toBe("local");
+  });
   it("keeps explicit settings", () => {
     expect(buildRouterConfig({ compute_mode: "hybrid", llm_ollama_model: "x" })).toMatchObject({ mode: "hybrid", ollama_model: "x" });
   });

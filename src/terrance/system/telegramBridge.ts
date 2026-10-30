@@ -430,8 +430,6 @@ async function handleFreeText(text: string): Promise<string> {
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: apiKey,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     return resp.content.trim();

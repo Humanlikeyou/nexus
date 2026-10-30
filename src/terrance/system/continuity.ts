@@ -291,8 +291,6 @@ export async function summarizeAndStoreSession(
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: apiKey,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     const summary = resp.content.trim();
@@ -482,8 +480,6 @@ export async function generateDailySummary(): Promise<{ sent: boolean; summary: 
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: apiKey,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     const summary = resp.content.trim();
@@ -558,8 +554,6 @@ export async function generateMiddayCorrection(): Promise<{ sent: boolean; messa
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: apiKey,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     const message = resp.content.trim();
@@ -632,8 +626,6 @@ export async function generateEveningIntegration(): Promise<{ sent: boolean; mes
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: apiKey,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     const message = resp.content.trim();
@@ -738,8 +730,6 @@ export async function pruneMemory(): Promise<{
           tags: [],
           forceProvider: undefined,
           anthropicApiKey: apiKey,
-          gatewayUrl: cfg.gateway_url ?? undefined,
-          gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
         });
         consolidatedSummary = resp.content.trim();
 
@@ -887,8 +877,6 @@ export async function consolidateRecentSessions(): Promise<{ consolidated: boole
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: apiKey,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     const consolidated = resp.content.trim();
@@ -961,8 +949,6 @@ export async function runReasoningLoop(): Promise<{ reasoned: boolean; reflectio
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: apiKey,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     const reflection = resp.content.trim();

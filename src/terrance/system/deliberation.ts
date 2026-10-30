@@ -67,8 +67,6 @@ export async function deliberate(
     const cfg = await getConfig();
     const routerConfig = buildRouterConfig(cfg);
     const apiKey = cfg.anthropic_api_key ?? undefined;
-    const gwUrl = cfg.gateway_url ?? undefined;
-    const gwToken = cfg.gateway_auth_token ?? undefined;
 
     const callLLM = async (prompt: string): Promise<string> => {
       const resp = await invoke<RouterResponse>("chat_with_router", {
@@ -77,8 +75,6 @@ export async function deliberate(
         tags: [],
         forceProvider: undefined,
         anthropicApiKey: apiKey,
-        gatewayUrl: gwUrl,
-        gatewayAuthToken: gwToken,
       });
       return resp.content.trim();
     };
@@ -147,8 +143,6 @@ export async function quickDeliberate(
     const cfg = await getConfig();
     const routerConfig = buildRouterConfig(cfg);
     const apiKey = cfg.anthropic_api_key ?? undefined;
-    const gwUrl = cfg.gateway_url ?? undefined;
-    const gwToken = cfg.gateway_auth_token ?? undefined;
 
     const callLLM = async (prompt: string): Promise<string> => {
       const resp = await invoke<RouterResponse>("chat_with_router", {
@@ -157,8 +151,6 @@ export async function quickDeliberate(
         tags: [],
         forceProvider: undefined,
         anthropicApiKey: apiKey,
-        gatewayUrl: gwUrl,
-        gatewayAuthToken: gwToken,
       });
       return resp.content.trim();
     };

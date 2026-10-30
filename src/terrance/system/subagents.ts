@@ -252,8 +252,6 @@ async function runSubagent(agent: Subagent): Promise<void> {
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: apiKey,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     const output = resp.content.trim();
@@ -319,8 +317,6 @@ async function runSubagentJob(agent: Subagent, job: SubagentJob): Promise<void> 
       tags: [],
       forceProvider: undefined,
       anthropicApiKey: apiKey,
-      gatewayUrl: cfg.gateway_url ?? undefined,
-      gatewayAuthToken: cfg.gateway_auth_token ?? undefined,
     });
 
     const output = resp.content.trim();
