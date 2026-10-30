@@ -1,6 +1,6 @@
 # Nexus — Project Brief for Claude Coders
 
-> **Central Goal**: Nexus is a local, private command center — a Tauri 2 desktop app combining Amara (AI agent runtime; local Ollama by default, OpenClaw gateway optional), neuro sessions (Muse EEG), health signals (read-only from NOOP), business/ARM data, and goals, with n8n automation behind it.
+> **Central Goal**: Nexus is a local, private command center — a Tauri 2 desktop app combining Amara (AI agent runtime; local Ollama; the OpenClaw gateway mode was removed in 3a663eb/e183ad6), neuro sessions (Muse EEG), health signals (read-only from NOOP), business/ARM data, and goals, with n8n automation behind it.
 
 > **Naming (Decision 13, ec12efa / de94dfa):** the user-facing app is **Amara OS** (`productName`), the window and page title is "Amara OS — Command Center", and the assistant is **Amara**. Internal ids are unchanged: repo/npm/Cargo `nexus`, `nexus_lib`, `com.taisun.nexus`, Tauri command names, `terrance*` module ids, tables and file names.
 
@@ -53,7 +53,7 @@ There is **no Whoop integration** any more: `whoop.rs`, `useWhoop*`, `src/lib/wh
 | Rust backend | Tauri commands, `tokio`, `reqwest`, `rusqlite`, `dirs`, `serde_json` |
 | Automation | n8n (self-hosted, Docker stack) |
 | LLM | Local Ollama, default `gemma4:latest` (`mode: "local"`) |
-| AI gateway | OpenClaw (Node.js, port 18789), **optional**: used only in compute mode `gateway`. Not used in local mode, and Nexus works without it installed |
+| AI gateway | OpenClaw (Node.js, port 18789), **not used by the router**: compute mode `gateway` was removed (3a663eb, e183ad6), and a saved `gateway` maps to local Ollama. Status/health/restart code (`openclaw.rs`, `restart_services`) and OpenClaw UI status remain |
 | Biometrics | Muse EEG via BLE; health via NOOP (read-only SQLite) |
 | Agents | CrewAI service (`stack/crew-service`, Docker, 127.0.0.1:8400, local Ollama gemma4) via `crew.rs`; UI in Chat & Agents › Crews |
 | Trading | ARM system via local HTTP |
@@ -91,14 +91,14 @@ npm run outbox-status
 - **`suppressed` status** (8041224): an activity outcome meaning "deliberately not sent" (for example a ritual refused by the `NEXUS_OUTBOUND_DISABLED` kill switch). It is neutral, neither success nor failure, and shows as "Suppressed" in Activity. `terrence_automations.rs` also uses `suppressed` as a run and delivery status.
 - **Outbox expiry** (46fa421): pending outbox items older than `OUTBOX_EXPIRY_HOURS = 24` are marked `expired`. They are kept, never sent and not deleted, and the delivery card shows "Expired".
 - **Activity-log retention** (6a076f8, be271f5): `archive_activity_log` keeps 30 days (`ACTIVITY_KEEP_DAYS`) as files, capped at 5000 files (`ACTIVITY_MAX_FILES`). Older entries move into `activity_log/archive/YYYY-MM.jsonl.gz` (UTC month). Each archive is written via a temp file and verified before the sources are removed, and unparsable files are left in place. It runs from `pruneMemory()` in the prune job (every 7 days) and failures are non-fatal. `list_activity_entries` reads only the newest files.
-- **OpenClaw is optional** (71bf687, 0a23bcd, 4c55ba7, 514de9b, 95bd46a, da68b7d). In local mode the router never calls it, and Auto-Heal never restarts it (9f0d8b7). In `gateway` mode Auto-Heal can still propose a restart, behind the approval dialog. When OpenClaw isn't installed (no plist or binary: nothing is spawned; plist present but no launchd job: still not installed), `read_openclaw_status` returns `not_installed`, `get_openclaw_health` returns `installed:false`, and `restart_services`/`restart_openclaw` return `unavailable: openclaw not installed` with no dialog. The `gateway` route falls back to local Ollama (if that also fails: `unavailable: openclaw not installed`), and `pack_it_up` records `openclaw not installed` in `skipped`. The UI shows a neutral "Assistant" badge on Home and Chat only while the gateway is reachable, and `jobFailureReason` maps OpenClaw errors to "Assistant backend not reachable".
+- **OpenClaw is optional** (71bf687, 0a23bcd, 4c55ba7, 514de9b, 95bd46a, da68b7d). The router never calls it: gateway mode was removed (3a663eb Rust, e183ad6 frontend) and a saved or forced `gateway` routes to local Ollama. Self-diagnosis never flags or restarts a down OpenClaw (e183ad6). When OpenClaw isn't installed (no plist or binary: nothing is spawned; plist present but no launchd job: still not installed), `read_openclaw_status` returns `not_installed`, `get_openclaw_health` returns `installed:false`, and `restart_services`/`restart_openclaw` return `unavailable: openclaw not installed` with no dialog.  and `pack_it_up` records `openclaw not installed` in `skipped`. The UI shows a neutral "Assistant" badge on Home and Chat only while the gateway is reachable, and `jobFailureReason` maps OpenClaw errors to "Assistant backend not reachable".
 - **Prune fix** (c90435a, be271f5): from 2026-07-06 the weekly prune never ran. `runReasoningLoop` swallowed errors, so reasoning logged "Skipped" with no backoff and held the single heavy-job slot every tick. Reasoning and prune failures now count as failures with backoff and a reason (`scheduler.pruneStarvation.test.ts`). The first prune after launch archives about 16.6k old activity files.
 
 ## Services & Infrastructure
 
 | Service | Location | Notes |
 |---------|----------|-------|
-| OpenClaw AI gateway (optional) | `127.0.0.1:18789` | Gateway mode only. Installed = LaunchAgent plist `~/Library/LaunchAgents/ai.openclaw.gateway.plist` + binary (`/opt/homebrew/bin/openclaw` or `/usr/local/bin/openclaw`) + a loaded launchd job. On this Mac it is currently shut down (job not loaded), so status reads `not_installed` |
+| OpenClaw AI gateway (optional) | `127.0.0.1:18789` | Not used by the router (gateway mode removed). Installed = LaunchAgent plist `~/Library/LaunchAgents/ai.openclaw.gateway.plist` + binary (`/opt/homebrew/bin/openclaw` or `/usr/local/bin/openclaw`) + a loaded launchd job. On this Mac it is currently shut down (job not loaded), so status reads `not_installed` |
 | n8n automation | Docker: `stack-n8n-1` | Backed by `stack-postgres-1`, db `n8n_db`, user `terrance` |
 | Postgres | Docker: `stack-postgres-1` | `psql -U terrance -d n8n_db` |
 | Amara integrations | `stack/integrations/` (in this repo) | n8n workflow JSON files in `stack/integrations/n8n/` |
@@ -299,5 +299,5 @@ const response = await helpers.httpRequest({
 | `src-tauri/src/commands/mod.rs` | Command module declarations |
 | `src-tauri/src/commands/noop.rs` | NOOP health bridge (read-only) |
 | `src-tauri/src/commands/openclaw.rs` | OpenClaw health check logic |
-| `~/.openclaw/openclaw.json` | OpenClaw runtime config (only in `gateway` mode) |
+| `~/.openclaw/openclaw.json` | OpenClaw runtime config (read for status/health only) |
 | `stack/integrations/n8n/` | n8n workflow JSON files |

@@ -119,7 +119,7 @@
 **Phase 5B — Self-Diagnosis + Auto-Healing** (COMPLETE)
 - Health check tick every 30min in scheduler
 - New `selfDiagnosis.ts`: checks OpenClaw gateway, n8n Docker, Ollama port
-- Auto-heal: restart Docker containers, and OpenClaw (launchctl) in `gateway` mode only. Never in local mode (9f0d8b7), and never when OpenClaw isn't installed (`unavailable:`, no dialog)
+- Auto-heal: restart Docker containers. OpenClaw was restarted only in `gateway` mode; since e183ad6 self-diagnosis never flags or restarts a down OpenClaw
 - 1h cooldown per service prevents heal spam
 - Telegram alerts for failures that can't be auto-healed
 - New Rust commands: `check_docker_service`, `restart_docker_service`, `check_service_port`
@@ -156,7 +156,9 @@ This stage turns Amara from semi-autonomous to fully autonomous.
 - [x] Gallery no longer shows an "OpenClaw gateway" sample row (dfa35dc)
 - [x] Not installed is a typed state: `get_openclaw_health` returns `not_installed`; `offline` now means "no config"
 - [ ] `stack/integrations/n8n/openclaw_health_monitor.json` is still in the repo (inactive in n8n). Keep it off, or archive it
-- [ ] The Rust router still supports compute mode `gateway` (OpenClaw on :18789), though the console Settings screen no longer offers it; `scripts/mock-gateway.mjs` (`npm run mock-gateway`) still mocks the gateway for outbox tests
+- [x] Compute mode `gateway` removed from the router (3a663eb Rust, e183ad6 frontend); a saved `gateway` maps to local Ollama
+- [ ] Still present: `src-tauri/src/commands/openclaw.rs`, `restart_services` (`restart_services.rs`) and OpenClaw status UI (`src-console/app/openclaw.ts`, statusViews, Chat/Terrance screens)
+- [ ] `scripts/mock-gateway.mjs` is a manual dev tool only (`npm run mock-gateway*` in package.json; no test or CI uses it). It mocks the outbox `POST /events` receiver on :18789, not OpenClaw chat
 
 ---
 
