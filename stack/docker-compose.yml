@@ -161,7 +161,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:latest}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
     volumes:
       - ./data/verba:/data
@@ -209,7 +209,7 @@ services:
       MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.io/anthropic}
       MINIMAX_MODEL: ${MINIMAX_MODEL:-MiniMax-M2.5}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      CREW_OLLAMA_MODEL: ${CREW_OLLAMA_MODEL:-gemma4}
+      CREW_OLLAMA_MODEL: ${CREW_OLLAMA_MODEL:-gemma4:latest}
       # Persistence — crew_runs table in the shared terrance DB
       CREW_DB_HOST: postgres
       CREW_DB_PORT: "5432"

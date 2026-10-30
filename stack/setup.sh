@@ -36,7 +36,7 @@ OPENAI_API_KEY=
 # Start Ollama on the Mac, pull models, then these just work.
 OLLAMA_BASE_URL=http://host.docker.internal:11434
 OLLAMA_URL=http://host.docker.internal:11434
-OLLAMA_MODEL=llama3
+OLLAMA_MODEL=gemma4:latest
 OLLAMA_EMBED_MODEL=nomic-embed-text
 EOF
 

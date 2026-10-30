@@ -55,7 +55,7 @@ MINIMAX_API_KEY = _env("MINIMAX_API_KEY")
 MINIMAX_BASE_URL = _env("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic")
 MINIMAX_MODEL = _env("MINIMAX_MODEL", "MiniMax-M2.5")
 OLLAMA_BASE_URL = _env("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-CREW_OLLAMA_MODEL = _env("CREW_OLLAMA_MODEL", "gemma4")
+CREW_OLLAMA_MODEL = _env("CREW_OLLAMA_MODEL", "gemma4:latest")
 
 PG = dict(
     host=_env("CREW_DB_HOST", "postgres"),
