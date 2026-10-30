@@ -3,8 +3,8 @@ mod commands;
 mod dock_icon;
 
 use commands::{
-    arm, assistant, ble_common, continuity, crew, events, goals, kv, llm_router, muse, noop,
-    onboarding, openclaw, outbox, packager, replay, research, restart_services, sessions,
+    arm, assistant, ble_common, continuity, crew, events, goals, kb_status, kv, llm_router, muse,
+    noop, onboarding, openclaw, outbox, packager, replay, research, restart_services, sessions,
     snapshots, system, telegram, terrence_actions, terrence_automations, terrence_context,
     terrence_priorities, terrence_projects, terrence_runtime, terrence_runtime_bridge,
 };
@@ -326,6 +326,8 @@ pub fn run() {
             crew::crew_status,
             crew::crew_stop,
             crew::crew_health,
+            kb_status::kb_status,
+            kb_status::crew_tools,
             // Appearance
             dock_icon::sync_dock_icon,
         ])
