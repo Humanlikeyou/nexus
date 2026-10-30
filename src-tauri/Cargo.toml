@@ -35,6 +35,7 @@ hex = "0.4"
 rand = "0.8"
 tar = "0.4"
 flate2 = "1"
+libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Already in the tree via tauri/tao; used only to set the Dock icon (dock_icon.rs).

@@ -1,13 +1,18 @@
 //! Read-only status for the knowledge base (Verba + Weaviate) and the crew's tool allowlist.
 //! No approval dialogs, no writes. Nothing upstream is passed through verbatim: `detail` is
-//! fixed text, and `crew_tools` reads only the `CREW_ALLOWED_TOOLS` key from `stack/.env.crew`.
+//! fixed text, and `crew_tools` reads only `stack/crew-tools.conf`
+//! (never `.env.crew`, which holds the crew key).
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const DEFAULT_VERBA_URL: &str = "http://127.0.0.1:8001";
-const DEFAULT_WEAVIATE_URL: &str = "http://127.0.0.1:8080";
+/// Fixed loopback endpoints; deliberately not configurable (no env/URL override).
+const KB_HOST: &str = "127.0.0.1";
+const VERBA_PORT: u16 = 8001;
+const WEAVIATE_PORT: u16 = 8080;
+const CREW_TOOLS_FILE: &str = "crew-tools.conf";
+const CREW_TOOLS_UNAVAILABLE: &str = "crew tools config unavailable";
 const TIMEOUT: Duration = Duration::from_secs(3);
 /// Tools the crew service implements (stack/crew-service/main.py).
 pub const KNOWN_CREW_TOOLS: [&str; 2] = ["kb_query", "memory_query"];
@@ -49,12 +54,8 @@ pub struct CrewToolInfo {
     pub allowed: bool,
 }
 
-fn env_url(key: &str, default: &str) -> String {
-    std::env::var(key)
-        .ok()
-        .map(|v| v.trim().trim_end_matches('/').to_string())
-        .filter(|v| v.starts_with("http://127.0.0.1") || v.starts_with("http://localhost"))
-        .unwrap_or_else(|| default.to_string())
+fn loopback_url(port: u16) -> String {
+    format!("http://{KB_HOST}:{port}")
 }
 
 #[tauri::command]
@@ -65,8 +66,8 @@ pub async fn kb_status() -> Result<KbStatus, String> {
         .map_err(|_| "kb status client failed".to_string())?;
     Ok(kb_status_at(
         &client,
-        &env_url("NEXUS_VERBA_URL", DEFAULT_VERBA_URL),
-        &env_url("NEXUS_WEAVIATE_URL", DEFAULT_WEAVIATE_URL),
+        &loopback_url(VERBA_PORT),
+        &loopback_url(WEAVIATE_PORT),
     )
     .await)
 }
@@ -186,37 +187,56 @@ fn kind(e: &reqwest::Error) -> &'static str {
 
 // ── Crew tools ──────────────────────────────────────────────────────────────
 
-/// `NEXUS_CREW_ENV_FILE`, else `~/projects/nexus/stack/.env.crew` (written by
-/// scripts/sync-crew-env.sh; a Finder-launched app has no repo path of its own).
-fn crew_env_file() -> PathBuf {
-    std::env::var("NEXUS_CREW_ENV_FILE")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("projects/nexus/stack/.env.crew")
-        })
+/// `~/projects/nexus/stack` (a Finder-launched app has no repo path of its own).
+fn stack_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("projects/nexus/stack")
 }
 
 #[tauri::command]
 pub fn crew_tools() -> Result<Vec<CrewToolInfo>, String> {
-    crew_tools_from(&crew_env_file())
+    let stack = stack_dir();
+    crew_tools_at(&stack, &stack.join(CREW_TOOLS_FILE))
 }
 
-/// Reads only the CREW_ALLOWED_TOOLS line; every other line (the crew key) is skipped
-/// without being kept. Missing file or empty value: no tools.
-fn crew_tools_from(path: &Path) -> Result<Vec<CrewToolInfo>, String> {
-    let meta = match std::fs::symlink_metadata(path) {
+fn current_uid() -> u32 {
+    // SAFETY: getuid has no preconditions and cannot fail.
+    unsafe { libc::getuid() }
+}
+
+/// Reads `file` (normally `<stack>/crew-tools.conf`, written by scripts/sync-crew-env.sh) and
+/// only its CREW_ALLOWED_TOOLS line. Refuses symlinks, files outside `stack`, files not owned
+/// by this user, and files readable by group/other. Missing file or empty value: no tools.
+/// Errors are fixed text: no paths, no contents.
+fn crew_tools_at(stack: &Path, file: &Path) -> Result<Vec<CrewToolInfo>, String> {
+    use std::os::unix::fs::MetadataExt;
+    let unavailable = || CREW_TOOLS_UNAVAILABLE.to_string();
+    let meta = match std::fs::symlink_metadata(file) {
         Ok(m) => m,
-        Err(_) => return Ok(Vec::new()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(_) => return Err(unavailable()),
     };
-    if !meta.is_file() {
-        return Err("crew env file is not a regular file".to_string());
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err(unavailable());
     }
-    let text =
-        std::fs::read_to_string(path).map_err(|_| "crew env file could not be read".to_string())?;
+    // Canonical location must be inside the (existing) stack dir; path_safety does the check.
+    let name = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(unavailable)?;
+    if !stack.is_dir() {
+        return Err(unavailable());
+    }
+    let inside = crate::commands::path_safety::safe_join(stack, name).map_err(|_| unavailable())?;
+    let canon = file.canonicalize().map_err(|_| unavailable())?;
+    if inside != canon {
+        return Err(unavailable());
+    }
+    if meta.uid() != current_uid() || meta.mode() & 0o077 != 0 {
+        return Err(unavailable());
+    }
+    let text = std::fs::read_to_string(&canon).map_err(|_| unavailable())?;
     let raw = allowlist_value(&text).unwrap_or_default();
     let allowed: Vec<&str> = raw
         .split(',')
@@ -400,19 +420,36 @@ mod tests {
         assert!(!serde_json::to_string(&s).unwrap().contains("Traceback"));
     }
 
-    fn env_file(body: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("nexus-crew-env-{}", uuid::Uuid::new_v4()));
+    fn stack(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("nexus-stack-{tag}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    fn conf(dir: &Path, body: &str, mode: u32) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join(CREW_TOOLS_FILE);
         std::fs::write(&p, body).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
         p
     }
 
     #[test]
-    fn crew_tools_reads_only_the_allowlist_and_never_the_secret() {
+    fn crew_tools_reads_conf_and_never_env_crew() {
+        let d = stack("ok");
         let secret = "SECRETVALUE_should_never_appear_0123456789abcdef";
-        let p = env_file(&format!(
-            "# generated\nCREW_INGRESS_SECRET={secret}\nCREW_ALLOWED_TOOLS=kb_query\nOTHER=x\n"
-        ));
-        let tools = crew_tools_from(&p).unwrap();
+        // Decoy: .env.crew says both tools + a secret; the conf says only kb_query.
+        std::fs::write(
+            d.join(".env.crew"),
+            format!("CREW_INGRESS_SECRET={secret}\nCREW_ALLOWED_TOOLS=kb_query,memory_query\n"),
+        )
+        .unwrap();
+        let p = conf(
+            &d,
+            "# x\nOTHER=memory_query\nCREW_ALLOWED_TOOLS=kb_query\n",
+            0o600,
+        );
+        let tools = crew_tools_at(&d, &p).unwrap();
         assert_eq!(
             tools,
             vec![
@@ -427,38 +464,66 @@ mod tests {
             ]
         );
         let json = serde_json::to_string(&tools).unwrap();
-        assert!(!json.contains(secret) && !json.contains("SECRETVALUE"));
-        let _ = std::fs::remove_file(p);
+        assert!(!json.contains("SECRETVALUE"));
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
     fn crew_tools_both_allowed_last_line_wins_and_quotes_strip() {
-        let p =
-            env_file("CREW_ALLOWED_TOOLS=\nexport CREW_ALLOWED_TOOLS=\"kb_query, memory_query\"\n");
-        assert!(crew_tools_from(&p).unwrap().iter().all(|t| t.allowed));
-        let _ = std::fs::remove_file(p);
+        let d = stack("both");
+        let p = conf(
+            &d,
+            "CREW_ALLOWED_TOOLS=\nexport CREW_ALLOWED_TOOLS=\"kb_query, memory_query\"\n",
+            0o600,
+        );
+        assert!(crew_tools_at(&d, &p).unwrap().iter().all(|t| t.allowed));
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
-    fn empty_or_missing_allowlist_gives_no_tools() {
+    fn missing_empty_or_other_keys_give_no_tools() {
+        let d = stack("empty");
+        assert_eq!(crew_tools_at(&d, &d.join(CREW_TOOLS_FILE)).unwrap(), vec![]);
         for body in [
-            "CREW_INGRESS_SECRET=abc\n",
+            "",
             "CREW_ALLOWED_TOOLS=\n",
             "CREW_ALLOWED_TOOLS=  \"\"\n",
-            "",
+            "CREW_ALLOWED_TOOLS_OLD=kb_query\nXCREW_ALLOWED_TOOLS=kb_query\n",
         ] {
-            let p = env_file(body);
-            assert_eq!(crew_tools_from(&p).unwrap(), vec![], "{body:?}");
-            let _ = std::fs::remove_file(p);
+            let p = conf(&d, body, 0o600);
+            assert_eq!(crew_tools_at(&d, &p).unwrap(), vec![], "{body:?}");
         }
-        let missing = std::env::temp_dir().join("nexus-crew-env-does-not-exist");
-        assert_eq!(crew_tools_from(&missing).unwrap(), vec![]);
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
-    fn a_similar_key_name_is_not_the_allowlist() {
-        let p = env_file("CREW_ALLOWED_TOOLS_OLD=kb_query\nXCREW_ALLOWED_TOOLS=kb_query\n");
-        assert_eq!(crew_tools_from(&p).unwrap(), vec![]);
-        let _ = std::fs::remove_file(p);
+    fn symlink_wrong_mode_and_outside_path_are_refused_with_fixed_text() {
+        let d = stack("refuse");
+        let other = stack("outside");
+        let real = conf(&other, "CREW_ALLOWED_TOOLS=kb_query\n", 0o600);
+        // Symlink inside stack pointing at a valid file.
+        let link = d.join(CREW_TOOLS_FILE);
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        // Outside the stack dir.
+        let errs = [
+            crew_tools_at(&d, &link).unwrap_err(),
+            crew_tools_at(&d, &real).unwrap_err(),
+        ];
+        std::fs::remove_file(&link).unwrap();
+        // Group/other readable.
+        let loose = conf(&d, "CREW_ALLOWED_TOOLS=kb_query\n", 0o644);
+        let e3 = crew_tools_at(&d, &loose).unwrap_err();
+        for e in errs.iter().chain([&e3]) {
+            assert_eq!(e, CREW_TOOLS_UNAVAILABLE);
+            assert!(!e.contains('/') && !e.contains("kb_query"));
+        }
+        let _ = std::fs::remove_dir_all(d);
+        let _ = std::fs::remove_dir_all(other);
+    }
+
+    #[test]
+    fn kb_endpoints_are_fixed_loopback() {
+        assert_eq!(loopback_url(VERBA_PORT), "http://127.0.0.1:8001");
+        assert_eq!(loopback_url(WEAVIATE_PORT), "http://127.0.0.1:8080");
     }
 }
