@@ -3,8 +3,8 @@
 # Values are never printed; the temp file lives only inside the n8n container and is removed.
 #   nxIngressSecret1  Header Auth  X-Nexus-Secret: $NEXUS_SECRET          (Webhook node auth)
 #   lettaBearerAuth1  Header Auth  Authorization: Bearer $LETTA_SERVER_PASSWORD (HTTP Request nodes)
-#   nxCrewIngress1    Header Auth  X-Nexus-Secret: $CREW_INGRESS_SECRET   (Crew Ingress Webhook, read-only:
-#                     kb.query + memory.query). Unset = random value (revoked); refused if it equals NEXUS_SECRET.
+# The crew webhook no longer uses a credential: its key is checked in the "Crew Auth" node, rendered by
+# n8n_render_crew_auth.sh (n8n's Header Auth compares with !== and answers 403, not 401).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 N8N_CONTAINER="${N8N_CONTAINER:-$(docker compose ps -q n8n)}"
@@ -25,17 +25,6 @@ creds = [
     {"id": "lettaBearerAuth1", "name": "Letta API (Bearer)", "type": "httpHeaderAuth",
      "data": {"name": "Authorization", "value": "Bearer " + env['LETTA_SERVER_PASSWORD']}},
 ]
-crew = env.get('CREW_INGRESS_SECRET')
-if not crew:
-    # Revoke, don't skip: overwrite the credential with a random value nobody holds, so clearing
-    # CREW_INGRESS_SECRET in .env actually locks the crew webhook (a skipped credential keeps the old key).
-    import secrets
-    crew = secrets.token_urlsafe(48)
-    print('CREW_INGRESS_SECRET is empty in .env; crew credential set to a random value (crew access revoked)', file=sys.stderr)
-elif crew == env['NEXUS_SECRET']:
-    sys.exit('CREW_INGRESS_SECRET must differ from NEXUS_SECRET (it is the read-only key)')
-creds.append({"id": "nxCrewIngress1", "name": "Crew Ingress Secret (X-Nexus-Secret, read-only)",
-              "type": "httpHeaderAuth", "data": {"name": "X-Nexus-Secret", "value": crew}})
 json.dump(creds, sys.stdout)
 PY
 docker exec "$N8N_CONTAINER" sh -c 'n8n import:credentials --input=/tmp/nexus-creds.json 2>&1 | grep -iv "migration lock"; rm -f /tmp/nexus-creds.json'

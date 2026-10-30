@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // Read-only: "Handle kb.query" from the exported Ingress (stack/n8n/workflows/eYdwlwZKTMV89z2J.json),
 // run with the globals n8n's task runner gives a Code node ($input, helpers), Verba faked.
@@ -72,5 +72,22 @@ describe("Handle kb.query: Verba 200 with { error }", () => {
   it("an HTTP error from Verba stays a fixed message with the status only", async () => {
     const out = await kbQuery(async () => { throw Object.assign(new Error("Request failed: secret body"), { httpCode: "500" }); });
     expect(out).toEqual({ ok: false, trace_id: "t1", error: { message: "kb.query failed", node: "kb.query", status: 500 } });
+  });
+});
+
+describe("Handle kb.query: raw upstream text is logged locally, never returned", () => {
+  it("Verba {error}: console.error gets the raw text, the response does not", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const out = await kbQuery(async () => ({ error: GRPC }));
+    expect(JSON.stringify(out)).not.toContain("AioRpcError");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("[kb.query]"), expect.stringContaining("AioRpcError"));
+  });
+
+  it("connection refused: logged, fixed message returned", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const out = await kbQuery(async () => { throw refused(); });
+    expect(out.error.message).toBe("knowledge base not running");
+    expect(JSON.stringify(out)).not.toContain("172.18");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("[kb.query]"), expect.stringContaining("ECONNREFUSED"));
   });
 });
