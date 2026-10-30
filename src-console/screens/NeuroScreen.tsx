@@ -169,7 +169,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
             <div className="neuro__hero">
               <StatTile className="neuro__session-time" label="Session" value={heroIdle ? "Ready" : elapsed} />
               {showCalm && (
-                <Card className="neuro__calm" title={<>Calm <Badge tone="neutral">BETA</Badge></>} headingLevel={3} elevation={0}>
+                <Card className="neuro__calm" title={<>Calm <Badge tone="neutral">Beta</Badge></>} headingLevel={3} elevation={0}>
                   <Ring value={whole(state.calmPercent)} label="Calm" size="sm" color="var(--accent)" valueText={whole(state.calmPercent) == null ? undefined : `${whole(state.calmPercent)}% calm`}>
                     <span className="neuro__ring-value">{whole(state.calmPercent) == null ? DASH : `${whole(state.calmPercent)}%`}</span>
                   </Ring>
@@ -235,7 +235,7 @@ function SessionPanel({ session, onClose }: { session: RecordedSession; onClose:
       accessory={<Button variant="plain" size="small" iconOnly icon={X} aria-label="Close session summary" onClick={onClose} />}>
       <p className="neuro__callout">{dateTime(session.start)} · <span className="neuro__num">{mmss(session.duration_secs)}</span></p>
       <div className="neuro__panel-tiles">
-        <StatTile label={<>Calm <Badge tone="neutral">BETA</Badge></>} value={whole(s.calm_pct)} unit="%" />
+        <StatTile label={<>Calm <Badge tone="neutral">Beta</Badge></>} value={whole(s.calm_pct)} unit="%" />
         <StatTile label="In target" value={whole(s.time_in_target_pct)} unit="%" />
         <StatTile label="Avg focus" value={whole(s.avg_focus)} />
         <StatTile label="Avg relaxation" value={whole(s.avg_relaxation)} />

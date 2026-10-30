@@ -140,7 +140,7 @@ describe("Neuro screen", () => {
     expect(badge).toHaveAttribute("data-tone", "danger");
   });
 
-  it("training: calibration meter, held badge with label, Calm ring (BETA)", () => {
+  it("training: calibration meter, held badge with label, Calm ring (Beta)", () => {
     live.telemetry = flowing();
     const { unmount } = render(<NeuroField data={snap({ muse: streaming })} devices={[]} operation={null} error={null} sessionStartedAt={NOW - 3_000} sessionEndedAt={null}
       training={trainingWith({ phase: "calibrating", label: "Calibrating", calibrationPercent: 40 }, "alpha")}
@@ -151,7 +151,7 @@ describe("Neuro screen", () => {
     expect(screen.getByText("Movement detected")).toHaveAttribute("data-tone", "warning");
     expect(screen.getByRole("meter", { name: "Calm" })).toHaveAttribute("aria-valuenow", "62");
     expect(screen.getByText("62%")).toBeInTheDocument();
-    expect(screen.getAllByText("BETA").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Beta").length).toBeGreaterThan(0);
   });
 
   it("recent sessions: up to 5 rows; selecting one opens its summary, old sessions show — for Calm", () => {
@@ -164,11 +164,11 @@ describe("Neuro screen", () => {
     fireEvent.click(rows[0]);
     let panel = screen.getByRole("complementary");
     expect(panel).toHaveTextContent("Session summary");
-    expect(panel).toHaveTextContent("Calm BETA62%");
+    expect(panel).toHaveTextContent("Calm Beta62%");
     expect(panel).toHaveTextContent("In target40%");
     fireEvent.click(rows[1]);
     panel = screen.getByRole("complementary");
-    expect(panel).toHaveTextContent("Calm BETA—");
+    expect(panel).toHaveTextContent("Calm Beta—");
     fireEvent.click(within(panel).getByRole("button", { name: "Close session summary" }));
     expect(screen.queryByRole("complementary")).toBeNull();
   });
