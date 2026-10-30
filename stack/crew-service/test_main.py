@@ -3,12 +3,15 @@
 Run inside the crew image (it has the deps):  python -m unittest -v test_main
 """
 
+import io
+import json
 import os
 import signal
 import subprocess
 import threading
 import time
 import unittest
+import urllib.error
 from unittest import mock
 
 import main
@@ -279,6 +282,150 @@ class ToolRegistryTests(unittest.TestCase):
         wrapped = main._to_crewai_tool(big)
         self.assertEqual(wrapped.name, "capped")
         self.assertEqual(wrapped._run("ab"), "ababababab…[truncated]")
+
+
+class _FakeResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeIngress:
+    """Stands in for urllib.request.urlopen: records requests, returns a canned reply."""
+
+    def __init__(self, reply=None, status=200, exc=None):
+        self.reply, self.status, self.exc, self.requests = reply, status, exc, []
+
+    def __call__(self, req, timeout=None):
+        self.requests.append((req, timeout))
+        if self.exc:
+            raise self.exc
+        if self.status != 200:
+            raise urllib.error.HTTPError(req.full_url, self.status, "x", {}, io.BytesIO(b'{"leak":"body"}'))
+        return _FakeResponse(json.dumps(self.reply).encode())
+
+
+KEY = "crew-" + "Kk9Qz7Lp" * 5  # fake; built at runtime
+URL = "http://n8n:5678/webhook/terrance/ingress-crew"
+
+
+class IngressToolTests(unittest.TestCase):
+    """kb_query / memory_query with a mocked HTTP layer (no network, no env vars)."""
+
+    def tools(self, fake):
+        reg = {}
+        self.assertTrue(main.register_ingress_tools(reg, KEY, URL, opener=fake))
+        return reg
+
+    def test_missing_key_registers_neither_tool_and_logs_no_value(self):
+        reg = {}
+        with self.assertLogs("crew-service", "WARNING") as logs:
+            self.assertFalse(main.register_ingress_tools(reg, "", URL, opener=_FakeIngress()))
+        self.assertEqual(reg, {})
+        self.assertIn("CREW_INGRESS_SECRET not set", logs.output[0])
+        # Declared on the researcher but unregistered: silently skipped, not an error.
+        self.assertEqual(main.tools_for("researcher", frozenset({"kb_query", "memory_query"}), reg), [])
+
+    def test_registered_tools_have_15s_timeout_and_4000_char_cap(self):
+        reg = self.tools(_FakeIngress({"ok": True, "result": {}}))
+        self.assertEqual(sorted(reg), ["kb_query", "memory_query"])
+        for t in reg.values():
+            self.assertEqual((t.timeout_s, t.max_output_chars), (15.0, 4000))
+
+    def test_allowlist_still_gates_the_ingress_tools(self):
+        reg = self.tools(_FakeIngress({"ok": True, "result": {}}))
+        self.assertEqual(main.tools_for("researcher", frozenset(), reg), [])
+        got = main.tools_for("researcher", main.parse_allowed_tools("kb_query", reg), reg)
+        self.assertEqual([t.name for t in got], ["kb_query"])
+        self.assertEqual(main.tools_for("writer", frozenset(reg), reg), [])
+
+    def test_kb_query_sends_the_crew_key_to_the_ingress_only(self):
+        fake = _FakeIngress({"ok": True, "trace_id": "t", "result": {"documents": [{"title": "Nexus"}]}})
+        out = main.run_tool(self.tools(fake)["kb_query"], "  what is nexus  ")
+        self.assertEqual(json.loads(out), {"documents": [{"title": "Nexus"}]})
+        (req, timeout), = fake.requests
+        self.assertEqual(req.full_url, URL)
+        self.assertEqual(req.get_method(), "POST")
+        self.assertEqual(req.get_header("X-nexus-secret"), KEY)
+        self.assertEqual(timeout, 15.0)
+        sent = json.loads(req.data)
+        self.assertEqual(sent["event"], {"type": "kb.query", "payload": {"query": "what is nexus"}})
+        self.assertTrue(sent["trace_id"].startswith("crew-"))
+        self.assertNotIn(KEY, req.data.decode())
+
+    def test_memory_query_filters_by_label(self):
+        blocks = [{"label": "human", "value": "h", "limit": 5}, {"label": "persona", "value": "p"}]
+        fake = _FakeIngress({"ok": True, "result": {"blocks": blocks}})
+        tool = self.tools(fake)["memory_query"]
+        self.assertEqual(json.loads(main.run_tool(tool, "Persona")), [{"label": "persona", "value": "p"}])
+        self.assertEqual(len(json.loads(main.run_tool(tool, ""))), 2)
+        self.assertEqual(json.loads(fake.requests[0][0].data)["event"], {"type": "memory.query", "payload": {}})
+
+    def test_output_is_capped_at_4000(self):
+        fake = _FakeIngress({"ok": True, "result": {"text": "x" * 10_000}})
+        out = main.run_tool(self.tools(fake)["kb_query"], "q")
+        self.assertEqual(len(out), 4000 + len("…[truncated]"))
+
+    def test_http_403_is_a_tool_error_without_the_body(self):
+        out = main.run_tool(self.tools(_FakeIngress(status=403))["kb_query"], "q")
+        self.assertEqual(out, "Tool error: kb_query: IngressError: kb.query: ingress returned HTTP 403")
+        self.assertNotIn("leak", out)
+
+    def test_ingress_error_payload_is_a_sanitized_tool_error(self):
+        fake = _FakeIngress({"ok": False, "error": {"message": "knowledge base not running\nat /srv/x.py"}})
+        out = main.run_tool(self.tools(fake)["kb_query"], "q")
+        self.assertEqual(out, "Tool error: kb_query: IngressError: kb.query: knowledge base not running")
+
+    def test_unreachable_and_bad_json_are_tool_errors(self):
+        out = main.run_tool(self.tools(_FakeIngress(exc=urllib.error.URLError(ConnectionRefusedError())))["memory_query"], "")
+        self.assertEqual(out, "Tool error: memory_query: IngressError: memory.query: ingress unreachable (ConnectionRefusedError)")
+        out = main.run_tool(self.tools(lambda req, timeout=None: _FakeResponse(b"<html>"))["kb_query"], "q")
+        self.assertEqual(out, "Tool error: kb_query: IngressError: kb.query: ingress returned invalid JSON")
+
+    def test_empty_query_never_calls_the_ingress(self):
+        fake = _FakeIngress({"ok": True, "result": {}})
+        out = main.run_tool(self.tools(fake)["kb_query"], "   ")
+        self.assertEqual(out, "Tool error: kb_query: IngressError: kb.query: empty query")
+        self.assertEqual(fake.requests, [])
+
+    def test_slow_ingress_times_out_as_a_tool_error(self):
+        release = threading.Event()
+
+        def slow(req, timeout=None):
+            release.wait(10)
+            return _FakeResponse(b'{"ok": true, "result": {}}')
+
+        reg = {}
+        main.register_ingress_tools(reg, KEY, URL, opener=slow)
+        tool = reg["kb_query"]
+        fast = main.CrewTool(tool.name, tool.description, tool.fn, timeout_s=0.2)
+        t0 = time.time()
+        out = main.run_tool(fast, "q")
+        release.set()
+        self.assertLess(time.time() - t0, 2)
+        self.assertEqual(out, "Tool error: kb_query timed out after 0.2s")
+
+    def test_the_key_never_reaches_output_errors_or_logs(self):
+        echo = _FakeIngress({"ok": True, "result": {"echo": f"header was {KEY}"}})
+        self.assertNotIn(KEY, main.run_tool(self.tools(echo)["kb_query"], "q"))
+        err = _FakeIngress({"ok": False, "error": {"message": f"bad key {KEY}"}})
+        with self.assertLogs("crew-service", "DEBUG") as logs:
+            main.log.debug("sentinel")
+            out = main.run_tool(self.tools(err)["kb_query"], "q")
+        self.assertNotIn(KEY, out)
+        self.assertNotIn(KEY, "\n".join(logs.output))
+        # And a failed run's stored result goes through safe_result as well.
+        self.assertNotIn(KEY, main.safe_result("failed", out) or "")
+
+    def test_non_http_url_is_refused(self):
+        with self.assertRaisesRegex(main.IngressError, "http"):
+            main.ingress_call("kb.query", {}, url="file:///etc/passwd", secret=KEY, opener=_FakeIngress())
+
+    def test_service_reads_no_crew_key_in_this_test_image(self):
+        self.assertEqual(main.CREW_INGRESS_SECRET, "")
+        self.assertEqual(main.TOOL_REGISTRY, {})
 
 
 if __name__ == "__main__":

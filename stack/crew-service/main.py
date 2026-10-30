@@ -106,18 +106,23 @@ def parse_allowed_tools(raw: str, registry: Dict[str, CrewTool]) -> frozenset:
     return frozenset(names & registry.keys())
 
 
-ALLOWED_TOOLS = parse_allowed_tools(_env("CREW_ALLOWED_TOOLS"), TOOL_REGISTRY)
+# Tools implemented in this file that register only when their config is present (the Ingress
+# tools need CREW_INGRESS_SECRET). An agent may declare these even when they're unregistered.
+OPTIONAL_TOOLS = frozenset({"kb_query", "memory_query"})
 
 
 def tools_for(agent_key: str, allowed: Optional[frozenset] = None,
-              registry: Optional[Dict[str, CrewTool]] = None) -> List[CrewTool]:
-    """The tools an agent may receive: its declared tools that are allowlisted.
-    A declared tool that isn't implemented is a bug and raises."""
+              registry: Optional[Dict[str, CrewTool]] = None,
+              optional: frozenset = OPTIONAL_TOOLS) -> List[CrewTool]:
+    """The tools an agent may receive: its declared tools that are registered and allowlisted.
+    A declared tool that is neither registered nor a known optional tool is a bug and raises."""
     allowed = ALLOWED_TOOLS if allowed is None else allowed
     registry = TOOL_REGISTRY if registry is None else registry
     out = []
     for name in AGENT_CATALOG[agent_key]["tools"]:
         if name not in registry:
+            if name in optional:
+                continue
             raise ValueError(f"agent {agent_key} declares unknown tool {name}")
         if name in allowed:
             out.append(registry[name])
@@ -156,12 +161,116 @@ def _to_crewai_tool(tool: CrewTool):
     return _Tool()
 
 
+# ── Ingress tools (read-only) ───────────────────────────────────────────────
+# kb_query and memory_query call the n8n Ingress's crew webhook, which accepts only those two
+# event types for this key (anything else is 403). The key is sent as X-Nexus-Secret on these
+# calls only and is scrubbed from every output and error.
+CREW_INGRESS_SECRET = _env("CREW_INGRESS_SECRET")
+CREW_INGRESS_URL = _env("CREW_INGRESS_URL", "http://n8n:5678/webhook/terrance/ingress-crew")
+INGRESS_TIMEOUT_S = 15.0
+INGRESS_OUTPUT_CHARS = 4000
+MAX_QUERY_CHARS = 2000
+
+
+class IngressError(RuntimeError):
+    """A failed Ingress call. Its message is fixed text plus an HTTP status, never the body."""
+
+
+def _scrub(text: str, secret: str) -> str:
+    return text.replace(secret, "[redacted]") if secret else text
+
+
+def ingress_call(event_type: str, payload: dict, *, url: str, secret: str,
+                 timeout: float = INGRESS_TIMEOUT_S, opener=None) -> dict:
+    """POST one event to the Ingress and return its `result`. Raises IngressError."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    if not url.startswith(("http://", "https://")):
+        raise IngressError("ingress URL must be http(s)")
+    body = json.dumps({"trace_id": f"crew-{uuid.uuid4().hex[:12]}",
+                       "event": {"type": event_type, "payload": payload}}).encode()
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "Content-Type": "application/json", "X-Nexus-Secret": secret})
+    open_ = opener or urllib.request.urlopen
+    try:
+        with open_(req, timeout=timeout) as resp:
+            raw = resp.read(256 * 1024)
+    except urllib.error.HTTPError as e:
+        raise IngressError(f"{event_type}: ingress returned HTTP {e.code}") from None
+    except (urllib.error.URLError, OSError) as e:
+        reason = getattr(e, "reason", e)
+        raise IngressError(f"{event_type}: ingress unreachable ({type(reason).__name__})") from None
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        raise IngressError(f"{event_type}: ingress returned invalid JSON") from None
+    if not isinstance(doc, dict) or doc.get("ok") is not True:
+        err = doc.get("error") if isinstance(doc, dict) else None
+        msg = err.get("message") if isinstance(err, dict) else None
+        raise IngressError(f"{event_type}: {sanitize_text(str(msg)) if msg else 'request failed'}")
+    return doc.get("result") or {}
+
+
+def _ingress_tool(fn: Callable[[str], str], secret: str) -> Callable[[str], str]:
+    """Scrub the key from a tool's output and from any error it raises."""
+    def run(arg: str) -> str:
+        try:
+            return _scrub(fn(arg), secret)
+        except IngressError as e:
+            raise IngressError(_scrub(str(e), secret)) from None
+    return run
+
+
+def make_ingress_tools(secret: str, url: str, opener=None) -> List[CrewTool]:
+    import json
+
+    def kb_query(query: str) -> str:
+        q = str(query or "").strip()[:MAX_QUERY_CHARS]
+        if not q:
+            raise IngressError("kb.query: empty query")
+        result = ingress_call("kb.query", {"query": q}, url=url, secret=secret, opener=opener)
+        return json.dumps(result, ensure_ascii=False)
+
+    def memory_query(label: str) -> str:
+        result = ingress_call("memory.query", {}, url=url, secret=secret, opener=opener)
+        blocks = result.get("blocks") or []
+        want = str(label or "").strip().lower()
+        if want:
+            blocks = [b for b in blocks if str(b.get("label", "")).lower() == want]
+        return json.dumps([{"label": b.get("label"), "value": b.get("value")} for b in blocks],
+                          ensure_ascii=False)
+
+    return [
+        CrewTool("kb_query", "Search the local knowledge base (Verba). Input: a search query.",
+                 _ingress_tool(kb_query, secret), INGRESS_TIMEOUT_S, INGRESS_OUTPUT_CHARS),
+        CrewTool("memory_query", "Read Amara's core memory blocks (read-only). Input: a block "
+                 "label such as 'human' or 'persona', or empty for all.",
+                 _ingress_tool(memory_query, secret), INGRESS_TIMEOUT_S, INGRESS_OUTPUT_CHARS),
+    ]
+
+
+def register_ingress_tools(registry: Dict[str, CrewTool], secret: str, url: str, opener=None) -> bool:
+    """Register kb_query and memory_query when the crew key is set; otherwise register neither."""
+    if not secret:
+        log.warning("CREW_INGRESS_SECRET not set; kb_query and memory_query are not registered")
+        return False
+    for tool in make_ingress_tools(secret, url, opener):
+        register_tool(tool, registry)
+    return True
+
+
+register_ingress_tools(TOOL_REGISTRY, CREW_INGRESS_SECRET, CREW_INGRESS_URL)
+ALLOWED_TOOLS = parse_allowed_tools(_env("CREW_ALLOWED_TOOLS"), TOOL_REGISTRY)
+
+
 AGENT_CATALOG: Dict[str, dict] = {
     "researcher": dict(
         role="Terrance Research Assistant",
         goal="Investigate the task thoroughly and report verified findings.",
         backstory="A precise, efficient researcher in the Terrance ecosystem.",
-        tools=[],
+        tools=["kb_query", "memory_query"],
     ),
     "analyst": dict(
         role="Terrance Analyst",
