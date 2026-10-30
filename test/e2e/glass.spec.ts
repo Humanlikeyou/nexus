@@ -22,16 +22,17 @@ test("glass and shadow tokens resolve", async ({ page, theme }) => {
 });
 
 test("glass applied: palette dialog blurs, cards stay solid, vibrancy layers transparent", async ({ page, theme }) => {
-  await openApp(page, { theme, reduceMotion: true });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "no-preference" }, { name: "prefers-color-scheme", value: theme }] });
+  await openApp(page, { theme, reduceMotion: false });
   await page.keyboard.press("Meta+k");
   const dialog = page.locator("dialog.ui-dialog[open]").first();
   await expect(dialog).toBeVisible();
   const bf = await dialog.evaluate((el) => {
     const s = getComputedStyle(el); return s.backdropFilter || (s as unknown as Record<string, string>).webkitBackdropFilter;
   });
-  // The e2e browser reports prefers-reduced-transparency: reduce, so the solid fallback is what renders here.
-  const reduced = await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches);
-  if (reduced) expect(bf).toBe("none"); else expect(bf).not.toBe("none");
+  expect(await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches)).toBe(false);
+  expect(bf).not.toBe("none");
   const css = readFileSync("src-console/styles/glass-apply.css", "utf8");
   expect(css).toMatch(/:root \.ui-dialog \{[^}]*backdrop-filter: blur\(var\(--blur-thick\)\)/);
   expect(css).toMatch(/:root \.context-inspector \{[^}]*backdrop-filter: blur/);
@@ -72,7 +73,7 @@ test("glass renders with reduced transparency forced off (review shot)", async (
   // Playwright's emulateMedia has no reducedTransparency option; force it via CDP (Chromium only).
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "no-preference" }, { name: "prefers-color-scheme", value: theme }] });
-  await openApp(page, { theme, reduceMotion: true });
+  await openApp(page, { theme, reduceMotion: false /* reduced motion drops blur too */ });
   expect(await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches)).toBe(false);
   await page.keyboard.press("Meta+k");
   const dialog = page.locator("dialog.ui-dialog[open]").first();
