@@ -5,7 +5,8 @@
  *   local   — always Ollama, never calls any external API
  *   hybrid  — Ollama by default; escalates to Anthropic when warranted
  *   api     — always Anthropic (direct HTTP)
- *   gateway — always OpenClaw gateway (routes to whatever model is configured there)
+ *   gateway — OpenClaw gateway (routes to whatever model is configured there); when
+ *             OpenClaw isn't installed or its gateway is unreachable, local Ollama instead
  *
  * Usage logging is written to:
  *   ~/Library/Application Support/com.taisun.nexus/llm_usage.json
@@ -346,6 +347,43 @@ async fn call_anthropic(
     Ok((content.to_string(), prompt_tokens, completion_tokens))
 }
 
+/// Prefix of `call_openclaw`'s transport error: the gateway isn't there (fall back).
+const GATEWAY_UNREACHABLE: &str = "OpenClaw gateway unreachable:";
+
+type ProviderReply = (String, u32, u32, String, String);
+
+/// The "gateway" route. OpenClaw is not the default path: not installed means local
+/// Ollama without trying it, and an unreachable gateway falls back the same way. If
+/// Ollama fails too: `unavailable: openclaw not installed` (or the gateway error when
+/// it is installed). An OpenClaw API error is returned as before.
+async fn via_gateway<O, OF, L, LF>(
+    openclaw_installed: bool,
+    ollama_model: &str,
+    openclaw: O,
+    ollama: L,
+) -> Result<ProviderReply, String>
+where
+    O: FnOnce() -> OF,
+    OF: std::future::Future<Output = Result<(String, u32, u32, String), String>>,
+    L: FnOnce() -> LF,
+    LF: std::future::Future<Output = Result<(String, u32, u32), String>>,
+{
+    let gateway_err = if openclaw_installed {
+        match openclaw().await {
+            Ok((c, p, o, model)) => return Ok((c, p, o, "gateway".to_string(), model)),
+            Err(e) if e.starts_with(GATEWAY_UNREACHABLE) => e,
+            Err(e) => return Err(e),
+        }
+    } else {
+        super::openclaw::NOT_INSTALLED_ERROR.to_string()
+    };
+    eprintln!("[llm_router] OpenClaw unavailable, using local Ollama");
+    match ollama().await {
+        Ok((c, p, o)) => Ok((c, p, o, "ollama".to_string(), ollama_model.to_string())),
+        Err(_) => Err(gateway_err),
+    }
+}
+
 async fn call_openclaw(
     gateway_url: &str,
     gateway_token: &str,
@@ -377,7 +415,7 @@ async fn call_openclaw(
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("OpenClaw gateway unreachable: {}", e))?;
+        .map_err(|e| format!("{GATEWAY_UNREACHABLE} {}", e))?;
 
     let body: serde_json::Value = resp
         .json()
@@ -434,8 +472,13 @@ pub async fn chat_with_router(
             "gateway" => {
                 let url = gateway_url.as_deref().unwrap_or("http://127.0.0.1:18789");
                 let token = gateway_auth_token.as_deref().unwrap_or("");
-                let (c, p, o, model) = call_openclaw(url, token, &text, None, &client).await?;
-                (c, p, o, "gateway".to_string(), model)
+                via_gateway(
+                    super::openclaw::InstallPaths::system().installed(),
+                    &config.ollama_model,
+                    || call_openclaw(url, token, &text, None, &client),
+                    || call_ollama(&config.ollama_model, &text, &client),
+                )
+                .await?
             }
             "anthropic" => {
                 let key = anthropic_api_key.as_deref().unwrap_or("");
@@ -733,5 +776,65 @@ mod tests {
         // (1000/1000)*0.015 + (500/1000)*0.075 = 0.0525
         let cost = estimate_cost("anthropic", "claude-opus-4-6", 1000, 500);
         assert!((cost - 0.0525).abs() < 1e-9, "cost={}", cost);
+    }
+
+    #[tokio::test]
+    async fn gateway_without_openclaw_falls_back_to_ollama_without_calling_it() {
+        let reply = via_gateway(
+            false,
+            "gemma4:latest",
+            || async { panic!("OpenClaw must not be called when not installed") },
+            || async { Ok(("hi".to_string(), 1, 2)) },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            reply,
+            ("hi".into(), 1, 2, "ollama".into(), "gemma4:latest".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_without_openclaw_or_ollama_is_unavailable() {
+        let err = via_gateway(
+            false,
+            "gemma4:latest",
+            || async { panic!("not installed") },
+            || async { Err("Ollama unreachable: refused".to_string()) },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, "unavailable: openclaw not installed");
+    }
+
+    #[tokio::test]
+    async fn installed_gateway_is_used_and_unreachable_falls_back() {
+        let ok = via_gateway(
+            true,
+            "m",
+            || async { Ok(("g".to_string(), 3, 4, "minimax".to_string())) },
+            || async { panic!("gateway answered") },
+        )
+        .await
+        .unwrap();
+        assert_eq!(ok.3, "gateway");
+        let fell_back = via_gateway(
+            true,
+            "m",
+            || async { Err(format!("{GATEWAY_UNREACHABLE} connection refused")) },
+            || async { Ok(("l".to_string(), 0, 0)) },
+        )
+        .await
+        .unwrap();
+        assert_eq!(fell_back.3, "ollama");
+        let api_err = via_gateway(
+            true,
+            "m",
+            || async { Err("OpenClaw: model overloaded".to_string()) },
+            || async { panic!("API errors don't fall back") },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(api_err, "OpenClaw: model overloaded");
     }
 }
