@@ -188,7 +188,7 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
           <div className="fitness__empty-lead">
             <Inbox className="fitness__empty-icon" aria-hidden="true" />
             <p className="fitness__callout">{failed ? "Amara OS couldn't read the local NOOP store. Try again in a moment." : health.message || "NOOP health data is not available yet."}</p>
-            {!failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Check Again</Button>}
+            {!failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Check again</Button>}
           </div>
           <div className="fitness__tiles fitness__tiles--3">
             <StatTile label="Recovery" value={null} />

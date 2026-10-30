@@ -58,7 +58,7 @@ export function DevicesGroup({ data, devices, operation, error, onScan: scan, on
       {error && (
         <div className="settings__alert" role="alert">
           <p>{error}</p>
-          <Button variant="secondary" size="small" onClick={onScan} disabled={operation !== null}>Try Again</Button>
+          <Button variant="secondary" size="small" onClick={onScan} disabled={operation !== null}>Retry</Button>
         </div>
       )}
       {devices.length > 0 && !muse.connected && (

@@ -41,10 +41,10 @@ describe("Fitness (HealthField)", () => {
     expect(container.textContent).not.toMatch(/whoop/i);
   });
 
-  it("empty: Check Again action, null tiles hide units, readiness values are badges", () => {
+  it("empty: Check again action, null tiles hide units, readiness values are badges", () => {
     const onRetry = vi.fn();
     const { container } = render(<HealthField onRetry={onRetry} data={snap({ status: "waiting_for_data" })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Check Again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
     expect(onRetry).toHaveBeenCalledOnce();
     expect(container.querySelectorAll(".ui-stat__value[data-empty]")).toHaveLength(3);
     expect(screen.queryByText("ms")).toBeNull();

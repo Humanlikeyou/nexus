@@ -30,11 +30,11 @@ describe("Sessions (Neuro › History)", () => {
     expect(screen.getByRole("region", { name: "Muse session" })).toBeInTheDocument();
   });
 
-  it("empty state offers Start a Session; error state offers Retry", () => {
+  it("empty state offers Start session; error state offers Retry", () => {
     const onStart = vi.fn();
     const { unmount } = render(<SessionsField data={snap({ sessions: [] })} onStartSession={onStart} />);
     expect(screen.getByRole("heading", { level: 1, name: "History" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Start a Session" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start session" }));
     expect(onStart).toHaveBeenCalledTimes(1);
     unmount();
     const onRetry = vi.fn();

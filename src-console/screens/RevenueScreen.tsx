@@ -29,7 +29,7 @@ export function RevenueField({ data, onRetry }: { data: SystemSnapshot; onRetry?
   const strategyList = (title: string) => down("arm_list_strategies") && strategies.length === 0
     ? <Card title={title}><Unavailable label="Revenue strategies" onRetry={onRetry} /></Card>
     : strategies.length === 0
-      ? <Card title={title}><p className="biz__note">No strategies configured.</p></Card>
+      ? <Card title={title}><p className="biz__note"><strong>No strategies yet</strong><br />Strategies appear here once you configure one.</p></Card>
       : (
         <InsetGroup title={`${title} (${strategies.length})`}>
           {strategies.map((s) => (

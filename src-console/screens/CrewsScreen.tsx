@@ -192,7 +192,7 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
             <TextField label="Task" value={task} maxLength={CREW_MAX_TASK_CHARS} autoComplete="off"
               description={`${task.length}/${CREW_MAX_TASK_CHARS}`} onChange={(e) => setTask(e.target.value)} />
             <div className="crews__actions">
-              <Button type="submit" icon={Play} disabled={!canStart}>Start Run</Button>
+              <Button type="submit" icon={Play} disabled={!canStart}>Start run</Button>
             </div>
           </form>
         </Card>
@@ -200,7 +200,7 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
 
       {actionError && <p className="crews__error" role="alert">{actionError}</p>}
 
-      <Dialog open={confirmStart} title="Start this run?" confirmLabel="Start Run" busy={busy}
+      <Dialog open={confirmStart} title="Start this run?" confirmLabel="Start run" busy={busy}
         onConfirm={() => { void start(); }} onCancel={() => setConfirmStart(false)}>
         Runs on the local model inside the crew service. It may take a few minutes; you can stop it from the run.
       </Dialog>

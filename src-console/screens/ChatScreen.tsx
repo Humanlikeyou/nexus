@@ -164,7 +164,7 @@ export function ChatField({
             <ListRow icon={Activity} title="Activity" value={String(data.activity.length)} onSelect={onOpenActivity} />
           </InsetGroup>
         )}
-        <Button variant="plain" icon={SquarePen} onClick={onNewConversation} title="New chat (⌘N)">New Chat</Button>
+        <Button variant="plain" icon={SquarePen} onClick={onNewConversation} title="New chat (⌘N)">New chat</Button>
       </aside>
 
       <section className="chat-screen__conversation" aria-labelledby="chat-title">

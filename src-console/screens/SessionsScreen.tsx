@@ -33,7 +33,7 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
         <h1 className="sessions__title">History</h1>
         <Card title="No sessions yet" headingLevel={2}>
           <p className="sessions__copy">Finish a Muse session and Amara OS keeps the recording and summary here.</p>
-          {onStartSession && <div><Button variant="primary" onClick={onStartSession}>Start a Session</Button></div>}
+          {onStartSession && <div><Button variant="primary" onClick={onStartSession}>Start session</Button></div>}
         </Card>
       </div>
     );

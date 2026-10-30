@@ -31,7 +31,7 @@ describe("Chat & Agents › Crews", () => {
     render(<CrewsField data={{ ...INITIAL_SNAPSHOT }} />);
     expect(screen.getByRole("heading", { name: "Crews" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Loading crew service");
-    expect(screen.queryByRole("button", { name: "Start Run" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start run" })).toBeNull();
   });
 
   it("not configured: badge and the sync-crew-token.sh hint, no runs or form", () => {
@@ -54,7 +54,7 @@ describe("Chat & Agents › Crews", () => {
     render(<CrewsField data={snap({})} />);
     expect(screen.getByText("Online")).toBeInTheDocument();
     expect(screen.getByText("No runs yet")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start Run" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Start run" })).toBeDisabled();
   });
 
   it("list: rows with clamped task (full text in title), status badges; selecting shows result or error", () => {
@@ -87,11 +87,11 @@ describe("Chat & Agents › Crews", () => {
     expect(nameBox).not.toHaveAttribute("aria-invalid", "true");
     fireEvent.change(screen.getByRole("textbox", { name: "Task" }), { target: { value: "Reply with the word OK" } });
     expect(screen.getByText("22/4000")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Start Run" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
     const dialog = screen.getByRole("dialog", { name: "Start this run?" });
     expect(dialog).toHaveTextContent("Runs on the local model");
     expect(crew.startCrew).not.toHaveBeenCalled();
-    await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Start Run" })); });
+    await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Start run" })); });
     expect(crew.startCrew).toHaveBeenCalledWith("smoke", "Reply with the word OK");
     expect(within(screen.getByRole("list", { name: "Runs" })).getByText("Running")).toBeInTheDocument();
   });
@@ -137,8 +137,8 @@ describe("Chat & Agents › Crews", () => {
     render(<CrewsField data={snap({})} />);
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "smoke" } });
     fireEvent.change(screen.getByRole("textbox", { name: "Task" }), { target: { value: "hi" } });
-    fireEvent.click(screen.getByRole("button", { name: "Start Run" }));
-    await act(async () => { fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Start Run" })); });
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    await act(async () => { fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Start run" })); });
     expect(screen.getByRole("alert")).toHaveTextContent("too many running crews");
   });
 });

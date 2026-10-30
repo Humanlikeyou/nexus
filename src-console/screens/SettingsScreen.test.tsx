@@ -28,7 +28,7 @@ describe("Settings (§11) + Devices (§9)", () => {
     expect(screen.getAllByRole("switch")).toHaveLength(1);
     expect(screen.getByText("Every 15 seconds")).toBeInTheDocument();
   });
-  it("Muse: Find Muse scans; nearby headsets show signal words; error offers Try Again", () => {
+  it("Muse: Find Muse scans; nearby headsets show signal words; error offers Retry", () => {
     const onScan = vi.fn(); const onConnect = vi.fn();
     const device = { name: "Muse-1234", address: "aa", rssi: -70 } as never;
     render(<SettingsField data={snap()} {...base} devices={[device]} error="Bluetooth is unavailable." onScan={onScan} onConnect={onConnect} />);
@@ -39,7 +39,7 @@ describe("Settings (§11) + Devices (§9)", () => {
     fireEvent.click(within(devices).getByRole("button", { name: "Connect" }));
     expect(onConnect).toHaveBeenCalledWith(device);
     expect(within(devices).getByRole("alert")).toHaveTextContent("Bluetooth is unavailable.");
-    expect(within(devices).getByRole("button", { name: "Try Again" })).toBeInTheDocument();
+    expect(within(devices).getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
   it("diagnostics show — before the first load and Unavailable for down sources", () => {
     const { unmount } = render(<SettingsField data={INITIAL_SNAPSHOT} {...base} />);
