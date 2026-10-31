@@ -180,7 +180,7 @@ async fn rig_with(
     let state = State::new(cfg, secrets, outbound_disabled);
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", l.local_addr().unwrap());
-    let app = server::router(state);
+    let app = server::local_router(state);
     tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
     Rig {
         url,
@@ -928,4 +928,18 @@ async fn bad_requests_are_400() {
     )
     .await;
     assert_eq!(resp.status(), 400);
+}
+
+#[tokio::test]
+async fn loopback_port_refuses_browser_and_rebinding_requests() {
+    let rig = rig(Mock::default()).await;
+    let c = reqwest::Client::new();
+    let body = json!({"model": "amara", "messages": [{"role": "user", "content": "hi"}]});
+    let from_page = c.post(format!("{}/v1/chat/completions", rig.url))
+        .header("Origin", "https://evil.example").json(&body).send().await.unwrap();
+    assert_eq!(from_page.status(), 403);
+    let rebound = c.get(format!("{}/health", rig.url)).header("Host", "evil.example:8787").send().await.unwrap();
+    assert_eq!(rebound.status(), 403);
+    let ok = c.get(format!("{}/health", rig.url)).send().await.unwrap();
+    assert_eq!(ok.status(), 200);
 }

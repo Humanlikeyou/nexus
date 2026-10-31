@@ -46,7 +46,7 @@ pub async fn run(
     let (tx, _) = tokio::sync::broadcast::channel::<()>(1);
     let mut tasks = Vec::new();
     let mut rx = tx.subscribe();
-    let app = server::router(Arc::clone(&state));
+    let app = server::local_router(Arc::clone(&state));
     tasks.push(tokio::spawn(async move {
         axum::serve(local, app)
             .with_graceful_shutdown(async move {

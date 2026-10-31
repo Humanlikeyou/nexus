@@ -263,19 +263,43 @@ pub fn router_base(passed: Option<&str>, saved: Option<&str>) -> String {
     [passed, saved]
         .into_iter()
         .flatten()
-        .map(|u| u.trim().trim_end_matches('/'))
-        .find(|u| is_loopback_url(u))
-        .unwrap_or(DEFAULT_ROUTER_URL)
-        .to_string()
+        .find_map(loopback_base)
+        .unwrap_or_else(|| DEFAULT_ROUTER_URL.to_string())
 }
 
-fn is_loopback_url(u: &str) -> bool {
-    let Some(rest) = u.strip_prefix("http://") else {
-        return false;
-    };
-    let host = rest.split('/').next().unwrap_or("");
-    let host = host.rsplit_once(':').map_or(host, |(h, _)| h);
-    matches!(host, "127.0.0.1" | "localhost" | "[::1]")
+/// `http://<loopback host>[:port]`, rebuilt from the parsed URL, or None. Parsing (rather than
+/// splitting the string) closes userinfo tricks like `http://127.0.0.1@evil.example` and
+/// `http://localhost:1@evil.example:8787`; any path, query or fragment is refused too.
+fn loopback_base(raw: &str) -> Option<String> {
+    let u = reqwest::Url::parse(raw.trim()).ok()?;
+    let host = u.host_str()?.to_string();
+    let loopback = host == "localhost"
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    if !loopback {
+        return None;
+    }
+    let clean = u.scheme() == "http"
+        && u.username().is_empty()
+        && u.password().is_none()
+        && matches!(u.path(), "" | "/")
+        && u.query().is_none()
+        && u.fragment().is_none();
+    clean.then(|| match u.port() {
+        Some(port) => format!("http://{host}:{port}"),
+        None => format!("http://{host}"),
+    })
+}
+
+/// The router is loopback-only, so a redirect from it is never legitimate: don't follow one off the Mac.
+fn no_redirect_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_default()
 }
 
 /// Routing hints for the router as header pairs. The router decides; these only ask.
@@ -477,7 +501,7 @@ pub async fn chat_with_router(
 
     let start = Instant::now();
     let transport = HttpTransport {
-        client: reqwest::Client::new(),
+        client: no_redirect_client(),
     };
     let (content, tier, mut reason, prompt_tokens, completion_tokens) =
         ask_router(&transport, &base, &headers, &body).await?;
@@ -531,7 +555,7 @@ pub async fn get_cost_estimate(
     let gate = claude_gate(&config, daily_spend_usd(&load_usage_records()));
     let headers = router_headers(&config, &tags, deep.unwrap_or(false), None, &gate);
     let transport = HttpTransport {
-        client: reqwest::Client::new(),
+        client: no_redirect_client(),
     };
     let (tier, reason) = match transport
         .post(
@@ -692,6 +716,16 @@ mod tests {
             router_base(Some("http://127.0.0.1.evil.com"), None),
             DEFAULT_ROUTER_URL
         );
+        for trick in [
+            "http://127.0.0.1@evil.example",
+            "http://localhost:1@evil.example:8787",
+            "http://user:pw@127.0.0.1:8787",
+            "http://127.0.0.1:8787/v1?x=1",
+            "http://127.0.0.1:8787#frag",
+        ] {
+            assert_eq!(router_base(Some(trick), None), "http://127.0.0.1:8787", "{trick}");
+        }
+        assert_eq!(router_base(Some("http://[::1]:8787"), None), "http://[::1]:8787");
     }
 
     // ── hints forwarded (no model decisions in the app) ──

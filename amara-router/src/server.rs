@@ -55,6 +55,31 @@ pub fn router(state: St) -> Router {
         .with_state(state)
 }
 
+/// The loopback listener. It has no key, so it refuses what a web page could send it: a Host other
+/// than loopback (DNS rebinding) and any request carrying an Origin header (cross-site fetches from a
+/// browser). HA, Hermes and Nexus's Rust client send neither.
+pub fn local_router(state: St) -> Router {
+    router(state).layer(middleware::from_fn(|req: Request, next: Next| async move {
+        let headers = req.headers();
+        if headers.contains_key(header::ORIGIN) || !loopback_host(headers) {
+            return (StatusCode::FORBIDDEN, axum::Json(json!({"error": {"message":
+                "amara-router only accepts local, non-browser requests on this port"}}))).into_response();
+        }
+        next.run(req).await
+    }))
+}
+
+fn loopback_host(headers: &HeaderMap) -> bool {
+    let Some(host) = headers.get(header::HOST).and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    let name = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => host.rsplit_once(':').map_or(host, |(h, _)| h),
+    };
+    name.eq_ignore_ascii_case("localhost") || name.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
 /// The LAN listener: same routes, every request needs `Authorization: Bearer <key>`.
 pub fn lan_router(state: St, key: String) -> Router {
     let key = Arc::new(key);
