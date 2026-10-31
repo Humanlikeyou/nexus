@@ -51,6 +51,9 @@ pub struct NexusConfig {
     /// Settings › "Allow Claude" (llm_router claude tier). Off unless set.
     #[serde(default)]
     pub allow_claude: Option<bool>,
+    /// Amara Router base URL (compute mode "amara"). None = http://127.0.0.1:8787.
+    #[serde(default)]
+    pub amara_router_url: Option<String>,
 }
 
 fn default_gateway_url() -> Option<String> {

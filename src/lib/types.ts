@@ -223,13 +223,16 @@ export interface NexusConfig {
   llm_per_task_cap_usd: number | null;
   llm_show_cost_estimate: boolean | null;
   anthropic_api_key: string | null;
+  /** Amara Router base URL (loopback only); null = http://127.0.0.1:8787. */
+  amara_router_url?: string | null;
 }
 
 // ============================================================
 // LLM Router
 // ============================================================
 
-export type ComputeMode = "local" | "hybrid" | "api";
+/** All modes go through the Amara Router; "amara" (default) and "local" never ask for Claude. */
+export type ComputeMode = "amara" | "local" | "hybrid" | "api";
 
 export interface LlmRouterConfig {
   mode: ComputeMode;
@@ -239,6 +242,8 @@ export interface LlmRouterConfig {
   daily_cap_usd: number | null;
   per_task_cap_usd: number | null;
   show_cost_estimate: boolean;
+  /** Amara Router base URL; null/absent = the saved one or http://127.0.0.1:8787. */
+  router_url?: string | null;
 }
 
 /** Amara's model tier. Responses carry the tier only, never a model or provider name. */

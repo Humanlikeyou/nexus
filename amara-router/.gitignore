@@ -1,0 +1,4 @@
+/target/
+# The real config is 0600 and local-only; config.example.toml is the committed template.
+/config.toml
+*.env
