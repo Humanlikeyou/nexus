@@ -105,37 +105,77 @@ pub fn get_noop_settings() -> NoopSettings {
     load_settings()
 }
 
-/// Persist settings. Any change to `binary_path` or `db_path` requires `confirm == true`
-/// (the UI must show an explicit confirmation); new paths are validated and stored canonical.
-#[tauri::command]
-pub fn set_noop_settings(settings: NoopSettings, confirm: bool) -> Result<(), String> {
-    let next = apply_settings(&load_settings(), settings, confirm, &Roots::current()?)
-        .map_err(|e| e.detail())?;
-    let s = serde_json::to_string(&next).map_err(|e| e.to_string())?;
-    super::kv::save_kv(SETTINGS_KEY.to_string(), s)
+/// Exact rejection string when the user cancels the native path-change dialog.
+pub const PATH_CHANGE_CANCELLED: &str = "cancelled: user declined path change";
+
+/// Asks the user to approve new canonical NOOP paths. Injected so tests can approve/deny.
+pub trait ConfirmPrompter {
+    fn confirm_paths(&self, binary_path: Option<&str>, db_path: Option<&str>) -> bool;
 }
 
+/// Native Confirm/Cancel dialog (tauri-plugin-dialog). Must be called off the main thread.
+struct DialogPrompter(tauri::AppHandle);
+
+impl ConfirmPrompter for DialogPrompter {
+    fn confirm_paths(&self, binary_path: Option<&str>, db_path: Option<&str>) -> bool {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+        let msg = format!(
+            "Allow Nexus to run the NOOP CLI with these paths?\n\nBinary: {}\nDatabase: {}",
+            binary_path.unwrap_or("(not set)"),
+            db_path.unwrap_or("(NOOP app default)")
+        );
+        self.0
+            .dialog()
+            .message(msg)
+            .title("Confirm NOOP path change")
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Confirm".into(),
+                "Cancel".into(),
+            ))
+            .blocking_show()
+    }
+}
+
+/// Persist settings. If `binary_path` or `db_path` changes, the new paths are validated and a
+/// native Confirm/Cancel dialog shows both canonical paths; nothing is saved unless confirmed
+/// (cancel rejects with exactly [`PATH_CHANGE_CANCELLED`]). Async + spawn_blocking so the
+/// blocking dialog never runs on the main thread.
+#[tauri::command]
+pub async fn set_noop_settings(
+    app: tauri::AppHandle,
+    settings: NoopSettings,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let roots = Roots::current()?;
+        let next = apply_settings(&load_settings(), settings, &DialogPrompter(app), &roots)?;
+        let s = serde_json::to_string(&next).map_err(|e| e.to_string())?;
+        super::kv::save_kv(SETTINGS_KEY.to_string(), s)
+    })
+    .await
+    .map_err(|_| "settings task failed".to_string())?
+}
+
+/// Validate, then (only if a path changed) ask the prompter. Returns the settings to save.
 pub(crate) fn apply_settings(
     current: &NoopSettings,
     mut next: NoopSettings,
-    confirm: bool,
+    prompter: &dyn ConfirmPrompter,
     roots: &Roots,
-) -> Result<NoopSettings, NoopQueryError> {
+) -> Result<NoopSettings, String> {
     let paths_changed = next.binary_path != current.binary_path || next.db_path != current.db_path;
-    if paths_changed && !confirm {
-        return Err(NoopQueryError::InvalidPath(
-            "changing the NOOP binary or database path requires confirm=true".into(),
-        ));
-    }
     if let Some(b) = next.binary_path.as_deref() {
-        next.binary_path = Some(
-            validate_path(b, PathKind::Binary, roots)?
-                .display()
-                .to_string(),
-        );
+        let c = validate_path(b, PathKind::Binary, roots).map_err(|e| e.detail())?;
+        next.binary_path = Some(c.display().to_string());
     }
     if let Some(d) = next.db_path.as_deref() {
-        next.db_path = Some(validate_path(d, PathKind::Db, roots)?.display().to_string());
+        let c = validate_path(d, PathKind::Db, roots).map_err(|e| e.detail())?;
+        next.db_path = Some(c.display().to_string());
+    }
+    if paths_changed
+        && !prompter.confirm_paths(next.binary_path.as_deref(), next.db_path.as_deref())
+    {
+        return Err(PATH_CHANGE_CANCELLED.to_string());
     }
     Ok(next)
 }
@@ -187,39 +227,69 @@ impl Roots {
     }
 }
 
-fn under_glob(path: &Path, base: &Path, tail: &[&str]) -> bool {
-    // base/<one component>/tail..., with at least one more component after.
-    let Ok(rest) = path.strip_prefix(base) else {
-        return false;
-    };
+/// If `path` is under base/<one component>/tail.../<more>, return base/<component>/tail.
+fn glob_root(path: &Path, base: &Path, tail: &[&str]) -> Option<PathBuf> {
+    let rest = path.strip_prefix(base).ok()?;
     let comps: Vec<_> = rest
         .components()
         .map(|c| c.as_os_str().to_string_lossy().into_owned())
         .collect();
-    comps.len() > tail.len() + 1 && comps[1..=tail.len()].iter().zip(tail).all(|(a, b)| a == b)
+    let ok =
+        comps.len() > tail.len() + 1 && comps[1..=tail.len()].iter().zip(tail).all(|(a, b)| a == b);
+    ok.then(|| {
+        comps[..=tail.len()]
+            .iter()
+            .fold(base.to_path_buf(), |p, c| p.join(c))
+    })
 }
 
-fn location_allowed(p: &Path, kind: PathKind, r: &Roots) -> bool {
+fn prefix_root(path: &Path, base: &Path) -> Option<PathBuf> {
+    (path.starts_with(base) && path != base).then(|| base.to_path_buf())
+}
+
+/// The allowlist root that `p` falls under, if any.
+fn allowlist_root(p: &Path, kind: PathKind, r: &Roots) -> Option<PathBuf> {
     let projects = r.home.join("projects");
     match kind {
-        PathKind::Binary => {
-            under_glob(p, &projects, &["Packages", "NoopLocalAccess", ".build"])
-                || (p.starts_with(&r.usr_local_bin) && p != r.usr_local_bin)
-        }
+        PathKind::Binary => glob_root(p, &projects, &["Packages", "NoopLocalAccess", ".build"])
+            .or_else(|| prefix_root(p, &r.usr_local_bin)),
         PathKind::Db => {
             let app_support = r.home.join("Library/Application Support");
             let containers = r.home.join("Library/Containers");
-            ["OpenWhoop", "NOOP"].iter().any(|d| {
-                let base = app_support.join(d);
-                (p.starts_with(&base) && p != base)
-                    || under_glob(
-                        p,
-                        &containers,
-                        &["Data", "Library", "Application Support", d],
-                    )
-            }) || under_glob(p, &projects, &[])
+            ["OpenWhoop", "NOOP"]
+                .iter()
+                .find_map(|d| {
+                    prefix_root(p, &app_support.join(d)).or_else(|| {
+                        glob_root(
+                            p,
+                            &containers,
+                            &["Data", "Library", "Application Support", d],
+                        )
+                    })
+                })
+                .or_else(|| glob_root(p, &projects, &[]))
         }
     }
+}
+
+/// Every folder from the file's parent up to and including `root` must be owned by the
+/// current uid or root and not group- or world-writable.
+fn parents_safe(file: &Path, root: &Path, uid: u32) -> bool {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let mut dir = file.parent();
+    while let Some(d) = dir {
+        let Ok(m) = std::fs::metadata(d) else {
+            return false;
+        };
+        if !m.is_dir() || (m.uid() != uid && m.uid() != 0) || m.permissions().mode() & 0o022 != 0 {
+            return false;
+        }
+        if d == root {
+            return true;
+        }
+        dir = d.parent();
+    }
+    false
 }
 
 pub fn validate_path(raw: &str, kind: PathKind, r: &Roots) -> Result<PathBuf, NoopQueryError> {
@@ -239,7 +309,8 @@ pub fn validate_path(raw: &str, kind: PathKind, r: &Roots) -> Result<PathBuf, No
         return bad("path is not a regular file");
     }
     // SAFETY: getuid has no preconditions and cannot fail.
-    if meta.uid() != unsafe { libc::getuid() } {
+    let uid = unsafe { libc::getuid() };
+    if meta.uid() != uid {
         return bad("file is not owned by the current user");
     }
     let mode = meta.permissions().mode();
@@ -249,11 +320,14 @@ pub fn validate_path(raw: &str, kind: PathKind, r: &Roots) -> Result<PathBuf, No
     if kind == PathKind::Binary && mode & 0o111 == 0 {
         return bad("binary is not executable");
     }
-    if !location_allowed(&canon, kind, r) {
+    let Some(root) = allowlist_root(&canon, kind, r) else {
         return bad(match kind {
             PathKind::Binary => "binary must be under ~/projects/*/Packages/NoopLocalAccess/.build/ or /usr/local/bin/",
             PathKind::Db => "database must be under ~/Library/Application Support/{OpenWhoop,NOOP}/, the NOOP app container, or ~/projects/*/",
         });
+    };
+    if !parents_safe(&canon, &root, uid) {
+        return bad("a parent folder is group- or world-writable or not owned by you or root");
     }
     Ok(canon)
 }
@@ -600,6 +674,7 @@ mod tests {
         assert!(matches!(r, Err(NoopQueryError::InvalidPath(_))));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn parses_fake_server_and_times_out_in_sandbox() {
         let h = FakeHome::new();
@@ -627,6 +702,7 @@ mod tests {
         assert!(t.elapsed() < Duration::from_secs(5));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn sandbox_denies_network() {
         // The fake CLI tries TCP; under the profile it must fail and report that.
@@ -717,26 +793,69 @@ mod tests {
         assert!(validate_path(h.0.join("projects").to_str().unwrap(), PathKind::Db, &r).is_err());
     }
 
+    struct Fixed(bool, std::cell::Cell<u32>);
+    impl ConfirmPrompter for Fixed {
+        fn confirm_paths(&self, _: Option<&str>, _: Option<&str>) -> bool {
+            self.1.set(self.1.get() + 1);
+            self.0
+        }
+    }
+
     #[test]
-    fn settings_path_change_needs_confirm() {
+    fn settings_path_change_needs_dialog_approval() {
         let h = FakeHome::new();
         let r = h.roots();
         let ok = h.script("true");
         let cur = NoopSettings::default();
         let next = with_bin(&ok);
-        assert!(matches!(
-            apply_settings(&cur, next.clone(), false, &r),
-            Err(NoopQueryError::InvalidPath(_))
-        ));
-        let saved = apply_settings(&cur, next.clone(), true, &r).unwrap();
+        let deny = Fixed(false, Default::default());
+        assert_eq!(
+            apply_settings(&cur, next.clone(), &deny, &r),
+            Err(PATH_CHANGE_CANCELLED.to_string())
+        );
+        assert_eq!(deny.1.get(), 1);
+        let approve = Fixed(true, Default::default());
+        let saved = apply_settings(&cur, next.clone(), &approve, &r).unwrap();
         assert_eq!(saved.binary_path, sp(&ok));
-        // source-only change needs no confirm
+        // source-only change skips the dialog
         let mut src = saved.clone();
         src.whoop_source = WhoopSource::Ble;
-        assert!(apply_settings(&saved, src, false, &r).is_ok());
-        // invalid path rejected even with confirm
+        let never = Fixed(false, Default::default());
+        assert!(apply_settings(&saved, src, &never, &r).is_ok());
+        assert_eq!(never.1.get(), 0);
+        // invalid path rejected before any dialog
         let bad = with_bin(Path::new("/etc/hosts"));
-        assert!(apply_settings(&cur, bad, true, &r).is_err());
+        let a2 = Fixed(true, Default::default());
+        assert!(apply_settings(&cur, bad, &a2, &r)
+            .unwrap_err()
+            .starts_with("invalid_path"));
+        assert_eq!(a2.1.get(), 0);
+    }
+
+    #[test]
+    fn writable_parent_folder_is_rejected() {
+        use std::os::unix::fs::PermissionsExt;
+        for mode in [0o777, 0o775] {
+            let h = FakeHome::new();
+            let p = h.script("true");
+            let r = h.roots();
+            assert!(validate_path(p.to_str().unwrap(), PathKind::Binary, &r).is_ok());
+            let dir = h.build_dir();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(
+                validate_path(p.to_str().unwrap(), PathKind::Binary, &r).is_err(),
+                "{mode:o}"
+            );
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+            // the allowlist root itself (.build) counts too
+            let root = dir.parent().unwrap();
+            std::fs::set_permissions(root, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(
+                validate_path(p.to_str().unwrap(), PathKind::Binary, &r).is_err(),
+                "root {mode:o}"
+            );
+            std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
 
     #[test]

@@ -644,6 +644,16 @@ export interface BodyContext {
 // ── NOOP local access (mirrors src-tauri/src/commands/noop_query.rs) ──
 export type WhoopSource = "noop" | "ble";
 
+/**
+ * Tauri commands:
+ *   get_noop_settings(): NoopSettings
+ *   set_noop_settings({ settings }): void — if binary_path/db_path change, the backend shows a
+ *     native Confirm/Cancel dialog with the canonical paths; rejects with
+ *     NOOP_PATH_CHANGE_CANCELLED on cancel, or "invalid_path: …" if validation fails.
+ *   noop_query({ tool, args? }): unknown (parsed JSON), rejects with NoopQueryError.
+ */
+export const NOOP_PATH_CHANGE_CANCELLED = "cancelled: user declined path change";
+
 export interface NoopSettings {
   whoop_source: WhoopSource;
   binary_path: string | null;
