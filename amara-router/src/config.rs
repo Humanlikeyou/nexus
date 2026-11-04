@@ -196,7 +196,7 @@ impl Default for Loading {
             poll_secs: 20,
             gpu_budget_gb: 21.0,
             first_token_timeout_ms: 20_000,
-            first_token_timeout_resident_ms: 90_000,
+            first_token_timeout_resident_ms: 300_000,
         }
     }
 }
@@ -570,7 +570,7 @@ deep = "d:latest"
         assert_eq!(c.models.fast_num_ctx, 65536);
         assert!(c.models.fast_num_ctx >= 64_000, "Hermes floor");
         assert_eq!(c.models.deep_think, Some(false));
-        assert_eq!(c.loading.first_token_timeout_resident_ms, 90_000);
+        assert_eq!(c.loading.first_token_timeout_resident_ms, 300_000);
         assert_eq!(c.models.deep_num_ctx, 32768);
         assert_eq!(c.loading.first_token_timeout_ms, 20_000);
         assert!(c.loading.warm_fast_on_start);
