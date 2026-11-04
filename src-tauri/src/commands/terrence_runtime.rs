@@ -105,6 +105,9 @@ pub struct TerrenceInteraction {
     /// Fast/Deep as the Amara Router decided it; None = unknown (no badge).
     #[serde(default)]
     pub tier: Option<terrence_runtime_bridge::AmaraTier>,
+    /// Where the interaction came from (e.g. "home"); None for old rows and Hermes turns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1098,6 +1101,7 @@ fn interaction_failure(
         action_id: None,
         runtime_profile: NEXUS_RUNTIME_PROFILE.to_string(),
         tier: None,
+        source: None,
     }
 }
 
@@ -1474,6 +1478,7 @@ pub async fn interact_with_terrence(
         action_id: action_id.clone(),
         runtime_profile: NEXUS_RUNTIME_PROFILE.to_string(),
         tier,
+        source: None,
     };
     if let Some(action_id) = action_id.as_deref() {
         let _ = terrence_actions::complete_terrence_action(
@@ -1494,12 +1499,41 @@ pub struct AmaraNoteInput {
     pub tier: Option<terrence_runtime_bridge::AmaraTier>,
     #[serde(default)]
     pub duration_ms: u64,
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+pub const INVALID_SOURCE_ERROR: &str =
+    "invalid_source: source must be 1-32 characters of lowercase a-z, 0-9, _ or -.";
+const MAX_SOURCE_CHARS: usize = 32;
+
+fn validate_interaction_source(source: Option<String>) -> Result<Option<String>, String> {
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let valid = !source.is_empty()
+        && source.len() <= MAX_SOURCE_CHARS
+        && source
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-');
+    if valid {
+        Ok(Some(source))
+    } else {
+        Err(INVALID_SOURCE_ERROR.to_string())
+    }
 }
 
 /// Store an exchange Amara produced outside Hermes (/deliberate through the router), so it stays
 /// in the transcript and in the history the next Hermes turn receives.
 #[tauri::command]
 pub fn record_amara_interaction(input: AmaraNoteInput) -> Result<TerrenceInteraction, String> {
+    let interaction = build_amara_interaction(input)?;
+    persist_interaction(&interaction)?;
+    Ok(interaction)
+}
+
+fn build_amara_interaction(input: AmaraNoteInput) -> Result<TerrenceInteraction, String> {
+    let source = validate_interaction_source(input.source)?;
     let user_message = input.user_message.trim().to_string();
     let assistant_message = input.assistant_message.trim().to_string();
     if input.conversation_id.trim().is_empty()
@@ -1534,8 +1568,8 @@ pub fn record_amara_interaction(input: AmaraNoteInput) -> Result<TerrenceInterac
         tier: input
             .tier
             .filter(|t| matches!(t.tier.as_str(), "fast" | "deep" | "claude")),
+        source,
     };
-    persist_interaction(&interaction)?;
     Ok(interaction)
 }
 
@@ -1822,6 +1856,70 @@ mod tests {
         let json = r#"{"id":"1","conversationId":"c","hermesSessionId":null,"runtime":"hermes","model":"m","provider":"p","status":"succeeded","userMessage":"u","assistantMessage":"a","error":null,"startedAt":"s","completedAt":"c","durationMs":1}"#;
         let record: TerrenceInteraction = serde_json::from_str(json).unwrap();
         assert!(record.tier.is_none());
+        assert!(record.source.is_none());
+    }
+
+    fn amara_note(source: Option<&str>) -> AmaraNoteInput {
+        AmaraNoteInput {
+            conversation_id: "c".into(),
+            user_message: "turn on the lights".into(),
+            assistant_message: "Done.".into(),
+            tier: None,
+            duration_ms: 5,
+            source: source.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn amara_note_source_is_optional_and_backward_compatible() {
+        let input: AmaraNoteInput = serde_json::from_str(
+            r#"{"conversationId":"c","userMessage":"u","assistantMessage":"a","tier":null}"#,
+        )
+        .unwrap();
+        assert!(input.source.is_none());
+        let record = build_amara_interaction(amara_note(None)).unwrap();
+        assert!(record.source.is_none());
+        let json = serde_json::to_value(&record).unwrap();
+        assert!(json.get("source").is_none());
+    }
+
+    #[test]
+    fn amara_note_source_round_trips_through_storage_json() {
+        let record = build_amara_interaction(amara_note(Some("home"))).unwrap();
+        assert_eq!(record.source.as_deref(), Some("home"));
+        assert_eq!(record.runtime, "amara-router");
+        let json = serde_json::to_string(&record).unwrap();
+        assert!(json.contains(r#""source":"home""#));
+        let reloaded: TerrenceInteraction = serde_json::from_str(&json).unwrap();
+        let (reloaded, _) = sanitize_stored_interaction(reloaded);
+        assert_eq!(reloaded.source.as_deref(), Some("home"));
+    }
+
+    #[test]
+    fn amara_note_source_accepts_slugs_and_rejects_everything_else() {
+        for ok in ["home", "a", "smart_home-2", &"a".repeat(32)] {
+            assert_eq!(
+                validate_interaction_source(Some(ok.to_string()))
+                    .unwrap()
+                    .as_deref(),
+                Some(ok)
+            );
+        }
+        for bad in [
+            "",
+            "Home",
+            "home page",
+            "home/x",
+            "../x",
+            "h\u{e9}",
+            " home",
+            &"a".repeat(33),
+        ] {
+            assert_eq!(
+                build_amara_interaction(amara_note(Some(bad))).unwrap_err(),
+                INVALID_SOURCE_ERROR
+            );
+        }
     }
 
     #[test]
