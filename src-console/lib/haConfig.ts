@@ -17,7 +17,8 @@ export interface HaConfigBackend {
   getConfig(): Promise<HaConfig>;
   setConfig(input: HaConfigInput): Promise<void>;
   clearToken(): Promise<HaClearResult>;
-  testConnection(): Promise<HaTestResult>;
+  /** Tests the given (unsaved, edited) values; omitted keys fall back to the saved config. */
+  testConnection(input?: HaConfigInput): Promise<HaTestResult>;
 }
 
 const tauriBackend: HaConfigBackend = {
@@ -42,8 +43,13 @@ const tauriBackend: HaConfigBackend = {
     const raw = await invoke<Partial<HaClearResult> | null>("ha_clear_token");
     return { fallbackActive: raw?.fallbackActive === true };
   },
-  async testConnection() {
-    const raw = await invoke<HaTestResult | null>("ha_test_connection");
+  async testConnection(input = {}) {
+    // Flat args like ha_set_config. Rust's ha_test_connection (12f46fa) takes no args yet and
+    // ignores these, testing the saved config; it needs ha_test_connection(url: Option<String>, token: Option<String>).
+    const args: Record<string, string> = {};
+    if (input.url !== undefined) args.url = input.url;
+    if (input.token !== undefined) args.token = input.token;
+    const raw = await invoke<HaTestResult | null>("ha_test_connection", args);
     return {
       ok: raw?.ok === true,
       kind: typeof raw?.kind === "string" ? raw.kind : undefined,

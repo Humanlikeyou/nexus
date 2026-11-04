@@ -29,6 +29,9 @@ function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
   const w = window as unknown as Record<string, unknown>;
   const unmocked: string[] = [];
   w.__E2E_UNMOCKED = unmocked;
+  /** In-page record of invoke calls (args included) for specs that assert what was sent. */
+  const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
+  w.__E2E_CALLS = calls;
   w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   const listeners: Array<{ event: string; handler: number }> = [];
   /** e2e: deliver a Tauri event to every listener registered for it. */
@@ -42,8 +45,15 @@ function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
     convertFileSrc: (p: string) => p,
     invoke: async (cmd: string, args?: Record<string, unknown>) => {
       if (delays[cmd]) await new Promise((r) => setTimeout(r, delays[cmd]));
+      if (!cmd.startsWith("plugin:")) calls.push({ cmd, args: args ? structuredClone(args) : undefined });
       if (failing.includes(cmd)) throw new Error(`e2e: ${cmd} failed`);
-      const canned = data[cmd] as { __byTool?: Record<string, unknown>; __reject?: unknown } | undefined;
+      let canned = data[cmd] as { __byTool?: Record<string, unknown>; __reject?: unknown; __sequence?: unknown[] } | undefined;
+      // __sequence: one canned answer per call (the last one repeats); entries may be { __reject }.
+      if (canned && typeof canned === "object" && Array.isArray(canned.__sequence)) {
+        const seq = canned.__sequence;
+        canned = (seq.length > 1 ? seq.shift() : seq[0]) as typeof canned;
+        if (!(canned && typeof canned === "object" && "__reject" in canned)) return structuredClone(canned);
+      }
       if (canned && typeof canned === "object" && "__reject" in canned) throw structuredClone(canned.__reject);
       if (canned && typeof canned === "object" && canned.__byTool) {
         const tool = String(args?.tool ?? "");

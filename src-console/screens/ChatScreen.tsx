@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { MODEL_LOADING_COPY } from "../app/modelLoading";
 import { HermesSubtitle } from "./agentLabels";
 import { Activity, Bot, Brain, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
@@ -25,6 +26,8 @@ export interface ChatFieldProps {
   onNewConversation: () => void;
   /** Stop waiting for the pending reply (it is ignored if it lands later). */
   onCancelPending?: () => void;
+  /** Router answered 503 "model loading"; the reply is being retried automatically. */
+  loadingModel?: boolean;
   onOpenContext: () => void;
   onApproveAction: (action: TerrenceAction) => void;
   onRetryAction: (action: TerrenceAction) => void;
@@ -113,7 +116,7 @@ function crewsValue(crew: SystemSnapshot["crew"]): string {
 }
 
 /** Pending reply bubble: elapsed seconds and an optional Cancel. */
-export function ThinkingBubble({ onCancel }: { onCancel?: () => void }) {
+export function ThinkingBubble({ onCancel, loadingModel = false }: { onCancel?: () => void; loadingModel?: boolean }) {
   const [started] = useState(() => Date.now());
   const [now, setNow] = useState(started);
   useEffect(() => {
@@ -121,10 +124,11 @@ export function ThinkingBubble({ onCancel }: { onCancel?: () => void }) {
     return () => window.clearInterval(id);
   }, []);
   const seconds = Math.max(0, Math.floor((now - started) / 1000));
+  const label = loadingModel ? MODEL_LOADING_COPY : "Thinking…";
   return (
     <li className="chat-message" data-role="assistant" data-start>
-      <div className="chat-bubble chat-bubble--pending" data-role="assistant" role="status" aria-label="Amara is thinking">
-        <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>Thinking…
+      <div className="chat-bubble chat-bubble--pending" data-role="assistant" role="status" aria-label={loadingModel ? MODEL_LOADING_COPY : "Amara is thinking"}>
+        <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{label}
         {seconds > 0 && <time className="chat-bubble__elapsed" dateTime={`PT${seconds}S`} aria-hidden="true"> {seconds} s</time>}
       </div>
       {onCancel && <Button variant="plain" size="small" onClick={onCancel} aria-label="Cancel waiting for Amara's reply">Cancel</Button>}
@@ -132,8 +136,23 @@ export function ThinkingBubble({ onCancel }: { onCancel?: () => void }) {
   );
 }
 
+/** Header model: the router-reported model of Amara's latest reply; Hermes's configured model only when not routed. */
+export function headerModel(messages: { role: string; servedModel?: string }[], hermesModel: string, routed: boolean): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "assistant" && m.servedModel) return m.servedModel;
+  }
+  return routed ? "Amara Router" : hermesModel;
+}
+
+/** Home/End scroll the message list unless focus is in a text field. */
+export function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+}
+
 export function ChatField({
-  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onCancelPending, onOpenContext, onOpenActivity, onOpenCrews, initialDraft = "",
+  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onCancelPending, loadingModel = false, onOpenContext, onOpenActivity, onOpenCrews, initialDraft = "",
   onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false, conversationId = null,
 }: ChatFieldProps) {
   const [draft, setDraft] = useState(initialDraft);
@@ -200,6 +219,20 @@ export function ChatField({
     const bottom = el.scrollHeight - el.clientHeight;
     el.scrollTop = lastUser ? Math.min(bottom, Math.max(0, lastUser.offsetTop - el.offsetTop - 16)) : bottom;
   }, [messages.length, sending]);
+
+  // Home → top of the conversation, End → bottom (not while typing).
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if ((e.key !== "Home" && e.key !== "End") || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.defaultPrevented) return;
+      if (isTypingTarget(e.target)) return;
+      const el = listRef.current;
+      if (!el) return;
+      e.preventDefault();
+      el.scrollTop = e.key === "Home" ? 0 : el.scrollHeight;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Auto-grow the composer up to 6 lines.
   useEffect(() => {
@@ -268,7 +301,7 @@ export function ChatField({
             {voice.state === "speaking" && <AmaraLens state="speaking" size={28} className="chat-screen__lens" />}
             <h1 id="chat-title">Amara</h1>
             <Badge tone={online ? "success" : "warning"}>{online ? "Online" : "Offline"}</Badge>
-            <span className="chat-screen__model">{hermes.model}</span>
+            <span className="chat-screen__model" title={`Hermes configured model: ${hermes.model}`}>{headerModel(messages, hermes.model, deepAvailable)}</span>
             {/* eslint-disable-next-line react-hooks/purity -- the 'Saved …' label is read at render on purpose; it re-renders on every save */}
             {lastSavedAt != null && <span className="chat-screen__saved" title={dateTime(lastSavedAt)}>Saved {relative(lastSavedAt, Date.now())}</span>}
           </div>
@@ -318,7 +351,7 @@ export function ChatField({
               </li>
             );
             })}
-            {sending && <ThinkingBubble onCancel={onCancelPending} />}
+            {sending && <ThinkingBubble onCancel={onCancelPending} loadingModel={loadingModel} />}
           </ol>
         )}
 

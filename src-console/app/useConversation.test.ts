@@ -209,3 +209,58 @@ describe("useConversation", () => {
     expect(compressor.resetCompressor).toHaveBeenCalled();
   });
 });
+
+describe("useConversation · router model loading (503)", () => {
+  const LOADING = { kind: "model_loading", retryAfter: 2 };
+  it("retries automatically and shows the loading state", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      bridge.interactWithTerrence.mockReset();
+      bridge.interactWithTerrence.mockRejectedValueOnce(LOADING).mockResolvedValueOnce(interaction({ assistantMessage: "Ready." }));
+      const { result } = renderHook(() => useConversation(async () => {}));
+      await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
+      let done!: Promise<void>;
+      act(() => { done = result.current.sendToTerrence("hello there"); });
+      await waitFor(() => expect(result.current.loadingModel).toBe(true));
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); await done; });
+      expect(bridge.interactWithTerrence).toHaveBeenCalledTimes(2);
+      expect(result.current.loadingModel).toBe(false);
+      expect(last(result.current.messages)).toMatchObject({ role: "assistant", content: "Ready." });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("gives up after 3 retries with a failed (retryable) message", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      bridge.interactWithTerrence.mockReset();
+      bridge.interactWithTerrence.mockRejectedValue(LOADING);
+      const { result } = renderHook(() => useConversation(async () => {}));
+      await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
+      let done!: Promise<void>;
+      act(() => { done = result.current.sendToTerrence("hello there"); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); await done; });
+      expect(bridge.interactWithTerrence).toHaveBeenCalledTimes(4);
+      expect(last(result.current.messages)).toMatchObject({ status: "failed", content: "Amara's model is still loading. Try again in a moment." });
+      expect(result.current.sending).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("Cancel during the wait stops retrying", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      bridge.interactWithTerrence.mockReset();
+      bridge.interactWithTerrence.mockRejectedValue(LOADING);
+      const { result } = renderHook(() => useConversation(async () => {}));
+      await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
+      let done!: Promise<void>;
+      act(() => { done = result.current.sendToTerrence("hello there"); });
+      await waitFor(() => expect(result.current.loadingModel).toBe(true));
+      await act(async () => { result.current.cancelPending(); await done; });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(bridge.interactWithTerrence).toHaveBeenCalledTimes(1);
+      expect(result.current.sending).toBe(false);
+      expect(result.current.loadingModel).toBe(false);
+      expect(result.current.messages.some((m) => m.status === "failed")).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+});

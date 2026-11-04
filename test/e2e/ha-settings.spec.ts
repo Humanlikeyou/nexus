@@ -70,4 +70,26 @@ test.describe("Home Assistant settings", () => {
     await expect(group).toBeInViewport();
     await expect(group.getByLabel("Address")).toBeVisible();
   });
+  test("Test connection sends the edited fields; bad URL shows described inline error", async ({ page, theme }) => {
+    const data = { ...responses(), ha_get_config: { url: "http://127.0.0.1:8123", tokenSet: true, tokenSource: "app" }, ha_test_connection: { ok: true, version: "2026.10.1" } };
+    await openApp(page, { theme, data });
+    await navButton(page, "Settings").click();
+    const group = activeField(page, "Settings").locator("#home-assistant");
+    const address = group.getByLabel("Address");
+    await expect(address).toHaveValue("http://127.0.0.1:8123");
+    await address.fill("https://127.0.0.1:8123");
+    const err = group.getByText("Use http://, not https://, for Home Assistant on this Mac.");
+    await expect(err).toBeVisible();
+    const errId = await err.getAttribute("id");
+    expect((await address.getAttribute("aria-describedby"))?.split(" ")).toContain(errId);
+    await expect(address).toHaveAttribute("aria-invalid", "true");
+    await expect(group.getByRole("button", { name: "Test connection" })).toBeDisabled();
+    await address.fill("http://localhost:8124");
+    await group.getByRole("button", { name: "Replace token" }).click();
+    await group.getByLabel("New access token").fill(TOKEN);
+    await group.getByRole("button", { name: "Test connection" }).click();
+    await expect(group).toContainText("Connected to Home Assistant 2026.10.1.");
+    const args = await page.evaluate(() => (window as unknown as { __E2E_CALLS: Array<{ cmd: string; args?: unknown }> }).__E2E_CALLS.filter((c) => c.cmd === "ha_test_connection").map((c) => c.args));
+    expect(args).toEqual([{ url: "http://localhost:8124", token: TOKEN }]);
+  });
 });

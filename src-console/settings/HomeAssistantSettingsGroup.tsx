@@ -16,7 +16,6 @@ type Result = { ok: boolean; text: string } | null;
 export function HomeAssistantSettingsGroup() {
   const [load, setLoad] = useState<Load>({ status: "loading" });
   const [url, setUrl] = useState("");
-  const [urlTouched, setUrlTouched] = useState(false);
   const [token, setToken] = useState("");
   const [replacing, setReplacing] = useState(false);
   const [busy, setBusy] = useState<"save" | "clear" | "test" | null>(null);
@@ -71,7 +70,6 @@ export function HomeAssistantSettingsGroup() {
 
   const onSave = async (e: FormEvent) => {
     e.preventDefault();
-    setUrlTouched(true);
     if (!canSave) return;
     setBusy("save"); setSaveResult(null); setTestResult(null);
     const input: { url?: string; token?: string } = {};
@@ -105,7 +103,11 @@ export function HomeAssistantSettingsGroup() {
   const onTest = async () => {
     setBusy("test"); setTestResult(null);
     try {
-      const result = await haConfigBackend().testConnection();
+      // Test what is on screen: the edited address and any typed token, not just the saved config.
+      const input: { url?: string; token?: string } = {};
+      if (urlChanged) input.url = url.trim();
+      if (token !== "") input.token = token;
+      const result = await haConfigBackend().testConnection(input);
       if (mounted.current) setTestResult({ ok: result.ok, text: testResultCopy(result) });
     } catch (err) {
       fail(err, comingSoon, () => testResultCopy({ ok: false }), setTestResult);
@@ -118,8 +120,8 @@ export function HomeAssistantSettingsGroup() {
         <form className="settings__ha-form" onSubmit={(e) => { void onSave(e); }} noValidate aria-label="Home Assistant connection">
           <TextField label="Address" description={`A local http address on this Mac. Leave empty to use ${HA_DEFAULT_URL}.`}
             value={url} placeholder={HA_DEFAULT_URL} inputMode="url" autoComplete="off" spellCheck={false}
-            onChange={(e) => { setUrl(e.target.value); setSaveResult(null); }} onBlur={() => setUrlTouched(true)}
-            error={urlTouched ? uErr ?? undefined : undefined} />
+            onChange={(e) => { setUrl(e.target.value); setSaveResult(null); }}
+            error={uErr ?? undefined} />
           <ListRow title="Access token" subtitle={config.tokenSet && config.tokenSource ? TOKEN_SOURCE_COPY[config.tokenSource] : undefined}
             accessory={<Badge tone={config.tokenSet ? "success" : "neutral"}>{config.tokenSet ? "Saved" : "Not set"}</Badge>} />
           {showToken && (
@@ -139,7 +141,7 @@ export function HomeAssistantSettingsGroup() {
             {config.tokenSet && appToken && (
               <Button type="button" size="small" variant="secondary" loading={busy === "clear"} disabled={busy !== null} onClick={() => { void onClear(); }}>Clear token</Button>
             )}
-            <Button type="button" size="small" variant="secondary" loading={busy === "test"} disabled={busy !== null} onClick={() => { void onTest(); }}>Test connection</Button>
+            <Button type="button" size="small" variant="secondary" loading={busy === "test"} disabled={busy !== null || uErr !== null || tErr !== null} onClick={() => { void onTest(); }}>Test connection</Button>
           </div>
           <p className="settings__ha-result" role="status" aria-live="polite" data-ok={saveResult?.ok}>{saveResult?.text ?? ""}</p>
           <p className="settings__ha-result" role="status" aria-live="polite" data-ok={testResult?.ok}>{testResult?.text ?? ""}</p>

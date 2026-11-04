@@ -4,6 +4,7 @@ import { deliberate } from "@/terrance/system/deliberation";
 import { resetCompressor } from "@/terrance/system/contextCompressor";
 import { type ConversationMessage, CONVERSATION_KEY, HERMES_SESSION_KEY, HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE, createConversationId, messagesFromInteractions } from "./conversation";
 import { HOME_SOURCE, dropLegacyHomeReplyIds, preRouteHome } from "../lib/homeAssistant";
+import { MODEL_LOADING_FAILED, MODEL_LOADING_RETRIES, modelLoadingDelay, waitUnlessAborted } from "./modelLoading";
 import { compressTurns, formatDeliberation, guardSections, historyTurns, parseChatCommand, tierFromRouter } from "./amaraChat";
 
 export interface SendOptions {
@@ -44,6 +45,9 @@ export function useConversation(refresh: () => Promise<void>) {
   const [sending, setSending] = useState(false);
   /** Bumped by each send and by cancel; a reply whose generation is stale is dropped. */
   const generation = useRef(0);
+  /** "Model loading" (router 503): retries are in progress; the Thinking bubble says so. */
+  const [loadingModel, setLoadingModel] = useState(false);
+  const waitAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     let activeRequest = true;
     resetCompressor();
@@ -117,7 +121,7 @@ export function useConversation(refresh: () => Promise<void>) {
         guardedContext(command.text),
         compressTurns(history).catch((error) => { console.warn("[amara] compression skipped", error); return { turns: history, compressed: false }; }),
       ]);
-      const interaction = await interactWithTerrence({
+      const request = {
         message: command.text,
         conversationId,
         hermesSessionId,
@@ -125,8 +129,24 @@ export function useConversation(refresh: () => Promise<void>) {
         deep: command.deep,
         context: context.sections,
         contextItemIds: context.itemIds,
-      });
+      };
+      const abort = new AbortController();
+      waitAbort.current = abort;
+      let interaction: Awaited<ReturnType<typeof interactWithTerrence>> | undefined;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          interaction = await interactWithTerrence(request);
+          break;
+        } catch (error) {
+          const delay = modelLoadingDelay(error);
+          if (delay === null || !live()) throw error;
+          if (attempt >= MODEL_LOADING_RETRIES) throw new Error(MODEL_LOADING_FAILED);
+          setLoadingModel(true);
+          if (!(await waitUnlessAborted(delay, abort.signal)) || !live()) return;
+        }
+      }
       if (!live()) return;
+      setLoadingModel(false);
       if (interaction.hermesSessionId) {
         setHermesSessionId(interaction.hermesSessionId);
         window.localStorage.setItem(HERMES_SESSION_KEY, interaction.hermesSessionId);
@@ -144,17 +164,21 @@ export function useConversation(refresh: () => Promise<void>) {
         status: "failed",
       }]);
     } finally {
-      if (live()) setSending(false);
+      if (live()) { setSending(false); setLoadingModel(false); }
     }
   }, [conversationId, hermesSessionId, refresh, runDeliberation]);
   /** Stop waiting: the pending reply is ignored when it lands (the backend call itself can't be aborted). */
   const cancelPending = useCallback(() => {
     generation.current++;
+    waitAbort.current?.abort();
     setSending(false);
+    setLoadingModel(false);
   }, []);
   const startNewConversation = useCallback(() => {
     generation.current++;
+    waitAbort.current?.abort();
     setSending(false);
+    setLoadingModel(false);
     const created = createConversationId();
     window.localStorage.setItem(CONVERSATION_KEY, created);
     window.localStorage.removeItem(HERMES_SESSION_KEY);
@@ -164,5 +188,5 @@ export function useConversation(refresh: () => Promise<void>) {
     setMessages([]);
     setConversationId(created);
   }, []);
-  return { conversationId, messages, sending, sendToTerrence, startNewConversation, cancelPending };
+  return { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending };
 }

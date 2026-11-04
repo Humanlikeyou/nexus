@@ -130,3 +130,38 @@ describe("HomeAssistantSettingsGroup", () => {
     expect(screen.queryByText(/Coming soon/)).not.toBeInTheDocument();
   });
 });
+
+describe("HomeAssistantSettingsGroup · QA 11-04 retest2", () => {
+  it("Test connection sends the edited URL and typed token, not only the saved config", async () => {
+    const b = backend({ getConfig: vi.fn(async () => ({ url: "http://127.0.0.1:8123", tokenSet: false, tokenSource: null })) });
+    render(<HomeAssistantSettingsGroup />);
+    const url = await screen.findByLabelText("Address");
+    fireEvent.change(url, { target: { value: "http://localhost:8124" } });
+    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: TOKEN } });
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+    await waitFor(() => expect(b.testConnection).toHaveBeenCalledWith({ url: "http://localhost:8124", token: TOKEN }));
+  });
+
+  it("unchanged fields test the saved config (no args)", async () => {
+    const b = backend();
+    render(<HomeAssistantSettingsGroup />);
+    fireEvent.click(await screen.findByRole("button", { name: "Test connection" }));
+    await waitFor(() => expect(b.testConnection).toHaveBeenCalledWith({}));
+  });
+
+  it.each([
+    ["https://127.0.0.1:8123", "Use http://, not https://, for Home Assistant on this Mac."],
+    ["http://192.168.1.10:8123", "Use a local address on this Mac, like http://127.0.0.1:8123."],
+  ])("%s shows inline error text tied by aria-describedby while typing", async (value, copy) => {
+    backend();
+    render(<HomeAssistantSettingsGroup />);
+    const url = await screen.findByLabelText("Address");
+    fireEvent.change(url, { target: { value } });
+    const err = screen.getByText(copy);
+    expect(url).toHaveAttribute("aria-invalid", "true");
+    expect(url.getAttribute("aria-describedby")?.split(" ")).toContain(err.id);
+    expect(url).toHaveAccessibleDescription(expect.stringContaining(copy));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
+  });
+});

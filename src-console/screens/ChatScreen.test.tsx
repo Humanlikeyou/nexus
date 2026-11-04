@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConversationMessage } from "../app/conversation";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction } from "../types";
-import { ChatField, chatActions, threadItems, groupStarts, type ChatFieldProps } from "./ChatScreen";
+import { ChatField, chatActions, threadItems, groupStarts, headerModel, type ChatFieldProps } from "./ChatScreen";
 
 const loaded: SystemSnapshot = {
   ...INITIAL_SNAPSHOT,
@@ -291,5 +291,44 @@ describe("chat actions in the thread (QA 11-04)", () => {
     expect(within(line).getByText("Cancelled")).toBeInTheDocument();
     expect(within(list).getByText("4")).toBeInTheDocument();
     expect(screen.queryByLabelText("Actions")).not.toBeInTheDocument();
+  });
+});
+
+describe("QA 11-04 retest2", () => {
+  it("model loading: the pending bubble says so and Cancel still works", () => {
+    const onCancelPending = vi.fn();
+    setup({ sending: true, loadingModel: true, onCancelPending, messages: [msg("u", "user", "hi", "2026-10-28T05:00:00Z")] });
+    expect(screen.getByRole("status", { name: "Amara is loading her model…" })).toHaveTextContent("Amara is loading her model…");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel waiting for Amara's reply" }));
+    expect(onCancelPending).toHaveBeenCalled();
+  });
+
+  it("header shows the router-reported model, not Hermes's configured one", () => {
+    expect(headerModel([msg("a", "assistant", "x", "t", { servedModel: "qwen3-32b" }), msg("u", "user", "y", "t")], "gemma4-12b", true)).toBe("qwen3-32b");
+    expect(headerModel([], "gemma4-12b", true)).toBe("Amara Router");
+    expect(headerModel([], "gemma4-12b", false)).toBe("gemma4-12b");
+  });
+
+  it("deep reply shows a Deep badge and the served model in the header", () => {
+    setup({ data: { ...loaded, hermes: { ...loaded.hermes, routedViaRouter: true } }, messages: [
+      msg("u", "user", "/deep plan", "2026-10-28T05:00:00Z"),
+      msg("a", "assistant", "Plan.", "2026-10-28T05:00:30Z", { servedModel: "qwen3-32b", tier: { tier: "deep", reason: "slash_deep", source: "router_reply" } }),
+    ] });
+    expect(screen.getAllByText("Deep").some((el) => el.closest(".chat-message"))).toBe(true);
+    expect(document.querySelector(".chat-screen__model")).toHaveTextContent("qwen3-32b");
+  });
+
+  it("Home scrolls to the top and End to the bottom, but not while typing", () => {
+    setup({ messages: [msg("u", "user", "hi", "2026-10-28T05:00:00Z"), msg("a", "assistant", "Hello.", "2026-10-28T05:00:05Z")] });
+    const list = screen.getByRole("list", { name: "Messages" });
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 900 });
+    list.scrollTop = 400;
+    fireEvent.keyDown(document.body, { key: "Home" });
+    expect(list.scrollTop).toBe(0);
+    fireEvent.keyDown(document.body, { key: "End" });
+    expect(list.scrollTop).toBe(900);
+    list.scrollTop = 400;
+    fireEvent.keyDown(screen.getByRole("textbox", { name: /message/i }), { key: "Home" });
+    expect(list.scrollTop).toBe(400);
   });
 });

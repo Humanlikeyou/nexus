@@ -72,7 +72,7 @@ export default function App() {
   // Amara background scheduler: started once for the shell, stopped on unmount.
   useSchedulerLifecycle();
 
-  const { conversationId, messages, sending, sendToTerrence, startNewConversation, cancelPending } = useConversation(refresh);
+  const { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending } = useConversation(refresh);
   // Session continuity: summarize the Amara chat after idle / on new chat / on close (bug 6).
   const autoSave = useIdleAutoSave(messages, conversationId);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -133,7 +133,7 @@ export default function App() {
     : screenId === "assistant" ? <ActivityField data={data} onRetry={retrySnapshot} />
     : screenId === "crews" ? <CrewsField data={data} onRetry={retrySnapshot} />
     : screenId === "voice" ? <VoiceField />
-    : screenId === "chat" ? <ChatField key={askDraft.n} conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} onOpenActivity={() => setRoute({ id: "chat", view: "activity" })} onOpenCrews={() => setRoute({ id: "chat", view: "crews" })} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
+    : screenId === "chat" ? <ChatField key={askDraft.n} conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} onOpenActivity={() => setRoute({ id: "chat", view: "activity" })} onOpenCrews={() => setRoute({ id: "chat", view: "crews" })} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
     : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} />;
 
   return (

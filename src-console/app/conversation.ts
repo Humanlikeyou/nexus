@@ -1,4 +1,5 @@
 import type { AmaraTierInfo, TerrenceAction, TerrenceInteraction } from "../types";
+import { routeInfoFrom } from "./routeInfo";
 
 export type ConversationMessage = {
   id: string;
@@ -7,6 +8,8 @@ export type ConversationMessage = {
   timestamp: string;
   status?: "failed";
   model?: string;
+  /** Model id the Amara Router reports it served this reply with (routeInfo.ts); absent = unknown. */
+  servedModel?: string;
   /** Router tier for Amara's reply; absent = unknown (no badge). */
   tier?: AmaraTierInfo;
   /** "home": answered by Home Assistant's conversation agent (chat pre-route), not a model. */
@@ -65,6 +68,7 @@ export function actionPlan(action: TerrenceAction): string[] {
 
 export function messagesFromInteractions(interactions: TerrenceInteraction[]): ConversationMessage[] {
   return interactions.flatMap((interaction) => {
+    const route = routeInfoFrom(interaction);
     const messages: ConversationMessage[] = [{
       id: `${interaction.id}-user`,
       role: "user",
@@ -78,7 +82,8 @@ export function messagesFromInteractions(interactions: TerrenceInteraction[]): C
         content: displayAssistantMessage(interaction.assistantMessage),
         timestamp: interaction.completedAt,
         model: interaction.model,
-        ...(interaction.tier ? { tier: interaction.tier } : {}),
+        ...(route.tier ? { tier: route.tier } : {}),
+        ...(route.model ? { servedModel: route.model } : {}),
         ...(interaction.source === "home" ? { source: "home" as const } : {}),
       });
     } else if (interaction.error) {
