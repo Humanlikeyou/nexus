@@ -251,6 +251,7 @@ impl Config {
         // proxy), which cannot leak traffic off the Mac.
         let a = &self.cloud.anthropic_url;
         let a_ok = match url_host(a) {
+            Some(h) if is_spoofy_host(h) => false,
             Some(h) if a.starts_with("https://") => !h.is_empty(),
             Some(h) if a.starts_with("http://") => is_loopback_host(h),
             _ => false,
@@ -297,6 +298,21 @@ fn url_host(url: &str) -> Option<&str> {
         authority.rsplit_once(':').map_or(authority, |(h, _)| h)
     };
     (!host.is_empty()).then_some(host)
+}
+
+/// Hosts that only look local or numeric: `localhost.<anything>`, and integer/hex/octal or
+/// short-form IPv4 (`2130706433`, `0x7f000001`, `0177.0.0.1`, `127.1`) that some resolvers
+/// expand to 127.0.0.1. Refused for anthropic_url in any scheme.
+fn is_spoofy_host(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    if lower.starts_with("localhost.") {
+        return true;
+    }
+    let numeric = !lower.is_empty()
+        && lower.split('.').all(|p| {
+            !p.is_empty() && (p.chars().all(|c| c.is_ascii_digit()) || p.starts_with("0x"))
+        });
+    numeric && lower.parse::<std::net::Ipv4Addr>().is_err()
 }
 
 fn is_loopback_host(host: &str) -> bool {
@@ -520,6 +536,24 @@ deep = "d:latest"
             Config::parse_with(&t, false).is_ok(),
             "loopback mock allowed"
         );
+        for bad in [
+            "localhost.evil.com",
+            "http://localhost.evil.com/v1/messages",
+            "https://localhost.evil.com/v1/messages",
+            "http://localhost@evil.com/v1/messages",
+            "https://localhost@evil.com/v1/messages",
+            "http://2130706433/v1/messages",
+            "http://0x7f000001/v1/messages",
+            "https://2130706433/v1/messages",
+            "http://0177.0.0.1/v1/messages",
+            "http://127.1/v1/messages",
+        ] {
+            let t = format!("{MIN}\n[cloud]\nanthropic_url = \"{bad}\"\n");
+            assert!(Config::parse_with(&t, false).is_err(), "{bad}");
+        }
+        let ok =
+            format!("{MIN}\n[cloud]\nanthropic_url = \"https://api.anthropic.com/v1/messages\"\n");
+        assert!(Config::parse_with(&ok, false).is_ok());
     }
 
     #[test]
