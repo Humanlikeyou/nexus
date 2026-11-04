@@ -1315,7 +1315,7 @@ async fn ps_unavailable_easy_prompt_goes_fast() {
 }
 
 #[tokio::test]
-async fn fast_not_resident_hard_prompt_goes_deep_only_if_deep_is_loaded() {
+async fn fast_not_resident_hard_prompt_goes_deep_whether_or_not_deep_is_loaded() {
     let mut m = mock("EASY", &["ok"]);
     m.ps_models = vec![DEEP.into()];
     let r = rig(m).await;
@@ -1324,13 +1324,26 @@ async fn fast_not_resident_hard_prompt_goes_deep_only_if_deep_is_loaded() {
         (tier.as_str(), reason.as_str()),
         ("deep", "fast_not_resident_hard_to_deep")
     );
-    r.mock.lock().unwrap().ps_models.clear(); // nothing loaded: no cold deep load
+    r.mock.lock().unwrap().ps_models.clear(); // nothing loaded: deep is loaded, not fast
     let (tier, reason) = route_of(&r, "debug this for me").await;
+    assert_eq!(
+        (tier.as_str(), reason.as_str()),
+        ("deep", "fast_not_resident_hard_to_deep")
+    );
+    assert!(classifier_calls(&r).is_empty());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        r.mock.lock().unwrap().generates.is_empty(),
+        "no fast warm competing with the deep load"
+    );
+    // An easy prompt stays fast and starts loading fast.
+    let (tier, reason) = route_of(&r, "turn on the light").await;
     assert_eq!(
         (tier.as_str(), reason.as_str()),
         ("fast", "classifier_skipped_fast_not_resident")
     );
-    assert!(classifier_calls(&r).is_empty());
+    let g = wait_for_generates(&r, 1).await;
+    assert_eq!(g[0]["model"], FAST);
 }
 
 // ── first-byte timeout: short while loading, long when resident ─────────────

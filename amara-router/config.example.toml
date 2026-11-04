@@ -35,8 +35,8 @@ classifier = true
 classifier_timeout_ms = 2000
 # /api/ps check before classifying (50-2000 ms; it takes 340-620 ms during a model swap).
 # No answer in time: skip the classifier; a hard-looking prompt goes deep, otherwise fast.
-# Fast not resident: skip the classifier and start loading fast; a hard-looking prompt goes
-# deep only if deep is already loaded, otherwise fast.
+# Fast not resident: skip the classifier; a hard-looking prompt goes deep (loading it if
+# needed), otherwise fast (and fast starts loading).
 residency_check_timeout_ms = 1000
 # Characters of the message sent to the classifier (prompt evaluation is most of its latency).
 classifier_max_chars = 400

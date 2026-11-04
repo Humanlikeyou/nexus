@@ -97,8 +97,8 @@ streaming (tags split across chunks are held back), and Ollama's separate `think
   default 1000; a model swap makes it take 340-620 ms). If `/api/ps` does not answer in time,
   the classifier is skipped and a *hard-looking* prompt goes deep (`ps_unavailable_hard_to_deep`),
   anything else fast (`classifier_skipped_ps_unavailable`). If fast is not loaded, the
-  classifier is skipped and fast is loaded; a hard-looking prompt goes deep only when deep is
-  already loaded (`fast_not_resident_hard_to_deep`). Hard-looking (`route::looks_hard`): a ```
+  classifier is skipped: a hard-looking prompt goes deep (`fast_not_resident_hard_to_deep`,
+  loading deep if needed, since a load is needed either way), anything else fast (and fast is loaded). Hard-looking (`route::looks_hard`): a ```
   code block, a reasoning phrase (explain why/how, step by step, prove, analyze/analyse,
   compare, debug, design, architecture, trade-off/tradeoff, as a word start, any case), two or
   more `?`, two or more numbered/bulleted lines, or over 300 estimated tokens.

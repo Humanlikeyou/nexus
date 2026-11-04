@@ -138,13 +138,14 @@ impl State {
                 };
                 match resident {
                     Ok((true, _)) => self.classify(text).await,
-                    // Fast not loaded: the classifier would only time out. Load fast; send a
-                    // hard-looking prompt to deep only if deep is already loaded (no cold load).
-                    Ok((false, deep_loaded)) => {
-                        self.spawn_warm(Tier::Fast);
-                        if hard && deep_loaded {
+                    // Fast not loaded: the classifier would only time out.
+                    // A load is needed either way, so load the right model: deep for a
+                    // hard-looking prompt (no parallel fast warm competing for RAM), else fast.
+                    Ok((false, _)) => {
+                        if hard {
                             decided(Tier::Deep, "fast_not_resident_hard_to_deep")
                         } else {
+                            self.spawn_warm(Tier::Fast);
                             decided(Tier::Fast, "classifier_skipped_fast_not_resident")
                         }
                     }
