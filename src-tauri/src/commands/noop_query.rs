@@ -70,6 +70,8 @@ pub enum NoopQueryError {
     ProcessFailed(String),
     BadOutput(String),
     ToolError(String),
+    InvalidPath(String),
+    SandboxMissing(String),
 }
 
 impl NoopQueryError {
@@ -84,6 +86,8 @@ impl NoopQueryError {
             Self::ProcessFailed(_) => "process_failed",
             Self::BadOutput(_) => "bad_output",
             Self::ToolError(_) => "tool_error",
+            Self::InvalidPath(_) => "invalid_path",
+            Self::SandboxMissing(_) => "sandbox_missing",
         }
     }
 }
@@ -101,19 +105,170 @@ pub fn get_noop_settings() -> NoopSettings {
     load_settings()
 }
 
+/// Persist settings. Any change to `binary_path` or `db_path` requires `confirm == true`
+/// (the UI must show an explicit confirmation); new paths are validated and stored canonical.
 #[tauri::command]
-pub fn set_noop_settings(settings: NoopSettings) -> Result<(), String> {
-    for p in [&settings.binary_path, &settings.db_path]
-        .into_iter()
-        .flatten()
-    {
-        if !Path::new(p).is_absolute() {
-            return Err("paths must be absolute".into());
-        }
-    }
-    let s = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
+pub fn set_noop_settings(settings: NoopSettings, confirm: bool) -> Result<(), String> {
+    let next = apply_settings(&load_settings(), settings, confirm, &Roots::current()?)
+        .map_err(|e| e.detail())?;
+    let s = serde_json::to_string(&next).map_err(|e| e.to_string())?;
     super::kv::save_kv(SETTINGS_KEY.to_string(), s)
 }
+
+pub(crate) fn apply_settings(
+    current: &NoopSettings,
+    mut next: NoopSettings,
+    confirm: bool,
+    roots: &Roots,
+) -> Result<NoopSettings, NoopQueryError> {
+    let paths_changed = next.binary_path != current.binary_path || next.db_path != current.db_path;
+    if paths_changed && !confirm {
+        return Err(NoopQueryError::InvalidPath(
+            "changing the NOOP binary or database path requires confirm=true".into(),
+        ));
+    }
+    if let Some(b) = next.binary_path.as_deref() {
+        next.binary_path = Some(
+            validate_path(b, PathKind::Binary, roots)?
+                .display()
+                .to_string(),
+        );
+    }
+    if let Some(d) = next.db_path.as_deref() {
+        next.db_path = Some(validate_path(d, PathKind::Db, roots)?.display().to_string());
+    }
+    Ok(next)
+}
+
+impl NoopQueryError {
+    fn detail(&self) -> String {
+        match serde_json::to_value(self) {
+            Ok(v) => format!("{}: {}", self.kind(), v["detail"]),
+            Err(_) => self.kind().to_string(),
+        }
+    }
+}
+
+// ── Path policy ──
+//
+// Both paths: absolute, canonicalized (symlinks resolved), a regular file, owned by the current
+// uid, not group- or world-writable. Location allowlist, checked on the CANONICAL path:
+//   binary_path: ~/projects/<repo>/Packages/NoopLocalAccess/.build/**  or  /usr/local/bin/**
+//                (must also have an execute bit)
+//   db_path:     ~/Library/Application Support/{OpenWhoop,NOOP}/**
+//                ~/Library/Containers/<bundle>/Data/Library/Application Support/{OpenWhoop,NOOP}/**
+//                  (the official sandboxed NOOP app store, see noop.rs)
+//                ~/projects/<repo>/**  (dev copies)
+// If db_path is unset the CLI resolves the official app container itself (read-only).
+// Re-validated on every run (TOCTOU) and the canonical path is what gets spawned / passed.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathKind {
+    Binary,
+    Db,
+}
+
+pub struct Roots {
+    home: PathBuf,
+    usr_local_bin: PathBuf,
+}
+
+impl Roots {
+    pub fn current() -> Result<Self, String> {
+        let home = dirs::home_dir().ok_or("no home directory")?;
+        Ok(Self::with_home(&home))
+    }
+    pub(crate) fn with_home(home: &Path) -> Self {
+        let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        Roots {
+            home: canon(home),
+            usr_local_bin: canon(Path::new("/usr/local/bin")),
+        }
+    }
+}
+
+fn under_glob(path: &Path, base: &Path, tail: &[&str]) -> bool {
+    // base/<one component>/tail..., with at least one more component after.
+    let Ok(rest) = path.strip_prefix(base) else {
+        return false;
+    };
+    let comps: Vec<_> = rest
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    comps.len() > tail.len() + 1 && comps[1..=tail.len()].iter().zip(tail).all(|(a, b)| a == b)
+}
+
+fn location_allowed(p: &Path, kind: PathKind, r: &Roots) -> bool {
+    let projects = r.home.join("projects");
+    match kind {
+        PathKind::Binary => {
+            under_glob(p, &projects, &["Packages", "NoopLocalAccess", ".build"])
+                || (p.starts_with(&r.usr_local_bin) && p != r.usr_local_bin)
+        }
+        PathKind::Db => {
+            let app_support = r.home.join("Library/Application Support");
+            let containers = r.home.join("Library/Containers");
+            ["OpenWhoop", "NOOP"].iter().any(|d| {
+                let base = app_support.join(d);
+                (p.starts_with(&base) && p != base)
+                    || under_glob(
+                        p,
+                        &containers,
+                        &["Data", "Library", "Application Support", d],
+                    )
+            }) || under_glob(p, &projects, &[])
+        }
+    }
+}
+
+pub fn validate_path(raw: &str, kind: PathKind, r: &Roots) -> Result<PathBuf, NoopQueryError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let bad = |m: &str| Err(NoopQueryError::InvalidPath(m.to_string()));
+    if raw.is_empty() || !Path::new(raw).is_absolute() {
+        return bad("path must be absolute");
+    }
+    let canon = match Path::new(raw).canonicalize() {
+        Ok(c) => c,
+        Err(_) if kind == PathKind::Binary => return Err(binary_missing()),
+        Err(_) => return bad("path does not exist"),
+    };
+    let meta = std::fs::metadata(&canon)
+        .map_err(|_| NoopQueryError::InvalidPath("cannot stat path".into()))?;
+    if !meta.is_file() {
+        return bad("path is not a regular file");
+    }
+    // SAFETY: getuid has no preconditions and cannot fail.
+    if meta.uid() != unsafe { libc::getuid() } {
+        return bad("file is not owned by the current user");
+    }
+    let mode = meta.permissions().mode();
+    if mode & 0o022 != 0 {
+        return bad("file is group- or world-writable");
+    }
+    if kind == PathKind::Binary && mode & 0o111 == 0 {
+        return bad("binary is not executable");
+    }
+    if !location_allowed(&canon, kind, r) {
+        return bad(match kind {
+            PathKind::Binary => "binary must be under ~/projects/*/Packages/NoopLocalAccess/.build/ or /usr/local/bin/",
+            PathKind::Db => "database must be under ~/Library/Application Support/{OpenWhoop,NOOP}/, the NOOP app container, or ~/projects/*/",
+        });
+    }
+    Ok(canon)
+}
+
+fn binary_missing() -> NoopQueryError {
+    NoopQueryError::BinaryMissing(
+        "NOOP CLI not found; build Packages/NoopLocalAccess with `swift build -c release` and set its path in Settings".into(),
+    )
+}
+
+pub const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+/// Network denied for the CLI. Verified 2026-11-04: real binary answers initialize/tools/list
+/// under this profile; curl/nc under it fail (DNS + TCP blocked). sandbox-exec is deprecated
+/// but present on current macOS; if it is missing we refuse to run rather than run unsandboxed.
+pub const SANDBOX_PROFILE: &str = "(version 1)(allow default)(deny network*)";
 
 fn int_arg(a: &Map<String, Value>, k: &str, min: i64, max: i64) -> Result<(), NoopQueryError> {
     match a.get(k) {
@@ -193,22 +348,36 @@ pub fn validate(tool: &str, args: &Value) -> Result<Map<String, Value>, NoopQuer
     Ok(a)
 }
 
-/// Run one MCP tools/call against `binary` with a hard timeout (child killed on expiry).
+/// Run one MCP tools/call with a hard timeout (child killed on expiry). Paths are re-validated
+/// here on every run and the canonical binary is spawned inside sandbox-exec (no network).
 pub fn run_query(
-    binary: &Path,
-    db_path: Option<&str>,
+    settings: &NoopSettings,
+    roots: &Roots,
     tool: &str,
     args: &Value,
     timeout: Duration,
 ) -> Result<Value, NoopQueryError> {
     let args = validate(tool, args)?;
-    if !binary.is_absolute() || !binary.is_file() {
-        return Err(NoopQueryError::BinaryMissing(
-            "NOOP CLI not found; build Packages/NoopLocalAccess with `swift build -c release` and set its path in Settings".into(),
-        ));
+    let raw_bin = settings
+        .binary_path
+        .as_deref()
+        .filter(|p| !p.is_empty())
+        .ok_or_else(binary_missing)?;
+    let binary = validate_path(raw_bin, PathKind::Binary, roots)?;
+    let db = match settings.db_path.as_deref().filter(|p| !p.is_empty()) {
+        Some(d) => Some(validate_path(d, PathKind::Db, roots)?),
+        None => None,
+    };
+    if !Path::new(SANDBOX_EXEC).is_file() {
+        return Err(NoopQueryError::SandboxMissing(format!(
+            "{SANDBOX_EXEC} not found; refusing to run the NOOP CLI without the network sandbox"
+        )));
     }
-    let mut cmd = Command::new(binary);
-    cmd.arg("mcp")
+    let mut cmd = Command::new(SANDBOX_EXEC);
+    cmd.arg("-p")
+        .arg(SANDBOX_PROFILE)
+        .arg(&binary)
+        .arg("mcp")
         .env_clear()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -216,7 +385,7 @@ pub fn run_query(
     if let Some(home) = std::env::var_os("HOME") {
         cmd.env("HOME", home);
     }
-    if let Some(db) = db_path {
+    if let Some(db) = &db {
         cmd.env("NOOP_DB_PATH", db);
     }
     let mut child = cmd
@@ -294,13 +463,68 @@ pub fn parse_response(out: &[u8]) -> Result<Value, NoopQueryError> {
 #[tauri::command]
 pub async fn noop_query(tool: String, args: Option<Value>) -> Result<Value, NoopQueryError> {
     let s = load_settings();
-    let bin = PathBuf::from(s.binary_path.clone().unwrap_or_default());
+    let roots = Roots::current().map_err(NoopQueryError::InvalidPath)?;
     let args = args.unwrap_or(Value::Null);
     tauri::async_runtime::spawn_blocking(move || {
-        run_query(&bin, s.db_path.as_deref(), &tool, &args, DEFAULT_TIMEOUT)
+        run_query(&s, &roots, &tool, &args, DEFAULT_TIMEOUT)
     })
     .await
     .map_err(|_| NoopQueryError::ProcessFailed("join".into()))?
+}
+
+/// Test helper: a fake `home` with an allowlisted build dir for fake CLI scripts.
+#[cfg(test)]
+pub(crate) mod test_util {
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+
+    pub struct FakeHome(pub PathBuf);
+    impl FakeHome {
+        pub fn new() -> Self {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static N: AtomicU32 = AtomicU32::new(0);
+            let p = std::env::temp_dir().join(format!(
+                "noopq-{}-{}",
+                std::process::id(),
+                N.fetch_add(1, Ordering::SeqCst)
+            ));
+            std::fs::create_dir_all(&p).unwrap();
+            FakeHome(p.canonicalize().unwrap())
+        }
+        pub fn build_dir(&self) -> PathBuf {
+            let d = self
+                .0
+                .join("projects/noop-main/Packages/NoopLocalAccess/.build/release");
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        }
+        pub fn file(&self, rel: &str, body: &str, mode: u32) -> PathBuf {
+            let p = self.0.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, body).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+            p
+        }
+        pub fn script(&self, body: &str) -> PathBuf {
+            self.build_dir();
+            self.file(
+                "projects/noop-main/Packages/NoopLocalAccess/.build/release/fake-noop",
+                &format!("#!/bin/sh\n{body}\n"),
+                0o755,
+            )
+        }
+        pub fn roots(&self) -> super::Roots {
+            super::Roots::with_home(&self.0)
+        }
+    }
+    impl Drop for FakeHome {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    pub fn s(p: &Path) -> Option<String> {
+        Some(p.display().to_string())
+    }
 }
 
 #[cfg(test)]
@@ -337,55 +561,182 @@ mod tests {
         assert!(validate("metric_series", &json!({"key": "recovery", "source": "my-whoop", "from_day": "2026-10-01", "to_day": "2026-10-31", "limit": 100})).is_ok());
     }
 
+    use super::test_util::{s as sp, FakeHome};
+
+    fn with_bin(p: &Path) -> NoopSettings {
+        NoopSettings {
+            binary_path: sp(p),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn missing_binary_is_structured() {
+        let h = FakeHome::new();
         let r = run_query(
-            Path::new("/nonexistent/noop-local-access"),
-            None,
+            &NoopSettings::default(),
+            &h.roots(),
+            "data_freshness",
+            &Value::Null,
+            DEFAULT_TIMEOUT,
+        );
+        assert!(matches!(r, Err(NoopQueryError::BinaryMissing(_))));
+        let gone = h.build_dir().join("nope");
+        let r = run_query(
+            &with_bin(&gone),
+            &h.roots(),
             "data_freshness",
             &Value::Null,
             DEFAULT_TIMEOUT,
         );
         assert!(matches!(r, Err(NoopQueryError::BinaryMissing(_))));
         let r = run_query(
-            Path::new("relative"),
-            None,
+            &with_bin(Path::new("relative")),
+            &h.roots(),
             "data_freshness",
             &Value::Null,
             DEFAULT_TIMEOUT,
         );
-        assert!(matches!(r, Err(NoopQueryError::BinaryMissing(_))));
+        assert!(matches!(r, Err(NoopQueryError::InvalidPath(_))));
     }
 
-    #[cfg(unix)]
-    fn script(body: &str) -> (tempdir_lite::Dir, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
-        let d = tempdir_lite::Dir::new();
-        let p = d.0.join("fake-noop");
-        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-        (d, p)
-    }
-
-    #[cfg(unix)]
     #[test]
-    fn parses_fake_server_and_times_out() {
-        let (_d, p) = script(
-            r#"cat >/dev/null; echo '{"jsonrpc":"2.0","id":1,"result":{}}'; echo '{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"ok\":true,\"n\":3}"}]}}'"#,
-        );
-        let v = run_query(&p, None, "data_freshness", &Value::Null, DEFAULT_TIMEOUT).unwrap();
+    fn parses_fake_server_and_times_out_in_sandbox() {
+        let h = FakeHome::new();
+        let p = h.script(r#"cat >/dev/null; echo '{"jsonrpc":"2.0","id":1,"result":{}}'; echo '{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"ok\":true,\"n\":3}"}]}}'"#);
+        let v = run_query(
+            &with_bin(&p),
+            &h.roots(),
+            "data_freshness",
+            &Value::Null,
+            DEFAULT_TIMEOUT,
+        )
+        .unwrap();
         assert_eq!(v["n"], 3);
-        let (_d2, p2) = script("sleep 30");
+        let h2 = FakeHome::new();
+        let p2 = h2.script("sleep 30");
         let t = Instant::now();
         let r = run_query(
-            &p2,
-            None,
+            &with_bin(&p2),
+            &h2.roots(),
             "data_freshness",
             &Value::Null,
             Duration::from_millis(300),
         );
         assert!(matches!(r, Err(NoopQueryError::Timeout(_))));
         assert!(t.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn sandbox_denies_network() {
+        // The fake CLI tries TCP; under the profile it must fail and report that.
+        let h = FakeHome::new();
+        let p = h.script(r#"cat >/dev/null; if /usr/bin/nc -z -w2 1.1.1.1 443 2>/dev/null; then r=open; else r=denied; fi; echo "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"structuredContent\":{\"net\":\"$r\"}}}""#);
+        let v = run_query(
+            &with_bin(&p),
+            &h.roots(),
+            "data_freshness",
+            &Value::Null,
+            DEFAULT_TIMEOUT,
+        )
+        .unwrap();
+        assert_eq!(v["net"], "denied");
+    }
+
+    #[test]
+    fn path_policy() {
+        use std::os::unix::fs::symlink;
+        let h = FakeHome::new();
+        let r = h.roots();
+        let ok = h.script("true");
+        assert_eq!(
+            validate_path(ok.to_str().unwrap(), PathKind::Binary, &r).unwrap(),
+            ok
+        );
+        // symlink inside the allowlist pointing outside it
+        let outside = h.file("elsewhere/evil", "#!/bin/sh\n", 0o755);
+        let link = h.build_dir().join("link");
+        symlink(&outside, &link).unwrap();
+        assert!(matches!(
+            validate_path(link.to_str().unwrap(), PathKind::Binary, &r),
+            Err(NoopQueryError::InvalidPath(_))
+        ));
+        // outside allowlist
+        assert!(validate_path(outside.to_str().unwrap(), PathKind::Binary, &r).is_err());
+        // group- / world-writable
+        let gw = h.file(
+            "projects/noop-main/Packages/NoopLocalAccess/.build/gw",
+            "x",
+            0o775,
+        );
+        let ww = h.file(
+            "projects/noop-main/Packages/NoopLocalAccess/.build/ww",
+            "x",
+            0o757,
+        );
+        assert!(validate_path(gw.to_str().unwrap(), PathKind::Binary, &r).is_err());
+        assert!(validate_path(ww.to_str().unwrap(), PathKind::Binary, &r).is_err());
+        // directory, not a file
+        assert!(validate_path(h.build_dir().to_str().unwrap(), PathKind::Binary, &r).is_err());
+        // not executable
+        let nx = h.file(
+            "projects/noop-main/Packages/NoopLocalAccess/.build/nx",
+            "x",
+            0o644,
+        );
+        assert!(validate_path(nx.to_str().unwrap(), PathKind::Binary, &r).is_err());
+        // wrong owner: a root-owned file outside our control (skip if not root-owned)
+        if std::fs::metadata("/bin/sh")
+            .map(|m| std::os::unix::fs::MetadataExt::uid(&m) == 0)
+            .unwrap_or(false)
+        {
+            assert!(validate_path("/bin/sh", PathKind::Binary, &r).is_err());
+        }
+        // db allowlist
+        let db1 = h.file(
+            "Library/Application Support/OpenWhoop/whoop.sqlite",
+            "",
+            0o600,
+        );
+        let db2 = h.file(
+            "Library/Containers/com.x/Data/Library/Application Support/NOOP/a.sqlite",
+            "",
+            0o600,
+        );
+        let db3 = h.file("projects/noop-main/test.sqlite", "", 0o600);
+        let db_bad = h.file("Library/Application Support/Other/x.sqlite", "", 0o600);
+        let db_ww = h.file("Library/Application Support/OpenWhoop/ww.sqlite", "", 0o606);
+        for d in [&db1, &db2, &db3] {
+            assert!(
+                validate_path(d.to_str().unwrap(), PathKind::Db, &r).is_ok(),
+                "{d:?}"
+            );
+        }
+        assert!(validate_path(db_bad.to_str().unwrap(), PathKind::Db, &r).is_err());
+        assert!(validate_path(db_ww.to_str().unwrap(), PathKind::Db, &r).is_err());
+        assert!(validate_path(h.0.join("projects").to_str().unwrap(), PathKind::Db, &r).is_err());
+    }
+
+    #[test]
+    fn settings_path_change_needs_confirm() {
+        let h = FakeHome::new();
+        let r = h.roots();
+        let ok = h.script("true");
+        let cur = NoopSettings::default();
+        let next = with_bin(&ok);
+        assert!(matches!(
+            apply_settings(&cur, next.clone(), false, &r),
+            Err(NoopQueryError::InvalidPath(_))
+        ));
+        let saved = apply_settings(&cur, next.clone(), true, &r).unwrap();
+        assert_eq!(saved.binary_path, sp(&ok));
+        // source-only change needs no confirm
+        let mut src = saved.clone();
+        src.whoop_source = WhoopSource::Ble;
+        assert!(apply_settings(&saved, src, false, &r).is_ok());
+        // invalid path rejected even with confirm
+        let bad = with_bin(Path::new("/etc/hosts"));
+        assert!(apply_settings(&cur, bad, true, &r).is_err());
     }
 
     #[test]
@@ -410,27 +761,5 @@ mod tests {
         assert!(!s.whoop_ble_allowed());
         let b: NoopSettings = serde_json::from_str(r#"{"whoop_source":"ble"}"#).unwrap();
         assert!(b.whoop_ble_allowed());
-    }
-
-    mod tempdir_lite {
-        pub struct Dir(pub std::path::PathBuf);
-        impl Dir {
-            pub fn new() -> Self {
-                use std::sync::atomic::{AtomicU32, Ordering};
-                static N: AtomicU32 = AtomicU32::new(0);
-                let p = std::env::temp_dir().join(format!(
-                    "noopq-{}-{}",
-                    std::process::id(),
-                    N.fetch_add(1, Ordering::SeqCst)
-                ));
-                std::fs::create_dir_all(&p).unwrap();
-                Dir(p)
-            }
-        }
-        impl Drop for Dir {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_dir_all(&self.0);
-            }
-        }
     }
 }

@@ -619,8 +619,26 @@ export interface RecordedSession {
     max_hr?: number;
     avg_hrv?: number;
   };
-  /** NOOP health_snapshot taken at session start; absent on older sessions. */
-  body_context?: unknown;
+  /** Minimised NOOP context captured at session start; absent on older sessions. */
+  body_context?: BodyContext;
+}
+
+export interface BodyContext {
+  today: {
+    recovery: number | null;
+    hrv: number | null;
+    rhr: number | null;
+    strain: number | null;
+    sleep_total_min: number | null;
+  } | null;
+  latest_night: {
+    day: string | null;
+    total_sleep_min: number | null;
+    efficiency: number | null;
+    deep_min: number | null;
+    rem_min: number | null;
+    light_min: number | null;
+  } | null;
 }
 
 // ── NOOP local access (mirrors src-tauri/src/commands/noop_query.rs) ──
@@ -662,7 +680,9 @@ export type NoopQueryError =
   | { kind: "timeout"; detail: number }
   | { kind: "process_failed"; detail: string }
   | { kind: "bad_output"; detail: string }
-  | { kind: "tool_error"; detail: string };
+  | { kind: "tool_error"; detail: string }
+  | { kind: "invalid_path"; detail: string }
+  | { kind: "sandbox_missing"; detail: string };
 
 export interface NfSession extends RecordedSession {
   protocol_id: string;

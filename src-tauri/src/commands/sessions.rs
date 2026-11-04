@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -10,29 +10,97 @@ use super::noop_query::{self, NoopSettings};
 const BODY_CONTEXT_DAYS: i64 = 7;
 const BODY_CONTEXT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Snapshot captured at the latest session start, consumed by the next save_session.
-static PENDING_BODY_CONTEXT: Mutex<Option<serde_json::Value>> = Mutex::new(None);
+static PENDING_BODY_CONTEXT: Mutex<Option<BodyContext>> = Mutex::new(None);
+
+/// Minimised NOOP context stored on a session. Explicit whitelist: everything else in the
+/// health_snapshot (sources, freshness, appleDaily, battery, recentDays, spo2, skin temp,
+/// steps, ...) is dropped.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct BodyContext {
+    #[serde(default)]
+    pub today: Option<BodyToday>,
+    #[serde(default)]
+    pub latest_night: Option<BodyNight>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct BodyToday {
+    #[serde(default)]
+    pub recovery: Option<f64>,
+    #[serde(default)]
+    pub hrv: Option<f64>,
+    #[serde(default)]
+    pub rhr: Option<f64>,
+    #[serde(default)]
+    pub strain: Option<f64>,
+    #[serde(default)]
+    pub sleep_total_min: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct BodyNight {
+    #[serde(default)]
+    pub day: Option<String>,
+    #[serde(default)]
+    pub total_sleep_min: Option<f64>,
+    #[serde(default)]
+    pub efficiency: Option<f64>,
+    #[serde(default)]
+    pub deep_min: Option<f64>,
+    #[serde(default)]
+    pub rem_min: Option<f64>,
+    #[serde(default)]
+    pub light_min: Option<f64>,
+}
+
+impl BodyContext {
+    /// Build from a NOOP health_snapshot payload (camelCase keys, see LocalAccessCore.swift).
+    pub fn from_snapshot(v: &serde_json::Value) -> Self {
+        let num = |o: &serde_json::Value, k: &str| o.get(k).and_then(serde_json::Value::as_f64);
+        let today = v.get("today").filter(|t| t.is_object()).map(|t| BodyToday {
+            recovery: num(t, "recovery"),
+            hrv: num(t, "avgHrv"),
+            rhr: num(t, "restingHr"),
+            strain: num(t, "strain"),
+            sleep_total_min: num(t, "totalSleepMin"),
+        });
+        let latest_night = v
+            .get("latestNight")
+            .filter(|n| n.is_object())
+            .map(|n| BodyNight {
+                day: n
+                    .get("day")
+                    .and_then(|d| d.as_str())
+                    .map(|d| d.chars().take(10).collect()),
+                total_sleep_min: num(n, "totalSleepMin"),
+                efficiency: num(n, "efficiency"),
+                deep_min: num(n, "deepMin"),
+                rem_min: num(n, "remMin"),
+                light_min: num(n, "lightMin"),
+            });
+        BodyContext {
+            today,
+            latest_night,
+        }
+    }
+}
 
 /// Best-effort health_snapshot for a session. None unless WhoopSource=noop and a binary is
 /// configured; None on any error. Logs status and error kind only, never values.
 pub(crate) fn capture_body_context_with(
     settings: &NoopSettings,
+    roots: &noop_query::Roots,
     timeout: Duration,
-) -> Option<serde_json::Value> {
+) -> Option<BodyContext> {
     if settings.whoop_ble_allowed() {
         return None;
     }
-    let bin = settings.binary_path.as_deref().filter(|p| !p.is_empty())?;
+    settings.binary_path.as_deref().filter(|p| !p.is_empty())?;
     let args = serde_json::json!({ "days": BODY_CONTEXT_DAYS });
-    match noop_query::run_query(
-        Path::new(bin),
-        settings.db_path.as_deref(),
-        "health_snapshot",
-        &args,
-        timeout,
-    ) {
+    match noop_query::run_query(settings, roots, "health_snapshot", &args, timeout) {
         Ok(v) => {
             println!("[sessions] body_context: status=ok");
-            Some(v)
+            Some(BodyContext::from_snapshot(&v))
         }
         Err(e) => {
             println!("[sessions] body_context: status=error kind={}", e.kind());
@@ -47,14 +115,18 @@ pub fn begin_body_context_capture() {
         *slot = None;
     }
     std::thread::spawn(|| {
-        let v = capture_body_context_with(&noop_query::load_settings(), BODY_CONTEXT_TIMEOUT);
+        let Ok(roots) = noop_query::Roots::current() else {
+            return;
+        };
+        let v =
+            capture_body_context_with(&noop_query::load_settings(), &roots, BODY_CONTEXT_TIMEOUT);
         if let (Some(v), Ok(mut slot)) = (v, PENDING_BODY_CONTEXT.lock()) {
             *slot = Some(v);
         }
     });
 }
 
-fn take_pending_body_context() -> Option<serde_json::Value> {
+fn take_pending_body_context() -> Option<BodyContext> {
     PENDING_BODY_CONTEXT.lock().ok().and_then(|mut s| s.take())
 }
 
@@ -113,7 +185,7 @@ pub struct RecordedSession {
     pub summary: SessionSummary,
     /// NOOP health_snapshot taken at Muse session start. Absent in older session files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body_context: Option<serde_json::Value>,
+    pub body_context: Option<BodyContext>,
 }
 
 #[tauri::command]
@@ -287,62 +359,88 @@ mod tests {
             .get("body_context")
             .is_none());
         let mut v = serde_json::to_value(&s).unwrap();
-        v["body_context"] = serde_json::json!({ "status": "ok" });
+        v["body_context"] = serde_json::json!({ "today": { "hrv": 1.23 } });
         let s2: RecordedSession = serde_json::from_value(v).unwrap();
-        assert_eq!(s2.body_context.unwrap()["status"], "ok");
+        assert_eq!(s2.body_context.unwrap().today.unwrap().hrv, Some(1.23));
     }
 
-    #[cfg(unix)]
-    fn fake_noop(body: &str) -> (PathBuf, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
-        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let d = std::env::temp_dir().join(format!(
-            "bodyctx-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-        ));
-        std::fs::create_dir_all(&d).unwrap();
-        let p = d.join("fake-noop");
-        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-        (d, p)
+    #[test]
+    fn body_context_whitelists_fields() {
+        let snap = serde_json::json!({
+            "generatedAt": "2026-01-01T00:00:00Z", "sources": {"a": "b"},
+            "freshness": {"dailyRows": 1}, "recentDays": [{"day": "2026-01-01"}],
+            "appleDaily": [{"steps": 0}], "battery": {"percentage": 1.23},
+            "latestSleep": {"durationMin": 1.0},
+            "today": {"day": "2026-01-01", "source": "my-whoop", "recovery": 1.0, "avgHrv": 1.23,
+                      "restingHr": 0, "strain": 1.23, "totalSleepMin": 1.23, "spo2Pct": 1.23,
+                      "skinTempDevC": 0.0, "steps": 0, "respRateBpm": 1.23, "activeKcalEst": 1.23},
+            "latestNight": {"day": "2026-01-01", "startTs": 0, "endTs": 60, "sessionCount": 1,
+                            "totalSleepMin": 1.23, "inBedMin": 2.46, "efficiency": 0.5,
+                            "deepMin": 0.0, "remMin": 0.0, "lightMin": 1.23}
+        });
+        let bc = BodyContext::from_snapshot(&snap);
+        let v = serde_json::to_value(&bc).unwrap();
+        let keys = |o: &serde_json::Value| {
+            let mut k: Vec<String> = o.as_object().unwrap().keys().cloned().collect();
+            k.sort();
+            k
+        };
+        assert_eq!(keys(&v), ["latest_night", "today"]);
+        assert_eq!(
+            keys(&v["today"]),
+            ["hrv", "recovery", "rhr", "sleep_total_min", "strain"]
+        );
+        assert_eq!(
+            keys(&v["latest_night"]),
+            [
+                "day",
+                "deep_min",
+                "efficiency",
+                "light_min",
+                "rem_min",
+                "total_sleep_min"
+            ]
+        );
+        assert_eq!(bc.today.unwrap().hrv, Some(1.23));
+        let empty =
+            BodyContext::from_snapshot(&serde_json::json!({"today": null, "latestNight": null}));
+        assert_eq!(empty, BodyContext::default());
     }
 
-    #[cfg(unix)]
     #[test]
     fn body_context_capture_is_best_effort() {
+        use super::noop_query::test_util::{s as sp, FakeHome};
         use super::noop_query::WhoopSource;
-        let ok = r#"cat >/dev/null; echo '{"jsonrpc":"2.0","id":2,"result":{"structuredContent":{"status":"ok"}}}'"#;
-        let (d, p) = fake_noop(ok);
+        let h = FakeHome::new();
+        let r = h.roots();
+        let ok = h.script(r#"cat >/dev/null; echo '{"jsonrpc":"2.0","id":2,"result":{"structuredContent":{"today":{"avgHrv":1.23,"spo2Pct":1.0},"battery":{}}}}'"#);
         let mut s = NoopSettings {
-            binary_path: Some(p.display().to_string()),
+            binary_path: sp(&ok),
             ..Default::default()
         };
-        assert_eq!(
-            capture_body_context_with(&s, Duration::from_secs(5)).unwrap()["status"],
-            "ok"
-        );
+        let bc = capture_body_context_with(&s, &r, Duration::from_secs(5)).unwrap();
+        assert_eq!(bc.today.unwrap().hrv, Some(1.23));
         s.whoop_source = WhoopSource::Ble;
-        assert!(capture_body_context_with(&s, Duration::from_secs(5)).is_none());
+        assert!(capture_body_context_with(&s, &r, Duration::from_secs(5)).is_none());
         assert!(
-            capture_body_context_with(&NoopSettings::default(), Duration::from_secs(5)).is_none()
+            capture_body_context_with(&NoopSettings::default(), &r, Duration::from_secs(5))
+                .is_none()
         );
-        let (d2, slow) = fake_noop("sleep 30");
+        let h2 = FakeHome::new();
+        let slow = h2.script("sleep 30");
         let s2 = NoopSettings {
-            binary_path: Some(slow.display().to_string()),
+            binary_path: sp(&slow),
             ..Default::default()
         };
         let t = std::time::Instant::now();
-        assert!(capture_body_context_with(&s2, Duration::from_millis(300)).is_none());
+        assert!(capture_body_context_with(&s2, &h2.roots(), Duration::from_millis(300)).is_none());
         assert!(t.elapsed() < Duration::from_secs(5));
-        let (d3, bad) = fake_noop("cat >/dev/null; echo nope");
+        let h3 = FakeHome::new();
+        let bad = h3.script("cat >/dev/null; echo nope");
         let s3 = NoopSettings {
-            binary_path: Some(bad.display().to_string()),
+            binary_path: sp(&bad),
             ..Default::default()
         };
-        assert!(capture_body_context_with(&s3, Duration::from_secs(5)).is_none());
-        for d in [d, d2, d3] {
-            let _ = std::fs::remove_dir_all(d);
-        }
+        assert!(capture_body_context_with(&s3, &h3.roots(), Duration::from_secs(5)).is_none());
     }
 }
