@@ -164,7 +164,7 @@ cargo test
 
 # 1. Binary
 mkdir -p ~/.local/bin
-cp target/release/amara-router ~/.local/bin/amara-router
+rm -f ~/.local/bin/amara-router && cp target/release/amara-router ~/.local/bin/amara-router
 
 # 2. Config (0600). Check model names first:  ollama list
 mkdir -p ~/.config/amara-router && chmod 700 ~/.config/amara-router
