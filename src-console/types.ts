@@ -594,12 +594,12 @@ export interface NoopSnapshotPayload {
   logicalToday: string;
   sources: Record<string, string | null>;
   freshness: { latestHeartRateSample: { ts: number; iso: string; ageSeconds: number } | null; latestDailyMetricDay: string | null; latestAppleHealthDay: string | null; dailyRows: number; appleDailyRows: number };
-  today: NoopDayRow | null;
+  today?: NoopDayRow | null;
   recentDays: NoopDayRow[];
   appleDaily: unknown[];
-  latestSleep: unknown | null;
-  latestNight: NoopLatestNight | null;
-  battery: unknown | null;
+  latestSleep?: unknown | null;
+  latestNight?: NoopLatestNight | null;
+  battery?: unknown | null;
 }
 export interface NoopSeriesPayload {
   key: import("../src/lib/types").NoopMetricKey;

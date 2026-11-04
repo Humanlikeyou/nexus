@@ -40,7 +40,8 @@ export function parseMetricSeries(key: NoopMetricKey, raw: unknown): NoopMetricS
 }
 
 export function isSnapshot(raw: unknown): raw is NoopSnapshotPayload {
-  return isObj(raw) && typeof raw.generatedAt === "string" && Array.isArray(raw.recentDays) && "today" in raw && "latestNight" in raw;
+  // NOOP omits nil fields, so today, latestSleep, latestNight and battery can each be absent.
+  return isObj(raw) && typeof raw.generatedAt === "string" && Array.isArray(raw.recentDays);
 }
 
 /** recentDays plus today (deduped by day, ascending). */
