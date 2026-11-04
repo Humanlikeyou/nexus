@@ -353,6 +353,8 @@ pub fn run() {
             voice::voice_recent_turns,
             voice::voice_list_voices,
             voice::voice_set_voice,
+            commands::voice_bridge::voice_bridge_start,
+            commands::voice_bridge::voice_bridge_stop,
             // Appearance
             dock_icon::sync_dock_icon,
         ])
