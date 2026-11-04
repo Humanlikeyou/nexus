@@ -95,6 +95,8 @@ pub const KIND_UPSTREAM_ERROR: &str = "upstream_error";
 pub const KIND_UNSAFE_STORAGE: &str = "unsafe_storage";
 /// Writing settings (app-data `.env` or config) failed.
 pub const KIND_STORAGE_ERROR: &str = "storage_error";
+/// A connection test with an unsaved URL must also send the token to use with it.
+pub const KIND_TOKEN_REQUIRED: &str = "token_required";
 /// All kinds, for the frontend and tests.
 #[allow(dead_code)] // stable contract for the frontend; asserted in tests
 pub const ERROR_KINDS: &[&str] = &[
@@ -114,10 +116,13 @@ pub const ERROR_KINDS: &[&str] = &[
     KIND_UPSTREAM_ERROR,
     KIND_UNSAFE_STORAGE,
     KIND_STORAGE_ERROR,
+    KIND_TOKEN_REQUIRED,
 ];
 
 const ERR_CONFIG: &str =
     "not_configured: Home Assistant is not configured (check HA_URL and HA_TOKEN).";
+const ERR_TOKEN_REQUIRED: &str =
+    "token_required: Enter the token to test a URL that is not the saved one.";
 const ERR_URL: &str = "bad_url: HA_URL must be a loopback http address.";
 const ERR_UNREACHABLE: &str = "unreachable: Home Assistant is not reachable.";
 const ERR_AUTH: &str = "auth_rejected: Home Assistant rejected the token.";
@@ -1457,7 +1462,13 @@ pub fn ha_clear_token() -> Result<HaClearResult, String> {
 
 /// GET `/api/config` with the resolved settings. Never rejects; failures are `{ok:false, kind}`.
 #[tauri::command]
-pub async fn ha_test_connection() -> HaTestResult {
+pub async fn ha_test_connection(url: Option<String>, token: Option<String>) -> HaTestResult {
+    // Wrap at once so the typed token is zeroized on every path.
+    let token = token.map(HaToken);
+    let overrides = match test_overrides(url, token) {
+        Ok(o) => o,
+        Err(e) => return fail(e),
+    };
     let Ok(mut last) = TEST_GATE.try_lock() else {
         return fail(ERR_BUSY);
     };
@@ -1466,7 +1477,64 @@ pub async fn ha_test_connection() -> HaTestResult {
         return fail(ERR_BUSY);
     }
     *last = Some(now);
-    match load_config() {
+    test_connection_with(&Sources::live(), overrides).await
+}
+
+/// Unsaved form values for a connection test; `None` = use the stored setting.
+#[derive(Debug, Default)]
+struct TestOverrides {
+    base: Option<String>,
+    token: Option<HaToken>,
+}
+
+/// Validates form values with `ha_set_config`'s rules. Blank fields count as not provided.
+fn test_overrides(
+    url: Option<String>,
+    token: Option<HaToken>,
+) -> Result<TestOverrides, &'static str> {
+    let base = match url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+        Some(u) => Some(loopback_base(u).ok_or(ERR_URL)?),
+        None => None,
+    };
+    let token = match token {
+        Some(t) if t.0.trim().is_empty() => None,
+        Some(t) => {
+            if !valid_new_token(&t.0) {
+                return Err(ERR_TOKEN_FORMAT);
+            }
+            Some(t)
+        }
+        None => None,
+    };
+    Ok(TestOverrides { base, token })
+}
+
+/// Stored config with `o` applied on top; nothing is written anywhere.
+fn config_with_overrides(src: &Sources, o: TestOverrides) -> Result<HaConfig, String> {
+    let (legacy_url, legacy_token) = legacy_values(src);
+    let saved_base = loopback_base(
+        configured_url(src, &legacy_url)
+            .as_deref()
+            .unwrap_or(DEFAULT_HA_URL),
+    );
+    // The saved token only ever goes to the saved base: an unsaved URL needs its own token,
+    // or any IPC caller could send the real token to another loopback port.
+    if o.token.is_none() && o.base.is_some() && o.base != saved_base {
+        return Err(ERR_TOKEN_REQUIRED.to_string());
+    }
+    let base = match o.base {
+        Some(b) => b,
+        None => saved_base.ok_or_else(|| ERR_URL.to_string())?,
+    };
+    let token = match o.token {
+        Some(t) => t,
+        None => resolve_token(src, legacy_token)?,
+    };
+    Ok(HaConfig { base, token })
+}
+
+async fn test_connection_with(src: &Sources, o: TestOverrides) -> HaTestResult {
+    match config_with_overrides(src, o) {
         Ok(cfg) => test_with(&cfg).await,
         Err(e) => fail(&e),
     }
@@ -2151,8 +2219,9 @@ mod tests {
             ERR_SAVE,
             ERR_TOKEN_FORMAT,
             ERR_NOTHING,
+            ERR_TOKEN_REQUIRED,
         ];
-        assert_eq!(ERROR_KINDS.len(), 16);
+        assert_eq!(ERROR_KINDS.len(), 17);
         for e in all {
             let (kind, text) = e.split_once(": ").expect(e);
             assert!(ERROR_KINDS.contains(&kind), "{e}");
@@ -2799,5 +2868,137 @@ mod tests {
             ERR_CONFIG
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut v: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| {
+                let e = e.unwrap();
+                (
+                    e.file_name().to_string_lossy().to_string(),
+                    std::fs::read(e.path()).unwrap(),
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    }
+
+    fn ov(url: Option<&str>, token: Option<&str>) -> TestOverrides {
+        test_overrides(url.map(str::to_string), token.map(|t| HaToken(t.into()))).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_connection_other_url_with_saved_token_is_token_required() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        // Raw listener: counts connections, so "no request" also means "no connect".
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let other = format!("http://{}", listener.local_addr().unwrap());
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let h2 = hits.clone();
+        tokio::spawn(async move {
+            while listener.accept().await.is_ok() {
+                h2.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        let dir = tmpdir();
+        set_token(&dir, TOKEN).unwrap();
+        let mut s = src(&dir);
+        s.cfg_url = Some("http://127.0.0.1:1".into());
+        let before = snapshot(&dir);
+        for url in [other.as_str(), "http://localhost:1", "http://127.0.0.1:2"] {
+            let r = test_connection_with(&s, ov(Some(url), None)).await;
+            assert!(!r.ok);
+            assert_eq!(r.kind, Some(KIND_TOKEN_REQUIRED), "{url}");
+        }
+        // No saved URL either: the default base is the only one the saved token may reach.
+        s.cfg_url = None;
+        let r = test_connection_with(&s, ov(Some(&other), None)).await;
+        assert_eq!(r.kind, Some(KIND_TOKEN_REQUIRED));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            0,
+            "the other port saw no connection"
+        );
+        assert_eq!(snapshot(&dir), before, "nothing persisted");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn test_connection_same_url_with_saved_token_is_allowed() {
+        let (base, seen) = mock(vec![("/api/config", 200, "{\"version\":\"1\"}".into())]).await;
+        let port = base.rsplit(':').next().unwrap().to_string();
+        let dir = tmpdir();
+        set_token(&dir, TOKEN).unwrap();
+        let mut s = src(&dir);
+        s.cfg_url = Some(base.clone());
+        let before = snapshot(&dir);
+        // Same base after loopback_base: exact, trailing slash, upper-case scheme/host spelling.
+        for url in [
+            base.clone(),
+            format!("{base}/"),
+            format!(" HTTP://127.0.0.1:{port}/ "),
+        ] {
+            let r = test_connection_with(&s, ov(Some(&url), None)).await;
+            assert!(r.ok, "{url}: {r:?}");
+        }
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 3);
+        assert!(
+            seen.iter().all(|r| r.2),
+            "saved token sent to the saved base"
+        );
+        assert_eq!(snapshot(&dir), before, "nothing persisted");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn test_connection_override_token_only_uses_stored_url() {
+        let (base, seen) = mock(vec![("/api/config", 200, "{\"version\":\"1\"}".into())]).await;
+        let dir = tmpdir();
+        set_token(&dir, NEW_TOKEN).unwrap();
+        let mut s = src(&dir);
+        s.cfg_url = Some(base.clone());
+        let before = snapshot(&dir);
+        let r = test_connection_with(&s, ov(None, Some(TOKEN))).await;
+        assert!(r.ok, "{r:?}");
+        assert!(seen.lock().unwrap()[0].2, "override token sent");
+        assert_eq!(snapshot(&dir), before, "stored token unchanged");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn test_connection_override_both_needs_no_stored_config() {
+        let (base, seen) = mock(vec![("/api/config", 200, "{\"version\":\"1\"}".into())]).await;
+        let dir = tmpdir();
+        let s = src(&dir);
+        // Without overrides there is nothing to test with.
+        assert!(!test_connection_with(&s, ov(None, None)).await.ok);
+        let r = test_connection_with(&s, ov(Some(&base), Some(TOKEN))).await;
+        assert!(r.ok, "{r:?}");
+        assert!(seen.lock().unwrap()[0].2);
+        assert!(snapshot(&dir).is_empty(), "no .env created");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_connection_overrides_are_validated() {
+        let bad_url = |u: &str| test_overrides(Some(u.into()), None).unwrap_err();
+        assert_eq!(bad_url("http://example.com:8123"), ERR_URL);
+        assert_eq!(bad_url("not a url"), ERR_URL);
+        assert_eq!(fail(ERR_URL).kind, Some("bad_url"));
+        let bad_tok = |t: &str| test_overrides(None, Some(HaToken(t.into()))).unwrap_err();
+        assert_eq!(bad_tok("short"), ERR_TOKEN_FORMAT);
+        assert_eq!(bad_tok(&format!("{TOKEN} x")), ERR_TOKEN_FORMAT);
+        assert_eq!(fail(ERR_TOKEN_FORMAT).kind, Some("invalid_input"));
+        let o = ov(Some("  "), Some(""));
+        assert!(
+            o.base.is_none() && o.token.is_none(),
+            "blank = not provided"
+        );
+        let dbg = format!("{:?}", ov(None, Some(TOKEN)));
+        assert!(!dbg.contains(TOKEN), "{dbg}");
     }
 }

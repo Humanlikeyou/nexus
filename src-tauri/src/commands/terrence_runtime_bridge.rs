@@ -72,12 +72,43 @@ pub struct AmaraTier {
     pub source: String,
 }
 
+/// Where the router says this reply was served, from its response headers (sanitized).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteInfo {
+    /// "fast" | "deep" | "claude": the tier that actually answered (`X-Amara-Route`).
+    pub tier: String,
+    /// `X-Amara-Model`, else the JSON `model` field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// `X-Amara-Route-Reason`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct HermesReply {
     pub content: String,
     pub session_id: Option<String>,
     /// `amara` metadata, if Hermes ever passes the router's through.
     pub tier: Option<AmaraTier>,
+    pub route: Option<RouteInfo>,
+}
+
+/// A failed turn: fixed user-facing text plus any route headers the error response carried.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HermesError {
+    pub message: String,
+    pub route: Option<RouteInfo>,
+}
+
+impl From<String> for HermesError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            route: None,
+        }
+    }
 }
 
 /// One chat turn as Hermes will see it.
@@ -211,6 +242,55 @@ pub fn tier_from_metadata(v: &Value, header_tier: Option<&str>) -> Option<AmaraT
     })
 }
 
+const MODEL_MAX: usize = 128;
+const REASON_MAX: usize = 160;
+const RETRY_AFTER_DEFAULT: u64 = 10;
+const RETRY_AFTER_MAX: u64 = 300;
+
+fn safe_field(v: Option<&str>, max: usize, extra: &[u8]) -> Option<String> {
+    let v = v?.trim();
+    (!v.is_empty()
+        && v.len() <= max
+        && v.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || extra.contains(&b)))
+    .then(|| v.to_string())
+}
+
+/// Route headers (`X-Amara-Route`, `X-Amara-Model`, `X-Amara-Route-Reason`; keys lowercase).
+/// Unknown tier → None; an unsafe model or reason → that field None.
+pub fn route_info(headers: &HashMap<String, String>, v: &Value) -> Option<RouteInfo> {
+    let tier = headers.get("x-amara-route")?.trim().to_ascii_lowercase();
+    if !matches!(tier.as_str(), "fast" | "deep" | "claude") {
+        return None;
+    }
+    let model_extra = b"._:/@+-";
+    let model = safe_field(
+        headers.get("x-amara-model").map(String::as_str),
+        MODEL_MAX,
+        model_extra,
+    )
+    .or_else(|| safe_field(v["model"].as_str(), MODEL_MAX, model_extra));
+    let reason = safe_field(
+        headers.get("x-amara-route-reason").map(String::as_str),
+        REASON_MAX,
+        b" ._:,=+/-",
+    );
+    Some(RouteInfo {
+        tier,
+        model,
+        reason,
+    })
+}
+
+/// `Retry-After` in whole seconds, clamped to 1-300; missing or non-integer → 10.
+pub fn retry_after_secs(headers: &HashMap<String, String>) -> u64 {
+    headers
+        .get("retry-after")
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|n| n.clamp(1, RETRY_AFTER_MAX))
+        .unwrap_or(RETRY_AFTER_DEFAULT)
+}
+
 /// Hermes's reply → content/session, or a fixed, user-facing error (never a raw body).
 pub fn parse_hermes_reply(
     status: u16,
@@ -220,7 +300,13 @@ pub fn parse_hermes_reply(
     match status {
         200..=299 => {}
         401 | 403 => return Err(HERMES_BAD_KEY.to_string()),
-        429 | 503 => return Err(HERMES_BUSY.to_string()),
+        429 => return Err(HERMES_BUSY.to_string()),
+        503 => {
+            return Err(format!(
+                "model_loading: retry_after={}",
+                retry_after_secs(headers)
+            ))
+        }
         _ => {
             let message = v["error"]["message"].as_str().unwrap_or("").trim();
             let message = super::continuity::redact_sensitive_text(message);
@@ -246,6 +332,7 @@ pub fn parse_hermes_reply(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
         tier: tier_from_metadata(v, headers.get("x-amara-tier").map(String::as_str)),
+        route: route_info(headers, v),
     })
 }
 
@@ -401,7 +488,7 @@ pub(crate) async fn send_turn(
     api_key: &str,
     session_key: &str,
     body: &Value,
-) -> Result<HermesReply, String> {
+) -> Result<HermesReply, HermesError> {
     let headers = [
         ("Authorization", format!("Bearer {api_key}")),
         ("X-Hermes-Session-Key", session_key.to_string()),
@@ -418,7 +505,10 @@ pub(crate) async fn send_turn(
             "timeout" => "Hermes did not complete within 30 minutes.".to_string(),
             _ => HERMES_DOWN.to_string(),
         })?;
-    parse_hermes_reply(status, &headers, &v)
+    parse_hermes_reply(status, &headers, &v).map_err(|message| HermesError {
+        message,
+        route: route_info(&headers, &v),
+    })
 }
 
 /// The router's routing decision for exactly this body, without generating.
@@ -494,10 +584,10 @@ impl NexusRuntimeBridge {
         &self,
         hermes_home: &Path,
         turn: HermesTurn<'_>,
-    ) -> Result<HermesReply, String> {
+    ) -> Result<HermesReply, HermesError> {
         let env_text = std::fs::read_to_string(hermes_home.join(".env")).unwrap_or_default();
-        let api_key =
-            env_value(&env_text, "API_SERVER_KEY").ok_or_else(|| HERMES_NO_KEY.to_string())?;
+        let api_key = env_value(&env_text, "API_SERVER_KEY")
+            .ok_or_else(|| HermesError::from(HERMES_NO_KEY.to_string()))?;
         let base = hermes_base(&env_text);
         let key = session_key(std::env::var(SESSION_KEY_ENV).ok().as_deref());
         let body = chat_body(&turn.system, &turn.context, turn.history, turn.message);
@@ -678,7 +768,8 @@ mod tests {
             &json!({}),
         )
         .await
-        .unwrap_err();
+        .unwrap_err()
+        .message;
         assert!(e.contains("not running"));
         for status in [401u16, 403] {
             let m = Mock::new(Ok((
@@ -688,7 +779,8 @@ mod tests {
             )));
             let e = send_turn(&m, "b", "secret-key", "s", &json!({}))
                 .await
-                .unwrap_err();
+                .unwrap_err()
+                .message;
             assert!(!e.contains("secret-key"));
             assert!(e.contains("API_SERVER_KEY"));
         }
@@ -698,7 +790,10 @@ mod tests {
             json!({"error": {"message": "line1\nline2"}}),
         )));
         assert_eq!(
-            send_turn(&m, "b", "k", "s", &json!({})).await.unwrap_err(),
+            send_turn(&m, "b", "k", "s", &json!({}))
+                .await
+                .unwrap_err()
+                .message,
             HERMES_FAILED
         );
         let empty = Mock::new(Ok((200, HashMap::new(), ok_reply("  "))));
@@ -964,5 +1059,109 @@ mod tests {
             headers.get("x-amara-tier").map(String::as_str),
             Some("fast")
         );
+    }
+
+    fn hdrs(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn route_info_reads_headers_with_json_model_fallback() {
+        let h = hdrs(&[
+            ("x-amara-route", "deep"),
+            ("x-amara-model", "qwen3:32b"),
+            ("x-amara-route-reason", "slash_deep"),
+        ]);
+        let v = json!({"model": "other"});
+        assert_eq!(
+            route_info(&h, &v),
+            Some(RouteInfo {
+                tier: "deep".into(),
+                model: Some("qwen3:32b".into()),
+                reason: Some("slash_deep".into()),
+            })
+        );
+        let h = hdrs(&[("x-amara-route", "fast")]);
+        let r = route_info(&h, &json!({"model": "llama3.2:3b"})).unwrap();
+        assert_eq!(r.model.as_deref(), Some("llama3.2:3b"));
+        assert!(r.reason.is_none());
+        let out = serde_json::to_string(&r).unwrap();
+        assert_eq!(out, r#"{"tier":"fast","model":"llama3.2:3b"}"#);
+    }
+
+    #[test]
+    fn route_info_is_sanitized() {
+        assert!(route_info(&hdrs(&[("x-amara-route", "turbo")]), &Value::Null).is_none());
+        assert!(route_info(&HashMap::new(), &json!({"model": "m"})).is_none());
+        let long = "m".repeat(129);
+        let h = hdrs(&[
+            ("x-amara-route", "claude"),
+            ("x-amara-model", &long),
+            ("x-amara-route-reason", "<script>"),
+        ]);
+        let r = route_info(&h, &json!({"model": "bad model\n"})).unwrap();
+        assert_eq!(r.tier, "claude");
+        assert!(r.model.is_none() && r.reason.is_none());
+    }
+
+    #[test]
+    fn status_503_is_model_loading_and_429_stays_busy() {
+        let e = |status, h: &[(&str, &str)]| {
+            parse_hermes_reply(status, &hdrs(h), &Value::Null).unwrap_err()
+        };
+        assert_eq!(
+            e(503, &[("retry-after", "42")]),
+            "model_loading: retry_after=42"
+        );
+        assert_eq!(e(503, &[]), "model_loading: retry_after=10");
+        assert_eq!(
+            e(503, &[("retry-after", "0")]),
+            "model_loading: retry_after=1"
+        );
+        assert_eq!(
+            e(503, &[("retry-after", "9999")]),
+            "model_loading: retry_after=300"
+        );
+        assert_eq!(
+            e(503, &[("retry-after", "1.5")]),
+            "model_loading: retry_after=10"
+        );
+        assert_eq!(
+            e(503, &[("retry-after", "Wed, 21 Oct 2026 07:28:00 GMT")]),
+            "model_loading: retry_after=10"
+        );
+        assert_eq!(e(429, &[("retry-after", "42")]), HERMES_BUSY);
+    }
+
+    #[tokio::test]
+    async fn error_responses_keep_the_route() {
+        let h = hdrs(&[
+            ("x-amara-route", "deep"),
+            ("x-amara-model", "qwen3:32b"),
+            ("retry-after", "20"),
+        ]);
+        for (status, msg) in [
+            (503u16, "model_loading: retry_after=20"),
+            (502, HERMES_FAILED),
+        ] {
+            let m = Mock::new(Ok((status, h.clone(), json!({"error": {}}))));
+            let e = send_turn(&m, "b", "k", "s", &json!({})).await.unwrap_err();
+            assert_eq!(e.message, msg);
+            let route = e.route.unwrap();
+            assert_eq!(
+                (route.tier.as_str(), route.model.as_deref()),
+                ("deep", Some("qwen3:32b"))
+            );
+        }
+        let ok = Mock::new(Ok((
+            200,
+            hdrs(&[("x-amara-route", "fast")]),
+            ok_reply("hi"),
+        )));
+        let reply = send_turn(&ok, "b", "k", "s", &json!({})).await.unwrap();
+        assert_eq!(reply.route.unwrap().tier, "fast");
     }
 }

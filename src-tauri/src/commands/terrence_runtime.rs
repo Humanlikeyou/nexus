@@ -108,6 +108,9 @@ pub struct TerrenceInteraction {
     /// Where the interaction came from (e.g. "home"); None for old rows and Hermes turns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Router-reported route (headers), also on failed turns; None when the router sent none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<terrence_runtime_bridge::RouteInfo>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1102,6 +1105,7 @@ fn interaction_failure(
         runtime_profile: NEXUS_RUNTIME_PROFILE.to_string(),
         tier: None,
         source: None,
+        route: None,
     }
 }
 
@@ -1295,13 +1299,24 @@ pub async fn interact_with_terrence(
         .await
     {
         Ok(response) => response,
-        Err(error) => {
+        Err(terrence_runtime_bridge::HermesError { message, route }) => {
             if let Some(action_id) = action_id.as_deref() {
-                let _ = terrence_actions::fail_terrence_action(action_id, error.clone());
+                let _ = terrence_actions::fail_terrence_action(action_id, message.clone());
             }
-            return Err(fail(error, started_at));
+            let mut interaction = interaction_failure(
+                &request,
+                &model,
+                &provider,
+                started_at,
+                started.elapsed().as_millis() as u64,
+                message.clone(),
+            );
+            interaction.route = route;
+            let _ = persist_interaction(&interaction);
+            return Err(message);
         }
     };
+    let route = bridge_response.route.clone();
     let tier = bridge_response.tier.clone().or_else(|| {
         if !routed {
             return None;
@@ -1479,6 +1494,7 @@ pub async fn interact_with_terrence(
         runtime_profile: NEXUS_RUNTIME_PROFILE.to_string(),
         tier,
         source: None,
+        route,
     };
     if let Some(action_id) = action_id.as_deref() {
         let _ = terrence_actions::complete_terrence_action(
@@ -1569,6 +1585,7 @@ fn build_amara_interaction(input: AmaraNoteInput) -> Result<TerrenceInteraction,
             .tier
             .filter(|t| matches!(t.tier.as_str(), "fast" | "deep" | "claude")),
         source,
+        route: None,
     };
     Ok(interaction)
 }
