@@ -273,7 +273,7 @@ pub fn route_info(headers: &HashMap<String, String>, v: &Value) -> Option<RouteI
     let reason = safe_field(
         headers.get("x-amara-route-reason").map(String::as_str),
         REASON_MAX,
-        b" ._:,=+/-",
+        b" ._:;,=+/-",
     );
     Some(RouteInfo {
         tier,
@@ -367,7 +367,8 @@ pub fn tier_from_dry_run(v: &Value) -> Option<AmaraTier> {
 }
 
 /// The tier the router actually served during [since, until] (RFC 3339), from routes.jsonl.
-/// Only successful OpenAI-API lines count (Hermes's wire). Another client can hit the router in
+/// Only finished OpenAI-API lines count (Hermes's wire): an error or cancelled line served
+/// nothing. Another client can hit the router in
 /// the same window, so mixed tiers are only resolved when the dry run names one of them.
 pub fn tier_from_route_log(
     log: &str,
@@ -392,7 +393,8 @@ pub fn tier_from_route_log(
         else {
             continue;
         };
-        if ts < since || ts > until || v["api"] != "openai" || v["status"] == "error" {
+        let unserved = v["status"] == "error" || v["status"] == "cancelled";
+        if ts < since || ts > until || v["api"] != "openai" || unserved {
             continue;
         }
         if let Some(route) = v["route"].as_str() {
@@ -1090,6 +1092,28 @@ mod tests {
         assert!(r.reason.is_none());
         let out = serde_json::to_string(&r).unwrap();
         assert_eq!(out, r#"{"tier":"fast","model":"llama3.2:3b"}"#);
+    }
+
+    #[test]
+    fn route_info_keeps_a_fallback_reason() {
+        let h = hdrs(&[
+            ("x-amara-route", "fast"),
+            ("x-amara-route-reason", "slash_deep; deep_failed"),
+        ]);
+        let r = route_info(&h, &Value::Null).unwrap();
+        assert_eq!(r.reason.as_deref(), Some("slash_deep; deep_failed"));
+    }
+
+    #[test]
+    fn route_log_skips_cancelled_lines() {
+        let log = [
+            r#"{"ts":"2026-11-04T10:00:01Z","api":"openai","route":"deep","reason":"slash_deep","status":"cancelled"}"#,
+            r#"{"ts":"2026-11-04T10:00:02Z","api":"openai","route":"fast","reason":"classifier_easy","status":"ok"}"#,
+        ]
+        .join("\n");
+        let t = tier_from_route_log(&log, "2026-11-04T10:00:00Z", "2026-11-04T10:00:03Z", None)
+            .unwrap();
+        assert_eq!(t.tier, "fast");
     }
 
     #[test]
