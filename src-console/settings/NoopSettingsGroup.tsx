@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState, type FormEvent } from "react";
+import { NOOP_PATH_CHANGE_CANCELLED } from "../../src/lib/types";
 import type { NoopSettings, WhoopSource } from "../types";
 import { Button, InsetGroup, ListRow, SegmentedControl, TextField } from "../ui";
 
@@ -16,13 +17,9 @@ export function pathError(value: string): string | null {
   return v === "" || v.startsWith("/") ? null : "Use a full path that starts with /.";
 }
 
-/**
- * True when set_noop_settings rejected because the user cancelled Rust's native confirm dialog.
- * The exact backend string is TBD: swap the matcher here once Integrations fixes it.
- */
+/** True only for the exact rejection Rust returns when the user cancels its native confirm dialog. */
 export function isUserCancel(error: unknown): boolean {
-  const text = typeof error === "string" ? error : "";
-  return !text.startsWith("invalid_path:") && /cancel/i.test(text);
+  return error === NOOP_PATH_CHANGE_CANCELLED;
 }
 
 export type SaveOutcome = { state: "saved" } | { state: "cancelled" } | { state: "error"; message: string };
