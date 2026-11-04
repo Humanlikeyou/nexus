@@ -87,6 +87,8 @@ export interface TerrenceInteraction {
   actionId: string | null;
   runtimeProfile: string;
   tier?: AmaraTierInfo | null;
+  /** Who answered, e.g. "home" (Home Assistant). Absent when unset. */
+  source?: string;
 }
 
 export interface TerrenceTool {

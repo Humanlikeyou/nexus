@@ -210,21 +210,12 @@ export function stateLabel(e: HaEntity): string {
 }
 
 // ─── Home replies across reload ──────────────────────────────────────────────
-/**
- * record_amara_interaction has no source field (and filters tier), so the "Home" badge is kept by
- * remembering saved interaction ids locally. Ids only; no message text. Drop once Rust adds `source`.
- */
-export const HOME_REPLY_IDS_KEY = "nexus.ha.homeReplyIds";
-const MAX_HOME_IDS = 500;
-export function homeReplyIds(): Set<string> {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(HOME_REPLY_IDS_KEY) ?? "[]");
-    return new Set(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : []);
-  } catch { return new Set(); }
-}
-export function rememberHomeReply(interactionId: string) {
-  const ids = [...homeReplyIds().add(interactionId)].slice(-MAX_HOME_IDS);
-  window.localStorage.setItem(HOME_REPLY_IDS_KEY, JSON.stringify(ids));
+/** Interaction `source` for replies answered by Home Assistant (record_amara_interaction). */
+export const HOME_SOURCE = "home";
+/** Pre-`source` workaround key; removed on load. */
+export const LEGACY_HOME_REPLY_IDS_KEY = "nexus.ha.homeReplyIds";
+export function dropLegacyHomeReplyIds() {
+  try { window.localStorage.removeItem(LEGACY_HOME_REPLY_IDS_KEY); } catch { /* storage unavailable: harmless */ }
 }
 
 // ─── chat pre-route ──────────────────────────────────────────────────────────

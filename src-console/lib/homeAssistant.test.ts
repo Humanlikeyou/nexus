@@ -5,7 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 
 import {
-  applyStateChange, classifyHaError, containerErrorCopy, createMockHaBackend, haErrorCopy, homeReplyIds, inactiveKindFor, isServiceRefusal, rememberHomeReply, isToggleable, mockEntity, preRouteHome, setHaBackend, sortDevices, stateLabel, tauriHaBackend, validServiceCall, validServiceData, hvacModesFor, climateRange, HA_BAD_DATA, HA_ERROR_KINDS, looksLikeHomeCommand, isHaFailureSpeech,
+  applyStateChange, classifyHaError, containerErrorCopy, createMockHaBackend, haErrorCopy, inactiveKindFor, isServiceRefusal, dropLegacyHomeReplyIds, isToggleable, mockEntity, preRouteHome, setHaBackend, sortDevices, stateLabel, tauriHaBackend, validServiceCall, validServiceData, hvacModesFor, climateRange, HA_BAD_DATA, HA_ERROR_KINDS, looksLikeHomeCommand, isHaFailureSpeech,
 } from "./homeAssistant";
 
 afterEach(() => invokeMock.mockReset());
@@ -64,13 +64,10 @@ describe("Home Assistant wrapper", () => {
     expect(containerErrorCopy("upstream_error: x")).toBe("The container command failed.");
   });
 
-  it("remembers Home reply ids (ids only, capped)", () => {
-    window.localStorage.clear();
-    rememberHomeReply("i1");
-    rememberHomeReply("i2");
-    expect([...homeReplyIds()]).toEqual(["i1", "i2"]);
-    window.localStorage.setItem("nexus.ha.homeReplyIds", "not json");
-    expect(homeReplyIds().size).toBe(0);
+  it("drops the legacy Home reply id key", () => {
+    window.localStorage.setItem("nexus.ha.homeReplyIds", "[\"i1\"]");
+    dropLegacyHomeReplyIds();
+    expect(window.localStorage.getItem("nexus.ha.homeReplyIds")).toBeNull();
   });
 
   it("filters bookkeeping entities, sorts, and labels states", () => {

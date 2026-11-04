@@ -59,11 +59,14 @@ describe("useConversation", () => {
     await act(() => first.result.current.sendToTerrence("turn the lamp on"));
     restore();
     first.unmount();
-    bridge.listTerrenceInteractions.mockResolvedValue([interaction({ id: "h1", userMessage: "lamp on", assistantMessage: "Done.", tier: null }), interaction({ id: "x2" })]);
+    expect(bridge.recordAmaraInteraction).toHaveBeenCalledWith(expect.objectContaining({ source: "home", tier: null }));
+    window.localStorage.setItem("nexus.ha.homeReplyIds", "[\"h1\"]");
+    bridge.listTerrenceInteractions.mockResolvedValue([interaction({ id: "h1", userMessage: "lamp on", assistantMessage: "Done.", tier: null, source: "home" }), interaction({ id: "x2" })]);
     const { result } = renderHook(() => useConversation(async () => {}));
     await waitFor(() => expect(result.current.messages).toHaveLength(4));
     const replies = result.current.messages.filter((m) => m.role === "assistant");
     expect(replies.map((m) => m.source)).toEqual(["home", undefined]);
+    expect(window.localStorage.getItem("nexus.ha.homeReplyIds")).toBeNull();
   });
 
   it.each([["Deep toggle", "turn on the lamp", { deep: true }], ["/deep", "/deep turn on the lamp", {}]])("%s skips Home Assistant", async (_label, text, options) => {

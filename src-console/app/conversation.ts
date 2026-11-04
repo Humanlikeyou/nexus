@@ -79,6 +79,7 @@ export function messagesFromInteractions(interactions: TerrenceInteraction[]): C
         timestamp: interaction.completedAt,
         model: interaction.model,
         ...(interaction.tier ? { tier: interaction.tier } : {}),
+        ...(interaction.source === "home" ? { source: "home" as const } : {}),
       });
     } else if (interaction.error) {
       messages.push({

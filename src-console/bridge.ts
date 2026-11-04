@@ -298,6 +298,8 @@ export const recordAmaraInteraction = (input: {
   assistantMessage: string;
   tier: AmaraTierInfo | null;
   durationMs: number;
+  /** ^[a-z0-9_-]{1,32}$, e.g. "home"; Rust rejects others with invalid_source. */
+  source?: string | null;
 }) => invoke<TerrenceInteraction>("record_amara_interaction", { input });
 
 export const listTerrenceInteractions = (conversationId: string, limit = 80) =>

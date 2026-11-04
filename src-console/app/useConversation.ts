@@ -3,7 +3,7 @@ import { interactWithTerrence, listTerrenceInteractions, prepareAmaraTurn, recor
 import { deliberate } from "@/terrance/system/deliberation";
 import { resetCompressor } from "@/terrance/system/contextCompressor";
 import { type ConversationMessage, CONVERSATION_KEY, HERMES_SESSION_KEY, HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE, createConversationId, messagesFromInteractions } from "./conversation";
-import { homeReplyIds, preRouteHome, rememberHomeReply } from "../lib/homeAssistant";
+import { HOME_SOURCE, dropLegacyHomeReplyIds, preRouteHome } from "../lib/homeAssistant";
 import { compressTurns, formatDeliberation, guardSections, historyTurns, parseChatCommand, tierFromRouter } from "./amaraChat";
 
 export interface SendOptions {
@@ -49,8 +49,8 @@ export function useConversation(refresh: () => Promise<void>) {
     resetCompressor();
     listTerrenceInteractions(conversationId).then((interactions) => {
       if (!activeRequest) return;
-      const home = homeReplyIds();
-      setMessages(messagesFromInteractions(interactions).map((m) => (m.role === "assistant" && home.has(m.id.replace(/-assistant$/, "")) ? { ...m, source: "home" as const } : m)));
+      dropLegacyHomeReplyIds();
+      setMessages(messagesFromInteractions(interactions));
       const latestSession = [...interactions]
         .reverse()
         .find((interaction) => interaction.runtimeProfile === NEXUS_RUNTIME_PROFILE && interaction.hermesSessionId)
@@ -107,9 +107,8 @@ export function useConversation(refresh: () => Promise<void>) {
       if (home.handled) {
         const started = Date.now();
         const saved = await Promise.resolve()
-          .then(() => recordAmaraInteraction({ conversationId, userMessage: message, assistantMessage: home.speech, tier: null, durationMs: Date.now() - started }))
+          .then(() => recordAmaraInteraction({ conversationId, userMessage: message, assistantMessage: home.speech, tier: null, durationMs: Date.now() - started, source: HOME_SOURCE }))
           .catch(() => { console.warn("[ha] home reply not saved"); return null; });
-        if (saved) rememberHomeReply(saved.id);
         if (!live()) return;
         setMessages((current) => [...current, { id: saved ? `${saved.id}-assistant` : `${requestId}-home`, role: "assistant", content: home.speech, timestamp: new Date().toISOString(), source: "home" }]);
         return;
