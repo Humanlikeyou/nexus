@@ -69,10 +69,11 @@ impl State {
     }
 
     pub fn gate(&self, hints: &Hints) -> CloudGate {
+        let key = &self.secrets.anthropic_key;
         CloudGate {
             enabled: self.cfg.cloud.anthropic_enabled,
             outbound_disabled: self.outbound_disabled,
-            has_key: self.secrets.anthropic_key.is_some(),
+            has_key: key.is_some(),
             caller_allows: hints.allow_claude != Some(false),
         }
     }
