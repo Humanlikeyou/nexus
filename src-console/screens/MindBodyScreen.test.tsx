@@ -35,6 +35,12 @@ const invokeMock = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 
 describe("loadMindBody", () => {
+  it("ready when NOOP omits its nil fields", async () => {
+    const { today: _today, latestSleep: _sleep, latestNight: _night, battery: _battery, ...snapshot } = mockSnapshot();
+    invokeMock.mockImplementation(async (_cmd: string, { tool, args }: { tool: string; args: { key?: string } }) =>
+      tool === "health_snapshot" ? snapshot : mockSeriesPayload(args.key as never, [60]));
+    expect((await loadMindBody()).status).toBe("ready");
+  });
   it("ready with real shapes, empty driver points allowed", async () => {
     invokeMock.mockImplementation(async (_cmd: string, { tool, args }: { tool: string; args: { key?: string } }) =>
       tool === "health_snapshot" ? mockSnapshot() : mockSeriesPayload(args.key as never, []));
