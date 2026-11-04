@@ -7,7 +7,7 @@ import { useMuseSession } from "./app/useMuseSession";
 import { runApproval } from "./lib/approval";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
-import { ActivityField, BusinessField, CrewsField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, retryLazyScreens } from "./app/lazyScreens";
+import { ActivityField, BusinessField, CrewsField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, VoiceField, retryLazyScreens } from "./app/lazyScreens";
 import { ScreenErrorBoundary } from "./shell/ScreenErrorBoundary";
 import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";
 import { CommandSurface } from "./design/SystemPrimitives";
@@ -122,6 +122,7 @@ export default function App() {
     : screenId === "revenue" ? <RevenueField data={data} onRetry={retrySnapshot} />
     : screenId === "assistant" ? <ActivityField data={data} onRetry={retrySnapshot} />
     : screenId === "crews" ? <CrewsField data={data} onRetry={retrySnapshot} />
+    : screenId === "voice" ? <VoiceField />
     : screenId === "chat" ? <ChatField key={askDraft.n} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} onOpenActivity={() => setRoute({ id: "chat", view: "activity" })} onOpenCrews={() => setRoute({ id: "chat", view: "crews" })} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
     : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} />;
 

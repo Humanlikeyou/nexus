@@ -38,6 +38,9 @@ import type {
 
 interface SnapshotRead<T> {
   unavailable: NexusUnavailableSource | null;
+  VoiceList,
+  VoiceStatus,
+  VoiceTurn,
   value: T;
 }
 
@@ -301,3 +304,11 @@ export const saveMuseSession = (session: RecordedSession & { file_path: string }
 /** Settings › "Allow Claude": only this flag crosses the bridge (no keys). */
 export const getAllowClaude = () => invoke<boolean>("get_allow_claude");
 export const setAllowClaude = (enabled: boolean) => invoke<boolean>("set_allow_claude", { enabled });
+
+/** Amara Voice (commands/voice.rs). */
+export const getVoiceStatus = () => invoke<VoiceStatus>("voice_status");
+export const startVoice = () => invoke<VoiceStatus>("voice_start");
+export const stopVoice = () => invoke<VoiceStatus>("voice_stop");
+export const getVoiceTurns = (n = 20) => invoke<VoiceTurn[]>("voice_recent_turns", { n });
+export const listVoices = () => invoke<VoiceList>("voice_list_voices");
+export const setVoice = (name: string) => invoke<VoiceList>("voice_set_voice", { name });

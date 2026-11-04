@@ -2,6 +2,7 @@ mod app_paths;
 mod commands;
 mod dock_icon;
 
+use commands::voice;
 use commands::{
     arm, assistant, ble_common, continuity, crew, events, goals, kb_status, kv, llm_router, muse,
     noop, onboarding, openclaw, outbox, packager, replay, research, restart_services, sessions,
@@ -332,6 +333,13 @@ pub fn run() {
             kb_status::crew_tools,
             // Appearance
             dock_icon::sync_dock_icon,
+            // Amara Voice (~/projects/amara-voice)
+            voice::voice_status,
+            voice::voice_start,
+            voice::voice_stop,
+            voice::voice_recent_turns,
+            voice::voice_list_voices,
+            voice::voice_set_voice,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Amara OS");

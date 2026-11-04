@@ -25,6 +25,7 @@ test.describe("sub-views and anchors", () => {
   const SUBVIEWS: [string, string, (f: Field) => Promise<void>][] = [
     ["Chat & Agents", "Activity", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Activity")],
     ["Chat & Agents", "Crews", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Crews")],
+    ["Chat & Agents", "Voice", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Voice"); await expect(f.getByRole("list", { name: "Recent turns" })).toBeVisible(); }],
     ["Neuro", "History", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("History"); await expect(f.getByRole("list", { name: "History" })).toBeVisible(); }],
     ["Business", "Revenue", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Business")],
   ];

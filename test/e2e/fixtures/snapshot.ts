@@ -78,5 +78,12 @@ export function responses(): Responses {
     migrate_legacy_terrence_context: null,
     load_kv: null,
     save_kv: null,
+    voice_status: { installed: true, running: true, pid: 4242, state: "listening", state_age_s: 2, voice: "neosoul_g", rss_mb: 3123.4, launchd: false, dir: "/Users/taisun/projects/amara-voice" },
+    voice_list_voices: { voices: ["amara_ref", "neosoul", "neosoul_g"], current: "neosoul_g" },
+    voice_recent_turns: [
+      { time: "2026-10-28T13:05:00+09:00", heard: "Amara, what time is it?", text: "what time is it?", route: "local", reply: "It's one o five p.m.", asr_s: 0.4, total_s: 1.1, barged: null, verdict: "ok" },
+      { time: "2026-10-28T13:06:00+09:00", heard: "The Aikido, the akiya in Utsunomiya.", text: "", route: "ignored", ignored: "hint-echo", reply: "", asr_s: 0.9, barged: null, verdict: "noise" },
+      { time: "2026-10-28T13:07:00+09:00", heard: "Amara, how's the akiya search going?", text: "how's the akiya search going?", route: "hermes", reply: "Two new listings near Utsunomiya station came in this morning.", asr_s: 0.5, token_s: 2.1, first_audio_s: 5.4, total_s: 9.8, barged: null, verdict: "ok" },
+    ],
   };
 }

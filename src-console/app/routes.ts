@@ -31,7 +31,7 @@ export type SubView = { view: string; label: string; screen: ModuleId };
 /** Sub-views per host. Interim: folded screens render as-is behind a SegmentedControl so nothing
  *  becomes unreachable; each host replaces its legacy screen as its spec (§5–§10) lands. */
 export const HOST_VIEWS: Partial<Record<ModuleId, SubView[]>> = {
-  chat: [{ view: "main", label: "Chat", screen: "chat" }, { view: "activity", label: "Activity", screen: "assistant" }, { view: "crews", label: "Crews", screen: "crews" }],
+  chat: [{ view: "main", label: "Chat", screen: "chat" }, { view: "activity", label: "Activity", screen: "assistant" }, { view: "crews", label: "Crews", screen: "crews" }, { view: "voice", label: "Voice", screen: "voice" }],
   neuro: [{ view: "main", label: "Live", screen: "neuro" }, { view: "history", label: "History", screen: "sessions" }],
   business: [{ view: "main", label: "Work", screen: "business" }, { view: "revenue", label: "Revenue", screen: "revenue" }],
 };

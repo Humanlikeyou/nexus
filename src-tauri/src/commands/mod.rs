@@ -30,3 +30,4 @@ pub mod terrence_priorities;
 pub mod terrence_projects;
 pub mod terrence_runtime;
 pub mod terrence_runtime_bridge;
+pub mod voice;

@@ -1,7 +1,7 @@
 import type { CrewToolInfo, KbStatus } from "../src/lib/types";
 export type { CrewToolInfo, KbState, KbStatus } from "../src/lib/types";
 
-export type ModuleId = "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings";
+export type ModuleId = "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings" | "voice";
 
 export type OpenClawState = "online" | "configured" | "not_installed" | "offline";
 
@@ -488,4 +488,45 @@ export interface CrewSnapshot {
 export interface NexusUnavailableSource {
   command: string;
   label: string;
+}
+
+/** Amara Voice (~/projects/amara-voice), via commands/voice.rs. */
+export type VoiceState = "loading" | "idle" | "listening" | "heard" | "thinking" | "speaking" | "error" | "stopped" | "not_installed";
+
+export interface VoiceStatus {
+  installed: boolean;
+  running: boolean;
+  pid: number | null;
+  state: VoiceState;
+  /** Seconds since logs/state last changed. */
+  state_age_s: number | null;
+  voice: string;
+  rss_mb: number | null;
+  /** Installed as a LaunchAgent: start/stop go through `amara start|stop`. */
+  launchd: boolean;
+  dir: string;
+}
+
+/** One line of logs/turns.jsonl (amara_voice.log_turn). Fields are optional: older lines have fewer. */
+export interface VoiceTurn {
+  time?: string;
+  heard?: string;
+  text?: string;
+  /** hermes = Amara answered; local = skills.py; repeat = "Sorry, say that again?"; ignored = not acted on. */
+  route?: "hermes" | "local" | "repeat" | "ignored" | string;
+  reply?: string;
+  ignored?: string;
+  verdict?: "ok" | "low" | "noise" | string;
+  asr_s?: number | null;
+  token_s?: number | null;
+  first_audio_s?: number | null;
+  total_s?: number | null;
+  barged?: "name" | "stop" | null;
+  follow_up?: boolean;
+  error?: string | null;
+}
+
+export interface VoiceList {
+  voices: string[];
+  current: string;
 }
