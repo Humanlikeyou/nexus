@@ -312,3 +312,18 @@
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root { --material-sidebar: var(--bg-window); --material-toolbar: var(--bg-window); --material-popover: var(--bg-content); }
 }
+
+/* ─── Amara speaking lens (spec-amara-speaking-hal.md §3). Amara copper/emerald only (Taisun, Nov 4).
+ * The lens is an object, not chrome: same colours in light and dark. */
+:root, :root[data-lens-palette="amara"] {
+  --lens-hot: #ffe9c4; --lens-mid: #d29a5c; --lens-deep: #7a4a22; --lens-rim: #34c79a; --lens-glow: #b4864e;
+}
+:root {
+  --lens-bezel-hi: #9aa0a3; --lens-bezel-mid: #3b3f42; --lens-bezel-lo: #16181a; --lens-bezel-edge: #4a4f52;
+  --lens-glass: #050505; --lens-stroke: #000; --lens-specular: #fff; --lens-shadow: rgba(0, 0, 0, .5);
+  --lens-error-mid: #b07a3a; --lens-error-deep: #3a2a1a;
+  --lens-dur-breathe: 2.4s; --lens-dur-flicker: 180ms;
+  --lens-halo-theme: .6; /* light theme halo ×0.6 */
+}
+:root[data-theme="dark"] { --lens-halo-theme: 1; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --lens-halo-theme: 1; } }

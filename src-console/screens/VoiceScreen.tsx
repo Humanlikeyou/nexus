@@ -5,6 +5,8 @@ import { EmptyState } from "../design/ProductUI";
 import { dateTime, plainText } from "../lib/format";
 import type { VoiceList, VoiceState, VoiceStatus, VoiceTurn } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Select, StatusDot, type Tone } from "../ui";
+import { AmaraLens } from "../components/AmaraLens/AmaraLens";
+import { useAmaraVoice } from "../hooks/useAmaraVoice";
 import "./VoiceScreen.css";
 
 export const VOICE_STATUS_POLL_MS = 1500;
@@ -76,6 +78,7 @@ export function VoiceField() {
   const [runningVoice, setRunningVoice] = useState<string | null>(null);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const lens = useAmaraVoice();
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -170,6 +173,7 @@ export function VoiceField() {
       <h1 className="voice__title">Voice</h1>
       <Card title="Amara Voice" accessory={<StatusDot tone={view.tone} pulse={view.pulse} aria-label={`Amara Voice: ${view.label}`}>{view.label}</StatusDot>}>
         <div className="voice__live" data-state={status.state}>
+          <div className="voice__lens"><AmaraLens state={lens.state} size={160} showLabel /></div>
           <p className="voice__state" role="status" aria-live="polite">{view.detail}</p>
           <dl className="voice__facts">
             <div><dt>Voice</dt><dd>{status.voice}</dd></div>

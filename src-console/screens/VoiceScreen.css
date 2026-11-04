@@ -16,3 +16,4 @@
 .voice__error { margin: 0; font: var(--type-callout); color: var(--system-red, #ff3b30); }
 .voice__said, .voice__reply { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 60ch; }
 .voice__badges { display: inline-flex; gap: var(--space-1, 4px); }
+.voice__lens { display: flex; justify-content: center; padding: var(--space-6) 0 var(--space-4); }

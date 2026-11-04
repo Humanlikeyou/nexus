@@ -16,6 +16,7 @@ import { useWindowActive } from "./shell/useWindowActive";
 import { useIdleAutoSave } from "./hooks/useIdleAutoSave";
 import { useSchedulerLifecycle } from "./hooks/useSchedulerLifecycle";
 import { ChatField } from "./screens/ChatScreen";
+import { AmaraVoiceAnnouncer } from "./components/AmaraLens/AmaraLens";
 import { TerranceField } from "./screens/TerranceScreen";
 import { ContextInspector } from "./shell/ContextInspector";
 import { Footer } from "./shell/Footer";
@@ -144,6 +145,7 @@ export default function App() {
       <Sidebar active={active} onSelect={setActive} data={data} />
       <section className="active-field" aria-label={`${selected.label} system`}>{subViews && <div className="subview-bar"><SegmentedControl label={`${selected.label} view`} size="small" value={route.view} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); setRoute({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
       <Footer data={data} busy={busy} />
+      <AmaraVoiceAnnouncer />
       {notice && <div className="field-notice"><i />{notice}</div>}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />
     </CommandSurface>

@@ -8,6 +8,8 @@ import { dateTime, time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, StatTile, TextField, type Tone } from "../ui";
+import { AmaraLens } from "../components/AmaraLens/AmaraLens";
+import { useAmaraVoice } from "../hooks/useAmaraVoice";
 import "./ChatScreen.css";
 
 export interface ChatFieldProps {
@@ -100,6 +102,7 @@ export function ChatField({
   const [draft, setDraft] = useState(initialDraft);
   const [query, setQuery] = useState("");
   const [deep, setDeep] = useState(false);
+  const voice = useAmaraVoice();
   const listRef = useRef<HTMLOListElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   // Loading = first snapshot not in yet and no local transcript to show.
@@ -201,6 +204,7 @@ export function ChatField({
       <section className="chat-screen__conversation" aria-labelledby="chat-title">
         <header className="chat-screen__header">
           <div className="chat-screen__heading">
+            {voice.state === "speaking" && <AmaraLens state="speaking" size={28} className="chat-screen__lens" />}
             <h1 id="chat-title">Amara</h1>
             <Badge tone={online ? "success" : "warning"}>{online ? "Online" : "Offline"}</Badge>
             <span className="chat-screen__model">{hermes.model}</span>
@@ -230,6 +234,7 @@ export function ChatField({
             {messages.map((m, i) => (
               <li key={m.id} className="chat-message" data-role={m.role} data-start={starts[i] || undefined}>
                 {starts[i] && <span className="chat-message__meta">{m.role === "user" ? "You" : "Amara"} · <time dateTime={m.timestamp}>{time(m.timestamp)}</time></span>}
+                {m.role === "assistant" && m.source === "home" && <AmaraLens state="idle" size={44} level={0.5} decorative className="chat-message__lens" />}
                 <div className="chat-bubble" data-role={m.role} data-failed={m.status === "failed" || undefined} title={m.role === "assistant" ? [m.model, time(m.timestamp)].filter(Boolean).join(" · ") : undefined}>
                   {m.content}
                 </div>
