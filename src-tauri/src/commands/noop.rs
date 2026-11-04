@@ -1248,22 +1248,17 @@ mod tests {
         let path = seeded_database();
         let conn = Connection::open(&path).unwrap();
         conn.execute("DELETE FROM sleepSession", []).unwrap();
-        let night_start = Utc
-            .with_ymd_and_hms(2026, 9, 6, 14, 30, 0)
-            .unwrap()
-            .timestamp();
-        let night_end = Utc
-            .with_ymd_and_hms(2026, 9, 6, 22, 30, 0)
-            .unwrap()
-            .timestamp();
-        let nap_start = Utc
-            .with_ymd_and_hms(2026, 9, 7, 4, 30, 0)
-            .unwrap()
-            .timestamp();
-        let nap_end = Utc
-            .with_ymd_and_hms(2026, 9, 7, 8, 0, 0)
-            .unwrap()
-            .timestamp();
+        // Overnight is judged by the Mac's local hour, so the fixture is written in local time.
+        let local = |day, hour, minute| {
+            Local
+                .with_ymd_and_hms(2026, 9, day, hour, minute, 0)
+                .unwrap()
+                .timestamp()
+        };
+        let night_start = local(6, 23, 30);
+        let night_end = local(7, 7, 30);
+        let nap_start = local(7, 13, 30);
+        let nap_end = local(7, 17, 0);
         conn.execute(
             "INSERT INTO sleepSession VALUES ('my-whoop-noop', ?1, ?2, .91, 61, 82, NULL)",
             params![night_start, night_end],
@@ -1281,7 +1276,7 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let now = Utc.with_ymd_and_hms(2026, 9, 7, 10, 0, 0).unwrap();
+        let now = DateTime::<Utc>::from_timestamp(nap_end + 2 * 60 * 60, 0).unwrap();
         let snapshot = snapshot_from_database(&path, "my-whoop".to_string(), None, now).unwrap();
         let latest = snapshot.latest_sleep.as_ref().unwrap();
         let night = snapshot.latest_night.as_ref().unwrap();
