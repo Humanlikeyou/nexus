@@ -4,11 +4,11 @@ mod dock_icon;
 
 use commands::voice;
 use commands::{
-    arm, assistant, ble_common, continuity, crew, events, goals, kb_status, kv, llm_router, muse,
-    noop, noop_query, onboarding, openclaw, outbox, packager, replay, research, restart_services,
-    sessions, snapshots, system, telegram, terrence_actions, terrence_automations,
-    terrence_context, terrence_priorities, terrence_projects, terrence_runtime,
-    terrence_runtime_bridge,
+    arm, assistant, ble_common, continuity, crew, events, goals, ha, kb_status, kv, llm_router,
+    muse, noop, noop_query, onboarding, openclaw, outbox, packager, replay, research,
+    restart_services, sessions, snapshots, system, telegram, terrence_actions,
+    terrence_automations, terrence_context, terrence_priorities, terrence_projects,
+    terrence_runtime, terrence_runtime_bridge,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -200,6 +200,15 @@ pub fn run() {
             noop_query::noop_query,
             noop_query::get_noop_settings,
             noop_query::set_noop_settings,
+            // Home Assistant (commands/ha.rs)
+            ha::ha_states,
+            ha::ha_call_service,
+            ha::ha_conversation,
+            ha::ha_container_status,
+            ha::ha_container_start,
+            ha::ha_container_stop,
+            ha::ha_live_start,
+            ha::ha_live_stop,
             // Telegram
             telegram::get_config,
             telegram::save_settings,

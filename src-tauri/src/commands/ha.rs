@@ -1,0 +1,1075 @@
+//! Home Assistant backend: states, service calls, Assist conversation, the HA container, and
+//! live `state_changed` events over the HA websocket.
+//!
+//! - The address is `HA_URL` from `~/projects/amara-voice/.env` (default
+//!   `http://127.0.0.1:8123`) and must be a clean loopback `http://host[:port]`.
+//!   `NEXUS_OUTBOUND_DISABLED` does not apply: HA never leaves the Mac.
+//! - `HA_TOKEN` is read from that file on every call (only `HA_URL` / `HA_TOKEN` are parsed),
+//!   held in a type with no `Serialize`/`Display` and a redacted `Debug`, and is never
+//!   returned, logged or emitted. All errors are fixed text.
+//! - Container start/stop run `docker compose` with fixed args (no shell), one at a time, with
+//!   a timeout.
+
+use futures::{SinkExt, StreamExt};
+use serde::Serialize;
+use serde_json::{json, Map, Value};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex as StdMutex;
+use std::time::Duration;
+use tauri::{AppHandle, Emitter};
+use tokio_tungstenite::tungstenite::Message;
+
+const DEFAULT_HA_URL: &str = "http://127.0.0.1:8123";
+const ENV_MAX_BYTES: u64 = 16 * 1024;
+const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+const DOCKER_TIMEOUT: Duration = Duration::from_secs(120);
+const MAX_CONVERSATION_CHARS: usize = 1_000;
+const MAX_STATES: usize = 5_000;
+const BACKOFF_START: Duration = Duration::from_secs(1);
+const BACKOFF_CAP: Duration = Duration::from_secs(60);
+
+pub const STATE_CHANGED_EVENT: &str = "ha://state_changed";
+pub const LIVE_STATUS_EVENT: &str = "ha://live_status";
+
+const ERR_CONFIG: &str = "Home Assistant is not configured (check HA_URL and HA_TOKEN).";
+const ERR_URL: &str = "HA_URL must be a loopback http address.";
+const ERR_UNREACHABLE: &str = "Home Assistant is not reachable.";
+const ERR_AUTH: &str = "Home Assistant rejected the token.";
+const ERR_FAILED: &str = "Home Assistant returned an error.";
+const ERR_BAD_REPLY: &str = "Home Assistant sent an unexpected reply.";
+const ERR_INVALID: &str = "Invalid domain, service or entity id.";
+const ERR_TEXT: &str = "Message is empty or too long.";
+const ERR_BUSY: &str = "A Home Assistant container action is already running.";
+const ERR_DOCKER: &str = "Docker is not available.";
+const ERR_DOCKER_FAILED: &str = "The Home Assistant container command failed.";
+const ERR_DOCKER_TIMEOUT: &str = "The Home Assistant container command timed out.";
+
+// ─── types (camelCase for the frontend) ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HaEntity {
+    pub entity_id: String,
+    pub state: String,
+    pub friendly_name: Option<String>,
+    pub domain: String,
+    pub last_changed: Option<String>,
+    /// HA attributes minus anything token-like (see `sanitize_attributes`).
+    pub attributes: Value,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HaConversationResult {
+    Match { speech: String },
+    NoMatch,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HaContainerStatus {
+    /// false when the container doesn't exist or isn't running.
+    pub running: bool,
+    /// Docker's status line, e.g. "Up 3 hours" or "Exited (0) 2 minutes ago"; empty if absent.
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HaStateChanged {
+    pub entity_id: String,
+    pub new_state: Option<HaEntity>,
+    pub old_state: Option<HaEntity>,
+    pub time_fired: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HaLiveStatus {
+    /// "connecting" | "connected" | "authFailed" | "disconnected" | "stopped"
+    pub state: &'static str,
+}
+
+/// The HA token. No `Serialize`, no `Display`; `Debug` is redacted.
+#[derive(Clone)]
+struct HaToken(String);
+
+impl std::fmt::Debug for HaToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HaToken(<redacted>)")
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HaConfig {
+    base: String,
+    token: HaToken,
+}
+
+/// Logs fixed text only: `&'static str` means no runtime value (token, body) can be logged.
+fn log(msg: &'static str) {
+    eprintln!("[ha] {msg}");
+}
+
+// ─── config ──────────────────────────────────────────────────────────────────
+
+fn voice_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join("projects/amara-voice"))
+}
+
+fn compose_file() -> Option<PathBuf> {
+    voice_dir().map(|d| d.join("homeassistant/docker-compose.yml"))
+}
+
+fn current_uid() -> u32 {
+    // SAFETY: getuid has no preconditions and cannot fail.
+    unsafe { libc::getuid() }
+}
+
+/// Same rule as llm_router's private `loopback_base` (copied, not shared, because llm_router.rs
+/// is Integrations-owned): `http://<loopback host>[:port]`, rebuilt from the parsed URL; userinfo,
+/// path, query and fragment refused.
+fn loopback_base(raw: &str) -> Option<String> {
+    let u = reqwest::Url::parse(raw.trim()).ok()?;
+    let host = u.host_str()?.to_string();
+    let loopback = host == "localhost"
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    if !loopback {
+        return None;
+    }
+    let clean = u.scheme() == "http"
+        && u.username().is_empty()
+        && u.password().is_none()
+        && matches!(u.path(), "" | "/")
+        && u.query().is_none()
+        && u.fragment().is_none();
+    clean.then(|| match u.port() {
+        Some(port) => format!("http://{host}:{port}"),
+        None => format!("http://{host}"),
+    })
+}
+
+/// Reads only `HA_URL` and `HA_TOKEN` from `file` inside `dir`. The file is opened once with
+/// O_NOFOLLOW|O_NONBLOCK and must be a regular file owned by `expected_uid`, mode without
+/// group/other bits, at most 16 KiB. Errors are fixed text.
+fn read_config_at(dir: &Path, file: &Path, expected_uid: u32) -> Result<HaConfig, String> {
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let cfg_err = || ERR_CONFIG.to_string();
+    let name = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(cfg_err)?;
+    let inside = crate::commands::path_safety::safe_join(dir, name).map_err(|_| cfg_err())?;
+    let parent = file
+        .parent()
+        .and_then(|p| p.canonicalize().ok())
+        .ok_or_else(cfg_err)?;
+    if parent.join(name) != inside {
+        return Err(cfg_err());
+    }
+    let mut f = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&inside)
+        .map_err(|_| cfg_err())?;
+    let meta = f.metadata().map_err(|_| cfg_err())?;
+    if !meta.is_file() || meta.uid() != expected_uid || meta.mode() & 0o077 != 0 {
+        return Err(cfg_err());
+    }
+    let mut buf = Vec::new();
+    (&mut f)
+        .take(ENV_MAX_BYTES + 1)
+        .read_to_end(&mut buf)
+        .map_err(|_| cfg_err())?;
+    if buf.len() as u64 > ENV_MAX_BYTES {
+        return Err(cfg_err());
+    }
+    let text = String::from_utf8(buf).map_err(|_| cfg_err())?;
+    parse_config(&text)
+}
+
+/// `KEY=value` lines; only `HA_URL` and `HA_TOKEN` are looked at (last one wins).
+fn parse_config(text: &str) -> Result<HaConfig, String> {
+    let mut url = None;
+    let mut token = None;
+    for line in text.lines() {
+        let line = line.trim();
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        let v = v.trim().trim_matches(|c| c == '"' || c == '\'');
+        match k.trim() {
+            "HA_URL" => url = Some(v.to_string()),
+            "HA_TOKEN" => token = Some(v.to_string()),
+            _ => {}
+        }
+    }
+    let url = url.filter(|u| !u.is_empty());
+    let base = loopback_base(url.as_deref().unwrap_or(DEFAULT_HA_URL))
+        .ok_or_else(|| ERR_URL.to_string())?;
+    let token = token
+        .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_graphic()))
+        .ok_or_else(|| ERR_CONFIG.to_string())?;
+    Ok(HaConfig {
+        base,
+        token: HaToken(token),
+    })
+}
+
+fn load_config() -> Result<HaConfig, String> {
+    let dir = voice_dir().ok_or_else(|| ERR_CONFIG.to_string())?;
+    read_config_at(&dir, &dir.join(".env"), current_uid())
+}
+
+fn client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(HTTP_TIMEOUT)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_default()
+}
+
+// ─── validation ──────────────────────────────────────────────────────────────
+
+fn is_slug(s: &str, max: usize) -> bool {
+    !s.is_empty()
+        && s.len() <= max
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+/// `^[a-z0-9_]{1,64}$`
+fn valid_name(s: &str) -> bool {
+    is_slug(s, 64)
+}
+
+/// `^[a-z0-9_]+\.[a-z0-9_]{1,128}$` (domain part capped at 64 too).
+fn valid_entity_id(s: &str) -> bool {
+    match s.split_once('.') {
+        Some((d, o)) => is_slug(d, 64) && is_slug(o, 128),
+        None => false,
+    }
+}
+
+// ─── sanitizing ──────────────────────────────────────────────────────────────
+
+/// Attribute keys dropped (any depth): HA puts signed `?token=` URLs in `entity_picture`
+/// and cameras expose `access_token`.
+fn sensitive_key(k: &str) -> bool {
+    let k = k.to_ascii_lowercase();
+    [
+        "token",
+        "password",
+        "secret",
+        "api_key",
+        "apikey",
+        "auth",
+        "entity_picture",
+    ]
+    .iter()
+    .any(|s| k.contains(s))
+}
+
+fn sanitize_attributes(v: &Value) -> Value {
+    match v {
+        Value::Object(m) => Value::Object(
+            m.iter()
+                .filter(|(k, _)| !sensitive_key(k))
+                .map(|(k, v)| (k.clone(), sanitize_attributes(v)))
+                .collect::<Map<_, _>>(),
+        ),
+        Value::Array(a) => Value::Array(a.iter().map(sanitize_attributes).collect()),
+        Value::String(s) if s.contains("token=") => Value::String(String::new()),
+        other => other.clone(),
+    }
+}
+
+fn entity_from(v: &Value) -> Option<HaEntity> {
+    let entity_id = v["entity_id"].as_str()?.to_string();
+    if !valid_entity_id(&entity_id) {
+        return None;
+    }
+    let domain = entity_id.split('.').next().unwrap_or("").to_string();
+    Some(HaEntity {
+        state: v["state"].as_str().unwrap_or("").to_string(),
+        friendly_name: v["attributes"]["friendly_name"]
+            .as_str()
+            .map(str::to_string),
+        domain,
+        last_changed: v["last_changed"].as_str().map(str::to_string),
+        attributes: sanitize_attributes(&v["attributes"]),
+        entity_id,
+    })
+}
+
+fn state_changed_from(event: &Value) -> Option<HaStateChanged> {
+    let data = &event["data"];
+    let entity_id = data["entity_id"].as_str()?.to_string();
+    if !valid_entity_id(&entity_id) {
+        return None;
+    }
+    Some(HaStateChanged {
+        entity_id,
+        new_state: entity_from(&data["new_state"]),
+        old_state: entity_from(&data["old_state"]),
+        time_fired: event["time_fired"].as_str().map(str::to_string),
+    })
+}
+
+fn status_error(status: reqwest::StatusCode) -> String {
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        ERR_AUTH.to_string()
+    } else {
+        ERR_FAILED.to_string()
+    }
+}
+
+// ─── HTTP calls (pure over config, tested against a mock) ────────────────────
+
+async fn states_with(cfg: &HaConfig) -> Result<Vec<HaEntity>, String> {
+    let resp = client()
+        .get(format!("{}/api/states", cfg.base))
+        .bearer_auth(&cfg.token.0)
+        .send()
+        .await
+        .map_err(|_| ERR_UNREACHABLE.to_string())?;
+    if !resp.status().is_success() {
+        return Err(status_error(resp.status()));
+    }
+    let v: Value = resp.json().await.map_err(|_| ERR_BAD_REPLY.to_string())?;
+    let list = v.as_array().ok_or_else(|| ERR_BAD_REPLY.to_string())?;
+    Ok(list
+        .iter()
+        .take(MAX_STATES)
+        .filter_map(entity_from)
+        .collect())
+}
+
+async fn call_service_with(
+    cfg: &HaConfig,
+    domain: &str,
+    service: &str,
+    entity_id: &str,
+) -> Result<(), String> {
+    if !valid_name(domain) || !valid_name(service) || !valid_entity_id(entity_id) {
+        return Err(ERR_INVALID.to_string());
+    }
+    let resp = client()
+        .post(format!("{}/api/services/{domain}/{service}", cfg.base))
+        .bearer_auth(&cfg.token.0)
+        .json(&json!({ "entity_id": entity_id }))
+        .send()
+        .await
+        .map_err(|_| ERR_UNREACHABLE.to_string())?;
+    if !resp.status().is_success() {
+        return Err(status_error(resp.status()));
+    }
+    Ok(())
+}
+
+async fn conversation_with(cfg: &HaConfig, text: &str) -> Result<HaConversationResult, String> {
+    let text = text.trim();
+    if text.is_empty() || text.chars().count() > MAX_CONVERSATION_CHARS {
+        return Err(ERR_TEXT.to_string());
+    }
+    let resp = client()
+        .post(format!("{}/api/conversation/process", cfg.base))
+        .bearer_auth(&cfg.token.0)
+        .json(&json!({
+            "text": text,
+            "language": "en",
+            "agent_id": "conversation.home_assistant",
+        }))
+        .send()
+        .await
+        .map_err(|_| ERR_UNREACHABLE.to_string())?;
+    if !resp.status().is_success() {
+        return Err(status_error(resp.status()));
+    }
+    let v: Value = resp.json().await.map_err(|_| ERR_BAD_REPLY.to_string())?;
+    conversation_result(&v)
+}
+
+fn conversation_result(v: &Value) -> Result<HaConversationResult, String> {
+    let r = &v["response"];
+    if r["response_type"] == "error" && r["data"]["code"] == "no_intent_match" {
+        return Ok(HaConversationResult::NoMatch);
+    }
+    let speech = r["speech"]["plain"]["speech"]
+        .as_str()
+        .ok_or_else(|| ERR_BAD_REPLY.to_string())?;
+    Ok(HaConversationResult::Match {
+        speech: speech.to_string(),
+    })
+}
+
+// ─── commands ────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn ha_states() -> Result<Vec<HaEntity>, String> {
+    states_with(&load_config()?).await
+}
+
+#[tauri::command]
+pub async fn ha_call_service(
+    domain: String,
+    service: String,
+    entity_id: String,
+) -> Result<(), String> {
+    if !valid_name(&domain) || !valid_name(&service) || !valid_entity_id(&entity_id) {
+        return Err(ERR_INVALID.to_string());
+    }
+    call_service_with(&load_config()?, &domain, &service, &entity_id).await
+}
+
+#[tauri::command]
+pub async fn ha_conversation(text: String) -> Result<HaConversationResult, String> {
+    conversation_with(&load_config()?, &text).await
+}
+
+// ─── container ───────────────────────────────────────────────────────────────
+
+static DOCKER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// GUI apps on macOS don't inherit the shell PATH, so docker is looked up at fixed paths.
+fn docker_bin() -> Option<&'static str> {
+    [
+        "/usr/local/bin/docker",
+        "/opt/homebrew/bin/docker",
+        "/Applications/Docker.app/Contents/Resources/bin/docker",
+    ]
+    .into_iter()
+    .find(|p| Path::new(p).is_file())
+}
+
+async fn run_docker(args: &[&str]) -> Result<String, String> {
+    let bin = docker_bin().ok_or_else(|| ERR_DOCKER.to_string())?;
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    let out = tokio::time::timeout(DOCKER_TIMEOUT, cmd.output())
+        .await
+        .map_err(|_| ERR_DOCKER_TIMEOUT.to_string())?
+        .map_err(|_| ERR_DOCKER.to_string())?;
+    if !out.status.success() {
+        return Err(ERR_DOCKER_FAILED.to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+fn parse_container_status(stdout: &str) -> HaContainerStatus {
+    let status: String = stdout
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(120)
+        .collect();
+    HaContainerStatus {
+        running: status.starts_with("Up"),
+        status,
+    }
+}
+
+async fn container_status() -> Result<HaContainerStatus, String> {
+    let out = run_docker(&[
+        "ps",
+        "--all",
+        "--filter",
+        "name=^homeassistant$",
+        "--format",
+        "{{.Status}}",
+    ])
+    .await?;
+    Ok(parse_container_status(&out))
+}
+
+#[tauri::command]
+pub async fn ha_container_status() -> Result<HaContainerStatus, String> {
+    container_status().await
+}
+
+async fn compose(action: &[&str]) -> Result<HaContainerStatus, String> {
+    let _guard = DOCKER_LOCK.try_lock().map_err(|_| ERR_BUSY.to_string())?;
+    let file = compose_file().ok_or_else(|| ERR_DOCKER.to_string())?;
+    let file = file.to_str().ok_or_else(|| ERR_DOCKER.to_string())?;
+    let mut args = vec!["compose", "-f", file];
+    args.extend_from_slice(action);
+    run_docker(&args).await?;
+    container_status().await
+}
+
+/// `docker compose -f ~/projects/amara-voice/homeassistant/docker-compose.yml up -d`.
+/// No approval dialog (per the brief); see the report for routing it through approval_gate.
+#[tauri::command]
+pub async fn ha_container_start() -> Result<HaContainerStatus, String> {
+    compose(&["up", "-d"]).await
+}
+
+/// `docker compose -f … stop`.
+#[tauri::command]
+pub async fn ha_container_stop() -> Result<HaContainerStatus, String> {
+    compose(&["stop"]).await
+}
+
+// ─── live websocket ──────────────────────────────────────────────────────────
+
+static LIVE_TASK: StdMutex<Option<tokio::task::JoinHandle<()>>> = StdMutex::new(None);
+
+#[derive(Debug, PartialEq)]
+enum SessionEnd {
+    AuthFailed,
+    Closed,
+}
+
+fn ws_url(base: &str) -> String {
+    format!("{}/api/websocket", base.replacen("http://", "ws://", 1))
+}
+
+/// One websocket session: auth_required → auth → auth_ok → subscribe state_changed, then
+/// forward every event to `on_change` until the socket closes. `on_connected` fires on auth_ok.
+async fn live_session<S>(
+    mut ws: S,
+    token: &HaToken,
+    mut on_connected: impl FnMut(),
+    mut on_change: impl FnMut(HaStateChanged),
+) -> SessionEnd
+where
+    S: futures::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+        + futures::Sink<Message>
+        + Unpin,
+{
+    async fn next_json<S>(ws: &mut S) -> Option<Value>
+    where
+        S: futures::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    {
+        loop {
+            match ws.next().await? {
+                Ok(Message::Text(t)) => return serde_json::from_str(t.as_str()).ok(),
+                Ok(Message::Close(_)) | Err(_) => return None,
+                Ok(_) => continue,
+            }
+        }
+    }
+    match next_json(&mut ws).await {
+        Some(v) if v["type"] == "auth_required" => {}
+        _ => return SessionEnd::Closed,
+    }
+    let auth = json!({"type": "auth", "access_token": token.0}).to_string();
+    if ws.send(Message::Text(auth.into())).await.is_err() {
+        return SessionEnd::Closed;
+    }
+    match next_json(&mut ws).await {
+        Some(v) if v["type"] == "auth_ok" => {}
+        Some(v) if v["type"] == "auth_invalid" => return SessionEnd::AuthFailed,
+        _ => return SessionEnd::Closed,
+    }
+    let sub = json!({"id": 1, "type": "subscribe_events", "event_type": "state_changed"});
+    if ws
+        .send(Message::Text(sub.to_string().into()))
+        .await
+        .is_err()
+    {
+        return SessionEnd::Closed;
+    }
+    on_connected();
+    while let Some(v) = next_json(&mut ws).await {
+        if v["type"] == "event" && v["event"]["event_type"] == "state_changed" {
+            if let Some(change) = state_changed_from(&v["event"]) {
+                on_change(change);
+            }
+        }
+    }
+    SessionEnd::Closed
+}
+
+fn next_backoff(current: Duration) -> Duration {
+    (current * 2).min(BACKOFF_CAP)
+}
+
+async fn live_loop(app: AppHandle) {
+    let status = |state: &'static str| {
+        let _ = app.emit(LIVE_STATUS_EVENT, HaLiveStatus { state });
+    };
+    let mut backoff = BACKOFF_START;
+    loop {
+        status("connecting");
+        // Re-read the config every attempt so a rotated token or new URL is picked up.
+        match load_config() {
+            Ok(cfg) => match tokio_tungstenite::connect_async(ws_url(&cfg.base)).await {
+                Ok((ws, _)) => {
+                    let mut connected = false;
+                    let end = live_session(
+                        ws,
+                        &cfg.token,
+                        || {
+                            connected = true;
+                            status("connected");
+                        },
+                        |change| {
+                            let _ = app.emit(STATE_CHANGED_EVENT, change);
+                        },
+                    )
+                    .await;
+                    if connected {
+                        backoff = BACKOFF_START;
+                    }
+                    if end == SessionEnd::AuthFailed {
+                        log("websocket auth failed");
+                        status("authFailed");
+                        backoff = BACKOFF_CAP;
+                    } else {
+                        status("disconnected");
+                    }
+                }
+                Err(_) => {
+                    log("websocket connect failed");
+                    status("disconnected");
+                }
+            },
+            Err(_) => {
+                log("config unavailable for websocket");
+                status("disconnected");
+            }
+        }
+        tokio::time::sleep(backoff).await;
+        backoff = next_backoff(backoff);
+    }
+}
+
+/// Starts the live `ha://state_changed` stream (async so it runs inside the Tokio runtime). Idempotent: returns false if already running.
+#[tauri::command]
+pub async fn ha_live_start(app: AppHandle) -> bool {
+    let mut slot = LIVE_TASK.lock().unwrap_or_else(|p| p.into_inner());
+    if slot.as_ref().is_some_and(|h| !h.is_finished()) {
+        return false;
+    }
+    *slot = Some(tokio::spawn(live_loop(app)));
+    true
+}
+
+/// Stops the live stream. Returns false if it wasn't running.
+#[tauri::command]
+pub async fn ha_live_stop(app: AppHandle) -> bool {
+    let task = LIVE_TASK.lock().unwrap_or_else(|p| p.into_inner()).take();
+    match task {
+        Some(h) => {
+            h.abort();
+            let _ = app.emit(LIVE_STATUS_EVENT, HaLiveStatus { state: "stopped" });
+            true
+        }
+        None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    const TOKEN: &str = "TEST-HA-TOKEN-zz9-must-never-leak";
+
+    fn cfg(base: &str) -> HaConfig {
+        HaConfig {
+            base: base.to_string(),
+            token: HaToken(TOKEN.into()),
+        }
+    }
+
+    /// Records every request (method, path, has-right-bearer, body) and answers by path.
+    /// Error bodies echo the token to prove it never reaches our errors.
+    type Seen = std::sync::Arc<StdMutex<Vec<(String, String, bool, String)>>>;
+    async fn mock(routes: Vec<(&'static str, u16, String)>) -> (String, Seen) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let seen: Seen = Default::default();
+        let s2 = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let routes = routes.clone();
+                let seen = s2.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 65536];
+                    let mut n = 0;
+                    // Read headers + body (content-length).
+                    loop {
+                        let r = sock.read(&mut buf[n..]).await.unwrap_or(0);
+                        if r == 0 {
+                            break;
+                        }
+                        n += r;
+                        let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                        if let Some(i) = text.find("\r\n\r\n") {
+                            let len = text
+                                .lines()
+                                .find_map(|l| {
+                                    l.to_ascii_lowercase()
+                                        .strip_prefix("content-length:")
+                                        .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                                })
+                                .unwrap_or(0);
+                            if n >= i + 4 + len {
+                                break;
+                            }
+                        }
+                    }
+                    let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let mut first = req.split_whitespace();
+                    let method = first.next().unwrap_or("").to_string();
+                    let path = first.next().unwrap_or("/").to_string();
+                    let bearer = req.contains(&format!("authorization: Bearer {TOKEN}"))
+                        || req.contains(&format!("Authorization: Bearer {TOKEN}"));
+                    let body = req.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+                    seen.lock()
+                        .unwrap()
+                        .push((method, path.clone(), bearer, body));
+                    let (status, body) = routes
+                        .iter()
+                        .find(|(p, _, _)| *p == path)
+                        .map(|(_, s, b)| (*s, b.clone()))
+                        .unwrap_or((404, format!("{{\"message\":\"no {TOKEN}\"}}")));
+                    let resp = format!(
+                        "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        (format!("http://{addr}"), seen)
+    }
+
+    fn states_body() -> String {
+        json!([
+            {"entity_id": "light.kitchen", "state": "on", "last_changed": "2026-11-04T04:00:00Z",
+             "attributes": {"friendly_name": "Kitchen", "brightness": 200,
+                            "entity_picture": format!("/api/camera_proxy/x?token={TOKEN}"),
+                            "nested": {"access_token": TOKEN, "ok": 1}}},
+            {"entity_id": "camera.door", "state": "idle",
+             "attributes": {"access_token": TOKEN, "friendly_name": "Door"}},
+            {"entity_id": "BAD ID", "state": "x", "attributes": {}}
+        ])
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn states_are_parsed_sanitized_and_carry_no_token() {
+        let (base, seen) = mock(vec![("/api/states", 200, states_body())]).await;
+        let list = states_with(&cfg(&base)).await.unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].entity_id, "light.kitchen");
+        assert_eq!(list[0].domain, "light");
+        assert_eq!(list[0].friendly_name.as_deref(), Some("Kitchen"));
+        assert_eq!(list[0].attributes["brightness"], 200);
+        assert_eq!(list[0].attributes["nested"]["ok"], 1);
+        let out = serde_json::to_string(&list).unwrap();
+        assert!(!out.contains(TOKEN), "{out}");
+        assert!(out.contains("\"entityId\"") && out.contains("\"lastChanged\""));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].0, "GET");
+        assert!(seen[0].2, "bearer token sent");
+    }
+
+    #[tokio::test]
+    async fn call_service_posts_entity_id_and_validates() {
+        let (base, seen) = mock(vec![("/api/services/light/turn_on", 200, "[]".into())]).await;
+        call_service_with(&cfg(&base), "light", "turn_on", "light.kitchen")
+            .await
+            .unwrap();
+        {
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen[0].0, "POST");
+            assert!(seen[0].2);
+            let body: Value = serde_json::from_str(&seen[0].3).unwrap();
+            assert_eq!(body, json!({"entity_id": "light.kitchen"}));
+        }
+        for (d, s, e) in [
+            ("Light", "turn_on", "light.kitchen"),
+            ("light/../x", "turn_on", "light.kitchen"),
+            ("light", "turn on", "light.kitchen"),
+            ("light", "turn_on", "light"),
+            ("light", "turn_on", "light.kitchen;rm"),
+            ("light", "turn_on", ".kitchen"),
+            ("light", "turn_on", "light."),
+            ("", "turn_on", "light.kitchen"),
+        ] {
+            let r = call_service_with(&cfg(&base), d, s, e).await;
+            assert_eq!(r.unwrap_err(), ERR_INVALID, "{d} {s} {e}");
+        }
+        assert!(!valid_name(&"a".repeat(65)));
+        assert!(valid_entity_id(&format!("a.{}", "b".repeat(128))));
+        assert!(!valid_entity_id(&format!("a.{}", "b".repeat(129))));
+        assert_eq!(seen.lock().unwrap().len(), 1, "rejected calls never hit HA");
+    }
+
+    #[tokio::test]
+    async fn conversation_match_no_match_and_cap() {
+        let matched = json!({"response": {"response_type": "action_done",
+            "speech": {"plain": {"speech": "Turned on the light"}}}})
+        .to_string();
+        let (base, seen) = mock(vec![("/api/conversation/process", 200, matched)]).await;
+        let r = conversation_with(&cfg(&base), "turn on the kitchen light")
+            .await
+            .unwrap();
+        assert_eq!(
+            r,
+            HaConversationResult::Match {
+                speech: "Turned on the light".into()
+            }
+        );
+        let body: Value = serde_json::from_str(&seen.lock().unwrap()[0].3).unwrap();
+        assert_eq!(body["language"], "en");
+        assert_eq!(body["agent_id"], "conversation.home_assistant");
+        assert_eq!(
+            serde_json::to_value(&r).unwrap(),
+            json!({"kind": "match", "speech": "Turned on the light"})
+        );
+
+        let nomatch = json!({"response": {"response_type": "error",
+            "data": {"code": "no_intent_match"},
+            "speech": {"plain": {"speech": "Sorry, I couldn't understand that"}}}})
+        .to_string();
+        let (base2, _) = mock(vec![("/api/conversation/process", 200, nomatch)]).await;
+        let r = conversation_with(&cfg(&base2), "sing").await.unwrap();
+        assert_eq!(r, HaConversationResult::NoMatch);
+        assert_eq!(
+            serde_json::to_value(&r).unwrap(),
+            json!({"kind": "noMatch"})
+        );
+
+        let long = "a".repeat(MAX_CONVERSATION_CHARS + 1);
+        assert_eq!(
+            conversation_with(&cfg(&base), &long).await.unwrap_err(),
+            ERR_TEXT
+        );
+        assert_eq!(
+            conversation_with(&cfg(&base), "  ").await.unwrap_err(),
+            ERR_TEXT
+        );
+    }
+
+    #[tokio::test]
+    async fn errors_are_fixed_text_and_never_echo_the_token() {
+        let (base, _) = mock(vec![
+            (
+                "/api/states",
+                401,
+                format!("{{\"message\":\"bad {TOKEN}\"}}"),
+            ),
+            (
+                "/api/services/light/turn_on",
+                500,
+                format!("{{\"message\":\"{TOKEN}\"}}"),
+            ),
+            ("/api/conversation/process", 200, format!("\"{TOKEN}\"")),
+        ])
+        .await;
+        let c = cfg(&base);
+        let errs = [
+            states_with(&c).await.unwrap_err(),
+            call_service_with(&c, "light", "turn_on", "light.x")
+                .await
+                .unwrap_err(),
+            conversation_with(&c, "hi").await.unwrap_err(),
+        ];
+        assert_eq!(errs[0], ERR_AUTH);
+        assert_eq!(errs[1], ERR_FAILED);
+        assert_eq!(errs[2], ERR_BAD_REPLY);
+        for e in &errs {
+            assert!(!e.contains(TOKEN));
+        }
+        // Nothing listening.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let down = cfg(&format!("http://127.0.0.1:{port}"));
+        assert_eq!(states_with(&down).await.unwrap_err(), ERR_UNREACHABLE);
+        assert!(!format!("{c:?}").contains(TOKEN), "Debug is redacted");
+    }
+
+    #[test]
+    fn url_must_be_loopback_and_only_two_keys_are_read() {
+        let ok = parse_config(&format!(
+            "HERMES_KEY=zzz\nexport HA_URL=\"http://localhost:8123\"\nHA_TOKEN='{TOKEN}'\n"
+        ))
+        .unwrap();
+        assert_eq!(ok.base, "http://localhost:8123");
+        assert_eq!(ok.token.0, TOKEN);
+        let default = parse_config(&format!("HA_TOKEN={TOKEN}")).unwrap();
+        assert_eq!(default.base, DEFAULT_HA_URL);
+        for bad in [
+            "http://192.168.1.10:8123",
+            "http://homeassistant.local:8123",
+            "https://127.0.0.1:8123",
+            "http://127.0.0.1@evil.com:8123",
+            "http://127.0.0.1:8123/api",
+            "ws://127.0.0.1:8123",
+        ] {
+            let e = parse_config(&format!("HA_URL={bad}\nHA_TOKEN={TOKEN}")).unwrap_err();
+            assert_eq!(e, ERR_URL, "{bad}");
+        }
+        assert_eq!(
+            parse_config("HA_URL=http://127.0.0.1:8123").unwrap_err(),
+            ERR_CONFIG
+        );
+        assert_eq!(
+            parse_config("HA_TOKEN=has space\n").unwrap_err(),
+            ERR_CONFIG
+        );
+    }
+
+    #[test]
+    fn env_file_checks_mode_owner_and_symlinks() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("nexus-ha-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let f = dir.join(".env");
+        std::fs::write(&f, format!("HA_TOKEN={TOKEN}\n")).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let uid = current_uid();
+        assert_eq!(read_config_at(&dir, &f, uid).unwrap_err(), ERR_CONFIG);
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(read_config_at(&dir, &f, uid).is_ok());
+        assert_eq!(read_config_at(&dir, &f, uid + 1).unwrap_err(), ERR_CONFIG);
+        let link = dir.join("link.env");
+        std::os::unix::fs::symlink(&f, &link).unwrap();
+        assert_eq!(read_config_at(&dir, &link, uid).unwrap_err(), ERR_CONFIG);
+        let big = dir.join("big.env");
+        std::fs::write(&big, "x".repeat(ENV_MAX_BYTES as usize + 1)).unwrap();
+        std::fs::set_permissions(&big, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(read_config_at(&dir, &big, uid).unwrap_err(), ERR_CONFIG);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn websocket_auth_subscribe_and_state_changed_events() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(sock).await.unwrap();
+            ws.send(Message::Text(r#"{"type":"auth_required"}"#.into()))
+                .await
+                .unwrap();
+            let auth: Value =
+                serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(auth["type"], "auth");
+            assert_eq!(auth["access_token"], TOKEN);
+            ws.send(Message::Text(r#"{"type":"auth_ok"}"#.into()))
+                .await
+                .unwrap();
+            let sub: Value =
+                serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(sub["type"], "subscribe_events");
+            assert_eq!(sub["event_type"], "state_changed");
+            let ev = json!({"id": 1, "type": "event", "event": {
+                "event_type": "state_changed", "time_fired": "2026-11-04T04:00:01Z",
+                "data": {"entity_id": "light.kitchen",
+                    "old_state": {"entity_id": "light.kitchen", "state": "off", "attributes": {}},
+                    "new_state": {"entity_id": "light.kitchen", "state": "on",
+                        "attributes": {"friendly_name": "Kitchen", "entity_picture": format!("/x?token={TOKEN}")}}}}});
+            ws.send(Message::Text(ev.to_string().into())).await.unwrap();
+            let other = json!({"id": 1, "type": "event", "event": {"event_type": "call_service", "data": {}}});
+            ws.send(Message::Text(other.to_string().into()))
+                .await
+                .unwrap();
+            ws.close(None).await.unwrap();
+        });
+        let (ws, _) = tokio_tungstenite::connect_async(ws_url(&format!("http://{addr}")))
+            .await
+            .unwrap();
+        let mut connected = false;
+        let mut changes = Vec::new();
+        let end = live_session(
+            ws,
+            &HaToken(TOKEN.into()),
+            || connected = true,
+            |c| changes.push(c),
+        )
+        .await;
+        server.await.unwrap();
+        assert!(connected);
+        assert_eq!(end, SessionEnd::Closed);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].entity_id, "light.kitchen");
+        assert_eq!(changes[0].new_state.as_ref().unwrap().state, "on");
+        assert_eq!(changes[0].old_state.as_ref().unwrap().state, "off");
+        let payload = serde_json::to_string(&changes[0]).unwrap();
+        assert!(!payload.contains(TOKEN), "{payload}");
+        assert!(payload.contains("\"newState\"") && payload.contains("\"timeFired\""));
+    }
+
+    #[tokio::test]
+    async fn websocket_auth_invalid_ends_the_session() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(sock).await.unwrap();
+            ws.send(Message::Text(r#"{"type":"auth_required"}"#.into()))
+                .await
+                .unwrap();
+            let _ = ws.next().await;
+            ws.send(Message::Text(
+                r#"{"type":"auth_invalid","message":"x"}"#.into(),
+            ))
+            .await
+            .unwrap();
+        });
+        let (ws, _) = tokio_tungstenite::connect_async(ws_url(&format!("http://{addr}")))
+            .await
+            .unwrap();
+        let mut connected = false;
+        let end = live_session(ws, &HaToken(TOKEN.into()), || connected = true, |_| {}).await;
+        assert_eq!(end, SessionEnd::AuthFailed);
+        assert!(!connected);
+    }
+
+    #[test]
+    fn backoff_doubles_to_a_cap_and_container_status_parses() {
+        let mut b = BACKOFF_START;
+        let mut seen = vec![];
+        for _ in 0..10 {
+            seen.push(b.as_secs());
+            b = next_backoff(b);
+        }
+        assert_eq!(seen, [1, 2, 4, 8, 16, 32, 60, 60, 60, 60]);
+        assert_eq!(
+            parse_container_status("Up 3 hours\n"),
+            HaContainerStatus {
+                running: true,
+                status: "Up 3 hours".into()
+            }
+        );
+        assert!(!parse_container_status("Exited (0) 2 minutes ago").running);
+        assert_eq!(
+            parse_container_status(""),
+            HaContainerStatus {
+                running: false,
+                status: String::new()
+            }
+        );
+        assert_eq!(
+            ws_url("http://127.0.0.1:8123"),
+            "ws://127.0.0.1:8123/api/websocket"
+        );
+    }
+}

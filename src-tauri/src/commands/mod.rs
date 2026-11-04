@@ -6,6 +6,7 @@ pub mod continuity;
 pub mod crew;
 pub mod events;
 pub mod goals;
+pub mod ha;
 pub mod kb_status;
 pub mod kv;
 pub mod llm_router;
