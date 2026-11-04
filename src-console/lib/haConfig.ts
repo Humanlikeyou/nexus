@@ -6,15 +6,17 @@ import { classifyHaError } from "./homeAssistant";
  * (ha_get_config / ha_set_config / ha_clear_token / ha_test_connection).
  * The token is write-only: it is sent once on save and never read back, logged or echoed.
  */
-export type HaConfig = { url: string | null; tokenSet: boolean };
-export type HaTestKind = "not_configured" | "auth_rejected" | "unreachable" | "timed_out" | "upstream_error";
+export type HaTokenSource = "app" | "env" | "legacy";
+export type HaConfig = { url: string | null; tokenSet: boolean; tokenSource: HaTokenSource | null };
+export type HaClearResult = { fallbackActive: boolean };
+export type HaTestKind = "unreachable" | "auth_rejected" | "upstream_error" | "too_large" | "bad_url" | "not_configured" | "not_allowed" | "already_running" | "unsafe_storage";
 export type HaTestResult = { ok: boolean; kind?: string; version?: string };
 export type HaConfigInput = { url?: string; token?: string };
 
 export interface HaConfigBackend {
   getConfig(): Promise<HaConfig>;
   setConfig(input: HaConfigInput): Promise<void>;
-  clearToken(): Promise<void>;
+  clearToken(): Promise<HaClearResult>;
   testConnection(): Promise<HaTestResult>;
 }
 
@@ -22,7 +24,12 @@ const tauriBackend: HaConfigBackend = {
   async getConfig() {
     const raw = await invoke<Partial<HaConfig> | null>("ha_get_config");
     // Pick only the two known fields so nothing else (e.g. a token) can reach the UI.
-    return { url: typeof raw?.url === "string" ? raw.url : null, tokenSet: raw?.tokenSet === true };
+    const src = raw?.tokenSource;
+    return {
+      url: typeof raw?.url === "string" && raw.url !== "" ? raw.url : null,
+      tokenSet: raw?.tokenSet === true,
+      tokenSource: src === "app" || src === "env" || src === "legacy" ? src : null,
+    };
   },
   setConfig: (input) => {
     // Flat args matching ha_set_config(url: Option<String>, token: Option<String>); omitted keys stay unchanged.
@@ -31,7 +38,10 @@ const tauriBackend: HaConfigBackend = {
     if (input.token !== undefined) args.token = input.token;
     return invoke<void>("ha_set_config", args);
   },
-  clearToken: () => invoke<void>("ha_clear_token"),
+  async clearToken() {
+    const raw = await invoke<Partial<HaClearResult> | null>("ha_clear_token");
+    return { fallbackActive: raw?.fallbackActive === true };
+  },
   async testConnection() {
     const raw = await invoke<HaTestResult | null>("ha_test_connection");
     return {
@@ -51,12 +61,13 @@ export function setHaConfigBackend(next: HaConfigBackend): () => void { const pr
 export const isCommandMissing = (err: unknown): boolean => classifyHaError(err) === "backend_missing";
 
 export const HA_DEFAULT_URL = "http://127.0.0.1:8123";
-const LOOPBACK = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?\/?$/i;
+const LOOPBACK = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?\/?$/i;
 
-/** Client-side check: loopback http(s) with an optional port; no path, query or credentials. */
+/** Client-side check: loopback http with an optional port; no path, query or credentials. Empty clears (default address). */
 export function urlError(value: string): string | null {
   const v = value.trim();
-  if (v === "") return "Enter the Home Assistant address.";
+  if (v === "") return null;
+  if (/^https:\/\//i.test(v)) return "Use http://, not https://, for Home Assistant on this Mac.";
   const m = LOOPBACK.exec(v);
   if (!m) return "Use a local address on this Mac, like http://127.0.0.1:8123.";
   if (m[2] !== undefined) {
@@ -73,20 +84,43 @@ export function tokenError(value: string): string | null {
   return null;
 }
 
-/** Fixed copy for save failures; the backend's message is never shown. */
-export function saveErrorCopy(err: unknown): string {
+export const SET_ERROR_KINDS = ["bad_url", "invalid_input", "unsafe_storage", "storage_error", "not_allowed", "upstream_error"] as const;
+export type HaSetErrorKind = (typeof SET_ERROR_KINDS)[number];
+export const SET_ERROR_COPY: Record<HaSetErrorKind, string> = {
+  bad_url: "Nexus didn't accept that address. Use a local address like http://127.0.0.1:8123.",
+  invalid_input: "Nexus didn't accept those details. Check the address and token, then try again.",
+  unsafe_storage: "Nexus couldn't store the token safely. Its settings file has unsafe permissions or ownership.",
+  storage_error: "Nexus couldn't save the settings. Try again.",
+  not_allowed: "Nexus doesn't allow this change right now.",
+  upstream_error: "Something went wrong while saving. Try again.",
+};
+
+/** Fixed copy for save/clear failures, by "<kind>: …" prefix; the backend's message is never shown. */
+export function setErrorCopy(err: unknown, fallback = "Couldn't save the Home Assistant settings. Try again."): string {
   const text = err instanceof Error ? err.message : typeof err === "string" ? err : "";
-  if (/^\s*bad_url\b/.test(text)) return "Nexus didn't accept that address. Use a local address like http://127.0.0.1:8123.";
-  if (/^\s*invalid_input\b/.test(text)) return "Nexus didn't accept those details. Check the address and token, then try again.";
-  return "Couldn't save the Home Assistant settings. Try again.";
+  const kind = /^\s*([a-z_]+):/.exec(text)?.[1];
+  return kind && (SET_ERROR_COPY as Record<string, string>)[kind] ? (SET_ERROR_COPY as Record<string, string>)[kind] : fallback;
 }
+/** @deprecated use setErrorCopy */
+export const saveErrorCopy = (err: unknown) => setErrorCopy(err);
+
+export const TOKEN_SOURCE_COPY: Record<HaTokenSource, string> = {
+  app: "Saved in Nexus",
+  env: "From environment",
+  legacy: "From legacy config",
+};
+export const FALLBACK_ACTIVE_COPY = "A token from the environment is still in use.";
 
 export const TEST_COPY: Record<HaTestKind, string> = {
-  not_configured: "Add the address and token, then test again.",
-  auth_rejected: "Home Assistant rejected the token. Create a new long-lived token and replace it.",
   unreachable: "Home Assistant isn't reachable. Check that it's running.",
-  timed_out: "Home Assistant took too long to answer. Try again.",
+  auth_rejected: "Home Assistant rejected the token. Create a new long-lived token and replace it.",
   upstream_error: "Home Assistant returned an error. Try again later.",
+  too_large: "Home Assistant sent a response that was too large.",
+  bad_url: "The saved address isn't a local http address. Fix it, then test again.",
+  not_configured: "Add the address and token, then test again.",
+  not_allowed: "Nexus doesn't allow a connection test right now.",
+  already_running: "A test is already running. Wait a moment, then try again.",
+  unsafe_storage: "Nexus couldn't read the token safely. Its settings file has unsafe permissions or ownership.",
 };
 
 export function testResultCopy(result: HaTestResult): string {

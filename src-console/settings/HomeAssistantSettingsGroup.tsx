@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  COMING_SOON_COPY, HA_DEFAULT_URL, haConfigBackend, isCommandMissing, saveErrorCopy, testResultCopy, tokenError, urlError, type HaConfig,
+  COMING_SOON_COPY, FALLBACK_ACTIVE_COPY, HA_DEFAULT_URL, TOKEN_SOURCE_COPY, haConfigBackend, isCommandMissing, setErrorCopy, testResultCopy, tokenError, urlError, type HaConfig,
 } from "../lib/haConfig";
 import { Badge, Button, InsetGroup, ListRow, TextField } from "../ui";
 
@@ -29,13 +29,13 @@ export function HomeAssistantSettingsGroup() {
     (config) => {
       if (!mounted.current) return;
       setLoad({ status: "ready", config });
-      setUrl(config.url ?? HA_DEFAULT_URL);
+      setUrl(config.url ?? "");
     },
     (err: unknown) => { if (mounted.current) setLoad(isCommandMissing(err) ? { status: "coming_soon" } : { status: "error" }); },
   ), []);
   useEffect(() => { void refresh(); }, [refresh]);
 
-  const header = { title: "Home Assistant", footer: "Connects Smart home to Home Assistant on this Mac. The token is stored in your Keychain and never shown again." };
+  const header = { title: "Home Assistant", footer: "Connects Smart home to Home Assistant on this Mac. The token is stored privately on this Mac and never shown again." };
 
   if (load.status === "loading") {
     return <div id={HA_SETTINGS_ANCHOR}><InsetGroup {...header}><ListRow title="Status" value="Loading…" /></InsetGroup></div>;
@@ -59,6 +59,7 @@ export function HomeAssistantSettingsGroup() {
   const uErr = urlError(url);
   const tErr = tokenError(token);
   const urlChanged = url.trim() !== (config.url ?? "");
+  const appToken = config.tokenSource === "app" || (config.tokenSet && config.tokenSource == null);
   const canSave = !uErr && !tErr && (urlChanged || token !== "") && busy === null;
 
   const fail = (err: unknown, missingSetter: () => void, fallback: (e: unknown) => string, set: (r: Result) => void) => {
@@ -84,20 +85,20 @@ export function HomeAssistantSettingsGroup() {
       await refresh();
     } catch (err) {
       setToken("");
-      fail(err, comingSoon, saveErrorCopy, setSaveResult);
+      fail(err, comingSoon, (e) => setErrorCopy(e), setSaveResult);
     } finally { if (mounted.current) setBusy(null); }
   };
 
   const onClear = async () => {
     setBusy("clear"); setSaveResult(null); setTestResult(null);
     try {
-      await haConfigBackend().clearToken();
+      const { fallbackActive } = await haConfigBackend().clearToken();
       if (!mounted.current) return;
       setToken(""); setReplacing(false);
-      setSaveResult({ ok: true, text: "Token cleared." });
+      setSaveResult({ ok: true, text: fallbackActive ? `Token cleared. ${FALLBACK_ACTIVE_COPY}` : "Token cleared." });
       await refresh();
     } catch (err) {
-      fail(err, comingSoon, () => "Couldn't clear the token. Try again.", setSaveResult);
+      fail(err, comingSoon, (e) => setErrorCopy(e, "Couldn't clear the token. Try again."), setSaveResult);
     } finally { if (mounted.current) setBusy(null); }
   };
 
@@ -115,11 +116,11 @@ export function HomeAssistantSettingsGroup() {
     <div id={HA_SETTINGS_ANCHOR}>
       <InsetGroup {...header}>
         <form className="settings__ha-form" onSubmit={(e) => { void onSave(e); }} noValidate aria-label="Home Assistant connection">
-          <TextField label="Address" description="A local address on this Mac, like http://127.0.0.1:8123."
-            value={url} inputMode="url" autoComplete="off" spellCheck={false}
+          <TextField label="Address" description={`A local http address on this Mac. Leave empty to use ${HA_DEFAULT_URL}.`}
+            value={url} placeholder={HA_DEFAULT_URL} inputMode="url" autoComplete="off" spellCheck={false}
             onChange={(e) => { setUrl(e.target.value); setSaveResult(null); }} onBlur={() => setUrlTouched(true)}
             error={urlTouched ? uErr ?? undefined : undefined} />
-          <ListRow title="Access token"
+          <ListRow title="Access token" subtitle={config.tokenSet && config.tokenSource ? TOKEN_SOURCE_COPY[config.tokenSource] : undefined}
             accessory={<Badge tone={config.tokenSet ? "success" : "neutral"}>{config.tokenSet ? "Saved" : "Not set"}</Badge>} />
           {showToken && (
             <TextField label={config.tokenSet ? "New access token" : "Access token"} type="password" autoComplete="off"
@@ -135,7 +136,7 @@ export function HomeAssistantSettingsGroup() {
             {replacing && (
               <Button type="button" size="small" variant="secondary" disabled={busy !== null} onClick={() => { setReplacing(false); setToken(""); }}>Cancel</Button>
             )}
-            {config.tokenSet && (
+            {config.tokenSet && appToken && (
               <Button type="button" size="small" variant="secondary" loading={busy === "clear"} disabled={busy !== null} onClick={() => { void onClear(); }}>Clear token</Button>
             )}
             <Button type="button" size="small" variant="secondary" loading={busy === "test"} disabled={busy !== null} onClick={() => { void onTest(); }}>Test connection</Button>

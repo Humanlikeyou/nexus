@@ -15,13 +15,17 @@ test.describe("Home Assistant settings", () => {
   });
 
   test("save URL + token, token never rendered, test connection", async ({ page, theme, consoleErrors }) => {
-    const data = { ...responses(), ha_get_config: { url: null, tokenSet: false }, ha_set_config: null, ha_test_connection: { ok: true, version: "2026.10.1" } };
+    const data = { ...responses(), ha_get_config: { url: null, tokenSet: false, tokenSource: null }, ha_set_config: null, ha_test_connection: { ok: true, version: "2026.10.1" } };
     await openApp(page, { theme, data});
     await navButton(page, "Settings").click();
     const group = activeField(page, "Settings").locator("#home-assistant");
     await expect(group.getByText("Not set", { exact: true })).toBeVisible();
     const address = group.getByLabel("Address");
-    await expect(address).toHaveValue("http://127.0.0.1:8123");
+    await expect(address).toHaveValue("");
+    await expect(address).toHaveAttribute("placeholder", "http://127.0.0.1:8123");
+    await address.fill("https://127.0.0.1:8123");
+    await address.blur();
+    await expect(group).toContainText("Use http://, not https://");
     await address.fill("http://example.com");
     await address.blur();
     await expect(group).toContainText("Use a local address on this Mac");
@@ -42,22 +46,23 @@ test.describe("Home Assistant settings", () => {
   });
 
   test("saved token: Replace/Clear, rejected test copy", async ({ page, theme }) => {
-    const data = { ...responses(), ha_get_config: { url: "http://127.0.0.1:8123", tokenSet: true }, ha_clear_token: null, ha_test_connection: { ok: false, kind: "auth_rejected" } };
+    const data = { ...responses(), ha_get_config: { url: "http://127.0.0.1:8123", tokenSet: true, tokenSource: "app" }, ha_clear_token: { fallbackActive: true }, ha_test_connection: { ok: false, kind: "auth_rejected" } };
     await openApp(page, { theme, data });
     await navButton(page, "Settings").click();
     const group = activeField(page, "Settings").locator("#home-assistant");
     await expect(group.getByText("Saved", { exact: true })).toBeVisible();
+    await expect(group.getByText("Saved in Nexus")).toBeVisible();
     await expect(group.locator('input[type="password"]')).toHaveCount(0);
     await group.getByRole("button", { name: "Replace token" }).click();
     await expect(group.getByLabel("New access token")).toHaveValue("");
     await group.getByRole("button", { name: "Test connection" }).click();
     await expect(group).toContainText("Home Assistant rejected the token.");
     await group.getByRole("button", { name: "Clear token" }).click();
-    await expect(group.getByText("Token cleared.", { exact: true })).toBeVisible();
+    await expect(group).toContainText("Token cleared. A token from the environment is still in use.");
   });
 
   test("Smart home setup state links to the Settings group", async ({ page, theme }) => {
-    const data = { ...responses(), ha_states: { __reject: "not_configured: Home Assistant is not configured (check HA_URL and HA_TOKEN)." }, ha_get_config: { url: null, tokenSet: false } };
+    const data = { ...responses(), ha_states: { __reject: "not_configured: Home Assistant is not configured (check HA_URL and HA_TOKEN)." }, ha_get_config: { url: null, tokenSet: false, tokenSource: null } };
     await openApp(page, { theme, data });
     await navButton(page, "Smart home").click();
     await activeField(page, "Smart home").getByRole("button", { name: "Open Home Assistant settings" }).click();
