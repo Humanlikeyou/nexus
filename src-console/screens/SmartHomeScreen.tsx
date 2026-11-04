@@ -1,10 +1,10 @@
-import { Lightbulb, Plug, Power, RefreshCw, Thermometer, ToggleLeft, type LucideIcon } from "lucide-react";
+import { Lightbulb, Minus, Plug, Plus, Power, RefreshCw, Thermometer, ThermometerSun, ToggleLeft, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type HaContainerStatus, type HaEntity, type HaInactiveKind, type HaLiveState,
-  HA_ERROR_COPY, applyStateChange, classifyHaError, containerErrorCopy, inactiveKindFor, isServiceRefusal, domainLabel, entityName, haBackend, isToggleable, sortDevices, stateLabel, toggleService,
+  HA_ERROR_COPY, HVAC_LABEL, type HaServiceData, applyStateChange, clampTemperature, climateRange, hvacModesFor, isHvacMode, targetTemperature, validServiceData, classifyHaError, containerErrorCopy, inactiveKindFor, isServiceRefusal, domainLabel, entityName, haBackend, isToggleable, sortDevices, stateLabel, toggleService,
 } from "../lib/homeAssistant";
-import { Badge, Button, InsetGroup, ListRow, Toggle } from "../ui";
+import { Badge, Button, InsetGroup, ListRow, Select, Toggle } from "../ui";
 import "./SmartHomeScreen.css";
 
 export type DevicesState =
@@ -15,7 +15,7 @@ export type DevicesState =
 
 type Container = { status: "loading" } | { status: "ok"; value: HaContainerStatus } | { status: "unavailable"; message: string };
 
-const ICONS: Record<string, LucideIcon> = { light: Lightbulb, switch: Plug, fan: Power, input_boolean: ToggleLeft, sensor: Thermometer };
+const ICONS: Record<string, LucideIcon> = { light: Lightbulb, switch: Plug, fan: Power, input_boolean: ToggleLeft, sensor: Thermometer, climate: ThermometerSun };
 
 /** Fixed setup copy per inactive kind (Rust's error text is never shown raw). */
 export const INACTIVE_COPY: Record<HaInactiveKind, { title: string; intro: string; steps: string[] }> = {
@@ -48,6 +48,54 @@ export const INACTIVE_COPY: Record<HaInactiveKind, { title: string; intro: strin
     steps: ["Update Amara OS, then come back here."],
   },
 };
+
+type ClimateSend = (service: "set_temperature" | "set_hvac_mode", data: HaServiceData) => void;
+
+/** Climate setpoint stepper (clamped to the entity's range inside 5–95) and an hvac mode select. */
+export function ClimateControl({ device, pending, onSend }: { device: HaEntity; pending: boolean; onSend: ClimateSend }) {
+  const name = entityName(device);
+  const range = climateRange(device);
+  const target = targetTemperature(device);
+  const [draft, setDraft] = useState(target == null ? "" : String(target));
+  const [invalid, setInvalid] = useState(false);
+  // Re-sync to the entity after each call settles (success or failure, so a refusal reverts the field).
+  const syncKey = pending ? null : `${target}`;
+  const [lastSync, setLastSync] = useState(syncKey);
+  if (syncKey !== lastSync) {
+    setLastSync(syncKey);
+    if (syncKey !== null) { setDraft(target == null ? "" : String(target)); setInvalid(false); }
+  }
+  const modes = hvacModesFor(device);
+  const send = (t: number) => {
+    const next = clampTemperature(t, range);
+    setDraft(String(next));
+    setInvalid(false);
+    if (next !== target) onSend("set_temperature", { temperature: next });
+  };
+  const commitDraft = () => {
+    const t = Number(draft);
+    if (draft.trim() === "" || !Number.isFinite(t)) { setInvalid(true); return; }
+    send(t);
+  };
+  const base = target ?? clampTemperature((range.min + range.max) / 2, range);
+  const unit = typeof device.attributes.temperature_unit === "string" ? device.attributes.temperature_unit : "°";
+  return (
+    <span className="smart-home__climate" role="group" aria-label={`${name} controls`}>
+      <Button size="small" variant="plain" iconOnly icon={Minus} aria-label={`Lower ${name} temperature`} disabled={pending || base <= range.min} onClick={() => send(base - range.step)} />
+      <input className="smart-home__temp" type="number" inputMode="decimal" min={range.min} max={range.max} step={range.step}
+        aria-label={`${name} target temperature`} aria-invalid={invalid || undefined} value={draft} disabled={pending}
+        onChange={(e) => setDraft(e.target.value)} onBlur={commitDraft} onKeyDown={(e) => { if (e.key === "Enter") commitDraft(); }} />
+      <span className="smart-home__unit" aria-hidden="true">{unit}</span>
+      <Button size="small" variant="plain" iconOnly icon={Plus} aria-label={`Raise ${name} temperature`} disabled={pending || base >= range.max} onClick={() => send(base + range.step)} />
+      {modes.length > 0 && (
+        <Select label={`${name} mode`} hideLabel className="smart-home__mode" disabled={pending}
+          value={isHvacMode(device.state) ? device.state : ""}
+          options={[...(isHvacMode(device.state) ? [] : [{ value: "", label: "Mode", disabled: true }]), ...modes.map((m) => ({ value: m, label: HVAC_LABEL[m] }))]}
+          onChange={(e) => { if (isHvacMode(e.target.value) && e.target.value !== device.state) onSend("set_hvac_mode", { hvacMode: e.target.value }); }} />
+      )}
+    </span>
+  );
+}
 
 export async function loadDevices(): Promise<DevicesState> {
   try {
@@ -156,6 +204,23 @@ export function SmartHomeField({ load = loadDevices }: { load?: () => Promise<De
     }
   };
 
+  const setClimate = async (device: HaEntity, service: "set_temperature" | "set_hvac_mode", data: HaServiceData) => {
+    setRowError(null);
+    if (!validServiceData("climate", service, data)) { setRowError({ entityId: device.entityId, message: HA_ERROR_COPY.invalid_input }); return; }
+    setPending((p) => ({ ...p, [device.entityId]: true }));
+    try {
+      await haBackend().callService("climate", service, device.entityId, data);
+      if (mounted.current) setState((s) => s.status === "ready" ? { ...s, devices: s.devices.map((d) => d.entityId !== device.entityId ? d
+        : service === "set_hvac_mode" ? { ...d, state: data.hvacMode! } : { ...d, attributes: { ...d.attributes, temperature: data.temperature } }) } : s);
+    } catch (error) {
+      // Entity state is untouched on failure; ClimateControl re-syncs to it when pending clears.
+      const kind = classifyHaError(error);
+      if (mounted.current) setRowError({ entityId: device.entityId, message: HA_ERROR_COPY[kind] });
+    } finally {
+      if (mounted.current) setPending((p) => { const next = { ...p }; delete next[device.entityId]; return next; });
+    }
+  };
+
   const toggle = async (device: HaEntity, on: boolean) => {
     setRowError(null);
     setPending((p) => ({ ...p, [device.entityId]: true }));
@@ -199,8 +264,8 @@ export function SmartHomeField({ load = loadDevices }: { load?: () => Promise<De
                 {state.devices.map((d) => (
                   <ListRow key={d.entityId} icon={ICONS[d.domain]} title={entityName(d)}
                     subtitle={rowError?.entityId === d.entityId ? <span role="alert" className="smart-home__row-error">{rowError.message}</span> : domainLabel(d.domain)}
-                    value={isToggleable(d) ? undefined : stateLabel(d)}
-                    accessory={isToggleable(d) ? <Toggle checked={d.state === "on"} disabled={!!pending[d.entityId]} aria-label={entityName(d)} onCheckedChange={(on) => { void toggle(d, on); }} /> : undefined} />
+                    value={isToggleable(d) || d.domain === "climate" ? undefined : stateLabel(d)}
+                    accessory={d.domain === "climate" ? <ClimateControl device={d} pending={!!pending[d.entityId]} onSend={(service, data) => { void setClimate(d, service, data); }} /> : isToggleable(d) ? <Toggle checked={d.state === "on"} disabled={!!pending[d.entityId]} aria-label={entityName(d)} onCheckedChange={(on) => { void toggle(d, on); }} /> : undefined} />
                 ))}
               </InsetGroup>
             </div>

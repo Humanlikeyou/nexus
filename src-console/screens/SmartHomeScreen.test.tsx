@@ -98,4 +98,42 @@ describe("Smart home", () => {
     await waitFor(() => expect(containerStop).toHaveBeenCalledTimes(1));
     expect(containerStart).toHaveBeenCalledTimes(1);
   });
+
+  describe("climate", () => {
+    const hall = () => mockEntity({ entityId: "climate.hall", friendlyName: "Hall", state: "heat", attributes: { temperature: 21, hvac_modes: ["off", "heat", "eco"], min_temp: 7, max_temp: 35, target_temp_step: 0.5 } });
+
+    it("stepper and typed value send set_temperature with only temperature, clamped", async () => {
+      const callService = vi.fn(async () => {});
+      use({ states: async () => [hall()], callService });
+      render(<SmartHomeField />);
+      fireEvent.click(await screen.findByRole("button", { name: "Raise Hall temperature" }));
+      await waitFor(() => expect(callService).toHaveBeenLastCalledWith("climate", "set_temperature", "climate.hall", { temperature: 21.5 }));
+      const input = screen.getByRole("spinbutton", { name: "Hall target temperature" });
+      await waitFor(() => expect(input).toHaveValue(21.5));
+      fireEvent.change(input, { target: { value: "99" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await waitFor(() => expect(callService).toHaveBeenLastCalledWith("climate", "set_temperature", "climate.hall", { temperature: 35 }));
+      await waitFor(() => expect(input).toHaveValue(35));
+      expect(screen.getByRole("button", { name: "Raise Hall temperature" })).toBeDisabled();
+    });
+
+    it("mode select offers the intersection and sends only hvacMode", async () => {
+      const callService = vi.fn(async () => {});
+      use({ states: async () => [hall()], callService });
+      render(<SmartHomeField />);
+      const select = await screen.findByRole("combobox", { name: "Hall mode" });
+      expect([...(select as HTMLSelectElement).options].map((o) => o.value)).toEqual(["off", "heat"]);
+      fireEvent.change(select, { target: { value: "off" } });
+      await waitFor(() => expect(callService).toHaveBeenCalledWith("climate", "set_hvac_mode", "climate.hall", { hvacMode: "off" }));
+      await waitFor(() => expect(select).toHaveValue("off"));
+    });
+
+    it("refusal shows fixed copy and reverts the setpoint", async () => {
+      use({ states: async () => [hall()], callService: async () => { throw "declined: The Home Assistant action was not approved."; } });
+      render(<SmartHomeField />);
+      fireEvent.click(await screen.findByRole("button", { name: "Lower Hall temperature" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Not changed.");
+      await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Hall target temperature" })).toHaveValue(21));
+    });
+  });
 });

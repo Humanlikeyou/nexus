@@ -20,3 +20,9 @@
 .subsystem-inactive h2 { margin: 0; font: var(--type-headline); }
 .subsystem-inactive p, .subsystem-inactive ol { margin: 0; font: var(--type-callout); color: var(--label-secondary); }
 .smart-home__row-error { color: var(--tone-danger-text); }
+.smart-home__climate { display: inline-flex; align-items: center; gap: var(--space-1); }
+.smart-home__temp { width: 4.5em; padding: var(--space-0_5) var(--space-1); font: var(--type-callout); font-variant-numeric: tabular-nums; text-align: center; color: var(--label); background: var(--fill-tertiary, transparent); border: 0; border-radius: var(--radius-sm); box-shadow: var(--glass-hairline); }
+.smart-home__temp:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: var(--space-0_5); }
+.smart-home__temp[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--tone-danger); }
+.smart-home__unit { font: var(--type-footnote); color: var(--label-secondary); }
+.smart-home__mode { min-width: 8em; margin-left: var(--space-2); }

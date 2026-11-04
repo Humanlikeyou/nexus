@@ -5,7 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 
 import {
-  applyStateChange, classifyHaError, containerErrorCopy, createMockHaBackend, haErrorCopy, homeReplyIds, inactiveKindFor, isServiceRefusal, rememberHomeReply, isToggleable, mockEntity, preRouteHome, setHaBackend, sortDevices, stateLabel, tauriHaBackend, validServiceCall,
+  applyStateChange, classifyHaError, containerErrorCopy, createMockHaBackend, haErrorCopy, homeReplyIds, inactiveKindFor, isServiceRefusal, rememberHomeReply, isToggleable, mockEntity, preRouteHome, setHaBackend, sortDevices, stateLabel, tauriHaBackend, validServiceCall, validServiceData, hvacModesFor, climateRange, HA_BAD_DATA, HA_ERROR_KINDS,
 } from "./homeAssistant";
 
 afterEach(() => invokeMock.mockReset());
@@ -36,12 +36,12 @@ describe("Home Assistant wrapper", () => {
     ["docker_unavailable", "Docker isn't available. Open Docker Desktop, then try again.", null],
     ["already_running", "A container action is already running.", null],
     ["timed_out", "That took too long. Try again.", null],
-    ["too_large", "That's too long for Home Assistant.", null],
+    ["too_large", "That request was too large.", null],
     ["not_allowed", "Not allowed from Nexus without confirmation.", null],
     ["needs_approval", "Not allowed from Nexus without confirmation.", null],
     ["declined", "Not changed.", null],
     ["domain_mismatch", "That service doesn't match this device.", null],
-    ["invalid_input", "That request isn't valid.", null],
+    ["invalid_input", "That value isn't valid for this device.", null],
     ["upstream_error", "Home Assistant returned an error.", null],
   ] as const)("kind %s: parsed from the prefix, fixed copy, never the raw message", (kind, copy, inactive) => {
     const raw = `${kind}: secret detail /Users/x 1.2.3.4`;
@@ -101,5 +101,55 @@ describe("Home Assistant wrapper", () => {
     expect(await preRouteHome("lamp")).toEqual({ handled: false });
     expect(warn.mock.calls.flat().join(" ")).not.toMatch(/reachable\./);
     r3(); warn.mockRestore();
+  });
+
+  describe("climate data contract", () => {
+    it("validServiceData allows exactly one field for the two climate services and nothing elsewhere", () => {
+      expect(validServiceData("climate", "set_temperature", { temperature: 21.5 })).toBe(true);
+      expect(validServiceData("climate", "set_temperature", { temperature: 5 })).toBe(true);
+      expect(validServiceData("climate", "set_temperature", { temperature: 95 })).toBe(true);
+      expect(validServiceData("climate", "set_hvac_mode", { hvacMode: "heat_cool" })).toBe(true);
+      expect(validServiceData("light", "turn_on", undefined)).toBe(true);
+      for (const t of [4.9, 95.1, NaN, Infinity]) expect(validServiceData("climate", "set_temperature", { temperature: t })).toBe(false);
+      expect(validServiceData("climate", "set_temperature", undefined)).toBe(false);
+      expect(validServiceData("climate", "set_temperature", {})).toBe(false);
+      expect(validServiceData("climate", "set_temperature", { temperature: 20, hvacMode: "heat" })).toBe(false);
+      expect(validServiceData("climate", "set_hvac_mode", { hvacMode: "turbo" as never })).toBe(false);
+      expect(validServiceData("climate", "set_hvac_mode", { temperature: 20 })).toBe(false);
+      expect(validServiceData("climate", "turn_on", { temperature: 20 })).toBe(false);
+      expect(validServiceData("light", "turn_on", { temperature: 20 })).toBe(false);
+      expect(validServiceData("climate", "set_temperature", { temperature: 20, extra: 1 } as never)).toBe(false);
+    });
+
+    it("sends data only for climate services and rejects bad data without invoking", async () => {
+      invokeMock.mockResolvedValue(undefined);
+      await tauriHaBackend.callService("climate", "set_temperature", "climate.hall", { temperature: 21 });
+      expect(invokeMock).toHaveBeenLastCalledWith("ha_call_service", { domain: "climate", service: "set_temperature", entityId: "climate.hall", data: { temperature: 21 } });
+      await tauriHaBackend.callService("climate", "set_hvac_mode", "climate.hall", { hvacMode: "cool" });
+      expect(invokeMock).toHaveBeenLastCalledWith("ha_call_service", { domain: "climate", service: "set_hvac_mode", entityId: "climate.hall", data: { hvacMode: "cool" } });
+      await tauriHaBackend.callService("climate", "turn_off", "climate.hall");
+      expect(invokeMock.mock.lastCall?.[1]).not.toHaveProperty("data");
+      invokeMock.mockClear();
+      await expect(tauriHaBackend.callService("light", "turn_on", "light.x", { temperature: 20 })).rejects.toBe(HA_BAD_DATA);
+      await expect(tauriHaBackend.callService("climate", "set_temperature", "climate.hall", { temperature: 120 })).rejects.toBe(HA_BAD_DATA);
+      expect(invokeMock).not.toHaveBeenCalled();
+      expect(haErrorCopy(HA_BAD_DATA)).toBe("That value isn't valid for this device.");
+    });
+
+    it("hvac options intersect the entity's hvac_modes; range clamps to 5–95", () => {
+      const e = mockEntity({ entityId: "climate.hall", state: "heat", attributes: { hvac_modes: ["off", "heat", "eco", "auto"], min_temp: 0, max_temp: 120, target_temp_step: 1 } });
+      expect(hvacModesFor(e)).toEqual(["off", "heat", "auto"]);
+      expect(hvacModesFor(mockEntity({ entityId: "climate.x" }))).toHaveLength(7);
+      expect(climateRange(e)).toEqual({ min: 5, max: 95, step: 1 });
+      expect(climateRange(mockEntity({ entityId: "climate.x", attributes: { min_temp: 16, max_temp: 30 } }))).toEqual({ min: 16, max: 30, step: 0.5 });
+    });
+
+    it("maps the exact Rust refusal strings and keeps 14 kinds", () => {
+      expect(HA_ERROR_KINDS).toHaveLength(14);
+      expect(haErrorCopy("not_allowed: That Home Assistant action is not allowed.")).toBe("Not allowed from Nexus without confirmation.");
+      expect(haErrorCopy("declined: The Home Assistant action was not approved.")).toBe("Not changed.");
+      expect(classifyHaError("domain_mismatch: The entity does not belong to the service's domain.")).toBe("domain_mismatch");
+      expect(classifyHaError("invalid_input: Invalid or missing data for this Home Assistant service.")).toBe("invalid_input");
+    });
   });
 });
