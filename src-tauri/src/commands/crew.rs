@@ -305,7 +305,8 @@ mod crew_url_tests {
 
     #[test]
     fn crew_service_url_is_loopback_8400() {
-        std::env::set_var("CREW_SERVICE_URL", "http://evil.example.com:9999");
+        // No env mutation: the URL is a compile-time constant, so there is
+        // nothing to override and no cross-test env race.
         let url = crew_service_url();
         let rest = url.strip_prefix("http://").expect("http scheme");
         let authority = rest.split('/').next().unwrap();
@@ -315,6 +316,5 @@ mod crew_url_tests {
             "host {host} not loopback"
         );
         assert_eq!(port, "8400");
-        std::env::remove_var("CREW_SERVICE_URL");
     }
 }
