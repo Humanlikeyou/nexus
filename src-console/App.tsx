@@ -7,7 +7,7 @@ import { useMuseSession } from "./app/useMuseSession";
 import { runApproval } from "./lib/approval";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
-import { ActivityField, BusinessField, CrewsField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, VoiceField, retryLazyScreens } from "./app/lazyScreens";
+import { ActivityField, BusinessField, CrewsField, HealthField, MindBodyField, NeuroField, RevenueField, SessionsField, SettingsField, VoiceField, retryLazyScreens } from "./app/lazyScreens";
 import { ScreenErrorBoundary } from "./shell/ScreenErrorBoundary";
 import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";
 import { CommandSurface } from "./design/SystemPrimitives";
@@ -44,7 +44,14 @@ export default function App() {
     const anchor = route.id === "terrance" && route.view === "goals" ? "goals"
       : route.id === "settings" && (route.view === "devices" || route.view === "about") ? route.view : null;
     if (!anchor) return;
-    const frame = requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView?.({ block: "start", behavior: "smooth" }));
+    // The host screen is lazy: retry for ~1s of frames until the anchor has mounted.
+    let frame = 0, tries = 0;
+    const scroll = () => {
+      const el = document.getElementById(anchor);
+      if (el) el.scrollIntoView?.({ block: "start", behavior: "smooth" });
+      else if (tries++ < 60) frame = requestAnimationFrame(scroll);
+    };
+    frame = requestAnimationFrame(scroll);
     return () => cancelAnimationFrame(frame);
   }, [route]);
   // Old ids (sessions, trajectory, revenue, assistant, devices) resolve to their host + sub-view.
@@ -116,6 +123,7 @@ export default function App() {
   const retrySnapshot = () => { void refresh(); };
   const view = screenId === "terrance" ? <TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} />
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
+    : screenId === "mindbody" ? <MindBodyField sessions={data.sessions} />
     : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => setRoute({ id: "neuro", view: "main" })} />
     : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} />

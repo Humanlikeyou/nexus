@@ -1,7 +1,7 @@
 import type { CrewToolInfo, KbStatus } from "../src/lib/types";
 export type { CrewToolInfo, KbState, KbStatus } from "../src/lib/types";
 
-export type ModuleId = "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings" | "voice";
+export type ModuleId = "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings" | "voice" | "mindbody";
 
 export type OpenClawState = "online" | "configured" | "not_installed" | "offline";
 
@@ -333,6 +333,8 @@ export interface RecordedSession {
     calm_pct?: number | null;
     time_in_target_pct?: number | null;
   };
+  /** Minimised NOOP context captured at Muse session start; absent on older sessions. Parse with parseBodyContext. */
+  body_context?: import("../src/lib/types").BodyContext | null;
 }
 
 export interface NoopDailyMetric {
@@ -556,3 +558,56 @@ export interface VoiceList {
   voices: string[];
   current: string;
 }
+
+/* ── NOOP query: contract types live in src/lib/types.ts (Integrations); re-exported, not duplicated. ── */
+export type { NoopMetricKey, NoopQueryArgs, NoopQueryError, NoopQueryTool, NoopSettings, WhoopSource } from "../src/lib/types";
+export { NOOP_QUERY_TOOLS } from "../src/lib/types";
+
+export type { BodyContext } from "../src/lib/types";
+
+/** UI-side body state, parsed from a session's body_context (see lib/noop.ts). */
+export interface BodyState {
+  captured_at: string | null;
+  recovery: number | null;
+  hrv_ms: number | null;
+  resting_hr: number | null;
+  sleep_minutes: number | null;
+}
+
+/* Real noop_query payloads (noop-shapes-1104; keys always present, values nullable). */
+export interface NoopDayRow {
+  day: string; source: string;
+  totalSleepMin: number | null; efficiency: number | null; deepMin: number | null; remMin: number | null; lightMin: number | null;
+  disturbances: number | null; restingHr: number | null; avgHrv: number | null; recovery: number | null; strain: number | null;
+  exerciseCount: number | null; spo2Pct: number | null; skinTempDevC: number | null; respRateBpm: number | null;
+  steps: number | null; activeKcalEst: number | null;
+}
+export interface NoopLatestNight {
+  day: string; startTs: number; endTs: number; start: string; end: string; sessionCount: number;
+  totalSleepMin: number; inBedMin: number; efficiency: number; deepMin: number; remMin: number; lightMin: number;
+}
+/** health_snapshot payload (also RecordedSession.body_context). Only the fields the UI reads are typed strictly. */
+export interface NoopSnapshotPayload {
+  generatedAt: string;
+  logicalToday: string;
+  sources: Record<string, string | null>;
+  freshness: { latestHeartRateSample: { ts: number; iso: string; ageSeconds: number } | null; latestDailyMetricDay: string | null; latestAppleHealthDay: string | null; dailyRows: number; appleDailyRows: number };
+  today: NoopDayRow | null;
+  recentDays: NoopDayRow[];
+  appleDaily: unknown[];
+  latestSleep: unknown | null;
+  latestNight: NoopLatestNight | null;
+  battery: unknown | null;
+}
+export interface NoopSeriesPayload {
+  key: import("../src/lib/types").NoopMetricKey;
+  requestedSource: string;
+  range: { from: string; to: string };
+  resolution: { candidates: Array<{ source: string; key: string }>; usedSources: string[] };
+  returned: number;
+  points: Array<{ day: string; key: string; value: number; source: string; sourceKey: string }>;
+}
+
+/** UI-side metric point. */
+export interface NoopMetricPoint { day: string; value: number | null }
+export interface NoopMetricSeries { key: import("../src/lib/types").NoopMetricKey; points: NoopMetricPoint[] }

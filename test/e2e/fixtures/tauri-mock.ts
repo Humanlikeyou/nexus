@@ -35,9 +35,16 @@ function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
     transformCallback: (cb: unknown) => { const id = next++; callbacks.set(id, cb); return id; },
     unregisterCallback: (id: number) => callbacks.delete(id),
     convertFileSrc: (p: string) => p,
-    invoke: async (cmd: string) => {
+    invoke: async (cmd: string, args?: Record<string, unknown>) => {
       if (delays[cmd]) await new Promise((r) => setTimeout(r, delays[cmd]));
       if (failing.includes(cmd)) throw new Error(`e2e: ${cmd} failed`);
+      const canned = data[cmd] as { __byTool?: Record<string, unknown>; __reject?: unknown } | undefined;
+      if (canned && typeof canned === "object" && "__reject" in canned) throw structuredClone(canned.__reject);
+      if (canned && typeof canned === "object" && canned.__byTool) {
+        const tool = String(args?.tool ?? "");
+        if (tool in canned.__byTool) return structuredClone(canned.__byTool[tool]);
+        throw { kind: "tool_not_allowed", detail: tool };
+      }
       if (cmd in data) return structuredClone(data[cmd]);
       if (cmd.startsWith("plugin:event|")) return next++;
       unmocked.push(cmd);

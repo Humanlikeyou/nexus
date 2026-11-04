@@ -5,6 +5,7 @@ const SECTIONS: { label: string; h1: RegExp }[] = [
   { label: "Chat & Agents", h1: /^Amara$/ },
   { label: "Fitness", h1: /^Fitness$/ },
   { label: "Neuro", h1: /^Neuro$/ },
+  { label: "Mind–Body", h1: /^Mind–Body$/ },
   { label: "Business", h1: /^Business$/ },
   { label: "Settings", h1: /^Settings$/ },
 ];

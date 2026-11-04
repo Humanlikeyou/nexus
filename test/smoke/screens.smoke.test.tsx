@@ -64,7 +64,7 @@ describe("lazy screens", () => {
   // Pre-warm every screen chunk so lazy() resolves in microtasks, not on module-transform
   // time; makes resolution independent of machine load (fake timers throughout).
   beforeAll(async () => {
-    await Promise.all(["Health", "Neuro", "Sessions", "Devices", "Settings", "Business", "Revenue", "Activity", "Crews"]
+    await Promise.all(["Health", "Neuro", "Sessions", "Devices", "Settings", "Business", "Revenue", "Activity", "Crews", "MindBody"]
       .map((n) => import(`../../src-console/screens/${n}Screen.tsx`)));
   });
   const flush = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(0); }); };

@@ -1,10 +1,10 @@
 import type { ModuleId } from "../types";
-import { BriefcaseBusiness, Bot, HeartPulse, MessagesSquare, Radio, Settings2, type LucideIcon } from "lucide-react";
+import { Activity, BriefcaseBusiness, Bot, HeartPulse, MessagesSquare, Radio, Settings2, type LucideIcon } from "lucide-react";
 
 export type SystemEntry = { id: ModuleId; label: string; signal: string; icon: LucideIcon };
 
-/** Six items in four groups, like macOS Settings (screen-specs Part 2). The first group is untitled
- *  (it sits under the wordmark). ⌘1–6 follow this order. */
+/** Seven items in four groups, like macOS Settings (screen-specs Part 2). The first group is untitled
+ *  (it sits under the wordmark). ⌘1–7 follow this order. */
 export const SYSTEM_GROUPS: Array<{ label: string; systems: SystemEntry[] }> = [
   { label: "", systems: [
     { id: "terrance", label: "Home", signal: "AI", icon: Bot },
@@ -13,6 +13,7 @@ export const SYSTEM_GROUPS: Array<{ label: string; systems: SystemEntry[] }> = [
   { label: "Body & Mind", systems: [
     { id: "health", label: "Fitness", signal: "NOOP", icon: HeartPulse },
     { id: "neuro", label: "Neuro", signal: "EEG", icon: Radio },
+    { id: "mindbody", label: "Mind–Body", signal: "BODY", icon: Activity },
   ] },
   { label: "Work", systems: [
     { id: "business", label: "Business", signal: "WORK", icon: BriefcaseBusiness },

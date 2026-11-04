@@ -4,6 +4,7 @@ import { APP_NAME, APP_VERSION } from "../app/version";
 import { dateTime, humanize } from "../lib/format";
 import { AllowClaudeGroup } from "../settings/AllowClaude";
 import { BackupSection } from "../settings/BackupSection";
+import { NoopSettingsGroup } from "../settings/NoopSettingsGroup";
 import type { MuseDevice, SystemSnapshot } from "../types";
 import { Button, InsetGroup, ListRow, SegmentedControl, Toggle, Wordmark } from "../ui";
 import { DevicesGroup } from "./DevicesScreen";
@@ -59,6 +60,8 @@ export function SettingsField({ data, theme, setTheme, reduceMotion, setReduceMo
       </InsetGroup>
 
       <DevicesGroup data={data} devices={devices} operation={operation} error={error} onScan={onScan} onConnect={onConnect} onDisconnect={onDisconnect} onRetry={onRetry} />
+
+      <NoopSettingsGroup />
 
       <InsetGroup title="General">
         <ListRow title="Refresh" value="Every 15 seconds" />
