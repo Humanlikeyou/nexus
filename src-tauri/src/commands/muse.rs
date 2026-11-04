@@ -396,6 +396,7 @@ pub async fn disconnect_muse(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
     println!("[muse] eeg_stream: status=starting");
+    super::sessions::begin_body_context_capture();
     let stored = MUSE_PERIPHERAL.lock().await;
     let peripheral = stored.as_ref().ok_or("Muse not connected")?.clone();
     drop(stored);
