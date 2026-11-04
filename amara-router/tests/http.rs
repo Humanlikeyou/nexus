@@ -935,10 +935,20 @@ async fn loopback_port_refuses_browser_and_rebinding_requests() {
     let rig = rig(Mock::default()).await;
     let c = reqwest::Client::new();
     let body = json!({"model": "amara", "messages": [{"role": "user", "content": "hi"}]});
-    let from_page = c.post(format!("{}/v1/chat/completions", rig.url))
-        .header("Origin", "https://evil.example").json(&body).send().await.unwrap();
+    let from_page = c
+        .post(format!("{}/v1/chat/completions", rig.url))
+        .header("Origin", "https://evil.example")
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(from_page.status(), 403);
-    let rebound = c.get(format!("{}/health", rig.url)).header("Host", "evil.example:8787").send().await.unwrap();
+    let rebound = c
+        .get(format!("{}/health", rig.url))
+        .header("Host", "evil.example:8787")
+        .send()
+        .await
+        .unwrap();
     assert_eq!(rebound.status(), 403);
     let ok = c.get(format!("{}/health", rig.url)).send().await.unwrap();
     assert_eq!(ok.status(), 200);
