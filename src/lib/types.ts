@@ -619,7 +619,50 @@ export interface RecordedSession {
     max_hr?: number;
     avg_hrv?: number;
   };
+  /** NOOP health_snapshot taken at session start; absent on older sessions. */
+  body_context?: unknown;
 }
+
+// ── NOOP local access (mirrors src-tauri/src/commands/noop_query.rs) ──
+export type WhoopSource = "noop" | "ble";
+
+export interface NoopSettings {
+  whoop_source: WhoopSource;
+  binary_path: string | null;
+  db_path: string | null;
+}
+
+export const NOOP_QUERY_TOOLS = [
+  "health_snapshot",
+  "metric_series",
+  "data_freshness",
+  "sleep_summary",
+  "workout_summary",
+] as const;
+export type NoopQueryTool = (typeof NOOP_QUERY_TOOLS)[number];
+
+export type NoopMetricKey =
+  | "recovery" | "hrv" | "rhr" | "resp_rate" | "spo2"
+  | "strain" | "sleep_total_min" | "steps" | "active_kcal";
+
+export interface NoopQueryArgs {
+  days?: number;
+  key?: NoopMetricKey;
+  source?: string;
+  from_day?: string;
+  to_day?: string;
+  limit?: number;
+}
+
+export type NoopQueryError =
+  | { kind: "tool_not_allowed"; detail: string }
+  | { kind: "invalid_args"; detail: string }
+  | { kind: "binary_missing"; detail: string }
+  | { kind: "spawn_failed"; detail: string }
+  | { kind: "timeout"; detail: number }
+  | { kind: "process_failed"; detail: string }
+  | { kind: "bad_output"; detail: string }
+  | { kind: "tool_error"; detail: string };
 
 export interface NfSession extends RecordedSession {
   protocol_id: string;
