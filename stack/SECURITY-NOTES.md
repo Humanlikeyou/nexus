@@ -23,3 +23,13 @@ Do **not** expose port 8283 beyond 127.0.0.1, add users, or install third-party 
 
 **Revisit after launch:** migrate to the new Letta self-hosted App Server
 (https://docs.letta.com/self-hosting/) or to 0.16.9 if it is ever published, and drop this pin.
+
+## Accepted risk — containers can reach the keyless router and Ollama
+
+Confirmed 2026-11-04: containers reach the keyless router at `host.docker.internal:8787` and Ollama at `:11434` by sending a
+`Host: 127.0.0.1:<port>` header. This was tested with health and version calls from `homeassistant` and `stack-n8n-1`.
+The router's loopback Host check doesn't stop containers.
+
+Cloud is off, and Ollama was already reachable, so a compromised container gains local model use only.
+
+Don't rely on the Host check as a container boundary. **Revisit if the cloud tier is enabled.**
