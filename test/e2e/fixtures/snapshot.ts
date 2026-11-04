@@ -39,6 +39,35 @@ const crewRun = (id: string, name: string, status: string, task: string, result:
   id, name, status, agents: ["writer"], started_at: "2026-10-28T13:30:00+09:00", task, result,
 });
 
+/* noop_query payloads in the real shapes (noop-shapes-1104), fake values. */
+const noopRow = (d: string, i: number) => ({
+  day: d, source: "my-whoop", totalSleepMin: 420 + ((i * 13) % 60), efficiency: 90, deepMin: 90, remMin: 100, lightMin: 230, disturbances: 3,
+  restingHr: 50 + (i % 4), avgHrv: 56 + ((i * 7) % 14), recovery: 55 + ((i * 11) % 35), strain: 8 + ((i * 5) % 9), exerciseCount: 1,
+  spo2Pct: 97, skinTempDevC: 0.2, respRateBpm: 14.6, steps: 8000, activeKcalEst: 450,
+});
+const noopDays = Array.from({ length: 29 }, (_, i) => noopRow(new Date(Date.parse("2026-09-30T00:00:00Z") + i * 864e5).toISOString().slice(0, 10), i));
+export const NOOP_SNAPSHOT = {
+  generatedAt: "2026-10-28T07:30:00+09:00", logicalToday: "2026-10-28",
+  sources: { whoopImported: "my-whoop", noopComputed: "my-whoop-noop", appleHealth: null, nutrition: null, mood: null, journal: null },
+  freshness: { latestHeartRateSample: null, latestDailyMetricDay: "2026-10-28", latestAppleHealthDay: null, dailyRows: 29, appleDailyRows: 0 },
+  today: noopDays[28], recentDays: noopDays.slice(0, 28), appleDaily: [], latestSleep: null,
+  latestNight: { day: "2026-10-28", startTs: 1, endTs: 2, start: "2026-10-27T23:41:00+09:00", end: "2026-10-28T07:13:00+09:00", sessionCount: 1, totalSleepMin: 452, inBedMin: 478, efficiency: 91, deepMin: 92, remMin: 104, lightMin: 230 },
+  battery: null,
+};
+const NOOP_SERIES = {
+  key: "hrv", requestedSource: "my-whoop", range: { from: "2026-09-30", to: "2026-10-28" },
+  resolution: { candidates: [{ source: "my-whoop", key: "hrv" }], usedSources: ["my-whoop"] }, returned: 29,
+  points: noopDays.map((d) => ({ day: d.day, key: "hrv", value: d.avgHrv, source: "my-whoop", sourceKey: "hrv" })),
+};
+
+/* Home Assistant (ha.rs shapes, camelCase; no token field anywhere). */
+export const HA_ENTITIES = [
+  { entityId: "light.desk_lamp", state: "on", friendlyName: "Desk lamp", domain: "light", lastChanged: "2026-10-28T04:00:00Z", attributes: { friendly_name: "Desk lamp" } },
+  { entityId: "switch.kettle", state: "off", friendlyName: "Kettle", domain: "switch", lastChanged: "2026-10-28T04:00:00Z", attributes: { friendly_name: "Kettle" } },
+  { entityId: "sensor.office_temperature", state: "21.5", friendlyName: "Office temperature", domain: "sensor", lastChanged: "2026-10-28T04:00:00Z", attributes: { unit_of_measurement: "°C" } },
+  { entityId: "sun.sun", state: "above_horizon", friendlyName: "Sun", domain: "sun", attributes: {} },
+];
+
 export type Responses = Record<string, unknown>;
 
 /** Every command the console reads on load, with sample values. */
@@ -52,7 +81,7 @@ export function responses(): Responses {
     list_terrence_projects: [{ id: "p1", title: "Sample project", status: "active", nextAction: "Write the next step" }],
     get_noop_health_snapshot: NOOP_READY,
     get_muse_state: { connected: false, device_name: null, streaming: false },
-    list_sessions: [{ id: "s1", device_type: "muse", start: "2026-10-27T21:00:00+09:00", end: "2026-10-27T21:20:00+09:00", duration_secs: 1200, data_points: 76800, summary: { avg_focus: 0.62, avg_relaxation: 0.71 } }],
+    list_sessions: [{ id: "s1", device_type: "muse", start: "2026-10-27T21:00:00+09:00", end: "2026-10-27T21:20:00+09:00", duration_secs: 1200, data_points: 76800, summary: { avg_focus: 0.62, avg_relaxation: 0.71 }, body_context: { today: { recovery: 74, hrv: 64, rhr: 52, strain: 11, sleep_total_min: 452 }, latest_night: { day: "2026-10-27", total_sleep_min: 452, efficiency: 91, deep_min: 92, rem_min: 104, light_min: 230 } } }],
     read_tasks: [{ title: "Write release notes", status: "active", priority: "high", tags: ["docs"] }, { title: "Plan next quarter", status: "waiting", priority: null, tags: ["planning"] }, { title: "Restock samples", status: "backlog", priority: "medium", tags: [] }],
     read_content_pipeline: [{ title: "Launch note", stage: "drafting", content_type: "blog_post", notes: null }, { title: "Routine reel", stage: "ideation", content_type: "short_video", notes: null }],
     arm_get_revenue_summary: { total_revenue: 1820, total_expenses: 240, net_income: 1580, today_revenue: 120, today_expenses: 0, week_revenue: 640, month_revenue: 1820, by_strategy: [{ strategy_id: "s1", strategy_name: "Sample shop", revenue: 1500, expenses: 200, net: 1300 }, { strategy_id: "s2", strategy_name: "Sample API", revenue: 320, expenses: 40, net: 280 }] },
@@ -75,8 +104,27 @@ export function responses(): Responses {
       interaction("i1", "What's on my plate this afternoon?", "Two things: finish the release notes, then review the sleep pipeline.", "2026-10-28T13:12:00+09:00"),
     ],
     list_context_items: [],
+    // Tool-keyed: the mock returns __byTool[args.tool].
+    noop_query: { __byTool: { health_snapshot: NOOP_SNAPSHOT, metric_series: NOOP_SERIES } },
+    get_noop_settings: { whoop_source: "noop", binary_path: null, db_path: null },
+    set_noop_settings: null,
+    ha_states: HA_ENTITIES,
+    ha_call_service: null,
+    ha_conversation: { kind: "noMatch" },
+    ha_container_status: { running: true, status: "Up 3 hours" },
+    ha_container_start: { running: true, status: "Up 1 second" },
+    ha_container_stop: { running: false, status: "Exited (0) 1 second ago" },
+    ha_live_start: true,
+    ha_live_stop: true,
     migrate_legacy_terrence_context: null,
     load_kv: null,
     save_kv: null,
+    voice_status: { installed: true, running: true, pid: 4242, state: "listening", state_age_s: 2, voice: "neosoul_g", rss_mb: 3123.4, launchd: false, dir: "/Users/taisun/projects/amara-voice" },
+    voice_list_voices: { voices: ["amara_ref", "neosoul", "neosoul_g"], current: "neosoul_g" },
+    voice_recent_turns: [
+      { time: "2026-10-28T13:05:00+09:00", heard: "Amara, what time is it?", text: "what time is it?", route: "local", reply: "It's one o five p.m.", asr_s: 0.4, total_s: 1.1, barged: null, verdict: "ok" },
+      { time: "2026-10-28T13:06:00+09:00", heard: "The Aikido, the akiya in Utsunomiya.", text: "", route: "ignored", ignored: "hint-echo", reply: "", asr_s: 0.9, barged: null, verdict: "noise" },
+      { time: "2026-10-28T13:07:00+09:00", heard: "Amara, how's the akiya search going?", text: "how's the akiya search going?", route: "hermes", reply: "Two new listings near Utsunomiya station came in this morning.", asr_s: 0.5, token_s: 2.1, first_audio_s: 5.4, total_s: 9.8, barged: null, verdict: "ok" },
+    ],
   };
 }

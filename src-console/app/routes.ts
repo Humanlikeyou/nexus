@@ -1,10 +1,10 @@
 import type { ModuleId } from "../types";
-import { BriefcaseBusiness, Bot, HeartPulse, MessagesSquare, Radio, Settings2, type LucideIcon } from "lucide-react";
+import { Activity, BriefcaseBusiness, Bot, HeartPulse, House, MessagesSquare, Radio, Settings2, type LucideIcon } from "lucide-react";
 
 export type SystemEntry = { id: ModuleId; label: string; signal: string; icon: LucideIcon };
 
-/** Six items in four groups, like macOS Settings (screen-specs Part 2). The first group is untitled
- *  (it sits under the wordmark). ⌘1–6 follow this order. */
+/** Eight items in four groups, like macOS Settings (screen-specs Part 2). The first group is untitled
+ *  (it sits under the wordmark). ⌘1–8 follow this order. Smart home sits last so existing shortcuts don't move. */
 export const SYSTEM_GROUPS: Array<{ label: string; systems: SystemEntry[] }> = [
   { label: "", systems: [
     { id: "terrance", label: "Home", signal: "AI", icon: Bot },
@@ -13,12 +13,14 @@ export const SYSTEM_GROUPS: Array<{ label: string; systems: SystemEntry[] }> = [
   { label: "Body & Mind", systems: [
     { id: "health", label: "Fitness", signal: "NOOP", icon: HeartPulse },
     { id: "neuro", label: "Neuro", signal: "EEG", icon: Radio },
+    { id: "mindbody", label: "Mind–Body", signal: "BODY", icon: Activity },
   ] },
   { label: "Work", systems: [
     { id: "business", label: "Business", signal: "WORK", icon: BriefcaseBusiness },
   ] },
   { label: "System", systems: [
     { id: "settings", label: "Settings", signal: "APP", icon: Settings2 },
+    { id: "smarthome", label: "Smart home", signal: "HA", icon: House },
   ] },
 ];
 
@@ -31,7 +33,7 @@ export type SubView = { view: string; label: string; screen: ModuleId };
 /** Sub-views per host. Interim: folded screens render as-is behind a SegmentedControl so nothing
  *  becomes unreachable; each host replaces its legacy screen as its spec (§5–§10) lands. */
 export const HOST_VIEWS: Partial<Record<ModuleId, SubView[]>> = {
-  chat: [{ view: "main", label: "Chat", screen: "chat" }, { view: "activity", label: "Activity", screen: "assistant" }, { view: "crews", label: "Crews", screen: "crews" }],
+  chat: [{ view: "main", label: "Chat", screen: "chat" }, { view: "activity", label: "Activity", screen: "assistant" }, { view: "crews", label: "Crews", screen: "crews" }, { view: "voice", label: "Voice", screen: "voice" }],
   neuro: [{ view: "main", label: "Live", screen: "neuro" }, { view: "history", label: "History", screen: "sessions" }],
   business: [{ view: "main", label: "Work", screen: "business" }, { view: "revenue", label: "Revenue", screen: "revenue" }],
 };

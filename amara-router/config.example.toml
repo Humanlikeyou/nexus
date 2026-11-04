@@ -1,0 +1,79 @@
+# Amara Router config. Copy to config.toml (git-ignored) and: chmod 600 config.toml
+# Model names must match `ollama list` exactly. Nothing is hard-coded in the binary.
+
+ollama_url = "http://127.0.0.1:11434"
+# Loopback listener (no auth). Must be a loopback address.
+bind = "127.0.0.1:8787"
+# Optional LAN listener (Bearer auth with AMARA_ROUTER_API_KEY from secrets_file). Off by default.
+# lan_bind = "0.0.0.0:8788"
+# 0600 env file with AMARA_ROUTER_API_KEY=... and/or ANTHROPIC_API_KEY=...
+# secrets_file = "~/.config/amara-router/secrets.env"
+
+[models]
+fast = "gemma4-12b-uncensored:latest"
+deep = "qwen3.8-uncensored:latest"
+# -1 = keep resident forever; "5m" = unload after 5 idle minutes.
+fast_keep_alive = -1
+deep_keep_alive = "5m"
+# Sent as options.num_ctx on every Ollama call (requests, classifier, warm-ups) so the model
+# is never loaded at its own default (131072 for gemma4: a 60-140 s cold load on low RAM).
+# 512-262144. Fast default 16384: Hermes's system prompt + tool schemas + recalled memory
+# need more than 8k, and Ollama silently cuts prompts longer than this. Deep default 8192.
+fast_num_ctx = 16384
+# Deep model context. Keep it modest: the KV cache of a 27B model grows fast.
+deep_num_ctx = 8192
+# `think` used when the caller does not set it. Fast: off (hidden reasoning costs seconds).
+# Deep: leave unset for the model default, or set true/false.
+fast_think = false
+# deep_think = true
+
+[routing]
+token_threshold = 2000
+trigger_phrases = ["think deeper", "think harder", "think deeply", "think more deeply", "deep think"]
+classifier = true
+# 100-10000 ms.
+classifier_timeout_ms = 2000
+# /api/ps check before classifying (50-2000 ms; it takes 340-620 ms during a model swap).
+# No answer in time: skip the classifier; a hard-looking prompt goes deep, otherwise fast.
+# Fast not resident: skip the classifier; a hard-looking prompt goes deep (loading it if
+# needed), otherwise fast (and fast starts loading).
+residency_check_timeout_ms = 1000
+# Characters of the message sent to the classifier (prompt evaluation is most of its latency).
+classifier_max_chars = 400
+
+[loading]
+# Background pre-warm at startup (never blocks). Deep is loaded after fast, if enabled.
+warm_fast_on_start = true
+warm_deep_on_start = false
+# Re-warm fast right after a deep answer, only if /api/ps shows VRAM headroom: loaded models'
+# size_vram + fast's last seen size_vram <= gpu_budget_gb. Otherwise the next fast request loads it.
+rewarm_fast_after_deep = true
+# GPU memory budget in GB (1-512). ~21 GB is usable by the GPU on this 32 GB Mac.
+gpu_budget_gb = 21.0
+# Unused (kept so older configs parse).
+poll_secs = 20
+# No first byte from Ollama within this (1000-300000 ms): HTTP 503 "Model loading, try again
+# shortly." while the load continues in the background.
+# Applies only when the model is not resident per /api/ps (or /api/ps does not answer).
+first_token_timeout_ms = 20000
+# When the model is resident (1000-600000 ms): Ollama streams nothing during prompt evaluation,
+# so a long prompt can be silent for a while. The 503 carries Retry-After: 10.
+first_token_timeout_resident_ms = 90000
+# Optional, OFF by default and not done by the router: let the GPU wire more RAM so fast and
+# deep can both stay loaded. Resets on reboot.  sudo sysctl iogpu.wired_limit_mb=26000
+
+[filler]
+# Streamed responses only: a short line sent before a deep-route answer.
+enabled = false
+text = "Give me a moment to think this through."
+
+[cloud]
+# Anthropic tier. OFF by default. When on, a warning is logged at start, and it is still used
+# only for requests that ask for Claude, never when NEXUS_OUTBOUND_DISABLED is set, never when
+# the caller sends X-Amara-Allow-Claude: 0, and only with ANTHROPIC_API_KEY in secrets_file.
+anthropic_enabled = false
+anthropic_model = "claude-haiku-4-5-20251001"
+
+[log]
+# JSONL, one line per request: timestamp, route, reason, model, latency, tokens. No content.
+path = "~/Library/Logs/amara-router/routes.jsonl"

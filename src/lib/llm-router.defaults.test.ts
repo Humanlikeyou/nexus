@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { buildRouterConfig } from "./llm-router";
 
-// Standing rule (2026-10-29): Nexus uses local Ollama only, gemma4 primary.
+// Compute mode "amara" (2026-10-31): the Amara Router at 127.0.0.1:8787 picks fast/deep.
 describe("buildRouterConfig defaults", () => {
-  it("defaults to local Ollama with gemma4:latest", () => {
-    expect(buildRouterConfig({})).toMatchObject({ mode: "local", ollama_model: "gemma4:latest" });
+  it("defaults to the Amara Router", () => {
+    expect(buildRouterConfig({})).toMatchObject({ mode: "amara", router_url: null });
+  });
+  it("passes a configured router URL through", () => {
+    expect(buildRouterConfig({ amara_router_url: "http://127.0.0.1:9000" }).router_url).toBe("http://127.0.0.1:9000");
   });
   it("maps a saved retired \"gateway\" compute_mode to local", () => {
     expect(buildRouterConfig({ compute_mode: "gateway" }).mode).toBe("local");
@@ -37,8 +40,8 @@ describe("background LLM jobs never route to OpenClaw", () => {
     }
     expect(sites).toBeGreaterThanOrEqual(10);
   });
-  it("the live config shape (compute_mode local) routes to Ollama gemma4", () => {
+  it("the live config shape (compute_mode local) stays local (router, no cloud)", () => {
     expect(buildRouterConfig({ compute_mode: "local", llm_ollama_model: "gemma4:latest" })).toMatchObject({ mode: "local", ollama_model: "gemma4:latest" });
-    expect(buildRouterConfig({ compute_mode: null })).toMatchObject({ mode: "local" });
+    expect(buildRouterConfig({ compute_mode: null })).toMatchObject({ mode: "amara" });
   });
 });

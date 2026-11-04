@@ -1,25 +1,28 @@
 /**
- * LLM Router — one Amara identity over three model tiers. Only the model changes.
+ * LLM Router — thin client for the Amara Router (`amara-router/`, default
+ * http://127.0.0.1:8787). The router is the ONLY place that picks a model: fast (resident) or
+ * deep (on demand), plus the optional cloud tier. This module only:
+ *   - builds the one Amara system prompt (Hermes SOUL.md persona + identity guard),
+ *   - forwards caller hints as headers (deep toggle, forced provider, tags, compute mode),
+ *   - forwards the "Allow Claude" gate as `X-Amara-Allow-Claude: 0|1`,
+ *   - logs usage (tier, tokens, cost) locally.
  *
- * Tiers:
- *   light  (default) — Gemma 12B through Ollama at the fixed loopback address
- *   deep            — Qwen 3.5-family through Ollama at the same address; chosen by the Deep
- *                     toggle, "think deeper", or a simple heuristic (long or multi-step prompts)
- *   claude (opt-in) — Anthropic. Reachable only when "Allow Claude" is on in Settings (saved
- *                     config, not the caller's), NEXUS_OUTBOUND_DISABLED is not set, a key exists,
- *                     mode is not local and the daily cap is not spent. Forcing the provider
- *                     never skips these checks.
+ * Compute modes (all go through the router):
+ *   amara  (default) — router decides; Claude never requested.
+ *   local            — same as amara (saved "gateway" maps here too).
+ *   hybrid / api     — the router is asked for Claude (api: always; hybrid: escalation tags).
+ *                      Still only when Settings › Allow Claude is on, NEXUS_OUTBOUND_DISABLED
+ *                      is unset and the daily cap is not spent; otherwise the app sends
+ *                      `X-Amara-Allow-Claude: 0` and the router answers deep instead. The
+ *                      router also needs its own cloud flag and key (off by default).
  *
- * Fallback: claude → deep → light; deep → light. Fallback never makes a network call.
- * Every tier gets the same system prompt (Hermes SOUL.md persona + identity guard), and
- * responses carry the tier only, never a model or provider name.
- *
- * The former "gateway" (OpenClaw) mode is retired: a saved "gateway" mode is treated as local.
+ * Responses and usage carry the tier only (light|deep|claude), never a model or provider name.
  *
  * Usage logging is written to:
  *   ~/Library/Application Support/com.taisun.nexus/llm_usage.json
  */
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -28,48 +31,46 @@ use std::time::Instant;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RouterConfig {
-    pub mode: String, // "local" | "hybrid" | "api"
+    pub mode: String, // "amara" | "local" | "hybrid" | "api"
     pub ollama_model: String,
     pub anthropic_model: String,
     pub token_threshold: u32,
     pub daily_cap_usd: Option<f64>,
     pub per_task_cap_usd: Option<f64>,
     pub show_cost_estimate: bool,
+    /// Amara Router base URL. Loopback only; None or anything else = DEFAULT_ROUTER_URL.
+    #[serde(default)]
+    pub router_url: Option<String>,
 }
 
-/// Telegram chat's model (gemma4-only, 576e5a2). The chat tiers use LIGHT_MODEL / DEEP_MODEL.
+/// Telegram chat's model (gemma4-only, 576e5a2); not used by the router client.
 pub const DEFAULT_OLLAMA_MODEL: &str = "gemma4:latest";
-/// Light tier: Gemma 12B, the same model Hermes/Amara runs on.
-pub const LIGHT_MODEL: &str = "gemma4-12b-uncensored:latest";
-/// Deep tier: Qwen 3.5-family 27B (Ollama architecture `qwen35`).
-pub const DEEP_MODEL: &str = "qwen3.8-uncensored:latest";
-/// Fixed loopback Ollama endpoint for both local tiers (no env override, by design).
-const OLLAMA_CHAT_URL: &str = "http://127.0.0.1:11434/api/chat";
-const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
-/// Retired OpenClaw compute mode; mapped to local Ollama wherever it appears.
+pub const DEFAULT_ROUTER_URL: &str = "http://127.0.0.1:8787";
+pub const DEFAULT_MODE: &str = "amara";
+/// Retired OpenClaw compute mode; treated like "local".
 const RETIRED_GATEWAY_MODE: &str = "gateway";
-/// Deep heuristic: prompts over ~1,600 characters.
-pub const DEEP_TOKEN_THRESHOLD: u32 = 400;
-/// Deep heuristic: this many numbered or bulleted lines make a multi-step task.
-const DEEP_STEP_LINES: usize = 3;
 const PERSONA_MAX_BYTES: u64 = 64 * 1024;
-const UNAVAILABLE: &str = "Amara isn't responding right now. Check that Ollama is running.";
+const ROUTER_DOWN: &str =
+    "Amara isn't responding right now. Check that the Amara router is running.";
+const OLLAMA_DOWN: &str = "Amara isn't responding right now. Check that Ollama is running.";
+const ROUTER_FAILED: &str = "Amara couldn't answer right now. Details are in the Amara router log.";
 
 impl Default for RouterConfig {
     fn default() -> Self {
         Self {
-            // Standing rule: local Ollama only.
-            mode: "local".to_string(),
+            mode: DEFAULT_MODE.to_string(),
             ollama_model: DEFAULT_OLLAMA_MODEL.to_string(),
             anthropic_model: "claude-haiku-4-5-20251001".to_string(),
             token_threshold: 8000,
             daily_cap_usd: Some(5.0),
             per_task_cap_usd: Some(0.10),
             show_cost_estimate: true,
+            router_url: None,
         }
     }
 }
 
+/// Amara's tier as the app reports it. The router's `fast` is shown as `light`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Tier {
@@ -77,6 +78,17 @@ pub enum Tier {
     Light,
     Deep,
     Claude,
+}
+
+impl Tier {
+    /// The router's `amara.tier` / `X-Amara-Tier` value.
+    pub fn from_router(s: &str) -> Tier {
+        match s {
+            "deep" => Tier::Deep,
+            "claude" => Tier::Claude,
+            _ => Tier::Light,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -199,92 +211,20 @@ fn daily_spend_usd(records: &[LlmUsageRecord]) -> f64 {
         .sum()
 }
 
-// ─── Tier selection ───────────────────────────────────────────────────────────
+// ─── The Claude gate (forwarded to the router) ────────────────────────────────
 
-/// Why the deep tier is wanted, or None. Simple on purpose: the toggle, an explicit ask,
-/// a long prompt, or a multi-step task.
-pub fn deep_reason(text: &str, deep_toggle: bool) -> Option<&'static str> {
-    if deep_toggle {
-        return Some("deep_toggle");
-    }
-    let lower = text.to_lowercase();
-    if [
-        "think deeper",
-        "think harder",
-        "think deeply",
-        "think more deeply",
-    ]
-    .iter()
-    .any(|p| lower.contains(p))
-    {
-        return Some("asked_to_think_deeper");
-    }
-    if estimate_tokens(text) > DEEP_TOKEN_THRESHOLD {
-        return Some("long_prompt");
-    }
-    let step_lines = text
-        .lines()
-        .map(str::trim_start)
-        .filter(|l| {
-            let digits = l.chars().take_while(char::is_ascii_digit).count();
-            (digits > 0 && matches!(l[digits..].chars().next(), Some('.' | ')')))
-                || l.starts_with("- ")
-                || l.starts_with("* ")
-                || l.starts_with("• ")
-        })
-        .count();
-    if step_lines >= DEEP_STEP_LINES || lower.contains("step by step") {
-        return Some("multi_step");
-    }
-    None
-}
-
-/// The tier asked for, before the Claude gate. Claude is only ever *requested* here.
-pub fn requested_tier(
-    config: &RouterConfig,
-    text: &str,
-    tags: &[String],
-    deep_toggle: bool,
-    force_provider: Option<&str>,
-) -> (Tier, String) {
-    match force_provider {
-        Some("anthropic" | "claude") => return (Tier::Claude, "force_provider".to_string()),
-        Some("deep") => return (Tier::Deep, "force_provider".to_string()),
-        Some("light" | "ollama" | RETIRED_GATEWAY_MODE) => {
-            return (Tier::Light, "force_provider".to_string())
-        }
-        _ => {}
-    }
-    let escalation_tag = tags
-        .iter()
-        .find(|t| ["heavy", "research", "code", "long"].contains(&t.as_str()));
-    let claude_wanted = config.mode == "api"
-        || (config.mode == "hybrid"
-            && (escalation_tag.is_some() || estimate_tokens(text) > config.token_threshold));
-    if claude_wanted {
-        return (Tier::Claude, format!("mode={}", config.mode));
-    }
-    if let Some(reason) = deep_reason(text, deep_toggle) {
-        return (Tier::Deep, reason.to_string());
-    }
-    if let Some(tag) = escalation_tag {
-        return (Tier::Deep, format!("tag={tag}"));
-    }
-    (Tier::Light, "default".to_string())
-}
-
-/// Everything that must hold before a request may leave the Mac.
+/// Everything the app must allow before the router may use the cloud. The router adds its own
+/// checks (cloud flag, key, its own NEXUS_OUTBOUND_DISABLED).
 #[derive(Clone, Copy, Debug)]
 pub struct ClaudeGate {
     pub allow_claude: bool,
     pub outbound_disabled: bool,
-    pub has_key: bool,
     pub local_mode: bool,
     pub over_daily_cap: bool,
 }
 
 impl ClaudeGate {
-    /// The first failing check, or None when Claude may be called.
+    /// The first failing check, or None when the router may be allowed to call Claude.
     pub fn blocked(&self) -> Option<&'static str> {
         if self.outbound_disabled {
             Some("outbound_disabled")
@@ -292,8 +232,6 @@ impl ClaudeGate {
             Some("local_mode")
         } else if !self.allow_claude {
             Some("claude_not_allowed")
-        } else if !self.has_key {
-            Some("no_key")
         } else if self.over_daily_cap {
             Some("daily_cap")
         } else {
@@ -302,13 +240,132 @@ impl ClaudeGate {
     }
 }
 
-/// Tiers to try, in order. Claude appears only first, and only when the gate is open.
-pub fn tier_plan(requested: Tier, gate: &ClaudeGate) -> Vec<Tier> {
-    match requested {
-        Tier::Claude if gate.blocked().is_none() => vec![Tier::Claude, Tier::Deep, Tier::Light],
-        Tier::Claude | Tier::Deep => vec![Tier::Deep, Tier::Light],
-        Tier::Light => vec![Tier::Light],
+fn is_cloud_mode(mode: &str) -> bool {
+    mode == "api" || mode == "hybrid"
+}
+
+fn claude_gate(config: &RouterConfig, daily_spent: f64) -> ClaudeGate {
+    ClaudeGate {
+        allow_claude: crate::commands::telegram::load_config()
+            .allow_claude
+            .unwrap_or(false),
+        outbound_disabled: crate::commands::telegram::outbound_disabled(),
+        local_mode: !is_cloud_mode(&config.mode),
+        over_daily_cap: config.daily_cap_usd.is_some_and(|cap| daily_spent >= cap),
     }
+}
+
+// ─── Request building ─────────────────────────────────────────────────────────
+
+/// The router base URL: the caller's, else the saved one, else the default. Loopback only, so
+/// the app never sends notes to another machine through this setting.
+pub fn router_base(passed: Option<&str>, saved: Option<&str>) -> String {
+    [passed, saved]
+        .into_iter()
+        .flatten()
+        .find_map(loopback_base)
+        .unwrap_or_else(|| DEFAULT_ROUTER_URL.to_string())
+}
+
+/// `http://<loopback host>[:port]`, rebuilt from the parsed URL, or None. Parsing (rather than
+/// splitting the string) closes userinfo tricks like `http://127.0.0.1@evil.example` and
+/// `http://localhost:1@evil.example:8787`; any path, query or fragment is refused too.
+fn loopback_base(raw: &str) -> Option<String> {
+    let u = reqwest::Url::parse(raw.trim()).ok()?;
+    let host = u.host_str()?.to_string();
+    let loopback = host == "localhost"
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    if !loopback {
+        return None;
+    }
+    let clean = u.scheme() == "http"
+        && u.username().is_empty()
+        && u.password().is_none()
+        && matches!(u.path(), "" | "/")
+        && u.query().is_none()
+        && u.fragment().is_none();
+    clean.then(|| match u.port() {
+        Some(port) => format!("http://{host}:{port}"),
+        None => format!("http://{host}"),
+    })
+}
+
+/// The router is loopback-only, so a redirect from it is never legitimate: don't follow one off the Mac.
+fn no_redirect_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_default()
+}
+
+/// Routing hints for the router as header pairs. The router decides; these only ask.
+pub fn router_headers(
+    config: &RouterConfig,
+    tags: &[String],
+    deep_toggle: bool,
+    force_provider: Option<&str>,
+    gate: &ClaudeGate,
+) -> Vec<(&'static str, String)> {
+    let mode = match config.mode.as_str() {
+        RETIRED_GATEWAY_MODE | "" => "local",
+        m => m,
+    };
+    let mut h = vec![
+        (
+            "X-Amara-Allow-Claude",
+            if gate.blocked().is_none() { "1" } else { "0" }.to_string(),
+        ),
+        ("X-Amara-Mode", mode.to_string()),
+    ];
+    let route = match force_provider {
+        Some("anthropic" | "claude") => Some("claude"),
+        Some("deep") => Some("deep"),
+        Some("light" | "fast" | "ollama" | RETIRED_GATEWAY_MODE) => Some("fast"),
+        _ if deep_toggle => Some("deep"),
+        _ => None,
+    };
+    if let Some(r) = route {
+        h.push(("X-Amara-Route", r.to_string()));
+    }
+    let tags: Vec<&str> = tags
+        .iter()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty() && !t.contains([',', '\r', '\n']))
+        .collect();
+    if !tags.is_empty() {
+        h.push(("X-Amara-Tags", tags.join(",")));
+    }
+    h
+}
+
+/// OpenAI chat body: the one system prompt + the user text, non-streamed.
+pub fn router_body(system: &str, text: &str) -> Value {
+    json!({
+        "model": "amara",
+        "stream": false,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": text}
+        ]
+    })
+}
+
+/// (content, tier, reason, prompt_tokens, completion_tokens) from the router's JSON reply.
+pub fn parse_router_reply(v: &Value) -> Result<(String, Tier, String, u32, u32), String> {
+    let content = v["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or("router reply has no content")?;
+    Ok((
+        content.trim().to_string(),
+        Tier::from_router(v["amara"]["tier"].as_str().unwrap_or("fast")),
+        v["amara"]["reason"].as_str().unwrap_or("").to_string(),
+        v["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+        v["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32,
+    ))
 }
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
@@ -337,177 +394,81 @@ pub fn system_prompt(persona: &str) -> String {
     format!("{persona}\n\n{IDENTITY_GUARD}")
 }
 
-// ─── Provider callers ─────────────────────────────────────────────────────────
+// ─── Transport ────────────────────────────────────────────────────────────────
 
-fn strip_thinking_tags(s: &str) -> String {
-    let mut result = s.to_string();
-    while let (Some(start), Some(end)) = (result.find("<think>"), result.find("</think>")) {
-        if start < end {
-            result = format!("{}{}", &result[..start], &result[end + "</think>".len()..]);
-        } else {
-            break;
-        }
-    }
-    result.trim().to_string()
-}
-
-/// (content, prompt_tokens, completion_tokens)
-type Reply = (String, u32, u32);
-
-/// The two transports. Tests swap in a mock to prove which requests are (not) made.
-pub(crate) trait TierBackend {
-    async fn ollama(&self, model: &str, system: &str, text: &str) -> Result<Reply, String>;
-    async fn anthropic(
+/// POSTs JSON to the router. Tests swap in a mock to see exactly what is sent.
+pub(crate) trait RouterTransport {
+    /// Ok((status, body)); Err on connection failure.
+    async fn post(
         &self,
-        model: &str,
-        system: &str,
-        text: &str,
-        key: &str,
-    ) -> Result<Reply, String>;
+        url: &str,
+        headers: &[(&'static str, String)],
+        body: &Value,
+        timeout_secs: u64,
+    ) -> Result<(u16, Value), String>;
 }
 
-struct HttpBackend {
+struct HttpTransport {
     client: reqwest::Client,
 }
 
-impl TierBackend for HttpBackend {
-    async fn ollama(&self, model: &str, system: &str, text: &str) -> Result<Reply, String> {
-        let resp = self
-            .client
-            .post(OLLAMA_CHAT_URL)
-            .json(&serde_json::json!({
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": text}
-                ],
-                "stream": false
-            }))
-            .timeout(std::time::Duration::from_secs(180))
-            .send()
-            .await
-            .map_err(|e| format!("Ollama unreachable ({e})"))?;
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Ollama parse error: {e}"))?;
-        if let Some(err) = body["error"].as_str() {
-            return Err(format!("Ollama: {err}"));
-        }
-        let content = body["message"]["content"]
-            .as_str()
-            .ok_or_else(|| "Ollama: no content in response".to_string())?;
-        Ok((
-            strip_thinking_tags(content),
-            body["prompt_eval_count"].as_u64().unwrap_or(0) as u32,
-            body["eval_count"].as_u64().unwrap_or(0) as u32,
-        ))
-    }
-
-    async fn anthropic(
+impl RouterTransport for HttpTransport {
+    async fn post(
         &self,
-        model: &str,
-        system: &str,
-        text: &str,
-        key: &str,
-    ) -> Result<Reply, String> {
-        let resp = self
+        url: &str,
+        headers: &[(&'static str, String)],
+        body: &Value,
+        timeout_secs: u64,
+    ) -> Result<(u16, Value), String> {
+        let mut req = self
             .client
-            .post(ANTHROPIC_URL)
-            .header("x-api-key", key)
-            .header("anthropic-version", "2023-06-01")
-            .header("content-type", "application/json")
-            .json(&serde_json::json!({
-                "model": model,
-                "max_tokens": 4096,
-                "system": system,
-                "messages": [{"role": "user", "content": text}]
-            }))
-            .timeout(std::time::Duration::from_secs(60))
+            .post(url)
+            .json(body)
+            .timeout(std::time::Duration::from_secs(timeout_secs));
+        for (k, v) in headers {
+            req = req.header(*k, v);
+        }
+        let resp = req
             .send()
             .await
-            .map_err(|e| format!("Anthropic unreachable: {e}"))?;
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Anthropic parse error: {e}"))?;
-        if let Some(err) = body["error"]["message"].as_str() {
-            return Err(format!("Anthropic: {err}"));
+            .map_err(|e| format!("router unreachable: {e}"))?;
+        let status = resp.status().as_u16();
+        let v = resp.json().await.unwrap_or(Value::Null);
+        Ok((status, v))
+    }
+}
+
+/// One chat turn through the router. Errors are logged with detail; the caller only ever
+/// sees fixed text, so no model or provider name leaks into the UI.
+pub(crate) async fn ask_router(
+    transport: &impl RouterTransport,
+    base: &str,
+    headers: &[(&'static str, String)],
+    body: &Value,
+) -> Result<(String, Tier, String, u32, u32), String> {
+    let url = format!("{base}/v1/chat/completions");
+    // Generous: the deep model may have to load first.
+    let (status, v) = transport
+        .post(&url, headers, body, 600)
+        .await
+        .map_err(|e| {
+            eprintln!("[llm_router] {e}");
+            ROUTER_DOWN.to_string()
+        })?;
+    if !(200..300).contains(&status) {
+        let detail = v["error"]["message"].as_str().unwrap_or("");
+        eprintln!("[llm_router] router HTTP {status}: {detail}");
+        return Err(if status == 503 {
+            OLLAMA_DOWN
+        } else {
+            ROUTER_FAILED
         }
-        let content = body["content"][0]["text"]
-            .as_str()
-            .ok_or_else(|| "Anthropic: no content in response".to_string())?;
-        Ok((
-            content.to_string(),
-            body["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32,
-            body["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32,
-        ))
+        .to_string());
     }
-}
-
-/// Runs the plan in order. Errors are logged locally with detail; the caller only ever sees
-/// fixed text, so no model or provider name leaks into the UI.
-pub(crate) async fn run_plan(
-    backend: &impl TierBackend,
-    plan: &[Tier],
-    config: &RouterConfig,
-    system: &str,
-    text: &str,
-    key: &str,
-) -> Result<(Tier, Reply, Vec<Tier>), String> {
-    let mut failed = Vec::new();
-    for &tier in plan {
-        let result = match tier {
-            Tier::Light => backend.ollama(LIGHT_MODEL, system, text).await,
-            Tier::Deep => backend.ollama(DEEP_MODEL, system, text).await,
-            Tier::Claude => {
-                backend
-                    .anthropic(&config.anthropic_model, system, text, key)
-                    .await
-            }
-        };
-        match result {
-            Ok(reply) => return Ok((tier, reply, failed)),
-            Err(e) => {
-                eprintln!("[llm_router] {tier:?} tier failed: {e}");
-                failed.push(tier);
-            }
-        }
-    }
-    Err(UNAVAILABLE.to_string())
-}
-
-fn claude_gate(config: &RouterConfig, key: &str, daily_spent: f64) -> ClaudeGate {
-    ClaudeGate {
-        allow_claude: crate::commands::telegram::load_config()
-            .allow_claude
-            .unwrap_or(false),
-        outbound_disabled: crate::commands::telegram::outbound_disabled(),
-        has_key: !key.trim().is_empty(),
-        local_mode: config.mode != "api" && config.mode != "hybrid",
-        over_daily_cap: config.daily_cap_usd.is_some_and(|cap| daily_spent >= cap),
-    }
-}
-
-/// The key from the caller, else the saved one.
-fn anthropic_key(passed: Option<String>) -> String {
-    passed
-        .filter(|k| !k.trim().is_empty())
-        .or_else(|| crate::commands::telegram::load_config().anthropic_api_key)
-        .unwrap_or_default()
-}
-
-fn routing_reason(requested: Tier, why: &str, gate: &ClaudeGate, failed: &[Tier]) -> String {
-    let mut reason = why.to_string();
-    if requested == Tier::Claude {
-        if let Some(block) = gate.blocked() {
-            reason.push_str(&format!("; claude_blocked={block}"));
-        }
-    }
-    for tier in failed {
-        reason.push_str(&format!("; {tier:?}_failed").to_lowercase());
-    }
-    reason
+    parse_router_reply(&v).map_err(|e| {
+        eprintln!("[llm_router] {e}");
+        ROUTER_FAILED.to_string()
+    })
 }
 
 // ─── Tauri commands ───────────────────────────────────────────────────────────
@@ -521,28 +482,36 @@ pub async fn chat_with_router(
     anthropic_api_key: Option<String>,
     deep: Option<bool>,
 ) -> Result<RouterResponse, String> {
-    let key = anthropic_key(anthropic_api_key);
-    let daily_spent = daily_spend_usd(&load_usage_records());
-    let gate = claude_gate(&config, &key, daily_spent);
-    let (requested, why) = requested_tier(
+    // The cloud key now lives in the router's 0600 secrets file; a passed key is ignored.
+    let _ = anthropic_api_key;
+    let saved = crate::commands::telegram::load_config();
+    let base = router_base(
+        config.router_url.as_deref(),
+        saved.amara_router_url.as_deref(),
+    );
+    let gate = claude_gate(&config, daily_spend_usd(&load_usage_records()));
+    let headers = router_headers(
         &config,
-        &text,
         &tags,
         deep.unwrap_or(false),
         force_provider.as_deref(),
+        &gate,
     );
-    let plan = tier_plan(requested, &gate);
-    let system = system_prompt(&amara_persona());
+    let body = router_body(&system_prompt(&amara_persona()), &text);
 
     let start = Instant::now();
-    let backend = HttpBackend {
-        client: reqwest::Client::new(),
+    let transport = HttpTransport {
+        client: no_redirect_client(),
     };
-    let (tier, (content, prompt_tokens, completion_tokens), failed) =
-        run_plan(&backend, &plan, &config, &system, &text, &key).await?;
+    let (content, tier, mut reason, prompt_tokens, completion_tokens) =
+        ask_router(&transport, &base, &headers, &body).await?;
     let latency_ms = start.elapsed().as_millis() as u64;
     let cost = tier_cost(tier, &config, prompt_tokens, completion_tokens);
-    let reason = routing_reason(requested, &why, &gate, &failed);
+    if let Some(block) = gate.blocked().filter(|_| is_cloud_mode(&config.mode)) {
+        if !reason.contains("claude_blocked") {
+            reason.push_str(&format!("; app_claude_gate={block}"));
+        }
+    }
 
     append_usage_record(LlmUsageRecord {
         id: uuid::Uuid::new_v4().to_string(),
@@ -569,6 +538,7 @@ pub async fn chat_with_router(
     })
 }
 
+/// Asks the router's dry-run endpoint which tier it would use (may run its classifier).
 #[tauri::command]
 pub async fn get_cost_estimate(
     text: String,
@@ -577,15 +547,36 @@ pub async fn get_cost_estimate(
     deep: Option<bool>,
 ) -> Result<CostEstimate, String> {
     let estimated_tokens = estimate_tokens(&text);
-    let key = anthropic_key(None);
-    let gate = claude_gate(&config, &key, daily_spend_usd(&load_usage_records()));
-    let (requested, why) = requested_tier(&config, &text, &tags, deep.unwrap_or(false), None);
-    let tier = tier_plan(requested, &gate)[0];
+    let saved = crate::commands::telegram::load_config();
+    let base = router_base(
+        config.router_url.as_deref(),
+        saved.amara_router_url.as_deref(),
+    );
+    let gate = claude_gate(&config, daily_spend_usd(&load_usage_records()));
+    let headers = router_headers(&config, &tags, deep.unwrap_or(false), None, &gate);
+    let transport = HttpTransport {
+        client: no_redirect_client(),
+    };
+    let (tier, reason) = match transport
+        .post(
+            &format!("{base}/amara/route"),
+            &headers,
+            &json!({ "text": text }),
+            5,
+        )
+        .await
+    {
+        Ok((200, v)) => (
+            Tier::from_router(v["tier"].as_str().unwrap_or("fast")),
+            v["reason"].as_str().unwrap_or("").to_string(),
+        ),
+        _ => (Tier::Light, "router_unreachable".to_string()),
+    };
     Ok(CostEstimate {
         tier,
         estimated_input_tokens: estimated_tokens,
         estimated_cost_usd: tier_cost(tier, &config, estimated_tokens, estimated_tokens / 2),
-        routing_reason: routing_reason(requested, &why, &gate, &[]),
+        routing_reason: reason,
     })
 }
 
@@ -636,298 +627,251 @@ mod tests {
         ClaudeGate {
             allow_claude: true,
             outbound_disabled: false,
-            has_key: true,
             local_mode: false,
             over_daily_cap: false,
         }
     }
 
-    /// Records every request; models listed in `fail` return an error.
-    #[derive(Default)]
-    struct MockBackend {
-        fail: Vec<&'static str>,
-        calls: RefCell<Vec<(String, String)>>, // (model, system prompt)
-        anthropic_calls: RefCell<u32>,
+    fn header<'a>(h: &'a [(&'static str, String)], k: &str) -> Option<&'a str> {
+        h.iter().find(|(n, _)| *n == k).map(|(_, v)| v.as_str())
     }
 
-    impl TierBackend for MockBackend {
-        async fn ollama(&self, model: &str, system: &str, _text: &str) -> Result<Reply, String> {
-            self.calls
-                .borrow_mut()
-                .push((model.to_string(), system.to_string()));
-            if self.fail.contains(&model) {
-                Err("down".into())
-            } else {
-                Ok((format!("from {model}"), 1, 1))
+    /// (url, headers, body) of one request.
+    type Seen = (String, Vec<(&'static str, String)>, Value);
+
+    /// Records every request and answers with a canned status/body.
+    struct MockTransport {
+        reply: Result<(u16, Value), String>,
+        seen: RefCell<Vec<Seen>>,
+    }
+
+    impl MockTransport {
+        fn new(reply: Result<(u16, Value), String>) -> Self {
+            Self {
+                reply,
+                seen: RefCell::new(vec![]),
             }
         }
-        async fn anthropic(
+    }
+
+    impl RouterTransport for MockTransport {
+        async fn post(
             &self,
-            model: &str,
-            system: &str,
-            _text: &str,
-            _key: &str,
-        ) -> Result<Reply, String> {
-            *self.anthropic_calls.borrow_mut() += 1;
-            self.calls
+            url: &str,
+            headers: &[(&'static str, String)],
+            body: &Value,
+            _t: u64,
+        ) -> Result<(u16, Value), String> {
+            self.seen
                 .borrow_mut()
-                .push((model.to_string(), system.to_string()));
-            if self.fail.contains(&"claude") {
-                Err("down".into())
-            } else {
-                Ok(("from claude".into(), 1, 1))
-            }
+                .push((url.to_string(), headers.to_vec(), body.clone()));
+            self.reply.clone()
         }
     }
 
-    // ── tier selection ──
+    fn router_ok(tier: &str) -> Value {
+        json!({
+            "choices": [{"message": {"role": "assistant", "content": " hi "}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+            "amara": {"tier": tier, "reason": "classifier_easy", "routing_ms": 300}
+        })
+    }
+
+    // ── defaults ──
 
     #[test]
-    fn default_is_light_in_local_mode() {
-        let (t, why) = requested_tier(&cfg("local"), "hi there", &[], false, None);
-        assert_eq!(t, Tier::Light);
-        assert_eq!(why, "default");
-        assert_eq!(RouterConfig::default().mode, "local");
+    fn default_mode_is_amara_via_the_router() {
+        let c = RouterConfig::default();
+        assert_eq!(c.mode, "amara");
+        assert_eq!(router_base(None, None), "http://127.0.0.1:8787");
+        // A config saved by an older build (no router_url) still deserialises.
+        let old: RouterConfig = serde_json::from_value(json!({
+            "mode": "local", "ollama_model": "gemma4:latest", "anthropic_model": "x",
+            "token_threshold": 1, "daily_cap_usd": null, "per_task_cap_usd": null,
+            "show_cost_estimate": true
+        }))
+        .unwrap();
+        assert!(old.router_url.is_none());
     }
 
     #[test]
-    fn deep_toggle_and_think_deeper_pick_deep() {
+    fn router_url_is_configurable_but_loopback_only() {
         assert_eq!(
-            requested_tier(&cfg("local"), "hi", &[], true, None).0,
-            Tier::Deep
+            router_base(Some("http://127.0.0.1:9999/"), None),
+            "http://127.0.0.1:9999"
         );
-        assert_eq!(deep_reason("hi", true), Some("deep_toggle"));
         assert_eq!(
-            deep_reason("Can you Think Deeper about this?", false),
-            Some("asked_to_think_deeper")
+            router_base(None, Some("http://localhost:8788")),
+            "http://localhost:8788"
+        );
+        assert_eq!(
+            router_base(Some("http://192.168.1.5:8787"), None),
+            DEFAULT_ROUTER_URL
+        );
+        assert_eq!(
+            router_base(Some("https://evil.example"), Some("http://127.0.0.1:1")),
+            "http://127.0.0.1:1"
+        );
+        assert_eq!(
+            router_base(Some("http://127.0.0.1.evil.com"), None),
+            DEFAULT_ROUTER_URL
+        );
+        for trick in [
+            "http://127.0.0.1@evil.example",
+            "http://localhost:1@evil.example:8787",
+            "http://user:pw@127.0.0.1:8787",
+            "http://127.0.0.1:8787/v1?x=1",
+            "http://127.0.0.1:8787#frag",
+        ] {
+            assert_eq!(
+                router_base(Some(trick), None),
+                "http://127.0.0.1:8787",
+                "{trick}"
+            );
+        }
+        assert_eq!(
+            router_base(Some("http://[::1]:8787"), None),
+            "http://[::1]:8787"
+        );
+    }
+
+    // ── hints forwarded (no model decisions in the app) ──
+
+    #[test]
+    fn plain_request_sends_no_route_hint() {
+        let h = router_headers(&cfg("amara"), &[], false, None, &open_gate());
+        assert_eq!(header(&h, "X-Amara-Route"), None);
+        assert_eq!(header(&h, "X-Amara-Mode"), Some("amara"));
+        // Long or multi-step text is the router's call now; the app adds nothing.
+        let b = router_body("sys", &"1. a\n2. b\n3. c ".repeat(500));
+        assert_eq!(b["model"], "amara");
+        assert_eq!(b["messages"][0]["content"], "sys");
+    }
+
+    #[test]
+    fn deep_toggle_force_provider_and_tags_become_headers() {
+        let g = open_gate();
+        let c = cfg("amara");
+        assert_eq!(
+            header(&router_headers(&c, &[], true, None, &g), "X-Amara-Route"),
+            Some("deep")
+        );
+        assert_eq!(
+            header(
+                &router_headers(&c, &[], false, Some("deep"), &g),
+                "X-Amara-Route"
+            ),
+            Some("deep")
+        );
+        assert_eq!(
+            header(
+                &router_headers(&c, &[], true, Some("light"), &g),
+                "X-Amara-Route"
+            ),
+            Some("fast")
+        );
+        assert_eq!(
+            header(
+                &router_headers(&c, &[], false, Some("anthropic"), &g),
+                "X-Amara-Route"
+            ),
+            Some("claude")
+        );
+        let tags = vec!["heavy".to_string(), "bad,tag".to_string(), " ".to_string()];
+        assert_eq!(
+            header(&router_headers(&c, &tags, false, None, &g), "X-Amara-Tags"),
+            Some("heavy")
         );
     }
 
     #[test]
-    fn deep_heuristic_long_and_multi_step() {
-        assert_eq!(deep_reason(&"a".repeat(1_604), false), Some("long_prompt"));
-        assert_eq!(deep_reason(&"a".repeat(1_600), false), None);
-        assert_eq!(
-            deep_reason("Plan:\n1. book\n2) pack\n3. go", false),
-            Some("multi_step")
-        );
-        assert_eq!(
-            deep_reason("- one\n- two\n* three", false),
-            Some("multi_step")
-        );
-        assert_eq!(deep_reason("- one\n- two", false), None);
-        assert_eq!(
-            deep_reason("walk me through it step by step", false),
-            Some("multi_step")
-        );
-        assert_eq!(deep_reason("what's the weather", false), None);
+    fn retired_gateway_mode_is_local() {
+        let h = router_headers(&cfg("gateway"), &[], false, Some("gateway"), &open_gate());
+        assert_eq!(header(&h, "X-Amara-Mode"), Some("local"));
+        assert_eq!(header(&h, "X-Amara-Route"), Some("fast"));
     }
 
-    #[test]
-    fn escalation_tag_goes_deep_in_local_mode() {
-        let tags = vec!["heavy".to_string()];
-        let (t, why) = requested_tier(&cfg("local"), "hi", &tags, false, None);
-        assert_eq!(t, Tier::Deep);
-        assert_eq!(why, "tag=heavy");
-    }
-
-    #[test]
-    fn claude_only_requested_by_api_hybrid_escalation_or_force() {
-        assert_eq!(
-            requested_tier(&cfg("api"), "hi", &[], false, None).0,
-            Tier::Claude
-        );
-        assert_eq!(
-            requested_tier(&cfg("hybrid"), "hi", &["research".into()], false, None).0,
-            Tier::Claude
-        );
-        assert_eq!(
-            requested_tier(&cfg("hybrid"), "hi", &[], false, None).0,
-            Tier::Light
-        );
-        assert_eq!(
-            requested_tier(&cfg("local"), "hi", &[], false, Some("anthropic")).0,
-            Tier::Claude
-        );
-    }
-
-    #[test]
-    fn retired_gateway_is_light() {
-        assert_eq!(
-            requested_tier(&cfg("gateway"), "hi", &[], false, Some("gateway")).0,
-            Tier::Light
-        );
-    }
-
-    // ── the Claude gate ──
+    // ── the Claude gate, forwarded ──
 
     type BreakGate = fn(&mut ClaudeGate);
 
     #[test]
-    fn gate_blocks_each_missing_condition() {
+    fn gate_blocks_each_missing_condition_and_forwards_zero() {
         assert_eq!(open_gate().blocked(), None);
-        let cases: [(BreakGate, &str); 5] = [
+        let h = router_headers(&cfg("api"), &[], false, Some("anthropic"), &open_gate());
+        assert_eq!(header(&h, "X-Amara-Allow-Claude"), Some("1"));
+        let cases: [(BreakGate, &str); 4] = [
             (|g| g.outbound_disabled = true, "outbound_disabled"),
             (|g| g.local_mode = true, "local_mode"),
             (|g| g.allow_claude = false, "claude_not_allowed"),
-            (|g| g.has_key = false, "no_key"),
             (|g| g.over_daily_cap = true, "daily_cap"),
         ];
         for (break_it, want) in cases {
             let mut g = open_gate();
             break_it(&mut g);
             assert_eq!(g.blocked(), Some(want));
-            assert_eq!(tier_plan(Tier::Claude, &g), vec![Tier::Deep, Tier::Light]);
+            // Forcing the provider never bypasses the gate.
+            let h = router_headers(&cfg("api"), &[], false, Some("anthropic"), &g);
+            assert_eq!(header(&h, "X-Amara-Allow-Claude"), Some("0"), "{want}");
         }
-    }
-
-    async fn forced_claude_requests(gate: ClaudeGate, mode: &str) -> u32 {
-        let backend = MockBackend::default();
-        let config = cfg(mode);
-        let (requested, _) = requested_tier(&config, "hi", &[], false, Some("anthropic"));
-        let plan = tier_plan(requested, &gate);
-        let (tier, _, _) = run_plan(&backend, &plan, &config, "sys", "hi", "k")
-            .await
-            .unwrap();
-        assert_eq!(tier, Tier::Deep);
-        let n = *backend.anthropic_calls.borrow();
-        n
-    }
-
-    #[tokio::test]
-    async fn no_anthropic_request_under_outbound_disabled() {
-        let gate = ClaudeGate {
-            outbound_disabled: true,
-            ..open_gate()
-        };
-        assert_eq!(forced_claude_requests(gate, "api").await, 0);
-    }
-
-    #[tokio::test]
-    async fn no_anthropic_request_in_local_mode_even_when_forced() {
-        let gate = ClaudeGate {
-            local_mode: true,
-            ..open_gate()
-        };
-        assert_eq!(forced_claude_requests(gate, "local").await, 0);
-    }
-
-    #[tokio::test]
-    async fn no_anthropic_request_without_the_toggle() {
-        let gate = ClaudeGate {
-            allow_claude: false,
-            ..open_gate()
-        };
-        assert_eq!(forced_claude_requests(gate, "api").await, 0);
-    }
-
-    #[tokio::test]
-    async fn no_anthropic_request_without_a_key() {
-        let gate = ClaudeGate {
-            has_key: false,
-            ..open_gate()
-        };
-        assert_eq!(forced_claude_requests(gate, "api").await, 0);
-    }
-
-    #[tokio::test]
-    async fn open_gate_calls_claude_once() {
-        let backend = MockBackend::default();
-        let config = cfg("api");
-        let plan = tier_plan(Tier::Claude, &open_gate());
-        let (tier, reply, failed) = run_plan(&backend, &plan, &config, "sys", "hi", "k")
-            .await
-            .unwrap();
-        assert_eq!((tier, reply.0.as_str()), (Tier::Claude, "from claude"));
-        assert!(failed.is_empty());
-        assert_eq!(*backend.anthropic_calls.borrow(), 1);
-    }
-
-    // ── fallback order ──
-
-    #[tokio::test]
-    async fn deep_falls_back_to_light() {
-        let backend = MockBackend {
-            fail: vec![DEEP_MODEL],
-            ..Default::default()
-        };
-        let plan = tier_plan(Tier::Deep, &open_gate());
-        let (tier, _, failed) = run_plan(&backend, &plan, &cfg("local"), "s", "t", "")
-            .await
-            .unwrap();
-        assert_eq!(tier, Tier::Light);
-        assert_eq!(failed, vec![Tier::Deep]);
-        let models: Vec<String> = backend.calls.borrow().iter().map(|c| c.0.clone()).collect();
-        assert_eq!(models, vec![DEEP_MODEL, LIGHT_MODEL]);
-    }
-
-    #[tokio::test]
-    async fn claude_failure_falls_back_deep_then_light_with_one_network_call() {
-        let backend = MockBackend {
-            fail: vec!["claude", DEEP_MODEL],
-            ..Default::default()
-        };
-        let config = cfg("api");
-        let plan = tier_plan(Tier::Claude, &open_gate());
-        assert_eq!(plan, vec![Tier::Claude, Tier::Deep, Tier::Light]);
-        let (tier, _, failed) = run_plan(&backend, &plan, &config, "s", "t", "k")
-            .await
-            .unwrap();
-        assert_eq!(tier, Tier::Light);
-        assert_eq!(failed, vec![Tier::Claude, Tier::Deep]);
-        assert_eq!(*backend.anthropic_calls.borrow(), 1);
-        let models: Vec<String> = backend.calls.borrow().iter().map(|c| c.0.clone()).collect();
-        assert_eq!(
-            models,
-            vec![config.anthropic_model.as_str(), DEEP_MODEL, LIGHT_MODEL]
-        );
     }
 
     #[test]
-    fn claude_never_appears_after_the_first_slot() {
-        for requested in [Tier::Light, Tier::Deep, Tier::Claude] {
-            let plan = tier_plan(requested, &open_gate());
-            assert!(!plan[1..].contains(&Tier::Claude), "{plan:?}");
+    fn amara_and_local_modes_count_as_local_for_the_gate() {
+        for m in ["amara", "local", "gateway", ""] {
+            assert!(!is_cloud_mode(m));
         }
+        assert!(is_cloud_mode("api") && is_cloud_mode("hybrid"));
+    }
+
+    // ── transport ──
+
+    #[tokio::test]
+    async fn sends_one_request_to_the_router_and_maps_the_tier() {
+        let t = MockTransport::new(Ok((200, router_ok("fast"))));
+        let headers = router_headers(&cfg("amara"), &[], false, None, &open_gate());
+        let body = router_body("sys", "hi");
+        let (content, tier, reason, p, c) =
+            ask_router(&t, "http://127.0.0.1:8787", &headers, &body)
+                .await
+                .unwrap();
+        assert_eq!(
+            (content.as_str(), tier, reason.as_str(), p, c),
+            ("hi", Tier::Light, "classifier_easy", 5, 2)
+        );
+        let seen = t.seen.borrow();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, "http://127.0.0.1:8787/v1/chat/completions");
+        assert_eq!(seen[0].2["messages"][1]["content"], "hi");
+        assert_eq!(Tier::from_router("deep"), Tier::Deep);
+        assert_eq!(Tier::from_router("claude"), Tier::Claude);
     }
 
     #[tokio::test]
-    async fn all_tiers_down_gives_fixed_text() {
-        let backend = MockBackend {
-            fail: vec![DEEP_MODEL, LIGHT_MODEL],
-            ..Default::default()
-        };
-        let err = run_plan(
-            &backend,
-            &[Tier::Deep, Tier::Light],
-            &cfg("local"),
-            "s",
-            "t",
-            "",
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err, UNAVAILABLE);
+    async fn router_or_ollama_down_gives_fixed_text() {
+        let body = router_body("s", "t");
+        let down = MockTransport::new(Err("connection refused".into()));
+        assert_eq!(
+            ask_router(&down, "http://x", &[], &body).await.unwrap_err(),
+            ROUTER_DOWN
+        );
+        let ollama = MockTransport::new(Ok((
+            503,
+            json!({"error": {"message": "Ollama is not reachable"}}),
+        )));
+        assert_eq!(
+            ask_router(&ollama, "http://x", &[], &body)
+                .await
+                .unwrap_err(),
+            OLLAMA_DOWN
+        );
+        let bad = MockTransport::new(Ok((502, json!({"error": {"message": "qwen3.8 failed"}}))));
+        let err = ask_router(&bad, "http://x", &[], &body).await.unwrap_err();
+        assert_eq!(err, ROUTER_FAILED);
         assert!(!err.contains("gemma") && !err.contains("qwen"));
     }
 
     // ── identity ──
-
-    #[tokio::test]
-    async fn every_tier_gets_the_same_system_prompt() {
-        let backend = MockBackend {
-            fail: vec!["claude", DEEP_MODEL],
-            ..Default::default()
-        };
-        let system = system_prompt("Persona from SOUL.md");
-        let plan = tier_plan(Tier::Claude, &open_gate());
-        run_plan(&backend, &plan, &cfg("api"), &system, "t", "k")
-            .await
-            .unwrap();
-        let calls = backend.calls.borrow();
-        assert_eq!(calls.len(), 3);
-        assert!(calls.iter().all(|(_, s)| s == &system));
-    }
 
     #[test]
     fn system_prompt_keeps_persona_and_forbids_model_names() {
@@ -948,7 +892,7 @@ mod tests {
             prompt_tokens: 1,
             completion_tokens: 1,
             estimated_cost_usd: 0.0,
-            routing_reason: "deep_toggle".into(),
+            routing_reason: "slash_deep".into(),
         };
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["tier"], "deep");
@@ -960,26 +904,12 @@ mod tests {
         assert_eq!(old.tier, Tier::Light);
     }
 
-    #[test]
-    fn routing_reason_names_the_block_and_failures() {
-        let gate = ClaudeGate {
-            outbound_disabled: true,
-            ..open_gate()
-        };
-        assert_eq!(
-            routing_reason(Tier::Claude, "mode=api", &gate, &[Tier::Deep]),
-            "mode=api; claude_blocked=outbound_disabled; deep_failed"
-        );
-    }
-
     // ── constants and costs ──
 
     #[test]
-    fn tier_models_and_loopback() {
-        assert_eq!(LIGHT_MODEL, "gemma4-12b-uncensored:latest");
-        assert_eq!(DEEP_MODEL, "qwen3.8-uncensored:latest");
-        assert!(OLLAMA_CHAT_URL.starts_with("http://127.0.0.1:11434/"));
+    fn constants() {
         assert_eq!(DEFAULT_OLLAMA_MODEL, "gemma4:latest");
+        assert!(DEFAULT_ROUTER_URL.starts_with("http://127.0.0.1:"));
     }
 
     #[test]

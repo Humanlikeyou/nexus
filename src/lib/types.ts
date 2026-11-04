@@ -223,13 +223,16 @@ export interface NexusConfig {
   llm_per_task_cap_usd: number | null;
   llm_show_cost_estimate: boolean | null;
   anthropic_api_key: string | null;
+  /** Amara Router base URL (loopback only); null = http://127.0.0.1:8787. */
+  amara_router_url?: string | null;
 }
 
 // ============================================================
 // LLM Router
 // ============================================================
 
-export type ComputeMode = "local" | "hybrid" | "api";
+/** All modes go through the Amara Router; "amara" (default) and "local" never ask for Claude. */
+export type ComputeMode = "amara" | "local" | "hybrid" | "api";
 
 export interface LlmRouterConfig {
   mode: ComputeMode;
@@ -239,6 +242,8 @@ export interface LlmRouterConfig {
   daily_cap_usd: number | null;
   per_task_cap_usd: number | null;
   show_cost_estimate: boolean;
+  /** Amara Router base URL; null/absent = the saved one or http://127.0.0.1:8787. */
+  router_url?: string | null;
 }
 
 /** Amara's model tier. Responses carry the tier only, never a model or provider name. */
@@ -614,7 +619,80 @@ export interface RecordedSession {
     max_hr?: number;
     avg_hrv?: number;
   };
+  /** Minimised NOOP context captured at session start; absent on older sessions. */
+  body_context?: BodyContext;
 }
+
+export interface BodyContext {
+  today: {
+    recovery: number | null;
+    hrv: number | null;
+    rhr: number | null;
+    strain: number | null;
+    sleep_total_min: number | null;
+  } | null;
+  latest_night: {
+    day: string | null;
+    total_sleep_min: number | null;
+    efficiency: number | null;
+    deep_min: number | null;
+    rem_min: number | null;
+    light_min: number | null;
+  } | null;
+}
+
+// ── NOOP local access (mirrors src-tauri/src/commands/noop_query.rs) ──
+export type WhoopSource = "noop" | "ble";
+
+/**
+ * Tauri commands:
+ *   get_noop_settings(): NoopSettings
+ *   set_noop_settings({ settings }): void — if binary_path/db_path change, the backend shows a
+ *     native Confirm/Cancel dialog with the canonical paths; rejects with
+ *     NOOP_PATH_CHANGE_CANCELLED on cancel, or "invalid_path: …" if validation fails.
+ *   noop_query({ tool, args? }): unknown (parsed JSON), rejects with NoopQueryError.
+ */
+export const NOOP_PATH_CHANGE_CANCELLED = "cancelled: user declined path change";
+
+export interface NoopSettings {
+  whoop_source: WhoopSource;
+  binary_path: string | null;
+  db_path: string | null;
+}
+
+export const NOOP_QUERY_TOOLS = [
+  "health_snapshot",
+  "metric_series",
+  "data_freshness",
+  "sleep_summary",
+  "workout_summary",
+] as const;
+export type NoopQueryTool = (typeof NOOP_QUERY_TOOLS)[number];
+
+export type NoopMetricKey =
+  | "recovery" | "hrv" | "rhr" | "resp_rate" | "spo2"
+  | "strain" | "sleep_total_min" | "steps" | "active_kcal";
+
+export interface NoopQueryArgs {
+  days?: number;
+  key?: NoopMetricKey;
+  source?: string;
+  from_day?: string;
+  to_day?: string;
+  limit?: number;
+}
+
+export type NoopQueryError =
+  | { kind: "tool_not_allowed"; detail: string }
+  | { kind: "invalid_args"; detail: string }
+  | { kind: "binary_missing"; detail: string }
+  | { kind: "spawn_failed"; detail: string }
+  | { kind: "timeout"; detail: number }
+  | { kind: "process_failed"; detail: string }
+  | { kind: "bad_output"; detail: string }
+  | { kind: "tool_error"; detail: string }
+  | { kind: "invalid_path"; detail: string }
+  | { kind: "sandbox_missing"; detail: string };
 
 export interface NfSession extends RecordedSession {
   protocol_id: string;

@@ -32,3 +32,6 @@ export const BusinessField = retryableLazy(() => import("../screens/BusinessScre
 export const RevenueField = retryableLazy(() => import("../screens/RevenueScreen").then((m) => ({ default: m.RevenueField })));
 export const CrewsField = retryableLazy(() => import("../screens/CrewsScreen").then((m) => ({ default: m.CrewsField })));
 export const ActivityField = retryableLazy(() => import("../screens/ActivityScreen").then((m) => ({ default: m.ActivityField })));
+export const VoiceField = retryableLazy(() => import("../screens/VoiceScreen").then((m) => ({ default: m.VoiceField })));
+export const SmartHomeField = retryableLazy(() => import("../screens/SmartHomeScreen").then((m) => ({ default: m.SmartHomeField })));
+export const MindBodyField = retryableLazy(() => import("../screens/MindBodyScreen").then((m) => ({ default: m.MindBodyField })));

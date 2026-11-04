@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Amara Router LaunchAgent. __HOME__ is replaced with your home directory at install time
+  (launchd does not expand ~). See amara-router/README.md › Install.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.taisun.amara-router</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.local/bin/amara-router</string>
+        <string>--config</string>
+        <string>__HOME__/.config/amara-router/config.toml</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Restart unless it exited cleanly. A config error exits 1, so launchd retries every 30 s: check router.log. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/amara-router/router.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/amara-router/router.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Uncomment to forbid every cloud call regardless of config:
+        <key>NEXUS_OUTBOUND_DISABLED</key>
+        <string>1</string>
+        -->
+    </dict>
+</dict>
+</plist>

@@ -29,9 +29,10 @@ vi.mock("@tauri-apps/api/event", () => ({ emit: vi.fn() }));
 import { consolidateRecentSessions, runReasoningLoop } from "./continuity";
 
 describe.each([
-  ["compute_mode local", { compute_mode: "local" }],
-  ["compute_mode unset (defaults to local)", {}],
-])("%s: LLM failures never mention OpenClaw", (_label, cfg) => {
+  ["compute_mode local", { compute_mode: "local" }, "local"],
+  // Unset now defaults to "amara" (the local Amara Router); still never OpenClaw.
+  ["compute_mode unset (defaults to amara)", {}, "amara"],
+])("%s: LLM failures never mention OpenClaw", (_label, cfg, wantMode) => {
   beforeEach(() => { m.cfg = cfg; m.routerCalls = []; });
 
   it("consolidation", async () => {
@@ -46,12 +47,12 @@ describe.each([
     expect(r.reason).not.toMatch(/openclaw|gateway/i);
   });
 
-  it("routes to local mode with no forced provider", async () => {
+  it("routes to the local mode with no forced provider", async () => {
     await consolidateRecentSessions();
     await runReasoningLoop();
     expect(m.routerCalls.length).toBeGreaterThanOrEqual(2);
     for (const call of m.routerCalls) {
-      expect((call.config as { mode: string }).mode).toBe("local");
+      expect((call.config as { mode: string }).mode).toBe(wantMode);
       expect(call.forceProvider).toBeUndefined();
     }
   });

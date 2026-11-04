@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { MODEL_LOADING_COPY } from "../app/modelLoading";
 import { HermesSubtitle } from "./agentLabels";
-import { Activity, Bot, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
+import { Activity, Bot, Brain, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
+import { tierLabel, tierTitle } from "../app/amaraChat";
 import { assistantView } from "../app/statusViews";
 import { dateTime, time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, StatTile, TextField, type Tone } from "../ui";
+import { AmaraLens } from "../components/AmaraLens/AmaraLens";
+import { useAmaraVoice } from "../hooks/useAmaraVoice";
 import "./ChatScreen.css";
 
 export interface ChatFieldProps {
@@ -17,8 +21,13 @@ export interface ChatFieldProps {
   loading?: boolean;
   /** Epoch ms of the last session auto-save (useIdleAutoSave). */
   lastSavedAt?: number | null;
-  onSend: (message: string) => Promise<void>;
+  /** `deep`: the composer Deep toggle (sends /deep through the Amara Router). */
+  onSend: (message: string, options?: { deep?: boolean }) => Promise<void>;
   onNewConversation: () => void;
+  /** Stop waiting for the pending reply (it is ignored if it lands later). */
+  onCancelPending?: () => void;
+  /** Router answered 503 "model loading"; the reply is being retried automatically. */
+  loadingModel?: boolean;
   onOpenContext: () => void;
   onApproveAction: (action: TerrenceAction) => void;
   onRetryAction: (action: TerrenceAction) => void;
@@ -31,6 +40,8 @@ export interface ChatFieldProps {
   /** Pre-filled composer text (⌘K “Ask Amara”); remount via key to apply. */
   initialDraft?: string;
   busy?: boolean;
+  /** Current conversation: resolved action lines from other conversations are hidden. */
+  conversationId?: string | null;
 }
 
 const ACTION_TONE: Record<TerrenceAction["status"], Tone> = {
@@ -43,6 +54,41 @@ const ACTION_LABEL: Record<TerrenceAction["status"], string> = {
 };
 const GROUP_MS = 2 * 60_000;
 const MAX_COMPOSER_LINES = 6;
+
+/** Statuses that still need Taisun; only these render as prominent cards. */
+const PROMINENT: ReadonlySet<TerrenceAction["status"]> = new Set(["awaiting_approval", "needs_attention"]);
+const MAX_ACTIONS = 5;
+
+export type ChatActionItem = { action: TerrenceAction; prominent: boolean };
+
+/**
+ * Actions shown in the thread. Pending ones (any conversation) are prominent cards; resolved or
+ * cancelled ones show as compact inline lines, and only for the current conversation, so stale
+ * ledger rows from old sessions never surface.
+ */
+export function chatActions(actions: TerrenceAction[], conversationId: string | null | undefined): ChatActionItem[] {
+  return actions
+    .filter((a) => a.toolId !== "agent.hermes_chat")
+    .filter((a) => PROMINENT.has(a.status) || (conversationId != null && a.conversationId === conversationId))
+    .map((action) => ({ action, prominent: PROMINENT.has(action.status) }))
+    .sort((x, y) => Date.parse(y.action.requestedAt) - Date.parse(x.action.requestedAt))
+    .slice(0, MAX_ACTIONS)
+    .reverse();
+}
+
+type ThreadItem = { kind: "message"; index: number; at: number } | { kind: "action"; item: ChatActionItem; at: number };
+
+/** Messages and action items interleaved by time (stable: messages keep their order). */
+export function threadItems(messages: ConversationMessage[], items: ChatActionItem[]): ThreadItem[] {
+  const out: ThreadItem[] = messages.map((m, index) => ({ kind: "message", index, at: Date.parse(m.timestamp) || 0 }));
+  for (const item of items) {
+    const at = Date.parse(item.action.requestedAt) || 0;
+    let i = out.length;
+    while (i > 0 && out[i - 1].at > at) i--;
+    out.splice(i, 0, { kind: "action", item, at });
+  }
+  return out;
+}
 
 /** Consecutive messages from the same sender within 2 min share one header (Messages.app). */
 export function groupStarts(messages: ConversationMessage[]): boolean[] {
@@ -69,12 +115,50 @@ function crewsValue(crew: SystemSnapshot["crew"]): string {
   return running > 0 ? `${running} running` : "0 running";
 }
 
+/** Pending reply bubble: elapsed seconds and an optional Cancel. */
+export function ThinkingBubble({ onCancel, loadingModel = false }: { onCancel?: () => void; loadingModel?: boolean }) {
+  const [started] = useState(() => Date.now());
+  const [now, setNow] = useState(started);
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const seconds = Math.max(0, Math.floor((now - started) / 1000));
+  const label = loadingModel ? MODEL_LOADING_COPY : "Thinking…";
+  return (
+    <li className="chat-message" data-role="assistant" data-start>
+      <div className="chat-bubble chat-bubble--pending" data-role="assistant" role="status" aria-label={loadingModel ? MODEL_LOADING_COPY : "Amara is thinking"}>
+        <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{label}
+        {seconds > 0 && <time className="chat-bubble__elapsed" dateTime={`PT${seconds}S`} aria-hidden="true"> {seconds} s</time>}
+      </div>
+      {onCancel && <Button variant="plain" size="small" onClick={onCancel} aria-label="Cancel waiting for Amara's reply">Cancel</Button>}
+    </li>
+  );
+}
+
+/** Header model: the router-reported model of Amara's latest reply; Hermes's configured model only when not routed. */
+export function headerModel(messages: { role: string; servedModel?: string }[], hermesModel: string, routed: boolean): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "assistant" && m.servedModel) return m.servedModel;
+  }
+  return routed ? "Amara Router" : hermesModel;
+}
+
+/** Home/End scroll the message list unless focus is in a text field. */
+export function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+}
+
 export function ChatField({
-  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onOpenContext, onOpenActivity, onOpenCrews, initialDraft = "",
-  onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false,
+  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onCancelPending, loadingModel = false, onOpenContext, onOpenActivity, onOpenCrews, initialDraft = "",
+  onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false, conversationId = null,
 }: ChatFieldProps) {
   const [draft, setDraft] = useState(initialDraft);
   const [query, setQuery] = useState("");
+  const [deep, setDeep] = useState(false);
+  const voice = useAmaraVoice();
   const listRef = useRef<HTMLOListElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   // Loading = first snapshot not in yet and no local transcript to show.
@@ -84,12 +168,38 @@ export function ChatField({
   const assistant = assistantView(data.openclaw, { loading, unavailable: data.unavailableSources.some((s) => s.command === "read_openclaw_status") });
   const actionsUnavailable = data.unavailableSources.some((s) => s.command === "list_terrence_actions");
   const hermesUnavailable = data.unavailableSources.some((s) => s.command === "get_terrence_runtime_health");
+  // Deep is the router's call; with Hermes still on Ollama directly nothing would read /deep.
+  const deepAvailable = hermes.routedViaRouter === true;
 
-  const actions = useMemo(() => {
-    const tools = data.actions.filter((a) => a.toolId !== "agent.hermes_chat");
-    const first = (a: TerrenceAction) => a.status === "awaiting_approval" || a.retryAllowed;
-    return [...tools.filter(first), ...tools.filter((a) => !first(a))].slice(0, 5);
-  }, [data.actions]);
+  const actions = useMemo(() => chatActions(data.actions, conversationId), [data.actions, conversationId]);
+  const thread = useMemo(() => threadItems(messages, actions), [messages, actions]);
+  const renderAction = ({ action: a, prominent }: ChatActionItem) => {
+    if (!prominent) {
+      return (
+        <li key={a.id} className="chat-action-line" data-status={a.status}>
+          <span className="chat-action-line__title">{a.title}</span>
+          <Badge tone={ACTION_TONE[a.status]}>{ACTION_LABEL[a.status]}</Badge>
+          {a.retryAllowed && <Button variant="plain" size="small" icon={RotateCcw} disabled={busy} onClick={() => onRetryAction(a)} aria-label={`Retry ${a.title}`}>Retry</Button>}
+        </li>
+      );
+    }
+    const plan = a.status === "awaiting_approval" ? actionPlan(a) : [];
+    return (
+      <li key={a.id} className="chat-action">
+        <Card as="article" title={a.title} headingLevel={3} accessory={<Badge tone={ACTION_TONE[a.status]}>{ACTION_LABEL[a.status]}</Badge>}>
+          {a.summary && <p className="chat-action__summary">{a.summary}</p>}
+          {plan.length > 0 && <InsetGroup title="Plan">{plan.map((step, i) => <ListRow key={i} title={step} />)}</InsetGroup>}
+          <div className="chat-action__buttons">
+            {a.status === "awaiting_approval" && <>
+              <Button variant="primary" size="small" icon={Check} disabled={busy} onClick={() => onApproveAction(a)}>Approve</Button>
+              <Button size="small" icon={X} disabled={busy} onClick={() => onCancelAction(a)}>Cancel</Button>
+            </>}
+            {a.retryAllowed && <Button size="small" icon={RotateCcw} disabled={busy} onClick={() => onRetryAction(a)}>Retry</Button>}
+          </div>
+        </Card>
+      </li>
+    );
+  };
   const suggestions = data.prioritySnapshot.items.slice(0, 3).map((p) => p.title).filter(Boolean);
   const starts = useMemo(() => groupStarts(messages), [messages]);
   const startedAt = messages[0]?.timestamp;
@@ -100,11 +210,29 @@ export function ChatField({
     ...(assistant?.kind === "unreachable" ? [{ id: "assistant", icon: Workflow, title: "Assistant", subtitle: assistant.message, searchText: assistant.message, tone: "warning" as Tone, label: "Not reachable" }] : []),
   ].filter((a) => !query.trim() || `${a.title} ${a.searchText}`.toLowerCase().includes(query.trim().toLowerCase()));
 
-  // Keep the newest message in view.
+  // Keep the newest exchange in view: scroll to the bottom, but never past the latest user message.
   useEffect(() => {
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const users = el.querySelectorAll<HTMLElement>('li[data-role="user"]');
+    const lastUser = users[users.length - 1];
+    const bottom = el.scrollHeight - el.clientHeight;
+    el.scrollTop = lastUser ? Math.min(bottom, Math.max(0, lastUser.offsetTop - el.offsetTop - 16)) : bottom;
   }, [messages.length, sending]);
+
+  // Home → top of the conversation, End → bottom (not while typing).
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if ((e.key !== "Home" && e.key !== "End") || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.defaultPrevented) return;
+      if (isTypingTarget(e.target)) return;
+      const el = listRef.current;
+      if (!el) return;
+      e.preventDefault();
+      el.scrollTop = e.key === "Home" ? 0 : el.scrollHeight;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Auto-grow the composer up to 6 lines.
   useEffect(() => {
@@ -130,7 +258,7 @@ export function ChatField({
     const message = text.trim();
     if (!message || sending) return;
     setDraft("");
-    await onSend(message);
+    await onSend(message, { deep: deep && deepAvailable });
   };
   const submit = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); void send(draft); };
   const onComposerKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -170,9 +298,10 @@ export function ChatField({
       <section className="chat-screen__conversation" aria-labelledby="chat-title">
         <header className="chat-screen__header">
           <div className="chat-screen__heading">
+            {voice.state === "speaking" && <AmaraLens state="speaking" size={28} className="chat-screen__lens" />}
             <h1 id="chat-title">Amara</h1>
             <Badge tone={online ? "success" : "warning"}>{online ? "Online" : "Offline"}</Badge>
-            <span className="chat-screen__model">{hermes.model}</span>
+            <span className="chat-screen__model" title={`Hermes configured model: ${hermes.model}`}>{headerModel(messages, hermes.model, deepAvailable)}</span>
             {/* eslint-disable-next-line react-hooks/purity -- the 'Saved …' label is read at render on purpose; it re-renders on every save */}
             {lastSavedAt != null && <span className="chat-screen__saved" title={dateTime(lastSavedAt)}>Saved {relative(lastSavedAt, Date.now())}</span>}
           </div>
@@ -196,51 +325,55 @@ export function ChatField({
                 </Card>
               </li>
             )}
-            {messages.map((m, i) => (
+            {thread.map((t) => {
+              if (t.kind === "action") return renderAction(t.item);
+              const i = t.index; const m = messages[i];
+              return (
               <li key={m.id} className="chat-message" data-role={m.role} data-start={starts[i] || undefined}>
                 {starts[i] && <span className="chat-message__meta">{m.role === "user" ? "You" : "Amara"} · <time dateTime={m.timestamp}>{time(m.timestamp)}</time></span>}
+                {m.role === "assistant" && m.source === "home" && <AmaraLens state="idle" size={44} level={0.5} decorative className="chat-message__lens" />}
                 <div className="chat-bubble" data-role={m.role} data-failed={m.status === "failed" || undefined} title={m.role === "assistant" ? [m.model, time(m.timestamp)].filter(Boolean).join(" · ") : undefined}>
                   {m.content}
                 </div>
+                {m.role === "assistant" && m.source === "home" && (
+                  <div className="chat-message__tier">
+                    <Badge tone="info" title="Answered by Home Assistant" aria-label="Answered by Home Assistant">Home</Badge>
+                  </div>
+                )}
+                {m.role === "assistant" && m.status !== "failed" && m.tier && tierLabel(m.tier) && (
+                  <div className="chat-message__tier">
+                    <Badge tone={m.tier.tier === "fast" ? "neutral" : "accent"} title={tierTitle(m.tier)} aria-label={`Answered on the ${tierLabel(m.tier)} tier`}>{tierLabel(m.tier)}</Badge>
+                  </div>
+                )}
                 {m.status === "failed" && (
                   <div className="chat-message__failed"><Badge tone="danger">Failed</Badge><Button variant="plain" size="small" icon={RotateCcw} onClick={() => retry(m, i)} disabled={sending}>Retry</Button></div>
                 )}
               </li>
-            ))}
-            {sending && (
-              <li className="chat-message" data-role="assistant" data-start>
-                <div className="chat-bubble chat-bubble--pending" data-role="assistant" role="status" aria-label="Amara is thinking">
-                  <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>Thinking…
-                </div>
-              </li>
-            )}
+            );
+            })}
+            {sending && <ThinkingBubble onCancel={onCancelPending} loadingModel={loadingModel} />}
           </ol>
         )}
 
-        {(actions.length > 0 || actionsUnavailable) && (
+        {actionsUnavailable && (
           <div className="chat-screen__actions" aria-label="Actions">
-            {actionsUnavailable ? (
-              <Card padding="md"><p>Action ledger unavailable</p>{onRetrySources && <Button size="small" onClick={onRetrySources}>Retry</Button>}</Card>
-            ) : actions.map((a) => {
-              const plan = a.status === "awaiting_approval" ? actionPlan(a) : [];
-              return (
-                <Card key={a.id} as="article" title={a.title} headingLevel={3} accessory={<Badge tone={ACTION_TONE[a.status]}>{ACTION_LABEL[a.status]}</Badge>}>
-                  {a.summary && <p className="chat-action__summary">{a.summary}</p>}
-                  {plan.length > 0 && <InsetGroup title="Plan">{plan.map((step, i) => <ListRow key={i} title={step} />)}</InsetGroup>}
-                  <div className="chat-action__buttons">
-                    {a.status === "awaiting_approval" && <>
-                      <Button variant="primary" size="small" icon={Check} disabled={busy} onClick={() => onApproveAction(a)}>Approve</Button>
-                      <Button size="small" icon={X} disabled={busy} onClick={() => onCancelAction(a)}>Cancel</Button>
-                    </>}
-                    {a.retryAllowed && <Button size="small" icon={RotateCcw} disabled={busy} onClick={() => onRetryAction(a)}>Retry</Button>}
-                  </div>
-                </Card>
-              );
-            })}
+            <Card padding="md"><p>Action ledger unavailable</p>{onRetrySources && <Button size="small" onClick={onRetrySources}>Retry</Button>}</Card>
           </div>
         )}
 
         <form className="chat-screen__composer" onSubmit={submit}>
+          {/* Wrapper carries the hint: WebKit fires no hover (so no tooltip) on a disabled button. */}
+          <span className="chat-composer__deep-wrap" title={deepAvailable ? undefined : "Deep needs the Amara Router"}>
+            <Button
+              variant="plain"
+              icon={Brain}
+              className="chat-composer__deep"
+              aria-pressed={deep && deepAvailable}
+              disabled={!deepAvailable}
+              title={deepAvailable ? "Send to Amara's deep model" : undefined}
+              onClick={() => setDeep((on) => !on)}
+            >Deep</Button>
+          </span>
           <label htmlFor="chat-composer" className="ui-visually-hidden">Message Amara</label>
           <textarea
             id="chat-composer"
@@ -249,7 +382,7 @@ export function ChatField({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onComposerKey}
-            placeholder={online ? "Message Amara" : "Amara is offline — messages may fail"}
+            placeholder={!online ? "Amara is offline — messages may fail" : deep && deepAvailable ? "Message Amara (Deep)" : "Message Amara"}
           />
           <Button type="submit" variant="primary" icon={Send} iconOnly aria-label="Send" disabled={sending || !draft.trim()} />
         </form>

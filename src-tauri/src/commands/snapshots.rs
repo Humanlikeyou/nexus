@@ -7,8 +7,8 @@ pub(crate) fn nexus_data_dir() -> PathBuf {
     crate::app_paths::data_dir()
 }
 
-fn snapshots_dir() -> PathBuf {
-    nexus_data_dir().join("snapshots")
+fn snapshots_dir_in(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("snapshots")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +29,12 @@ pub struct BrainSnapshot {
 
 #[tauri::command]
 pub fn save_snapshot(snapshot: BrainSnapshot) -> Result<String, String> {
-    let dir = snapshots_dir();
+    save_snapshot_at(&nexus_data_dir(), snapshot)
+}
+
+/// `save_snapshot` with the app data dir passed in (tests use a temp dir, never HOME).
+fn save_snapshot_at(data_dir: &std::path::Path, snapshot: BrainSnapshot) -> Result<String, String> {
+    let dir = snapshots_dir_in(data_dir);
     crate::app_paths::create_private_dir_all(&dir)
         .map_err(|e| format!("Failed to create snapshots dir: {}", e))?;
 
@@ -119,7 +124,12 @@ mod tests {
 
 #[tauri::command]
 pub fn list_snapshots() -> Result<Vec<BrainSnapshot>, String> {
-    let dir = snapshots_dir();
+    list_snapshots_in(&nexus_data_dir())
+}
+
+/// `list_snapshots` with the app data dir passed in.
+fn list_snapshots_in(data_dir: &std::path::Path) -> Result<Vec<BrainSnapshot>, String> {
+    let dir = snapshots_dir_in(data_dir);
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -166,26 +176,19 @@ mod repro_tests {
         }
     }
 
-    /// Ignored by default because it sets the process-wide HOME, which would race other
-    /// tests. Run with: cargo test repro_ -- --ignored --test-threads=1
+    /// The data dir is passed in, so no process-wide env (HOME) is touched and the test runs
+    /// in parallel with everything else.
     #[test]
-    #[ignore = "mutates HOME; run with --ignored --test-threads=1"]
     fn repro_same_second_snapshots_are_both_kept() {
-        let home = std::env::temp_dir().join(format!("nexus-snap-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&home).unwrap();
-        let old = std::env::var_os("HOME");
-        std::env::set_var("HOME", &home);
-        let a = save_snapshot(snap("a", "2026-10-21T18:00:00Z"));
-        let b = save_snapshot(snap("b", "2026-10-21T18:00:00Z"));
-        let listed = list_snapshots();
-        match old {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-        let _ = std::fs::remove_dir_all(&home);
+        let base = std::env::temp_dir().join(format!("nexus-snap-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&base).unwrap();
+        let a = save_snapshot_at(&base, snap("a", "2026-10-21T18:00:00Z"));
+        let b = save_snapshot_at(&base, snap("b", "2026-10-21T18:00:00Z"));
+        let listed = list_snapshots_in(&base);
+        let _ = std::fs::remove_dir_all(&base);
         assert!(
-            a.unwrap().starts_with(home.to_str().unwrap()),
-            "snapshot escaped temp HOME"
+            a.unwrap().starts_with(base.to_str().unwrap()),
+            "snapshot escaped the temp data dir"
         );
         b.unwrap();
         assert_eq!(

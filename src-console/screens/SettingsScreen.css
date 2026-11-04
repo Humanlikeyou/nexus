@@ -13,3 +13,15 @@
 .backup-restore__result p { margin: 0 0 var(--space-1, 4px); color: var(--text); }
 .backup-restore__result ul { margin: 0; padding-left: var(--space-4, 16px); }
 .backup-restore__file code { font: var(--text-subheadline)/1.35 var(--font-mono); word-break: break-all; }
+
+/* Settings › WHOOP (NOOP) fields. */
+.settings__fields { display: grid; gap: var(--space-3); padding: var(--space-3) var(--space-4) 0; }
+.settings__save-state { font: var(--type-footnote); color: var(--label-secondary); }
+.settings__save-error { margin: 0; font: var(--type-footnote); color: var(--tone-danger-text); }
+
+#home-assistant { scroll-margin-top: var(--space-4, 16px); }
+.settings__ha-form { display: grid; gap: var(--space-3, 12px); padding: var(--space-3, 12px) var(--space-4, 16px); }
+.settings__ha-actions { display: flex; flex-wrap: wrap; gap: var(--space-2, 8px); }
+.settings__ha-result { margin: 0; font-size: var(--text-footnote, 13px); color: var(--label-secondary); }
+.settings__ha-result:empty { display: none; }
+.settings__ha-result[data-ok="false"] { color: var(--danger); }

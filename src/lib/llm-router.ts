@@ -54,6 +54,9 @@ export function formatLatency(ms: number): string {
 // ─── Config builder ───────────────────────────────────────────────────────────
 /** Build a RouterConfig from NexusConfig (with sensible defaults). */
 export const DEFAULT_OLLAMA_MODEL = "gemma4:latest";
+/** Compute mode "amara": every call goes to the Amara Router, which picks fast or deep. */
+export const DEFAULT_COMPUTE_MODE: ComputeMode = "amara";
+export const DEFAULT_ROUTER_URL = "http://127.0.0.1:8787";
 
 export function buildRouterConfig(cfg: {
   compute_mode?: string | null;
@@ -63,17 +66,19 @@ export function buildRouterConfig(cfg: {
   llm_daily_cap_usd?: number | null;
   llm_per_task_cap_usd?: number | null;
   llm_show_cost_estimate?: boolean | null;
+  amara_router_url?: string | null;
 }): LlmRouterConfig {
   return {
-    // Standing rule: local Ollama only, gemma4 primary.
+    // Default: the Amara Router (local models only unless Claude is explicitly allowed).
     // The retired OpenClaw "gateway" mode (saved by older builds) maps to local.
-    mode: cfg.compute_mode === "gateway" ? "local" : ((cfg.compute_mode as ComputeMode) ?? "local"),
+    mode: cfg.compute_mode === "gateway" ? "local" : ((cfg.compute_mode as ComputeMode) ?? DEFAULT_COMPUTE_MODE),
     ollama_model: cfg.llm_ollama_model ?? DEFAULT_OLLAMA_MODEL,
     anthropic_model: cfg.llm_anthropic_model ?? "claude-haiku-4-5-20251001",
     token_threshold: cfg.llm_token_threshold ?? 8000,
     daily_cap_usd: cfg.llm_daily_cap_usd ?? 5.0,
     per_task_cap_usd: cfg.llm_per_task_cap_usd ?? 0.10,
     show_cost_estimate: cfg.llm_show_cost_estimate ?? true,
+    router_url: cfg.amara_router_url ?? null,
   };
 }
 

@@ -1,10 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ConversationMessage } from "../app/conversation";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction } from "../types";
-import { ChatField, groupStarts, type ChatFieldProps } from "./ChatScreen";
+import { ChatField, chatActions, threadItems, groupStarts, headerModel, type ChatFieldProps } from "./ChatScreen";
 
 const loaded: SystemSnapshot = {
   ...INITIAL_SNAPSHOT,
@@ -67,7 +67,7 @@ describe("ChatField", () => {
     const props = setup({ data });
     expect(screen.getByRole("heading", { name: "Ask Amara anything" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Ship Amara OS v2" }));
-    expect(props.onSend).toHaveBeenCalledWith("Ship Amara OS v2");
+    expect(props.onSend).toHaveBeenCalledWith("Ship Amara OS v2", { deep: false });
   });
 
   it("Enter sends, Shift+Enter adds a newline, and the composer clears", async () => {
@@ -76,7 +76,7 @@ describe("ChatField", () => {
     await userEvent.type(box, "hello{Shift>}{Enter}{/Shift}there");
     expect(box).toHaveValue("hello\nthere");
     await userEvent.type(box, "{Enter}");
-    expect(props.onSend).toHaveBeenCalledWith("hello\nthere");
+    expect(props.onSend).toHaveBeenCalledWith("hello\nthere", { deep: false });
     expect(box).toHaveValue("");
   });
 
@@ -121,7 +121,7 @@ describe("ChatField", () => {
     const props = setup({ messages, sending: false });
     expect(screen.getByText("Failed")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(props.onSend).toHaveBeenCalledWith("what's next?");
+    expect(props.onSend).toHaveBeenCalledWith("what's next?", { deep: false });
   });
 
   it("shows the thinking bubble while sending", () => {
@@ -129,18 +129,30 @@ describe("ChatField", () => {
     expect(screen.getByRole("status", { name: "Amara is thinking" })).toBeInTheDocument();
   });
 
+  it("thinking shows elapsed seconds and a labelled Cancel", () => {
+    vi.useFakeTimers();
+    try {
+      const onCancelPending = vi.fn();
+      setup({ messages: [msg("u1", "user", "hi", "2026-10-28T05:00:00Z")], sending: true, onCancelPending });
+      act(() => { vi.advanceTimersByTime(3000); });
+      expect(screen.getByRole("status", { name: "Amara is thinking" })).toHaveTextContent("3 s");
+      fireEvent.click(screen.getByRole("button", { name: "Cancel waiting for Amara's reply" }));
+      expect(onCancelPending).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("action cards: approve, cancel, retry; hermes chat actions are hidden", async () => {
     const data = { ...loaded, actions: [
       action(),
-      action({ id: "a2", title: "Retry me", status: "failed", retryAllowed: true }),
-      action({ id: "a3", toolId: "agent.hermes_chat", title: "Chat turn", status: "succeeded" }),
+      action({ id: "a2", title: "Retry me", status: "failed", retryAllowed: true, conversationId: "c1" }),
+      action({ id: "a3", toolId: "agent.hermes_chat", title: "Chat turn", status: "succeeded", conversationId: "c1" }),
     ] };
-    const props = setup({ data });
-    const actions = screen.getByLabelText("Actions");
+    const props = setup({ data, conversationId: "c1" });
+    const actions = screen.getByLabelText("Messages");
     expect(within(actions).queryByText("Chat turn")).not.toBeInTheDocument();
     await userEvent.click(within(actions).getByRole("button", { name: "Approve" }));
     await userEvent.click(within(actions).getByRole("button", { name: "Cancel" }));
-    await userEvent.click(within(actions).getByRole("button", { name: "Retry" }));
+    await userEvent.click(within(actions).getByRole("button", { name: "Retry Retry me" }));
     expect(props.onApproveAction).toHaveBeenCalledWith(expect.objectContaining({ id: "a1" }));
     expect(props.onCancelAction).toHaveBeenCalledWith(expect.objectContaining({ id: "a1" }));
     expect(props.onRetryAction).toHaveBeenCalledWith(expect.objectContaining({ id: "a2" }));
@@ -196,11 +208,127 @@ describe("groupStarts", () => {
   it("'Ask Amara anything' only for a thread with zero items: hidden once an action card exists", () => {
     setup({ data: { ...loaded, actions: [action()] } });
     expect(screen.queryByRole("heading", { name: "Ask Amara anything" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Actions")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Messages")).getByRole("article")).toBeInTheDocument();
   });
 
   it("an action that isn't shown (Hermes chat turn) doesn't count as an item", () => {
     setup({ data: { ...loaded, actions: [action({ id: "h", toolId: "agent.hermes_chat", status: "succeeded" })] } });
     expect(screen.getByRole("heading", { name: "Ask Amara anything" })).toBeInTheDocument();
+  });
+
+  it("Deep toggle is off and explained while Hermes is not on the Amara Router", () => {
+    setup();
+    const deep = screen.getByRole("button", { name: "Deep" });
+    expect(deep).toBeDisabled();
+    expect(deep).toHaveAttribute("aria-pressed", "false");
+    expect(deep.closest(".chat-composer__deep-wrap")).toHaveAttribute("title", "Deep needs the Amara Router");
+  });
+
+  it("Deep toggle sends deep: true when Hermes routes through the Amara Router", async () => {
+    const props = setup({ data: { ...loaded, hermes: { ...loaded.hermes, routedViaRouter: true } } });
+    const deep = screen.getByRole("button", { name: "Deep" });
+    await userEvent.click(deep);
+    expect(deep).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Message Amara")).toHaveAttribute("placeholder", "Message Amara (Deep)");
+    await userEvent.type(screen.getByLabelText("Message Amara"), "plan my week{Enter}");
+    expect(props.onSend).toHaveBeenCalledWith("plan my week", { deep: true });
+  });
+
+  it("tier badge: Fast/Deep from the router on Amara's replies, nothing when unknown", () => {
+    setup({ messages: [
+      msg("u1", "user", "hi", "2026-10-28T05:00:00Z"),
+      msg("a1", "assistant", "Hello.", "2026-10-28T05:00:05Z", { tier: { tier: "fast", reason: "classifier_easy", source: "router_log" } }),
+      msg("u2", "user", "/deep plan", "2026-10-28T05:00:10Z"),
+      msg("a2", "assistant", "Here is a plan.", "2026-10-28T05:00:40Z", { tier: { tier: "deep", reason: "slash_deep", source: "router_dry_run" } }),
+      msg("a3", "assistant", "No tier known.", "2026-10-28T05:01:00Z"),
+    ] });
+    const fast = screen.getByLabelText("Answered on the Fast tier");
+    expect(fast).toHaveTextContent("Fast");
+    expect(fast).toHaveAttribute("title", expect.stringContaining("route log"));
+    expect(screen.getByLabelText("Answered on the Deep tier")).toHaveTextContent("Deep");
+    expect(within(screen.getByRole("list", { name: "Messages" })).getAllByText(/^(Fast|Deep)$/)).toHaveLength(2);
+  });
+
+  it("Home badge on replies answered by Home Assistant", () => {
+    setup({ messages: [
+      msg("u1", "user", "turn on the lamp", "2026-10-28T05:00:00Z"),
+      msg("a1", "assistant", "Turned on the desk lamp.", "2026-10-28T05:00:01Z", { source: "home" }),
+    ] });
+    expect(screen.getByLabelText("Answered by Home Assistant")).toHaveTextContent("Home");
+  });
+});
+
+describe("chat actions in the thread (QA 11-04)", () => {
+  const msg = (id: string, role: "user" | "assistant", timestamp: string) => ({ id, role, content: id, timestamp }) as unknown as ConversationMessage;
+
+  it("chatActions: pending is prominent from any conversation; resolved only for this conversation", () => {
+    const items = chatActions([
+      action({ id: "p", status: "awaiting_approval", conversationId: "old" }),
+      action({ id: "c", status: "cancelled", conversationId: "c1", requestedAt: "2026-10-28T05:05:00Z" }),
+      action({ id: "stale", title: "Open https://example.com", status: "cancelled", conversationId: "old" }),
+      action({ id: "done", status: "succeeded", conversationId: null }),
+    ], "c1");
+    expect(items.map((i) => [i.action.id, i.prominent])).toEqual([["p", true], ["c", false]]);
+    expect(chatActions([action({ id: "x", status: "succeeded", conversationId: "c1" })], null)).toEqual([]);
+  });
+
+  it("threadItems interleaves actions by time and keeps message order", () => {
+    const messages = [msg("u1", "user", "2026-10-28T05:00:00Z"), msg("a1", "assistant", "2026-10-28T05:02:00Z")];
+    const t = threadItems(messages, [{ action: action({ id: "x", requestedAt: "2026-10-28T05:01:00Z" }), prominent: false }]);
+    expect(t.map((i) => (i.kind === "message" ? messages[i.index].id : i.item.action.id))).toEqual(["u1", "x", "a1"]);
+  });
+
+  it("cancelled cards are compact lines inside the message list; reply and tier badge stay visible", () => {
+    const messages = [msg("what is 2+2", "user", "2026-10-28T05:00:00Z"), { ...msg("4", "assistant", "2026-10-28T05:00:05Z"), tier: { tier: "fast" } } as ConversationMessage];
+    setup({ messages, conversationId: "c1", data: { ...loaded, actions: [
+      action({ id: "s", title: "Open Safari", status: "cancelled", conversationId: "c1", requestedAt: "2026-10-28T04:59:00Z" }),
+      action({ id: "v", title: "Lower volume by 10%", status: "cancelled", conversationId: "c1", requestedAt: "2026-10-28T04:59:30Z" }),
+    ] } });
+    const list = screen.getByLabelText("Messages");
+    expect(within(list).queryByRole("article")).not.toBeInTheDocument();
+    const line = within(list).getByText("Open Safari").closest("li")!;
+    expect(line).toHaveClass("chat-action-line");
+    expect(within(line).getByText("Cancelled")).toBeInTheDocument();
+    expect(within(list).getByText("4")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Actions")).not.toBeInTheDocument();
+  });
+});
+
+describe("QA 11-04 retest2", () => {
+  it("model loading: the pending bubble says so and Cancel still works", () => {
+    const onCancelPending = vi.fn();
+    setup({ sending: true, loadingModel: true, onCancelPending, messages: [msg("u", "user", "hi", "2026-10-28T05:00:00Z")] });
+    expect(screen.getByRole("status", { name: "Amara is loading her model…" })).toHaveTextContent("Amara is loading her model…");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel waiting for Amara's reply" }));
+    expect(onCancelPending).toHaveBeenCalled();
+  });
+
+  it("header shows the router-reported model, not Hermes's configured one", () => {
+    expect(headerModel([msg("a", "assistant", "x", "t", { servedModel: "qwen3-32b" }), msg("u", "user", "y", "t")], "gemma4-12b", true)).toBe("qwen3-32b");
+    expect(headerModel([], "gemma4-12b", true)).toBe("Amara Router");
+    expect(headerModel([], "gemma4-12b", false)).toBe("gemma4-12b");
+  });
+
+  it("deep reply shows a Deep badge and the served model in the header", () => {
+    setup({ data: { ...loaded, hermes: { ...loaded.hermes, routedViaRouter: true } }, messages: [
+      msg("u", "user", "/deep plan", "2026-10-28T05:00:00Z"),
+      msg("a", "assistant", "Plan.", "2026-10-28T05:00:30Z", { servedModel: "qwen3-32b", tier: { tier: "deep", reason: "slash_deep", source: "router_reply" } }),
+    ] });
+    expect(screen.getAllByText("Deep").some((el) => el.closest(".chat-message"))).toBe(true);
+    expect(document.querySelector(".chat-screen__model")).toHaveTextContent("qwen3-32b");
+  });
+
+  it("Home scrolls to the top and End to the bottom, but not while typing", () => {
+    setup({ messages: [msg("u", "user", "hi", "2026-10-28T05:00:00Z"), msg("a", "assistant", "Hello.", "2026-10-28T05:00:05Z")] });
+    const list = screen.getByRole("list", { name: "Messages" });
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 900 });
+    list.scrollTop = 400;
+    fireEvent.keyDown(document.body, { key: "Home" });
+    expect(list.scrollTop).toBe(0);
+    fireEvent.keyDown(document.body, { key: "End" });
+    expect(list.scrollTop).toBe(900);
+    list.scrollTop = 400;
+    fireEvent.keyDown(screen.getByRole("textbox", { name: /message/i }), { key: "Home" });
+    expect(list.scrollTop).toBe(400);
   });
 });

@@ -29,11 +29,18 @@ import type {
   TerrenceContextItemQuery,
   TerrenceDecision,
   TerrenceInteraction,
+  AmaraContextSection,
+  AmaraTierInfo,
+  AmaraTurnContext,
+  ChatTurn,
   TerrenceAction,
   TerrenceAutomation,
   TerrenceAutomationRun,
   TerrencePrioritySnapshot,
   TerrenceProject,
+  VoiceList,
+  VoiceStatus,
+  VoiceTurn,
 } from "./types";
 
 interface SnapshotRead<T> {
@@ -272,7 +279,28 @@ export const interactWithTerrence = (request: {
   message: string;
   conversationId: string;
   hermesSessionId: string | null;
+  /** Full visible history (guarded, compressed when long). */
+  history?: ChatTurn[];
+  /** Composer Deep toggle → /deep through the router. */
+  deep?: boolean;
+  /** Guarded sections from prepareAmaraTurn. */
+  context?: AmaraContextSection[];
+  contextItemIds?: string[];
 }) => invoke<TerrenceInteraction>("interact_with_terrence", { request });
+
+/** Background context for a turn, to run through the injection guard before it is sent. */
+export const prepareAmaraTurn = (message: string) => invoke<AmaraTurnContext>("prepare_amara_turn", { message });
+
+/** Persist an exchange made outside Hermes (/deliberate via the router). */
+export const recordAmaraInteraction = (input: {
+  conversationId: string;
+  userMessage: string;
+  assistantMessage: string;
+  tier: AmaraTierInfo | null;
+  durationMs: number;
+  /** ^[a-z0-9_-]{1,32}$, e.g. "home"; Rust rejects others with invalid_source. */
+  source?: string | null;
+}) => invoke<TerrenceInteraction>("record_amara_interaction", { input });
 
 export const listTerrenceInteractions = (conversationId: string, limit = 80) =>
   invoke<TerrenceInteraction[]>("list_terrence_interactions", { conversationId, limit });
@@ -301,3 +329,11 @@ export const saveMuseSession = (session: RecordedSession & { file_path: string }
 /** Settings › "Allow Claude": only this flag crosses the bridge (no keys). */
 export const getAllowClaude = () => invoke<boolean>("get_allow_claude");
 export const setAllowClaude = (enabled: boolean) => invoke<boolean>("set_allow_claude", { enabled });
+
+/** Amara Voice (commands/voice.rs). */
+export const getVoiceStatus = () => invoke<VoiceStatus>("voice_status");
+export const startVoice = () => invoke<VoiceStatus>("voice_start");
+export const stopVoice = () => invoke<VoiceStatus>("voice_stop");
+export const getVoiceTurns = (n = 20) => invoke<VoiceTurn[]>("voice_recent_turns", { n });
+export const listVoices = () => invoke<VoiceList>("voice_list_voices");
+export const setVoice = (name: string) => invoke<VoiceList>("voice_set_voice", { name });

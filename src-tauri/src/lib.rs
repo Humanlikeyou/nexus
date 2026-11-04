@@ -2,11 +2,13 @@ mod app_paths;
 mod commands;
 mod dock_icon;
 
+use commands::voice;
 use commands::{
-    arm, assistant, ble_common, continuity, crew, events, goals, kb_status, kv, llm_router, muse,
-    noop, onboarding, openclaw, outbox, packager, replay, research, restart_services, sessions,
-    snapshots, system, telegram, terrence_actions, terrence_automations, terrence_context,
-    terrence_priorities, terrence_projects, terrence_runtime, terrence_runtime_bridge,
+    arm, assistant, ble_common, continuity, crew, events, goals, ha, kb_status, kv, llm_router,
+    muse, noop, noop_query, onboarding, openclaw, outbox, packager, replay, research,
+    restart_services, sessions, snapshots, system, telegram, terrence_actions,
+    terrence_automations, terrence_context, terrence_priorities, terrence_projects,
+    terrence_runtime, terrence_runtime_bridge,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -108,6 +110,7 @@ pub mod test_support {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    app_paths::check_dev_config_dir();
     app_paths::migrate_legacy_data_dir();
     tauri::Builder::default()
         .manage(terrence_runtime_bridge::NexusRuntimeBridge::default())
@@ -195,6 +198,22 @@ pub fn run() {
             muse::get_muse_state,
             // NOOP is the exclusive WHOOP/health reader. It owns strap sync and health storage.
             noop::get_noop_health_snapshot,
+            noop_query::noop_query,
+            noop_query::get_noop_settings,
+            noop_query::set_noop_settings,
+            // Home Assistant (commands/ha.rs)
+            ha::ha_states,
+            ha::ha_call_service,
+            ha::ha_conversation,
+            ha::ha_container_status,
+            ha::ha_container_start,
+            ha::ha_container_stop,
+            ha::ha_live_start,
+            ha::ha_live_stop,
+            ha::ha_get_config,
+            ha::ha_set_config,
+            ha::ha_clear_token,
+            ha::ha_test_connection,
             // Telegram
             telegram::get_config,
             telegram::save_settings,
@@ -305,6 +324,8 @@ pub fn run() {
             terrence_runtime::list_terrence_capabilities,
             terrence_runtime::interact_with_terrence,
             terrence_runtime::list_terrence_interactions,
+            terrence_runtime::prepare_amara_turn,
+            terrence_runtime::record_amara_interaction,
             // Assistant chat history
             assistant::create_chat_session,
             assistant::list_chat_sessions,
@@ -330,6 +351,15 @@ pub fn run() {
             crew::crew_health,
             kb_status::kb_status,
             kb_status::crew_tools,
+            // Amara Voice (~/projects/amara-voice)
+            voice::voice_status,
+            voice::voice_start,
+            voice::voice_stop,
+            voice::voice_recent_turns,
+            voice::voice_list_voices,
+            voice::voice_set_voice,
+            commands::voice_bridge::voice_bridge_start,
+            commands::voice_bridge::voice_bridge_stop,
             // Appearance
             dock_icon::sync_dock_icon,
         ])

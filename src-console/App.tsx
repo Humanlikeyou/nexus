@@ -7,7 +7,7 @@ import { useMuseSession } from "./app/useMuseSession";
 import { runApproval } from "./lib/approval";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
-import { ActivityField, BusinessField, CrewsField, HealthField, NeuroField, RevenueField, SessionsField, SettingsField, retryLazyScreens } from "./app/lazyScreens";
+import { ActivityField, BusinessField, CrewsField, HealthField, MindBodyField, NeuroField, SmartHomeField, RevenueField, SessionsField, SettingsField, VoiceField, retryLazyScreens } from "./app/lazyScreens";
 import { ScreenErrorBoundary } from "./shell/ScreenErrorBoundary";
 import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";
 import { CommandSurface } from "./design/SystemPrimitives";
@@ -16,6 +16,7 @@ import { useWindowActive } from "./shell/useWindowActive";
 import { useIdleAutoSave } from "./hooks/useIdleAutoSave";
 import { useSchedulerLifecycle } from "./hooks/useSchedulerLifecycle";
 import { ChatField } from "./screens/ChatScreen";
+import { AmaraVoiceAnnouncer } from "./components/AmaraLens/AmaraLens";
 import { TerranceField } from "./screens/TerranceScreen";
 import { ContextInspector } from "./shell/ContextInspector";
 import { Footer } from "./shell/Footer";
@@ -42,9 +43,16 @@ export default function App() {
   // §9/§11: Devices and About live inside Settings; their aliases scroll to the anchor.
   useEffect(() => {
     const anchor = route.id === "terrance" && route.view === "goals" ? "goals"
-      : route.id === "settings" && (route.view === "devices" || route.view === "about") ? route.view : null;
+      : route.id === "settings" && (route.view === "devices" || route.view === "about" || route.view === "home-assistant") ? route.view : null;
     if (!anchor) return;
-    const frame = requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView?.({ block: "start", behavior: "smooth" }));
+    // The host screen is lazy: retry for ~1s of frames until the anchor has mounted.
+    let frame = 0, tries = 0;
+    const scroll = () => {
+      const el = document.getElementById(anchor);
+      if (el) el.scrollIntoView?.({ block: "start", behavior: "smooth" });
+      else if (tries++ < 60) frame = requestAnimationFrame(scroll);
+    };
+    frame = requestAnimationFrame(scroll);
     return () => cancelAnimationFrame(frame);
   }, [route]);
   // Old ids (sessions, trajectory, revenue, assistant, devices) resolve to their host + sub-view.
@@ -64,7 +72,7 @@ export default function App() {
   // Amara background scheduler: started once for the shell, stopped on unmount.
   useSchedulerLifecycle();
 
-  const { conversationId, messages, sending, sendToTerrence, startNewConversation } = useConversation(refresh);
+  const { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending } = useConversation(refresh);
   // Session continuity: summarize the Amara chat after idle / on new chat / on close (bug 6).
   const autoSave = useIdleAutoSave(messages, conversationId);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -116,13 +124,16 @@ export default function App() {
   const retrySnapshot = () => { void refresh(); };
   const view = screenId === "terrance" ? <TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} />
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
+    : screenId === "mindbody" ? <MindBodyField sessions={data.sessions} />
+    : screenId === "smarthome" ? <SmartHomeField onOpenSettings={() => setRoute({ id: "settings", view: "home-assistant" })} />
     : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => setRoute({ id: "neuro", view: "main" })} />
     : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} />
     : screenId === "revenue" ? <RevenueField data={data} onRetry={retrySnapshot} />
     : screenId === "assistant" ? <ActivityField data={data} onRetry={retrySnapshot} />
     : screenId === "crews" ? <CrewsField data={data} onRetry={retrySnapshot} />
-    : screenId === "chat" ? <ChatField key={askDraft.n} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} onOpenActivity={() => setRoute({ id: "chat", view: "activity" })} onOpenCrews={() => setRoute({ id: "chat", view: "crews" })} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
+    : screenId === "voice" ? <VoiceField />
+    : screenId === "chat" ? <ChatField key={askDraft.n} conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} onOpenActivity={() => setRoute({ id: "chat", view: "activity" })} onOpenCrews={() => setRoute({ id: "chat", view: "crews" })} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
     : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} />;
 
   return (
@@ -134,6 +145,7 @@ export default function App() {
       <Sidebar active={active} onSelect={setActive} data={data} />
       <section className="active-field" aria-label={`${selected.label} system`}>{subViews && <div className="subview-bar"><SegmentedControl label={`${selected.label} view`} size="small" value={route.view} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); setRoute({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
       <Footer data={data} busy={busy} />
+      <AmaraVoiceAnnouncer />
       {notice && <div className="field-notice"><i />{notice}</div>}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />
     </CommandSurface>

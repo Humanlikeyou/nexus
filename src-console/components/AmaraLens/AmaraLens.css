@@ -1,0 +1,90 @@
+/* Amara speaking lens (spec-amara-speaking-hal.md). Tokens only; animates transform and opacity only. */
+.amara-lens-wrap { display: inline-flex; flex-direction: column; align-items: center; gap: var(--space-3); flex: none; }
+.amara-lens-wrap[data-size="28"], .amara-lens-wrap[data-size="44"] { display: inline-flex; vertical-align: middle; }
+
+.amara-lens {
+  --lens-size: 160px; --lens-level: 0; --lens-scale: 1; --lens-halo-factor: 1; --lens-ring-width: 1.5px;
+  position: relative; width: var(--lens-size); height: var(--lens-size); flex: none; isolation: isolate; contain: layout style;
+}
+.amara-lens[data-size="44"] { --lens-size: 44px; --lens-halo-factor: .5; --lens-ring-width: 1px; }
+.amara-lens[data-size="28"] { --lens-size: 28px; --lens-ring-width: 1px; }
+
+.amara-lens > div { position: absolute; border-radius: 50%; pointer-events: none; }
+
+/* 1. Glow halo: 1.9× lens, opacity = level × 0.35 (×0.5 inline, ×0.6 in light theme). */
+.amara-lens__halo {
+  inset: -45%; z-index: 0;
+  background: radial-gradient(closest-side, var(--lens-glow), transparent);
+  opacity: calc(var(--lens-level) * .35 * var(--lens-halo-factor) * var(--lens-halo-theme));
+}
+/* Listening / thinking outer ring at 1.14×. */
+.amara-lens__ring { inset: -7%; z-index: 1; border: var(--lens-ring-width) solid var(--lens-rim); opacity: 0; }
+.amara-lens[data-state="listening"] .amara-lens__ring { opacity: .7; }
+.amara-lens[data-state="thinking"] .amara-lens__ring { opacity: .3; border-style: dashed; }
+
+/* 2. Metallic bezel: solid, light at upper-left, soft drop shadow (static). */
+.amara-lens__bezel {
+  inset: 0; z-index: 2;
+  background: radial-gradient(circle at 30% 25%, var(--lens-bezel-hi), var(--lens-bezel-mid) 38%, var(--lens-bezel-lo) 72%, var(--lens-bezel-edge));
+  box-shadow: 0 calc(var(--lens-size) * .06) calc(var(--lens-size) * .12) var(--lens-shadow);
+}
+/* 3. Black glass ring at 86% radius, 1px black inner stroke. */
+.amara-lens__glass { inset: 7%; z-index: 3; background: var(--lens-glass); box-shadow: inset 0 0 0 1px var(--lens-stroke); }
+/* 4. Glow core at 84% of the glass radius, scaled by --lens-scale (≤1.12 stays inside the glass). */
+.amara-lens__core {
+  inset: 14%; z-index: 4;
+  background: radial-gradient(circle, var(--lens-hot), var(--lens-mid) 30%, var(--lens-deep) 66%, transparent 100%);
+  opacity: .2; transform: scale(1); will-change: opacity, transform;
+}
+.amara-lens[data-state="listening"] .amara-lens__core { opacity: .6; }
+.amara-lens[data-state="thinking"] .amara-lens__core { opacity: .3; animation: amara-lens-breathe var(--lens-dur-breathe) ease-in-out infinite; }
+.amara-lens[data-state="speaking"] .amara-lens__core { opacity: calc(.35 + .65 * var(--lens-level)); transform: scale(var(--lens-scale)); }
+.amara-lens[data-state="error"] .amara-lens__core {
+  opacity: .35; background: radial-gradient(circle, var(--lens-error-mid), var(--lens-error-deep) 60%, transparent 100%);
+}
+.amara-lens[data-state="error"] { animation: amara-lens-flicker var(--lens-dur-flicker) linear 1; }
+/* 5. Rim light: 82–100% of the glass radius. */
+.amara-lens__rim {
+  inset: 7%; z-index: 5;
+  background: radial-gradient(closest-side, transparent 82%, var(--lens-rim) 90%, transparent 100%);
+  opacity: .9;
+}
+.amara-lens[data-state="error"] .amara-lens__rim { background: radial-gradient(closest-side, transparent 82%, var(--tone-warning) 90%, transparent 100%); }
+/* 6. Specular (static): ellipse upper-left at −18°, catchlight dot. */
+.amara-lens__specular {
+  z-index: 6; left: 18%; top: 15%; width: 40%; height: 22%; transform: rotate(-18deg);
+  background: radial-gradient(ellipse closest-side, color-mix(in srgb, var(--lens-specular) 35%, transparent), transparent);
+}
+.amara-lens__catchlight {
+  z-index: 6; left: 64%; top: 26%; width: 4%; height: 4%;
+  background: color-mix(in srgb, var(--lens-specular) 55%, transparent);
+}
+
+.amara-lens__label { font: var(--type-callout); color: var(--label); }
+.amara-lens__error { display: inline-flex; flex-direction: column; align-items: center; gap: var(--space-2); font: var(--type-callout); color: var(--tone-warning-text); text-align: center; }
+
+@keyframes amara-lens-breathe { 0%, 100% { opacity: .3; } 50% { opacity: .7; } }
+@keyframes amara-lens-flicker { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+
+/* §5 Reduced motion: static per-state core, no breathe, flicker or amplitude scale. */
+@media (prefers-reduced-motion: reduce) {
+  .amara-lens, .amara-lens__core { animation: none !important; }
+  .amara-lens__core { will-change: auto; }
+  .amara-lens[data-state="thinking"] .amara-lens__core { opacity: .5; }
+  .amara-lens[data-state="speaking"] .amara-lens__core { opacity: .8; transform: none; }
+  .amara-lens__halo { opacity: calc(.8 * .35 * var(--lens-halo-factor) * var(--lens-halo-theme)); }
+  .amara-lens:not([data-state="speaking"]) .amara-lens__halo { opacity: 0; }
+}
+/* §5 Reduced transparency: halo off, core opaque over the black glass. */
+@media (prefers-reduced-transparency: reduce) {
+  .amara-lens__halo { display: none; }
+  .amara-lens__core { background: radial-gradient(circle, var(--lens-hot), var(--lens-mid) 30%, var(--lens-deep) 66%, var(--lens-glass) 100%); }
+  .amara-lens[data-state] .amara-lens__core { opacity: 1; }
+  .amara-lens[data-state="error"] .amara-lens__core { background: radial-gradient(circle, var(--lens-error-mid), var(--lens-error-deep) 60%, var(--lens-glass) 100%); }
+}
+@media (forced-colors: active) {
+  .amara-lens__halo, .amara-lens__specular, .amara-lens__catchlight { display: none; }
+  .amara-lens__bezel { background: Canvas; border: 2px solid CanvasText; box-shadow: none; }
+  .amara-lens__core { opacity: 1 !important; background: CanvasText; transform: none !important; }
+  .amara-lens__rim, .amara-lens__ring { border: 1px solid CanvasText; background: none; }
+}

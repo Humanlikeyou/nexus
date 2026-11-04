@@ -90,6 +90,31 @@ jobs:
       - name: cargo test
         run: cargo test --locked
 
+  # ── amara-router (standalone crate, own Cargo.lock): fmt, clippy, test, build
+  amara-router:
+    name: amara-router (fmt + clippy + test + build, Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: amara-router
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned to the toolchain verified locally (rustc 1.93.0).
+      - uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: amara-router
+      - name: cargo fmt --check
+        run: cargo fmt --check
+      - name: cargo clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: cargo test
+        run: cargo test --locked
+      - name: cargo build
+        run: cargo build --locked
+
   # ── Crew service: pytest in a test image built from the crew image ───────
   crew:
     name: Crew (pytest in Docker)
