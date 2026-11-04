@@ -306,6 +306,8 @@ pub fn run() {
             terrence_runtime::list_terrence_capabilities,
             terrence_runtime::interact_with_terrence,
             terrence_runtime::list_terrence_interactions,
+            terrence_runtime::prepare_amara_turn,
+            terrence_runtime::record_amara_interaction,
             // Assistant chat history
             assistant::create_chat_session,
             assistant::list_chat_sessions,
@@ -331,8 +333,6 @@ pub fn run() {
             crew::crew_health,
             kb_status::kb_status,
             kb_status::crew_tools,
-            // Appearance
-            dock_icon::sync_dock_icon,
             // Amara Voice (~/projects/amara-voice)
             voice::voice_status,
             voice::voice_start,
@@ -340,6 +340,8 @@ pub fn run() {
             voice::voice_recent_turns,
             voice::voice_list_voices,
             voice::voice_set_voice,
+            // Appearance
+            dock_icon::sync_dock_icon,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Amara OS");

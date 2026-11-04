@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { HermesSubtitle } from "./agentLabels";
-import { Activity, Bot, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
+import { Activity, Bot, Brain, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
+import { tierLabel, tierTitle } from "../app/amaraChat";
 import { assistantView } from "../app/statusViews";
 import { dateTime, time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
@@ -17,7 +18,8 @@ export interface ChatFieldProps {
   loading?: boolean;
   /** Epoch ms of the last session auto-save (useIdleAutoSave). */
   lastSavedAt?: number | null;
-  onSend: (message: string) => Promise<void>;
+  /** `deep`: the composer Deep toggle (sends /deep through the Amara Router). */
+  onSend: (message: string, options?: { deep?: boolean }) => Promise<void>;
   onNewConversation: () => void;
   onOpenContext: () => void;
   onApproveAction: (action: TerrenceAction) => void;
@@ -75,6 +77,7 @@ export function ChatField({
 }: ChatFieldProps) {
   const [draft, setDraft] = useState(initialDraft);
   const [query, setQuery] = useState("");
+  const [deep, setDeep] = useState(false);
   const listRef = useRef<HTMLOListElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   // Loading = first snapshot not in yet and no local transcript to show.
@@ -84,6 +87,8 @@ export function ChatField({
   const assistant = assistantView(data.openclaw, { loading, unavailable: data.unavailableSources.some((s) => s.command === "read_openclaw_status") });
   const actionsUnavailable = data.unavailableSources.some((s) => s.command === "list_terrence_actions");
   const hermesUnavailable = data.unavailableSources.some((s) => s.command === "get_terrence_runtime_health");
+  // Deep is the router's call; with Hermes still on Ollama directly nothing would read /deep.
+  const deepAvailable = hermes.routedViaRouter === true;
 
   const actions = useMemo(() => {
     const tools = data.actions.filter((a) => a.toolId !== "agent.hermes_chat");
@@ -130,7 +135,7 @@ export function ChatField({
     const message = text.trim();
     if (!message || sending) return;
     setDraft("");
-    await onSend(message);
+    await onSend(message, { deep: deep && deepAvailable });
   };
   const submit = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); void send(draft); };
   const onComposerKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -202,6 +207,11 @@ export function ChatField({
                 <div className="chat-bubble" data-role={m.role} data-failed={m.status === "failed" || undefined} title={m.role === "assistant" ? [m.model, time(m.timestamp)].filter(Boolean).join(" · ") : undefined}>
                   {m.content}
                 </div>
+                {m.role === "assistant" && m.status !== "failed" && m.tier && tierLabel(m.tier) && (
+                  <div className="chat-message__tier">
+                    <Badge tone={m.tier.tier === "fast" ? "neutral" : "accent"} title={tierTitle(m.tier)} aria-label={`Answered on the ${tierLabel(m.tier)} tier`}>{tierLabel(m.tier)}</Badge>
+                  </div>
+                )}
                 {m.status === "failed" && (
                   <div className="chat-message__failed"><Badge tone="danger">Failed</Badge><Button variant="plain" size="small" icon={RotateCcw} onClick={() => retry(m, i)} disabled={sending}>Retry</Button></div>
                 )}
@@ -241,6 +251,15 @@ export function ChatField({
         )}
 
         <form className="chat-screen__composer" onSubmit={submit}>
+          <Button
+            variant="plain"
+            icon={Brain}
+            className="chat-composer__deep"
+            aria-pressed={deep && deepAvailable}
+            disabled={!deepAvailable}
+            title={deepAvailable ? "Deep: send this message to Amara's deep model (/deep)" : "Deep needs Hermes on the Amara Router (see amara-router/README.md)"}
+            onClick={() => setDeep((on) => !on)}
+          >Deep</Button>
           <label htmlFor="chat-composer" className="ui-visually-hidden">Message Amara</label>
           <textarea
             id="chat-composer"
@@ -249,7 +268,7 @@ export function ChatField({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onComposerKey}
-            placeholder={online ? "Message Amara" : "Amara is offline — messages may fail"}
+            placeholder={!online ? "Amara is offline — messages may fail" : deep && deepAvailable ? "Message Amara (Deep)" : "Message Amara"}
           />
           <Button type="submit" variant="primary" icon={Send} iconOnly aria-label="Send" disabled={sending || !draft.trim()} />
         </form>

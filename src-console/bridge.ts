@@ -29,18 +29,22 @@ import type {
   TerrenceContextItemQuery,
   TerrenceDecision,
   TerrenceInteraction,
+  AmaraContextSection,
+  AmaraTierInfo,
+  AmaraTurnContext,
+  ChatTurn,
   TerrenceAction,
   TerrenceAutomation,
   TerrenceAutomationRun,
   TerrencePrioritySnapshot,
   TerrenceProject,
+  VoiceList,
+  VoiceStatus,
+  VoiceTurn,
 } from "./types";
 
 interface SnapshotRead<T> {
   unavailable: NexusUnavailableSource | null;
-  VoiceList,
-  VoiceStatus,
-  VoiceTurn,
   value: T;
 }
 
@@ -275,7 +279,26 @@ export const interactWithTerrence = (request: {
   message: string;
   conversationId: string;
   hermesSessionId: string | null;
+  /** Full visible history (guarded, compressed when long). */
+  history?: ChatTurn[];
+  /** Composer Deep toggle → /deep through the router. */
+  deep?: boolean;
+  /** Guarded sections from prepareAmaraTurn. */
+  context?: AmaraContextSection[];
+  contextItemIds?: string[];
 }) => invoke<TerrenceInteraction>("interact_with_terrence", { request });
+
+/** Background context for a turn, to run through the injection guard before it is sent. */
+export const prepareAmaraTurn = (message: string) => invoke<AmaraTurnContext>("prepare_amara_turn", { message });
+
+/** Persist an exchange made outside Hermes (/deliberate via the router). */
+export const recordAmaraInteraction = (input: {
+  conversationId: string;
+  userMessage: string;
+  assistantMessage: string;
+  tier: AmaraTierInfo | null;
+  durationMs: number;
+}) => invoke<TerrenceInteraction>("record_amara_interaction", { input });
 
 export const listTerrenceInteractions = (conversationId: string, limit = 80) =>
   invoke<TerrenceInteraction[]>("list_terrence_interactions", { conversationId, limit });

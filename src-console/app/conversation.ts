@@ -1,4 +1,4 @@
-import type { TerrenceAction, TerrenceInteraction } from "../types";
+import type { AmaraTierInfo, TerrenceAction, TerrenceInteraction } from "../types";
 
 export type ConversationMessage = {
   id: string;
@@ -7,6 +7,8 @@ export type ConversationMessage = {
   timestamp: string;
   status?: "failed";
   model?: string;
+  /** Router tier for Amara's reply; absent = unknown (no badge). */
+  tier?: AmaraTierInfo;
 };
 
 export const CONVERSATION_KEY = "nexus.terrence.conversationId";
@@ -74,6 +76,7 @@ export function messagesFromInteractions(interactions: TerrenceInteraction[]): C
         content: displayAssistantMessage(interaction.assistantMessage),
         timestamp: interaction.completedAt,
         model: interaction.model,
+        ...(interaction.tier ? { tier: interaction.tier } : {}),
       });
     } else if (interaction.error) {
       messages.push({

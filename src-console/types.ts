@@ -36,6 +36,31 @@ export interface HermesRuntimeHealth {
   configuredToolsets: string[];
   checkedAt: string;
   detail: string | null;
+  /** Hermes's model.base_url is the Amara Router, so Fast/Deep can be known. */
+  routedViaRouter?: boolean;
+}
+
+/** Fast/Deep as the Amara Router decided it (router names). Absent = unknown, no badge. */
+export interface AmaraTierInfo {
+  tier: "fast" | "deep" | "claude";
+  reason: string;
+  /** hermes_metadata | router_log | router_dry_run | router_reply */
+  source: string;
+}
+
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AmaraContextSection {
+  tag: string;
+  text: string;
+}
+
+export interface AmaraTurnContext {
+  sections: AmaraContextSection[];
+  itemIds: string[];
 }
 
 export interface TerrenceCapability {
@@ -61,6 +86,7 @@ export interface TerrenceInteraction {
   contextItemIds: string[];
   actionId: string | null;
   runtimeProfile: string;
+  tier?: AmaraTierInfo | null;
 }
 
 export interface TerrenceTool {

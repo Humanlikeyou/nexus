@@ -10,7 +10,7 @@
  * Usage:
  *  - Called from the reasoning loop for goal prioritization
  *  - Called from daily summary for suggested priorities
- *  - Can be triggered manually via "/deliberate [topic]" in chat
+ *  - Triggered from Amara chat via "/deliberate <topic>" (deep: true → the router's deep tier)
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -18,6 +18,7 @@ import { getConfig } from "@/lib/api";
 import { buildRouterConfig } from "@/lib/llm-router";
 import type { RouterResponse } from "@/lib/types";
 import { activityBus } from "./activityBus";
+import { scanForInjection } from "./injectionGuard";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,16 @@ export interface DeliberationResult {
   synthesis: string;
   confidence: "high" | "medium" | "low";
   timestamp: number;
+  /** Tier the router reported for the synthesis pass (its reply metadata). */
+  tier?: RouterResponse["tier"];
+  routingReason?: string;
+}
+
+export interface DeliberateOptions {
+  /** Ask the router for its deep tier on every pass (X-Amara-Route: deep). */
+  deep?: boolean;
+  /** Receives the router's user-facing error text when a pass fails. */
+  onError?: (message: string) => void;
 }
 
 // ─── System Prompts ─────────────────────────────────────────────────────────
@@ -62,11 +73,13 @@ const SYNTHESIS_PROMPT =
 export async function deliberate(
   topic: string,
   context?: string,
+  options: DeliberateOptions = {},
 ): Promise<DeliberationResult | null> {
   try {
     const cfg = await getConfig();
     const routerConfig = buildRouterConfig(cfg);
     const apiKey = cfg.anthropic_api_key ?? undefined;
+    let last: RouterResponse | null = null;
 
     const callLLM = async (prompt: string): Promise<string> => {
       const resp = await invoke<RouterResponse>("chat_with_router", {
@@ -75,9 +88,13 @@ export async function deliberate(
         tags: [],
         forceProvider: undefined,
         anthropicApiKey: apiKey,
+        deep: options.deep ?? false,
       });
+      last = resp;
       return resp.content.trim();
     };
+    // Bull/bear output is re-fed into the synthesis prompt: guard it first.
+    const guarded = (text: string) => scanForInjection(text).sanitized.trim();
 
     const contextBlock = context ? `\n\nAdditional context:\n${context}` : "";
     const taskId = activityBus.register(`Deliberation: ${topic.slice(0, 40)}`, "deliberation");
@@ -111,9 +128,10 @@ export async function deliberate(
     const synthesis = await callLLM(
       `${SYNTHESIS_PROMPT}\n\n` +
       `Topic: ${topic}\n\n` +
-      `Bull Case (optimistic view):\n${bullCase}\n\n` +
-      `Bear Case (skeptical view):\n${bearCase}`,
+      `Bull Case (optimistic view):\n${guarded(bullCase)}\n\n` +
+      `Bear Case (skeptical view):\n${guarded(bearCase)}`,
     );
+    const synthesisReply = last as RouterResponse | null;
 
     // Extract confidence from synthesis
     const confidence = extractConfidence(synthesis);
@@ -125,9 +143,12 @@ export async function deliberate(
       synthesis,
       confidence,
       timestamp: Date.now(),
+      tier: synthesisReply?.tier,
+      routingReason: synthesisReply?.routing_reason,
     };
   } catch (e) {
     console.error("[deliberation] Failed:", e);
+    options.onError?.(e instanceof Error ? e.message : String(e));
     return null;
   }
 }

@@ -67,7 +67,7 @@ describe("ChatField", () => {
     const props = setup({ data });
     expect(screen.getByRole("heading", { name: "Ask Amara anything" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Ship Amara OS v2" }));
-    expect(props.onSend).toHaveBeenCalledWith("Ship Amara OS v2");
+    expect(props.onSend).toHaveBeenCalledWith("Ship Amara OS v2", { deep: false });
   });
 
   it("Enter sends, Shift+Enter adds a newline, and the composer clears", async () => {
@@ -76,7 +76,7 @@ describe("ChatField", () => {
     await userEvent.type(box, "hello{Shift>}{Enter}{/Shift}there");
     expect(box).toHaveValue("hello\nthere");
     await userEvent.type(box, "{Enter}");
-    expect(props.onSend).toHaveBeenCalledWith("hello\nthere");
+    expect(props.onSend).toHaveBeenCalledWith("hello\nthere", { deep: false });
     expect(box).toHaveValue("");
   });
 
@@ -121,7 +121,7 @@ describe("ChatField", () => {
     const props = setup({ messages, sending: false });
     expect(screen.getByText("Failed")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(props.onSend).toHaveBeenCalledWith("what's next?");
+    expect(props.onSend).toHaveBeenCalledWith("what's next?", { deep: false });
   });
 
   it("shows the thinking bubble while sending", () => {
@@ -202,5 +202,38 @@ describe("groupStarts", () => {
   it("an action that isn't shown (Hermes chat turn) doesn't count as an item", () => {
     setup({ data: { ...loaded, actions: [action({ id: "h", toolId: "agent.hermes_chat", status: "succeeded" })] } });
     expect(screen.getByRole("heading", { name: "Ask Amara anything" })).toBeInTheDocument();
+  });
+
+  it("Deep toggle is off and explained while Hermes is not on the Amara Router", () => {
+    setup();
+    const deep = screen.getByRole("button", { name: "Deep" });
+    expect(deep).toBeDisabled();
+    expect(deep).toHaveAttribute("aria-pressed", "false");
+    expect(deep).toHaveAttribute("title", expect.stringContaining("Amara Router"));
+  });
+
+  it("Deep toggle sends deep: true when Hermes routes through the Amara Router", async () => {
+    const props = setup({ data: { ...loaded, hermes: { ...loaded.hermes, routedViaRouter: true } } });
+    const deep = screen.getByRole("button", { name: "Deep" });
+    await userEvent.click(deep);
+    expect(deep).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Message Amara")).toHaveAttribute("placeholder", "Message Amara (Deep)");
+    await userEvent.type(screen.getByLabelText("Message Amara"), "plan my week{Enter}");
+    expect(props.onSend).toHaveBeenCalledWith("plan my week", { deep: true });
+  });
+
+  it("tier badge: Fast/Deep from the router on Amara's replies, nothing when unknown", () => {
+    setup({ messages: [
+      msg("u1", "user", "hi", "2026-10-28T05:00:00Z"),
+      msg("a1", "assistant", "Hello.", "2026-10-28T05:00:05Z", { tier: { tier: "fast", reason: "classifier_easy", source: "router_log" } }),
+      msg("u2", "user", "/deep plan", "2026-10-28T05:00:10Z"),
+      msg("a2", "assistant", "Here is a plan.", "2026-10-28T05:00:40Z", { tier: { tier: "deep", reason: "slash_deep", source: "router_dry_run" } }),
+      msg("a3", "assistant", "No tier known.", "2026-10-28T05:01:00Z"),
+    ] });
+    const fast = screen.getByLabelText("Answered on the Fast tier");
+    expect(fast).toHaveTextContent("Fast");
+    expect(fast).toHaveAttribute("title", expect.stringContaining("route log"));
+    expect(screen.getByLabelText("Answered on the Deep tier")).toHaveTextContent("Deep");
+    expect(within(screen.getByRole("list", { name: "Messages" })).getAllByText(/^(Fast|Deep)$/)).toHaveLength(2);
   });
 });

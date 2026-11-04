@@ -201,33 +201,63 @@ loopback listener or put a reverse proxy in front.
 ## Point Hermes at the router
 
 Hermes today calls Ollama's OpenAI API directly (`~/.hermes/config.yaml`:
-`model.base_url: http://localhost:11434/v1`, `model.default: gemma4-12b-uncensored`).
+`model.base_url: http://localhost:11434/v1`, `model.default: gemma4-12b-uncensored`), so the
+router never sees Amara's chat and Nexus can't show a Fast/Deep badge (it shows none).
+Nothing below has been applied; Taisun applies it.
 
-```bash
-cp ~/.hermes/config.yaml ~/.hermes/config.yaml.backup-before-amara-router-$(date +%Y%m%d%H%M%S)
-```
+1. Back up (keep the file name; it is how you roll back):
 
-Then edit the `model:` block in `~/.hermes/config.yaml`:
+   ```bash
+   cp -p ~/.hermes/config.yaml ~/.hermes/config.yaml.backup-before-amara-router-$(date +%Y%m%d%H%M%S)
+   ls -l ~/.hermes/config.yaml.backup-before-amara-router-*
+   ```
 
-```yaml
-model:
-  default: amara                        # auto routing; amara-fast / amara-deep to pin a tier
-  provider: custom
-  base_url: http://127.0.0.1:8787/v1
-  api_mode: chat_completions
-  context_length: 131072                # unchanged
-  ollama_num_ctx: 131072                # ignored by the router (it uses fast_num_ctx)
-  max_tokens: 4096
-```
+2. Install and start the router (see Install above) and check `curl -s 127.0.0.1:8787/health`.
 
-Restart the Hermes gateway the way you normally do, then check with
-`tail -f ~/Library/Logs/amara-router/routes.jsonl` while sending Amara a message.
-To roll back, copy the backup over `config.yaml` and restart Hermes.
+3. Edit only the `model:` block in `~/.hermes/config.yaml`:
 
-Notes for Hermes: its agent loop calls the model once per tool step, and each call runs the
-classifier (~0.8 s). If tool-heavy turns get slow, or a HARD classification sends a tool step
-to the deep model and that model handles tools worse, use `default: amara-fast` and ask for
-depth with `/deep` or "think deeper".
+   ```yaml
+   model:
+     default: amara                        # auto routing; amara-fast / amara-deep to pin a tier
+     provider: custom
+     base_url: http://127.0.0.1:8787/v1
+     api_mode: chat_completions
+     context_length: 131072                # unchanged
+     ollama_num_ctx: 131072                # ignored by the router (it uses fast_num_ctx)
+     max_tokens: 4096
+   ```
+
+4. Restart the Hermes gateway the way you normally do (Hermes desktop app, or stop/start
+   `hermes gateway run`). Then send Amara a message and watch
+   `tail -f ~/Library/Logs/amara-router/routes.jsonl`: one line per model call.
+
+5. Roll back: copy the backup over `config.yaml` and restart Hermes.
+
+### What changes once Hermes uses the router (checked in the Hermes source, read-only)
+
+- **`/deep` reaches the router.** The API server passes the user's text to the agent
+  unchanged; Hermes only *appends* its memory/plugin context after it
+  (`agent/turn_context.py: compose_user_api_content`), so a leading `/deep`, `/fast` or
+  `/claude` is still at the start of the last user message. The router strips it before the
+  model sees it. Hermes's own transcript keeps the prefix.
+- **`X-Amara-*` request headers are not forwarded.** Hermes builds its own OpenAI client; the
+  only extra headers are static ones from `model.default_headers` / `model.extra_headers` in
+  `config.yaml`. Setting `X-Amara-Route: fast` there would pin *every* Hermes call (Telegram
+  included), so use `/deep` per message instead.
+- **Tier metadata does not come back through Hermes.** Hermes writes its own
+  `chat.completion` (`gateway/platforms/api_server_openai_routes.py`), without the router's
+  `X-Amara-Tier` header or `amara` field. Nexus therefore takes the tier from the router's route
+  log for the turn's time window (`routes.jsonl`, `api: openai`, no content), and falls back
+  to a `POST /amara/route` dry run of the same body. If Hermes ever forwards `amara`, Nexus
+  uses that first.
+- **The routing text includes Hermes's memory block.** Because Hermes appends recalled memory
+  to the last user message, a short question with a large recall can cross `token_threshold`
+  (2000 tokens) and go deep. The route log shows the tier that really answered.
+- **Every model call is routed.** Hermes calls the model once per tool step, and each call
+  routes on the same last user message, with ~0.8 s of classifier time when the classifier
+  runs. If tool-heavy turns get slow, set `default: amara-fast` and ask for depth with `/deep`.
+- **Telegram and every other Hermes channel go through the router too.** That is the point
+  (one router decides), but it also means a deep answer on Telegram loads the deep model.
 
 ## Point the Nexus app at the router
 
