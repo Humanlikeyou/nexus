@@ -34,8 +34,10 @@ deep_think = false
 
 [routing]
 token_threshold = 2000
+# false keeps deep to explicit asks: /deep, a route header, the deep alias or a trigger phrase.
+auto_deep = false
 trigger_phrases = ["think deeper", "think harder", "think deeply", "think more deeply", "deep think"]
-classifier = true
+classifier = false
 # 100-10000 ms.
 classifier_timeout_ms = 2000
 # /api/ps check before classifying (50-2000 ms; it takes 340-620 ms during a model swap).

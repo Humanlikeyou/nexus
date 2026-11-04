@@ -128,6 +128,9 @@ fn default_deep_keep_alive() -> KeepAlive {
 pub struct Routing {
     /// Latest user message over this many estimated tokens (~4 chars each) goes deep.
     pub token_threshold: u32,
+    /// Send long prompts and code blocks to deep automatically. Off keeps deep to explicit
+    /// asks (`/deep`, a route header, the deep alias or a trigger phrase).
+    pub auto_deep: bool,
     /// Case-insensitive phrases that send a message deep (stripped before forwarding).
     pub trigger_phrases: Vec<String>,
     /// Run the EASY/HARD classifier on the fast model when no earlier rule matched.
@@ -147,6 +150,7 @@ impl Default for Routing {
     fn default() -> Self {
         Self {
             token_threshold: 2000,
+            auto_deep: true,
             trigger_phrases: vec![
                 "think deeper".into(),
                 "think harder".into(),
