@@ -175,6 +175,12 @@ This stage turns Amara from semi-autonomous to fully autonomous.
 - [x] Outbox: pending items older than 24h become `expired` (kept, never sent) (46fa421)
 - [x] Activity-log retention: 30 days / 5000 files, older entries archived to monthly `.jsonl.gz` (6a076f8)
 - [x] Prune fix: reasoning and prune failures now back off, so the weekly prune that had been stuck since 2026-07-06 runs again (c90435a, be271f5)
+- [x] Amara tiers Gemma/Qwen/Claude, one identity that never names the model; Claude gated by Settings › Assistant › Allow Claude (off by default, "sends data off the Mac") (caaa71c, 97441b7)
+- [x] Amara Router (`amara-router/`, 127.0.0.1:8787, LaunchAgent `com.taisun.amara-router`) picks fast/deep; Nexus `llm_router.rs` is a thin client (1c769c3, ce2b612)
+- [x] Chat routed through Hermes over HTTP (127.0.0.1:8642); fixes the broken `nexus_runtime` bridge from 84e57f1; Fast/Deep badge and Deep toggle (6206c38)
+- [x] Chat & Agents › Voice panel for Amara Voice (6399560)
+- [ ] Switch-over (Taisun, manual): install the router LaunchAgent and point Hermes at `http://127.0.0.1:8787/v1` (`TAISUN-STEPS.md`); Home Assistant per `amara-router/README.md`
+- [ ] Mind-Body page (planned)
 
 ---
 
