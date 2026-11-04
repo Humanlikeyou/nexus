@@ -92,4 +92,23 @@ test.describe("Home Assistant settings", () => {
     const args = await page.evaluate(() => (window as unknown as { __E2E_CALLS: Array<{ cmd: string; args?: unknown }> }).__E2E_CALLS.filter((c) => c.cmd === "ha_test_connection").map((c) => c.args));
     expect(args).toEqual([{ url: "http://localhost:8124", token: TOKEN }]);
   });
+  test("new address needs the token re-entered before Test; token_required copy", async ({ page, theme }) => {
+    const data = { ...responses(), ha_get_config: { url: "http://127.0.0.1:8123", tokenSet: true, tokenSource: "app" }, ha_test_connection: { ok: false, kind: "token_required" } };
+    await openApp(page, { theme, data });
+    await navButton(page, "Settings").click();
+    const group = activeField(page, "Settings").locator("#home-assistant");
+    const address = group.getByLabel("Address");
+    await expect(address).toHaveValue("http://127.0.0.1:8123");
+    await address.fill("http://localhost:8124");
+    const test = group.getByRole("button", { name: "Test connection" });
+    await expect(test).toBeDisabled();
+    const hint = group.getByText("Re-enter the token to test a new address.");
+    await expect(hint).toBeVisible();
+    const token = group.getByLabel("New access token");
+    expect((await token.getAttribute("aria-describedby"))?.split(" ")).toContain(await hint.getAttribute("id"));
+    await token.fill(TOKEN);
+    await expect(test).toBeEnabled();
+    await test.click();
+    await expect(group.getByRole("status").filter({ hasText: "Re-enter the token to test a new address." })).toBeVisible();
+  });
 });

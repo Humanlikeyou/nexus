@@ -165,3 +165,31 @@ describe("HomeAssistantSettingsGroup · QA 11-04 retest2", () => {
     expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
   });
 });
+
+describe("HomeAssistantSettingsGroup · token_required", () => {
+  it("a new address disables Test until a token is typed, with a hint tied to the token field", async () => {
+    const b = backend({ getConfig: vi.fn(async () => ({ url: "http://127.0.0.1:8123", tokenSet: true, tokenSource: "app" as const })) });
+    render(<HomeAssistantSettingsGroup />);
+    const url = await screen.findByLabelText("Address");
+    const test = screen.getByRole("button", { name: "Test connection" });
+    fireEvent.change(url, { target: { value: "http://127.0.0.1:8123/ " } });
+    expect(test).toBeEnabled();
+    expect(screen.queryByText("Re-enter the token to test a new address.")).toBeNull();
+    fireEvent.change(url, { target: { value: "http://localhost:8124" } });
+    expect(test).toBeDisabled();
+    const token = screen.getByLabelText("New access token");
+    const hint = screen.getByText("Re-enter the token to test a new address.");
+    expect(token.getAttribute("aria-describedby")?.split(" ")).toContain(hint.id);
+    fireEvent.change(token, { target: { value: TOKEN } });
+    expect(screen.queryByText("Re-enter the token to test a new address.")).toBeNull();
+    fireEvent.click(test);
+    await waitFor(() => expect(b.testConnection).toHaveBeenCalledWith({ url: "http://localhost:8124", token: TOKEN }));
+  });
+
+  it("maps kind token_required to the hint copy", async () => {
+    backend({ testConnection: vi.fn(async () => ({ ok: false, kind: "token_required" })) });
+    render(<HomeAssistantSettingsGroup />);
+    fireEvent.click(await screen.findByRole("button", { name: "Test connection" }));
+    expect(await screen.findByText("Re-enter the token to test a new address.")).toBeInTheDocument();
+  });
+});

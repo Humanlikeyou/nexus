@@ -9,7 +9,7 @@ import { classifyHaError } from "./homeAssistant";
 export type HaTokenSource = "app" | "env" | "legacy";
 export type HaConfig = { url: string | null; tokenSet: boolean; tokenSource: HaTokenSource | null };
 export type HaClearResult = { fallbackActive: boolean };
-export type HaTestKind = "unreachable" | "auth_rejected" | "upstream_error" | "too_large" | "bad_url" | "not_configured" | "not_allowed" | "already_running" | "unsafe_storage";
+export type HaTestKind = "unreachable" | "auth_rejected" | "upstream_error" | "too_large" | "bad_url" | "not_configured" | "not_allowed" | "already_running" | "unsafe_storage" | "token_required";
 export type HaTestResult = { ok: boolean; kind?: string; version?: string };
 export type HaConfigInput = { url?: string; token?: string };
 
@@ -44,11 +44,10 @@ const tauriBackend: HaConfigBackend = {
     return { fallbackActive: raw?.fallbackActive === true };
   },
   async testConnection(input = {}) {
-    // Flat args like ha_set_config. Rust's ha_test_connection (12f46fa) takes no args yet and
-    // ignores these, testing the saved config; it needs ha_test_connection(url: Option<String>, token: Option<String>).
+    // Flat args: ha_test_connection(url?: String, token?: String). Blank counts as absent, so it isn't sent.
     const args: Record<string, string> = {};
-    if (input.url !== undefined) args.url = input.url;
-    if (input.token !== undefined) args.token = input.token;
+    if (input.url) args.url = input.url;
+    if (input.token) args.token = input.token;
     const raw = await invoke<HaTestResult | null>("ha_test_connection", args);
     return {
       ok: raw?.ok === true,
@@ -117,6 +116,14 @@ export const TOKEN_SOURCE_COPY: Record<HaTokenSource, string> = {
 };
 export const FALLBACK_ACTIVE_COPY = "A token from the environment is still in use.";
 
+/** Security rule: testing an edited address needs the token re-entered (Rust returns kind token_required). */
+export const TOKEN_REQUIRED_COPY = "Re-enter the token to test a new address.";
+
+/** Comparable form of an HA address, matching the backend: trimmed, trailing slash dropped. No host aliasing (localhost ≠ 127.0.0.1), no case folding. */
+export function normalizeHaUrl(value: string | null | undefined): string {
+  return (value ?? "").trim().replace(/\/+$/, "");
+}
+
 export const TEST_COPY: Record<HaTestKind, string> = {
   unreachable: "Home Assistant isn't reachable. Check that it's running.",
   auth_rejected: "Home Assistant rejected the token. Create a new long-lived token and replace it.",
@@ -126,6 +133,7 @@ export const TEST_COPY: Record<HaTestKind, string> = {
   not_configured: "Add the address and token, then test again.",
   not_allowed: "Nexus doesn't allow a connection test right now.",
   already_running: "A test is already running. Wait a moment, then try again.",
+  token_required: TOKEN_REQUIRED_COPY,
   unsafe_storage: "Nexus couldn't read the token safely. Its settings file has unsafe permissions or ownership.",
 };
 

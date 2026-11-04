@@ -7,6 +7,8 @@ describe("modelLoading", () => {
     expect(modelLoadingDelay({ kind: "model_loading", retry_after: "2" })).toBe(2000);
     expect(modelLoadingDelay({ kind: "model_loading" })).toBe(MODEL_LOADING_DEFAULT_MS);
     expect(modelLoadingDelay({ kind: "model_loading", retryAfter: 9999 })).toBe(MODEL_LOADING_MAX_MS);
+    expect(modelLoadingDelay("model_loading: retry_after=300")).toBe(60_000);
+    expect(modelLoadingDelay("model_loading: retry_after=10")).toBe(10_000);
     expect(modelLoadingDelay({ kind: "model_loading", retryAfter: "Wed, 21 Oct 2026 07:28:00 GMT" })).toBe(MODEL_LOADING_DEFAULT_MS);
     expect(modelLoadingDelay("model_loading: Model loading retry_after=4")).toBe(4000);
     expect(modelLoadingDelay(new Error("Hermes is busy with another request. Try again in a moment."))).toBe(MODEL_LOADING_DEFAULT_MS);

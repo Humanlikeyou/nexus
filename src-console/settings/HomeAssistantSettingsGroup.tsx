@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
-  COMING_SOON_COPY, FALLBACK_ACTIVE_COPY, HA_DEFAULT_URL, TOKEN_SOURCE_COPY, haConfigBackend, isCommandMissing, setErrorCopy, testResultCopy, tokenError, urlError, type HaConfig,
+  COMING_SOON_COPY, FALLBACK_ACTIVE_COPY, TOKEN_REQUIRED_COPY, normalizeHaUrl, HA_DEFAULT_URL, TOKEN_SOURCE_COPY, haConfigBackend, isCommandMissing, setErrorCopy, testResultCopy, tokenError, urlError, type HaConfig,
 } from "../lib/haConfig";
 import { Badge, Button, InsetGroup, ListRow, TextField } from "../ui";
 
@@ -17,6 +17,7 @@ export function HomeAssistantSettingsGroup() {
   const [load, setLoad] = useState<Load>({ status: "loading" });
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
+  const tokenHintId = useId();
   const [replacing, setReplacing] = useState(false);
   const [busy, setBusy] = useState<"save" | "clear" | "test" | null>(null);
   const [saveResult, setSaveResult] = useState<Result>(null);
@@ -54,7 +55,10 @@ export function HomeAssistantSettingsGroup() {
   }
 
   const { config } = load;
-  const showToken = !config.tokenSet || replacing;
+  // Security: an edited address can only be tested with the token re-entered.
+  const addressDiffers = normalizeHaUrl(url) !== normalizeHaUrl(config.url);
+  const needsToken = addressDiffers && token === "";
+  const showToken = !config.tokenSet || replacing || addressDiffers;
   const uErr = urlError(url);
   const tErr = tokenError(token);
   const urlChanged = url.trim() !== (config.url ?? "");
@@ -105,7 +109,7 @@ export function HomeAssistantSettingsGroup() {
     try {
       // Test what is on screen: the edited address and any typed token, not just the saved config.
       const input: { url?: string; token?: string } = {};
-      if (urlChanged) input.url = url.trim();
+      if (addressDiffers && url.trim() !== "") input.url = url.trim();
       if (token !== "") input.token = token;
       const result = await haConfigBackend().testConnection(input);
       if (mounted.current) setTestResult({ ok: result.ok, text: testResultCopy(result) });
@@ -128,8 +132,10 @@ export function HomeAssistantSettingsGroup() {
             <TextField label={config.tokenSet ? "New access token" : "Access token"} type="password" autoComplete="off"
               spellCheck={false} name="ha-access-token" value={token}
               description="Create a long-lived access token in Home Assistant under Profile, then Security."
-              onChange={(e) => { setToken(e.target.value); setSaveResult(null); }} error={tErr ?? undefined} />
+              onChange={(e) => { setToken(e.target.value); setSaveResult(null); }} error={tErr ?? undefined}
+              aria-describedby={needsToken ? tokenHintId : undefined} />
           )}
+          {showToken && needsToken && <p id={tokenHintId} className="settings__ha-hint ui-text-field__description">{TOKEN_REQUIRED_COPY}</p>}
           <div className="settings__ha-actions">
             <Button type="submit" variant="primary" size="small" loading={busy === "save"} disabled={!canSave}>Save</Button>
             {config.tokenSet && !replacing && (
@@ -141,7 +147,7 @@ export function HomeAssistantSettingsGroup() {
             {config.tokenSet && appToken && (
               <Button type="button" size="small" variant="secondary" loading={busy === "clear"} disabled={busy !== null} onClick={() => { void onClear(); }}>Clear token</Button>
             )}
-            <Button type="button" size="small" variant="secondary" loading={busy === "test"} disabled={busy !== null || uErr !== null || tErr !== null} onClick={() => { void onTest(); }}>Test connection</Button>
+            <Button type="button" size="small" variant="secondary" loading={busy === "test"} disabled={busy !== null || uErr !== null || tErr !== null || needsToken} onClick={() => { void onTest(); }}>Test connection</Button>
           </div>
           <p className="settings__ha-result" role="status" aria-live="polite" data-ok={saveResult?.ok}>{saveResult?.text ?? ""}</p>
           <p className="settings__ha-result" role="status" aria-live="polite" data-ok={testResult?.ok}>{testResult?.text ?? ""}</p>

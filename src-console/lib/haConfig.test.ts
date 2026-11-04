@@ -68,3 +68,12 @@ describe("copy", () => {
     expect(tokenError("abc.def")).toBeNull();
   });
 });
+
+describe("normalizeHaUrl", () => {
+  it("only trims and drops trailing slashes; no host aliasing", async () => {
+    const { normalizeHaUrl } = await import("./haConfig");
+    expect(normalizeHaUrl(" http://127.0.0.1:8123/ ")).toBe("http://127.0.0.1:8123");
+    expect(normalizeHaUrl("http://localhost:8123")).not.toBe(normalizeHaUrl("http://127.0.0.1:8123"));
+    expect(normalizeHaUrl(null)).toBe("");
+  });
+});

@@ -2,12 +2,13 @@
  * Router "model loading" (HTTP 503 + Retry-After) → automatic retries.
  * Single swap point for how Rust reports it. Accepted today:
  *  - an object `{ kind: "model_loading", retryAfter?: seconds }` (proposed)
- *  - a string `"model_loading: … retry_after=<seconds>"` (proposed)
+ *  - a string `"model_loading: retry_after=<seconds>"` (Rust, confirmed: 1–300, default 10)
  *  - Rust's current fixed text for 429/503 ("Hermes is busy with another request…"), which has
  *    no Retry-After, so the default wait applies.
  */
 export const MODEL_LOADING_DEFAULT_MS = 3000;
-export const MODEL_LOADING_MAX_MS = 30_000;
+/** Rust sends retry_after 1–300 s (default 10). 60 s per wait (3 waits ≤ 3 min, Cancel always works) covers a deep model load without leaving the bubble stuck for 5 min. */
+export const MODEL_LOADING_MAX_MS = 60_000;
 export const MODEL_LOADING_MIN_MS = 500;
 export const MODEL_LOADING_RETRIES = 3;
 export const MODEL_LOADING_COPY = "Amara is loading her model…";

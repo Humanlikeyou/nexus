@@ -15,6 +15,9 @@ describe("routeInfoFrom", () => {
       .toEqual({ tier: { tier: "deep", reason: "slash_deep", source: "router_reply" }, model: "qwen3-32b" });
     expect(routeInfoFrom(base({ routeTier: "light", servedModel: "gemma4-4b" }))).toMatchObject({ tier: { tier: "fast" }, model: "gemma4-4b" });
   });
+  it("Rust's confirmed shape: route { tier } with model and reason optional", () => {
+    expect(routeInfoFrom(base({ route: { tier: "fast" } }))).toEqual({ tier: { tier: "fast", reason: "", source: "router_reply" }, model: null });
+  });
   it("claude keeps its own tier; JSON model fallback", () => {
     expect(routeInfoFrom(base({ route: { tier: "claude" }, routerModel: "claude-sonnet" }))).toMatchObject({ tier: { tier: "claude" }, model: "claude-sonnet" });
   });
