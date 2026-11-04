@@ -86,8 +86,9 @@ streaming (tags split across chunks are held back), and Ollama's separate `think
 
 - Fast stays resident (`keep_alive = -1`), warmed at start (`warm_fast_on_start`).
 - Deep loads on demand and unloads after 5 idle minutes (`deep_keep_alive = "5m"`).
-- After a deep answer the router polls `/api/ps` every `poll_secs`. Once deep has unloaded,
-  it reloads fast if Ollama had evicted it (`rewarm_fast_after_deep`).
+- After a deep answer the router checks `/api/ps` once and re-warms fast only if the loaded
+  models' `size_vram` plus fast's last seen `size_vram` fits `gpu_budget_gb` (default 21).
+  If fast's size was never seen, or `/api/ps` fails, it skips; the next fast request loads it.
 - **Optional, OFF by default:** on a 32 GB M1 Pro macOS lets the GPU wire roughly two thirds of
   RAM, so fast (≈8.5 GB at 131k context) and deep (≈16 GB + KV) may not both fit and Ollama
   evicts fast while deep runs. You can raise the limit until the next reboot with

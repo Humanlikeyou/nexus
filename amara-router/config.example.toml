@@ -43,8 +43,12 @@ classifier_max_chars = 400
 # Background pre-warm at startup (never blocks). Deep is loaded after fast, if enabled.
 warm_fast_on_start = true
 warm_deep_on_start = false
-# Re-warm fast right after a deep answer; if that fails, poll /api/ps every poll_secs.
+# Re-warm fast right after a deep answer, only if /api/ps shows VRAM headroom: loaded models'
+# size_vram + fast's last seen size_vram <= gpu_budget_gb. Otherwise the next fast request loads it.
 rewarm_fast_after_deep = true
+# GPU memory budget in GB (1-512). ~21 GB is usable by the GPU on this 32 GB Mac.
+gpu_budget_gb = 21.0
+# Unused (kept so older configs parse).
 poll_secs = 20
 # No first byte from Ollama within this (1000-300000 ms): HTTP 503 "Model loading, try again
 # shortly." while the load continues in the background.

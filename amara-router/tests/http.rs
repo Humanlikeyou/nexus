@@ -33,6 +33,10 @@ struct Mock {
     gen_delay_ms: u64,
     /// Delay before /api/ps answers.
     ps_delay_ms: u64,
+    /// size_vram (bytes) reported per model by /api/ps (missing = 0).
+    ps_vram: std::collections::HashMap<String, u64>,
+    /// /api/ps answers 500.
+    ps_fails: bool,
 }
 
 type M = Arc<Mutex<Mock>>;
@@ -115,8 +119,12 @@ async fn start_mock(m: M) -> String {
         .route("/api/ps", get(|AxState(m): AxState<M>| async move {
             let delay = m.lock().unwrap().ps_delay_ms;
             tokio::time::sleep(Duration::from_millis(delay)).await;
-            let models: Vec<Value> = m.lock().unwrap().ps_models.iter().map(|n| json!({"name": n, "model": n})).collect();
-            axum::Json(json!({"models": models}))
+            let g = m.lock().unwrap();
+            if g.ps_fails {
+                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "ps broke").into_response();
+            }
+            let models: Vec<Value> = g.ps_models.iter().map(|n| json!({"name": n, "model": n, "size_vram": g.ps_vram.get(n).copied().unwrap_or(0)})).collect();
+            axum::Json(json!({"models": models})).into_response()
         }))
         .route("/api/version", get(|| async { axum::Json(json!({"version": "9.9.9"})) }))
         .route("/v1/messages", http_post(|AxState(m): AxState<M>| async move {
@@ -789,31 +797,6 @@ async fn jsonl_log_has_fields_and_no_content() {
 }
 
 #[tokio::test]
-async fn fast_is_rewarmed_after_deep_unloads() {
-    let r = rig_with(mock("EASY", &["ok"]), "rewarm", None, false).await;
-    post(
-        &format!("{}/v1/chat/completions", r.url),
-        oa("/deep x", false),
-        &[],
-    )
-    .await
-    .text()
-    .await
-    .unwrap();
-    // Mock /api/ps reports nothing loaded: deep has gone and fast was evicted.
-    for _ in 0..40 {
-        if !r.mock.lock().unwrap().generates.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    let g = r.mock.lock().unwrap().generates.clone();
-    assert_eq!(g.len(), 1, "expected one warm request");
-    assert_eq!(g[0]["model"], FAST);
-    assert_eq!(g[0]["keep_alive"], -1);
-}
-
-#[tokio::test]
 async fn filler_line_streams_before_a_deep_answer_only() {
     let r = rig_with(mock("EASY", &["Answer"]), "filler", None, false).await;
     let text = post(
@@ -1054,28 +1037,6 @@ async fn slow_ps_skips_classifier_within_the_residency_timeout() {
 }
 
 #[tokio::test]
-async fn fast_is_rewarmed_right_after_a_deep_reply_while_deep_is_still_loaded() {
-    let mut m = mock("EASY", &["ok"]);
-    m.ps_models = vec![DEEP.to_string()]; // deep still resident: the old poll loop would wait
-    let r = rig_cfg(m, "rewarm", None, false, |c| c.loading.poll_secs = 60).await;
-    post(
-        &format!("{}/v1/chat/completions", r.url),
-        oa("/deep x", false),
-        &[],
-    )
-    .await
-    .text()
-    .await
-    .unwrap();
-    let g = wait_for_generates(&r, 1).await;
-    assert_eq!(g.len(), 1, "expected one immediate warm request");
-    assert_eq!(g[0]["model"], FAST);
-    assert_eq!(g[0]["prompt"], "");
-    assert_eq!(g[0]["keep_alive"], -1);
-    assert_eq!(g[0]["options"]["num_ctx"], 4096);
-}
-
-#[tokio::test]
 async fn configured_classifier_timeout_is_honoured() {
     // 600 ms classifier: inside a 1500 ms timeout it decides, inside 300 ms it times out.
     let mut m = mock("HARD", &["ok"]);
@@ -1119,14 +1080,13 @@ async fn num_ctx_is_in_every_ollama_request_body() {
         .await
         .unwrap();
     }
-    wait_for_generates(&r, 1).await;
     let g = r.mock.lock().unwrap();
     assert!(g.chats.len() >= 4);
     for b in &g.chats {
         let want = if b["model"] == DEEP { 2048 } else { 4096 };
         assert_eq!(b["options"]["num_ctx"], want, "body without num_ctx: {b}");
     }
-    assert!(!g.generates.is_empty());
+    // Warm-up bodies are checked in the re-warm and pre-warm tests.
     for b in &g.generates {
         assert!(b["options"]["num_ctx"].is_u64(), "warm-up without num_ctx");
     }
@@ -1209,4 +1169,84 @@ async fn startup_prewarm_is_background_and_sends_num_ctx() {
     assert!(State::new(cfg, Secrets::default(), false)
         .prewarm_on_start()
         .is_none());
+}
+
+// ── VRAM-gated re-warm after deep ────────────────────────────────────────────
+
+const GB: u64 = 1_000_000_000;
+
+/// A rig where the router has already seen fast at 8 GB in /api/ps (via a classified request),
+/// then /api/ps shows only deep at `deep_gb`. Returns after one `/deep` reply.
+async fn after_deep(deep_gb: u64, ps_fails: bool) -> Rig {
+    let mut m = mock("EASY", &["ok"]);
+    m.ps_vram.insert(FAST.into(), 8 * GB);
+    let r = rig_with(m, "rewarm", None, false).await;
+    post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("hello", false),
+        &[],
+    )
+    .await
+    .text()
+    .await
+    .unwrap();
+    {
+        let mut g = r.mock.lock().unwrap();
+        g.ps_models = vec![DEEP.into()];
+        g.ps_vram.insert(DEEP.into(), deep_gb * GB);
+        g.ps_fails = ps_fails;
+    }
+    post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/deep x", false),
+        &[],
+    )
+    .await
+    .text()
+    .await
+    .unwrap();
+    r
+}
+
+#[tokio::test]
+async fn rewarm_after_deep_is_sent_with_vram_headroom() {
+    let r = after_deep(12, false).await; // 12 + 8 = 20 GB <= 21
+    let g = wait_for_generates(&r, 1).await;
+    assert_eq!(g.len(), 1, "expected one warm request");
+    assert_eq!(g[0]["model"], FAST);
+    assert_eq!(g[0]["prompt"], "");
+    assert_eq!(g[0]["keep_alive"], -1);
+    assert_eq!(g[0]["options"]["num_ctx"], 4096);
+}
+
+#[tokio::test]
+async fn rewarm_after_deep_is_skipped_without_headroom() {
+    let r = after_deep(14, false).await; // 14 + 8 = 22 GB > 21
+    tokio::time::sleep(Duration::from_millis(1500)).await; // longer than poll_secs = 1
+    assert!(r.mock.lock().unwrap().generates.is_empty());
+}
+
+#[tokio::test]
+async fn rewarm_after_deep_is_skipped_when_ps_fails() {
+    let r = after_deep(1, true).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(r.mock.lock().unwrap().generates.is_empty());
+}
+
+#[tokio::test]
+async fn rewarm_after_deep_is_skipped_when_fast_size_never_seen() {
+    let mut m = mock("EASY", &["ok"]);
+    m.ps_models = vec![]; // nothing loaded, fast never seen
+    let r = rig_with(m, "rewarm", None, false).await;
+    post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/deep x", false),
+        &[],
+    )
+    .await
+    .text()
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(r.mock.lock().unwrap().generates.is_empty());
 }

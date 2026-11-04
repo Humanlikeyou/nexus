@@ -7,7 +7,7 @@ use crate::think::ThinkStripper;
 use futures::stream::{BoxStream, StreamExt};
 use serde_json::{json, Value};
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -52,6 +52,8 @@ pub struct State {
     rewarm_running: AtomicBool,
     warming_fast: AtomicBool,
     warming_deep: AtomicBool,
+    /// Last `size_vram` (bytes) seen for the fast model in `/api/ps`; 0 = never seen.
+    fast_vram_seen: AtomicU64,
     log_lock: Mutex<()>,
 }
 
@@ -76,6 +78,7 @@ impl State {
             rewarm_running: AtomicBool::new(false),
             warming_fast: AtomicBool::new(false),
             warming_deep: AtomicBool::new(false),
+            fast_vram_seen: AtomicU64::new(0),
             log_lock: Mutex::new(()),
         })
     }
@@ -469,31 +472,65 @@ impl State {
     }
 
     async fn loaded_models_within(&self, timeout: Duration) -> Result<Vec<String>, String> {
-        let v: Value = self
+        Ok(self
+            .ps_within(timeout)
+            .await?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect())
+    }
+
+    /// `/api/ps` as (model name, size_vram bytes). Remembers fast's size when it is loaded.
+    async fn ps_within(&self, timeout: Duration) -> Result<Vec<(String, u64)>, String> {
+        let resp = self
             .http
             .get(self.cfg.ollama("/api/ps"))
             .timeout(timeout)
             .send()
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(|_| "ps: unreachable or timed out".to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("ps: HTTP {}", resp.status()));
+        }
+        let v: Value = resp
             .json()
             .await
-            .map_err(|e| e.to_string())?;
-        Ok(v["models"]
+            .map_err(|_| "ps: unparseable reply".to_string())?;
+        let models: Vec<(String, u64)> = v["models"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|m| {
-                m["model"]
-                    .as_str()
-                    .or_else(|| m["name"].as_str())
-                    .map(str::to_string)
+                let name = m["model"].as_str().or_else(|| m["name"].as_str())?;
+                Some((name.to_string(), m["size_vram"].as_u64().unwrap_or(0)))
             })
-            .collect())
+            .collect();
+        for (name, vram) in &models {
+            if *vram > 0 && same_model(name, &self.cfg.models.fast) {
+                self.fast_vram_seen.store(*vram, Ordering::SeqCst);
+            }
+        }
+        Ok(models)
     }
 
-    /// After a deep answer: re-warm fast right away (background). If that fails, wait until
-    /// deep unloads, then reload fast if it was evicted.
+    /// Whether fast should be re-warmed now: fast is not loaded, its size is known, and the
+    /// loaded models' `size_vram` plus fast's fits in `gpu_budget_gb`. Errors mean "skip".
+    pub async fn rewarm_headroom(&self) -> Result<bool, String> {
+        let ps = self.ps_within(Duration::from_secs(3)).await?;
+        if ps.iter().any(|(n, _)| same_model(n, &self.cfg.models.fast)) {
+            return Ok(false); // already resident
+        }
+        let fast = self.fast_vram_seen.load(Ordering::SeqCst);
+        if fast == 0 {
+            return Err("fast size never seen in /api/ps".into());
+        }
+        let used: u64 = ps.iter().map(|(_, v)| *v).sum();
+        let budget = (self.cfg.loading.gpu_budget_gb * 1e9) as u64;
+        Ok(used.saturating_add(fast) <= budget)
+    }
+
+    /// After a deep answer: re-warm fast in the background, only with VRAM headroom (see
+    /// [`State::rewarm_headroom`]). When skipped, the next fast request loads it.
     pub fn schedule_rewarm(self: &Arc<Self>) {
         if !self.cfg.loading.rewarm_fast_after_deep
             || self.rewarm_running.swap(true, Ordering::SeqCst)
@@ -502,34 +539,19 @@ impl State {
         }
         let me = Arc::clone(self);
         tokio::spawn(async move {
-            if !me.warming_fast.swap(true, Ordering::SeqCst) {
-                let r = me.warm(Tier::Fast).await;
-                me.warming_fast.store(false, Ordering::SeqCst);
-                match r {
-                    Ok(()) => {
-                        me.rewarm_running.store(false, Ordering::SeqCst);
-                        return;
-                    }
-                    Err(e) => eprintln!("[amara-router] re-warm after deep failed: {e}"),
-                }
-            }
-            let poll = Duration::from_secs(me.cfg.loading.poll_secs.max(1));
-            // Give up after ~3 h so a pinned deep model never keeps a task alive forever.
-            for _ in 0..(3 * 3600 / poll.as_secs().max(1)) {
-                tokio::time::sleep(poll).await;
-                let Ok(loaded) = me.loaded_models().await else {
-                    continue;
-                };
-                if loaded.iter().any(|m| same_model(m, &me.cfg.models.deep)) {
-                    continue;
-                }
-                if !loaded.iter().any(|m| same_model(m, &me.cfg.models.fast)) {
-                    match me.warm_fast().await {
-                        Ok(()) => eprintln!("[amara-router] deep unloaded; fast re-warmed"),
-                        Err(e) => eprintln!("[amara-router] re-warm failed: {e}"),
+            match me.rewarm_headroom().await {
+                Ok(true) => {
+                    if !me.warming_fast.swap(true, Ordering::SeqCst) {
+                        if let Err(e) = me.warm(Tier::Fast).await {
+                            eprintln!("[amara-router] re-warm after deep failed: {e}");
+                        }
+                        me.warming_fast.store(false, Ordering::SeqCst);
                     }
                 }
-                break;
+                Ok(false) => {
+                    eprintln!("[amara-router] re-warm skipped: no VRAM headroom or fast resident")
+                }
+                Err(e) => eprintln!("[amara-router] re-warm skipped: {e}"),
             }
             me.rewarm_running.store(false, Ordering::SeqCst);
         });

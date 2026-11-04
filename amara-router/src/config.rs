@@ -88,6 +88,8 @@ pub const NUM_CTX_RANGE: std::ops::RangeInclusive<u32> = 512..=262_144;
 pub const CLASSIFIER_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 100..=10_000;
 /// Accepted `routing.residency_check_timeout_ms` range.
 pub const RESIDENCY_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 50..=2_000;
+/// Accepted `loading.gpu_budget_gb` range.
+pub const GPU_BUDGET_GB_RANGE: std::ops::RangeInclusive<f64> = 1.0..=512.0;
 /// Accepted `loading.first_token_timeout_ms` range.
 pub const FIRST_TOKEN_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 1_000..=300_000;
 
@@ -153,10 +155,15 @@ pub struct Loading {
     /// Also load the deep model at startup, after fast. Off by default: on low RAM both may
     /// not fit, and loading deep could evict fast.
     pub warm_deep_on_start: bool,
-    /// Right after a deep answer, re-warm fast in the background. If that fails, keep
-    /// watching `/api/ps` and reload fast once deep has unloaded.
+    /// Right after a deep answer, re-warm fast in the background, but only when `/api/ps`
+    /// shows VRAM headroom for it within `gpu_budget_gb`. Otherwise the next fast request
+    /// loads it.
     pub rewarm_fast_after_deep: bool,
+    /// Unused since the VRAM-gated re-warm (no more polling); kept so older configs parse.
     pub poll_secs: u64,
+    /// GPU memory budget in GB (1-512). Re-warm fast only if the `size_vram` of the loaded
+    /// models plus fast's last seen `size_vram` fits. ~21 GB is usable by the GPU on a 32 GB Mac.
+    pub gpu_budget_gb: f64,
     /// Ollama must send its first byte within this time (1000-300000 ms), or the request gets
     /// a 503 "model loading" reply while the load continues in the background.
     pub first_token_timeout_ms: u64,
@@ -169,6 +176,7 @@ impl Default for Loading {
             warm_deep_on_start: false,
             rewarm_fast_after_deep: true,
             poll_secs: 20,
+            gpu_budget_gb: 21.0,
             first_token_timeout_ms: 20_000,
         }
     }
@@ -317,6 +325,13 @@ impl Config {
                     r.end()
                 ));
             }
+        }
+        if !GPU_BUDGET_GB_RANGE.contains(&self.loading.gpu_budget_gb) {
+            return Err(format!(
+                "config: loading.gpu_budget_gb must be between {} and {}",
+                GPU_BUDGET_GB_RANGE.start(),
+                GPU_BUDGET_GB_RANGE.end()
+            ));
         }
         let bind: std::net::SocketAddr = self
             .bind
@@ -533,6 +548,7 @@ deep = "d:latest"
         assert_eq!(c.loading.first_token_timeout_ms, 20_000);
         assert!(c.loading.warm_fast_on_start);
         assert!(!c.loading.warm_deep_on_start);
+        assert_eq!(c.loading.gpu_budget_gb, 21.0);
         assert_eq!(c.models.fast_keep_alive, KeepAlive::Secs(-1));
         assert_eq!(c.models.deep_keep_alive, KeepAlive::Duration("5m".into()));
         assert!(!c.cloud.anthropic_enabled);
@@ -564,6 +580,16 @@ deep = "d:latest"
         assert!(with("loading", "first_token_timeout_ms = 500").is_err());
         assert!(with("loading", "first_token_timeout_ms = 300001").is_err());
         assert!(with("loading", "first_token_timeout_ms = 30000").is_ok());
+        assert!(with("loading", "gpu_budget_gb = 0.5").is_err());
+        assert!(with("loading", "gpu_budget_gb = 1000.0").is_err());
+        assert!(with("loading", "gpu_budget_gb = nan").is_err());
+        assert_eq!(
+            with("loading", "gpu_budget_gb = 24.5")
+                .unwrap()
+                .loading
+                .gpu_budget_gb,
+            24.5
+        );
         assert!(with("models", "fast_num_ctx = 0").is_err());
         assert!(with("models", "deep_num_ctx = 1048576").is_err());
         assert_eq!(
