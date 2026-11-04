@@ -29,6 +29,10 @@ struct Mock {
     tool_call: bool,
     fail_models: Vec<String>,
     ps_models: Vec<String>,
+    /// Delay before a generation (non-classifier /api/chat) answers: a cold model load.
+    gen_delay_ms: u64,
+    /// Delay before /api/ps answers.
+    ps_delay_ms: u64,
 }
 
 type M = Arc<Mutex<Mock>>;
@@ -39,7 +43,7 @@ fn is_classifier(b: &Value) -> bool {
 
 async fn mock_chat(AxState(m): AxState<M>, body: Bytes) -> Response {
     let b: Value = serde_json::from_slice(&body).unwrap();
-    let (classifier, delay, reply, fails, pieces, tool, fail_models) = {
+    let (classifier, delay, reply, fails, pieces, tool, fail_models, gen_delay) = {
         let mut g = m.lock().unwrap();
         g.chats.push(b.clone());
         (
@@ -50,8 +54,12 @@ async fn mock_chat(AxState(m): AxState<M>, body: Bytes) -> Response {
             g.pieces.clone(),
             g.tool_call,
             g.fail_models.clone(),
+            g.gen_delay_ms,
         )
     };
+    if !classifier && gen_delay > 0 {
+        tokio::time::sleep(Duration::from_millis(gen_delay)).await;
+    }
     if classifier {
         tokio::time::sleep(Duration::from_millis(delay)).await;
         if fails {
@@ -105,6 +113,8 @@ async fn start_mock(m: M) -> String {
             axum::Json(json!({"done": true}))
         }))
         .route("/api/ps", get(|AxState(m): AxState<M>| async move {
+            let delay = m.lock().unwrap().ps_delay_ms;
+            tokio::time::sleep(Duration::from_millis(delay)).await;
             let models: Vec<Value> = m.lock().unwrap().ps_models.iter().map(|n| json!({"name": n, "model": n})).collect();
             axum::Json(json!({"models": models}))
         }))
@@ -167,12 +177,23 @@ async fn rig_with(
     ollama_override: Option<String>,
     outbound_disabled: bool,
 ) -> Rig {
+    rig_cfg(mock, extra, ollama_override, outbound_disabled, |_| {}).await
+}
+
+async fn rig_cfg(
+    mock: Mock,
+    extra: &str,
+    ollama_override: Option<String>,
+    outbound_disabled: bool,
+    tweak: impl FnOnce(&mut Config),
+) -> Rig {
     let mock = Arc::new(Mutex::new(mock));
     let mock_url = start_mock(Arc::clone(&mock)).await;
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("routes.jsonl");
     let mut cfg = base_config(&ollama_override.unwrap_or(mock_url.clone()), &log, extra);
     cfg.cloud.anthropic_url = format!("{mock_url}/v1/messages");
+    tweak(&mut cfg);
     let secrets = Secrets {
         api_key: None,
         anthropic_key: extra.contains("cloud").then(|| "test-key".to_string()),
@@ -194,6 +215,8 @@ fn mock(reply: &str, pieces: &[&str]) -> Mock {
     Mock {
         classifier_reply: reply.into(),
         pieces: pieces.iter().map(|s| s.to_string()).collect(),
+        // Fast is resident unless a test says otherwise (the classifier runs only then).
+        ps_models: vec![FAST.to_string()],
         ..Default::default()
     }
 }
@@ -955,4 +978,235 @@ async fn loopback_port_refuses_browser_and_rebinding_requests() {
     assert_eq!(rebound.status(), 403);
     let ok = c.get(format!("{}/health", rig.url)).send().await.unwrap();
     assert_eq!(ok.status(), 200);
+}
+
+// ── residency, warm-ups, num_ctx, first-token timeout ───────────────────────
+
+async fn wait_for_generates(r: &Rig, n: usize) -> Vec<Value> {
+    for _ in 0..50 {
+        if r.mock.lock().unwrap().generates.len() >= n {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    r.mock.lock().unwrap().generates.clone()
+}
+
+#[tokio::test]
+async fn fast_not_resident_skips_classifier_uses_heuristic_and_warms_fast() {
+    let mut m = mock("HARD", &["ok"]);
+    m.ps_models = vec![DEEP.to_string()]; // just after a deep reply: fast was evicted
+    m.classifier_delay_ms = 3000;
+    let r = rig(m).await;
+    let t = Instant::now();
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("why is the sky blue?", false),
+        &[],
+    )
+    .await;
+    assert_eq!(resp.headers()["x-amara-tier"], "fast");
+    assert_eq!(
+        resp.headers()["x-amara-route-reason"],
+        "classifier_skipped_fast_not_resident"
+    );
+    assert!(t.elapsed() < Duration::from_secs(1));
+    assert!(
+        classifier_calls(&r).is_empty(),
+        "classifier must be skipped"
+    );
+    let g = wait_for_generates(&r, 1).await;
+    assert_eq!(g[0]["model"], FAST);
+    assert_eq!(g[0]["options"]["num_ctx"], 4096);
+
+    // The heuristic rules still apply: a code block goes deep without the classifier.
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("fix ```fn main(){}```", false),
+        &[],
+    )
+    .await;
+    assert_eq!(resp.headers()["x-amara-tier"], "deep");
+    assert!(classifier_calls(&r).is_empty());
+}
+
+#[tokio::test]
+async fn slow_ps_skips_classifier_within_the_residency_timeout() {
+    let mut m = mock("HARD", &["ok"]);
+    m.ps_delay_ms = 2000;
+    let r = rig_cfg(m, "", None, false, |c| {
+        c.routing.residency_check_timeout_ms = 100;
+    })
+    .await;
+    let t = Instant::now();
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("hello", false),
+        &[],
+    )
+    .await;
+    assert_eq!(
+        resp.headers()["x-amara-route-reason"],
+        "classifier_skipped_ps_unavailable"
+    );
+    assert!(t.elapsed() < Duration::from_secs(1));
+    assert!(classifier_calls(&r).is_empty());
+}
+
+#[tokio::test]
+async fn fast_is_rewarmed_right_after_a_deep_reply_while_deep_is_still_loaded() {
+    let mut m = mock("EASY", &["ok"]);
+    m.ps_models = vec![DEEP.to_string()]; // deep still resident: the old poll loop would wait
+    let r = rig_cfg(m, "rewarm", None, false, |c| c.loading.poll_secs = 60).await;
+    post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/deep x", false),
+        &[],
+    )
+    .await
+    .text()
+    .await
+    .unwrap();
+    let g = wait_for_generates(&r, 1).await;
+    assert_eq!(g.len(), 1, "expected one immediate warm request");
+    assert_eq!(g[0]["model"], FAST);
+    assert_eq!(g[0]["prompt"], "");
+    assert_eq!(g[0]["keep_alive"], -1);
+    assert_eq!(g[0]["options"]["num_ctx"], 4096);
+}
+
+#[tokio::test]
+async fn configured_classifier_timeout_is_honoured() {
+    // 600 ms classifier: inside a 1500 ms timeout it decides, inside 300 ms it times out.
+    let mut m = mock("HARD", &["ok"]);
+    m.classifier_delay_ms = 600;
+    let r = rig_cfg(m, "", None, false, |c| {
+        c.routing.classifier_timeout_ms = 1500
+    })
+    .await;
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("hello", false),
+        &[],
+    )
+    .await;
+    assert_eq!(resp.headers()["x-amara-route-reason"], "classifier_hard");
+    assert_eq!(resp.headers()["x-amara-tier"], "deep");
+
+    let mut m = mock("HARD", &["ok"]);
+    m.classifier_delay_ms = 600;
+    let r = rig(m).await; // base config: 300 ms
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("hello", false),
+        &[],
+    )
+    .await;
+    assert_eq!(resp.headers()["x-amara-route-reason"], "classifier_timeout");
+}
+
+#[tokio::test]
+async fn num_ctx_is_in_every_ollama_request_body() {
+    let r = rig_with(mock("HARD", &["ok"]), "rewarm", None, false).await;
+    for text in ["hello", "/deep x", "/fast y"] {
+        post(
+            &format!("{}/v1/chat/completions", r.url),
+            oa(text, false),
+            &[],
+        )
+        .await
+        .text()
+        .await
+        .unwrap();
+    }
+    wait_for_generates(&r, 1).await;
+    let g = r.mock.lock().unwrap();
+    assert!(g.chats.len() >= 4);
+    for b in &g.chats {
+        let want = if b["model"] == DEEP { 2048 } else { 4096 };
+        assert_eq!(b["options"]["num_ctx"], want, "body without num_ctx: {b}");
+    }
+    assert!(!g.generates.is_empty());
+    for b in &g.generates {
+        assert!(b["options"]["num_ctx"].is_u64(), "warm-up without num_ctx");
+    }
+}
+
+#[tokio::test]
+async fn first_token_timeout_is_a_fixed_503_and_keeps_warming() {
+    let mut m = mock("EASY", &["ok"]);
+    m.gen_delay_ms = 3000;
+    let r = rig_cfg(m, "", None, false, |c| {
+        c.loading.first_token_timeout_ms = 300
+    })
+    .await;
+    for stream in [false, true] {
+        let t = Instant::now();
+        let resp = post(
+            &format!("{}/v1/chat/completions", r.url),
+            oa("/fast hi", stream),
+            &[],
+        )
+        .await;
+        assert_eq!(resp.status(), 503);
+        assert!(t.elapsed() < Duration::from_secs(2));
+        let body = resp.text().await.unwrap();
+        assert!(body.contains(amara_router::engine::LOADING_MSG), "{body}");
+        assert!(!body.contains("model failed"), "upstream text leaked");
+    }
+    // Ollama API too.
+    let resp = post(
+        &format!("{}/api/chat", r.url),
+        json!({"model": "amara-fast", "messages": [{"role": "user", "content": "hi"}]}),
+        &[],
+    )
+    .await;
+    assert_eq!(resp.status(), 503);
+    assert!(resp
+        .text()
+        .await
+        .unwrap()
+        .contains(amara_router::engine::LOADING_MSG));
+    let g = wait_for_generates(&r, 1).await;
+    assert_eq!(g[0]["model"], FAST, "load continues in the background");
+    // A deep load that times out does not start a second cold load of fast.
+    let before = generations(&r).len();
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/deep hi", false),
+        &[],
+    )
+    .await;
+    assert_eq!(resp.status(), 503);
+    let gens = generations(&r);
+    assert_eq!(gens.len(), before + 1);
+    assert_eq!(gens.last().unwrap()["model"], DEEP);
+}
+
+#[tokio::test]
+async fn startup_prewarm_is_background_and_sends_num_ctx() {
+    let m = Arc::new(Mutex::new(mock("EASY", &[])));
+    let url = start_mock(Arc::clone(&m)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = base_config(&url, &dir.path().join("r.jsonl"), "");
+    cfg.loading.warm_fast_on_start = true;
+    cfg.loading.warm_deep_on_start = true;
+    let state = State::new(cfg, Secrets::default(), false);
+    let t = Instant::now();
+    let h = state.prewarm_on_start().expect("pre-warm task");
+    assert!(t.elapsed() < Duration::from_millis(50), "must not block");
+    h.await.unwrap();
+    let g = m.lock().unwrap().generates.clone();
+    assert_eq!(g.len(), 2);
+    assert_eq!(g[0]["model"], FAST);
+    assert_eq!(g[0]["options"]["num_ctx"], 4096);
+    assert_eq!(g[0]["keep_alive"], -1);
+    assert_eq!(g[1]["model"], DEEP);
+    assert_eq!(g[1]["options"]["num_ctx"], 2048);
+
+    let mut cfg = base_config(&url, &dir.path().join("r.jsonl"), "");
+    cfg.loading.warm_fast_on_start = false;
+    assert!(State::new(cfg, Secrets::default(), false)
+        .prewarm_on_start()
+        .is_none());
 }

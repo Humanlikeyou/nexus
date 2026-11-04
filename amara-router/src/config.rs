@@ -63,13 +63,14 @@ pub struct Models {
     pub fast_keep_alive: KeepAlive,
     #[serde(default = "default_deep_keep_alive")]
     pub deep_keep_alive: KeepAlive,
-    /// Context size the fast model is always loaded with. Every fast request (and the
-    /// classifier) uses it, so callers asking for other sizes never force a reload.
-    #[serde(default)]
-    pub fast_num_ctx: Option<u32>,
+    /// Context size the fast model is always loaded with. Every fast request, the classifier
+    /// and every warm-up send it as `options.num_ctx`, so callers asking for other sizes never
+    /// force a reload (and Ollama never falls back to the model's huge default context).
+    #[serde(default = "default_num_ctx")]
+    pub fast_num_ctx: u32,
     /// Context size for the deep model (kept small: a big KV cache on a 27B model costs GBs).
-    #[serde(default)]
-    pub deep_num_ctx: Option<u32>,
+    #[serde(default = "default_num_ctx")]
+    pub deep_num_ctx: u32,
     /// `think` sent to the fast model when the caller did not set it. Default false: the
     /// fast model's hidden reasoning otherwise costs seconds on short answers.
     #[serde(default = "default_fast_think")]
@@ -77,6 +78,21 @@ pub struct Models {
     /// `think` sent to the deep model when the caller did not set it (unset = model default).
     #[serde(default)]
     pub deep_think: Option<bool>,
+}
+
+/// Default `num_ctx` for both models (see README "Context size").
+pub const DEFAULT_NUM_CTX: u32 = 8192;
+/// Accepted `num_ctx` range.
+pub const NUM_CTX_RANGE: std::ops::RangeInclusive<u32> = 512..=262_144;
+/// Accepted `routing.classifier_timeout_ms` range.
+pub const CLASSIFIER_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 100..=10_000;
+/// Accepted `routing.residency_check_timeout_ms` range.
+pub const RESIDENCY_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 50..=2_000;
+/// Accepted `loading.first_token_timeout_ms` range.
+pub const FIRST_TOKEN_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 1_000..=300_000;
+
+fn default_num_ctx() -> u32 {
+    DEFAULT_NUM_CTX
 }
 
 fn default_fast_think() -> Option<bool> {
@@ -99,7 +115,12 @@ pub struct Routing {
     pub trigger_phrases: Vec<String>,
     /// Run the EASY/HARD classifier on the fast model when no earlier rule matched.
     pub classifier: bool,
+    /// Hard timeout for the classifier call (100-10000 ms).
     pub classifier_timeout_ms: u64,
+    /// Before classifying, `/api/ps` is checked with this timeout (50-2000 ms). If the fast
+    /// model is not resident (or `/api/ps` does not answer in time) the classifier is skipped:
+    /// it would only time out while fast loads.
+    pub residency_check_timeout_ms: u64,
     /// Only the first this-many characters of the message go to the classifier (prompt
     /// evaluation dominates its latency; longer messages are caught by the token rule).
     pub classifier_max_chars: usize,
@@ -118,6 +139,7 @@ impl Default for Routing {
             ],
             classifier: true,
             classifier_timeout_ms: 2000,
+            residency_check_timeout_ms: 250,
             classifier_max_chars: 400,
         }
     }
@@ -126,19 +148,28 @@ impl Default for Routing {
 #[derive(Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub struct Loading {
-    /// Load the fast model at startup.
+    /// Load the fast model at startup (in the background; startup never waits for it).
     pub warm_fast_on_start: bool,
-    /// After a deep answer, watch `/api/ps`; when deep has unloaded and fast is gone, reload fast.
+    /// Also load the deep model at startup, after fast. Off by default: on low RAM both may
+    /// not fit, and loading deep could evict fast.
+    pub warm_deep_on_start: bool,
+    /// Right after a deep answer, re-warm fast in the background. If that fails, keep
+    /// watching `/api/ps` and reload fast once deep has unloaded.
     pub rewarm_fast_after_deep: bool,
     pub poll_secs: u64,
+    /// Ollama must send its first byte within this time (1000-300000 ms), or the request gets
+    /// a 503 "model loading" reply while the load continues in the background.
+    pub first_token_timeout_ms: u64,
 }
 
 impl Default for Loading {
     fn default() -> Self {
         Self {
             warm_fast_on_start: true,
+            warm_deep_on_start: false,
             rewarm_fast_after_deep: true,
             poll_secs: 20,
+            first_token_timeout_ms: 20_000,
         }
     }
 }
@@ -249,6 +280,43 @@ impl Config {
         }
         if !anthropic_url_allowed(&self.cloud.anthropic_url) {
             return Err("config: cloud.anthropic_url must be https://api.anthropic.com (port 443) or a loopback mock".into());
+        }
+        for (name, n) in [
+            ("models.fast_num_ctx", self.models.fast_num_ctx),
+            ("models.deep_num_ctx", self.models.deep_num_ctx),
+        ] {
+            if !NUM_CTX_RANGE.contains(&n) {
+                return Err(format!(
+                    "config: {name} must be between {} and {}",
+                    NUM_CTX_RANGE.start(),
+                    NUM_CTX_RANGE.end()
+                ));
+            }
+        }
+        for (name, v, r) in [
+            (
+                "routing.classifier_timeout_ms",
+                self.routing.classifier_timeout_ms,
+                CLASSIFIER_TIMEOUT_RANGE,
+            ),
+            (
+                "routing.residency_check_timeout_ms",
+                self.routing.residency_check_timeout_ms,
+                RESIDENCY_TIMEOUT_RANGE,
+            ),
+            (
+                "loading.first_token_timeout_ms",
+                self.loading.first_token_timeout_ms,
+                FIRST_TOKEN_TIMEOUT_RANGE,
+            ),
+        ] {
+            if !r.contains(&v) {
+                return Err(format!(
+                    "config: {name} must be between {} and {}",
+                    r.start(),
+                    r.end()
+                ));
+            }
         }
         let bind: std::net::SocketAddr = self
             .bind
@@ -459,11 +527,52 @@ deep = "d:latest"
         let c = Config::parse(MIN).unwrap();
         assert_eq!(c.routing.token_threshold, 2000);
         assert_eq!(c.routing.classifier_timeout_ms, 2000);
+        assert_eq!(c.routing.residency_check_timeout_ms, 250);
+        assert_eq!(c.models.fast_num_ctx, 8192);
+        assert_eq!(c.models.deep_num_ctx, 8192);
+        assert_eq!(c.loading.first_token_timeout_ms, 20_000);
+        assert!(c.loading.warm_fast_on_start);
+        assert!(!c.loading.warm_deep_on_start);
         assert_eq!(c.models.fast_keep_alive, KeepAlive::Secs(-1));
         assert_eq!(c.models.deep_keep_alive, KeepAlive::Duration("5m".into()));
         assert!(!c.cloud.anthropic_enabled);
         assert!(!c.filler.enabled);
         assert!(c.lan_bind.is_none());
+    }
+
+    #[test]
+    fn timeouts_and_num_ctx_are_range_checked() {
+        let with = |section: &str, line: &str| {
+            let text = if section == "models" {
+                MIN.replacen("[models]", &format!("[models]\n{line}"), 1)
+            } else {
+                format!("{MIN}\n[{section}]\n{line}\n")
+            };
+            Config::parse_with(&text, false)
+        };
+        assert!(with("routing", "classifier_timeout_ms = 99").is_err());
+        assert!(with("routing", "classifier_timeout_ms = 10001").is_err());
+        assert_eq!(
+            with("routing", "classifier_timeout_ms = 750")
+                .unwrap()
+                .routing
+                .classifier_timeout_ms,
+            750
+        );
+        assert!(with("routing", "residency_check_timeout_ms = 0").is_err());
+        assert!(with("routing", "residency_check_timeout_ms = 5000").is_err());
+        assert!(with("loading", "first_token_timeout_ms = 500").is_err());
+        assert!(with("loading", "first_token_timeout_ms = 300001").is_err());
+        assert!(with("loading", "first_token_timeout_ms = 30000").is_ok());
+        assert!(with("models", "fast_num_ctx = 0").is_err());
+        assert!(with("models", "deep_num_ctx = 1048576").is_err());
+        assert_eq!(
+            with("models", "fast_num_ctx = 16384")
+                .unwrap()
+                .models
+                .fast_num_ctx,
+            16384
+        );
     }
 
     #[test]

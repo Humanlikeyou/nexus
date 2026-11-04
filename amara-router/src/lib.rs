@@ -62,14 +62,8 @@ pub async fn run(
                 .await
         }));
     }
-    if cfg.loading.warm_fast_on_start {
-        let st = Arc::clone(&state);
-        tokio::spawn(async move {
-            if let Err(e) = st.warm_fast().await {
-                eprintln!("[amara-router] could not warm the fast model yet: {e}");
-            }
-        });
-    }
+    // Background only: startup never waits for a model load.
+    let _ = state.prewarm_on_start();
     shutdown.await;
     let _ = tx.send(());
     for t in tasks {

@@ -223,7 +223,7 @@ Nothing below has been applied; Taisun applies it. Hermes must use the OpenAI pa
      base_url: http://127.0.0.1:8787/v1
      api_mode: chat_completions
      context_length: 131072                # unchanged
-     ollama_num_ctx: 131072                # ignored by the router (it uses fast_num_ctx)
+     ollama_num_ctx: 8192                  # ignored by the router (it uses fast_num_ctx); keep equal
      max_tokens: 4096
    ```
 
@@ -270,4 +270,5 @@ another loopback port, set `amara_router_url` in the Nexus config. Non-loopback 
 Anthropic (no real model is loaded): each routing rule, classifier timeout/error fallback,
 `<think>` stripping across chunks, both API formats streamed and not, tool calls, Ollama
 down (clear 503, no crash), the JSONL log, fast re-warm, the filler line, LAN auth and the
-cloud gate.
+cloud gate, the `/api/ps` residency check that skips the classifier, the immediate re-warm
+after deep, `num_ctx` on every Ollama body, the first-token 503 and the startup pre-warm.

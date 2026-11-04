@@ -34,7 +34,15 @@ pub enum UpstreamError {
     Unreachable(String),
     /// Upstream answered with an error.
     Failed(String),
+    /// No first byte within `loading.first_token_timeout_ms` (the model is still loading).
+    Loading,
 }
+
+/// Fixed client-facing message for a first-token timeout (never includes upstream text).
+pub const LOADING_MSG: &str = "Model loading, try again shortly.";
+
+/// How long a background warm-up may take (a cold load on low RAM was seen at 142 s).
+const WARM_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub struct State {
     pub cfg: Config,
@@ -42,6 +50,8 @@ pub struct State {
     pub http: reqwest::Client,
     pub outbound_disabled: bool,
     rewarm_running: AtomicBool,
+    warming_fast: AtomicBool,
+    warming_deep: AtomicBool,
     log_lock: Mutex<()>,
 }
 
@@ -64,6 +74,8 @@ impl State {
                 .expect("http client"),
             outbound_disabled,
             rewarm_running: AtomicBool::new(false),
+            warming_fast: AtomicBool::new(false),
+            warming_deep: AtomicBool::new(false),
             log_lock: Mutex::new(()),
         })
     }
@@ -93,7 +105,7 @@ impl State {
         }
     }
 
-    fn num_ctx(&self, tier: Tier) -> Option<u32> {
+    fn num_ctx(&self, tier: Tier) -> u32 {
         match tier {
             Tier::Deep => self.cfg.models.deep_num_ctx,
             _ => self.cfg.models.fast_num_ctx,
@@ -103,11 +115,26 @@ impl State {
     // ── routing ──────────────────────────────────────────────────────────────
 
     /// Applies the rules to the latest user message (cleaned in place) and returns the decision.
-    pub async fn decide(&self, text: &mut String, hints: &Hints) -> (Decision, u64) {
+    pub async fn decide(self: &Arc<Self>, text: &mut String, hints: &Hints) -> (Decision, u64) {
         let start = Instant::now();
         let d = match route::pre_route(&self.cfg.routing, text, hints, &self.gate(hints)) {
             PreRoute::Decided(d) => d,
-            PreRoute::Classify => self.classify(text).await,
+            PreRoute::Classify => match self.fast_resident().await {
+                Ok(true) => self.classify(text).await,
+                // Rules 1-3 (commands, phrases, tokens, code) already ran and did not pick
+                // deep, so the heuristic answer is fast. Start loading it now.
+                not_resident => {
+                    self.spawn_warm(Tier::Fast);
+                    Decision {
+                        tier: Tier::Fast,
+                        reason: if not_resident.is_ok() {
+                            "classifier_skipped_fast_not_resident".into()
+                        } else {
+                            "classifier_skipped_ps_unavailable".into()
+                        },
+                    }
+                }
+            },
         };
         (d, start.elapsed().as_millis() as u64)
     }
@@ -118,10 +145,8 @@ impl State {
             .chars()
             .take(self.cfg.routing.classifier_max_chars)
             .collect();
-        let mut options = json!({"temperature": 0, "num_predict": 3});
-        if let Some(n) = self.cfg.models.fast_num_ctx {
-            options["num_ctx"] = json!(n);
-        }
+        let options =
+            json!({"temperature": 0, "num_predict": 3, "num_ctx": self.cfg.models.fast_num_ctx});
         let body = json!({
             "model": self.cfg.models.fast,
             "messages": [
@@ -171,14 +196,22 @@ impl State {
     // ── upstream ─────────────────────────────────────────────────────────────
 
     /// Opens a reply stream for `tier`. `body` is a native chat body without `model`.
-    async fn open_tier(&self, tier: Tier, body: &Value) -> Result<EvStream, UpstreamError> {
+    async fn open_tier(
+        self: &Arc<Self>,
+        tier: Tier,
+        body: &Value,
+    ) -> Result<EvStream, UpstreamError> {
         match tier {
             Tier::Claude => self.open_anthropic(body).await,
             _ => self.open_ollama(tier, body).await,
         }
     }
 
-    async fn open_ollama(&self, tier: Tier, body: &Value) -> Result<EvStream, UpstreamError> {
+    async fn open_ollama(
+        self: &Arc<Self>,
+        tier: Tier,
+        body: &Value,
+    ) -> Result<EvStream, UpstreamError> {
         let mut b = body.clone();
         b["model"] = json!(self.model_for(tier));
         b["stream"] = json!(true);
@@ -191,27 +224,41 @@ impl State {
         if let (true, Some(t)) = (b["think"].is_null(), think) {
             b["think"] = json!(t);
         }
-        if let Some(n) = self.num_ctx(tier) {
-            if !b["options"].is_object() {
-                b["options"] = json!({});
+        if !b["options"].is_object() {
+            b["options"] = json!({});
+        }
+        b["options"]["num_ctx"] = json!(self.num_ctx(tier));
+        let first_byte = async {
+            let resp = self
+                .http
+                .post(self.cfg.ollama("/api/chat"))
+                .json(&b)
+                .send()
+                .await
+                .map_err(|_| UpstreamError::Unreachable("Ollama: unreachable".into()))?;
+            if !resp.status().is_success() {
+                // Never log or return the upstream body: status plus a fixed reason only.
+                let status = resp.status();
+                return Err(UpstreamError::Failed(format!(
+                    "Ollama {status}: request rejected"
+                )));
             }
-            b["options"]["num_ctx"] = json!(n);
+            let mut bytes = resp.bytes_stream();
+            let first = bytes.next().await;
+            Ok((first, bytes))
+        };
+        let timeout = Duration::from_millis(self.cfg.loading.first_token_timeout_ms);
+        match tokio::time::timeout(timeout, first_byte).await {
+            Ok(Ok((first, rest))) => Ok(ndjson_events(
+                futures::stream::iter(first).chain(rest).boxed(),
+            )),
+            Ok(Err(e)) => Err(e),
+            Err(_) => {
+                // Dropping our request may cancel Ollama's load; keep loading on our own.
+                self.spawn_warm(tier);
+                Err(UpstreamError::Loading)
+            }
         }
-        let resp = self
-            .http
-            .post(self.cfg.ollama("/api/chat"))
-            .json(&b)
-            .send()
-            .await
-            .map_err(|_| UpstreamError::Unreachable("Ollama: unreachable".into()))?;
-        if !resp.status().is_success() {
-            // Never log or return the upstream body: status plus a fixed reason only.
-            let status = resp.status();
-            return Err(UpstreamError::Failed(format!(
-                "Ollama {status}: request rejected"
-            )));
-        }
-        Ok(ndjson_events(resp.bytes_stream()))
     }
 
     async fn open_anthropic(&self, body: &Value) -> Result<EvStream, UpstreamError> {
@@ -281,7 +328,7 @@ impl State {
     /// Tries `decision.tier` then its fallbacks. Returns the stream (think-stripped), the tier
     /// that answered and the final reason; or a client-facing error.
     pub async fn open(
-        &self,
+        self: &Arc<Self>,
         decision: &Decision,
         body: &Value,
     ) -> Result<(EvStream, Tier, String), (u16, String)> {
@@ -300,6 +347,14 @@ impl State {
                     let (unreach, msg) = match e {
                         UpstreamError::Unreachable(m) => (true, m),
                         UpstreamError::Failed(m) => (false, m),
+                        UpstreamError::Loading => {
+                            // Do not start a second cold load (it would fight for RAM).
+                            eprintln!(
+                                "[amara-router] {} tier: no first token in time; still loading",
+                                tier.as_str()
+                            );
+                            return Err((503, LOADING_MSG.to_string()));
+                        }
                     };
                     // Anthropic being unreachable says nothing about Ollama.
                     if tier != Tier::Claude {
@@ -325,34 +380,99 @@ impl State {
 
     /// Loads the fast model (empty generate with its keep_alive and context).
     pub async fn warm_fast(&self) -> Result<(), String> {
-        let mut body = json!({
-            "model": self.cfg.models.fast,
-            "keep_alive": self.cfg.models.fast_keep_alive.to_json(),
-        });
-        if let Some(n) = self.cfg.models.fast_num_ctx {
-            body["options"] = json!({"num_ctx": n});
+        self.warm(Tier::Fast).await
+    }
+
+    /// Loads `tier`'s model: an empty-prompt generate with its keep_alive and `num_ctx`.
+    pub async fn warm(&self, tier: Tier) -> Result<(), String> {
+        if tier == Tier::Claude {
+            return Ok(());
         }
+        let body = json!({
+            "model": self.model_for(tier),
+            "prompt": "",
+            "stream": false,
+            "keep_alive": self.keep_alive(tier).to_json(),
+            "options": {"num_ctx": self.num_ctx(tier)},
+        });
         let resp = self
             .http
             .post(self.cfg.ollama("/api/generate"))
             .json(&body)
-            .timeout(Duration::from_secs(120))
+            .timeout(WARM_TIMEOUT)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|_| format!("warm {}: unreachable or timed out", tier.as_str()))?;
         if resp.status().is_success() {
             Ok(())
         } else {
-            Err(format!("warm fast: HTTP {}", resp.status()))
+            Err(format!("warm {}: HTTP {}", tier.as_str(), resp.status()))
         }
+    }
+
+    fn warming_flag(&self, tier: Tier) -> &AtomicBool {
+        if tier == Tier::Deep {
+            &self.warming_deep
+        } else {
+            &self.warming_fast
+        }
+    }
+
+    /// Starts a background warm-up of `tier` unless one is already running. Never blocks.
+    pub fn spawn_warm(self: &Arc<Self>, tier: Tier) {
+        if tier == Tier::Claude || self.warming_flag(tier).swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let me = Arc::clone(self);
+        tokio::spawn(async move {
+            if let Err(e) = me.warm(tier).await {
+                eprintln!("[amara-router] background warm failed: {e}");
+            }
+            me.warming_flag(tier).store(false, Ordering::SeqCst);
+        });
+    }
+
+    /// Startup pre-warm (background): fast, then deep if `warm_deep_on_start`. Sequential so
+    /// two cold loads never compete for RAM. Returns immediately.
+    pub fn prewarm_on_start(self: &Arc<Self>) -> Option<tokio::task::JoinHandle<()>> {
+        let (fast, deep) = (
+            self.cfg.loading.warm_fast_on_start,
+            self.cfg.loading.warm_deep_on_start,
+        );
+        if !fast && !deep {
+            return None;
+        }
+        let me = Arc::clone(self);
+        Some(tokio::spawn(async move {
+            for (on, tier) in [(fast, Tier::Fast), (deep, Tier::Deep)] {
+                if !on || me.warming_flag(tier).swap(true, Ordering::SeqCst) {
+                    continue;
+                }
+                if let Err(e) = me.warm(tier).await {
+                    eprintln!("[amara-router] could not pre-warm yet: {e}");
+                }
+                me.warming_flag(tier).store(false, Ordering::SeqCst);
+            }
+        }))
+    }
+
+    /// Whether the fast model is loaded, per `/api/ps` within `residency_check_timeout_ms`.
+    pub async fn fast_resident(&self) -> Result<bool, String> {
+        let t = Duration::from_millis(self.cfg.routing.residency_check_timeout_ms);
+        let loaded = self.loaded_models_within(t).await?;
+        Ok(loaded.iter().any(|m| same_model(m, &self.cfg.models.fast)))
     }
 
     /// Names of the models Ollama has loaded.
     pub async fn loaded_models(&self) -> Result<Vec<String>, String> {
+        self.loaded_models_within(Duration::from_secs(3)).await
+    }
+
+    async fn loaded_models_within(&self, timeout: Duration) -> Result<Vec<String>, String> {
         let v: Value = self
             .http
             .get(self.cfg.ollama("/api/ps"))
-            .timeout(Duration::from_secs(3))
+            .timeout(timeout)
             .send()
             .await
             .map_err(|e| e.to_string())?
@@ -372,7 +492,8 @@ impl State {
             .collect())
     }
 
-    /// After a deep answer: wait until deep unloads, then reload fast if it was evicted.
+    /// After a deep answer: re-warm fast right away (background). If that fails, wait until
+    /// deep unloads, then reload fast if it was evicted.
     pub fn schedule_rewarm(self: &Arc<Self>) {
         if !self.cfg.loading.rewarm_fast_after_deep
             || self.rewarm_running.swap(true, Ordering::SeqCst)
@@ -381,6 +502,17 @@ impl State {
         }
         let me = Arc::clone(self);
         tokio::spawn(async move {
+            if !me.warming_fast.swap(true, Ordering::SeqCst) {
+                let r = me.warm(Tier::Fast).await;
+                me.warming_fast.store(false, Ordering::SeqCst);
+                match r {
+                    Ok(()) => {
+                        me.rewarm_running.store(false, Ordering::SeqCst);
+                        return;
+                    }
+                    Err(e) => eprintln!("[amara-router] re-warm after deep failed: {e}"),
+                }
+            }
             let poll = Duration::from_secs(me.cfg.loading.poll_secs.max(1));
             // Give up after ~3 h so a pinned deep model never keeps a task alive forever.
             for _ in 0..(3 * 3600 / poll.as_secs().max(1)) {

@@ -15,11 +15,13 @@ deep = "qwen3.8-uncensored:latest"
 # -1 = keep resident forever; "5m" = unload after 5 idle minutes.
 fast_keep_alive = -1
 deep_keep_alive = "5m"
-# Every fast request and the classifier use this context so the resident model is never
-# reloaded at a different size. Match what Hermes uses (ollama_num_ctx in ~/.hermes/config.yaml).
-fast_num_ctx = 131072
+# Sent as options.num_ctx on every Ollama call (requests, classifier, warm-ups) so the model
+# is never loaded at its own default (131072 for gemma4: a 60-140 s cold load on low RAM).
+# 512-262144, default 8192. Raise fast to 16384 once Hermes (system prompt + tool schemas +
+# recalled memory) goes through the router; Ollama silently cuts prompts longer than this.
+fast_num_ctx = 8192
 # Deep model context. Keep it modest: the KV cache of a 27B model grows fast.
-deep_num_ctx = 16384
+deep_num_ctx = 8192
 # `think` used when the caller does not set it. Fast: off (hidden reasoning costs seconds).
 # Deep: leave unset for the model default, or set true/false.
 fast_think = false
@@ -29,14 +31,24 @@ fast_think = false
 token_threshold = 2000
 trigger_phrases = ["think deeper", "think harder", "think deeply", "think more deeply", "deep think"]
 classifier = true
+# 100-10000 ms.
 classifier_timeout_ms = 2000
+# /api/ps check before classifying (50-2000 ms). Fast not resident (or no answer in time):
+# skip the classifier and use the rules above (answer: fast), and start loading fast.
+residency_check_timeout_ms = 250
 # Characters of the message sent to the classifier (prompt evaluation is most of its latency).
 classifier_max_chars = 400
 
 [loading]
+# Background pre-warm at startup (never blocks). Deep is loaded after fast, if enabled.
 warm_fast_on_start = true
+warm_deep_on_start = false
+# Re-warm fast right after a deep answer; if that fails, poll /api/ps every poll_secs.
 rewarm_fast_after_deep = true
 poll_secs = 20
+# No first byte from Ollama within this (1000-300000 ms): HTTP 503 "Model loading, try again
+# shortly." while the load continues in the background.
+first_token_timeout_ms = 20000
 # Optional, OFF by default and not done by the router: let the GPU wire more RAM so fast and
 # deep can both stay loaded. Resets on reboot.  sudo sysctl iogpu.wired_limit_mb=26000
 
