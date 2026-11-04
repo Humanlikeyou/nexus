@@ -1011,7 +1011,7 @@ struct Sources {
 impl Sources {
     fn live() -> Self {
         Sources {
-            app_dir: Some(crate::app_paths::data_dir()),
+            app_dir: Some(app_env_dir()),
             legacy_dir: voice_dir(),
             uid: current_uid(),
             cfg_url: super::telegram::load_config().ha_url,
@@ -1331,8 +1331,14 @@ fn set_config_with(
     Ok(())
 }
 
+/// Folder holding the app-data `.env`: the app data dir (follows `NEXUS_DATA_DIR`, and
+/// `NEXUS_CONFIG_DIR` in dev builds).
+pub(crate) fn app_env_dir() -> PathBuf {
+    crate::app_paths::data_dir()
+}
+
 fn live_app_dir() -> Result<PathBuf, String> {
-    let dir = crate::app_paths::data_dir();
+    let dir = app_env_dir();
     crate::app_paths::create_private_dir_all(&dir).map_err(|_| ERR_SAVE.to_string())?;
     Ok(dir)
 }

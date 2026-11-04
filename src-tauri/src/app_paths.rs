@@ -126,6 +126,10 @@ pub fn merge_legacy_config_in(base: &Path) -> std::io::Result<Vec<String>> {
 }
 
 pub fn migrate_legacy_data_dir() {
+    // A dev NEXUS_CONFIG_DIR profile is self-contained: never copy into the real data dir.
+    if dev_config_dir_set() {
+        return;
+    }
     let Some(base) = dirs::data_dir() else { return };
     match migrate_legacy_data_dir_in(&base) {
         Ok(c) if !c.is_empty() => eprintln!("[nexus] migrated {} legacy app-data entries", c.len()),
@@ -224,8 +228,126 @@ pub fn restrict_sqlite_files(db: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Dev-only override of the whole app data/config directory (config.json, the app `.env` with
+/// the HA token, continuity data, kv, dbs, …). Honoured only when `debug_assertions` is on;
+/// release builds ignore it completely. It wins over `NEXUS_DATA_DIR`.
+///
+/// Rules: absolute, no `..` component; created 0700 if missing; refused if it is a symlink,
+/// not a directory, not owned by the current user, or group/world-writable. A refused value
+/// never falls back to the real data dir: `check_dev_config_dir` exits at startup, and
+/// `data_dir` panics (dev builds only).
+pub const CONFIG_DIR_ENV: &str = "NEXUS_CONFIG_DIR";
+
+const DEV_OVERRIDE_ENABLED: bool = cfg!(debug_assertions);
+
+fn dev_config_dir_set() -> bool {
+    DEV_OVERRIDE_ENABLED && std::env::var_os(CONFIG_DIR_ENV).is_some_and(|v| !v.is_empty())
+}
+
+/// Validates (and creates if missing) a `NEXUS_CONFIG_DIR` value. Errors are fixed text plus
+/// the reason; the path itself is not secret.
+fn validate_config_dir(raw: &std::ffi::OsStr, uid: u32) -> Result<PathBuf, String> {
+    use std::path::Component;
+    let p = PathBuf::from(raw);
+    if !p.is_absolute() {
+        return Err(format!("{CONFIG_DIR_ENV} must be an absolute path"));
+    }
+    if p.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(format!("{CONFIG_DIR_ENV} must not contain '..'"));
+    }
+    let meta = match fs::symlink_metadata(&p) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            create_private_dir_all(&p)
+                .map_err(|_| format!("{CONFIG_DIR_ENV} could not be created"))?;
+            fs::symlink_metadata(&p).map_err(|_| format!("{CONFIG_DIR_ENV} is not readable"))?
+        }
+        Err(_) => return Err(format!("{CONFIG_DIR_ENV} is not readable")),
+    };
+    if meta.file_type().is_symlink() {
+        return Err(format!("{CONFIG_DIR_ENV} must not be a symlink"));
+    }
+    if !meta.is_dir() {
+        return Err(format!("{CONFIG_DIR_ENV} must be a directory"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if meta.uid() != uid {
+            return Err(format!(
+                "{CONFIG_DIR_ENV} must be owned by the current user"
+            ));
+        }
+        if meta.mode() & 0o022 != 0 {
+            return Err(format!(
+                "{CONFIG_DIR_ENV} must not be group- or world-writable"
+            ));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = uid;
+    Ok(p)
+}
+
+fn current_uid() -> u32 {
+    #[cfg(unix)]
+    {
+        // SAFETY: getuid has no preconditions and cannot fail.
+        unsafe { libc::getuid() }
+    }
+    #[cfg(not(unix))]
+    0
+}
+
+/// Resolution with every input injected (tests). `dev` = debug build.
+fn resolve_data_dir(
+    dev: bool,
+    config_dir: Option<std::ffi::OsString>,
+    data_dir_env: Option<std::ffi::OsString>,
+    uid: u32,
+) -> Result<PathBuf, String> {
+    if dev {
+        if let Some(raw) = config_dir.filter(|v| !v.is_empty()) {
+            return validate_config_dir(&raw, uid);
+        }
+    }
+    Ok(data_dir_with_override(data_dir_env))
+}
+
+/// Startup check: in a dev build with a bad `NEXUS_CONFIG_DIR`, exit before anything reads or
+/// writes app data (never fall back to the real directory). No-op in release builds.
+pub fn check_dev_config_dir() {
+    if !dev_config_dir_set() {
+        return;
+    }
+    match resolve_data_dir(true, std::env::var_os(CONFIG_DIR_ENV), None, current_uid()) {
+        Ok(p) => eprintln!(
+            "[nexus] dev build: app data in {} ({CONFIG_DIR_ENV})",
+            p.display()
+        ),
+        Err(e) => {
+            eprintln!("[nexus] refusing to start: {e}");
+            std::process::exit(78); // EX_CONFIG
+        }
+    }
+}
+
 pub fn data_dir() -> PathBuf {
-    data_dir_with_override(std::env::var_os(DATA_DIR_ENV))
+    let config_dir = if DEV_OVERRIDE_ENABLED {
+        std::env::var_os(CONFIG_DIR_ENV)
+    } else {
+        None
+    };
+    match resolve_data_dir(
+        DEV_OVERRIDE_ENABLED,
+        config_dir,
+        std::env::var_os(DATA_DIR_ENV),
+        current_uid(),
+    ) {
+        Ok(p) => p,
+        // Dev builds only (release never validates); startup already exited on this.
+        Err(e) => panic!("{e}"),
+    }
 }
 
 fn data_dir_with_override(override_dir: Option<std::ffi::OsString>) -> PathBuf {
@@ -491,5 +613,148 @@ mod tests {
         );
         assert!(!base.join(DATA_DIR_NAME).join(CONFIG_MERGE_MARKER).exists());
         let _ = fs::remove_dir_all(&base);
+    }
+
+    // ── NEXUS_CONFIG_DIR (dev builds) ────────────────────────────────────────
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "nexus-cfgdir-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        d
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_dir_is_created_0700_and_wins_over_data_dir_in_dev() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmp("new").join("nested");
+        let got = resolve_data_dir(
+            true,
+            Some(d.clone().into()),
+            Some("/tmp/other".into()),
+            current_uid(),
+        )
+        .unwrap();
+        assert_eq!(got, d);
+        assert_eq!(
+            fs::metadata(&d).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        // An existing private dir is accepted as is.
+        assert_eq!(
+            validate_config_dir(d.as_os_str(), current_uid()).unwrap(),
+            d
+        );
+        let _ = fs::remove_dir_all(d.parent().unwrap());
+    }
+
+    #[test]
+    fn config_dir_ignored_in_release_and_when_empty() {
+        let d = tmp("release");
+        // Release: ignored completely, not even created or validated.
+        assert_eq!(
+            resolve_data_dir(false, Some(d.clone().into()), None, current_uid()).unwrap(),
+            data_dir_with_override(None)
+        );
+        assert!(!d.exists());
+        assert_eq!(
+            resolve_data_dir(false, Some("relative/bad".into()), Some("/tmp/x".into()), 0).unwrap(),
+            PathBuf::from("/tmp/x")
+        );
+        // Dev with an empty value: falls through to NEXUS_DATA_DIR / default.
+        assert_eq!(
+            resolve_data_dir(true, Some("".into()), Some("/tmp/x".into()), 0).unwrap(),
+            PathBuf::from("/tmp/x")
+        );
+        assert_eq!(DEV_OVERRIDE_ENABLED, cfg!(debug_assertions));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_dir_refusals() {
+        use std::os::unix::fs::PermissionsExt;
+        let uid = current_uid();
+        assert!(validate_config_dir("relative/dir".as_ref(), uid).is_err());
+        let base = tmp("bad");
+        create_private_dir_all(&base).unwrap();
+        let dotdot = format!("{}/a/../b", base.display());
+        assert!(validate_config_dir(dotdot.as_ref(), uid)
+            .unwrap_err()
+            .contains(".."));
+        assert!(!base.join("b").exists());
+        // symlink to a private dir
+        let real = base.join("real");
+        create_private_dir_all(&real).unwrap();
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(validate_config_dir(link.as_os_str(), uid)
+            .unwrap_err()
+            .contains("symlink"));
+        // group- and world-writable
+        for mode in [0o770, 0o707, 0o777] {
+            fs::set_permissions(&real, fs::Permissions::from_mode(mode)).unwrap();
+            assert!(validate_config_dir(real.as_os_str(), uid)
+                .unwrap_err()
+                .contains("writable"));
+        }
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o700)).unwrap();
+        // wrong owner, and a regular file
+        assert!(validate_config_dir(real.as_os_str(), uid + 1).is_err());
+        let file = base.join("file");
+        fs::write(&file, "x").unwrap();
+        assert!(validate_config_dir(file.as_os_str(), uid).is_err());
+        // dev resolution surfaces the refusal (never falls back to the default)
+        assert!(resolve_data_dir(true, Some(link.into()), None, uid).is_err());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// Runs this test binary again with NEXUS_CONFIG_DIR set (no set_var in this process, so
+    /// parallel tests are unaffected) and checks config.json, the app .env and continuity data
+    /// all resolve, and are written, under it.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn config_json_app_env_and_continuity_follow_config_dir() {
+        if std::env::var_os("NEXUS_CFGDIR_PROBE").is_some() {
+            let d = PathBuf::from(std::env::var_os(CONFIG_DIR_ENV).unwrap());
+            assert_eq!(data_dir(), d);
+            assert_eq!(
+                crate::commands::telegram::config_path(),
+                d.join("config.json")
+            );
+            assert_eq!(crate::commands::ha::app_env_dir(), d);
+            assert_eq!(
+                crate::commands::continuity::context_path(),
+                d.join("terrance_context.json")
+            );
+            assert!(crate::commands::continuity::activity_log_dir().starts_with(&d));
+            crate::commands::telegram::update_config(|c| {
+                c.ha_url = Some("http://127.0.0.1:8123".into())
+            })
+            .unwrap();
+            assert!(d.join("config.json").is_file());
+            return;
+        }
+        let d = tmp("probe");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "app_paths::tests::config_json_app_env_and_continuity_follow_config_dir",
+                "--nocapture",
+            ])
+            .env("NEXUS_CFGDIR_PROBE", "1")
+            .env(CONFIG_DIR_ENV, &d)
+            .env_remove(DATA_DIR_ENV)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert!(String::from_utf8_lossy(&out.stdout).contains("1 passed"));
+        assert!(d.join("config.json").is_file());
+        let _ = fs::remove_dir_all(&d);
     }
 }

@@ -22,7 +22,7 @@ fn data_dir() -> PathBuf {
 
 const CONTEXT_FILE: &str = "terrance_context.json";
 
-fn context_path() -> PathBuf {
+pub(crate) fn context_path() -> PathBuf {
     data_dir().join(CONTEXT_FILE)
 }
 
@@ -486,7 +486,7 @@ fn chrono_date_from_ms(ms: u64) -> String {
 
 // ─── Activity Log ────────────────────────────────────────────────────────────
 
-fn activity_log_dir() -> PathBuf {
+pub(crate) fn activity_log_dir() -> PathBuf {
     // Activity logs live alongside session_logs in the data dir
     data_dir().join("activity_log")
 }

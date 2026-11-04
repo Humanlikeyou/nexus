@@ -7,7 +7,7 @@ fn nexus_data_dir() -> PathBuf {
     crate::app_paths::data_dir()
 }
 
-fn config_path() -> PathBuf {
+pub(crate) fn config_path() -> PathBuf {
     nexus_data_dir().join("config.json")
 }
 

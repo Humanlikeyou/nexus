@@ -110,6 +110,7 @@ pub mod test_support {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    app_paths::check_dev_config_dir();
     app_paths::migrate_legacy_data_dir();
     tauri::Builder::default()
         .manage(terrence_runtime_bridge::NexusRuntimeBridge::default())
