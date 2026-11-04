@@ -247,17 +247,8 @@ impl Config {
                 return Err("config: ollama_url must be a loopback host while NEXUS_OUTBOUND_DISABLED is set".into());
             }
         }
-        // https only; plain http is tolerated solely for a loopback host (a local mock or
-        // proxy), which cannot leak traffic off the Mac.
-        let a = &self.cloud.anthropic_url;
-        let a_ok = match url_host(a) {
-            Some(h) if is_spoofy_host(h) => false,
-            Some(h) if a.starts_with("https://") => !h.is_empty(),
-            Some(h) if a.starts_with("http://") => is_loopback_host(h),
-            _ => false,
-        };
-        if !a_ok {
-            return Err("config: cloud.anthropic_url must be an https:// URL".into());
+        if !anthropic_url_allowed(&self.cloud.anthropic_url) {
+            return Err("config: cloud.anthropic_url must be https://api.anthropic.com (port 443) or a loopback mock".into());
         }
         let bind: std::net::SocketAddr = self
             .bind
@@ -298,6 +289,40 @@ fn url_host(url: &str) -> Option<&str> {
         authority.rsplit_once(':').map_or(authority, |(h, _)| h)
     };
     (!host.is_empty()).then_some(host)
+}
+
+/// The only Anthropic endpoints allowed: `https://api.anthropic.com[:443]/...` exactly, or a
+/// loopback mock (127.0.0.0/8 dotted-quad, `::1`, `localhost`) over http or https.
+fn anthropic_url_allowed(url: &str) -> bool {
+    let https = url.starts_with("https://");
+    if !https && !url.starts_with("http://") {
+        return false;
+    }
+    let Some(host) = url_host(url) else {
+        return false;
+    };
+    if is_spoofy_host(host) {
+        return false;
+    }
+    if is_loopback_host(host) {
+        return true;
+    }
+    https
+        && host.eq_ignore_ascii_case("api.anthropic.com")
+        && matches!(url_port(url), None | Some("443"))
+}
+
+/// Explicit port of an `http(s)://host:port/...` URL, if any.
+fn url_port(url: &str) -> Option<&str> {
+    let rest = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let after_host = match authority.strip_prefix('[') {
+        Some(v6) => v6.split_once(']').map_or("", |(_, r)| r),
+        None => authority.find(':').map_or("", |i| &authority[i..]),
+    };
+    after_host.strip_prefix(':')
 }
 
 /// Hosts that only look local or numeric: `localhost.<anything>`, and integer/hex/octal or
@@ -550,6 +575,30 @@ deep = "d:latest"
         ] {
             let t = format!("{MIN}\n[cloud]\nanthropic_url = \"{bad}\"\n");
             assert!(Config::parse_with(&t, false).is_err(), "{bad}");
+        }
+        for bad in [
+            "https://evil.com/v1/messages",
+            "https://api.anthropic.com.evil.com/v1/messages",
+            "https://anthropic.com/v1/messages",
+            "http://api.anthropic.com/v1/messages",
+            "https://api.anthropic.com:8443/v1/messages",
+            "https://api.anthropic.com:/v1/messages",
+            "https://127.1/v1/messages",
+        ] {
+            assert!(!anthropic_url_allowed(bad), "{bad}");
+            let t = format!("{MIN}\n[cloud]\nanthropic_url = \"{bad}\"\n");
+            assert!(Config::parse_with(&t, false).is_err(), "{bad}");
+        }
+        for good in [
+            "https://api.anthropic.com/v1/messages",
+            "https://API.anthropic.com:443/v1/messages",
+            "https://api.anthropic.com",
+            "http://127.0.0.1:9/v1/messages",
+            "https://127.9.9.9/v1/messages",
+            "http://[::1]:9/v1/messages",
+            "https://localhost:9/v1/messages",
+        ] {
+            assert!(anthropic_url_allowed(good), "{good}");
         }
         let ok =
             format!("{MIN}\n[cloud]\nanthropic_url = \"https://api.anthropic.com/v1/messages\"\n");
