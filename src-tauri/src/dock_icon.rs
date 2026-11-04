@@ -5,7 +5,9 @@
 
 use tauri::{AppHandle, Manager, Runtime, Theme, WebviewWindow};
 
+#[cfg(target_os = "macos")]
 pub const LIGHT_ICON: &[u8] = include_bytes!("../icons/1024x1024.png");
+#[cfg(target_os = "macos")]
 pub const DARK_ICON: &[u8] = include_bytes!("../icons/dark/icon-1024.png");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +24,7 @@ pub fn icon_for(theme: Option<Theme>) -> DockIcon {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub fn icon_bytes(icon: DockIcon) -> &'static [u8] {
     match icon {
         DockIcon::Light => LIGHT_ICON,
@@ -75,6 +78,7 @@ mod tests {
         assert_eq!(icon_for(None), DockIcon::Light);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn embedded_icons_are_distinct_pngs() {
         const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
