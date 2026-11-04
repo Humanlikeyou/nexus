@@ -1,12 +1,18 @@
 //! Home Assistant backend: states, service calls, Assist conversation, the HA container, and
 //! live `state_changed` events over the HA websocket.
 //!
-//! - The address is `HA_URL` from `~/projects/amara-voice/.env` (default
-//!   `http://127.0.0.1:8123`) and must be a clean loopback `http://host[:port]`.
-//!   `NEXUS_OUTBOUND_DISABLED` does not apply: HA never leaves the Mac.
-//! - `HA_TOKEN` is read from that file on every call (only `HA_URL` / `HA_TOKEN` are parsed),
-//!   held in a type with no `Serialize`/`Display` and a redacted `Debug`, and is never
-//!   returned, logged or emitted. All errors are fixed text.
+//! - Precedence (resolved on every call, including `ha_live_*` and `ha_states`):
+//!   - URL: app config `ha_url` (`<data_dir>/config.json`), then the `HA_URL` env var, then
+//!     legacy `HA_URL` in `~/projects/amara-voice/.env`, then `http://127.0.0.1:8123`.
+//!   - Token: `HA_TOKEN` in the app-data `.env` (`<data_dir>/.env`, written by
+//!     `ha_set_config`), then the `HA_TOKEN` env var, then legacy `~/projects/amara-voice/.env`.
+//!   - The app-data `.env` therefore wins over an env var. A present-but-unsafe app-data `.env`
+//!     (symlink, wrong owner, group/other bits) fails closed (`unsafe_storage`); it never falls
+//!     through to a weaker source.
+//! - The URL must be a clean loopback `http://host[:port]`. `NEXUS_OUTBOUND_DISABLED` does not
+//!   apply: HA never leaves the Mac.
+//! - The token is held in a type with no `Serialize`/`Display`, a redacted `Debug`, zeroized on
+//!   drop, and is never returned, logged or emitted. All errors are fixed text.
 //! - Container start/stop run `docker compose` with fixed args (no shell), one at a time, with
 //!   a timeout.
 
@@ -85,6 +91,10 @@ pub const KIND_DOMAIN_MISMATCH: &str = "domain_mismatch";
 pub const KIND_INVALID_INPUT: &str = "invalid_input";
 #[allow(dead_code)] // stable contract for the frontend; asserted in tests
 pub const KIND_UPSTREAM_ERROR: &str = "upstream_error";
+/// The app-data `.env` or its folder is a symlink, wrong owner, or has group/other bits.
+pub const KIND_UNSAFE_STORAGE: &str = "unsafe_storage";
+/// Writing settings (app-data `.env` or config) failed.
+pub const KIND_STORAGE_ERROR: &str = "storage_error";
 /// All kinds, for the frontend and tests.
 #[allow(dead_code)] // stable contract for the frontend; asserted in tests
 pub const ERROR_KINDS: &[&str] = &[
@@ -102,6 +112,8 @@ pub const ERROR_KINDS: &[&str] = &[
     KIND_DOMAIN_MISMATCH,
     KIND_INVALID_INPUT,
     KIND_UPSTREAM_ERROR,
+    KIND_UNSAFE_STORAGE,
+    KIND_STORAGE_ERROR,
 ];
 
 const ERR_CONFIG: &str =
@@ -197,6 +209,31 @@ struct HaToken(String);
 impl std::fmt::Debug for HaToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("HaToken(<redacted>)")
+    }
+}
+
+impl Drop for HaToken {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
+
+/// File text that may contain the token; zeroized on drop. Redacted `Debug` (the inner
+/// `Zeroizing` would print its contents).
+struct SecretText(zeroize::Zeroizing<String>);
+
+impl SecretText {
+    fn with_capacity(n: usize) -> Self {
+        SecretText(zeroize::Zeroizing::new(String::with_capacity(n)))
+    }
+    fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl std::fmt::Debug for SecretText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SecretText(<redacted>)")
     }
 }
 
@@ -323,8 +360,7 @@ fn parse_config(text: &str) -> Result<HaConfig, String> {
 }
 
 fn load_config() -> Result<HaConfig, String> {
-    let dir = voice_dir().ok_or_else(|| ERR_CONFIG.to_string())?;
-    read_config_at(&dir, &dir.join(".env"), current_uid())
+    resolve(&Sources::live())
 }
 
 fn client() -> reqwest::Client {
@@ -948,6 +984,494 @@ pub async fn ha_live_stop(app: AppHandle) -> bool {
             true
         }
         None => false,
+    }
+}
+
+// ─── settings: sources, precedence, app-data .env ────────────────────────────
+
+const APP_ENV_FILE: &str = ".env";
+const APP_ENV_MAX_BYTES: u64 = 64 * 1024;
+const TOKEN_KEY: &str = "HA_TOKEN";
+const TOKEN_MIN: usize = 32;
+const TOKEN_MAX: usize = 512;
+const VERSION_MAX: usize = 32;
+const TEST_BODY_MAX: usize = 64 * 1024;
+const TEST_MIN_GAP: Duration = Duration::from_secs(2);
+
+const ERR_STORAGE: &str =
+    "unsafe_storage: The app settings file is not safe to use (symlink, owner or permissions).";
+const ERR_TOKEN_FORMAT: &str =
+    "invalid_input: The token must be 32-512 characters of letters, digits, '.', '_' or '-'.";
+const ERR_NOTHING: &str = "invalid_input: Nothing to save.";
+const ERR_SAVE: &str = "storage_error: The settings could not be saved.";
+
+/// Everything `resolve` looks at, so tests can point it at temp dirs.
+struct Sources {
+    /// Folder holding the app-data `.env` (`app_paths::data_dir()` live).
+    app_dir: Option<PathBuf>,
+    /// Folder holding the legacy amara-voice `.env` (read-only fallback).
+    legacy_dir: Option<PathBuf>,
+    uid: u32,
+    cfg_url: Option<String>,
+    env_url: Option<String>,
+    env_token: Option<HaToken>,
+}
+
+impl Sources {
+    fn live() -> Self {
+        Sources {
+            app_dir: Some(crate::app_paths::data_dir()),
+            legacy_dir: voice_dir(),
+            uid: current_uid(),
+            cfg_url: super::telegram::load_config().ha_url,
+            env_url: std::env::var("HA_URL").ok(),
+            env_token: std::env::var(TOKEN_KEY).ok().map(HaToken),
+        }
+    }
+}
+
+fn token_ok_for_use(t: &str) -> bool {
+    !t.is_empty() && t.chars().all(|c| c.is_ascii_graphic())
+}
+
+/// Strict format for a token we store: `[A-Za-z0-9._-]{32,512}`. This excludes CR, LF, NUL,
+/// '=', '#', quotes and spaces, so a stored value can never add or split an env line.
+fn valid_new_token(t: &str) -> bool {
+    (TOKEN_MIN..=TOKEN_MAX).contains(&t.len())
+        && t.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
+}
+
+/// Reads an already-checked file into a buffer pre-sized to `min(len, max) + 1` (so
+/// `read_to_end` does not reallocate and leave copies), zeroizing it on every error path.
+fn read_secret(f: &mut std::fs::File, len: u64, max: u64) -> Result<SecretText, ()> {
+    use std::io::Read;
+    use zeroize::{Zeroize, Zeroizing};
+    let mut buf = Zeroizing::new(Vec::with_capacity(len.min(max) as usize + 1));
+    f.take(max + 1).read_to_end(&mut buf).map_err(|_| ())?;
+    if buf.len() as u64 > max {
+        return Err(()); // `buf` zeroized on drop
+    }
+    match String::from_utf8(std::mem::take(&mut *buf)) {
+        Ok(s) => Ok(SecretText(Zeroizing::new(s))),
+        Err(e) => {
+            e.into_bytes().zeroize();
+            Err(())
+        }
+    }
+}
+
+/// Opens `dir/name` with O_NOFOLLOW|O_NONBLOCK and checks the open handle: regular file, owned by
+/// `uid`, no `mode_mask` bits, at most `max` bytes. `Ok(None)` only when the file is absent.
+fn read_private_text(
+    dir: &Path,
+    name: &str,
+    uid: u32,
+    max: u64,
+    mode_mask: u32,
+) -> Result<Option<SecretText>, ()> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let path = dir.join(name);
+    let mut f = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&path)
+    {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(()),
+    };
+    let meta = f.metadata().map_err(|_| ())?;
+    if !meta.is_file() || meta.uid() != uid || meta.mode() & mode_mask != 0 {
+        return Err(());
+    }
+    read_secret(&mut f, meta.len(), max).map(Some)
+}
+
+/// Token from the app-data `.env`. `Err` = the file exists but is unsafe (fail closed).
+fn app_env_token(dir: &Path, uid: u32) -> Result<Option<HaToken>, String> {
+    let Some(text) = read_private_text(dir, APP_ENV_FILE, uid, APP_ENV_MAX_BYTES, 0o077)
+        .map_err(|_| ERR_STORAGE.to_string())?
+    else {
+        return Ok(None);
+    };
+    Ok(
+        super::terrence_runtime_bridge::env_value(text.as_str(), TOKEN_KEY)
+            .map(HaToken)
+            .filter(|t| token_ok_for_use(&t.0)),
+    )
+}
+
+/// `(HA_URL, HA_TOKEN)` from the legacy amara-voice `.env`, via the same checked reader as
+/// before (`read_config_at`). Absent, unsafe or invalid (bad URL / no token) = none.
+fn legacy_values(src: &Sources) -> (Option<String>, Option<HaToken>) {
+    let Some(dir) = src.legacy_dir.as_deref() else {
+        return (None, None);
+    };
+    match read_config_at(dir, &dir.join(".env"), src.uid) {
+        Ok(HaConfig { base, token }) => (Some(base), Some(token)),
+        Err(_) => (None, None),
+    }
+}
+
+fn non_empty(v: &Option<String>) -> Option<String> {
+    v.as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_string)
+}
+
+/// The URL a source explicitly sets (config, env, legacy), or `None` for the default.
+fn configured_url(src: &Sources, legacy_url: &Option<String>) -> Option<String> {
+    non_empty(&src.cfg_url)
+        .or_else(|| non_empty(&src.env_url))
+        .or_else(|| non_empty(legacy_url))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TokenSource {
+    App,
+    Env,
+    Legacy,
+}
+
+fn resolve_token_with_source(
+    src: &Sources,
+    legacy: Option<HaToken>,
+) -> Result<(HaToken, TokenSource), String> {
+    if let Some(dir) = src.app_dir.as_deref() {
+        if let Some(t) = app_env_token(dir, src.uid)? {
+            return Ok((t, TokenSource::App));
+        }
+    }
+    if let Some(t) = src.env_token.as_ref().filter(|t| token_ok_for_use(&t.0)) {
+        return Ok((t.clone(), TokenSource::Env));
+    }
+    legacy
+        .filter(|t| token_ok_for_use(&t.0))
+        .map(|t| (t, TokenSource::Legacy))
+        .ok_or_else(|| ERR_CONFIG.to_string())
+}
+
+fn resolve_token(src: &Sources, legacy: Option<HaToken>) -> Result<HaToken, String> {
+    resolve_token_with_source(src, legacy).map(|(t, _)| t)
+}
+
+/// Precedence documented at the top of the file.
+fn resolve(src: &Sources) -> Result<HaConfig, String> {
+    let (legacy_url, legacy_token) = legacy_values(src);
+    let url = configured_url(src, &legacy_url);
+    let base = loopback_base(url.as_deref().unwrap_or(DEFAULT_HA_URL))
+        .ok_or_else(|| ERR_URL.to_string())?;
+    let token = resolve_token(src, legacy_token)?;
+    Ok(HaConfig { base, token })
+}
+
+/// True when `line` assigns `key` (`KEY=…` or `export KEY=…`).
+fn is_key_line(line: &str, key: &str) -> bool {
+    let l = line.trim_start();
+    let l = l.strip_prefix("export ").unwrap_or(l);
+    l.split_once('=').is_some_and(|(k, _)| k.trim() == key)
+}
+
+/// Line-by-line merge: every other line keeps its exact bytes and order. The first `key` line
+/// is replaced (or dropped when `value` is `None`); later duplicates are dropped; a missing key
+/// is appended.
+fn merge_env(text: &str, key: &str, value: Option<&str>) -> SecretText {
+    let mut out = SecretText::with_capacity(text.len() + TOKEN_MAX + 16);
+    let mut done = false;
+    for seg in text.split_inclusive('\n') {
+        if is_key_line(seg, key) {
+            if !done {
+                if let Some(v) = value {
+                    out.0.push_str(key);
+                    out.0.push('=');
+                    out.0.push_str(v);
+                    if seg.ends_with("\r\n") {
+                        out.0.push_str("\r\n");
+                    } else if seg.ends_with('\n') {
+                        out.0.push('\n');
+                    }
+                }
+            }
+            done = true;
+            continue;
+        }
+        out.0.push_str(seg);
+    }
+    if !done {
+        if let Some(v) = value {
+            if !out.0.is_empty() && !out.0.ends_with('\n') {
+                out.0.push('\n');
+            }
+            out.0.push_str(key);
+            out.0.push('=');
+            out.0.push_str(v);
+            out.0.push('\n');
+        }
+    }
+    out
+}
+
+/// Atomically sets (or removes, `value: None`) one key in `dir/.env`.
+///
+/// The folder is opened O_DIRECTORY|O_NOFOLLOW and checked on the handle (directory, owned by
+/// `uid`, not group/world-writable, same inode as the path). The existing file is opened
+/// O_NOFOLLOW and checked on the handle (regular file, owned by `uid`, not group/world-writable).
+/// The new content goes to a temp file in the same folder (O_CREAT|O_EXCL|O_NOFOLLOW, 0600),
+/// is fsynced, renamed over the target, and the folder is fsynced. Errors carry no value.
+static ENV_WRITE_LOCK: StdMutex<()> = StdMutex::new(());
+
+fn write_env_key(dir: &Path, uid: u32, key: &str, value: Option<&str>) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    // One writer at a time, so a save and a clear can't interleave read-merge-rename.
+    let _guard = ENV_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let unsafe_err = || ERR_STORAGE.to_string();
+    let dir_fd = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(dir)
+        .map_err(|_| unsafe_err())?;
+    let dm = dir_fd.metadata().map_err(|_| unsafe_err())?;
+    if !dm.is_dir() || dm.uid() != uid || dm.mode() & 0o022 != 0 {
+        return Err(unsafe_err());
+    }
+    let lm = std::fs::symlink_metadata(dir).map_err(|_| unsafe_err())?;
+    if lm.file_type().is_symlink() || lm.ino() != dm.ino() || lm.dev() != dm.dev() {
+        return Err(unsafe_err());
+    }
+    let target = dir.join(APP_ENV_FILE);
+    let existing = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&target)
+    {
+        Ok(mut f) => {
+            let m = f.metadata().map_err(|_| unsafe_err())?;
+            // Same rule as the reader: no group/other bits at all.
+            if !m.is_file() || m.uid() != uid || m.mode() & 0o077 != 0 {
+                return Err(unsafe_err());
+            }
+            Some(read_secret(&mut f, m.len(), APP_ENV_MAX_BYTES).map_err(|_| unsafe_err())?)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return Err(unsafe_err()),
+    };
+    if existing.is_none() && value.is_none() {
+        return Ok(()); // nothing to remove
+    }
+    let merged = merge_env(existing.as_ref().map_or("", |t| t.as_str()), key, value);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let tmp = dir.join(format!(".env.tmp-{}-{nanos}", std::process::id()));
+    let write = || -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true) // O_CREAT|O_EXCL
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&tmp)?;
+        f.write_all(merged.as_str().as_bytes())?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, &target)?;
+        dir_fd.sync_all()
+    };
+    write().map_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+        ERR_SAVE.to_string()
+    })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HaSettingsView {
+    url: Option<String>,
+    token_set: bool,
+    /// Where the token in use comes from; `null` when none is usable.
+    token_source: Option<TokenSource>,
+}
+
+fn get_config_with(src: &Sources) -> HaSettingsView {
+    let (legacy_url, legacy_token) = legacy_values(src);
+    let source = resolve_token_with_source(src, legacy_token)
+        .ok()
+        .map(|(_, s)| s);
+    HaSettingsView {
+        url: configured_url(src, &legacy_url).and_then(|u| loopback_base(&u)),
+        token_set: source.is_some(),
+        token_source: source,
+    }
+}
+
+/// Validates everything first, then writes the token, then saves the URL via `save_url`
+/// (`Some("")` clears the saved URL).
+fn set_config_with(
+    app_dir: &Path,
+    uid: u32,
+    url: Option<String>,
+    token: Option<HaToken>,
+    save_url: impl FnOnce(Option<String>) -> Result<(), String>,
+) -> Result<(), String> {
+    if url.is_none() && token.is_none() {
+        return Err(ERR_NOTHING.to_string());
+    }
+    let url = match url.as_deref().map(str::trim) {
+        None => None,
+        Some("") => Some(None),
+        Some(u) => Some(Some(loopback_base(u).ok_or_else(|| ERR_URL.to_string())?)),
+    };
+    if let Some(t) = &token {
+        if !valid_new_token(&t.0) {
+            return Err(ERR_TOKEN_FORMAT.to_string());
+        }
+    }
+    if let Some(t) = &token {
+        write_env_key(app_dir, uid, TOKEN_KEY, Some(&t.0))?;
+    }
+    drop(token); // wiped
+    if let Some(u) = url {
+        save_url(u)?;
+    }
+    Ok(())
+}
+
+fn live_app_dir() -> Result<PathBuf, String> {
+    let dir = crate::app_paths::data_dir();
+    crate::app_paths::create_private_dir_all(&dir).map_err(|_| ERR_SAVE.to_string())?;
+    Ok(dir)
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct HaTestResult {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+}
+
+fn fail(e: &str) -> HaTestResult {
+    let k = e.split(':').next().unwrap_or("");
+    HaTestResult {
+        ok: false,
+        kind: Some(
+            ERROR_KINDS
+                .iter()
+                .copied()
+                .find(|x| *x == k)
+                .unwrap_or(KIND_UPSTREAM_ERROR),
+        ),
+        version: None,
+    }
+}
+
+fn safe_version(v: &str) -> Option<String> {
+    (!v.is_empty()
+        && v.len() <= VERSION_MAX
+        && v.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'+')))
+    .then(|| v.to_string())
+}
+
+async fn test_with(cfg: &HaConfig) -> HaTestResult {
+    let r: Result<Option<String>, String> = async {
+        let resp = client()
+            .get(format!("{}/api/config", cfg.base))
+            .bearer_auth(&cfg.token.0)
+            .send()
+            .await
+            .map_err(|_| ERR_UNREACHABLE.to_string())?;
+        if !resp.status().is_success() {
+            return Err(status_error(resp.status()));
+        }
+        let v = read_capped(resp, TEST_BODY_MAX).await?;
+        if !v.is_object() {
+            return Err(ERR_BAD_REPLY.to_string());
+        }
+        Ok(v.get("version")
+            .and_then(Value::as_str)
+            .and_then(safe_version))
+    }
+    .await;
+    match r {
+        Ok(version) => HaTestResult {
+            ok: true,
+            kind: None,
+            version,
+        },
+        Err(e) => fail(&e),
+    }
+}
+
+/// One test at a time, at least `TEST_MIN_GAP` between starts.
+static TEST_GATE: tokio::sync::Mutex<Option<std::time::Instant>> =
+    tokio::sync::Mutex::const_new(None);
+
+fn gap_ok(last: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    last.is_none_or(|t| now.saturating_duration_since(t) >= TEST_MIN_GAP)
+}
+
+/// `{url, tokenSet}`; `url` is the effective configured loopback URL (null = default).
+#[tauri::command]
+pub fn ha_get_config() -> HaSettingsView {
+    get_config_with(&Sources::live())
+}
+
+/// Saves the URL (app config) and/or the token (app-data `.env`). `url: ""` clears the saved
+/// URL. Rejects with `bad_url`, `invalid_input`, `not_allowed` (unsafe file) or
+/// `upstream_error` (write failed).
+#[tauri::command]
+pub fn ha_set_config(url: Option<String>, token: Option<String>) -> Result<(), String> {
+    let token = token.map(HaToken);
+    let dir = live_app_dir()?;
+    set_config_with(&dir, current_uid(), url, token, |u| {
+        super::telegram::update_config(|c| c.ha_url = u).map_err(|_| ERR_SAVE.to_string())
+    })
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HaClearResult {
+    /// True when a token is still usable after the clear (env var or legacy file).
+    fallback_active: bool,
+}
+
+fn clear_token_with(src: &Sources) -> Result<HaClearResult, String> {
+    let dir = src.app_dir.as_deref().ok_or_else(|| ERR_SAVE.to_string())?;
+    write_env_key(dir, src.uid, TOKEN_KEY, None)?;
+    let (_, legacy_token) = legacy_values(src);
+    Ok(HaClearResult {
+        fallback_active: resolve_token(src, legacy_token).is_ok(),
+    })
+}
+
+/// Removes only the `HA_TOKEN` line from the app-data `.env` (same atomic write) and reports
+/// whether an env-var or legacy token still applies.
+#[tauri::command]
+pub fn ha_clear_token() -> Result<HaClearResult, String> {
+    live_app_dir()?;
+    clear_token_with(&Sources::live())
+}
+
+/// GET `/api/config` with the resolved settings. Never rejects; failures are `{ok:false, kind}`.
+#[tauri::command]
+pub async fn ha_test_connection() -> HaTestResult {
+    let Ok(mut last) = TEST_GATE.try_lock() else {
+        return fail(ERR_BUSY);
+    };
+    let now = std::time::Instant::now();
+    if !gap_ok(*last, now) {
+        return fail(ERR_BUSY);
+    }
+    *last = Some(now);
+    match load_config() {
+        Ok(cfg) => test_with(&cfg).await,
+        Err(e) => fail(&e),
     }
 }
 
@@ -1626,8 +2150,12 @@ mod tests {
             ERR_DECLINED,
             ERR_NEEDS_APPROVAL,
             ERR_BUSY_APPROVAL,
+            ERR_STORAGE,
+            ERR_SAVE,
+            ERR_TOKEN_FORMAT,
+            ERR_NOTHING,
         ];
-        assert_eq!(ERROR_KINDS.len(), 14);
+        assert_eq!(ERROR_KINDS.len(), 16);
         for e in all {
             let (kind, text) = e.split_once(": ").expect(e);
             assert!(ERROR_KINDS.contains(&kind), "{e}");
@@ -1814,5 +2342,449 @@ mod tests {
             conversation_result(&json!({})).unwrap(),
             HaConversationResult::NoMatch
         );
+    }
+
+    // ─── settings ────────────────────────────────────────────────────────────
+
+    const NEW_TOKEN: &str = "abcDEF0123456789._-abcDEF0123456789xyz";
+
+    fn tmpdir() -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("nexus-ha-set-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        dir.canonicalize().unwrap()
+    }
+
+    fn src(app: &Path) -> Sources {
+        Sources {
+            app_dir: Some(app.to_path_buf()),
+            legacy_dir: None,
+            uid: current_uid(),
+            cfg_url: None,
+            env_url: None,
+            env_token: None,
+        }
+    }
+
+    fn set_token(dir: &Path, t: &str) -> Result<(), String> {
+        set_config_with(
+            dir,
+            current_uid(),
+            None,
+            Some(HaToken(t.into())),
+            |_| Ok(()),
+        )
+    }
+
+    #[test]
+    fn token_format_rules() {
+        assert!(valid_new_token(NEW_TOKEN));
+        for bad in [
+            format!("{NEW_TOKEN}\nEVIL=1"),
+            format!("{NEW_TOKEN}\r"),
+            format!("{NEW_TOKEN}\0"),
+            format!("{NEW_TOKEN}=x"),
+            format!("{NEW_TOKEN}#x"),
+            format!(" {NEW_TOKEN}"),
+            format!("{NEW_TOKEN} "),
+            "a".repeat(31),
+            "a".repeat(513),
+            String::new(),
+        ] {
+            assert!(!valid_new_token(&bad));
+        }
+        assert!(valid_new_token(&"a".repeat(32)) && valid_new_token(&"a".repeat(512)));
+    }
+
+    #[test]
+    fn newline_or_equals_token_refused_and_file_untouched() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmpdir();
+        let f = dir.join(".env");
+        std::fs::write(&f, "A=1\n").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        for bad in [format!("{NEW_TOKEN}\nX=1"), format!("{NEW_TOKEN}=1")] {
+            let e = set_token(&dir, &bad).unwrap_err();
+            assert_eq!(e, ERR_TOKEN_FORMAT);
+            assert!(!e.contains(NEW_TOKEN));
+        }
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "A=1\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn symlink_target_and_folder_refused() {
+        let dir = tmpdir();
+        let real = dir.join("real.env");
+        std::fs::write(&real, "A=1\n").unwrap();
+        std::os::unix::fs::symlink(&real, dir.join(".env")).unwrap();
+        assert_eq!(set_token(&dir, NEW_TOKEN).unwrap_err(), ERR_STORAGE);
+        assert_eq!(
+            write_env_key(&dir, current_uid(), TOKEN_KEY, None).unwrap_err(),
+            ERR_STORAGE
+        );
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "A=1\n");
+        // reading through the symlink fails closed
+        assert_eq!(resolve(&src(&dir)).unwrap_err(), ERR_STORAGE);
+
+        let other = tmpdir();
+        let link_dir = dir.join("linkdir");
+        std::os::unix::fs::symlink(&other, &link_dir).unwrap();
+        assert_eq!(set_token(&link_dir, NEW_TOKEN).unwrap_err(), ERR_STORAGE);
+        assert!(!other.join(".env").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&other);
+    }
+
+    #[test]
+    fn group_or_world_writable_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmpdir();
+        let f = dir.join(".env");
+        std::fs::write(&f, "A=1\n").unwrap();
+        for mode in [0o620, 0o602, 0o666, 0o640, 0o604] {
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(set_token(&dir, NEW_TOKEN).unwrap_err(), ERR_STORAGE);
+            assert_eq!(std::fs::read_to_string(&f).unwrap(), "A=1\n");
+        }
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        for mode in [0o770, 0o707] {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(set_token(&dir, NEW_TOKEN).unwrap_err(), ERR_STORAGE);
+        }
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // wrong owner is refused (checked against the handle's uid)
+        assert_eq!(
+            write_env_key(&dir, current_uid() + 1, TOKEN_KEY, Some(NEW_TOKEN)).unwrap_err(),
+            ERR_STORAGE
+        );
+        // the writer applies the reader's rule (no group/other bits); result is 0600
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        set_token(&dir, NEW_TOKEN).unwrap();
+        assert_eq!(
+            std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn other_keys_byte_identical_after_set_and_clear() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmpdir();
+        let f = dir.join(".env");
+        let original = "# header\r\nA=1\nexport B='x y'  \n\nHA_TOKEN=oldoldoldoldoldoldoldoldoldoldold\nC=\"q\"\nHA_TOKEN=dup\nLAST=no-newline";
+        std::fs::write(&f, original).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let others: Vec<&str> = original
+            .split_inclusive('\n')
+            .filter(|l| !l.starts_with("HA_TOKEN"))
+            .collect();
+
+        set_token(&dir, NEW_TOKEN).unwrap();
+        let after = std::fs::read_to_string(&f).unwrap();
+        let after_others: Vec<&str> = after
+            .split_inclusive('\n')
+            .filter(|l| !l.starts_with("HA_TOKEN"))
+            .collect();
+        assert_eq!(after_others, others);
+        assert_eq!(after.matches("HA_TOKEN=").count(), 1);
+        assert!(after.contains(&format!("\nHA_TOKEN={NEW_TOKEN}\n")));
+        assert_eq!(
+            std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(resolve(&src(&dir)).unwrap().token.0, NEW_TOKEN);
+
+        write_env_key(&dir, current_uid(), TOKEN_KEY, None).unwrap();
+        let cleared = std::fs::read_to_string(&f).unwrap();
+        assert_eq!(cleared, others.concat());
+        assert!(!cleared.contains("HA_TOKEN"));
+        // no temp files left behind
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec![".env".to_string()]);
+
+        // append to a fresh file; clear on a missing file is a no-op
+        let d2 = tmpdir();
+        write_env_key(&d2, current_uid(), TOKEN_KEY, None).unwrap();
+        assert!(!d2.join(".env").exists());
+        set_token(&d2, NEW_TOKEN).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(d2.join(".env")).unwrap(),
+            format!("HA_TOKEN={NEW_TOKEN}\n")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&d2);
+    }
+
+    #[test]
+    fn get_config_never_contains_token_bytes() {
+        let dir = tmpdir();
+        set_token(&dir, NEW_TOKEN).unwrap();
+        let mut s = src(&dir);
+        s.cfg_url = Some("http://localhost:8123/".into());
+        let view = get_config_with(&s);
+        let json = serde_json::to_string(&view).unwrap();
+        assert_eq!(
+            json,
+            r#"{"url":"http://localhost:8123","tokenSet":true,"tokenSource":"app"}"#
+        );
+        assert!(!json.contains(NEW_TOKEN) && !json.contains(&NEW_TOKEN[..8]));
+        assert!(!format!("{view:?}").contains(NEW_TOKEN));
+        let cfg = resolve(&s).unwrap();
+        assert!(!format!("{cfg:?}").contains(NEW_TOKEN));
+        assert_eq!(
+            serde_json::to_string(&get_config_with(&src(&tmpdir()))).unwrap(),
+            r#"{"url":null,"tokenSet":false,"tokenSource":null}"#
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_config_url_rules() {
+        let dir = tmpdir();
+        let mut saved = None;
+        set_config_with(
+            &dir,
+            current_uid(),
+            Some(" http://127.0.0.1:8123 ".into()),
+            None,
+            |u| {
+                saved = Some(u);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(saved, Some(Some("http://127.0.0.1:8123".to_string())));
+        let mut saved = None;
+        set_config_with(&dir, current_uid(), Some(String::new()), None, |u| {
+            saved = Some(u);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(saved, Some(None));
+        for bad in [
+            "https://example.com",
+            "http://user:p@127.0.0.1",
+            "ftp://127.0.0.1",
+        ] {
+            let e = set_config_with(&dir, current_uid(), Some(bad.into()), None, |_| {
+                panic!("must not save")
+            })
+            .unwrap_err();
+            assert_eq!(e, ERR_URL);
+        }
+        // bad URL rejects before the token is written
+        let e = set_config_with(
+            &dir,
+            current_uid(),
+            Some("http://10.0.0.1".into()),
+            Some(HaToken(NEW_TOKEN.into())),
+            |_| Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(e, ERR_URL);
+        assert!(!dir.join(".env").exists());
+        assert_eq!(
+            set_config_with(&dir, current_uid(), None, None, |_| Ok(())).unwrap_err(),
+            ERR_NOTHING
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn precedence_app_env_then_env_var_then_legacy() {
+        use std::os::unix::fs::PermissionsExt;
+        let app = tmpdir();
+        let legacy = tmpdir();
+        let lf = legacy.join(".env");
+        std::fs::write(&lf, "HA_URL=http://127.0.0.1:9000\nHA_TOKEN=legacytoken\n").unwrap();
+        std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mut s = src(&app);
+        s.legacy_dir = Some(legacy.clone());
+        let c = resolve(&s).unwrap();
+        assert_eq!(
+            (c.base.as_str(), c.token.0.as_str()),
+            ("http://127.0.0.1:9000", "legacytoken")
+        );
+        s.env_token = Some(HaToken("envtoken".into()));
+        s.env_url = Some("http://127.0.0.1:9001".into());
+        let c = resolve(&s).unwrap();
+        assert_eq!(
+            (c.base.as_str(), c.token.0.as_str()),
+            ("http://127.0.0.1:9001", "envtoken")
+        );
+        set_token(&app, NEW_TOKEN).unwrap();
+        s.cfg_url = Some("http://localhost:9002".into());
+        let c = resolve(&s).unwrap();
+        assert_eq!(
+            (c.base.as_str(), c.token.0.as_str()),
+            ("http://localhost:9002", NEW_TOKEN)
+        );
+        s.cfg_url = Some("http://192.168.1.2:8123".into());
+        assert_eq!(resolve(&s).unwrap_err(), ERR_URL);
+        let _ = std::fs::remove_dir_all(&app);
+        let _ = std::fs::remove_dir_all(&legacy);
+    }
+
+    #[tokio::test]
+    async fn test_connection_errors_never_carry_the_token() {
+        // mock() echoes TOKEN on unknown routes; these routes echo it too.
+        let (base, _) = mock(vec![("/api/config", 500, format!("bad {TOKEN}"))]).await;
+        let cfg = HaConfig {
+            base,
+            token: HaToken(TOKEN.into()),
+        };
+        let r = test_with(&cfg).await;
+        assert_eq!(r.kind, Some(KIND_UPSTREAM_ERROR));
+        let all = format!("{} {r:?}", serde_json::to_string(&r).unwrap());
+        assert!(!all.contains(TOKEN));
+
+        let (base, _) = mock(vec![(
+            "/api/config",
+            200,
+            format!("{{\"version\":\"{TOKEN}\"}}"),
+        )])
+        .await;
+        let cfg = HaConfig {
+            base,
+            token: HaToken(TOKEN.into()),
+        };
+        let r = test_with(&cfg).await;
+        assert!(r.ok && r.version.is_none()); // > 32 chars or unsafe charset: dropped
+        assert!(!serde_json::to_string(&r).unwrap().contains(TOKEN));
+
+        let (base, _) = mock(vec![("/api/config", 401, TOKEN.to_string())]).await;
+        let cfg = HaConfig {
+            base,
+            token: HaToken(TOKEN.into()),
+        };
+        let r = test_with(&cfg).await;
+        assert_eq!(r.kind, Some("auth_rejected"));
+        assert!(!serde_json::to_string(&r).unwrap().contains(TOKEN));
+
+        let (base, _) = mock(vec![(
+            "/api/config",
+            200,
+            r#"{"version":"2026.10.4"}"#.into(),
+        )])
+        .await;
+        let cfg = HaConfig {
+            base,
+            token: HaToken(TOKEN.into()),
+        };
+        assert_eq!(
+            serde_json::to_string(&test_with(&cfg).await).unwrap(),
+            r#"{"ok":true,"version":"2026.10.4"}"#
+        );
+        let cfg = HaConfig {
+            base: "http://127.0.0.1:1".into(),
+            token: HaToken(TOKEN.into()),
+        };
+        assert_eq!(test_with(&cfg).await.kind, Some(KIND_UNREACHABLE));
+    }
+
+    #[test]
+    fn test_connection_rate_limit_and_versions() {
+        let now = std::time::Instant::now();
+        assert!(gap_ok(None, now));
+        assert!(!gap_ok(Some(now), now + Duration::from_millis(1999)));
+        assert!(gap_ok(Some(now), now + Duration::from_secs(2)));
+        assert_eq!(safe_version("2026.10.4").as_deref(), Some("2026.10.4"));
+        assert!(safe_version("1.0 <script>").is_none());
+        assert!(safe_version(&"1".repeat(33)).is_none());
+        assert!(safe_version("").is_none());
+        assert_eq!(fail(ERR_BUSY).kind, Some("already_running"));
+        assert_eq!(fail("weird text").kind, Some(KIND_UPSTREAM_ERROR));
+    }
+
+    #[test]
+    fn token_redacted_and_secret_text_redacted() {
+        let t = HaToken(NEW_TOKEN.into());
+        assert_eq!(format!("{t:?}"), "HaToken(<redacted>)");
+        let st = SecretText(zeroize::Zeroizing::new(NEW_TOKEN.to_string()));
+        assert_eq!(format!("{st:?}"), "SecretText(<redacted>)");
+    }
+
+    #[test]
+    fn get_config_reports_token_source() {
+        use std::os::unix::fs::PermissionsExt;
+        let app = tmpdir();
+        let legacy = tmpdir();
+        let lf = legacy.join(".env");
+        std::fs::write(&lf, "HA_TOKEN=legacytoken\n").unwrap();
+        std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mut s = src(&app);
+        let json = |s: &Sources| serde_json::to_string(&get_config_with(s)).unwrap();
+        assert!(json(&s).ends_with(r#""tokenSet":false,"tokenSource":null}"#));
+        s.legacy_dir = Some(legacy.clone());
+        assert!(json(&s).ends_with(r#""tokenSet":true,"tokenSource":"legacy"}"#));
+        s.env_token = Some(HaToken("envtoken".into()));
+        assert!(json(&s).ends_with(r#""tokenSet":true,"tokenSource":"env"}"#));
+        set_token(&app, NEW_TOKEN).unwrap();
+        let j = json(&s);
+        assert!(j.ends_with(r#""tokenSet":true,"tokenSource":"app"}"#));
+        assert!(!j.contains(NEW_TOKEN) && !j.contains("envtoken") && !j.contains("legacytoken"));
+        // unsafe app .env: nothing usable is reported
+        std::fs::set_permissions(app.join(".env"), std::fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(json(&s).ends_with(r#""tokenSet":false,"tokenSource":null}"#));
+        let _ = std::fs::remove_dir_all(&app);
+        let _ = std::fs::remove_dir_all(&legacy);
+    }
+
+    #[test]
+    fn clear_token_reports_fallback() {
+        let app = tmpdir();
+        let mut s = src(&app);
+        set_token(&app, NEW_TOKEN).unwrap();
+        let r = clear_token_with(&s).unwrap();
+        assert_eq!(
+            serde_json::to_string(&r).unwrap(),
+            r#"{"fallbackActive":false}"#
+        );
+        assert!(!std::fs::read_to_string(app.join(".env"))
+            .unwrap()
+            .contains("HA_TOKEN"));
+        set_token(&app, NEW_TOKEN).unwrap();
+        s.env_token = Some(HaToken("envtoken".into()));
+        assert_eq!(
+            clear_token_with(&s).unwrap(),
+            HaClearResult {
+                fallback_active: true
+            }
+        );
+        assert_eq!(get_config_with(&s).token_source, Some(TokenSource::Env));
+        let _ = std::fs::remove_dir_all(&app);
+    }
+
+    #[test]
+    fn concurrent_set_and_clear_leave_a_consistent_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let app = tmpdir();
+        let f = app.join(".env");
+        std::fs::write(&f, "A=1\nB=2\n").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let handles: Vec<_> = (0..16)
+            .map(|i| {
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    if i % 2 == 0 {
+                        set_token(&app, NEW_TOKEN).unwrap();
+                    } else {
+                        write_env_key(&app, current_uid(), TOKEN_KEY, None).unwrap();
+                    }
+                })
+            })
+            .collect();
+        handles.into_iter().for_each(|h| h.join().unwrap());
+        let text = std::fs::read_to_string(&f).unwrap();
+        assert!(text.starts_with("A=1\nB=2\n"));
+        assert!(text.matches("HA_TOKEN=").count() <= 1);
+        assert_eq!(std::fs::read_dir(&app).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&app);
     }
 }

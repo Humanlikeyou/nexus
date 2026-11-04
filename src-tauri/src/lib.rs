@@ -209,6 +209,10 @@ pub fn run() {
             ha::ha_container_stop,
             ha::ha_live_start,
             ha::ha_live_stop,
+            ha::ha_get_config,
+            ha::ha_set_config,
+            ha::ha_clear_token,
+            ha::ha_test_connection,
             // Telegram
             telegram::get_config,
             telegram::save_settings,

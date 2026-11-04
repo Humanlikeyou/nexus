@@ -54,6 +54,9 @@ pub struct NexusConfig {
     /// Amara Router base URL (compute mode "amara"). None = http://127.0.0.1:8787.
     #[serde(default)]
     pub amara_router_url: Option<String>,
+    /// Home Assistant base URL (loopback only). None = HA_URL env var, then the default.
+    #[serde(default)]
+    pub ha_url: Option<String>,
 }
 
 fn default_gateway_url() -> Option<String> {

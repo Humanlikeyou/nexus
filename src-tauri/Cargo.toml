@@ -36,6 +36,7 @@ rand = "0.8"
 tar = "0.4"
 flate2 = "1"
 libc = "0.2"
+zeroize = "1"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
