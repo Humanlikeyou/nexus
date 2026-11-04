@@ -36,20 +36,20 @@ jobs:
       - run: npm ci
 
       # Notarization needs the App Store Connect key as a FILE (APPLE_API_KEY_PATH). The .p8
-      # contents live in the APPLE_API_PRIVATE_KEY secret; write them to a 0600 temp file and
+      # contents live in the APPLE_API_KEY_P8 secret; write them to a 0600 temp file and
       # pass its path. Skipped (unsigned build) while the secret is unset.
       - name: Write App Store Connect API key
         env:
-          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY }}
         run: |
-          if [ -z "$APPLE_API_PRIVATE_KEY" ]; then
-            echo "APPLE_API_PRIVATE_KEY not set; building without notarization"
+          if [ -z "$APPLE_API_KEY_P8" ]; then
+            echo "APPLE_API_KEY_P8 not set; building without notarization"
             exit 0
           fi
           umask 077
           key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID:-nexus}.p8"
-          printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key_path"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$key_path"
           echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
       - uses: tauri-apps/tauri-action@v0

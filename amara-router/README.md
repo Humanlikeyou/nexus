@@ -177,6 +177,9 @@ lsof -nP -iTCP:8787 -sTCP:LISTEN          # no output = free
 
 # 4. LaunchAgent
 mkdir -p ~/Library/Logs/amara-router
+chmod 700 ~/Library/Logs/amara-router
+L=~/Library/Logs/amara-router/router.log
+[ -e "$L" ] || [ -L "$L" ] || install -m 600 /dev/null "$L"   # never touches an existing log
 sed "s#__HOME__#$HOME#g" launchd/com.taisun.amara-router.plist > ~/Library/LaunchAgents/com.taisun.amara-router.plist
 plutil -lint ~/Library/LaunchAgents/com.taisun.amara-router.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.taisun.amara-router.plist

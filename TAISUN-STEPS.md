@@ -1,7 +1,7 @@
 # Taisun's steps: Amara Router, Hermes and the voice bridge
 
-Sections 1 to 3 are already done. They were approved by Taisun and applied on 2026-11-04, so don't run them again.
-Use section 4 to check the setup and section 5 to roll it back. Full details: `amara-router/README.md`.
+Sections 1 to 3 and 7 are already done. They were approved by Taisun and applied on 2026-11-04, so don't run them again.
+Use section 4 to check the setup and section 5 to roll it back. Section 7 has its own roll back. Section 8 records the current status and order of work. Full details: `amara-router/README.md`.
 No secret values belong in this file.
 
 ## 1. Done: backups
@@ -30,6 +30,15 @@ deep_think = false
 ```
 
 Claude stays off: `[cloud] anthropic_enabled = false`, and no secrets file.
+
+On a reinstall, create the log before loading the LaunchAgent. This sets the folder to 0700 and creates the log at 0600. An existing log is left as it is.
+
+```bash
+mkdir -p ~/Library/Logs/amara-router
+chmod 700 ~/Library/Logs/amara-router
+L=~/Library/Logs/amara-router/router.log
+[ -e "$L" ] || [ -L "$L" ] || install -m 600 /dev/null "$L"
+```
 
 ## 3. Done: Hermes
 
@@ -138,3 +147,32 @@ cat ~/projects/amara-voice/logs/state
 **Roll back.** Start Amara Voice with `AMARA_LEVEL_FEED=0` in its process environment. Don't put it in `.env`: `level_feed.py`
 reads the variable before `.env` loads. The voice loop keeps running, the level meter stays at zero, and state events
 continue. The bridge stores nothing, so there is no data to restore. The code is in commits `f7eea69` and `f5a2e25`.
+
+## 7. Done: Hermes route patch
+
+`hermes-amara-passthrough.patch` is applied to `~/.hermes/hermes-agent` (base `bf0203a794`). The gateway was restarted after it
+was applied, so it is live. The changes are uncommitted edits in that checkout.
+
+Hermes's reply now carries what the router reported: the `X-Amara-*` headers, the real `model`, and `amara` metadata.
+Nexus reads these for the Fast/Deep badge. The badge has not been checked in the app with the patch applied.
+Details: `~/projects/hermes-patches/README.md`.
+
+**Before `hermes update`,** revert the patch. After the update, run `git apply --check`, then re-apply.
+
+**Verify.** Run `pytest tests/agent/test_amara_route.py` in `~/.hermes/hermes-agent`, then send one real turn with `curl -i` to `:8642`.
+
+**Roll back.**
+
+```bash
+cd ~/.hermes/hermes-agent
+git apply -R ~/projects/hermes-patches/hermes-amara-passthrough.patch
+launchctl kickstart -k gui/$(id -u)/ai.hermes.gateway
+```
+
+Hermes then sends no route data, and Nexus goes back to `routes.jsonl` and the `/amara/route` dry run for the badge.
+Section 5 doesn't remove this patch.
+
+## 8. Status and order
+
+- `nexus-v2` is pushed: `origin/nexus-v2` is at `ab55ba7` (checked 2026-11-04). `amara-integration` has no branch on origin.
+- Home control is deliberately last. Do every other step in `NEXT_SESSION_PROMPT.md` first.

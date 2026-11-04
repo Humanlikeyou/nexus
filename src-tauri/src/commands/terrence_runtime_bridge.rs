@@ -44,6 +44,12 @@ const HERMES_BAD_KEY: &str =
     "Hermes refused the request: the API_SERVER_KEY in ~/.hermes/.env does not match the running Hermes.";
 const HERMES_BUSY: &str = "Hermes is busy with another request. Try again in a moment.";
 const HERMES_FAILED: &str = "Hermes could not complete the request.";
+const HERMES_RESTARTED: &str =
+    "Hermes restarted during this turn. Some actions may already have run, so check them before sending it again.";
+const HERMES_QUEUED: &str =
+    "Hermes is restarting. Your message is saved and will run once when it is back, so don't send it again.";
+const HERMES_INCOMPLETE: &str =
+    "Amara's model was still loading and the turn stopped early. Some actions may already have run, so check them before sending it again.";
 
 #[derive(Default)]
 pub struct NexusRuntimeBridge {
@@ -95,11 +101,23 @@ pub struct HermesReply {
     pub route: Option<RouteInfo>,
 }
 
+/// How a turn that Hermes may have run ended as `model_loading`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnRan {
+    /// Hermes's retries against the router ran out.
+    Exhausted,
+    /// `runtime_draining`: the gateway stopped under the turn.
+    Drained,
+}
+
 /// A failed turn: fixed user-facing text plus any route headers the error response carried.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HermesError {
     pub message: String,
     pub route: Option<RouteInfo>,
+    /// `model_loading` from a turn Hermes may have run. Tools may have run too, so it needs
+    /// [`settle_ran_turn`] before the UI may re-send it. None for a turn it refused.
+    pub turn_ran: Option<TurnRan>,
 }
 
 impl From<String> for HermesError {
@@ -107,6 +125,7 @@ impl From<String> for HermesError {
         Self {
             message,
             route: None,
+            turn_ran: None,
         }
     }
 }
@@ -119,6 +138,8 @@ pub struct HermesTurn<'a> {
     pub context: String,
     pub history: &'a [ChatTurn],
     pub message: &'a str,
+    /// Hermes's provider is the Amara Router, so the route log describes this turn.
+    pub routed: bool,
 }
 
 // ─── Pure helpers (unit-tested) ───────────────────────────────────────────────
@@ -246,6 +267,13 @@ const MODEL_MAX: usize = 128;
 const REASON_MAX: usize = 160;
 const RETRY_AFTER_DEFAULT: u64 = 10;
 const RETRY_AFTER_MAX: u64 = 300;
+/// Hermes's drain replies say `Retry-After: 1`, but a restart drains for about 30 s and the UI
+/// retries three times, so three 1 s waits would give up long before it ends.
+const DRAIN_RETRY_AFTER: u64 = 15;
+/// `LOADING_MSG` in `amara-router/src/engine.rs`; Hermes keeps it in its error summary.
+const ROUTER_LOADING_TEXT: &str = "Model loading, try again shortly.";
+/// Lowercase starts of the text the UI re-sends on, from `src-console/app/modelLoading.ts`.
+const RETRY_SIGNALS: [&str; 2] = ["model_loading", "hermes is busy with another request"];
 
 fn safe_field(v: Option<&str>, max: usize, extra: &[u8]) -> Option<String> {
     let v = v?.trim();
@@ -291,6 +319,57 @@ pub fn retry_after_secs(headers: &HashMap<String, String>) -> u64 {
         .unwrap_or(RETRY_AFTER_DEFAULT)
 }
 
+fn model_loading(retry_after: u64) -> String {
+    format!("model_loading: retry_after={retry_after}")
+}
+
+/// True when error text would read to the UI as a signal to re-send.
+fn is_retry_signal(message: &str) -> bool {
+    let message = message
+        .trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
+        .to_ascii_lowercase();
+    RETRY_SIGNALS.iter().any(|s| message.starts_with(s))
+}
+
+/// The fixed error for a turn Hermes ran and gave up on, if this 2xx body is one. Once its
+/// retries run out Hermes answers 200 with its own failure copy as the message `content`, so
+/// without this the copy would be shown and stored as Amara's reply. `partial` doesn't always
+/// mean text was delivered: a reply stays only when its `content` differs from `hermes.error`.
+fn failed_turn_error(headers: &HashMap<String, String>, v: &Value) -> Option<String> {
+    let hermes = &v["hermes"];
+    let error = hermes["error"].as_str();
+    let partial = hermes["partial"] == true;
+    let content = v["choices"][0]["message"]["content"].as_str().unwrap_or("");
+    let error_is_content = error.is_some_and(|e| e.trim() == content.trim());
+    let failed = hermes["failed"] == true || v["choices"][0]["finish_reason"] == "error";
+    if if partial { !error_is_content } else { !failed } {
+        return None;
+    }
+    Some(if error.is_some_and(|e| e.contains(ROUTER_LOADING_TEXT)) {
+        model_loading(retry_after_secs(headers))
+    } else {
+        HERMES_FAILED.to_string()
+    })
+}
+
+/// Hermes's 503: a refused turn, retried as `model_loading`, unless it is already queued.
+fn refused_turn_error(headers: &HashMap<String, String>, v: &Value) -> String {
+    let code = v["error"]["code"].as_str().unwrap_or("");
+    let no_retry = headers
+        .get("x-should-retry")
+        .is_some_and(|h| h.trim().eq_ignore_ascii_case("false"));
+    if code == "admission_queued" || no_retry {
+        // The input is committed: a re-send would run it twice.
+        return HERMES_QUEUED.to_string();
+    }
+    let secs = retry_after_secs(headers);
+    model_loading(if matches!(code, "runtime_draining" | "gateway_draining") {
+        secs.max(DRAIN_RETRY_AFTER)
+    } else {
+        secs
+    })
+}
+
 /// Hermes's reply → content/session, or a fixed, user-facing error (never a raw body).
 pub fn parse_hermes_reply(
     status: u16,
@@ -301,21 +380,26 @@ pub fn parse_hermes_reply(
         200..=299 => {}
         401 | 403 => return Err(HERMES_BAD_KEY.to_string()),
         429 => return Err(HERMES_BUSY.to_string()),
-        503 => {
-            return Err(format!(
-                "model_loading: retry_after={}",
-                retry_after_secs(headers)
-            ))
-        }
+        503 => return Err(refused_turn_error(headers, v)),
         _ => {
             let message = v["error"]["message"].as_str().unwrap_or("").trim();
             let message = super::continuity::redact_sensitive_text(message);
+            if is_retry_signal(&message) {
+                // An echo must not reach the UI as a re-send with no route-log check.
+                return Err(HERMES_FAILED.to_string());
+            }
+            if message.contains(ROUTER_LOADING_TEXT) {
+                return Err(model_loading(retry_after_secs(headers)));
+            }
             return Err(if message.is_empty() || message.contains('\n') {
                 HERMES_FAILED.to_string()
             } else {
                 message.chars().take(600).collect()
             });
         }
+    }
+    if let Some(error) = failed_turn_error(headers, v) {
+        return Err(error);
     }
     let content = v["choices"][0]["message"]["content"]
         .as_str()
@@ -366,44 +450,51 @@ pub fn tier_from_dry_run(v: &Value) -> Option<AmaraTier> {
     })
 }
 
+/// Each routes.jsonl line that parses and has a timestamp.
+fn route_lines(log: &str) -> Vec<(chrono::DateTime<chrono::FixedOffset>, Value)> {
+    log.lines()
+        .filter_map(|line| {
+            let v = serde_json::from_str::<Value>(line).ok()?;
+            let ts = chrono::DateTime::parse_from_rfc3339(v["ts"].as_str()?).ok()?;
+            Some((ts, v))
+        })
+        .collect()
+}
+
+/// A finished OpenAI-API line (Hermes's wire): an error or cancelled line served nothing.
+fn is_finished(v: &Value) -> bool {
+    v["api"] == "openai" && v["status"] != "error" && v["status"] != "cancelled"
+}
+
+/// `(route, reason)` of each model call finished during [since, until] (RFC 3339), from
+/// routes.jsonl. None when a bound does not parse.
+fn finished_routes(log: &str, since: &str, until: &str) -> Option<Vec<(String, String)>> {
+    let since = chrono::DateTime::parse_from_rfc3339(since).ok()?;
+    let until = chrono::DateTime::parse_from_rfc3339(until).ok()?;
+    Some(
+        route_lines(log)
+            .iter()
+            .filter(|(ts, v)| (since..=until).contains(ts) && is_finished(v))
+            .filter_map(|(_, v)| {
+                Some((
+                    v["route"].as_str()?.to_string(),
+                    v["reason"].as_str().unwrap_or("").to_string(),
+                ))
+            })
+            .collect(),
+    )
+}
+
 /// The tier the router actually served during [since, until] (RFC 3339), from routes.jsonl.
-/// Only finished OpenAI-API lines count (Hermes's wire): an error or cancelled line served
-/// nothing. Another client can hit the router in
-/// the same window, so mixed tiers are only resolved when the dry run names one of them.
+/// Another client can hit the router in the same window, so mixed tiers are only resolved when
+/// the dry run names one of them.
 pub fn tier_from_route_log(
     log: &str,
     since: &str,
     until: &str,
     predicted: Option<&AmaraTier>,
 ) -> Option<AmaraTier> {
-    let (Ok(since), Ok(until)) = (
-        chrono::DateTime::parse_from_rfc3339(since),
-        chrono::DateTime::parse_from_rfc3339(until),
-    ) else {
-        return None;
-    };
-    let mut served: Vec<(String, String)> = Vec::new();
-    for line in log.lines() {
-        let Ok(v) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        let Some(ts) = v["ts"]
-            .as_str()
-            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-        else {
-            continue;
-        };
-        let unserved = v["status"] == "error" || v["status"] == "cancelled";
-        if ts < since || ts > until || v["api"] != "openai" || unserved {
-            continue;
-        }
-        if let Some(route) = v["route"].as_str() {
-            served.push((
-                route.to_string(),
-                v["reason"].as_str().unwrap_or("").to_string(),
-            ));
-        }
-    }
+    let served = finished_routes(log, since, until)?;
     let first = served.first()?.clone();
     let tier = if served.iter().all(|(t, _)| *t == first.0) {
         first
@@ -419,6 +510,72 @@ pub fn tier_from_route_log(
 }
 
 // ─── Transport ────────────────────────────────────────────────────────────────
+
+/// True when the route log proves a re-send can't repeat a tool: Hermes runs one only after a
+/// finished model call, and its reply doesn't say how far the turn got. A retried-out turn must
+/// also show the router's 503 in the window, or a log that stopped being written would pass as
+/// proof; a drain writes no router line, so it needs Hermes to be using the router instead.
+fn retry_is_proven(
+    ran: TurnRan,
+    tail: Option<&RouteLogTail>,
+    routed: bool,
+    since: &str,
+    until: &str,
+) -> bool {
+    let (Some(tail), Ok(since), Ok(until)) = (
+        tail,
+        chrono::DateTime::parse_from_rfc3339(since),
+        chrono::DateTime::parse_from_rfc3339(until),
+    ) else {
+        return false;
+    };
+    let lines = route_lines(&tail.text);
+    let mut window = lines
+        .iter()
+        .filter(|(ts, _)| (since..=until).contains(ts))
+        .map(|(_, v)| v);
+    if window.clone().any(is_finished) {
+        return false;
+    }
+    // The log must reach back to the start of the turn.
+    let oldest_before_turn = lines
+        .iter()
+        .map(|(ts, _)| ts)
+        .min()
+        .is_some_and(|t| *t <= since);
+    let covers = oldest_before_turn || (!tail.cut && !lines.is_empty());
+    match ran {
+        TurnRan::Drained => covers && routed,
+        TurnRan::Exhausted => {
+            covers
+                && window.any(|v| {
+                    v["api"] == "openai" && v["status"] == "error" && v["http_status"] == 503
+                })
+        }
+    }
+}
+
+/// A turn Hermes may have run stays `model_loading` (which the UI re-sends) only with proof from
+/// the route log. Without it the user gets fixed text and decides.
+pub fn settle_ran_turn(
+    mut error: HermesError,
+    tail: Option<&RouteLogTail>,
+    routed: bool,
+    since: &str,
+    until: &str,
+) -> HermesError {
+    let Some(ran) = error.turn_ran else {
+        return error;
+    };
+    if !retry_is_proven(ran, tail, routed, since, until) {
+        error.message = match ran {
+            TurnRan::Exhausted => HERMES_INCOMPLETE,
+            TurnRan::Drained => HERMES_RESTARTED,
+        }
+        .to_string();
+    }
+    error
+}
 
 /// HTTP POST; tests swap in a mock.
 pub(crate) trait JsonTransport {
@@ -508,6 +665,12 @@ pub(crate) async fn send_turn(
             _ => HERMES_DOWN.to_string(),
         })?;
     parse_hermes_reply(status, &headers, &v).map_err(|message| HermesError {
+        turn_ran: match status {
+            _ if !message.starts_with("model_loading") => None,
+            503 if v["error"]["code"] == "runtime_draining" => Some(TurnRan::Drained),
+            503 => None,
+            _ => Some(TurnRan::Exhausted),
+        },
         message,
         route: route_info(&headers, &v),
     })
@@ -534,25 +697,41 @@ pub(crate) async fn dry_run_tier(
         .flatten()
 }
 
+/// The newest part of the route log, and whether older lines were left out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteLogTail {
+    pub text: String,
+    pub cut: bool,
+}
+
 /// The newest `ROUTE_LOG_TAIL_BYTES` of the router's route log (no message content in it).
-pub fn read_route_log_tail(path: &Path) -> String {
+/// None when it can't be read.
+pub fn read_route_log_window(path: &Path) -> Option<RouteLogTail> {
     use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut file) = std::fs::File::open(path) else {
-        return String::new();
-    };
-    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
-    let _ = file.seek(SeekFrom::Start(len.saturating_sub(ROUTE_LOG_TAIL_BYTES)));
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(ROUTE_LOG_TAIL_BYTES)))
+        .ok()?;
     let mut buf = Vec::new();
-    let _ = file.take(ROUTE_LOG_TAIL_BYTES).read_to_end(&mut buf);
+    file.take(ROUTE_LOG_TAIL_BYTES).read_to_end(&mut buf).ok()?;
     let text = String::from_utf8_lossy(&buf).to_string();
+    let cut = len > ROUTE_LOG_TAIL_BYTES;
     // Drop a partial first line when we started mid-file.
-    if len > ROUTE_LOG_TAIL_BYTES {
+    let text = if cut {
         text.split_once('\n')
             .map(|(_, rest)| rest.to_string())
             .unwrap_or_default()
     } else {
         text
-    }
+    };
+    Some(RouteLogTail { text, cut })
+}
+
+/// The route log's newest text; empty when it can't be read.
+pub fn read_route_log_tail(path: &Path) -> String {
+    read_route_log_window(path)
+        .map(|tail| tail.text)
+        .unwrap_or_default()
 }
 
 pub fn default_route_log_path() -> Option<std::path::PathBuf> {
@@ -592,9 +771,25 @@ impl NexusRuntimeBridge {
             .ok_or_else(|| HermesError::from(HERMES_NO_KEY.to_string()))?;
         let base = hermes_base(&env_text);
         let key = session_key(std::env::var(SESSION_KEY_ENV).ok().as_deref());
+        let routed = turn.routed;
         let body = chat_body(&turn.system, &turn.context, turn.history, turn.message);
         let _guard = self.turn.lock().await;
-        send_turn(&HttpTransport::default(), &base, &api_key, &key, &body).await
+        let since = chrono::Utc::now().to_rfc3339();
+        send_turn(&HttpTransport::default(), &base, &api_key, &key, &body)
+            .await
+            .map_err(|error| {
+                if error.turn_ran.is_none() {
+                    return error;
+                }
+                let tail = default_route_log_path().and_then(|p| read_route_log_window(&p));
+                settle_ran_turn(
+                    error,
+                    tail.as_ref(),
+                    routed,
+                    &since,
+                    &chrono::Utc::now().to_rfc3339(),
+                )
+            })
     }
 }
 
@@ -976,6 +1171,10 @@ mod tests {
             .all(|l| serde_json::from_str::<Value>(l).is_ok()));
         assert!(tail.ends_with("{\"last\":true}\n"));
         assert_eq!(read_route_log_tail(&dir.join("missing")), "");
+        assert!(read_route_log_window(&path).unwrap().cut);
+        assert_eq!(read_route_log_window(&dir.join("missing")), None);
+        std::fs::write(&path, "{}\n").unwrap();
+        assert!(!read_route_log_window(&path).unwrap().cut);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -995,6 +1194,7 @@ mod tests {
                     context: String::new(),
                     history: &[],
                     message: "Say hello to Taisun in five words or fewer.",
+                    routed: false,
                 },
             )
             .await
@@ -1158,6 +1358,301 @@ mod tests {
             "model_loading: retry_after=10"
         );
         assert_eq!(e(429, &[("retry-after", "42")]), HERMES_BUSY);
+    }
+
+    #[test]
+    fn hermes_drain_replies_retry_past_the_drain() {
+        let e = |code: &str, retry: &str| {
+            let body = json!({"error": {"message": code, "code": code}});
+            parse_hermes_reply(503, &hdrs(&[("retry-after", retry)]), &body).unwrap_err()
+        };
+        for code in ["runtime_draining", "gateway_draining"] {
+            assert_eq!(e(code, "1"), "model_loading: retry_after=15");
+            assert_eq!(e(code, "40"), "model_loading: retry_after=40");
+        }
+        assert_eq!(
+            e("storage_unavailable", "1"),
+            "model_loading: retry_after=1"
+        );
+    }
+
+    #[test]
+    fn a_queued_turn_is_never_retried() {
+        let body = json!({"error": {"message": "x", "code": "admission_queued"}});
+        let h = hdrs(&[("x-should-retry", "false")]);
+        assert_eq!(
+            parse_hermes_reply(503, &h, &body).unwrap_err(),
+            HERMES_QUEUED
+        );
+        assert_eq!(
+            parse_hermes_reply(503, &HashMap::new(), &body).unwrap_err(),
+            HERMES_QUEUED
+        );
+        assert_eq!(
+            parse_hermes_reply(503, &h, &Value::Null).unwrap_err(),
+            HERMES_QUEUED
+        );
+    }
+
+    const COPY: &str = "Custom endpoint reported it was overloaded on all 4 attempts.\n\nProvider said: HTTP 503: Model loading, try again shortly.";
+
+    /// Hermes's 200 once retries run out: its failure copy sits in `content`.
+    fn failed_turn(error: &str, partial: bool) -> Value {
+        json!({
+            "choices": [{"message": {"role": "assistant", "content": COPY}, "finish_reason": "error"}],
+            "hermes": {"completed": false, "partial": partial, "failed": true, "error": error, "error_code": "agent_error"},
+        })
+    }
+
+    #[test]
+    fn a_turn_that_ran_out_of_retries_is_not_a_reply() {
+        let none = HashMap::new();
+        let e = |v: &Value| parse_hermes_reply(200, &none, v).unwrap_err();
+        assert_eq!(
+            e(&failed_turn(
+                "HTTP 503: Model loading, try again shortly.",
+                false
+            )),
+            "model_loading: retry_after=10"
+        );
+        // Any other failure is fixed text: the copy and the provider's words never get through.
+        let other = e(&failed_turn(
+            "HTTP 503: Ollama is not reachable at http://127.0.0.1:11434.",
+            false,
+        ));
+        assert_eq!(other, HERMES_FAILED);
+        // No `hermes` block, or an error field that doesn't name the router's text.
+        let bare = json!({"choices": [{"message": {"content": COPY}, "finish_reason": "error"}]});
+        assert_eq!(e(&bare), HERMES_FAILED);
+        let nested = json!({"choices": [{"message": {"content": COPY}}], "hermes": {"failed": true, "error": 7}});
+        assert_eq!(e(&nested), HERMES_FAILED);
+    }
+
+    #[test]
+    fn reply_text_alone_never_reads_as_loading() {
+        let none = HashMap::new();
+        let said = format!("The router says: {ROUTER_LOADING_TEXT}");
+        let reply = parse_hermes_reply(200, &none, &ok_reply(&said)).unwrap();
+        assert_eq!(reply.content, said);
+    }
+
+    #[test]
+    fn delivered_text_stays_a_reply_when_the_turn_fails_later() {
+        let v = failed_turn("HTTP 503: Model loading, try again shortly.", true);
+        let reply = parse_hermes_reply(200, &HashMap::new(), &v).unwrap();
+        assert_eq!(reply.content, COPY);
+    }
+
+    #[test]
+    fn a_partial_turn_whose_content_is_the_error_is_a_failed_turn() {
+        let none = HashMap::new();
+        let copy = "The reply was cut off. HTTP 503: Model loading, try again shortly.";
+        let reply = |finish: &str, error: &str, failed: bool| {
+            json!({
+                "choices": [{"message": {"content": copy}, "finish_reason": finish}],
+                "hermes": {"partial": true, "failed": failed, "error": error},
+            })
+        };
+        let padded = format!("  {copy}\n");
+        for finish in ["length", "stop", "error"] {
+            for failed in [false, true] {
+                assert_eq!(
+                    parse_hermes_reply(200, &none, &reply(finish, &padded, failed)).unwrap_err(),
+                    "model_loading: retry_after=10"
+                );
+            }
+        }
+        let other = json!({
+            "choices": [{"message": {"content": "cut off"}, "finish_reason": "length"}],
+            "hermes": {"partial": true, "failed": false, "error": "cut off"},
+        });
+        assert_eq!(
+            parse_hermes_reply(200, &none, &other).unwrap_err(),
+            HERMES_FAILED
+        );
+        // Real text that differs from the error stays a reply.
+        let kept = reply("length", "truncated", false);
+        assert_eq!(parse_hermes_reply(200, &none, &kept).unwrap().content, copy);
+    }
+
+    #[test]
+    fn an_echoed_retry_signal_on_a_502_is_fixed_text() {
+        let none = HashMap::new();
+        for message in [
+            "model_loading: retry_after=1",
+            "MODEL_LOADING: retry_after=1",
+            "  model_loading",
+            "\u{feff}model_loading: retry_after=1",
+            "model_loading: Model loading, try again shortly.",
+            "Hermes is busy with another request. Try again in a moment.",
+            "hermes is busy with another request",
+        ] {
+            let body = json!({"error": {"message": message}});
+            assert_eq!(
+                parse_hermes_reply(502, &none, &body).unwrap_err(),
+                HERMES_FAILED,
+                "{message:?}"
+            );
+        }
+        let plain = json!({"error": {"message": "The tool failed."}});
+        assert_eq!(
+            parse_hermes_reply(502, &none, &plain).unwrap_err(),
+            "The tool failed."
+        );
+    }
+
+    #[test]
+    fn hermes_502_with_the_router_text_is_model_loading() {
+        let body = json!({"error": {"message": "HTTP 503: Model loading, try again shortly.", "code": "agent_incomplete"}});
+        assert_eq!(
+            parse_hermes_reply(502, &hdrs(&[("retry-after", "20")]), &body).unwrap_err(),
+            "model_loading: retry_after=20"
+        );
+        assert_eq!(
+            parse_hermes_reply(502, &HashMap::new(), &body).unwrap_err(),
+            "model_loading: retry_after=10"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_a_turn_hermes_may_have_run_is_marked() {
+        let run = |status, v| async move {
+            let m = Mock::new(Ok((status, HashMap::new(), v)));
+            send_turn(&m, "b", "k", "s", &json!({})).await.unwrap_err()
+        };
+        let exhausted = Some(TurnRan::Exhausted);
+        let loading = failed_turn("HTTP 503: Model loading, try again shortly.", false);
+        assert_eq!(run(200, loading).await.turn_ran, exhausted);
+        let e = run(502, json!({"error": {"message": ROUTER_LOADING_TEXT}})).await;
+        assert_eq!(e.turn_ran, exhausted);
+        let code = |c: &str| json!({"error": {"message": c, "code": c}});
+        let drained = run(503, code("runtime_draining")).await;
+        assert_eq!(drained.turn_ran, Some(TurnRan::Drained));
+        assert_eq!(drained.message, "model_loading: retry_after=15");
+        assert_eq!(run(503, code("gateway_draining")).await.turn_ran, None);
+        assert_eq!(run(503, code("admission_queued")).await.turn_ran, None);
+        assert_eq!(run(503, Value::Null).await.turn_ran, None);
+        assert_eq!(run(200, failed_turn("other", false)).await.turn_ran, None);
+        let echo = json!({"error": {"message": "model_loading: retry_after=1"}});
+        assert_eq!(run(502, echo).await.turn_ran, None);
+    }
+
+    const SINCE: &str = "2026-11-04T10:00:00Z";
+    const UNTIL: &str = "2026-11-04T10:09:00Z";
+    const LOAD_503: &str = r#"{"ts":"2026-11-04T10:01:30Z","api":"openai","route":"deep","status":"error","http_status":503}"#;
+    const FINISHED: &str =
+        r#"{"ts":"2026-11-04T10:01:00Z","api":"openai","route":"fast","status":"ok"}"#;
+    const EARLIER: &str =
+        r#"{"ts":"2026-11-04T09:59:00Z","api":"openai","route":"fast","status":"ok"}"#;
+
+    fn settle(ran: TurnRan, text: &str, cut: bool) -> String {
+        let error = HermesError {
+            message: "model_loading: retry_after=10".into(),
+            route: None,
+            turn_ran: Some(ran),
+        };
+        let tail = RouteLogTail {
+            text: text.to_string(),
+            cut,
+        };
+        settle_ran_turn(error, Some(&tail), true, SINCE, UNTIL).message
+    }
+
+    #[test]
+    fn a_retried_out_turn_needs_the_router_503_and_no_finished_call() {
+        let ok = "model_loading: retry_after=10";
+        let ran = TurnRan::Exhausted;
+        assert_eq!(settle(ran, LOAD_503, false), ok);
+        assert_eq!(settle(ran, &format!("{EARLIER}\n{LOAD_503}"), true), ok);
+        // A finished call means a tool may have run.
+        let both = format!("{FINISHED}\n{LOAD_503}");
+        assert_eq!(settle(ran, &both, false), HERMES_INCOMPLETE);
+        // A log with no 503 in the window proves nothing.
+        assert_eq!(settle(ran, "", false), HERMES_INCOMPLETE);
+        assert_eq!(settle(ran, EARLIER, false), HERMES_INCOMPLETE);
+        for other in [
+            r#"{"ts":"2026-11-04T10:01:30Z","api":"openai","status":"error","http_status":502}"#,
+            r#"{"ts":"2026-11-04T10:01:30Z","api":"ollama","status":"error","http_status":503}"#,
+            r#"{"ts":"2026-11-04T10:01:30Z","api":"openai","status":"cancelled","http_status":503}"#,
+        ] {
+            assert_eq!(settle(ran, other, false), HERMES_INCOMPLETE);
+        }
+        // Cut with the oldest line after the turn began: the start of the turn is missing.
+        assert_eq!(settle(ran, LOAD_503, true), HERMES_INCOMPLETE);
+    }
+
+    #[test]
+    fn a_drained_turn_needs_no_finished_call_and_a_log_reaching_the_turn() {
+        let ok = "model_loading: retry_after=10";
+        let ran = TurnRan::Drained;
+        assert_eq!(settle(ran, EARLIER, false), ok);
+        assert_eq!(settle(ran, LOAD_503, false), ok);
+        // A log past 64 KB still proves it when its oldest line predates the turn.
+        assert_eq!(settle(ran, EARLIER, true), ok);
+        assert_eq!(settle(ran, LOAD_503, true), HERMES_RESTARTED);
+        assert_eq!(settle(ran, "", false), HERMES_RESTARTED);
+        assert_eq!(settle(ran, FINISHED, false), HERMES_RESTARTED);
+    }
+
+    #[test]
+    fn a_drained_turn_is_retried_only_when_hermes_uses_the_router() {
+        let settled = |ran, routed| {
+            let error = HermesError {
+                message: "model_loading: retry_after=15".into(),
+                route: None,
+                turn_ran: Some(ran),
+            };
+            let tail = RouteLogTail {
+                text: format!("{EARLIER}\n{LOAD_503}"),
+                cut: false,
+            };
+            settle_ran_turn(error, Some(&tail), routed, SINCE, UNTIL).message
+        };
+        let ok = "model_loading: retry_after=15";
+        assert_eq!(settled(TurnRan::Drained, true), ok);
+        assert_eq!(settled(TurnRan::Drained, false), HERMES_RESTARTED);
+        assert_eq!(settled(TurnRan::Exhausted, false), ok);
+    }
+
+    #[test]
+    fn no_readable_log_or_bad_window_never_proves_a_retry() {
+        for (ran, fixed) in [
+            (TurnRan::Exhausted, HERMES_INCOMPLETE),
+            (TurnRan::Drained, HERMES_RESTARTED),
+        ] {
+            let error = HermesError {
+                message: "model_loading: retry_after=10".into(),
+                route: None,
+                turn_ran: Some(ran),
+            };
+            let tail = RouteLogTail {
+                text: LOAD_503.to_string(),
+                cut: false,
+            };
+            let settled = settle_ran_turn(error.clone(), None, true, SINCE, UNTIL);
+            assert_eq!(settled.message, fixed);
+            let settled = settle_ran_turn(error, Some(&tail), true, "bad", UNTIL);
+            assert_eq!(settled.message, fixed);
+        }
+    }
+
+    #[test]
+    fn a_refused_turn_keeps_its_retry() {
+        let refused = HermesError {
+            message: "model_loading: retry_after=15".into(),
+            route: None,
+            turn_ran: None,
+        };
+        assert_eq!(
+            settle_ran_turn(refused.clone(), None, false, SINCE, UNTIL),
+            refused
+        );
+    }
+
+    #[test]
+    fn loading_text_matches_the_router() {
+        let router = include_str!("../../../amara-router/src/engine.rs");
+        assert!(router.contains(&format!("LOADING_MSG: &str = \"{ROUTER_LOADING_TEXT}\"")));
     }
 
     #[tokio::test]

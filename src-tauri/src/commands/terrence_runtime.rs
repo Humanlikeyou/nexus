@@ -1294,12 +1294,13 @@ pub async fn interact_with_terrence(
                 context: context.clone(),
                 history: &history,
                 message: &outgoing,
+                routed,
             },
         )
         .await
     {
         Ok(response) => response,
-        Err(terrence_runtime_bridge::HermesError { message, route }) => {
+        Err(terrence_runtime_bridge::HermesError { message, route, .. }) => {
             if let Some(action_id) = action_id.as_deref() {
                 let _ = terrence_actions::fail_terrence_action(action_id, message.clone());
             }
