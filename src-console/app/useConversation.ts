@@ -3,6 +3,7 @@ import { interactWithTerrence, listTerrenceInteractions, prepareAmaraTurn, recor
 import { deliberate } from "@/terrance/system/deliberation";
 import { resetCompressor } from "@/terrance/system/contextCompressor";
 import { type ConversationMessage, CONVERSATION_KEY, HERMES_SESSION_KEY, HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE, createConversationId, messagesFromInteractions } from "./conversation";
+import { homeReplyIds, preRouteHome, rememberHomeReply } from "../lib/homeAssistant";
 import { compressTurns, formatDeliberation, guardSections, historyTurns, parseChatCommand, tierFromRouter } from "./amaraChat";
 
 export interface SendOptions {
@@ -46,7 +47,8 @@ export function useConversation(refresh: () => Promise<void>) {
     resetCompressor();
     listTerrenceInteractions(conversationId).then((interactions) => {
       if (!activeRequest) return;
-      setMessages(messagesFromInteractions(interactions));
+      const home = homeReplyIds();
+      setMessages(messagesFromInteractions(interactions).map((m) => (m.role === "assistant" && home.has(m.id.replace(/-assistant$/, "")) ? { ...m, source: "home" as const } : m)));
       const latestSession = [...interactions]
         .reverse()
         .find((interaction) => interaction.runtimeProfile === NEXUS_RUNTIME_PROFILE && interaction.hermesSessionId)
@@ -92,6 +94,18 @@ export function useConversation(refresh: () => Promise<void>) {
       if (command.kind === "deliberate") {
         if (!command.topic) throw new Error("Add a topic: /deliberate <topic>");
         await runDeliberation(message, command.topic, requestId);
+        return;
+      }
+      // Home Assistant pre-route for plain chat only: Deep (toggle or /deep) and /deliberate go straight to Hermes.
+      // NoMatch or any HA error falls through to Hermes too.
+      const home = command.deep ? { handled: false as const } : await preRouteHome(command.text);
+      if (home.handled) {
+        const started = Date.now();
+        const saved = await Promise.resolve()
+          .then(() => recordAmaraInteraction({ conversationId, userMessage: message, assistantMessage: home.speech, tier: null, durationMs: Date.now() - started }))
+          .catch(() => { console.warn("[ha] home reply not saved"); return null; });
+        if (saved) rememberHomeReply(saved.id);
+        setMessages((current) => [...current, { id: saved ? `${saved.id}-assistant` : `${requestId}-home`, role: "assistant", content: home.speech, timestamp: new Date().toISOString(), source: "home" }]);
         return;
       }
       const [context, compressed] = await Promise.all([

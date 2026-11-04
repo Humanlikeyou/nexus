@@ -236,4 +236,12 @@ describe("groupStarts", () => {
     expect(screen.getByLabelText("Answered on the Deep tier")).toHaveTextContent("Deep");
     expect(within(screen.getByRole("list", { name: "Messages" })).getAllByText(/^(Fast|Deep)$/)).toHaveLength(2);
   });
+
+  it("Home badge on replies answered by Home Assistant", () => {
+    setup({ messages: [
+      msg("u1", "user", "turn on the lamp", "2026-10-28T05:00:00Z"),
+      msg("a1", "assistant", "Turned on the desk lamp.", "2026-10-28T05:00:01Z", { source: "home" }),
+    ] });
+    expect(screen.getByLabelText("Answered by Home Assistant")).toHaveTextContent("Home");
+  });
 });

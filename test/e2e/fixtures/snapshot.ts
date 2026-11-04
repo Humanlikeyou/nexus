@@ -60,6 +60,14 @@ const NOOP_SERIES = {
   points: noopDays.map((d) => ({ day: d.day, key: "hrv", value: d.avgHrv, source: "my-whoop", sourceKey: "hrv" })),
 };
 
+/* Home Assistant (ha.rs shapes, camelCase; no token field anywhere). */
+export const HA_ENTITIES = [
+  { entityId: "light.desk_lamp", state: "on", friendlyName: "Desk lamp", domain: "light", lastChanged: "2026-10-28T04:00:00Z", attributes: { friendly_name: "Desk lamp" } },
+  { entityId: "switch.kettle", state: "off", friendlyName: "Kettle", domain: "switch", lastChanged: "2026-10-28T04:00:00Z", attributes: { friendly_name: "Kettle" } },
+  { entityId: "sensor.office_temperature", state: "21.5", friendlyName: "Office temperature", domain: "sensor", lastChanged: "2026-10-28T04:00:00Z", attributes: { unit_of_measurement: "°C" } },
+  { entityId: "sun.sun", state: "above_horizon", friendlyName: "Sun", domain: "sun", attributes: {} },
+];
+
 export type Responses = Record<string, unknown>;
 
 /** Every command the console reads on load, with sample values. */
@@ -100,6 +108,14 @@ export function responses(): Responses {
     noop_query: { __byTool: { health_snapshot: NOOP_SNAPSHOT, metric_series: NOOP_SERIES } },
     get_noop_settings: { whoop_source: "noop", binary_path: null, db_path: null },
     set_noop_settings: null,
+    ha_states: HA_ENTITIES,
+    ha_call_service: null,
+    ha_conversation: { kind: "noMatch" },
+    ha_container_status: { running: true, status: "Up 3 hours" },
+    ha_container_start: { running: true, status: "Up 1 second" },
+    ha_container_stop: { running: false, status: "Exited (0) 1 second ago" },
+    ha_live_start: true,
+    ha_live_stop: true,
     migrate_legacy_terrence_context: null,
     load_kv: null,
     save_kv: null,

@@ -207,6 +207,11 @@ export function ChatField({
                 <div className="chat-bubble" data-role={m.role} data-failed={m.status === "failed" || undefined} title={m.role === "assistant" ? [m.model, time(m.timestamp)].filter(Boolean).join(" · ") : undefined}>
                   {m.content}
                 </div>
+                {m.role === "assistant" && m.source === "home" && (
+                  <div className="chat-message__tier">
+                    <Badge tone="info" title="Answered by Home Assistant" aria-label="Answered by Home Assistant">Home</Badge>
+                  </div>
+                )}
                 {m.role === "assistant" && m.status !== "failed" && m.tier && tierLabel(m.tier) && (
                   <div className="chat-message__tier">
                     <Badge tone={m.tier.tier === "fast" ? "neutral" : "accent"} title={tierTitle(m.tier)} aria-label={`Answered on the ${tierLabel(m.tier)} tier`}>{tierLabel(m.tier)}</Badge>

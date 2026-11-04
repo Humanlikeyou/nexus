@@ -1,0 +1,22 @@
+/* Smart home (brief-ha-1104). Glass tokens only. */
+.smart-home { display: grid; gap: var(--space-5); padding: var(--space-6); color: var(--label); align-content: start; }
+.smart-home__header h1 { margin: 0; font: var(--type-large-title); }
+.smart-home__subtitle { margin: var(--space-1) 0 0; font: var(--type-callout); color: var(--label-secondary); }
+.smart-home__header { display: grid; gap: var(--space-1); justify-items: start; }
+.smart-home__title { margin: 0; font: var(--type-headline); }
+.smart-home__meta { margin: 0; font: var(--type-footnote); color: var(--label-secondary); }
+.smart-home__error { margin: 0; font: var(--type-footnote); color: var(--tone-danger-text); }
+.smart-home__container, .smart-home__panel {
+  display: grid; gap: var(--space-2); padding: var(--pad-card); max-width: 720px;
+  background: var(--bg-content); border-radius: var(--radius-md);
+  box-shadow: var(--glass-hairline), var(--glass-highlight), var(--elev-1);
+}
+.smart-home__container-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.smart-home__actions { display: inline-flex; gap: var(--space-2); margin-left: auto; }
+.smart-home__panel p { margin: 0; font: var(--type-callout); }
+.smart-home__list { display: grid; gap: var(--space-2); max-width: 720px; }
+/* Shared inactive style (also defined by Mind–Body, which is lazy-loaded separately). */
+.subsystem-inactive { display: grid; gap: var(--space-2); padding: var(--pad-card); max-width: 640px; background: var(--bg-content); border-radius: var(--radius-md); box-shadow: var(--glass-hairline), var(--elev-1); }
+.subsystem-inactive h2 { margin: 0; font: var(--type-headline); }
+.subsystem-inactive p, .subsystem-inactive ol { margin: 0; font: var(--type-callout); color: var(--label-secondary); }
+.smart-home__row-error { color: var(--tone-danger-text); }

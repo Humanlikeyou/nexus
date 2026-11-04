@@ -15,6 +15,7 @@ vi.mock("@/terrance/system/deliberation", () => deliberation);
 vi.mock("@/terrance/system/contextCompressor", () => compressor);
 
 import { useConversation } from "./useConversation";
+import { createMockHaBackend, setHaBackend } from "../lib/homeAssistant";
 
 const last = <T,>(items: T[]): T | undefined => items[items.length - 1];
 
@@ -36,6 +37,68 @@ beforeEach(() => {
 });
 
 describe("useConversation", () => {
+  it("Home Assistant pre-route: match answers with a Home message and skips Hermes", async () => {
+    const conversation = vi.fn(async () => ({ kind: "match" as const, speech: "Turned on the desk lamp." }));
+    bridge.recordAmaraInteraction.mockResolvedValue(interaction({ id: "h0", tier: null }));
+    const restore = setHaBackend(createMockHaBackend({ conversation }));
+    const { result } = renderHook(() => useConversation(async () => {}));
+    await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
+    await act(() => result.current.sendToTerrence("turn on the desk lamp"));
+    restore();
+    expect(conversation).toHaveBeenCalledWith("turn on the desk lamp");
+    expect(bridge.interactWithTerrence).not.toHaveBeenCalled();
+    expect(bridge.recordAmaraInteraction).toHaveBeenCalledWith(expect.objectContaining({ userMessage: "turn on the desk lamp", assistantMessage: "Turned on the desk lamp.", tier: null }));
+    expect(last(result.current.messages)).toMatchObject({ role: "assistant", content: "Turned on the desk lamp.", source: "home" });
+  });
+
+  it("Home replies keep the Home source after reload", async () => {
+    bridge.recordAmaraInteraction.mockResolvedValue(interaction({ id: "h1", tier: null }));
+    const restore = setHaBackend(createMockHaBackend({ conversation: async () => ({ kind: "match" as const, speech: "Done." }) }));
+    const first = renderHook(() => useConversation(async () => {}));
+    await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
+    await act(() => first.result.current.sendToTerrence("lamp on"));
+    restore();
+    first.unmount();
+    bridge.listTerrenceInteractions.mockResolvedValue([interaction({ id: "h1", userMessage: "lamp on", assistantMessage: "Done.", tier: null }), interaction({ id: "x2" })]);
+    const { result } = renderHook(() => useConversation(async () => {}));
+    await waitFor(() => expect(result.current.messages).toHaveLength(4));
+    const replies = result.current.messages.filter((m) => m.role === "assistant");
+    expect(replies.map((m) => m.source)).toEqual(["home", undefined]);
+  });
+
+  it.each([["Deep toggle", "turn on the lamp", { deep: true }], ["/deep", "/deep turn on the lamp", {}]])("%s skips Home Assistant", async (_label, text, options) => {
+    const conversation = vi.fn(async () => ({ kind: "match" as const, speech: "x" }));
+    const restore = setHaBackend(createMockHaBackend({ conversation }));
+    const { result } = renderHook(() => useConversation(async () => {}));
+    await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
+    await act(() => result.current.sendToTerrence(text, options));
+    restore();
+    expect(conversation).not.toHaveBeenCalled();
+    expect(bridge.interactWithTerrence).toHaveBeenCalledTimes(1);
+  });
+
+  it("/deliberate skips Home Assistant", async () => {
+    const conversation = vi.fn(async () => ({ kind: "match" as const, speech: "x" }));
+    const restore = setHaBackend(createMockHaBackend({ conversation }));
+    deliberation.deliberate.mockResolvedValue({ bullCase: "up", bearCase: "down", synthesis: "go", confidence: "high", timestamp: 0, tier: "deep", routingReason: "header_deep" });
+    bridge.recordAmaraInteraction.mockResolvedValue(interaction({ id: "d9" }));
+    const { result } = renderHook(() => useConversation(async () => {}));
+    await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
+    await act(() => result.current.sendToTerrence("/deliberate move"));
+    restore();
+    expect(conversation).not.toHaveBeenCalled();
+  });
+
+  it("Home Assistant pre-route: noMatch falls through to Hermes", async () => {
+    const restore = setHaBackend(createMockHaBackend());
+    const { result } = renderHook(() => useConversation(async () => {}));
+    await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
+    await act(() => result.current.sendToTerrence("hi"));
+    restore();
+    expect(bridge.interactWithTerrence).toHaveBeenCalledTimes(1);
+    expect(last(result.current.messages)?.source).toBeUndefined();
+  });
+
   it("sends the full history, guarded context and the Deep flag to Hermes", async () => {
     const { result } = renderHook(() => useConversation(async () => {}));
     await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());

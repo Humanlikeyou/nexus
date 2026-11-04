@@ -1,10 +1,10 @@
 import type { ModuleId } from "../types";
-import { Activity, BriefcaseBusiness, Bot, HeartPulse, MessagesSquare, Radio, Settings2, type LucideIcon } from "lucide-react";
+import { Activity, BriefcaseBusiness, Bot, HeartPulse, House, MessagesSquare, Radio, Settings2, type LucideIcon } from "lucide-react";
 
 export type SystemEntry = { id: ModuleId; label: string; signal: string; icon: LucideIcon };
 
-/** Seven items in four groups, like macOS Settings (screen-specs Part 2). The first group is untitled
- *  (it sits under the wordmark). ⌘1–7 follow this order. */
+/** Eight items in four groups, like macOS Settings (screen-specs Part 2). The first group is untitled
+ *  (it sits under the wordmark). ⌘1–8 follow this order. Smart home sits last so existing shortcuts don't move. */
 export const SYSTEM_GROUPS: Array<{ label: string; systems: SystemEntry[] }> = [
   { label: "", systems: [
     { id: "terrance", label: "Home", signal: "AI", icon: Bot },
@@ -20,6 +20,7 @@ export const SYSTEM_GROUPS: Array<{ label: string; systems: SystemEntry[] }> = [
   ] },
   { label: "System", systems: [
     { id: "settings", label: "Settings", signal: "APP", icon: Settings2 },
+    { id: "smarthome", label: "Smart home", signal: "HA", icon: House },
   ] },
 ];
 

@@ -7,7 +7,7 @@ import { useMuseSession } from "./app/useMuseSession";
 import { runApproval } from "./lib/approval";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
-import { ActivityField, BusinessField, CrewsField, HealthField, MindBodyField, NeuroField, RevenueField, SessionsField, SettingsField, VoiceField, retryLazyScreens } from "./app/lazyScreens";
+import { ActivityField, BusinessField, CrewsField, HealthField, MindBodyField, NeuroField, SmartHomeField, RevenueField, SessionsField, SettingsField, VoiceField, retryLazyScreens } from "./app/lazyScreens";
 import { ScreenErrorBoundary } from "./shell/ScreenErrorBoundary";
 import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";
 import { CommandSurface } from "./design/SystemPrimitives";
@@ -124,6 +124,7 @@ export default function App() {
   const view = screenId === "terrance" ? <TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} />
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
     : screenId === "mindbody" ? <MindBodyField sessions={data.sessions} />
+    : screenId === "smarthome" ? <SmartHomeField />
     : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => setRoute({ id: "neuro", view: "main" })} />
     : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} />

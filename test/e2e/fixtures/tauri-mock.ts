@@ -30,6 +30,11 @@ function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
   const unmocked: string[] = [];
   w.__E2E_UNMOCKED = unmocked;
   w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+  const listeners: Array<{ event: string; handler: number }> = [];
+  /** e2e: deliver a Tauri event to every listener registered for it. */
+  w.__E2E_EMIT = (event: string, payload: unknown) => {
+    for (const l of listeners) if (l.event === event) (callbacks.get(l.handler) as ((e: unknown) => void) | undefined)?.({ event, id: l.handler, payload });
+  };
   w.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
     transformCallback: (cb: unknown) => { const id = next++; callbacks.set(id, cb); return id; },
@@ -46,6 +51,7 @@ function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
         throw { kind: "tool_not_allowed", detail: tool };
       }
       if (cmd in data) return structuredClone(data[cmd]);
+      if (cmd === "plugin:event|listen") { listeners.push({ event: String(args?.event), handler: Number(args?.handler) }); return next++; }
       if (cmd.startsWith("plugin:event|")) return next++;
       unmocked.push(cmd);
       if (cmd.startsWith("list_") || cmd.startsWith("read_")) return [];
@@ -89,6 +95,10 @@ export const test = base.extend<Fixtures>({
 });
 
 export { expect };
+
+/** Emits a Tauri event inside the page (see __E2E_EMIT). */
+export const emitTauriEvent = (page: Page, event: string, payload: unknown) =>
+  page.evaluate(([e, p]) => (window as unknown as { __E2E_EMIT: (e: unknown, p: unknown) => void }).__E2E_EMIT(e, p), [event, payload] as const);
 
 /** Sidebar button for a section, e.g. "Chat & Agents". */
 export const navButton = (page: Page, label: string) =>

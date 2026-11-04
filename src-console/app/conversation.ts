@@ -9,6 +9,8 @@ export type ConversationMessage = {
   model?: string;
   /** Router tier for Amara's reply; absent = unknown (no badge). */
   tier?: AmaraTierInfo;
+  /** "home": answered by Home Assistant's conversation agent (chat pre-route), not a model. */
+  source?: "home";
 };
 
 export const CONVERSATION_KEY = "nexus.terrence.conversationId";
