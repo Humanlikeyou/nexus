@@ -110,7 +110,7 @@ Claude is used only when all of these hold:
 2. `anthropic_enabled = true`,
 3. `NEXUS_OUTBOUND_DISABLED` is not set (1/true/yes/on) in the router's environment,
 4. the caller did not send `X-Amara-Allow-Claude: 0` (the Nexus app sends 0 unless
-   Settings › Allow Claude is on, the mode is api/hybrid, its own `NEXUS_OUTBOUND_DISABLED`
+   Settings › Assistant › Allow Claude is on, the mode is api/hybrid, its own `NEXUS_OUTBOUND_DISABLED`
    is unset and the daily cap is not spent),
 5. `ANTHROPIC_API_KEY` is in the 0600 `secrets_file`.
 
@@ -129,7 +129,7 @@ No message content is ever logged. Errors add `"status":"error"` and `http_statu
 ## Install (LaunchAgent)
 
 ```bash
-cd ~/projects/nexus/amara-router          # or the worktree you build from
+cd ~/projects/nexus-amara/amara-router    # path moves after the nexus merge
 cargo build --release
 cargo test
 
@@ -203,7 +203,7 @@ loopback listener or put a reverse proxy in front.
 Hermes today calls Ollama's OpenAI API directly (`~/.hermes/config.yaml`:
 `model.base_url: http://localhost:11434/v1`, `model.default: gemma4-12b-uncensored`), so the
 router never sees Amara's chat and Nexus can't show a Fast/Deep badge (it shows none).
-Nothing below has been applied; Taisun applies it.
+Nothing below has been applied; Taisun applies it. Hermes must use the OpenAI path `http://127.0.0.1:8787/v1` (with `/v1`), not bare `:8787`; Home Assistant uses the bare URL.
 
 1. Back up (keep the file name; it is how you roll back):
 
