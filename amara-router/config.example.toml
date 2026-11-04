@@ -62,8 +62,9 @@ poll_secs = 20
 # Applies only when the model is not resident per /api/ps (or /api/ps does not answer).
 first_token_timeout_ms = 20000
 # When the model is resident (1000-600000 ms): Ollama streams nothing during prompt evaluation,
-# so a long prompt can be silent for a while. The 503 carries Retry-After: 10.
-first_token_timeout_resident_ms = 90000
+# so a long prompt can be silent for a while. Hermes sends about 12k tokens, and 90 s made /deep
+# return 503 on a loaded deep model. The 503 carries Retry-After: 10.
+first_token_timeout_resident_ms = 300000
 # Optional, OFF by default and not done by the router: let the GPU wire more RAM so fast and
 # deep can both stay loaded. Resets on reboot.  sudo sysctl iogpu.wired_limit_mb=26000
 
