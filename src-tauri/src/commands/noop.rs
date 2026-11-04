@@ -965,12 +965,25 @@ fn snapshot_from_database(
     })
 }
 
-pub fn health_snapshot() -> NoopHealthSnapshot {
-    let now = Utc::now();
-    let device_id = env::var("NOOP_DEVICE_ID")
+fn device_id_from_environment() -> String {
+    env::var("NOOP_DEVICE_ID")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_DEVICE_ID.to_string());
+        .unwrap_or_else(|| DEFAULT_DEVICE_ID.to_string())
+}
+
+/// The single NOOP store resolver shared by Home (direct read-only SQLite) and
+/// Mind-Body (`noop_query` CLI): `NOOP_DB_PATH` wins, else the freshest of the
+/// official container / Application Support stores.
+pub(crate) fn resolve_store_path() -> Result<PathBuf, String> {
+    NoopPaths::from_environment()
+        .resolve(&device_id_from_environment())
+        .map(|(_, path)| path)
+}
+
+pub fn health_snapshot() -> NoopHealthSnapshot {
+    let now = Utc::now();
+    let device_id = device_id_from_environment();
     let paths = NoopPaths::from_environment();
     let path = match paths.resolve(&device_id) {
         Ok((_, path)) => path,

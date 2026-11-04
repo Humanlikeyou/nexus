@@ -100,6 +100,19 @@ pub fn load_settings() -> NoopSettings {
         .unwrap_or_default()
 }
 
+/// Fill an unset `db_path` from the same resolver Home uses (`noop::resolve_store_path`), so
+/// Mind-Body and Home read the same store. An explicit Settings value always wins, and the
+/// result is still validated by `run_query` (allowlist, canonicalization, ownership).
+/// The binary is never auto-picked: which NOOP copy to run stays a Settings choice.
+pub fn with_resolved_db(mut s: NoopSettings) -> NoopSettings {
+    if s.db_path.as_deref().is_none_or(str::is_empty) {
+        if let Ok(p) = super::noop::resolve_store_path() {
+            s.db_path = Some(p.display().to_string());
+        }
+    }
+    s
+}
+
 #[tauri::command]
 pub fn get_noop_settings() -> NoopSettings {
     load_settings()
@@ -536,7 +549,7 @@ pub fn parse_response(out: &[u8]) -> Result<Value, NoopQueryError> {
 
 #[tauri::command]
 pub async fn noop_query(tool: String, args: Option<Value>) -> Result<Value, NoopQueryError> {
-    let s = load_settings();
+    let s = with_resolved_db(load_settings());
     let roots = Roots::current().map_err(NoopQueryError::InvalidPath)?;
     let args = args.unwrap_or(Value::Null);
     tauri::async_runtime::spawn_blocking(move || {

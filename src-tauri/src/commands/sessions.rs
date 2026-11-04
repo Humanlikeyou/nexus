@@ -118,8 +118,11 @@ pub fn begin_body_context_capture() {
         let Ok(roots) = noop_query::Roots::current() else {
             return;
         };
-        let v =
-            capture_body_context_with(&noop_query::load_settings(), &roots, BODY_CONTEXT_TIMEOUT);
+        let v = capture_body_context_with(
+            &noop_query::with_resolved_db(noop_query::load_settings()),
+            &roots,
+            BODY_CONTEXT_TIMEOUT,
+        );
         if let (Some(v), Ok(mut slot)) = (v, PENDING_BODY_CONTEXT.lock()) {
             *slot = Some(v);
         }
