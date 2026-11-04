@@ -30,12 +30,14 @@
     <string>__HOME__/Library/Logs/amara-router/router.log</string>
     <key>StandardErrorPath</key>
     <string>__HOME__/Library/Logs/amara-router/router.log</string>
+    <!-- 63 is 0077: new files the router creates are owner-only. An existing file keeps its mode. -->
+    <key>Umask</key>
+    <integer>63</integer>
     <key>EnvironmentVariables</key>
     <dict>
-        <!-- Uncomment to forbid every cloud call regardless of config:
+        <!-- Forbids every cloud call regardless of config. Remove it to allow the Claude tier. -->
         <key>NEXUS_OUTBOUND_DISABLED</key>
         <string>1</string>
-        -->
     </dict>
 </dict>
 </plist>

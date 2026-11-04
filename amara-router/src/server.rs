@@ -275,7 +275,10 @@ async fn chat(
         "requested": decision.tier,
         "routing_ms": routing_ms,
     });
-    let (events, tier, reason) = match st.open(&decision, &body).await {
+    let waiting = CancelLog::arm(&st, start, &base_log, decision.tier, &decision.reason);
+    let opened = st.open(&decision, &body).await;
+    waiting.disarm();
+    let (events, tier, reason) = match opened {
         Ok(x) => x,
         Err((status, msg)) => {
             let mut entry = base_log;
@@ -323,12 +326,15 @@ async fn chat(
         None => events,
     };
 
-    // Logged once the reply has finished (or failed mid-stream).
+    // Logged once the reply has finished (or failed mid-stream). A client that disconnects
+    // drops this closure unrun, and `cancelled` logs that line instead.
     let finish = {
+        let cancelled = CancelLog::arm(&st, start, &base_log, meta.tier, &meta.reason);
         let st = Arc::clone(&st);
         let meta = meta.clone();
         let real_model = st.model_for(tier).to_string();
         move |prompt: u64, completion: u64, err: Option<&str>| {
+            cancelled.disarm();
             let mut entry = base_log;
             entry["ts"] = json!(now_rfc3339());
             entry["route"] = json!(meta.tier);
@@ -383,6 +389,43 @@ async fn chat(
     };
     resp = with_meta(resp, &meta, &model);
     resp
+}
+
+/// Writes a `status: "cancelled"` route-log line if dropped while armed. Axum drops the
+/// handler or the body stream when the client disconnects, so no other log line is written.
+struct CancelLog {
+    st: St,
+    start: Instant,
+    entry: Option<Value>,
+}
+
+impl CancelLog {
+    fn arm(st: &St, start: Instant, base: &Value, tier: Tier, reason: &str) -> Self {
+        let mut entry = base.clone();
+        entry["route"] = json!(tier);
+        entry["reason"] = json!(reason);
+        entry["model"] = json!(st.model_for(tier));
+        Self {
+            st: Arc::clone(st),
+            start,
+            entry: Some(entry),
+        }
+    }
+
+    fn disarm(mut self) {
+        self.entry = None;
+    }
+}
+
+impl Drop for CancelLog {
+    fn drop(&mut self) {
+        if let Some(mut entry) = self.entry.take() {
+            entry["ts"] = json!(now_rfc3339());
+            entry["latency_ms"] = json!(self.start.elapsed().as_millis() as u64);
+            entry["status"] = json!("cancelled");
+            self.st.log_route(&entry);
+        }
+    }
 }
 
 fn with_meta(mut r: Response, meta: &RouteMeta, model: &str) -> Response {
