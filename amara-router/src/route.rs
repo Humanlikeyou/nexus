@@ -234,11 +234,13 @@ pub fn pre_route(cfg: &Routing, text: &mut String, hints: &Hints, gate: &CloudGa
     }
 
     // 3. Size / code.
-    if estimate_tokens(text) > cfg.token_threshold {
-        return decided(Tier::Deep, "over_token_threshold".into());
-    }
-    if text.contains("```") {
-        return decided(Tier::Deep, "code_block".into());
+    if cfg.auto_deep {
+        if estimate_tokens(text) > cfg.token_threshold {
+            return decided(Tier::Deep, "over_token_threshold".into());
+        }
+        if text.contains("```") {
+            return decided(Tier::Deep, "code_block".into());
+        }
     }
 
     // 4.
@@ -377,6 +379,33 @@ mod tests {
         assert_eq!(route("  /DEEP\nplan", Hints::default()).1, "plan");
         // Not a command when glued to other text.
         assert_eq!(route("/deeply odd", Hints::default()).0, PreRoute::Classify);
+    }
+
+    #[test]
+    fn auto_deep_off_keeps_only_explicit_asks_on_deep() {
+        let cfg = Routing {
+            auto_deep: false,
+            classifier: false,
+            ..Routing::default()
+        };
+        let long = "word ".repeat(10_000);
+        for text in [long.as_str(), "```rust\nfn main() {}\n```", "plan my week"] {
+            let mut t = text.to_string();
+            assert_eq!(
+                pre_route(&cfg, &mut t, &Hints::default(), &closed()),
+                d(Tier::Fast, "default")
+            );
+        }
+        let mut t = "/deep plan my week".to_string();
+        assert_eq!(
+            pre_route(&cfg, &mut t, &Hints::default(), &closed()),
+            d(Tier::Deep, "slash_deep")
+        );
+        let mut t = "think deeper about this".to_string();
+        assert_eq!(
+            pre_route(&cfg, &mut t, &Hints::default(), &closed()),
+            d(Tier::Deep, "trigger:think deeper")
+        );
     }
 
     #[test]
