@@ -294,7 +294,6 @@ fn loopback_base(raw: &str) -> Option<String> {
 /// O_NOFOLLOW|O_NONBLOCK and must be a regular file owned by `expected_uid`, mode without
 /// group/other bits, at most 16 KiB. Errors are fixed text.
 fn read_config_at(dir: &Path, file: &Path, expected_uid: u32) -> Result<HaConfig, String> {
-    use std::io::Read;
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
     let cfg_err = || ERR_CONFIG.to_string();
     let name = file
@@ -318,16 +317,8 @@ fn read_config_at(dir: &Path, file: &Path, expected_uid: u32) -> Result<HaConfig
     if !meta.is_file() || meta.uid() != expected_uid || meta.mode() & 0o077 != 0 {
         return Err(cfg_err());
     }
-    let mut buf = Vec::new();
-    (&mut f)
-        .take(ENV_MAX_BYTES + 1)
-        .read_to_end(&mut buf)
-        .map_err(|_| cfg_err())?;
-    if buf.len() as u64 > ENV_MAX_BYTES {
-        return Err(cfg_err());
-    }
-    let text = String::from_utf8(buf).map_err(|_| cfg_err())?;
-    parse_config(&text)
+    let text = read_secret(&mut f, meta.len(), ENV_MAX_BYTES).map_err(|_| cfg_err())?;
+    parse_config(text.as_str())
 }
 
 /// `KEY=value` lines; only `HA_URL` and `HA_TOKEN` are looked at (last one wins).
@@ -2786,5 +2777,21 @@ mod tests {
         assert!(text.matches("HA_TOKEN=").count() <= 1);
         assert_eq!(std::fs::read_dir(&app).unwrap().count(), 1);
         let _ = std::fs::remove_dir_all(&app);
+    }
+
+    #[test]
+    fn legacy_non_utf8_file_is_a_config_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmpdir();
+        let f = dir.join(".env");
+        let mut bytes = format!("HA_TOKEN={TOKEN}\n").into_bytes();
+        bytes.extend_from_slice(&[0xff, 0xfe, b'\n']);
+        std::fs::write(&f, bytes).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            read_config_at(&dir, &f, current_uid()).unwrap_err(),
+            ERR_CONFIG
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
