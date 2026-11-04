@@ -251,15 +251,18 @@ export function ChatField({
         )}
 
         <form className="chat-screen__composer" onSubmit={submit}>
-          <Button
-            variant="plain"
-            icon={Brain}
-            className="chat-composer__deep"
-            aria-pressed={deep && deepAvailable}
-            disabled={!deepAvailable}
-            title={deepAvailable ? "Deep: send this message to Amara's deep model (/deep)" : "Deep needs Hermes on the Amara Router (see amara-router/README.md)"}
-            onClick={() => setDeep((on) => !on)}
-          >Deep</Button>
+          {/* Wrapper carries the hint: WebKit fires no hover (so no tooltip) on a disabled button. */}
+          <span className="chat-composer__deep-wrap" title={deepAvailable ? undefined : "Deep needs the Amara Router"}>
+            <Button
+              variant="plain"
+              icon={Brain}
+              className="chat-composer__deep"
+              aria-pressed={deep && deepAvailable}
+              disabled={!deepAvailable}
+              title={deepAvailable ? "Send to Amara's deep model" : undefined}
+              onClick={() => setDeep((on) => !on)}
+            >Deep</Button>
+          </span>
           <label htmlFor="chat-composer" className="ui-visually-hidden">Message Amara</label>
           <textarea
             id="chat-composer"

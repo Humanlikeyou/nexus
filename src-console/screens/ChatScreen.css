@@ -124,9 +124,12 @@
 /* Deep toggle: plain button, accent tint while on (aria-pressed carries the state). */
 .chat-screen__composer .chat-composer__deep { flex: none; }
 .chat-screen__composer .chat-composer__deep[aria-pressed="true"] {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--tone-accent-text);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  /* Hairline makes "on" readable without colour. */
+  box-shadow: var(--glass-hairline);
 }
+.chat-screen__composer .chat-composer__deep-wrap { display: inline-flex; flex: none; }
 
 @keyframes chat-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes chat-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }

@@ -209,7 +209,7 @@ describe("groupStarts", () => {
     const deep = screen.getByRole("button", { name: "Deep" });
     expect(deep).toBeDisabled();
     expect(deep).toHaveAttribute("aria-pressed", "false");
-    expect(deep).toHaveAttribute("title", expect.stringContaining("Amara Router"));
+    expect(deep.closest(".chat-composer__deep-wrap")).toHaveAttribute("title", "Deep needs the Amara Router");
   });
 
   it("Deep toggle sends deep: true when Hermes routes through the Amara Router", async () => {
