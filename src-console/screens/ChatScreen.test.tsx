@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConversationMessage } from "../app/conversation";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction } from "../types";
-import { ChatField, groupStarts, type ChatFieldProps } from "./ChatScreen";
+import { ChatField, chatActions, threadItems, groupStarts, type ChatFieldProps } from "./ChatScreen";
 
 const loaded: SystemSnapshot = {
   ...INITIAL_SNAPSHOT,
@@ -144,15 +144,15 @@ describe("ChatField", () => {
   it("action cards: approve, cancel, retry; hermes chat actions are hidden", async () => {
     const data = { ...loaded, actions: [
       action(),
-      action({ id: "a2", title: "Retry me", status: "failed", retryAllowed: true }),
-      action({ id: "a3", toolId: "agent.hermes_chat", title: "Chat turn", status: "succeeded" }),
+      action({ id: "a2", title: "Retry me", status: "failed", retryAllowed: true, conversationId: "c1" }),
+      action({ id: "a3", toolId: "agent.hermes_chat", title: "Chat turn", status: "succeeded", conversationId: "c1" }),
     ] };
-    const props = setup({ data });
-    const actions = screen.getByLabelText("Actions");
+    const props = setup({ data, conversationId: "c1" });
+    const actions = screen.getByLabelText("Messages");
     expect(within(actions).queryByText("Chat turn")).not.toBeInTheDocument();
     await userEvent.click(within(actions).getByRole("button", { name: "Approve" }));
     await userEvent.click(within(actions).getByRole("button", { name: "Cancel" }));
-    await userEvent.click(within(actions).getByRole("button", { name: "Retry" }));
+    await userEvent.click(within(actions).getByRole("button", { name: "Retry Retry me" }));
     expect(props.onApproveAction).toHaveBeenCalledWith(expect.objectContaining({ id: "a1" }));
     expect(props.onCancelAction).toHaveBeenCalledWith(expect.objectContaining({ id: "a1" }));
     expect(props.onRetryAction).toHaveBeenCalledWith(expect.objectContaining({ id: "a2" }));
@@ -208,7 +208,7 @@ describe("groupStarts", () => {
   it("'Ask Amara anything' only for a thread with zero items: hidden once an action card exists", () => {
     setup({ data: { ...loaded, actions: [action()] } });
     expect(screen.queryByRole("heading", { name: "Ask Amara anything" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Actions")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Messages")).getByRole("article")).toBeInTheDocument();
   });
 
   it("an action that isn't shown (Hermes chat turn) doesn't count as an item", () => {
@@ -255,5 +255,41 @@ describe("groupStarts", () => {
       msg("a1", "assistant", "Turned on the desk lamp.", "2026-10-28T05:00:01Z", { source: "home" }),
     ] });
     expect(screen.getByLabelText("Answered by Home Assistant")).toHaveTextContent("Home");
+  });
+});
+
+describe("chat actions in the thread (QA 11-04)", () => {
+  const msg = (id: string, role: "user" | "assistant", timestamp: string) => ({ id, role, content: id, timestamp }) as unknown as ConversationMessage;
+
+  it("chatActions: pending is prominent from any conversation; resolved only for this conversation", () => {
+    const items = chatActions([
+      action({ id: "p", status: "awaiting_approval", conversationId: "old" }),
+      action({ id: "c", status: "cancelled", conversationId: "c1", requestedAt: "2026-10-28T05:05:00Z" }),
+      action({ id: "stale", title: "Open https://example.com", status: "cancelled", conversationId: "old" }),
+      action({ id: "done", status: "succeeded", conversationId: null }),
+    ], "c1");
+    expect(items.map((i) => [i.action.id, i.prominent])).toEqual([["p", true], ["c", false]]);
+    expect(chatActions([action({ id: "x", status: "succeeded", conversationId: "c1" })], null)).toEqual([]);
+  });
+
+  it("threadItems interleaves actions by time and keeps message order", () => {
+    const messages = [msg("u1", "user", "2026-10-28T05:00:00Z"), msg("a1", "assistant", "2026-10-28T05:02:00Z")];
+    const t = threadItems(messages, [{ action: action({ id: "x", requestedAt: "2026-10-28T05:01:00Z" }), prominent: false }]);
+    expect(t.map((i) => (i.kind === "message" ? messages[i.index].id : i.item.action.id))).toEqual(["u1", "x", "a1"]);
+  });
+
+  it("cancelled cards are compact lines inside the message list; reply and tier badge stay visible", () => {
+    const messages = [msg("what is 2+2", "user", "2026-10-28T05:00:00Z"), { ...msg("4", "assistant", "2026-10-28T05:00:05Z"), tier: { tier: "fast" } } as ConversationMessage];
+    setup({ messages, conversationId: "c1", data: { ...loaded, actions: [
+      action({ id: "s", title: "Open Safari", status: "cancelled", conversationId: "c1", requestedAt: "2026-10-28T04:59:00Z" }),
+      action({ id: "v", title: "Lower volume by 10%", status: "cancelled", conversationId: "c1", requestedAt: "2026-10-28T04:59:30Z" }),
+    ] } });
+    const list = screen.getByLabelText("Messages");
+    expect(within(list).queryByRole("article")).not.toBeInTheDocument();
+    const line = within(list).getByText("Open Safari").closest("li")!;
+    expect(line).toHaveClass("chat-action-line");
+    expect(within(line).getByText("Cancelled")).toBeInTheDocument();
+    expect(within(list).getByText("4")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Actions")).not.toBeInTheDocument();
   });
 });

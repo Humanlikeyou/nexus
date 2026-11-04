@@ -37,6 +37,8 @@ export interface ChatFieldProps {
   /** Pre-filled composer text (⌘K “Ask Amara”); remount via key to apply. */
   initialDraft?: string;
   busy?: boolean;
+  /** Current conversation: resolved action lines from other conversations are hidden. */
+  conversationId?: string | null;
 }
 
 const ACTION_TONE: Record<TerrenceAction["status"], Tone> = {
@@ -49,6 +51,41 @@ const ACTION_LABEL: Record<TerrenceAction["status"], string> = {
 };
 const GROUP_MS = 2 * 60_000;
 const MAX_COMPOSER_LINES = 6;
+
+/** Statuses that still need Taisun; only these render as prominent cards. */
+const PROMINENT: ReadonlySet<TerrenceAction["status"]> = new Set(["awaiting_approval", "needs_attention"]);
+const MAX_ACTIONS = 5;
+
+export type ChatActionItem = { action: TerrenceAction; prominent: boolean };
+
+/**
+ * Actions shown in the thread. Pending ones (any conversation) are prominent cards; resolved or
+ * cancelled ones show as compact inline lines, and only for the current conversation, so stale
+ * ledger rows from old sessions never surface.
+ */
+export function chatActions(actions: TerrenceAction[], conversationId: string | null | undefined): ChatActionItem[] {
+  return actions
+    .filter((a) => a.toolId !== "agent.hermes_chat")
+    .filter((a) => PROMINENT.has(a.status) || (conversationId != null && a.conversationId === conversationId))
+    .map((action) => ({ action, prominent: PROMINENT.has(action.status) }))
+    .sort((x, y) => Date.parse(y.action.requestedAt) - Date.parse(x.action.requestedAt))
+    .slice(0, MAX_ACTIONS)
+    .reverse();
+}
+
+type ThreadItem = { kind: "message"; index: number; at: number } | { kind: "action"; item: ChatActionItem; at: number };
+
+/** Messages and action items interleaved by time (stable: messages keep their order). */
+export function threadItems(messages: ConversationMessage[], items: ChatActionItem[]): ThreadItem[] {
+  const out: ThreadItem[] = messages.map((m, index) => ({ kind: "message", index, at: Date.parse(m.timestamp) || 0 }));
+  for (const item of items) {
+    const at = Date.parse(item.action.requestedAt) || 0;
+    let i = out.length;
+    while (i > 0 && out[i - 1].at > at) i--;
+    out.splice(i, 0, { kind: "action", item, at });
+  }
+  return out;
+}
 
 /** Consecutive messages from the same sender within 2 min share one header (Messages.app). */
 export function groupStarts(messages: ConversationMessage[]): boolean[] {
@@ -97,7 +134,7 @@ export function ThinkingBubble({ onCancel }: { onCancel?: () => void }) {
 
 export function ChatField({
   data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onCancelPending, onOpenContext, onOpenActivity, onOpenCrews, initialDraft = "",
-  onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false,
+  onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false, conversationId = null,
 }: ChatFieldProps) {
   const [draft, setDraft] = useState(initialDraft);
   const [query, setQuery] = useState("");
@@ -115,11 +152,35 @@ export function ChatField({
   // Deep is the router's call; with Hermes still on Ollama directly nothing would read /deep.
   const deepAvailable = hermes.routedViaRouter === true;
 
-  const actions = useMemo(() => {
-    const tools = data.actions.filter((a) => a.toolId !== "agent.hermes_chat");
-    const first = (a: TerrenceAction) => a.status === "awaiting_approval" || a.retryAllowed;
-    return [...tools.filter(first), ...tools.filter((a) => !first(a))].slice(0, 5);
-  }, [data.actions]);
+  const actions = useMemo(() => chatActions(data.actions, conversationId), [data.actions, conversationId]);
+  const thread = useMemo(() => threadItems(messages, actions), [messages, actions]);
+  const renderAction = ({ action: a, prominent }: ChatActionItem) => {
+    if (!prominent) {
+      return (
+        <li key={a.id} className="chat-action-line" data-status={a.status}>
+          <span className="chat-action-line__title">{a.title}</span>
+          <Badge tone={ACTION_TONE[a.status]}>{ACTION_LABEL[a.status]}</Badge>
+          {a.retryAllowed && <Button variant="plain" size="small" icon={RotateCcw} disabled={busy} onClick={() => onRetryAction(a)} aria-label={`Retry ${a.title}`}>Retry</Button>}
+        </li>
+      );
+    }
+    const plan = a.status === "awaiting_approval" ? actionPlan(a) : [];
+    return (
+      <li key={a.id} className="chat-action">
+        <Card as="article" title={a.title} headingLevel={3} accessory={<Badge tone={ACTION_TONE[a.status]}>{ACTION_LABEL[a.status]}</Badge>}>
+          {a.summary && <p className="chat-action__summary">{a.summary}</p>}
+          {plan.length > 0 && <InsetGroup title="Plan">{plan.map((step, i) => <ListRow key={i} title={step} />)}</InsetGroup>}
+          <div className="chat-action__buttons">
+            {a.status === "awaiting_approval" && <>
+              <Button variant="primary" size="small" icon={Check} disabled={busy} onClick={() => onApproveAction(a)}>Approve</Button>
+              <Button size="small" icon={X} disabled={busy} onClick={() => onCancelAction(a)}>Cancel</Button>
+            </>}
+            {a.retryAllowed && <Button size="small" icon={RotateCcw} disabled={busy} onClick={() => onRetryAction(a)}>Retry</Button>}
+          </div>
+        </Card>
+      </li>
+    );
+  };
   const suggestions = data.prioritySnapshot.items.slice(0, 3).map((p) => p.title).filter(Boolean);
   const starts = useMemo(() => groupStarts(messages), [messages]);
   const startedAt = messages[0]?.timestamp;
@@ -231,7 +292,10 @@ export function ChatField({
                 </Card>
               </li>
             )}
-            {messages.map((m, i) => (
+            {thread.map((t) => {
+              if (t.kind === "action") return renderAction(t.item);
+              const i = t.index; const m = messages[i];
+              return (
               <li key={m.id} className="chat-message" data-role={m.role} data-start={starts[i] || undefined}>
                 {starts[i] && <span className="chat-message__meta">{m.role === "user" ? "You" : "Amara"} · <time dateTime={m.timestamp}>{time(m.timestamp)}</time></span>}
                 {m.role === "assistant" && m.source === "home" && <AmaraLens state="idle" size={44} level={0.5} decorative className="chat-message__lens" />}
@@ -252,31 +316,15 @@ export function ChatField({
                   <div className="chat-message__failed"><Badge tone="danger">Failed</Badge><Button variant="plain" size="small" icon={RotateCcw} onClick={() => retry(m, i)} disabled={sending}>Retry</Button></div>
                 )}
               </li>
-            ))}
+            );
+            })}
             {sending && <ThinkingBubble onCancel={onCancelPending} />}
           </ol>
         )}
 
-        {(actions.length > 0 || actionsUnavailable) && (
+        {actionsUnavailable && (
           <div className="chat-screen__actions" aria-label="Actions">
-            {actionsUnavailable ? (
-              <Card padding="md"><p>Action ledger unavailable</p>{onRetrySources && <Button size="small" onClick={onRetrySources}>Retry</Button>}</Card>
-            ) : actions.map((a) => {
-              const plan = a.status === "awaiting_approval" ? actionPlan(a) : [];
-              return (
-                <Card key={a.id} as="article" title={a.title} headingLevel={3} accessory={<Badge tone={ACTION_TONE[a.status]}>{ACTION_LABEL[a.status]}</Badge>}>
-                  {a.summary && <p className="chat-action__summary">{a.summary}</p>}
-                  {plan.length > 0 && <InsetGroup title="Plan">{plan.map((step, i) => <ListRow key={i} title={step} />)}</InsetGroup>}
-                  <div className="chat-action__buttons">
-                    {a.status === "awaiting_approval" && <>
-                      <Button variant="primary" size="small" icon={Check} disabled={busy} onClick={() => onApproveAction(a)}>Approve</Button>
-                      <Button size="small" icon={X} disabled={busy} onClick={() => onCancelAction(a)}>Cancel</Button>
-                    </>}
-                    {a.retryAllowed && <Button size="small" icon={RotateCcw} disabled={busy} onClick={() => onRetryAction(a)}>Retry</Button>}
-                  </div>
-                </Card>
-              );
-            })}
+            <Card padding="md"><p>Action ledger unavailable</p>{onRetrySources && <Button size="small" onClick={onRetrySources}>Retry</Button>}</Card>
           </div>
         )}
 
