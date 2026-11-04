@@ -9,9 +9,8 @@ each request to one of two Ollama models:
 Model names live in `config.toml` only. Nothing is hard-coded.
 
 ```
-Home Assistant ─┐
-Hermes ─────────┼─► 127.0.0.1:8787 amara-router ─► 127.0.0.1:11434 Ollama
-Nexus app ──────┘        (routes, strips <think>, logs)
+Hermes ─────┬─► 127.0.0.1:8787 amara-router ─► 127.0.0.1:11434 Ollama
+Nexus app ──┘        (routes, strips <think>, logs)
 ```
 
 ## Routing (first match wins)
@@ -76,7 +75,8 @@ before routing (a 400 for bad JSON) have none.
 | GET | `/health` | `status` ok/degraded, Ollama up/down, which models are loaded |
 | POST | `/amara/route` | Dry run: `{"text": "..."}` or a chat body → `{tier, reason, routing_ms, model, stripped}`. Never generates, never returns content |
 
-Home Assistant's Ollama integration calls exactly `GET /api/tags` (setup, config flow, model
+Home Assistant doesn't use the router today (see [below](#home-assistant-does-not-use-the-router)). These
+Ollama endpoints stay for compatibility. HA's Ollama integration calls exactly `GET /api/tags` (setup, config flow, model
 list), `POST /api/chat` (`stream: true`, `options.num_ctx`, `keep_alive`, `tools`, optional
 `think`/`format`) and `POST /api/pull` when the chosen model is not in the tag list. It does
 not call `/api/show` or `/api/version`; those exist for other Ollama clients.
@@ -88,7 +88,7 @@ Requests may also send `X-Amara-Route`, `X-Amara-Tags`, `X-Amara-Mode`, `X-Amara
 The router owns model loading, so on every forwarded request it sets `model`, `keep_alive`
 (fast `-1`, deep `"5m"`), `options.num_ctx` (`fast_num_ctx` / `deep_num_ctx`) and, when the
 caller did not set it, `think` (`fast_think = false`). Callers asking for another context size
-or keep-alive (Home Assistant sends `num_ctx` 8192 and `keep_alive -1`) therefore never force the
+or keep-alive (HA's Ollama integration sends `num_ctx` 8192 and `keep_alive -1`) therefore never force the
 resident model to reload. `<think>…</think>` blocks are removed from content, also while
 streaming (tags split across chunks are held back), and Ollama's separate `thinking` field is dropped.
 
@@ -206,31 +206,31 @@ chmod 600 ~/.config/amara-router/secrets.env
 Then set `secrets_file = "~/.config/amara-router/secrets.env"` in config.toml. The router
 refuses to start if the file is readable by group or others.
 
-## Point Home Assistant at the router
+## Home Assistant does not use the router
 
-If HA runs on this Mac (Docker/VM with host networking), use the loopback listener. If it
-runs on another machine, enable the LAN listener (`lan_bind = "0.0.0.0:8788"` plus the
-secrets file) and allow it through the macOS firewall. Every LAN request needs
-`Authorization: Bearer <AMARA_ROUTER_API_KEY>`. Recent HA versions have an API key field on
-the Ollama integration; if yours does not, HA cannot send the header, so keep HA on the
-loopback listener or put a reverse proxy in front.
+Nothing to set up. Home Assistant is not a router client, and it needs no LLM.
 
-1. Back up first: Settings › System › Backups › Create backup.
-2. Settings › Devices & services › Add integration › **Ollama**.
-3. URL: `http://127.0.0.1:8787` (same host) or `http://<mac-lan-ip>:8788` (LAN). API key: the
-   `AMARA_ROUTER_API_KEY` value if you use the LAN listener.
-4. Add a conversation agent, model **`amara:latest`** (auto routing). It shows as
-   "(downloaded)". `amara-fast:latest` forces fast (best for quick voice commands),
-   `amara-deep:latest` forces deep.
-5. Keep "Think before responding" off. Context window and keep-alive settings are
-   overridden by the router (see above), so the defaults are fine.
-6. Settings › Voice assistants: select the new agent for your assistant.
-7. Test: Assist › "What's the capital of Japan?", then "/deep plan my week".
+Checked read-only on HA 2026.10.4, 2026-11-04: its integrations are `sun`, `analytics`, `go2rtc`,
+`backup`, `shopping_list`, `radio_browser` and `google_translate`, with no Ollama or other LLM
+integration. Its only assist pipeline uses `conversation.home_assistant`, the built-in sentence matcher.
+
+Amara Voice (`amara-voice/ha.py`) and Nexus chat (`src-tauri/src/commands/ha.rs`) call HA themselves.
+HA either handles a home command with its matcher, or answers `no_intent_match`, and then the text goes
+to Hermes, which calls the router. So free-form text reaches the router through Hermes, never through HA.
+
+### If HA ever gets an LLM conversation agent
+
+That is a new decision, not a setup step. `http://127.0.0.1:8787` will not work: HA runs in Docker
+(`amara-voice/homeassistant/docker-compose.yml`), where `127.0.0.1` is the container itself.
+`host.docker.internal:8787` does reach the listener, but the router answers 403 because the Host isn't
+loopback. The supported way is the LAN listener: `lan_bind` plus the secrets file, with
+`http://host.docker.internal:8788` as the URL and `AMARA_ROUTER_API_KEY` in the Ollama integration's
+API key field. That opens a port beyond loopback, so get it approved first.
 
 ## Point Hermes at the router
 
 Done on 2026-11-04, so don't repeat it. Hermes now calls the router, and the old direct Ollama setup is in the backups below.
-Hermes must use the OpenAI path `http://127.0.0.1:8787/v1` (with `/v1`), not bare `:8787`; Home Assistant uses the bare URL.
+Hermes must use the OpenAI path `http://127.0.0.1:8787/v1` (with `/v1`), not bare `:8787`; only Ollama API clients use the bare URL.
 
 `~/.hermes/config.yaml` has this `model:` block:
 
