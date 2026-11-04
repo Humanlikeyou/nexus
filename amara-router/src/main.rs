@@ -44,6 +44,9 @@ async fn main() {
         None => config::Secrets::default(),
     };
     if check {
+        if let Err(e) = config::lan_api_key(&cfg, &secrets) {
+            fail(e);
+        }
         println!(
             "config OK: fast={} deep={} bind={} lan={:?} cloud={} secrets={secrets:?}",
             cfg.models.fast, cfg.models.deep, cfg.bind, cfg.lan_bind, cfg.cloud.anthropic_enabled

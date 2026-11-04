@@ -588,10 +588,13 @@ async fn backend_error_on_every_tier_is_a_clean_502() {
     .await;
     assert_eq!(resp.status(), 502);
     let v: Value = resp.json().await.unwrap();
-    assert!(v["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("model failed to load"));
+    let msg = v["error"]["message"].as_str().unwrap();
+    // Status plus a fixed reason only: the upstream body is never echoed.
+    assert!(
+        msg.contains("500") && msg.contains("request rejected"),
+        "{msg}"
+    );
+    assert!(!msg.contains("model failed to load"), "{msg}");
 }
 
 // ── Ollama down ──────────────────────────────────────────────────────────────

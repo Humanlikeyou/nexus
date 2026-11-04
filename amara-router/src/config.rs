@@ -207,8 +207,14 @@ pub fn expand_home(p: &str) -> PathBuf {
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
+        Self::parse_with(text, outbound_disabled())
+    }
+
+    /// Like [`Config::parse`] but with the `NEXUS_OUTBOUND_DISABLED` value passed in
+    /// (tests use this so they never touch the process environment).
+    pub fn parse_with(text: &str, outbound_disabled: bool) -> Result<Self, String> {
         let cfg: Config = toml::from_str(text).map_err(|e| format!("config: {e}"))?;
-        cfg.validate()?;
+        cfg.validate_with(outbound_disabled)?;
         Ok(cfg)
     }
 
@@ -219,6 +225,11 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_with(outbound_disabled())
+    }
+
+    /// Validates the config; `outbound_disabled` is the `NEXUS_OUTBOUND_DISABLED` state.
+    pub fn validate_with(&self, outbound_disabled: bool) -> Result<(), String> {
         if self.models.fast.trim().is_empty() || self.models.deep.trim().is_empty() {
             return Err(
                 "config: models.fast and models.deep must be set (see `ollama list`)".into(),
@@ -226,6 +237,26 @@ impl Config {
         }
         if !self.ollama_url.starts_with("http://") && !self.ollama_url.starts_with("https://") {
             return Err("config: ollama_url must start with http:// or https://".into());
+        }
+        let host = url_host(&self.ollama_url).ok_or("config: ollama_url has no host")?;
+        if !is_loopback_host(host) {
+            if !self.cloud.anthropic_enabled {
+                return Err("config: ollama_url must be a loopback host (127.0.0.0/8, ::1, localhost) unless cloud.anthropic_enabled is true".into());
+            }
+            if outbound_disabled {
+                return Err("config: ollama_url must be a loopback host while NEXUS_OUTBOUND_DISABLED is set".into());
+            }
+        }
+        // https only; plain http is tolerated solely for a loopback host (a local mock or
+        // proxy), which cannot leak traffic off the Mac.
+        let a = &self.cloud.anthropic_url;
+        let a_ok = match url_host(a) {
+            Some(h) if a.starts_with("https://") => !h.is_empty(),
+            Some(h) if a.starts_with("http://") => is_loopback_host(h),
+            _ => false,
+        };
+        if !a_ok {
+            return Err("config: cloud.anthropic_url must be an https:// URL".into());
         }
         let bind: std::net::SocketAddr = self
             .bind
@@ -249,6 +280,49 @@ impl Config {
     pub fn ollama(&self, path: &str) -> String {
         format!("{}{}", self.ollama_url.trim_end_matches('/'), path)
     }
+}
+
+/// Host part of an `http(s)://host[:port][/...]` URL (brackets kept off IPv6). None if empty.
+fn url_host(url: &str) -> Option<&str> {
+    let rest = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.contains('@') {
+        return None;
+    }
+    let host = if let Some(v6) = authority.strip_prefix('[') {
+        v6.split(']').next().unwrap_or("")
+    } else {
+        authority.rsplit_once(':').map_or(authority, |(h, _)| h)
+    };
+    (!host.is_empty()).then_some(host)
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Minimum length of `AMARA_ROUTER_API_KEY` for the LAN listener.
+pub const MIN_API_KEY_LEN: usize = 24;
+
+/// The one LAN-key rule, used by `run` and by `--check`: when `lan_bind` is set the API key
+/// must be present and at least [`MIN_API_KEY_LEN`] chars. Returns the key (or None if no LAN).
+pub fn lan_api_key(cfg: &Config, secrets: &Secrets) -> Result<Option<String>, String> {
+    if cfg.lan_bind.is_none() {
+        return Ok(None);
+    }
+    secrets
+        .api_key
+        .clone()
+        .filter(|k| k.len() >= MIN_API_KEY_LEN)
+        .map(Some)
+        .ok_or_else(|| {
+            format!("lan_bind needs AMARA_ROUTER_API_KEY ({MIN_API_KEY_LEN}+ chars) in the 0600 secrets file")
+        })
 }
 
 /// Secrets read from the 0600 env file.
@@ -393,5 +467,76 @@ deep = "d:latest"
         assert_eq!(s.api_key.as_deref(), Some("abc"));
         assert!(s.anthropic_key.is_none());
         assert!(!format!("{s:?}").contains("abc"));
+    }
+
+    fn with_ollama(url: &str, cloud: bool) -> String {
+        let mut t = MIN.replace("http://127.0.0.1:11434", url);
+        if cloud {
+            t.push_str("\n[cloud]\nanthropic_enabled = true\n");
+        }
+        t
+    }
+
+    #[test]
+    fn ollama_url_must_be_loopback_unless_cloud_and_outbound_allowed() {
+        for ok in [
+            "http://127.0.0.1:11434",
+            "http://127.5.6.7:11434",
+            "http://localhost:11434",
+            "http://[::1]:11434",
+        ] {
+            assert!(
+                Config::parse_with(&with_ollama(ok, false), true).is_ok(),
+                "{ok}"
+            );
+        }
+        for bad in [
+            "http://192.168.1.5:11434",
+            "http://evil.example.com",
+            "http://127.0.0.1.evil.com:11434",
+            "http://user@127.0.0.1:11434",
+            "http://",
+        ] {
+            assert!(
+                Config::parse_with(&with_ollama(bad, false), false).is_err(),
+                "{bad}"
+            );
+        }
+        let lan = with_ollama("http://192.168.1.5:11434", true);
+        assert!(Config::parse_with(&lan, false).is_ok());
+        let e = Config::parse_with(&lan, true).unwrap_err();
+        assert!(e.contains("NEXUS_OUTBOUND_DISABLED"));
+    }
+
+    #[test]
+    fn anthropic_url_must_be_https() {
+        let t =
+            format!("{MIN}\n[cloud]\nanthropic_url = \"http://api.anthropic.com/v1/messages\"\n");
+        assert!(Config::parse_with(&t, false).unwrap_err().contains("https"));
+        let t = format!("{MIN}\n[cloud]\nanthropic_url = \"ftp://x/y\"\n");
+        assert!(Config::parse_with(&t, false).is_err());
+        let t = format!("{MIN}\n[cloud]\nanthropic_url = \"http://127.0.0.1:9/v1/messages\"\n");
+        assert!(
+            Config::parse_with(&t, false).is_ok(),
+            "loopback mock allowed"
+        );
+    }
+
+    #[test]
+    fn lan_key_rule_is_shared() {
+        let mut c = Config::parse_with(MIN, false).unwrap();
+        let s = |k: &str| Secrets {
+            api_key: Some(k.into()),
+            anthropic_key: None,
+        };
+        assert_eq!(lan_api_key(&c, &Secrets::default()).unwrap(), None);
+        c.lan_bind = Some("0.0.0.0:8788".into());
+        assert!(lan_api_key(&c, &Secrets::default()).is_err());
+        assert!(lan_api_key(&c, &s(&"k".repeat(MIN_API_KEY_LEN - 1))).is_err());
+        let k = "k".repeat(MIN_API_KEY_LEN);
+        assert_eq!(
+            lan_api_key(&c, &s(&k)).unwrap().as_deref(),
+            Some(k.as_str())
+        );
     }
 }

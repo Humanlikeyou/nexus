@@ -141,10 +141,14 @@ impl State {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
-            let v: Value = resp.json().await.map_err(|e| e.to_string())?;
-            if let Some(err) = v["error"].as_str() {
-                return Err(err.to_string());
+                .map_err(|_| "unreachable".to_string())?;
+            let status = resp.status();
+            let v: Value = resp
+                .json()
+                .await
+                .map_err(|_| format!("status {status}: unparseable reply"))?;
+            if v.get("error").is_some() {
+                return Err(format!("status {status}: upstream error"));
             }
             Ok::<String, String>(v["message"]["content"].as_str().unwrap_or("").to_string())
         };
@@ -199,15 +203,13 @@ impl State {
             .json(&b)
             .send()
             .await
-            .map_err(|e| UpstreamError::Unreachable(e.to_string()))?;
+            .map_err(|_| UpstreamError::Unreachable("Ollama: unreachable".into()))?;
         if !resp.status().is_success() {
+            // Never log or return the upstream body: status plus a fixed reason only.
             let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            let msg = serde_json::from_str::<Value>(&text)
-                .ok()
-                .and_then(|v| v["error"].as_str().map(str::to_string))
-                .unwrap_or(text);
-            return Err(UpstreamError::Failed(format!("Ollama {status}: {msg}")));
+            return Err(UpstreamError::Failed(format!(
+                "Ollama {status}: request rejected"
+            )));
         }
         Ok(ndjson_events(resp.bytes_stream()))
     }
@@ -240,13 +242,16 @@ impl State {
             .timeout(Duration::from_secs(90))
             .send()
             .await
-            .map_err(|e| UpstreamError::Unreachable(format!("Anthropic: {e}")))?;
+            .map_err(|_| UpstreamError::Unreachable("Anthropic: unreachable".into()))?;
+        let status = resp.status();
         let v: Value = resp
             .json()
             .await
-            .map_err(|e| UpstreamError::Failed(format!("Anthropic parse: {e}")))?;
-        if let Some(err) = v["error"]["message"].as_str() {
-            return Err(UpstreamError::Failed(format!("Anthropic: {err}")));
+            .map_err(|_| UpstreamError::Failed(format!("Anthropic {status}: unparseable reply")))?;
+        if !status.is_success() || v.get("error").is_some() {
+            return Err(UpstreamError::Failed(format!(
+                "Anthropic {status}: request rejected"
+            )));
         }
         let text: String = v["content"]
             .as_array()

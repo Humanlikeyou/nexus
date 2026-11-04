@@ -19,16 +19,9 @@ pub async fn run(
     let local = tokio::net::TcpListener::bind(&cfg.bind)
         .await
         .map_err(|e| format!("cannot bind {} ({e}); is another router or service using the port? Check with: lsof -nP -iTCP:{} -sTCP:LISTEN", cfg.bind, cfg.bind.rsplit(':').next().unwrap_or("")))?;
-    let lan = match &cfg.lan_bind {
-        Some(addr) => {
-            let key = state
-                .secrets
-                .api_key
-                .clone()
-                .filter(|k| k.len() >= 24)
-                .ok_or(
-                    "lan_bind needs AMARA_ROUTER_API_KEY (24+ chars) in the 0600 secrets file",
-                )?;
+    let lan = match config::lan_api_key(cfg, &state.secrets)? {
+        Some(key) => {
+            let addr = cfg.lan_bind.as_deref().unwrap_or_default();
             let l = tokio::net::TcpListener::bind(addr)
                 .await
                 .map_err(|e| format!("cannot bind LAN {addr}: {e}"))?;
