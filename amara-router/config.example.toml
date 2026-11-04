@@ -17,15 +17,20 @@ fast_keep_alive = -1
 deep_keep_alive = "5m"
 # Sent as options.num_ctx on every Ollama call (requests, classifier, warm-ups) so the model
 # is never loaded at its own default (131072 for gemma4: a 60-140 s cold load on low RAM).
-# 512-262144. Fast default 16384: Hermes's system prompt + tool schemas + recalled memory
-# need more than 8k, and Ollama silently cuts prompts longer than this. Deep default 8192.
-fast_num_ctx = 16384
-# Deep model context. Keep it modest: the KV cache of a 27B model grows fast.
-deep_num_ctx = 8192
+# Range 512-262144. Ollama silently cuts prompts longer than this.
+# Fast default 65536: Hermes refuses any window under 64,000 tokens (MINIMUM_CONTEXT_LENGTH),
+# and real Hermes prompts were 18,235 tokens. Keep Hermes's ollama_num_ctx equal to this value,
+# or Ollama reloads the model when Hermes calls it directly.
+fast_num_ctx = 65536
+# Deep default 32768: the KV cache of a 27B model grows fast, so deep stays below the Hermes
+# floor. Hermes checks its own window, not this one, so a long Hermes session routed to deep
+# can still exceed 32768 tokens and be cut. Raise it only if the GPU budget allows.
+deep_num_ctx = 32768
 # `think` used when the caller does not set it. Fast: off (hidden reasoning costs seconds).
-# Deep: leave unset for the model default, or set true/false.
+# Deep: off. With hidden thinking, deep ran 280 s with no reply and caused 90 s 503s for
+# another client. Set deep_think = true to turn it on; removing the line keeps it off.
 fast_think = false
-# deep_think = true
+deep_think = false
 
 [routing]
 token_threshold = 2000

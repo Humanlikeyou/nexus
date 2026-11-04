@@ -8,6 +8,7 @@ use axum::extract::State as AxState;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post as http_post};
 use axum::Router;
+use futures::StreamExt;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -31,6 +32,8 @@ struct Mock {
     ps_models: Vec<String>,
     /// Delay before a generation (non-classifier /api/chat) answers: a cold model load.
     gen_delay_ms: u64,
+    /// Delay between the byte chunks of a generation: a slow answer.
+    chunk_delay_ms: u64,
     /// Delay before /api/ps answers.
     ps_delay_ms: u64,
     /// size_vram (bytes) reported per model by /api/ps (missing = 0).
@@ -47,7 +50,7 @@ fn is_classifier(b: &Value) -> bool {
 
 async fn mock_chat(AxState(m): AxState<M>, body: Bytes) -> Response {
     let b: Value = serde_json::from_slice(&body).unwrap();
-    let (classifier, delay, reply, fails, pieces, tool, fail_models, gen_delay) = {
+    let (classifier, delay, reply, fails, pieces, tool, fail_models, gen_delay, chunk_delay) = {
         let mut g = m.lock().unwrap();
         g.chats.push(b.clone());
         (
@@ -59,6 +62,7 @@ async fn mock_chat(AxState(m): AxState<M>, body: Bytes) -> Response {
             g.tool_call,
             g.fail_models.clone(),
             g.gen_delay_ms,
+            g.chunk_delay_ms,
         )
     };
     if !classifier && gen_delay > 0 {
@@ -106,7 +110,11 @@ async fn mock_chat(AxState(m): AxState<M>, body: Bytes) -> Response {
         .chunks(9)
         .map(|c| Ok(Bytes::copy_from_slice(c)))
         .collect();
-    Response::new(axum::body::Body::from_stream(futures::stream::iter(chunks)))
+    let paced = futures::stream::iter(chunks).then(move |c| async move {
+        tokio::time::sleep(Duration::from_millis(chunk_delay)).await;
+        c
+    });
+    Response::new(axum::body::Body::from_stream(paced))
 }
 
 async fn start_mock(m: M) -> String {
@@ -442,7 +450,7 @@ async fn slash_deep_goes_deep_stripped_without_classifier() {
     assert_eq!(g[0]["model"], DEEP);
     assert_eq!(g[0]["keep_alive"], "5m");
     assert_eq!(g[0]["options"]["num_ctx"], 2048);
-    assert!(g[0].get("think").is_none(), "deep keeps the model default");
+    assert_eq!(g[0]["think"], false, "deep thinking is off by default");
     assert_eq!(g[0]["messages"][1]["content"], "plan my week");
     assert!(classifier_calls(&r).is_empty());
 }
@@ -1595,4 +1603,81 @@ async fn errors_after_routing_carry_route_headers() {
     .await;
     assert_eq!(resp.status(), 400);
     assert!(!resp.headers().contains_key("x-amara-route"));
+}
+
+// ── client cancellation ──────────────────────────────────────────────────────
+
+async fn route_log_lines(r: &Rig) -> Vec<Value> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Ok(text) = std::fs::read_to_string(&r.log) {
+            let lines: Vec<Value> = text
+                .lines()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect();
+            if !lines.is_empty() || Instant::now() > deadline {
+                return lines;
+            }
+        } else if Instant::now() > deadline {
+            return vec![];
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn client_gone_before_first_token_logs_cancelled() {
+    let mut m = mock("EASY", &["late"]);
+    m.gen_delay_ms = 30_000;
+    let r = rig(m).await;
+    let sent = reqwest::Client::new()
+        .post(format!("{}/v1/chat/completions", r.url))
+        .timeout(Duration::from_millis(400))
+        .json(&oa("/deep hi", false))
+        .send()
+        .await;
+    assert!(sent.is_err(), "the client should have timed out");
+    let lines = route_log_lines(&r).await;
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0]["status"], "cancelled");
+    assert_eq!(lines[0]["route"], "deep");
+    assert_eq!(lines[0]["model"], DEEP);
+    assert_eq!(lines[0]["reason"], "slash_deep");
+    assert!(lines[0]["ts"].is_string() && lines[0]["latency_ms"].is_u64());
+}
+
+#[tokio::test]
+async fn client_gone_mid_stream_logs_cancelled_once() {
+    let mut m = mock("EASY", &["one", "two", "three"]);
+    m.chunk_delay_ms = 100;
+    let r = rig(m).await;
+    let mut resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("Capital of France?", true),
+        &[],
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    assert!(resp.chunk().await.unwrap().is_some());
+    drop(resp);
+    let lines = route_log_lines(&r).await;
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0]["status"], "cancelled");
+    assert_eq!(lines[0]["route"], "fast");
+}
+
+#[tokio::test]
+async fn finished_reply_logs_one_ok_line_and_no_cancelled_line() {
+    let r = rig(mock("EASY", &["Paris."])).await;
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("Capital of France?", true),
+        &[],
+    )
+    .await;
+    resp.text().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let lines = route_log_lines(&r).await;
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0]["status"], "ok");
 }

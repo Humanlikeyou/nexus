@@ -66,24 +66,27 @@ pub struct Models {
     /// Context size the fast model is always loaded with. Every fast request, the classifier
     /// and every warm-up send it as `options.num_ctx`, so callers asking for other sizes never
     /// force a reload (and Ollama never falls back to the model's huge default context).
+    /// Must stay at or above the Hermes floor (see `DEFAULT_FAST_NUM_CTX`).
     #[serde(default = "default_fast_num_ctx")]
     pub fast_num_ctx: u32,
-    /// Context size for the deep model (kept small: a big KV cache on a 27B model costs GBs).
-    #[serde(default = "default_num_ctx")]
+    /// Context size for the deep model (below the Hermes floor: a big KV cache on a 27B model
+    /// costs GBs). A long Hermes session routed to deep can exceed it.
+    #[serde(default = "default_deep_num_ctx")]
     pub deep_num_ctx: u32,
     /// `think` sent to the fast model when the caller did not set it. Default false: the
     /// fast model's hidden reasoning otherwise costs seconds on short answers.
     #[serde(default = "default_fast_think")]
     pub fast_think: Option<bool>,
-    /// `think` sent to the deep model when the caller did not set it (unset = model default).
-    #[serde(default)]
+    /// `think` sent to the deep model when the caller did not set it. Default false: hidden
+    /// reasoning ran 280 s with no reply and blocked other clients behind 503s.
+    #[serde(default = "default_deep_think")]
     pub deep_think: Option<bool>,
 }
 
-/// Default `num_ctx` for both models (see README "Context size").
-pub const DEFAULT_NUM_CTX: u32 = 8192;
-/// Default fast `num_ctx`: Hermes's system prompt + tool schemas + recalled memory need >8k.
-pub const DEFAULT_FAST_NUM_CTX: u32 = 16_384;
+/// Default deep `num_ctx` (see README "Context size").
+pub const DEFAULT_DEEP_NUM_CTX: u32 = 32_768;
+/// Default fast `num_ctx`: Hermes refuses any window under 64,000 tokens.
+pub const DEFAULT_FAST_NUM_CTX: u32 = 65_536;
 /// Accepted `num_ctx` range.
 pub const NUM_CTX_RANGE: std::ops::RangeInclusive<u32> = 512..=262_144;
 /// Accepted `routing.classifier_timeout_ms` range.
@@ -101,11 +104,15 @@ fn default_fast_num_ctx() -> u32 {
     DEFAULT_FAST_NUM_CTX
 }
 
-fn default_num_ctx() -> u32 {
-    DEFAULT_NUM_CTX
+fn default_deep_num_ctx() -> u32 {
+    DEFAULT_DEEP_NUM_CTX
 }
 
 fn default_fast_think() -> Option<bool> {
+    Some(false)
+}
+
+fn default_deep_think() -> Option<bool> {
     Some(false)
 }
 
@@ -560,9 +567,11 @@ deep = "d:latest"
         assert_eq!(c.routing.token_threshold, 2000);
         assert_eq!(c.routing.classifier_timeout_ms, 2000);
         assert_eq!(c.routing.residency_check_timeout_ms, 1000);
-        assert_eq!(c.models.fast_num_ctx, 16384);
+        assert_eq!(c.models.fast_num_ctx, 65536);
+        assert!(c.models.fast_num_ctx >= 64_000, "Hermes floor");
+        assert_eq!(c.models.deep_think, Some(false));
         assert_eq!(c.loading.first_token_timeout_resident_ms, 90_000);
-        assert_eq!(c.models.deep_num_ctx, 8192);
+        assert_eq!(c.models.deep_num_ctx, 32768);
         assert_eq!(c.loading.first_token_timeout_ms, 20_000);
         assert!(c.loading.warm_fast_on_start);
         assert!(!c.loading.warm_deep_on_start);
@@ -632,6 +641,9 @@ deep = "d:latest"
         );
         assert!(c.lan_bind.is_none(), "LAN bind must be off in the example");
         assert_eq!(c.bind, "127.0.0.1:8787");
+        assert_eq!(c.models.fast_num_ctx, DEFAULT_FAST_NUM_CTX);
+        assert_eq!(c.models.deep_num_ctx, DEFAULT_DEEP_NUM_CTX);
+        assert_eq!(c.models.deep_think, Some(false));
     }
 
     #[test]
