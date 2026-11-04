@@ -21,11 +21,8 @@ The Terrance fold-in is scrapped, so don't plan around it. Code names such as `t
    While the app is open, check that a Chat reply shows the right Fast/Deep badge. That check hasn't been done yet.
 3. **Mind-Body QA on live NOOP data.** Test `src-console/screens/MindBodyScreen.tsx` against the real store. Stage 5½ closes
    when this passes.
-4. **Knowledge base ingest.** The knowledge base is empty. Follow `stack/kb/INGEST-PLAN.md`. `scripts/kb-ingest.sh` defaults to
-   a dry run, and `--apply` waits for Taisun's OK.
-5. **Verba recreate and Crew Auth import.** Recreate the `verba` container so it picks up `gemma4:latest`; the live one still
-   has `qwen3.5`. Import the Crew Auth version of the Ingress from `stack/n8n/workflows/eYdwlwZKTMV89z2J.json`. Live n8n still
-   runs the previous crew webhook, so a bad key gets 403 now and should get 401 after the import.
+4. **Knowledge base: done 2026-11-04.** Verba holds the 8 current docs (72 chunks). Weaviate goes read-only at 90% disk, so watch free space. Re-run `scripts/kb-ingest.sh --apply` after doc changes; it doesn't de-duplicate, so remove the old copies afterwards.
+5. **Verba and Crew Auth: done, no action needed.** Verba already runs `gemma4:latest`. Live n8n's Crew Auth logic matches the export, and its hash matches the current crew key.
 6. **Home control, last.** This is deliberately the final step. Don't start it before steps 1 to 5 are done.
 
 ## Key file locations
