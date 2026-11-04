@@ -277,6 +277,67 @@ pub fn classify_reply(reply: &str) -> Decision {
     }
 }
 
+/// Phrases that mark an explicit reasoning ask (matched case-insensitively at a word start).
+pub const HARD_PHRASES: [&str; 13] = [
+    "explain why",
+    "explain how",
+    "step by step",
+    "step-by-step",
+    "prove",
+    "analyze",
+    "analyse",
+    "compare",
+    "debug",
+    "design",
+    "architecture",
+    "trade-off",
+    "tradeoff",
+];
+
+/// Estimated tokens above which a prompt looks hard (well below `token_threshold`).
+pub const HARD_TOKENS: u32 = 300;
+
+/// Cheap "does this look hard" check used when the classifier cannot run. Returns the signal
+/// that matched: `code_block`, `phrase`, `multi_question`, `multi_part` or `long`.
+pub fn looks_hard(text: &str) -> Option<&'static str> {
+    if text.contains("```") {
+        return Some("code_block");
+    }
+    let lower = text.to_lowercase();
+    let at_word_start = |p: &str| {
+        lower.match_indices(p).any(|(i, _)| {
+            lower[..i]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !c.is_alphanumeric())
+        })
+    };
+    if HARD_PHRASES.iter().any(|p| at_word_start(p)) {
+        return Some("phrase");
+    }
+    if text.matches('?').count() >= 2 {
+        return Some("multi_question");
+    }
+    let parts = text
+        .lines()
+        .map(str::trim_start)
+        .filter(|l| {
+            l.starts_with("- ")
+                || l.starts_with("* ")
+                || l.split_once(['.', ')']).is_some_and(|(n, _)| {
+                    !n.is_empty() && n.len() <= 2 && n.chars().all(|c| c.is_ascii_digit())
+                })
+        })
+        .count();
+    if parts >= 2 {
+        return Some("multi_part");
+    }
+    if estimate_tokens(text) > HARD_TOKENS {
+        return Some("long");
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,6 +427,33 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(route("hi", h).0, d(Tier::Deep, "tag=research"));
+    }
+
+    #[test]
+    fn looks_hard_signals() {
+        for (t, want) in [
+            ("fix this ```x```", "code_block"),
+            ("Explain why the sky is blue", "phrase"),
+            ("walk me through it step by step", "phrase"),
+            ("can you PROVE it", "phrase"),
+            ("Compare Rust and Go", "phrase"),
+            ("what is it? and why?", "multi_question"),
+            ("do these:\n1. a\n2. b", "multi_part"),
+            ("- one\n- two", "multi_part"),
+        ] {
+            assert_eq!(looks_hard(t), Some(want), "{t}");
+        }
+        assert_eq!(looks_hard(&"word ".repeat(300)), Some("long"));
+        for easy in [
+            "hello",
+            "what time is it?",
+            "turn on the office light",
+            "improve my mood", // "prove" only at a word start
+            "I like the redesigned app",
+            "1.5 litres of milk",
+        ] {
+            assert_eq!(looks_hard(easy), None, "{easy}");
+        }
     }
 
     #[test]

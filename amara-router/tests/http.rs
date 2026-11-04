@@ -1097,7 +1097,8 @@ async fn first_token_timeout_is_a_fixed_503_and_keeps_warming() {
     let mut m = mock("EASY", &["ok"]);
     m.gen_delay_ms = 3000;
     let r = rig_cfg(m, "", None, false, |c| {
-        c.loading.first_token_timeout_ms = 300
+        c.loading.first_token_timeout_ms = 300;
+        c.loading.first_token_timeout_resident_ms = 300;
     })
     .await;
     for stream in [false, true] {
@@ -1249,4 +1250,202 @@ async fn rewarm_after_deep_is_skipped_when_fast_size_never_seen() {
     .unwrap();
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert!(r.mock.lock().unwrap().generates.is_empty());
+}
+
+// ── /api/ps slow or down: hard-looking heuristic ─────────────────────────────
+
+async fn route_of(r: &Rig, text: &str) -> (String, String) {
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa(text, false),
+        &[],
+    )
+    .await;
+    let h = |k: &str| resp.headers()[k].to_str().unwrap().to_string();
+    (h("x-amara-tier"), h("x-amara-route-reason"))
+}
+
+#[tokio::test]
+async fn slow_ps_within_the_default_timeout_still_runs_the_classifier() {
+    let mut m = mock("HARD", &["ok"]);
+    m.ps_delay_ms = 600; // a model swap: 340-620 ms
+    let r = rig(m).await; // residency_check_timeout_ms default 1000
+    let (tier, reason) = route_of(&r, "hello").await;
+    assert_eq!(
+        (tier.as_str(), reason.as_str()),
+        ("deep", "classifier_hard")
+    );
+    assert_eq!(classifier_calls(&r).len(), 1);
+}
+
+#[tokio::test]
+async fn ps_unavailable_hard_prompt_goes_deep() {
+    let mut m = mock("EASY", &["ok"]);
+    m.ps_fails = true;
+    let r = rig(m).await;
+    for text in [
+        "Explain why my build fails",
+        "compare these two plans",
+        "what is X? how does it relate to Y?",
+    ] {
+        let (tier, reason) = route_of(&r, text).await;
+        assert_eq!(
+            (tier.as_str(), reason.as_str()),
+            ("deep", "ps_unavailable_hard_to_deep"),
+            "{text}"
+        );
+    }
+    assert!(classifier_calls(&r).is_empty());
+}
+
+#[tokio::test]
+async fn ps_unavailable_easy_prompt_goes_fast() {
+    let mut m = mock("HARD", &["ok"]);
+    m.ps_delay_ms = 2000;
+    let r = rig_cfg(m, "", None, false, |c| {
+        c.routing.residency_check_timeout_ms = 100
+    })
+    .await;
+    let (tier, reason) = route_of(&r, "turn on the office light").await;
+    assert_eq!(
+        (tier.as_str(), reason.as_str()),
+        ("fast", "classifier_skipped_ps_unavailable")
+    );
+    assert!(classifier_calls(&r).is_empty());
+}
+
+#[tokio::test]
+async fn fast_not_resident_hard_prompt_goes_deep_only_if_deep_is_loaded() {
+    let mut m = mock("EASY", &["ok"]);
+    m.ps_models = vec![DEEP.into()];
+    let r = rig(m).await;
+    let (tier, reason) = route_of(&r, "debug this for me").await;
+    assert_eq!(
+        (tier.as_str(), reason.as_str()),
+        ("deep", "fast_not_resident_hard_to_deep")
+    );
+    r.mock.lock().unwrap().ps_models.clear(); // nothing loaded: no cold deep load
+    let (tier, reason) = route_of(&r, "debug this for me").await;
+    assert_eq!(
+        (tier.as_str(), reason.as_str()),
+        ("fast", "classifier_skipped_fast_not_resident")
+    );
+    assert!(classifier_calls(&r).is_empty());
+}
+
+// ── first-byte timeout: short while loading, long when resident ─────────────
+// Scaled timings: short = 300 ms (stands for 20 s), resident = 1500 ms (90 s).
+
+async fn ft_rig(m: Mock) -> Rig {
+    rig_cfg(m, "", None, false, |c| {
+        c.loading.first_token_timeout_ms = 300;
+        c.loading.first_token_timeout_resident_ms = 1500;
+    })
+    .await
+}
+
+fn assert_loading_503(resp: &reqwest::Response) {
+    assert_eq!(resp.status(), 503);
+    assert_eq!(resp.headers()["retry-after"], "10");
+}
+
+#[tokio::test]
+async fn resident_model_survives_a_long_silent_prompt_eval() {
+    let mut m = mock("EASY", &["answer"]);
+    m.gen_delay_ms = 800; // > short timeout, < resident timeout (25 s vs 20 s / 90 s)
+    let r = ft_rig(m).await; // fast resident
+    for stream in [false, true] {
+        let resp = post(
+            &format!("{}/v1/chat/completions", r.url),
+            oa("/fast hi", stream),
+            &[],
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+        assert!(resp.text().await.unwrap().contains("answer"));
+    }
+}
+
+#[tokio::test]
+async fn non_resident_model_past_short_timeout_is_503_with_retry_after() {
+    let mut m = mock("EASY", &["answer"]);
+    m.gen_delay_ms = 800;
+    m.ps_models = vec![]; // nothing loaded: it is a cold load
+    let r = ft_rig(m).await;
+    for stream in [false, true] {
+        let resp = post(
+            &format!("{}/v1/chat/completions", r.url),
+            oa("/fast hi", stream),
+            &[],
+        )
+        .await;
+        assert_loading_503(&resp);
+        let body = resp.text().await.unwrap();
+        assert!(body.contains(amara_router::engine::LOADING_MSG));
+    }
+    for stream in [false, true] {
+        let resp = post(
+            &format!("{}/api/chat", r.url),
+            json!({"model": "amara-fast", "stream": stream, "messages": [{"role": "user", "content": "hi"}]}),
+            &[],
+        )
+        .await;
+        assert_loading_503(&resp);
+        assert!(resp
+            .text()
+            .await
+            .unwrap()
+            .contains(amara_router::engine::LOADING_MSG));
+    }
+}
+
+#[tokio::test]
+async fn resident_model_past_long_timeout_is_503() {
+    let mut m = mock("EASY", &["answer"]);
+    m.gen_delay_ms = 2500;
+    let r = ft_rig(m).await;
+    let t = Instant::now();
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/fast hi", false),
+        &[],
+    )
+    .await;
+    assert_loading_503(&resp);
+    assert!(
+        t.elapsed() >= Duration::from_millis(1400),
+        "used the short timeout"
+    );
+}
+
+#[tokio::test]
+async fn ps_unavailable_uses_the_short_timeout() {
+    let mut m = mock("EASY", &["answer"]);
+    m.gen_delay_ms = 800;
+    m.ps_fails = true;
+    let r = ft_rig(m).await;
+    let t = Instant::now();
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/fast hi", false),
+        &[],
+    )
+    .await;
+    assert_loading_503(&resp);
+    assert!(t.elapsed() < Duration::from_millis(800));
+}
+
+#[tokio::test]
+async fn other_errors_have_no_retry_after() {
+    let mut m = mock("EASY", &["answer"]);
+    m.fail_models = vec![FAST.into()];
+    let r = rig(m).await;
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/fast hi", false),
+        &[],
+    )
+    .await;
+    assert_eq!(resp.status(), 502);
+    assert!(resp.headers().get("retry-after").is_none());
 }

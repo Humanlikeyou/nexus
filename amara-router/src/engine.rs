@@ -41,6 +41,9 @@ pub enum UpstreamError {
 /// Fixed client-facing message for a first-token timeout (never includes upstream text).
 pub const LOADING_MSG: &str = "Model loading, try again shortly.";
 
+/// `Retry-After` (seconds) sent with the [`LOADING_MSG`] 503.
+pub const RETRY_AFTER_SECS: u64 = 10;
+
 /// How long a background warm-up may take (a cold load on low RAM was seen at 142 s).
 const WARM_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -122,22 +125,39 @@ impl State {
         let start = Instant::now();
         let d = match route::pre_route(&self.cfg.routing, text, hints, &self.gate(hints)) {
             PreRoute::Decided(d) => d,
-            PreRoute::Classify => match self.fast_resident().await {
-                Ok(true) => self.classify(text).await,
-                // Rules 1-3 (commands, phrases, tokens, code) already ran and did not pick
-                // deep, so the heuristic answer is fast. Start loading it now.
-                not_resident => {
-                    self.spawn_warm(Tier::Fast);
-                    Decision {
-                        tier: Tier::Fast,
-                        reason: if not_resident.is_ok() {
-                            "classifier_skipped_fast_not_resident".into()
+            PreRoute::Classify => {
+                let t = Duration::from_millis(self.cfg.routing.residency_check_timeout_ms);
+                let resident = self.ps_within(t).await.map(|ps| {
+                    let has = |m: &str| ps.iter().any(|(n, _)| same_model(n, m));
+                    (has(&self.cfg.models.fast), has(&self.cfg.models.deep))
+                });
+                let hard = route::looks_hard(text).is_some();
+                let decided = |tier, reason: &str| Decision {
+                    tier,
+                    reason: reason.into(),
+                };
+                match resident {
+                    Ok((true, _)) => self.classify(text).await,
+                    // Fast not loaded: the classifier would only time out. Load fast; send a
+                    // hard-looking prompt to deep only if deep is already loaded (no cold load).
+                    Ok((false, deep_loaded)) => {
+                        self.spawn_warm(Tier::Fast);
+                        if hard && deep_loaded {
+                            decided(Tier::Deep, "fast_not_resident_hard_to_deep")
                         } else {
-                            "classifier_skipped_ps_unavailable".into()
-                        },
+                            decided(Tier::Fast, "classifier_skipped_fast_not_resident")
+                        }
+                    }
+                    // /api/ps slow or down (e.g. mid model swap): residency unknown.
+                    Err(_) => {
+                        if hard {
+                            decided(Tier::Deep, "ps_unavailable_hard_to_deep")
+                        } else {
+                            decided(Tier::Fast, "classifier_skipped_ps_unavailable")
+                        }
                     }
                 }
-            },
+            }
         };
         (d, start.elapsed().as_millis() as u64)
     }
@@ -250,7 +270,19 @@ impl State {
             let first = bytes.next().await;
             Ok((first, bytes))
         };
-        let timeout = Duration::from_millis(self.cfg.loading.first_token_timeout_ms);
+        // Short timeout only while the model is (or may be) loading; a resident model can be
+        // silent for a long prompt evaluation.
+        let resident = self
+            .ps_within(Duration::from_millis(
+                self.cfg.routing.residency_check_timeout_ms,
+            ))
+            .await
+            .is_ok_and(|ps| ps.iter().any(|(n, _)| same_model(n, self.model_for(tier))));
+        let timeout = Duration::from_millis(if resident {
+            self.cfg.loading.first_token_timeout_resident_ms
+        } else {
+            self.cfg.loading.first_token_timeout_ms
+        });
         match tokio::time::timeout(timeout, first_byte).await {
             Ok(Ok((first, rest))) => Ok(ndjson_events(
                 futures::stream::iter(first).chain(rest).boxed(),
@@ -457,13 +489,6 @@ impl State {
                 me.warming_flag(tier).store(false, Ordering::SeqCst);
             }
         }))
-    }
-
-    /// Whether the fast model is loaded, per `/api/ps` within `residency_check_timeout_ms`.
-    pub async fn fast_resident(&self) -> Result<bool, String> {
-        let t = Duration::from_millis(self.cfg.routing.residency_check_timeout_ms);
-        let loaded = self.loaded_models_within(t).await?;
-        Ok(loaded.iter().any(|m| same_model(m, &self.cfg.models.fast)))
     }
 
     /// Names of the models Ollama has loaded.

@@ -157,7 +157,14 @@ fn error_response(api: Api, status: u16, msg: &str) -> Response {
         }
         Api::Ollama => json!({"error": msg}),
     };
-    (code, axum::Json(body)).into_response()
+    let mut r = (code, axum::Json(body)).into_response();
+    if status == 503 && msg == crate::engine::LOADING_MSG {
+        r.headers_mut().insert(
+            header::RETRY_AFTER,
+            HeaderValue::from(crate::engine::RETRY_AFTER_SECS),
+        );
+    }
+    r
 }
 
 /// Index of the latest user message and its text.

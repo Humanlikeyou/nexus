@@ -86,6 +86,22 @@ streaming (tags split across chunks are held back), and Ollama's separate `think
 
 - Fast stays resident (`keep_alive = -1`), warmed at start (`warm_fast_on_start`).
 - Deep loads on demand and unloads after 5 idle minutes (`deep_keep_alive = "5m"`).
+- `fast_num_ctx` defaults to 16384 (Hermes prompts with tools and memory exceed 8k),
+  `deep_num_ctx` to 8192. Both are sent as `options.num_ctx` on every Ollama call.
+- First-byte timeout: if the target model is not resident per `/api/ps` (or `/api/ps` does
+  not answer), Ollama must send a byte within `first_token_timeout_ms` (20 s); if it is
+  resident, within `first_token_timeout_resident_ms` (90 s, since prompt evaluation streams
+  nothing). Otherwise the reply is HTTP 503 "Model loading, try again shortly." with
+  `Retry-After: 10`, on both APIs, streamed or not; the load continues in the background.
+- Before the classifier runs, the router checks `/api/ps` (`residency_check_timeout_ms`,
+  default 1000; a model swap makes it take 340-620 ms). If `/api/ps` does not answer in time,
+  the classifier is skipped and a *hard-looking* prompt goes deep (`ps_unavailable_hard_to_deep`),
+  anything else fast (`classifier_skipped_ps_unavailable`). If fast is not loaded, the
+  classifier is skipped and fast is loaded; a hard-looking prompt goes deep only when deep is
+  already loaded (`fast_not_resident_hard_to_deep`). Hard-looking (`route::looks_hard`): a ```
+  code block, a reasoning phrase (explain why/how, step by step, prove, analyze/analyse,
+  compare, debug, design, architecture, trade-off/tradeoff, as a word start, any case), two or
+  more `?`, two or more numbered/bulleted lines, or over 300 estimated tokens.
 - After a deep answer the router checks `/api/ps` once and re-warms fast only if the loaded
   models' `size_vram` plus fast's last seen `size_vram` fits `gpu_budget_gb` (default 21).
   If fast's size was never seen, or `/api/ps` fails, it skips; the next fast request loads it.
@@ -224,7 +240,7 @@ Nothing below has been applied; Taisun applies it. Hermes must use the OpenAI pa
      base_url: http://127.0.0.1:8787/v1
      api_mode: chat_completions
      context_length: 131072                # unchanged
-     ollama_num_ctx: 8192                  # ignored by the router (it uses fast_num_ctx); keep equal
+     ollama_num_ctx: 16384                 # ignored by the router (it uses fast_num_ctx); keep equal
      max_tokens: 4096
    ```
 

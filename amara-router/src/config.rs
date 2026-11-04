@@ -66,7 +66,7 @@ pub struct Models {
     /// Context size the fast model is always loaded with. Every fast request, the classifier
     /// and every warm-up send it as `options.num_ctx`, so callers asking for other sizes never
     /// force a reload (and Ollama never falls back to the model's huge default context).
-    #[serde(default = "default_num_ctx")]
+    #[serde(default = "default_fast_num_ctx")]
     pub fast_num_ctx: u32,
     /// Context size for the deep model (kept small: a big KV cache on a 27B model costs GBs).
     #[serde(default = "default_num_ctx")]
@@ -82,6 +82,8 @@ pub struct Models {
 
 /// Default `num_ctx` for both models (see README "Context size").
 pub const DEFAULT_NUM_CTX: u32 = 8192;
+/// Default fast `num_ctx`: Hermes's system prompt + tool schemas + recalled memory need >8k.
+pub const DEFAULT_FAST_NUM_CTX: u32 = 16_384;
 /// Accepted `num_ctx` range.
 pub const NUM_CTX_RANGE: std::ops::RangeInclusive<u32> = 512..=262_144;
 /// Accepted `routing.classifier_timeout_ms` range.
@@ -92,6 +94,12 @@ pub const RESIDENCY_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 50..=2_000;
 pub const GPU_BUDGET_GB_RANGE: std::ops::RangeInclusive<f64> = 1.0..=512.0;
 /// Accepted `loading.first_token_timeout_ms` range.
 pub const FIRST_TOKEN_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 1_000..=300_000;
+/// Accepted `loading.first_token_timeout_resident_ms` range.
+pub const FIRST_TOKEN_RESIDENT_RANGE: std::ops::RangeInclusive<u64> = 1_000..=600_000;
+
+fn default_fast_num_ctx() -> u32 {
+    DEFAULT_FAST_NUM_CTX
+}
 
 fn default_num_ctx() -> u32 {
     DEFAULT_NUM_CTX
@@ -141,7 +149,7 @@ impl Default for Routing {
             ],
             classifier: true,
             classifier_timeout_ms: 2000,
-            residency_check_timeout_ms: 250,
+            residency_check_timeout_ms: 1000,
             classifier_max_chars: 400,
         }
     }
@@ -167,6 +175,9 @@ pub struct Loading {
     /// Ollama must send its first byte within this time (1000-300000 ms), or the request gets
     /// a 503 "model loading" reply while the load continues in the background.
     pub first_token_timeout_ms: u64,
+    /// First-byte timeout when the model is already resident per `/api/ps` (1000-600000 ms).
+    /// Ollama streams nothing during prompt evaluation, so long prompts need longer.
+    pub first_token_timeout_resident_ms: u64,
 }
 
 impl Default for Loading {
@@ -178,6 +189,7 @@ impl Default for Loading {
             poll_secs: 20,
             gpu_budget_gb: 21.0,
             first_token_timeout_ms: 20_000,
+            first_token_timeout_resident_ms: 90_000,
         }
     }
 }
@@ -316,6 +328,11 @@ impl Config {
                 "loading.first_token_timeout_ms",
                 self.loading.first_token_timeout_ms,
                 FIRST_TOKEN_TIMEOUT_RANGE,
+            ),
+            (
+                "loading.first_token_timeout_resident_ms",
+                self.loading.first_token_timeout_resident_ms,
+                FIRST_TOKEN_RESIDENT_RANGE,
             ),
         ] {
             if !r.contains(&v) {
@@ -542,8 +559,9 @@ deep = "d:latest"
         let c = Config::parse(MIN).unwrap();
         assert_eq!(c.routing.token_threshold, 2000);
         assert_eq!(c.routing.classifier_timeout_ms, 2000);
-        assert_eq!(c.routing.residency_check_timeout_ms, 250);
-        assert_eq!(c.models.fast_num_ctx, 8192);
+        assert_eq!(c.routing.residency_check_timeout_ms, 1000);
+        assert_eq!(c.models.fast_num_ctx, 16384);
+        assert_eq!(c.loading.first_token_timeout_resident_ms, 90_000);
         assert_eq!(c.models.deep_num_ctx, 8192);
         assert_eq!(c.loading.first_token_timeout_ms, 20_000);
         assert!(c.loading.warm_fast_on_start);
@@ -580,6 +598,9 @@ deep = "d:latest"
         assert!(with("loading", "first_token_timeout_ms = 500").is_err());
         assert!(with("loading", "first_token_timeout_ms = 300001").is_err());
         assert!(with("loading", "first_token_timeout_ms = 30000").is_ok());
+        assert!(with("loading", "first_token_timeout_resident_ms = 999").is_err());
+        assert!(with("loading", "first_token_timeout_resident_ms = 600001").is_err());
+        assert!(with("loading", "first_token_timeout_resident_ms = 600000").is_ok());
         assert!(with("loading", "gpu_budget_gb = 0.5").is_err());
         assert!(with("loading", "gpu_budget_gb = 1000.0").is_err());
         assert!(with("loading", "gpu_budget_gb = nan").is_err());
