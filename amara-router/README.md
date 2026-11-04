@@ -96,8 +96,10 @@ streaming (tags split across chunks are held back), and Ollama's separate `think
 
 - Fast stays resident (`keep_alive = -1`), warmed at start (`warm_fast_on_start`).
 - Deep loads on demand and unloads after 5 idle minutes (`deep_keep_alive = "5m"`).
-- `fast_num_ctx` defaults to 16384 (Hermes prompts with tools and memory exceed 8k),
-  `deep_num_ctx` to 8192. Both are sent as `options.num_ctx` on every Ollama call.
+- `fast_num_ctx` defaults to 65536, because Hermes refuses a window under 64,000 tokens.
+  `deep_num_ctx` defaults to 32768, because the deep model's KV cache grows fast. Both are sent
+  as `options.num_ctx` on every Ollama call, and Ollama silently cuts longer prompts.
+- `deep_think` defaults to false. Hidden thinking on deep ran 280 s with no reply.
 - First-byte timeout: if the target model is not resident per `/api/ps` (or `/api/ps` does
   not answer), Ollama must send a byte within `first_token_timeout_ms` (20 s); if it is
   resident, within `first_token_timeout_resident_ms` (90 s, since prompt evaluation streams
@@ -227,38 +229,54 @@ loopback listener or put a reverse proxy in front.
 
 ## Point Hermes at the router
 
-Hermes today calls Ollama's OpenAI API directly (`~/.hermes/config.yaml`:
-`model.base_url: http://localhost:11434/v1`, `model.default: gemma4-12b-uncensored`), so the
-router never sees Amara's chat and Nexus can't show a Fast/Deep badge (it shows none).
-Nothing below has been applied; Taisun applies it. Hermes must use the OpenAI path `http://127.0.0.1:8787/v1` (with `/v1`), not bare `:8787`; Home Assistant uses the bare URL.
+Done on 2026-11-04, so don't repeat it. Hermes now calls the router, and the old direct Ollama setup is in the backups below.
+Hermes must use the OpenAI path `http://127.0.0.1:8787/v1` (with `/v1`), not bare `:8787`; Home Assistant uses the bare URL.
 
-1. Back up (keep the file name; it is how you roll back):
+`~/.hermes/config.yaml` has this `model:` block:
 
-   ```bash
-   cp -p ~/.hermes/config.yaml ~/.hermes/config.yaml.backup-before-amara-router-$(date +%Y%m%d%H%M%S)
-   ls -l ~/.hermes/config.yaml.backup-before-amara-router-*
-   ```
+```yaml
+model:
+  default: amara                        # auto routing; amara-fast / amara-deep to pin a tier
+  provider: custom
+  base_url: http://127.0.0.1:8787/v1
+  api_mode: chat_completions
+  context_length: 65536
+  ollama_num_ctx: 65536
+  max_tokens: 4096
+```
 
-2. Install and start the router (see Install above) and check `curl -s 127.0.0.1:8787/health`.
+It also sets `agent.api_max_retries: 4` and `platform_toolsets.api_server` to cronjob, file, memory, session_search,
+skills, terminal, todo and web. `SOUL.md` is unchanged.
 
-3. Edit only the `model:` block in `~/.hermes/config.yaml`:
+### Why context_length and ollama_num_ctx are 65536
 
-   ```yaml
-   model:
-     default: amara                        # auto routing; amara-fast / amara-deep to pin a tier
-     provider: custom
-     base_url: http://127.0.0.1:8787/v1
-     api_mode: chat_completions
-     context_length: 131072                # unchanged
-     ollama_num_ctx: 16384                 # ignored by the router (it uses fast_num_ctx); keep equal
-     max_tokens: 4096
-   ```
+- Hermes refuses a window under 64,000 tokens (`MINIMUM_CONTEXT_LENGTH` in `agent/model_metadata.py`). The old
+  `ollama_num_ctx: 16384` can't be used.
+- The router ignores `ollama_num_ctx` and sends `fast_num_ctx`, but Hermes still reads both keys for its own window.
+- Keep `context_length`, `ollama_num_ctx` and `fast_num_ctx` equal. Ollama silently cuts any prompt longer than
+  `num_ctx`, so `context_length: 131072` over a 16384 router window would lose text with no error.
+- Deep stays at 32768, below the Hermes floor. Hermes doesn't check that window, so a long session routed to deep can be cut.
 
-4. Restart the Hermes gateway the way you normally do (Hermes desktop app, or stop/start
-   `hermes gateway run`). Then send Amara a message and watch
-   `tail -f ~/Library/Logs/amara-router/routes.jsonl`: one line per model call.
+### Verify
 
-5. Roll back: copy the backup over `config.yaml` and restart Hermes.
+```bash
+curl -s 127.0.0.1:8787/health                       # status ok, Ollama up
+curl -s 127.0.0.1:11434/api/ps                      # context_length 65536 on the fast model
+tail -f ~/Library/Logs/amara-router/routes.jsonl    # one line per model call
+```
+
+Hermes may answer `503 runtime_draining` for up to a minute after a restart. Wait and try again.
+Restart it with `launchctl kickstart -k gui/$(id -u)/ai.hermes.gateway`.
+
+### Roll back
+
+Restore Hermes first, then the router config. Full commands: `TAISUN-STEPS.md` section 5.
+
+- `~/.hermes/config.yaml.backup-before-amara-router-20261104152031` and
+  `~/.hermes/config.yaml.backup-before-hermes-edits-20261104152924` are identical. Both return Hermes to Ollama directly,
+  with `context_length` and `ollama_num_ctx` at 131072.
+- `~/.config/amara-router/config.toml.backup-20261104152924` holds `fast_num_ctx` 16384 and `deep_num_ctx` 8192. Never
+  restore it while Hermes uses the router: Ollama would cut Hermes's prompts silently.
 
 ### What changes once Hermes uses the router (checked in the Hermes source, read-only)
 

@@ -179,7 +179,9 @@ This stage turns Amara from semi-autonomous to fully autonomous.
 - [x] Amara Router (`amara-router/`, 127.0.0.1:8787, LaunchAgent `com.taisun.amara-router`) picks fast/deep; Nexus `llm_router.rs` is a thin client (1c769c3, ce2b612)
 - [x] Chat routed through Hermes over HTTP (127.0.0.1:8642); fixes the broken `nexus_runtime` bridge from 84e57f1; Fast/Deep badge and Deep toggle (6206c38)
 - [x] Chat & Agents › Voice panel for Amara Voice (6399560)
-- [ ] Switch-over (Taisun, manual): install the router LaunchAgent and point Hermes at `http://127.0.0.1:8787/v1` (`TAISUN-STEPS.md`); Home Assistant per `amara-router/README.md`
+- [x] Switch-over: router LaunchAgent installed and Hermes pointed at `http://127.0.0.1:8787/v1`, applied 2026-11-04 (`TAISUN-STEPS.md`)
+- [x] Voice bridge: live state and level events from Amara Voice to the console (f7eea69, f5a2e25)
+- [ ] Home Assistant pointed at the router, per `amara-router/README.md`
 - [ ] Mind-Body page (planned)
 
 ---

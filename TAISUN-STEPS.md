@@ -1,71 +1,140 @@
-# Taisun's manual steps: Amara Router + Hermes
+# Taisun's steps: Amara Router, Hermes and the voice bridge
 
-Only Taisun runs these. Nothing here has been applied. Full details: `amara-router/README.md`.
-State checked 2026-11-04: no router installed yet (`~/.local/bin/amara-router`, `~/.config/amara-router/` and the
-router plist are absent). Hermes runs as LaunchAgent `ai.hermes.gateway` with `model.base_url: http://localhost:11434/v1`.
+Sections 1 to 3 are already done. They were approved by Taisun and applied on 2026-11-04, so don't run them again.
+Use section 4 to check the setup and section 5 to roll it back. Full details: `amara-router/README.md`.
 No secret values belong in this file.
 
-## 1. Back up first
+## 1. Done: backups
 
-```bash
-TS=$(date +%Y%m%d%H%M%S)
-cp -p ~/.hermes/config.yaml ~/.hermes/config.yaml.backup-before-amara-router-$TS
-cp -p ~/Library/LaunchAgents/ai.hermes.gateway.plist ~/ai.hermes.gateway.plist.backup-$TS
-# Only if a router plist already exists from an earlier try:
-[ -f ~/Library/LaunchAgents/com.taisun.amara-router.plist ] && cp -p ~/Library/LaunchAgents/com.taisun.amara-router.plist ~/com.taisun.amara-router.plist.backup-$TS
-ls -l ~/.hermes/config.yaml.backup-before-amara-router-* ~/*.backup-$TS
+Taken before the changes. `cp -p` kept the original file dates.
+
+| Backup | Holds |
+|---|---|
+| `~/.hermes/config.yaml.backup-before-amara-router-20261104152031` | Hermes before the router |
+| `~/.hermes/config.yaml.backup-before-hermes-edits-20261104152924` | The same bytes as the file above |
+| `~/.config/amara-router/config.toml.backup-20261104152924` | Router config with `fast_num_ctx` 16384, `deep_num_ctx` 8192 |
+| `~/ai.hermes.gateway.plist.backup-20261104152031` | Hermes LaunchAgent (never edited) |
+
+The two Hermes backups are identical. Both go back to Hermes calling Ollama directly. Neither one undoes only the tuning.
+
+## 2. Done: router
+
+LaunchAgent `com.taisun.amara-router` runs on `127.0.0.1:8787`, with `NEXUS_OUTBOUND_DISABLED=1` and `Umask` 63.
+The binary is `~/.local/bin/amara-router` and the config is `~/.config/amara-router/config.toml`.
+
+```toml
+[models]
+fast_num_ctx = 65536
+deep_num_ctx = 32768
+deep_think = false
 ```
 
-## 2. Install and load the router LaunchAgent
+Claude stays off: `[cloud] anthropic_enabled = false`, and no secrets file.
 
-```bash
-cd ~/projects/nexus-amara/amara-router
-cargo build --release && cargo test
-mkdir -p ~/.local/bin && cp target/release/amara-router ~/.local/bin/amara-router
-mkdir -p ~/.config/amara-router && chmod 700 ~/.config/amara-router
-cp config.example.toml ~/.config/amara-router/config.toml && chmod 600 ~/.config/amara-router/config.toml
-ollama list    # model names in config.toml must match (fast/deep under [models])
-~/.local/bin/amara-router --config ~/.config/amara-router/config.toml --check
-lsof -nP -iTCP:8787 -sTCP:LISTEN    # no output = port free
-mkdir -p ~/Library/Logs/amara-router
-sed "s#__HOME__#$HOME#g" launchd/com.taisun.amara-router.plist > ~/Library/LaunchAgents/com.taisun.amara-router.plist
-plutil -lint ~/Library/LaunchAgents/com.taisun.amara-router.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.taisun.amara-router.plist
-curl -s 127.0.0.1:8787/health
-```
+## 3. Done: Hermes
 
-Claude stays off: leave `[cloud] anthropic_enabled = false` and skip the secrets file unless you decide otherwise.
-
-## 3. Point Hermes at the router
-
-Edit only the `model:` block in `~/.hermes/config.yaml`:
+`~/.hermes/config.yaml` now has this `model:` block:
 
 ```yaml
 model:
   default: amara            # auto routing; amara-fast / amara-deep pin a tier
   provider: custom
   base_url: http://127.0.0.1:8787/v1
+  api_mode: chat_completions
+  context_length: 65536
+  ollama_num_ctx: 65536
+  max_tokens: 4096
 ```
 
-Keep the `/v1`: Hermes uses the OpenAI API, and Nexus detects the router by this URL. Leave the other keys as they are.
-Restart Hermes: `launchctl kickstart -k gui/$(id -u)/ai.hermes.gateway`
+Two other keys changed:
+
+```yaml
+agent:
+  api_max_retries: 4        # Hermes default is 3
+platform_toolsets:
+  api_server: [cronjob, file, memory, session_search, skills, terminal, todo, web]
+```
+
+`SOUL.md` is unchanged.
+
+Why these values:
+
+- Keep the `/v1`. Hermes uses the OpenAI API, and Nexus detects the router by this URL.
+- Hermes refuses a window under 64,000 tokens (`MINIMUM_CONTEXT_LENGTH`), so `ollama_num_ctx: 16384` can't be used.
+- `context_length` must match `fast_num_ctx`. Ollama silently cuts any prompt longer than `num_ctx`, so
+  `context_length: 131072` would tell Hermes it has far more room than the router gives it.
+- Deep stays at 32768 to save memory, and Hermes doesn't check that window. A long session routed to deep can still be cut.
 
 ## 4. Verify
 
 ```bash
-curl -s 127.0.0.1:8787/health                         # status ok, Ollama up
+curl -s 127.0.0.1:8787/health                          # status ok, Ollama up, cloud off
+curl -s 127.0.0.1:11434/api/ps                         # context_length 65536 on the fast model
+plutil -p ~/Library/LaunchAgents/com.taisun.amara-router.plist | grep -E 'NEXUS_OUTBOUND_DISABLED|Umask'
+grep -E '^(fast_num_ctx|deep_num_ctx|deep_think)' ~/.config/amara-router/config.toml
+grep -A7 '^model:' ~/.hermes/config.yaml
 tail -f ~/Library/Logs/amara-router/routes.jsonl       # then send Amara a message: one line per model call
 ```
 
-In Amara OS › Chat & Agents › Chat, a reply now shows a Fast/Deep badge and the Deep toggle is enabled.
+In Amara OS › Chat & Agents › Chat, a reply shows a Fast/Deep badge and the Deep toggle is enabled.
+
+Hermes may answer `503 runtime_draining` for up to a minute after a restart. Wait and try again.
 
 ## 5. Roll back
 
+This returns Hermes to Ollama directly and removes the router:
+
 ```bash
-cp -p ~/.hermes/config.yaml.backup-before-amara-router-<TS> ~/.hermes/config.yaml
+cp -p ~/.hermes/config.yaml.backup-before-amara-router-20261104152031 ~/.hermes/config.yaml
 launchctl kickstart -k gui/$(id -u)/ai.hermes.gateway
 launchctl bootout gui/$(id -u)/com.taisun.amara-router
-rm ~/Library/LaunchAgents/com.taisun.amara-router.plist   # or restore your backup copy of it
+rm ~/Library/LaunchAgents/com.taisun.amara-router.plist
+cp -p ~/.config/amara-router/config.toml.backup-20261104152924 ~/.config/amara-router/config.toml
 ```
 
-The Hermes plist was never edited; restore `~/ai.hermes.gateway.plist.backup-<TS>` only if it changed.
+- The restored file also removes `agent.api_max_retries` and `platform_toolsets.api_server`, and sets `context_length` and
+  `ollama_num_ctx` back to 131072. The first reply can be slow while Ollama reloads the model at that size.
+- Never restore the router config alone. With Hermes on the router, 16384 cuts its prompts silently.
+- To undo only the tuning, edit the values by hand and keep `context_length`, `ollama_num_ctx` and `fast_num_ctx` equal
+  and at 64,000 or more. Then restart both:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.taisun.amara-router
+launchctl kickstart -k gui/$(id -u)/ai.hermes.gateway
+```
+
+The Hermes plist was never edited, so `~/ai.hermes.gateway.plist.backup-20261104152031` is needed only if it changes.
+
+## 6. Voice bridge
+
+The bridge shows Amara Voice's live state and sound level in Amara OS. Nothing here changes Hermes or the router.
+
+- **State:** Amara OS reads `~/projects/amara-voice/logs/state` and checks for the `amara_voice.py` process. It emits
+  `amara-voice://state` on each change and every 5 seconds.
+- **Level:** Amara OS connects to `ws://127.0.0.1:8791/level`, published by `level_feed.py` in amara-voice at about 30 Hz.
+  It emits `amara-voice://level`. Frames carry level and state only, never audio. The feed binds to loopback only.
+- **Port:** 8791 on both sides. To move it, set `AMARA_LEVEL_PORT` for amara-voice and `NEXUS_AMARA_VOICE_LEVEL_PORT` for
+  Amara OS to the same value.
+
+**Start.** There is nothing to start by hand. The bridge starts when the Voice panel or a live Amara lens opens, and stops
+when the last one closes. If Amara Voice isn't running, the state reads as unavailable and no level events arrive.
+
+To start Amara Voice itself, use Start in Chat & Agents › Voice. Or run it by hand:
+
+```bash
+cd ~/projects/amara-voice && ~/projects/ming-mac/.venv/bin/python -u amara_voice.py
+```
+
+`./amara start` works only after `./amara install`, which sets up LaunchAgent `com.thevisualdude.amara-voice`.
+As of 2026-11-04 that LaunchAgent isn't installed and Amara Voice isn't running.
+
+**Verify.** With Amara Voice running:
+
+```bash
+lsof -nP -iTCP:8791 -sTCP:LISTEN    # one listener on 127.0.0.1
+cat ~/projects/amara-voice/logs/state
+```
+
+**Roll back.** Start Amara Voice with `AMARA_LEVEL_FEED=0` in its process environment. Don't put it in `.env`: `level_feed.py`
+reads the variable before `.env` loads. The voice loop keeps running, the level meter stays at zero, and state events
+continue. The bridge stores nothing, so there is no data to restore. The code is in commits `f7eea69` and `f5a2e25`.
