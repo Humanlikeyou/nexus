@@ -49,8 +49,9 @@ const HERMES_FAILED: &str = "Hermes could not complete the request.";
 pub struct NexusRuntimeBridge {
     /// Serializes turns (Hermes is single-request here).
     turn: Mutex<()>,
-    /// conversation id → system message. Hermes derives its session id from the system prompt
-    /// + first user message, so a conversation keeps one system message to stay one session.
+    /// conversation id → stable system prefix (policy only, no per-turn context). Hermes derives
+    /// its session id from the system prompt + first user message, so a conversation keeps one
+    /// prefix to stay one session; fresh context travels in a separate message each turn.
     system_prompts: std::sync::Mutex<HashMap<String, String>>,
 }
 
@@ -82,6 +83,9 @@ pub struct HermesReply {
 /// One chat turn as Hermes will see it.
 pub struct HermesTurn<'a> {
     pub system: String,
+    /// This turn's background sections, rebuilt every turn (empty = none). Sent as a system
+    /// message just before the new user message, so the cached prefix never changes.
+    pub context: String,
     pub history: &'a [ChatTurn],
     pub message: &'a str,
 }
@@ -172,8 +176,9 @@ pub fn outgoing_message(message: &str, deep: bool, routed: bool) -> String {
     }
 }
 
-/// OpenAI chat body: one system message, the full history, then the new user message.
-pub fn chat_body(system: &str, history: &[ChatTurn], message: &str) -> Value {
+/// OpenAI chat body: the stable system prefix, the full history, this turn's fresh context
+/// (if any) as a system message, then the new user message.
+pub fn chat_body(system: &str, context: &str, history: &[ChatTurn], message: &str) -> Value {
     let mut messages = Vec::with_capacity(history.len() + 2);
     if !system.trim().is_empty() {
         messages.push(json!({"role": "system", "content": system}));
@@ -188,6 +193,9 @@ pub fn chat_body(system: &str, history: &[ChatTurn], message: &str) -> Value {
             continue;
         }
         messages.push(json!({"role": role, "content": turn.content}));
+    }
+    if !context.trim().is_empty() {
+        messages.push(json!({"role": "system", "content": context}));
     }
     messages.push(json!({"role": "user", "content": message}));
     json!({"stream": false, "messages": messages})
@@ -492,7 +500,7 @@ impl NexusRuntimeBridge {
             env_value(&env_text, "API_SERVER_KEY").ok_or_else(|| HERMES_NO_KEY.to_string())?;
         let base = hermes_base(&env_text);
         let key = session_key(std::env::var(SESSION_KEY_ENV).ok().as_deref());
-        let body = chat_body(&turn.system, turn.history, turn.message);
+        let body = chat_body(&turn.system, &turn.context, turn.history, turn.message);
         let _guard = self.turn.lock().await;
         send_turn(&HttpTransport::default(), &base, &api_key, &key, &body).await
     }
@@ -616,7 +624,7 @@ mod tests {
                 content: "  ".into(),
             },
         ];
-        let body = chat_body("policy", &history, "three");
+        let body = chat_body("policy", "", &history, "three");
         let roles: Vec<_> = body["messages"]
             .as_array()
             .unwrap()
@@ -800,11 +808,57 @@ mod tests {
     }
 
     #[test]
-    fn a_conversation_keeps_its_first_system_prompt() {
+    fn a_conversation_keeps_its_prefix_while_context_refreshes_each_turn() {
         let bridge = NexusRuntimeBridge::default();
-        assert_eq!(bridge.system_prompt_for("c1", || "first".into()), "first");
-        assert_eq!(bridge.system_prompt_for("c1", || "second".into()), "first");
+        assert_eq!(bridge.system_prompt_for("c1", || "policy".into()), "policy");
+        assert_eq!(
+            bridge.system_prompt_for("c1", || "changed".into()),
+            "policy"
+        );
         assert_eq!(bridge.system_prompt_for("c2", || "other".into()), "other");
+        // Same prefix and first user message on every turn (one Hermes session), but each
+        // turn carries its own fresh context right before the new message.
+        let history = vec![
+            ChatTurn {
+                role: "user".into(),
+                content: "one".into(),
+            },
+            ChatTurn {
+                role: "assistant".into(),
+                content: "two".into(),
+            },
+        ];
+        let t1 = chat_body(
+            "policy",
+            "<nexus_priorities>\nold\n</nexus_priorities>",
+            &[],
+            "one",
+        );
+        let t2 = chat_body(
+            "policy",
+            "<nexus_priorities>\nnew\n</nexus_priorities>",
+            &history,
+            "three",
+        );
+        assert_eq!(t1["messages"][0], t2["messages"][0]);
+        let first_user = |b: &Value| {
+            b["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "user")
+                .cloned()
+        };
+        assert_eq!(first_user(&t1), first_user(&t2));
+        let msgs = t2["messages"].as_array().unwrap();
+        let n = msgs.len();
+        assert_eq!(msgs[n - 2]["role"], "system");
+        assert!(msgs[n - 2]["content"].as_str().unwrap().contains("new"));
+        assert!(!t2.to_string().contains("old"));
+        assert_eq!(msgs[n - 1]["content"], "three");
+        // No context: no extra system message.
+        let plain = chat_body("policy", "  ", &[], "hi");
+        assert_eq!(plain["messages"].as_array().unwrap().len(), 2);
     }
 
     #[test]
@@ -841,6 +895,7 @@ mod tests {
                 &home,
                 HermesTurn {
                     system: "Amara OS live check. Answer in one short sentence.".into(),
+                    context: String::new(),
                     history: &[],
                     message: "Say hello to Taisun in five words or fewer.",
                 },
@@ -865,12 +920,17 @@ mod tests {
     async fn live_router_tiers() {
         let t = HttpTransport::default();
         let base = "http://127.0.0.1:8787";
-        let deep = chat_body("policy", &[], &outgoing_message("plan my week", true, true));
+        let deep = chat_body(
+            "policy",
+            "",
+            &[],
+            &outgoing_message("plan my week", true, true),
+        );
         let d = dry_run_tier(&t, base, &deep).await.expect("router up");
         println!("deep toggle dry run: {d:?}");
         assert_eq!((d.tier.as_str(), d.reason.as_str()), ("deep", "slash_deep"));
 
-        let short = chat_body("policy", &[], "Reply with the single word OK.");
+        let short = chat_body("policy", "", &[], "Reply with the single word OK.");
         let predicted = dry_run_tier(&t, base, &short).await.expect("router up");
         println!("short dry run: {predicted:?}");
         let since = chrono::Utc::now().to_rfc3339();
