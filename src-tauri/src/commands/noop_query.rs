@@ -100,11 +100,30 @@ pub fn load_settings() -> NoopSettings {
         .unwrap_or_default()
 }
 
-/// Fill an unset `db_path` from the same resolver Home uses (`noop::resolve_store_path`), so
-/// Mind-Body and Home read the same store. An explicit Settings value always wins, and the
-/// result is still validated by `run_query` (allowlist, canonicalization, ownership).
-/// The binary is never auto-picked: which NOOP copy to run stays a Settings choice.
+/// Default NOOP CLI, relative to the user's home (resolved at runtime, never hardcoded).
+/// Chosen copy (2026-11-04, Taisun via Nexus Lead): ~/projects/noop-lucid-current.
+pub const DEFAULT_BINARY_REL: &str =
+    "projects/noop-lucid-current/Packages/NoopLocalAccess/.build/arm64-apple-macosx/release/noop-local-access";
+
+/// `$HOME/<DEFAULT_BINARY_REL>`, or None if there is no home directory.
+pub fn default_binary_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| default_binary_under(&h))
+}
+
+pub(crate) fn default_binary_under(home: &Path) -> PathBuf {
+    home.join(DEFAULT_BINARY_REL)
+}
+
+/// Fill unset paths with defaults: `db_path` from the same resolver Home uses
+/// (`noop::resolve_store_path`) so Mind-Body and Home read the same store, and `binary_path`
+/// from `default_binary_path()`. An explicit Settings value always wins, and the result is
+/// still validated by `run_query` (allowlist, canonicalization, ownership, sandbox).
 pub fn with_resolved_db(mut s: NoopSettings) -> NoopSettings {
+    if s.binary_path.as_deref().is_none_or(str::is_empty) {
+        if let Some(p) = default_binary_path() {
+            s.binary_path = Some(p.display().to_string());
+        }
+    }
     if s.db_path.as_deref().is_none_or(str::is_empty) {
         if let Ok(p) = super::noop::resolve_store_path() {
             s.db_path = Some(p.display().to_string());
@@ -884,6 +903,69 @@ mod tests {
         ));
         let sc = br#"{"jsonrpc":"2.0","id":2,"result":{"structuredContent":{"a":1}}}"#;
         assert_eq!(parse_response(sc).unwrap()["a"], 1);
+    }
+
+    #[test]
+    fn default_binary_is_under_home_and_explicit_wins() {
+        let home = Path::new("/h");
+        assert_eq!(
+            super::default_binary_under(home),
+            home.join("projects/noop-lucid-current/Packages/NoopLocalAccess/.build/arm64-apple-macosx/release/noop-local-access")
+        );
+        let filled = with_resolved_db(NoopSettings::default());
+        assert_eq!(
+            filled.binary_path.map(PathBuf::from),
+            super::default_binary_path()
+        );
+        let explicit = with_resolved_db(NoopSettings {
+            binary_path: Some("/usr/local/bin/x".into()),
+            ..Default::default()
+        });
+        assert_eq!(explicit.binary_path.as_deref(), Some("/usr/local/bin/x"));
+    }
+
+    /// Live check against the real default binary + Home's store. Prints key names only.
+    #[test]
+    #[ignore]
+    fn live_default_data_freshness() {
+        let s = with_resolved_db(load_settings_for_live());
+        let r = Roots::current().unwrap();
+        for tool in ["data_freshness", "health_snapshot"] {
+            let v = run_query(&s, &r, tool, &json!({}), Duration::from_secs(10)).unwrap();
+            let keys: Vec<_> = v
+                .as_object()
+                .map(|o| o.keys().cloned().collect())
+                .unwrap_or_default();
+            println!("{tool}: object={} keys={keys:?}", v.is_object());
+            // Timestamps only (…At, date, timestamp, iso, latest…Day keys); never metric values.
+            fn ts(v: &Value, path: String, out: &mut Vec<String>) {
+                if let Some(o) = v.as_object() {
+                    for (k, c) in o {
+                        let p = format!("{path}.{k}");
+                        let lk = k.to_lowercase();
+                        if c.is_string()
+                            && (lk.ends_with("at")
+                                || lk.contains("date")
+                                || lk.contains("timestamp")
+                                || lk == "iso"
+                                || lk.starts_with("latest") && lk.ends_with("day"))
+                        {
+                            out.push(format!("{p}={}", c.as_str().unwrap_or("")));
+                        } else {
+                            ts(c, p, out);
+                        }
+                    }
+                }
+            }
+            let mut out = Vec::new();
+            ts(&v, String::new(), &mut out);
+            out.truncate(12);
+            println!("{tool} timestamps: {out:?}");
+        }
+    }
+
+    fn load_settings_for_live() -> NoopSettings {
+        NoopSettings::default()
     }
 
     #[test]
