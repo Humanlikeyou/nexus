@@ -21,7 +21,7 @@ npm test                    # gates: check:secrets, tsc, vitest, test:neuro, car
 - [CLAUDE.md](CLAUDE.md) — architecture and conventions
 - [STAGES.md](STAGES.md) — roadmap
 - `docs/` — product verification and Amara architecture audit
-- [amara-router/README.md](amara-router/README.md) — Amara Router install, Home Assistant and Hermes setup; [TAISUN-STEPS.md](TAISUN-STEPS.md) — manual steps to switch over
+- [amara-router/README.md](amara-router/README.md) — Amara Router install and Hermes setup; [TAISUN-STEPS.md](TAISUN-STEPS.md) — manual steps to switch over
 - `stack/` — Docker stack (n8n, Postgres, Letta, Weaviate, Verba, crew service); KB ingest plan in `stack/kb/INGEST-PLAN.md`
 
 ## Layout

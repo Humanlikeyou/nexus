@@ -181,7 +181,7 @@ This stage turns Amara from semi-autonomous to fully autonomous.
 - [x] Chat & Agents › Voice panel for Amara Voice (6399560)
 - [x] Switch-over: router LaunchAgent installed and Hermes pointed at `http://127.0.0.1:8787/v1`, applied 2026-11-04 (`TAISUN-STEPS.md`)
 - [x] Voice bridge: live state and level events from Amara Voice to the console (f7eea69, f5a2e25)
-- [ ] Home Assistant pointed at the router, per `amara-router/README.md`
+- [x] Home Assistant needs no router link: it uses its built-in matcher with no LLM (`amara-router/README.md`)
 - [ ] Mind-Body page (planned)
 
 ---
