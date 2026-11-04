@@ -282,7 +282,7 @@ async fn openai_non_streamed_simple_question_goes_fast_via_classifier() {
     assert_eq!(resp.headers()["x-amara-route-reason"], "classifier_easy");
     let v: Value = resp.json().await.unwrap();
     assert_eq!(v["object"], "chat.completion");
-    assert_eq!(v["model"], "amara");
+    assert_eq!(v["model"], FAST);
     assert_eq!(v["choices"][0]["message"]["content"], "Paris.");
     assert_eq!(v["choices"][0]["finish_reason"], "stop");
     assert_eq!(
@@ -372,7 +372,7 @@ async fn ollama_api_streamed_and_not() {
     assert_eq!(content, "Hi there");
     let last = lines.last().unwrap();
     assert_eq!(last["done"], true);
-    assert_eq!(last["model"], "amara:latest");
+    assert_eq!(last["model"], FAST);
     assert_eq!(last["amara"]["tier"], "fast");
     assert_eq!(last["eval_count"], 7);
     // Router policy overrides the caller's keep_alive/num_ctx so the resident model never reloads.
@@ -1461,4 +1461,138 @@ async fn other_errors_have_no_retry_after() {
     .await;
     assert_eq!(resp.status(), 502);
     assert!(resp.headers().get("retry-after").is_none());
+}
+
+// ── route headers and real model ids ─────────────────────────────────────────
+
+fn assert_route(resp: &reqwest::Response, tier: &str, model: &str, reason: &str) {
+    let h = resp.headers();
+    assert_eq!(h["x-amara-route"], tier);
+    assert_eq!(h["x-amara-tier"], tier);
+    assert_eq!(h["x-amara-model"], model);
+    assert_eq!(h["x-amara-route-reason"], reason);
+}
+
+#[tokio::test]
+async fn every_chat_reply_states_route_and_real_model() {
+    let r = rig(mock("EASY", &["Hi ", "there"])).await;
+    // OpenAI, non-streamed and streamed.
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/deep a", false),
+        &[],
+    )
+    .await;
+    assert_route(&resp, "deep", DEEP, "slash_deep");
+    let v: Value = resp.json().await.unwrap();
+    assert_eq!(v["model"], DEEP);
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/fast a", true),
+        &[],
+    )
+    .await;
+    assert_route(&resp, "fast", FAST, "slash_fast");
+    let text = resp.text().await.unwrap();
+    let chunks: Vec<Value> = text
+        .split("\n\n")
+        .filter_map(|l| l.strip_prefix("data: "))
+        .filter(|l| *l != "[DONE]")
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert!(chunks.len() > 2);
+    assert!(chunks.iter().all(|c| c["model"] == FAST), "{text}");
+    // Ollama, streamed and not.
+    for stream in [true, false] {
+        let body = json!({"model": "amara:latest", "stream": stream, "messages": [{"role": "user", "content": "/deep hi"}]});
+        let resp = post(&format!("{}/api/chat", r.url), body, &[]).await;
+        assert_eq!(resp.status(), 200);
+        assert_route(&resp, "deep", DEEP, "slash_deep");
+        let lines: Vec<Value> = resp
+            .text()
+            .await
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert!(!lines.is_empty());
+        assert!(lines.iter().all(|l| l["model"] == DEEP));
+    }
+    // Dry run carries the same headers.
+    let resp = post(
+        &format!("{}/amara/route", r.url),
+        json!({"text": "/deep x"}),
+        &[],
+    )
+    .await;
+    assert_route(&resp, "deep", DEEP, "slash_deep");
+}
+
+#[tokio::test]
+async fn fallback_headers_and_model_name_the_tier_that_answered() {
+    let mut m = mock("EASY", &["from fast"]);
+    m.fail_models = vec![DEEP.into()];
+    let r = rig(m).await;
+    for stream in [false, true] {
+        let resp = post(
+            &format!("{}/v1/chat/completions", r.url),
+            oa("/deep x", stream),
+            &[],
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+        assert_route(&resp, "fast", FAST, "slash_deep; deep_failed");
+        let text = resp.text().await.unwrap();
+        assert!(text.contains(&format!("\"model\":\"{FAST}\"")), "{text}");
+        assert!(!text.contains(DEEP), "{text}");
+    }
+}
+
+#[tokio::test]
+async fn errors_after_routing_carry_route_headers() {
+    // 502: every tier fails.
+    let mut m = mock("EASY", &[]);
+    m.fail_models = vec![DEEP.into(), FAST.into()];
+    let r = rig(m).await;
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/deep x", false),
+        &[],
+    )
+    .await;
+    assert_eq!(resp.status(), 502);
+    assert!(resp.headers().contains_key("x-amara-route"));
+    assert!(resp.headers().contains_key("x-amara-model"));
+    assert!(resp.headers().contains_key("x-amara-route-reason"));
+
+    // 503: Ollama down, streamed and not, both APIs.
+    let dead = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}", l.local_addr().unwrap())
+    };
+    let r = rig_with(mock("EASY", &[]), "", Some(dead), false).await;
+    for stream in [false, true] {
+        let resp = post(
+            &format!("{}/v1/chat/completions", r.url),
+            oa("/fast hi", stream),
+            &[],
+        )
+        .await;
+        assert_eq!(resp.status(), 503);
+        assert_route(&resp, "fast", FAST, "slash_fast");
+        let resp = post(&format!("{}/api/chat", r.url), json!({"model": "amara", "stream": stream, "messages": [{"role": "user", "content": "/deep hi"}]}), &[]).await;
+        assert_eq!(resp.status(), 503);
+        assert_eq!(resp.headers()["x-amara-route"], "deep");
+        assert!(resp.headers().contains_key("x-amara-model"));
+    }
+
+    // 400s happen before routing: no route headers.
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        json!({"messages": "nope"}),
+        &[],
+    )
+    .await;
+    assert_eq!(resp.status(), 400);
+    assert!(!resp.headers().contains_key("x-amara-route"));
 }

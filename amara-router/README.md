@@ -42,10 +42,20 @@ use `/deep` and trigger phrases.
 
 ## Route metadata for clients
 
-Every chat reply carries the decision:
+Every chat reply carries the decision, streamed or not, and so do errors returned after a tier
+was chosen (the 502 when every tier failed, the 503 when Ollama is down or loading). Errors
+before routing (a 400 for bad JSON) have none.
 
-- Headers: `X-Amara-Tier: fast|deep|claude`, `X-Amara-Route-Reason: <reason>`, `X-Amara-Routing-Ms: <ms>`
-  (set before the body, so they are on streamed replies too; after a fallback they name the tier that answered).
+- Headers (set before the body, so they are on streamed replies too; after a fallback they name
+  the tier and model that actually answered):
+  - `X-Amara-Route: fast|deep|claude`
+  - `X-Amara-Model: <model id>`, e.g. `gemma4-12b-uncensored:latest` or the Anthropic model
+  - `X-Amara-Route-Reason: <reason>`, e.g. `slash_deep; deep_failed`
+  - `X-Amara-Routing-Ms: <ms>`
+  - `X-Amara-Tier`: older alias of `X-Amara-Route`, kept for existing clients.
+- `model` in the JSON body is the real model id that answered, not the virtual name the caller
+  sent (`amara`, `amara:latest`, …): on the OpenAI `chat.completion` object and on every
+  `chat.completion.chunk`, and on the Ollama object and every NDJSON line.
 - JSON: `"amara": {"tier": "fast", "reason": "classifier_easy", "routing_ms": 795}`
   - OpenAI non-streamed: top-level `amara` on the `chat.completion` object.
   - OpenAI streamed: on the **first** chunk (role chunk) and the **last** chunk (the one with

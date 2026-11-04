@@ -3,7 +3,12 @@
 //! `/amara/route`.
 //!
 //! Route metadata for clients (e.g. the Nexus Chat Fast/Deep badge):
-//! * headers `X-Amara-Tier: fast|deep|claude`, `X-Amara-Route-Reason`, `X-Amara-Routing-Ms`
+//! * headers `X-Amara-Route: fast|deep|claude` (and the older alias `X-Amara-Tier`),
+//!   `X-Amara-Model: <model id>`, `X-Amara-Route-Reason`, `X-Amara-Routing-Ms` on every chat
+//!   reply once a tier is chosen: streamed, non-streamed, and errors (502/503) alike. After a
+//!   fallback they name the tier and model that actually answered.
+//! * the JSON `model` field (OpenAI object and every chunk, Ollama object and every line) is
+//!   the real model id that answered, not the virtual name the caller sent.
 //! * an `amara` object `{tier, reason, routing_ms}` in the JSON reply, in the first and the
 //!   last (finish_reason) SSE chunk, and in the final (`done: true`) Ollama NDJSON line.
 
@@ -282,7 +287,16 @@ async fn chat(
             entry["status"] = json!("error");
             entry["http_status"] = json!(status);
             st.log_route(&entry);
-            return error_response(api, status, &msg);
+            let meta = RouteMeta {
+                tier: decision.tier,
+                reason: decision.reason.clone(),
+                routing_ms,
+            };
+            return with_meta(
+                error_response(api, status, &msg),
+                &meta,
+                st.model_for(decision.tier),
+            );
         }
     };
     let meta = RouteMeta {
@@ -291,6 +305,8 @@ async fn chat(
         routing_ms,
     };
     let meta_json = serde_json::to_value(&meta).unwrap_or(Value::Null);
+    // The model that actually answers (after any fallback); replaces the caller's virtual name.
+    let model = st.model_for(tier).to_string();
 
     let filler =
         (stream && tier != Tier::Fast && st.cfg.filler.enabled && !st.cfg.filler.text.is_empty())
@@ -331,8 +347,8 @@ async fn chat(
 
     let mut resp = if stream {
         let body = match api {
-            Api::OpenAi => openai_sse(events, model, meta_json, include_usage, finish),
-            Api::Ollama => ollama_ndjson(events, model, meta_json, start, finish),
+            Api::OpenAi => openai_sse(events, model.clone(), meta_json, include_usage, finish),
+            Api::Ollama => ollama_ndjson(events, model.clone(), meta_json, start, finish),
         };
         let ctype = if api == Api::OpenAi {
             "text/event-stream"
@@ -357,7 +373,7 @@ async fn chat(
             .as_ref()
             .filter(|_| collected.content.is_empty() && collected.tool_calls.is_empty())
         {
-            return with_meta(error_response(api, 502, e), &meta);
+            return with_meta(error_response(api, 502, e), &meta, &model);
         }
         let v = match api {
             Api::OpenAi => openai_json(&collected, &model, meta_json),
@@ -365,13 +381,20 @@ async fn chat(
         };
         axum::Json(v).into_response()
     };
-    resp = with_meta(resp, &meta);
+    resp = with_meta(resp, &meta, &model);
     resp
 }
 
-fn with_meta(mut r: Response, meta: &RouteMeta) -> Response {
+fn with_meta(mut r: Response, meta: &RouteMeta, model: &str) -> Response {
     let h = r.headers_mut();
+    h.insert(
+        "x-amara-route",
+        HeaderValue::from_static(meta.tier.as_str()),
+    );
     h.insert("x-amara-tier", HeaderValue::from_static(meta.tier.as_str()));
+    if let Ok(v) = HeaderValue::from_str(model) {
+        h.insert("x-amara-model", v);
+    }
     if let Ok(v) = HeaderValue::from_str(&meta.reason) {
         h.insert("x-amara-route-reason", v);
     }
@@ -725,7 +748,7 @@ async fn dry_route(AxState(st): AxState<St>, headers: HeaderMap, body: Bytes) ->
         "stripped": before != text,
     }))
     .into_response();
-    with_meta(r, &meta)
+    with_meta(r, &meta, st.model_for(meta.tier))
 }
 
 #[cfg(test)]
