@@ -76,16 +76,24 @@ npx tsc --noEmit              # Type-check (src-console only)
 npm run test:neuro            # node --test src-console/neuro/*.test.mjs
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri -- build        # Production bundle
-npm run bundle:local          # Ad-hoc signed lo- **Amara Router** (1c769c3, ce2b612, 6d32a9c): `amara-router/` is a separate Rust service on `127.0.0.1:8787` (OpenAI + Ollama APIs; optional LAN listener `lan_bind`, e.g. `:8788`, with a bearer key). It is the only place that picks a model: **fast** (resident, `gemma4-12b-uncensored:latest`) or **deep** (on demand, `qwen3.8-uncensored:latest`), via slash commands, `X-Amara-*` headers, trigger phrases, a token threshold, then an EASY/HARD classifier. Model names live only in its `config.toml` (`~/.config/amara-router/config.toml`, 0600; template `config.example.toml`). It runs as LaunchAgent `com.taisun.amara-router` (`amara-router/launchd/`), logs to `~/Library/Logs/amara-router/router.log` and `routes.jsonl` (no content). Hermes and Nexus point at it; Home Assistant does not (it uses its built-in matcher, no LLM); install and pointing steps are in `amara-router/README.md`, and Taisun's manual steps in `TAISUN-STEPS.md`.
+npm run bundle:local          # Ad-hoc signed local bundle (APPLE_SIGNING_IDENTITY=-)
+npm run mock-gateway          # also :partial, :no-ack, :fail
+npm run outbox-status
+```
+
+---
+
+## Runtime behaviour (2026-10-29)
+
+- **Amara Router** (1c769c3, ce2b612, 6d32a9c): `amara-router/` is a separate Rust service on `127.0.0.1:8787` (OpenAI + Ollama APIs; optional LAN listener `lan_bind`, e.g. `:8788`, with a bearer key). It is the only place that picks a model: **fast** (resident, `gemma4-12b-uncensored:latest`) or **deep** (on demand, `qwen3.8-uncensored:latest`), via slash commands, `X-Amara-*` headers, trigger phrases, a token threshold, then an EASY/HARD classifier. Model names live only in its `config.toml` (`~/.config/amara-router/config.toml`, 0600; template `config.example.toml`). It runs as LaunchAgent `com.taisun.amara-router` (`amara-router/launchd/`), logs to `~/Library/Logs/amara-router/router.log` and `routes.jsonl` (no content). Hermes and Nexus point at it; Home Assistant does not (it uses its built-in matcher, no LLM); install and pointing steps are in `amara-router/README.md`, and Taisun's manual steps in `TAISUN-STEPS.md`.
 - **Nexus `llm_router.rs` is a thin client** (1c769c3): default compute mode `amara` (router URL `amara_router_url`, loopback only, default `http://127.0.0.1:8787`). `local` and a saved `gateway` behave like `amara`; `hybrid`/`api` ask the router for Claude. `DEFAULT_OLLAMA_MODEL = "gemma4:latest"` is still the Telegram chat model: Telegram is **gemma4-only** (576e5a2) with no fallback, and fails cleanly with a logged reason.
-- **Amara tiers** (caaa71c, 97441b7, 1c769c3): Gemma (fast, Nexus calls it `light`), Qwen (deep) and Claude. Amara is **one identity across all tiers**: every call gets `~/.hermes/SOUL.md` plus `IDENTITY_GUARD` ("You are Amara, and only Amara ... never name a model or AI company as yourself"), and responses and usage carry the tier only (`light|deep|claude`), never a model or provider name. **Claude** needs all of: Settings › Assistant › **Allow Claude** on (saved `allow_claude`; off by default; the row says "This sends data off the Mac"), `NEXUS_OUTBOUND_DISABLED` unset, mode api/hybrid and the daily cap not spent (else Nexus sends `X-Amara-Allow-Claude: 0`), plus the router's own `[cloud] anthropic_enabled = true` and `ANTHROPIC_API_KEY` in its 0600 secrets file (off by default). Fallback claude→deep→fast, never to the network. Callers: the renderer scheduler (`continuity.ts`, `research.ts`), Chat's `/deliberate` and the context compressor.
-age carry `tier` only. Callers: the renderer scheduler (`continuity.ts`, `research.ts`). Callers also include Chat's `/deliberate` and the context compressor (below).
+- **Amara tiers** (caaa71c, 97441b7, 1c769c3): Gemma (fast, Nexus calls it `light`), Qwen (deep) and Claude. Amara is **one identity across all tiers**: every call gets `~/.hermes/SOUL.md` plus `IDENTITY_GUARD` ("You are Amara, and only Amara ... never name a model or AI company as yourself"), and responses and usage carry the tier only (`light|deep|claude`), never a model or provider name. **Claude** needs all of: Settings › Assistant › **Allow Claude** on (saved `allow_claude`; off by default; the row says "This sends data off the Mac"), `NEXUS_OUTBOUND_DISABLED` unset, mode api/hybrid and the daily cap not spent (else Nexus sends `X-Amara-Allow-Claude: 0`), plus the router's own `[cloud] anthropic_enabled = true` and `ANTHROPIC_API_KEY` in its 0600 secrets file (off by default). Fallback claude→deep→fast, never to the network. Callers: the renderer scheduler (`continuity.ts`, `research.ts`), Chat's `/deliberate` and the context compressor (below).
 - **Amara Chat → Hermes over HTTP** (`terrence_runtime_bridge.rs`). The old bridge spawned `python -m hermes_cli.nexus_runtime`, which only existed in Hermes fork commit 3683f75c07, so every Chat send failed. Chat now POSTs to Hermes's OpenAI API at `127.0.0.1:8642` (`API_SERVER_PORT` may move it) with `Authorization: Bearer <API_SERVER_KEY>` read from `~/.hermes/.env` on each send (never logged) and `X-Hermes-Session-Key: nexus-chat` (`NEXUS_HERMES_SESSION_KEY` overrides it for tests). The full visible history is sent in `messages`. Hermes (`SOUL.md`) is the only identity: Nexus's system message is policy + context only and is fixed per conversation (Hermes hashes it into its session id). Context comes from `prepare_amara_turn` and passes `injectionGuard.ts` in the renderer, and long histories pass `contextCompressor.ts` (restored from the archive; summarized through the router in chunks below its deep threshold, then guarded). Actions use the inline `<nexus_action>` protocol only. `/deliberate <topic>` runs `deliberation.ts` through `chat_with_router` with `deep: true` and is saved with `record_amara_interaction`.
-- **Fast/Deep badge**: shown only when the router decided the tier. Hermes doesn't forward the router's metadata, so Nexus uses, in order, `amara` metadata on Hermes's reply, the router's `routes.jsonl` lines in the turn window, then a `/amara/route` dry run, and only when Hermes's `model.base_url` is the router (`routedViaRouter` in runtime health). Otherwise there is no badge and the composer's Deep toggle is disabled. How to point Hermes at the router: `amara-router/README.md`.
+- **Fast/Deep badge**: shown only when the router decided the tier. The Hermes route patch is applied (`~/projects/hermes-patches/`; revert it before `hermes update`), so Hermes's reply carries the router's `X-Amara-Route`, `X-Amara-Model` and `X-Amara-Route-Reason` headers, the real `model`, and `amara` metadata. `route_info` in `terrence_runtime_bridge.rs` reads those headers into `interaction.route`, and `routeInfoFrom` in `routeInfo.ts` uses that first. A reply with no route falls back to `interaction.tier`: `amara` metadata, then the router's `routes.jsonl` lines in the turn window, then a `/amara/route` dry run. The last two run only when Hermes's `model.base_url` is the router (`routedViaRouter` in runtime health). Otherwise there is no badge and the composer's Deep toggle is disabled. The badge has not been checked in the app with the patch applied. How to point Hermes at the router: `amara-router/README.md`.
 - **Chat bridge** (6206c38): the broken `hermes_cli.nexus_runtime` bridge noted in 84e57f1 is fixed (see above). Chat is routed through Hermes, and Hermes reaches the router at `http://127.0.0.1:8787/v1` (`model.base_url`, applied 2026-11-04). `context_length` and `ollama_num_ctx` are 65536 and must equal the router's `fast_num_ctx`: Hermes refuses a window under 64,000, and Ollama silently cuts longer prompts.
 - **Voice panel** (6399560): Chat & Agents › Voice drives Amara Voice (`~/projects/amara-voice`, its own process): `commands/voice.rs` (`voice_status`, `voice_start`/`voice_stop`, `voice_recent_turns` from `logs/turns.jsonl`, `voice_list_voices`/`voice_set_voice`). Shows live state, start/stop, voice picker, recent turns with route badges and latencies, and an inactive state when amara-voice isn't installed.
 - **Voice bridge** (f7eea69, f5a2e25): `commands/voice_bridge.rs` emits `amara-voice://state` (from `logs/state` and the process check, on change plus a 5 s heartbeat) and `amara-voice://level` (from `ws://127.0.0.1:8791/level`, published by amara-voice's `level_feed.py`). `voice_bridge_start`/`voice_bridge_stop` are ref-counted by `useAmaraVoiceBridge` in the Voice panel and the live Amara lens. Ports: `AMARA_LEVEL_PORT` (amara-voice) and `NEXUS_AMARA_VOICE_LEVEL_PORT` (Nexus) must match; `AMARA_LEVEL_FEED=0` turns the feed off. Steps: `TAISUN-STEPS.md`.
-- **Mind-Body page (planned)**: not built yet; no code in `src-console/`.
+- **Mind-Body page** (f835631): `src-console/screens/MindBodyScreen.tsx` reads NOOP data through `commands/noop_query.rs` (`noop_query`, `get_noop_settings`, `set_noop_settings`). QA on live NOOP data is still open, so Stage 5½ stays open.
 - **`NEXUS_OUTBOUND_DISABLED`** (14cdf7c): set to `1`/`true`/`yes`/`on` (trimmed, any case) at launch to stop all outbound sends for that session. `send_telegram_message` refuses, the outbox pauses delivery to the gateway (`Delivery paused`), and Activity shows "delivery paused". Reads and health checks still work. Use it for QA launches, because a normal launch with `telegram_chat_id` set **will** send.
 - **Background throttling off**: the main window sets `"backgroundThrottling": "disabled"` (macOS 14+). The scheduler (daily summary, prune, rituals) runs in the renderer, and WebKit used to suspend its timers when the window was hidden or the screen was off (live check 2026-10-29: lid closed, scheduler frozen for 10+ min). Guarded by `test/config/tauriConf.test.ts`.
 - **`suppressed` status** (8041224): an activity outcome meaning "deliberately not sent" (for example a ritual refused by the `NEXUS_OUTBOUND_DISABLED` kill switch). It is neutral, neither success nor failure, and shows as "Suppressed" in Activity. `terrence_automations.rs` also uses `suppressed` as a run and delivery status.
@@ -200,17 +208,6 @@ The live design system is `src-console/styles.css` + `src-console/design/`. The 
 - Fallback identity inline if file read fails — Amara never loses its identity
 - Routing never alters the identity prompt — only the compute engine changes
 
-#### LLM Router Test Checklist
-- [ ] **Local mode** — Set mode=local, send a message, verify provider badge shows "Local", no API cost logged
-- [ ] **Hybrid default** — Set mode=hybrid, send a short message, verify it routes to Ollama
-- [ ] **Hybrid tag escalation** — In hybrid mode, if tags include "heavy", verify Anthropic is used (requires API key)
-- [ ] **API mode** — Set mode=api with valid API key, send a message, verify Anthropic is used and cost is logged
-- [ ] **Budget enforcement** — Set daily cap to $0.00, verify hybrid mode falls back to Ollama (cap exceeded)
-- [ ] **Usage log** — After several calls, open Settings → Compute Mode, verify usage summary shows correct counts and costs
-- [ ] **Clear usage** — Click "Clear" in usage summary, verify log resets to zero
-- [ ] **Offline fallback** — In hybrid mode with API key, kill internet, verify graceful fallback to Ollama (no crash)
-- [ ] **Unit tests** — Run `cargo test --manifest-path src-tauri/Cargo.toml` and verify all 16 router tests pass
-
 ---
 
 ### OpenClaw Model Routing (Session Feb 25 2026)
@@ -219,7 +216,6 @@ The live design system is `src-console/styles.css` + `src-console/design/`. The 
 - [x] `OLLAMA_API_KEY=ollama-local` added to LaunchAgent plist
 - [x] `models.json` fixed — was storing literal string "OLLAMA_API_KEY" instead of value
 - [x] Sessions cache cleared (was locked on deleted deepseek-r1:32b)
-- [ ] **When Anthropic credits topped up**: change primary back to `anthropic/claude-haiku-4-5-20251001` in `~/.openclaw/openclaw.json`
 
 ### Visual Redesign: Tactical Command Interface (Session Mar 2026)
 - [x] **globals.css** — Complete rewrite: removed glass morphism, OKLch colors → hex, near-black base (#0B0F14), `.panel`/`.panel-primary`/`.panel-elevated` replace `.glass` classes, new utility classes (`.heading-section`, `.metric-value`, `.metric-label`, `.badge-status`, `.btn-kill`, `.subsystem-inactive`, `.terminal-readout`), reduced border-radius (max 6px), removed light mode, restrained animations
@@ -254,12 +250,13 @@ The live design system is `src-console/styles.css` + `src-console/design/`. The 
 ## Pending / Future Work
 
 - [x] **Rename to Nexus** — done in 80276f9 (names) and f30acbb (app-data migration)
-- [ ] **Clean up after the src-console migration** (WIP snapshot commit 4a33ff6): remove empty legacy dirs (`src/components/*`, `src/styles`, `src-next/`, `src-console/system/`)
+- [x] **Clean up after the src-console migration** (WIP snapshot commit 4a33ff6): the empty legacy dirs (`src/components/*`, `src/styles`, `src-next/`, `src-console/system/`) are gone
 - [ ] **Legacy `src/`** — decide what remains (not type-checked or imported by the entry point)
 - [x] **`notifications.rs`** — removed (d6fd108)
 - [x] **CI** — Node 22 via `.nvmrc`, `test:neuro`, `cargo test --locked`, fmt/clippy (non-blocking), macOS job; tag-triggered draft release in `release.yml`
 - [x] **CrewAI service** — running on 127.0.0.1:8400; Crews UI (9e36a1e); bearer token (dc7e5b2), see STAGES.md Phase 5E
-- [ ] **End-to-end Telegram alert test**, **OpenClaw auto-restart**, **n8n webhook auth** (from earlier list)
+- [x] **n8n webhook auth**: the Ingress webhook uses Header Auth, see STAGES.md Stage 4
+- [ ] **End-to-end Telegram alert test**, **OpenClaw auto-restart** (from earlier list)
 
 ---
 

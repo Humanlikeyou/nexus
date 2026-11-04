@@ -162,7 +162,7 @@ This stage turns Amara from semi-autonomous to fully autonomous.
 
 ---
 
-## Stage 5½ — Console Rebuild (In Progress — WIP commit 4a33ff6)
+## Stage 5½ — Console Rebuild (In Progress — open until Mind-Body QA on live data; WIP commit 4a33ff6)
 
 - Live UI moved to `src-console/` (old `src/App.tsx` + `src/components/*` deleted; Tailwind/Radix/ECharts/framer-motion removed)
 - Whoop BLE integration removed (`whoop.rs`); health is read-only from NOOP via `noop.rs`
@@ -182,7 +182,9 @@ This stage turns Amara from semi-autonomous to fully autonomous.
 - [x] Switch-over: router LaunchAgent installed and Hermes pointed at `http://127.0.0.1:8787/v1`, applied 2026-11-04 (`TAISUN-STEPS.md`)
 - [x] Voice bridge: live state and level events from Amara Voice to the console (f7eea69, f5a2e25)
 - [x] Home Assistant needs no router link: it uses its built-in matcher with no LLM (`amara-router/README.md`)
-- [ ] Mind-Body page (planned)
+- [x] Hermes route patch applied 2026-11-04: Hermes's reply carries the router's route data (`~/projects/hermes-patches/`, `TAISUN-STEPS.md`)
+- [x] Mind-Body page built and merged: `MindBodyScreen.tsx`, `noop_query.rs` (f835631)
+- [ ] Mind-Body QA on live NOOP data. Stage 5½ stays open until this passes
 
 ---
 

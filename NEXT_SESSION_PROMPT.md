@@ -4,52 +4,37 @@
 
 ## Context
 
-Stage 4 (Activation) for the Amara OS project was just implemented and committed (`0db686f`). The production app was deployed to `/Applications/Electron.app` at the time (pre-rename; the app is now `Nexus`, `com.taisun.nexus`). Four features were added:
+Amara OS is the Tauri app in this repo. Chat goes through Hermes (`127.0.0.1:8642`), and Hermes calls the Amara Router
+(`127.0.0.1:8787`), which picks the model. The router, the Hermes switch-over, the Hermes route patch and the voice bridge
+were applied on 2026-11-04. `TAISUN-STEPS.md` has what changed, how to verify it and how to roll it back.
 
-1. **Automatic Memory Capture** — TelegramChat.tsx has a 2-minute idle timer that auto-saves sessions with 4+ messages. Coordinates with the manual "Save to memory" button.
-2. **Scheduled Memory Consolidation** — `src/terrance/system/scheduler.ts` runs every 6 hours, consolidates last 24h session logs into a single Letta memory write via n8n ingress.
-3. **Autonomous Reasoning Loops** — Every 12 hours, Amara reviews goals vs recent sessions, generates a reflection stored to session logs + Letta.
-4. **Gateway Authentication** — n8n ingress workflow validates `X-Nexus-Secret` via Header Auth (credential synced from `NEXUS_SECRET`). No open mode: missing/invalid header → 403.
+Stage 4 is complete except for RAG content. Stage 5½ stays open until Mind-Body passes QA on live data. See `STAGES.md`.
 
-## Outstanding Issue
+The Terrance fold-in is scrapped, so don't plan around it. Code names such as `terrence_runtime` stay as they are.
 
-After deploying Stage 4, the production app shows a crash on the Amara page:
-```
-Something went wrong
-This page encountered an error. Your data is safe.
-undefined is not an object (evaluating 'e.length')
-```
+## What to do next, in order
 
-Defensive `?? []` null guards were added on all `.length` accesses and a new build was deployed. **The user has not yet confirmed if the fix works.** If it still crashes:
-
-1. Run `cd /Users/thevisualdude/projects/nexus && npm run tauri -- dev`
-2. Open the WebKit inspector (Cmd+Option+I in the Tauri window)
-3. Check the console for the **unminified** error with full stack trace
-4. The error is `e.length` in minified code — the stack trace will show the exact file and line
-5. The most likely culprits are array fields from Rust deserialization being `null` instead of `[]`, or a component prop receiving `undefined`
-
-Key context for debugging:
-- Rust structs use `#[serde(rename_all = "camelCase")]` — all JSON from Tauri commands returns camelCase keys
-- The `types.ts` file previously had snake_case field names for `TerranceContext` and `SessionLogEntry` — these were corrected to camelCase in this session
-- The `ChatSession` type in `types.ts` still uses snake_case (`created_at`, `message_count`) — check if the Rust `ChatSession` struct also uses snake_case or if there's a mismatch
-
-## What to do next
-
-1. **Verify the crash is fixed** — Launch the app, confirm the Amara page loads without errors
-2. **Test auto-save** — Send 4+ messages to Amara, wait 2 minutes, check `memory/session_logs/` for a new JSON file
-3. **Test gateway auth** — Set `NEXUS_SECRET` in `stack/.env`, restart n8n (`docker compose restart n8n`), set the same secret in Nexus Settings > Webhook Secret, verify requests work with header and fail without
-4. **Test consolidation** — Temporarily lower the interval in `scheduler.ts` (e.g., 30 seconds), verify Letta memory updated: `curl -s http://localhost:8283/v1/agents/agent-5efd68f1-6976-4af5-a677-b82f668d6843/memory`
-5. **Test reasoning** — Same approach, check session logs for `reasoning-*` entries
-6. **If all verified** — Begin Stage 5 planning (Autonomy: CrewAI crews, proactive summaries). See `STAGES.md` for the roadmap.
+1. **Full gate and rebuild.** Run `npm test`, then `npm run bundle:local`. The bundle lands in `src-tauri/target/release/bundle/`.
+   Replace the installed `/Applications/Amara OS.app`.
+2. **Voice end to end.** Start Amara Voice from Chat & Agents › Voice. Check one spoken turn through the router and Hermes
+   (`~/Library/Logs/amara-router/routes.jsonl` gets a line) and check that the Amara lens follows state and level.
+   While the app is open, check that a Chat reply shows the right Fast/Deep badge. That check hasn't been done yet.
+3. **Mind-Body QA on live NOOP data.** Test `src-console/screens/MindBodyScreen.tsx` against the real store. Stage 5½ closes
+   when this passes.
+4. **Knowledge base ingest.** The knowledge base is empty. Follow `stack/kb/INGEST-PLAN.md`. `scripts/kb-ingest.sh` defaults to
+   a dry run, and `--apply` waits for Taisun's OK.
+5. **Verba recreate and Crew Auth import.** Recreate the `verba` container so it picks up `gemma4:latest`; the live one still
+   has `qwen3.5`. Import the Crew Auth version of the Ingress from `stack/n8n/workflows/eYdwlwZKTMV89z2J.json`. Live n8n still
+   runs the previous crew webhook, so a bad key gets 403 now and should get 401 after the import.
+6. **Home control, last.** This is deliberately the final step. Don't start it before steps 1 to 5 are done.
 
 ## Key file locations
 
 | File | Purpose |
 |------|---------|
-| `src/terrance/system/scheduler.ts` | Consolidation + reasoning scheduler |
-| `src/terrance/system/continuity.ts` | All memory functions (auto-save, consolidation, reasoning) |
-| `src/components/terrance/TelegramChat.tsx` | Chat UI with idle timer auto-save |
-| `src-tauri/src/commands/continuity.rs` | Rust context store + session logs |
-| `stack/n8n/workflows/eYdwlwZKTMV89z2J.json` | n8n Ingress gateway export (live id eYdwlwZKTMV89z2J) |
-| `stack/docker-compose.yml` | NEXUS_SECRET env var for n8n |
-| `STAGES.md` | Full project roadmap |
+| `TAISUN-STEPS.md` | Taisun's steps: verify and roll back the router, Hermes, the voice bridge and the route patch |
+| `amara-router/README.md` | Router install, config and client setup |
+| `~/projects/hermes-patches/README.md` | Hermes route patch: apply, revert, what updates can break |
+| `CLAUDE.md` | Architecture and runtime behaviour |
+| `STAGES.md` | Project roadmap |
+| `stack/kb/INGEST-PLAN.md` | Knowledge base ingest plan |
