@@ -47,7 +47,7 @@ test("Lens: idle → listening → thinking → speaking → error, labels, live
   // Chat header shows the 28px lens only while she talks.
   for (let i = 0; i < 3; i++) await level(page, 0);
   await expect.poll(async () => Number(await lens.evaluate((el) => (el as HTMLElement).style.getPropertyValue("--lens-scale")))).toBeLessThan(1.01);
-  await state(page, "error", { reason: "tts_failed" });
+  await state(page, "error", { reason: "unavailable" }); // amara-voice is down
   await expect(lens).toHaveAttribute("aria-label", "Amara can't speak right now");
   await expect(field.getByText("Amara can't speak right now. Check Amara Voice.")).toBeVisible();
   await page.waitForTimeout(300);
@@ -55,19 +55,37 @@ test("Lens: idle → listening → thinking → speaking → error, labels, live
   expect(consoleErrors).toEqual([]);
 });
 
-test("Lens: 2s of silence returns to idle; header lens only while speaking", async ({ page, theme }) => {
+const scaleOf = (lens: import("@playwright/test").Locator) => lens.evaluate((el) => Number((el as HTMLElement).style.getPropertyValue("--lens-scale")));
+
+test("Lens: 2s without levels decays the meter but keeps speaking; ~12s without state falls back to idle", async ({ page, theme }) => {
   const { lens } = await openVoice(page, theme);
   await page.getByRole("radio", { name: "Chat" }).click();
   const header = page.locator(".chat-screen__header .amara-lens");
   await expect(header).toHaveCount(0);
   await state(page, "speaking");
-  await level(page, 0.5);
+  for (let i = 0; i < 6; i++) { await level(page, 1); await page.waitForTimeout(33); }
   await expect(header).toHaveCount(1);
   await expect(header).toHaveAttribute("data-size", "28");
   await page.waitForTimeout(2300);
+  await expect.poll(() => scaleOf(header)).toBeLessThan(1.01);
+  await expect(header).toHaveCount(1); // state holds between heartbeats
+  await page.clock.fastForward(12_500); // missed heartbeats
   await expect(header).toHaveCount(0);
   await page.getByRole("radio", { name: "Voice" }).click();
   await expect(lens).toHaveAttribute("data-state", "idle");
+});
+
+test("Lens: idle with model_loading shows a loading note; bridge starts with the Voice panel and stops after", async ({ page, theme }) => {
+  const { field, lens } = await openVoice(page, theme);
+  const calls = () => page.evaluate(() => ((window as unknown as { __E2E_UNMOCKED: string[] }).__E2E_UNMOCKED).filter((c) => c.startsWith("voice_bridge_")));
+  await expect.poll(calls).toEqual(["voice_bridge_start"]);
+  await state(page, "idle", { reason: "model_loading" });
+  await expect(lens).toHaveAttribute("data-state", "idle");
+  await expect(field.getByText("Loading voice model…")).toBeVisible();
+  await state(page, "listening");
+  await expect(field.getByText("Loading voice model…")).toHaveCount(0);
+  await navButton(page, "Settings").click();
+  await expect.poll(calls).toEqual(["voice_bridge_start", "voice_bridge_stop"]);
 });
 
 test("Lens: reduced motion runs no animations and keeps scale at 1", async ({ page, theme }) => {

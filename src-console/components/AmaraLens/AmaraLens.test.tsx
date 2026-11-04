@@ -6,6 +6,8 @@ const events = vi.hoisted(() => ({
   handlers: new Map<string, (e: { payload: unknown }) => void>(),
   unlisten: vi.fn(),
 }));
+const core = vi.hoisted(() => ({ invoke: vi.fn(async () => true) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: core.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async (name: string, h: (e: { payload: unknown }) => void) => {
     events.handlers.set(name, h);
@@ -13,13 +15,13 @@ vi.mock("@tauri-apps/api/event", () => ({
   }),
 }));
 
-import { AMARA_VOICE_LEVEL_EVENT, AMARA_VOICE_STATE_EVENT, WATCHDOG_MS, __resetAmaraVoiceForTests, amaraVoiceLevel, ingestState } from "../../hooks/useAmaraVoice";
+import { AMARA_VOICE_LEVEL_EVENT, AMARA_VOICE_STATE_EVENT, LEVEL_SILENCE_MS, STATE_FALLBACK_MS, __resetAmaraVoiceForTests, amaraVoiceLevel, ingestState, useAmaraVoice } from "../../hooks/useAmaraVoice";
 import { AmaraLens, AmaraVoiceAnnouncer, LENS_ERROR_COPY, lensScale, stepEnvelope } from "./AmaraLens";
 
 const emit = (name: string, payload: Record<string, unknown>) => act(() => { events.handlers.get(name)?.({ payload: { ts: Date.now(), ...payload } }); });
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-beforeEach(() => { events.handlers.clear(); events.unlisten.mockClear(); });
+beforeEach(() => { events.handlers.clear(); events.unlisten.mockClear(); core.invoke.mockClear(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); __resetAmaraVoiceForTests(); });
 
 describe("envelope", () => {
@@ -86,21 +88,74 @@ describe("AmaraLens", () => {
 });
 
 describe("useAmaraVoice store", () => {
-  it("sanitises, drops stale and older-utterance events, and the watchdog returns to idle", async () => {
-    vi.useFakeTimers();
+  it("sanitises (peak >= rms), drops stale and older-utterance events", async () => {
     render(<AmaraVoiceAnnouncer />);
     await flush();
     emit(AMARA_VOICE_LEVEL_EVENT, { rms: 7, peak: NaN, state: "speaking", utteranceId: "b" });
-    expect(amaraVoiceLevel.current).toEqual({ rms: 1, peak: 0 });
+    expect(amaraVoiceLevel.current).toEqual({ rms: 1, peak: 1 });
     emit(AMARA_VOICE_LEVEL_EVENT, { rms: 0.3, peak: 0.3, ts: Date.now() - 600 });
     expect(amaraVoiceLevel.current.rms).toBe(1);
     emit(AMARA_VOICE_LEVEL_EVENT, { rms: 0.3, peak: 0.3, utteranceId: "a", ts: Date.now() - 100 });
     expect(amaraVoiceLevel.current.rms).toBe(1);
+    emit(AMARA_VOICE_LEVEL_EVENT, { rms: 0.4, peak: 0.2 });
+    expect(amaraVoiceLevel.current).toEqual({ rms: 0.4, peak: 0.4 });
     emit(AMARA_VOICE_STATE_EVENT, { state: "bogus" });
-    act(() => { vi.advanceTimersByTime(WATCHDOG_MS + 300); });
+    expect(amaraVoiceLevel.current.rms).toBe(0.4);
+  });
+
+  it("2s without levels decays the meter only; state holds until ~12s without a state event", async () => {
+    vi.useFakeTimers();
+    render(<AmaraVoiceAnnouncer />);
+    await flush();
+    emit(AMARA_VOICE_STATE_EVENT, { state: "speaking" });
+    emit(AMARA_VOICE_LEVEL_EVENT, { rms: 0.6, peak: 0.8 });
+    act(() => { vi.advanceTimersByTime(LEVEL_SILENCE_MS + 300); });
+    expect(amaraVoiceLevel.current).toEqual({ rms: 0, peak: 0 });
+    expect(screen.getByTestId("amara-voice-announcer")).toHaveTextContent("Amara is speaking");
+    // 5s heartbeat keeps the state alive.
+    act(() => { vi.advanceTimersByTime(4000); });
+    emit(AMARA_VOICE_STATE_EVENT, { state: "speaking" });
+    act(() => { vi.advanceTimersByTime(STATE_FALLBACK_MS - 1000); });
+    expect(screen.getByTestId("amara-voice-announcer")).toHaveTextContent("Amara is speaking");
+    act(() => { vi.advanceTimersByTime(1600); });
     act(() => { vi.advanceTimersByTime(600); });
     expect(screen.getByTestId("amara-voice-announcer")).toHaveTextContent("Amara is idle");
-    expect(amaraVoiceLevel.current.rms).toBe(0);
+  });
+
+  it("error/unavailable shows the error copy; idle/model_loading reports loading", async () => {
+    let snap: ReturnType<typeof useAmaraVoice> | null = null;
+    function Probe() { snap = useAmaraVoice(); return null; }
+    render(<><Probe /><AmaraLens state="idle" size={160} /></>);
+    await flush();
+    emit(AMARA_VOICE_STATE_EVENT, { state: "idle", reason: "model_loading" });
+    expect(snap!.loading).toBe(true);
+    emit(AMARA_VOICE_STATE_EVENT, { state: "error", reason: "unavailable" });
+    expect(snap!.state).toBe("error");
+    expect(snap!.reason).toBe("unavailable");
+    expect(snap!.loading).toBe(false);
+  });
+
+  it("voice bridge is ref-counted across live lenses; fixed-level lenses and the announcer don't start it", async () => {
+    const { rerender, unmount } = render(<><AmaraVoiceAnnouncer /><AmaraLens key="d" state="idle" size={44} level={0.5} decorative /></>);
+    await flush();
+    expect(core.invoke).not.toHaveBeenCalled();
+    rerender(<><AmaraVoiceAnnouncer /><AmaraLens key="d" state="idle" size={44} level={0.5} decorative /><AmaraLens key="a" state="idle" size={160} /><AmaraLens key="b" state="idle" size={28} /></>);
+    await flush();
+    expect(core.invoke.mock.calls).toEqual([["voice_bridge_start"]]);
+    rerender(<><AmaraVoiceAnnouncer /><AmaraLens key="a" state="idle" size={160} /></>);
+    await flush();
+    expect(core.invoke).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(core.invoke.mock.calls).toEqual([["voice_bridge_start"], ["voice_bridge_stop"]]);
+  });
+
+  it("a missing bridge command is tolerated (stays idle, no error)", async () => {
+    core.invoke.mockRejectedValueOnce("Command voice_bridge_start not found");
+    let snap: ReturnType<typeof useAmaraVoice> | null = null;
+    function Probe() { snap = useAmaraVoice(); return null; }
+    render(<><Probe /><AmaraLens state="idle" size={160} /></>);
+    await flush();
+    expect(snap!.state).toBe("idle");
   });
 
   it("live region announces each transition once (debounced), never per level", async () => {

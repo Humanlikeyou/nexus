@@ -1,6 +1,6 @@
 import { RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { type AmaraVoiceState, useAmaraVoice } from "../../hooks/useAmaraVoice";
+import { type AmaraVoiceState, useAmaraVoice, useAmaraVoiceBridge } from "../../hooks/useAmaraVoice";
 import { Button } from "../../ui";
 import "./AmaraLens.css";
 
@@ -49,6 +49,8 @@ export interface AmaraLensProps {
  */
 export function AmaraLens({ state, size, level, showLabel = false, decorative = false, onRetry, className }: AmaraLensProps) {
   const { levelRef } = useAmaraVoice();
+  // Only a live lens (no fixed level) needs the bridge running.
+  useAmaraVoiceBridge(level === undefined);
   const root = useRef<HTMLDivElement>(null);
   const levelProp = useRef(level);
   useEffect(() => { levelProp.current = level; }, [level]);
