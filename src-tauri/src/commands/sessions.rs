@@ -410,6 +410,8 @@ mod tests {
         assert_eq!(empty, BodyContext::default());
     }
 
+    // noop_query runs under macOS sandbox-exec, so this can only pass on macOS.
+    #[cfg(target_os = "macos")]
     #[test]
     fn body_context_capture_is_best_effort() {
         use super::noop_query::test_util::{s as sp, FakeHome};
