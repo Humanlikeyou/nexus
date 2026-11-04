@@ -200,9 +200,16 @@ describe("decline cooldown fails closed", () => {
       expect(await load(`{"openclaw": ${bad}}`)).toEqual({ openclaw: CAP });
     }
   });
-  it("far-future values are clamped to now+4h; past values pass through", async () => {
-    expect(await load(JSON.stringify({ openclaw: 9e15, "docker:stack-n8n-1": NOW - 1 })))
-      .toEqual({ openclaw: CAP, "docker:stack-n8n-1": NOW - 1 });
+  it("values beyond now+4h are expired (dropped); exactly now+4h and past values pass through", async () => {
+    expect(await load(JSON.stringify({ openclaw: 9e15, "docker:stack-n8n-1": NOW - 1, "docker:other": CAP })))
+      .toEqual({ "docker:stack-n8n-1": NOW - 1 });
+    expect(await load(JSON.stringify({ openclaw: CAP + 1, "docker:stack-n8n-1": CAP })))
+      .toEqual({ "docker:stack-n8n-1": CAP });
+  });
+  it("a declinedUntil more than 4h in the future does not block the prompt", async () => {
+    kv[DECLINE_COOLDOWN_KV_KEY] = JSON.stringify({ openclaw: NOW + DECLINE_COOLDOWN_MS + 60_000 });
+    await autoHeal(report("openclaw"), NOW);
+    expect(calls("restart_services")).toHaveLength(1);
   });
   it("a malformed store blocks the prompt (no restart_services call)", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});

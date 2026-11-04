@@ -67,7 +67,8 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * Load the persisted decline cooldowns for `candidates`, failing CLOSED:
  * a load/parse error or a non-object value cools every candidate until
  * now+4h; a present non-finite value cools that service until now+4h; every
- * value is clamped to at most now+4h so a far-future value can't suppress a
+ * value more than 4h in the future is treated as expired (dropped), since no
+ * legitimate Deny can set one; this stops a bad value from suppressing a
  * service forever. Absent entries mean "not declined".
  */
 export async function loadDeclinedUntil(candidates: string[], now: number): Promise<Record<string, number>> {
@@ -94,14 +95,16 @@ async function readKvCooldowns(candidates: string[], now: number): Promise<{ val
   for (const s of candidates) {
     if (!Object.prototype.hasOwnProperty.call(parsed, s)) continue;
     const v = parsed[s];
-    out[s] = typeof v === "number" && Number.isFinite(v) ? Math.min(v, cap) : cap;
+    if (typeof v !== "number" || !Number.isFinite(v)) { out[s] = cap; continue; }
+    if (v > cap) continue; // beyond the 4h window: expired, not blocking
+    out[s] = v;
   }
   return { values: out, corrupted: false };
 }
 
 /**
- * In-memory mirror of the decline cooldowns. Merged with kv (max per service,
- * clamped to now+4h) on every check, so a failed save_kv after a Deny or a
+ * In-memory mirror of the decline cooldowns. Merged with kv (max per service;
+ * anything beyond now+4h counts as expired) on every check, so a failed save_kv after a Deny or a
  * corrupted kv value still bounds prompting to the 4h window for this run.
  */
 const memDeclinedUntil: Record<string, number> = {};
@@ -131,7 +134,7 @@ async function currentCooldowns(candidates: string[], now: number): Promise<Reco
   for (const s of candidates) {
     // A corrupted read yields synthetic now+4h values; rely on the dated in-memory map instead.
     const v = Math.max(corrupted ? 0 : values[s] ?? 0, memDeclinedUntil[s] ?? 0);
-    if (v > 0) merged[s] = Math.min(v, cap);
+    if (v > 0 && v <= cap) merged[s] = v;
   }
   return merged;
 }
