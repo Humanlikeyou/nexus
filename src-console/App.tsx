@@ -43,7 +43,7 @@ export default function App() {
   // §9/§11: Devices and About live inside Settings; their aliases scroll to the anchor.
   useEffect(() => {
     const anchor = route.id === "terrance" && route.view === "goals" ? "goals"
-      : route.id === "settings" && (route.view === "devices" || route.view === "about") ? route.view : null;
+      : route.id === "settings" && (route.view === "devices" || route.view === "about" || route.view === "home-assistant") ? route.view : null;
     if (!anchor) return;
     // The host screen is lazy: retry for ~1s of frames until the anchor has mounted.
     let frame = 0, tries = 0;
@@ -125,7 +125,7 @@ export default function App() {
   const view = screenId === "terrance" ? <TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} />
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
     : screenId === "mindbody" ? <MindBodyField sessions={data.sessions} />
-    : screenId === "smarthome" ? <SmartHomeField />
+    : screenId === "smarthome" ? <SmartHomeField onOpenSettings={() => setRoute({ id: "settings", view: "home-assistant" })} />
     : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => setRoute({ id: "neuro", view: "main" })} />
     : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} />

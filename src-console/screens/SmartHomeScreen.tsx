@@ -1,4 +1,4 @@
-import { Lightbulb, Minus, Plug, Plus, Power, RefreshCw, Thermometer, ThermometerSun, ToggleLeft, type LucideIcon } from "lucide-react";
+import { Lightbulb, Minus, Plug, Plus, Power, RefreshCw, Settings2, Thermometer, ThermometerSun, ToggleLeft, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type HaContainerStatus, type HaEntity, type HaInactiveKind, type HaLiveState,
@@ -23,17 +23,16 @@ export const INACTIVE_COPY: Record<HaInactiveKind, { title: string; intro: strin
     title: "Home Assistant isn't set up",
     intro: "Amara OS reads your home through the local Home Assistant. To set it up:",
     steps: [
-      "In ~/projects/amara-voice/.env, set HA_URL to http://127.0.0.1:8123 and add a long-lived HA_TOKEN.",
-      "Keep the file private (chmod 600 .env).",
+      "Open Settings, then Home Assistant, and add the address (usually http://127.0.0.1:8123) and a long-lived access token.",
       "Start the container below, then choose Check again.",
     ],
   },
   auth: {
     title: "Home Assistant rejected the token",
-    intro: "The token in ~/projects/amara-voice/.env didn't work. To fix it:",
+    intro: "The saved access token didn't work. To fix it:",
     steps: [
       "In Home Assistant, open your profile, then Security, and create a long-lived access token.",
-      "Replace HA_TOKEN in ~/projects/amara-voice/.env with the new token.",
+      "Open Settings, then Home Assistant, and choose Replace token.",
       "Choose Check again.",
     ],
   },
@@ -136,19 +135,27 @@ function ContainerBar({ container, busy, onStart, onStop, error }: { container: 
   );
 }
 
-export function Inactive({ kind, onRetry }: { kind: HaInactiveKind; onRetry: () => void }) {
+/** Inactive kinds that are fixed from Settings › Home Assistant. */
+const SETTINGS_KINDS: ReadonlySet<HaInactiveKind> = new Set(["not_configured", "auth"]);
+
+export function Inactive({ kind, onRetry, onOpenSettings }: { kind: HaInactiveKind; onRetry: () => void; onOpenSettings?: () => void }) {
   const copy = INACTIVE_COPY[kind];
   return (
     <div className="subsystem-inactive" role="region" aria-label="Home Assistant setup">
       <h2>{copy.title}</h2>
       <p>{copy.intro}</p>
       <ol>{copy.steps.map((s) => <li key={s}>{s}</li>)}</ol>
-      <div><Button size="small" icon={RefreshCw} onClick={onRetry}>Check again</Button></div>
+      <div className="subsystem-inactive__actions">
+        {onOpenSettings && SETTINGS_KINDS.has(kind) && (
+          <Button size="small" variant="primary" icon={Settings2} onClick={onOpenSettings}>Open Home Assistant settings</Button>
+        )}
+        <Button size="small" icon={RefreshCw} onClick={onRetry}>Check again</Button>
+      </div>
     </div>
   );
 }
 
-export function SmartHomeField({ load = loadDevices }: { load?: () => Promise<DevicesState> }) {
+export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: () => Promise<DevicesState>; onOpenSettings?: () => void }) {
   const [state, setState] = useState<DevicesState>({ status: "loading" });
   const [container, setContainer] = useState<Container>({ status: "loading" });
   const [busy, setBusy] = useState<"start" | "stop" | null>(null);
@@ -247,7 +254,7 @@ export function SmartHomeField({ load = loadDevices }: { load?: () => Promise<De
       </header>
       <ContainerBar container={container} busy={busy} error={containerError} onStart={() => { void runContainer("start"); }} onStop={() => { void runContainer("stop"); }} />
       {state.status === "loading" ? <p className="smart-home__meta" role="status">Loading devices…</p>
-        : state.status === "inactive" ? <Inactive kind={state.kind} onRetry={refresh} />
+        : state.status === "inactive" ? <Inactive kind={state.kind} onRetry={refresh} onOpenSettings={onOpenSettings} />
           : live === "authFailed" ? <Inactive kind="auth" onRetry={refresh} />
           : state.status === "error" ? (
             <div className="smart-home__panel" role="region" aria-label="Devices">

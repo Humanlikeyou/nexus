@@ -19,6 +19,7 @@
 .subsystem-inactive { display: grid; gap: var(--space-2); padding: var(--pad-card); max-width: 640px; background: var(--bg-content); border-radius: var(--radius-md); box-shadow: var(--glass-hairline), var(--elev-1); }
 .subsystem-inactive h2 { margin: 0; font: var(--type-headline); }
 .subsystem-inactive p, .subsystem-inactive ol { margin: 0; font: var(--type-callout); color: var(--label-secondary); }
+.subsystem-inactive__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .smart-home__row-error { color: var(--tone-danger-text); }
 .smart-home__climate { display: inline-flex; align-items: center; gap: var(--space-1); }
 .smart-home__temp { width: 4.5em; padding: var(--space-0_5) var(--space-1); font: var(--type-callout); font-variant-numeric: tabular-nums; text-align: center; color: var(--label); background: var(--fill-tertiary, transparent); border: 0; border-radius: var(--radius-sm); box-shadow: var(--glass-hairline); }
