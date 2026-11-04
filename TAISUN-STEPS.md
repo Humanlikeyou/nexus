@@ -31,6 +31,15 @@ deep_think = false
 
 Claude stays off: `[cloud] anthropic_enabled = false`, and no secrets file.
 
+On a reinstall, create the log before loading the LaunchAgent. This sets the folder to 0700 and creates the log at 0600. An existing log is left as it is.
+
+```bash
+mkdir -p ~/Library/Logs/amara-router
+chmod 700 ~/Library/Logs/amara-router
+L=~/Library/Logs/amara-router/router.log
+[ -e "$L" ] || [ -L "$L" ] || install -m 600 /dev/null "$L"
+```
+
 ## 3. Done: Hermes
 
 `~/.hermes/config.yaml` now has this `model:` block:
