@@ -21,6 +21,8 @@ export interface ChatFieldProps {
   /** `deep`: the composer Deep toggle (sends /deep through the Amara Router). */
   onSend: (message: string, options?: { deep?: boolean }) => Promise<void>;
   onNewConversation: () => void;
+  /** Stop waiting for the pending reply (it is ignored if it lands later). */
+  onCancelPending?: () => void;
   onOpenContext: () => void;
   onApproveAction: (action: TerrenceAction) => void;
   onRetryAction: (action: TerrenceAction) => void;
@@ -71,8 +73,28 @@ function crewsValue(crew: SystemSnapshot["crew"]): string {
   return running > 0 ? `${running} running` : "0 running";
 }
 
+/** Pending reply bubble: elapsed seconds and an optional Cancel. */
+export function ThinkingBubble({ onCancel }: { onCancel?: () => void }) {
+  const [started] = useState(() => Date.now());
+  const [now, setNow] = useState(started);
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const seconds = Math.max(0, Math.floor((now - started) / 1000));
+  return (
+    <li className="chat-message" data-role="assistant" data-start>
+      <div className="chat-bubble chat-bubble--pending" data-role="assistant" role="status" aria-label="Amara is thinking">
+        <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>Thinking…
+        {seconds > 0 && <time className="chat-bubble__elapsed" dateTime={`PT${seconds}S`} aria-hidden="true"> {seconds} s</time>}
+      </div>
+      {onCancel && <Button variant="plain" size="small" onClick={onCancel} aria-label="Cancel waiting for Amara's reply">Cancel</Button>}
+    </li>
+  );
+}
+
 export function ChatField({
-  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onOpenContext, onOpenActivity, onOpenCrews, initialDraft = "",
+  data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onCancelPending, onOpenContext, onOpenActivity, onOpenCrews, initialDraft = "",
   onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false,
 }: ChatFieldProps) {
   const [draft, setDraft] = useState(initialDraft);
@@ -105,10 +127,14 @@ export function ChatField({
     ...(assistant?.kind === "unreachable" ? [{ id: "assistant", icon: Workflow, title: "Assistant", subtitle: assistant.message, searchText: assistant.message, tone: "warning" as Tone, label: "Not reachable" }] : []),
   ].filter((a) => !query.trim() || `${a.title} ${a.searchText}`.toLowerCase().includes(query.trim().toLowerCase()));
 
-  // Keep the newest message in view.
+  // Keep the newest exchange in view: scroll to the bottom, but never past the latest user message.
   useEffect(() => {
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const users = el.querySelectorAll<HTMLElement>('li[data-role="user"]');
+    const lastUser = users[users.length - 1];
+    const bottom = el.scrollHeight - el.clientHeight;
+    el.scrollTop = lastUser ? Math.min(bottom, Math.max(0, lastUser.offsetTop - el.offsetTop - 16)) : bottom;
   }, [messages.length, sending]);
 
   // Auto-grow the composer up to 6 lines.
@@ -222,13 +248,7 @@ export function ChatField({
                 )}
               </li>
             ))}
-            {sending && (
-              <li className="chat-message" data-role="assistant" data-start>
-                <div className="chat-bubble chat-bubble--pending" data-role="assistant" role="status" aria-label="Amara is thinking">
-                  <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>Thinking…
-                </div>
-              </li>
-            )}
+            {sending && <ThinkingBubble onCancel={onCancelPending} />}
           </ol>
         )}
 

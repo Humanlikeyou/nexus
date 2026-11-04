@@ -5,7 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 
 import {
-  applyStateChange, classifyHaError, containerErrorCopy, createMockHaBackend, haErrorCopy, homeReplyIds, inactiveKindFor, isServiceRefusal, rememberHomeReply, isToggleable, mockEntity, preRouteHome, setHaBackend, sortDevices, stateLabel, tauriHaBackend, validServiceCall, validServiceData, hvacModesFor, climateRange, HA_BAD_DATA, HA_ERROR_KINDS,
+  applyStateChange, classifyHaError, containerErrorCopy, createMockHaBackend, haErrorCopy, homeReplyIds, inactiveKindFor, isServiceRefusal, rememberHomeReply, isToggleable, mockEntity, preRouteHome, setHaBackend, sortDevices, stateLabel, tauriHaBackend, validServiceCall, validServiceData, hvacModesFor, climateRange, HA_BAD_DATA, HA_ERROR_KINDS, looksLikeHomeCommand, isHaFailureSpeech,
 } from "./homeAssistant";
 
 afterEach(() => invokeMock.mockReset());
@@ -150,6 +150,34 @@ describe("Home Assistant wrapper", () => {
       expect(haErrorCopy("declined: The Home Assistant action was not approved.")).toBe("Not changed.");
       expect(classifyHaError("domain_mismatch: The entity does not belong to the service's domain.")).toBe("domain_mismatch");
       expect(classifyHaError("invalid_input: Invalid or missing data for this Home Assistant service.")).toBe("invalid_input");
+    });
+  });
+
+  describe("pre-route gate", () => {
+    it.each(["turn on the desk lamp", "Switch off the kettle", "set the thermostat to 21", "dim the lights", "please lock the front door", "can you open the blinds", "is the garage door open?", "Are the lights on", "start the vacuum"])("device command: %s", (t) => {
+      expect(looksLikeHomeCommand(t, ["desk lamp", "kettle"])).toBe(true);
+    });
+    it.each(["what is 2+2", "2 + 2", "what's 12 * 4", "hi", "open safari", "set a reminder for 5pm", "stop", "what is the capital of France?", "turn on the lights ".repeat(10), "turn on the light\nand write me an essay about lamps"])("skips: %s", (t) => {
+      expect(looksLikeHomeCommand(t, [])).toBe(false);
+    });
+    it("known friendly names count as devices", () => {
+      expect(looksLikeHomeCommand("turn on Bubbles", ["bubbles"])).toBe(true);
+      expect(looksLikeHomeCommand("turn on Bubbles", [])).toBe(false);
+    });
+    it("HA failure speech is detected", () => {
+      expect(isHaFailureSpeech("Sorry, I am not aware of any device called 2+2")).toBe(true);
+      expect(isHaFailureSpeech("Sorry, I couldn't understand that")).toBe(true);
+      expect(isHaFailureSpeech("Turned on the desk lamp")).toBe(false);
+    });
+    it("a real device command still matches end to end", async () => {
+      const conversation = vi.fn(async () => ({ kind: "match" as const, speech: "Turned off the light" }));
+      const restore = setHaBackend(createMockHaBackend({ conversation }));
+      expect(await preRouteHome("turn off the desk lamp")).toEqual({ handled: true, speech: "Turned off the light" });
+      expect(await preRouteHome("what is 2+2")).toEqual({ handled: false });
+      conversation.mockResolvedValueOnce({ kind: "match", speech: "Sorry, I couldn't understand that" });
+      expect(await preRouteHome("turn off the desk lamp")).toEqual({ handled: false });
+      expect(conversation).toHaveBeenCalledTimes(2);
+      restore();
     });
   });
 });

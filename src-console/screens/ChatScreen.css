@@ -157,3 +157,4 @@
   .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 :root[data-reduce-motion="true"] .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.chat-bubble__elapsed { font-variant-numeric: tabular-nums; }

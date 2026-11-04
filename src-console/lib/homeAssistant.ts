@@ -228,17 +228,54 @@ export function rememberHomeReply(interactionId: string) {
 }
 
 // ─── chat pre-route ──────────────────────────────────────────────────────────
+const HOME_VERB_RE = /^(?:(?:please|hey amara|amara|can you|could you|would you)[,\s]+)*(?:turn|switch|set|dim|brighten|open|close|shut|lock|unlock|start|stop|toggle|activate|deactivate|raise|lower)\b/;
+const HOME_QUESTION_RE = /^(?:is|are)\s+(?:the\s+|my\s+)?(.+?)\s+(?:on|off|open|closed|locked|unlocked|running)\s*\??$/;
+const HOME_DEVICE_RE = /\b(?:lights?|lamps?|switch(?:es)?|plugs?|outlets?|fans?|thermostat|heating|heater|ac|a\/c|air ?con(?:ditioning|ditioner)?|tv|television|blinds?|curtains?|shades?|shutters?|doors?|locks?|garage|kettle|scene|speakers?|vacuum|hoover|heat|temperature|radiator|dehumidifier|humidifier|purifier)\b/;
+const MATH_RE = /\d\s*[-+*/x×÷^=%]\s*\d|\b(?:what is|what's|calculate|solve)\s+-?\d/;
+const HOME_MAX_WORDS = 14;
+const HOME_MAX_CHARS = 120;
+
+/** Friendly names from the last ha_states load (SmartHomeScreen), for the pre-route heuristic. */
+let knownNames: string[] = [];
+export function rememberEntityNames(entities: HaEntity[]) {
+  knownNames = [...new Set(entities.map((e) => (e.friendlyName ?? "").trim().toLowerCase()).filter((n) => n.length >= 3))];
+}
+const mentionsKnownName = (t: string) => knownNames.some((n) => new RegExp(`(?:^|\\W)${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|\\W)`).test(t));
+
 /**
- * Every chat message goes to HA's conversation agent first. NoMatch, any error
- * (not configured, unreachable, backend missing) or an empty reply falls through
- * to the normal Hermes path, so chat never breaks because of HA.
+ * Conservative gate: only short, device-shaped commands ("turn off the desk lamp",
+ * "set the thermostat to 21", "is the garage door open") go to HA. Math, general
+ * questions and long text skip HA entirely.
+ */
+export function looksLikeHomeCommand(text: string, names: string[] = knownNames): boolean {
+  if (text.trim().includes("\n")) return false;
+  const t = text.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!t || t.length > HOME_MAX_CHARS || t.split(" ").length > HOME_MAX_WORDS) return false;
+  if (MATH_RE.test(t)) return false;
+  const saved = knownNames; knownNames = names;
+  try {
+    const device = (s: string) => HOME_DEVICE_RE.test(s) || mentionsKnownName(s);
+    if (HOME_VERB_RE.test(t)) return device(t);
+    const q = HOME_QUESTION_RE.exec(t);
+    return !!q && device(q[1]);
+  } finally { knownNames = saved; }
+}
+
+/** HA "match" replies that are really failures (HA sometimes answers errors as speech). */
+const HA_FAILURE_SPEECH_RE = /\b(?:not aware of any|couldn'?t understand|could not understand|didn'?t understand|no device(?:s)? (?:called|named)|no area called|isn'?t supported|unable to|can'?t find|cannot find|error)\b|^sorry\b/i;
+export const isHaFailureSpeech = (speech: string) => HA_FAILURE_SPEECH_RE.test(speech);
+
+/**
+ * Only device-shaped text (looksLikeHomeCommand) goes to HA's conversation agent.
+ * NoMatch, failure-looking speech, any error or an empty reply falls through to
+ * Hermes, so chat never breaks because of HA.
  */
 export async function preRouteHome(text: string): Promise<{ handled: true; speech: string } | { handled: false }> {
   const trimmed = text.trim();
-  if (!trimmed || trimmed.length > HA_MAX_TEXT) return { handled: false };
+  if (!trimmed || trimmed.length > HA_MAX_TEXT || !looksLikeHomeCommand(trimmed)) return { handled: false };
   try {
     const result = await backend.conversation(trimmed);
-    if (result?.kind === "match" && typeof result.speech === "string" && result.speech.trim()) return { handled: true, speech: result.speech.trim() };
+    if (result?.kind === "match" && typeof result.speech === "string" && result.speech.trim() && !isHaFailureSpeech(result.speech)) return { handled: true, speech: result.speech.trim() };
   } catch (error) {
     console.warn(`[ha] pre-route skipped: ${classifyHaError(error)}`);
   }

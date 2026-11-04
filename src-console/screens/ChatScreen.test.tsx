@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ConversationMessage } from "../app/conversation";
@@ -127,6 +127,18 @@ describe("ChatField", () => {
   it("shows the thinking bubble while sending", () => {
     setup({ messages: [msg("u1", "user", "hi", "2026-10-28T05:00:00Z")], sending: true });
     expect(screen.getByRole("status", { name: "Amara is thinking" })).toBeInTheDocument();
+  });
+
+  it("thinking shows elapsed seconds and a labelled Cancel", () => {
+    vi.useFakeTimers();
+    try {
+      const onCancelPending = vi.fn();
+      setup({ messages: [msg("u1", "user", "hi", "2026-10-28T05:00:00Z")], sending: true, onCancelPending });
+      act(() => { vi.advanceTimersByTime(3000); });
+      expect(screen.getByRole("status", { name: "Amara is thinking" })).toHaveTextContent("3 s");
+      fireEvent.click(screen.getByRole("button", { name: "Cancel waiting for Amara's reply" }));
+      expect(onCancelPending).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
   });
 
   it("action cards: approve, cancel, retry; hermes chat actions are hidden", async () => {

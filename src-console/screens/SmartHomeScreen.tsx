@@ -2,7 +2,7 @@ import { Lightbulb, Minus, Plug, Plus, Power, RefreshCw, Thermometer, Thermomete
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type HaContainerStatus, type HaEntity, type HaInactiveKind, type HaLiveState,
-  HA_ERROR_COPY, HVAC_LABEL, type HaServiceData, applyStateChange, clampTemperature, climateRange, hvacModesFor, isHvacMode, targetTemperature, validServiceData, classifyHaError, containerErrorCopy, inactiveKindFor, isServiceRefusal, domainLabel, entityName, haBackend, isToggleable, sortDevices, stateLabel, toggleService,
+  HA_ERROR_COPY, HVAC_LABEL, type HaServiceData, applyStateChange, rememberEntityNames, clampTemperature, climateRange, hvacModesFor, isHvacMode, targetTemperature, validServiceData, classifyHaError, containerErrorCopy, inactiveKindFor, isServiceRefusal, domainLabel, entityName, haBackend, isToggleable, sortDevices, stateLabel, toggleService,
 } from "../lib/homeAssistant";
 import { Badge, Button, InsetGroup, ListRow, Select, Toggle } from "../ui";
 import "./SmartHomeScreen.css";
@@ -101,6 +101,7 @@ export async function loadDevices(): Promise<DevicesState> {
   try {
     const states = await haBackend().states();
     if (!Array.isArray(states)) return { status: "error" };
+    rememberEntityNames(states);
     return { status: "ready", devices: sortDevices(states) };
   } catch (error) {
     const kind = classifyHaError(error);

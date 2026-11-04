@@ -56,7 +56,7 @@ describe("useConversation", () => {
     const restore = setHaBackend(createMockHaBackend({ conversation: async () => ({ kind: "match" as const, speech: "Done." }) }));
     const first = renderHook(() => useConversation(async () => {}));
     await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
-    await act(() => first.result.current.sendToTerrence("lamp on"));
+    await act(() => first.result.current.sendToTerrence("turn the lamp on"));
     restore();
     first.unmount();
     bridge.listTerrenceInteractions.mockResolvedValue([interaction({ id: "h1", userMessage: "lamp on", assistantMessage: "Done.", tier: null }), interaction({ id: "x2" })]);
@@ -87,6 +87,50 @@ describe("useConversation", () => {
     await act(() => result.current.sendToTerrence("/deliberate move"));
     restore();
     expect(conversation).not.toHaveBeenCalled();
+  });
+
+  it("QA: 'what is 2+2' skips HA, goes to Hermes; user message and tier kept", async () => {
+    const conversation = vi.fn(async () => ({ kind: "match" as const, speech: "Sorry, I am not aware of any device called 2+2" }));
+    const restore = setHaBackend(createMockHaBackend({ conversation }));
+    const { result } = renderHook(() => useConversation(async () => {}));
+    await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
+    await act(() => result.current.sendToTerrence("what is 2+2"));
+    restore();
+    expect(conversation).not.toHaveBeenCalled();
+    expect(bridge.interactWithTerrence).toHaveBeenCalledTimes(1);
+    expect(result.current.messages[0]).toMatchObject({ role: "user", content: "what is 2+2" });
+    expect(last(result.current.messages)).toMatchObject({ role: "assistant", tier: { tier: "fast" } });
+    expect(last(result.current.messages)?.source).toBeUndefined();
+  });
+
+  it("HA failure speech on a device command falls back to Hermes", async () => {
+    const conversation = vi.fn(async () => ({ kind: "match" as const, speech: "Sorry, I am not aware of any device called porch light" }));
+    const restore = setHaBackend(createMockHaBackend({ conversation }));
+    const { result } = renderHook(() => useConversation(async () => {}));
+    await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
+    await act(() => result.current.sendToTerrence("turn on the porch light"));
+    restore();
+    expect(conversation).toHaveBeenCalledTimes(1);
+    expect(bridge.interactWithTerrence).toHaveBeenCalledTimes(1);
+    expect(result.current.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(last(result.current.messages)?.tier).toBeTruthy();
+  });
+
+  it("cancel stops waiting and the late reply is ignored", async () => {
+    let resolve!: (v: TerrenceInteraction) => void;
+    bridge.interactWithTerrence.mockImplementation(() => new Promise((r) => { resolve = r; }));
+    const restore = setHaBackend(createMockHaBackend());
+    const { result } = renderHook(() => useConversation(async () => {}));
+    await waitFor(() => expect(bridge.listTerrenceInteractions).toHaveBeenCalled());
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.sendToTerrence("tell me a story"); });
+    await waitFor(() => expect(result.current.sending).toBe(true));
+    await waitFor(() => expect(bridge.interactWithTerrence).toHaveBeenCalled());
+    act(() => result.current.cancelPending());
+    expect(result.current.sending).toBe(false);
+    await act(async () => { resolve(interaction({ assistantMessage: "Once upon a time." })); await pending; });
+    restore();
+    expect(result.current.messages.map((m) => m.role)).toEqual(["user"]);
   });
 
   it("Home Assistant pre-route: noMatch falls through to Hermes", async () => {

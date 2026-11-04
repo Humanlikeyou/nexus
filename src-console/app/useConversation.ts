@@ -42,6 +42,8 @@ export function useConversation(refresh: () => Promise<void>) {
   const messagesRef = useRef<ConversationMessage[]>([]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   const [sending, setSending] = useState(false);
+  /** Bumped by each send and by cancel; a reply whose generation is stale is dropped. */
+  const generation = useRef(0);
   useEffect(() => {
     let activeRequest = true;
     resetCompressor();
@@ -62,7 +64,7 @@ export function useConversation(refresh: () => Promise<void>) {
     return () => { activeRequest = false; };
   }, [conversationId]);
 
-  const runDeliberation = useCallback(async (message: string, topic: string, requestId: string) => {
+  const runDeliberation = useCallback(async (message: string, topic: string, requestId: string, live: () => boolean) => {
     const started = Date.now();
     const context = await guardedContext(topic);
     let routerError = "";
@@ -75,6 +77,7 @@ export function useConversation(refresh: () => Promise<void>) {
     const tier = tierFromRouter(result.tier, result.routingReason);
     const saved = await recordAmaraInteraction({ conversationId, userMessage: message, assistantMessage: content, tier, durationMs: Date.now() - started })
       .catch((error) => { console.warn("[amara] deliberation not saved", error); return null; });
+    if (!live()) return;
     setMessages((current) => [...current, {
       id: saved ? `${saved.id}-assistant` : `${requestId}-assistant`,
       role: "assistant",
@@ -86,6 +89,8 @@ export function useConversation(refresh: () => Promise<void>) {
 
   const sendToTerrence = useCallback(async (message: string, options: SendOptions = {}) => {
     const requestId = `pending-${Date.now()}`;
+    const gen = ++generation.current;
+    const live = () => generation.current === gen;
     const command = parseChatCommand(message, options.deep ?? false);
     const history = historyTurns(messagesRef.current);
     setMessages((current) => [...current, { id: `${requestId}-user`, role: "user", content: message, timestamp: new Date().toISOString() }]);
@@ -93,7 +98,7 @@ export function useConversation(refresh: () => Promise<void>) {
     try {
       if (command.kind === "deliberate") {
         if (!command.topic) throw new Error("Add a topic: /deliberate <topic>");
-        await runDeliberation(message, command.topic, requestId);
+        await runDeliberation(message, command.topic, requestId, live);
         return;
       }
       // Home Assistant pre-route for plain chat only: Deep (toggle or /deep) and /deliberate go straight to Hermes.
@@ -105,6 +110,7 @@ export function useConversation(refresh: () => Promise<void>) {
           .then(() => recordAmaraInteraction({ conversationId, userMessage: message, assistantMessage: home.speech, tier: null, durationMs: Date.now() - started }))
           .catch(() => { console.warn("[ha] home reply not saved"); return null; });
         if (saved) rememberHomeReply(saved.id);
+        if (!live()) return;
         setMessages((current) => [...current, { id: saved ? `${saved.id}-assistant` : `${requestId}-home`, role: "assistant", content: home.speech, timestamp: new Date().toISOString(), source: "home" }]);
         return;
       }
@@ -121,6 +127,7 @@ export function useConversation(refresh: () => Promise<void>) {
         context: context.sections,
         contextItemIds: context.itemIds,
       });
+      if (!live()) return;
       if (interaction.hermesSessionId) {
         setHermesSessionId(interaction.hermesSessionId);
         window.localStorage.setItem(HERMES_SESSION_KEY, interaction.hermesSessionId);
@@ -129,6 +136,7 @@ export function useConversation(refresh: () => Promise<void>) {
       setMessages((current) => [...current, ...messagesFromInteractions([interaction]).filter((entry) => entry.role === "assistant")]);
       await refresh();
     } catch (error) {
+      if (!live()) return;
       setMessages((current) => [...current, {
         id: `${requestId}-failed`,
         role: "assistant",
@@ -137,10 +145,17 @@ export function useConversation(refresh: () => Promise<void>) {
         status: "failed",
       }]);
     } finally {
-      setSending(false);
+      if (live()) setSending(false);
     }
   }, [conversationId, hermesSessionId, refresh, runDeliberation]);
+  /** Stop waiting: the pending reply is ignored when it lands (the backend call itself can't be aborted). */
+  const cancelPending = useCallback(() => {
+    generation.current++;
+    setSending(false);
+  }, []);
   const startNewConversation = useCallback(() => {
+    generation.current++;
+    setSending(false);
     const created = createConversationId();
     window.localStorage.setItem(CONVERSATION_KEY, created);
     window.localStorage.removeItem(HERMES_SESSION_KEY);
@@ -150,5 +165,5 @@ export function useConversation(refresh: () => Promise<void>) {
     setMessages([]);
     setConversationId(created);
   }, []);
-  return { conversationId, messages, sending, sendToTerrence, startNewConversation };
+  return { conversationId, messages, sending, sendToTerrence, startNewConversation, cancelPending };
 }
