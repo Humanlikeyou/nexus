@@ -35,6 +35,10 @@ const WS_MAX_FRAME: usize = 256 * 1024;
 const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// No frame for this long → treat the socket as dead and reconnect with backoff.
 const WS_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+/// auth_required → auth → auth_ok must complete within this.
+const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
+/// Client ping cadence once subscribed.
+const WS_PING_INTERVAL: Duration = Duration::from_secs(30);
 /// Climate set_temperature bounds (covers °C and °F setpoints).
 const MIN_TEMPERATURE: f64 = 5.0;
 const MAX_TEMPERATURE: f64 = 95.0;
@@ -569,7 +573,11 @@ async fn conversation_with(cfg: &HaConfig, text: &str) -> Result<HaConversationR
 
 fn conversation_result(v: &Value) -> Result<HaConversationResult, String> {
     let r = &v["response"];
-    if r["response_type"] == "error" && r["data"]["code"] == "no_intent_match" {
+    // Only a handled intent is a match; "error" (any code) or unknown/missing is noMatch.
+    if !matches!(
+        r["response_type"].as_str(),
+        Some("action_done" | "query_answer")
+    ) {
         return Ok(HaConversationResult::NoMatch);
     }
     let speech = r["speech"]["plain"]["speech"]
@@ -740,7 +748,7 @@ fn ws_url(base: &str) -> String {
 async fn live_session<S>(
     mut ws: S,
     token: &HaToken,
-    idle: Duration,
+    t: WsTimings,
     mut on_connected: impl FnMut(),
     mut on_change: impl FnMut(HaStateChanged),
 ) -> SessionEnd
@@ -749,31 +757,39 @@ where
         + futures::Sink<Message>
         + Unpin,
 {
-    async fn next_json<S>(ws: &mut S, idle: Duration) -> Option<Value>
+    /// Next text frame as JSON; non-text frames (pings/pongs) are skipped. None on close/error.
+    async fn next_json<S>(ws: &mut S) -> Option<Value>
     where
         S: futures::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
     {
         loop {
-            // Any frame (ping included) resets the idle clock; silence ends the session.
-            match tokio::time::timeout(idle, ws.next()).await.ok()?? {
+            match ws.next().await? {
                 Ok(Message::Text(t)) => return serde_json::from_str(t.as_str()).ok(),
                 Ok(Message::Close(_)) | Err(_) => return None,
                 Ok(_) => continue,
             }
         }
     }
-    match next_json(&mut ws, idle).await {
-        Some(v) if v["type"] == "auth_required" => {}
-        _ => return SessionEnd::Closed,
-    }
-    let auth = json!({"type": "auth", "access_token": token.0}).to_string();
-    if ws.send(Message::Text(auth.into())).await.is_err() {
-        return SessionEnd::Closed;
-    }
-    match next_json(&mut ws, idle).await {
-        Some(v) if v["type"] == "auth_ok" => {}
-        Some(v) if v["type"] == "auth_invalid" => return SessionEnd::AuthFailed,
-        _ => return SessionEnd::Closed,
+    // Auth phase (auth_required → auth → auth_ok) is bounded as a whole.
+    let auth = async {
+        match next_json(&mut ws).await {
+            Some(v) if v["type"] == "auth_required" => {}
+            _ => return Err(SessionEnd::Closed),
+        }
+        let auth = json!({"type": "auth", "access_token": token.0}).to_string();
+        if ws.send(Message::Text(auth.into())).await.is_err() {
+            return Err(SessionEnd::Closed);
+        }
+        match next_json(&mut ws).await {
+            Some(v) if v["type"] == "auth_ok" => Ok(()),
+            Some(v) if v["type"] == "auth_invalid" => Err(SessionEnd::AuthFailed),
+            _ => Err(SessionEnd::Closed),
+        }
+    };
+    match tokio::time::timeout(t.auth, auth).await {
+        Ok(Ok(())) => {}
+        Ok(Err(end)) => return end,
+        Err(_) => return SessionEnd::Closed,
     }
     let sub = json!({"id": 1, "type": "subscribe_events", "event_type": "state_changed"});
     if ws
@@ -784,14 +800,53 @@ where
         return SessionEnd::Closed;
     }
     on_connected();
-    while let Some(v) = next_json(&mut ws, idle).await {
-        if v["type"] == "event" && v["event"]["event_type"] == "state_changed" {
-            if let Some(change) = state_changed_from(&v["event"]) {
-                on_change(change);
+    // Ping every `t.ping`; any received frame (pongs included) resets the `t.idle` deadline.
+    let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + t.ping, t.ping);
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut deadline = tokio::time::Instant::now() + t.idle;
+    loop {
+        tokio::select! {
+            frame = ws.next() => {
+                deadline = tokio::time::Instant::now() + t.idle;
+                match frame {
+                    Some(Ok(Message::Text(text))) => {
+                        let Ok(v) = serde_json::from_str::<Value>(text.as_str()) else { continue };
+                        if v["type"] == "event" && v["event"]["event_type"] == "state_changed" {
+                            if let Some(change) = state_changed_from(&v["event"]) {
+                                on_change(change);
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return SessionEnd::Closed,
+                    Some(Ok(_)) => {}
+                }
             }
+            _ = ping.tick() => {
+                if ws.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    return SessionEnd::Closed;
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => return SessionEnd::Closed,
         }
     }
-    SessionEnd::Closed
+}
+
+/// Websocket timings; production uses `WsTimings::default()`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct WsTimings {
+    auth: Duration,
+    ping: Duration,
+    idle: Duration,
+}
+
+impl Default for WsTimings {
+    fn default() -> Self {
+        Self {
+            auth: WS_AUTH_TIMEOUT,
+            ping: WS_PING_INTERVAL,
+            idle: WS_IDLE_TIMEOUT,
+        }
+    }
 }
 
 fn ws_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
@@ -835,7 +890,7 @@ async fn live_loop(app: AppHandle) {
                     let end = live_session(
                         ws,
                         &cfg.token,
-                        WS_IDLE_TIMEOUT,
+                        WsTimings::default(),
                         || {
                             connected = true;
                             status("connected");
@@ -1108,11 +1163,13 @@ mod tests {
             call_service_with(&c, "light", "turn_on", &json!({"entity_id": "light.x"}))
                 .await
                 .unwrap_err(),
-            conversation_with(&c, "hi").await.unwrap_err(),
         ];
         assert_eq!(errs[0], ERR_AUTH);
         assert_eq!(errs[1], ERR_FAILED);
-        assert_eq!(errs[2], ERR_BAD_REPLY);
+        // A token-bearing reply with no response_type is noMatch and carries nothing back.
+        let conv = conversation_with(&c, "hi").await.unwrap();
+        assert_eq!(conv, HaConversationResult::NoMatch);
+        assert!(!serde_json::to_string(&conv).unwrap().contains(TOKEN));
         for e in &errs {
             assert!(!e.contains(TOKEN));
         }
@@ -1224,7 +1281,7 @@ mod tests {
         let end = live_session(
             ws,
             &HaToken(TOKEN.into()),
-            WS_IDLE_TIMEOUT,
+            WsTimings::default(),
             || connected = true,
             |c| changes.push(c),
         )
@@ -1265,7 +1322,7 @@ mod tests {
         let end = live_session(
             ws,
             &HaToken(TOKEN.into()),
-            WS_IDLE_TIMEOUT,
+            WsTimings::default(),
             || connected = true,
             |_| {},
         )
@@ -1509,7 +1566,10 @@ mod tests {
         let end = live_session(
             ws,
             &HaToken(TOKEN.into()),
-            Duration::from_millis(300),
+            WsTimings {
+                idle: Duration::from_millis(300),
+                ..WsTimings::default()
+            },
             || connected = true,
             |_| {},
         )
@@ -1536,7 +1596,7 @@ mod tests {
         let end = live_session(
             ws,
             &HaToken(TOKEN.into()),
-            Duration::from_secs(5),
+            WsTimings::default(),
             || {},
             |_| {},
         )
@@ -1590,5 +1650,169 @@ mod tests {
                 "{k} unused"
             );
         }
+    }
+
+    /// Accept one ws client; run `script` on the server side.
+    async fn ws_pair<F, Fut>(script: F) -> WsStream
+    where
+        F: FnOnce(tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>) -> Fut
+            + Send
+            + 'static,
+        Fut: std::future::Future<Output = ()> + Send,
+    {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            script(tokio_tungstenite::accept_async(sock).await.unwrap()).await;
+        });
+        connect_ws(&ws_url(&format!("http://{addr}")), WS_CONNECT_TIMEOUT)
+            .await
+            .unwrap()
+    }
+
+    async fn auth_ok_then<S>(ws: &mut S)
+    where
+        S: futures::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+            + futures::Sink<Message>
+            + Unpin,
+    {
+        let _ = ws
+            .send(Message::Text(r#"{"type":"auth_required"}"#.into()))
+            .await;
+        let _ = ws.next().await;
+        let _ = ws.send(Message::Text(r#"{"type":"auth_ok"}"#.into())).await;
+        let _ = ws.next().await; // subscribe
+    }
+
+    #[tokio::test]
+    async fn auth_phase_is_bounded_by_the_auth_timeout() {
+        assert_eq!(WS_AUTH_TIMEOUT, Duration::from_secs(10));
+        assert_eq!(WS_PING_INTERVAL, Duration::from_secs(30));
+        assert_eq!(WsTimings::default().auth, WS_AUTH_TIMEOUT);
+        // Scaled 10 s → 300 ms (tokio paused time needs the `test-util` feature, which would
+        // mean editing Cargo.toml). Server never sends auth_required.
+        let ws = ws_pair(|ws| async move {
+            let _keep_open = ws;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        })
+        .await;
+        let t = WsTimings {
+            auth: Duration::from_millis(300),
+            ..WsTimings::default()
+        };
+        let t0 = std::time::Instant::now();
+        let end = live_session(ws, &HaToken(TOKEN.into()), t, || {}, |_| {}).await;
+        assert_eq!(end, SessionEnd::Closed);
+        let took = t0.elapsed();
+        assert!(
+            took >= Duration::from_millis(300) && took < Duration::from_secs(3),
+            "{took:?}"
+        );
+        // The bound covers the whole phase: auth_required arrives, auth_ok never does.
+        let ws = ws_pair(|mut ws| async move {
+            let _ = ws
+                .send(Message::Text(r#"{"type":"auth_required"}"#.into()))
+                .await;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        })
+        .await;
+        let mut connected = false;
+        let t0 = std::time::Instant::now();
+        let end = live_session(ws, &HaToken(TOKEN.into()), t, || connected = true, |_| {}).await;
+        assert_eq!(end, SessionEnd::Closed);
+        assert!(!connected);
+        assert!(t0.elapsed() < Duration::from_secs(3));
+    }
+
+    #[tokio::test]
+    async fn pings_keep_a_silent_healthy_server_alive_past_the_idle_limit() {
+        // Scaled: ping 30 s → 100 ms, idle 90 s → 300 ms. Run 4× the idle limit.
+        let t = WsTimings {
+            auth: Duration::from_secs(5),
+            ping: Duration::from_millis(100),
+            idle: Duration::from_millis(300),
+        };
+        let pings = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let p2 = pings.clone();
+        // Healthy: sends no events, but keeps reading, so tungstenite auto-replies with pongs.
+        let ws = ws_pair(move |mut ws| async move {
+            auth_ok_then(&mut ws).await;
+            while let Some(Ok(m)) = ws.next().await {
+                if m.is_ping() {
+                    p2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+        })
+        .await;
+        let mut connected = false;
+        let r = tokio::time::timeout(
+            Duration::from_millis(1200),
+            live_session(ws, &HaToken(TOKEN.into()), t, || connected = true, |_| {}),
+        )
+        .await;
+        assert!(r.is_err(), "session must still be alive past 4× idle");
+        assert!(connected);
+        assert!(pings.load(std::sync::atomic::Ordering::SeqCst) >= 5);
+
+        // Unhealthy: never reads, so no pongs → closed by the idle limit.
+        let ws = ws_pair(|mut ws| async move {
+            auth_ok_then(&mut ws).await;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        })
+        .await;
+        let t0 = std::time::Instant::now();
+        let end = live_session(ws, &HaToken(TOKEN.into()), t, || {}, |_| {}).await;
+        assert_eq!(end, SessionEnd::Closed);
+        assert!(t0.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn conversation_match_only_for_action_done_or_query_answer() {
+        let reply = |rt: Option<&str>, code: Option<&str>| {
+            let mut r = json!({"speech": {"plain": {"speech": "Sorry, I am not aware of any device called 2+2"}}});
+            if let Some(rt) = rt {
+                r["response_type"] = json!(rt);
+            }
+            if let Some(code) = code {
+                r["data"] = json!({"code": code});
+            }
+            json!({"response": r})
+        };
+        let m = HaConversationResult::Match {
+            speech: "Sorry, I am not aware of any device called 2+2".into(),
+        };
+        assert_eq!(
+            conversation_result(&reply(Some("action_done"), None)).unwrap(),
+            m
+        );
+        assert_eq!(
+            conversation_result(&reply(Some("query_answer"), None)).unwrap(),
+            m
+        );
+        for code in [
+            "no_valid_targets",
+            "no_intent_match",
+            "failed_to_handle",
+            "unknown",
+        ] {
+            assert_eq!(
+                conversation_result(&reply(Some("error"), Some(code))).unwrap(),
+                HaConversationResult::NoMatch,
+                "{code}"
+            );
+        }
+        assert_eq!(
+            conversation_result(&reply(None, None)).unwrap(),
+            HaConversationResult::NoMatch
+        );
+        assert_eq!(
+            conversation_result(&reply(Some("weird"), None)).unwrap(),
+            HaConversationResult::NoMatch
+        );
+        assert_eq!(
+            conversation_result(&json!({})).unwrap(),
+            HaConversationResult::NoMatch
+        );
     }
 }
