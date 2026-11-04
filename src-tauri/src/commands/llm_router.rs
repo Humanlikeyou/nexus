@@ -723,9 +723,16 @@ mod tests {
             "http://127.0.0.1:8787/v1?x=1",
             "http://127.0.0.1:8787#frag",
         ] {
-            assert_eq!(router_base(Some(trick), None), "http://127.0.0.1:8787", "{trick}");
+            assert_eq!(
+                router_base(Some(trick), None),
+                "http://127.0.0.1:8787",
+                "{trick}"
+            );
         }
-        assert_eq!(router_base(Some("http://[::1]:8787"), None), "http://[::1]:8787");
+        assert_eq!(
+            router_base(Some("http://[::1]:8787"), None),
+            "http://[::1]:8787"
+        );
     }
 
     // ── hints forwarded (no model decisions in the app) ──
