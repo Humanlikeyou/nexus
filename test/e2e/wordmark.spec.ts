@@ -85,6 +85,12 @@ test.describe("splash at 2x", () => {
       return { color: getComputedStyle(document.querySelector(".splash__subtitle")!).color, secondary: c };
     });
     expect(color).toBe(secondary);
+    // Layout gap between the mark and the subtitle line box, independent of the font.
+    const boxGap = await page.evaluate(() => {
+      const mark = document.querySelector(".splash__lockup svg")!.getBoundingClientRect();
+      return document.querySelector(".splash__subtitle")!.getBoundingClientRect().top - mark.bottom;
+    });
+    expect(boxGap).toBeCloseTo(13, 1);
     // Visible gap, measured on rendered pixels (2x): blank rows between the AMARA strokes and the subtitle caps.
     const png = await page.locator(".splash__lockup").screenshot({ animations: "disabled" });
     const gap = await page.evaluate(async (b64) => {
@@ -112,8 +118,11 @@ test.describe("splash at 2x", () => {
       while (y < c.height && !inked(y)) y++; // blank rows = the visible gap
       return (y - start) / (window.devicePixelRatio || 1);
     }, png.toString("base64"));
-    expect(gap).toBeGreaterThanOrEqual(15.5);
-    expect(gap).toBeLessThanOrEqual(16.5);
+    // The target is 16px in SF, which only macOS has. Elsewhere the fallback font's cap height moves the ink
+    // (15-17px across the Linux fonts, same layout), so the exact box gap above holds the spacing there.
+    const slack = process.platform === "darwin" ? 0.5 : 1;
+    expect(gap).toBeGreaterThanOrEqual(16 - slack);
+    expect(gap).toBeLessThanOrEqual(16 + slack);
     await expect(splash).toBeHidden();
   });
 });
