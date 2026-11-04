@@ -11,7 +11,7 @@
 //!   a timeout.
 
 use futures::{SinkExt, StreamExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex as StdMutex;
@@ -27,22 +27,103 @@ const MAX_CONVERSATION_CHARS: usize = 1_000;
 const MAX_STATES: usize = 5_000;
 const BACKOFF_START: Duration = Duration::from_secs(1);
 const BACKOFF_CAP: Duration = Duration::from_secs(60);
+/// Max HTTP response body for /api/states and /api/conversation/process.
+const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
+const WS_MAX_MESSAGE: usize = 1024 * 1024;
+const WS_MAX_FRAME: usize = 256 * 1024;
+/// TCP connect + websocket handshake must finish within this.
+const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// No frame for this long → treat the socket as dead and reconnect with backoff.
+const WS_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+/// Climate set_temperature bounds (covers °C and °F setpoints).
+const MIN_TEMPERATURE: f64 = 5.0;
+const MAX_TEMPERATURE: f64 = 95.0;
+const HVAC_MODES: &[&str] = &[
+    "off",
+    "heat",
+    "cool",
+    "heat_cool",
+    "auto",
+    "dry",
+    "fan_only",
+];
 
 pub const STATE_CHANGED_EVENT: &str = "ha://state_changed";
 pub const LIVE_STATUS_EVENT: &str = "ha://live_status";
 
-const ERR_CONFIG: &str = "Home Assistant is not configured (check HA_URL and HA_TOKEN).";
-const ERR_URL: &str = "HA_URL must be a loopback http address.";
-const ERR_UNREACHABLE: &str = "Home Assistant is not reachable.";
-const ERR_AUTH: &str = "Home Assistant rejected the token.";
-const ERR_FAILED: &str = "Home Assistant returned an error.";
-const ERR_BAD_REPLY: &str = "Home Assistant sent an unexpected reply.";
-const ERR_INVALID: &str = "Invalid domain, service or entity id.";
-const ERR_TEXT: &str = "Message is empty or too long.";
-const ERR_BUSY: &str = "A Home Assistant container action is already running.";
-const ERR_DOCKER: &str = "Docker is not available.";
-const ERR_DOCKER_FAILED: &str = "The Home Assistant container command failed.";
-const ERR_DOCKER_TIMEOUT: &str = "The Home Assistant container command timed out.";
+// ─── error kinds: every user-facing error is "<kind>: <text>" ────────────────
+
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_NOT_CONFIGURED: &str = "not_configured";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_BAD_URL: &str = "bad_url";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_AUTH_REJECTED: &str = "auth_rejected";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_UNREACHABLE: &str = "unreachable";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_DOCKER_UNAVAILABLE: &str = "docker_unavailable";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_ALREADY_RUNNING: &str = "already_running";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_TIMED_OUT: &str = "timed_out";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_TOO_LARGE: &str = "too_large";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_NOT_ALLOWED: &str = "not_allowed";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_NEEDS_APPROVAL: &str = "needs_approval";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_DECLINED: &str = "declined";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_DOMAIN_MISMATCH: &str = "domain_mismatch";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_INVALID_INPUT: &str = "invalid_input";
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const KIND_UPSTREAM_ERROR: &str = "upstream_error";
+/// All kinds, for the frontend and tests.
+#[allow(dead_code)] // stable contract for the frontend; asserted in tests
+pub const ERROR_KINDS: &[&str] = &[
+    KIND_NOT_CONFIGURED,
+    KIND_BAD_URL,
+    KIND_AUTH_REJECTED,
+    KIND_UNREACHABLE,
+    KIND_DOCKER_UNAVAILABLE,
+    KIND_ALREADY_RUNNING,
+    KIND_TIMED_OUT,
+    KIND_TOO_LARGE,
+    KIND_NOT_ALLOWED,
+    KIND_NEEDS_APPROVAL,
+    KIND_DECLINED,
+    KIND_DOMAIN_MISMATCH,
+    KIND_INVALID_INPUT,
+    KIND_UPSTREAM_ERROR,
+];
+
+const ERR_CONFIG: &str =
+    "not_configured: Home Assistant is not configured (check HA_URL and HA_TOKEN).";
+const ERR_URL: &str = "bad_url: HA_URL must be a loopback http address.";
+const ERR_UNREACHABLE: &str = "unreachable: Home Assistant is not reachable.";
+const ERR_AUTH: &str = "auth_rejected: Home Assistant rejected the token.";
+const ERR_FAILED: &str = "upstream_error: Home Assistant returned an error.";
+const ERR_BAD_REPLY: &str = "upstream_error: Home Assistant sent an unexpected reply.";
+const ERR_INVALID: &str = "invalid_input: Invalid domain, service or entity id.";
+const ERR_TEXT: &str = "invalid_input: Message is empty or too long.";
+const ERR_BUSY: &str = "already_running: A Home Assistant container action is already running.";
+const ERR_DOCKER: &str = "docker_unavailable: Docker is not available.";
+const ERR_DOCKER_FAILED: &str = "upstream_error: The Home Assistant container command failed.";
+const ERR_DOCKER_TIMEOUT: &str = "timed_out: The Home Assistant container command timed out.";
+const ERR_TOO_LARGE: &str = "too_large: Home Assistant sent a reply that is too large.";
+const ERR_NOT_ALLOWED: &str = "not_allowed: That Home Assistant action is not allowed.";
+const ERR_DOMAIN_MISMATCH: &str =
+    "domain_mismatch: The entity does not belong to the service's domain.";
+const ERR_BAD_DATA: &str =
+    "invalid_input: Invalid or missing data for this Home Assistant service.";
+const ERR_NEEDS_APPROVAL: &str =
+    "needs_approval: This Home Assistant action needs approval, and the approval dialog could not be shown.";
+const ERR_BUSY_APPROVAL: &str =
+    "already_running: An approval for this Home Assistant domain is already in progress.";
+const ERR_DECLINED: &str = "declined: The Home Assistant action was not approved.";
 
 // ─── types (camelCase for the frontend) ──────────────────────────────────────
 
@@ -88,6 +169,21 @@ pub struct HaStateChanged {
 pub struct HaLiveStatus {
     /// "connecting" | "connected" | "authFailed" | "disconnected" | "stopped"
     pub state: &'static str,
+}
+
+/// Optional typed data for `climate.set_temperature` / `climate.set_hvac_mode` only.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HaServiceData {
+    pub temperature: Option<f64>,
+    pub hvac_mode: Option<String>,
+}
+
+/// What `ha_call_service` may do with a domain/service pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Policy {
+    Allowed,
+    NeedsApproval,
 }
 
 /// The HA token. No `Serialize`, no `Display`; `Debug` is redacted.
@@ -262,6 +358,80 @@ fn valid_entity_id(s: &str) -> bool {
 
 /// Attribute keys dropped (any depth): HA puts signed `?token=` URLs in `entity_picture`
 /// and cameras expose `access_token`.
+const SENSITIVE_DOMAINS: &[&str] = &[
+    "lock",
+    "alarm_control_panel",
+    "cover",
+    "script",
+    "shell_command",
+    "python_script",
+    "hassio",
+    "homeassistant",
+    "automation",
+];
+
+/// Allowlist check. Everything not listed is refused; sensitive domains need a native confirm.
+/// Returns the JSON body to POST.
+fn authorize(
+    domain: &str,
+    service: &str,
+    entity_id: &str,
+    data: Option<&HaServiceData>,
+) -> Result<(Policy, Value), String> {
+    if !valid_name(domain) || !valid_name(service) || !valid_entity_id(entity_id) {
+        return Err(ERR_INVALID.to_string());
+    }
+    if entity_id.split('.').next() != Some(domain) {
+        return Err(ERR_DOMAIN_MISMATCH.to_string());
+    }
+    let mut body = Map::new();
+    body.insert("entity_id".into(), Value::String(entity_id.into()));
+    let policy = match (domain, service) {
+        ("light" | "switch" | "fan" | "media_player", "turn_on" | "turn_off" | "toggle")
+        | ("scene", "turn_on")
+        | ("climate", "turn_on" | "turn_off") => Policy::Allowed,
+        ("climate", "set_temperature") => {
+            let t = data
+                .filter(|d| d.hvac_mode.is_none())
+                .and_then(|d| d.temperature)
+                .filter(|t| t.is_finite() && (MIN_TEMPERATURE..=MAX_TEMPERATURE).contains(t))
+                .ok_or_else(|| ERR_BAD_DATA.to_string())?;
+            body.insert("temperature".into(), json!(t));
+            return Ok((Policy::Allowed, Value::Object(body)));
+        }
+        ("climate", "set_hvac_mode") => {
+            let m = data
+                .filter(|d| d.temperature.is_none())
+                .and_then(|d| d.hvac_mode.as_deref())
+                .filter(|m| HVAC_MODES.contains(m))
+                .ok_or_else(|| ERR_BAD_DATA.to_string())?;
+            body.insert("hvac_mode".into(), json!(m));
+            return Ok((Policy::Allowed, Value::Object(body)));
+        }
+        (d, _) if SENSITIVE_DOMAINS.contains(&d) => Policy::NeedsApproval,
+        _ => return Err(ERR_NOT_ALLOWED.to_string()),
+    };
+    if data.is_some() {
+        return Err(ERR_BAD_DATA.to_string());
+    }
+    Ok((policy, Value::Object(body)))
+}
+
+/// Read a JSON body, refusing anything over `cap` bytes (Content-Length first, then streamed).
+async fn read_capped(mut resp: reqwest::Response, cap: usize) -> Result<Value, String> {
+    if resp.content_length().is_some_and(|n| n > cap as u64) {
+        return Err(ERR_TOO_LARGE.to_string());
+    }
+    let mut buf = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|_| ERR_BAD_REPLY.to_string())? {
+        if buf.len() + chunk.len() > cap {
+            return Err(ERR_TOO_LARGE.to_string());
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&buf).map_err(|_| ERR_BAD_REPLY.to_string())
+}
+
 fn sensitive_key(k: &str) -> bool {
     let k = k.to_ascii_lowercase();
     [
@@ -343,7 +513,7 @@ async fn states_with(cfg: &HaConfig) -> Result<Vec<HaEntity>, String> {
     if !resp.status().is_success() {
         return Err(status_error(resp.status()));
     }
-    let v: Value = resp.json().await.map_err(|_| ERR_BAD_REPLY.to_string())?;
+    let v = read_capped(resp, MAX_BODY_BYTES).await?;
     let list = v.as_array().ok_or_else(|| ERR_BAD_REPLY.to_string())?;
     Ok(list
         .iter()
@@ -356,15 +526,15 @@ async fn call_service_with(
     cfg: &HaConfig,
     domain: &str,
     service: &str,
-    entity_id: &str,
+    body: &Value,
 ) -> Result<(), String> {
-    if !valid_name(domain) || !valid_name(service) || !valid_entity_id(entity_id) {
+    if !valid_name(domain) || !valid_name(service) {
         return Err(ERR_INVALID.to_string());
     }
     let resp = client()
         .post(format!("{}/api/services/{domain}/{service}", cfg.base))
         .bearer_auth(&cfg.token.0)
-        .json(&json!({ "entity_id": entity_id }))
+        .json(body)
         .send()
         .await
         .map_err(|_| ERR_UNREACHABLE.to_string())?;
@@ -393,7 +563,7 @@ async fn conversation_with(cfg: &HaConfig, text: &str) -> Result<HaConversationR
     if !resp.status().is_success() {
         return Err(status_error(resp.status()));
     }
-    let v: Value = resp.json().await.map_err(|_| ERR_BAD_REPLY.to_string())?;
+    let v = read_capped(resp, MAX_BODY_BYTES).await?;
     conversation_result(&v)
 }
 
@@ -417,16 +587,43 @@ pub async fn ha_states() -> Result<Vec<HaEntity>, String> {
     states_with(&load_config()?).await
 }
 
+/// Map approval_gate's errors onto our fixed kinds (its text is not passed through).
+fn approval_error(e: &str) -> String {
+    if e.starts_with(super::approval_gate::DECLINED_PREFIX) {
+        ERR_DECLINED.to_string()
+    } else if e.starts_with(super::approval_gate::BUSY_PREFIX) {
+        ERR_BUSY_APPROVAL.to_string()
+    } else {
+        ERR_NEEDS_APPROVAL.to_string()
+    }
+}
+
 #[tauri::command]
 pub async fn ha_call_service(
+    app: AppHandle,
     domain: String,
     service: String,
     entity_id: String,
+    data: Option<HaServiceData>,
 ) -> Result<(), String> {
-    if !valid_name(&domain) || !valid_name(&service) || !valid_entity_id(&entity_id) {
-        return Err(ERR_INVALID.to_string());
-    }
-    call_service_with(&load_config()?, &domain, &service, &entity_id).await
+    let (policy, body) = authorize(&domain, &service, &entity_id, data.as_ref())?;
+    let _guard = if policy == Policy::NeedsApproval {
+        // Validated slugs only, so the dialog text is safe to show.
+        let text = super::approval_gate::approval_text(
+            &format!("Home Assistant: {domain}.{service}"),
+            &format!("Entity: {entity_id}\n\nThis is a sensitive Home Assistant action."),
+        )
+        .map_err(|_| ERR_NEEDS_APPROVAL.to_string())?;
+        let key = super::approval_gate::service_key(&format!("ha:{domain}"));
+        Some(
+            super::approval_gate::require_approval(&app, &[key], text)
+                .await
+                .map_err(|e| approval_error(&e))?,
+        )
+    } else {
+        None
+    };
+    call_service_with(&load_config()?, &domain, &service, &body).await
 }
 
 #[tauri::command]
@@ -543,6 +740,7 @@ fn ws_url(base: &str) -> String {
 async fn live_session<S>(
     mut ws: S,
     token: &HaToken,
+    idle: Duration,
     mut on_connected: impl FnMut(),
     mut on_change: impl FnMut(HaStateChanged),
 ) -> SessionEnd
@@ -551,19 +749,20 @@ where
         + futures::Sink<Message>
         + Unpin,
 {
-    async fn next_json<S>(ws: &mut S) -> Option<Value>
+    async fn next_json<S>(ws: &mut S, idle: Duration) -> Option<Value>
     where
         S: futures::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
     {
         loop {
-            match ws.next().await? {
+            // Any frame (ping included) resets the idle clock; silence ends the session.
+            match tokio::time::timeout(idle, ws.next()).await.ok()?? {
                 Ok(Message::Text(t)) => return serde_json::from_str(t.as_str()).ok(),
                 Ok(Message::Close(_)) | Err(_) => return None,
                 Ok(_) => continue,
             }
         }
     }
-    match next_json(&mut ws).await {
+    match next_json(&mut ws, idle).await {
         Some(v) if v["type"] == "auth_required" => {}
         _ => return SessionEnd::Closed,
     }
@@ -571,7 +770,7 @@ where
     if ws.send(Message::Text(auth.into())).await.is_err() {
         return SessionEnd::Closed;
     }
-    match next_json(&mut ws).await {
+    match next_json(&mut ws, idle).await {
         Some(v) if v["type"] == "auth_ok" => {}
         Some(v) if v["type"] == "auth_invalid" => return SessionEnd::AuthFailed,
         _ => return SessionEnd::Closed,
@@ -585,7 +784,7 @@ where
         return SessionEnd::Closed;
     }
     on_connected();
-    while let Some(v) = next_json(&mut ws).await {
+    while let Some(v) = next_json(&mut ws, idle).await {
         if v["type"] == "event" && v["event"]["event_type"] == "state_changed" {
             if let Some(change) = state_changed_from(&v["event"]) {
                 on_change(change);
@@ -593,6 +792,28 @@ where
         }
     }
     SessionEnd::Closed
+}
+
+fn ws_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+    tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(WS_MAX_MESSAGE))
+        .max_frame_size(Some(WS_MAX_FRAME))
+}
+
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// Connect + handshake with size limits, bounded by `limit`.
+async fn connect_ws(url: &str, limit: Duration) -> Option<WsStream> {
+    match tokio::time::timeout(
+        limit,
+        tokio_tungstenite::connect_async_with_config(url, Some(ws_config()), false),
+    )
+    .await
+    {
+        Ok(Ok((ws, _))) => Some(ws),
+        _ => None,
+    }
 }
 
 fn next_backoff(current: Duration) -> Duration {
@@ -608,12 +829,13 @@ async fn live_loop(app: AppHandle) {
         status("connecting");
         // Re-read the config every attempt so a rotated token or new URL is picked up.
         match load_config() {
-            Ok(cfg) => match tokio_tungstenite::connect_async(ws_url(&cfg.base)).await {
-                Ok((ws, _)) => {
+            Ok(cfg) => match connect_ws(&ws_url(&cfg.base), WS_CONNECT_TIMEOUT).await {
+                Some(ws) => {
                     let mut connected = false;
                     let end = live_session(
                         ws,
                         &cfg.token,
+                        WS_IDLE_TIMEOUT,
                         || {
                             connected = true;
                             status("connected");
@@ -634,8 +856,8 @@ async fn live_loop(app: AppHandle) {
                         status("disconnected");
                     }
                 }
-                Err(_) => {
-                    log("websocket connect failed");
+                None => {
+                    log("websocket connect failed or timed out");
                     status("disconnected");
                 }
             },
@@ -788,7 +1010,8 @@ mod tests {
     #[tokio::test]
     async fn call_service_posts_entity_id_and_validates() {
         let (base, seen) = mock(vec![("/api/services/light/turn_on", 200, "[]".into())]).await;
-        call_service_with(&cfg(&base), "light", "turn_on", "light.kitchen")
+        let (_, body) = authorize("light", "turn_on", "light.kitchen", None).unwrap();
+        call_service_with(&cfg(&base), "light", "turn_on", &body)
             .await
             .unwrap();
         {
@@ -808,7 +1031,7 @@ mod tests {
             ("light", "turn_on", "light."),
             ("", "turn_on", "light.kitchen"),
         ] {
-            let r = call_service_with(&cfg(&base), d, s, e).await;
+            let r = authorize(d, s, e, None);
             assert_eq!(r.unwrap_err(), ERR_INVALID, "{d} {s} {e}");
         }
         assert!(!valid_name(&"a".repeat(65)));
@@ -882,7 +1105,7 @@ mod tests {
         let c = cfg(&base);
         let errs = [
             states_with(&c).await.unwrap_err(),
-            call_service_with(&c, "light", "turn_on", "light.x")
+            call_service_with(&c, "light", "turn_on", &json!({"entity_id": "light.x"}))
                 .await
                 .unwrap_err(),
             conversation_with(&c, "hi").await.unwrap_err(),
@@ -1001,6 +1224,7 @@ mod tests {
         let end = live_session(
             ws,
             &HaToken(TOKEN.into()),
+            WS_IDLE_TIMEOUT,
             || connected = true,
             |c| changes.push(c),
         )
@@ -1038,7 +1262,14 @@ mod tests {
             .await
             .unwrap();
         let mut connected = false;
-        let end = live_session(ws, &HaToken(TOKEN.into()), || connected = true, |_| {}).await;
+        let end = live_session(
+            ws,
+            &HaToken(TOKEN.into()),
+            WS_IDLE_TIMEOUT,
+            || connected = true,
+            |_| {},
+        )
+        .await;
         assert_eq!(end, SessionEnd::AuthFailed);
         assert!(!connected);
     }
@@ -1071,5 +1302,293 @@ mod tests {
             ws_url("http://127.0.0.1:8123"),
             "ws://127.0.0.1:8123/api/websocket"
         );
+    }
+
+    #[test]
+    fn allowlist_domain_match_unknown_and_sensitive() {
+        for (d, s) in [
+            ("light", "turn_on"),
+            ("light", "toggle"),
+            ("switch", "turn_off"),
+            ("fan", "toggle"),
+            ("media_player", "turn_on"),
+            ("scene", "turn_on"),
+            ("climate", "turn_on"),
+            ("climate", "turn_off"),
+        ] {
+            let (p, body) = authorize(d, s, &format!("{d}.x"), None).unwrap();
+            assert_eq!(p, Policy::Allowed, "{d}.{s}");
+            assert_eq!(body, json!({"entity_id": format!("{d}.x")}));
+        }
+        // Domain mismatch.
+        assert_eq!(
+            authorize("light", "turn_on", "switch.x", None).unwrap_err(),
+            ERR_DOMAIN_MISMATCH
+        );
+        assert_eq!(
+            authorize("lock", "unlock", "light.x", None).unwrap_err(),
+            ERR_DOMAIN_MISMATCH
+        );
+        // Unknown domain / service refused outright.
+        for (d, s) in [
+            ("light", "turn_off_all"),
+            ("scene", "turn_off"),
+            ("scene", "apply"),
+            ("vacuum", "start"),
+            ("notify", "send"),
+            ("climate", "set_fan_mode"),
+            ("persistent_notification", "create"),
+        ] {
+            assert_eq!(
+                authorize(d, s, &format!("{d}.x"), None).unwrap_err(),
+                ERR_NOT_ALLOWED,
+                "{d}.{s}"
+            );
+        }
+        // Sensitive domains need the native confirm.
+        for d in SENSITIVE_DOMAINS {
+            let (p, _) = authorize(d, "turn_on", &format!("{d}.x"), None).unwrap();
+            assert_eq!(p, Policy::NeedsApproval, "{d}");
+        }
+        assert_eq!(
+            authorize("lock", "unlock", "lock.front", None).unwrap().0,
+            Policy::NeedsApproval
+        );
+        // Climate data: typed, bounded, only for the two services.
+        let t = |t: f64| HaServiceData {
+            temperature: Some(t),
+            hvac_mode: None,
+        };
+        let m = |m: &str| HaServiceData {
+            temperature: None,
+            hvac_mode: Some(m.into()),
+        };
+        let (p, body) =
+            authorize("climate", "set_temperature", "climate.lr", Some(&t(21.5))).unwrap();
+        assert_eq!(p, Policy::Allowed);
+        assert_eq!(
+            body,
+            json!({"entity_id": "climate.lr", "temperature": 21.5})
+        );
+        let (_, body) = authorize(
+            "climate",
+            "set_hvac_mode",
+            "climate.lr",
+            Some(&m("heat_cool")),
+        )
+        .unwrap();
+        assert_eq!(
+            body,
+            json!({"entity_id": "climate.lr", "hvac_mode": "heat_cool"})
+        );
+        for bad in [
+            t(4.9),
+            t(95.1),
+            t(f64::NAN),
+            t(f64::INFINITY),
+            HaServiceData::default(),
+            HaServiceData {
+                temperature: Some(20.0),
+                hvac_mode: Some("heat".into()),
+            },
+        ] {
+            assert_eq!(
+                authorize("climate", "set_temperature", "climate.lr", Some(&bad)).unwrap_err(),
+                ERR_BAD_DATA
+            );
+        }
+        assert_eq!(
+            authorize("climate", "set_temperature", "climate.lr", None).unwrap_err(),
+            ERR_BAD_DATA
+        );
+        for bad in [m("turbo"), m("HEAT"), m(""), t(20.0)] {
+            assert_eq!(
+                authorize("climate", "set_hvac_mode", "climate.lr", Some(&bad)).unwrap_err(),
+                ERR_BAD_DATA
+            );
+        }
+        assert_eq!(
+            authorize("light", "turn_on", "light.x", Some(&t(20.0))).unwrap_err(),
+            ERR_BAD_DATA
+        );
+        // Unknown data fields are rejected at deserialization.
+        assert!(serde_json::from_value::<HaServiceData>(json!({"brightness": 255})).is_err());
+        assert!(serde_json::from_value::<HaServiceData>(json!({"hvacMode": "cool"})).is_ok());
+    }
+
+    #[tokio::test]
+    async fn oversized_bodies_are_refused_with_fixed_text() {
+        let big = format!("[{}]", "0,".repeat(MAX_BODY_BYTES / 2) + "0");
+        assert!(big.len() > MAX_BODY_BYTES);
+        let (base, _) = mock(vec![
+            ("/api/states", 200, big.clone()),
+            ("/api/conversation/process", 200, big),
+        ])
+        .await;
+        assert_eq!(states_with(&cfg(&base)).await.unwrap_err(), ERR_TOO_LARGE);
+        assert_eq!(
+            conversation_with(&cfg(&base), "hi").await.unwrap_err(),
+            ERR_TOO_LARGE
+        );
+    }
+
+    #[tokio::test]
+    async fn streamed_body_without_length_is_capped() {
+        // Chunked reply (no Content-Length) exercises the streaming cap.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let chunk = " ".repeat(1000);
+                    let mut out = String::from("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n");
+                    for _ in 0..3 {
+                        out.push_str(&format!("{:x}\r\n{chunk}\r\n", chunk.len()));
+                    }
+                    out.push_str("1\r\n1\r\n0\r\n\r\n");
+                    let _ = sock.write_all(out.as_bytes()).await;
+                });
+            }
+        });
+        let get = || client().get(format!("http://{addr}/")).send();
+        let resp = get().await.unwrap();
+        assert!(resp.content_length().is_none());
+        assert_eq!(read_capped(resp, 2500).await.unwrap_err(), ERR_TOO_LARGE);
+        let v = read_capped(get().await.unwrap(), 4000).await.unwrap();
+        assert!(v.is_number());
+    }
+
+    #[tokio::test]
+    async fn websocket_config_connect_timeout_and_idle_timeout() {
+        let c = ws_config();
+        assert_eq!(c.max_message_size, Some(1024 * 1024));
+        assert_eq!(c.max_frame_size, Some(256 * 1024));
+        assert_eq!(WS_CONNECT_TIMEOUT, Duration::from_secs(10));
+        assert_eq!(WS_IDLE_TIMEOUT, Duration::from_secs(90));
+
+        // A server that accepts TCP but never answers the handshake → connect times out.
+        let silent = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = silent.local_addr().unwrap();
+        let hold = tokio::spawn(async move {
+            let (_sock, _) = silent.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        let t0 = std::time::Instant::now();
+        assert!(connect_ws(
+            &format!("ws://{addr}/api/websocket"),
+            Duration::from_millis(200)
+        )
+        .await
+        .is_none());
+        assert!(t0.elapsed() < Duration::from_secs(5));
+        hold.abort();
+
+        // Server goes silent after auth_ok → the idle timeout ends the session.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(sock).await.unwrap();
+            ws.send(Message::Text(r#"{"type":"auth_required"}"#.into()))
+                .await
+                .unwrap();
+            let _ = ws.next().await;
+            ws.send(Message::Text(r#"{"type":"auth_ok"}"#.into()))
+                .await
+                .unwrap();
+            let _ = ws.next().await;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        let ws = connect_ws(&ws_url(&format!("http://{addr}")), WS_CONNECT_TIMEOUT)
+            .await
+            .unwrap();
+        let mut connected = false;
+        let t0 = std::time::Instant::now();
+        let end = live_session(
+            ws,
+            &HaToken(TOKEN.into()),
+            Duration::from_millis(300),
+            || connected = true,
+            |_| {},
+        )
+        .await;
+        assert!(connected);
+        assert_eq!(end, SessionEnd::Closed);
+        assert!(t0.elapsed() < Duration::from_secs(5));
+        server.abort();
+
+        // Oversized message (> 1 MiB) is rejected by the client config → session ends.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(sock).await.unwrap();
+            ws.send(Message::Text("x".repeat(2 * 1024 * 1024).into()))
+                .await
+                .ok();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+        let ws = connect_ws(&ws_url(&format!("http://{addr}")), WS_CONNECT_TIMEOUT)
+            .await
+            .unwrap();
+        let end = live_session(
+            ws,
+            &HaToken(TOKEN.into()),
+            Duration::from_secs(5),
+            || {},
+            |_| {},
+        )
+        .await;
+        assert_eq!(end, SessionEnd::Closed);
+    }
+
+    #[test]
+    fn every_error_starts_with_a_known_kind() {
+        let all = [
+            ERR_CONFIG,
+            ERR_URL,
+            ERR_UNREACHABLE,
+            ERR_AUTH,
+            ERR_FAILED,
+            ERR_BAD_REPLY,
+            ERR_INVALID,
+            ERR_TEXT,
+            ERR_BUSY,
+            ERR_DOCKER,
+            ERR_DOCKER_FAILED,
+            ERR_DOCKER_TIMEOUT,
+            ERR_TOO_LARGE,
+            ERR_NOT_ALLOWED,
+            ERR_DOMAIN_MISMATCH,
+            ERR_BAD_DATA,
+            ERR_DECLINED,
+            ERR_NEEDS_APPROVAL,
+            ERR_BUSY_APPROVAL,
+        ];
+        assert_eq!(ERROR_KINDS.len(), 14);
+        for e in all {
+            let (kind, text) = e.split_once(": ").expect(e);
+            assert!(ERROR_KINDS.contains(&kind), "{e}");
+            assert!(!text.is_empty() && !text.contains(TOKEN));
+        }
+        // Approval-gate errors map to fixed kinds.
+        assert_eq!(
+            approval_error(&super::super::approval_gate::denied_message()),
+            ERR_DECLINED
+        );
+        assert_eq!(approval_error("busy: x"), ERR_BUSY_APPROVAL);
+        assert_eq!(
+            approval_error("Approval dialog failed: x"),
+            ERR_NEEDS_APPROVAL
+        );
+        // Every kind is used by at least one error.
+        for k in ERROR_KINDS {
+            assert!(
+                all.iter().any(|e| e.starts_with(&format!("{k}: "))),
+                "{k} unused"
+            );
+        }
     }
 }
