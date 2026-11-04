@@ -11,6 +11,7 @@ pub mod kv;
 pub mod llm_router;
 pub mod muse;
 pub mod noop;
+pub mod noop_query;
 pub mod onboarding;
 pub mod openclaw;
 pub mod outbox;

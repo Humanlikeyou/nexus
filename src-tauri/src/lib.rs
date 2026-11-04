@@ -5,9 +5,10 @@ mod dock_icon;
 use commands::voice;
 use commands::{
     arm, assistant, ble_common, continuity, crew, events, goals, kb_status, kv, llm_router, muse,
-    noop, onboarding, openclaw, outbox, packager, replay, research, restart_services, sessions,
-    snapshots, system, telegram, terrence_actions, terrence_automations, terrence_context,
-    terrence_priorities, terrence_projects, terrence_runtime, terrence_runtime_bridge,
+    noop, noop_query, onboarding, openclaw, outbox, packager, replay, research, restart_services,
+    sessions, snapshots, system, telegram, terrence_actions, terrence_automations,
+    terrence_context, terrence_priorities, terrence_projects, terrence_runtime,
+    terrence_runtime_bridge,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -196,6 +197,9 @@ pub fn run() {
             muse::get_muse_state,
             // NOOP is the exclusive WHOOP/health reader. It owns strap sync and health storage.
             noop::get_noop_health_snapshot,
+            noop_query::noop_query,
+            noop_query::get_noop_settings,
+            noop_query::set_noop_settings,
             // Telegram
             telegram::get_config,
             telegram::save_settings,
