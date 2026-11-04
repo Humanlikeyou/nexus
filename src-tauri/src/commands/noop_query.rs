@@ -93,7 +93,7 @@ impl NoopQueryError {
 }
 
 pub fn load_settings() -> NoopSettings {
-    super::kv::load_kv(SETTINGS_KEY.to_string())
+    super::kv::load_kv_internal(SETTINGS_KEY)
         .ok()
         .flatten()
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -150,7 +150,7 @@ pub async fn set_noop_settings(
         let roots = Roots::current()?;
         let next = apply_settings(&load_settings(), settings, &DialogPrompter(app), &roots)?;
         let s = serde_json::to_string(&next).map_err(|e| e.to_string())?;
-        super::kv::save_kv(SETTINGS_KEY.to_string(), s)
+        super::kv::save_kv_internal(SETTINGS_KEY, s)
     })
     .await
     .map_err(|_| "settings task failed".to_string())?

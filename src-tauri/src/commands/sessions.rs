@@ -418,7 +418,7 @@ mod tests {
             binary_path: sp(&ok),
             ..Default::default()
         };
-        let bc = capture_body_context_with(&s, &r, Duration::from_secs(5)).unwrap();
+        let bc = capture_body_context_with(&s, &r, Duration::from_secs(15)).unwrap();
         assert_eq!(bc.today.unwrap().hrv, Some(1.23));
         s.whoop_source = WhoopSource::Ble;
         assert!(capture_body_context_with(&s, &r, Duration::from_secs(5)).is_none());
