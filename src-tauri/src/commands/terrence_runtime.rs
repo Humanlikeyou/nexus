@@ -2,7 +2,7 @@ use super::{
     continuity, noop, terrence_actions, terrence_automations, terrence_context,
     terrence_priorities, terrence_projects, terrence_runtime_bridge,
 };
-use chrono::Utc;
+use chrono::{DateTime, Local, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
@@ -790,6 +790,19 @@ fn nexus_context_message(sections: &[AmaraContextSection]) -> String {
     out
 }
 
+/// The local date and time for one turn. Hermes only states the date far back in a long prompt,
+/// and the local model has named the wrong weekday from it, so each turn repeats it next to the
+/// new message, weekday spelled out. Built here, not by the renderer, so it can't be faked.
+fn nexus_clock_section<Tz: TimeZone>(now: &DateTime<Tz>) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    format!(
+        "<nexus_clock>\nRight now it is {}. Use this for any day, date or time.\n</nexus_clock>",
+        now.format("%A, %B %-d, %Y, %H:%M (UTC%:z)")
+    )
+}
+
 /// Full system text (prefix + context) as one string, for previews and tests.
 #[cfg(test)]
 fn nexus_system_message(sections: &[AmaraContextSection]) -> String {
@@ -1255,7 +1268,13 @@ pub async fn interact_with_terrence(
     let system = bridge.system_prompt_for(&request.conversation_id, || {
         nexus_runtime_system_instruction().to_string()
     });
-    let context = nexus_context_message(&request.context);
+    let context = format!(
+        "{}\n\n{}",
+        nexus_clock_section(&Local::now()),
+        nexus_context_message(&request.context)
+    )
+    .trim_end()
+    .to_string();
     let history = guard_history(&request.history);
     let context_item_ids = request.context_item_ids.clone();
     let action_id = terrence_actions::begin_hermes_conversation_action(
@@ -1638,6 +1657,20 @@ pub fn list_terrence_interactions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clock_section_names_the_local_weekday() {
+        use chrono::FixedOffset;
+        let jst = FixedOffset::east_opt(9 * 3600).unwrap();
+        let wednesday = jst.with_ymd_and_hms(2026, 11, 4, 23, 59, 0).unwrap();
+        let thursday = jst.with_ymd_and_hms(2026, 11, 5, 0, 1, 0).unwrap();
+        let section = nexus_clock_section(&wednesday);
+        assert!(
+            section.contains("Wednesday, November 4, 2026, 23:59 (UTC+09:00)"),
+            "{section}"
+        );
+        assert!(nexus_clock_section(&thursday).contains("Thursday, November 5, 2026, 00:01"));
+    }
 
     #[test]
     fn parses_quiet_hermes_output() {

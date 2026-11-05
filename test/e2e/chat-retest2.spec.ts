@@ -74,16 +74,24 @@ test("without router fields: no badge, header doesn't claim Hermes's default mod
   await expect(field.locator(".chat-screen__model")).toHaveText("Amara Router");
 });
 
-test("Home scrolls to the top, End to the bottom, not while typing", async ({ page, theme }) => {
+test("Home scrolls to the top, End to the bottom, from an empty composer, not while typing", async ({ page, theme }) => {
   const long = "Line of the plan.\n".repeat(80);
   await openApp(page, { theme, data: data(reply({ assistantMessage: long })) });
   const field = await send(page, "plan");
   const list = field.getByRole("list", { name: "Messages" });
   await expect(list.getByText(/Line of the plan/)).toBeVisible();
+  const composer = field.getByLabel("Message Amara");
+  await expect(composer).toBeFocused();
+  await composer.press("Home");
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(0);
+  await composer.press("End");
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await composer.fill("draft");
   await list.evaluate((el) => { el.scrollTop = 200; });
-  await field.getByLabel("Message Amara").press("Home");
+  await composer.press("Home");
   expect(await list.evaluate((el) => el.scrollTop)).toBe(200);
-  await field.getByLabel("Message Amara").blur();
+  await composer.fill("");
+  await composer.blur();
   await page.keyboard.press("Home");
   await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(0);
   await page.keyboard.press("End");
