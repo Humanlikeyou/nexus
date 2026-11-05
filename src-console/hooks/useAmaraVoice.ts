@@ -84,6 +84,9 @@ function accept(payload: { ts?: unknown; utteranceId?: unknown }): boolean {
   return true;
 }
 
+/** Time since the last level frame. A dead feed must never leave the lens looking as if she's talking. */
+export const amaraVoiceLevelAge = () => Date.now() - lastLevelAt;
+
 export function ingestLevel(raw: unknown) {
   if (!raw || typeof raw !== "object") return;
   const p = raw as Partial<Record<keyof AmaraVoiceLevel, unknown>>;

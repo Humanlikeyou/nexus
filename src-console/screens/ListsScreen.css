@@ -1,7 +1,7 @@
 /* Chat & Agents › Lists. Solid content cards; no animation of its own, so reduced motion needs no override. */
 .lists { display: grid; gap: var(--space-4); align-content: start; color: var(--label); }
 .lists__header { display: grid; gap: var(--space-1); }
-.lists__title { margin: 0; font: var(--type-title1); }
+.lists__title { margin: 0; font: var(--type-large-title); }
 .lists__subtitle, .lists__description, .lists__empty { margin: 0; font: var(--type-callout); color: var(--label-secondary); }
 .lists__section-title:focus { outline: none; }
 .lists__section-title:focus-visible { outline: var(--space-0_5) solid var(--focus-ring); outline-offset: var(--space-0_5); border-radius: var(--radius-sm); }

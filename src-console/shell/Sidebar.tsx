@@ -85,7 +85,7 @@ export function Sidebar({ active, onSelect, data }: { active: ModuleId; onSelect
             const index = SYSTEMS.findIndex((entry) => entry.id === system.id);
             const isActive = active === system.id;
             return (
-              <button key={system.id} className={isActive ? "is-active" : ""} aria-current={isActive ? "page" : undefined} onClick={() => onSelect(system.id)} title={`${system.label}${index < 9 ? ` (Command+${index + 1})` : ""}`}>
+              <button key={system.id} data-system={system.id} className={isActive ? "is-active" : ""} aria-current={isActive ? "page" : undefined} onClick={() => onSelect(system.id)} title={`${system.label}${index < 9 ? ` (Command+${index + 1})` : ""}`}>
                 <i><Icon size={17} /></i><span>{system.label}</span>{index < 9 && <small className="nav-shortcut" aria-hidden="true">⌘{index + 1}</small>}
               </button>
             );

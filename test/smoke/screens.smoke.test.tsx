@@ -100,7 +100,8 @@ describe("lazy screens", () => {
       fireEvent.click(within(field(host)!).getByRole("radio", { name: view }));
       await settle(host);
       const f = field(host)!;
-      expect(within(f).getByRole("radio", { name: view }), `${host} › ${view}`).toHaveAttribute("aria-checked", "true");
+      await vi.waitFor(() => expect(within(f).getByRole("radio", { name: view }), `${host} › ${view}`).toHaveAttribute("aria-checked", "true"));
+      await settle(host);
       expect(f.textContent!.trim().length, `${host} › ${view}: blank`).toBeGreaterThan(20);
     }
     expect(errorSpy.mock.calls.map((c) => String(c[0]).slice(0, 200))).toEqual([]);

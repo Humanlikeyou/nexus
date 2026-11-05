@@ -1,9 +1,17 @@
-/* Amara speaking lens (spec-amara-speaking-hal.md). Tokens only; animates transform and opacity only. */
+/* Amara speaking lens (spec-amara-speaking-hal.md). Tokens only; animates transform and opacity only.
+ * Motion always means she's alive (Taisun, Nov 5):
+ *   listening  breath and a slow drift of the light, CSS only. Each layer runs on its own period, so
+ *              the pattern doesn't visibly repeat. No scale.
+ *   thinking   a slow emerald arc around the ring; the iris holds still.
+ *   speaking   iris, hot centre and halo follow her real audio, through --lens-level.
+ *   idle, error  still and dim. */
 .amara-lens-wrap { display: inline-flex; flex-direction: column; align-items: center; gap: var(--space-3); flex: none; }
 .amara-lens-wrap[data-size="28"], .amara-lens-wrap[data-size="44"] { display: inline-flex; vertical-align: middle; }
 
 .amara-lens {
   --lens-size: 160px; --lens-level: 0; --lens-scale: 1; --lens-halo-factor: 1; --lens-ring-width: 1.5px;
+  --lens-breath-core: 5.2s; --lens-breath-halo: 6.7s; --lens-breath-hot: 4.3s; --lens-drift-core: 7.9s; --lens-drift-hot: 11.3s;
+  --lens-orbit: 9s; --lens-shimmer: 5.7s; --breath-core-lo: .46; --breath-core-hi: .72;
   position: relative; width: var(--lens-size); height: var(--lens-size); flex: none; isolation: isolate; contain: layout style;
 }
 .amara-lens[data-size="44"] { --lens-size: 44px; --lens-halo-factor: .5; --lens-ring-width: 1px; }
@@ -15,12 +23,20 @@
 .amara-lens__halo {
   inset: -45%; z-index: 0;
   background: radial-gradient(closest-side, var(--lens-glow), transparent);
-  opacity: calc(var(--lens-level) * .35 * var(--lens-halo-factor) * var(--lens-halo-theme));
+  opacity: calc(var(--lens-level) * .6 * var(--lens-halo-factor) * var(--lens-halo-theme));
 }
+.amara-lens[data-state="listening"] .amara-lens__halo { --breath-core-lo: calc(.1 * var(--lens-halo-factor)); --breath-core-hi: calc(.24 * var(--lens-halo-factor)); animation: amara-lens-breath var(--lens-breath-halo) ease-in-out infinite; }
 /* Listening / thinking outer ring at 1.14×. */
 .amara-lens__ring { inset: -7%; z-index: 1; border: var(--lens-ring-width) solid var(--lens-rim); opacity: 0; }
 .amara-lens[data-state="listening"] .amara-lens__ring { opacity: .7; }
-.amara-lens[data-state="thinking"] .amara-lens__ring { opacity: .3; border-style: dashed; }
+.amara-lens[data-state="thinking"] .amara-lens__ring {
+  border: 0; opacity: .7; will-change: transform;
+  background: conic-gradient(from 0deg, transparent 0 52%, color-mix(in srgb, var(--lens-rim) 35%, transparent) 76%, var(--lens-rim) 97%, transparent 100%);
+  -webkit-mask: radial-gradient(closest-side, transparent calc(100% - var(--lens-ring-width) - .5px), #000 calc(100% - var(--lens-ring-width)));
+  mask: radial-gradient(closest-side, transparent calc(100% - var(--lens-ring-width) - .5px), #000 calc(100% - var(--lens-ring-width)));
+  animation: amara-lens-orbit var(--lens-orbit) linear infinite, amara-lens-shimmer var(--lens-shimmer) ease-in-out infinite;
+}
+.amara-lens[data-state="speaking"] .amara-lens__ring { opacity: calc(var(--lens-level) * .7); }
 
 /* 2. Metallic bezel: solid, light at upper-left, soft drop shadow (static). */
 .amara-lens__bezel {
@@ -36,13 +52,19 @@
   background: radial-gradient(circle, var(--lens-hot), var(--lens-mid) 30%, var(--lens-deep) 66%, transparent 100%);
   opacity: .2; transform: scale(1); will-change: opacity, transform;
 }
-.amara-lens[data-state="listening"] .amara-lens__core { opacity: .6; }
-.amara-lens[data-state="thinking"] .amara-lens__core { opacity: .3; animation: amara-lens-breathe var(--lens-dur-breathe) ease-in-out infinite; }
+.amara-lens[data-state="listening"] .amara-lens__core { opacity: .6; animation: amara-lens-breath var(--lens-breath-core) ease-in-out infinite, amara-lens-drift var(--lens-drift-core) ease-in-out infinite; }
+.amara-lens[data-state="thinking"] .amara-lens__core { opacity: .45; }
 .amara-lens[data-state="speaking"] .amara-lens__core { opacity: calc(.35 + .65 * var(--lens-level)); transform: scale(var(--lens-scale)); }
 .amara-lens[data-state="error"] .amara-lens__core {
   opacity: .35; background: radial-gradient(circle, var(--lens-error-mid), var(--lens-error-deep) 60%, transparent 100%);
 }
-.amara-lens[data-state="error"] { animation: amara-lens-flicker var(--lens-dur-flicker) linear 1; }
+/* The bright centre sits on the iris: a separate layer, so it can move faster than the iris does. */
+.amara-lens__hot {
+  inset: 30%; z-index: 4; opacity: 0; will-change: opacity, transform;
+  background: radial-gradient(closest-side, var(--lens-hot), color-mix(in srgb, var(--lens-hot) 42%, transparent) 46%, transparent);
+}
+.amara-lens[data-state="listening"] .amara-lens__hot { --breath-core-lo: .08; --breath-core-hi: .3; animation: amara-lens-breath var(--lens-breath-hot) ease-in-out infinite, amara-lens-drift var(--lens-drift-hot) ease-in-out reverse infinite; }
+.amara-lens[data-state="speaking"] .amara-lens__hot { opacity: var(--lens-level); transform: scale(calc(.85 + var(--lens-level) * .5)); }
 /* 5. Rim light: 82–100% of the glass radius. */
 .amara-lens__rim {
   inset: 7%; z-index: 5;
@@ -67,17 +89,21 @@
   --lens-size: clamp(var(--lens-hero-min), min(88cqh, 84cqw), var(--lens-hero-max));
   --lens-halo-theme: 1;
   --hero-halo: .1; --hero-core: .24; --hero-rim: .5; --hero-gloss: .55;
+  --lens-ring-width: 2px; --breath-core-lo: .8; --breath-core-hi: 1;
 }
 .amara-lens[data-size="320"][data-state="listening"] { --hero-halo: .42; --hero-core: .96; --hero-rim: 1; --hero-gloss: 1; }
 .amara-lens[data-size="320"][data-state="thinking"] { --hero-halo: .26; --hero-core: .62; --hero-rim: .8; --hero-gloss: 1; }
-.amara-lens[data-size="320"][data-state="speaking"] { --hero-halo: .46; --hero-core: 1; --hero-rim: 1; --hero-gloss: 1; }
-.amara-lens[data-size="320"][data-state="error"] { --hero-halo: .06; --hero-core: .42; --hero-rim: .75; --hero-gloss: .55; }
+.amara-lens[data-size="320"][data-state="speaking"] { --hero-halo: .16; --hero-core: .55; --hero-rim: .9; --hero-gloss: 1; }
+.amara-lens[data-size="320"][data-state="error"] { --hero-halo: .06; --hero-core: .3; --hero-rim: .6; --hero-gloss: .55; }
 
 .amara-lens[data-size="320"] .amara-lens__halo {
   inset: -72%;
   background: radial-gradient(closest-side, var(--lens-glow), transparent);
-  opacity: calc(var(--hero-halo) + var(--lens-level) * .3);
+  opacity: calc(var(--hero-halo) + var(--lens-level) * .62);
+  will-change: opacity, transform;
 }
+.amara-lens[data-size="320"][data-state="listening"] .amara-lens__halo { --breath-core-lo: .3; --breath-core-hi: .52; }
+.amara-lens[data-size="320"][data-state="speaking"] .amara-lens__halo { transform: scale(calc(1 + var(--lens-level) * .08)); }
 .amara-lens[data-size="320"] .amara-lens__ring { inset: -4%; }
 .amara-lens[data-size="320"][data-state="listening"] .amara-lens__ring { animation: amara-lens-listen var(--lens-dur-listen) ease-in-out infinite; }
 .amara-lens[data-size="320"] .amara-lens__bezel {
@@ -98,9 +124,7 @@
   background: radial-gradient(closest-side, var(--lens-hot), var(--lens-mid) 25%, var(--lens-deep) 56%, var(--lens-iris-shadow) 82%, transparent 100%);
   opacity: var(--hero-core);
 }
-.amara-lens[data-size="320"][data-state="listening"] .amara-lens__core { opacity: calc(var(--hero-core) + var(--lens-level) * .04); transform: scale(calc(1 + (var(--lens-scale) - 1) * .5)); }
-.amara-lens[data-size="320"][data-state="thinking"] .amara-lens__core { animation: amara-lens-hero-breathe var(--lens-dur-breathe) ease-in-out infinite; }
-.amara-lens[data-size="320"][data-state="speaking"] .amara-lens__core { transform: scale(var(--lens-scale)); }
+.amara-lens[data-size="320"][data-state="speaking"] .amara-lens__core { opacity: calc(var(--hero-core) + var(--lens-level) * .45); transform: scale(var(--lens-scale)); }
 .amara-lens[data-size="320"][data-state="error"] .amara-lens__core { background: radial-gradient(closest-side, var(--lens-error-mid), var(--lens-error-deep) 56%, transparent 96%); }
 .amara-lens[data-size="320"] .amara-lens__rim {
   inset: 6.6%;
@@ -118,28 +142,51 @@
   background: var(--lens-glint); opacity: var(--hero-gloss);
 }
 @keyframes amara-lens-listen { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
-@keyframes amara-lens-hero-breathe { 0%, 100% { opacity: .42; } 50% { opacity: .82; } }
 
 .amara-lens__label { font: var(--type-callout); color: var(--label); }
 .amara-lens__error { display: inline-flex; flex-direction: column; align-items: center; gap: var(--space-2); font: var(--type-callout); color: var(--tone-warning-text); text-align: center; }
 
-@keyframes amara-lens-breathe { 0%, 100% { opacity: .3; } 50% { opacity: .7; } }
-@keyframes amara-lens-flicker { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+/* Uneven on purpose: a long rise, a small catch, a slower fall. */
+@keyframes amara-lens-breath {
+  0%, 100% { opacity: var(--breath-core-lo); }
+  34% { opacity: var(--breath-core-hi); }
+  47% { opacity: calc(var(--breath-core-hi) * .94); }
+  58% { opacity: var(--breath-core-hi); }
+}
+@keyframes amara-lens-drift {
+  0%, 100% { transform: translate(0, 0); }
+  27% { transform: translate(1.3%, -.9%); }
+  61% { transform: translate(-.8%, 1.1%); }
+  83% { transform: translate(-1.2%, -.5%); }
+}
+@keyframes amara-lens-orbit { to { transform: rotate(360deg); } }
+@keyframes amara-lens-shimmer { 0%, 100% { opacity: .5; } 40% { opacity: .9; } 70% { opacity: .65; } }
+/* The window is hidden: nothing to draw. */
+.amara-lens[data-paused] > div { animation-play-state: paused !important; }
 
-/* §5 Reduced motion: static per-state core, no breathe, flicker or amplitude scale. */
+/* §5 Reduced motion: no breath, drift, orbit or scale. Speaking stays a gentle brightness change,
+ * slowed in JS, because the light responding to her is the information. */
 @media (prefers-reduced-motion: reduce) {
-  .amara-lens, .amara-lens__core { animation: none !important; }
-  .amara-lens__core { will-change: auto; }
+  .amara-lens > div { animation: none !important; will-change: auto; }
   .amara-lens[data-state="thinking"] .amara-lens__core { opacity: .5; }
-  .amara-lens[data-state="speaking"] .amara-lens__core { opacity: .8; transform: none; }
+  .amara-lens[data-state="thinking"] .amara-lens__ring { opacity: .6; }
+  .amara-lens[data-state="speaking"] .amara-lens__core { opacity: calc(.68 + var(--lens-level) * .22); transform: none; }
+  .amara-lens[data-state="speaking"] .amara-lens__hot { opacity: calc(var(--lens-level) * .5); transform: none; }
+  .amara-lens[data-state="speaking"] .amara-lens__ring { opacity: 0; }
   .amara-lens__halo { opacity: calc(.8 * .35 * var(--lens-halo-factor) * var(--lens-halo-theme)); }
   .amara-lens:not([data-state="speaking"]) .amara-lens__halo { opacity: 0; }
   /* The hero's glow is its state, not motion: static per state. */
-  .amara-lens[data-size="320"] .amara-lens__ring { animation: none !important; }
-  .amara-lens[data-size="320"][data-state] .amara-lens__halo { opacity: var(--hero-halo); }
+  .amara-lens[data-size="320"][data-state] .amara-lens__halo { opacity: var(--hero-halo); transform: none; }
   .amara-lens[data-size="320"][data-state] .amara-lens__core { transform: none; }
+  .amara-lens[data-size="320"][data-state="speaking"] .amara-lens__halo { opacity: .4; }
+  .amara-lens[data-size="320"][data-state="speaking"] .amara-lens__core { opacity: calc(.72 + var(--lens-level) * .24); }
 }
-:root[data-reduce-motion="true"] .amara-lens[data-size="320"] :is(.amara-lens__ring, .amara-lens__core) { animation: none !important; }
+:root[data-reduce-motion="true"] .amara-lens > div { animation: none !important; will-change: auto; }
+:root[data-reduce-motion="true"] .amara-lens[data-state] :is(.amara-lens__core, .amara-lens__hot, .amara-lens__halo) { transform: none; }
+:root[data-reduce-motion="true"] .amara-lens[data-state="speaking"] .amara-lens__ring { opacity: 0; }
+:root[data-reduce-motion="true"] .amara-lens[data-state="speaking"] .amara-lens__hot { opacity: calc(var(--lens-level) * .5); }
+:root[data-reduce-motion="true"] .amara-lens[data-size="320"][data-state="speaking"] .amara-lens__core { opacity: calc(.72 + var(--lens-level) * .24); }
+:root[data-reduce-motion="true"] .amara-lens[data-size="320"][data-state="speaking"] .amara-lens__halo { opacity: .4; }
 /* §5 Reduced transparency: halo off, core opaque over the black glass. */
 @media (prefers-reduced-transparency: reduce) {
   .amara-lens__halo { display: none; }
@@ -154,5 +201,6 @@
   .amara-lens__halo, .amara-lens__specular, .amara-lens__catchlight { display: none; }
   .amara-lens__bezel { background: Canvas; border: 2px solid CanvasText; box-shadow: none; }
   .amara-lens__core { opacity: 1 !important; background: CanvasText; transform: none !important; }
-  .amara-lens__rim, .amara-lens__ring { border: 1px solid CanvasText; background: none; }
+  .amara-lens__hot { display: none; }
+  .amara-lens[data-state] .amara-lens__ring, .amara-lens__rim { border: 1px solid CanvasText; background: none; -webkit-mask: none; mask: none; animation: none; }
 }

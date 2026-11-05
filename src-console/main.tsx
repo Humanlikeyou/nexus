@@ -10,6 +10,7 @@ import App from "./App";
 import "./styles.css";
 import "./styles/glass-apply.css";
 import "./styles/glass-motion.css";
+import "./styles/route-motion.css";
 import { installVibrancy } from "./shell/vibrancy";
 
 // Before the first render, so the transparent window never paints a frame with the wrong background.

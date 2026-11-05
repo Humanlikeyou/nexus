@@ -1,4 +1,4 @@
-import { activeField, expect, navButton, openApp, openView, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, openView, routeSettled, test } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 const SECTIONS: { label: string; h1: RegExp }[] = [
@@ -71,7 +71,7 @@ test.describe("Mind–Body host: nothing folded in is out of reach", () => {
     await navButton(page, "Mind–Body").click();
     await expect(page.locator("nav.system-constellation > .nav-group button")).toHaveCount(6);
     await expect(page.locator("nav.system-constellation").getByRole("button", { name: /^(Fitness|Neuro)/ })).toHaveCount(0);
-    await expect(activeField(page, "Mind–Body").getByRole("radio")).toHaveText(["Overview", "Fitness", "Neuro", "Neuro history"]);
+    await expect(activeField(page, "Mind–Body").getByRole("radiogroup", { name: "Mind–Body view" }).getByRole("radio")).toHaveText(["Overview", "Fitness", "Neuro", "Neuro history"]);
     await expect(selected(page, "Overview")).toHaveAttribute("aria-checked", "true");
     await expect(activeField(page, "Mind–Body").getByRole("heading", { level: 1 })).toHaveText("Mind–Body");
   });
@@ -160,10 +160,11 @@ test("(d) one content edge: h1s, Chat's first column and the sub-view bar line u
     const field = await openView(page, label);
     const target = label === "Chat & Agents" ? field.locator(".chat-screen__agents") : field.getByRole("heading", { level: 1 }).first();
     await target.waitFor();
+    await routeSettled(page); // the box is measured at rest, not part-way through the enter animation
     return (await target.boundingBox())!.x;
   };
   const home = await left("Today");
-  for (const label of ["Fitness", "Neuro", "Lists", "Business", "Chat & Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
+  for (const label of ["Mind–Body", "Fitness", "Neuro", "Activity", "Lists", "Crews", "Voice", "Business", "Revenue", "Smart home", "Chat & Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
 
   // Sub-view bars (Mind–Body, Chat/Activity/Crews, Business) sit on the same edge.
   for (const label of ["Mind–Body", "Chat & Agents", "Business"]) {

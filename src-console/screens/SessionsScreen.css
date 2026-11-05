@@ -1,5 +1,5 @@
 .sessions { display: grid; gap: var(--space-4, 16px); }
-.sessions__title { margin: 0; font: var(--type-title1, 600 22px/1.2 system-ui); color: var(--label); }
+.sessions__title { margin: 0; font: var(--type-large-title); color: var(--label); }
 .sessions__tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3, 12px); }
 .sessions__split { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: var(--space-4, 16px); align-items: start; }
 .sessions__metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3, 12px); }

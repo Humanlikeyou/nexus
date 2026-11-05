@@ -1,5 +1,5 @@
 /* Mind-Body (spec-mind-body-1104). Tokens only; solid cards, no backdrop-filter. */
-.mind-body { display: grid; gap: var(--space-6); padding: var(--space-6); color: var(--label); }
+.mind-body { display: grid; gap: var(--space-6); color: var(--label); }
 .mind-body__header h1 { margin: 0; font: var(--type-large-title); }
 .mind-body__subtitle { margin: var(--space-1) 0 0; font: var(--type-callout); color: var(--label-secondary); }
 .mind-body__grid-layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--space-5); align-items: stretch; }

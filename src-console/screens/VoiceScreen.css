@@ -1,5 +1,5 @@
 .voice { display: grid; gap: var(--space-4, 16px); }
-.voice__title { margin: 0; font: var(--type-title1, 600 22px/1.2 system-ui); color: var(--label); }
+.voice__title { margin: 0; font: var(--type-large-title); color: var(--label); }
 .voice__note { margin: 0; color: var(--label-secondary); font: var(--type-callout); }
 .voice__note strong { color: var(--label); }
 .voice__live { display: grid; gap: var(--space-3, 12px); }

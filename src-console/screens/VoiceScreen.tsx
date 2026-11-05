@@ -139,7 +139,7 @@ export function VoiceField() {
 
   if (!status) {
     return (
-      <div className="voice">
+      <div className="voice page-inset">
         <h1 className="voice__title">Voice</h1>
         <Card title="Amara Voice">
           {statusError ? (
@@ -155,7 +155,7 @@ export function VoiceField() {
 
   if (!status.installed) {
     return (
-      <div className="voice">
+      <div className="voice page-inset">
         <h1 className="voice__title">Voice</h1>
         <Card title="Amara Voice" accessory={<Badge tone="neutral">Not installed</Badge>}>
           <EmptyState icon={Mic} title="Amara Voice isn’t set up on this Mac"
@@ -170,7 +170,7 @@ export function VoiceField() {
   const needsRestart = status.running && runningVoice !== null && current !== runningVoice;
   const recent = [...turns].reverse();
   return (
-    <div className="voice">
+    <div className="voice page-inset">
       <h1 className="voice__title">Voice</h1>
       <Card title="Amara Voice" accessory={<StatusDot tone={view.tone} pulse={view.pulse} aria-label={`Amara Voice: ${view.label}`}>{view.label}</StatusDot>}>
         <div className="voice__live" data-state={status.state}>

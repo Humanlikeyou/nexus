@@ -322,8 +322,7 @@
   --lens-bezel-hi: #9aa0a3; --lens-bezel-mid: #3b3f42; --lens-bezel-lo: #16181a; --lens-bezel-edge: #4a4f52;
   --lens-glass: #050505; --lens-stroke: #000; --lens-specular: #fff; --lens-shadow: rgba(0, 0, 0, .5);
   --lens-error-mid: #b07a3a; --lens-error-deep: #3a2a1a;
-  --lens-dur-breathe: 2.4s; --lens-dur-flicker: 180ms;
-  --lens-halo-theme: .6; /* light theme halo ×0.6 */
+    --lens-halo-theme: .6; /* light theme halo ×0.6 */
 }
 /* Hero lens (AmaraLens size 320) and the landing page. Dark in both themes (LandingScreen.css). */
 :root {
@@ -332,7 +331,7 @@
   --lens-rim-body: #27906f; --lens-rim-hi: #37a884; --lens-rim-deep: #0e4f3d;
   --lens-glint: #d9d5cd; --lens-gloss: rgba(255, 255, 255, .34); --lens-gloss-fade: rgba(255, 255, 255, .05);
   --lens-drop: rgba(0, 0, 0, .34);
-  --lens-hero-max: 320px; --lens-hero-min: 120px; --lens-dur-listen: 3.6s;
+  --lens-hero-max: 320px; --lens-hero-min: 120px; --lens-dur-listen: 5.9s;
   --landing-deep: #020c0a;
   --landing-bg: radial-gradient(ellipse 78% 96% at 50% 44%, var(--emerald-800) 0%, var(--emerald-900) 52%, var(--landing-deep) 100%);
   --landing-label: #f4f1ea;
