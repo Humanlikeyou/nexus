@@ -29,14 +29,23 @@ export function Dialog({ open, title, children, confirmLabel, cancelLabel = "Can
   const ref = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const opener = useRef<Element | null>(null);
+  const pressed = useRef<Element | null>(null);
   const titleId = useId();
   const bodyId = useId();
+
+  // WebKit does not focus a button on click, so activeElement cannot name a mouse opener.
+  useEffect(() => {
+    const note = (event: PointerEvent) => { pressed.current = event.target instanceof Element ? event.target.closest("button") : null; };
+    document.addEventListener("pointerdown", note, true);
+    return () => document.removeEventListener("pointerdown", note, true);
+  }, []);
 
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
     if (open && !dialog.open) {
-      opener.current = document.activeElement;
+      const active = document.activeElement;
+      opener.current = active && active !== document.body ? active : pressed.current;
       if (typeof dialog.showModal === "function") dialog.showModal();
       else dialog.setAttribute("open", "");
       cancelRef.current?.focus();

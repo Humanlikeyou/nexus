@@ -33,6 +33,7 @@
 /* Toolbar: nothing scrolls beneath it, so it needs no band, edge or blur. */
 :root main.command-surface > .intelligence-overlay > .field-clock.field-clock { border-bottom: 0; box-shadow: none; }
 :root:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > :is(.field-clock, .nexus-mark) { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-vibrancy="true"] main.command-surface > .intelligence-overlay > .field-clock.field-clock { -webkit-backdrop-filter: none; backdrop-filter: none; }
 :root main.command-surface > .intelligence-overlay > .nexus-mark { border: 0; box-shadow: none; }
 /* The page names itself; the toolbar's copy stays for assistive tech. */
 :root .toolbar-location { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

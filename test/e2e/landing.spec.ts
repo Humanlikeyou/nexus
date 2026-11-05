@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
-import { activeField, expect, navButton, openApp, test, type Theme } from "./fixtures/tauri-mock";
+import { activeField, emulateDisplay, expect, navButton, openApp, test, type Theme } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 /** Home landing page: the lens shows the real voice state. LANDING_SHOTS=<dir> saves screenshots (blur on). */
@@ -21,8 +21,7 @@ const NAV = ["Today", "Chat & Agents", "Mind–Body", "Business", "Settings", "S
 
 /** e2e Chromium reports reduced transparency; force it off so shots show the real look. */
 async function realLook(page: Page, theme: Theme) {
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "no-preference" }, { name: "prefers-color-scheme", value: theme }] });
+  await emulateDisplay(page, theme, "no-preference");
 }
 
 test("Landing: launch opens the lens with no sidebar, toolbar or footer, and the buttons replace them", async ({ page, theme, consoleErrors }) => {
@@ -116,11 +115,13 @@ test("Landing: Today opens the dashboard, Home returns to the lens, ⌘1 and ⌘
   expect(consoleErrors).toEqual([]);
 });
 
-test("Landing: every button is keyboard reachable with the emerald focus ring", async ({ page, theme }) => {
+test("Landing: every button is keyboard reachable with the emerald focus ring", async ({ page, theme, browserName }) => {
   await openApp(page, { theme, data: waiting });
   const buttons = page.locator(".landing__nav").getByRole("button");
+  // WebKit follows macOS: plain Tab skips buttons unless Keyboard navigation is on; Option+Tab always reaches them.
+  const next = browserName === "webkit" ? "Alt+Tab" : "Tab";
   for (const name of NAV) {
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(next);
     await expect(buttons.filter({ hasText: name })).toBeFocused();
   }
   const ring = await buttons.last().evaluate((el) => { const s = getComputedStyle(el); return `${s.outlineStyle} ${s.outlineWidth} ${s.outlineOffset} ${s.outlineColor}`; });

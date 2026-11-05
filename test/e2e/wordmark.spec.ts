@@ -66,7 +66,7 @@ test("(w) inactive window: toolbar mark dims to solid bronze, OS stays secondary
 
 test.describe("splash at 2x", () => {
   test.use({ deviceScaleFactor: 2 });
-  test("(w) splash: \"Command Center\" subtitle 16px (visible) under the mark, SF 13px secondary, aria-hidden (Decision 13)", async ({ page, theme }) => {
+  test("(w) splash: \"Command Center\" subtitle 16px (visible) under the mark, SF 13px secondary, aria-hidden (Decision 13)", async ({ page, theme, browserName }) => {
     await openApp(page, { theme, reduceMotion: true, delays: { get_terrence_runtime_health: 900 } }).catch(() => {});
     const splash = page.locator(".splash");
     await expect(splash).toBeVisible();
@@ -119,8 +119,9 @@ test.describe("splash at 2x", () => {
       return (y - start) / (window.devicePixelRatio || 1);
     }, png.toString("base64"));
     // The target is 16px in SF, which only macOS has. Elsewhere the fallback font's cap height moves the ink
-    // (15-17px across the Linux fonts, same layout), so the exact box gap above holds the spacing there.
-    const slack = process.platform === "darwin" ? 0.5 : 1;
+    // (15-17px across the Linux fonts, same layout), and WebKit sets the same baseline 1px lower (17px),
+    // so the exact box gap above holds the spacing there.
+    const slack = process.platform === "darwin" && browserName === "chromium" ? 0.5 : 1;
     expect(gap).toBeGreaterThanOrEqual(16 - slack);
     expect(gap).toBeLessThanOrEqual(16 + slack);
     await expect(splash).toBeHidden();

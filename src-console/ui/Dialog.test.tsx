@@ -41,6 +41,16 @@ describe("Dialog", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
+  it("returns focus to a mouse opener that the click did not focus, as in WebKit", () => {
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "Restore from Backup…" });
+    fireEvent.pointerDown(opener);
+    fireEvent.click(opener);
+    expect(opener).not.toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(opener).toHaveFocus();
+  });
+
   it("Esc (native cancel event) acts as Cancel", async () => {
     render(<Harness />);
     await userEvent.click(screen.getByRole("button", { name: "Restore from Backup…" }));
