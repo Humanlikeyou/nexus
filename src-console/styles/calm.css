@@ -131,7 +131,10 @@
 
 /* Screens that used to be tiled. */
 :root .fitness, :root .neuro { width: 100%; max-width: var(--page-column); margin-inline: auto; padding: var(--space-6) 0 var(--space-10); gap: var(--space-8); }
-:root .fitness__row--today { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-6); }
+:root .fitness__row--today, :root .fitness__tiles, :root .fitness__tiles--3, :root .fitness__tiles--2 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-6); }
+/* Rings start on their column's edge, under their title, so they line up with the rows below. */
+:root .fitness__ring-body { justify-items: start; padding-block: 0; }
+:root .fitness__ring-card { align-content: start; }
 :root .fitness__header-trailing, :root .neuro__actions { display: flex; align-items: center; gap: var(--space-3); }
 :root .fitness__header-trailing:empty, :root .neuro__actions:empty { display: none; }
 :root .fitness__display { font: 300 var(--text-title1)/1.2 var(--font-text); }
@@ -143,7 +146,10 @@
 :root .mind-body__score { font: inherit; }
 :root .sessions__split { grid-template-columns: minmax(0, 1fr); gap: var(--space-8); }
 :root .sessions__list .ui-button { justify-self: start; }
-:root .sessions__detail .sessions__metrics { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-10); }
+:root .sessions__detail .sessions__metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4) var(--space-6); }
+:root .neuro__row, :root .neuro__row--sessions { grid-template-columns: minmax(0, 1fr); gap: var(--space-8); }
+:root .neuro__hero { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-6); }
+:root .fitness__tiles .ui-stat, :root .fitness .ui-card .ui-stat { padding: 0; background: none; }
 :root .settings { gap: var(--space-8); padding-bottom: var(--space-10); }
 :root .settings .ui-inset-group + .ui-inset-group { margin-top: 0; }
 :root .voice__live { display: grid; justify-items: center; gap: var(--space-4); padding: 0; }
@@ -167,7 +173,10 @@
 
 /* Screens that used to be tiled. */
 :root .fitness, :root .neuro { width: 100%; max-width: var(--page-column); margin-inline: auto; padding: var(--space-6) 0 var(--space-10); gap: var(--space-8); }
-:root .fitness__row--today { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-6); }
+:root .fitness__row--today, :root .fitness__tiles, :root .fitness__tiles--3, :root .fitness__tiles--2 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-6); }
+/* Rings start on their column's edge, under their title, so they line up with the rows below. */
+:root .fitness__ring-body { justify-items: start; padding-block: 0; }
+:root .fitness__ring-card { align-content: start; }
 :root .fitness__header-trailing, :root .neuro__actions { display: flex; align-items: center; gap: var(--space-3); }
 :root .fitness__header-trailing:empty, :root .neuro__actions:empty { display: none; }
 :root .fitness__display { font: 300 var(--text-title1)/1.2 var(--font-text); }
@@ -179,7 +188,10 @@
 :root .mind-body__score { font: inherit; }
 :root .sessions__split { grid-template-columns: minmax(0, 1fr); gap: var(--space-8); }
 :root .sessions__list .ui-button { justify-self: start; }
-:root .sessions__detail .sessions__metrics { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-10); }
+:root .sessions__detail .sessions__metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4) var(--space-6); }
+:root .neuro__row, :root .neuro__row--sessions { grid-template-columns: minmax(0, 1fr); gap: var(--space-8); }
+:root .neuro__hero { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-6); }
+:root .fitness__tiles .ui-stat, :root .fitness .ui-card .ui-stat { padding: 0; background: none; }
 :root .settings { gap: var(--space-8); padding-bottom: var(--space-10); }
 :root .voice__live { display: grid; justify-items: center; gap: var(--space-4); padding: 0; }
 :root .chat-screen__conversation.chat-screen__conversation { border: 0; border-radius: 0; background: none; box-shadow: none; }

@@ -19,7 +19,8 @@ test.describe("Mind–Body", () => {
     for (const name of ["Readiness", "Focus drivers", "Session body context"]) await expect(f.getByRole("heading", { level: 2, name })).toBeVisible();
     await expect(f.getByLabel(/^Readiness: (High|Moderate|Low)$/)).toBeVisible();
     await expect(f.getByText("Collecting data: 1/15 sessions")).toBeVisible();
-    await expect(f.getByText(/Correlation, not causation · n = 1/)).toBeVisible();
+    await expect(f.getByText("n = 1 matched sessions")).toBeVisible();
+    await expect(f.getByText("Correlation, not causation.")).toBeVisible();
     await expect(f.getByText("Personal estimates, not medical data.").last()).toBeVisible();
     await expect(f.getByRole("img", { name: /^HRV, last \d+ days/ })).toBeVisible();
     expect(consoleErrors).toEqual([]);

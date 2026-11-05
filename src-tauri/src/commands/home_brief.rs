@@ -4,6 +4,8 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 const MAX_BYTES: u64 = 8_192;
@@ -85,11 +87,18 @@ fn brief_path() -> Option<PathBuf> {
 #[tauri::command]
 pub fn home_brief() -> HomeBrief {
     let read = || {
-        let path = brief_path()?;
-        let meta = fs::symlink_metadata(&path).ok()?;
-        (meta.is_file() && meta.len() <= MAX_BYTES)
-            .then(|| fs::read_to_string(path).ok())
-            .flatten()
+        // O_NOFOLLOW and limits on the open handle, so the file can't change between check and read.
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(brief_path()?)
+            .ok()?;
+        if !file.metadata().ok()?.is_file() {
+            return None;
+        }
+        let mut text = String::new();
+        file.take(MAX_BYTES).read_to_string(&mut text).ok()?;
+        Some(text)
     };
     read().map_or_else(HomeBrief::default, |text| parse_brief(&text, Utc::now()))
 }

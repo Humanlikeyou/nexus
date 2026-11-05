@@ -21,9 +21,11 @@ pub mod test_support {
     use std::path::Path;
 
     pub use crate::app_paths::{
-        data_dir, merge_legacy_config_in, migrate_legacy_data_dir_in, DATA_DIR_ENV, DATA_DIR_NAME,
+        data_dir, merge_legacy_config_in, migrate_legacy_data_dir_in, private_open_options,
+        DATA_DIR_ENV, DATA_DIR_NAME,
     };
     pub use crate::commands::goals::{read_goals, save_goals};
+    pub use crate::commands::muse;
     pub use crate::commands::noop::health_snapshot;
     pub use crate::commands::onboarding::{check_onboarding, complete_onboarding};
     pub use crate::commands::outbox::get_outbox_status;

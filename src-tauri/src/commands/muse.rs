@@ -25,9 +25,124 @@ const MUSE_AF7_PREFIX: [u8; 4] = [0x27, 0x3e, 0x00, 0x04];
 const MUSE_AF8_PREFIX: [u8; 4] = [0x27, 0x3e, 0x00, 0x05];
 const MUSE_TP10_PREFIX: [u8; 4] = [0x27, 0x3e, 0x00, 0x06];
 
+/// Data streams beyond the four EEG channels. UUIDs, layouts and scales follow muse-lsl's
+/// `constants.py` and `muse.py`, and muse-js's `muse.ts` and `muse-parse.ts`, which agree.
+/// None of these is required: a headset without one still streams EEG.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptionalStream {
+    /// Same packet and scale as EEG, emitted on `muse-eeg`. `AUX` is what the frontend reads.
+    Aux(&'static str),
+    Accelerometer,
+    Gyroscope,
+    Ppg(&'static str),
+}
+
+const OPTIONAL_STREAMS: [([u8; 4], OptionalStream); 7] = [
+    ([0x27, 0x3e, 0x00, 0x02], OptionalStream::Aux("AUX_L")),
+    ([0x27, 0x3e, 0x00, 0x07], OptionalStream::Aux("AUX")),
+    ([0x27, 0x3e, 0x00, 0x09], OptionalStream::Gyroscope),
+    ([0x27, 0x3e, 0x00, 0x0a], OptionalStream::Accelerometer),
+    ([0x27, 0x3e, 0x00, 0x0f], OptionalStream::Ppg("ambient")),
+    ([0x27, 0x3e, 0x00, 0x10], OptionalStream::Ppg("infrared")),
+    ([0x27, 0x3e, 0x00, 0x11], OptionalStream::Ppg("red")),
+];
+
+/// One optional subscribe may not hold up EEG for long.
+const OPTIONAL_SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Silence on the EEG channels this long counts as a stall.
+const EEG_SILENCE_CHECK: Duration = Duration::from_secs(5);
+
+const ACCELEROMETER_G_PER_LSB: f64 = 0.0000610352;
+const GYROSCOPE_DPS_PER_LSB: f64 = 0.0074768;
+/// A Muse data packet: a 16-bit sequence number and 18 bytes of samples.
+const MUSE_PACKET_BYTES: usize = 20;
+
 /// Match a characteristic UUID by its first 4 bytes (works across all Muse models).
 fn uuid_prefix_match(uuid: &Uuid, prefix: &[u8; 4]) -> bool {
     uuid.as_bytes()[..4] == prefix[..]
+}
+
+pub fn optional_stream(uuid: &Uuid) -> Option<OptionalStream> {
+    OPTIONAL_STREAMS
+        .iter()
+        .find(|(prefix, _)| uuid_prefix_match(uuid, prefix))
+        .map(|(_, stream)| *stream)
+}
+
+pub fn is_control_characteristic(uuid: &Uuid) -> bool {
+    uuid_prefix_match(uuid, &MUSE_CONTROL_PREFIX)
+}
+
+/// EEG, or one of the optional streams.
+pub fn is_data_characteristic(uuid: &Uuid) -> bool {
+    let eeg = [
+        MUSE_TP9_PREFIX,
+        MUSE_AF7_PREFIX,
+        MUSE_AF8_PREFIX,
+        MUSE_TP10_PREFIX,
+    ];
+    eeg.iter().any(|prefix| uuid_prefix_match(uuid, prefix)) || optional_stream(uuid).is_some()
+}
+
+/// A readable name for a Muse characteristic, by the same prefix match.
+pub fn characteristic_name(uuid: &Uuid) -> &'static str {
+    const NAMES: [(u8, &str); 17] = [
+        (0x01, "control"),
+        (0x02, "aux_left"),
+        (0x03, "eeg_tp9"),
+        (0x04, "eeg_af7"),
+        (0x05, "eeg_af8"),
+        (0x06, "eeg_tp10"),
+        (0x07, "aux_right"),
+        (0x08, "ref_drl"),
+        (0x09, "gyroscope"),
+        (0x0a, "accelerometer"),
+        (0x0b, "telemetry"),
+        (0x0f, "ppg_ambient"),
+        (0x10, "ppg_infrared"),
+        (0x11, "ppg_red"),
+        (0x12, "thermistor"),
+        (0x13, "athena_data_1"),
+        (0x14, "athena_data_2"),
+    ];
+    NAMES
+        .iter()
+        .find(|(id, _)| uuid_prefix_match(uuid, &[0x27, 0x3e, 0x00, *id]))
+        .map_or("unknown", |(_, name)| name)
+}
+
+/// One log line per characteristic: names and UUIDs only.
+pub fn gatt_log_text(stamp: &str, characteristics: &[(Uuid, Uuid)]) -> String {
+    let mut text = format!("{stamp} characteristics={}\n", characteristics.len());
+    for (service, uuid) in characteristics {
+        let name = characteristic_name(uuid);
+        text.push_str(&format!(
+            "{stamp} service={service} characteristic={uuid} name={name}\n"
+        ));
+    }
+    text
+}
+
+/// Appends to the day's GATT log in `dir`, created private, and returns its path.
+pub fn append_gatt_log(
+    dir: &std::path::Path,
+    characteristics: &[(Uuid, Uuid)],
+) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
+    crate::app_paths::create_private_dir_all(dir)?;
+    let now = chrono::Local::now();
+    let path = dir.join(format!("muse-gatt-{}.log", now.format("%Y-%m-%d")));
+    let mut file = crate::app_paths::private_open_options()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    file.write_all(gatt_log_text(&now.to_rfc3339(), characteristics).as_bytes())?;
+    Ok(path)
+}
+
+/// Where Muse logs and captures live, under the app data folder.
+pub fn muse_data_dir() -> std::path::PathBuf {
+    crate::app_paths::data_dir().join("muse")
 }
 
 lazy_static::lazy_static! {
@@ -95,11 +210,40 @@ pub struct MuseDevice {
     pub rssi: Option<i16>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct EegSample {
     pub timestamp: f64,
     pub channel: String,
     pub samples: Vec<f64>,
+}
+
+/// `muse-motion`: 3 samples per packet, each `[x, y, z]`, about 52 Hz.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct MotionSample {
+    pub timestamp: f64,
+    /// `accelerometer` or `gyroscope`.
+    pub sensor: String,
+    /// `g` or `deg/s`.
+    pub unit: String,
+    pub sequence: u16,
+    pub samples: Vec<[f64; 3]>,
+}
+
+/// `muse-ppg`: 6 raw unsigned 24-bit counts per packet, about 64 Hz.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct PpgSample {
+    pub timestamp: f64,
+    /// `ambient`, `infrared` or `red`.
+    pub channel: String,
+    pub sequence: u16,
+    pub samples: Vec<u32>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum OptionalEvent {
+    Aux(EegSample),
+    Motion(MotionSample),
+    Ppg(PpgSample),
 }
 
 #[derive(Serialize, Clone)]
@@ -352,6 +496,10 @@ pub async fn connect_muse(app: AppHandle, address: String) -> Result<MuseConnect
         let props = format!("{:?}", ch.properties);
         println!("[muse] gatt: uuid={} properties={props}", ch.uuid);
     }
+    let listing: Vec<(Uuid, Uuid)> = chars.iter().map(|c| (c.service_uuid, c.uuid)).collect();
+    if let Err(e) = append_gatt_log(&muse_data_dir(), &listing) {
+        println!("[muse] gatt_log: error={e}");
+    }
 
     let name = peripheral
         .properties()
@@ -446,6 +594,8 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
         return Err("No EEG characteristics found — cannot stream".to_string());
     }
 
+    subscribe_optional_streams(&peripheral).await;
+
     // 250ms settle time after subscriptions before sending commands
     tokio::time::sleep(Duration::from_millis(250)).await;
 
@@ -509,6 +659,8 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
         let mut last_sizes: Vec<usize> = Vec::new();
         let task_start = std::time::Instant::now();
         let mut got_first = false;
+        // Silence means EEG silence: motion and PPG arriving must not hide a dead EEG stream.
+        let mut silent_since = std::time::Instant::now();
 
         loop {
             // Check streaming flag
@@ -523,7 +675,8 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
             // Use select to add a 5-second timeout for detecting silent streams
             let notification = tokio::select! {
                 n = notification_stream.next() => n,
-                _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                _ = tokio::time::sleep(EEG_SILENCE_CHECK.saturating_sub(silent_since.elapsed())) => {
+                    silent_since = std::time::Instant::now();
                     if !got_first {
                         let elapsed = task_start.elapsed().as_secs();
                         let msg = format!("no BLE notifications received after {elapsed}s — stream may be dead");
@@ -553,6 +706,12 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
                     break;
                 }
             };
+
+            if let Some(stream) = optional_stream(&notification.uuid) {
+                emit_optional(&app_handle, stream, &notification.value);
+                continue;
+            }
+            silent_since = std::time::Instant::now();
 
             if !got_first {
                 got_first = true;
@@ -707,10 +866,102 @@ pub async fn get_muse_state() -> Result<MuseConnectionState, String> {
     }
 }
 
+/// Subscribes to whichever optional streams the headset has. A stream that is missing, refuses or
+/// doesn't answer is logged and skipped; EEG goes on without it.
+pub async fn subscribe_optional_streams(peripheral: &Peripheral) {
+    let chars = peripheral.characteristics();
+    for (prefix, stream) in &OPTIONAL_STREAMS {
+        let Some(ch) = chars.iter().find(|c| uuid_prefix_match(&c.uuid, prefix)) else {
+            println!("[muse] optional_stream: missing stream={stream:?}");
+            push_proof_event("muse", "optional_missing", &format!("{stream:?}")).await;
+            continue;
+        };
+        let subscribed =
+            tokio::time::timeout(OPTIONAL_SUBSCRIBE_TIMEOUT, peripheral.subscribe(ch)).await;
+        let detail = format!("uuid={} stream={stream:?}", ch.uuid);
+        let event = if matches!(subscribed, Ok(Ok(()))) {
+            "optional_subscribed"
+        } else {
+            "optional_subscribe_failed"
+        };
+        println!("[muse] {event} {detail}");
+        push_proof_event("muse", event, &detail).await;
+    }
+}
+
+/// Decodes one packet of an optional stream. None if it is shorter than a full packet.
+pub fn decode_optional(
+    stream: OptionalStream,
+    data: &[u8],
+    timestamp: f64,
+) -> Option<OptionalEvent> {
+    if data.len() < MUSE_PACKET_BYTES {
+        return None;
+    }
+    let sequence = u16::from_be_bytes([data[0], data[1]]);
+    let motion = |sensor: &str, unit: &str, scale| {
+        OptionalEvent::Motion(MotionSample {
+            timestamp,
+            sensor: sensor.to_string(),
+            unit: unit.to_string(),
+            sequence,
+            samples: parse_imu_samples(data, scale),
+        })
+    };
+    Some(match stream {
+        OptionalStream::Aux(channel) => OptionalEvent::Aux(EegSample {
+            timestamp,
+            channel: channel.to_string(),
+            samples: parse_eeg_packet(data),
+        }),
+        OptionalStream::Accelerometer => motion("accelerometer", "g", ACCELEROMETER_G_PER_LSB),
+        OptionalStream::Gyroscope => motion("gyroscope", "deg/s", GYROSCOPE_DPS_PER_LSB),
+        OptionalStream::Ppg(channel) => OptionalEvent::Ppg(PpgSample {
+            timestamp,
+            channel: channel.to_string(),
+            sequence,
+            samples: parse_ppg_samples(data),
+        }),
+    })
+}
+
+/// After the sequence number: 3 samples of big-endian signed 16-bit x, y, z.
+fn parse_imu_samples(data: &[u8], scale: f64) -> Vec<[f64; 3]> {
+    let axis = |at: usize| scale * f64::from(i16::from_be_bytes([data[at], data[at + 1]]));
+    (0..3)
+        .map(|sample| {
+            let at = 2 + sample * 6;
+            [axis(at), axis(at + 2), axis(at + 4)]
+        })
+        .collect()
+}
+
+/// After the sequence number: 6 big-endian unsigned 24-bit counts.
+fn parse_ppg_samples(data: &[u8]) -> Vec<u32> {
+    data[2..MUSE_PACKET_BYTES]
+        .chunks_exact(3)
+        .map(|b| u32::from_be_bytes([0, b[0], b[1], b[2]]))
+        .collect()
+}
+
+/// Aux goes out on `muse-eeg` but is not recorded, so session files keep their four channels.
+fn emit_optional(app: &AppHandle, stream: OptionalStream, data: &[u8]) {
+    let timestamp = chrono::Utc::now().timestamp_millis() as f64;
+    let emitted = match decode_optional(stream, data, timestamp) {
+        Some(OptionalEvent::Aux(sample)) => app.emit("muse-eeg", &sample),
+        Some(OptionalEvent::Motion(sample)) => app.emit("muse-motion", &sample),
+        Some(OptionalEvent::Ppg(sample)) => app.emit("muse-ppg", &sample),
+        None => Ok(()),
+    };
+    if let Err(e) = emitted {
+        println!("[muse] optional_emit: error={e}");
+    }
+}
+
 /// Encode a Muse control command with the required length-prefix byte.
 /// Protocol: [length_of_remaining_bytes, ...command_ascii, 0x0a]
 /// e.g. "d" → [0x02, 0x64, 0x0a], "p50" → [0x04, 0x70, 0x35, 0x30, 0x0a]
-fn muse_cmd(cmd: &str) -> Vec<u8> {
+pub fn muse_cmd(cmd: &str) -> Vec<u8> {
     let cmd_bytes = cmd.as_bytes();
     let len = (cmd_bytes.len() + 1) as u8; // +1 for trailing 0x0a
     let mut buf = Vec::with_capacity(cmd_bytes.len() + 2);
@@ -760,4 +1011,196 @@ fn parse_eeg_packet(data: &[u8]) -> Vec<f64> {
     }
 
     samples
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn uuid(text: &str) -> Uuid {
+        Uuid::parse_str(text).unwrap()
+    }
+
+    /// A packet in the headset's format: sequence 0x0102, then 18 bytes filled from `payload`.
+    fn packet(payload: &[u8]) -> Vec<u8> {
+        let mut data = vec![0x01, 0x02];
+        data.extend_from_slice(payload);
+        data.resize(MUSE_PACKET_BYTES, 0);
+        data
+    }
+
+    #[test]
+    fn the_published_uuids_route_to_their_streams() {
+        let uuids = [
+            ("273e0002", OptionalStream::Aux("AUX_L")),
+            ("273e0007", OptionalStream::Aux("AUX")),
+            ("273e0009", OptionalStream::Gyroscope),
+            ("273e000a", OptionalStream::Accelerometer),
+            ("273e000f", OptionalStream::Ppg("ambient")),
+            ("273e0010", OptionalStream::Ppg("infrared")),
+            ("273e0011", OptionalStream::Ppg("red")),
+        ];
+        for (prefix, stream) in uuids {
+            let full = uuid(&format!("{prefix}-4c4d-454d-96be-f03bac821358"));
+            assert_eq!(optional_stream(&full), Some(stream), "{prefix}");
+            // The suffix varies by model, so only the prefix counts.
+            let other = uuid(&format!("{prefix}-0000-1000-8000-00805f9b34fb"));
+            assert_eq!(optional_stream(&other), Some(stream), "{prefix}");
+        }
+        for eeg in ["273e0003", "273e0004", "273e0005", "273e0006"] {
+            let full = uuid(&format!("{eeg}-4c4d-454d-96be-f03bac821358"));
+            assert_eq!(optional_stream(&full), None);
+            assert!(is_data_characteristic(&full));
+        }
+        let control = uuid("273e0001-4c4d-454d-96be-f03bac821358");
+        assert_eq!(optional_stream(&control), None);
+        assert!(!is_data_characteristic(&control));
+        assert!(is_control_characteristic(&control));
+    }
+
+    #[test]
+    fn an_eeg_packet_decodes_twelve_samples_at_the_published_scale() {
+        // Pairs 0x000 0xFFF, then 0x800 0x801, then padding at the midpoint.
+        let mut payload = vec![0x00, 0x0f, 0xff, 0x80, 0x08, 0x01];
+        payload.extend([0x80, 0x08, 0x00].repeat(4));
+        let samples = parse_eeg_packet(&packet(&payload));
+        assert_eq!(samples.len(), 12);
+        assert_eq!(samples[0], -1000.0);
+        assert_eq!(samples[1], 0.48828125 * 2047.0);
+        assert_eq!(samples[2], 0.0);
+        assert_eq!(samples[3], 0.48828125);
+        assert!(samples[4..].iter().all(|s| *s == 0.0));
+    }
+
+    #[test]
+    fn aux_uses_the_eeg_packet_on_the_channel_the_frontend_reads() {
+        let data = packet(&[0x00, 0x0f, 0xff]);
+        let event = decode_optional(OptionalStream::Aux("AUX"), &data, 7.0).unwrap();
+        let OptionalEvent::Aux(sample) = event else {
+            panic!("{event:?}")
+        };
+        assert_eq!((sample.channel.as_str(), sample.timestamp), ("AUX", 7.0));
+        assert_eq!(sample.samples, parse_eeg_packet(&data));
+    }
+
+    #[test]
+    fn motion_packets_decode_signed_axes_with_sequence_and_scale() {
+        // x, y, z for three samples: +1 g, -1 LSB, 0; then two all-zero samples except a max.
+        let payload = [
+            0x40, 0x00, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x7f, 0xff, 0x80, 0x00,
+        ];
+        let data = packet(&payload);
+        let Some(OptionalEvent::Motion(acc)) =
+            decode_optional(OptionalStream::Accelerometer, &data, 1.0)
+        else {
+            panic!("not motion")
+        };
+        assert_eq!(
+            (acc.sensor.as_str(), acc.unit.as_str()),
+            ("accelerometer", "g")
+        );
+        assert_eq!(acc.sequence, 0x0102);
+        assert_eq!(acc.samples.len(), 3);
+        assert!((acc.samples[0][0] - 1.0).abs() < 1e-4);
+        assert_eq!(acc.samples[0][1], -ACCELEROMETER_G_PER_LSB);
+        assert_eq!(acc.samples[0][2], 0.0);
+        assert_eq!(acc.samples[1], [0.0, 0.0, 0.0]);
+        assert_eq!(acc.samples[2][1], 32767.0 * ACCELEROMETER_G_PER_LSB);
+        assert_eq!(acc.samples[2][2], -32768.0 * ACCELEROMETER_G_PER_LSB);
+
+        let Some(OptionalEvent::Motion(gyro)) =
+            decode_optional(OptionalStream::Gyroscope, &data, 1.0)
+        else {
+            panic!("not motion")
+        };
+        assert_eq!(
+            (gyro.sensor.as_str(), gyro.unit.as_str()),
+            ("gyroscope", "deg/s")
+        );
+        assert_eq!(gyro.samples[0][1], -GYROSCOPE_DPS_PER_LSB);
+    }
+
+    #[test]
+    fn ppg_packets_decode_six_raw_counts() {
+        let payload = [
+            0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x12, 0x34, 0x56, 0xff, 0xff, 0xff, 0x00, 0x00,
+            0x00, 0x7f, 0x00, 0x80,
+        ];
+        let data = packet(&payload);
+        let event = decode_optional(OptionalStream::Ppg("infrared"), &data, 2.0);
+        let Some(OptionalEvent::Ppg(ppg)) = event else {
+            panic!("{event:?}")
+        };
+        assert_eq!(ppg.channel, "infrared");
+        assert_eq!(ppg.sequence, 0x0102);
+        assert_eq!(ppg.samples, [1, 0x010000, 0x123456, 0xffffff, 0, 0x7f0080]);
+    }
+
+    #[test]
+    fn short_packets_are_skipped_not_fatal() {
+        for stream in OPTIONAL_STREAMS.map(|(_, stream)| stream) {
+            assert_eq!(decode_optional(stream, &[0; 19], 0.0), None);
+            assert_eq!(decode_optional(stream, &[], 0.0), None);
+        }
+    }
+
+    #[test]
+    fn event_payloads_keep_their_field_names() {
+        let motion = MotionSample {
+            timestamp: 1.0,
+            sensor: "gyroscope".into(),
+            unit: "deg/s".into(),
+            sequence: 2,
+            samples: vec![[0.5, 0.0, -0.5]],
+        };
+        assert_eq!(
+            serde_json::to_value(&motion).unwrap(),
+            serde_json::json!({"timestamp": 1.0, "sensor": "gyroscope", "unit": "deg/s",
+                               "sequence": 2, "samples": [[0.5, 0.0, -0.5]]})
+        );
+        let ppg = PpgSample {
+            timestamp: 1.0,
+            channel: "red".into(),
+            sequence: 2,
+            samples: vec![3],
+        };
+        assert_eq!(
+            serde_json::to_value(&ppg).unwrap(),
+            serde_json::json!({"timestamp": 1.0, "channel": "red", "sequence": 2, "samples": [3]})
+        );
+    }
+
+    #[test]
+    fn the_gatt_log_holds_names_and_uuids_in_a_private_dated_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let service = uuid("0000fe8d-0000-1000-8000-00805f9b34fb");
+        let found = [
+            (service, uuid("273e0007-4c4d-454d-96be-f03bac821358")),
+            (service, uuid("0000abcd-0000-1000-8000-00805f9b34fb")),
+        ];
+        let text = gatt_log_text("T", &found);
+        assert_eq!(text.lines().count(), 3);
+        assert!(text.contains(
+            "T service=0000fe8d-0000-1000-8000-00805f9b34fb \
+             characteristic=273e0007-4c4d-454d-96be-f03bac821358 name=aux_right\n"
+        ));
+        assert!(text.contains("name=unknown\n"));
+
+        let dir = std::env::temp_dir().join(format!("nexus-muse-{}", Uuid::new_v4()));
+        let path = append_gatt_log(&dir, &found).unwrap();
+        append_gatt_log(&dir, &found).unwrap();
+        let day = chrono::Local::now().format("%Y-%m-%d").to_string();
+        assert!(path.ends_with(format!("muse-gatt-{day}.log")));
+        assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 6);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn preset_commands_are_length_prefixed() {
+        assert_eq!(muse_cmd("p50"), [0x04, b'p', b'5', b'0', 0x0a]);
+        assert_eq!(muse_cmd("p20"), [0x04, b'p', b'2', b'0', 0x0a]);
+    }
 }

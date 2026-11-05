@@ -11,13 +11,16 @@ export function BaselineChart({ points, reading, tall = false }: { points: NoopM
   if (shown < 2) return <p className="mb-chart__empty">Not enough days to draw yet</p>;
   const label = `${reading.def.label}, last ${points.length} days, ${shown} readings${reading.base ? `, usual ${reading.def.format(reading.base.mean)}` : ""}`;
   return (
-    <div className="mb-chart" data-tall={tall || undefined}>
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={label}>
-        {band && <rect className="mb-chart__band" x="0" width="100" y={band.top} height={Math.max(band.bottom - band.top, .5)} />}
-        {mean !== null && <line className="mb-chart__mean" x1="0" x2="100" y1={mean} y2={mean} />}
-        <path className="mb-chart__line" d={path} fill="none" />
-      </svg>
-      {last && <i className="mb-chart__now" style={{ left: `${(last as { x: number }).x}%`, top: `${(last as { y: number }).y}%` }} aria-hidden="true" />}
+    <div className="mb-chart" data-plot="" data-tall={tall || undefined}>
+      {/* The band spans the plot; the points are inset by a dot's radius, so the end dots stay on it. */}
+      {band && <i className="mb-chart__band" data-plot="" style={{ top: `${band.top}%`, height: `${Math.max(band.bottom - band.top, .5)}%` }} aria-hidden="true" />}
+      {mean !== null && <i className="mb-chart__mean" style={{ top: `${mean}%` }} aria-hidden="true" />}
+      <div className="mb-chart__points">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={label}>
+          <path className="mb-chart__line" d={path} fill="none" />
+        </svg>
+        {last && <i className="mb-chart__now" style={{ left: `${(last as { x: number }).x}%`, top: `${(last as { y: number }).y}%` }} aria-hidden="true" />}
+      </div>
     </div>
   );
 }
@@ -39,7 +42,7 @@ export function StageStrip({ stages }: { stages: Array<{ label: string; minutes:
   const total = stages.reduce((sum, stage) => sum + stage.minutes, 0);
   if (total <= 0) return null;
   return (
-    <div className="mb-stages" role="img" aria-label={stages.map((stage) => `${stage.label} ${Math.round(stage.minutes)} minutes`).join(", ")}>
+    <div className="mb-stages" data-plot="" role="img" aria-label={stages.map((stage) => `${stage.label} ${Math.round(stage.minutes)} minutes`).join(", ")}>
       {stages.map((stage) => <i key={stage.label} data-tone={stage.tone} style={{ flexGrow: stage.minutes }} />)}
     </div>
   );

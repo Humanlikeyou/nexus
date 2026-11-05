@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { READINESS_COPY, matchDriver, pearson, readinessReading, shortDay, tokyoDay, trendText, type DriverKey, type DriverPoint } from "../lib/mindBody";
+import { MIN_TREND_SESSIONS, READINESS_COPY, matchDriver, pearson, readinessReading, shortDay, tokyoDay, trendText, type DriverKey, type DriverPoint } from "../lib/mindBody";
 import { METRICS, driverSentence, drivers as rankDrivers, hoursMinutes, inRange, lean, loadRatio, mergeSeries, metricReading, windowAverage, type MetricKey } from "../lib/mindBodyDeep";
 import { NoopShapeError, isSnapshot, noopQuery, parseBodyContext, parseMetricSeries, snapshotDays } from "../lib/noop";
 import type { NoopDayRow, NoopLatestNight, NoopMetricPoint, NoopMetricSeries, NoopSnapshotPayload, RecordedSession } from "../types";
@@ -11,7 +11,10 @@ export const INVALID_PATH_STEPS = "The NOOP binary or database path in Settings 
 export const SANDBOX_STEPS = "NOOP's local data access isn't set up yet. Open NOOP once so it can create its data folder, then check again.";
 export const DISCLAIMER = "Personal estimates, not medical data.";
 const DASH = "—";
-const CHART_W = 300, CHART_H = 160, PAD = 24;
+/* Every plot fills its column edge to edge: no inner gutter, so plots line up across sections. */
+const CHART_W = 300, CHART_H = 160, CHART_BASE = 154, CHART_TOP = 8;
+/** Keeps a round dot wholly inside the plot at any stretch. */
+const DOT_INSET = 6;
 
 export type MindBodySeries = { hrv: NoopMetricSeries; recovery: NoopMetricSeries; sleep: NoopMetricSeries; resting_hr: NoopMetricSeries; strain: NoopMetricSeries };
 export type DriverSeries = Record<DriverKey, NoopMetricPoint[]>;
@@ -81,45 +84,49 @@ function ChartBox({ state, label, children, onRetry }: { state: "loading" | "emp
   if (state === "loading") return <div className="mind-body__chart mind-body__skeleton" role="status" aria-label={`${label} loading`} />;
   if (state === "error") return <div className="mind-body__chart mind-body__chart-msg" role="alert"><p>Couldn't load this chart.</p>{onRetry && <Button variant="plain" size="small" onClick={onRetry}>Retry</Button>}</div>;
   if (state === "empty") return <div className="mind-body__chart mind-body__chart-msg"><p>No data yet</p><p className="mind-body__hint">Sync your device to see this chart.</p></div>;
-  return <div className="mind-body__chart">{children}</div>;
+  return <div className="mind-body__chart" data-plot="">{children}</div>;
 }
 
 function Gridlines() {
-  return <g className="mind-body__grid" aria-hidden="true">{[0, 1, 2, 3].map((i) => <line key={i} x1={PAD} x2={CHART_W - 4} y1={8 + i * ((CHART_H - PAD - 8) / 3)} y2={8 + i * ((CHART_H - PAD - 8) / 3)} />)}</g>;
+  return <g className="mind-body__grid" aria-hidden="true">{[0, 1, 2, 3].map((i) => { const y = CHART_TOP + i * ((CHART_BASE - CHART_TOP) / 3); return <line key={i} x1={0} x2={CHART_W} y1={y} y2={y} />; })}</g>;
 }
 
 export function LineChart({ points, label, variant }: { points: NoopMetricPoint[]; label: string; variant: "hrv" | "load" }) {
   const vals = points.filter((p): p is { day: string; value: number } => typeof p.value === "number");
   if (vals.length < 2) return <ChartBox state="empty" label={label} />;
-  const y = scale(vals.map((p) => p.value), 8, CHART_H - PAD);
-  const x = (i: number) => PAD + (i / (vals.length - 1)) * (CHART_W - PAD - 4);
+  const y = scale(vals.map((p) => p.value), CHART_TOP, CHART_BASE);
+  const x = (i: number) => (i / (vals.length - 1)) * CHART_W;
   const d = vals.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
   return (
     <ChartBox state="ready" label={label}>
       <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} role="img" aria-label={`${label}, ${vals.length} days`} preserveAspectRatio="none">
         <Gridlines />
-        <path d={`${d} L${x(vals.length - 1)},${CHART_H - PAD} L${PAD},${CHART_H - PAD} Z`} className="mind-body__area" />
+        <path d={`${d} L${CHART_W},${CHART_BASE} L0,${CHART_BASE} Z`} className="mind-body__area" />
         <path d={d} className="mind-body__line" data-series={variant} fill="none" />
       </svg>
     </ChartBox>
   );
 }
 
+const BAR_GAP = 2;
+
 export function StrainBars({ points }: { points: NoopMetricPoint[] }) {
   const vals = [...points].sort((a, b) => a.day.localeCompare(b.day)).slice(-28);
   const nums = vals.map((p) => p.value).filter((v): v is number => typeof v === "number");
   if (nums.length < 2) return <ChartBox state="empty" label="Strain" />;
   const max = Math.max(...nums, 1);
-  const bw = (CHART_W - PAD - 4) / vals.length;
+  // The first bar starts on the left edge and the last ends on the right edge.
+  const step = (CHART_W + BAR_GAP) / vals.length;
+  const bw = step - BAR_GAP;
   // 7-day vs 28-day rolling average load (copper comparison line).
   const avg = (i: number, w: number) => { const xs = vals.slice(Math.max(0, i - w + 1), i + 1).map((p) => p.value).filter((v): v is number => typeof v === "number"); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0; };
-  const yOf = (v: number) => CHART_H - PAD - (v / max) * (CHART_H - PAD - 8);
-  const line = (w: number) => vals.map((_, i) => `${i ? "L" : "M"}${(PAD + bw * i + bw / 2).toFixed(1)},${yOf(avg(i, w)).toFixed(1)}`).join(" ");
+  const yOf = (v: number) => CHART_BASE - (v / max) * (CHART_BASE - CHART_TOP);
+  const line = (w: number) => vals.map((_, i) => `${i ? "L" : "M"}${(step * i + bw / 2).toFixed(1)},${yOf(avg(i, w)).toFixed(1)}`).join(" ");
   return (
     <ChartBox state="ready" label="Strain">
       <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} role="img" aria-label={`Daily strain with 7 and 28 day load, ${nums.length} days`} preserveAspectRatio="none">
         <Gridlines />
-        {vals.map((p, i) => typeof p.value === "number" && <rect key={p.day} className="mind-body__bar" x={PAD + bw * i + 1} width={Math.max(bw - 2, 1)} y={yOf(p.value)} height={CHART_H - PAD - yOf(p.value)} rx={2} />)}
+        {vals.map((p, i) => typeof p.value === "number" && <rect key={p.day} className="mind-body__bar" x={step * i} width={bw} y={yOf(p.value)} height={CHART_BASE - yOf(p.value)} />)}
         <path d={line(7)} className="mind-body__line" data-series="load" fill="none" />
         <path d={line(28)} className="mind-body__line" data-series="baseline" fill="none" />
       </svg>
@@ -129,14 +136,15 @@ export function StrainBars({ points }: { points: NoopMetricPoint[] }) {
 
 export function ScatterChart({ points, label, xUnit }: { points: DriverPoint[]; label: string; xUnit: string }) {
   if (points.length === 0) return <ChartBox state="empty" label={label} />;
-  const sx = scale(points.map((p) => p.x), CHART_W - 4, PAD); // reversed range → left-to-right
-  const sy = scale(points.map((p) => p.y), 8, CHART_H - PAD);
+  const sy = scale(points.map((p) => p.y), CHART_TOP + DOT_INSET, CHART_BASE - DOT_INSET);
+  const lo = Math.min(...points.map((p) => p.x)), hi = Math.max(...points.map((p) => p.x));
+  const sx = (v: number) => (hi === lo ? CHART_W / 2 : DOT_INSET + ((v - lo) / (hi - lo)) * (CHART_W - DOT_INSET * 2));
   return (
     <ChartBox state="ready" label={label}>
       <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} role="img" aria-label={`${label}: focus against ${xUnit}, n = ${points.length}`} preserveAspectRatio="none">
         <Gridlines />
         {/* A zero-length round line stays a true dot when the chart stretches. */}
-        {points.map((p, i) => { const x = CHART_W - 4 + PAD - sx(p.x), y = sy(p.y); return <line key={i} className="mind-body__dot" x1={x} x2={x} y1={y} y2={y} />; })}
+        {points.map((p, i) => { const x = sx(p.x), y = sy(p.y); return <line key={i} className="mind-body__dot" x1={x} x2={x} y1={y} y2={y} />; })}
       </svg>
     </ChartBox>
   );
@@ -258,10 +266,18 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
 
               <section className="mb-section" aria-labelledby="mb-sleep">
                 <h2 id="mb-sleep" className="mb-section__title">Sleep</h2>
-                <p className="mb-section__figure">{typeof sleepMin === "number" ? hoursMinutes(sleepMin) : DASH}{typeof efficiency === "number" && <span>{Math.round(efficiency)}% efficient</span>}</p>
-                <StageStrip stages={stages} />
-                {stages.some((stage) => stage.minutes > 0) && <p className="mind-body__meta mb-stages__key">{stages.map((stage) => `${stage.label} ${hoursMinutes(stage.minutes)}`).join(" · ")}</p>}
-                <BaselineChart points={inRange(merged.sleep, asOf, days)} reading={readingOf("sleep")} tall />
+                <div className="mb-row">
+                  <div className="mb-row__head">
+                    <h3>Last night</h3>
+                    <p className="mb-row__value">{typeof sleepMin === "number" ? hoursMinutes(sleepMin) : DASH}</p>
+                    <p className="mb-row__usual">{typeof efficiency === "number" ? `${Math.round(efficiency)}% efficient` : "\u00a0"}</p>
+                  </div>
+                  <div className="mb-plot">
+                    <StageStrip stages={stages} />
+                    {stages.some((stage) => stage.minutes > 0) && <p className="mind-body__meta">{stages.map((stage) => `${stage.label} ${hoursMinutes(stage.minutes)}`).join(" · ")}</p>}
+                    <BaselineChart points={inRange(merged.sleep, asOf, days)} reading={readingOf("sleep")} tall />
+                  </div>
+                </div>
               </section>
 
               <section className="mb-section" aria-labelledby="mb-trends">
@@ -276,7 +292,7 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
                           <p className="mb-row__value">{item.value === null ? DASH : item.def.format(item.value)}</p>
                           <p className="mb-row__usual">{item.base ? `usual ${item.def.format(item.base.mean)}` : "no baseline yet"}</p>
                         </div>
-                        <BaselineChart points={inRange(merged[key], asOf, days)} reading={item} />
+                        <div className="mb-plot"><BaselineChart points={inRange(merged[key], asOf, days)} reading={item} /></div>
                       </div>
                     );
                   })}
@@ -285,9 +301,18 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
 
               <section className="mb-section" aria-labelledby="mb-load">
                 <h2 id="mb-load" className="mb-section__title">Training load</h2>
-                {loadRun && <p className="mb-section__lede">{loadRun.line} <span className="mb-quiet">Week ÷ month = {loadRun.ratio.toFixed(2)}</span></p>}
-                <StrainBars points={series?.strain.points ?? []} />
-                <p className="mind-body__meta">Daily strain, with the 7-day line and the dashed 28-day line.</p>
+                {loadRun && <p className="mb-section__lede">{loadRun.line}</p>}
+                <div className="mb-row">
+                  <div className="mb-row__head">
+                    <h3>Week ÷ month</h3>
+                    <p className="mb-row__value">{loadRun ? loadRun.ratio.toFixed(2) : DASH}</p>
+                    <p className="mb-row__usual">28 days of strain</p>
+                  </div>
+                  <div className="mb-plot">
+                    <StrainBars points={series?.strain.points ?? []} />
+                    <p className="mind-body__meta">Daily strain, with the 7-day line and the dashed 28-day line.</p>
+                  </div>
+                </div>
               </section>
 
               <section className="mb-section" aria-labelledby="mb-compare">
@@ -314,10 +339,20 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
 
           <section className="mb-section" aria-labelledby="mb-drivers">
             <h2 id="mb-drivers" className="mb-section__title">Focus drivers</h2>
-            <p className="mb-section__lede">How your neuro sessions line up with your body. <span className="mb-quiet">Correlation, not causation · n = {points.length} matched sessions{r !== null ? ` · r = ${r.toFixed(2)}` : ""}</span></p>
-            <SegmentedControl label="Focus driver" size="small" value={driver} options={DRIVERS.map((d) => ({ value: d.key, label: d.label }))} onChange={(v) => setDriver(v as DriverKey)} />
-            {loading ? <ChartBox state="loading" label="Focus drivers" /> : <ScatterChart points={points} label={`Focus vs ${meta.noun}`} xUnit={meta.unit} />}
-            <p className="mind-body__trend" aria-live="polite">{trendText(points, meta.noun)}</p>
+            <p className="mb-section__lede">How your neuro sessions line up with your body.</p>
+            <div className="mb-row">
+              <div className="mb-row__head">
+                <h3>Correlation</h3>
+                <p className="mb-row__value">{r !== null ? `r = ${r.toFixed(2)}` : DASH}</p>
+                <p className="mb-row__usual">n = {points.length} matched sessions</p>
+              </div>
+              <div className="mb-plot">
+                <SegmentedControl label="Focus driver" size="small" value={driver} options={DRIVERS.map((d) => ({ value: d.key, label: d.label }))} onChange={(v) => setDriver(v as DriverKey)} />
+                {loading ? <ChartBox state="loading" label="Focus drivers" /> : <ScatterChart points={points} label={`Focus vs ${meta.noun}`} xUnit={meta.unit} />}
+                <p className="mind-body__trend" aria-live="polite">{trendText(points, meta.noun)}</p>
+                {points.length < MIN_TREND_SESSIONS && <p className="mind-body__meta">Correlation, not causation.</p>}
+              </div>
+            </div>
           </section>
 
           <section className="mb-section" aria-labelledby="mb-context">
