@@ -17,7 +17,7 @@ const emit = (page: Page, event: string, payload: Record<string, unknown>) =>
   page.evaluate(([e, p]) => (window as unknown as { __E2E_EMIT: (e: unknown, p: unknown) => void }).__E2E_EMIT(e, { ts: Date.now(), ...p }), [event, payload] as const);
 const lens = (page: Page) => page.locator('.amara-lens[data-size="320"]');
 const line = (page: Page) => page.locator(".landing__line");
-const NAV = ["Today", "Chat & Agents", "Fitness", "Neuro", "Mind–Body", "Business", "Settings", "Smart home"];
+const NAV = ["Today", "Chat & Agents", "Mind–Body", "Business", "Settings", "Smart home"];
 
 /** e2e Chromium reports reduced transparency; force it off so shots show the real look. */
 async function realLook(page: Page, theme: Theme) {
@@ -106,7 +106,7 @@ test("Landing: Today opens the dashboard, Home returns to the lens, ⌘1 and ⌘
   await navButton(page, "Home").click();
   await expect(lens(page)).toBeVisible();
   await page.keyboard.press("Meta+3");
-  await expect(activeField(page, "Fitness").getByRole("heading", { level: 1 })).toHaveText("Fitness");
+  await expect(activeField(page, "Mind–Body").getByRole("heading", { level: 1 })).toHaveText("Mind–Body");
   await page.keyboard.press("Meta+1");
   await expect(lens(page)).toBeVisible();
   await page.keyboard.press("Meta+k");
@@ -144,6 +144,22 @@ test("Landing: fits the window at every size with no clipping or page scroll", a
     const last = (await page.locator(".landing__nav").getByRole("button").last().boundingBox())!;
     expect(last.y + last.height, `${width}×${height}`).toBeLessThanOrEqual(height);
     expect(last.x + last.width, `${width}×${height}`).toBeLessThanOrEqual(width);
+  }
+});
+
+test("Landing: the six buttons sit in one centred row at both window sizes", async ({ page, theme }) => {
+  await openApp(page, { theme, data: waiting });
+  for (const viewport of [WIDE, SMALL]) {
+    await page.setViewportSize(viewport);
+    const boxes = await Promise.all((await page.locator(".landing__nav").getByRole("button").all()).map(async (b) => (await b.boundingBox())!));
+    expect(boxes).toHaveLength(6);
+    expect(new Set(boxes.map((b) => b.y)).size, `${viewport.width}: one row`).toBe(1);
+    const left = boxes[0].x;
+    const right = viewport.width - (boxes[5].x + boxes[5].width);
+    expect(Math.abs(left - right), `${viewport.width}: centred`).toBeLessThanOrEqual(1);
+    expect(left, `${viewport.width}: side margin`).toBeGreaterThanOrEqual(24);
+    const gaps = boxes.slice(1).map((b, i) => Math.round(b.x - (boxes[i].x + boxes[i].width)));
+    expect(new Set(gaps).size, `${viewport.width}: even gaps`).toBe(1);
   }
 });
 
@@ -190,6 +206,14 @@ test("Landing: stays the dark design in light theme too", async ({ page, theme }
 
 test.describe("sign-off shots", () => {
   test.skip(() => !process.env.LANDING_SHOTS, "LANDING_SHOTS not set");
+  test("six buttons 1280x800", async ({ page, theme }) => {
+    await realLook(page, theme);
+    await page.setViewportSize(WIDE);
+    await openApp(page, { theme, data: waiting });
+    await expect(line(page)).toHaveText("Amara is listening");
+    await page.waitForTimeout(1900);
+    await page.screenshot({ path: `${process.env.LANDING_SHOTS}/landing-six-1280x800-${theme}.png` });
+  });
   for (const [name, data] of [["listening", waiting], ["voice-off", stopped]] as const) {
     for (const [size, viewport] of [["1280x800", WIDE], ["900x620", SMALL]] as const) {
       test(`${name} ${size}`, async ({ page, theme }) => {

@@ -68,6 +68,26 @@ export const HA_ENTITIES = [
   { entityId: "sun.sun", state: "above_horizon", friendlyName: "Sun", domain: "sun", attributes: {} },
 ];
 
+/** Amara's follow-up lists (commands/followups.rs). Sample data only. */
+const followup = (id: number, text: string, o: Record<string, unknown> = {}) => ({ id, text, added: "2026-10-20", due: null, next: null, notes: [], lastNudged: null, done: null, ...o });
+export const FOLLOWUPS = {
+  open: [
+    followup(1, "Send the release notes draft", { due: "2026-10-25", next: "Ask for a second read first" }),
+    followup(2, "Book the sample dentist appointment", { due: "2026-10-28" }),
+    followup(3, "Renew the library card", { due: "2026-11-12", next: "Find the old card", notes: ["Branch closes early on Fridays"] }),
+    followup(4, "Pick a date for the sample dinner"),
+  ],
+  recentlyDone: [
+    followup(5, "Return the sample package", { done: "2026-10-27" }),
+    followup(6, "Water the office plant", { done: "2026-10-21" }),
+  ],
+  muted: [
+    { topic: "sample project", added: "2026-10-20", until: "2026-11-15", active: true },
+    { topic: "gym schedule", added: "2026-10-01", until: null, active: true },
+    { topic: "old invoice", added: "2026-09-01", until: "2026-10-20", active: false },
+  ],
+};
+
 export type Responses = Record<string, unknown>;
 
 /** Every command the console reads on load, with sample values. */
@@ -108,6 +128,14 @@ export function responses(): Responses {
     noop_query: { __byTool: { health_snapshot: NOOP_SNAPSHOT, metric_series: NOOP_SERIES } },
     get_noop_settings: { whoop_source: "noop", binary_path: null, db_path: null },
     set_noop_settings: null,
+    followups_list: FOLLOWUPS,
+    followups_add_item: followup(7, "New sample item"),
+    followups_update_item: FOLLOWUPS.open[0],
+    followups_mark_done: FOLLOWUPS.open[0],
+    followups_reopen_item: FOLLOWUPS.recentlyDone[0],
+    followups_delete_item: null,
+    followups_add_muted_topic: FOLLOWUPS.muted[0],
+    followups_delete_muted_topic: null,
     ha_states: HA_ENTITIES,
     ha_call_service: null,
     ha_conversation: { kind: "noMatch" },

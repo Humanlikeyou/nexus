@@ -32,6 +32,8 @@ function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
   /** In-page record of invoke calls (args included) for specs that assert what was sent. */
   const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
   w.__E2E_CALLS = calls;
+  /** The live canned responses, so a spec can change the answer at an exact moment (see setMock). */
+  w.__E2E_DATA = data;
   w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   const listeners: Array<{ event: string; handler: number }> = [];
   /** e2e: deliver a Tauri event to every listener registered for it. */
@@ -117,9 +119,24 @@ export { expect };
 export const emitTauriEvent = (page: Page, event: string, payload: unknown) =>
   page.evaluate(([e, p]) => (window as unknown as { __E2E_EMIT: (e: unknown, p: unknown) => void }).__E2E_EMIT(e, p), [event, payload] as const);
 
+/** Changes one canned response from now on. Use it for what the backend starts saying mid-test. */
+export const setMock = (page: Page, cmd: string, value: unknown) =>
+  page.evaluate(([c, v]) => { (window as unknown as { __E2E_DATA: Record<string, unknown> }).__E2E_DATA[c as string] = v; }, [cmd, value] as const);
+
 /** Sidebar button for a section, e.g. "Chat & Agents". */
 export const navButton = (page: Page, label: string) =>
   page.getByRole("navigation", { name: "Amara OS navigation" }).getByRole("button", { name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }).first();
 
 /** The visible screen region ("<label> system"). */
 export const activeField = (page: Page, label: string) => page.getByRole("region", { name: `${label} system` });
+
+const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Lists: "Chat & Agents" };
+
+/** Opens a section, or a sub-view through its host, and returns the screen region. */
+export async function openView(page: Page, label: string) {
+  const host = SUB_VIEW_HOSTS[label];
+  await navButton(page, host ?? label).click();
+  const field = activeField(page, host ?? label);
+  if (host) await field.getByRole("radio", { name: label, exact: true }).click();
+  return field;
+}

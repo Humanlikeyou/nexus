@@ -45,12 +45,12 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
   color: var(--landing-label);
 }
 
-/* One row on a wide window, then 4 + 4 down to the 900×620 minimum: never an orphan row. */
+/* Six buttons stay on one row down to the 900×620 minimum, then 3 + 3: never an orphan row. */
 .landing__nav {
   position: relative;
   flex: none;
   display: grid;
-  grid-template-columns: repeat(8, auto);
+  grid-template-columns: repeat(6, auto);
   justify-content: center;
   gap: var(--space-2);
   max-width: 100%;
@@ -77,7 +77,7 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 .landing__button:active { background: var(--landing-button-active); }
 .landing__button:focus-visible { outline: 3px solid var(--landing-focus); outline-offset: 2px; }
 
-@media (max-width: 1040px) { .landing__nav { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 800px) { .landing__nav { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-height: 680px) { .landing { gap: var(--space-3); } }
 
 @media (forced-colors: active) {

@@ -1,0 +1,32 @@
+/* Chat & Agents › Lists. Solid content cards; no animation of its own, so reduced motion needs no override. */
+.lists { display: grid; gap: var(--space-4); align-content: start; color: var(--label); }
+.lists__header { display: grid; gap: var(--space-1); }
+.lists__title { margin: 0; font: var(--type-title1); }
+.lists__subtitle, .lists__description, .lists__empty { margin: 0; font: var(--type-callout); color: var(--label-secondary); }
+.lists__section-title:focus { outline: none; }
+.lists__section-title:focus-visible { outline: var(--space-0_5) solid var(--focus-ring); outline-offset: var(--space-0_5); border-radius: var(--radius-sm); }
+
+.lists__row .ui-list-row__title, .lists__row .ui-list-row__subtitle { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+
+.lists__editor { display: block; padding: var(--space-3); }
+.lists__add { padding-top: var(--space-1); }
+.lists__form { display: grid; gap: var(--space-3); min-width: 0; }
+.lists__form-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--space-3); align-items: start; }
+.lists__form-row--end { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; }
+.lists__form-row--end > .ui-button { margin-top: calc(var(--type-headline-line, 1.3em) + var(--space-2)); }
+.lists__form-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+
+.lists__notice { margin: 0; font: var(--type-callout); color: var(--tone-warning-text); }
+.lists__error { margin: 0; font: var(--type-callout); color: var(--tone-danger-text); }
+.lists__link { padding: 0; border: 0; background: none; color: var(--tone-accent-text); font: inherit; text-decoration: underline; cursor: pointer; }
+.lists__link:focus-visible { outline: var(--space-0_5) solid var(--focus-ring); outline-offset: var(--space-0_5); border-radius: var(--radius-sm); }
+
+.lists__banner, .lists__unavailable { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.lists__banner { padding: var(--space-3) var(--pad-card); border: var(--hairline); border-radius: var(--radius-md); background: var(--bg-content); box-shadow: var(--elev-1); }
+.lists__banner p, .lists__unavailable p { margin: 0; font: var(--type-callout); color: var(--tone-danger-text); }
+
+@media (max-width: 640px) {
+  .lists__form-row, .lists__form-row--end { grid-template-columns: minmax(0, 1fr); }
+  .lists__form-row--end > .ui-button { margin-top: 0; justify-self: end; }
+  .lists__row { flex-wrap: wrap; }
+}

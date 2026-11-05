@@ -34,5 +34,5 @@ test("(i) Home status strip: three text segments under the subline, deep links, 
   expect(anim).toBe("none");
   await expect(home.getByText("Gateway online")).toHaveCount(0);
   await buttons.nth(2).click();
-  await expect(activeField(page, "Fitness").getByRole("heading", { level: 1 })).toHaveText("Fitness");
+  await expect(activeField(page, "Mind–Body").getByRole("heading", { level: 1 })).toHaveText("Fitness");
 });

@@ -1,13 +1,13 @@
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, openView, test } from "./fixtures/tauri-mock";
+import { responses } from "./fixtures/snapshot";
 
 const SECTIONS: { label: string; h1: RegExp }[] = [
   { label: "Today", h1: /^Command Center$/ },
   { label: "Chat & Agents", h1: /^Amara$/ },
-  { label: "Fitness", h1: /^Fitness$/ },
-  { label: "Neuro", h1: /^Neuro$/ },
   { label: "Mind–Body", h1: /^Mind–Body$/ },
   { label: "Business", h1: /^Business$/ },
   { label: "Settings", h1: /^Settings$/ },
+  { label: "Smart home", h1: /^Smart home$/ },
 ];
 
 test.describe("sections", () => {
@@ -25,9 +25,12 @@ test.describe("sub-views and anchors", () => {
   type Field = ReturnType<typeof activeField>;
   const SUBVIEWS: [string, string, (f: Field) => Promise<void>][] = [
     ["Chat & Agents", "Activity", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Activity")],
+    ["Chat & Agents", "Lists", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Lists")],
     ["Chat & Agents", "Crews", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Crews")],
     ["Chat & Agents", "Voice", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Voice"); await expect(f.getByRole("list", { name: "Recent turns" })).toBeVisible(); }],
-    ["Neuro", "History", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("History"); await expect(f.getByRole("list", { name: "History" })).toBeVisible(); }],
+    ["Mind–Body", "Fitness", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Fitness")],
+    ["Mind–Body", "Neuro", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro")],
+    ["Mind–Body", "Neuro history", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("History"); await expect(f.getByRole("list", { name: "History" })).toBeVisible(); }],
     ["Business", "Revenue", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Business")],
   ];
   for (const [host, view, check] of SUBVIEWS) {
@@ -35,8 +38,8 @@ test.describe("sub-views and anchors", () => {
       await openApp(page, { theme });
       await navButton(page, host).click();
       const field = activeField(page, host);
-      await field.getByRole("radio", { name: view }).click();
-      await expect(field.getByRole("radio", { name: view })).toHaveAttribute("aria-checked", "true");
+      await field.getByRole("radio", { name: view, exact: true }).click();
+      await expect(field.getByRole("radio", { name: view, exact: true })).toHaveAttribute("aria-checked", "true");
       await check(field);
       expect(consoleErrors).toEqual([]);
     });
@@ -58,6 +61,50 @@ test.describe("sub-views and anchors", () => {
       expect(consoleErrors).toEqual([]);
     });
   }
+});
+
+test.describe("Mind–Body host: nothing folded in is out of reach", () => {
+  const selected = (page: import("@playwright/test").Page, name: string) => activeField(page, "Mind–Body").getByRole("radio", { name, exact: true });
+
+  test("the sidebar has six items and Overview is the default", async ({ page, theme }) => {
+    await openApp(page, { theme });
+    await navButton(page, "Mind–Body").click();
+    await expect(page.locator("nav.system-constellation > .nav-group button")).toHaveCount(6);
+    await expect(page.locator("nav.system-constellation").getByRole("button", { name: /^(Fitness|Neuro)/ })).toHaveCount(0);
+    await expect(activeField(page, "Mind–Body").getByRole("radio")).toHaveText(["Overview", "Fitness", "Neuro", "Neuro history"]);
+    await expect(selected(page, "Overview")).toHaveAttribute("aria-checked", "true");
+    await expect(activeField(page, "Mind–Body").getByRole("heading", { level: 1 })).toHaveText("Mind–Body");
+  });
+
+  test("Today's links land on the right sub-view", async ({ page, theme, consoleErrors }) => {
+    await openApp(page, { theme });
+    for (const [link, view, h1] of [["Open Fitness", "Fitness", "Fitness"], ["Open insights in Fitness", "Fitness", "Fitness"], ["Open Neuro", "Neuro", "Neuro"]] as const) {
+      await page.keyboard.press("Meta+1"); // back to the lens: Today is a landing button
+      await navButton(page, "Today").click();
+      await activeField(page, "Today").getByRole("button", { name: link, exact: true }).click();
+      await expect(selected(page, view)).toHaveAttribute("aria-checked", "true");
+      await expect(activeField(page, "Mind–Body").getByRole("heading", { level: 1 })).toHaveText(h1);
+    }
+    expect(consoleErrors).toEqual([]);
+  });
+
+  for (const [query, view] of [["Fitness", "Fitness"], ["Mind–Body › Neuro", "Neuro"], ["Neuro history", "Neuro history"]] as const) {
+    test(`⌘K "${query}" opens ${view}`, async ({ page, theme }) => {
+      await openApp(page, { theme });
+      await page.keyboard.press("Meta+k");
+      await page.getByRole("combobox", { name: "Search or ask Amara" }).fill(query);
+      await page.keyboard.press("Enter");
+      await expect(selected(page, view)).toHaveAttribute("aria-checked", "true");
+    });
+  }
+
+  test("Start session on an empty history opens Neuro", async ({ page, theme }) => {
+    await openApp(page, { theme, data: { ...responses(), list_sessions: [] } });
+    const field = await openView(page, "Neuro history");
+    await field.getByRole("button", { name: "Start session" }).click();
+    await expect(selected(page, "Neuro")).toHaveAttribute("aria-checked", "true");
+    await expect(field.getByRole("heading", { level: 1 })).toHaveText("Neuro");
+  });
 });
 
 test("(c) ⌘1–6 open the six sections in order", async ({ page, theme, consoleErrors }) => {
@@ -110,25 +157,23 @@ test("(d) one content edge: h1s, Chat's first column and the sub-view bar line u
   await page.setViewportSize({ width: 1440, height: 900 });
   await openApp(page, { theme });
   const left = async (label: string) => {
-    await navButton(page, label).click();
-    const field = activeField(page, label);
+    const field = await openView(page, label);
     const target = label === "Chat & Agents" ? field.locator(".chat-screen__agents") : field.getByRole("heading", { level: 1 }).first();
     await target.waitFor();
     return (await target.boundingBox())!.x;
   };
   const home = await left("Today");
-  for (const label of ["Fitness", "Neuro", "Business", "Chat & Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
+  for (const label of ["Fitness", "Neuro", "Lists", "Business", "Chat & Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
 
-  // Sub-view bars (Neuro Live/History, Chat/Activity/Crews, Business) sit on the same edge.
-  for (const label of ["Neuro", "Chat & Agents", "Business"]) {
+  // Sub-view bars (Mind–Body, Chat/Activity/Crews, Business) sit on the same edge.
+  for (const label of ["Mind–Body", "Chat & Agents", "Business"]) {
     await navButton(page, label).click();
     const bar = activeField(page, label).locator(".subview-bar [role=radiogroup]").first();
     if (await bar.count()) expect((await bar.boundingBox())!.x, `${label} bar`).toBeCloseTo(home, 0);
   }
-  await navButton(page, "Neuro").click();
-  await activeField(page, "Neuro").getByRole("radio", { name: "History" }).click();
-  await expect(activeField(page, "Neuro").getByRole("heading", { level: 1 })).toHaveText("History");
-  expect((await activeField(page, "Neuro").getByRole("heading", { level: 1 }).boundingBox())!.x).toBeCloseTo(home, 0);
+  const history = await openView(page, "Neuro history");
+  await expect(history.getByRole("heading", { level: 1 })).toHaveText("History");
+  expect((await history.getByRole("heading", { level: 1 }).boundingBox())!.x).toBeCloseTo(home, 0);
 
   // Settings: its own centred column.
   await navButton(page, "Settings").click();

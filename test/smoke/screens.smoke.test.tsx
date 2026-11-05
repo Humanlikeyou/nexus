@@ -64,7 +64,7 @@ describe("lazy screens", () => {
   // Pre-warm every screen chunk so lazy() resolves in microtasks, not on module-transform
   // time; makes resolution independent of machine load (fake timers throughout).
   beforeAll(async () => {
-    await Promise.all(["Health", "Neuro", "Sessions", "Devices", "Settings", "Business", "Revenue", "Activity", "Crews", "MindBody", "SmartHome"]
+    await Promise.all(["Health", "Neuro", "Sessions", "Devices", "Settings", "Business", "Revenue", "Activity", "Lists", "Crews", "MindBody", "SmartHome"]
       .map((n) => import(`../../src-console/screens/${n}Screen.tsx`)));
   });
   const flush = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(0); }); };
@@ -94,7 +94,7 @@ describe("lazy screens", () => {
     vi.useFakeTimers();
     render(<App />);
     await flush();
-    for (const [host, view] of [["Chat & Agents", "Activity"], ["Chat & Agents", "Crews"], ["Neuro", "History"], ["Business", "Revenue"]] as const) {
+    for (const [host, view] of [["Chat & Agents", "Activity"], ["Chat & Agents", "Lists"], ["Chat & Agents", "Crews"], ["Mind–Body", "Fitness"], ["Mind–Body", "Neuro"], ["Mind–Body", "Neuro history"], ["Business", "Revenue"]] as const) {
       go(host);
       await settle(host);
       fireEvent.click(within(field(host)!).getByRole("radio", { name: view }));
@@ -110,11 +110,11 @@ describe("lazy screens", () => {
     vi.useFakeTimers();
     render(<App />);
     await flush();
-    go("Fitness");
-    await settle("Fitness");
+    go("Mind–Body");
+    await settle("Mind–Body");
     go("Home");
-    go("Fitness");
-    expect(loading("Fitness")).toBeNull();
+    go("Mind–Body");
+    expect(loading("Mind–Body")).toBeNull();
   });
 });
 
@@ -123,6 +123,7 @@ describe("Neuro (Live) session timer (fake timers)", () => {
   const flush = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
   const readout = () => document.querySelector(".neuro__session-time .ui-stat__value")?.textContent;
   const click = async (name: RegExp) => { fireEvent.click(screen.getByRole("button", { name })); await flush(); await flush(); };
+  const openNeuro = async () => { go("Mind–Body"); await flush(); fireEvent.click(within(field("Mind–Body")!).getByRole("radio", { name: "Neuro" })); await flush(); };
 
   async function openLive() {
     vi.useFakeTimers();
@@ -130,7 +131,7 @@ describe("Neuro (Live) session timer (fake timers)", () => {
     h.muse.connected = true;
     render(<App />);
     await flush(); await flush();
-    go("Neuro");
+    await openNeuro();
     for (let i = 0; i < 5 && !document.querySelector(".neuro__session-time"); i++) await flush();
     expect(readout()).toBe("Ready");
   }
@@ -151,9 +152,9 @@ describe("Neuro (Live) session timer (fake timers)", () => {
     await click(/Start Session/);
     await flush(15_000);
     expect(readout()).toBe("00:15");
-    go("Fitness"); await flush(); await flush();
+    go("Business"); await flush(); await flush();
     await flush(10_000);
-    go("Neuro"); await flush();
+    await openNeuro(); await flush();
     expect(readout()).toBe("00:25");
     await flush(15_000); // includes a 15 s snapshot refresh re-render
     expect(readout()).toBe("00:40");

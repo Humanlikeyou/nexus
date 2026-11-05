@@ -1,4 +1,4 @@
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, openApp, openView, test } from "./fixtures/tauri-mock";
 
 /** (e) One scenario per screen: its command fails → it lands in unavailableSources → the screen's error state. */
 const SCENARIOS: { label: string; failing: string; check: (field: ReturnType<typeof activeField>) => Promise<void> }[] = [
@@ -13,8 +13,7 @@ const SCENARIOS: { label: string; failing: string; check: (field: ReturnType<typ
 for (const { label, failing, check } of SCENARIOS) {
   test(`(e) ${label}: ${failing} unavailable shows the error state`, async ({ page, theme, consoleErrors }) => {
     await openApp(page, { theme, failing: [failing] });
-    await navButton(page, label).click();
-    const field = activeField(page, label);
+    const field = await openView(page, label);
     await expect(field.getByRole("heading", { level: 1 })).toBeVisible();
     await check(field);
     expect(consoleErrors).toEqual([]);

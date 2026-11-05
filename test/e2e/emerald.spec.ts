@@ -28,7 +28,7 @@ test("emerald wash: vibrancy layers stay transparent, content pane gets the wash
     await page.evaluate(() => document.documentElement.removeAttribute("data-vibrancy"));
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.screenshot({ path: `${shots}/home-${theme}.png` });
-    for (const name of ["Chat", "Neuro"]) {
+    for (const name of ["Chat", "Mind"]) {
       await page.locator("nav.system-constellation").getByRole("button", { name: new RegExp(`^${name}`) }).first().click();
       await page.waitForTimeout(600);
       await page.screenshot({ path: `${shots}/${name.toLowerCase()}-${theme}.png` });
