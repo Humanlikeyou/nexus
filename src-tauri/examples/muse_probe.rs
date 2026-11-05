@@ -7,6 +7,11 @@
 //! (the published EEG + AUX preset), and disconnects. Files go to `<app data>/muse/`, private to
 //! this user: `muse-gatt-<date>.log` and `muse-capture-<time>.jsonl`.
 //! Writes to the headset only the app's own commands: a preset, `s`, `d` and `h`.
+//!
+//!   cargo run --example muse_probe -- eyes
+//!
+//! For an eyes-closed test of the AUX electrode: on p50, 30 s labelled `eyes_open`, then 30 s
+//! labelled `eyes_closed`, with a printed prompt and a terminal bell at each change.
 
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter, WriteType};
 use btleplug::platform::{Adapter, Manager, Peripheral};
@@ -22,10 +27,45 @@ use std::time::{Duration, Instant};
 
 const SCAN_LIMIT: Duration = Duration::from_secs(30);
 const CONNECT_LIMIT: Duration = Duration::from_secs(20);
-const PHASES: [(&str, Duration); 2] = [
-    ("p50", Duration::from_secs(30)),
-    ("p20", Duration::from_secs(30)),
+const PHASE_LENGTH: Duration = Duration::from_secs(30);
+
+struct Phase {
+    label: &'static str,
+    preset: &'static str,
+    prompt: &'static str,
+}
+
+const PRESET_PHASES: [Phase; 2] = [
+    Phase {
+        label: "p50",
+        preset: "p50",
+        prompt: "recording with preset p50",
+    },
+    Phase {
+        label: "p20",
+        preset: "p20",
+        prompt: "recording with preset p20",
+    },
 ];
+
+const EYES_PHASES: [Phase; 2] = [
+    Phase {
+        label: "eyes_open",
+        preset: "p50",
+        prompt: "EYES OPEN: look ahead and stay still",
+    },
+    Phase {
+        label: "eyes_closed",
+        preset: "p50",
+        prompt: "EYES CLOSED: close them now, and open them at the next bell",
+    },
+];
+
+/// The terminal bell, for prompts he can't read with his eyes closed.
+fn announce(prompt: &str) {
+    println!("\x07{prompt} ({} s)", PHASE_LENGTH.as_secs());
+    let _ = std::io::stdout().flush();
+}
 
 async fn find_muse(adapter: &Adapter) -> Result<Option<Peripheral>, String> {
     adapter
@@ -68,7 +108,7 @@ async fn send(peripheral: &Peripheral, cmd: &str) -> Result<(), String> {
     Ok(())
 }
 
-async fn capture(peripheral: &Peripheral) -> Result<(), String> {
+async fn capture(peripheral: &Peripheral, phases: &[Phase]) -> Result<(), String> {
     peripheral
         .discover_services()
         .await
@@ -111,28 +151,41 @@ async fn capture(peripheral: &Peripheral) -> Result<(), String> {
     tokio::time::sleep(Duration::from_millis(250)).await;
 
     let start = Instant::now();
-    'phases: for (preset, length) in PHASES {
-        println!("recording {}s with preset {preset}", length.as_secs());
-        let marker =
-            json!({"event": "phase", "preset": preset, "t_ms": start.elapsed().as_millis() as u64});
-        writeln!(out, "{marker}").map_err(|e| e.to_string())?;
-        for cmd in [preset, "s", "d"] {
-            send(peripheral, cmd).await?;
+    let mut running = None;
+    'phases: for phase in phases {
+        let Phase { label, preset, .. } = *phase;
+        // Streaming carries on across phases that share a preset, so nothing is lost between them.
+        if running != Some(preset) {
+            if running.is_some() {
+                send(peripheral, "h").await?;
+            }
+            for cmd in [preset, "s", "d"] {
+                send(peripheral, cmd).await?;
+            }
+            running = Some(preset);
         }
+        announce(phase.prompt);
+        let marker = json!({
+            "event": "phase",
+            "label": label,
+            "preset": preset,
+            "t_ms": start.elapsed().as_millis() as u64,
+        });
+        writeln!(out, "{marker}").map_err(|e| e.to_string())?;
         let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
-        let deadline = tokio::time::Instant::now() + length;
+        let deadline = tokio::time::Instant::now() + PHASE_LENGTH;
         loop {
             tokio::select! {
                 _ = tokio::time::sleep_until(deadline) => break,
                 _ = tokio::signal::ctrl_c() => {
                     println!("stopping early");
-                    print_counts(preset, &counts);
+                    print_counts(label, &counts);
                     break 'phases;
                 }
                 n = notifications.next() => {
                     let Some(n) = n else {
                         println!("the headset stopped sending");
-                        print_counts(preset, &counts);
+                        print_counts(label, &counts);
                         break 'phases;
                     };
                     let stream = characteristic_name(&n.uuid);
@@ -147,19 +200,20 @@ async fn capture(peripheral: &Peripheral) -> Result<(), String> {
                 }
             }
         }
-        print_counts(preset, &counts);
-        send(peripheral, "h").await?;
+        print_counts(label, &counts);
     }
+    println!("\x07done");
+    let halted = send(peripheral, "h").await;
     out.flush().map_err(|e| e.to_string())?;
     println!("capture saved to {}", path.display());
-    Ok(())
+    halted
 }
 
-fn print_counts(preset: &str, counts: &BTreeMap<&str, u64>) {
-    println!("packets with {preset}: {counts:?}");
+fn print_counts(label: &str, counts: &BTreeMap<&str, u64>) {
+    println!("packets in {label}: {counts:?}");
 }
 
-async fn run() -> Result<bool, String> {
+async fn run(phases: &[Phase]) -> Result<bool, String> {
     let manager = Manager::new().await.map_err(|e| e.to_string())?;
     let adapter = manager
         .adapters()
@@ -178,7 +232,7 @@ async fn run() -> Result<bool, String> {
         .await
         .map_err(|_| "connect timed out".to_string())?
         .map_err(|e| format!("connect failed: {e}"))?;
-    let captured = capture(&peripheral).await;
+    let captured = capture(&peripheral, phases).await;
     let _ = tokio::time::timeout(Duration::from_secs(5), peripheral.disconnect()).await;
     println!("disconnected");
     captured.map(|()| true)
@@ -186,7 +240,15 @@ async fn run() -> Result<bool, String> {
 
 #[tokio::main]
 async fn main() {
-    let code = match run().await {
+    let phases: &[Phase] = match std::env::args().nth(1).as_deref() {
+        None => &PRESET_PHASES,
+        Some("eyes") => &EYES_PHASES,
+        Some(other) => {
+            eprintln!("unknown mode {other:?}; the only mode is `eyes`");
+            std::process::exit(64);
+        }
+    };
+    let code = match run(phases).await {
         Ok(true) => 0,
         Ok(false) => 2,
         Err(e) => {

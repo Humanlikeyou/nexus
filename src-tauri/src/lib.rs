@@ -158,12 +158,17 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::ThemeChanged(_) = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::ThemeChanged(_) => {
                 if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
                     dock_icon::sync(&webview);
                 }
             }
+            // The setting is changed in System Settings, so a change shows on coming back.
+            tauri::WindowEvent::Focused(true) => {
+                system::sync_reduce_transparency(window.app_handle());
+            }
+            _ => {}
         })
         // Unregistered 2026-10-29: no live frontend caller (docs/terrance-merge-inventory.md).
         // The fns stay; re-add the `module::fn` line to restore one:
@@ -175,6 +180,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // System
             system::get_system_info,
+            system::get_reduce_transparency,
             system::health_check,
             system::check_docker_service,
             system::restart_docker_service,
