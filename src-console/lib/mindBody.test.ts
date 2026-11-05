@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NoopMetricPoint, RecordedSession } from "../types";
-import { MIN_TREND_SESSIONS, baseline, matchDriver, mockSeriesPayload, mockSnapshot, pearson, readiness, trendText } from "./mindBody";
+import { MIN_TREND_SESSIONS, baseline, matchDriver, mockSeriesPayload, mockSnapshot, pearson, readiness, readingDay, shortDay, trendText, upToDay } from "./mindBody";
 import { NoopShapeError, parseBodyContext, parseMetricSeries } from "./noop";
 
 const series = (base: number[], today: number | null): NoopMetricPoint[] =>
@@ -60,6 +60,27 @@ describe("focus drivers (15-session threshold)", () => {
     const out = matchDriver([s("2026-10-08T09:00:00+09:00", 99), s("2026-10-09T09:00:00+09:00"), s("2020-01-01T09:00:00+09:00")], "hrv", series);
     expect(out).toHaveLength(2);
     expect(out[0].x).toBe(99);
+  });
+});
+
+describe("readingDay", () => {
+  const pts = (...values: Array<number | null>) => values.map((value, i) => ({ day: `2026-11-0${i + 1}`, value }));
+  it("is the last row when it has a value", () => {
+    expect(readingDay({ hrv: pts(1, 2, 3), recovery: pts(1, 2, null), sleep: [] })).toBe("2026-11-03");
+  });
+  it("skips an empty today, up to two days", () => {
+    expect(readingDay({ hrv: pts(1, null), recovery: pts(1, null), sleep: pts(1, null) })).toBe("2026-11-01");
+    expect(readingDay({ hrv: pts(1, null, null), recovery: [], sleep: [] })).toBe("2026-11-01");
+  });
+  it("is null when the newest value is too old or there are none", () => {
+    expect(readingDay({ hrv: pts(1, null, null, null), recovery: [], sleep: [] })).toBeNull();
+    expect(readingDay({ hrv: pts(null), recovery: [], sleep: [] })).toBeNull();
+    expect(readingDay({ hrv: [], recovery: [], sleep: [] })).toBeNull();
+  });
+  it("trims later days, and formats the day in UTC", () => {
+    expect(upToDay(pts(1, 2, 3), "2026-11-02")).toHaveLength(2);
+    expect(upToDay(pts(1, 2, 3), null)).toHaveLength(3);
+    expect(shortDay("2026-11-04")).toBe("Nov 4");
   });
 });
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { READINESS_COPY, matchDriver, readiness, tokyoDay, trendText, type DriverKey, type DriverPoint } from "../lib/mindBody";
+import { READINESS_COPY, matchDriver, readiness, readingDay, shortDay, tokyoDay, trendText, upToDay, type DriverKey, type DriverPoint } from "../lib/mindBody";
 import { NoopShapeError, isSnapshot, noopQuery, parseBodyContext, parseMetricSeries, snapshotDays } from "../lib/noop";
 import type { NoopDayRow, NoopMetricPoint, NoopMetricSeries, NoopSnapshotPayload, RecordedSession } from "../types";
 import { Badge, Button, SegmentedControl } from "../ui";
@@ -164,7 +164,11 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
   useEffect(() => { let live = true; void load().then((s) => { if (live) setState(s); }, () => { if (live) setState({ status: "inactive", steps: null }); }); return () => { live = false; }; }, [load]);
 
   const series = state.status === "ready" ? state.series : null;
-  const ready = useMemo(() => series ? readiness({ hrv: series.hrv.points, recovery: series.recovery.points, sleep: series.sleep.points }) : null, [series]);
+  // Today's row is empty until the night syncs: read the latest day that has values, and say which.
+  const asOf = useMemo(() => series ? readingDay({ hrv: series.hrv.points, recovery: series.recovery.points, sleep: series.sleep.points }) : null, [series]);
+  const ready = useMemo(() => series ? readiness({ hrv: upToDay(series.hrv.points, asOf), recovery: upToDay(series.recovery.points, asOf), sleep: upToDay(series.sleep.points, asOf) }) : null, [series, asOf]);
+  const recovery = last(upToDay(series?.recovery.points ?? [], asOf));
+  const earlier = asOf !== null && (series?.recovery.points ?? []).some((p) => p.day > asOf);
   const meta = DRIVERS.find((d) => d.key === driver)!;
   const drivers = state.status === "ready" ? state.drivers : null;
   const points = useMemo(() => drivers ? matchDriver(sessions, driver, drivers[driver]) : [], [drivers, sessions, driver]);
@@ -183,10 +187,10 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
         <div className="mind-body__grid-layout">
           <section className="mind-body__panel" aria-labelledby="mb-readiness">
             <h2 id="mb-readiness" className="mind-body__title">Readiness</h2>
-            <p className="mind-body__meta">Compared with your own 28-day baseline</p>
+            <p className="mind-body__meta">Compared with your own 28-day baseline{earlier && ` · latest reading ${shortDay(asOf)}`}</p>
             <div className="mind-body__readiness">
               <Badge tone={copy.tone} aria-label={`Readiness: ${copy.label}`}>{copy.label}</Badge>
-              <span className="mind-body__score" aria-label={`Recovery ${num(last(series?.recovery.points ?? []))}%`}>{num(last(series?.recovery.points ?? []))}</span>
+              <span className="mind-body__score" aria-label={`Recovery ${num(recovery)}%`}>{num(recovery)}</span>
             </div>
             <p className="mind-body__help">{copy.help}</p>
             <h3 className="mind-body__sub">HRV, last 14 days <span className="mind-body__unit">ms</span></h3>
@@ -194,8 +198,8 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
             <h3 className="mind-body__sub">Training load <span className="mind-body__unit">strain · 7-day vs 28-day</span></h3>
             {loading ? <ChartBox state="loading" label="Strain" /> : <StrainBars points={series?.strain.points ?? []} />}
             <dl className="mind-body__stats">
-              <div><dt>Resting HR</dt><dd>{num(last(series?.resting_hr.points ?? []))} bpm</dd></div>
-              <div><dt>HRV</dt><dd>{num(last(series?.hrv.points ?? []))} ms</dd></div>
+              <div><dt>Resting HR</dt><dd>{num(last(upToDay(series?.resting_hr.points ?? [], asOf)))} bpm</dd></div>
+              <div><dt>HRV</dt><dd>{num(last(upToDay(series?.hrv.points ?? [], asOf)))} ms</dd></div>
               <div><dt>Strain, 7-day average</dt><dd>{num(avgLast(series?.strain.points ?? [], 7), 1)}</dd></div>
             </dl>
           </section>

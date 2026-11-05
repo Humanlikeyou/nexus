@@ -49,6 +49,27 @@ function split(points: NoopMetricPoint[]) {
   return { today, base: baseline(sorted.slice(-1 - BASELINE_DAYS, -1).map((p) => p.value)) };
 }
 
+/** A missing reading older than this stays "No data" (same limit as Home's stale rule). */
+export const MAX_READING_AGE_DAYS = 2;
+
+/**
+ * Newest day with an HRV, recovery or sleep value. NOOP adds today's row before the night has synced,
+ * so its metrics stay null for hours; that row is not a reading. Null past MAX_READING_AGE_DAYS.
+ */
+export function readingDay({ hrv, recovery, sleep }: ReadinessInput): string | null {
+  const points = [...hrv, ...recovery, ...sleep];
+  const newest = (ps: NoopMetricPoint[]) => ps.map((p) => p.day).sort().pop();
+  const row = newest(points), day = newest(points.filter((p) => finite(p.value)));
+  if (!row || !day) return null;
+  return Date.parse(row) - Date.parse(day) <= MAX_READING_AGE_DAYS * 86_400_000 ? day : null;
+}
+
+/** The points up to and including `day`; all of them when there is no reading day. */
+export const upToDay = (points: NoopMetricPoint[], day: string | null) => (day ? points.filter((p) => p.day <= day) : points);
+
+/** "2026-11-04" → "Nov 4". */
+export const shortDay = (day: string) => new Date(day).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
 export function readiness(input: ReadinessInput): Readiness {
   const h = split(input.hrv), r = split(input.recovery), s = split(input.sleep);
   const hrvZ = h.base && finite(h.today) ? (h.today - h.base.mean) / Math.max(h.base.sd, 1) : null;

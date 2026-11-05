@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { mockSeriesPayload, mockSnapshot } from "../lib/mindBody";
+import { mockDayRow, mockSeriesPayload, mockSnapshot } from "../lib/mindBody";
 import { DISCLAIMER, INVALID_PATH_STEPS, MindBodyField, SANDBOX_STEPS, loadMindBody, seriesFromSnapshot, type MindBodyState } from "./MindBodyScreen";
 
 describe("Mind-Body", () => {
@@ -28,6 +28,22 @@ describe("Mind-Body", () => {
     expect(screen.getByText("Collecting data: 0/15 sessions")).toBeInTheDocument();
     expect(screen.getByText("No sessions yet.")).toBeInTheDocument();
     expect(DISCLAIMER).toBe("Personal estimates, not medical data.");
+  });
+  it("reads the latest synced day while today's row is still empty", async () => {
+    const snap = mockSnapshot();
+    const empty = mockDayRow(snap.logicalToday, { totalSleepMin: null, restingHr: null, avgHrv: null, recovery: null, strain: null });
+    const { latestNight: _night, ...rest } = snap;
+    const series = seriesFromSnapshot({ ...rest, today: empty });
+    render(<MindBodyField sessions={[]} load={() => Promise.resolve<MindBodyState>({ status: "ready", series, drivers: { sleep: [], hrv: [], recovery: [] } })} />);
+    expect(await screen.findByLabelText(/^Readiness: (High|Moderate|Low)$/)).toBeInTheDocument();
+    expect(screen.getByText(/latest reading Nov 3$/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Recovery \d+%$/)).toBeInTheDocument();
+    expect(screen.getByText("HRV", { selector: "dt" }).nextSibling).toHaveTextContent(/^\d+ ms$/);
+  });
+  it("names no earlier day when today has values", async () => {
+    render(<MindBodyField sessions={[]} load={() => Promise.resolve<MindBodyState>({ status: "ready", series: seriesFromSnapshot(mockSnapshot()), drivers: { sleep: [], hrv: [], recovery: [] } })} />);
+    await screen.findByRole("heading", { name: "Readiness" });
+    expect(screen.queryByText(/latest reading/)).not.toBeInTheDocument();
   });
 });
 
