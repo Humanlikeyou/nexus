@@ -78,14 +78,16 @@ test("Lens: 2s without levels decays the meter but keeps speaking; ~12s without 
 test("Lens: idle with model_loading shows a loading note; bridge starts with the Voice panel and stops after", async ({ page, theme }) => {
   const { field, lens } = await openVoice(page, theme);
   const calls = () => page.evaluate(() => ((window as unknown as { __E2E_UNMOCKED: string[] }).__E2E_UNMOCKED).filter((c) => c.startsWith("voice_bridge_")));
-  await expect.poll(calls).toEqual(["voice_bridge_start"]);
+  // The landing lens runs the bridge from launch; leaving it stops it, then the Voice panel starts it.
+  const opened = ["voice_bridge_start", "voice_bridge_stop", "voice_bridge_start"];
+  await expect.poll(calls).toEqual(opened);
   await state(page, "idle", { reason: "model_loading" });
   await expect(lens).toHaveAttribute("data-state", "idle");
   await expect(field.getByText("Loading voice model…")).toBeVisible();
   await state(page, "listening");
   await expect(field.getByText("Loading voice model…")).toHaveCount(0);
   await navButton(page, "Settings").click();
-  await expect.poll(calls).toEqual(["voice_bridge_start", "voice_bridge_stop"]);
+  await expect.poll(calls).toEqual([...opened, "voice_bridge_stop"]);
 });
 
 test("Lens: reduced motion runs no animations and keeps scale at 1", async ({ page, theme }) => {

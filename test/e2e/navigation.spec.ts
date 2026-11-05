@@ -1,7 +1,7 @@
 import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
 
 const SECTIONS: { label: string; h1: RegExp }[] = [
-  { label: "Home", h1: /^Command Center$/ },
+  { label: "Today", h1: /^Command Center$/ },
   { label: "Chat & Agents", h1: /^Amara$/ },
   { label: "Fitness", h1: /^Fitness$/ },
   { label: "Neuro", h1: /^Neuro$/ },
@@ -45,7 +45,7 @@ test.describe("sub-views and anchors", () => {
   const ANCHORS: [string, string, string][] = [
     ["Settings", "Settings › Devices", "#devices"],
     ["Settings", "About Amara OS", "#about"],
-    ["Home", "Home › Goals", "#goals"],
+    ["Today", "Home › Goals", "#goals"],
   ];
   for (const [host, command, anchor] of ANCHORS) {
     test(`(b) ${command} scrolls ${anchor} into view`, async ({ page, theme, consoleErrors }) => {
@@ -64,7 +64,8 @@ test("(c) ⌘1–6 open the six sections in order", async ({ page, theme, consol
   await openApp(page, { theme });
   for (const [i, { label, h1 }] of SECTIONS.entries()) {
     await page.keyboard.press(`Meta+${i + 1}`);
-    await expect(activeField(page, label).getByRole("heading", { level: 1 })).toHaveText(h1);
+    // ⌘1 is Home, the lens landing page; Today is its sub-view and has no shortcut.
+    await expect(activeField(page, i === 0 ? "Home" : label).getByRole("heading", { level: 1 })).toHaveText(h1);
   }
   expect(consoleErrors).toEqual([]);
 });
@@ -115,7 +116,7 @@ test("(d) one content edge: h1s, Chat's first column and the sub-view bar line u
     await target.waitFor();
     return (await target.boundingBox())!.x;
   };
-  const home = await left("Home");
+  const home = await left("Today");
   for (const label of ["Fitness", "Neuro", "Business", "Chat & Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
 
   // Sub-view bars (Neuro Live/History, Chat/Activity/Crews, Business) sit on the same edge.

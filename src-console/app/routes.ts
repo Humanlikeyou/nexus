@@ -52,6 +52,15 @@ export const ROUTE_ALIASES: Partial<Record<ModuleId, { id: ModuleId; view: strin
 
 export type Route = { id: ModuleId; view: string };
 
+/** Home's main view is the lens landing page; the dashboard moved one level down to this sub-view.
+ *  No SegmentedControl: Home is left through the landing buttons and returned to through the sidebar. */
+export const TODAY_ROUTE: Route = { id: "terrance", view: "today" };
+export const TODAY_LABEL = "Today";
+/** The landing page's buttons, in sidebar order: Today in Home's slot, then every other section. */
+export const LANDING_ENTRIES: Array<SystemEntry & { shortcut: number | null }> = SYSTEMS.map((system, index) => (
+  system.id === "terrance" ? { ...system, label: TODAY_LABEL, shortcut: null } : { ...system, shortcut: index + 1 }
+));
+
 export function resolveRoute(id: ModuleId, view = "main"): Route {
   const alias = ROUTE_ALIASES[id];
   if (alias) return { id: alias.id, view: alias.view };
@@ -61,5 +70,6 @@ export function resolveRoute(id: ModuleId, view = "main"): Route {
 
 /** The screen that actually renders for a route (the host, or a folded legacy screen). */
 export function screenFor(route: Route): ModuleId {
+  if (route.id === "terrance") return route.view === "main" ? "landing" : "terrance";
   return HOST_VIEWS[route.id]?.find((entry) => entry.view === route.view)?.screen ?? route.id;
 }

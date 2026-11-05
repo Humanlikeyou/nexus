@@ -86,6 +86,13 @@ export async function openApp(page: Page, options: MockOptions): Promise<void> {
   await expect(page.getByRole("navigation", { name: "Amara OS navigation" })).toBeVisible();
 }
 
+/** Open the app, then its dashboard: launch lands on the lens, and shell chrome starts at Today. */
+export async function openToday(page: Page, options: MockOptions): Promise<void> {
+  await openApp(page, options);
+  await navButton(page, "Today").click();
+  await expect(activeField(page, "Today").locator(".home__summary")).toBeVisible();
+}
+
 /** Expected noise: loadSystemSnapshot() warns (not errors) for failing reads. */
 const IGNORED_CONSOLE = [/favicon/i, /404 \(Not Found\)/];
 

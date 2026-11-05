@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { MessageCircle } from "lucide-react";
-import { HOST_VIEWS, SYSTEMS, type Route } from "../app/routes";
+import { HOST_VIEWS, SYSTEMS, TODAY_LABEL, TODAY_ROUTE, type Route } from "../app/routes";
 import { Dialog } from "../ui";
 import "./CommandPalette.css";
 
@@ -14,6 +14,7 @@ export function paletteCommands(extra: PaletteCommand[] = []): PaletteCommand[] 
     for (const v of HOST_VIEWS[s.id] ?? []) if (v.view !== "main") subs.push({ id: `${s.id}:${v.view}`, label: `${s.label} › ${v.label}`, route: { id: s.id, view: v.view } });
   }
   subs.push(
+    { id: "terrance:today", label: `Home › ${TODAY_LABEL}`, route: TODAY_ROUTE },
     { id: "terrance:goals", label: "Home › Goals", route: { id: "terrance", view: "goals" } },
     { id: "settings:devices", label: "Settings › Devices", route: { id: "settings", view: "devices" } },
     { id: "settings:about", label: "About Amara OS", route: { id: "settings", view: "about" } },

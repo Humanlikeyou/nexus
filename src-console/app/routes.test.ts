@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HOST_VIEWS, ROUTE_ALIASES, SYSTEM_GROUPS, SYSTEMS, resolveRoute, screenFor } from "./routes";
+import { HOST_VIEWS, LANDING_ENTRIES, ROUTE_ALIASES, SYSTEM_GROUPS, SYSTEMS, TODAY_ROUTE, resolveRoute, screenFor } from "./routes";
 
 describe("navigation (8 items, 4 groups)", () => {
   it("has the spec order and grouping", () => {
@@ -31,7 +31,20 @@ describe("navigation (8 items, 4 groups)", () => {
   it("keeps host ids and their main views", () => {
     for (const s of SYSTEMS) {
       expect(resolveRoute(s.id)).toEqual({ id: s.id, view: "main" });
-      expect(screenFor(resolveRoute(s.id))).toBe(s.id);
+      expect(screenFor(resolveRoute(s.id))).toBe(s.id === "terrance" ? "landing" : s.id);
     }
+  });
+
+  it("Home is the landing page; the dashboard stays reachable as Today and through #goals", () => {
+    expect(screenFor({ id: "terrance", view: "main" })).toBe("landing");
+    expect(screenFor(TODAY_ROUTE)).toBe("terrance");
+    expect(screenFor(resolveRoute("trajectory"))).toBe("terrance");
+    expect(resolveRoute("landing")).toEqual({ id: "terrance", view: "main" });
+  });
+
+  it("landing buttons are Today plus every other section, with the sidebar's shortcuts", () => {
+    expect(LANDING_ENTRIES.map((e) => e.label)).toEqual(["Today", "Chat & Agents", "Fitness", "Neuro", "Mind–Body", "Business", "Settings", "Smart home"]);
+    expect(LANDING_ENTRIES.map((e) => e.shortcut)).toEqual([null, 2, 3, 4, 5, 6, 7, 8]);
+    expect(LANDING_ENTRIES.map((e) => e.icon)).toEqual(SYSTEMS.map((s) => s.icon));
   });
 });

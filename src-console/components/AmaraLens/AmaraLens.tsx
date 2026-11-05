@@ -4,7 +4,8 @@ import { type AmaraVoiceState, useAmaraVoice, useAmaraVoiceBridge } from "../../
 import { Button } from "../../ui";
 import "./AmaraLens.css";
 
-export type AmaraLensSize = 28 | 44 | 160;
+/** 320 is the landing page hero: 320px at most, CSS shrinks it to fit its container (AmaraLens.css). */
+export type AmaraLensSize = 28 | 44 | 160 | 320;
 
 export const LENS_LABEL: Record<AmaraVoiceState, string> = {
   idle: "Amara is idle",
@@ -27,7 +28,9 @@ export function stepEnvelope(env: number, target: number, dtMs: number): number 
 }
 export const lensScale = (env: number) => 1 + MAX_SCALE_GAIN * Math.min(1, Math.max(0, env));
 
-const reducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** Either switch: the OS setting or Settings › Appearance › Reduce motion. */
+const reducedMotion = () => document.documentElement.dataset.reduceMotion === "true"
+  || (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
 export interface AmaraLensProps {
   state: AmaraVoiceState;
@@ -58,8 +61,13 @@ export function AmaraLens({ state, size, level, showLabel = false, decorative = 
   useEffect(() => {
     const el = root.current;
     if (!el) return;
+    // A listening lens runs this loop indefinitely; unchanged values must not touch the style.
+    let written = "";
     const write = (env: number) => {
-      el.style.setProperty("--lens-level", env.toFixed(3));
+      const value = env.toFixed(3);
+      if (value === written) return;
+      written = value;
+      el.style.setProperty("--lens-level", value);
       el.style.setProperty("--lens-scale", lensScale(env).toFixed(4));
     };
     if (reducedMotion()) { write(0); return; }
@@ -109,15 +117,18 @@ export function AmaraLens({ state, size, level, showLabel = false, decorative = 
 
 export const ANNOUNCE_DEBOUNCE_MS = 500;
 
-/** The one shared live region: announces state transitions only (debounced 500ms), never levels. */
-export function AmaraVoiceAnnouncer() {
+/**
+ * The one shared live region: announces state transitions only (debounced 500ms), never levels.
+ * `message` replaces the copy derived from the feed, for a screen that resolves its own state.
+ */
+export function AmaraVoiceAnnouncer({ message }: { message?: string }) {
   const { state } = useAmaraVoice();
   const [text, setText] = useState("");
   const first = useRef(true);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
-    const id = window.setTimeout(() => setText(state === "error" ? LENS_ERROR_COPY : LENS_LABEL[state]), ANNOUNCE_DEBOUNCE_MS);
+    const id = window.setTimeout(() => setText(message ?? (state === "error" ? LENS_ERROR_COPY : LENS_LABEL[state])), ANNOUNCE_DEBOUNCE_MS);
     return () => window.clearTimeout(id);
-  }, [state]);
+  }, [state, message]);
   return <div className="ui-visually-hidden" role="status" aria-live="polite" data-testid="amara-voice-announcer">{text}</div>;
 }

@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { HOST_VIEWS, SYSTEMS, resolveRoute, screenFor, type Route } from "./app/routes";
+import { HOST_VIEWS, SYSTEMS, TODAY_LABEL, TODAY_ROUTE, resolveRoute, screenFor, type Route } from "./app/routes";
 import { SegmentedControl } from "./ui";
 import { useConversation } from "./app/useConversation";
 import { useSnapshot } from "./app/useSnapshot";
@@ -17,6 +17,7 @@ import { useIdleAutoSave } from "./hooks/useIdleAutoSave";
 import { useSchedulerLifecycle } from "./hooks/useSchedulerLifecycle";
 import { ChatField } from "./screens/ChatScreen";
 import { AmaraVoiceAnnouncer } from "./components/AmaraLens/AmaraLens";
+import { LandingField } from "./screens/LandingScreen";
 import { TerranceField } from "./screens/TerranceScreen";
 import { ContextInspector } from "./shell/ContextInspector";
 import { Footer } from "./shell/Footer";
@@ -121,8 +122,11 @@ export default function App() {
 
   const selected = useMemo(() => SYSTEMS.find((system) => system.id === active)!, [active]);
   const subViews = HOST_VIEWS[active];
+  const onLanding = screenId === "landing";
+  const fieldLabel = screenId === "terrance" ? TODAY_LABEL : selected.label;
   const retrySnapshot = () => { void refresh(); };
-  const view = screenId === "terrance" ? <TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} />
+  const view = onLanding ? <LandingField onSelect={setActive} onToday={() => setRoute(TODAY_ROUTE)} />
+    : screenId === "terrance" ? <TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} />
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
     : screenId === "mindbody" ? <MindBodyField sessions={data.sessions} />
     : screenId === "smarthome" ? <SmartHomeField onOpenSettings={() => setRoute({ id: "settings", view: "home-assistant" })} />
@@ -138,14 +142,14 @@ export default function App() {
 
   return (
     <CommandSurface mode={screenId}>
-      <Toolbar label={selected.label} busy={busy} onRefresh={refresh} onSearch={() => setPaletteOpen(true)} />
+      {!onLanding && <Toolbar label={fieldLabel} busy={busy} onRefresh={refresh} onSearch={() => setPaletteOpen(true)} />}
       <Splash loaded={data.refreshedAt !== INITIAL_SNAPSHOT.refreshedAt} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={setRoute}
         onAsk={(text) => { setAskDraft((d) => ({ text, n: d.n + 1 })); setRoute({ id: "chat", view: "main" }); }} />
-      <Sidebar active={active} onSelect={setActive} data={data} />
-      <section className="active-field" aria-label={`${selected.label} system`}>{subViews && <div className="subview-bar"><SegmentedControl label={`${selected.label} view`} size="small" value={route.view} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); setRoute({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
-      <Footer data={data} busy={busy} />
-      <AmaraVoiceAnnouncer />
+      {!onLanding && <Sidebar active={active} onSelect={setActive} data={data} />}
+      <section className="active-field" aria-label={`${fieldLabel} system`}>{subViews && <div className="subview-bar"><SegmentedControl label={`${selected.label} view`} size="small" value={route.view} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); setRoute({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
+      {!onLanding && <Footer data={data} busy={busy} />}
+      {!onLanding && <AmaraVoiceAnnouncer />}
       {notice && <div className="field-notice"><i />{notice}</div>}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />
     </CommandSurface>

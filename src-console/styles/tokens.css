@@ -325,5 +325,28 @@
   --lens-dur-breathe: 2.4s; --lens-dur-flicker: 180ms;
   --lens-halo-theme: .6; /* light theme halo ×0.6 */
 }
+/* Hero lens (AmaraLens size 320) and the landing page. Dark in both themes (LandingScreen.css). */
+:root {
+  --lens-bezel-top: #5a5d60; --lens-bezel-bottom: #121315; --lens-bezel-shine: rgba(255, 255, 255, .24);
+  --lens-iris-shadow: #2c1a0d; --lens-iris-edge: #0e0805;
+  --lens-rim-body: #27906f; --lens-rim-hi: #37a884; --lens-rim-deep: #0e4f3d;
+  --lens-glint: #d9d5cd; --lens-gloss: rgba(255, 255, 255, .34); --lens-gloss-fade: rgba(255, 255, 255, .05);
+  --lens-drop: rgba(0, 0, 0, .34);
+  --lens-hero-max: 320px; --lens-hero-min: 120px; --lens-dur-listen: 3.6s;
+  --landing-deep: #020c0a;
+  --landing-bg: radial-gradient(ellipse 78% 96% at 50% 44%, var(--emerald-800) 0%, var(--emerald-900) 52%, var(--landing-deep) 100%);
+  --landing-label: #f4f1ea;
+  --landing-wordmark: #c79a62;
+  --landing-icon: #d9a76c;
+  --landing-focus: var(--lens-rim);
+  --landing-button: #0d2b23;
+  --landing-button-hover: #143a2f;
+  --landing-button-active: #0a221c;
+  --landing-hairline: rgba(255, 255, 255, .13);
+  --landing-highlight: rgba(255, 255, 255, .09);
+  --landing-pad-top: 56px;
+  --landing-lens-box: 368px;
+  --landing-lens-min: 136px;
+}
 :root[data-theme="dark"] { --lens-halo-theme: 1; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --lens-halo-theme: 1; } }

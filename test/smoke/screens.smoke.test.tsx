@@ -79,7 +79,7 @@ describe("lazy screens", () => {
     render(<App />);
     await flush();
     for (const sys of SYSTEMS) {
-      go(sys.label);
+      if (sys.id !== "terrance") go(sys.label); // Home is where launch lands, with no button of its own
       await settle(sys.label);
       const f = field(sys.label);
       expect(f, `${sys.id}: active field`).not.toBeNull();
@@ -182,6 +182,8 @@ describe("isolated clock", () => {
     vi.setSystemTime(new Date("2026-10-21T10:00:00+09:00"));
     render(<App />);
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    go("Today"); // the toolbar clock lives on every screen but the landing page
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     const clockBefore = document.querySelector(".field-clock strong")?.textContent;
     const base = h.appRenders;
     // One act() per 250 ms step: a single act() batches every update into one commit
