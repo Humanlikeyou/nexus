@@ -12,6 +12,14 @@ pub struct SearchResult {
     pub snippet: String,
 }
 
+/// These commands reach the internet, so the session kill switch covers them too.
+fn outbound_gate(disabled: bool) -> Result<(), String> {
+    if disabled {
+        return Err("Web access is off for this session (NEXUS_OUTBOUND_DISABLED).".to_string());
+    }
+    Ok(())
+}
+
 /// Search the web using Brave Search API.
 /// Falls back to a simple DuckDuckGo scrape if no API key configured.
 #[tauri::command]
@@ -19,6 +27,7 @@ pub async fn web_search(
     query: String,
     max_results: Option<u32>,
 ) -> Result<Vec<SearchResult>, String> {
+    outbound_gate(super::telegram::outbound_disabled())?;
     let limit = max_results.unwrap_or(5).min(10);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -156,6 +165,7 @@ async fn duckduckgo_search(
 /// Returns at most `max_chars` characters (default 10000).
 #[tauri::command]
 pub async fn fetch_url(url: String, max_chars: Option<usize>) -> Result<String, String> {
+    outbound_gate(super::telegram::outbound_disabled())?;
     let limit = max_chars.unwrap_or(10_000);
     let mut current = parse_public_url(&url)?;
     let mut hops = 0;
@@ -436,6 +446,12 @@ fn urlencoding_decode(s: &str) -> String {
 #[cfg(test)]
 mod ssrf_tests {
     use super::*;
+
+    #[test]
+    fn the_kill_switch_stops_web_access() {
+        assert!(outbound_gate(true).is_err());
+        assert!(outbound_gate(false).is_ok());
+    }
 
     #[test]
     fn rejects_non_http_and_local_urls() {

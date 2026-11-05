@@ -48,6 +48,8 @@ const HERMES_RESTARTED: &str =
     "Hermes restarted during this turn. Some actions may already have run, so check them before sending it again.";
 const HERMES_QUEUED: &str =
     "Hermes is restarting. Your message is saved and will run once when it is back, so don't send it again.";
+const HERMES_TIMED_OUT: &str =
+    "Hermes did not finish within 30 minutes and may still be working. Some actions may already have run, so check them before sending it again.";
 const HERMES_INCOMPLETE: &str =
     "Amara's model was still loading and the turn stopped early. Some actions may already have run, so check them before sending it again.";
 
@@ -635,7 +637,11 @@ impl JsonTransport for HttpTransport {
                 ))
             })
             .collect();
-        let v = resp.json().await.unwrap_or(Value::Null);
+        let v = match resp.json().await {
+            Ok(v) => v,
+            Err(e) if e.is_timeout() => return Err("timeout".to_string()),
+            Err(_) => Value::Null,
+        };
         Ok((status, headers, v))
     }
 }
@@ -661,7 +667,7 @@ pub(crate) async fn send_turn(
         )
         .await
         .map_err(|e| match e.as_str() {
-            "timeout" => "Hermes did not complete within 30 minutes.".to_string(),
+            "timeout" => HERMES_TIMED_OUT.to_string(),
             _ => HERMES_DOWN.to_string(),
         })?;
     parse_hermes_reply(status, &headers, &v).map_err(|message| HermesError {
@@ -968,6 +974,14 @@ mod tests {
         .unwrap_err()
         .message;
         assert!(e.contains("not running"));
+        let slow = Mock::new(Err("timeout".into()));
+        let timed_out = send_turn(&slow, "b", "k", "s", &json!({}))
+            .await
+            .unwrap_err();
+        assert_eq!(timed_out.message, HERMES_TIMED_OUT);
+        // Hermes may still be running it: not a turn the UI re-sends by itself.
+        assert_eq!(timed_out.turn_ran, None);
+        assert!(!timed_out.message.starts_with("model_loading"));
         for status in [401u16, 403] {
             let m = Mock::new(Ok((
                 status,

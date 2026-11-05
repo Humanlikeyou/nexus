@@ -218,7 +218,8 @@ pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMes
 
 /// Session kill switch for every outbound send (Telegram messages and outbox
 /// delivery to the gateway): set `NEXUS_OUTBOUND_DISABLED=1` (or `true`/`yes`/`on`)
-/// when launching for QA. Reads (getUpdates, getMe, health checks) still work.
+/// when launching for QA. Reads (getUpdates, getMe, health checks) still work. A launch from
+/// Finder, the Dock or `open` inherits no shell env, so `Info.plist` sets it via `LSEnvironment`.
 pub const OUTBOUND_DISABLED_ENV: &str = "NEXUS_OUTBOUND_DISABLED";
 
 pub fn outbound_disabled() -> bool {
@@ -635,6 +636,17 @@ mod tests {
 #[cfg(test)]
 mod outbound_tests {
     use super::*;
+
+    /// A Finder launch has no shell env; the bundle must switch outbound off by itself.
+    #[test]
+    fn finder_launches_have_the_kill_switch_on() {
+        let plist: String = include_str!("../../Info.plist")
+            .split_whitespace()
+            .collect();
+        assert!(plist.contains(
+            "<key>LSEnvironment</key><dict><key>NEXUS_OUTBOUND_DISABLED</key><string>1</string></dict>"
+        ));
+    }
 
     /// Pinned semantics (no env access: the pure parser only). "on" counts as on (lead decision 2026-10-29).
     #[test]
