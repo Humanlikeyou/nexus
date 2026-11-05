@@ -13,6 +13,7 @@
 //!   last (finish_reason) SSE chunk, and in the final (`done: true`) Ollama NDJSON line.
 
 use crate::engine::{Ev, RouteMeta, State};
+use crate::gemma_tools;
 use crate::route::{parse_tier, Hints, Tier};
 use crate::translate;
 use axum::body::{Body, Bytes};
@@ -310,6 +311,11 @@ async fn chat(
     let meta_json = serde_json::to_value(&meta).unwrap_or(Value::Null);
     // The model that actually answers (after any fallback); replaces the caller's virtual name.
     let model = st.model_for(tier).to_string();
+
+    let events = match tier {
+        Tier::Claude => events,
+        _ => gemma_tools::recover_stream(events, gemma_tools::offered_names(&body)),
+    };
 
     let filler =
         (stream && tier != Tier::Fast && st.cfg.filler.enabled && !st.cfg.filler.text.is_empty())

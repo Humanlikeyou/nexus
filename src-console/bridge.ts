@@ -5,6 +5,10 @@ import type {
   CrewServiceHealth,
   CrewSnapshot,
   CrewToolInfo,
+  FollowupItem,
+  FollowupItemInput,
+  FollowupItemPatch,
+  FollowupLists,
   KbStatus,
   ActivityEntry,
   CorrectTerrenceContextItemInput,
@@ -12,6 +16,7 @@ import type {
   HermesRuntimeHealth,
   MuseDevice,
   MuseState,
+  MutedTopic,
   NexusUnavailableSource,
   NoopHealthSnapshot,
   OpenClawStatus,
@@ -337,3 +342,13 @@ export const stopVoice = () => invoke<VoiceStatus>("voice_stop");
 export const getVoiceTurns = (n = 20) => invoke<VoiceTurn[]>("voice_recent_turns", { n });
 export const listVoices = () => invoke<VoiceList>("voice_list_voices");
 export const setVoice = (name: string) => invoke<VoiceList>("voice_set_voice", { name });
+
+/** Amara's follow-up lists (commands/followups.rs). Errors are the bare kinds in lib/followups.ts. */
+export const listFollowups = () => invoke<FollowupLists>("followups_list");
+export const addFollowupItem = (input: FollowupItemInput) => invoke<FollowupItem>("followups_add_item", { ...input });
+export const updateFollowupItem = (id: number, patch: FollowupItemPatch) => invoke<FollowupItem>("followups_update_item", { id, patch });
+export const markFollowupDone = (id: number) => invoke<FollowupItem>("followups_mark_done", { id });
+export const reopenFollowupItem = (id: number) => invoke<FollowupItem>("followups_reopen_item", { id });
+export const deleteFollowupItem = (id: number) => invoke<void>("followups_delete_item", { id });
+export const addMutedTopic = (topic: string, until?: string) => invoke<MutedTopic>("followups_add_muted_topic", until ? { topic, until } : { topic });
+export const deleteMutedTopic = (topic: string) => invoke<void>("followups_delete_muted_topic", { topic });

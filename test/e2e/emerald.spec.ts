@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { activeField, expect, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, openToday, test } from "./fixtures/tauri-mock";
 
 // Emerald wash (design, Oct 29): content pane, content toolbar edge and Home header only.
 // Under [data-vibrancy] html, #root, body, the sidebar and its header must stay transparent (6fe246e).
@@ -13,8 +13,8 @@ test("emerald wash never targets the vibrancy layers", () => {
 });
 
 test("emerald wash: vibrancy layers stay transparent, content pane gets the wash", async ({ page, theme }) => {
-  await openApp(page, { theme, reduceMotion: true });
-  await expect(activeField(page, "Home").getByRole("heading", { level: 1 })).toHaveText("Command Center");
+  await openToday(page, { theme, reduceMotion: true });
+  await expect(activeField(page, "Today").getByRole("heading", { level: 1 })).toHaveText("Command Center");
   await page.evaluate(() => document.documentElement.setAttribute("data-vibrancy", "true"));
   const bg = (sel: string) => page.locator(sel).first().evaluate((el) => {
     const s = getComputedStyle(el); return `${s.backgroundColor}|${s.backgroundImage}`;
@@ -28,7 +28,7 @@ test("emerald wash: vibrancy layers stay transparent, content pane gets the wash
     await page.evaluate(() => document.documentElement.removeAttribute("data-vibrancy"));
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.screenshot({ path: `${shots}/home-${theme}.png` });
-    for (const name of ["Chat", "Neuro"]) {
+    for (const name of ["Chat", "Mind"]) {
       await page.locator("nav.system-constellation").getByRole("button", { name: new RegExp(`^${name}`) }).first().click();
       await page.waitForTimeout(600);
       await page.screenshot({ path: `${shots}/${name.toLowerCase()}-${theme}.png` });

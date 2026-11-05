@@ -1,10 +1,10 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
-import { activeField, expect, navButton, openApp, test, type Theme } from "./fixtures/tauri-mock";
+import { expect, openApp, openToday, openView, test, type Theme } from "./fixtures/tauri-mock";
 
 // Glass fallbacks and contrast (ported from the Oct 30 /tmp/glass review specs).
 // prefers-reduced-transparency has no Playwright option, so it is set through CDP (Chromium only).
-const SECTIONS = ["Home", "Chat & Agents", "Fitness", "Neuro", "Business", "Settings"];
+const SECTIONS = ["Today", "Chat & Agents", "Mind–Body", "Fitness", "Neuro", "Business", "Settings"];
 
 async function emulate(page: Page, theme: Theme, rt: "reduce" | "no-preference", rm: "reduce" | "no-preference" = "no-preference") {
   const cdp = await page.context().newCDPSession(page);
@@ -19,8 +19,8 @@ async function emulate(page: Page, theme: Theme, rt: "reduce" | "no-preference",
 
 async function openSection(page: Page, theme: Theme, label: string) {
   await openApp(page, { theme, reduceMotion: false });
-  await navButton(page, label).click();
-  await expect(activeField(page, label).getByRole("heading", { level: 1 })).toBeVisible();
+  const field = await openView(page, label);
+  await expect(field.getByRole("heading", { level: 1 })).toBeVisible();
   await page.waitForTimeout(300);
 }
 
@@ -94,7 +94,7 @@ test("palette dialog: blurred by default, solid under reduced transparency and r
 
 test("worst-case backdrop: text on glass chrome is at least 4.5:1 (3:1 large)", async ({ page, theme }) => {
   await emulate(page, theme, "no-preference");
-  await openApp(page, { theme, reduceMotion: false });
+  await openToday(page, { theme, reduceMotion: false });
   await page.waitForTimeout(300);
   const res = await page.evaluate(() => {
     const parse = (s: string) => (s.match(/[\d.]+/g) || []).map(Number);

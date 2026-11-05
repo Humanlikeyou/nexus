@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { expect, openApp, test } from "./fixtures/tauri-mock";
+import { expect, openApp, openToday, test } from "./fixtures/tauri-mock";
 
 const TOKENS = [
   "--glass-ultrathin", "--glass-thin", "--glass-regular", "--glass-thick", "--glass-solid",
@@ -24,7 +24,7 @@ test("glass and shadow tokens resolve", async ({ page, theme }) => {
 test("glass applied: palette dialog blurs, cards stay solid, vibrancy layers transparent", async ({ page, theme }) => {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "no-preference" }, { name: "prefers-color-scheme", value: theme }] });
-  await openApp(page, { theme, reduceMotion: false });
+  await openToday(page, { theme, reduceMotion: false });
   await page.keyboard.press("Meta+k");
   const dialog = page.locator("dialog.ui-dialog[open]").first();
   await expect(dialog).toBeVisible();
@@ -91,7 +91,7 @@ test("glass renders with reduced transparency forced off (review shot)", async (
 test("reduced transparency: shell chrome and composer have no blur", async ({ page, theme }) => {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "reduce" }, { name: "prefers-color-scheme", value: theme }] });
-  await openApp(page, { theme, reduceMotion: true });
+  await openToday(page, { theme, reduceMotion: true });
   expect(await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches)).toBe(true);
   for (const sel of ["main.command-surface > .intelligence-overlay > .nexus-mark", "main.command-surface > .intelligence-overlay > .field-clock", "main.command-surface > nav.system-constellation"]) {
     expect(await page.locator(sel).first().evaluate((el) => getComputedStyle(el).backdropFilter), sel).toBe("none");

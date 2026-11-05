@@ -60,6 +60,66 @@
   background: color-mix(in srgb, var(--lens-specular) 55%, transparent);
 }
 
+/* Hero (landing page, reference: amara-lens-copper). Same DOM layers, rebuilt for a large render:
+ * the iris sits on the glass and stays static, the core is only the hot centre, so it can scale with
+ * the voice and never overflow. Scoped here so 28, 44 and 160 keep their exact look. */
+.amara-lens[data-size="320"] {
+  --lens-size: clamp(var(--lens-hero-min), min(88cqh, 84cqw), var(--lens-hero-max));
+  --lens-halo-theme: 1;
+  --hero-halo: .1; --hero-core: .24; --hero-rim: .5; --hero-gloss: .55;
+}
+.amara-lens[data-size="320"][data-state="listening"] { --hero-halo: .42; --hero-core: .96; --hero-rim: 1; --hero-gloss: 1; }
+.amara-lens[data-size="320"][data-state="thinking"] { --hero-halo: .26; --hero-core: .62; --hero-rim: .8; --hero-gloss: 1; }
+.amara-lens[data-size="320"][data-state="speaking"] { --hero-halo: .46; --hero-core: 1; --hero-rim: 1; --hero-gloss: 1; }
+.amara-lens[data-size="320"][data-state="error"] { --hero-halo: .06; --hero-core: .42; --hero-rim: .75; --hero-gloss: .55; }
+
+.amara-lens[data-size="320"] .amara-lens__halo {
+  inset: -72%;
+  background: radial-gradient(closest-side, var(--lens-glow), transparent);
+  opacity: calc(var(--hero-halo) + var(--lens-level) * .3);
+}
+.amara-lens[data-size="320"] .amara-lens__ring { inset: -4%; }
+.amara-lens[data-size="320"][data-state="listening"] .amara-lens__ring { animation: amara-lens-listen var(--lens-dur-listen) ease-in-out infinite; }
+.amara-lens[data-size="320"] .amara-lens__bezel {
+  background: linear-gradient(172deg, var(--lens-bezel-top), var(--lens-bezel-mid) 30%, var(--lens-bezel-lo) 72%, var(--lens-bezel-bottom));
+  box-shadow:
+    inset 0 1px 1px var(--lens-bezel-shine),
+    calc(var(--lens-size) * -.012) calc(var(--lens-size) * .036) 0 var(--lens-drop),
+    0 calc(var(--lens-size) * .07) calc(var(--lens-size) * .14) var(--lens-shadow);
+}
+.amara-lens[data-size="320"] .amara-lens__glass {
+  inset: 6.6%;
+  background: radial-gradient(closest-side, var(--lens-iris-shadow), var(--lens-iris-edge) 74%, var(--lens-glass) 94%);
+  box-shadow: 0 0 0 calc(var(--lens-size) * .009) var(--lens-stroke);
+}
+.amara-lens[data-size="320"] .amara-lens__core,
+.amara-lens[data-size="320"][data-state] .amara-lens__core {
+  inset: 8%;
+  background: radial-gradient(closest-side, var(--lens-hot), var(--lens-mid) 25%, var(--lens-deep) 56%, var(--lens-iris-shadow) 82%, transparent 100%);
+  opacity: var(--hero-core);
+}
+.amara-lens[data-size="320"][data-state="listening"] .amara-lens__core { opacity: calc(var(--hero-core) + var(--lens-level) * .04); transform: scale(calc(1 + (var(--lens-scale) - 1) * .5)); }
+.amara-lens[data-size="320"][data-state="thinking"] .amara-lens__core { animation: amara-lens-hero-breathe var(--lens-dur-breathe) ease-in-out infinite; }
+.amara-lens[data-size="320"][data-state="speaking"] .amara-lens__core { transform: scale(var(--lens-scale)); }
+.amara-lens[data-size="320"][data-state="error"] .amara-lens__core { background: radial-gradient(closest-side, var(--lens-error-mid), var(--lens-error-deep) 56%, transparent 96%); }
+.amara-lens[data-size="320"] .amara-lens__rim {
+  inset: 6.6%;
+  background: radial-gradient(closest-side, transparent 84%, var(--lens-rim-deep) 91.5%, var(--lens-rim-body) 96.5%, var(--lens-rim-hi) 98.4%, var(--lens-rim-deep) 99.6%, transparent 100%);
+  opacity: var(--hero-rim);
+}
+.amara-lens[data-size="320"][data-state="error"] .amara-lens__rim { background: radial-gradient(closest-side, transparent 88%, var(--tone-warning) 96%, transparent 100%); }
+.amara-lens[data-size="320"] .amara-lens__specular {
+  left: 12.5%; top: 18%; width: 44%; height: 22%; transform: rotate(-20deg);
+  background: linear-gradient(100deg, var(--lens-gloss), var(--lens-gloss-fade));
+  opacity: var(--hero-gloss);
+}
+.amara-lens[data-size="320"] .amara-lens__catchlight {
+  left: 62%; top: 30.5%; width: 3.6%; height: 3.6%;
+  background: var(--lens-glint); opacity: var(--hero-gloss);
+}
+@keyframes amara-lens-listen { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
+@keyframes amara-lens-hero-breathe { 0%, 100% { opacity: .42; } 50% { opacity: .82; } }
+
 .amara-lens__label { font: var(--type-callout); color: var(--label); }
 .amara-lens__error { display: inline-flex; flex-direction: column; align-items: center; gap: var(--space-2); font: var(--type-callout); color: var(--tone-warning-text); text-align: center; }
 
@@ -74,7 +134,12 @@
   .amara-lens[data-state="speaking"] .amara-lens__core { opacity: .8; transform: none; }
   .amara-lens__halo { opacity: calc(.8 * .35 * var(--lens-halo-factor) * var(--lens-halo-theme)); }
   .amara-lens:not([data-state="speaking"]) .amara-lens__halo { opacity: 0; }
+  /* The hero's glow is its state, not motion: static per state. */
+  .amara-lens[data-size="320"] .amara-lens__ring { animation: none !important; }
+  .amara-lens[data-size="320"][data-state] .amara-lens__halo { opacity: var(--hero-halo); }
+  .amara-lens[data-size="320"][data-state] .amara-lens__core { transform: none; }
 }
+:root[data-reduce-motion="true"] .amara-lens[data-size="320"] :is(.amara-lens__ring, .amara-lens__core) { animation: none !important; }
 /* §5 Reduced transparency: halo off, core opaque over the black glass. */
 @media (prefers-reduced-transparency: reduce) {
   .amara-lens__halo { display: none; }
@@ -82,6 +147,9 @@
   .amara-lens[data-state] .amara-lens__core { opacity: 1; }
   .amara-lens[data-state="error"] .amara-lens__core { background: radial-gradient(circle, var(--lens-error-mid), var(--lens-error-deep) 60%, var(--lens-glass) 100%); }
 }
+/* Hero: the iris is opaque on the glass already, and the core keeps its per-state strength so a
+ * lens that isn't listening never looks lit. */
+:root[data-reduce-transparency="true"] .amara-lens[data-size="320"] .amara-lens__halo { display: none; }
 @media (forced-colors: active) {
   .amara-lens__halo, .amara-lens__specular, .amara-lens__catchlight { display: none; }
   .amara-lens__bezel { background: Canvas; border: 2px solid CanvasText; box-shadow: none; }

@@ -10,12 +10,12 @@ import "./Wordmark.css";
 export const WORDMARK_PATH =
   "M0 100L45 0L90 100 M175 100V0L221 62L267 0V100 M352 100L397 0L442 100 M527 100V0H567A26 26 0 0 1 567 52H527 M561 52L605 100 M690 100L735 0L780 100";
 
-export type WordmarkSize = "sidebar" | "about" | "splash";
+export type WordmarkSize = "sidebar" | "landing" | "about" | "splash";
 
 /** Cap height in px per placement; the SVG is 7.94 × cap wide and 1.14 × cap tall (stroke overhang included). */
-export const WORDMARK_CAP: Record<WordmarkSize, number> = { sidebar: 12, about: 32, splash: 48 };
+export const WORDMARK_CAP: Record<WordmarkSize, number> = { sidebar: 12, landing: 20, about: 32, splash: 48 };
 /** Stroke in grid units: 11 (0.11 × cap) everywhere except the sidebar, which holds the 1.5px floor (12.5 × 0.12). */
-const STROKE: Record<WordmarkSize, number> = { sidebar: 12.5, about: 11, splash: 11 };
+const STROKE: Record<WordmarkSize, number> = { sidebar: 12.5, landing: 11, about: 11, splash: 11 };
 
 export type WordmarkProps = {
   size: WordmarkSize;

@@ -1,9 +1,9 @@
-import { activeField, expect, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, openToday, test } from "./fixtures/tauri-mock";
 
 // screen-specs › Home › Greeting (Decision 13): greeting, then status · "Thursday, Oct 29" from the app clock.
 test("(h) Home subline: greeting, status from data, and today's date from the clock", async ({ page, theme }) => {
-  await openApp(page, { theme, reduceMotion: true });
-  const home = activeField(page, "Home");
+  await openToday(page, { theme, reduceMotion: true });
+  const home = activeField(page, "Today");
   await expect(home.getByRole("heading", { level: 1 })).toHaveText("Command Center");
   const today = await page.evaluate(() => new Date(Date.now()).toLocaleDateString("en-US", { timeZone: "Asia/Tokyo", weekday: "long", month: "short", day: "numeric" }));
   expect(today).toMatch(/^[A-Z][a-z]+day, [A-Z][a-z]{2} \d{1,2}$/);
@@ -14,8 +14,8 @@ test("(h) Home subline: greeting, status from data, and today's date from the cl
 
 // screen-specs › Command center feel: one 28px status strip under the subline, plain text, no Badges.
 test("(i) Home status strip: three text segments under the subline, deep links, no Badge", async ({ page, theme }) => {
-  await openApp(page, { theme, reduceMotion: true });
-  const home = activeField(page, "Home");
+  await openToday(page, { theme, reduceMotion: true });
+  const home = activeField(page, "Today");
   const strip = home.getByRole("group", { name: "Status" });
   await expect(strip).toBeVisible();
   const buttons = strip.getByRole("button");
@@ -34,5 +34,5 @@ test("(i) Home status strip: three text segments under the subline, deep links, 
   expect(anim).toBe("none");
   await expect(home.getByText("Gateway online")).toHaveCount(0);
   await buttons.nth(2).click();
-  await expect(activeField(page, "Fitness").getByRole("heading", { level: 1 })).toHaveText("Fitness");
+  await expect(activeField(page, "Mind–Body").getByRole("heading", { level: 1 })).toHaveText("Fitness");
 });

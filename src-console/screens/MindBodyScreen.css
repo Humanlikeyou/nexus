@@ -16,7 +16,7 @@
 .mind-body__score { font: var(--type-display); font-variant-numeric: tabular-nums; }
 .mind-body__trend { margin: 0; font: var(--type-callout); color: var(--label-secondary); }
 .mind-body__stats { display: flex; flex-wrap: wrap; gap: var(--space-4); margin: 0; }
-.mind-body__stats dt { font: var(--type-caption); color: var(--label-tertiary); }
+.mind-body__stats dt { font: var(--type-caption); color: var(--label-secondary); }
 .mind-body__stats dd { margin: 0; font: var(--type-callout); font-variant-numeric: tabular-nums; }
 .mind-body__disclaimer { margin: 0; font: var(--type-footnote); color: var(--label-secondary); }
 

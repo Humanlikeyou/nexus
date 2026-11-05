@@ -1,10 +1,10 @@
-import { expect, openApp, test } from "./fixtures/tauri-mock";
+import { expect, openApp, openToday, test } from "./fixtures/tauri-mock";
 
 // screen-specs › Shell › Wordmark (Decision 17): drawn AMARA SVG, no font file, bronze per theme.
 const BRONZE = { light: "rgb(140, 98, 57)", dark: "rgb(180, 134, 78)" };
 
 test("(w) sidebar wordmark: 12px caps centred on the traffic lights, bronze, named Amara OS", async ({ page, theme }) => {
-  await openApp(page, { theme, reduceMotion: true });
+  await openToday(page, { theme, reduceMotion: true });
   const lockup = page.getByRole("img", { name: "Amara OS" }).first();
   await expect(lockup).toBeVisible();
   const svg = lockup.locator("svg.wordmark--sidebar");
@@ -35,7 +35,7 @@ test("(w) no Cormorant / font file is requested for the wordmark", async ({ page
 const INACTIVE = { light: "rgb(145, 120, 95)", dark: "rgb(147, 125, 97)" };
 
 test("(w) inactive window: toolbar mark dims to solid bronze, OS stays secondary, selected icon goes neutral", async ({ page, theme }) => {
-  await openApp(page, { theme, reduceMotion: true });
+  await openToday(page, { theme, reduceMotion: true });
   await expect(page.locator("html")).toHaveAttribute("data-window-active", "true");
   const lockup = page.getByRole("img", { name: "Amara OS" }).first();
   const os = lockup.locator(".wordmark-os");

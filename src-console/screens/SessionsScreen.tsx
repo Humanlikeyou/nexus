@@ -5,7 +5,7 @@ import { dateTime, number, time } from "../lib/format";
 import type { RecordedSession, SystemSnapshot } from "../types";
 import "./SessionsScreen.css";
 
-/** Sessions → Neuro › History (screen-specs §5): source list + detail, like Voice Memos. */
+/** Sessions → Mind–Body › Neuro history (screen-specs §5): source list + detail, like Voice Memos. */
 const SESSIONS_COMMAND = "list_sessions";
 const title = (s: RecordedSession) => (s.device_type === "muse" ? "Muse session" : `${s.device_type} session`);
 const minutes = (s: RecordedSession) => Math.max(1, Math.round(s.duration_secs / 60));

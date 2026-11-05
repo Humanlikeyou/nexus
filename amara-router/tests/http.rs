@@ -433,6 +433,131 @@ async fn tool_calls_round_trip_in_both_formats() {
     );
 }
 
+#[tokio::test]
+async fn gemma_call_text_becomes_tool_calls_in_every_format() {
+    let leaked = [
+        "mcp__followups__item_done{item:<|\"|>x, y<|\"|>,no",
+        "te:<|\"|>z<|\"|>} mcp__followups__mute_topic{topic:<|\"|>x<|\"|>}<tool_call|>",
+    ];
+    let r = rig(mock("EASY", &leaked)).await;
+    let tools = json!([
+        {"type": "function", "function": {"name": "mcp__followups__item_done"}},
+        {"type": "function", "function": {"name": "mcp__followups__mute_topic"}},
+    ]);
+    let done = "{\"item\":\"x, y\",\"note\":\"z\"}";
+
+    let mut body = oa("done", false);
+    body["tools"] = tools.clone();
+    let url = format!("{}/v1/chat/completions", r.url);
+    let v: Value = post(&url, body, &[]).await.json().await.unwrap();
+    let choice = &v["choices"][0];
+    assert_eq!(choice["finish_reason"], "tool_calls");
+    assert_eq!(choice["message"]["content"], "");
+    let calls = choice["message"]["tool_calls"].as_array().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["function"]["arguments"], done);
+    assert_eq!(calls[1]["function"]["name"], "mcp__followups__mute_topic");
+
+    let mut body = oa("done", true);
+    body["tools"] = tools.clone();
+    let sse = post(&url, body, &[]).await.text().await.unwrap();
+    assert!(!sse.contains("<|"), "{sse}");
+    assert!(sse.contains("\"finish_reason\":\"tool_calls\""));
+    assert_eq!(sse.matches("\"type\":\"function\"").count(), 2);
+
+    for stream in [false, true] {
+        let ol = json!({"model": "amara", "stream": stream, "tools": tools,
+                        "messages": [{"role": "user", "content": "done"}]});
+        let text = post(&format!("{}/api/chat", r.url), ol, &[])
+            .await
+            .text()
+            .await
+            .unwrap();
+        assert!(!text.contains("<|"), "{text}");
+        assert!(text.contains("mcp__followups__mute_topic"));
+    }
+
+    // The same text with those tools not offered is left alone.
+    let v: Value = post(&url, oa("done", false), &[])
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["choices"][0]["message"]["content"], leaked.concat());
+    assert!(v["choices"][0]["message"]["tool_calls"].is_null());
+}
+
+#[tokio::test]
+async fn gemma_call_with_trailing_prose_keeps_the_prose_as_content() {
+    let leaked = "mcp__followups__item_done{item:<|\"|>bike repair receipt<|\"|>,note:<|\"|>sorted<|\"|>} All good on that front.";
+    let r = rig(mock("EASY", &[leaked])).await;
+    let tools = json!([{"type": "function", "function": {"name": "mcp__followups__item_done"}}]);
+    let url = format!("{}/v1/chat/completions", r.url);
+
+    let mut body = oa("done", false);
+    body["tools"] = tools.clone();
+    let v: Value = post(&url, body, &[]).await.json().await.unwrap();
+    let choice = &v["choices"][0];
+    assert_eq!(choice["finish_reason"], "tool_calls");
+    assert_eq!(choice["message"]["content"], "All good on that front.");
+    assert_eq!(
+        choice["message"]["tool_calls"][0]["function"]["arguments"],
+        "{\"item\":\"bike repair receipt\",\"note\":\"sorted\"}"
+    );
+
+    let mut body = oa("done", true);
+    body["tools"] = tools;
+    let sse = post(&url, body, &[]).await.text().await.unwrap();
+    assert!(!sse.contains("<|"), "{sse}");
+    assert!(sse.contains("All good on that front."));
+    assert!(sse.contains("\"finish_reason\":\"tool_calls\""));
+}
+
+#[tokio::test]
+async fn a_terminal_echo_stays_text_in_every_format() {
+    let echo = "terminal{command:<|\"|>rm -rf x<|\"|>}<tool_call|>";
+    let r = rig(mock("EASY", &[echo])).await;
+    let tools = json!([{"type": "function", "function": {"name": "terminal"}}]);
+    let url = format!("{}/v1/chat/completions", r.url);
+
+    let mut body = oa("done", false);
+    body["tools"] = tools.clone();
+    let v: Value = post(&url, body, &[]).await.json().await.unwrap();
+    assert_eq!(v["choices"][0]["message"]["content"], echo);
+    assert!(v["choices"][0]["message"]["tool_calls"].is_null());
+    assert_eq!(v["choices"][0]["finish_reason"], "stop");
+
+    let mut body = oa("done", true);
+    body["tools"] = tools.clone();
+    let sse = post(&url, body, &[]).await.text().await.unwrap();
+    assert!(!sse.contains("tool_calls"), "{sse}");
+    let mut text = String::new();
+    for line in sse.lines().filter_map(|l| l.strip_prefix("data: ")) {
+        if let Ok(v) = serde_json::from_str::<Value>(line) {
+            text.push_str(v["choices"][0]["delta"]["content"].as_str().unwrap_or(""));
+        }
+    }
+    assert_eq!(text, echo);
+
+    let ol = |stream: bool| {
+        json!({"model": "amara", "stream": stream, "tools": tools,
+               "messages": [{"role": "user", "content": "done"}]})
+    };
+    let url = format!("{}/api/chat", r.url);
+    let v: Value = post(&url, ol(false), &[]).await.json().await.unwrap();
+    assert_eq!(v["message"]["content"], echo);
+    assert!(v["message"]["tool_calls"].is_null());
+
+    let lines = post(&url, ol(true), &[]).await.text().await.unwrap();
+    assert!(!lines.contains("tool_calls"), "{lines}");
+    let text: String = lines
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .map(|v| v["message"]["content"].as_str().unwrap_or("").to_string())
+        .collect();
+    assert_eq!(text, echo);
+}
+
 // ── each routing rule ────────────────────────────────────────────────────────
 
 #[tokio::test]

@@ -5,6 +5,7 @@ pub mod ble_common;
 pub mod continuity;
 pub mod crew;
 pub mod events;
+pub mod followups;
 pub mod goals;
 pub mod ha;
 pub mod kb_status;

@@ -1,7 +1,7 @@
 import type { CrewToolInfo, KbStatus } from "../src/lib/types";
 export type { CrewToolInfo, KbState, KbStatus } from "../src/lib/types";
 
-export type ModuleId = "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings" | "voice" | "mindbody" | "smarthome";
+export type ModuleId = "landing" | "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings" | "voice" | "lists" | "mindbody" | "smarthome";
 
 export type OpenClawState = "online" | "configured" | "not_installed" | "offline";
 
@@ -613,3 +613,43 @@ export interface NoopSeriesPayload {
 /** UI-side metric point. */
 export interface NoopMetricPoint { day: string; value: number | null }
 export interface NoopMetricSeries { key: import("../src/lib/types").NoopMetricKey; points: NoopMetricPoint[] }
+
+/** Amara's follow-up lists (commands/followups.rs). Dates are "YYYY-MM-DD" when the app wrote them. */
+export interface FollowupItem {
+  id: number;
+  text: string;
+  added: string | null;
+  due: string | null;
+  next: string | null;
+  notes: string[];
+  lastNudged: string | null;
+  done: string | null;
+}
+
+export interface MutedTopic {
+  topic: string;
+  added: string | null;
+  until: string | null;
+  /** False once `until` has passed: Amara no longer treats it as muted. */
+  active: boolean;
+}
+
+export interface FollowupLists {
+  open: FollowupItem[];
+  /** Closed in the last 30 days, newest first. */
+  recentlyDone: FollowupItem[];
+  muted: MutedTopic[];
+}
+
+export interface FollowupItemInput {
+  text: string;
+  due?: string;
+  next?: string;
+}
+
+/** Absent stays as it is; `null` or "" clears `due` and `next`. */
+export interface FollowupItemPatch {
+  text?: string;
+  due?: string | null;
+  next?: string | null;
+}
