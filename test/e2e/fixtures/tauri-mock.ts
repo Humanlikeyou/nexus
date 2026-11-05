@@ -130,13 +130,20 @@ export const navButton = (page: Page, label: string) =>
 /** The visible screen region ("<label> system"). */
 export const activeField = (page: Page, label: string) => page.getByRole("region", { name: `${label} system` });
 
-const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Lists: "Chat & Agents" };
+const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Activity: "Chat & Agents", Lists: "Chat & Agents", Crews: "Chat & Agents", Voice: "Chat & Agents", Revenue: "Business" };
+
+/** Resolves once a route transition and its enter animation have finished. */
+export const routeSettled = (page: Page) => page.waitForFunction(() => !document.documentElement.dataset.routeMotion);
 
 /** Opens a section, or a sub-view through its host, and returns the screen region. */
 export async function openView(page: Page, label: string) {
   const host = SUB_VIEW_HOSTS[label];
   await navButton(page, host ?? label).click();
   const field = activeField(page, host ?? label);
-  if (host) await field.getByRole("radio", { name: label, exact: true }).click();
+  if (host) {
+    const radio = field.getByRole("radio", { name: label, exact: true });
+    await radio.click();
+    await expect(radio).toHaveAttribute("aria-checked", "true");
+  }
   return field;
 }

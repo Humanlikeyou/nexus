@@ -178,7 +178,7 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
   const loading = state.status === "loading";
 
   return (
-    <div className="mind-body">
+    <div className="mind-body page-inset">
       <header className="mind-body__header">
         <h1>Mind–Body</h1>
         <p className="mind-body__subtitle">How your body state lines up with focus. {DISCLAIMER}</p>

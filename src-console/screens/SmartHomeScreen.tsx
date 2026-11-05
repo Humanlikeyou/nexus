@@ -246,7 +246,7 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
   };
 
   return (
-    <div className="smart-home">
+    <div className="smart-home page-inset">
       <header className="smart-home__header">
         <h1>Smart home</h1>
         <p className="smart-home__subtitle">Devices from your local Home Assistant.</p>

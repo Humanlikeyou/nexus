@@ -16,7 +16,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import { AMARA_VOICE_LEVEL_EVENT, AMARA_VOICE_STATE_EVENT, LEVEL_SILENCE_MS, STATE_FALLBACK_MS, __resetAmaraVoiceForTests, amaraVoiceLevel, ingestState, useAmaraVoice } from "../../hooks/useAmaraVoice";
-import { AmaraLens, AmaraVoiceAnnouncer, LENS_ERROR_COPY, lensScale, stepEnvelope } from "./AmaraLens";
+import { ATTACK_MS, AmaraLens, AmaraVoiceAnnouncer, LENS_ERROR_COPY, LEVEL_CEILING_DB, LEVEL_FLOOR_DB, LEVEL_FRESH_MS, RELEASE_MS, levelToVisual, lensScale, stepEnvelope } from "./AmaraLens";
 
 const emit = (name: string, payload: Record<string, unknown>) => act(() => { events.handlers.get(name)?.({ payload: { ts: Date.now(), ...payload } }); });
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -28,12 +28,56 @@ describe("envelope", () => {
   it("attack is faster than release; scale never exceeds 1.12", () => {
     const up = stepEnvelope(0, 1, 40);
     const down = 1 - stepEnvelope(1, 0, 40);
-    expect(up).toBeCloseTo(1 - Math.exp(-1), 5);
-    expect(down).toBeCloseTo(1 - Math.exp(-0.25), 5);
+    expect(up).toBeCloseTo(1 - Math.exp(-40 / ATTACK_MS), 5);
+    expect(down).toBeCloseTo(1 - Math.exp(-40 / RELEASE_MS), 5);
     expect(up).toBeGreaterThan(down);
     expect(lensScale(0)).toBe(1);
     expect(lensScale(5)).toBeCloseTo(1.12, 10);
     expect(stepEnvelope(0, NaN, 16)).toBe(0);
+  });
+});
+
+/** Her reference voice as the feed delivers it: rms per 30 Hz tick at the default 0.25 gain, measured from voices/amara_ref.wav. */
+const REAL_SPEECH = [0.0004, 0.0399, 0.0277, 0.0277, 0.0023, 0.0081, 0.0098, 0.0409, 0.0409, 0.0374, 0.0266, 0.0207, 0.0162, 0.0162, 0.0119, 0.0073, 0.0011, 0.0011, 0.0004, 0, 0, 0, 0, 0, 0, 0.0006, 0.0006, 0.0396, 0.0336, 0.0135, 0.0135, 0.0079, 0.0577, 0.0562, 0.0315, 0.0315, 0.0041, 0.0118, 0.0312, 0.0312, 0.0205, 0.0026, 0.0023, 0.0099, 0.0099, 0.033, 0.038, 0.0294, 0.0294, 0.0269, 0.0288, 0.0282, 0.0098, 0.0098, 0.0256, 0.0235, 0.0042, 0.0019, 0.0019, 0.0074, 0.0295, 0.0305, 0.0305, 0.0175, 0.0202, 0.0432, 0.0455, 0.0455, 0.03, 0.0048, 0.0004, 0.0004, 0.001, 0.0003, 0.0002, 0.0001, 0.0001, 0.0123, 0.0303, 0.0351, 0.0351, 0.0103, 0.0082, 0.0403, 0.0532, 0.0532, 0.0394, 0.0307, 0.0324, 0.016, 0.016, 0.0089, 0.0012, 0.0099, 0.0099, 0.0168, 0.0169, 0.0134, 0.0074, 0.0074, 0.0032];
+/** Runs the follower at 60 fps over 30 Hz ticks, as the lens does. */
+function follow(ticks: number[]) {
+  let env = 0;
+  return ticks.flatMap((rms) => [0, 1].map(() => { env = stepEnvelope(env, levelToVisual(rms), 1000 / 60); return env; }));
+}
+
+describe("level to visual", () => {
+  it("is silent at and below the floor, full at and above the ceiling", () => {
+    expect(levelToVisual(0)).toBe(0);
+    expect(levelToVisual(NaN)).toBe(0);
+    expect(levelToVisual(10 ** (LEVEL_FLOOR_DB / 20))).toBeCloseTo(0, 6);
+    expect(levelToVisual(10 ** (LEVEL_CEILING_DB / 20))).toBeCloseTo(1, 6);
+    expect(levelToVisual(1)).toBe(1);
+  });
+  it("gives real speech most of the range, which raw rms never could", () => {
+    const peak = Math.max(...follow(REAL_SPEECH));
+    expect(peak).toBeGreaterThan(.8);
+    expect(Math.max(...REAL_SPEECH)).toBeLessThan(.06); // raw, the same speech would be 6% of the range
+  });
+  it("rises and falls with syllables, and rests between phrases", () => {
+    const env = follow(REAL_SPEECH);
+    let beats = 0, high = 0, falling = false;
+    for (const value of env) {
+      if (!falling && value > high) high = value;
+      else if (!falling && high - value > .2) { beats++; falling = true; high = value; }
+      else if (falling && value < high) high = value;
+      else if (falling && value - high > .2) { falling = false; high = value; }
+    }
+    expect(beats).toBeGreaterThanOrEqual(7); // 3.4 s of speech
+    expect(Math.min(...env.slice(40))).toBeLessThan(.08);
+  });
+  it("reaches a syllable within two feed ticks and falls to nothing soon after she stops", () => {
+    expect(stepEnvelope(0, 1, 66)).toBeGreaterThan(.85);
+    let env = .9;
+    for (let i = 0; i < 60; i++) env = stepEnvelope(env, 0, 1000 / 60);
+    expect(env).toBeLessThan(.002);
+  });
+  it("keeps the speaking swing far above the listening breath", () => {
+    expect(lensScale(1) - lensScale(0)).toBeGreaterThan(.1); // the breath has no scale at all
   });
 });
 
@@ -58,6 +102,37 @@ describe("AmaraLens", () => {
     expect(container.querySelector(".amara-lens__catchlight")).toBeNull();
     expect(container.querySelector(".amara-lens")).toHaveAttribute("aria-hidden", "true");
     expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("speaking with no audio data stays still; a feed that stops reads as silence", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance", "Date", "setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    const { container } = render(<AmaraLens state="speaking" size={160} />);
+    await flush();
+    const lens = container.querySelector<HTMLElement>(".amara-lens")!;
+    const level = () => Number(lens.style.getPropertyValue("--lens-level"));
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(level()).toBe(0);
+    for (let i = 0; i < 10; i++) { emit(AMARA_VOICE_LEVEL_EVENT, { rms: .05, peak: .1, state: "speaking" }); act(() => { vi.advanceTimersByTime(33); }); }
+    expect(level()).toBeGreaterThan(.8);
+    act(() => { vi.advanceTimersByTime(LEVEL_FRESH_MS + 800); });
+    expect(level()).toBeLessThan(.01);
+  });
+
+  it("only speaking runs a frame loop", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance", "Date", "setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    const frames = vi.spyOn(window, "requestAnimationFrame");
+    render(<AmaraLens state="listening" size={320} decorative />);
+    await flush();
+    act(() => { vi.advanceTimersByTime(300); });
+    expect(frames).not.toHaveBeenCalled();
+    frames.mockRestore();
+  });
+
+  it("drops its bright-centre layer below 160", () => {
+    const { container, rerender } = render(<AmaraLens state="speaking" size={160} level={0} />);
+    expect(container.querySelector(".amara-lens__hot")).not.toBeNull();
+    rerender(<AmaraLens state="speaking" size={44} level={0} />);
+    expect(container.querySelector(".amara-lens__hot")).toBeNull();
   });
 
   it("30 Hz levels drive CSS vars without re-rendering React", async () => {

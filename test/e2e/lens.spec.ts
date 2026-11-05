@@ -100,3 +100,71 @@ test("Lens: reduced motion runs no animations and keeps scale at 1", async ({ pa
   const t = await lens.locator(".amara-lens__core").evaluate((el) => getComputedStyle(el).transform);
   expect(["none", "matrix(1, 0, 0, 1, 0, 0)"]).toContain(t);
 });
+
+test.describe("Lens: motion means she's alive", () => {
+  const hero = (page: Page) => page.locator('.landing .amara-lens[data-size="320"]');
+  const names = (lens: import("@playwright/test").Locator) => lens.evaluate((el) => el.getAnimations({ subtree: true }).map((a) => (a as CSSAnimation).animationName).sort());
+
+  test("listening breathes and drifts, on periods that don't line up, and never scales", async ({ page, theme }) => {
+    await openApp(page, { theme });
+    await expect(hero(page)).toHaveAttribute("data-state", "listening");
+    const running = await names(hero(page));
+    expect(running.filter((name) => name === "amara-lens-breath").length).toBeGreaterThanOrEqual(3);
+    expect(running).toContain("amara-lens-drift");
+    const periods = await hero(page).evaluate((el) => [...new Set(el.getAnimations({ subtree: true }).map((a) => a.effect?.getTiming().duration))]);
+    expect(periods.length).toBeGreaterThanOrEqual(4);
+    const keyframes = await hero(page).evaluate((el) => el.getAnimations({ subtree: true }).flatMap((a) => (a.effect as KeyframeEffect).getKeyframes()).map((f) => String(f.transform ?? "")));
+    expect(keyframes.join()).not.toContain("scale");
+  });
+
+  test("thinking orbits the ring and leaves the iris still", async ({ page, theme }) => {
+    await openApp(page, { theme });
+    await emitNow(page, STATE, { state: "thinking" });
+    await expect(hero(page)).toHaveAttribute("data-state", "thinking");
+    const running = await names(hero(page));
+    expect(running).toContain("amara-lens-orbit");
+    expect(running).not.toContain("amara-lens-breath");
+    expect(running).not.toContain("amara-lens-drift");
+  });
+
+  test("speaking with no level data doesn't move", async ({ page, theme }) => {
+    await openApp(page, { theme });
+    await emitNow(page, STATE, { state: "speaking" });
+    await expect(hero(page)).toHaveAttribute("data-state", "speaking");
+    await page.waitForTimeout(300);
+    expect(await names(hero(page))).toEqual([]);
+    expect(await hero(page).evaluate((el) => Number((el as HTMLElement).style.getPropertyValue("--lens-level")))).toBe(0);
+  });
+
+  test("error is still", async ({ page, theme }) => {
+    await openApp(page, { theme });
+    await emitNow(page, STATE, { state: "error" });
+    await expect(hero(page)).toHaveAttribute("data-state", "error");
+    expect(await names(hero(page))).toEqual([]);
+  });
+
+  test("reduced motion: speaking changes brightness only", async ({ page, theme }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openApp(page, { theme });
+    await emitNow(page, STATE, { state: "speaking" });
+    await expect(hero(page)).toHaveAttribute("data-state", "speaking");
+    const core = hero(page).locator(".amara-lens__core");
+    const opacity = () => core.evaluate((el) => Number(getComputedStyle(el).opacity));
+    const quiet = await opacity();
+    for (let i = 0; i < 15; i++) { await emitNow(page, LEVEL, { rms: .05, peak: .1, state: "speaking" }); await page.waitForTimeout(33); }
+    await expect.poll(opacity).toBeGreaterThan(quiet + .08);
+    expect(await core.evaluate((el) => getComputedStyle(el).transform)).toBe("none");
+    expect(await hero(page).evaluate((el) => (el as HTMLElement).style.getPropertyValue("--lens-scale"))).toBe("1");
+  });
+
+  test("a hidden window pauses the light", async ({ page, theme }) => {
+    await openApp(page, { theme });
+    await expect(hero(page)).toHaveAttribute("data-state", "listening");
+    await page.evaluate(() => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect(hero(page)).toHaveAttribute("data-paused", "");
+    expect(await hero(page).evaluate((el) => el.getAnimations({ subtree: true }).every((a) => a.playState === "paused"))).toBe(true);
+  });
+});

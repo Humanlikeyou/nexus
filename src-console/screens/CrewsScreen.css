@@ -1,5 +1,5 @@
 .crews { display: grid; gap: var(--space-4, 16px); }
-.crews__title { margin: 0; font: var(--type-title1, 600 22px/1.2 system-ui); color: var(--label); }
+.crews__title { margin: 0; font: var(--type-large-title); color: var(--label); }
 .crews__note { margin: 0; color: var(--label-secondary); font: var(--type-callout); }
 .crews__note strong { color: var(--label); }
 .crews__note code { font: var(--type-callout); font-family: var(--font-mono, ui-monospace, monospace); color: var(--label); }

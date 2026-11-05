@@ -122,7 +122,7 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
 
   if (isLoading) {
     return (
-      <div className="crews">
+      <div className="crews page-inset">
         <h1 className="crews__title">Crews</h1>
         <Card title="Crew service"><p className="crews__note" role="status">Loading crew service…</p></Card>
       </div>
@@ -131,7 +131,7 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
 
   const badge = HEALTH_BADGE[health];
   return (
-    <div className="crews">
+    <div className="crews page-inset">
       <h1 className="crews__title">Crews</h1>
       <Card title="Crew service" accessory={<Badge tone={badge.tone}>{badge.text}</Badge>}>
         {health === "not_configured" ? (

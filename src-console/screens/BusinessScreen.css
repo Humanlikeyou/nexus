@@ -1,6 +1,6 @@
 .biz { display: grid; gap: var(--space-4, 16px); container: biz / inline-size; }
 .biz__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 12px); }
-.biz__title { margin: 0; font: var(--type-title1, 600 22px/1.2 system-ui); color: var(--label); }
+.biz__title { margin: 0; font: var(--type-large-title); color: var(--label); }
 .biz__tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3, 12px); }
 .biz__hero { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: var(--space-3, 12px); align-items: stretch; }
 .biz__ring { display: flex; align-items: center; gap: var(--space-3, 12px); }

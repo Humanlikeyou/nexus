@@ -1,5 +1,5 @@
 /* Smart home (brief-ha-1104). Glass tokens only. */
-.smart-home { display: grid; gap: var(--space-5); padding: var(--space-6); color: var(--label); align-content: start; }
+.smart-home { display: grid; gap: var(--space-5); color: var(--label); align-content: start; }
 .smart-home__header h1 { margin: 0; font: var(--type-large-title); }
 .smart-home__subtitle { margin: var(--space-1) 0 0; font: var(--type-callout); color: var(--label-secondary); }
 .smart-home__header { display: grid; gap: var(--space-1); justify-items: start; }

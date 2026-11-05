@@ -1,0 +1,57 @@
+/*
+ * Route motion (Taisun, Nov 5): the exit half of app/routeMotion.ts, which holds the enter timings.
+ * Only the old view is captured. Its snapshot fades away on top of the new view, which is already a
+ * live page, so nothing waits for an animation and clicks land from the first frame.
+ * Transform and opacity only, never blur. Reduced motion skips all of this.
+ *   space    lens page and back, 280ms: one room, the lens folds into the sidebar's Home item.
+ *   section  section to section, 220ms: the pane cross-fades; sidebar and toolbar stay live.
+ *   subview  inside a host, 180ms: same with a smaller rise; only the content changes.
+ */
+:root {
+  --route-dur-space: 280ms;
+  --route-dur-out: 110ms;
+  --route-zoom: .012;
+}
+
+html::view-transition { pointer-events: none; }
+
+/* Nothing is captured except what's named here. */
+html[data-route-motion] { view-transition-name: none; }
+html[data-route-capture="space"] { view-transition-name: root; }
+html:is([data-route-capture="section"], [data-route-capture="subview"]) .active-field { view-transition-name: route-field; }
+/* The lens and wordmark exist on both sides of the move, so they stay captured throughout. */
+html[data-route-motion="space"] .landing .amara-lens,
+html[data-route-motion="space"] nav.system-constellation [data-system="terrance"] > i { view-transition-name: amara-lens; }
+html[data-route-motion="space"] .landing__wordmark,
+html[data-route-motion="space"] .nexus-mark .wordmark { view-transition-name: amara-wordmark; }
+
+html::view-transition-group(route-field) { animation: none; }
+html::view-transition-old(route-field) { animation: route-fade-out var(--route-dur-out) linear both; }
+
+/* Space: the old page steps past you going in, and away from you coming back. */
+html::view-transition-old(root) { --route-scale-to: calc(1 + var(--route-zoom)); animation: route-space-out var(--route-dur-space) var(--ease-standard) both; }
+html[data-route-direction="back"]::view-transition-old(root) { --route-scale-to: calc(1 - var(--route-zoom)); }
+
+/* The shared lens and wordmark travel on the group's own morph. */
+html::view-transition-group(amara-lens), html::view-transition-group(amara-wordmark) { animation-duration: var(--route-dur-space); animation-timing-function: var(--ease-standard); }
+html::view-transition-old(amara-wordmark), html::view-transition-new(amara-wordmark) { animation-duration: var(--route-dur-space); }
+/* Going in, the lens stays a lens until it's nearly home; coming back, the icon gives way early. */
+html[data-route-direction="forward"]::view-transition-old(amara-lens) { animation: route-fade-out 120ms linear 140ms both; }
+html[data-route-direction="forward"]::view-transition-new(amara-lens) { animation: route-fade-in 120ms linear 120ms both; }
+html[data-route-direction="back"]::view-transition-old(amara-lens) { animation: route-fade-out 80ms linear both; }
+html[data-route-direction="back"]::view-transition-new(amara-lens) { animation: route-fade-in 120ms linear both; }
+
+@keyframes route-fade-out { to { opacity: 0; } }
+@keyframes route-fade-in { from { opacity: 0; } }
+@keyframes route-space-out { to { opacity: 0; transform: scale(var(--route-scale-to)); } }
+
+/* The sidebar's selection follows the route instead of snapping. */
+main.command-surface .nav-group button { transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
+/* The heading takes focus after navigation so keyboard and VoiceOver users land on the new page.
+ * It isn't a control, so it shows no ring. */
+.active-field h1[tabindex="-1"]:focus { outline: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html::view-transition-group(*), html::view-transition-old(*), html::view-transition-new(*) { animation: none !important; }
+}
+:root[data-reduce-motion="true"]::view-transition-group(*), :root[data-reduce-motion="true"]::view-transition-old(*), :root[data-reduce-motion="true"]::view-transition-new(*) { animation: none !important; }

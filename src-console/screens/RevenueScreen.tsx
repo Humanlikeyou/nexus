@@ -48,7 +48,7 @@ export function RevenueField({ data, onRetry }: { data: SystemSnapshot; onRetry?
 
   if (down("arm_get_revenue_summary") && isAwaitingRevenue) {
     return (
-      <div className="biz">
+      <div className="biz page-inset">
         <div className="biz__head"><h1 className="biz__title">Business</h1>{status}</div>
         <Card title="Revenue"><Unavailable label="Revenue summary" onRetry={onRetry} /></Card>
         {strategyList("Configured strategies")}
@@ -59,7 +59,7 @@ export function RevenueField({ data, onRetry }: { data: SystemSnapshot; onRetry?
 
   if (isAwaitingRevenue) {
     return (
-      <div className="biz">
+      <div className="biz page-inset">
         <div className="biz__head"><h1 className="biz__title">Business</h1>{status}</div>
         <Card title="No revenue yet"><p className="biz__note">Tracking starts when a real source reports in.</p></Card>
         {strategyList("Configured strategies")}
@@ -71,7 +71,7 @@ export function RevenueField({ data, onRetry }: { data: SystemSnapshot; onRetry?
   const net = revenue.net_income;
   const deployedPct = risk.global_capital_limit ? (risk.global_capital_deployed / risk.global_capital_limit) * 100 : null;
   return (
-    <div className="biz">
+    <div className="biz page-inset">
       <div className="biz__head"><h1 className="biz__title">Business</h1>{status}</div>
       <div className="biz__hero">
         <StatTile label="Total revenue" value={money(revenue.total_revenue)} />
