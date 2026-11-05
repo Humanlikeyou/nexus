@@ -151,6 +151,8 @@ pub struct NoopHealthSnapshot {
     pub generated_at: String,
     pub device_id: String,
     pub latest_day: Option<String>,
+    /// Newest day that holds a reading; see [`reading_day`]. `today` may be an empty row.
+    pub reading_day: Option<String>,
     pub data_age_days: Option<i64>,
     pub today: Option<NoopDailyMetric>,
     pub recent_days: Vec<NoopDailyMetric>,
@@ -297,6 +299,26 @@ fn expand_home(path: &Path, home: &Path) -> PathBuf {
     }
 }
 
+/// Newest day with an HRV, recovery or sleep value, from `(day, has_value)` rows. NOOP adds
+/// today's row before the night has synced, so its metrics stay null for hours; that row is not a
+/// reading. Same rule as `readingDay` in src-console/lib/mindBody.ts, and also None when the
+/// reading is over [`STALE_AFTER_DAYS`] older than `today` (the current day, when known).
+pub(crate) fn reading_day<'a>(
+    rows: impl Iterator<Item = (&'a str, bool)>,
+    today: Option<NaiveDate>,
+) -> Option<String> {
+    let rows: Vec<(NaiveDate, bool)> = rows
+        .filter_map(|(day, has_value)| {
+            let date = NaiveDate::parse_from_str(day, "%Y-%m-%d").ok()?;
+            Some((date, has_value))
+        })
+        .collect();
+    let newest_row = rows.iter().map(|row| row.0).max()?;
+    let newest_value = rows.iter().filter(|row| row.1).map(|row| row.0).max()?;
+    let reference = today.map_or(newest_row, |day| day.max(newest_row));
+    ((reference - newest_value).num_days() <= STALE_AFTER_DAYS).then(|| newest_value.to_string())
+}
+
 fn now_iso(now: DateTime<Utc>) -> String {
     now.to_rfc3339()
 }
@@ -312,6 +334,7 @@ fn unavailable_snapshot(
         generated_at: now_iso(now),
         device_id,
         latest_day: None,
+        reading_day: None,
         data_age_days: None,
         today: None,
         recent_days: Vec::new(),
@@ -884,6 +907,15 @@ fn snapshot_from_database(
         .collect::<Vec<_>>();
     let today = all_days.last().cloned();
     let latest_day = today.as_ref().map(|metric| metric.day.clone());
+    let reading_day = reading_day(
+        all_days.iter().map(|metric| {
+            let has_value = metric.avg_hrv.is_some()
+                || metric.recovery.is_some()
+                || metric.total_sleep_min.is_some();
+            (metric.day.as_str(), has_value)
+        }),
+        Some(now.date_naive()),
+    );
     let data_age_days = latest_day.as_deref().and_then(|day| {
         NaiveDate::parse_from_str(day, "%Y-%m-%d")
             .ok()
@@ -954,6 +986,7 @@ fn snapshot_from_database(
         generated_at: now_iso(now),
         device_id,
         latest_day,
+        reading_day,
         data_age_days,
         today,
         recent_days,
@@ -1016,7 +1049,10 @@ fn runtime_health_brief_from_snapshot(snapshot: &NoopHealthSnapshot, limit: usiz
     let mut lines = vec![format!(
         "NOOP health context (read-only, source-authoritative; status {}, latest daily data {}).",
         snapshot.status,
-        snapshot.latest_day.as_deref().unwrap_or("unknown")
+        snapshot
+            .reading_day
+            .as_deref()
+            .unwrap_or("none in the last 2 days")
     )];
     if let Some(sleep) = snapshot
         .latest_night
@@ -1526,6 +1562,62 @@ mod tests {
         assert_eq!(kind, NoopStoreKind::Explicit);
         assert_eq!(path, path_of(&paths, NoopStoreKind::Container));
         let _ = fs::remove_dir_all(&paths.home);
+    }
+
+    #[test]
+    fn reading_day_skips_empty_rows_for_at_most_two_days() {
+        let d = |day: &str| NaiveDate::parse_from_str(day, "%Y-%m-%d").ok();
+        fn rows<'a>(
+            pairs: &'a [(&'static str, bool)],
+        ) -> impl Iterator<Item = (&'static str, bool)> + 'a {
+            pairs.iter().copied()
+        }
+        let filled = ("2026-11-03", true);
+        let empty = |day| (day, false);
+
+        assert_eq!(
+            reading_day(rows(&[filled, empty("2026-11-04")]), d("2026-11-04")).as_deref(),
+            Some("2026-11-03")
+        );
+        // Exactly two days old counts, three does not (mindBody.test.ts readingDay).
+        let two = [filled, empty("2026-11-04"), empty("2026-11-05")];
+        assert_eq!(
+            reading_day(rows(&two), d("2026-11-05")).as_deref(),
+            Some("2026-11-03")
+        );
+        let three = [filled, empty("2026-11-05"), empty("2026-11-06")];
+        assert_eq!(reading_day(rows(&three), d("2026-11-06")), None);
+        // The real day counts even when no row exists for it yet.
+        assert_eq!(reading_day(rows(&[filled]), d("2026-11-06")), None);
+        // Unknown current day: the rows alone decide, as in the frontend.
+        assert_eq!(
+            reading_day(rows(&[filled]), None).as_deref(),
+            Some("2026-11-03")
+        );
+        // A clock behind the rows cannot make an old reading look fresh.
+        assert_eq!(reading_day(rows(&three), d("2026-11-01")), None);
+        assert_eq!(reading_day(rows(&[empty("2026-11-05")]), None), None);
+        assert_eq!(reading_day(rows(&[]), None), None);
+        assert_eq!(reading_day(rows(&[("not-a-day", true)]), None), None);
+    }
+
+    #[test]
+    fn snapshot_and_brief_label_the_reading_day_not_the_empty_row() {
+        let path = seeded_database();
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO dailyMetric (deviceId, day) VALUES ('my-whoop', '2026-08-27')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let now = Utc.with_ymd_and_hms(2026, 8, 27, 12, 0, 0).unwrap();
+        let snapshot = snapshot_from_database(&path, "my-whoop".to_string(), None, now).unwrap();
+        assert_eq!(snapshot.latest_day.as_deref(), Some("2026-08-27"));
+        assert_eq!(snapshot.reading_day.as_deref(), Some("2026-08-26"));
+        let brief = runtime_health_brief_from_snapshot(&snapshot, 1_200);
+        assert!(brief.contains("latest daily data 2026-08-26"));
+        let _ = fs::remove_file(path);
     }
 
     #[test]

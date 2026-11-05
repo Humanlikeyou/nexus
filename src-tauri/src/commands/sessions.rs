@@ -25,6 +25,9 @@ pub struct BodyContext {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct BodyToday {
+    /// The day these values belong to. Absent in older session files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub day: Option<String>,
     #[serde(default)]
     pub recovery: Option<f64>,
     #[serde(default)]
@@ -53,11 +56,49 @@ pub struct BodyNight {
     pub light_min: Option<f64>,
 }
 
+/// The `recentDays` or `today` row of the snapshot's reading day. Today's row stays all-null until
+/// the night syncs, so a morning session reads the latest day with values instead.
+fn reading_row(v: &serde_json::Value) -> Option<&serde_json::Value> {
+    let rows: Vec<&serde_json::Value> = v
+        .get("recentDays")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .chain(v.get("today"))
+        .filter(|row| row.is_object())
+        .collect();
+    fn day(row: &serde_json::Value) -> Option<&str> {
+        row.get("day").and_then(serde_json::Value::as_str)
+    }
+    fn has_value(row: &serde_json::Value) -> bool {
+        ["avgHrv", "recovery", "totalSleepMin"]
+            .iter()
+            .any(|k| row.get(k).is_some_and(serde_json::Value::is_number))
+    }
+    let current = v
+        .get("logicalToday")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
+    let reading = super::noop::reading_day(
+        rows.iter()
+            .filter_map(|row| Some((day(row)?, has_value(row)))),
+        current,
+    )?;
+    rows.iter()
+        .rev()
+        .find(|row| day(row) == Some(reading.as_str()) && has_value(row))
+        .copied()
+}
+
 impl BodyContext {
     /// Build from a NOOP health_snapshot payload (camelCase keys, see LocalAccessCore.swift).
     pub fn from_snapshot(v: &serde_json::Value) -> Self {
         let num = |o: &serde_json::Value, k: &str| o.get(k).and_then(serde_json::Value::as_f64);
-        let today = v.get("today").filter(|t| t.is_object()).map(|t| BodyToday {
+        let today = reading_row(v).map(|t| BodyToday {
+            day: t
+                .get("day")
+                .and_then(|d| d.as_str())
+                .map(|d| d.chars().take(10).collect()),
             recovery: num(t, "recovery"),
             hrv: num(t, "avgHrv"),
             rhr: num(t, "restingHr"),
@@ -391,7 +432,7 @@ mod tests {
         assert_eq!(keys(&v), ["latest_night", "today"]);
         assert_eq!(
             keys(&v["today"]),
-            ["hrv", "recovery", "rhr", "sleep_total_min", "strain"]
+            ["day", "hrv", "recovery", "rhr", "sleep_total_min", "strain"]
         );
         assert_eq!(
             keys(&v["latest_night"]),
@@ -410,6 +451,55 @@ mod tests {
         assert_eq!(empty, BodyContext::default());
     }
 
+    #[test]
+    fn body_context_uses_the_latest_day_with_values() {
+        let row = |day: &str, recovery: Option<f64>| {
+            serde_json::json!({"day": day, "recovery": recovery, "avgHrv": null,
+                               "restingHr": null, "strain": null, "totalSleepMin": null})
+        };
+        let snap = serde_json::json!({
+            "logicalToday": "2026-11-05",
+            "recentDays": [row("2026-11-03", Some(1.0)), row("2026-11-04", Some(2.0)),
+                           row("2026-11-05", None)],
+            "today": row("2026-11-05", None),
+        });
+        let today = BodyContext::from_snapshot(&snap).today.unwrap();
+        assert_eq!(today.day.as_deref(), Some("2026-11-04"));
+        assert_eq!(today.recovery, Some(2.0));
+
+        // A filled today row wins over its recentDays copy, and is labelled too.
+        let snap = serde_json::json!({
+            "recentDays": [row("2026-11-05", Some(1.0))],
+            "today": row("2026-11-05", Some(2.0)),
+        });
+        let today = BodyContext::from_snapshot(&snap).today.unwrap();
+        assert_eq!(today.day.as_deref(), Some("2026-11-05"));
+        assert_eq!(today.recovery, Some(2.0));
+
+        // Two days old is kept, three is not, with or without a today row.
+        let aged = |logical: &str| {
+            serde_json::json!({
+                "logicalToday": logical,
+                "recentDays": [row("2026-11-03", Some(1.0))],
+            })
+        };
+        assert!(BodyContext::from_snapshot(&aged("2026-11-05"))
+            .today
+            .is_some());
+        assert_eq!(BodyContext::from_snapshot(&aged("2026-11-06")).today, None);
+        let all_null = serde_json::json!({"today": row("2026-11-05", None)});
+        assert_eq!(BodyContext::from_snapshot(&all_null).today, None);
+    }
+
+    #[test]
+    fn body_context_without_a_day_label_still_loads() {
+        let old = serde_json::json!({ "today": { "recovery": 1.0 }, "latest_night": null });
+        let bc: BodyContext = serde_json::from_value(old).unwrap();
+        assert_eq!(bc.today.as_ref().unwrap().day, None);
+        let saved = serde_json::to_value(&bc).unwrap();
+        assert!(saved["today"].get("day").is_none());
+    }
+
     // noop_query runs under macOS sandbox-exec, so this can only pass on macOS.
     #[cfg(target_os = "macos")]
     #[test]
@@ -418,7 +508,7 @@ mod tests {
         use super::noop_query::WhoopSource;
         let h = FakeHome::new();
         let r = h.roots();
-        let ok = h.script(r#"cat >/dev/null; echo '{"jsonrpc":"2.0","id":2,"result":{"structuredContent":{"today":{"avgHrv":1.23,"spo2Pct":1.0},"battery":{}}}}'"#);
+        let ok = h.script(r#"cat >/dev/null; echo '{"jsonrpc":"2.0","id":2,"result":{"structuredContent":{"today":{"day":"2026-01-01","avgHrv":1.23,"spo2Pct":1.0},"battery":{}}}}'"#);
         let mut s = NoopSettings {
             binary_path: sp(&ok),
             ..Default::default()

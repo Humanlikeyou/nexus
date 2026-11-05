@@ -98,6 +98,7 @@ describe("NOOP payload parsers (real shapes)", () => {
   });
   it("body_context: sleep falls back to today; null when absent, wrong shape or all-null", () => {
     expect(parseBodyContext({ today: { recovery: null, hrv: null, rhr: null, strain: null, sleep_total_min: 420 }, latest_night: null })?.sleep_minutes).toBe(420);
+    expect(parseBodyContext({ today: { day: "2026-11-04", recovery: 71 }, latest_night: null })?.captured_at).toBe("2026-11-04");
     expect(parseBodyContext(undefined)).toBeNull();
     expect(parseBodyContext(mockSnapshot(2))).toBeNull();
     expect(parseBodyContext({ today: null, latest_night: null })).toBeNull();
