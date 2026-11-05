@@ -8,6 +8,7 @@ pub mod events;
 pub mod followups;
 pub mod goals;
 pub mod ha;
+pub mod home_brief;
 pub mod kb_status;
 pub mod kv;
 pub mod llm_router;
