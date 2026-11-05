@@ -62,7 +62,7 @@ pub fn router(state: St) -> Router {
 
 /// The loopback listener. It has no key, so it refuses what a web page could send it: a Host other
 /// than loopback (DNS rebinding) and any request carrying an Origin header (cross-site fetches from a
-/// browser). HA, Hermes and Nexus's Rust client send neither.
+/// browser). Hermes and Nexus's Rust client send neither.
 pub fn local_router(state: St) -> Router {
     router(state).layer(middleware::from_fn(|req: Request, next: Next| async move {
         let headers = req.headers();
@@ -728,7 +728,7 @@ async fn ollama_version(AxState(st): AxState<St>) -> Response {
         .into_response()
 }
 
-/// HA pulls a model that is missing from `/api/tags`. The router's models are virtual, so
+/// Ollama clients pull a model missing from `/api/tags`. The router's models are virtual, so
 /// "pulling" one succeeds at once; anything else is refused.
 async fn ollama_pull(body: Bytes) -> Response {
     let v: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);

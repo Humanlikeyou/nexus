@@ -60,7 +60,7 @@ export function parseBodyContext(raw: unknown): BodyState | null {
   const today = isObj(raw.today) ? raw.today : null;
   const night = isObj(raw.latest_night) ? raw.latest_night : null;
   const ctx: BodyState = {
-    captured_at: typeof night?.day === "string" ? night.day : null,
+    captured_at: typeof night?.day === "string" ? night.day : typeof today?.day === "string" ? today.day : null,
     recovery: nn(today?.recovery),
     hrv_ms: nn(today?.hrv),
     resting_hr: nn(today?.rhr),

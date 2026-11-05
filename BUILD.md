@@ -86,7 +86,7 @@ CI (`.github/workflows/ci.yml`) uses Node 22 from `.nvmrc`: `npm ci`, `npm run c
 
 ## Local runtime
 
-- **LLM:** the default is local Ollama with `gemma4:latest` (`ollama pull gemma4`). Keep `compute_mode` at `local`. `gateway` routes LLM jobs to OpenClaw on :18789 and falls back to Ollama when OpenClaw isn't installed or reachable. OpenClaw is not required.
+- **LLM:** the default compute mode is `amara`. Nexus calls the local Amara Router (`http://127.0.0.1:8787`, set by `amara_router_url`), which picks the model and calls Ollama. Fast is `gemma4:latest` (`ollama pull gemma4`). Deep is `qwen3.8-uncensored:latest`, used only on request. `local` and a saved `gateway` behave like `amara`; `hybrid` and `api` ask the router for Claude. OpenClaw is not required. Router setup: `amara-router/README.md`.
 - **QA launches:** `NEXUS_OUTBOUND_DISABLED=1 npm run tauri -- dev` (also `true`/`yes`) blocks Telegram sends and outbox delivery for that session. Without it, a launch with `telegram_chat_id` configured sends real messages.
 - **Outbox:** pending items older than 24h are marked `expired` and are never sent.
 

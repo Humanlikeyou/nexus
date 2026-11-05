@@ -6,5 +6,10 @@
     <string>Nexus needs Bluetooth access to connect to your Muse headband for real-time EEG data.</string>
     <key>NSBluetoothPeripheralUsageDescription</key>
     <string>Nexus needs Bluetooth access to connect to your Muse headband for real-time EEG data.</string>
+    <key>LSEnvironment</key>
+    <dict>
+        <key>NEXUS_OUTBOUND_DISABLED</key>
+        <string>1</string>
+    </dict>
 </dict>
 </plist>
