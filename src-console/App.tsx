@@ -53,6 +53,8 @@ export default function App() {
     let frame = 0, tries = 0;
     const scroll = () => {
       const el = document.getElementById(anchor);
+      const fold = el?.closest("details");
+      if (fold) fold.open = true; // an anchor can live behind a page's disclosure
       if (el) el.scrollIntoView?.({ block: "start", behavior: reducedMotion() ? "auto" : "smooth" });
       else if (tries++ < 60) frame = requestAnimationFrame(scroll);
     };

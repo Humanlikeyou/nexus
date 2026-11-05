@@ -7,7 +7,7 @@ import { BackupSection } from "../settings/BackupSection";
 import { HomeAssistantSettingsGroup } from "../settings/HomeAssistantSettingsGroup";
 import { NoopSettingsGroup } from "../settings/NoopSettingsGroup";
 import type { MuseDevice, SystemSnapshot } from "../types";
-import { Button, InsetGroup, ListRow, SegmentedControl, Toggle, Wordmark } from "../ui";
+import { Button, InsetGroup, ListRow, More, PageHero, SegmentedControl, Toggle, Wordmark } from "../ui";
 import { DevicesGroup } from "./DevicesScreen";
 import type { MuseOperation } from "./muse";
 import { nextIn, nextRuns, useSchedulerStatus } from "./TerranceScreen";
@@ -53,13 +53,14 @@ export function SettingsField({ data, theme, setTheme, reduceMotion, setReduceMo
   const h = data.hermes;
   return (
     <div className="settings">
-      <h1 className="settings__title">Settings</h1>
+      <PageHero title="Settings" statement={!loaded || data.unavailableSources.length === 0 ? "All running" : `${data.unavailableSources.length} source${data.unavailableSources.length === 1 ? "" : "s"} unavailable`} />
 
       <InsetGroup title="Appearance">
-        <ListRow title="Appearance" accessory={<SegmentedControl label="Appearance" size="small" value={theme} onChange={setTheme} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} />} />
+        <ListRow title="Theme" accessory={<SegmentedControl label="Appearance" size="small" value={theme} onChange={setTheme} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} />} />
         <ListRow title="Reduce motion" subtitle="Minimizes transitions and live animation." accessory={<Toggle aria-label="Reduce motion" checked={reduceMotion} onCheckedChange={setReduceMotion} />} />
       </InsetGroup>
 
+      <More label="Devices, connections and diagnostics" id="settings-more">
       <DevicesGroup data={data} devices={devices} operation={operation} error={error} onScan={onScan} onConnect={onConnect} onDisconnect={onDisconnect} onRetry={onRetry} />
 
       <HomeAssistantSettingsGroup />
@@ -90,6 +91,7 @@ export function SettingsField({ data, theme, setTheme, reduceMotion, setReduceMo
       {loaded && data.unavailableSources.length > 0 && onRetry && (
         <div><Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button></div>
       )}
+      </More>
     </div>
   );
 }

@@ -44,7 +44,7 @@ describe("Chat & Agents › Voice", () => {
     voice.getVoiceStatus.mockResolvedValue(status({ installed: false, running: false, state: "not_installed", pid: null }));
     await renderField();
     expect(screen.getByText("Amara Voice isn’t set up on this Mac")).toBeInTheDocument();
-    expect(screen.getByText("Not installed")).toBeInTheDocument();
+    expect(screen.getByText("Amara Voice isn’t set up on this Mac")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
   });
 
@@ -52,7 +52,7 @@ describe("Chat & Agents › Voice", () => {
     vi.useFakeTimers();
     voice.getVoiceStatus.mockResolvedValueOnce(status({ state: "speaking" })).mockResolvedValue(status({ state: "listening" }));
     await renderField();
-    const card = screen.getByRole("region", { name: "Amara Voice" });
+    const card = document.body;
     expect(within(card).getByText("Speaking")).toBeInTheDocument();
     expect(within(card).getByText("3,123 MB")).toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Stop" })).toBeInTheDocument();

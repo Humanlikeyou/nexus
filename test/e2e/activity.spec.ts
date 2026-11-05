@@ -1,4 +1,4 @@
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, test, openMore } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 const at = (iso: string) => Date.parse(iso);
@@ -23,6 +23,7 @@ test("activity shows Suppressed as neutral, the Expired outbox row and the activ
   const field = activeField(page, "Chat & Agents");
   await field.getByRole("radio", { name: "Activity" }).click();
   await expect(field.getByRole("heading", { level: 1 })).toHaveText("Activity");
+  await openMore(page);
 
   const expired = field.getByRole("listitem").filter({ hasText: "Expired" }).first();
   await expect(expired).toContainText("Older than 24h, kept, not sent");
@@ -44,7 +45,7 @@ test("activity shows Suppressed as neutral, the Expired outbox row and the activ
   const skipped = field.getByRole("listitem").filter({ hasText: "weekly review" });
   await expect(skipped.locator(".ui-badge")).toHaveText("Skipped");
   await expect(skipped.locator(".ui-badge")).toHaveAttribute("data-tone", "neutral");
-  await expect(field.getByRole("listitem").filter({ hasText: "Last delivered" })).toContainText("Oct 28, 1:40 PM");
+  await expect(field.getByText(/^Last delivered /)).toContainText("Oct 28, 1:40 PM");
   expect(consoleErrors).toEqual([]);
 });
 

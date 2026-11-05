@@ -1,0 +1,50 @@
+/* Neurofeedback (Taisun, Nov 5): the lens is the feedback. Watch it glow and steady, or close your eyes
+ * and follow the sound. Everything else stays out of the way. */
+.nf-step { display: grid; gap: var(--space-4); justify-items: start; }
+.nf-step__title { margin: 0; color: var(--label); font: 300 var(--text-title1)/1.2 var(--font-text); letter-spacing: -.01em; }
+.nf-step__line { margin: 0; color: var(--label-secondary); font: 400 var(--text-title3)/var(--lh-title3) var(--font-text); }
+.nf-recommended { color: var(--page-name); }
+.nf-strategy { display: grid; gap: 2px; margin: 0; color: var(--label); font: 300 var(--text-title2)/1.35 var(--font-text); }
+.nf-strategy span { color: var(--page-name); font: 500 var(--text-callout)/var(--lh-callout) var(--font-text); }
+.nf-meta, .nf-note { margin: 0; color: var(--label-secondary); font: var(--type-callout); }
+.nf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.nf-actions--center { justify-content: center; }
+.nf-electrode { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; color: var(--label-secondary); font: var(--type-callout); }
+.nf-electrode i { width: 6px; height: 6px; border-radius: 50%; background: var(--label-tertiary); }
+.nf-electrode[data-mode="read"] i { background: var(--accent); }
+
+.nf-fit { display: grid; width: 100%; margin: 0; padding: 0; list-style: none; }
+.nf-fit li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding-block: var(--space-3); box-shadow: inset 0 -1px 0 var(--separator); color: var(--label); font: var(--type-body); }
+.nf-fit li:last-child { box-shadow: none; }
+.nf-fit i { width: 8px; height: 8px; border-radius: 50%; background: var(--label-tertiary); }
+.nf-fit__state { color: var(--label-secondary); font: var(--type-callout); }
+.nf-fit li[data-quality="good"] i { background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent); }
+.nf-fit li[data-quality="fair"] i { background: var(--copper); }
+.nf-fit li[data-quality="poor"] .nf-fit__state { color: var(--tone-warning-text); }
+.nf-fit li[data-quality="poor"] i { background: var(--tone-warning); }
+
+.nf-live { display: grid; justify-items: center; gap: var(--space-3); text-align: center; }
+.nf-lens { width: 100%; height: min(52vh, 400px); min-height: 180px; display: grid; place-items: center; container-type: size; }
+.nf-live__label { margin: 0; color: var(--label); font: 300 var(--text-title1)/1.2 var(--font-text); letter-spacing: -.01em; }
+.nf-live__sub { max-width: 52ch; min-height: 1.4em; margin: 0; color: var(--label-secondary); font: var(--type-body); }
+.nf-live[data-held] .nf-live__sub { color: var(--tone-warning-text); }
+.nf-progress { width: 220px; height: 2px; border-radius: 1px; background: var(--separator); overflow: hidden; }
+.nf-progress i { display: block; height: 100%; background: var(--accent); transform-origin: left; transition: transform 500ms linear; }
+.nf-readout { display: flex; gap: var(--space-8); margin: var(--space-2) 0 0; font-variant-numeric: tabular-nums; }
+.nf-readout div { display: grid; gap: 2px; }
+.nf-readout dt { order: 2; color: var(--label-secondary); font: var(--type-subheadline); }
+.nf-readout dd { order: 1; margin: 0; color: var(--label); font: 300 var(--text-title3)/1.2 var(--font-text); }
+
+.nf-summary__figure { display: flex; align-items: baseline; gap: var(--space-3); margin: 0; color: var(--label); font: 300 var(--page-statement)/1.1 var(--font-text); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.nf-summary__figure span { color: var(--label-secondary); font: var(--type-body); letter-spacing: 0; }
+.nf-trend { display: grid; gap: var(--space-2); width: 100%; }
+.nf-trend h3 { margin: 0; color: var(--label-secondary); font: 400 var(--text-callout)/var(--lh-callout) var(--font-text); }
+.nf-noteform { display: grid; gap: var(--space-2); width: 100%; }
+.nf-noteform label { display: grid; gap: 2px; color: var(--label); font: var(--type-body); }
+.nf-noteform label span { color: var(--label-secondary); font: var(--type-callout); }
+.nf-noteform textarea { width: 100%; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-sm); background: var(--fill-tertiary); box-shadow: inset 0 0 0 1px var(--separator); color: var(--label); font: var(--type-body); resize: vertical; }
+.nf-noteform textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .nf-progress i { transition: none; } }
+:root[data-reduce-motion="true"] .nf-progress i { transition: none; }
+/* Ending a session isn't an alarm: it stays a quiet word inside the flow. */
+:is(.nf-step, .nf-live) .ui-button[data-variant="destructive"] { --ui-button-bg: transparent; --ui-button-bg-hover: var(--fill-tertiary); --ui-button-bg-pressed: var(--fill-secondary); --ui-button-fg: var(--label); --ui-button-line: var(--separator-strong); --ui-button-highlight: transparent; }

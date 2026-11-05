@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, test, openMore } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 const SHOTS = process.env.MIND_BODY_SHOTS; // e.g. /tmp/mind-body-shots (screenshots only when set)
@@ -15,12 +15,14 @@ test.describe("Mind–Body", () => {
     await navButton(page, "Mind–Body").click();
     const f = activeField(page, "Mind–Body");
     await expect(f.getByRole("heading", { level: 1 })).toHaveText("Mind–Body");
+    await openMore(page);
     for (const name of ["Readiness", "Focus drivers", "Session body context"]) await expect(f.getByRole("heading", { level: 2, name })).toBeVisible();
     await expect(f.getByLabel(/^Readiness: (High|Moderate|Low)$/)).toBeVisible();
     await expect(f.getByText("Collecting data: 1/15 sessions")).toBeVisible();
-    await expect(f.getByText(/Correlation, not causation · n = 1/)).toBeVisible();
+    await expect(f.getByText("n = 1 matched sessions")).toBeVisible();
+    await expect(f.getByText("Correlation, not causation.")).toBeVisible();
     await expect(f.getByText("Personal estimates, not medical data.").last()).toBeVisible();
-    await expect(f.getByRole("img", { name: /HRV, last 14 days/ })).toBeVisible();
+    await expect(f.getByRole("img", { name: /^HRV, last \d+ days/ })).toBeVisible();
     expect(consoleErrors).toEqual([]);
     await shot(page, `data-${theme}`);
   });
@@ -50,6 +52,7 @@ test.describe("Mind–Body", () => {
     await openApp(page, { theme });
     await navButton(page, "Settings").click();
     const f = activeField(page, "Settings");
+    await openMore(page);
     await expect(f.getByRole("radio", { name: "NOOP (recommended)" })).toHaveAttribute("aria-checked", "true");
     await f.getByLabel("NOOP binary path").fill("relative/noop");
     await expect(f.getByText("Use a full path that starts with /.")).toBeVisible();

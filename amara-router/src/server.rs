@@ -352,7 +352,7 @@ async fn chat(
             entry["status"] = json!(if err.is_some() { "error" } else { "ok" });
             st.log_route(&entry);
             if meta.tier == Tier::Deep {
-                st.schedule_rewarm();
+                st.watch_for_deep_unload();
             }
         }
     };

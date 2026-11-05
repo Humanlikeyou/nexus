@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
-import { expect, openApp, openView, setMock, test, type Theme } from "./fixtures/tauri-mock";
+import { expect, openApp, openView, setMock, test, type Theme, openMore } from "./fixtures/tauri-mock";
 import { FOLLOWUPS, responses, type Responses } from "./fixtures/snapshot";
 
 const open = async (page: Page, theme: Theme, data: Responses = responses()) => {
@@ -16,6 +16,7 @@ test.describe("Chat & Agents › Lists", () => {
   test("shows the three sections; the other sub-views stay in place", async ({ page, theme, consoleErrors }) => {
     const field = await open(page, theme);
     await expect(field.getByRole("radio")).toHaveText(["Chat", "Activity", "Lists", "Crews", "Voice"]);
+    await openMore(page);
     for (const name of ["Open", "Done recently", "Not mentioning"]) await expect(field.getByRole("heading", { level: 2, name })).toBeVisible();
     await expect(field.getByRole("list", { name: "Open items" }).getByRole("listitem")).toHaveCount(4);
     await expect(field.getByText("Overdue")).toBeVisible();
@@ -35,6 +36,7 @@ test.describe("Chat & Agents › Lists", () => {
   test("empty states", async ({ page, theme }) => {
     const field = await open(page, theme, { ...responses(), followups_list: { open: [], recentlyDone: [], muted: [] } });
     await expect(field.getByText("Nothing open. Amara isn't following up on anything.")).toBeVisible();
+    await openMore(page);
     await expect(field.getByText("Nothing done in the last 30 days.")).toBeVisible();
     await expect(field.getByText("No muted topics. Amara can bring up anything.")).toBeVisible();
   });
@@ -68,9 +70,10 @@ test.describe("Chat & Agents › Lists", () => {
     await text.fill("Send the final release notes");
     await setMock(page, "followups_list", changed);
     await refocus(page);
-    await expect(field.getByText("Added by Amara")).toBeVisible();
     await expect(text).toHaveValue("Send the final release notes");
     await expect(text).toBeFocused();
+    await openMore(page); // a fifth open item waits behind the disclosure
+    await expect(field.getByText("Added by Amara")).toBeVisible();
     await expect(field.getByText(/Amara updated this while you were editing/)).toBeVisible();
     await field.getByRole("button", { name: "Save", exact: true }).click();
     await expect(text).toHaveCount(0);
@@ -124,6 +127,7 @@ test.describe("Chat & Agents › Lists", () => {
   test("Done, Reopen, add item and mute send the right commands", async ({ page, theme }) => {
     const field = await open(page, theme);
     await field.getByRole("button", { name: "Done: Pick a date for the sample dinner" }).click();
+    await openMore(page);
     await field.getByRole("button", { name: "Reopen: Return the sample package" }).click();
     await field.getByRole("button", { name: "Add item", exact: true }).click();
     const add = field.getByRole("form", { name: "Add item" });

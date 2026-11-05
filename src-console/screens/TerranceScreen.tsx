@@ -1,4 +1,4 @@
-import { Bot, Brain, ChevronRight, CircleDollarSign, Cpu, Library, RefreshCw, Sparkles } from "lucide-react";
+import { Bot, Brain, ChevronRight, CircleDollarSign, Cpu, Library, RefreshCw } from "lucide-react";
 import { HermesSubtitle } from "./agentLabels";
 import { useEffect, useState, type ReactNode } from "react";
 import { getSchedulerStatus, type SchedulerStatus } from "@/terrance/system/scheduler";
@@ -8,9 +8,10 @@ import { assistantView, kbView } from "../app/statusViews";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import { dateTime, money, time } from "../lib/format";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, StatusDot, type Tone } from "../ui";
+import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, StatusDot, type Tone, Line, Lines, More, PageHero } from "../ui";
 import { recoveryBand } from "./HealthScreen";
 import { GoalsCard } from "./GoalsCard";
+import { useReadinessLine } from "../lib/useReadiness";
 import "./TerranceScreen.css";
 
 const DASH = "—";
@@ -243,6 +244,7 @@ function OpenLink({ to, label, onNavigate }: { to: ModuleId; label: string; onNa
 
 export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNow, scheduler: schedulerOverride }: TerranceFieldProps) {
   const now = useNow(fixedNow);
+  const readinessLine = useReadinessLine();
   const scheduler = useSchedulerStatus(schedulerOverride);
   const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
@@ -251,26 +253,16 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
   const summary = isLoading ? null : homeSummary(data);
 
   const header = (
-    <header className="home__header">
-      <div>
-        {/* Naming (Decision 13): h1 "Command Center"; greeting, then what Amara has for you · date. */}
-        <h1>Command Center</h1>
-        <p className="home__date">{greeting(now)}, Taisun</p>
-        <p className="home__date home__summary">
-          {summary && (summary.kind === "actions" && onNavigate
-            ? <button type="button" className="home__summary-link" onClick={() => onNavigate("chat")}>{summary.text}</button>
-            : <span>{summary.text}</span>)}
-          {summary && " · "}
-          <time dateTime={new Date(now).toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" })}>{homeDate(now)}</time>
-        </p>
-        {!isLoading && <StatusStrip data={data} scheduler={scheduler} fixedNow={fixedNow} onNavigate={onNavigate} />}
-      </div>
-      <div className="home__header-badges">
-        {/* Sentence-case status text with a dot; Badges stay for 1–2 word tags. Gateway state is in the strip (Agents). */}
-        {unavailable.length > 0 && <span className="home__status" data-tone="warning" title={unavailable.map((s) => s.label).join(", ")}><i className="home__dot" aria-hidden="true" />{unavailable.length} source{unavailable.length === 1 ? "" : "s"} unavailable</span>}
-      </div>
-    </header>
+    <PageHero title="Command Center" statement={`${greeting(now)}, Taisun`}
+      detail={<span className="home__summary">
+        {summary && (summary.kind === "actions" && onNavigate
+          ? <button type="button" className="home__summary-link" onClick={() => onNavigate("chat")}>{summary.text}</button>
+          : <span>{summary.text}</span>)}
+        {summary && " · "}
+        <time dateTime={new Date(now).toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" })}>{homeDate(now)}</time>
+      </span>} />
   );
+  const sourcesNote = unavailable.length > 0 && <span className="home__status" data-tone="warning" title={unavailable.map((s) => s.label).join(", ")}><i className="home__dot" aria-hidden="true" />{unavailable.length} source{unavailable.length === 1 ? "" : "s"} unavailable</span>;
 
   if (isLoading) {
     return (
@@ -321,9 +313,31 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
     <div className="home" data-state="ready">
       {header}
 
-      <div className="home__top">
-        <Card title="Recovery & sleep" accessory={<OpenLink to="health" label="Open Fitness" onNavigate={onNavigate} />}>{recoveryBody}</Card>
+      {sourcesNote}
+      <section className="home__first" aria-label="Recovery & sleep">
+        {recoveryBody}
+        <OpenLink to="health" label="Open Fitness" onNavigate={onNavigate} />
+      </section>
 
+      {readinessLine && (
+        <button type="button" className="home__readiness" disabled={!onNavigate} onClick={() => onNavigate?.("mindbody")} aria-label={`Open Mind–Body. Readiness ${readinessLine.score}, ${readinessLine.label}. ${readinessLine.reason}`}>
+          <span className="home__readiness-score">{readinessLine.score}</span>
+          <span className="home__readiness-text">
+            <span>Mind–Body readiness{readinessLine.earlierDay ? `, ${readinessLine.earlierDay}` : ""} <Badge tone={readinessLine.tone}>{readinessLine.label}</Badge></span>
+            <span className="home__readiness-reason">{readinessLine.reason}</span>
+          </span>
+        </button>
+      )}
+
+      <Card title="Priorities" accessory={<OpenLink to="chat" label="Open Chat" onNavigate={onNavigate} />}>
+        {priorities.length === 0
+          ? <p className="home__note">No current priorities</p>
+          : <Lines label="Priorities">{priorities.slice(0, 3).map((p) => <Line key={`${p.sourceKind}-${p.sourceId}`} title={p.title} trailing={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{p.sourceStatus.replace(/_/g, " ")}</Badge>} />)}</Lines>}
+      </Card>
+
+      <More label="Agents, schedule and everything else" id="home-more">
+      {!isLoading && <StatusStrip data={data} scheduler={scheduler} fixedNow={fixedNow} onNavigate={onNavigate} />}
+      <div className="home__top">
         <Card title="Scheduler" accessory={scheduler.running ? <Badge tone="success">Running</Badge> : undefined /* stopped is already stated by the status strip */}>
           <InsetGroup>
             <ListRow title={<span title={exact(next.consolidation)}>{nextConsolidation ? `Next: Consolidation ${nextConsolidation}` : "Next: Consolidation not scheduled yet"}</span>} />
@@ -361,18 +375,14 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           : <InsetGroup><ListRow icon={Library} title={kb.title ?? "Verba"} subtitle={kb.body} /></InsetGroup>}
       </Card>
 
-      <Card title="Priorities" accessory={<OpenLink to="chat" label="Open Chat" onNavigate={onNavigate} />}>
-        {priorities.length === 0
-          ? <p className="home__note">No current priorities</p>
-          : (
-            <InsetGroup>
-              {priorities.map((p) => (
-                <ListRow key={`${p.sourceKind}-${p.sourceId}`} icon={Sparkles} title={p.title} subtitle={`#${p.rank} · ${p.sourceKind}`}
-                  accessory={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{p.sourceStatus.replace(/_/g, " ")}</Badge>} />
-              ))}
-            </InsetGroup>
-          )}
-      </Card>
+      {priorities.length > 3 && (
+        <InsetGroup title="More priorities">
+          {priorities.slice(3).map((p) => (
+            <ListRow key={`${p.sourceKind}-${p.sourceId}`} title={p.title} subtitle={`#${p.rank} · ${p.sourceKind}`}
+              accessory={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{p.sourceStatus.replace(/_/g, " ")}</Badge>} />
+          ))}
+        </InsetGroup>
+      )}
 
       <GoalsCard goals={data.goals} failed={down("read_goals")} onRetry={onRetry} />
 
@@ -402,6 +412,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           Scheduler{nextConsolidation ? ` · next consolidation ${nextConsolidation.replace(/^in /, "")}` : ""}{nextReasoning ? ` · next reasoning ${nextReasoning.replace(/^in /, "")}` : ""}
         </footer>
       )}
+      </More>
     </div>
   );
 }

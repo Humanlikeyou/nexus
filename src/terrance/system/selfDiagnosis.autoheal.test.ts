@@ -356,3 +356,16 @@ describe("runDiagnostics: local mode skips the OpenClaw restart", () => {
     expect(calls("restart_services").map(([, a]) => a.services)).toEqual([["docker:stack-n8n-1"]]);
   });
 });
+
+describe("n8n check that can't run", () => {
+  it("never offers a restart, because it doesn't know n8n is down", async () => {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_docker_service") throw new Error("docker not found");
+      if (cmd === "check_service_port") return "open";
+      return { status: "offline", gateway: false, installed: false };
+    });
+    const report = await runDiagnostics();
+    const n8n = report.issues.find((i) => i.service === "n8n");
+    expect(n8n?.canAutoHeal).toBe(false);
+  });
+});

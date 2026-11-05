@@ -99,6 +99,10 @@ pub const GPU_BUDGET_GB_RANGE: std::ops::RangeInclusive<f64> = 1.0..=512.0;
 pub const FIRST_TOKEN_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 1_000..=300_000;
 /// Accepted `loading.first_token_timeout_resident_ms` range.
 pub const FIRST_TOKEN_RESIDENT_RANGE: std::ops::RangeInclusive<u64> = 1_000..=600_000;
+/// Accepted `loading.deep_load_timeout_ms` range.
+pub const DEEP_LOAD_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 100..=300_000;
+/// Accepted `loading.fast_wait_ms` range.
+pub const FAST_WAIT_RANGE: std::ops::RangeInclusive<u64> = 100..=600_000;
 
 fn default_fast_num_ctx() -> u32 {
     DEFAULT_FAST_NUM_CTX
@@ -174,14 +178,11 @@ pub struct Loading {
     /// Also load the deep model at startup, after fast. Off by default: on low RAM both may
     /// not fit, and loading deep could evict fast.
     pub warm_deep_on_start: bool,
-    /// Right after a deep answer, re-warm fast in the background, but only when `/api/ps`
-    /// shows VRAM headroom for it within `gpu_budget_gb`. Otherwise the next fast request
-    /// loads it.
+    /// Re-warm fast in the background once deep's keep-alive has ended.
     pub rewarm_fast_after_deep: bool,
-    /// Unused since the VRAM-gated re-warm (no more polling); kept so older configs parse.
+    /// Seconds between `/api/ps` checks after deep work, to re-warm fast once deep has unloaded.
     pub poll_secs: u64,
-    /// GPU memory budget in GB (1-512). Re-warm fast only if the `size_vram` of the loaded
-    /// models plus fast's last seen `size_vram` fits. ~21 GB is usable by the GPU on a 32 GB Mac.
+    /// Unused now that fast and deep are swapped by hand; kept so older configs parse.
     pub gpu_budget_gb: f64,
     /// Ollama must send its first byte within this time (1000-300000 ms), or the request gets
     /// a 503 "model loading" reply while the load continues in the background.
@@ -189,6 +190,13 @@ pub struct Loading {
     /// First-byte timeout when the model is already resident per `/api/ps` (1000-600000 ms).
     /// Ollama streams nothing during prompt evaluation, so long prompts need longer.
     pub first_token_timeout_resident_ms: u64,
+    /// How long a deep request may wait for fast to go quiet and deep to load (100-300000 ms),
+    /// before it is answered on fast with reason `deep_unavailable`. Prompt evaluation comes after
+    /// this, under `first_token_timeout_resident_ms`.
+    pub deep_load_timeout_ms: u64,
+    /// How long a fast request waits while deep is loading or answering (100-600000 ms), before it
+    /// gets a 503 with `Retry-After`.
+    pub fast_wait_ms: u64,
 }
 
 impl Default for Loading {
@@ -201,6 +209,8 @@ impl Default for Loading {
             gpu_budget_gb: 21.0,
             first_token_timeout_ms: 20_000,
             first_token_timeout_resident_ms: 300_000,
+            deep_load_timeout_ms: 90_000,
+            fast_wait_ms: 120_000,
         }
     }
 }
@@ -344,6 +354,16 @@ impl Config {
                 "loading.first_token_timeout_resident_ms",
                 self.loading.first_token_timeout_resident_ms,
                 FIRST_TOKEN_RESIDENT_RANGE,
+            ),
+            (
+                "loading.deep_load_timeout_ms",
+                self.loading.deep_load_timeout_ms,
+                DEEP_LOAD_TIMEOUT_RANGE,
+            ),
+            (
+                "loading.fast_wait_ms",
+                self.loading.fast_wait_ms,
+                FAST_WAIT_RANGE,
             ),
         ] {
             if !r.contains(&v) {

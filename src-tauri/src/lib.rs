@@ -4,9 +4,9 @@ mod dock_icon;
 
 use commands::voice;
 use commands::{
-    arm, assistant, ble_common, continuity, crew, events, followups, goals, ha, kb_status, kv,
-    llm_router, muse, noop, noop_query, onboarding, openclaw, outbox, packager, replay, research,
-    restart_services, sessions, snapshots, system, telegram, terrence_actions,
+    arm, assistant, ble_common, continuity, crew, events, followups, goals, ha, home_brief,
+    kb_status, kv, llm_router, muse, noop, noop_query, onboarding, openclaw, outbox, packager,
+    replay, research, restart_services, sessions, snapshots, system, telegram, terrence_actions,
     terrence_automations, terrence_context, terrence_priorities, terrence_projects,
     terrence_runtime, terrence_runtime_bridge,
 };
@@ -21,9 +21,11 @@ pub mod test_support {
     use std::path::Path;
 
     pub use crate::app_paths::{
-        data_dir, merge_legacy_config_in, migrate_legacy_data_dir_in, DATA_DIR_ENV, DATA_DIR_NAME,
+        data_dir, merge_legacy_config_in, migrate_legacy_data_dir_in, private_open_options,
+        DATA_DIR_ENV, DATA_DIR_NAME,
     };
     pub use crate::commands::goals::{read_goals, save_goals};
+    pub use crate::commands::muse;
     pub use crate::commands::noop::health_snapshot;
     pub use crate::commands::onboarding::{check_onboarding, complete_onboarding};
     pub use crate::commands::outbox::get_outbox_status;
@@ -201,6 +203,7 @@ pub fn run() {
             noop_query::noop_query,
             noop_query::get_noop_settings,
             noop_query::set_noop_settings,
+            home_brief::home_brief,
             // Amara's follow-up lists (commands/followups.rs)
             followups::followups_list,
             followups::followups_add_item,

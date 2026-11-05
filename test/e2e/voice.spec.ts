@@ -1,4 +1,4 @@
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, test, openMore } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 /** Chat & Agents › Voice (commands/voice.rs). VOICE_SHOTS=<dir> also saves screenshots there. */
@@ -12,9 +12,10 @@ test("Voice: live state, voice picker and recent turns", async ({ page, theme, c
   const field = activeField(page, "Chat & Agents");
   await field.getByRole("radio", { name: "Voice" }).click();
   await expect(field.getByRole("heading", { level: 1 })).toHaveText("Voice");
-  const card = field.getByRole("region", { name: "Amara Voice" });
-  await expect(card.getByText("Listening", { exact: true })).toBeVisible();
+  const card = field;
+  await expect(card.getByLabel("Amara Voice: Listening")).toBeVisible();
   await expect(card.getByRole("button", { name: "Stop" })).toBeVisible();
+  await openMore(page);
   await expect(field.getByLabel("Voice", { exact: true })).toHaveValue("neosoul_g");
   const rows = field.getByRole("list", { name: "Recent turns" }).getByRole("listitem");
   await expect(rows).toHaveCount(3);

@@ -67,6 +67,15 @@ export function readingDay({ hrv, recovery, sleep }: ReadinessInput): string | n
 /** The points up to and including `day`; all of them when there is no reading day. */
 export const upToDay = (points: NoopMetricPoint[], day: string | null) => (day ? points.filter((p) => p.day <= day) : points);
 
+/** The numbers both Today and Mind–Body read: the reading day, its readiness and its recovery. */
+export function readinessReading(series: { hrv: NoopMetricPoint[]; recovery: NoopMetricPoint[]; sleep: NoopMetricPoint[] }) {
+  const asOf = readingDay(series);
+  const ready = readiness({ hrv: upToDay(series.hrv, asOf), recovery: upToDay(series.recovery, asOf), sleep: upToDay(series.sleep, asOf) });
+  const upTo = [...upToDay(series.recovery, asOf)].sort((a, b) => a.day.localeCompare(b.day));
+  const recovery = upTo[upTo.length - 1]?.value ?? null;
+  return { asOf, ready, recovery, earlier: asOf !== null && series.recovery.some((p) => p.day > asOf) };
+}
+
 /** "2026-11-04" → "Nov 4". */
 export const shortDay = (day: string) => new Date(day).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 

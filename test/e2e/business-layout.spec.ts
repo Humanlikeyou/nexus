@@ -1,27 +1,27 @@
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, openMore, test } from "./fixtures/tauri-mock";
 
-// screen-specs › Business › Content pipeline: 5 stage columns; below 900px of content width, one list grouped by stage.
-async function stageBoxes(page: import("@playwright/test").Page) {
+// Business keeps its first glance short: the pipeline lives behind the disclosure, as one list grouped by stage.
+test("(l) pipeline: one list grouped by stage, empty stages hidden", async ({ page, theme }) => {
+  await openApp(page, { theme, reduceMotion: true });
   await navButton(page, "Business").click();
   const field = activeField(page, "Business");
   await expect(field.getByRole("heading", { level: 1 })).toHaveText("Business");
-  const groups = field.locator(".biz__stages .biz__stage");
-  await expect(groups.first()).toBeVisible();
-  return groups.evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== "none").map((e) => { const b = e.getBoundingClientRect(); return { x: Math.round(b.x), y: Math.round(b.y), text: e.querySelector("h3")?.textContent ?? "" }; }));
-}
-
-test("(l) wide: pipeline shows all 5 stages side by side", async ({ page, theme }) => {
-  await openApp(page, { theme, reduceMotion: true });
-  const boxes = await stageBoxes(page);
-  expect(boxes).toHaveLength(5);
-  expect(new Set(boxes.map((b) => b.y)).size).toBe(1);
-});
-
-test("(l) narrow (<900px content): pipeline is one list grouped by stage, empty stages hidden", async ({ page, theme }) => {
-  await page.setViewportSize({ width: 1000, height: 900 });
-  await openApp(page, { theme, reduceMotion: true });
-  const boxes = await stageBoxes(page);
+  await expect(field.locator(".biz__stage").first()).toBeHidden();
+  await openMore(page);
+  await expect(field.locator(".biz__stage").first()).toBeVisible();
+  const boxes = await field.locator(".biz__stage").evaluateAll((els) => els.map((e) => { const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, text: e.querySelector(".ui-inset-group__title")?.textContent }; }));
   expect(boxes.map((b) => b.text)).toEqual(["Ideation · 1", "Drafting · 1"]);
   expect(new Set(boxes.map((b) => b.x)).size).toBe(1);
   expect(boxes[1].y).toBeGreaterThan(boxes[0].y);
+});
+
+test("(l) first glance: a headline and at most three work items, however long the list", async ({ page, theme }) => {
+  const { responses } = await import("./fixtures/snapshot");
+  const read_tasks = Array.from({ length: 24 }, (_, i) => ({ title: `Task ${i + 1}`, status: i % 2 ? "active" : "waiting", priority: "normal", tags: [] }));
+  await openApp(page, { theme, reduceMotion: true, data: { ...responses(), read_tasks } });
+  await navButton(page, "Business").click();
+  const field = activeField(page, "Business");
+  await expect(field.locator(".page-hero__statement")).toHaveText("12 in progress, 12 waiting");
+  await expect(field.locator(".quiet-line")).toHaveCount(3);
+  await expect(field.getByText("Task 24")).toBeHidden();
 });

@@ -226,7 +226,8 @@ export async function runDiagnostics(): Promise<DiagnosticReport> {
       service: "n8n",
       status: "error",
       message: "Failed to check n8n container status",
-      canAutoHeal: true,
+      // Not knowing isn't the same as down: never ask to restart a container we couldn't check.
+      canAutoHeal: false,
     });
   }
 

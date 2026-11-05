@@ -59,7 +59,12 @@ function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
       if (canned && typeof canned === "object" && "__reject" in canned) throw structuredClone(canned.__reject);
       if (canned && typeof canned === "object" && canned.__byTool) {
         const tool = String(args?.tool ?? "");
-        if (tool in canned.__byTool) return structuredClone(canned.__byTool[tool]);
+        if (tool in canned.__byTool) {
+          const answer = canned.__byTool[tool] as { __byKey?: Record<string, unknown> };
+          // __byKey: a different metric_series per metric key.
+          const key = String((args?.args as { key?: unknown } | undefined)?.key ?? "");
+          return structuredClone(answer && typeof answer === "object" && answer.__byKey ? answer.__byKey[key] : answer);
+        }
         throw { kind: "tool_not_allowed", detail: tool };
       }
       if (cmd in data) return structuredClone(data[cmd]);
@@ -134,6 +139,15 @@ const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: 
 
 /** Resolves once a route transition and its enter animation have finished. */
 export const routeSettled = (page: Page) => page.waitForFunction(() => !document.documentElement.dataset.routeMotion);
+
+/** Opens the page's quiet disclosure, the way a person would. */
+export async function openMore(page: Page) {
+  // A slow chunk can hold the route back, and an error state may have no disclosure at all.
+  await page.locator(".active-field details.quiet-more").first().waitFor({ state: "attached", timeout: 2_000 }).catch(() => undefined);
+  await routeSettled(page);
+  const closed = page.locator(".active-field details.quiet-more:not([open]) > summary");
+  while (await closed.count()) await closed.first().click();
+}
 
 /** Opens a section, or a sub-view through its host, and returns the screen region. */
 export async function openView(page: Page, label: string) {

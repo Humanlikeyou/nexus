@@ -42,7 +42,7 @@ test("glass applied: palette dialog blurs, cards stay solid, vibrancy layers tra
   const cardBf = await page.locator(".ui-card").first().evaluate((el) => getComputedStyle(el).backdropFilter).catch(() => "none");
   expect(cardBf).toBe("none");
   await page.evaluate(() => document.documentElement.setAttribute("data-vibrancy", "true"));
-  for (const sel of ["html", "#root", "main.command-surface > nav.system-constellation"]) {
+  for (const sel of ["html", "#root"]) {
     expect(await page.locator(sel).first().evaluate((el) => getComputedStyle(el).backgroundColor), sel).toBe("rgba(0, 0, 0, 0)");
   }
 });

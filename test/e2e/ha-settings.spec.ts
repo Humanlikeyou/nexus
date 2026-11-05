@@ -1,4 +1,4 @@
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, test, openMore } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 /** Settings › Home Assistant: write-only token, loopback URL, test connection, Smart home link. */
@@ -8,6 +8,7 @@ test.describe("Home Assistant settings", () => {
   test("missing commands show Coming soon, not an error", async ({ page, theme, consoleErrors }) => {
     await openApp(page, { theme });
     await navButton(page, "Settings").click();
+    await openMore(page);
     const group = activeField(page, "Settings").locator("#home-assistant");
     await expect(group).toContainText("Coming soon: needs Nexus update.");
     await expect(group.getByRole("button", { name: "Test connection" })).toHaveCount(0);
@@ -18,6 +19,7 @@ test.describe("Home Assistant settings", () => {
     const data = { ...responses(), ha_get_config: { url: null, tokenSet: false, tokenSource: null }, ha_set_config: null, ha_test_connection: { ok: true, version: "2026.10.1" } };
     await openApp(page, { theme, data});
     await navButton(page, "Settings").click();
+    await openMore(page);
     const group = activeField(page, "Settings").locator("#home-assistant");
     await expect(group.getByText("Not set", { exact: true })).toBeVisible();
     const address = group.getByLabel("Address");
@@ -49,6 +51,7 @@ test.describe("Home Assistant settings", () => {
     const data = { ...responses(), ha_get_config: { url: "http://127.0.0.1:8123", tokenSet: true, tokenSource: "app" }, ha_clear_token: { fallbackActive: true }, ha_test_connection: { ok: false, kind: "auth_rejected" } };
     await openApp(page, { theme, data });
     await navButton(page, "Settings").click();
+    await openMore(page);
     const group = activeField(page, "Settings").locator("#home-assistant");
     await expect(group.getByText("Saved", { exact: true })).toBeVisible();
     await expect(group.getByText("Saved in Nexus")).toBeVisible();
@@ -74,6 +77,7 @@ test.describe("Home Assistant settings", () => {
     const data = { ...responses(), ha_get_config: { url: "http://127.0.0.1:8123", tokenSet: true, tokenSource: "app" }, ha_test_connection: { ok: true, version: "2026.10.1" } };
     await openApp(page, { theme, data });
     await navButton(page, "Settings").click();
+    await openMore(page);
     const group = activeField(page, "Settings").locator("#home-assistant");
     const address = group.getByLabel("Address");
     await expect(address).toHaveValue("http://127.0.0.1:8123");
@@ -96,6 +100,7 @@ test.describe("Home Assistant settings", () => {
     const data = { ...responses(), ha_get_config: { url: "http://127.0.0.1:8123", tokenSet: true, tokenSource: "app" }, ha_test_connection: { ok: false, kind: "token_required" } };
     await openApp(page, { theme, data });
     await navButton(page, "Settings").click();
+    await openMore(page);
     const group = activeField(page, "Settings").locator("#home-assistant");
     const address = group.getByLabel("Address");
     await expect(address).toHaveValue("http://127.0.0.1:8123");

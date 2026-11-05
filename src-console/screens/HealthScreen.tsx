@@ -5,7 +5,7 @@ import { INITIAL_SNAPSHOT } from "../bridge";
 import { EMPTY_DEVICE_ID } from "../lib/devices";
 import { date, formatMinutes, number } from "../lib/format";
 import type { NoopDailyMetric, NoopHealthInsight, NoopHealthSnapshot, SystemSnapshot } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, Meter, Ring, SegmentedControl, Sparkline, StatTile, type Tone } from "../ui";
+import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, SegmentedControl, Sparkline, StatTile, type Tone } from "../ui";
 import "./HealthScreen.css";
 
 const NOOP_COMMAND = "get_noop_health_snapshot";
@@ -158,26 +158,17 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
   if (isLoading) return <FitnessSkeleton />;
 
   const status = STATUS_BADGE[health.status];
+  const heroBand = recoveryBand(health.today?.recovery ?? null);
   const header = (
-    <header className="fitness__header">
-      <div className="fitness__heading">
-        <div className="fitness__title-row">
-          <h1>Fitness</h1>
-          {failed
-            ? <Badge tone="danger">Unavailable</Badge>
-            : <Badge tone={status.tone}>{status.text}</Badge>}
-        </div>
-        <p className="fitness__meta">
-          {failed
-            ? "NOOP health couldn't be read."
-            : [health.generatedAt ? `Updated ${clock(health.generatedAt)}` : null, health.dataAgeDays != null ? `${health.dataAgeDays}d old` : null, health.deviceId && health.deviceId !== EMPTY_DEVICE_ID ? health.deviceId : null].filter(Boolean).join(" · ") || "Read directly from your local NOOP store."}
-        </p>
-      </div>
+    <>
+      <PageHero title="Fitness"
+        statement={failed ? "Out of reach" : heroBand ? `${heroBand.word} recovery` : status.text}
+        detail={failed ? "NOOP health couldn't be read." : [heroBand && status.tone !== "warning" ? status.text : null, health.generatedAt ? `Updated ${clock(health.generatedAt)}` : null, health.dataAgeDays != null ? `${health.dataAgeDays}d old` : null, health.deviceId && health.deviceId !== EMPTY_DEVICE_ID ? health.deviceId : null].filter(Boolean).join(" · ") || undefined} />
       <div className="fitness__header-trailing">
-        {!failed && <BatteryStatus battery={health.battery} />}
+        {failed ? <Badge tone="danger">Unavailable</Badge> : heroBand && status.tone === "warning" && <Badge tone="warning">{status.text}</Badge>}
         {failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
       </div>
-    </header>
+    </>
   );
 
   if (failed || health.status === "unavailable" || health.status === "waiting_for_data") {
@@ -190,6 +181,7 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
             <p className="fitness__callout">{failed ? "Amara OS couldn't read the local NOOP store. Try again in a moment." : health.message || "NOOP health data is not available yet."}</p>
             {!failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Check again</Button>}
           </div>
+          <More label="Readiness">
           <div className="fitness__tiles fitness__tiles--3">
             <StatTile label="Recovery" value={null} />
             <StatTile label="HRV" value={null} unit="ms" />
@@ -200,6 +192,7 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
             <ListRow icon={Sparkles} title="Morning briefing" subtitle="Amara stays quiet until a fresh sleep session is available." accessory={<Badge tone="neutral">Waiting</Badge>} />
             <ListRow icon={BatteryMedium} title="Battery watch" subtitle={health.battery ? "A current NOOP band reading is available." : "No NOOP band battery reading is available locally."} accessory={<Badge tone="neutral">{health.battery ? `${number(health.battery.percentage)}%` : "No reading"}</Badge>} />
           </InsetGroup>
+          </More>
         </Card>
       </div>
     );
@@ -283,19 +276,14 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
             : (
               <div className="fitness__sleep-body">
                 <p className="fitness__display">{val(hm(sleepMin))}</p>
-                <div className="fitness__labelled-meter">
-                  <span>Efficiency</span><span className="fitness__num">{eff == null ? <Missing /> : `${fmt(eff)}%`}</span>
-                  <Meter value={eff} label="Sleep efficiency" color="var(--data-sleep)" />
-                </div>
-                <Meter label="Sleep stages" segments={stages} format={(v) => formatMinutes(v)} />
-                <ul className="fitness__legend" aria-hidden="true">
-                  {stages.map((s) => <li key={s.label}><i style={{ background: s.color }} />{s.label} <span className="fitness__num">{formatMinutes(s.value)}</span></li>)}
-                </ul>
+                <p className="fitness__sleep-note">{eff == null ? <Missing /> : `${fmt(eff)}%`} efficiency</p>
               </div>
             )}
         </Card>
       </div>
 
+      <More label="Last night, trends and insights">
+      <BatteryStatus battery={health.battery} />
       {/* Row 2: only signals not shown elsewhere (RHR/HRV live in Last night); hidden when all are null. */}
       {extraTiles.length > 0 && <div className="fitness__tiles">{extraTiles}</div>}
 
@@ -337,6 +325,7 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
         </InsetGroup>
       )}
       {insights.length === 0 && <p className="fitness__pending">Insights appear after NOOP&apos;s nightly sync.</p>}
+      </More>
     </div>
   );
 }

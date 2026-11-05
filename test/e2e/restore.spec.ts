@@ -1,4 +1,4 @@
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, test, openMore } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 /** Settings › Backup › Restore: picker → destructive Dialog → unpack_backup → result list. */
@@ -13,6 +13,7 @@ test("restore from backup asks first, then shows what was restored", async ({ pa
   });
   await navButton(page, "Settings").click();
   const field = activeField(page, "Settings");
+  await openMore(page);
   await field.getByRole("button", { name: "Choose…" }).click();
   await expect(field.getByLabel("Backup file")).toHaveValue("/Users/me/Desktop/nexus-backup-20261029_101500.tar.gz");
 

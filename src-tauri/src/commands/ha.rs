@@ -676,7 +676,7 @@ pub async fn ha_conversation(text: String) -> Result<HaConversationResult, Strin
 static DOCKER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// GUI apps on macOS don't inherit the shell PATH, so docker is looked up at fixed paths.
-fn docker_bin() -> Option<&'static str> {
+pub(super) fn docker_bin() -> Option<&'static str> {
     [
         "/usr/local/bin/docker",
         "/opt/homebrew/bin/docker",

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { INITIAL_SNAPSHOT, getCrewStatus, startCrew, stopCrew } from "../bridge";
 import { dateTime, humanize, plainText } from "../lib/format";
 import type { CrewInfo, CrewServiceHealth, SystemSnapshot } from "../types";
-import { Badge, Button, Card, Dialog, InsetGroup, ListRow, TextField, type Tone } from "../ui";
+import { Badge, Button, Card, Dialog, InsetGroup, ListRow, More, PageHero, TextField, type Tone } from "../ui";
 import { CREW_TOOL_OUTPUT_CAP, CREW_TOOL_TIMEOUT_S } from "../app/statusViews";
 import "./CrewsScreen.css";
 
@@ -41,6 +41,8 @@ function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }
 }
 
 /** Chat & Agents › Crews (Stage 5E): crew-service health, runs, start and stop. */
+const FIRST_GLANCE = 3;
+
 export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; onRetry?: () => void; loading?: boolean }) {
   const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const { health } = data.crew;
@@ -123,41 +125,29 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
   if (isLoading) {
     return (
       <div className="crews page-inset">
-        <h1 className="crews__title">Crews</h1>
-        <Card title="Crew service"><p className="crews__note" role="status">Loading crew service…</p></Card>
+        <PageHero title="Crews" statement="Checking" detail={<span role="status">Loading crew service…</span>} />
       </div>
     );
   }
 
   const badge = HEALTH_BADGE[health];
+  const runRow = (run: (typeof runs)[number]) => (
+    <ListRow key={run.id} title={run.name} selected={run.id === selectedId} onSelect={() => setSelectedId(run.id === selectedId ? null : run.id)}
+      subtitle={<span className="crews__clamp" title={run.task ?? undefined}>{run.task ?? "No task text"}</span>}
+      value={[run.started_at ? dateTime(run.started_at) : null, run.agents.length ? run.agents.join(", ") : null].filter(Boolean).join(" · ")}
+      accessory={<Badge tone={STATUS_TONE[run.status] ?? "neutral"}>{humanize(run.status)}</Badge>} />
+  );
   return (
     <div className="crews page-inset">
-      <h1 className="crews__title">Crews</h1>
-      <Card title="Crew service" accessory={<Badge tone={badge.tone}>{badge.text}</Badge>}>
-        {health === "not_configured" ? (
-          <p className="crews__note">No crew token found. Run <code>scripts/sync-crew-token.sh</code>, then reopen Amara OS.</p>
-        ) : health === "offline" ? (
-          <div className="crews__unavailable">
-            <p>The crew service on 127.0.0.1:8400 isn&apos;t responding.</p>
-            {onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
-          </div>
-        ) : (
-          <p className="crews__note">Runs use the local model. At most 2 run at once.</p>
-        )}
-      </Card>
-
-      <Card title="Tools">
-        {data.unavailableSources.some((s) => s.command === "crew_tools") ? <Unavailable label="Crew tools" onRetry={onRetry} />
-          : data.crew.tools.length === 0 ? <p className="crews__note">No tools enabled</p>
-            : (
-              <InsetGroup>
-                {data.crew.tools.map((t) => (
-                  <ListRow key={t.name} title={t.name} subtitle={`${CREW_TOOL_TIMEOUT_S} s timeout · ${CREW_TOOL_OUTPUT_CAP}-char output cap`}
-                    accessory={<Badge tone={t.allowed ? "success" : "neutral"} aria-label={`${t.name}: ${t.allowed ? "allowed" : "blocked"}`}>{t.allowed ? "Allowed" : "Blocked"}</Badge>} />
-                ))}
-              </InsetGroup>
-            )}
-      </Card>
+      <PageHero title="Crews" statement={badge.text} detail={health === "online" ? "Runs use the local model. At most 2 run at once." : undefined} />
+      {health === "not_configured" ? (
+        <p className="crews__note">No crew token found. Run <code>scripts/sync-crew-token.sh</code>, then reopen Amara OS.</p>
+      ) : health === "offline" ? (
+        <div className="crews__unavailable">
+          <p>The crew service on 127.0.0.1:8400 isn&apos;t responding.</p>
+          {onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
+        </div>
+      ) : null}
 
       {health === "online" && (
         listDown && runs.length === 0 ? <Card title="Runs"><Unavailable label="Crew runs" onRetry={onRetry} /></Card>
@@ -165,12 +155,7 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
             <Card title="Runs"><p className="crews__note"><strong>No runs yet</strong><br />Start one below; it appears here while it runs.</p></Card>
           ) : (
             <InsetGroup title="Runs">
-              {runs.map((run) => (
-                <ListRow key={run.id} title={run.name} selected={run.id === selectedId} onSelect={() => setSelectedId(run.id === selectedId ? null : run.id)}
-                  subtitle={<span className="crews__clamp" title={run.task ?? undefined}>{run.task ?? "No task text"}</span>}
-                  value={[run.started_at ? dateTime(run.started_at) : null, run.agents.length ? run.agents.join(", ") : null].filter(Boolean).join(" · ")}
-                  accessory={<Badge tone={STATUS_TONE[run.status] ?? "neutral"}>{humanize(run.status)}</Badge>} />
-              ))}
+              {runs.slice(0, FIRST_GLANCE).map(runRow)}
             </InsetGroup>
           )
       )}
@@ -185,6 +170,8 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
         </Card>
       )}
 
+      <More label={health === "online" ? "New run and tools" : "Tools"}>
+        {runs.length > FIRST_GLANCE && <InsetGroup title="Earlier runs">{runs.slice(FIRST_GLANCE).map(runRow)}</InsetGroup>}
       {health === "online" && (
         <Card title="New Run">
           <form className="crews__form" onSubmit={onSubmit}>
@@ -197,6 +184,21 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
           </form>
         </Card>
       )}
+
+      <Card title="Tools">
+        {data.unavailableSources.some((s) => s.command === "crew_tools") ? <Unavailable label="Crew tools" onRetry={onRetry} />
+          : data.crew.tools.length === 0 ? <p className="crews__note">No tools enabled</p>
+            : (
+              <InsetGroup>
+                {data.crew.tools.map((t) => (
+                  <ListRow key={t.name} title={t.name} subtitle={`${CREW_TOOL_TIMEOUT_S} s timeout · ${CREW_TOOL_OUTPUT_CAP}-char output cap`}
+                    accessory={<Badge tone={t.allowed ? "success" : "neutral"} aria-label={`${t.name}: ${t.allowed ? "allowed" : "blocked"}`}>{t.allowed ? "Allowed" : "Blocked"}</Badge>} />
+                ))}
+              </InsetGroup>
+            )}
+      </Card>
+
+      </More>
 
       {actionError && <p className="crews__error" role="alert">{actionError}</p>}
 

@@ -7,8 +7,9 @@ import { useMuseTelemetry } from "../neuro/useMuseTelemetry";
 import type { useTraining } from "../neuro/useTraining";
 import { useNow } from "../shell/useNow";
 import type { RecordedSession } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, Meter, Ring, Select, Sparkline, StatTile, type Tone } from "../ui";
+import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, Select, Sparkline, StatTile, type Tone } from "../ui";
 import { recoveryBand } from "./HealthScreen";
+import { NeuroFlow } from "./NeuroFlow";
 import { type MuseScreenProps, museSignalState } from "./muse";
 import "./NeuroScreen.css";
 
@@ -82,23 +83,19 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
   const primary = pendingSave
     ? <Button variant="primary" icon={RefreshCw} onClick={onStop} loading={operation === "stopping"} disabled={busy}>{operation === "stopping" ? BUSY_LABEL.stopping : "Retry Save"}</Button>
     : running || streaming
-      ? <Button variant="destructive" icon={Square} onClick={onStop} loading={operation === "stopping"} disabled={busy}>{operation === "stopping" ? BUSY_LABEL.stopping : "Stop Session"}</Button>
+      ? <Button variant="destructive" icon={Square} onClick={onStop} loading={operation === "stopping"} disabled={busy}>{operation === "stopping" ? BUSY_LABEL.stopping : "Stop session"}</Button>
       : connected
-        ? <Button variant="primary" icon={Play} onClick={onStart} loading={operation === "starting"} disabled={busy}>{operation === "starting" ? BUSY_LABEL.starting : "Start Session"}</Button>
+        ? <Button variant="primary" icon={Play} onClick={onStart} loading={operation === "starting"} disabled={busy}>{operation === "starting" ? BUSY_LABEL.starting : "Start session"}</Button>
         : <Button variant="primary" icon={Bluetooth} onClick={onScan} loading={operation === "scanning" || operation === "connecting"} disabled={busy || failed}>{operation === "scanning" || operation === "connecting" ? BUSY_LABEL[operation] : "Find Muse"}</Button>;
   const secondary = connected && !running && !streaming
     ? <Button variant="secondary" icon={Unplug} onClick={onDisconnect} loading={operation === "disconnecting"} disabled={busy}>{operation === "disconnecting" ? BUSY_LABEL.disconnecting : "Disconnect"}</Button>
     : null;
 
   const header = (
-    <header className="neuro__header">
-      <div className="neuro__title-row">
-        <h1>Neuro</h1>
-        {failed ? <Badge tone="danger">Unavailable</Badge> : <Badge tone={deviceBadge.tone}>{deviceBadge.text}</Badge>}
-        {band && <Badge tone={band.tone}>Recovery {Math.round(recovery as number)}%</Badge>}
-      </div>
-      <div className="neuro__actions">{secondary}{primary}</div>
-    </header>
+    <>
+      <PageHero title="Neuro" statement={failed ? "Out of reach" : deviceBadge.text} detail={failed ? <Badge tone="danger">Unavailable</Badge> : band ? <Badge tone={band.tone}>Recovery {Math.round(recovery as number)}%</Badge> : undefined} />
+      <div className="neuro__actions">{secondary}{!connected && primary}</div>
+    </>
   );
 
   if (failed) {
@@ -158,6 +155,8 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
         )
         : (
           <>
+            <NeuroFlow training={training} telemetry={telemetry} sessions={data.sessions} running={running} action={primary} />
+            <More label="Live readings and signal" open={running && !training.state.stage ? true : undefined}>
             <Card className="neuro__strip" aria-label="Session">
               <Select className="neuro__protocol" label="Protocol" hideLabel value={training.protocolId} options={protocolOptions}
                 onChange={(e) => training.setProtocolId(e.target.value)} disabled={running || busy} />
@@ -211,10 +210,12 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
                 </details>
               </Card>
             </div>
+            </More>
           </>
         )}
 
       <div className="neuro__row neuro__row--sessions">
+        <More label="Recent sessions">
         <InsetGroup title="Recent sessions" className="neuro__sessions"
           footer={sessionsFailed ? "Saved sessions couldn't be read." : sessions.length ? undefined : "Your first completed session will appear here."}>
           {sessions.slice(0, 5).map((s) => (
@@ -222,6 +223,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
               subtitle={<span className="neuro__num">{Math.max(1, Math.round(s.duration_secs / 60))} min · {s.data_points.toLocaleString()} samples · relax {whole(s.summary.avg_relaxation) ?? DASH}</span>} />
           ))}
         </InsetGroup>
+        </More>
         {selected && <SessionPanel session={selected} onClose={() => setSelectedId(null)} />}
       </div>
     </div>

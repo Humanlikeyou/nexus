@@ -26,7 +26,7 @@ function snap(extra: Partial<SystemSnapshot> = {}): SystemSnapshot {
 function trainingWith(state: Partial<TrainingState> = {}, protocolId = "off") {
   return {
     protocolId, setProtocolId: vi.fn(), protocols: [{ id: "alpha", name: "Alpha up" }, { id: "smr", name: "SMR" }],
-    state: { ...INACTIVE_TRAINING, ...state }, begin: vi.fn(), summary: vi.fn(), finish: vi.fn(),
+    state: { ...INACTIVE_TRAINING, ...state }, begin: vi.fn(), summary: vi.fn(), finish: vi.fn(), advance: vi.fn(), finished: null, dismissFinished: vi.fn(),
   } as unknown as ReturnType<typeof useTraining>;
 }
 function renderNeuro(props: Partial<NeuroFieldProps> = {}) {
@@ -71,11 +71,11 @@ describe("Neuro screen", () => {
     expect(screen.getByText("Searching for Muse")).toBeInTheDocument();
   });
 
-  it("connected but idle: Start Session + Disconnect, hero tiles Ready, bands at 0 with —", () => {
+  it("connected but idle: Start session + Disconnect, hero tiles Ready, bands at 0 with —", () => {
     const h = renderNeuro({ data: snap({ muse: connected, noop: { ...INITIAL_SNAPSHOT.noop, today: { ...(INITIAL_SNAPSHOT.noop.today ?? {}), recovery: 74 } as SystemSnapshot["noop"]["today"] } }) });
     expect(screen.getByText("Muse S · Connected")).toBeInTheDocument();
     expect(screen.getByText("Recovery 74%")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Start Session" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start session" }));
     expect(h.onStart).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     expect(h.onDisconnect).toHaveBeenCalled();
@@ -108,11 +108,11 @@ describe("Neuro screen", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Recording stopped at 02:00. Saving is pending; keep Amara OS open.");
   });
 
-  it("streaming: Stop Session (destructive), elapsed time, live bands, signal trace and diagnostics", () => {
+  it("streaming: Stop session (destructive), elapsed time, live bands, signal trace and diagnostics", () => {
     live.telemetry = flowing();
     const h = renderNeuro({ data: snap({ muse: streaming }), sessionStartedAt: NOW - 65_000 });
     expect(screen.getByText("Muse S · Streaming")).toBeInTheDocument();
-    const stop = screen.getByRole("button", { name: "Stop Session" });
+    const stop = screen.getByRole("button", { name: "Stop session" });
     expect(stop).toHaveAttribute("data-variant", "destructive");
     fireEvent.click(stop);
     expect(h.onStop).toHaveBeenCalled();

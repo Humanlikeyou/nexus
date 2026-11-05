@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { useRef, type ComponentPropsWithRef, type KeyboardEvent } from "react";
+import { useLayoutEffect, useRef, type ComponentPropsWithRef, type KeyboardEvent } from "react";
 import { cx } from "./shared";
 import "./SegmentedControl.css";
 
@@ -22,6 +22,14 @@ export function SegmentedControl<T extends string>({ value, options, onChange, l
   const buttons = useRef<Array<HTMLButtonElement | null>>([]);
   const selectedIndex = options.findIndex((option) => option.value === value);
   const focusIndex = selectedIndex === -1 ? 0 : selectedIndex;
+  const indicator = useRef<HTMLSpanElement>(null);
+  // Measured, then moved with transform only, so the line glides without layout work.
+  useLayoutEffect(() => {
+    const button = buttons.current[selectedIndex];
+    if (!indicator.current) return;
+    indicator.current.style.opacity = button ? "1" : "0";
+    if (button) indicator.current.style.transform = `translateX(${button.offsetLeft}px) scaleX(${button.offsetWidth / 100})`;
+  }, [selectedIndex, options.length]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     onKeyDown?.(event);
@@ -62,6 +70,7 @@ export function SegmentedControl<T extends string>({ value, options, onChange, l
           </button>
         );
       })}
+      <span ref={indicator} className="ui-segmented__indicator" aria-hidden="true" />
     </div>
   );
 }

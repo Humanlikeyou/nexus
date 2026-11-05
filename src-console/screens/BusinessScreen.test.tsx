@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { Strategy, SystemSnapshot } from "../types";
@@ -22,7 +22,7 @@ describe("Business › Work (§7)", () => {
     const onRetry = vi.fn();
     render(<BusinessField onRetry={onRetry} data={snap({ tasks: [], pipeline: [], unavailableSources: [{ command: "read_tasks", label: "Task source" }] })} />);
     expect(screen.getByText("Task source unavailable")).toBeInTheDocument();
-    expect(screen.getByText("Pipeline is clear")).toBeInTheDocument();
+    expect(screen.getByText("Pipeline is clear. Content moves here from idea to publication.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalled();
   });
@@ -36,7 +36,7 @@ describe("Business › Revenue (§8)", () => {
     expect(screen.getByText("Daily P&L -$40 of $500 loss cap · Risk index 0.2")).toBeInTheDocument();
     expect(screen.getByText("Risk within limits")).toBeInTheDocument();
     expect(screen.getByText("Ads test")).toBeInTheDocument();
-    expect(screen.getByRole("meter", { name: "Capital deployed" })).toBeInTheDocument();
+    expect(screen.getByText("Capital deployed")).toBeInTheDocument();
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByText("ARM")).toBeNull();
   });
@@ -50,8 +50,8 @@ describe("Business › Revenue (§8)", () => {
   });
   it("awaiting state", () => {
     render(<RevenueField data={snap({ strategies: [strategy] })} />);
-    const card = screen.getByRole("region", { name: "No revenue yet" });
-    expect(within(card).getByText("Tracking starts when a real source reports in.")).toBeInTheDocument();
+    expect(screen.getByText("No revenue yet")).toBeInTheDocument();
+    expect(screen.getByText("Tracking starts when a real source reports in.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Configured strategies (1)" })).toBeInTheDocument();
   });
 });

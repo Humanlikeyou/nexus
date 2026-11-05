@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
-import { expect, openApp, openToday, openView, test, type Theme } from "./fixtures/tauri-mock";
+import { expect, openApp, openToday, openView, test, type Theme, openMore } from "./fixtures/tauri-mock";
 
 // Glass fallbacks and contrast (ported from the Oct 30 /tmp/glass review specs).
 // prefers-reduced-transparency has no Playwright option, so it is set through CDP (Chromium only).
@@ -94,7 +94,7 @@ test("palette dialog: blurred by default, solid under reduced transparency and r
 
 test("worst-case backdrop: text on glass chrome is at least 4.5:1 (3:1 large)", async ({ page, theme }) => {
   await emulate(page, theme, "no-preference");
-  await openToday(page, { theme, reduceMotion: false });
+  await openSection(page, theme, "Chat & Agents"); // the composer is the page chrome that still blurs
   await page.waitForTimeout(300);
   const res = await page.evaluate(() => {
     const parse = (s: string) => (s.match(/[\d.]+/g) || []).map(Number);
@@ -155,6 +155,7 @@ test("segmented control: neutral selected pill, focus ring separated from it", a
 
 test("settings: Allow Claude is off by default, notes data leaves the Mac, turns on", async ({ page, theme }) => {
   await openSection(page, theme, "Settings");
+  await openMore(page);
   const toggle = page.getByRole("switch", { name: "Allow Claude" });
   await expect(toggle).toBeEnabled();
   await expect(toggle).toHaveAttribute("aria-checked", "false");

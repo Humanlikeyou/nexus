@@ -7,7 +7,7 @@ use crate::think::ThinkStripper;
 use futures::stream::{BoxStream, StreamExt};
 use serde_json::{json, Value};
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -46,18 +46,47 @@ pub const RETRY_AFTER_SECS: u64 = 10;
 
 /// How long a background warm-up may take (a cold load on low RAM was seen at 142 s).
 const WARM_TIMEOUT: Duration = Duration::from_secs(300);
+/// How long a model may take to leave `/api/ps` once told to unload.
+const UNLOAD_WAIT: Duration = Duration::from_secs(30);
+const SWAP_POLL: Duration = Duration::from_millis(100);
+/// After a failed deep load, deep requests go straight to fast this long before trying again.
+const DEEP_RETRY_AFTER: Duration = Duration::from_secs(60);
+/// The last words of amara-voice's keep_warm turn (`amara_voice.py`, `Amara.warm`).
+const VOICE_WARM_PING: &str = "Voice mode is starting up. Reply with just: ready.";
 
 pub struct State {
     pub cfg: Config,
     pub secrets: Secrets,
     pub http: reqwest::Client,
     pub outbound_disabled: bool,
-    rewarm_running: AtomicBool,
     warming_fast: AtomicBool,
+    /// The one deep load is running.
     warming_deep: AtomicBool,
-    /// Last `size_vram` (bytes) seen for the fast model in `/api/ps`; 0 = never seen.
-    fast_vram_seen: AtomicU64,
     log_lock: Mutex<()>,
+    /// Fast replies open right now.
+    fast_in_flight: Arc<AtomicUsize>,
+    /// Deep requests loading or answering right now.
+    deep_in_flight: Arc<AtomicUsize>,
+    /// Held while deep is unloaded for fast, so a deep request can't start mid-swap.
+    restoring_fast: tokio::sync::Mutex<()>,
+    deep_retry_at: Mutex<Option<Instant>>,
+    fast_watch_running: AtomicBool,
+}
+
+/// Counts one open reply until dropped.
+struct InFlight(Arc<AtomicUsize>);
+
+impl InFlight {
+    fn new(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(count))
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// Route metadata exposed to clients (header `X-Amara-Tier` + an `amara` JSON field).
@@ -78,11 +107,14 @@ impl State {
                 .build()
                 .expect("http client"),
             outbound_disabled,
-            rewarm_running: AtomicBool::new(false),
             warming_fast: AtomicBool::new(false),
             warming_deep: AtomicBool::new(false),
-            fast_vram_seen: AtomicU64::new(0),
             log_lock: Mutex::new(()),
+            fast_in_flight: Arc::new(AtomicUsize::new(0)),
+            deep_in_flight: Arc::new(AtomicUsize::new(0)),
+            restoring_fast: tokio::sync::Mutex::new(()),
+            deep_retry_at: Mutex::new(None),
+            fast_watch_running: AtomicBool::new(false),
         })
     }
 
@@ -236,6 +268,12 @@ impl State {
         tier: Tier,
         body: &Value,
     ) -> Result<EvStream, UpstreamError> {
+        // Held until the reply ends: deep work holds fast back, and the other way round.
+        let in_flight = if tier == Tier::Fast {
+            self.enter_fast().await?
+        } else {
+            InFlight::new(&self.deep_in_flight)
+        };
         let mut b = body.clone();
         b["model"] = json!(self.model_for(tier));
         b["stream"] = json!(true);
@@ -285,13 +323,21 @@ impl State {
             self.cfg.loading.first_token_timeout_ms
         });
         match tokio::time::timeout(timeout, first_byte).await {
-            Ok(Ok((first, rest))) => Ok(ndjson_events(
-                futures::stream::iter(first).chain(rest).boxed(),
-            )),
+            Ok(Ok((first, rest))) => {
+                let events = ndjson_events(futures::stream::iter(first).chain(rest).boxed());
+                Ok(events
+                    .map(move |ev| {
+                        let _held_until_the_reply_ends = &in_flight;
+                        ev
+                    })
+                    .boxed())
+            }
             Ok(Err(e)) => Err(e),
             Err(_) => {
                 // Dropping our request may cancel Ollama's load; keep loading on our own.
-                self.spawn_warm(tier);
+                if tier == Tier::Fast {
+                    self.spawn_warm(tier);
+                }
                 Err(UpstreamError::Loading)
             }
         }
@@ -368,6 +414,13 @@ impl State {
         decision: &Decision,
         body: &Value,
     ) -> Result<(EvStream, Tier, String), (u16, String)> {
+        if decision.tier == Tier::Fast
+            && is_voice_warm_ping(body)
+            && (self.deep_busy() || self.deep_resident().await)
+        {
+            let reason = format!("{}; warm_ping_skipped", decision.reason);
+            return Ok((ready_reply(), Tier::Fast, reason));
+        }
         let plan: &[Tier] = match decision.tier {
             Tier::Claude => &[Tier::Claude, Tier::Deep, Tier::Fast],
             Tier::Deep => &[Tier::Deep, Tier::Fast],
@@ -377,12 +430,23 @@ impl State {
         let mut all_unreachable = true;
         let mut last = String::new();
         for &tier in plan {
+            // Counted from here, so fast requests hold back through the load and the answer.
+            let _deep_work = (tier == Tier::Deep).then(|| InFlight::new(&self.deep_in_flight));
+            if tier == Tier::Deep && !self.ensure_deep().await {
+                reason.push_str("; deep_unavailable");
+                continue;
+            }
             match self.open_tier(tier, body).await {
                 Ok(s) => return Ok((strip_stream(s), tier, reason)),
                 Err(e) => {
                     let (unreach, msg) = match e {
                         UpstreamError::Unreachable(m) => (true, m),
                         UpstreamError::Failed(m) => (false, m),
+                        UpstreamError::Loading if tier == Tier::Deep => {
+                            eprintln!("[amara-router] deep tier: no first token in time");
+                            reason.push_str("; deep_unavailable");
+                            continue;
+                        }
                         UpstreamError::Loading => {
                             // Do not start a second cold load (it would fight for RAM).
                             eprintln!(
@@ -421,6 +485,10 @@ impl State {
 
     /// Loads `tier`'s model: an empty-prompt generate with its keep_alive and `num_ctx`.
     pub async fn warm(&self, tier: Tier) -> Result<(), String> {
+        self.warm_within(tier, WARM_TIMEOUT).await
+    }
+
+    async fn warm_within(&self, tier: Tier, timeout: Duration) -> Result<(), String> {
         if tier == Tier::Claude {
             return Ok(());
         }
@@ -435,7 +503,7 @@ impl State {
             .http
             .post(self.cfg.ollama("/api/generate"))
             .json(&body)
-            .timeout(WARM_TIMEOUT)
+            .timeout(timeout)
             .send()
             .await
             .map_err(|_| format!("warm {}: unreachable or timed out", tier.as_str()))?;
@@ -456,7 +524,11 @@ impl State {
 
     /// Starts a background warm-up of `tier` unless one is already running. Never blocks.
     pub fn spawn_warm(self: &Arc<Self>, tier: Tier) {
-        if tier == Tier::Claude || self.warming_flag(tier).swap(true, Ordering::SeqCst) {
+        // While deep works, fast loads only for a reply, and that reply waits for deep first.
+        if tier != Tier::Fast
+            || self.deep_busy()
+            || self.warming_flag(tier).swap(true, Ordering::SeqCst)
+        {
             return;
         }
         let me = Arc::clone(self);
@@ -465,6 +537,184 @@ impl State {
                 eprintln!("[amara-router] background warm failed: {e}");
             }
             me.warming_flag(tier).store(false, Ordering::SeqCst);
+        });
+    }
+
+    /// Deep work is loading or answering, so fast must stay out of memory.
+    fn deep_busy(&self) -> bool {
+        self.warming_deep.load(Ordering::SeqCst) || self.deep_in_flight.load(Ordering::SeqCst) > 0
+    }
+
+    async fn deep_resident(&self) -> bool {
+        let timeout = Duration::from_millis(self.cfg.routing.residency_check_timeout_ms);
+        self.ps_within(timeout)
+            .await
+            .is_ok_and(|ps| ps.iter().any(|(n, _)| same_model(n, &self.cfg.models.deep)))
+    }
+
+    /// Waits for deep to be resident, loading it if needed. False once the load window has passed
+    /// or the last load just failed. The caller may disconnect: the load does not depend on it.
+    async fn ensure_deep(self: &Arc<Self>) -> bool {
+        drop(self.restoring_fast.lock().await);
+        if self.deep_resident().await {
+            return true;
+        }
+        self.spawn_deep_load();
+        let window = Duration::from_millis(self.cfg.loading.deep_load_timeout_ms);
+        let deadline = Instant::now() + window + Duration::from_secs(1);
+        while self.warming_deep.load(Ordering::SeqCst) && Instant::now() < deadline {
+            tokio::time::sleep(SWAP_POLL).await;
+        }
+        self.deep_resident().await
+    }
+
+    /// Starts the one deep load, unless it is running or just failed. It runs in its own task, so
+    /// no client disconnecting can cancel it. Never blocks.
+    fn spawn_deep_load(self: &Arc<Self>) {
+        let retry_at = *self.deep_retry_at.lock().unwrap_or_else(|p| p.into_inner());
+        if retry_at.is_some_and(|at| Instant::now() < at)
+            || self.warming_deep.swap(true, Ordering::SeqCst)
+        {
+            return;
+        }
+        let me = Arc::clone(self);
+        tokio::spawn(async move {
+            let loaded = me.load_deep().await;
+            me.warming_deep.store(false, Ordering::SeqCst);
+            match loaded {
+                Ok(()) => me.watch_for_deep_unload(),
+                Err(e) => {
+                    eprintln!("[amara-router] deep load failed, using fast: {e}");
+                    *me.deep_retry_at.lock().unwrap_or_else(|p| p.into_inner()) =
+                        Some(Instant::now() + DEEP_RETRY_AFTER);
+                    // Fast may be out of memory by now. With the requester still counted this
+                    // does nothing, and the watcher brings fast back if it never asks for it.
+                    me.spawn_warm(Tier::Fast);
+                    me.watch_for_deep_unload();
+                }
+            }
+        });
+    }
+
+    /// Fast and deep do not fit together, and Ollama's own eviction can hang: asked to load deep
+    /// while fast (keep_alive -1) is in use, it waits for an unload that a later fast request
+    /// calls off, for hours, with fast still answering. So the swap is done by hand: wait for fast
+    /// to go quiet, unload it, confirm it left, and only then ask for deep.
+    async fn load_deep(&self) -> Result<(), String> {
+        let window = Duration::from_millis(self.cfg.loading.deep_load_timeout_ms);
+        let deadline = Instant::now() + window;
+        // A fast reply counts itself before checking `deep_busy`, so one sees the other.
+        while self.fast_in_flight.load(Ordering::SeqCst) > 0 {
+            if Instant::now() >= deadline {
+                return Err("fast stayed busy".into());
+            }
+            tokio::time::sleep(SWAP_POLL).await;
+        }
+        let ps = self.ps_within(Duration::from_secs(3)).await?;
+        if ps.iter().any(|(n, _)| same_model(n, &self.cfg.models.deep)) {
+            return Ok(());
+        }
+        if ps.iter().any(|(n, _)| same_model(n, &self.cfg.models.fast)) {
+            self.unload_and_confirm(Tier::Fast).await?;
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        self.warm_within(Tier::Deep, left).await
+    }
+
+    /// Waits for deep work to end, then makes sure fast can load. Returns with the reply counted.
+    /// Past `fast_wait_ms` the caller gets the 503 with `Retry-After`.
+    async fn enter_fast(&self) -> Result<InFlight, UpstreamError> {
+        let deadline = Instant::now() + Duration::from_millis(self.cfg.loading.fast_wait_ms);
+        loop {
+            let in_flight = InFlight::new(&self.fast_in_flight);
+            // A deep request counts itself before it takes this lock, so it can't slip past.
+            let restoring = self.restoring_fast.lock().await;
+            if !self.deep_busy() {
+                self.restore_fast().await;
+                return Ok(in_flight);
+            }
+            drop(restoring);
+            drop(in_flight);
+            if Instant::now() >= deadline {
+                eprintln!("[amara-router] fast reply gave up waiting for deep to finish");
+                return Err(UpstreamError::Loading);
+            }
+            tokio::time::sleep(SWAP_POLL).await;
+        }
+    }
+
+    /// Deep is idle but in memory: move it out by hand, for the same reason as [`Self::load_deep`].
+    async fn restore_fast(&self) {
+        let timeout = Duration::from_millis(self.cfg.routing.residency_check_timeout_ms);
+        let Ok(ps) = self.ps_within(timeout).await else {
+            return;
+        };
+        let has = |m: &str| ps.iter().any(|(n, _)| same_model(n, m));
+        if has(&self.cfg.models.deep) && !has(&self.cfg.models.fast) {
+            if let Err(e) = self.unload_and_confirm(Tier::Deep).await {
+                eprintln!("[amara-router] could not unload deep for fast: {e}");
+            }
+        }
+    }
+
+    async fn unload_and_confirm(&self, tier: Tier) -> Result<(), String> {
+        self.unload(tier).await?;
+        let model = self.model_for(tier);
+        let deadline = Instant::now() + UNLOAD_WAIT;
+        loop {
+            let ps = self.ps_within(Duration::from_secs(3)).await?;
+            if !ps.iter().any(|(n, _)| same_model(n, model)) {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(format!("{} did not unload", tier.as_str()));
+            }
+            tokio::time::sleep(SWAP_POLL).await;
+        }
+    }
+
+    /// Asks Ollama to drop `tier`'s model now.
+    async fn unload(&self, tier: Tier) -> Result<(), String> {
+        let body = json!({"model": self.model_for(tier), "keep_alive": 0});
+        let resp = self
+            .http
+            .post(self.cfg.ollama("/api/generate"))
+            .json(&body)
+            .timeout(UNLOAD_WAIT)
+            .send()
+            .await
+            .map_err(|_| format!("unload {}: unreachable or timed out", tier.as_str()))?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("unload {}: HTTP {}", tier.as_str(), resp.status()))
+        }
+    }
+
+    /// Once deep's keep-alive ends, nothing asks for fast until the next message: bring it back.
+    pub fn watch_for_deep_unload(self: &Arc<Self>) {
+        if !self.cfg.loading.rewarm_fast_after_deep
+            || self.fast_watch_running.swap(true, Ordering::SeqCst)
+        {
+            return;
+        }
+        let me = Arc::clone(self);
+        let every = Duration::from_secs(self.cfg.loading.poll_secs.max(1));
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(every).await;
+                let Ok(ps) = me.ps_within(Duration::from_secs(3)).await else {
+                    continue;
+                };
+                let has = |m: &str| ps.iter().any(|(n, _)| same_model(n, m));
+                if !has(&me.cfg.models.deep) && !me.deep_busy() {
+                    if !has(&me.cfg.models.fast) {
+                        me.spawn_warm(Tier::Fast);
+                    }
+                    break;
+                }
+            }
+            me.fast_watch_running.store(false, Ordering::SeqCst);
         });
     }
 
@@ -506,7 +756,7 @@ impl State {
             .collect())
     }
 
-    /// `/api/ps` as (model name, size_vram bytes). Remembers fast's size when it is loaded.
+    /// `/api/ps` as (model name, size_vram bytes).
     async fn ps_within(&self, timeout: Duration) -> Result<Vec<(String, u64)>, String> {
         let resp = self
             .http
@@ -522,7 +772,7 @@ impl State {
             .json()
             .await
             .map_err(|_| "ps: unparseable reply".to_string())?;
-        let models: Vec<(String, u64)> = v["models"]
+        Ok(v["models"]
             .as_array()
             .into_iter()
             .flatten()
@@ -530,57 +780,7 @@ impl State {
                 let name = m["model"].as_str().or_else(|| m["name"].as_str())?;
                 Some((name.to_string(), m["size_vram"].as_u64().unwrap_or(0)))
             })
-            .collect();
-        for (name, vram) in &models {
-            if *vram > 0 && same_model(name, &self.cfg.models.fast) {
-                self.fast_vram_seen.store(*vram, Ordering::SeqCst);
-            }
-        }
-        Ok(models)
-    }
-
-    /// Whether fast should be re-warmed now: fast is not loaded, its size is known, and the
-    /// loaded models' `size_vram` plus fast's fits in `gpu_budget_gb`. Errors mean "skip".
-    pub async fn rewarm_headroom(&self) -> Result<bool, String> {
-        let ps = self.ps_within(Duration::from_secs(3)).await?;
-        if ps.iter().any(|(n, _)| same_model(n, &self.cfg.models.fast)) {
-            return Ok(false); // already resident
-        }
-        let fast = self.fast_vram_seen.load(Ordering::SeqCst);
-        if fast == 0 {
-            return Err("fast size never seen in /api/ps".into());
-        }
-        let used: u64 = ps.iter().map(|(_, v)| *v).sum();
-        let budget = (self.cfg.loading.gpu_budget_gb * 1e9) as u64;
-        Ok(used.saturating_add(fast) <= budget)
-    }
-
-    /// After a deep answer: re-warm fast in the background, only with VRAM headroom (see
-    /// [`State::rewarm_headroom`]). When skipped, the next fast request loads it.
-    pub fn schedule_rewarm(self: &Arc<Self>) {
-        if !self.cfg.loading.rewarm_fast_after_deep
-            || self.rewarm_running.swap(true, Ordering::SeqCst)
-        {
-            return;
-        }
-        let me = Arc::clone(self);
-        tokio::spawn(async move {
-            match me.rewarm_headroom().await {
-                Ok(true) => {
-                    if !me.warming_fast.swap(true, Ordering::SeqCst) {
-                        if let Err(e) = me.warm(Tier::Fast).await {
-                            eprintln!("[amara-router] re-warm after deep failed: {e}");
-                        }
-                        me.warming_fast.store(false, Ordering::SeqCst);
-                    }
-                }
-                Ok(false) => {
-                    eprintln!("[amara-router] re-warm skipped: no VRAM headroom or fast resident")
-                }
-                Err(e) => eprintln!("[amara-router] re-warm skipped: {e}"),
-            }
-            me.rewarm_running.store(false, Ordering::SeqCst);
-        });
+            .collect())
     }
 
     // ── log ──────────────────────────────────────────────────────────────────
@@ -603,6 +803,31 @@ impl State {
             let _ = writeln!(f, "{entry}");
         }
     }
+}
+
+/// amara-voice's keep_warm turn, the latest user message of the request.
+fn is_voice_warm_ping(body: &Value) -> bool {
+    body["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .rev()
+        .find(|m| m["role"] == "user")
+        .is_some_and(|m| crate::translate::content_text(&m["content"]).contains(VOICE_WARM_PING))
+}
+
+/// The answer the ping asks for, without touching a model.
+fn ready_reply() -> EvStream {
+    let delta = Ev::Delta {
+        content: "ready.".into(),
+        tool_calls: vec![],
+    };
+    let done = Ev::Done {
+        done_reason: "stop".into(),
+        prompt_tokens: 0,
+        completion_tokens: 0,
+    };
+    futures::stream::iter([Ok(delta), Ok(done)]).boxed()
 }
 
 /// `gemma:latest` and `gemma` name the same model.

@@ -1,10 +1,9 @@
-import { Mic, Play, RefreshCw, RotateCcw, Square } from "lucide-react";
+import { Play, RefreshCw, RotateCcw, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getVoiceStatus, getVoiceTurns, listVoices, setVoice, startVoice, stopVoice } from "../bridge";
-import { EmptyState } from "../design/ProductUI";
 import { dateTime, plainText } from "../lib/format";
 import type { VoiceList, VoiceState, VoiceStatus, VoiceTurn } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, Select, StatusDot, type Tone } from "../ui";
+import { Badge, Button, Card, InsetGroup, ListRow, More, PageHero, Select, type Tone } from "../ui";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
 import { useAmaraVoice, useAmaraVoiceBridge } from "../hooks/useAmaraVoice";
 import "./VoiceScreen.css";
@@ -140,8 +139,8 @@ export function VoiceField() {
   if (!status) {
     return (
       <div className="voice page-inset">
-        <h1 className="voice__title">Voice</h1>
-        <Card title="Amara Voice">
+        <PageHero title="Voice" statement={statusError ? "Out of reach" : "Checking"} />
+        <Card>
           {statusError ? (
             <div className="voice__unavailable">
               <p>Voice status unavailable: {statusError}</p>
@@ -156,11 +155,8 @@ export function VoiceField() {
   if (!status.installed) {
     return (
       <div className="voice page-inset">
-        <h1 className="voice__title">Voice</h1>
-        <Card title="Amara Voice" accessory={<Badge tone="neutral">Not installed</Badge>}>
-          <EmptyState icon={Mic} title="Amara Voice isn’t set up on this Mac"
-            detail={`Talk to Amara out loud with the local voice loop. Amara OS looks for it in ${status.dir}.`} />
-        </Card>
+        <PageHero title="Voice" statement="Amara Voice isn’t set up on this Mac"
+          detail={`Talk to Amara out loud with the local voice loop. Amara OS looks for it in ${status.dir}.`} />
       </div>
     );
   }
@@ -171,27 +167,25 @@ export function VoiceField() {
   const recent = [...turns].reverse();
   return (
     <div className="voice page-inset">
-      <h1 className="voice__title">Voice</h1>
-      <Card title="Amara Voice" accessory={<StatusDot tone={view.tone} pulse={view.pulse} aria-label={`Amara Voice: ${view.label}`}>{view.label}</StatusDot>}>
-        <div className="voice__live" data-state={status.state}>
-          <div className="voice__lens"><AmaraLens state={lens.state} size={160} showLabel />{lens.loading && <span className="voice__lens-note" role="status">Loading voice model…</span>}</div>
-          <p className="voice__state" role="status" aria-live="polite">{view.detail}</p>
-          <dl className="voice__facts">
-            <div><dt>Voice</dt><dd>{status.voice}</dd></div>
-            {status.running && <div><dt>Memory</dt><dd>{status.rss_mb != null ? `${Math.round(status.rss_mb).toLocaleString()} MB` : "--"}</dd></div>}
-            {status.running && <div><dt>Process</dt><dd>{status.pid ?? "--"}</dd></div>}
-            <div><dt>Runs as</dt><dd>{status.launchd ? "Login item (launchd)" : "App process"}</dd></div>
-          </dl>
-          <div className="voice__actions">
-            {status.running
-              ? <Button variant="secondary" icon={Square} loading={busy === "stop"} disabled={busy !== null} onClick={() => { void run("stop", stopVoice); }}>Stop</Button>
-              : <Button variant="primary" icon={Play} loading={busy === "start"} disabled={busy !== null} onClick={() => { void run("start", startVoice); }}>Start</Button>}
-          </div>
-          {statusError && <p className="voice__error" role="alert">Status unavailable: {statusError}</p>}
-          {actionError && <p className="voice__error" role="alert">{actionError}</p>}
+      <PageHero title="Voice" statement={<span aria-label={`Amara Voice: ${view.label}`}>{view.label}</span>} detail={<span role="status" aria-live="polite">{view.detail}</span>} />
+      <div className="voice__live" data-state={status.state}>
+        <div className="voice__lens"><AmaraLens state={lens.state} size={160} showLabel />{lens.loading && <span className="voice__lens-note" role="status">Loading voice model…</span>}</div>
+        <div className="voice__actions">
+          {status.running
+            ? <Button variant="secondary" icon={Square} loading={busy === "stop"} disabled={busy !== null} onClick={() => { void run("stop", stopVoice); }}>Stop</Button>
+            : <Button variant="primary" icon={Play} loading={busy === "start"} disabled={busy !== null} onClick={() => { void run("start", startVoice); }}>Start</Button>}
         </div>
-      </Card>
+        {statusError && <p className="voice__error" role="alert">Status unavailable: {statusError}</p>}
+        {actionError && <p className="voice__error" role="alert">{actionError}</p>}
+      </div>
 
+      <More label="Her voice, process and recent turns">
+      <dl className="voice__facts">
+        <div><dt>Voice</dt><dd>{status.voice}</dd></div>
+        {status.running && <div><dt>Memory</dt><dd>{status.rss_mb != null ? `${Math.round(status.rss_mb).toLocaleString()} MB` : "--"}</dd></div>}
+        {status.running && <div><dt>Process</dt><dd>{status.pid ?? "--"}</dd></div>}
+        <div><dt>Runs as</dt><dd>{status.launchd ? "Login item (launchd)" : "App process"}</dd></div>
+      </dl>
       {voices && voices.voices.length > 0 && (
         <Card title="Her voice">
           <div className="voice__picker">
@@ -213,6 +207,7 @@ export function VoiceField() {
       {recent.length === 0
         ? <Card title="Recent turns"><p className="voice__note"><strong>No turns yet</strong><br />Say “Amara, what time is it?” and the turn shows up here with its timings.</p></Card>
         : <InsetGroup title="Recent turns">{recent.map((t, i) => <TurnRow key={`${t.time ?? ""}-${i}`} turn={t} />)}</InsetGroup>}
+      </More>
     </div>
   );
 }

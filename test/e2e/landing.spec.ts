@@ -154,9 +154,11 @@ test("Landing: the six buttons sit in one centred row at both window sizes", asy
     const boxes = await Promise.all((await page.locator(".landing__nav").getByRole("button").all()).map(async (b) => (await b.boundingBox())!));
     expect(boxes).toHaveLength(6);
     expect(new Set(boxes.map((b) => b.y)).size, `${viewport.width}: one row`).toBe(1);
+    // Centred under the lens, which sits in the larger golden section on a wide window.
+    const stage = (await page.locator(".landing__stage").boundingBox())!;
     const left = boxes[0].x;
-    const right = viewport.width - (boxes[5].x + boxes[5].width);
-    expect(Math.abs(left - right), `${viewport.width}: centred`).toBeLessThanOrEqual(1);
+    const right = stage.x + stage.width - (boxes[5].x + boxes[5].width);
+    expect(Math.abs(left - stage.x - right), `${viewport.width}: centred`).toBeLessThanOrEqual(1);
     expect(left, `${viewport.width}: side margin`).toBeGreaterThanOrEqual(24);
     const gaps = boxes.slice(1).map((b, i) => Math.round(b.x - (boxes[i].x + boxes[i].width)));
     expect(new Set(gaps).size, `${viewport.width}: even gaps`).toBe(1);
@@ -226,4 +228,53 @@ test.describe("sign-off shots", () => {
       });
     }
   }
+});
+
+test.describe("Landing: the welcome", () => {
+  const welcome = (page: Page) => page.locator(".landing__welcome");
+  const recent = "2026-10-28T04:30:00.000Z";
+
+  test("greeting, time, date and weather, on the golden section", async ({ page, theme }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openApp(page, { theme });
+    await expect(welcome(page).locator(".landing__greeting")).toHaveText(/Taisun/);
+    await expect(welcome(page).locator(".landing__time")).toHaveText(/^\d{1,2}:\d{2} (AM|PM)$/);
+    await expect(welcome(page).locator(".landing__date")).toHaveText(/^[A-Z][a-z]+day, [A-Z][a-z]+ \d{1,2}$/);
+    await expect(welcome(page).locator(".landing__weather")).toContainText("18° Clear");
+    const lens = (await page.locator(".landing .amara-lens").boundingBox())!;
+    expect(lens.x + lens.width / 2).toBeCloseTo(1280 * .691, -2); // the middle of the larger 61.8% section
+  });
+
+  test("a brief's greeting wins, and a long one holds its place", async ({ page, theme }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openApp(page, { theme, data: { ...responses(), home_brief: { greeting: "Good to see you this morning, Taisun.", weather: null, updatedAt: recent } } });
+    const greeting = welcome(page).locator(".landing__greeting");
+    await expect(greeting).toHaveText("Good to see you this morning, Taisun.");
+    await expect(page.locator(".landing__weather")).toHaveCount(0);
+    const text = (await greeting.boundingBox())!;
+    const lens = (await page.locator(".landing .amara-lens").boundingBox())!;
+    expect(text.x + text.width).toBeLessThan(lens.x);
+  });
+
+  test("no brief, old brief and partial weather show less, never a placeholder", async ({ page, theme }) => {
+    await openApp(page, { theme, data: { ...responses(), home_brief: { greeting: "Old line", weather: { place: "Tokyo", tempC: 9, summary: "rain", highC: 10, lowC: 2 }, updatedAt: "2026-10-27T01:00:00.000Z" } } });
+    await expect(welcome(page).locator(".landing__greeting")).not.toHaveText("Old line");
+    await expect(page.locator(".landing__weather")).toHaveCount(0);
+  });
+
+  test("a missing field just drops out of the line", async ({ page, theme }) => {
+    await openApp(page, { theme, data: { ...responses(), home_brief: { greeting: null, weather: { place: "Utsunomiya", tempC: 14, summary: "rain", highC: null, lowC: null }, updatedAt: recent } } });
+    await expect(page.locator(".landing__weather")).toContainText("14° Rain");
+    await expect(page.locator(".landing__weather")).toContainText("Utsunomiya");
+    await expect(page.locator(".landing__weather")).not.toContainText("High");
+  });
+
+  test("the small window keeps everything, without crowding the lens", async ({ page, theme }) => {
+    await page.setViewportSize({ width: 900, height: 620 });
+    await openApp(page, { theme });
+    await expect(welcome(page).locator(".landing__weather")).toBeVisible();
+    const end = (await welcome(page).boundingBox())!;
+    const stage = (await page.locator(".landing .amara-lens").boundingBox())!;
+    expect(end.y + end.height).toBeLessThanOrEqual(stage.y + 1);
+  });
 });

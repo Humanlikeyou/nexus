@@ -8,7 +8,7 @@ import {
   type FollowupErrorKind, type ItemDraft,
 } from "../lib/followups";
 import type { FollowupItem, FollowupLists, MutedTopic } from "../types";
-import { Badge, Button, Card, Dialog, InsetGroup, ListRow, TextField } from "../ui";
+import { Badge, Button, Card, Dialog, InsetGroup, ListRow, More, PageHero, TextField } from "../ui";
 import "./ListsScreen.css";
 
 type FieldErrors = { text?: string; due?: string; next?: string; form?: string };
@@ -170,6 +170,8 @@ function mutedSubtitle(muted: MutedTopic) {
 }
 
 /** Chat & Agents › Lists: Amara's follow-ups (~/.hermes/amara), which she and the app both change. */
+const FIRST_GLANCE = 4;
+
 export function ListsField({ refreshSignal }: { refreshSignal?: number }) {
   const [lists, setLists] = useState<FollowupLists | null>(null);
   const [loadError, setLoadError] = useState<FollowupErrorKind | null>(null);
@@ -324,12 +326,8 @@ export function ListsField({ refreshSignal }: { refreshSignal?: number }) {
 
   const isPending = (key: string) => pending.includes(key);
   const banners = [...new Set([loadError ? FOLLOWUP_ERROR_COPY[loadError] : null, actionError].filter((text): text is string => !!text))];
-  const header = (
-    <header className="lists__header">
-      <h1 className="lists__title">Lists</h1>
-      <p className="lists__subtitle">What Amara is keeping track of for you. She updates these too.</p>
-    </header>
-  );
+  const count = lists?.open.length ?? 0;
+  const header = <PageHero title="Lists" statement={!lists ? "Keeping track" : count === 0 ? "Nothing open" : `${count} open`} detail="What Amara is keeping track of for you. She updates these too." />;
   const live = <p className="ui-visually-hidden" role="status">{status}</p>;
 
   if (!lists) {
@@ -354,6 +352,7 @@ export function ListsField({ refreshSignal }: { refreshSignal?: number }) {
   const openRows = [...lists.open, ...Object.values(edits).filter((edit) => !openIds.has(edit.base.id)).map((edit) => edit.base)];
   const doneRows = lists.recentlyDone.filter((item) => !edits[item.id]);
   const today = todayIso();
+  const later = openRows.slice(FIRST_GLANCE);
 
   const openRow = (item: FollowupItem) => {
     const edit = edits[item.id];
@@ -390,13 +389,14 @@ export function ListsField({ refreshSignal }: { refreshSignal?: number }) {
 
       <Card title={<SectionTitle headingRef={openHeading}>Open</SectionTitle>}
         accessory={!adding && <Button id="lists-add" size="small" variant="secondary" onClick={() => setAdding(true)}>Add item</Button>}>
-        <p className="lists__description">What Amara is following up on.</p>
-        {adding && <AddItemForm onAdd={addItem} onCancel={() => { setAdding(false); setFocusRequest({ target: { elementId: "lists-add" } }); }} />}
+                {adding && <AddItemForm onAdd={addItem} onCancel={() => { setAdding(false); setFocusRequest({ target: { elementId: "lists-add" } }); }} />}
         {openRows.length > 0
-          ? <InsetGroup aria-label="Open items">{openRows.map(openRow)}</InsetGroup>
+          ? <InsetGroup aria-label="Open items">{openRows.slice(0, FIRST_GLANCE).map(openRow)}</InsetGroup>
           : <p className="lists__empty">Nothing open. Amara isn't following up on anything.</p>}
       </Card>
 
+      <More label={later.length > 0 ? `${later.length} more, done and not mentioning` : "Done and not mentioning"}>
+      {later.length > 0 && <InsetGroup title="More open" aria-label="More open items">{later.map(openRow)}</InsetGroup>}
       <Card title={<SectionTitle headingRef={doneHeading}>Done recently</SectionTitle>}>
         <p className="lists__description">Finished in the last 30 days.</p>
         {doneRows.length > 0
@@ -428,6 +428,7 @@ export function ListsField({ refreshSignal }: { refreshSignal?: number }) {
           : <p className="lists__empty">No muted topics. Amara can bring up anything.</p>}
         <AddTopicForm onAdd={addTopic} />
       </Card>
+      </More>
 
       <Dialog open={confirm !== null} title={confirm?.kind === "muted" ? "Remove this topic?" : "Delete this item?"}
         confirmLabel={confirm?.kind === "muted" ? "Remove" : "Delete"} destructive busy={isPending("confirm")}

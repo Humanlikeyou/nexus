@@ -19,10 +19,14 @@ test("emerald wash: vibrancy layers stay transparent, content pane gets the wash
   const bg = (sel: string) => page.locator(sel).first().evaluate((el) => {
     const s = getComputedStyle(el); return `${s.backgroundColor}|${s.backgroundImage}`;
   });
-  for (const sel of ["html", "#root", "main.command-surface > nav.system-constellation", "main.command-surface > .intelligence-overlay > .nexus-mark"]) {
+  for (const sel of ["html", "#root"]) {
     expect(await bg(sel), sel).toBe("rgba(0, 0, 0, 0)|none");
   }
-  expect(await bg("main.command-surface > .active-field")).toContain("linear-gradient");
+  // The native sidebar stays translucent, tinted emerald in dark so it shares the lens page's space.
+  for (const sel of ["main.command-surface > nav.system-constellation", "main.command-surface > .intelligence-overlay > .nexus-mark"]) {
+    expect(await bg(sel), sel).toBe(theme === "dark" ? "rgba(11, 42, 34, 0.84)|none" : "rgba(0, 0, 0, 0)|none");
+  }
+  expect(await bg("main.command-surface > .active-field")).toContain("gradient");
   const shots = process.env.EMERALD_SHOTS;
   if (shots) {
     await page.evaluate(() => document.documentElement.removeAttribute("data-vibrancy"));

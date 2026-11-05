@@ -139,7 +139,7 @@ describe("Neuro (Live) session timer (fake timers)", () => {
 
   it("ticks once per second from 00:00 without drift or double-ticks", async () => {
     await openLive();
-    await click(/Start Session/);
+    await click(/Start session/);
     expect(readout()).toBe("00:00");
     const seen: string[] = [];
     for (let i = 0; i < 5; i++) { await flush(1000); seen.push(readout()!); }
@@ -150,7 +150,7 @@ describe("Neuro (Live) session timer (fake timers)", () => {
 
   it("keeps time across screen switches and re-renders (derived from start, no reset)", async () => {
     await openLive();
-    await click(/Start Session/);
+    await click(/Start session/);
     await flush(15_000);
     expect(readout()).toBe("00:15");
     go("Business"); await flush(); await flush();
@@ -163,15 +163,15 @@ describe("Neuro (Live) session timer (fake timers)", () => {
 
   it("stops on Stop session and resets to 00:00 on the next start", async () => {
     await openLive();
-    await click(/Start Session/);
+    await click(/Start session/);
     await flush(7_000);
     expect(readout()).toBe("00:07");
-    await click(/Stop Session/);
+    await click(/Stop session/);
     expect(readout()).toBe("Ready");
     await flush(5_000);
     expect(readout()).toBe("Ready");
     expect(h.invoke.mock.calls.filter(([c]) => c === "save_session")).toHaveLength(1);
-    await click(/Start Session/);
+    await click(/Start session/);
     expect(readout()).toBe("00:00");
     await flush(3_000);
     expect(readout()).toBe("00:03");
