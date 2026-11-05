@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { expect, openApp, openToday, test } from "./fixtures/tauri-mock";
+import { emulateDisplay, expect, openApp, openToday, reducedTransparency, test } from "./fixtures/tauri-mock";
 
 const TOKENS = [
   "--glass-ultrathin", "--glass-thin", "--glass-regular", "--glass-thick", "--glass-solid",
@@ -22,8 +22,7 @@ test("glass and shadow tokens resolve", async ({ page, theme }) => {
 });
 
 test("glass applied: palette dialog blurs, cards stay solid, vibrancy layers transparent", async ({ page, theme }) => {
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "no-preference" }, { name: "prefers-color-scheme", value: theme }] });
+  await emulateDisplay(page, theme, "no-preference");
   await openToday(page, { theme, reduceMotion: false });
   await page.keyboard.press("Meta+k");
   const dialog = page.locator("dialog.ui-dialog[open]").first();
@@ -70,9 +69,7 @@ test("reduced motion: dialog has no transform animation or transition", async ({
 });
 
 test("glass renders with reduced transparency forced off (review shot)", async ({ page, theme }) => {
-  // Playwright's emulateMedia has no reducedTransparency option; force it via CDP (Chromium only).
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "no-preference" }, { name: "prefers-color-scheme", value: theme }] });
+  await emulateDisplay(page, theme, "no-preference");
   await openApp(page, { theme, reduceMotion: false /* reduced motion drops blur too */ });
   expect(await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches)).toBe(false);
   await page.keyboard.press("Meta+k");
@@ -89,10 +86,9 @@ test("glass renders with reduced transparency forced off (review shot)", async (
 });
 
 test("reduced transparency: shell chrome and composer have no blur", async ({ page, theme }) => {
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "reduce" }, { name: "prefers-color-scheme", value: theme }] });
+  await emulateDisplay(page, theme, "reduce");
   await openToday(page, { theme, reduceMotion: true });
-  expect(await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches)).toBe(true);
+  expect(await reducedTransparency(page)).toBe(true);
   for (const sel of ["main.command-surface > .intelligence-overlay > .nexus-mark", "main.command-surface > .intelligence-overlay > .field-clock", "main.command-surface > nav.system-constellation"]) {
     expect(await page.locator(sel).first().evaluate((el) => getComputedStyle(el).backdropFilter), sel).toBe("none");
   }

@@ -1,21 +1,9 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
-import { expect, openApp, openToday, openView, test, type Theme, openMore } from "./fixtures/tauri-mock";
+import { emulateDisplay as emulate, expect, openApp, openToday, openView, reducedTransparency, test, type Theme, openMore } from "./fixtures/tauri-mock";
 
 // Glass fallbacks and contrast (ported from the Oct 30 /tmp/glass review specs).
-// prefers-reduced-transparency has no Playwright option, so it is set through CDP (Chromium only).
 const SECTIONS = ["Today", "Chat & Agents", "Mind–Body", "Fitness", "Neuro", "Business", "Settings"];
-
-async function emulate(page: Page, theme: Theme, rt: "reduce" | "no-preference", rm: "reduce" | "no-preference" = "no-preference") {
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setEmulatedMedia", {
-    features: [
-      { name: "prefers-reduced-transparency", value: rt },
-      { name: "prefers-reduced-motion", value: rm },
-      { name: "prefers-color-scheme", value: theme },
-    ],
-  });
-}
 
 async function openSection(page: Page, theme: Theme, label: string) {
   await openApp(page, { theme, reduceMotion: false });
@@ -36,7 +24,7 @@ for (const label of SECTIONS) {
   test(`reduced transparency: ${label} has no blur`, async ({ page, theme }) => {
     await emulate(page, theme, "reduce");
     await openSection(page, theme, label);
-    expect(await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches)).toBe(true);
+    expect(await reducedTransparency(page)).toBe(true);
     expect(await blurred(page)).toEqual([]);
   });
 

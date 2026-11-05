@@ -9,6 +9,41 @@ import { NOW, responses, type Responses } from "./snapshot";
 
 export type Theme = "light" | "dark";
 
+type Reduce = "reduce" | "no-preference";
+
+/**
+ * Sets theme, reduced transparency and reduced motion. Chromium goes through CDP, because
+ * Playwright's emulateMedia has no reducedTransparency option. WebKit (the real engine) has no
+ * prefers-reduced-transparency media feature at all, so there the app's own switch,
+ * :root[data-reduce-transparency], stands in for it.
+ */
+export async function emulateDisplay(page: Page, theme: Theme, rt: Reduce, rm: Reduce = "no-preference") {
+  if (page.context().browser()?.browserType().name() === "chromium") {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setEmulatedMedia", {
+      features: [
+        { name: "prefers-reduced-transparency", value: rt },
+        { name: "prefers-reduced-motion", value: rm },
+        { name: "prefers-color-scheme", value: theme },
+      ],
+    });
+    return;
+  }
+  await page.emulateMedia({ colorScheme: theme, reducedMotion: rm });
+  // Init scripts run before <html> exists in WebKit.
+  const apply = (on: boolean) => {
+    const set = () => { if (on) document.documentElement.setAttribute("data-reduce-transparency", "true"); else document.documentElement.removeAttribute("data-reduce-transparency"); };
+    if (document.documentElement) set();
+    else document.addEventListener("readystatechange", set, { once: true });
+  };
+  await page.addInitScript(apply, rt === "reduce");
+  await page.evaluate(apply, rt === "reduce");
+}
+
+/** Whether emulateDisplay's reduced transparency took effect in this engine. */
+export const reducedTransparency = (page: Page) =>
+  page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches || document.documentElement.getAttribute("data-reduce-transparency") === "true");
+
 export interface MockOptions {
   theme: Theme;
   reduceMotion?: boolean;
