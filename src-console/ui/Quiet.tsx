@@ -36,9 +36,9 @@ export function Figure({ label, value }: { label: ReactNode; value: ReactNode })
 }
 
 /** The one quiet step away. Closed by default, so a page's first glance stays short. */
-export function More({ label, children, id }: { label: string; children: ReactNode; id?: string }) {
+export function More({ label, children, id, open }: { label: string; children: ReactNode; id?: string; open?: boolean }) {
   return (
-    <details className="quiet-more" id={id}>
+    <details className="quiet-more" id={id} open={open}>
       <summary><ChevronRight className="quiet-more__chevron" aria-hidden="true" />{label}</summary>
       <div className="quiet-more__body">{children}</div>
     </details>

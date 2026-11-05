@@ -75,3 +75,13 @@
 .home__top { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-6); }
 .home__half { gap: var(--space-6); }
 .home__strip { margin-top: 0; }
+
+/* Mind–Body readiness: one quiet line that opens the deeper page. */
+.home__readiness { display: flex; align-items: center; gap: var(--space-4); width: 100%; padding: var(--space-2) 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--label); text-align: left; cursor: pointer; }
+.home__readiness:disabled { cursor: default; }
+.home__readiness:hover:not(:disabled) .home__readiness-reason { color: var(--label); }
+.home__readiness:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.home__readiness-score { font: 300 var(--text-title1)/1 var(--font-text); font-variant-numeric: tabular-nums; }
+.home__readiness-text { display: grid; gap: 2px; color: var(--label-secondary); font: var(--type-callout); }
+.home__readiness-text .ui-badge { margin-left: var(--space-1); }
+.home__readiness-reason { transition: color var(--dur-fast) var(--ease-standard); }

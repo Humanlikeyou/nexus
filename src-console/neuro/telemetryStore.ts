@@ -21,6 +21,8 @@ export interface MuseTelemetry {
   sampleCount: number;
   lastPacketAt: number | null;
   channelLastPacketAt: Record<string, number>;
+  /** Muse auxiliary input, only once a real AUX packet has arrived. muse.rs doesn't stream it yet. */
+  aux?: { samples: number[]; lastPacketAt: number } | null;
 }
 
 const EMPTY_BANDS: FrequencyBands = { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 };
@@ -31,6 +33,7 @@ const emptyTelemetry = (): MuseTelemetry => ({
   sampleCount: 0,
   lastPacketAt: null,
   channelLastPacketAt: {},
+  aux: null,
 });
 
 export function createMuseTelemetryStore() {
@@ -40,6 +43,7 @@ export function createMuseTelemetryStore() {
   let channelSamples: Record<string, number> = { TP9: 0, AF7: 0, AF8: 0, TP10: 0 };
   let lastPacketAt: number | null = null;
   let channelLastPacketAt: Record<string, number> = {};
+  let aux: MuseTelemetry["aux"] = null;
   let snapshot: MuseTelemetry = emptyTelemetry();
   let publishedPackets = 0;
   const listeners = new Set<() => void>();
@@ -61,11 +65,16 @@ export function createMuseTelemetryStore() {
       sampleCount,
       lastPacketAt,
       channelLastPacketAt: { ...channelLastPacketAt },
+      aux: aux && { samples: [...aux.samples], lastPacketAt: aux.lastPacketAt },
     };
     emit();
   };
 
   const ingest = (payload: EegSample) => {
+    if (payload.channel === "AUX") {
+      aux = { samples: [...(aux?.samples ?? []), ...payload.samples].slice(-MAX_BUFFER), lastPacketAt: Date.now() };
+      return;
+    }
     if (!CHANNELS.includes(payload.channel as (typeof CHANNELS)[number])) return;
     buffers[payload.channel] = [...(buffers[payload.channel] ?? []), ...payload.samples].slice(-MAX_BUFFER);
     packetCount += 1;
@@ -90,6 +99,7 @@ export function createMuseTelemetryStore() {
       channelSamples = { TP9: 0, AF7: 0, AF8: 0, TP10: 0 };
       lastPacketAt = null;
       channelLastPacketAt = {};
+      aux = null;
       snapshot = emptyTelemetry();
       emit();
     },

@@ -14,6 +14,50 @@ const TICK_MS = 500;
 export const CALM_RATIO = 1.1;
 const FALLBACK_BASELINE_MS = 60_000;
 
+/** Eyes-open and eyes-closed baselines, 20 s each at the 500 ms tick. */
+export const BASELINE_TICKS = 40;
+/** The reinforcement schedule: reward about 60% of clean time, checked every 30 s (CRED-nf reporting). */
+export const TARGET_REWARD_RATE = .6;
+export const ADAPT_TICKS = 60;
+const ADAPT_BAND = .12, ADAPT_STEP = 1.04, ADAPT_MIN = .7, ADAPT_MAX = 1.5;
+/** An electrode reading this long gone is not contact. */
+const STALE_MS = 1500;
+const FIT_TICKS = 4;
+/** A reading is centred half a second back in its one-second FFT window. */
+const FFT_WINDOW_DELAY_MS = 500;
+
+export type GuidedStage = "fit" | "baseline-open" | "baseline-closed" | "training";
+export type HoldReason = "contact" | "dropout" | "blink" | "jaw" | "movement" | "noise";
+export type ChannelFit = "good" | "fair" | "poor" | "none";
+export const FIT_LABEL: Record<ChannelFit, string> = { good: "Good contact", fair: "Fair contact", poor: "Poor contact", none: "No signal" };
+
+/** Why the feedback is held, in plain words. Holding keeps noise from ever being rewarded. */
+export const HOLD_COPY: Record<HoldReason, string> = {
+  contact: "Holding: adjust the headband until the sensors settle.",
+  dropout: "Holding: the headset signal dropped out.",
+  blink: "Holding: that was a blink. Rest your eyes.",
+  jaw: "Holding: your jaw tightened. Let it soften.",
+  movement: "Holding: you moved. Settle back in.",
+  noise: "Holding: the signal is noisy right now.",
+};
+
+/** Next reward threshold scale from the last window's reward rate. Stays within sensible limits. */
+export function adaptScale(scale: number, rewardRate: number): number {
+  if (rewardRate > TARGET_REWARD_RATE + ADAPT_BAND) return Math.min(ADAPT_MAX, scale * ADAPT_STEP);
+  if (rewardRate < TARGET_REWARD_RATE - ADAPT_BAND) return Math.max(ADAPT_MIN, scale / ADAPT_STEP);
+  return scale;
+}
+
+/**
+ * What the lens shows, 0 to 1. Held and off-target are dark, so noise can't look like success; being
+ * in the target lifts it, and staying there is what makes it full and steady.
+ */
+export function feedbackLevel(state: Pick<TrainingState, "phase" | "stage" | "signal" | "streak">): number {
+  if (state.stage !== "training" || state.phase === "held" || !state.signal || state.signal.gated) return 0;
+  if (state.signal.action === "reward") return Math.min(1, .5 + (state.streak ?? 0) / 16);
+  return state.signal.action === "inhibit" ? .06 : .18;
+}
+
 export type TimelineEntry = { timestamp: number; focus: number; relaxation: number; action: string; gated: boolean };
 
 export type TrainingState = {
@@ -25,6 +69,19 @@ export type TrainingState = {
   relaxation: number | null;
   /** Live Calm % (0–100) so far this session; null until there is a baseline and a valid entry. */
   calmPercent: number | null;
+  /* Guided sessions only. */
+  stage?: GuidedStage;
+  hold?: HoldReason | null;
+  fit?: Record<string, ChannelFit>;
+  fitReady?: boolean;
+  /** Consecutive rewarded ticks: what steadies the lens. */
+  streak?: number;
+  /** Age of the newest EEG when this feedback was computed. */
+  delayMs?: number | null;
+  /** Share of clean training time rewarded so far, 0–100. */
+  targetPercent?: number | null;
+  /** The Myndlift electrode is the signal source. Only ever true with real AUX samples. */
+  auxSource?: boolean;
 };
 
 export const INACTIVE_TRAINING: TrainingState = { phase: "off", label: "Recording only", calibrationPercent: 0, signal: null, focus: null, relaxation: null, calmPercent: null };
@@ -61,6 +118,13 @@ function bandValue(bands: FrequencyBandPowers, label: string): number {
   return bands[keys[label.toLowerCase().replace(/\s+/g, "")]] ?? 0;
 }
 
+/** Eyes-closed alpha against eyes-open. A clear rise is a good sign the signal is real brain activity. */
+export function alphaRatio(open: FrequencyBandPowers[], closed: FrequencyBandPowers[]): number | null {
+  const alpha = (items: FrequencyBandPowers[]) => mean(items.map((item) => item.alpha));
+  const a = alpha(open), b = alpha(closed);
+  return a && b ? b / a : null;
+}
+
 export class TrainingSession {
   private baseline: FrequencyBandPowers[] = [];
   private thresholds: InZoneThresholds | null = null;
@@ -71,20 +135,84 @@ export class TrainingSession {
   private lastArtifactAt = -Infinity;
   private entries: TimelineEntry[] = [];
   private calibrationRelaxation: number[] = [];
+  private readonly guided: boolean;
+  private stage: GuidedStage = "fit";
+  private fitGoodTicks = 0;
+  private baselines: Record<"open" | "closed", FrequencyBandPowers[]> = { open: [], closed: [] };
+  private baseThresholds: InZoneThresholds | null = null;
+  private scale = 1;
+  private adjustments: number[] = [];
+  private streak = 0;
+  private window: boolean[] = [];
+  private held: Record<HoldReason, number> = { contact: 0, dropout: 0, blink: 0, jaw: 0, movement: 0, noise: 0 };
   state: TrainingState = { ...INACTIVE_TRAINING };
 
-  constructor(readonly protocol: NfProtocol) {
+  constructor(readonly protocol: NfProtocol, options: { guided?: boolean } = {}) {
     resetOutputEngine();
     resetPolicyState();
+    this.guided = options.guided ?? false;
     this.state = { ...INACTIVE_TRAINING, phase: "calibrating", label: "Calibrating" };
+    if (this.guided) this.state = { ...this.state, label: "Checking the fit", stage: "fit", fit: {}, fitReady: false };
+  }
+
+  /** Fit is good enough: start the eyes-open baseline. */
+  advance() {
+    if (this.guided && this.stage === "fit" && this.state.fitReady) {
+      this.stage = "baseline-open";
+      this.state = { ...this.state, stage: this.stage, label: "Eyes open", calibrationPercent: 0, hold: null };
+    }
+  }
+
+  private channelFit(telemetry: MuseTelemetry, channel: string, now: number): ChannelFit {
+    const at = telemetry.channelLastPacketAt[channel];
+    const samples = telemetry.channels[channel] ?? [];
+    if (!at || now - at > STALE_MS || samples.length < 256) return "none";
+    return samples.some((value) => !Number.isFinite(value)) ? "poor" : assessChannel(samples.slice(-256));
+  }
+
+  /** Thresholds from the baseline this protocol trains in: eyes closed for eyes-closed goals. */
+  private finishBaseline() {
+    const source = this.baselines[this.protocol.eyesClosed ? "closed" : "open"];
+    this.calibrationRelaxation = source.map((item) => item.relaxationScore);
+    const average = (label: string) => source.reduce((sum, item) => sum + bandValue(item, label), 0) / source.length;
+    this.baseThresholds = {
+      rewardMin: Object.fromEntries(this.protocol.rewardBands.map((band) => [band.label, Math.max(0.01, average(band.label) * 1.1)])),
+      inhibitMax: Object.fromEntries(this.protocol.inhibitBands.map((band) => [band.label, Math.max(0.01, average(band.label) * 0.9)])),
+    };
+    this.thresholds = this.baseThresholds;
+    this.stage = "training";
+  }
+
+  private applyScale() {
+    if (!this.baseThresholds) return;
+    this.thresholds = { ...this.baseThresholds, rewardMin: Object.fromEntries(Object.entries(this.baseThresholds.rewardMin).map(([label, value]) => [label, value * this.scale])) };
+  }
+
+  private hold(reason: HoldReason, telemetry: MuseTelemetry, now: number, fit: Record<string, ChannelFit>): TrainingState {
+    if (this.stage === "training") this.held[reason] += 1;
+    this.streak = 0;
+    this.state = { ...this.state, phase: "held", label: HOLD_COPY[reason], stage: this.stage, hold: reason, fit, signal: null, focus: null, relaxation: null, streak: 0, delayMs: telemetry.lastPacketAt ? now - telemetry.lastPacketAt + FFT_WINDOW_DELAY_MS : null };
+    return this.state;
   }
 
   tick(telemetry: MuseTelemetry, now: number): TrainingState {
     if (now - this.lastTick < TICK_MS) return this.state;
     this.lastTick = now;
-    const stale = CHANNELS.some((channel) => !telemetry.channelLastPacketAt[channel] || now - telemetry.channelLastPacketAt[channel] > 1500);
+    const fit = this.guided ? Object.fromEntries(CHANNELS.map((channel) => [channel, this.channelFit(telemetry, channel, now)])) as Record<string, ChannelFit> : {};
+    if (this.guided && this.stage === "fit") {
+      const ready = CHANNELS.every((channel) => fit[channel] === "good" || fit[channel] === "fair");
+      this.fitGoodTicks = ready ? this.fitGoodTicks + 1 : 0;
+      this.state = { ...this.state, fit, fitReady: this.fitGoodTicks >= FIT_TICKS };
+      return this.state;
+    }
+    if (this.guided) {
+      if (Object.values(fit).includes("none")) return this.hold("dropout", telemetry, now, fit);
+      if (Object.values(fit).includes("poor")) return this.hold("contact", telemetry, now, fit);
+      if (telemetry.packetCount === this.lastPacket) return this.hold("dropout", telemetry, now, fit);
+    }
+    const stale = CHANNELS.some((channel) => !telemetry.channelLastPacketAt[channel] || now - telemetry.channelLastPacketAt[channel] > STALE_MS);
     const incomplete = CHANNELS.some((channel) => telemetry.channels[channel]?.length < 256);
-    const poor = CHANNELS.some((channel) => {
+    const poor = !this.guided && CHANNELS.some((channel) => {
       const samples = telemetry.channels[channel] ?? [];
       return samples.some((value) => !Number.isFinite(value)) || assessChannel(samples.slice(-256)) !== "good";
     });
@@ -99,6 +227,11 @@ export class TrainingSession {
     this.artifacts = this.artifacts.filter((time) => now - time < 60_000);
     if (detected.length) {
       if (now - this.lastArtifactAt >= 1000) { this.artifacts.push(now); this.lastArtifactAt = now; }
+      if (this.guided) {
+        // A blink costs one tick of the baseline, never the whole baseline.
+        const type = detected[0].type;
+        return this.hold(type === "blink" ? "blink" : type === "jaw_clench" ? "jaw" : "movement", telemetry, now, fit);
+      }
       if (!this.thresholds) this.baseline = [];
       this.state = { ...this.state, phase: "held", label: "Movement detected", signal: null, focus: null, relaxation: null, calibrationPercent: this.thresholds ? 100 : 0 };
       return this.state;
@@ -106,12 +239,28 @@ export class TrainingSession {
     const jawPower = (computeJawPower(windows.AF7) + computeJawPower(windows.AF8)) / 2;
     if (!this.thresholds) this.jawBaseline = this.jawBaseline ? this.jawBaseline * 0.9 + jawPower * 0.1 : jawPower;
     // Preserve the established frontal-electrode metrics without averaging phases.
-    const frontal = ["AF7", "AF8"].map((channel) => {
-      const samples = telemetry.channels[channel];
+    // The back-of-head electrode reads alpha better than the forehead, when it's really there.
+    const auxLive = this.guided && telemetry.aux != null && now - telemetry.aux.lastPacketAt < STALE_MS && telemetry.aux.samples.length >= 256 && assessChannel(telemetry.aux.samples.slice(-256)) !== "poor";
+    const auxSource = auxLive && this.protocol.rewardBands.some((band) => band.label === "Alpha");
+    const frontal = (auxSource ? ["AUX"] : ["AF7", "AF8"]).map((channel) => {
+      const samples = channel === "AUX" ? (telemetry.aux as NonNullable<MuseTelemetry["aux"]>).samples : telemetry.channels[channel];
       const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length;
       return computeBands(samples.map((value) => value - mean));
     });
     const bands = Object.fromEntries(Object.keys(frontal[0]).map((key) => [key, frontal.reduce((sum, item) => sum + item[key as keyof FrequencyBandPowers], 0) / frontal.length])) as unknown as FrequencyBandPowers;
+    if (this.guided && !this.thresholds) {
+      const eyes = this.stage === "baseline-closed" ? "closed" : "open";
+      this.baselines[eyes].push(bands);
+      if (this.baselines[eyes].length >= BASELINE_TICKS) {
+        if (eyes === "open") this.stage = "baseline-closed";
+        else this.finishBaseline();
+      }
+      const done = this.stage === "baseline-closed" ? 0 : this.baselines[eyes].length;
+      this.state = { ...this.state, phase: this.stage === "training" ? "training" : "calibrating", stage: this.stage, hold: null, fit, auxSource,
+        label: this.stage === "baseline-closed" ? "Eyes closed" : this.stage === "training" ? "Training" : "Eyes open",
+        calibrationPercent: this.stage === "training" ? 100 : (this.stage === "baseline-closed" ? this.baselines.closed.length : done) / BASELINE_TICKS * 100 };
+      return this.state;
+    }
     if (!this.thresholds) {
       this.baseline.push(bands);
       if (this.baseline.length >= CALIBRATION_TICKS) {
@@ -127,6 +276,28 @@ export class TrainingSession {
     }
     const signal = computeFeedbackSignal(bands, this.protocol, this.thresholds, 1, "good", this.artifacts.length, false);
     this.entries.push({ timestamp: now, focus: bands.focusScore, relaxation: bands.relaxationScore, action: signal.action, gated: signal.gated });
+    if (this.guided) {
+      if (signal.gated) return this.hold("noise", telemetry, now, fit);
+      const rewarded = signal.action === "reward";
+      this.streak = rewarded ? this.streak + 1 : 0;
+      this.window.push(rewarded);
+      if (this.window.length >= ADAPT_TICKS) {
+        this.scale = adaptScale(this.scale, this.window.filter(Boolean).length / this.window.length);
+        this.adjustments.push(this.scale);
+        this.applyScale();
+        this.window = [];
+      }
+      const valid = this.entries.filter((entry) => !entry.gated);
+      this.state = {
+        ...this.state, phase: "training", stage: "training", hold: null, fit, signal, auxSource, streak: this.streak,
+        label: rewarded ? "In your target" : signal.action === "inhibit" ? "Ease off a little" : "Keep going",
+        focus: bands.focusScore, relaxation: bands.relaxationScore, calibrationPercent: 100,
+        calmPercent: calmPercent(this.entries, relaxationBaseline(this.calibrationRelaxation, this.entries)),
+        delayMs: telemetry.lastPacketAt ? now - telemetry.lastPacketAt + FFT_WINDOW_DELAY_MS : null,
+        targetPercent: valid.length ? valid.filter((entry) => entry.action === "reward").length / valid.length * 100 : null,
+      };
+      return this.state;
+    }
     this.state = {
       phase: signal.gated ? "held" : "training",
       label: signal.gated ? "Feedback paused" : signal.action === "reward" ? "In target range" : signal.action === "inhibit" ? "Above inhibit threshold" : "Approaching target",
@@ -144,6 +315,13 @@ export class TrainingSession {
       protocol_id: this.protocol.id, protocol_name: this.protocol.name, avg_focus: average("focus"), avg_relaxation: average("relaxation"),
       time_in_target_pct: valid.length ? valid.filter((entry) => entry.action === "reward").length / valid.length * 100 : null,
       relaxation_baseline: baseline, calm_pct: calmPercent(this.entries, baseline), timeline: [...this.entries],
+      ...(this.guided ? { guided: {
+        reward_schedule: { target_rate: TARGET_REWARD_RATE, check_every_s: ADAPT_TICKS * TICK_MS / 1000, threshold_scale: this.scale, adjustments: [...this.adjustments] },
+        held_seconds: Object.fromEntries(Object.entries(this.held).map(([reason, ticks]) => [reason, ticks * TICK_MS / 1000])) as Record<HoldReason, number>,
+        trained_seconds: valid.length * TICK_MS / 1000,
+        alpha_eyes_closed_ratio: alphaRatio(this.baselines.open, this.baselines.closed),
+        aux_source: !!this.state.auxSource,
+      } } : {}),
     };
   }
 }

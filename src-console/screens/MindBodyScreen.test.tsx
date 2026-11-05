@@ -36,9 +36,9 @@ describe("Mind-Body", () => {
     const series = seriesFromSnapshot({ ...rest, today: empty });
     render(<MindBodyField sessions={[]} load={() => Promise.resolve<MindBodyState>({ status: "ready", series, drivers: { sleep: [], hrv: [], recovery: [] } })} />);
     expect(await screen.findByLabelText(/^Readiness: (High|Moderate|Low)$/)).toBeInTheDocument();
-    expect(screen.getByText(/latest reading Nov 3$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Reading for Nov 3, the latest with data/)).toBeInTheDocument();
     expect(screen.getByLabelText(/^Recovery \d+%$/)).toBeInTheDocument();
-    expect(screen.getByText("HRV", { selector: "dt" }).nextSibling).toHaveTextContent(/^\d+ ms$/);
+    expect(screen.getByRole("heading", { level: 3, name: "HRV" }).nextSibling).toHaveTextContent(/^\d+ ms$/);
   });
   it("names no earlier day when today has values", async () => {
     render(<MindBodyField sessions={[]} load={() => Promise.resolve<MindBodyState>({ status: "ready", series: seriesFromSnapshot(mockSnapshot()), drivers: { sleep: [], hrv: [], recovery: [] } })} />);
@@ -81,5 +81,15 @@ describe("loadMindBody", () => {
     expect((await loadMindBody()).status).toBe("error");
     invokeMock.mockReset(); invokeMock.mockResolvedValue({ nope: true });
     expect((await loadMindBody()).status).toBe("error");
+  });
+
+  it("says plainly when the latest reading is old, and never scores it", async () => {
+    const days = Array.from({ length: 10 }, (_, i) => ({ day: `2026-10-${String(i + 1).padStart(2, "0")}`, value: 60 }));
+    const blank = { day: "2026-10-20", value: null };
+    const series = { hrv: { key: "hrv", points: [...days, blank] }, recovery: { key: "recovery", points: [...days, blank] }, sleep: { key: "sleep_total_min", points: [...days, blank] }, resting_hr: { key: "rhr", points: [] }, strain: { key: "strain", points: [] } };
+    render(<MindBodyField sessions={[]} load={async () => ({ status: "ready", series, drivers: { sleep: [], hrv: [], recovery: [] } } as never)} />);
+    expect(await screen.findByText("No recent reading")).toBeInTheDocument();
+    expect(screen.getByText("The last reading was Oct 10. Open NOOP to sync.")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Readiness:/)).not.toBeInTheDocument();
   });
 });

@@ -65,6 +65,8 @@ export interface AmaraLensProps {
   showLabel?: boolean;
   /** Hide from assistive tech when adjacent text already says the same. */
   decorative?: boolean;
+  /** Slower envelope for a level that isn't speech: neurofeedback glows and settles. */
+  smoothing?: { attackMs: number; releaseMs: number };
   /** Error state: optional Retry next to the message. */
   onRetry?: () => void;
   className?: string;
@@ -74,13 +76,15 @@ export interface AmaraLensProps {
  * Amara's speaking lens. Layers are CSS radial gradients; only transform and opacity animate.
  * Level drives CSS variables from requestAnimationFrame, so voice events never re-render React.
  */
-export function AmaraLens({ state, size, level, showLabel = false, decorative = false, onRetry, className }: AmaraLensProps) {
+export function AmaraLens({ state, size, level, smoothing, showLabel = false, decorative = false, onRetry, className }: AmaraLensProps) {
   const { levelRef } = useAmaraVoice();
   // Only a live lens (no fixed level) needs the bridge running.
   useAmaraVoiceBridge(level === undefined);
   const root = useRef<HTMLDivElement>(null);
   const levelProp = useRef(level);
   useEffect(() => { levelProp.current = level; }, [level]);
+  const envelope = useRef(smoothing);
+  useEffect(() => { envelope.current = smoothing; }, [smoothing]);
 
   useEffect(() => {
     const el = root.current;
@@ -111,7 +115,7 @@ export function AmaraLens({ state, size, level, showLabel = false, decorative = 
     const tick = (now: number) => {
       frame = 0;
       if (document.hidden) { env = 0; write(0); return; }
-      env = stepEnvelope(env, target(), now - last, calm ? CALM_ATTACK_MS : ATTACK_MS, calm ? CALM_RELEASE_MS : RELEASE_MS);
+      env = stepEnvelope(env, target(), now - last, calm ? CALM_ATTACK_MS : envelope.current?.attackMs ?? ATTACK_MS, calm ? CALM_RELEASE_MS : envelope.current?.releaseMs ?? RELEASE_MS);
       last = now;
       write(env);
       // Keep running while driven; otherwise run out the release curve and stop.

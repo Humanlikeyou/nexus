@@ -9,6 +9,7 @@ import { useNow } from "../shell/useNow";
 import type { RecordedSession } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, Select, Sparkline, StatTile, type Tone } from "../ui";
 import { recoveryBand } from "./HealthScreen";
+import { NeuroFlow } from "./NeuroFlow";
 import { type MuseScreenProps, museSignalState } from "./muse";
 import "./NeuroScreen.css";
 
@@ -82,9 +83,9 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
   const primary = pendingSave
     ? <Button variant="primary" icon={RefreshCw} onClick={onStop} loading={operation === "stopping"} disabled={busy}>{operation === "stopping" ? BUSY_LABEL.stopping : "Retry Save"}</Button>
     : running || streaming
-      ? <Button variant="destructive" icon={Square} onClick={onStop} loading={operation === "stopping"} disabled={busy}>{operation === "stopping" ? BUSY_LABEL.stopping : "Stop Session"}</Button>
+      ? <Button variant="destructive" icon={Square} onClick={onStop} loading={operation === "stopping"} disabled={busy}>{operation === "stopping" ? BUSY_LABEL.stopping : "Stop session"}</Button>
       : connected
-        ? <Button variant="primary" icon={Play} onClick={onStart} loading={operation === "starting"} disabled={busy}>{operation === "starting" ? BUSY_LABEL.starting : "Start Session"}</Button>
+        ? <Button variant="primary" icon={Play} onClick={onStart} loading={operation === "starting"} disabled={busy}>{operation === "starting" ? BUSY_LABEL.starting : "Start session"}</Button>
         : <Button variant="primary" icon={Bluetooth} onClick={onScan} loading={operation === "scanning" || operation === "connecting"} disabled={busy || failed}>{operation === "scanning" || operation === "connecting" ? BUSY_LABEL[operation] : "Find Muse"}</Button>;
   const secondary = connected && !running && !streaming
     ? <Button variant="secondary" icon={Unplug} onClick={onDisconnect} loading={operation === "disconnecting"} disabled={busy}>{operation === "disconnecting" ? BUSY_LABEL.disconnecting : "Disconnect"}</Button>
@@ -93,7 +94,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
   const header = (
     <>
       <PageHero title="Neuro" statement={failed ? "Out of reach" : deviceBadge.text} detail={failed ? <Badge tone="danger">Unavailable</Badge> : band ? <Badge tone={band.tone}>Recovery {Math.round(recovery as number)}%</Badge> : undefined} />
-      <div className="neuro__actions">{secondary}{primary}</div>
+      <div className="neuro__actions">{secondary}{!connected && primary}</div>
     </>
   );
 
@@ -154,6 +155,8 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
         )
         : (
           <>
+            <NeuroFlow training={training} telemetry={telemetry} sessions={data.sessions} running={running} action={primary} />
+            <More label="Live readings and signal" open={running && !training.state.stage ? true : undefined}>
             <Card className="neuro__strip" aria-label="Session">
               <Select className="neuro__protocol" label="Protocol" hideLabel value={training.protocolId} options={protocolOptions}
                 onChange={(e) => training.setProtocolId(e.target.value)} disabled={running || busy} />
@@ -175,7 +178,6 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
               <StatTile label="Relaxation" value={heroIdle ? "Ready" : whole(state.relaxation)} />
             </div>
 
-            <More label="Band powers and signal">
             <div className="neuro__row">
               <Card title="Band powers" className="neuro__bands">
                 <InsetGroup className="neuro__group">

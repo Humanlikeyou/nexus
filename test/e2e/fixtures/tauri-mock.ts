@@ -59,7 +59,12 @@ function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
       if (canned && typeof canned === "object" && "__reject" in canned) throw structuredClone(canned.__reject);
       if (canned && typeof canned === "object" && canned.__byTool) {
         const tool = String(args?.tool ?? "");
-        if (tool in canned.__byTool) return structuredClone(canned.__byTool[tool]);
+        if (tool in canned.__byTool) {
+          const answer = canned.__byTool[tool] as { __byKey?: Record<string, unknown> };
+          // __byKey: a different metric_series per metric key.
+          const key = String((args?.args as { key?: unknown } | undefined)?.key ?? "");
+          return structuredClone(answer && typeof answer === "object" && answer.__byKey ? answer.__byKey[key] : answer);
+        }
         throw { kind: "tool_not_allowed", detail: tool };
       }
       if (cmd in data) return structuredClone(data[cmd]);

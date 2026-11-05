@@ -11,6 +11,7 @@ import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, StatusDot, type Tone, Line, Lines, More, PageHero } from "../ui";
 import { recoveryBand } from "./HealthScreen";
 import { GoalsCard } from "./GoalsCard";
+import { useReadinessLine } from "../lib/useReadiness";
 import "./TerranceScreen.css";
 
 const DASH = "—";
@@ -243,6 +244,7 @@ function OpenLink({ to, label, onNavigate }: { to: ModuleId; label: string; onNa
 
 export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNow, scheduler: schedulerOverride }: TerranceFieldProps) {
   const now = useNow(fixedNow);
+  const readinessLine = useReadinessLine();
   const scheduler = useSchedulerStatus(schedulerOverride);
   const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
@@ -316,6 +318,16 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
         {recoveryBody}
         <OpenLink to="health" label="Open Fitness" onNavigate={onNavigate} />
       </section>
+
+      {readinessLine && (
+        <button type="button" className="home__readiness" disabled={!onNavigate} onClick={() => onNavigate?.("mindbody")} aria-label={`Open Mind–Body. Readiness ${readinessLine.score}, ${readinessLine.label}. ${readinessLine.reason}`}>
+          <span className="home__readiness-score">{readinessLine.score}</span>
+          <span className="home__readiness-text">
+            <span>Mind–Body readiness{readinessLine.earlierDay ? `, ${readinessLine.earlierDay}` : ""} <Badge tone={readinessLine.tone}>{readinessLine.label}</Badge></span>
+            <span className="home__readiness-reason">{readinessLine.reason}</span>
+          </span>
+        </button>
+      )}
 
       <Card title="Priorities" accessory={<OpenLink to="chat" label="Open Chat" onNavigate={onNavigate} />}>
         {priorities.length === 0
