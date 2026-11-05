@@ -318,7 +318,7 @@ describe("QA 11-04 retest2", () => {
     expect(document.querySelector(".chat-screen__model")).toHaveTextContent("qwen3-32b");
   });
 
-  it("Home scrolls to the top and End to the bottom, but not while typing", () => {
+  it("Home scrolls to the top and End to the bottom, from an empty composer too, but not while typing", () => {
     setup({ messages: [msg("u", "user", "hi", "2026-10-28T05:00:00Z"), msg("a", "assistant", "Hello.", "2026-10-28T05:00:05Z")] });
     const list = screen.getByRole("list", { name: "Messages" });
     Object.defineProperty(list, "scrollHeight", { configurable: true, value: 900 });
@@ -327,8 +327,17 @@ describe("QA 11-04 retest2", () => {
     expect(list.scrollTop).toBe(0);
     fireEvent.keyDown(document.body, { key: "End" });
     expect(list.scrollTop).toBe(900);
+    const composer = screen.getByRole("textbox", { name: /message/i });
     list.scrollTop = 400;
-    fireEvent.keyDown(screen.getByRole("textbox", { name: /message/i }), { key: "Home" });
+    fireEvent.keyDown(composer, { key: "Home" });
+    expect(list.scrollTop).toBe(0);
+    fireEvent.keyDown(composer, { key: "End" });
+    expect(list.scrollTop).toBe(900);
+    fireEvent.change(composer, { target: { value: "draft" } });
+    list.scrollTop = 400;
+    expect(fireEvent.keyDown(composer, { key: "Home" })).toBe(true); // not prevented: the caret moves
+    expect(list.scrollTop).toBe(400);
+    fireEvent.keyDown(composer, { key: "End" });
     expect(list.scrollTop).toBe(400);
   });
 });

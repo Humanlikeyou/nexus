@@ -145,7 +145,7 @@ export function headerModel(messages: { role: string; servedModel?: string }[], 
   return routed ? "Amara Router" : hermesModel;
 }
 
-/** Home/End scroll the message list unless focus is in a text field. */
+/** Text fields keep Home/End for the caret; the empty composer is the one exception (see the key handler). */
 export function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
@@ -220,11 +220,12 @@ export function ChatField({
     el.scrollTop = lastUser ? Math.min(bottom, Math.max(0, lastUser.offsetTop - el.offsetTop - 16)) : bottom;
   }, [messages.length, sending]);
 
-  // Home → top of the conversation, End → bottom (not while typing).
+  // Home → top of the conversation, End → bottom. The composer keeps focus after send, so it scrolls too while empty.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if ((e.key !== "Home" && e.key !== "End") || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.defaultPrevented) return;
-      if (isTypingTarget(e.target)) return;
+      const composer = composerRef.current;
+      if (isTypingTarget(e.target) && !(e.target === composer && !composer?.value)) return;
       const el = listRef.current;
       if (!el) return;
       e.preventDefault();
