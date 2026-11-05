@@ -2,6 +2,9 @@
 //! `mcp__x__y{topic:<|"|>a card<|"|>}<tool_call|>`, with or without `<|tool_call>call:` in front.
 //! [`recover_stream`] turns such a reply into real tool calls.
 //!
+//! Text can come from anywhere the model read, so only tools in [`RECOVERABLE_PREFIXES`] are ever
+//! recovered. An echoed `terminal{command:...}` stays text, even though the user then sees it.
+//!
 //! A reply converts only when it begins with a whole call to a tool this request offered, so a
 //! normal reply that mentions the syntax is unchanged. Prose after the calls stays as `content`
 //! beside `tool_calls`: Hermes keeps that as commentary, and as the answer if the next model turn
@@ -11,6 +14,9 @@ use crate::engine::{Ev, EvStream};
 use futures::StreamExt;
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
+
+/// The low-risk tools a text call may reach. Nothing else is recovered, offered or not.
+const RECOVERABLE_PREFIXES: [&str; 2] = ["mcp__followups__", "mcp__vault__"];
 
 const QUOTE: &str = "<|\"|>";
 const OPEN: &str = "<|tool_call>";
@@ -47,7 +53,7 @@ fn may_be_call(text: &str, names: &HashSet<String>) -> bool {
 
 /// The leading calls to `names` as native tool calls, plus the prose after them. None unless
 /// `text` begins with a whole call.
-pub fn parse_leading_calls(text: &str, names: &HashSet<String>) -> Option<(Vec<Value>, String)> {
+fn parse_leading_calls(text: &str, names: &HashSet<String>) -> Option<(Vec<Value>, String)> {
     let mut p = Parser { rest: text };
     let mut calls = Vec::new();
     loop {
@@ -224,9 +230,15 @@ fn settle(held: String, names: &HashSet<String>) -> Option<Ev> {
     })
 }
 
-/// Passes `events` through, recovering a tool call written as text. Ordinary replies are released
-/// at the first delta that cannot begin a call to one of `names`.
-pub fn recover_stream(events: EvStream, names: HashSet<String>) -> EvStream {
+fn recoverable(name: &str) -> bool {
+    RECOVERABLE_PREFIXES.iter().any(|p| name.starts_with(p))
+}
+
+/// Passes `events` through, recovering a tool call written as text for the offered `names` that
+/// are [`recoverable`]. Ordinary replies are released at the first delta that cannot begin such a
+/// call; with no such name nothing is held.
+pub fn recover_stream(events: EvStream, mut names: HashSet<String>) -> EvStream {
+    names.retain(|name| recoverable(name));
     if names.is_empty() {
         return events;
     }
@@ -273,9 +285,10 @@ mod tests {
 
     const MUTE: &str = "mcp__followups__mute_topic";
     const DONE: &str = "mcp__followups__item_done";
+    const READ: &str = "mcp__vault__vault_read";
 
     fn names() -> HashSet<String> {
-        [MUTE, DONE, "lights"].map(String::from).into()
+        [MUTE, DONE, READ, "terminal"].map(String::from).into()
     }
 
     /// All of `text` must be calls.
@@ -315,9 +328,9 @@ mod tests {
 
     #[test]
     fn markers_and_value_types() {
-        let text = "<|tool_call>call:lights{note:<|\"|>a, b } c: d<|\"|>,level:3,on:true,off:null,\
+        let text = "<|tool_call>call:mcp__vault__vault_read{note:<|\"|>a, b } c: d<|\"|>,level:3,on:true,off:null,\
                     room:kitchen,tags:[<|\"|>x,y<|\"|>,2],deep:{a:{b:1.5}}}<tool_call|>\
-                    <|tool_call>call:lights{}<tool_call|>";
+                    <|tool_call>call:mcp__vault__vault_read{}<tool_call|>";
         let calls = parse_calls(text, &names()).unwrap();
         assert_eq!(calls.len(), 2);
         assert_eq!(
@@ -326,7 +339,8 @@ mod tests {
                     "room": "kitchen", "tags": ["x,y", 2], "deep": {"a": {"b": 1.5}}})
         );
         assert_eq!(call(&calls[1]).1, &json!({}));
-        let json_args = parse_calls("lights{\"on\": \"a, \\\"b\\\"\"}", &names()).unwrap();
+        let json_args =
+            parse_calls("mcp__vault__vault_read{\"on\": \"a, \\\"b\\\"\"}", &names()).unwrap();
         assert_eq!(call(&json_args[0]).1, &json!({"on": "a, \"b\""}));
     }
 
@@ -344,19 +358,23 @@ mod tests {
         );
         assert_eq!(prose, "All good on that front.");
 
-        let two = "lights{a:1}<tool_call|> lights{a:2}\n\nDone. Mute {this} too?";
+        let two = "mcp__vault__vault_read{a:1}<tool_call|> mcp__vault__vault_read{a:2}\n\nDone. Mute {this} too?";
         let (calls, prose) = parse_leading_calls(two, &names()).unwrap();
         assert_eq!(calls.len(), 2);
         assert_eq!(prose, "Done. Mute {this} too?");
 
         let (calls, prose) =
-            parse_leading_calls("lights{a:1}, then web_search{}", &names()).unwrap();
+            parse_leading_calls("mcp__vault__vault_read{a:1}, then web_search{}", &names())
+                .unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(prose, ", then web_search{}");
 
         // A cut-off second call must not reach the user.
-        let (calls, prose) =
-            parse_leading_calls("lights{a:1} lights{a:<|\"|>cut off", &names()).unwrap();
+        let (calls, prose) = parse_leading_calls(
+            "mcp__vault__vault_read{a:1} mcp__vault__vault_read{a:<|\"|>cut off",
+            &names(),
+        )
+        .unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(prose, "");
     }
@@ -372,15 +390,15 @@ mod tests {
             // A mention, not a call.
             "You could call mcp__followups__mute_topic{topic:<|\"|>x<|\"|>} for that.",
             // Broken syntax.
-            "lights{note:<|\"|>unclosed}",
-            "lights{note:<|\"|>a<|\"|>",
-            "lights{no colon}",
-            "lights{a b:1}",
+            "mcp__vault__vault_read{note:<|\"|>unclosed}",
+            "mcp__vault__vault_read{note:<|\"|>a<|\"|>",
+            "mcp__vault__vault_read{no colon}",
+            "mcp__vault__vault_read{a b:1}",
             "lights",
         ] {
             assert_eq!(parse_leading_calls(text, &names()), None, "{text}");
         }
-        let deep = format!("lights{{a:{}", "[".repeat(100_000));
+        let deep = format!("mcp__vault__vault_read{{a:{}", "[".repeat(100_000));
         assert_eq!(parse_leading_calls(&deep, &names()), None);
     }
 
@@ -389,10 +407,10 @@ mod tests {
         assert!(may_be_call("", &names()));
         assert!(may_be_call("  mcp__foll", &names()));
         assert!(may_be_call("<|tool", &names()));
-        assert!(may_be_call("call:li", &names()));
-        assert!(may_be_call("lights{on:", &names()));
+        assert!(may_be_call("call:mcp__vault", &names()));
+        assert!(may_be_call("mcp__vault__vault_read{on:", &names()));
         assert!(!may_be_call("Done", &names()));
-        assert!(!may_be_call("lights are on", &names()));
+        assert!(!may_be_call("mcp__vault are on", &names()));
         assert!(!may_be_call("call me", &names()));
     }
 
@@ -449,14 +467,19 @@ mod tests {
         assert_eq!(out[3], Ok(done()));
 
         // Held for a moment, then released whole.
-        let out = run(chunks(&["li", "ghts are on", " now"])).await;
-        assert_eq!(out[0], Ok(text_delta("lights are on".into())));
+        let out = run(chunks(&["mcp__v", "ault notes", " now"])).await;
+        assert_eq!(out[0], Ok(text_delta("mcp__vault notes".into())));
         assert_eq!(out[1], Ok(text_delta(" now".into())));
     }
 
     #[tokio::test]
     async fn trailing_prose_is_held_with_the_call_and_kept() {
-        let out = run(chunks(&["lights{on:true}", " All good", " on that front."])).await;
+        let out = run(chunks(&[
+            "mcp__vault__vault_read{on:true}",
+            " All good",
+            " on that front.",
+        ]))
+        .await;
         let Ok(Ev::Delta {
             content,
             tool_calls,
@@ -471,14 +494,18 @@ mod tests {
 
     #[tokio::test]
     async fn a_broken_call_passes_unchanged_at_the_end() {
-        let text = "lights{on is the call I would use";
-        let out = run(chunks(&["lights{on", " is the call I would use"])).await;
+        let text = "mcp__vault__vault_read{on is the call I would use";
+        let out = run(chunks(&[
+            "mcp__vault__vault_read{on",
+            " is the call I would use",
+        ]))
+        .await;
         assert_eq!(out, vec![Ok(text_delta(text.to_string())), Ok(done())]);
     }
 
     #[tokio::test]
     async fn native_tool_calls_and_empty_tools_pass_through() {
-        let native = vec![json!({"function": {"name": "lights", "arguments": {}}})];
+        let native = vec![json!({"function": {"name": "terminal", "arguments": {}}})];
         let delta = Ev::Delta {
             content: String::new(),
             tool_calls: native,
@@ -505,16 +532,69 @@ mod tests {
 
     #[tokio::test]
     async fn an_oversized_reply_goes_out_as_text() {
-        let long = format!("lights{{a:<|\"|>{}", "x".repeat(MAX_HELD_BYTES));
+        let long = format!(
+            "mcp__vault__vault_read{{a:<|\"|>{}",
+            "x".repeat(MAX_HELD_BYTES)
+        );
         let out = run(chunks(&[&long, "tail"])).await;
         assert_eq!(out[0], Ok(text_delta(long)));
         assert_eq!(out[1], Ok(text_delta("tail".into())));
     }
 
+    #[tokio::test]
+    async fn only_the_fixed_prefixes_are_recovered() {
+        for text in [
+            "terminal{command:<|\"|>rm -rf x<|\"|>}<tool_call|>",
+            "<|tool_call>call:terminal{command:<|\"|>rm -rf x<|\"|>}<tool_call|>",
+            "write_file{path:<|\"|>x<|\"|>}",
+            "patch{path:<|\"|>x<|\"|>}",
+            "web_search{query:<|\"|>x<|\"|>}",
+            "web_extract{url:<|\"|>x<|\"|>}",
+            "mcp__noop__health_snapshot{}",
+            "xmcp__vault__vault_read{}",
+        ] {
+            let name = text
+                .trim_start_matches("<|tool_call>call:")
+                .split('{')
+                .next()
+                .unwrap()
+                .to_string();
+            let events = futures::stream::iter(chunks(&[text])).boxed();
+            let offered = HashSet::from([name]);
+            let out: Vec<_> = recover_stream(events, offered).collect().await;
+            assert_eq!(out, chunks(&[text]), "{text}");
+        }
+        // Recoverable names beside a blocked one: the blocked one is still not a call, and a
+        // later blocked call in the same reply stays prose.
+        let mut offered = names();
+        offered.insert("terminal".to_string());
+        let text = "terminal{command:<|\"|>x<|\"|>} mcp__vault__vault_read{a:1}";
+        let events = futures::stream::iter(chunks(&[text])).boxed();
+        let out: Vec<_> = recover_stream(events, offered).collect().await;
+        assert_eq!(out, chunks(&[text]));
+
+        let text = "mcp__vault__vault_read{a:1} terminal{command:x}";
+        let events = futures::stream::iter(chunks(&[text])).boxed();
+        let out: Vec<_> = recover_stream(events, names()).collect().await;
+        let Ok(Ev::Delta {
+            content,
+            tool_calls,
+        }) = &out[0]
+        else {
+            panic!("{out:?}")
+        };
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(call(&tool_calls[0]).0, READ);
+        assert_eq!(content, "terminal{command:x}");
+    }
+
     #[test]
     fn offered_names_come_from_the_request() {
-        let body = json!({"tools": [{"type": "function", "function": {"name": "lights"}}, {}]});
-        assert_eq!(offered_names(&body), HashSet::from(["lights".to_string()]));
+        let body = json!({"tools": [{"type": "function", "function": {"name": "terminal"}}, {}]});
+        assert_eq!(
+            offered_names(&body),
+            HashSet::from(["terminal".to_string()])
+        );
         assert!(offered_names(&json!({})).is_empty());
     }
 }

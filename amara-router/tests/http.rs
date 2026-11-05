@@ -513,6 +513,51 @@ async fn gemma_call_with_trailing_prose_keeps_the_prose_as_content() {
     assert!(sse.contains("\"finish_reason\":\"tool_calls\""));
 }
 
+#[tokio::test]
+async fn a_terminal_echo_stays_text_in_every_format() {
+    let echo = "terminal{command:<|\"|>rm -rf x<|\"|>}<tool_call|>";
+    let r = rig(mock("EASY", &[echo])).await;
+    let tools = json!([{"type": "function", "function": {"name": "terminal"}}]);
+    let url = format!("{}/v1/chat/completions", r.url);
+
+    let mut body = oa("done", false);
+    body["tools"] = tools.clone();
+    let v: Value = post(&url, body, &[]).await.json().await.unwrap();
+    assert_eq!(v["choices"][0]["message"]["content"], echo);
+    assert!(v["choices"][0]["message"]["tool_calls"].is_null());
+    assert_eq!(v["choices"][0]["finish_reason"], "stop");
+
+    let mut body = oa("done", true);
+    body["tools"] = tools.clone();
+    let sse = post(&url, body, &[]).await.text().await.unwrap();
+    assert!(!sse.contains("tool_calls"), "{sse}");
+    let mut text = String::new();
+    for line in sse.lines().filter_map(|l| l.strip_prefix("data: ")) {
+        if let Ok(v) = serde_json::from_str::<Value>(line) {
+            text.push_str(v["choices"][0]["delta"]["content"].as_str().unwrap_or(""));
+        }
+    }
+    assert_eq!(text, echo);
+
+    let ol = |stream: bool| {
+        json!({"model": "amara", "stream": stream, "tools": tools,
+               "messages": [{"role": "user", "content": "done"}]})
+    };
+    let url = format!("{}/api/chat", r.url);
+    let v: Value = post(&url, ol(false), &[]).await.json().await.unwrap();
+    assert_eq!(v["message"]["content"], echo);
+    assert!(v["message"]["tool_calls"].is_null());
+
+    let lines = post(&url, ol(true), &[]).await.text().await.unwrap();
+    assert!(!lines.contains("tool_calls"), "{lines}");
+    let text: String = lines
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .map(|v| v["message"]["content"].as_str().unwrap_or("").to_string())
+        .collect();
+    assert_eq!(text, echo);
+}
+
 // ── each routing rule ────────────────────────────────────────────────────────
 
 #[tokio::test]

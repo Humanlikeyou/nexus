@@ -129,7 +129,9 @@ pub enum PreRoute {
 /// Removes a leading `/cmd` (whole word, any case). Returns the rest, or None.
 fn strip_command(text: &str, cmd: &str) -> Option<String> {
     let t = text.trim_start();
-    if t.len() < cmd.len() || !t[..cmd.len()].eq_ignore_ascii_case(cmd) {
+    // `get`, not a slice: the cut can land inside a character such as the phone keyboard's ’.
+    let head = t.get(..cmd.len())?;
+    if !head.eq_ignore_ascii_case(cmd) {
         return None;
     }
     let rest = &t[cmd.len()..];
@@ -343,6 +345,21 @@ pub fn looks_hard(text: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn curly_apostrophes_and_wide_letters_never_panic() {
+        let text = "No I’m reading message to the black man. Think deeper";
+        assert_eq!(strip_command(text, "/deep"), None);
+        assert_eq!(
+            strip_phrase(text, "think deeper").as_deref(),
+            Some("No I’m reading message to the black man.")
+        );
+        for t in ["’’’’’’’", "日本語のメッセージ", "/de’p", "İİİ think deeper"]
+        {
+            let _ = strip_command(t, "/deep");
+            let _ = strip_phrase(t, "think deeper");
+        }
+    }
 
     fn open() -> CloudGate {
         CloudGate {
