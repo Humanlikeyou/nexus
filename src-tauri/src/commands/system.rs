@@ -51,12 +51,17 @@ pub(super) fn validate_container_name(name: &str) -> Result<(), String> {
     }
 }
 
+/// An app opened from Finder or the Dock has no shell PATH, so a bare "docker" isn't found.
+fn docker() -> Result<&'static str, String> {
+    super::ha::docker_bin().ok_or_else(|| "Docker isn't installed.".to_string())
+}
+
 /// Check the status of a Docker container by name.
 /// Returns "running", "exited", "paused", "not_found", or the raw status string.
 #[tauri::command]
 pub async fn check_docker_service(name: String) -> Result<String, String> {
     validate_container_name(&name)?;
-    let output = tokio::process::Command::new("docker")
+    let output = tokio::process::Command::new(docker()?)
         .args(["inspect", "--format", "{{.State.Status}}", &name])
         .output()
         .await
@@ -98,7 +103,7 @@ pub async fn restart_docker_service(app: tauri::AppHandle, name: String) -> Resu
 
 /// The ungated restart. Only call with a validated name after approval.
 pub(super) async fn docker_restart(name: &str) -> Result<String, String> {
-    let output = tokio::process::Command::new("docker")
+    let output = tokio::process::Command::new(docker()?)
         .args(["restart", name])
         .output()
         .await
