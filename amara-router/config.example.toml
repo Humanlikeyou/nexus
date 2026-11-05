@@ -10,7 +10,7 @@ bind = "127.0.0.1:8787"
 # secrets_file = "~/.config/amara-router/secrets.env"
 
 [models]
-fast = "gemma4-12b-uncensored:latest"
+fast = "gemma4:latest"
 deep = "qwen3.8-uncensored:latest"
 # -1 = keep resident forever; "5m" = unload after 5 idle minutes.
 fast_keep_alive = -1

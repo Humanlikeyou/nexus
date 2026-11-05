@@ -3,8 +3,8 @@
 One local endpoint for Amara. It speaks the OpenAI chat API and the Ollama API, and sends
 each request to one of two Ollama models:
 
-- **fast**: resident, answers most things (`gemma4-12b-uncensored:latest` today)
-- **deep**: loaded on demand for hard requests (`qwen3.8-uncensored:latest` today)
+- **fast**: resident, answers most things (`gemma4:latest` today, 8B)
+- **deep**: loaded on demand when asked for (`qwen3.8-uncensored:latest` today)
 
 Model names live in `config.toml` only. Nothing is hard-coded.
 
@@ -20,24 +20,25 @@ Nexus app ──┘        (routes, strips <think>, logs)
 | 0 | `/claude`, `X-Amara-Route: claude`, model `amara-claude`, `X-Amara-Mode: api`, or `hybrid` + an escalation tag | claude if the cloud gate is open, else deep | `slash_claude`, `mode=api`, … (`; claude_blocked=<why>`) |
 | 1 | `/deep`, `X-Amara-Route: deep`, model `amara-deep`, a trigger phrase, or tag `heavy`/`research`/`code`/`long` | deep | `slash_deep`, `header_deep`, `model_deep`, `trigger:<phrase>`, `tag=<t>` |
 | 2 | `/fast`, `X-Amara-Route: fast`, model `amara-fast` | fast | `slash_fast`, `header_fast`, `model_fast` |
-| 3 | Latest user message over `token_threshold` (~4 chars/token), or it has a ```` ``` ```` code block | deep | `over_token_threshold`, `code_block` |
-| 4 | EASY/HARD classifier on the fast model | HARD → deep, else fast | `classifier_hard`, `classifier_easy`, `classifier_unclear`, `classifier_timeout`, `classifier_error` |
+| 3 | Only with `auto_deep` on: latest user message over `token_threshold` (~4 chars/token), or it has a ```` ``` ```` code block | deep | `over_token_threshold`, `code_block` |
+| 4 | With `classifier` on: EASY/HARD classifier on the fast model. Off: plain fast | HARD → deep, else fast | `classifier_hard`, `classifier_easy`, `classifier_unclear`, `classifier_timeout`, `classifier_error`; off: `default` |
+
+The live config and `config.example.toml` set `auto_deep = false` and `classifier = false`, so deep is manual: `/deep`, a
+trigger phrase, a route header, the `amara-deep` alias or an escalation tag. A Claude ask that the gate blocks also goes deep.
+Everything else goes fast. Both settings default to true if the keys are missing from `config.toml`.
 
 - `/deep`, `/fast`, `/claude` and trigger phrases are stripped from the message before it is forwarded.
 - Only the latest user message is routed on. The full history and the system prompt are passed through unchanged.
-- The classifier sends the first `classifier_max_chars` (400) characters with temperature 0,
+- When on, the classifier sends the first `classifier_max_chars` (400) characters with temperature 0,
   `num_predict` 3, `think: false` and a JSON-schema enum (`EASY`|`HARD`), and gives up after
   `classifier_timeout_ms` (2000). Timeout or error = fast.
 - Fallback when a model fails to answer: deep → fast; claude → deep → fast. Never to the network.
 
-### Classifier speed on this Mac (measured 2026-10-31)
+### Classifier speed
 
-Prompt evaluation on gemma4-12b runs at about 85 tokens/s, and Gemma's sliding-window
-attention stops Ollama reusing the cached prompt prefix. So every prompt token costs about
-11 ms. The classifier prompt is kept to about 50 tokens. Measured routing overhead for short
-questions with fast warm: 0.40–0.84 s (typically ~0.8 s). Messages near 400 characters take
-about 1.0 s. If that is too slow, set `classifier = false` (then rule 4 is plain fast) or
-use `/deep` and trigger phrases.
+The classifier is off. When on, it added 0.40–0.84 s to short questions with fast warm, and
+about 1.0 s near 400 characters. That was measured on 2026-10-31 on the previous fast model,
+`gemma4-12b-uncensored`. It has not been measured on `gemma4:latest`.
 
 ## Route metadata for clients
 
@@ -48,14 +49,14 @@ before routing (a 400 for bad JSON) have none.
 - Headers (set before the body, so they are on streamed replies too; after a fallback they name
   the tier and model that actually answered):
   - `X-Amara-Route: fast|deep|claude`
-  - `X-Amara-Model: <model id>`, e.g. `gemma4-12b-uncensored:latest` or the Anthropic model
+  - `X-Amara-Model: <model id>`, e.g. `gemma4:latest` or the Anthropic model
   - `X-Amara-Route-Reason: <reason>`, e.g. `slash_deep; deep_failed`
   - `X-Amara-Routing-Ms: <ms>`
   - `X-Amara-Tier`: older alias of `X-Amara-Route`, kept for existing clients.
 - `model` in the JSON body is the real model id that answered, not the virtual name the caller
   sent (`amara`, `amara:latest`, …): on the OpenAI `chat.completion` object and on every
   `chat.completion.chunk`, and on the Ollama object and every NDJSON line.
-- JSON: `"amara": {"tier": "fast", "reason": "classifier_easy", "routing_ms": 795}`
+- JSON: `"amara": {"tier": "fast", "reason": "default", "routing_ms": 0}`
   - OpenAI non-streamed: top-level `amara` on the `chat.completion` object.
   - OpenAI streamed: on the **first** chunk (role chunk) and the **last** chunk (the one with
     `finish_reason`), before `data: [DONE]`.
@@ -118,7 +119,7 @@ streaming (tags split across chunks are held back), and Ollama's separate `think
   models' `size_vram` plus fast's last seen `size_vram` fits `gpu_budget_gb` (default 21).
   If fast's size was never seen, or `/api/ps` fails, it skips; the next fast request loads it.
 - **Optional, OFF by default:** on a 32 GB M1 Pro macOS lets the GPU wire roughly two thirds of
-  RAM, so fast (≈8.5 GB at 131k context) and deep (≈16 GB + KV) may not both fit and Ollama
+  RAM, so fast and deep (≈16 GB + KV) may not both fit and Ollama
   evicts fast while deep runs. You can raise the limit until the next reboot with
   `sudo sysctl iogpu.wired_limit_mb=26000`. The router never does this. It leaves ~6 GB for
   macOS, Docker (~5 GB) and the voice pipeline (~3 GB), so expect swapping; undo with
@@ -150,7 +151,7 @@ Otherwise the request goes deep, with `claude_blocked=<why>` in the reason.
 `~/Library/Logs/amara-router/routes.jsonl` (0600), one line per request:
 
 ```json
-{"ts":"2026-10-31T09:26:54.803Z","api":"openai","stream":false,"requested":"fast","route":"fast","reason":"classifier_easy","model":"gemma4-12b-uncensored:latest","routing_ms":795,"latency_ms":5058,"prompt_tokens":31,"completion_tokens":56,"status":"ok"}
+{"ts":"2026-10-31T09:26:54.803Z","api":"openai","stream":false,"requested":"fast","route":"fast","reason":"default","model":"gemma4:latest","routing_ms":0,"latency_ms":5058,"prompt_tokens":31,"completion_tokens":56,"status":"ok"}
 ```
 
 No message content is ever logged. Errors add `"status":"error"` and `http_status`.
@@ -239,7 +240,7 @@ Hermes must use the OpenAI path `http://127.0.0.1:8787/v1` (with `/v1`), not bar
 
 ```yaml
 model:
-  default: amara                        # auto routing; amara-fast / amara-deep to pin a tier
+  default: amara                        # the router decides; amara-fast / amara-deep to pin a tier
   provider: custom
   base_url: http://127.0.0.1:8787/v1
   api_mode: chat_completions
@@ -249,7 +250,8 @@ model:
 ```
 
 It also sets `agent.api_max_retries: 4` and `platform_toolsets.api_server` to cronjob, file, memory, session_search,
-skills, terminal, todo and web. `SOUL.md` is unchanged.
+skills, terminal, todo and web. `tools.tool_search.enabled` is `"off"`, so the 8B fast model gets direct tools.
+`SOUL.md` is unchanged.
 
 ### Why context_length and ollama_num_ctx are 65536
 
@@ -292,18 +294,17 @@ Restore Hermes first, then the router config. Full commands: `TAISUN-STEPS.md` s
   only extra headers are static ones from `model.default_headers` / `model.extra_headers` in
   `config.yaml`. Setting `X-Amara-Route: fast` there would pin *every* Hermes call (Telegram
   included), so use `/deep` per message instead.
-- **Tier metadata does not come back through Hermes.** Hermes writes its own
-  `chat.completion` (`gateway/platforms/api_server_openai_routes.py`), without the router's
-  `X-Amara-Tier` header or `amara` field. Nexus therefore takes the tier from the router's route
-  log for the turn's time window (`routes.jsonl`, `api: openai`, no content), and falls back
-  to a `POST /amara/route` dry run of the same body. If Hermes ever forwards `amara`, Nexus
-  uses that first.
+- **Tier metadata needs the Hermes route patch.** Stock Hermes writes its own `chat.completion`
+  (`gateway/platforms/api_server_openai_routes.py`), without the router's headers or `amara`
+  field. The patch in `~/projects/hermes-patches/` is applied, so replies carry them and Nexus
+  uses them first. Revert it before `hermes update`. With no route on a reply, Nexus reads the
+  route log for the turn's time window (`routes.jsonl`, `api: openai`, no content), then falls
+  back to a `POST /amara/route` dry run of the same body.
 - **The routing text includes Hermes's memory block.** Because Hermes appends recalled memory
   to the last user message, a short question with a large recall can cross `token_threshold`
-  (2000 tokens) and go deep. The route log shows the tier that really answered.
+  (2000 tokens) and go deep if `auto_deep` is on. The route log shows the tier that really answered.
 - **Every model call is routed.** Hermes calls the model once per tool step, and each call
-  routes on the same last user message, with ~0.8 s of classifier time when the classifier
-  runs. If tool-heavy turns get slow, set `default: amara-fast` and ask for depth with `/deep`.
+  routes on the same last user message. With the classifier off, routing adds no model call.
 - **Telegram and every other Hermes channel go through the router too.** That is the point
   (one router decides), but it also means a deep answer on Telegram loads the deep model.
 
