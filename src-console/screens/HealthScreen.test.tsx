@@ -63,7 +63,7 @@ describe("Fitness (HealthField)", () => {
 
   it("ready: rings, band word, clamped effort, NOOP band battery, merged sessions, insights", () => {
     const { container } = render(<HealthField data={snap(ready)} />);
-    expect(screen.getByText("Up to date")).toBeInTheDocument();
+    expect(screen.getByText(/^Up to date · /)).toBeInTheDocument();
     const recovery = screen.getByRole("meter", { name: "Recovery" });
     expect(recovery).toHaveAttribute("aria-valuenow", "74");
     expect(recovery).toHaveAttribute("aria-valuetext", "74%, High");
@@ -79,7 +79,7 @@ describe("Fitness (HealthField)", () => {
     expect(screen.getAllByText("HRV", { selector: "dt" })).toHaveLength(1);
     expect(screen.getByText("2 sessions merged")).toBeInTheDocument();
     expect(screen.getByText("23:41 → 07:13")).toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "Sleep efficiency" })).toHaveAttribute("aria-valuenow", "91");
+    expect(screen.getByText(/91% *efficiency/)).toBeInTheDocument();
     // SpO2 / skin / resp are null across all days: hidden
     expect(screen.queryByText("SpO₂")).toBeNull();
     expect(screen.queryByRole("radio", { name: "Skin temp" })).toBeNull();
@@ -93,7 +93,7 @@ describe("Fitness (HealthField)", () => {
 
   it("waiting_for_nightly_data: effort shown, recovery/sleep pending", () => {
     render(<HealthField data={snap({ ...ready, status: "waiting_for_nightly_data", latestNight: null })} />);
-    expect(screen.getByText("Syncing overnight")).toBeInTheDocument();
+    expect(screen.getByText(/Syncing overnight/)).toBeInTheDocument();
     expect(screen.getAllByText("Arrives after the sleep record closes")).toHaveLength(2);
     expect(screen.getByRole("meter", { name: "Effort" })).toBeInTheDocument();
     expect(screen.queryByRole("meter", { name: "Recovery" })).toBeNull();

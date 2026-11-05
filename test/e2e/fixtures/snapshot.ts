@@ -147,6 +147,7 @@ export function responses(): Responses {
     migrate_legacy_terrence_context: null,
     load_kv: null,
     save_kv: null,
+    home_brief: { greeting: null, weather: { place: "Tokyo", tempC: 18, summary: "Clear", highC: 21, lowC: 12 }, updatedAt: "2026-10-28T04:30:00.000Z" },
     voice_status: { installed: true, running: true, pid: 4242, state: "listening", state_age_s: 2, voice: "neosoul_g", rss_mb: 3123.4, launchd: false, dir: "/Users/taisun/projects/amara-voice" },
     voice_list_voices: { voices: ["amara_ref", "neosoul", "neosoul_g"], current: "neosoul_g" },
     voice_recent_turns: [

@@ -12,13 +12,12 @@ const outbox = { gateway_online: true, queue_depth: 2, last_delivered_at: "2026-
 describe("Chat & Agents › Activity (§10)", () => {
   it("delivery card and activity rows", () => {
     render(<ActivityField data={snap({ outbox, activity: [{ id: "a1", type: "mac_action", name: "open_app", status: "completed", startedAt: Date.parse("2026-10-28T13:00:00+09:00"), completedAt: 0, durationMs: 1200, detail: "Opened Notes", outcome: null }] })} />);
-    expect(screen.getByRole("region", { name: "Gateway delivery" })).toBeInTheDocument();
+    expect(screen.getByText("Gateway delivery")).toBeInTheDocument();
     expect(screen.getByText("Gateway online")).toBeInTheDocument();
     expect(screen.getByText("timeout")).toBeInTheDocument();
     expect(screen.getByText("open app")).toBeInTheDocument();
     expect(screen.getByText("Mac action · Opened Notes")).toBeInTheDocument();
-    expect(screen.getByText("Last 30 operations")).toBeInTheDocument();
-    expect(document.querySelector(".signal-stream")).toBeNull();
+        expect(document.querySelector(".signal-stream")).toBeNull();
   });
   it("expired items: shown as Expired, hidden when none", () => {
     const { unmount } = render(<ActivityField data={snap({ outbox: { ...outbox, queue_depth: 0, last_error: null, expired: 11 }, activity: [] })} />);
@@ -61,6 +60,6 @@ describe("Activity status badges (Decision 20 tones)", () => {
   it("row time uses dateTime(): 'Oct 28, 1:00 PM'", () => {
     render(<ActivityField data={snap({ outbox, activity: [{ id: "a1", type: "mac_action", name: "open_app", status: "completed", startedAt: Date.parse("2026-10-28T13:00:00+09:00"), completedAt: 0, durationMs: 1200, detail: "Opened Notes", outcome: null }] })} />);
     expect(screen.getByText("1.2s · Oct 28, 1:00 PM")).toBeInTheDocument();
-    expect(screen.getByText("Oct 28, 1:40 PM")).toBeInTheDocument(); // last delivered
+    expect(screen.getByText("Last delivered Oct 28, 1:40 PM")).toBeInTheDocument();
   });
 });

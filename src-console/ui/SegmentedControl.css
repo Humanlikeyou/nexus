@@ -1,47 +1,40 @@
+/* Quiet tabs (Taisun, Nov 5): text only. The selected label brightens and a thin line of the lens's
+ * emerald slides beneath it. No track, no pill. One treatment everywhere the control appears. */
 .ui-segmented {
-  --ui-seg-h: var(--control-h);
   --ui-seg-icon: var(--text-body);
-
+  position: relative;
   display: inline-flex;
-  gap: var(--space-0_5);
-  padding: var(--space-0_5);
-  border-radius: calc(var(--radius-sm) + var(--space-0_5));
-  background: var(--fill-secondary);
-  /* Hugs its segments (left-aligned) instead of stretching across a grid/card. */
+  gap: var(--space-5);
+  padding-bottom: var(--space-1);
   width: auto;
-  max-width: 480px;
+  max-width: 100%;
   justify-self: start;
   align-self: start;
 }
-.ui-segmented[data-size="small"] { --ui-seg-h: var(--control-h-sm); --ui-seg-icon: var(--text-callout); }
-
+.ui-segmented[data-size="small"] { --ui-seg-icon: var(--text-callout); }
 .ui-segmented__segment {
   display: inline-flex;
-  flex: 1 1 0;
   align-items: center;
-  justify-content: center;
   gap: var(--space-1);
-  min-height: calc(var(--ui-seg-h) - var(--space-0_5) * 2);
-  padding: 0 var(--space-3);
+  min-height: var(--control-h-sm);
+  padding: 0;
   border: 0;
-  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--label-secondary);
-  font: var(--type-callout);
-  font-weight: 600;
+  font: 400 var(--text-body)/1 var(--font-text);
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color var(--dur-state) var(--ease-standard), color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-state) var(--ease-standard);
+  transition: color var(--dur-fast) var(--ease-standard);
 }
 .ui-segmented__segment:hover:not([data-checked]) { color: var(--label); }
-/* Selected = a neutral raised pill (macOS segmented control): no accent ring, so it never reads as focus. */
-.ui-segmented__segment[data-checked] { background: var(--bg-content); color: var(--label); box-shadow: var(--ui-seg-pill-edge, var(--glass-hairline)), var(--elev-1); }
-/* Dark: --bg-content pill on --fill-secondary track is ~1.5:1, so the pill edge carries the 3:1
- * separation (label at 50% over --d-bg-content ≈ #8c8c8d → ~3.1:1 vs the track). */
-:root[data-theme="dark"] .ui-segmented { --ui-seg-pill-edge: inset 0 0 0 1px color-mix(in srgb, var(--label) 50%, transparent); }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .ui-segmented { --ui-seg-pill-edge: inset 0 0 0 1px color-mix(in srgb, var(--label) 50%, transparent); }
+.ui-segmented__segment[data-checked] { color: var(--label); font-weight: 500; }
+.ui-segmented__indicator {
+  position: absolute; left: 0; bottom: 0; width: 100px; height: 2px;
+  border-radius: 1px; background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent);
+  transform-origin: left; transition: transform var(--dur-state) var(--ease-standard);
+  pointer-events: none;
 }
-/* Focus ring (3px) stands 2px off the pill (separated from selection) and draws above its neighbours. */
-.ui-segmented__segment:focus-visible { position: relative; z-index: 1; outline: 3px solid var(--focus-ring); outline-offset: var(--space-0_5); }
+/* Colour is never the only cue: the selected tab also gains weight and the line. */
+.ui-segmented__segment:focus-visible { position: relative; z-index: 1; border-radius: var(--radius-xs); outline: 3px solid var(--focus-ring); outline-offset: var(--space-0_5); }
 .ui-segmented__icon { width: var(--ui-seg-icon); height: var(--ui-seg-icon); flex: none; }
+@media (forced-colors: active) { .ui-segmented__indicator { background: Highlight; box-shadow: none; } }

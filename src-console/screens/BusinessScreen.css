@@ -1,25 +1,11 @@
-.biz { display: grid; gap: var(--space-4, 16px); container: biz / inline-size; }
-.biz__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 12px); }
-.biz__title { margin: 0; font: var(--type-large-title); color: var(--label); }
-.biz__tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3, 12px); }
-.biz__hero { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: var(--space-3, 12px); align-items: stretch; }
-.biz__ring { display: flex; align-items: center; gap: var(--space-3, 12px); }
-.biz__ring-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+.biz { display: grid; align-content: start; }
 .biz__note { margin: 0; color: var(--label-secondary); font: var(--type-callout); }
 .biz__note strong { color: var(--label); }
 .biz__unavailable { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 12px); color: var(--label-secondary); }
 .biz__unavailable p { margin: 0; }
-.biz__stages { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-3, 12px); }
+.biz__pipeline { display: grid; gap: var(--space-4); }
+.biz__section { margin: 0; color: var(--label-secondary); font: 400 var(--text-callout)/var(--lh-callout) var(--font-text); }
 .biz__risk { display: grid; gap: var(--space-2, 8px); color: var(--label-secondary); font: var(--type-callout); font-variant-numeric: tabular-nums; }
 .biz__risk p { margin: 0; }
 .biz__at-risk { display: flex; flex-wrap: wrap; gap: var(--space-2, 8px); }
 .biz__mix-meter { width: 120px; }
-@media (max-width: 900px) {
-  .biz__hero { grid-template-columns: 1fr; }
-}
-/* Content pipeline (screen-specs › Business): below 900px of content width the 5 stage columns become one
- * list grouped by stage; empty stages drop out (their count is still in the card's total badge). */
-@container biz (max-width: 900px) {
-  .biz__stages { grid-template-columns: 1fr; gap: var(--space-2, 8px); }
-  .biz__stage--empty { display: none; }
-}

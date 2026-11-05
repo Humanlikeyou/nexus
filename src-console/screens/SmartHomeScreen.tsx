@@ -4,7 +4,7 @@ import {
   type HaContainerStatus, type HaEntity, type HaInactiveKind, type HaLiveState,
   HA_ERROR_COPY, HVAC_LABEL, type HaServiceData, applyStateChange, rememberEntityNames, clampTemperature, climateRange, hvacModesFor, isHvacMode, targetTemperature, validServiceData, classifyHaError, containerErrorCopy, inactiveKindFor, isServiceRefusal, domainLabel, entityName, haBackend, isToggleable, sortDevices, stateLabel, toggleService,
 } from "../lib/homeAssistant";
-import { Badge, Button, InsetGroup, ListRow, Select, Toggle } from "../ui";
+import { Badge, Button, InsetGroup, ListRow, More, PageHero, Select, Toggle } from "../ui";
 import "./SmartHomeScreen.css";
 
 export type DevicesState =
@@ -155,6 +155,9 @@ export function Inactive({ kind, onRetry, onOpenSettings }: { kind: HaInactiveKi
   );
 }
 
+/** Devices shown before the disclosure. */
+const FIRST_GLANCE = 4;
+
 export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: () => Promise<DevicesState>; onOpenSettings?: () => void }) {
   const [state, setState] = useState<DevicesState>({ status: "loading" });
   const [container, setContainer] = useState<Container>({ status: "loading" });
@@ -245,14 +248,18 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
     }
   };
 
+  const hiddenDevices = state.status === "ready" ? state.devices.slice(FIRST_GLANCE) : [];
+  const deviceRow = (d: (typeof hiddenDevices)[number]) => (
+                  <ListRow key={d.entityId} icon={ICONS[d.domain]} title={entityName(d)}
+                    subtitle={rowError?.entityId === d.entityId ? <span role="alert" className="smart-home__row-error">{rowError.message}</span> : domainLabel(d.domain)}
+                    value={isToggleable(d) || d.domain === "climate" ? undefined : stateLabel(d)}
+                    accessory={d.domain === "climate" ? <ClimateControl device={d} pending={!!pending[d.entityId]} onSend={(service, data) => { void setClimate(d, service, data); }} /> : isToggleable(d) ? <Toggle checked={d.state === "on"} disabled={!!pending[d.entityId]} aria-label={entityName(d)} onCheckedChange={(on) => { void toggle(d, on); }} /> : undefined} />
+  );
+
   return (
     <div className="smart-home page-inset">
-      <header className="smart-home__header">
-        <h1>Smart home</h1>
-        <p className="smart-home__subtitle">Devices from your local Home Assistant.</p>
-        {live && <Badge className="smart-home__live" tone={LIVE_TONE[live]} role="status" aria-label={`Live updates: ${LIVE_COPY[live]}`}>{LIVE_COPY[live]}</Badge>}
-      </header>
-      <ContainerBar container={container} busy={busy} error={containerError} onStart={() => { void runContainer("start"); }} onStop={() => { void runContainer("stop"); }} />
+      <PageHero title="Smart home" statement={state.status === "ready" && state.devices.length ? `${state.devices.length} device${state.devices.length === 1 ? "" : "s"}` : "Home Assistant"}
+        detail={live ? <Badge className="smart-home__live" tone={LIVE_TONE[live]} role="status" aria-label={`Live updates: ${LIVE_COPY[live]}`}>{LIVE_COPY[live]}</Badge> : undefined} />
       {state.status === "loading" ? <p className="smart-home__meta" role="status">Loading devices…</p>
         : state.status === "inactive" ? <Inactive kind={state.kind} onRetry={refresh} onOpenSettings={onOpenSettings} />
           : live === "authFailed" ? <Inactive kind="auth" onRetry={refresh} />
@@ -268,16 +275,14 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
             </div>
           ) : (
             <div className="smart-home__list">
-              <InsetGroup title="Devices" footer="Changes come from Home Assistant as they happen.">
-                {state.devices.map((d) => (
-                  <ListRow key={d.entityId} icon={ICONS[d.domain]} title={entityName(d)}
-                    subtitle={rowError?.entityId === d.entityId ? <span role="alert" className="smart-home__row-error">{rowError.message}</span> : domainLabel(d.domain)}
-                    value={isToggleable(d) || d.domain === "climate" ? undefined : stateLabel(d)}
-                    accessory={d.domain === "climate" ? <ClimateControl device={d} pending={!!pending[d.entityId]} onSend={(service, data) => { void setClimate(d, service, data); }} /> : isToggleable(d) ? <Toggle checked={d.state === "on"} disabled={!!pending[d.entityId]} aria-label={entityName(d)} onCheckedChange={(on) => { void toggle(d, on); }} /> : undefined} />
-                ))}
-              </InsetGroup>
+              <InsetGroup title="Devices">{state.devices.slice(0, FIRST_GLANCE).map(deviceRow)}</InsetGroup>
             </div>
           )}
+      <More label={hiddenDevices.length ? `${hiddenDevices.length} more devices, and the container` : "Container"}>
+        {hiddenDevices.length > 0 && <InsetGroup title="More devices">{hiddenDevices.map(deviceRow)}</InsetGroup>}
+        <ContainerBar container={container} busy={busy} error={containerError} onStart={() => { void runContainer("start"); }} onStop={() => { void runContainer("stop"); }} />
+        <p className="smart-home__meta">Changes come from Home Assistant as they happen.</p>
+      </More>
     </div>
   );
 }

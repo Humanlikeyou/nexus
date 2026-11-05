@@ -1,4 +1,4 @@
-import { activeField, expect, navButton, openApp, openView, routeSettled, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, openView, routeSettled, test, openMore } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 const SECTIONS: { label: string; h1: RegExp }[] = [
@@ -27,7 +27,7 @@ test.describe("sub-views and anchors", () => {
     ["Chat & Agents", "Activity", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Activity")],
     ["Chat & Agents", "Lists", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Lists")],
     ["Chat & Agents", "Crews", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Crews")],
-    ["Chat & Agents", "Voice", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Voice"); await expect(f.getByRole("list", { name: "Recent turns" })).toBeVisible(); }],
+    ["Chat & Agents", "Voice", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Voice"); await f.getByText("Her voice, process and recent turns").click(); await expect(f.getByRole("list", { name: "Recent turns" })).toBeVisible(); }],
     ["Mind–Body", "Fitness", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Fitness")],
     ["Mind–Body", "Neuro", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro")],
     ["Mind–Body", "Neuro history", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("History"); await expect(f.getByRole("list", { name: "History" })).toBeVisible(); }],
@@ -81,6 +81,8 @@ test.describe("Mind–Body host: nothing folded in is out of reach", () => {
     for (const [link, view, h1] of [["Open Fitness", "Fitness", "Fitness"], ["Open insights in Fitness", "Fitness", "Fitness"], ["Open Neuro", "Neuro", "Neuro"]] as const) {
       await page.keyboard.press("Meta+1"); // back to the lens: Today is a landing button
       await navButton(page, "Today").click();
+      await activeField(page, "Today").getByRole("heading", { level: 1 }).waitFor();
+      await openMore(page);
       await activeField(page, "Today").getByRole("button", { name: link, exact: true }).click();
       await expect(selected(page, view)).toHaveAttribute("aria-checked", "true");
       await expect(activeField(page, "Mind–Body").getByRole("heading", { level: 1 })).toHaveText(h1);
@@ -158,7 +160,7 @@ test("(d) one content edge: h1s, Chat's first column and the sub-view bar line u
   await openApp(page, { theme });
   const left = async (label: string) => {
     const field = await openView(page, label);
-    const target = label === "Chat & Agents" ? field.locator(".chat-screen__agents") : field.getByRole("heading", { level: 1 }).first();
+    const target = field.getByRole("heading", { level: 1 }).first();
     await target.waitFor();
     await routeSettled(page); // the box is measured at rest, not part-way through the enter animation
     return (await target.boundingBox())!.x;

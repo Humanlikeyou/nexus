@@ -7,7 +7,7 @@ import { useMuseTelemetry } from "../neuro/useMuseTelemetry";
 import type { useTraining } from "../neuro/useTraining";
 import { useNow } from "../shell/useNow";
 import type { RecordedSession } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, Meter, Ring, Select, Sparkline, StatTile, type Tone } from "../ui";
+import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, Select, Sparkline, StatTile, type Tone } from "../ui";
 import { recoveryBand } from "./HealthScreen";
 import { type MuseScreenProps, museSignalState } from "./muse";
 import "./NeuroScreen.css";
@@ -91,14 +91,10 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
     : null;
 
   const header = (
-    <header className="neuro__header">
-      <div className="neuro__title-row">
-        <h1>Neuro</h1>
-        {failed ? <Badge tone="danger">Unavailable</Badge> : <Badge tone={deviceBadge.tone}>{deviceBadge.text}</Badge>}
-        {band && <Badge tone={band.tone}>Recovery {Math.round(recovery as number)}%</Badge>}
-      </div>
+    <>
+      <PageHero title="Neuro" statement={failed ? "Out of reach" : deviceBadge.text} detail={failed ? <Badge tone="danger">Unavailable</Badge> : band ? <Badge tone={band.tone}>Recovery {Math.round(recovery as number)}%</Badge> : undefined} />
       <div className="neuro__actions">{secondary}{primary}</div>
-    </header>
+    </>
   );
 
   if (failed) {
@@ -179,6 +175,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
               <StatTile label="Relaxation" value={heroIdle ? "Ready" : whole(state.relaxation)} />
             </div>
 
+            <More label="Band powers and signal">
             <div className="neuro__row">
               <Card title="Band powers" className="neuro__bands">
                 <InsetGroup className="neuro__group">
@@ -211,10 +208,12 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
                 </details>
               </Card>
             </div>
+            </More>
           </>
         )}
 
       <div className="neuro__row neuro__row--sessions">
+        <More label="Recent sessions">
         <InsetGroup title="Recent sessions" className="neuro__sessions"
           footer={sessionsFailed ? "Saved sessions couldn't be read." : sessions.length ? undefined : "Your first completed session will appear here."}>
           {sessions.slice(0, 5).map((s) => (
@@ -222,6 +221,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
               subtitle={<span className="neuro__num">{Math.max(1, Math.round(s.duration_secs / 60))} min · {s.data_points.toLocaleString()} samples · relax {whole(s.summary.avg_relaxation) ?? DASH}</span>} />
           ))}
         </InsetGroup>
+        </More>
         {selected && <SessionPanel session={selected} onClose={() => setSelectedId(null)} />}
       </div>
     </div>

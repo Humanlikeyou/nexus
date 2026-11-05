@@ -19,6 +19,9 @@ html::view-transition { pointer-events: none; }
 html[data-route-motion] { view-transition-name: none; }
 html[data-route-capture="space"] { view-transition-name: root; }
 html:is([data-route-capture="section"], [data-route-capture="subview"]) .active-field { view-transition-name: route-field; }
+/* Sub-views: the tabs are left out of the fading snapshot, so their line glides on the live page. */
+html[data-route-capture="subview"] .active-field > .subview-bar { view-transition-name: route-tabs; }
+html::view-transition-old(route-tabs) { display: none; }
 /* The lens and wordmark exist on both sides of the move, so they stay captured throughout. */
 html[data-route-motion="space"] .landing .amara-lens,
 html[data-route-motion="space"] nav.system-constellation [data-system="terrance"] > i { view-transition-name: amara-lens; }

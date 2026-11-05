@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { activeField, expect, navButton, openApp, openView, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, openView, test, openMore } from "./fixtures/tauri-mock";
 
 const motion = (page: Page) => page.evaluate(() => document.documentElement.dataset.routeMotion ?? null);
 
@@ -69,7 +69,7 @@ test.describe("interruption and input", () => {
       document.querySelector<HTMLElement>("[data-system=settings]")!.click();
       while (!document.documentElement.dataset.routeMotion || !document.querySelector(".settings")) await new Promise((next) => requestAnimationFrame(next));
       await new Promise((next) => requestAnimationFrame(next));
-      const box = document.querySelector(".settings__title")!.getBoundingClientRect();
+      const box = document.querySelector(".settings .page-hero__title")!.getBoundingClientRect();
       return { during: !!document.documentElement.dataset.routeMotion, inPage: !!document.elementFromPoint(box.x + 10, box.y + 10)?.closest(".active-field") };
     });
     expect(hit).toEqual({ during: true, inPage: true });
@@ -130,6 +130,7 @@ test.describe("focus and scroll", () => {
     await openApp(page, { theme });
     await navButton(page, "Settings").click();
     await activeField(page, "Settings").getByRole("heading", { level: 1 }).waitFor();
+    await openMore(page);
     const pane = page.locator(".active-field");
     await pane.evaluate((el) => { el.scrollTop = 400; });
     expect(await pane.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);

@@ -6,19 +6,21 @@
 main.command-surface.command-surface--landing { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 main.command-surface.command-surface--landing > .active-field { grid-column: 1; grid-row: 1; padding: 0; overflow: hidden; }
 
+/* The golden section (Taisun, Nov 5): the window splits 1 : 1.618. The lens owns the larger part and
+ * stays the hero; the welcome sits in the smaller one with its top on the 38.2% line. Type and spacing
+ * come from the Fibonacci run 13, 21, 34, 55. */
 .landing {
   --wordmark: var(--landing-wordmark);
+  --fib-8: 8px; --fib-13: 13px; --fib-21: 21px; --fib-34: 34px; --fib-55: 55px;
   color-scheme: dark;
   position: relative;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.618fr);
   align-items: center;
-  justify-content: center;
-  gap: var(--space-5);
   height: 100%;
   min-height: 100%;
-  padding: var(--landing-pad-top) var(--space-6) var(--space-6);
+  padding: var(--landing-pad-top) var(--fib-34) var(--fib-34);
   overflow: auto;
   color: var(--landing-label);
   background: var(--landing-bg);
@@ -26,6 +28,15 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 /* Under the overlay title bar there's no toolbar here, so this strip keeps the window draggable. */
 .landing__drag { position: fixed; inset: 0 0 auto; height: var(--toolbar-h, 52px); z-index: 1; }
 .landing__wordmark { position: fixed; top: var(--landing-pad-top); left: var(--space-8); z-index: 2; pointer-events: none; }
+
+.landing__stage { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--fib-21); height: 100%; min-height: 0; min-width: 0; }
+.landing__welcome { position: relative; align-self: start; display: grid; margin-top: calc(38.2vh - var(--landing-pad-top) - var(--fib-55)); padding-left: var(--fib-21); color: var(--landing-label); }
+.landing__greeting { margin: 0 0 var(--fib-34); font: 300 var(--fib-34)/1.15 var(--font-text); letter-spacing: -.015em; text-wrap: balance; }
+.landing__time { font: 200 var(--fib-55)/1 var(--font-text); letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
+.landing__date { margin: var(--fib-13) 0 0; color: var(--landing-muted); font: 300 var(--fib-21)/1.25 var(--font-text); }
+.landing__weather { display: grid; gap: 4px; margin: var(--fib-34) 0 0; color: var(--landing-label); font: 300 var(--fib-21)/1.25 var(--font-text); }
+.landing__temp { font-variant-numeric: tabular-nums; }
+.landing__weather-detail { color: var(--landing-muted); font: 400 var(--fib-13)/1.4 var(--font-text); }
 
 /* A size container: it takes the height the line and buttons leave, and the hero lens fits inside it. */
 .landing__lens {
@@ -77,12 +88,23 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 .landing__button:active { background: var(--landing-button-active); }
 .landing__button:focus-visible { outline: 3px solid var(--landing-focus); outline-offset: 2px; }
 
+/* Too small for two columns: the welcome becomes a short block above the lens, one step down the scale. */
+@media (max-width: 1180px), (max-height: 680px) {
+  .landing { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--fib-13); padding: var(--fib-13) var(--fib-21) var(--fib-21); }
+  .landing__welcome { justify-self: center; justify-items: center; margin: 0; padding: 0; text-align: center; grid-template-columns: auto; }
+  .landing__greeting { margin: 0 0 var(--fib-8); font-size: var(--fib-21); }
+  .landing__time { font-size: var(--fib-34); }
+  .landing__date { margin-top: 4px; font-size: var(--fib-13); }
+  .landing__weather { margin-top: 4px; display: block; font-size: var(--fib-13); }
+  .landing__weather-detail { margin-left: var(--fib-8); }
+  .landing__stage { gap: var(--fib-13); }
+}
+@media (max-height: 560px) { .landing__time { display: none; } }
 @media (max-width: 800px) { .landing__nav { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-height: 680px) { .landing { gap: var(--space-3); } }
 
 @media (forced-colors: active) {
   .landing { background: Canvas; color: CanvasText; }
-  .landing__line { color: CanvasText; }
+  .landing__line, .landing__welcome, .landing__date, .landing__weather-detail { color: CanvasText; }
   .landing__button { border: 1px solid ButtonText; background: ButtonFace; color: ButtonText; box-shadow: none; }
   .landing__button svg { color: ButtonText; }
   .landing__button:focus-visible { outline-color: Highlight; }

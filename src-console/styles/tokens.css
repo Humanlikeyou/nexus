@@ -102,13 +102,13 @@
   --d-tone-success: #4cd36a; --d-tone-warning: #e0a458; --d-tone-danger: #ff7a66;
   --d-copper: #b4864e; --d-copper-hairline: rgba(180, 134, 78, .40);
   --d-destructive: #ff7a66; --d-destructive-hover: #ff9180; --d-destructive-pressed: #e9654f; --d-on-destructive: #2a0a05;
-  --d-bg-window: #1c1c1e;
-  --d-bg-content: #232325;
-  --d-bg-rgb: 28, 28, 30;
+  --d-bg-window: #0b2a22;
+  --d-bg-content: #10332a;
+  --d-bg-rgb: 11, 42, 34;
   --d-fill-secondary: rgba(120, 120, 128, .32);
   --d-fill-tertiary: rgba(120, 120, 128, .16);
-  --d-separator: rgba(84, 84, 88, .60);
-  --d-separator-strong: rgba(84, 84, 88, .90);
+  --d-separator: rgba(255, 255, 255, .09);
+  --d-separator-strong: rgba(255, 255, 255, .18);
   --d-hairline-color: rgba(255, 255, 255, .08);
   --d-accent: #34c79a;
   --d-accent-strong: #4fd6a9;
@@ -335,6 +335,7 @@
   --landing-deep: #020c0a;
   --landing-bg: radial-gradient(ellipse 78% 96% at 50% 44%, var(--emerald-800) 0%, var(--emerald-900) 52%, var(--landing-deep) 100%);
   --landing-label: #f4f1ea;
+  --landing-muted: rgba(244, 241, 234, .66);
   --landing-wordmark: #c79a62;
   --landing-icon: #d9a76c;
   --landing-focus: var(--lens-rim);

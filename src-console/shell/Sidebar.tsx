@@ -86,13 +86,13 @@ export function Sidebar({ active, onSelect, data }: { active: ModuleId; onSelect
             const isActive = active === system.id;
             return (
               <button key={system.id} data-system={system.id} className={isActive ? "is-active" : ""} aria-current={isActive ? "page" : undefined} onClick={() => onSelect(system.id)} title={`${system.label}${index < 9 ? ` (Command+${index + 1})` : ""}`}>
-                <i><Icon size={17} /></i><span>{system.label}</span>{index < 9 && <small className="nav-shortcut" aria-hidden="true">⌘{index + 1}</small>}
+                <i>{system.id === "terrance" ? <b className="nav-lens" aria-hidden="true" /> : <Icon size={16} strokeWidth={1.6} />}</i><span>{system.label}</span>{index < 9 && <small className="nav-shortcut" aria-hidden="true">⌘{index + 1}</small>}
               </button>
             );
           })}
         </section>
       ))}
-      <div className="sidebar-status"><StatusIndicator tone={data.hermes.status === "online" ? "success" : "danger"}>{data.hermes.status === "online" ? "Amara ready" : "Amara offline"}</StatusIndicator><span>{data.hermes.model}</span></div>
+      <div className="sidebar-status" title={data.hermes.model}><StatusIndicator tone={data.hermes.status === "online" ? "success" : "danger"}>{data.hermes.status === "online" ? "Amara ready" : "Amara offline"}</StatusIndicator><span className="ui-visually-hidden">{data.hermes.model}</span></div>
       <Resizer width={width} setWidth={setWidth} />
     </nav>
   );

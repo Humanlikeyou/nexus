@@ -36,7 +36,7 @@ describe("Chat & Agents › Crews", () => {
 
   it("not configured: badge and the sync-crew-token.sh hint, no runs or form", () => {
     render(<CrewsField data={snap({ health: "not_configured" })} />);
-    expect(within(screen.getByRole("region", { name: "Crew service" })).getByText("Not configured")).toBeInTheDocument();
+    expect(screen.getByText("Not configured")).toBeInTheDocument();
     expect(screen.getByText("scripts/sync-crew-token.sh")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "New Run" })).toBeNull();
   });

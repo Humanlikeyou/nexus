@@ -63,3 +63,15 @@
 @keyframes home-strip-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .home__strip-item[data-live] .ui-status-dot__dot { animation: none; } }
 :root[data-reduce-motion="true"] .home__strip-item[data-live] .ui-status-dot__dot { animation: none; }
+
+/* Today: greeting, the night's numbers around a fine ring, three priorities, then one disclosure. */
+.home__first { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); }
+.home__first .home__recovery { display: flex; align-items: center; gap: var(--space-10); }
+.home__first .home__recovery-stats { display: flex; gap: var(--space-10); }
+.home .ui-card .ui-stat .ui-stat__value, .home__first .ui-stat__value { font: 300 var(--text-title1)/1.2 var(--font-text); }
+.home__ring-value { font: 300 var(--text-title2)/1.2 var(--font-text); }
+.home__ring-band { font: var(--type-subheadline); }
+.home__summary { display: inline; }
+.home__top { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-6); }
+.home__half { gap: var(--space-6); }
+.home__strip { margin-top: 0; }

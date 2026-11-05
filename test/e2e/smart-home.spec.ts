@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { activeField, emitTauriEvent, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, emitTauriEvent, expect, navButton, openApp, test, openMore } from "./fixtures/tauri-mock";
 import { HA_ENTITIES, responses } from "./fixtures/snapshot";
 
 /** Smart home (Home Assistant) + chat pre-route, all ha_* commands mocked. HA_SHOTS=<dir> saves screenshots. */
@@ -16,6 +16,7 @@ test.describe("Smart home", () => {
     await navButton(page, "Smart home").click();
     const f = activeField(page, "Smart home");
     await expect(f.getByRole("heading", { level: 1 })).toHaveText("Smart home");
+    await openMore(page);
     await expect(f.getByLabel("Home Assistant container: Up")).toBeVisible();
     const lamp = f.getByRole("switch", { name: "Desk lamp" });
     await expect(lamp).toHaveAttribute("aria-checked", "true");
@@ -45,6 +46,7 @@ test.describe("Smart home", () => {
     const f = activeField(page, "Smart home");
     const inactive = f.locator(".subsystem-inactive");
     await expect(inactive).toContainText("Home Assistant isn't set up");
+    await openMore(page);
     await expect(f.getByLabel("Home Assistant container: Down")).toBeVisible();
     await expect(f.getByRole("button", { name: "Start" })).toBeEnabled();
     await shot(page, `inactive-${theme}`);

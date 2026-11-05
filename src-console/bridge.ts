@@ -352,3 +352,8 @@ export const reopenFollowupItem = (id: number) => invoke<FollowupItem>("followup
 export const deleteFollowupItem = (id: number) => invoke<void>("followups_delete_item", { id });
 export const addMutedTopic = (topic: string, until?: string) => invoke<MutedTopic>("followups_add_muted_topic", until ? { topic, until } : { topic });
 export const deleteMutedTopic = (topic: string) => invoke<void>("followups_delete_muted_topic", { topic });
+
+/** Home's brief (commands/home.rs). Null fields mean "not available": the page simply shows less. */
+export interface HomeWeather { place: string | null; tempC: number | null; summary: string | null; highC: number | null; lowC: number | null }
+export interface HomeBrief { greeting: string | null; weather: HomeWeather | null; updatedAt: string | null }
+export const getHomeBrief = () => invoke<HomeBrief>("home_brief");

@@ -8,7 +8,7 @@ import { assistantView } from "../app/statusViews";
 import { dateTime, time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, StatTile, TextField, type Tone } from "../ui";
+import { Badge, Button, Card, InsetGroup, ListRow, More, StatTile, TextField, type Tone } from "../ui";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
 import { useAmaraVoice } from "../hooks/useAmaraVoice";
 import "./ChatScreen.css";
@@ -272,6 +272,23 @@ export function ChatField({
 
   return (
     <div className="chat-screen page-inset">
+      <section className="chat-screen__conversation" aria-labelledby="chat-title">
+        <header className="chat-screen__header">
+          <div className="chat-screen__heading">
+            {voice.state === "speaking" && <AmaraLens state="speaking" size={28} className="chat-screen__lens" />}
+            <h1 id="chat-title">Amara</h1>
+            <Badge tone={online ? "success" : "warning"}>{online ? "Online" : "Offline"}</Badge>
+            <span className="chat-screen__model" title={`Hermes configured model: ${hermes.model}`}>{headerModel(messages, hermes.model, deepAvailable)}</span>
+            {/* eslint-disable-next-line react-hooks/purity -- the 'Saved …' label is read at render on purpose; it re-renders on every save */}
+            {lastSavedAt != null && <span className="chat-screen__saved" title={dateTime(lastSavedAt)}>Saved {relative(lastSavedAt, Date.now())}</span>}
+          </div>
+          <div className="chat-screen__tools">
+            <Button variant="plain" icon={SquarePen} iconOnly aria-label="New chat" title="New chat (⌘N)" onClick={onNewConversation} />
+            <Button variant="plain" icon={PanelRight} iconOnly aria-label="Show context" title="Show context (⌘⌥I)" onClick={onOpenContext} />
+          </div>
+        </header>
+        <More label="Agents and focus">
+          <div className="chat-screen__side">
       <aside className="chat-screen__agents" aria-label="Agents and conversations">
         <TextField label="Search agents" hideLabel placeholder="Search" leadingIcon={Search} value={query} onChange={(e) => setQuery(e.target.value)} />
         <InsetGroup title="Agents">
@@ -296,21 +313,16 @@ export function ChatField({
         <Button variant="plain" icon={SquarePen} onClick={onNewConversation} title="New chat (⌘N)">New chat</Button>
       </aside>
 
-      <section className="chat-screen__conversation" aria-labelledby="chat-title">
-        <header className="chat-screen__header">
-          <div className="chat-screen__heading">
-            {voice.state === "speaking" && <AmaraLens state="speaking" size={28} className="chat-screen__lens" />}
-            <h1 id="chat-title">Amara</h1>
-            <Badge tone={online ? "success" : "warning"}>{online ? "Online" : "Offline"}</Badge>
-            <span className="chat-screen__model" title={`Hermes configured model: ${hermes.model}`}>{headerModel(messages, hermes.model, deepAvailable)}</span>
-            {/* eslint-disable-next-line react-hooks/purity -- the 'Saved …' label is read at render on purpose; it re-renders on every save */}
-            {lastSavedAt != null && <span className="chat-screen__saved" title={dateTime(lastSavedAt)}>Saved {relative(lastSavedAt, Date.now())}</span>}
+      <aside className="chat-screen__summary" aria-label="Focus">
+        <StatTile label="Open actions" value={String(data.actions.filter((a) => a.status === "awaiting_approval").length)} />
+        <InsetGroup title="Current focus">
+          {data.prioritySnapshot.items.slice(0, 3).map((p) => <ListRow key={`${p.rank}-${p.title}`} title={p.title} subtitle={p.sourceStatus} />)}
+          {data.prioritySnapshot.items.length === 0 && <ListRow title="No current priorities" />}
+        </InsetGroup>
+        {data.projects[0] && <InsetGroup title="Active project"><ListRow title={data.projects[0].title} subtitle={data.projects[0].nextAction ?? undefined} /></InsetGroup>}
+      </aside>
           </div>
-          <div className="chat-screen__tools">
-            <Button variant="plain" icon={SquarePen} iconOnly aria-label="New chat" title="New chat (⌘N)" onClick={onNewConversation} />
-            <Button variant="plain" icon={PanelRight} iconOnly aria-label="Show context" title="Show context (⌘⌥I)" onClick={onOpenContext} />
-          </div>
-        </header>
+        </More>
 
         {loading ? (
           <div className="chat-screen__messages" role="status" aria-label="Loading">
@@ -389,14 +401,6 @@ export function ChatField({
         </form>
       </section>
 
-      <aside className="chat-screen__summary" aria-label="Focus">
-        <StatTile label="Open actions" value={String(data.actions.filter((a) => a.status === "awaiting_approval").length)} />
-        <InsetGroup title="Current focus">
-          {data.prioritySnapshot.items.slice(0, 3).map((p) => <ListRow key={`${p.rank}-${p.title}`} title={p.title} subtitle={p.sourceStatus} />)}
-          {data.prioritySnapshot.items.length === 0 && <ListRow title="No current priorities" />}
-        </InsetGroup>
-        {data.projects[0] && <InsetGroup title="Active project"><ListRow title={data.projects[0].title} subtitle={data.projects[0].nextAction ?? undefined} /></InsetGroup>}
-      </aside>
     </div>
   );
 }

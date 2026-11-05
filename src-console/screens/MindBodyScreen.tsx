@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { READINESS_COPY, matchDriver, readiness, readingDay, shortDay, tokyoDay, trendText, upToDay, type DriverKey, type DriverPoint } from "../lib/mindBody";
 import { NoopShapeError, isSnapshot, noopQuery, parseBodyContext, parseMetricSeries, snapshotDays } from "../lib/noop";
 import type { NoopDayRow, NoopMetricPoint, NoopMetricSeries, NoopSnapshotPayload, RecordedSession } from "../types";
-import { Badge, Button, SegmentedControl } from "../ui";
+import { Badge, Button, More, PageHero, SegmentedControl } from "../ui";
 import "./MindBodyScreen.css";
 
 export const INVALID_PATH_STEPS = "The NOOP binary or database path in Settings isn't valid. Open Settings › WHOOP and set full paths that start with /.";
@@ -179,22 +179,20 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
 
   return (
     <div className="mind-body page-inset">
-      <header className="mind-body__header">
-        <h1>Mind–Body</h1>
-        <p className="mind-body__subtitle">How your body state lines up with focus. {DISCLAIMER}</p>
-      </header>
+      <PageHero title="Mind–Body"
+        statement={ready ? <span className="mind-body__hero"><span className="mind-body__score" aria-label={`Recovery ${num(recovery)}%`}>{num(recovery)}</span><Badge tone={copy.tone} aria-label={`Readiness: ${copy.label}`}>{copy.label}</Badge></span> : "How your body lines up with focus"}
+        detail={ready ? copy.help : undefined} />
       {state.status === "inactive" ? <Inactive steps={state.steps} /> : state.status === "error" ? <ChartBox state="error" label="Mind–Body" onRetry={refresh} /> : (
         <div className="mind-body__grid-layout">
           <section className="mind-body__panel" aria-labelledby="mb-readiness">
             <h2 id="mb-readiness" className="mind-body__title">Readiness</h2>
             <p className="mind-body__meta">Compared with your own 28-day baseline{earlier && ` · latest reading ${shortDay(asOf)}`}</p>
-            <div className="mind-body__readiness">
-              <Badge tone={copy.tone} aria-label={`Readiness: ${copy.label}`}>{copy.label}</Badge>
-              <span className="mind-body__score" aria-label={`Recovery ${num(recovery)}%`}>{num(recovery)}</span>
-            </div>
-            <p className="mind-body__help">{copy.help}</p>
             <h3 className="mind-body__sub">HRV, last 14 days <span className="mind-body__unit">ms</span></h3>
             {loading ? <ChartBox state="loading" label="HRV" /> : <LineChart points={(series?.hrv.points ?? []).slice(-14)} label="HRV, last 14 days" variant="hrv" />}
+            </section>
+
+          <More label="Training load, focus drivers and session context">
+          <section className="mind-body__panel" aria-label="Training load">
             <h3 className="mind-body__sub">Training load <span className="mind-body__unit">strain · 7-day vs 28-day</span></h3>
             {loading ? <ChartBox state="loading" label="Strain" /> : <StrainBars points={series?.strain.points ?? []} />}
             <dl className="mind-body__stats">
@@ -203,7 +201,6 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
               <div><dt>Strain, 7-day average</dt><dd>{num(avgLast(series?.strain.points ?? [], 7), 1)}</dd></div>
             </dl>
           </section>
-
           <section className="mind-body__panel" aria-labelledby="mb-drivers">
             <h2 id="mb-drivers" className="mind-body__title">Focus drivers</h2>
             <p className="mind-body__meta">Correlation, not causation · n = {points.length} matched sessions</p>
@@ -224,6 +221,7 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
               </dl>
             ) : <p className="mind-body__hint">{lastSession ? "No body context saved for this session. Sessions recorded before NOOP was set up don't have one." : "No sessions yet."}</p>}
           </section>
+          </More>
         </div>
       )}
       <p className="mind-body__disclaimer">{DISCLAIMER}</p>

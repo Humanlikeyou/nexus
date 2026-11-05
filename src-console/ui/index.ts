@@ -26,5 +26,6 @@ export { Sparkline, sparklineSummary } from "./Sparkline";
 export type { SparklineProps } from "./Sparkline";
 export { Dialog } from "./Dialog";
 export type { DialogProps } from "./Dialog";
+export { PageHero, Lines, Line, Figures, Figure, More } from "./Quiet";
 export { Wordmark, WORDMARK_CAP, WORDMARK_PATH } from "./Wordmark";
 export type { WordmarkProps, WordmarkSize } from "./Wordmark";
