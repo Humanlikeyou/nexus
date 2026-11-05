@@ -851,7 +851,7 @@ fn guard_history(
 /// Rust port of the renderer's `injectionGuard.ts` patterns (no regex dependency): same names
 /// and severities. High-severity matches become `[REDACTED]`; invisible and bidi-override
 /// characters are stripped. Medium matches are flagged only.
-mod injection_guard {
+pub(super) mod injection_guard {
     pub struct Scan {
         pub sanitized: String,
         pub threats: Vec<&'static str>,
