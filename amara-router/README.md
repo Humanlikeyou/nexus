@@ -97,6 +97,19 @@ streaming (tags split across chunks are held back), and Ollama's separate `think
 
 - Fast stays resident (`keep_alive = -1`), warmed at start (`warm_fast_on_start`).
 - Deep loads on demand and unloads after 5 idle minutes (`deep_keep_alive = "5m"`).
+- Fast and deep don't fit in memory together, so the router swaps them by hand. A deep request while
+  deep isn't resident waits for fast replies to end, unloads fast, confirms it left, loads deep
+  (about 10 s) and answers on deep in the same request. The load runs on its own, so a client
+  disconnecting doesn't stop it, and several requests share one load. Past `deep_load_timeout_ms`
+  (90 s) the reply comes from fast with reason `...; deep_unavailable`, one line is logged, fast
+  comes back, and deep requests go straight to fast for 60 s. Prompt evaluation after the load has
+  `first_token_timeout_resident_ms`; a deep that stays silent past it also falls to fast.
+- A fast request while deep is loading or answering waits, up to `fast_wait_ms` (120 s), then gets
+  a 503 with `Retry-After: 10`. It never cancels deep. The first fast request after that unloads an
+  idle deep by hand. If none comes, fast is re-warmed once deep's keep-alive ends
+  (`rewarm_fast_after_deep`, checked every `poll_secs`).
+- amara-voice's keep_warm turn ("Voice mode is starting up...") is answered "ready." by the router
+  while deep is busy or resident (reason `...; warm_ping_skipped`), so it can't evict deep.
 - `fast_num_ctx` defaults to 65536, because Hermes refuses a window under 64,000 tokens.
   `deep_num_ctx` defaults to 32768, because the deep model's KV cache grows fast. Both are sent
   as `options.num_ctx` on every Ollama call, and Ollama silently cuts longer prompts.
@@ -115,9 +128,6 @@ streaming (tags split across chunks are held back), and Ollama's separate `think
   code block, a reasoning phrase (explain why/how, step by step, prove, analyze/analyse,
   compare, debug, design, architecture, trade-off/tradeoff, as a word start, any case), two or
   more `?`, two or more numbered/bulleted lines, or over 300 estimated tokens.
-- After a deep answer the router checks `/api/ps` once and re-warms fast only if the loaded
-  models' `size_vram` plus fast's last seen `size_vram` fits `gpu_budget_gb` (default 21).
-  If fast's size was never seen, or `/api/ps` fails, it skips; the next fast request loads it.
 - **Optional, OFF by default:** on a 32 GB M1 Pro macOS lets the GPU wire roughly two thirds of
   RAM, so fast and deep (≈16 GB + KV) may not both fit and Ollama
   evicts fast while deep runs. You can raise the limit until the next reboot with
