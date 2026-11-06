@@ -1145,6 +1145,8 @@ pub fn get_noop_health_snapshot() -> NoopHealthSnapshot {
 
 /// A reading older than this isn't "live": the strap is off or NOOP has stopped syncing.
 const LIVE_HR_MAX_AGE_SECS: i64 = 120;
+/// Allows for a small clock difference between the strap and the Mac.
+const LIVE_HR_MAX_FUTURE_SECS: i64 = 60;
 const LIVE_HR_MIN_BPM: i64 = 30;
 const LIVE_HR_MAX_BPM: i64 = 240;
 
@@ -1156,25 +1158,25 @@ pub struct LiveHeartRate {
     pub at: i64,
 }
 
-/// Uses the (deviceId, ts) primary key, so this stays cheap on a very long table. Off-wrist,
-/// stale, future-dated and implausible samples all come back as None and the screen hides the line.
+/// Uses the (deviceId, ts) primary key, so this stays cheap on a very long table. Future-dated rows
+/// are skipped, because NOOP stores do hold some and one would otherwise hide the line for good.
+/// Off-wrist, stale and implausible samples come back as None and the screen hides the line.
 fn latest_heart_rate(
     path: &Path,
     device_id: &str,
     now: DateTime<Utc>,
 ) -> rusqlite::Result<Option<LiveHeartRate>> {
     let conn = open_store(path)?;
+    let now = now.timestamp();
     let row: Option<(i64, i64)> = conn
         .query_row(
-            "SELECT ts, bpm FROM hrSample WHERE deviceId = ?1 ORDER BY ts DESC LIMIT 1",
-            params![device_id],
+            "SELECT ts, bpm FROM hrSample WHERE deviceId = ?1 AND ts <= ?2 ORDER BY ts DESC LIMIT 1",
+            params![device_id, now + LIVE_HR_MAX_FUTURE_SECS],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    let now = now.timestamp();
     Ok(row.and_then(|(at, bpm)| {
-        let age = now - at;
-        let live = (-LIVE_HR_MAX_AGE_SECS..=LIVE_HR_MAX_AGE_SECS).contains(&age);
+        let live = now - at <= LIVE_HR_MAX_AGE_SECS;
         let plausible = (LIVE_HR_MIN_BPM..=LIVE_HR_MAX_BPM).contains(&bpm);
         (live && plausible).then_some(LiveHeartRate {
             bpm: bpm as u16,
@@ -1247,7 +1249,7 @@ mod tests {
         let at = now.timestamp();
         for (ts, bpm) in [
             (at - LIVE_HR_MAX_AGE_SECS - 1, 64),
-            (at + LIVE_HR_MAX_AGE_SECS + 1, 64),
+            (at + LIVE_HR_MAX_FUTURE_SECS + 1, 64),
             (at - 5, 0),
             (at - 5, 300),
         ] {
@@ -1255,6 +1257,19 @@ mod tests {
             assert_eq!(latest_heart_rate(&path, "my-whoop", now).unwrap(), None);
             let _ = fs::remove_file(path);
         }
+    }
+
+    #[test]
+    fn live_heart_rate_skips_a_future_dated_row() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        let at = now.timestamp();
+        let path = heart_rate_database(&[
+            ("my-whoop", at - 5, 66),
+            ("my-whoop", at + 1_000_000_000, 70),
+        ]);
+        let reading = latest_heart_rate(&path, "my-whoop", now).unwrap();
+        assert_eq!(reading.map(|r| r.bpm), Some(66));
+        let _ = fs::remove_file(path);
     }
 
     #[test]
