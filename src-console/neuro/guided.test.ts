@@ -3,8 +3,9 @@ import { isOutputAllowed, deriveElectrodeMode } from "../../src/lib/electrode/el
 import { PROTOCOLS } from "../../src/lib/neurofeedback/protocols";
 import type { MuseTelemetry } from "./telemetryStore";
 import { createMuseTelemetryStore } from "./telemetryStore";
-import { ADAPT_TICKS, BASELINE_TICKS, HOLD_COPY, TARGET_REWARD_RATE, TrainingSession, adaptScale, alphaRatio, feedbackLevel } from "./training";
+import { ADAPT_TICKS, AUX_PROVEN, BASELINE_TICKS, HOLD_COPY, TARGET_REWARD_RATE, TrainingSession, adaptScale, alphaRatio, feedbackLevel } from "./training";
 import { GOALS, parseNotes, recommendedGoal } from "./goals";
+import { PPG_BUFFER, PPG_RATE } from "./heartRate";
 
 const calm = PROTOCOLS.find((p) => p.id === "calm")!;
 const deep = PROTOCOLS.find((p) => p.id === "deep-relaxation")!;
@@ -29,8 +30,8 @@ function telemetry(now: number, alpha: number, patch: Partial<MuseTelemetry> & {
 }
 
 /** Runs a session to the given point and returns it with the clock. */
-function run(protocol = calm) {
-  const session = new TrainingSession(protocol, { guided: true });
+function run(protocol = calm, options: { aux?: boolean } = {}) {
+  const session = new TrainingSession(protocol, { guided: true, ...options });
   let now = 1_000_000;
   const tick = (alpha: number, patch?: Parameters<typeof telemetry>[2]) => { now += TICK; return session.tick(telemetry(now, alpha, patch), now); };
   const fit = () => { for (let i = 0; i < 6; i++) tick(20); session.advance(); };
@@ -175,18 +176,24 @@ describe("Myndlift electrode", () => {
     expect(deriveElectrodeMode(true, true, "live", 1)).toBe("read");
     expect(deriveElectrodeMode(true, true, "demo", 1)).toBe("off");
   });
-  it("is only ever the source with real AUX samples, and only for alpha goals", () => {
+  it("stays out of training until AUX is proven, even with samples flowing", () => {
     const item = run();
+    item.fit(); item.baseline();
+    expect(AUX_PROVEN).toBe(false);
+    expect(item.tick(20, { aux: { samples: wave(30, 3), lastPacketAt: item.at() + TICK } }).auxSource).toBe(false);
+  });
+  it("is only ever the source with real AUX samples, and only for alpha goals", () => {
+    const item = run(calm, { aux: true });
     item.fit(); item.baseline();
     expect(item.tick(20).auxSource).toBe(false);
     const aux = { samples: wave(30, 3), lastPacketAt: item.at() + TICK };
     expect(item.tick(20, { aux }).auxSource).toBe(true);
-    const focus = run(PROTOCOLS.find((p) => p.id === "focus"));
+    const focus = run(PROTOCOLS.find((p) => p.id === "focus"), { aux: true });
     focus.fit(); focus.baseline();
     expect(focus.tick(20, { aux: { samples: wave(30, 3), lastPacketAt: focus.at() + TICK } }).auxSource).toBe(false);
   });
   it("a stale AUX falls back to the Muse's own sensors", () => {
-    const item = run();
+    const item = run(calm, { aux: true });
     item.fit(); item.baseline();
     expect(item.tick(20, { aux: { samples: wave(30, 3), lastPacketAt: item.at() - 9000 } }).auxSource).toBe(false);
   });
@@ -216,5 +223,42 @@ describe("goals and notes", () => {
   });
   it("no protocol copy promises treatment", () => {
     for (const p of PROTOCOLS) expect(`${p.description} ${p.sessionPrompt ?? ""} ${(p.coachingCues ?? []).join(" ")}`).not.toMatch(/\b(cure|treat|therapy|diagnos|disorder|ADHD|anxiety|depression)\w*/i);
+  });
+});
+
+describe("real-world signals", () => {
+  const still = (now: number) => ({ samples: Array.from({ length: 260 }, () => [-6, 5, -3]), lastPacketAt: now });
+  const turning = (now: number) => ({ samples: [...still(now).samples.slice(8), ...Array.from({ length: 8 }, () => [30, 5, -3])], lastPacketAt: now });
+
+  it("mains hum on the ear sensors alone doesn't hold feedback", () => {
+    const item = run();
+    item.fit(); item.baseline();
+    const hum = (size: number) => wave(12, 2, 512).map((value, i) => value + size * Math.sin(2 * Math.PI * 50 * i / 256));
+    const state = item.tick(12, { only: { TP9: hum(45), AF7: wave(12, 2), AF8: wave(12, 3), TP10: hum(85) } });
+    expect(state.fit).toMatchObject({ TP9: "good", TP10: "good" });
+    expect(state.hold).toBeNull();
+  });
+  it("holds on head movement in plain words, and ignores the gyroscope's resting offset", () => {
+    const item = run();
+    item.fit(); item.baseline();
+    expect(item.tick(12, { gyro: still(item.at() + TICK) }).hold).toBeNull();
+    const state = item.tick(12, { gyro: turning(item.at() + TICK) });
+    expect(state.hold).toBe("movement");
+    expect(state.label).toBe(HOLD_COPY.movement);
+    expect(item.session.summary().guided?.held_seconds.movement).toBe(.5);
+  });
+  it("carries on without a gyroscope, or with a stale one", () => {
+    const item = run();
+    item.fit(); item.baseline();
+    expect(item.tick(12, { gyro: null }).hold).toBeNull();
+    expect(item.tick(12, { gyro: turning(item.at() - 9000) }).hold).toBeNull();
+  });
+  it("puts a labelled heart rate estimate in the summary, and none without PPG", () => {
+    const item = run();
+    item.fit();
+    expect(item.session.summary().heart_rate).toBeNull();
+    const samples = Array.from({ length: PPG_BUFFER }, (_, i) => 53_500 + 300 * Math.sin(2 * Math.PI * (64 / 60) * i / PPG_RATE));
+    item.tick(12, { ppg: { samples, lastPacketAt: item.at() + TICK } });
+    expect(item.session.summary().heart_rate).toEqual({ bpm: 64, readings: 1, estimate: true, source: "ppg" });
   });
 });

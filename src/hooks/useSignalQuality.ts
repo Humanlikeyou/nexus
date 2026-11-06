@@ -2,9 +2,13 @@
  * Signal quality hook: monitors per-channel EEG signal quality.
  *
  * Detection methods:
- * 1. Amplitude check — lifted electrode produces rail voltage (very large or flatline)
- * 2. Variance check — good signal has physiological variance; flatline = disconnected
- * 3. Line noise — 50/60Hz dominance indicates poor contact
+ * 1. Amplitude check — a lifted electrode sits at the rail of the ±1000 µV 12-bit range
+ * 2. Spread check, with mains hum removed first — hum alone says nothing about contact, but hum
+ *    with no signal under it is a sensor off the skin, and sustained noise is a loose one
+ * 3. Jump check — large sample-to-sample jumps, also with the hum removed
+ *
+ * The spread is robust (from the median), so a blink is left to artifact detection. With hum
+ * removed, worn sensors read about 3 to 15 µV; their raw sd of 14 to 67 µV is mostly hum.
  *
  * Outputs per-channel quality (good/fair/poor) and an overall quality level.
  * When 2+ channels are poor, sets `frozen` flag to pause scores.
@@ -14,6 +18,7 @@ import { useState, useEffect, useRef } from "react";
 import type { EegRingBuffer } from "@/lib/eegRingBuffer";
 import type { EegChannel, ChannelQuality, OverallQuality } from "@/lib/types";
 import { EEG_CHANNELS } from "@/lib/types";
+import { removeLineNoise } from "@/lib/lineNoise";
 
 export type { ChannelQuality, OverallQuality };
 
@@ -28,9 +33,10 @@ export interface SignalQualityState {
 
 const ANALYSIS_INTERVAL_MS = 1000;   // Check quality every 1s
 const ANALYSIS_WINDOW = 256;          // 1 second of samples at 256Hz
-const RAIL_VOLTAGE_UV = 1500;         // Above this = railed electrode
-const MIN_VARIANCE_UV2 = 5;           // Below this = flatline
-const MAX_VARIANCE_UV2 = 50000;       // Above this = excessive noise/movement
+const RAIL_VOLTAGE_UV = 900;          // Above this = railed electrode (full scale is about 1000)
+const FLATLINE_UV = 1.5;              // Below this spread = no signal under any hum
+const FAIR_SPREAD_UV = 40;            // Above this spread = sustained noise
+const POOR_SPREAD_UV = 100;           // Above this spread = the sensor isn't reading EEG
 
 const INITIAL_STATE: SignalQualityState = {
   channels: { TP9: "good", AF7: "good", AF8: "good", TP10: "good" },
@@ -111,40 +117,39 @@ export function useSignalQuality(
   return quality;
 }
 
+/** Standard deviation from the median absolute deviation: brief spikes barely move it. */
+function robustSpread(samples: number[]): number {
+  const middle = (values: number[]) => [...values].sort((a, b) => a - b)[values.length >> 1];
+  const center = middle(samples);
+  return 1.4826 * middle(samples.map((value) => Math.abs(value - center)));
+}
+
 export function assessChannel(samples: number[]): ChannelQuality {
   if (samples.length < 32) return "good"; // Not enough data yet
 
-  // Check for railed values
+  // Check for railed values. Hum can rail a sensor too, so this reads the raw signal.
   let railedCount = 0;
-  let sum = 0;
   for (let i = 0; i < samples.length; i++) {
-    const v = Math.abs(samples[i]);
-    if (v > RAIL_VOLTAGE_UV) railedCount++;
-    sum += samples[i];
+    if (Math.abs(samples[i]) > RAIL_VOLTAGE_UV) railedCount++;
   }
   if (railedCount > samples.length * 0.3) return "poor"; // >30% railed
 
-  // Compute variance
-  const mean = sum / samples.length;
-  let variance = 0;
-  for (let i = 0; i < samples.length; i++) {
-    const d = samples[i] - mean;
-    variance += d * d;
-  }
-  variance /= samples.length;
+  const clean = removeLineNoise(samples);
+  const spread = robustSpread(clean);
 
-  // Flatline check
-  if (variance < MIN_VARIANCE_UV2) return "poor";
+  // Flatline, or hum with nothing under it
+  if (spread < FLATLINE_UV) return "poor";
 
-  // Excessive noise/movement
-  if (variance > MAX_VARIANCE_UV2) return "fair";
+  // Sustained noise that a blink can't explain
+  if (spread > POOR_SPREAD_UV) return "poor";
+  if (spread > FAIR_SPREAD_UV) return "fair";
 
   // Check for large jumps (muscle artifacts / electrode pop)
   let jumpCount = 0;
-  for (let i = 1; i < samples.length; i++) {
-    if (Math.abs(samples[i] - samples[i - 1]) > 100) jumpCount++;
+  for (let i = 1; i < clean.length; i++) {
+    if (Math.abs(clean[i] - clean[i - 1]) > 100) jumpCount++;
   }
-  if (jumpCount > samples.length * 0.2) return "fair"; // >20% large jumps
+  if (jumpCount > clean.length * 0.2) return "fair"; // >20% large jumps
 
   return "good";
 }

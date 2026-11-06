@@ -3,9 +3,12 @@ import { assessChannel } from "../../src/hooks/useSignalQuality";
 import { computeFeedbackSignal, resetOutputEngine } from "../../src/lib/neurofeedback/outputEngine";
 import { resetPolicyState } from "../../src/lib/neurofeedback/policyEngine";
 import { computeJawPower, detectAllArtifacts } from "../../src/lib/artifactDetection";
+import { removeLineNoise } from "../../src/lib/lineNoise";
 import type { InZoneThresholds } from "../../src/lib/neurofeedback/brainState";
 import type { FrequencyBandPowers, NfProtocol, FeedbackSignal } from "../../src/lib/types";
 import type { MuseTelemetry } from "./useMuseTelemetry";
+import { headMoved } from "./headMotion";
+import { estimateHeartRate, heartRateSummary } from "./heartRate";
 
 const CHANNELS = ["TP9", "AF7", "AF8", "TP10"];
 const CALIBRATION_TICKS = 10;
@@ -25,6 +28,12 @@ const STALE_MS = 1500;
 const FIT_TICKS = 4;
 /** A reading is centred half a second back in its one-second FFT window. */
 const FFT_WINDOW_DELAY_MS = 500;
+const HEART_RATE_EVERY_MS = 5000;
+/**
+ * AUX is not a training source or shown to anyone until an eyes-closed test proves it. The Muse
+ * streams it whether or not an electrode is attached, and a real capture read 76-81% beta.
+ */
+export const AUX_PROVEN = false;
 
 export type GuidedStage = "fit" | "baseline-open" | "baseline-closed" | "training";
 export type HoldReason = "contact" | "dropout" | "blink" | "jaw" | "movement" | "noise";
@@ -145,12 +154,16 @@ export class TrainingSession {
   private streak = 0;
   private window: boolean[] = [];
   private held: Record<HoldReason, number> = { contact: 0, dropout: 0, blink: 0, jaw: 0, movement: 0, noise: 0 };
+  private readonly auxAllowed: boolean;
+  private heartRates: number[] = [];
+  private lastHeartRateAt = -Infinity;
   state: TrainingState = { ...INACTIVE_TRAINING };
 
-  constructor(readonly protocol: NfProtocol, options: { guided?: boolean } = {}) {
+  constructor(readonly protocol: NfProtocol, options: { guided?: boolean; aux?: boolean } = {}) {
     resetOutputEngine();
     resetPolicyState();
     this.guided = options.guided ?? false;
+    this.auxAllowed = options.aux ?? AUX_PROVEN;
     this.state = { ...INACTIVE_TRAINING, phase: "calibrating", label: "Calibrating" };
     if (this.guided) this.state = { ...this.state, label: "Checking the fit", stage: "fit", fit: {}, fitReady: false };
   }
@@ -195,9 +208,25 @@ export class TrainingSession {
     return this.state;
   }
 
+  /** The gyroscope is optional: without a fresh stream, this gate stays out of the way. */
+  private moved(telemetry: MuseTelemetry, now: number): boolean {
+    return telemetry.gyro != null && now - telemetry.gyro.lastPacketAt < STALE_MS && headMoved(telemetry.gyro.samples);
+  }
+
+  /** A pulse reading every few seconds, skipping movement, which swamps the optical signal. */
+  private readHeartRate(telemetry: MuseTelemetry, now: number, moved: boolean) {
+    if (moved || now - this.lastHeartRateAt < HEART_RATE_EVERY_MS) return;
+    if (!telemetry.ppg || now - telemetry.ppg.lastPacketAt >= STALE_MS) return;
+    this.lastHeartRateAt = now;
+    const bpm = estimateHeartRate(telemetry.ppg.samples);
+    if (bpm !== null) this.heartRates.push(bpm);
+  }
+
   tick(telemetry: MuseTelemetry, now: number): TrainingState {
     if (now - this.lastTick < TICK_MS) return this.state;
     this.lastTick = now;
+    const moved = this.moved(telemetry, now);
+    this.readHeartRate(telemetry, now, moved);
     const fit = this.guided ? Object.fromEntries(CHANNELS.map((channel) => [channel, this.channelFit(telemetry, channel, now)])) as Record<string, ChannelFit> : {};
     if (this.guided && this.stage === "fit") {
       const ready = CHANNELS.every((channel) => fit[channel] === "good" || fit[channel] === "fair");
@@ -207,7 +236,7 @@ export class TrainingSession {
     }
     if (this.guided) {
       if (Object.values(fit).includes("none")) return this.hold("dropout", telemetry, now, fit);
-      if (Object.values(fit).includes("poor")) return this.hold("contact", telemetry, now, fit);
+      if (Object.values(fit).includes("poor")) return this.hold(moved ? "movement" : "contact", telemetry, now, fit);
       if (telemetry.packetCount === this.lastPacket) return this.hold("dropout", telemetry, now, fit);
     }
     const stale = CHANNELS.some((channel) => !telemetry.channelLastPacketAt[channel] || now - telemetry.channelLastPacketAt[channel] > STALE_MS);
@@ -222,14 +251,14 @@ export class TrainingSession {
       return this.state;
     }
     this.lastPacket = telemetry.packetCount;
-    const windows = Object.fromEntries(CHANNELS.map((channel) => [channel, telemetry.channels[channel].slice(-256)]));
+    const windows = Object.fromEntries(CHANNELS.map((channel) => [channel, removeLineNoise(telemetry.channels[channel].slice(-256))]));
     const detected = detectAllArtifacts(windows, this.jawBaseline, now);
     this.artifacts = this.artifacts.filter((time) => now - time < 60_000);
-    if (detected.length) {
+    if (detected.length || moved) {
       if (now - this.lastArtifactAt >= 1000) { this.artifacts.push(now); this.lastArtifactAt = now; }
       if (this.guided) {
         // A blink costs one tick of the baseline, never the whole baseline.
-        const type = detected[0].type;
+        const type = moved ? "motion" : detected[0].type;
         return this.hold(type === "blink" ? "blink" : type === "jaw_clench" ? "jaw" : "movement", telemetry, now, fit);
       }
       if (!this.thresholds) this.baseline = [];
@@ -240,10 +269,10 @@ export class TrainingSession {
     if (!this.thresholds) this.jawBaseline = this.jawBaseline ? this.jawBaseline * 0.9 + jawPower * 0.1 : jawPower;
     // Preserve the established frontal-electrode metrics without averaging phases.
     // The back-of-head electrode reads alpha better than the forehead, when it's really there.
-    const auxLive = this.guided && telemetry.aux != null && now - telemetry.aux.lastPacketAt < STALE_MS && telemetry.aux.samples.length >= 256 && assessChannel(telemetry.aux.samples.slice(-256)) !== "poor";
+    const auxLive = this.guided && this.auxAllowed && telemetry.aux != null && now - telemetry.aux.lastPacketAt < STALE_MS && telemetry.aux.samples.length >= 256 && assessChannel(telemetry.aux.samples.slice(-256)) !== "poor";
     const auxSource = auxLive && this.protocol.rewardBands.some((band) => band.label === "Alpha");
     const frontal = (auxSource ? ["AUX"] : ["AF7", "AF8"]).map((channel) => {
-      const samples = channel === "AUX" ? (telemetry.aux as NonNullable<MuseTelemetry["aux"]>).samples : telemetry.channels[channel];
+      const samples = removeLineNoise(channel === "AUX" ? (telemetry.aux as NonNullable<MuseTelemetry["aux"]>).samples : telemetry.channels[channel]);
       const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length;
       return computeBands(samples.map((value) => value - mean));
     });
@@ -315,6 +344,7 @@ export class TrainingSession {
       protocol_id: this.protocol.id, protocol_name: this.protocol.name, avg_focus: average("focus"), avg_relaxation: average("relaxation"),
       time_in_target_pct: valid.length ? valid.filter((entry) => entry.action === "reward").length / valid.length * 100 : null,
       relaxation_baseline: baseline, calm_pct: calmPercent(this.entries, baseline), timeline: [...this.entries],
+      heart_rate: heartRateSummary(this.heartRates),
       ...(this.guided ? { guided: {
         reward_schedule: { target_rate: TARGET_REWARD_RATE, check_every_s: ADAPT_TICKS * TICK_MS / 1000, threshold_scale: this.scale, adjustments: [...this.adjustments] },
         held_seconds: Object.fromEntries(Object.entries(this.held).map(([reason, ticks]) => [reason, ticks * TICK_MS / 1000])) as Record<HoldReason, number>,

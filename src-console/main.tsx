@@ -12,10 +12,12 @@ import "./styles/glass-apply.css";
 import "./styles/glass-motion.css";
 import "./styles/route-motion.css";
 import "./styles/calm.css";
+import { installReduceTransparency } from "./shell/reduceTransparency";
 import { installVibrancy } from "./shell/vibrancy";
 
 // Before the first render, so the transparent window never paints a frame with the wrong background.
 installVibrancy();
+installReduceTransparency();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

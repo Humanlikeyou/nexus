@@ -321,6 +321,7 @@ export const approveTerrenceAction = (id: string) => invoke<TerrenceAction>("app
 export const retryTerrenceAction = (id: string) => invoke<TerrenceAction>("retry_terrence_action", { id });
 export const cancelTerrenceAction = (id: string) => invoke<TerrenceAction>("cancel_terrence_action", { id });
 
+export const getReduceTransparency = () => invoke<boolean>("get_reduce_transparency");
 export const scanMuse = () => invoke<MuseDevice[]>("scan_muse");
 export const connectMuse = (address: string) => invoke<MuseState>("connect_muse", { address });
 export const disconnectMuse = () => invoke<void>("disconnect_muse");

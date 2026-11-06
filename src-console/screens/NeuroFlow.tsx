@@ -5,7 +5,7 @@ import { useAudioFeedback } from "../../src/hooks/useAudioFeedback";
 import { loadKv, saveKv } from "../bridge";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
 import { GOALS, NOTES_KEY, SENSORS, goalOf, parseNotes, recommendedGoal, suggestedStrategy, type NfNote } from "../neuro/goals";
-import { FIT_LABEL, HOLD_COPY, feedbackLevel, type ChannelFit } from "../neuro/training";
+import { AUX_PROVEN, FIT_LABEL, HOLD_COPY, feedbackLevel, type ChannelFit } from "../neuro/training";
 import type { MuseTelemetry } from "../neuro/telemetryStore";
 import type { useTraining } from "../neuro/useTraining";
 import { useNow } from "../shell/useNow";
@@ -147,6 +147,7 @@ function SummaryStep({ training, sessions, onNote, lastStrategy }: { training: T
         <Figure label="Trained" value={seconds(guided.trained_seconds)} />
         <Figure label="Held" value={seconds(held)} />
         <Figure label="Threshold" value={`${Math.round(guided.reward_schedule.threshold_scale * 100)}%`} />
+        {done.heart_rate && <Figure label="Heart rate (estimate)" value={`${done.heart_rate.bpm} bpm`} />}
       </Figures>
       {held > 0 && worst[1] > 0 && <p className="nf-meta">Most of the held time was {worst[0] === "blink" ? "blinks" : worst[0] === "jaw" ? "jaw tension" : worst[0] === "movement" ? "movement" : worst[0] === "dropout" ? "signal dropouts" : "poor contact"}. Held time is never counted.</p>}
       {ratio !== null && <p className="nf-meta">{ratio >= 1.2 ? `Alpha rose ${ratio.toFixed(1)}× with your eyes closed, a good sign the signal was clean.` : "Alpha barely changed with your eyes closed, so the fit may have been loose."}</p>}
@@ -167,6 +168,7 @@ function SummaryStep({ training, sessions, onNote, lastStrategy }: { training: T
 
 /** The session itself: goal, fit, baseline, training, summary. The lens is the feedback. */
 export function NeuroFlow({ training, telemetry, sessions, running, action }: { training: Training; telemetry: MuseTelemetry; sessions: RecordedSession[]; running: boolean; action: ReactNode }) {
+  const aux = AUX_PROVEN ? telemetry.aux : null;
   const { state } = training;
   const { notes, add } = useNotes();
   const { init, setMode, cleanup, setMuted, playBell, updateState } = useAudioFeedback();
@@ -202,9 +204,9 @@ export function NeuroFlow({ training, telemetry, sessions, running, action }: { 
   if (training.finished && !running) return <SummaryStep training={training} sessions={sessions} lastStrategy={strategy} onNote={(note) => add({ at: new Date().toISOString(), protocol: training.finished!.protocol_name, targetPercent: training.finished!.time_in_target_pct, strategy, note })} />;
   if (!running || !state.stage) {
     if (running) return <div className="nf-actions">{action}</div>; // a plain recording: the live readings below are the screen
-    return <GoalStep training={training} aux={telemetry.aux} lastNote={notes[0] ?? null} action={action} />;
+    return <GoalStep training={training} aux={aux} lastNote={notes[0] ?? null} action={action} />;
   }
-  if (state.stage === "fit") return <FitStep fit={state.fit ?? {}} ready={!!state.fitReady} onContinue={training.advance} aux={telemetry.aux} action={action} />;
+  if (state.stage === "fit") return <FitStep fit={state.fit ?? {}} ready={!!state.fitReady} onContinue={training.advance} aux={aux} action={action} />;
   if (state.stage !== "training") return <BaselineStep closed={state.stage === "baseline-closed"} percent={state.calibrationPercent} hold={state.hold ? HOLD_COPY[state.hold] : null} action={action} />;
   return <TrainingStep training={training} soundOn={soundOn} onSound={() => setSoundOn((on) => !on)} action={action} />;
 }

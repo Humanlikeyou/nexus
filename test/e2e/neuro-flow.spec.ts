@@ -116,12 +116,13 @@ test("no headset: the page asks for one, and offers no training", async ({ page,
   await expect(field.getByRole("radiogroup", { name: "Goal" })).toHaveCount(0);
 });
 
-test("the electrode appears only with real AUX data, and only ever reads", async ({ page, theme }) => {
+test("the electrode stays hidden while AUX is unproven, even with AUX data flowing", async ({ page, theme }) => {
   const field = await toFit(page, theme);
   await expect(field.getByText(/Myndlift/)).toHaveCount(0);
   await setHeadset(page, { aux: true });
   await page.clock.runFor(1_000);
-  await expect(field.getByText("Myndlift electrode: reading, read only")).toBeVisible();
+  await expect(field.getByRole("list", { name: "Sensor contact" })).toBeVisible();
+  await expect(field.getByText(/Myndlift/)).toHaveCount(0);
 });
 
 test("Today shows the readiness line, and it opens Mind–Body", async ({ page, theme }) => {
