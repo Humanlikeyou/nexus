@@ -1143,12 +1143,127 @@ pub fn get_noop_health_snapshot() -> NoopHealthSnapshot {
     health_snapshot()
 }
 
+/// A reading older than this isn't "live": the strap is off or NOOP has stopped syncing.
+const LIVE_HR_MAX_AGE_SECS: i64 = 120;
+const LIVE_HR_MIN_BPM: i64 = 30;
+const LIVE_HR_MAX_BPM: i64 = 240;
+
+/// The newest heart rate for the Home screen. Never log this value.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveHeartRate {
+    pub bpm: u16,
+    pub at: i64,
+}
+
+/// Uses the (deviceId, ts) primary key, so this stays cheap on a very long table. Off-wrist,
+/// stale, future-dated and implausible samples all come back as None and the screen hides the line.
+fn latest_heart_rate(
+    path: &Path,
+    device_id: &str,
+    now: DateTime<Utc>,
+) -> rusqlite::Result<Option<LiveHeartRate>> {
+    let conn = open_store(path)?;
+    let row: Option<(i64, i64)> = conn
+        .query_row(
+            "SELECT ts, bpm FROM hrSample WHERE deviceId = ?1 ORDER BY ts DESC LIMIT 1",
+            params![device_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let now = now.timestamp();
+    Ok(row.and_then(|(at, bpm)| {
+        let age = now - at;
+        let live = (-LIVE_HR_MAX_AGE_SECS..=LIVE_HR_MAX_AGE_SECS).contains(&age);
+        let plausible = (LIVE_HR_MIN_BPM..=LIVE_HR_MAX_BPM).contains(&bpm);
+        (live && plausible).then_some(LiveHeartRate {
+            bpm: bpm as u16,
+            at,
+        })
+    }))
+}
+
+/// Runs off the main thread: the screen polls this, and NOOP may be holding the store for a moment.
+#[tauri::command]
+pub async fn live_heart_rate() -> Option<LiveHeartRate> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let device_id = device_id_from_environment();
+        let (_, path) = NoopPaths::from_environment().resolve(&device_id).ok()?;
+        latest_heart_rate(&path, &device_id, Utc::now()).ok()?
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
     use std::fs;
     use uuid::Uuid;
+
+    fn heart_rate_database(rows: &[(&str, i64, i64)]) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("terrence-hr-{}.sqlite", Uuid::new_v4()));
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE hrSample (deviceId TEXT NOT NULL, ts INTEGER NOT NULL, bpm INTEGER NOT NULL,
+             synced INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (deviceId, ts));",
+        )
+        .unwrap();
+        for (device, ts, bpm) in rows {
+            conn.execute(
+                "INSERT INTO hrSample (deviceId, ts, bpm) VALUES (?1, ?2, ?3)",
+                params![device, ts, bpm],
+            )
+            .unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn live_heart_rate_takes_the_newest_sample_for_this_device() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        let at = now.timestamp();
+        let path = heart_rate_database(&[
+            ("my-whoop", at - 30, 61),
+            ("my-whoop", at - 10, 64),
+            ("other", at - 1, 99),
+        ]);
+        let reading = latest_heart_rate(&path, "my-whoop", now).unwrap();
+        assert_eq!(
+            reading,
+            Some(LiveHeartRate {
+                bpm: 64,
+                at: at - 10
+            })
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn live_heart_rate_hides_stale_future_and_implausible_samples() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        let at = now.timestamp();
+        for (ts, bpm) in [
+            (at - LIVE_HR_MAX_AGE_SECS - 1, 64),
+            (at + LIVE_HR_MAX_AGE_SECS + 1, 64),
+            (at - 5, 0),
+            (at - 5, 300),
+        ] {
+            let path = heart_rate_database(&[("my-whoop", ts, bpm)]);
+            assert_eq!(latest_heart_rate(&path, "my-whoop", now).unwrap(), None);
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn live_heart_rate_is_none_when_there_are_no_samples() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        let path = heart_rate_database(&[]);
+        assert_eq!(latest_heart_rate(&path, "my-whoop", now).unwrap(), None);
+        let _ = fs::remove_file(path);
+    }
 
     fn seeded_database() -> PathBuf {
         let path = std::env::temp_dir().join(format!("terrence-noop-{}.sqlite", Uuid::new_v4()));

@@ -362,3 +362,5 @@ export const saveKv = (key: string, value: string) => invoke<void>("save_kv", { 
 export interface HomeWeather { place: string | null; tempC: number | null; summary: string | null; highC: number | null; lowC: number | null }
 export interface HomeBrief { greeting: string | null; weather: HomeWeather | null; updatedAt: string | null }
 export const getHomeBrief = () => invoke<HomeBrief>("home_brief");
+export interface LiveHeartRate { bpm: number; at: number }
+export const getLiveHeartRate = () => invoke<LiveHeartRate | null>("live_heart_rate");

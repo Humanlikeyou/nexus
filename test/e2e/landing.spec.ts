@@ -278,4 +278,11 @@ test.describe("Landing: the welcome", () => {
     const stage = (await page.locator(".landing .amara-lens").boundingBox())!;
     expect(end.y + end.height).toBeLessThanOrEqual(stage.y + 1);
   });
+
+  test("shows the live heart rate under the weather", async ({ page, theme }) => {
+    await openApp(page, { theme, data: { ...waiting, live_heart_rate: { bpm: 64, at: 1793931653 } } });
+    await realLook(page, theme);
+    await expect(page.getByRole("img", { name: "Heart rate 64 beats per minute" })).toBeVisible();
+    if (process.env.HR_SHOT) await page.screenshot({ path: process.env.HR_SHOT });
+  });
 });
