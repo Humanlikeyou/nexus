@@ -206,6 +206,7 @@ pub fn run() {
             muse::get_muse_state,
             // NOOP is the exclusive WHOOP/health reader. It owns strap sync and health storage.
             noop::get_noop_health_snapshot,
+            noop::live_heart_rate,
             noop_query::noop_query,
             noop_query::get_noop_settings,
             noop_query::set_noop_settings,

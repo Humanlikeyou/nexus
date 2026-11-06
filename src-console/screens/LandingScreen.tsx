@@ -1,7 +1,10 @@
+import { Heart } from "lucide-react";
+import type { CSSProperties } from "react";
 import { LANDING_ENTRIES } from "../app/routes";
 import { AmaraLens, AmaraVoiceAnnouncer } from "../components/AmaraLens/AmaraLens";
 import { freshBrief, usableWeather, useHomeBrief } from "../hooks/useHomeBrief";
 import { useLandingVoice } from "../hooks/useLandingVoice";
+import { beatSeconds, useLiveHeartRate } from "../hooks/useLiveHeartRate";
 import { localGreeting } from "../lib/greeting";
 import { useNow } from "../shell/useNow";
 import type { ModuleId } from "../types";
@@ -10,6 +13,19 @@ import "./LandingScreen.css";
 
 const formatTime = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 const formatDate = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" });
+
+/** Live heart rate from NOOP. The heart beats at the real rate; with no live reading the line is gone. */
+function HeartRate() {
+  const bpm = useLiveHeartRate();
+  if (bpm == null) return null;
+  return (
+    <p className="landing__pulse" role="img" aria-label={`Heart rate ${bpm} beats per minute`}>
+      <span className="landing__heart" style={{ "--landing-beat": `${beatSeconds(bpm)}s` } as CSSProperties}><Heart size={15} aria-hidden="true" /></span>
+      <span className="landing__bpm">{bpm}</span>
+      <span className="landing__weather-detail">bpm</span>
+    </p>
+  );
+}
 
 /** Greeting, time, date and weather. Nothing here is a box; the type scale does the work. */
 function Welcome() {
@@ -29,6 +45,7 @@ function Welcome() {
           {extra && <span className="landing__weather-detail">{extra}</span>}
         </p>
       )}
+      <HeartRate />
     </section>
   );
 }

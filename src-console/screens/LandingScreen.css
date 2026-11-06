@@ -37,6 +37,11 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 .landing__weather { display: grid; gap: 4px; margin: var(--fib-34) 0 0; color: var(--landing-label); font: 300 var(--fib-21)/1.25 var(--font-text); }
 .landing__temp { font-variant-numeric: tabular-nums; }
 .landing__weather-detail { color: var(--landing-muted); font: 400 var(--fib-13)/1.4 var(--font-text); }
+.landing__pulse { display: inline-flex; align-items: baseline; gap: var(--fib-8); margin: var(--fib-13) 0 0; color: var(--landing-label); font: 300 var(--fib-21)/1.25 var(--font-text); }
+.landing__bpm { font-variant-numeric: tabular-nums; }
+.landing__heart { display: inline-flex; align-self: center; color: var(--landing-icon); animation: landing-beat var(--landing-beat, 1s) ease-out infinite; }
+@keyframes landing-beat { 0%, 45%, 100% { transform: scale(1); } 15% { transform: scale(1.16); } }
+@media (prefers-reduced-motion: reduce) { .landing__heart { animation: none; } }
 
 /* A size container: it takes the height the line and buttons leave, and the hero lens fits inside it. */
 .landing__lens {
@@ -97,6 +102,7 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
   .landing__date { margin-top: 4px; font-size: var(--fib-13); }
   .landing__weather { margin-top: 4px; display: block; font-size: var(--fib-13); }
   .landing__weather-detail { margin-left: var(--fib-8); }
+  .landing__pulse { margin-top: 4px; font-size: var(--fib-13); }
   .landing__stage { gap: var(--fib-13); }
 }
 @media (max-height: 560px) { .landing__time { display: none; } }
@@ -104,7 +110,7 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 
 @media (forced-colors: active) {
   .landing { background: Canvas; color: CanvasText; }
-  .landing__line, .landing__welcome, .landing__date, .landing__weather-detail { color: CanvasText; }
+  .landing__line, .landing__welcome, .landing__date, .landing__weather-detail, .landing__pulse, .landing__heart { color: CanvasText; }
   .landing__button { border: 1px solid ButtonText; background: ButtonFace; color: ButtonText; box-shadow: none; }
   .landing__button svg { color: ButtonText; }
   .landing__button:focus-visible { outline-color: Highlight; }
