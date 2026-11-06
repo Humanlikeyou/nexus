@@ -174,5 +174,7 @@ Section 5 doesn't remove this patch.
 
 ## 8. Status and order
 
-- `nexus-v2` is pushed: `origin/nexus-v2` is at `ab55ba7` (checked 2026-11-04). `amara-integration` has no branch on origin.
-- Home control is deliberately last. Do every other step in `NEXT_SESSION_PROMPT.md` first.
+- The local tracking ref `origin/nexus-v2` is at `62ce254` (read 2026-11-06, no fetch run). `nexus-v2` is ahead of it by design: nothing is pushed until the project is near 90%. `amara-integration` has no branch on origin.
+- Order of what's left is in `NEXT_SESSION_PROMPT.md`. Home control comes after the live checks. The Muse eyes-closed test and key rotation are last, then the push.
+- Lid-awake is installed (AC power only). Its scripts are in `~/projects/hermes-patches/lid-awake`.
+- The rotation runbook `stack/ROTATION-RUNBOOK.md` stays out of git on purpose. It's in `.git/info/exclude`, along with `memory/session_logs/`.

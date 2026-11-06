@@ -91,7 +91,7 @@
 - Continuity system (TS + Rust) — `src/terrance/system/continuity.ts` + `src-tauri/src/commands/continuity.rs`
 - session_logs structure — per-session JSON summaries in `memory/session_logs/`
 - memory.write pipeline — posts to n8n ingress webhook
-- RAG infrastructure — Weaviate + Verba up and healthy (compose healthcheck). **The knowledge base is empty**: it has never been ingested, so kb.query returns "knowledge base is empty" until the ingest plan (`stack/kb/INGEST-PLAN.md`) is applied
+- RAG infrastructure — Weaviate + Verba up and healthy (compose healthcheck). The knowledge base was ingested on 2026-11-04: Verba holds the 8 current docs (72 chunks). See `stack/kb/INGEST-PLAN.md`
 - LLM router implemented — local/hybrid/api modes with budget caps
 - Identity prepended to prompts — `config/terrance.identity.md` always injected
 - Automatic memory capture: `src-console/hooks/useIdleAutoSave.ts` saves after 10 min idle (`IDLE_AUTOSAVE_MS`) via `summarizeAndStoreSessionSilent()`, and also on new chat and on close. The old TelegramChat 2-min timer is gone with the legacy UI
@@ -99,7 +99,7 @@
 - Autonomous reasoning loops — `runReasoningLoop()` every 12h, goal-driven reflection, pattern recognition, generates proactive briefs, writes to n8n memory
 - Gateway authentication — n8n ingress webhook uses Header Auth (credential `nxIngressSecret1`, header `X-Nexus-Secret`, value synced from `NEXUS_SECRET` by `stack/scripts/n8n_sync_credentials.sh`); client sends the secret from NexusConfig. There is no open mode: requests without a valid header get 403
 
-- Crew read-only access: `terrance/ingress-crew` (kb.query + memory.query only) is live in its previous form (bad key → 403 from n8n Header Auth). The constant-time Crew Auth version (bad key → 401) is in the export but **not yet imported**
+- Crew read-only access: `terrance/ingress-crew` (kb.query + memory.query only) is live with the constant-time Crew Auth check (bad key → 401). Live n8n matches the export, and its hash matches the current crew key (checked 2026-11-04)
 
 **Result:** The nervous system is alive. It remembers automatically, consolidates on schedule, reasons proactively, and authenticates its communications. It moves on its own.
 
@@ -184,7 +184,7 @@ This stage turns Amara from semi-autonomous to fully autonomous.
 - [x] Home Assistant needs no router link: it uses its built-in matcher with no LLM (`amara-router/README.md`)
 - [x] Hermes route patch applied 2026-11-04: Hermes's reply carries the router's route data (`~/projects/hermes-patches/`, `TAISUN-STEPS.md`)
 - [x] Mind-Body page built and merged: `MindBodyScreen.tsx`, `noop_query.rs` (f835631)
-- [ ] Mind-Body QA on live NOOP data. Stage 5½ stays open until this passes
+- [ ] Mind-Body QA on live NOOP data. Stage 5½ stays open until this passes. Fixes for the 2026-11-04 chart failure are in (ec28dfc, 551fc33, 8478d79) and need a live check
 
 ---
 
