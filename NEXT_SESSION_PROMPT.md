@@ -16,16 +16,15 @@ The Terrance fold-in is scrapped, so don't plan around it. Code names such as `t
 
 Check the live state before trusting this list. Update it at the end of each session.
 
-1. **Live checks with Taisun.** Quit and reopen Amara OS. Check Mind-Body charts, the weekday in Chat, Home and End in an empty composer, Lists, the Fast/Deep badge and the Home heart rate.
-   These fixes are committed but not proven in the app.
-2. **Design calls.** Sidebar emerald tint or plain glass, and keep or drop the Light theme.
+1. **Backup prune.** Lines 1-18 of `~/Backups/PRUNE-PLAN-2026-11-06.md` are held in `~/Backups/pruned-2026-11-06/`, not deleted. Taisun said to wait. Lines 25-26 and a passphrase for 19-24 are also his. The two newest snapshot sets wait until 2026-11-19 09:28 JST.
+2. **Home control.** Needs home Wi-Fi and the Wi-Fi devices. Docker has no discovery, Bluetooth or USB. This is the largest step left before 90%.
 3. **Neurofeedback.** A real Muse session in the app, for latency, thresholds, artifacts and audio.
 4. **Voice with headphones.** A live spoken reply with the lens pulsing, and smoothness on the M1 Pro. Keep the speakers quiet while Taisun is at work: read the volume first and only lower it.
-5. **Telegram.** The Fujimi teacher question through the vault tools.
-6. **Calendar.** The token expired and needs Taisun's login.
-7. **Backup prune.** Follow `~/Backups/PRUNE-PLAN-2026-11-06.md`, one line at a time with Taisun's OK. The two newest snapshot sets wait until 2026-11-19 09:28 JST.
-8. **Home control.** Needs home Wi-Fi and the Wi-Fi devices. Docker has no discovery, Bluetooth or USB. This is the largest step left before 90%.
-9. **Last, in order.** Muse eyes-closed test (`cd src-tauri && cargo run --example muse_probe -- eyes`). `AUX_PROVEN` stays false until it passes. Then key rotation (`stack/ROTATION-RUNBOOK.md`), then the push near 90%.
+5. **Slow first turn.** The first Chat turn took about 55 s on a 20k-token prompt.
+6. **Calendar.** Reconnected 2026-11-06. If it fails around 2026-11-13, the Google app is in Testing and needs publishing.
+7. **Last, in order.** Muse eyes-closed test (`cd src-tauri && cargo run --example muse_probe -- eyes`). `AUX_PROVEN` stays false until it passes. Then key rotation (`stack/ROTATION-RUNBOOK.md`), then the push near 90%.
+
+Done 2026-11-06, proven in the real app: Mind-Body, the Chat weekday, the Fast/Deep badge, Lists, Home and End, and the Home heart rate line. Telegram vault tools work. The redesign stays as it is.
 
 Open decisions for Taisun: stay on Letta 0.16.8 or migrate, and keep Tauri packages on ~2.11 or raise them.
 
