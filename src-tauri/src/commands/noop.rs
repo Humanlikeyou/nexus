@@ -1150,17 +1150,35 @@ const LIVE_HR_MAX_FUTURE_SECS: i64 = 60;
 const LIVE_HR_MIN_BPM: i64 = 30;
 const LIVE_HR_MAX_BPM: i64 = 240;
 
-/// The newest heart rate for the Home screen. Never log this value.
+/// The trace on the Home screen covers 89 seconds. These extra rows let it play through a late
+/// batch from NOOP without its left edge running out.
+const LIVE_HR_TRACE_ROWS: i64 = 144;
+
+/// One heart rate sample. Never log these values.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct LiveHeartRate {
+pub struct HeartSample {
     pub bpm: u16,
     pub at: i64,
 }
 
+/// The live heart rate for the Home screen, oldest sample first. Never log this.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveHeartRate {
+    pub bpm: u16,
+    pub at: i64,
+    pub trace: Vec<HeartSample>,
+}
+
+fn plausible_bpm(bpm: i64) -> bool {
+    (LIVE_HR_MIN_BPM..=LIVE_HR_MAX_BPM).contains(&bpm)
+}
+
 /// Uses the (deviceId, ts) primary key, so this stays cheap on a very long table. Future-dated rows
 /// are skipped, because NOOP stores do hold some and one would otherwise hide the line for good.
-/// Off-wrist, stale and implausible samples come back as None and the screen hides the line.
+/// A stale or off-wrist newest sample means None and the screen hides the line. Older off-wrist
+/// samples are dropped from the trace.
 fn latest_heart_rate(
     path: &Path,
     device_id: &str,
@@ -1168,20 +1186,35 @@ fn latest_heart_rate(
 ) -> rusqlite::Result<Option<LiveHeartRate>> {
     let conn = open_store(path)?;
     let now = now.timestamp();
-    let row: Option<(i64, i64)> = conn
-        .query_row(
-            "SELECT ts, bpm FROM hrSample WHERE deviceId = ?1 AND ts <= ?2 ORDER BY ts DESC LIMIT 1",
-            params![device_id, now + LIVE_HR_MAX_FUTURE_SECS],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    Ok(row.and_then(|(at, bpm)| {
-        let live = now - at <= LIVE_HR_MAX_AGE_SECS;
-        let plausible = (LIVE_HR_MIN_BPM..=LIVE_HR_MAX_BPM).contains(&bpm);
-        (live && plausible).then_some(LiveHeartRate {
+    let mut statement = conn.prepare(
+        "SELECT ts, bpm FROM hrSample WHERE deviceId = ?1 AND ts <= ?2 ORDER BY ts DESC LIMIT ?3",
+    )?;
+    let rows = statement
+        .query_map(
+            params![device_id, now + LIVE_HR_MAX_FUTURE_SECS, LIVE_HR_TRACE_ROWS],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let Some(&(at, bpm)) = rows.first() else {
+        return Ok(None);
+    };
+    if now - at > LIVE_HR_MAX_AGE_SECS || !plausible_bpm(bpm) {
+        return Ok(None);
+    }
+    let oldest = at - LIVE_HR_TRACE_ROWS;
+    let trace = rows
+        .iter()
+        .rev()
+        .filter(|(ts, sample)| *ts >= oldest && plausible_bpm(*sample))
+        .map(|&(at, bpm)| HeartSample {
             bpm: bpm as u16,
             at,
         })
+        .collect();
+    Ok(Some(LiveHeartRate {
+        bpm: bpm as u16,
+        at,
+        trace,
     }))
 }
 
@@ -1232,14 +1265,10 @@ mod tests {
             ("my-whoop", at - 10, 64),
             ("other", at - 1, 99),
         ]);
-        let reading = latest_heart_rate(&path, "my-whoop", now).unwrap();
-        assert_eq!(
-            reading,
-            Some(LiveHeartRate {
-                bpm: 64,
-                at: at - 10
-            })
-        );
+        let reading = latest_heart_rate(&path, "my-whoop", now).unwrap().unwrap();
+        assert_eq!((reading.bpm, reading.at), (64, at - 10));
+        let expected: Vec<_> = reading.trace.iter().map(|s| s.bpm).collect();
+        assert_eq!(expected, vec![61, 64]);
         let _ = fs::remove_file(path);
     }
 
@@ -1269,6 +1298,24 @@ mod tests {
         ]);
         let reading = latest_heart_rate(&path, "my-whoop", now).unwrap();
         assert_eq!(reading.map(|r| r.bpm), Some(66));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn live_heart_rate_trace_is_oldest_first_bounded_and_skips_off_wrist_samples() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        let at = now.timestamp();
+        let mut rows: Vec<(&str, i64, i64)> = (0..400).map(|i| ("my-whoop", at - i, 70)).collect();
+        rows[3].2 = 0;
+        rows.push(("my-whoop", at - 3_000, 90));
+        let path = heart_rate_database(&rows);
+        let trace = latest_heart_rate(&path, "my-whoop", now)
+            .unwrap()
+            .unwrap()
+            .trace;
+        assert_eq!(trace.len() as i64, LIVE_HR_TRACE_ROWS - 1);
+        assert!(trace.windows(2).all(|pair| pair[0].at < pair[1].at));
+        assert!(trace.iter().all(|sample| sample.bpm == 70));
         let _ = fs::remove_file(path);
     }
 

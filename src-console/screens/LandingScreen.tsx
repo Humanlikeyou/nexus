@@ -6,6 +6,7 @@ import { freshBrief, usableWeather, useHomeBrief } from "../hooks/useHomeBrief";
 import { useLandingVoice } from "../hooks/useLandingVoice";
 import { beatSeconds, useLiveHeartRate } from "../hooks/useLiveHeartRate";
 import { localGreeting } from "../lib/greeting";
+import { TRACE_HEIGHT, TRACE_WIDTH, traceShape } from "../lib/heartTrace";
 import { useNow } from "../shell/useNow";
 import type { ModuleId } from "../types";
 import { Wordmark } from "../ui/Wordmark";
@@ -14,16 +15,26 @@ import "./LandingScreen.css";
 const formatTime = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 const formatDate = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" });
 
-/** Live heart rate from NOOP. The heart beats at the real rate; with no live reading the line is gone. */
+/** Live heart rate from NOOP, with the last 89 seconds behind it. With no live reading it's all gone. */
 function HeartRate() {
-  const bpm = useLiveHeartRate();
-  if (bpm == null) return null;
+  const heart = useLiveHeartRate();
+  if (!heart) return null;
+  const { paths, dot } = traceShape(heart.samples, heart.at);
   return (
-    <p className="landing__pulse" role="img" aria-label={`Heart rate ${bpm} beats per minute`}>
-      <span className="landing__heart" style={{ "--landing-beat": `${beatSeconds(bpm)}s` } as CSSProperties}><Heart size={15} aria-hidden="true" /></span>
-      <span className="landing__bpm">{bpm}</span>
-      <span className="landing__weather-detail">bpm</span>
-    </p>
+    <div className="landing__heart-rate" role="img" aria-label={`Heart rate ${heart.bpm} beats per minute`}>
+      <p className="landing__pulse">
+        <span className="landing__heart" style={{ "--landing-beat": `${beatSeconds(heart.bpm)}s` } as CSSProperties}><Heart size={13} fill="currentColor" aria-hidden="true" /></span>
+        <span className="landing__bpm">{heart.bpm}</span>
+        <span className="landing__weather-detail">bpm</span>
+      </p>
+      {dot && (
+        <svg className="landing__trace" width={TRACE_WIDTH} height={TRACE_HEIGHT} viewBox={`0 0 ${TRACE_WIDTH} ${TRACE_HEIGHT}`} aria-hidden="true">
+          {paths.map((path) => <path key={path} className="landing__trace-line" d={path} />)}
+          <circle className="landing__trace-halo" cx={dot.x} cy={dot.y} r="8" />
+          <circle className="landing__trace-dot" cx={dot.x} cy={dot.y} r="3" />
+        </svg>
+      )}
+    </div>
   );
 }
 
