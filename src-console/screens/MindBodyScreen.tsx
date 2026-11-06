@@ -270,7 +270,7 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
                   <div className="mb-row__head">
                     <h3>Last night</h3>
                     <p className="mb-row__value">{typeof sleepMin === "number" ? hoursMinutes(sleepMin) : DASH}</p>
-                    <p className="mb-row__usual">{typeof efficiency === "number" ? `${Math.round(efficiency)}% efficient` : "\u00a0"}</p>
+                    <p className="mb-row__usual">{typeof efficiency === "number" ? `${Math.round(efficiency * 100)}% efficient` : "\u00a0"}</p>
                   </div>
                   <div className="mb-plot">
                     <StageStrip stages={stages} />

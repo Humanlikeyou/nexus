@@ -161,7 +161,7 @@ const wave = (base: number, swing: number, i: number) => Math.round(base + Math.
 
 /** A DayRow in the real shape (all metric keys present, nullable). */
 export function mockDayRow(day: string, over: Partial<NoopDayRow> = {}): NoopDayRow {
-  return { day, source: "my-whoop", totalSleepMin: 440, efficiency: 91, deepMin: 90, remMin: 100, lightMin: 230, disturbances: 3,
+  return { day, source: "my-whoop", totalSleepMin: 440, efficiency: 0.91, deepMin: 90, remMin: 100, lightMin: 230, disturbances: 3,
     restingHr: 52, avgHrv: 62, recovery: 68, strain: 11, exerciseCount: 1, spo2Pct: 97, skinTempDevC: 0.2, respRateBpm: 14.6,
     steps: 8000, activeKcalEst: 450, ...over };
 }

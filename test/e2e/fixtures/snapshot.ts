@@ -41,7 +41,7 @@ const crewRun = (id: string, name: string, status: string, task: string, result:
 
 /* noop_query payloads in the real shapes (noop-shapes-1104), fake values. */
 const noopRow = (d: string, i: number) => ({
-  day: d, source: "my-whoop", totalSleepMin: 420 + ((i * 13) % 60), efficiency: 90, deepMin: 90, remMin: 100, lightMin: 230, disturbances: 3,
+  day: d, source: "my-whoop", totalSleepMin: 420 + ((i * 13) % 60), efficiency: 0.9, deepMin: 90, remMin: 100, lightMin: 230, disturbances: 3,
   restingHr: 50 + (i % 4), avgHrv: 56 + ((i * 7) % 14), recovery: 55 + ((i * 11) % 35), strain: 8 + ((i * 5) % 9), exerciseCount: 1,
   spo2Pct: 97, skinTempDevC: 0.2, respRateBpm: 14.6, steps: 8000, activeKcalEst: 450,
 });
@@ -51,7 +51,7 @@ export const NOOP_SNAPSHOT = {
   sources: { whoopImported: "my-whoop", noopComputed: "my-whoop-noop", appleHealth: null, nutrition: null, mood: null, journal: null },
   freshness: { latestHeartRateSample: null, latestDailyMetricDay: "2026-10-28", latestAppleHealthDay: null, dailyRows: 29, appleDailyRows: 0 },
   today: noopDays[28], recentDays: noopDays.slice(0, 28), appleDaily: [], latestSleep: null,
-  latestNight: { day: "2026-10-28", startTs: 1, endTs: 2, start: "2026-10-27T23:41:00+09:00", end: "2026-10-28T07:13:00+09:00", sessionCount: 1, totalSleepMin: 452, inBedMin: 478, efficiency: 91, deepMin: 92, remMin: 104, lightMin: 230 },
+  latestNight: { day: "2026-10-28", startTs: 1, endTs: 2, start: "2026-10-27T23:41:00+09:00", end: "2026-10-28T07:13:00+09:00", sessionCount: 1, totalSleepMin: 452, inBedMin: 478, efficiency: 0.91, deepMin: 92, remMin: 104, lightMin: 230 },
   battery: null,
 };
 const NOOP_SERIES = {
