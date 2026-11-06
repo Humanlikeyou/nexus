@@ -1,5 +1,45 @@
 use serde::Serialize;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::Emitter;
+
+pub const REDUCE_TRANSPARENCY_EVENT: &str = "reduce-transparency-changed";
+
+/// Last value seen: 0 none yet, 1 off, 2 on.
+static REDUCE_TRANSPARENCY: AtomicU8 = AtomicU8::new(0);
+
+/// macOS's Reduce Transparency. The system WKWebView has no media query for it.
+#[cfg(target_os = "macos")]
+fn read_reduce_transparency() -> bool {
+    objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceTransparency()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_reduce_transparency() -> bool {
+    false
+}
+
+/// Stores `now` and says whether it differs from the last value seen.
+fn note_reduce_transparency(last: &AtomicU8, now: bool) -> bool {
+    let value = if now { 2 } else { 1 };
+    let before = last.swap(value, Ordering::SeqCst);
+    before != 0 && before != value
+}
+
+#[tauri::command]
+pub fn get_reduce_transparency() -> bool {
+    let now = read_reduce_transparency();
+    note_reduce_transparency(&REDUCE_TRANSPARENCY, now);
+    now
+}
+
+/// Emits `reduce-transparency-changed` with the new value when the setting has changed.
+pub fn sync_reduce_transparency(app: &tauri::AppHandle) {
+    let now = read_reduce_transparency();
+    if note_reduce_transparency(&REDUCE_TRANSPARENCY, now) {
+        let _ = app.emit(REDUCE_TRANSPARENCY_EVENT, now);
+    }
+}
 
 #[derive(Serialize)]
 pub struct SystemInfo {
@@ -134,7 +174,18 @@ pub async fn check_service_port(host: String, port: u16) -> Result<String, Strin
 
 #[cfg(test)]
 mod tests {
-    use super::validate_container_name;
+    use super::{note_reduce_transparency, validate_container_name};
+    use std::sync::atomic::AtomicU8;
+
+    #[test]
+    fn reduce_transparency_reports_only_real_changes() {
+        let last = AtomicU8::new(0);
+        assert!(!note_reduce_transparency(&last, false), "the first read");
+        assert!(!note_reduce_transparency(&last, false));
+        assert!(note_reduce_transparency(&last, true));
+        assert!(!note_reduce_transparency(&last, true));
+        assert!(note_reduce_transparency(&last, false));
+    }
 
     #[test]
     fn container_names() {

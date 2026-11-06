@@ -1,6 +1,8 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { EegSample } from "../types";
 import { relativeChannelBandPowers, type FrequencyBands } from "./fft";
+import { GYRO_BUFFER } from "./headMotion";
+import { PPG_BUFFER } from "./heartRate";
 
 /**
  * Muse EEG telemetry as an external store (useSyncExternalStore). Raw samples
@@ -21,9 +23,18 @@ export interface MuseTelemetry {
   sampleCount: number;
   lastPacketAt: number | null;
   channelLastPacketAt: Record<string, number>;
-  /** Muse auxiliary input, only once a real AUX packet has arrived. muse.rs doesn't stream it yet. */
+  /** Muse auxiliary input, only once a real AUX packet has arrived. Unproven: see AUX_PROVEN. */
   aux?: { samples: number[]; lastPacketAt: number } | null;
+  /** Recent gyroscope samples as [x, y, z] in deg/s, once a packet has arrived. */
+  gyro?: { samples: number[][]; lastPacketAt: number } | null;
+  /** Recent infrared PPG counts, once a packet has arrived. */
+  ppg?: { samples: number[]; lastPacketAt: number } | null;
 }
+
+/** `muse-motion`, from muse.rs. */
+export type MotionPacket = { timestamp: number; sensor: string; unit: string; sequence: number; samples: number[][] };
+/** `muse-ppg`, from muse.rs. */
+export type PpgPacket = { timestamp: number; channel: string; sequence: number; samples: number[] };
 
 const EMPTY_BANDS: FrequencyBands = { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 };
 const emptyTelemetry = (): MuseTelemetry => ({
@@ -34,6 +45,8 @@ const emptyTelemetry = (): MuseTelemetry => ({
   lastPacketAt: null,
   channelLastPacketAt: {},
   aux: null,
+  gyro: null,
+  ppg: null,
 });
 
 export function createMuseTelemetryStore() {
@@ -44,6 +57,8 @@ export function createMuseTelemetryStore() {
   let lastPacketAt: number | null = null;
   let channelLastPacketAt: Record<string, number> = {};
   let aux: MuseTelemetry["aux"] = null;
+  let gyro: MuseTelemetry["gyro"] = null;
+  let ppg: MuseTelemetry["ppg"] = null;
   let snapshot: MuseTelemetry = emptyTelemetry();
   let publishedPackets = 0;
   const listeners = new Set<() => void>();
@@ -66,6 +81,8 @@ export function createMuseTelemetryStore() {
       lastPacketAt,
       channelLastPacketAt: { ...channelLastPacketAt },
       aux: aux && { samples: [...aux.samples], lastPacketAt: aux.lastPacketAt },
+      gyro: gyro && { samples: [...gyro.samples], lastPacketAt: gyro.lastPacketAt },
+      ppg: ppg && { samples: [...ppg.samples], lastPacketAt: ppg.lastPacketAt },
     };
     emit();
   };
@@ -84,6 +101,16 @@ export function createMuseTelemetryStore() {
     channelLastPacketAt[payload.channel] = lastPacketAt;
   };
 
+  const ingestMotion = (payload: MotionPacket) => {
+    if (payload.sensor !== "gyroscope") return;
+    gyro = { samples: [...(gyro?.samples ?? []), ...payload.samples].slice(-GYRO_BUFFER), lastPacketAt: Date.now() };
+  };
+
+  const ingestPpg = (payload: PpgPacket) => {
+    if (payload.channel !== "infrared") return;
+    ppg = { samples: [...(ppg?.samples ?? []), ...payload.samples].slice(-PPG_BUFFER), lastPacketAt: Date.now() };
+  };
+
   return {
     subscribe(listener: () => void) {
       listeners.add(listener);
@@ -100,22 +127,32 @@ export function createMuseTelemetryStore() {
       lastPacketAt = null;
       channelLastPacketAt = {};
       aux = null;
+      gyro = null;
+      ppg = null;
       snapshot = emptyTelemetry();
       emit();
     },
     /** Test seam: feed a packet without Tauri. */
     ingest,
+    ingestMotion,
+    ingestPpg,
     /** Start listening (ref-counted); returns a stop function. */
     start(): () => void {
       starts += 1;
       if (starts === 1) {
         let cancelled = false;
-        let unlisten: UnlistenFn | null = null;
-        void listen<EegSample>("muse-eeg", ({ payload }) => { if (!cancelled) ingest(payload); })
-          .then((cleanup) => { if (cancelled) cleanup(); else unlisten = cleanup; })
-          .catch((error) => console.warn("[muse] EEG event listener unavailable", error));
+        const unlisteners: UnlistenFn[] = [];
+        const keep = (registered: Promise<UnlistenFn>, label: string) => {
+          void registered
+            .then((cleanup) => { if (cancelled) cleanup(); else unlisteners.push(cleanup); })
+            .catch((error) => console.warn(`[muse] ${label} event listener unavailable`, error));
+        };
+        keep(listen<EegSample>("muse-eeg", ({ payload }) => { if (!cancelled) ingest(payload); }), "EEG");
+        // Optional streams: a headset without them still trains on EEG.
+        keep(listen<MotionPacket>("muse-motion", ({ payload }) => { if (!cancelled) ingestMotion(payload); }), "motion");
+        keep(listen<PpgPacket>("muse-ppg", ({ payload }) => { if (!cancelled) ingestPpg(payload); }), "PPG");
         const timer = window.setInterval(publish, UI_INTERVAL_MS);
-        stopFn = () => { cancelled = true; unlisten?.(); window.clearInterval(timer); };
+        stopFn = () => { cancelled = true; unlisteners.forEach((cleanup) => cleanup()); window.clearInterval(timer); };
       }
       let stopped = false;
       return () => {

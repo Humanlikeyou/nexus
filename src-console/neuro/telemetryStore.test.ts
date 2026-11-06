@@ -50,4 +50,21 @@ describe("muse telemetry store", () => {
     await vi.advanceTimersByTimeAsync(UI_INTERVAL_MS * 4);
     expect(listener).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps gyroscope and infrared PPG, skips the other sensors, and clears on reset", async () => {
+    const store = createMuseTelemetryStore();
+    const stop = store.start();
+    store.ingestMotion({ timestamp: 0, sensor: "accelerometer", unit: "g", sequence: 1, samples: [[0, 0, 1]] });
+    store.ingestMotion({ timestamp: 0, sensor: "gyroscope", unit: "deg/s", sequence: 1, samples: [[1, 2, 3], [4, 5, 6], [7, 8, 9]] });
+    store.ingestPpg({ timestamp: 0, channel: "ambient", sequence: 1, samples: [1, 1, 1, 1, 1, 1] });
+    store.ingestPpg({ timestamp: 0, channel: "infrared", sequence: 1, samples: [9, 9, 9, 9, 9, 9] });
+    store.ingest({ timestamp: 0, channel: "AF7", samples: [1] });
+    await vi.advanceTimersByTimeAsync(UI_INTERVAL_MS);
+    expect(store.getSnapshot().gyro?.samples).toHaveLength(3);
+    expect(store.getSnapshot().ppg?.samples).toEqual([9, 9, 9, 9, 9, 9]);
+    store.reset();
+    expect(store.getSnapshot().gyro).toBeNull();
+    expect(store.getSnapshot().ppg).toBeNull();
+    stop();
+  });
 });
