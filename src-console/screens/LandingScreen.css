@@ -8,10 +8,10 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 
 /* The golden section (Taisun, Nov 5): the window splits 1 : 1.618. The lens owns the larger part and
  * stays the hero; the welcome sits in the smaller one with its top on the 38.2% line. Type and spacing
- * come from the Fibonacci run 13, 21, 34, 55. */
+ * come from the Fibonacci run 5, 8, 13, 21, 34, 55. */
 .landing {
   --wordmark: var(--landing-wordmark);
-  --fib-8: 8px; --fib-13: 13px; --fib-21: 21px; --fib-34: 34px; --fib-55: 55px;
+  --fib-5: 5px; --fib-8: 8px; --fib-13: 13px; --fib-21: 21px; --fib-34: 34px; --fib-55: 55px;
   color-scheme: dark;
   position: relative;
   box-sizing: border-box;
@@ -34,12 +34,17 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 .landing__greeting { margin: 0 0 var(--fib-34); font: 300 var(--fib-34)/1.15 var(--font-text); letter-spacing: -.015em; text-wrap: balance; }
 .landing__time { font: 200 var(--fib-55)/1 var(--font-text); letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
 .landing__date { margin: var(--fib-13) 0 0; color: var(--landing-muted); font: 300 var(--fib-21)/1.25 var(--font-text); }
-.landing__weather { display: grid; gap: 4px; margin: var(--fib-34) 0 0; color: var(--landing-label); font: 300 var(--fib-21)/1.25 var(--font-text); }
+.landing__weather { display: grid; gap: var(--fib-5); margin: var(--fib-34) 0 0; color: var(--landing-label); font: 300 var(--fib-21)/1.25 var(--font-text); }
 .landing__temp { font-variant-numeric: tabular-nums; }
 .landing__weather-detail { color: var(--landing-muted); font: 400 var(--fib-13)/1.4 var(--font-text); }
-.landing__pulse { display: inline-flex; align-items: baseline; gap: var(--fib-8); margin: var(--fib-13) 0 0; color: var(--landing-label); font: 300 var(--fib-21)/1.25 var(--font-text); }
+.landing__heart-rate { display: grid; gap: var(--fib-8); justify-items: start; margin: var(--fib-21) 0 0; }
+.landing__pulse { display: inline-flex; align-items: baseline; gap: var(--fib-8); margin: 0; color: var(--landing-heart); font: 300 var(--fib-21)/1.25 var(--font-text); }
 .landing__bpm { font-variant-numeric: tabular-nums; }
-.landing__heart { display: inline-flex; align-self: center; color: var(--landing-icon); animation: landing-beat var(--landing-beat, 1s) ease-out infinite; }
+.landing__heart { display: inline-flex; align-self: center; color: var(--landing-heart); animation: landing-beat var(--landing-beat, 1s) ease-out infinite; }
+.landing__trace { display: block; margin-left: calc(var(--fib-8) * -1); overflow: visible; }
+.landing__trace-line { fill: none; stroke: var(--landing-heart); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.landing__trace-dot { fill: var(--landing-heart); }
+.landing__trace-halo { fill: var(--landing-heart); opacity: .34; }
 @keyframes landing-beat { 0%, 45%, 100% { transform: scale(1); } 15% { transform: scale(1.16); } }
 @media (prefers-reduced-motion: reduce) { .landing__heart { animation: none; } }
 
@@ -99,10 +104,13 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
   .landing__welcome { justify-self: center; justify-items: center; margin: 0; padding: 0; text-align: center; grid-template-columns: auto; }
   .landing__greeting { margin: 0 0 var(--fib-8); font-size: var(--fib-21); }
   .landing__time { font-size: var(--fib-34); }
-  .landing__date { margin-top: 4px; font-size: var(--fib-13); }
-  .landing__weather { margin-top: 4px; display: block; font-size: var(--fib-13); }
+  .landing__date { margin-top: var(--fib-5); font-size: var(--fib-13); }
+  .landing__weather { margin-top: var(--fib-5); display: block; font-size: var(--fib-13); }
   .landing__weather-detail { margin-left: var(--fib-8); }
-  .landing__pulse { margin-top: 4px; font-size: var(--fib-13); }
+  .landing__heart-rate { justify-items: center; margin-top: var(--fib-5); }
+  .landing__pulse { font-size: var(--fib-13); }
+  .landing__pulse .landing__weather-detail { margin-left: 0; }
+  .landing__trace { display: none; }
   .landing__stage { gap: var(--fib-13); }
 }
 @media (max-height: 560px) { .landing__time { display: none; } }
@@ -111,6 +119,8 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 @media (forced-colors: active) {
   .landing { background: Canvas; color: CanvasText; }
   .landing__line, .landing__welcome, .landing__date, .landing__weather-detail, .landing__pulse, .landing__heart { color: CanvasText; }
+  .landing__trace-line { stroke: CanvasText; }
+  .landing__trace-dot, .landing__trace-halo { fill: CanvasText; }
   .landing__button { border: 1px solid ButtonText; background: ButtonFace; color: ButtonText; box-shadow: none; }
   .landing__button svg { color: ButtonText; }
   .landing__button:focus-visible { outline-color: Highlight; }

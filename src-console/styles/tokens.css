@@ -338,6 +338,7 @@
   --landing-muted: rgba(244, 241, 234, .66);
   --landing-wordmark: #c79a62;
   --landing-icon: #d9a76c;
+  --landing-heart: #ec7486;
   --landing-focus: var(--lens-rim);
   --landing-button: #0d2b23;
   --landing-button-hover: #143a2f;

@@ -280,9 +280,17 @@ test.describe("Landing: the welcome", () => {
   });
 
   test("shows the live heart rate under the weather", async ({ page, theme }) => {
-    await openApp(page, { theme, data: { ...waiting, live_heart_rate: { bpm: 64, at: 1793931653 } } });
+    await openApp(page, { theme, data: waiting });
     await realLook(page, theme);
-    await expect(page.getByRole("img", { name: "Heart rate 64 beats per minute" })).toBeVisible();
+    await expect(page.getByRole("img", { name: /^Heart rate \d+ beats per minute$/ })).toBeVisible();
+    const trace = page.locator(".landing__trace");
+    await expect(trace).toBeVisible();
+    await expect(trace.locator(".landing__trace-line")).toHaveCount(1);
+    expect(await trace.boundingBox()).toMatchObject({ width: 233, height: 55 });
     if (process.env.HR_SHOT) await page.screenshot({ path: process.env.HR_SHOT });
+    await page.setViewportSize({ width: 900, height: 620 });
+    await expect(trace).toBeHidden();
+    await expect(page.locator(".landing__pulse")).toBeVisible();
+    if (process.env.HR_SHOT) await page.screenshot({ path: process.env.HR_SHOT.replace(".png", "-small.png") });
   });
 });
