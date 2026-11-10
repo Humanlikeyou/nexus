@@ -14,12 +14,13 @@ import { hoursMinutes } from "../lib/mindBodyDeep";
 import { score } from "../neuro/sessionSamples";
 import { NeuroFlow } from "./NeuroFlow";
 import { type MuseScreenProps, museSignalState } from "./muse";
+import { LiveSignal } from "../neuro/LiveSignal";
+import { recordingsAdapter } from "../neuro/recordings";
 import "./NeuroScreen.css";
 
 const MUSE_COMMAND = "get_muse_state";
 const SESSIONS_COMMAND = "list_sessions";
 const DASH = "—";
-const SIGNAL_WINDOW = 256;
 
 const BANDS: Record<BandKey, { symbol: string; name: string }> = {
   delta: { symbol: "δ", name: "Delta" },
@@ -122,8 +123,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
       ? { tone: "warning", text: state.label }
       : { tone: state.signal?.action === "reward" ? "success" : "neutral", text: state.label };
 
-  const traceValues = telemetry.channels.TP9?.length ? telemetry.channels.TP9 : Object.values(telemetry.channels).find((v) => v.length) ?? [];
-  const traceChannel = telemetry.channels.TP9?.length ? "TP9" : Object.entries(telemetry.channels).find(([, v]) => v.length)?.[0] ?? "TP9";
+  const liveAux = recordingsAdapter(data.sessions).liveAux();
   const sinceLastPacket = telemetry.lastPacketAt ? Math.max(0, Math.round((now.getTime() - telemetry.lastPacketAt) / 1000)) : null;
   const heroIdle = connected && !streaming && !running;
 
@@ -203,11 +203,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
                 <p className="neuro__footnote">Relative power · 1–45 Hz · not a medical measurement.</p>
               </Card>
 
-              <Card title="Signal" className="neuro__signal">
-                {traceValues.length > 1
-                  ? <Sparkline size="lg" values={traceValues.slice(-SIGNAL_WINDOW)} label={`${traceChannel} raw EEG, last ${SIGNAL_WINDOW} samples`} />
-                  : <p className="neuro__pending">{streaming ? "Acquiring…" : "The live signal appears when a session starts."}</p>}
-                <p className="neuro__footnote">{traceChannel} · 4 Hz visual update</p>
+              <LiveSignal trace={telemetry.trace ?? telemetry.channels} aux={liveAux} streaming={streaming}>
                 <details className="neuro__disclosure">
                   <summary>Signal diagnostics</summary>
                   <InsetGroup className="neuro__group">
@@ -217,7 +213,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
                     ))}
                   </InsetGroup>
                 </details>
-              </Card>
+              </LiveSignal>
             </div>
             </More>
           </>
@@ -274,8 +270,8 @@ function ScoreMeter({ label, value }: { label: string; value: number | null }) {
 
 /**
  * design-1110c C12: the latest saved session when no Muse is connected: focus and calm in the
- * header pattern with thin meters, the body context of that day, and a plain note that graphs over
- * time need per-minute samples.
+ * header pattern with thin meters, the body context of that day, and a pointer to its saved recording
+ * in Neuro history (design-1110e E10).
  */
 function LastSessionCard({ session, onOpenHistory }: { session: RecordedSession; onOpenHistory?: () => void }) {
   const body = parseBodyContext(session.body_context);
@@ -299,7 +295,7 @@ function LastSessionCard({ session, onOpenHistory }: { session: RecordedSession;
         </dl>
       )}
       <p className="neuro__last-foot">
-        <span>Graphs over time need per-minute samples, which this session doesn&apos;t have yet.</span>
+        <span>{session.file_path ? "The raw signal of this session is saved on this Mac. Open it in Neuro history." : "This session has its summary only."}</span>
         {onOpenHistory && <Button variant="plain" size="small" onClick={onOpenHistory}>Session history ›</Button>}
       </p>
     </Card>

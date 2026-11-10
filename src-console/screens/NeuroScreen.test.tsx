@@ -121,7 +121,7 @@ describe("Neuro screen", () => {
     expect(screen.getByText("27%")).toBeInTheDocument(); // alpha 27.4
     expect(screen.getByRole("progressbar", { name: "Alpha relative power" })).toHaveAttribute("aria-valuenow", "27.4");
     expect(screen.getByText("Relative power · 1–45 Hz · not a medical measurement.")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /TP9 raw EEG, last 256 samples/ })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /TP9 raw EEG, last 10 seconds/ })).toBeInTheDocument();
     expect(screen.getByText("1s ago")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Protocol" })).toBeDisabled();
   });

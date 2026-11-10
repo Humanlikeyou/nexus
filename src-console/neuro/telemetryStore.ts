@@ -15,6 +15,8 @@ import { PPG_BUFFER } from "./heartRate";
 const CHANNELS = ["TP9", "AF7", "AF8", "TP10"] as const;
 const MAX_BUFFER = 512;
 export const UI_INTERVAL_MS = 250;
+/** design-1110e E9: the live signal draws up to 10 s per channel (AUX included). */
+export const TRACE_BUFFER = 2560;
 
 export interface MuseTelemetry {
   channels: Record<string, number[]>;
@@ -29,6 +31,8 @@ export interface MuseTelemetry {
   gyro?: { samples: number[][]; lastPacketAt: number } | null;
   /** Recent infrared PPG counts, once a packet has arrived. */
   ppg?: { samples: number[]; lastPacketAt: number } | null;
+  /** Last 10 s per channel for the live signal lanes (TP9…TP10, and AUX once packets arrive). */
+  trace?: Record<string, number[]>;
 }
 
 /** `muse-motion`, from muse.rs. */
@@ -59,6 +63,7 @@ export function createMuseTelemetryStore() {
   let aux: MuseTelemetry["aux"] = null;
   let gyro: MuseTelemetry["gyro"] = null;
   let ppg: MuseTelemetry["ppg"] = null;
+  let trace: Record<string, number[]> = {};
   let snapshot: MuseTelemetry = emptyTelemetry();
   let publishedPackets = 0;
   const listeners = new Set<() => void>();
@@ -83,17 +88,26 @@ export function createMuseTelemetryStore() {
       aux: aux && { samples: [...aux.samples], lastPacketAt: aux.lastPacketAt },
       gyro: gyro && { samples: [...gyro.samples], lastPacketAt: gyro.lastPacketAt },
       ppg: ppg && { samples: [...ppg.samples], lastPacketAt: ppg.lastPacketAt },
+      trace: Object.fromEntries(Object.entries(trace).map(([c, v]) => [c, [...v]])),
     };
     emit();
   };
 
+  const keepTrace = (channel: string, samples: number[]) => {
+    const buf = trace[channel] ?? (trace[channel] = []);
+    buf.push(...samples);
+    if (buf.length > TRACE_BUFFER) buf.splice(0, buf.length - TRACE_BUFFER);
+  };
+
   const ingest = (payload: EegSample) => {
     if (payload.channel === "AUX") {
+      keepTrace("AUX", payload.samples);
       aux = { samples: [...(aux?.samples ?? []), ...payload.samples].slice(-MAX_BUFFER), lastPacketAt: Date.now() };
       return;
     }
     if (!CHANNELS.includes(payload.channel as (typeof CHANNELS)[number])) return;
     buffers[payload.channel] = [...(buffers[payload.channel] ?? []), ...payload.samples].slice(-MAX_BUFFER);
+    keepTrace(payload.channel, payload.samples);
     packetCount += 1;
     sampleCount += payload.samples.length;
     channelSamples[payload.channel] += payload.samples.length;
@@ -129,6 +143,7 @@ export function createMuseTelemetryStore() {
       aux = null;
       gyro = null;
       ppg = null;
+      trace = {};
       snapshot = emptyTelemetry();
       emit();
     },
