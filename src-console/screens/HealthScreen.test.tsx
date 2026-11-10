@@ -79,7 +79,7 @@ describe("Fitness (HealthField)", () => {
     expect(screen.getAllByText("HRV", { selector: "dt" })).toHaveLength(1);
     expect(screen.getByText("2 sessions merged")).toBeInTheDocument();
     expect(screen.getByText("23:41 → 07:13")).toBeInTheDocument();
-    expect(screen.getByText(/91% *efficiency/)).toBeInTheDocument();
+    expect(document.querySelector(".sleep-dawn__pill")?.textContent).toMatch(/^Efficiency 91%/);
     // SpO2 / skin / resp are null across all days: hidden
     expect(screen.queryByText("SpO₂")).toBeNull();
     expect(screen.queryByRole("radio", { name: "Skin temp" })).toBeNull();

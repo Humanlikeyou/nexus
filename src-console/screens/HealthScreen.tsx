@@ -9,6 +9,8 @@ import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, 
 import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
 import { LastFourteenDays } from "./FitnessTrends";
 import { calendarDays, deltaWords, usualRange } from "../ui/charts/chartMath";
+import { SleepCard } from "./SleepCard";
+import { sleepCardModel } from "./sleepModel";
 import "./HealthScreen.css";
 
 const NOOP_COMMAND = "get_noop_health_snapshot";
@@ -51,7 +53,6 @@ function clock(iso: string | null | undefined) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? DASH : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Tokyo" });
 }
-const pct = (fraction: number | null | undefined) => (typeof fraction === "number" && Number.isFinite(fraction) ? fraction * 100 : null);
 /** "2026-09-20" → "Sep 20" (a calendar day, not an instant: no time, no UTC shift). */
 export function dayLabel(day: string): string {
   const parsed = new Date(`${day}T00:00:00`);
@@ -61,7 +62,6 @@ export function dayLabel(day: string): string {
 const observed = (iso: string | null | undefined) => (iso ? `${date(iso)}, ${clock(iso)}` : "No record");
 
 const Missing = () => <span title="unavailable">{DASH}</span>;
-const val = (text: string) => (text === DASH ? <Missing /> : text);
 /** StatTile renders null as a tertiary "—" and hides the unit. */
 const nullable = (text: string) => (text === DASH ? null : text);
 
@@ -214,13 +214,17 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
   const sleepMin = overnight?.durationMin ?? today?.totalSleepMin ?? null;
   const hrv = overnight?.avgHrv ?? today?.avgHrv ?? null;
   const rhr = overnight?.restingHr ?? today?.restingHr ?? null;
-  const eff = pct(overnight?.efficiency ?? today?.efficiency ?? null);
   const recovery = today?.recovery ?? null;
   const band = recoveryBand(recovery);
   const strain = today?.strain == null ? null : clampEffort(today.strain);
   const days = health.recentDays;
   const everNull = (pick: (d: NoopDailyMetric) => number | null) => days.every((d) => pick(d) == null) && (today == null || pick(today) == null);
   const pending = "Arrives after the sleep record closes";
+  const sleepModel = sleepCardModel({
+    day: overnight?.day ?? today?.day ?? "", durationMin: sleepMin, efficiency: overnight?.efficiency ?? today?.efficiency ?? null,
+    startedAt: overnight?.startedAt, endedAt: overnight?.endedAt,
+    deepMin: overnight?.deepMin ?? today?.deepMin ?? null, remMin: overnight?.remMin ?? today?.remMin ?? null, lightMin: overnight?.lightMin ?? today?.lightMin ?? null, awakeMin: overnight?.awakeMin ?? null,
+  }, days);
   const extraTiles = [
     !everNull((d) => d.spo2Pct) && <StatTile key="spo2" label="SpO₂" value={nullable(fmt(today?.spo2Pct, 1))} unit="%" />,
     !everNull((d) => d.skinTempDevC) && <StatTile key="skin" label="Skin temp" value={nullable(signed(today?.skinTempDevC))} unit="°C vs baseline" />,
@@ -279,16 +283,7 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
             </Ring>
           </div>
         </Card>
-        <Card title="Sleep" className="fitness__sleep-card">
-          {nightly
-            ? <p className="fitness__pending">{pending}</p>
-            : (
-              <div className="fitness__sleep-body">
-                <p className="fitness__display">{val(hm(sleepMin))}</p>
-                <p className="fitness__sleep-note">{eff == null ? <Missing /> : `${fmt(eff)}%`} efficiency</p>
-              </div>
-            )}
-        </Card>
+        <SleepCard model={nightly ? null : sleepModel} pending={nightly ? pending : undefined} />
       </div>
 
       <LastFourteenDays days={days} />
