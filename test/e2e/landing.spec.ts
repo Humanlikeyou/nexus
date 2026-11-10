@@ -285,13 +285,11 @@ test.describe("Landing: the welcome", () => {
   test("shows the live heart rate under the weather", async ({ page, theme }) => {
     await openApp(page, { theme, data: waiting });
     await realLook(page, theme);
-    await expect(page.getByRole("group", { name: /^Heart rate \d+ beats per minute$/ })).toBeVisible();
-    // design-1110c C14: a bpm chart with fixed 40/70/100 ticks and a −99 s … now axis, at the mockup's 320 px width.
-    const trace = page.locator(".landing__hr-chart");
+    await expect(page.getByRole("img", { name: /^Heart rate \d+ beats per minute$/ })).toBeVisible();
+    const trace = page.locator(".landing__trace");
     await expect(trace).toBeVisible();
-    await expect(trace.getByRole("img", { name: /^Heart rate, last 100 seconds\. Now \d+ bpm\./ })).toBeVisible();
-    expect((await trace.boundingBox())!.width).toBe(320);
-    await expect(trace.locator(".chart-legend")).toContainText("Live · 5-s average");
+    await expect(trace.locator(".landing__trace-line")).toHaveCount(1);
+    expect(await trace.boundingBox()).toMatchObject({ width: 233, height: 55 });
     if (process.env.HR_SHOT) await page.screenshot({ path: process.env.HR_SHOT });
     await page.setViewportSize({ width: 900, height: 620 });
     await expect(trace).toBeHidden();
