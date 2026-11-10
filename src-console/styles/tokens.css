@@ -75,8 +75,8 @@
   --data-strain: var(--copper);     /* Effort, 0–100 scale (NOOP native); copper, not system blue (P0.7) */
   --data-sleep: #5e5ce6;
   --data-sleep-deep: var(--accent);
-  --data-sleep-rem: var(--copper);
-  --data-sleep-light: var(--label-tertiary);
+  --data-sleep-rem: color-mix(in srgb, var(--accent) 58%, transparent);
+  --data-sleep-light: color-mix(in srgb, var(--accent) 26%, transparent);
   --data-sleep-awake: rgba(60, 60, 67, .12);
   --data-hrv: var(--accent);
 
@@ -123,8 +123,8 @@
   /* Data colors that need a dark variant (same variable names, overridden below). */
   --d-data-recovery-mid-text: #f5b800;
   --d-data-sleep-deep: var(--accent);
-  --d-data-sleep-rem: var(--copper);
-  --d-data-sleep-light: var(--label-tertiary);
+  --d-data-sleep-rem: color-mix(in srgb, var(--accent) 58%, transparent);
+  --d-data-sleep-light: color-mix(in srgb, var(--accent) 26%, transparent);
   --d-data-sleep-awake: rgba(235, 235, 245, .22);
   --d-sys-green: #30d158;
   --d-sys-orange: #ff9f0a;

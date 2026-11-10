@@ -176,7 +176,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
                 </Card>
               )}
               <StatTile label="Focus" value={heroIdle ? "Ready" : whole(state.focus)} />
-              <StatTile label="Relaxation" value={heroIdle ? "Ready" : whole(state.relaxation)} />
+              <StatTile label="Calm" value={heroIdle ? "Ready" : whole(state.relaxation)} />
             </div>
 
             <div className="neuro__row">
@@ -221,7 +221,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
           footer={sessionsFailed ? "Saved sessions couldn't be read." : sessions.length ? undefined : "Your first completed session will appear here."}>
           {sessions.slice(0, 5).map((s) => (
             <ListRow key={s.id} icon={Inbox} title={dateTime(s.start)} onSelect={() => setSelectedId(s.id === selectedId ? null : s.id)} selected={s.id === selectedId}
-              subtitle={<span className="neuro__num">{Math.max(1, Math.round(s.duration_secs / 60))} min · {s.data_points.toLocaleString()} samples · relax {whole(s.summary.avg_relaxation) ?? DASH}</span>} />
+              subtitle={<span className="neuro__num">{Math.max(1, Math.round(s.duration_secs / 60))} min · {s.data_points.toLocaleString()} samples · calm {whole(s.summary.avg_relaxation) ?? DASH}</span>} />
           ))}
         </InsetGroup>
         </More>
@@ -241,7 +241,7 @@ function SessionPanel({ session, onClose }: { session: RecordedSession; onClose:
         <StatTile label={<>Calm <Badge tone="neutral">Beta</Badge></>} value={whole(s.calm_pct)} unit="%" />
         <StatTile label="In target" value={whole(s.time_in_target_pct)} unit="%" />
         <StatTile label="Avg focus" value={whole(s.avg_focus)} />
-        <StatTile label="Avg relaxation" value={whole(s.avg_relaxation)} />
+        <StatTile label="Avg calm" value={whole(s.avg_relaxation)} />
       </div>
       <p className="neuro__footnote"><span className="neuro__num">{session.data_points.toLocaleString()}</span> samples recorded on this Mac.</p>
     </Card>

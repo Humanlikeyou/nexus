@@ -5,7 +5,9 @@ import { INITIAL_SNAPSHOT } from "../bridge";
 import { EMPTY_DEVICE_ID } from "../lib/devices";
 import { date, formatMinutes, number } from "../lib/format";
 import type { NoopDailyMetric, NoopHealthInsight, NoopHealthSnapshot, SystemSnapshot } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, SegmentedControl, Sparkline, StatTile, type Tone } from "../ui";
+import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, SegmentedControl, StatTile, type Tone } from "../ui";
+import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
+import { deltaWords, usualRange } from "../ui/charts/chartMath";
 import "./HealthScreen.css";
 
 const NOOP_COMMAND = "get_noop_health_snapshot";
@@ -239,7 +241,6 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
   const points = series.filter((v): v is number => v != null && Number.isFinite(v));
   const mean = points.length ? points.reduce((a, b) => a + b, 0) / points.length : null;
   const f = (v: number) => `${v.toFixed(trend.digits)}${trend.unit && trend.unit !== "%" ? ` ${trend.unit}` : trend.unit}`;
-  const dayLabels = days.length ? [days[0], days[Math.floor((days.length - 1) / 2)], days[days.length - 1]].map((d) => d.day.slice(5)) : [];
   const insights = buildInsights(health);
 
   return (
@@ -313,8 +314,18 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
             ? <p className="fitness__pending">Trend appears after 2+ days of data.</p>
             : (
               <figure className="fitness__trend">
-                <Sparkline values={series} label={`${trend.label}, last ${days.length} days`} format={f} showMean size="lg" color={trend.color} />
-                <div className="fitness__axis" aria-hidden="true">{dayLabels.map((d, i) => <span key={`${d}-${i}`}>{d}</span>)}</div>
+                {/* design-1110c C11: the shared header, curve and usual band. */}
+                <ChartHeader title={trend.label} value={f(points[points.length - 1])} delta={deltaWords(points[points.length - 1], mean, trend.unit === "%" ? "%" : trend.unit ? ` ${trend.unit}` : "", trend.digits)} usual={`usual ${f(mean as number)}`} />
+                <TrendChart
+                  values={series.map((v) => (v != null && Number.isFinite(v) ? v : null))}
+                  labels={days.map((d) => d.day.slice(5))}
+                  lastLabel={days[days.length - 1].day.slice(5)}
+                  label={`${trend.label}, last ${days.length} days: min ${f(Math.min(...points))}, max ${f(Math.max(...points))}, last ${f(points[points.length - 1])}`}
+                  format={(v) => v.toFixed(Number.isInteger(v) ? 0 : trend.digits)}
+                  unit={trend.unit || undefined}
+                  usual={usualRange(series)}
+                  height={132}
+                />
                 <figcaption className="fitness__caption">Mean {f(mean as number)} · Min {f(Math.min(...points))} · Max {f(Math.max(...points))}</figcaption>
               </figure>
             )}

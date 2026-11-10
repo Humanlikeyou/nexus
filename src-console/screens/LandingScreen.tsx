@@ -20,7 +20,7 @@ function HeartRate() {
   const heart = useLiveHeartRate();
   const beat = beatSeconds(heart?.bpm);
   if (!heart || beat == null) return null;
-  const { paths, dot } = traceShape(heart.samples, heart.at);
+  const { paths, areas = [], dot } = traceShape(heart.samples, heart.at);
   return (
     <div className="landing__heart-rate" role="img" aria-label={`Heart rate ${heart.bpm} beats per minute`}>
       <p className="landing__pulse">
@@ -30,6 +30,8 @@ function HeartRate() {
       </p>
       {dot && (
         <svg className="landing__trace" width={TRACE_WIDTH} height={TRACE_HEIGHT} viewBox={`0 0 ${TRACE_WIDTH} ${TRACE_HEIGHT}`} aria-hidden="true">
+          <defs><linearGradient id="landing-trace-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" className="landing__trace-stop0" /><stop offset="1" className="landing__trace-stop1" /></linearGradient></defs>
+          {areas.map((area) => <path key={area} className="landing__trace-area" d={area} fill="url(#landing-trace-fill)" />)}
           {paths.map((path) => <path key={path} className="landing__trace-line" d={path} />)}
           <circle className="landing__trace-halo" cx={dot.x} cy={dot.y} r="8" />
           <circle className="landing__trace-dot" cx={dot.x} cy={dot.y} r="3" />

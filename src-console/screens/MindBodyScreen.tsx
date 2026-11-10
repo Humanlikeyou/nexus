@@ -4,7 +4,8 @@ import { METRICS, driverSentence, drivers as rankDrivers, hoursMinutes, inRange,
 import { NoopShapeError, isSnapshot, noopQuery, parseBodyContext, parseMetricSeries, snapshotDays } from "../lib/noop";
 import type { NoopDayRow, NoopLatestNight, NoopMetricPoint, NoopMetricSeries, NoopSnapshotPayload, RecordedSession } from "../types";
 import { Badge, Button, PageHero, SegmentedControl } from "../ui";
-import { BaselineChart, DeltaBar, StageStrip } from "./MindBodyCharts";
+import { monotonePath } from "../ui/charts/chartMath";
+import { BaselineChart, DeltaBar, StageStrip, readingDelta } from "./MindBodyCharts";
 import "./MindBodyScreen.css";
 
 export const INVALID_PATH_STEPS = "The NOOP binary or database path in Settings isn't valid. Open Settings › WHOOP and set full paths that start with /.";
@@ -121,12 +122,13 @@ export function StrainBars({ points }: { points: NoopMetricPoint[] }) {
   // 7-day vs 28-day rolling average load (copper comparison line).
   const avg = (i: number, w: number) => { const xs = vals.slice(Math.max(0, i - w + 1), i + 1).map((p) => p.value).filter((v): v is number => typeof v === "number"); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0; };
   const yOf = (v: number) => CHART_BASE - (v / max) * (CHART_BASE - CHART_TOP);
-  const line = (w: number) => vals.map((_, i) => `${i ? "L" : "M"}${(step * i + bw / 2).toFixed(1)},${yOf(avg(i, w)).toFixed(1)}`).join(" ");
+  // design-1110c C1: the load lines are monotone curves, so they never overshoot a day.
+  const line = (w: number) => monotonePath(vals.map((_, i) => [step * i + bw / 2, yOf(avg(i, w))] as const));
   return (
     <ChartBox state="ready" label="Strain">
       <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} role="img" aria-label={`Daily strain with 7 and 28 day load, ${nums.length} days`} preserveAspectRatio="none">
         <Gridlines />
-        {vals.map((p, i) => typeof p.value === "number" && <rect key={p.day} className="mind-body__bar" x={step * i} width={bw} y={yOf(p.value)} height={CHART_BASE - yOf(p.value)} />)}
+        {vals.map((p, i) => typeof p.value === "number" && <rect key={p.day} className="mind-body__bar" rx={1.5} x={step * i} width={bw} y={yOf(p.value)} height={CHART_BASE - yOf(p.value)} />)}
         <path d={line(7)} className="mind-body__line" data-series="load" fill="none" />
         <path d={line(28)} className="mind-body__line" data-series="baseline" fill="none" />
       </svg>
@@ -274,8 +276,8 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
                   </div>
                   <div className="mb-plot">
                     <StageStrip stages={stages} />
-                    {stages.some((stage) => stage.minutes > 0) && <p className="mb-legend">{stages.map((stage) => <span key={stage.tone}><i data-tone={stage.tone} aria-hidden="true" />{`${stage.label} ${hoursMinutes(stage.minutes)}`}</span>)}</p>}
-                    <BaselineChart points={inRange(merged.sleep, asOf, days)} reading={readingOf("sleep")} tall />
+                    {stages.some((stage) => stage.minutes > 0) && <p className="mb-legend">{stages.map((stage) => <span key={stage.tone}><i data-tone={stage.tone} aria-hidden="true" />{`${stage.label} ${hoursMinutes(stage.minutes)} · ${Math.round((stage.minutes / Math.max(1, stages.reduce((sum, item) => sum + item.minutes, 0))) * 100)}%`}</span>)}</p>}
+                    <BaselineChart points={inRange(merged.sleep, asOf, days)} reading={readingOf("sleep")} tall bars />
                   </div>
                 </div>
               </section>
@@ -291,6 +293,7 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
                           <h3>{item.def.label}</h3>
                           <p className="mb-row__value">{item.value === null ? DASH : item.def.format(item.value)}</p>
                           <p className="mb-row__usual">{item.base ? `usual ${item.def.format(item.base.mean)}` : "no baseline yet"}</p>
+                          {readingDelta(item) && <p className="mb-row__delta" data-dir={readingDelta(item)!.dir}>{readingDelta(item)!.text}</p>}
                         </div>
                         <div className="mb-plot"><BaselineChart points={inRange(merged[key], asOf, days)} reading={item} /></div>
                       </div>

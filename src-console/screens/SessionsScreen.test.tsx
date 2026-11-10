@@ -45,3 +45,26 @@ describe("Sessions (Neuro › History)", () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("design-1110c Neuro history", () => {
+  it("a real session without samples says graphs aren't recorded yet, and no sample data shows", () => {
+    render(<SessionsField data={snap({ sessions: [session("a")] })} samples={false} />);
+    expect(screen.getByText("Graphs over time aren't recorded yet")).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/)).toBeNull();
+    expect(screen.queryByRole("region", { name: "Sample sessions" })).toBeNull();
+  });
+
+  it("sample mode adds a separate, labelled sample section and never touches the real list", () => {
+    render(<SessionsField data={snap({ sessions: [session("a"), session("b", { start: "2026-10-28T21:00:00+09:00", summary: { avg_focus: 70, avg_relaxation: 52 } })] })} samples />);
+    expect(within(screen.getByRole("list", { name: "History" })).getAllByRole("button")).toHaveLength(2);
+    const sample = screen.getByRole("region", { name: "Sample sessions" });
+    expect(within(sample).getAllByText("Sample").length).toBe(8);
+    expect(within(sample).getAllByText("Sample data").length).toBeGreaterThanOrEqual(3);
+    expect(within(sample).getByRole("radiogroup", { name: "Session view" })).toBeInTheDocument();
+    expect(within(sample).getAllByRole("img", { name: /band power over the session/ })).toHaveLength(5);
+    fireEvent.click(within(sample).getByRole("radio", { name: "Focus & calm" }));
+    expect(within(sample).getByRole("img", { name: /^Focus over the session/ })).toBeInTheDocument();
+    fireEvent.click(within(sample).getByRole("radio", { name: "Sensors" }));
+    expect(within(sample).getByRole("img", { name: /Muse sensors: TP9/ })).toBeInTheDocument();
+  });
+});

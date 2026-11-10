@@ -44,6 +44,9 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 .landing__trace { display: block; margin-left: calc(var(--fib-8) * -1); overflow: visible; }
 .landing__trace-line { fill: none; stroke: var(--landing-heart); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .landing__trace-dot { fill: var(--landing-heart); }
+.landing__trace-stop0 { stop-color: var(--landing-heart); stop-opacity: .2; }
+.landing__trace-stop1 { stop-color: var(--landing-heart); stop-opacity: 0; }
+.landing__trace-area { stroke: none; }
 .landing__trace-halo { fill: var(--landing-heart); opacity: .34; }
 @keyframes landing-beat { 0%, 45%, 100% { transform: scale(1); } 15% { transform: scale(1.16); } }
 @media (prefers-reduced-motion: reduce) { .landing__heart { animation: none; } }
@@ -120,6 +123,7 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
   .landing { background: Canvas; color: CanvasText; }
   .landing__line, .landing__welcome, .landing__date, .landing__weather-detail, .landing__pulse, .landing__heart { color: CanvasText; }
   .landing__trace-line { stroke: CanvasText; }
+  .landing__trace-area { display: none; }
   .landing__trace-dot, .landing__trace-halo { fill: CanvasText; }
   .landing__button { border: 1px solid ButtonText; background: ButtonFace; color: ButtonText; box-shadow: none; }
   .landing__button svg { color: ButtonText; }

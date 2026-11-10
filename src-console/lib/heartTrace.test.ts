@@ -18,6 +18,13 @@ describe("heart trace", () => {
   it("has nothing to draw with fewer than two samples", () => {
     expect(traceShape(run([70]), AT)).toEqual({ paths: [], dot: null });
   });
+  it("design-1110c C14: a monotone curve with a soft fill under each run", () => {
+    const { paths, areas } = traceShape(run([60, 70, 80, 90, 100, 110, 120]), AT);
+    expect(paths[0]).toMatch(/^M[\d.]+,[\d.]+C/);
+    expect(areas).toHaveLength(1);
+    expect(areas![0].startsWith(paths[0])).toBe(true);
+    expect(areas![0].endsWith("Z")).toBe(true);
+  });
   it("ends on the live dot at the right edge, inside the box", () => {
     const { paths, dot } = traceShape(run([60, 70, 80, 90, 100, 110, 120]), AT);
     expect(paths).toHaveLength(1);

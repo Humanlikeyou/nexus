@@ -1,8 +1,12 @@
-import { useState, type KeyboardEvent } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
 import { BrainCircuit, HeartPulse, RefreshCw } from "lucide-react";
 import { Badge, Button, Card, InsetGroup, ListRow, More, PageHero, StatTile } from "../ui";
 import { dateTime, number, time } from "../lib/format";
 import type { RecordedSession, SystemSnapshot } from "../types";
+import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
+import { deltaWords, usualRange } from "../ui/charts/chartMath";
+import { sampleMode, sampleSessions, score, type SessionWithSamples } from "../neuro/sessionSamples";
+import { SampleBadge, SessionGraphs } from "./SessionGraphs";
 import "./SessionsScreen.css";
 
 /** Sessions → Mind–Body › Neuro history (screen-specs §5): source list + detail, like Voice Memos. */
@@ -13,8 +17,8 @@ const pct = (v: number | null | undefined) => (v == null ? null : Math.round(v))
 
 const FIRST_GLANCE = 4;
 
-export function SessionsField({ data, onRetry, onStartSession }: { data: SystemSnapshot; onRetry?: () => void; onStartSession?: () => void }) {
-  const sessions = data.sessions;
+export function SessionsField({ data, onRetry, onStartSession, samples = sampleMode() }: { data: SystemSnapshot; onRetry?: () => void; onStartSession?: () => void; samples?: boolean }) {
+  const sessions = data.sessions as SessionWithSamples[];
   const [selectedId, setSelectedId] = useState<string | null>(sessions[0]?.id ?? null);
   const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0] ?? null;
   const [showAll, setShowAll] = useState(false);
@@ -38,6 +42,7 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
           <p className="sessions__copy">Finish a Muse session and Amara OS keeps the recording and summary here.</p>
           {onStartSession && <div><Button variant="primary" onClick={onStartSession}>Start session</Button></div>}
         </Card>
+        {samples && <SampleHistory />}
       </div>
     );
   }
@@ -61,7 +66,7 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
         <div className="sessions__list" onKeyDown={onListKey}>
           <InsetGroup title="History" footer="Most recent first">
             {sessions.slice(0, showAll ? undefined : FIRST_GLANCE).map((s) => (
-              <ListRow key={s.id} icon={s.device_type === "muse" ? BrainCircuit : HeartPulse} title={title(s)} subtitle={dateTime(s.start)} value={`${minutes(s)} min`} onSelect={() => setSelectedId(s.id)} selected={s.id === selected?.id} />
+              <ListRow key={s.id} icon={s.device_type === "muse" ? BrainCircuit : HeartPulse} title={title(s)} subtitle={rowLine(s)} value={`${minutes(s)} min`} onSelect={() => setSelectedId(s.id)} selected={s.id === selected?.id} />
             ))}
           </InsetGroup>
           {!showAll && sessions.length > FIRST_GLANCE && <Button variant="plain" size="small" onClick={() => setShowAll(true)}>Show {sessions.length - FIRST_GLANCE} more</Button>}
@@ -72,7 +77,7 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
               <StatTile label="Duration" value={minutes(selected)} unit="min" />
               <StatTile label="Data points" value={selected.data_points.toLocaleString()} />
               <StatTile label="Avg focus" value={selected.summary.avg_focus == null ? null : number(selected.summary.avg_focus)} />
-              <StatTile label="Avg relaxation" value={selected.summary.avg_relaxation == null ? null : number(selected.summary.avg_relaxation)} />
+              <StatTile label="Avg calm" value={selected.summary.avg_relaxation == null ? null : number(selected.summary.avg_relaxation)} />
             </div>
             <More label="Scores and session window">
             <div className="sessions__metrics sessions__metrics--beta">
@@ -84,11 +89,74 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
             </InsetGroup>
             <p className="sessions__callout">Scores summarize the recorded signal for reflection. They aren&apos;t clinical measurements.</p>
             </More>
+            <SessionGraphs session={selected} others={sessions} />
           </Card>
         ) : (
           <Card className="sessions__detail"><p className="sessions__copy">Select a session</p></Card>
         )}
       </div>
+      <AcrossSessions sessions={sessions} />
+      {samples && <SampleHistory />}
     </div>
+  );
+}
+
+/** C15: "Thu, Oct 22, 9:10 PM · focus 61 · calm 48" under each session's title. */
+function rowLine(s: SessionWithSamples) {
+  const f = score(s.summary.avg_focus), c = score(s.summary.avg_relaxation);
+  return [dateTime(s.start), f == null ? null : `focus ${Math.round(f)}`, c == null ? null : `calm ${Math.round(c)}`].filter(Boolean).join(" · ");
+}
+
+/** C15: focus and calm per session against his usual across sessions. Needs two sessions with scores. */
+function AcrossSessions({ sessions, sample = false }: { sessions: SessionWithSamples[]; sample?: boolean }) {
+  const ordered = [...sessions].sort((a, b) => a.start.localeCompare(b.start));
+  const rows = (["Focus", "Calm"] as const).map((name) => ({ name, values: ordered.map((s) => score(name === "Focus" ? s.summary.avg_focus : s.summary.avg_relaxation)) }));
+  if (rows.every((r) => r.values.filter((v) => v != null).length < 2)) return null;
+  const labels = ordered.map((s) => new Date(s.start).toLocaleDateString("en-US", { month: "short", day: "numeric" }));
+  return (
+    <Card title="Across sessions" headingLevel={2} accessory={sample ? <SampleBadge /> : undefined}>
+      <div className="ns-across">
+        {rows.map(({ name, values }) => {
+          const nums = values.filter((v): v is number => v != null);
+          const prior = nums.slice(0, -1), m = prior.length ? prior.reduce((a, b) => a + b, 0) / prior.length : null;
+          const usual = usualRange(prior) ?? (m == null ? null : { low: m, high: m, median: m });
+          const last = nums[nums.length - 1];
+          return (
+            <div key={name}>
+              <ChartHeader title={`Average ${name.toLowerCase()} · per session`} value={Math.round(last)} unit="/ 100" delta={deltaWords(last, m, " pts")} usual={m == null ? undefined : `usual ${Math.round(m)}`} />
+              <TrendChart values={values} labels={labels} lastLabel={labels[labels.length - 1]} label={`${name} per session${sample ? " (sample data)" : ""}`} domain={[0, 100]} smoothing={1} height={108} usual={usual} />
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * C20: generated sessions to preview the graphs, only in dev and the e2e/capture mock. They live in
+ * their own section with a banner, a badge on every card and a "Sample" tag on every row, and are
+ * never merged into the real list above.
+ */
+function SampleHistory() {
+  const list = useMemo(() => sampleSessions(), []);
+  const [id, setId] = useState(list[0].id);
+  const picked = list.find((s) => s.id === id) ?? list[0];
+  return (
+    <section className="ns-sample" aria-label="Sample sessions">
+      <div className="ns-banner" role="note"><SampleBadge /><p><b>Sample data.</b> These sessions are generated to preview Neuro history. None of it is a real reading; real sessions show graphs once the Muse recording keeps per-minute samples.</p></div>
+      <AcrossSessions sessions={list} sample />
+      <div className="sessions__split">
+        <InsetGroup title="Sample sessions" footer="Generated, most recent first">
+          {list.map((s) => (
+            <ListRow key={s.id} icon={BrainCircuit} title={<>{new Date(s.start).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} <span className="ns-tag">Sample</span></>}
+              subtitle={rowLine(s)} value={`${minutes(s)} min`} onSelect={() => setId(s.id)} selected={s.id === picked.id} />
+          ))}
+        </InsetGroup>
+        <Card className="sessions__detail" title="Sample session" headingLevel={2} accessory={<SampleBadge />}>
+          <SessionGraphs session={picked} others={list} />
+        </Card>
+      </div>
+    </section>
   );
 }
