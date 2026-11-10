@@ -16,7 +16,7 @@ export interface TrendChartProps {
   unit?: string;
   /** "line": smooth 3-day average + daily dots (C1–C3). "bar": rounded bars (C10). */
   kind?: "line" | "bar";
-  /** Average window for the line; 1 = draw the values themselves. */
+  /** Average window for the line. Default 1: the line goes through each slot's own value. */
   smoothing?: number;
   usual?: Usual | null;
   height?: number;
@@ -42,7 +42,7 @@ export interface TrendChartProps {
   ticks?: number[];
   /** Which slots get an x label (default first, middle, last). */
   xTicks?: number[];
-  /** Draw each slot's own value as a dot under the smoothed line (default on). */
+  /** Draw each slot's own value as a dot (default on), so lone days and gaps stay visible. */
   rawDots?: boolean;
 }
 
@@ -68,10 +68,10 @@ function useWidth<T extends HTMLElement>(fallback: number) {
 /**
  * design-1110c: the one chart every health graph uses. Emerald = you, copper = your usual (a soft
  * band for the middle half plus a thin dashed median). Hairline gridlines with the unit on the top
- * tick. The line is a monotone curve through a short rolling average, and each day's real value
- * stays visible as a dot, so smoothing hides nothing. Hover shows the exact values.
+ * tick. The line is a monotone curve through each day's own value (it never overshoots a reading),
+ * breaks at a missing day, and every reading is a dot. Hover shows the exact values.
  */
-export function TrendChart({ values, labels, label, format = (v) => String(Math.round(v)), unit, kind = "line", smoothing = 3, usual = null, height = 120, tone = "you", markers, readout, lastLabel = "Today", nowClassName, domain, hover: hoverProp, onHover, shadeTo, shadeLabel, hideX = false, ticks: fixedTicks, xTicks: fixedX, rawDots = true }: TrendChartProps) {
+export function TrendChart({ values, labels, label, format = (v) => String(Math.round(v)), unit, kind = "line", smoothing = 1, usual = null, height = 120, tone = "you", markers, readout, lastLabel = "Today", nowClassName, domain, hover: hoverProp, onHover, shadeTo, shadeLabel, hideX = false, ticks: fixedTicks, xTicks: fixedX, rawDots = true }: TrendChartProps) {
   const gradient = useId().replace(/:/g, "");
   const [ref, W] = useWidth<HTMLDivElement>(480);
   const [ownHover, setOwnHover] = useState<number | null>(null);
@@ -82,8 +82,10 @@ export function TrendChart({ values, labels, label, format = (v) => String(Math.
   const H = height, B = (hideX ? 4 : AXIS) + (markers ? MARK : 0);
   const pw = Math.max(1, W - GUTTER - RIGHT), ph = Math.max(1, H - TOP - B);
   const { lo, hi, ticks } = useMemo(() => {
-    if (domain) return { lo: domain[0], hi: domain[1], ticks: fixedTicks ?? niceTicks(domain[0], domain[1]) };
     const all = [...nums, ...(usual ? [usual.low, usual.high] : [])];
+    // A fixed domain is kept only while it holds every value and the usual band; never clip a reading.
+    if (domain && Math.min(...all, domain[0]) >= domain[0] && Math.max(...all, domain[1]) <= domain[1]) return { lo: domain[0], hi: domain[1], ticks: fixedTicks ?? niceTicks(domain[0], domain[1]) };
+    if (domain) { const t = niceTicks(Math.min(domain[0], ...all), Math.max(domain[1], ...all)); return { lo: t[0], hi: t[t.length - 1], ticks: t }; }
     const t = niceTicks(kind === "bar" ? 0 : Math.min(...all), Math.max(...all));
     return { lo: t[0] ?? 0, hi: t[t.length - 1] ?? 1, ticks: t };
   }, [domain, nums, usual, kind, fixedTicks]);
@@ -138,7 +140,7 @@ export function TrendChart({ values, labels, label, format = (v) => String(Math.
             <>
               {paths.map(({ d, r }) => r.length > 1 && <path key={`a${d}`} className="trend-chart__area" fill={`url(#${gradient})`} d={`${d}L${r[r.length - 1][0]},${base}L${r[0][0]},${base}Z`} />)}
               {paths.map(({ d }) => <path key={d} className="trend-chart__line" d={d} />)}
-              {smoothing > 1 && rawDots && values.map((v, i) => v != null && i !== lastIndex && <circle key={i} className="trend-chart__raw" cx={x(i)} cy={y(v)} r={1.6} />)}
+              {rawDots && values.map((v, i) => v != null && i !== lastIndex && <circle key={i} className="trend-chart__raw" cx={x(i)} cy={y(v)} r={1.6} />)}
             </>
           )}
           {markers?.map((m, i) => m && <path key={`m${i}`} className="trend-chart__marker" d={`M${x(i) - 3} ${TOP + ph + 9} L${x(i)} ${TOP + ph + 4} L${x(i) + 3} ${TOP + ph + 9} Z`} />)}
@@ -148,7 +150,7 @@ export function TrendChart({ values, labels, label, format = (v) => String(Math.
             <text key={`x${i}`} className="trend-chart__tick" x={x(i)} y={H - 4} textAnchor={k === 0 ? "start" : k === xTicks.length - 1 ? "end" : "middle"}>{i === n - 1 ? lastLabel : labels[i]}</text>
           ))}
           {hover != null && <line className="trend-chart__cross" x1={x(hover)} x2={x(hover)} y1={TOP - 4} y2={TOP + ph} />}
-          {hover != null && hv != null && kind === "line" && <circle className="trend-chart__hover" cx={x(hover)} cy={y(line[hover] ?? hv)} r={4.5} />}
+          {hover != null && hv != null && kind === "line" && <circle className="trend-chart__hover" cx={x(hover)} cy={y(hv)} r={4.5} />}
         </g>
         {kind === "line" && lastIndex >= 0 && <circle className={nowClassName ? `trend-chart__now ${nowClassName}` : "trend-chart__now"} cx={x(lastIndex)} cy={y(values[lastIndex] as number)} r={3.5} aria-hidden="true" />}
       </svg>

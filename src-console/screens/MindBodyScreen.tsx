@@ -303,7 +303,7 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
 
               <section className="mb-section" aria-labelledby="mb-trends">
                 <h2 id="mb-trends" className="mb-section__title">Trends against your usual</h2>
-                <p className="chart-legend mb-legend-line" aria-hidden="true"><span><i />You · 3-day average</span><span><i data-key="dot" />Daily value</span><span><i data-key="usual" />Your usual ({days} days)</span><span><i data-key="workout" />Workout day</span></p>
+                <p className="chart-legend mb-legend-line" aria-hidden="true"><span><i />You · daily value</span><span><i data-key="usual" />Your usual ({days} days)</span><span><i data-key="workout" />Workout day</span></p>
                 <div className="mb-rows">
                   {TREND_ROWS.map((key) => {
                     const item = readingOf(key);

@@ -70,7 +70,7 @@ export function SessionGraphs({ session, others }: { session: SessionWithSamples
               <div className="ns-band" key={b.key}>
                 <div className="ns-band__head"><b>{b.name}</b><small>{b.range}</small><span>{whole(stats.bandAvg[b.key])}% avg</span>{delta && <span className="ns-band__delta">{delta.text}</span>}</div>
                 <TrendChart values={s.bands[b.key]} labels={labels} lastLabel={end} label={`${b.name} band power over the session, average ${whole(stats.bandAvg[b.key])}%`}
-                  unit={k === 0 ? "%" : undefined} smoothing={5} height={k === BANDS.length - 1 ? 64 : 48} hideX={k !== BANDS.length - 1} hover={hover} onHover={setHover} usual={usual} />
+                  unit={k === 0 ? "%" : undefined} rawDots={false} height={k === BANDS.length - 1 ? 64 : 48} hideX={k !== BANDS.length - 1} hover={hover} onHover={setHover} usual={usual} />
               </div>
             );
           })}
@@ -82,7 +82,7 @@ export function SessionGraphs({ session, others }: { session: SessionWithSamples
           {([["Focus", s.focus, focusUsual, stats.focus], ["Calm", s.calm, calmUsual, stats.calm]] as const).map(([name, values, usual, avg]) => (
             <div key={name} className="ns-score">
               <ChartHeader title={name} value={whole(avg)} unit="/ 100" delta={deltaWords(avg, usual?.median ?? null, " pts")} usual={usual ? `usual ${whole(usual.median)}` : "no usual yet"} />
-              <TrendChart values={values} labels={labels} lastLabel={end} label={`${name} over the session, average ${whole(avg)} of 100`} domain={[0, 100]} smoothing={5} height={120}
+              <TrendChart values={values} labels={labels} lastLabel={end} label={`${name} over the session, average ${whole(avg)} of 100`} domain={[0, 100]} rawDots={false} height={120}
                 usual={usual} shadeTo={settle} shadeLabel="Settling in" readout={(i) => <><strong>{whole(values[i])} / 100</strong><span>{labels[i]} into the session</span></>} />
             </div>
           ))}
@@ -104,7 +104,7 @@ export function SessionGraphs({ session, others }: { session: SessionWithSamples
                 return (
                   <div key={x.key} className="ns-sensor">
                     <div className="ns-band__head"><b>{x.key}</b><small>{x.name}</small><span>contact {s.contact?.[x.key] ?? "—"}%</span></div>
-                    {values ? <TrendChart values={values} labels={labels} lastLabel={end} label={`${x.key} ${band} power over the session`} domain={[0, 50]} unit="%" smoothing={5} height={72} />
+                    {values ? <TrendChart values={values} labels={labels} lastLabel={end} label={`${x.key} ${band} power over the session`} domain={[0, 50]} unit="%" rawDots={false} smoothing={1} height={72} />
                       : <p className="trend-chart__empty">Not split by sensor in this recording</p>}
                   </div>
                 );

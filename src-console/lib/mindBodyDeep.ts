@@ -1,3 +1,4 @@
+import { calendarDays } from "../ui/charts/chartMath";
 import type { NoopMetricPoint } from "../types";
 import { BASELINE_DAYS, baseline, type Baseline } from "./mindBody";
 
@@ -91,9 +92,10 @@ export function loadRatio(points: NoopMetricPoint[], day: string | null): { rati
   return { ratio, line };
 }
 
-/** The last `days` days ending at `day`, for a chart's range. */
+/** The last `days` calendar days ending at `day`, for a chart's range: a day with no reading is `null`. */
 export function inRange(points: NoopMetricPoint[], day: string | null, days: number): NoopMetricPoint[] {
-  return sorted(points).filter((p) => !day || p.day <= day).slice(-days);
+  const upTo = sorted(points).filter((p) => !day || p.day <= day);
+  return calendarDays(upTo, (p) => p.day, days, day ?? undefined).map(({ day: d, item }) => item ?? { day: d, value: null });
 }
 
 export type ChartGeometry = { path: string; band: { top: number; bottom: number } | null; mean: number | null; last: { x: number; y: number } | null };

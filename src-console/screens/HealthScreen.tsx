@@ -8,7 +8,7 @@ import type { NoopDailyMetric, NoopHealthInsight, NoopHealthSnapshot, SystemSnap
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, SegmentedControl, StatTile, type Tone } from "../ui";
 import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
 import { LastFourteenDays } from "./FitnessTrends";
-import { deltaWords, usualRange } from "../ui/charts/chartMath";
+import { calendarDays, deltaWords, usualRange } from "../ui/charts/chartMath";
 import "./HealthScreen.css";
 
 const NOOP_COMMAND = "get_noop_health_snapshot";
@@ -240,7 +240,10 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
     .filter((k) => !((k === "skin" || k === "resp") && everNull(TRENDS[k].pick)))
     .map((k) => ({ value: k, label: TRENDS[k].label }));
   const trend = TRENDS[metric];
-  const series = days.map(trend.pick);
+  // Calendar slots from the first to the last day, so a missing day is a gap and x follows real time.
+  const span = days.length ? Math.min(90, Math.round((Date.parse(`${days[days.length - 1].day}T00:00:00Z`) - Date.parse(`${days[0].day}T00:00:00Z`)) / 86_400_000) + 1) : 0;
+  const slots = calendarDays(days, (d) => d.day, span);
+  const series = slots.map(({ item }) => (item ? trend.pick(item) : null));
   const points = series.filter((v): v is number => v != null && Number.isFinite(v));
   const mean = points.length ? points.reduce((a, b) => a + b, 0) / points.length : null;
   const f = (v: number) => `${v.toFixed(trend.digits)}${trend.unit && trend.unit !== "%" ? ` ${trend.unit}` : trend.unit}`;
@@ -323,9 +326,9 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
                 <ChartHeader title={trend.label} value={f(points[points.length - 1])} delta={deltaWords(points[points.length - 1], mean, trend.unit === "%" ? "%" : trend.unit ? ` ${trend.unit}` : "", trend.digits)} usual={`usual ${f(mean as number)}`} />
                 <TrendChart
                   values={series.map((v) => (v != null && Number.isFinite(v) ? v : null))}
-                  labels={days.map((d) => d.day.slice(5))}
-                  lastLabel={days[days.length - 1].day.slice(5)}
-                  label={`${trend.label}, last ${days.length} days: min ${f(Math.min(...points))}, max ${f(Math.max(...points))}, last ${f(points[points.length - 1])}`}
+                  labels={slots.map((d) => d.day.slice(5))}
+                  lastLabel={slots[slots.length - 1].day.slice(5)}
+                  label={`${trend.label}, last ${slots.length} days: min ${f(Math.min(...points))}, max ${f(Math.max(...points))}, last ${f(points[points.length - 1])}`}
                   format={(v) => v.toFixed(Number.isInteger(v) ? 0 : trend.digits)}
                   unit={trend.unit || undefined}
                   usual={usualRange(series)}

@@ -28,6 +28,26 @@ export function monotonePath(points: readonly Pt[]): string {
   return d;
 }
 
+/** "YYYY-MM-DD" plus `n` calendar days. Pure date arithmetic in UTC, so no timezone can shift the day. */
+export function addDays(day: string, n: number): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+/** Today's date in Tokyo as "YYYY-MM-DD": the app's day strings are JST days. */
+export const todayJst = (now = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now);
+
+/**
+ * One slot per calendar day for the `n` days ending at `end` (default: the latest item's day), oldest
+ * first. A day with no item is `null`, so x stays proportional to real time and the line breaks there.
+ */
+export function calendarDays<T>(items: readonly T[], dayOf: (item: T) => string, n: number, end?: string | null): Array<{ day: string; item: T | null }> {
+  const byDay = new Map(items.map((it) => [dayOf(it), it] as const));
+  const last = end ?? [...byDay.keys()].sort().pop();
+  if (!last || n <= 0) return [];
+  return Array.from({ length: n }, (_, i) => { const day = addDays(last, i - n + 1); return { day, item: byDay.get(day) ?? null }; });
+}
+
 /** Centred rolling mean over `k` values (edges use what exists). Nulls are skipped, and stay null. */
 export function rollingMean(values: readonly (number | null)[], k = 3): (number | null)[] {
   const h = Math.floor(k / 2);

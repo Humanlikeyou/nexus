@@ -86,7 +86,7 @@ describe("Fitness (HealthField)", () => {
     // trend with a null day is a gap and the caption summarises min/max
     // design-1110c C11: recovery, HRV, resting HR and sleep live in the "Last 14 days" grid.
     const trends = screen.getByRole("region", { name: "Last 14 days" });
-    expect(within(trends).getByRole("img", { name: /Recovery, last 3 days: min 60%, max 74%, last 74%/ })).toBeInTheDocument();
+    expect(within(trends).getByRole("img", { name: /Recovery, last 14 days: min 60%, max 74%, last 74%/ })).toBeInTheDocument();
     expect(within(trends).getByRole("heading", { name: "Recovery" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "More trends" })).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/whoop/i);

@@ -1,15 +1,15 @@
 import { type MetricReading } from "../lib/mindBodyDeep";
 import { shortDay } from "../lib/mindBody";
 import { TrendChart } from "../ui/charts/TrendChart";
-import { deltaWords } from "../ui/charts/chartMath";
+import { deltaWords, todayJst } from "../ui/charts/chartMath";
 
 const DASH = "\u2014";
 import type { NoopMetricPoint } from "../types";
 
 /**
  * design-1110c: one line against his own baseline, in the shared chart vocabulary: the copper band
- * is his usual (mean ± 1 sd), the dashed copper line its middle, emerald is the 3-day average with
- * each day's reading as a dot. Hover reads any day back exactly.
+ * is his usual (mean ± 1 sd), the dashed copper line its middle, emerald goes through each day's own
+ * reading (a dot), breaking at days with none. Hover reads any day back exactly.
  */
 export function BaselineChart({ points, reading, tall = false, bars = false, markers }: { points: NoopMetricPoint[]; reading: MetricReading; tall?: boolean; bars?: boolean; markers?: boolean[] }) {
   const shown = points.filter((p) => typeof p.value === "number").length;
@@ -35,6 +35,7 @@ export function BaselineChart({ points, reading, tall = false, bars = false, mar
         height={tall ? 148 : 112}
         {...(bars && hours ? { kind: "bar" as const, smoothing: 1, domain: [0, 10] as [number, number], ticks: [0, 5, 10] } : bars ? { kind: "bar" as const, smoothing: 1 } : {})}
         nowClassName="mb-chart__now"
+        lastLabel={points[points.length - 1].day === todayJst() ? "Today" : shortDay(points[points.length - 1].day)}
         xTicks={points.length > 21 ? [0, 7, 14, 21, points.length - 1] : undefined}
         markers={markers}
         readout={(i) => {
