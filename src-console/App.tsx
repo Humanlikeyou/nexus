@@ -9,6 +9,7 @@ import { useConversation } from "./app/useConversation";
 import { useSnapshot } from "./app/useSnapshot";
 import { useMuseSession } from "./app/useMuseSession";
 import { runApproval } from "./lib/approval";
+import { restingUsual } from "./lib/heartTrace";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
 import { ActivityField, BusinessField, CrewsField, ListsField, HealthField, MindBodyField, NeuroField, SmartHomeField, RevenueField, SessionsField, SettingsField, VoiceField, retryLazyScreens } from "./app/lazyScreens";
@@ -137,14 +138,16 @@ export default function App() {
   const onLanding = screenId === "landing";
   const fieldLabel = screenId === "terrance" ? TODAY_LABEL : selected.label;
   const retrySnapshot = () => { void refresh(); };
+  // design-1110c C14: Home's resting band comes from NOOP's real daily resting HR (null = hidden).
+  const restingBand = restingUsual(data.noop.recentDays);
   const chat = <ChatField key={askDraft.n} variant="home" expanded={chatExpanded} onToggleExpanded={() => setChatExpanded((open) => !open)} voiceTurns={voiceTurns} focusSignal={chatFocus + askDraft.n}
     conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />;
-  const view = onLanding ? <LandingField onSelect={setActive} onToday={() => navigate(TODAY_ROUTE)} chat={chat} chatExpanded={chatExpanded} />
+  const view = onLanding ? <LandingField onSelect={setActive} onToday={() => navigate(TODAY_ROUTE)} chat={chat} chatExpanded={chatExpanded} resting={restingBand} />
     : screenId === "terrance" ? <><TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} /><PageSection id="lists"><ListsField refreshSignal={data.refreshedAt} /></PageSection></>
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
     : screenId === "mindbody" ? <MindBodyField sessions={data.sessions} />
     : screenId === "smarthome" ? <SmartHomeField onOpenSettings={() => navigate({ id: "settings", view: "home-assistant" })} />
-    : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
+    : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} onOpenHistory={() => setActive("sessions")} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => setActive("neuro")} />
     : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} />
     : screenId === "revenue" ? <RevenueField data={data} onRetry={retrySnapshot} />

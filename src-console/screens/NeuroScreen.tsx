@@ -9,6 +9,9 @@ import { useNow } from "../shell/useNow";
 import type { RecordedSession } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, Select, Sparkline, StatTile, type Tone } from "../ui";
 import { recoveryBand } from "./HealthScreen";
+import { parseBodyContext } from "../lib/noop";
+import { hoursMinutes } from "../lib/mindBodyDeep";
+import { score } from "../neuro/sessionSamples";
 import { NeuroFlow } from "./NeuroFlow";
 import { type MuseScreenProps, museSignalState } from "./muse";
 import "./NeuroScreen.css";
@@ -42,11 +45,13 @@ export type NeuroFieldProps = MuseScreenProps & {
   training: ReturnType<typeof useTraining>;
   /** Re-runs the snapshot load. Retry is hidden without it. */
   onRetry?: () => void;
+  /** design-1110c C12: "Session history ›" on the Last session card. */
+  onOpenHistory?: () => void;
   /** Overrides the first-load detection (refreshedAt still equals INITIAL_SNAPSHOT's). */
   loading?: boolean;
 };
 
-export function NeuroField({ data, devices, operation, error, sessionStartedAt, sessionEndedAt, onScan, onConnect, onDisconnect, onStart, onStop, training, onRetry, loading }: NeuroFieldProps) {
+export function NeuroField({ data, devices, operation, error, sessionStartedAt, sessionEndedAt, onScan, onConnect, onDisconnect, onStart, onStop, training, onRetry, loading, onOpenHistory }: NeuroFieldProps) {
   const telemetry = useMuseTelemetry(); // only this screen subscribes to live readings
   const history = useBandHistory();
   const now = useNow(); // 1 s tick scoped to this screen
@@ -140,6 +145,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
 
       {!connected
         ? (
+          <>
           <Card className="neuro__empty" title={operation === "scanning" ? "Searching for Muse" : "No Muse connected"} headingLevel={2}>
             <div className="neuro__empty-lead">
               <BrainCircuit className="neuro__empty-icon" aria-hidden="true" />
@@ -153,6 +159,8 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
               ))}
             </InsetGroup>
           </Card>
+          {data.sessions[0] && <LastSessionCard session={data.sessions[0]} onOpenHistory={onOpenHistory} />}
+          </>
         )
         : (
           <>
@@ -244,6 +252,56 @@ function SessionPanel({ session, onClose }: { session: RecordedSession; onClose:
         <StatTile label="Avg calm" value={whole(s.avg_relaxation)} />
       </div>
       <p className="neuro__footnote"><span className="neuro__num">{session.data_points.toLocaleString()}</span> samples recorded on this Mac.</p>
+    </Card>
+  );
+}
+
+const whenFmt = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
+const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+/** C12: a thin 0–100 meter with its scale; the number is in the header, so this is never colour alone. */
+function ScoreMeter({ label, value }: { label: string; value: number | null }) {
+  return (
+    <div className="neuro__score">
+      <p className="neuro__score-head"><span>{label}</span><strong>{value == null ? DASH : Math.round(value)}<small> / 100</small></strong></p>
+      <div className="neuro__score-bar" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value == null ? undefined : Math.round(value)}>
+        <i style={{ width: `${Math.max(0, Math.min(100, value ?? 0))}%` }} />
+      </div>
+      <p className="neuro__score-scale" aria-hidden="true"><span>0</span><span>50</span><span>100</span></p>
+    </div>
+  );
+}
+
+/**
+ * design-1110c C12: the latest saved session when no Muse is connected: focus and calm in the
+ * header pattern with thin meters, the body context of that day, and a plain note that graphs over
+ * time need per-minute samples.
+ */
+function LastSessionCard({ session, onOpenHistory }: { session: RecordedSession; onOpenHistory?: () => void }) {
+  const body = parseBodyContext(session.body_context);
+  const minutes = Math.max(1, Math.round(session.duration_secs / 60));
+  const figures: Array<[string, string | null, string]> = [
+    ["Recovery that day", body?.recovery == null ? null : String(Math.round(body.recovery)), "%"],
+    ["HRV", body?.hrv_ms == null ? null : String(Math.round(body.hrv_ms)), "ms"],
+    ["Resting HR", body?.resting_hr == null ? null : String(Math.round(body.resting_hr)), "bpm"],
+    ["Sleep before", body?.sleep_minutes == null ? null : hoursMinutes(body.sleep_minutes), ""],
+  ];
+  return (
+    <Card className="neuro__last" title="Last session" headingLevel={2}
+      accessory={<span className="neuro__last-when">{`${whenFmt.format(new Date(session.start))} · ${hhmm(session.start)}–${hhmm(session.end)} · ${minutes} min`}</span>}>
+      <div className="neuro__last-scores">
+        <ScoreMeter label="Average focus" value={score(session.summary.avg_focus)} />
+        <ScoreMeter label="Average calm" value={score(session.summary.avg_relaxation)} />
+      </div>
+      {body && (
+        <dl className="neuro__last-body">
+          {figures.map(([label, value, unit]) => <div key={label}><dd>{value ?? DASH}{value && unit ? <small> {unit}</small> : null}</dd><dt>{label}</dt></div>)}
+        </dl>
+      )}
+      <p className="neuro__last-foot">
+        <span>Graphs over time need per-minute samples, which this session doesn&apos;t have yet.</span>
+        {onOpenHistory && <Button variant="plain" size="small" onClick={onOpenHistory}>Session history ›</Button>}
+      </p>
     </Card>
   );
 }

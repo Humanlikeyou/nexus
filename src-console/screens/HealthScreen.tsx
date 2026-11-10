@@ -7,6 +7,7 @@ import { date, formatMinutes, number } from "../lib/format";
 import type { NoopDailyMetric, NoopHealthInsight, NoopHealthSnapshot, SystemSnapshot } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, SegmentedControl, StatTile, type Tone } from "../ui";
 import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
+import { LastFourteenDays } from "./FitnessTrends";
 import { deltaWords, usualRange } from "../ui/charts/chartMath";
 import "./HealthScreen.css";
 
@@ -206,7 +207,7 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
 }
 
 function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: ReactNode }) {
-  const [metric, setMetric] = useState<TrendKey>("recovery");
+  const [metric, setMetric] = useState<TrendKey>("strain");
   const today = health.today;
   const nightly = health.status === "waiting_for_nightly_data";
   const overnight = health.latestNight ?? health.latestSleep;
@@ -233,7 +234,9 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
   ];
   const nightStages = [...stages, { label: "Awake", value: overnight?.awakeMin ?? 0, color: "var(--data-sleep-awake)" }];
 
+  // design-1110c C11: recovery, HRV, resting HR and sleep are in the "Last 14 days" grid; the rest stay here.
   const trendOptions = (Object.keys(TRENDS) as TrendKey[])
+    .filter((k) => !["recovery", "hrv", "rhr", "sleep"].includes(k))
     .filter((k) => !((k === "skin" || k === "resp") && everNull(TRENDS[k].pick)))
     .map((k) => ({ value: k, label: TRENDS[k].label }));
   const trend = TRENDS[metric];
@@ -285,6 +288,8 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
         </Card>
       </div>
 
+      <LastFourteenDays days={days} />
+
       <More label="Last night, trends and insights">
       <BatteryStatus battery={health.battery} />
       {/* Row 2: only signals not shown elsewhere (RHR/HRV live in Last night); hidden when all are null. */}
@@ -308,7 +313,7 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
       )}
 
       {days.length > 0 && (
-        <Card title="14-day trends">
+        <Card title="More trends">
           <SegmentedControl label="Trend metric" size="small" value={metric} options={trendOptions} onChange={setMetric} />
           {points.length < 2
             ? <p className="fitness__pending">Trend appears after 2+ days of data.</p>

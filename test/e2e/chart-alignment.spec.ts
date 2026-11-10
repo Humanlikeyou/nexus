@@ -33,10 +33,16 @@ for (const size of SIZES) {
       for (const range of ["Month", "Week"]) {
         await page.getByRole("radio", { name: range, exact: true }).click();
         await page.waitForTimeout(50);
-        const plots = await boxes(page, ".mind-body [data-plot]");
-        expect(plots.length).toBeGreaterThanOrEqual(8);
+        // design-1110c C7/C8: Sleep and Trends rows stack the header above a full-width plot, so those plots span the card's content edges.
+        const [section] = await boxes(page, ".mb-section");
+        const stacked = await boxes(page, ".mind-body .mb-row--stack [data-plot]");
+        expect(stacked.length).toBeGreaterThanOrEqual(6);
+        sameEdges(stacked, { left: section.inner, right: section.innerRight }, `${range} stacked`);
+        // The remaining rows keep the label column: their plots still share one left and right edge.
+        const plots = await boxes(page, ".mind-body .mb-row:not(.mb-row--stack) [data-plot]");
+        expect(plots.length).toBeGreaterThanOrEqual(2);
         sameEdges(plots, plots[0], range);
-        // Stage strip, sleep chart, four trends, load bars and the scatter are all on it.
+        // Load bars and the scatter are on it.
         expect((await boxes(page, ".mind-body .mind-body__chart svg")).length).toBeGreaterThanOrEqual(2);
         sameEdges(await boxes(page, ".mind-body .mind-body__chart svg"), plots[0], `${range} svg`);
       }
@@ -44,9 +50,9 @@ for (const size of SIZES) {
 
     test("Mind–Body: labels, drivers and the table sit on the same grid as the plots", async ({ page, theme }) => {
       await openOverview(page, theme);
-      const [plot] = await boxes(page, ".mind-body [data-plot]");
+      const [plot] = await boxes(page, ".mind-body .mb-row:not(.mb-row--stack) [data-plot]");
       const [section] = await boxes(page, ".mb-section");
-      for (const head of await boxes(page, ".mb-row__head")) expect(Math.abs(head.left - section.inner)).toBeLessThanOrEqual(TOLERANCE);
+      for (const head of await boxes(page, ".mb-row__head, .mb-row--stack .chart-head")) expect(Math.abs(head.left - section.inner)).toBeLessThanOrEqual(TOLERANCE);
       for (const value of await boxes(page, ".mb-drivers__value")) expect(Math.abs(value.left - plot.left), "driver values").toBeLessThanOrEqual(TOLERANCE);
       const [week] = await boxes(page, ".mb-table thead th:nth-child(2)");
       expect(Math.abs(week.left - plot.left), "table columns").toBeLessThanOrEqual(TOLERANCE);

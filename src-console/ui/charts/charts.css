@@ -15,8 +15,8 @@
 .trend-chart__line { fill: none; stroke: var(--tc-line); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .trend-chart__raw { fill: var(--tc-line); opacity: .55; }
 .trend-chart__now { fill: var(--tc-line); stroke: var(--bg-content, #fff); stroke-width: 1.5; }
-.trend-chart__bar { fill: var(--tc-fill); }
-.trend-chart__bar:not([data-solid]) { opacity: .85; }
+.trend-chart__bar[data-solid] { fill: var(--tc-fill); }
+.trend-chart__bar:not([data-solid]) { fill: color-mix(in srgb, var(--tc-fill) 40%, transparent); }
 .trend-chart__shade { fill: var(--label-tertiary); opacity: .12; }
 .trend-chart__marker { fill: var(--label-tertiary); }
 .trend-chart__cross { stroke: var(--label-tertiary); stroke-width: 1; stroke-dasharray: 2 3; }
@@ -39,3 +39,4 @@
 .chart-legend i[data-key="usual"] { height: 8px; background: color-mix(in srgb, var(--copper) 22%, transparent); box-shadow: inset 0 -1px 0 var(--copper); }
 .chart-legend i[data-key="dot"] { width: 4px; height: 4px; border-radius: 50%; opacity: .6; }
 @media (forced-colors: active) { .trend-chart__line { stroke: CanvasText; } .trend-chart__band { fill: none; stroke: CanvasText; } }
+.trend-chart__tip em { color: var(--label); font-style: normal; font-weight: 600; }

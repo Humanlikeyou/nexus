@@ -84,9 +84,11 @@ describe("Fitness (HealthField)", () => {
     expect(screen.queryByText("SpO₂")).toBeNull();
     expect(screen.queryByRole("radio", { name: "Skin temp" })).toBeNull();
     // trend with a null day is a gap and the caption summarises min/max
-    const trends = screen.getByRole("region", { name: "14-day trends" });
+    // design-1110c C11: recovery, HRV, resting HR and sleep live in the "Last 14 days" grid.
+    const trends = screen.getByRole("region", { name: "Last 14 days" });
     expect(within(trends).getByRole("img", { name: /Recovery, last 3 days: min 60%, max 74%, last 74%/ })).toBeInTheDocument();
-    expect(within(trends).getByText(/Mean 67%/)).toBeInTheDocument();
+    expect(within(trends).getByRole("heading", { name: "Recovery" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "More trends" })).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/whoop/i);
     expect(screen.getByText("NOOP band battery is 82%")).toBeInTheDocument();
   });

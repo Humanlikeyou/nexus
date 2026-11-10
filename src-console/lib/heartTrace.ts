@@ -2,7 +2,7 @@ import type { HeartSample } from "../bridge";
 import { monotonePath } from "../ui/charts/chartMath";
 
 /** The trace's window in seconds, and its box: all Fibonacci, like the rest of Home. */
-export const TRACE_SECONDS = 89;
+export const TRACE_SECONDS = 100;
 export const TRACE_WIDTH = 233;
 export const TRACE_HEIGHT = 55;
 /** Room for the live dot's halo. */
@@ -60,4 +60,30 @@ export function traceShape(samples: HeartSample[], at: number): TraceShape {
     areas: drawn.map((run) => `${curve(run)}L${run[run.length - 1].x},${floor}L${run[0].x},${floor}Z`),
     dot: points[points.length - 1],
   };
+}
+
+/**
+ * design-1110c C14: the live window as one slot per second, oldest first (slot 0 = 99 s ago,
+ * the last slot = now). Each slot takes the nearest sample within 2.5 s; a longer gap stays null so
+ * the line breaks across a strap dropout instead of bridging it.
+ */
+export function heartSlots(samples: HeartSample[], at: number, seconds = TRACE_SECONDS): (number | null)[] {
+  return Array.from({ length: seconds }, (_, i) => {
+    const t = at - (seconds - 1 - i);
+    let best: HeartSample | null = null;
+    for (const sample of samples) if (Math.abs(sample.at - t) <= 2.5 && (!best || Math.abs(sample.at - t) < Math.abs(best.at - t))) best = sample;
+    return best ? best.bpm : null;
+  });
+}
+
+/**
+ * The resting band from NOOP's daily resting heart rate (the same rows Mind–Body and Fitness read):
+ * the range of recent days, with the usual line at the mean of the days before today. Null with fewer
+ * than two real readings, so Home never shows a made-up resting value.
+ */
+export function restingUsual(days: Array<{ restingHr: number | null }>): { low: number; high: number; median: number } | null {
+  const xs = days.map((d) => d.restingHr).filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
+  if (xs.length < 2) return null;
+  const prior = xs.slice(0, -1);
+  return { low: Math.min(...xs), high: Math.max(...xs), median: prior.reduce((a, b) => a + b, 0) / prior.length };
 }

@@ -5,7 +5,8 @@ import { NoopShapeError, isSnapshot, noopQuery, parseBodyContext, parseMetricSer
 import type { NoopDayRow, NoopLatestNight, NoopMetricPoint, NoopMetricSeries, NoopSnapshotPayload, RecordedSession } from "../types";
 import { Badge, Button, PageHero, SegmentedControl } from "../ui";
 import { monotonePath } from "../ui/charts/chartMath";
-import { BaselineChart, DeltaBar, StageStrip, readingDelta } from "./MindBodyCharts";
+import { BaselineChart, DeltaBar, SleepSpan, StageStrip, readingDelta } from "./MindBodyCharts";
+import { ChartHeader } from "../ui/charts/TrendChart";
 import "./MindBodyScreen.css";
 
 export const INVALID_PATH_STEPS = "The NOOP binary or database path in Settings isn't valid. Open Settings › WHOOP and set full paths that start with /.";
@@ -223,6 +224,8 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
     { label: "Deep", minutes: night?.deepMin ?? day?.deepMin ?? 0, tone: "deep" },
     { label: "REM", minutes: night?.remMin ?? day?.remMin ?? 0, tone: "rem" },
     { label: "Light", minutes: night?.lightMin ?? day?.lightMin ?? 0, tone: "light" },
+    // design-1110c C9: awake = in bed minus asleep, from the real night record (hatched, never copper).
+    ...(night && night.inBedMin > night.totalSleepMin ? [{ label: "Awake", minutes: night.inBedMin - night.totalSleepMin, tone: "awake" }] : []),
   ];
   const efficiency = night?.efficiency ?? day?.efficiency ?? null;
   const also = day ? [
@@ -267,39 +270,57 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
               <div className="mb-range"><SegmentedControl label="Range" size="small" value={range} options={ranges} onChange={setRange} /></div>
 
               <section className="mb-section" aria-labelledby="mb-sleep">
-                <h2 id="mb-sleep" className="mb-section__title">Sleep</h2>
-                <div className="mb-row">
+                <div className="mb-section__head">
+                  <h2 id="mb-sleep" className="mb-section__title">Sleep</h2>
+                  <p className="chart-legend" aria-hidden="true"><span><i />You</span><span><i data-key="usual" />Your usual ({days} days)</span></p>
+                </div>
+                <div className="mb-row mb-row--stack">
                   <div className="mb-row__head">
-                    <h3>Last night</h3>
-                    <p className="mb-row__value">{typeof sleepMin === "number" ? hoursMinutes(sleepMin) : DASH}</p>
-                    <p className="mb-row__usual">{typeof efficiency === "number" ? `${Math.round(efficiency * 100)}% efficient` : "\u00a0"}</p>
+                    <ChartHeader title="Last night" value={typeof sleepMin === "number" ? hoursMinutes(sleepMin) : DASH} delta={readingDelta(readingOf("sleep"))}
+                      usual={[typeof efficiency === "number" ? `${Math.round(efficiency * 100)}% efficient` : null, night ? `in bed ${hoursMinutes(night.inBedMin)}` : null].filter(Boolean).join(" · ") || "\u00a0"} />
                   </div>
                   <div className="mb-plot">
+                    {night && <SleepSpan start={night.start} end={night.end} />}
                     <StageStrip stages={stages} />
-                    {stages.some((stage) => stage.minutes > 0) && <p className="mb-legend">{stages.map((stage) => <span key={stage.tone}><i data-tone={stage.tone} aria-hidden="true" />{`${stage.label} ${hoursMinutes(stage.minutes)} · ${Math.round((stage.minutes / Math.max(1, stages.reduce((sum, item) => sum + item.minutes, 0))) * 100)}%`}</span>)}</p>}
-                    <BaselineChart points={inRange(merged.sleep, asOf, days)} reading={readingOf("sleep")} tall bars />
+                    {stages.some((stage) => stage.minutes > 0) && (
+                      <dl className="mb-stagekey">
+                        {stages.map((stage) => <div key={stage.tone}><dt><i data-tone={stage.tone} aria-hidden="true" />{stage.label}</dt><dd>{hoursMinutes(stage.minutes)}<small>{Math.round((stage.minutes / Math.max(1, stages.reduce((sum, item) => sum + item.minutes, 0))) * 100)}%</small></dd></div>)}
+                      </dl>
+                    )}
+                    <p className="mind-body__meta">Totals for the night. Stage order needs per-epoch data, which isn&apos;t sent yet.</p>
                   </div>
+                </div>
+                <div className="mb-row mb-row--stack mb-row--rule">
+                  <div className="mb-row__head">
+                    {(() => { const item = readingOf("sleep"); const nights = inRange(merged.sleep, asOf, days).filter((p) => typeof p.value === "number");
+                      const avg = nights.length ? nights.reduce((sum, p) => sum + (p.value as number), 0) / nights.length : null;
+                      return <ChartHeader title={`Nightly sleep · last ${nights.length} nights`} value={avg == null ? DASH : hoursMinutes(avg)} unit="avg"
+                        usual={item.base ? `usual ${hoursMinutes(item.base.mean - item.base.sd)}–${hoursMinutes(item.base.mean + item.base.sd)}` : "no baseline yet"} />; })()}
+                  </div>
+                  <div className="mb-plot"><BaselineChart points={inRange(merged.sleep, asOf, days)} reading={readingOf("sleep")} tall bars /></div>
                 </div>
               </section>
 
               <section className="mb-section" aria-labelledby="mb-trends">
-                <h2 id="mb-trends" className="mb-section__title">Trends against your baseline</h2>
+                <h2 id="mb-trends" className="mb-section__title">Trends against your usual</h2>
+                <p className="chart-legend mb-legend-line" aria-hidden="true"><span><i />You · 3-day average</span><span><i data-key="dot" />Daily value</span><span><i data-key="usual" />Your usual ({days} days)</span><span><i data-key="workout" />Workout day</span></p>
                 <div className="mb-rows">
                   {TREND_ROWS.map((key) => {
                     const item = readingOf(key);
+                    const pts = inRange(merged[key], asOf, days);
+                    const workouts = key === "strain" ? pts.map((p) => ((ready_?.days ?? []).find((row) => row.day === p.day)?.exerciseCount ?? 0) > 0) : undefined;
                     return (
-                      <div className="mb-row" key={key}>
+                      <div className="mb-row mb-row--stack" key={key}>
                         <div className="mb-row__head">
-                          <h3>{item.def.label}</h3>
-                          <p className="mb-row__value">{item.value === null ? DASH : item.def.format(item.value)}</p>
-                          <p className="mb-row__usual">{item.base ? `usual ${item.def.format(item.base.mean)}` : "no baseline yet"}</p>
-                          {readingDelta(item) && <p className="mb-row__delta" data-dir={readingDelta(item)!.dir}>{readingDelta(item)!.text}</p>}
+                          <ChartHeader title={key === "resting_hr" ? "Resting heart rate" : item.def.label} value={item.value === null ? DASH : item.def.format(item.value).replace(/ ?(ms|bpm|%)$/, "")}
+                            unit={item.def.unit || undefined} delta={readingDelta(item)} usual={item.base ? `usual ${item.def.format(item.base.mean)}` : "no baseline yet"} />
                         </div>
-                        <div className="mb-plot"><BaselineChart points={inRange(merged[key], asOf, days)} reading={item} /></div>
+                        <div className="mb-plot"><BaselineChart points={pts} reading={item} bars={key === "strain"} markers={workouts} /></div>
                       </div>
                     );
                   })}
                 </div>
+                <p className="mind-body__meta">Workouts are a daily count (no time or type yet). Meals aren&apos;t shown: no nutrition source is connected.</p>
               </section>
 
               <section className="mb-section" aria-labelledby="mb-load">
