@@ -7,6 +7,7 @@ vi.mock("../bridge", async (orig) => ({ ...(await orig<typeof import("../bridge"
 import { INITIAL_SNAPSHOT, crewSnapshot } from "../bridge";
 import type { CrewInfo, SystemSnapshot } from "../types";
 import { CREW_POLL_MS, CrewsField } from "./CrewsScreen";
+import { sampleCrews, unwiredCrews } from "../crews/adapters";
 
 const snap = (c: Partial<SystemSnapshot["crew"]>, extra: Partial<SystemSnapshot> = {}): SystemSnapshot => ({
   ...INITIAL_SNAPSHOT, refreshedAt: INITIAL_SNAPSHOT.refreshedAt + 1, crew: { health: "online", runs: [], tools: [], ...c }, ...extra,
@@ -36,7 +37,7 @@ describe("Agents › Crews", () => {
 
   it("not configured: badge and the sync-crew-token.sh hint, no runs or form", () => {
     render(<CrewsField data={snap({ health: "not_configured" })} />);
-    expect(screen.getByText("Not configured")).toBeInTheDocument();
+    expect(screen.getAllByText("Not configured").length).toBeGreaterThan(0);
     expect(screen.getByText("scripts/sync-crew-token.sh")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "New Run" })).toBeNull();
   });
@@ -44,7 +45,7 @@ describe("Agents › Crews", () => {
   it("offline: badge and Retry", () => {
     const onRetry = vi.fn();
     render(<CrewsField onRetry={onRetry} data={snap({ health: "offline" })} />);
-    expect(screen.getByText("Offline")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Crews" }).parentElement).toHaveTextContent("Offline");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalled();
     expect(screen.queryByRole("region", { name: "New Run" })).toBeNull();
@@ -52,24 +53,28 @@ describe("Agents › Crews", () => {
 
   it("online and empty: Online badge, empty runs note, form", () => {
     render(<CrewsField data={snap({})} />);
-    expect(screen.getByText("Online")).toBeInTheDocument();
-    expect(screen.getByText("No runs yet")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Crew health" })).getAllByText("Online").length).toBeGreaterThan(0);
+    expect(within(screen.getByRole("region", { name: "Runs" })).getByText("No runs yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start run" })).toBeDisabled();
   });
 
   it("list: rows with clamped task (full text in title), status badges; selecting shows result or error", () => {
     const long = "x".repeat(300);
     render(<CrewsField data={snap({ runs: [run(), run({ id: "r2", name: "broken", status: "failed", task: long, result: "LLM unavailable" }), run({ id: "r3", name: "halted", status: "stopped", result: null })] })} />);
-    const runs = screen.getByRole("list", { name: "Runs" });
+    const runs = screen.getByRole("table", { name: "Runs" });
     expect(within(runs).getByText("Completed")).toBeInTheDocument();
     expect(within(runs).getByText("Failed")).toBeInTheDocument();
     expect(within(runs).getByText("Stopped")).toBeInTheDocument();
     expect(within(runs).getByTitle(long)).toHaveClass("crews__clamp");
-    expect(within(runs).getAllByText("writer", { exact: false })).toHaveLength(3);
-    fireEvent.click(within(runs).getByText("Broken"));
-    expect(screen.getByText("LLM unavailable")).toHaveClass("crews__result--error");
-    fireEvent.click(within(runs).getByText("Smoke"));
-    expect(screen.getByText("OK")).toHaveClass("crews__result");
+    expect(within(runs).getAllByText("writer")).toHaveLength(3);
+    // design-1110d D-C5: no source for duration/tokens/cost yet, so the cells are dashes, never numbers.
+    expect(within(runs).queryByText(/\d+ s$|tokens|\$/)).toBeNull();
+    fireEvent.click(within(runs).getByRole("row", { name: "Open run Broken" }));
+    expect(screen.getByText("LLM unavailable", { selector: "pre" })).toHaveClass("crews__result--error");
+    expect(screen.getByRole("heading", { level: 1, name: "Crew run" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Crews" }));
+    fireEvent.click(within(screen.getByRole("table", { name: "Runs" })).getByRole("row", { name: "Open run Smoke" }));
+    expect(screen.getByText("OK", { selector: "pre" })).toHaveClass("crews__result");
   });
 
   it("list error: crew_list unavailable while online", () => {
@@ -93,7 +98,7 @@ describe("Agents › Crews", () => {
     expect(crew.startCrew).not.toHaveBeenCalled();
     await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Start run" })); });
     expect(crew.startCrew).toHaveBeenCalledWith("smoke", "Reply with the word OK");
-    expect(within(screen.getByRole("list", { name: "Runs" })).getByText("Running")).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "Runs" })).getByText("Running")).toBeInTheDocument();
   });
 
   it("running: polls crew_status every 5 s while mounted, stops polling when done or unmounted", async () => {
@@ -122,14 +127,14 @@ describe("Agents › Crews", () => {
     crew.stopCrew.mockResolvedValue("stopped");
     crew.getCrewStatus.mockResolvedValue(run({ status: "stopped", result: null }));
     render(<CrewsField data={snap({ runs: [run({ status: "running", result: null })] })} />);
-    fireEvent.click(screen.getByText("Smoke"));
+    fireEvent.click(screen.getByRole("row", { name: "Open run Smoke" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     const dialog = screen.getByRole("dialog", { name: "Stop this run?" });
     const confirm = within(dialog).getByRole("button", { name: "Stop Run" });
     expect(crew.stopCrew).not.toHaveBeenCalled();
     await act(async () => { fireEvent.click(confirm); });
     expect(crew.stopCrew).toHaveBeenCalledWith("r1");
-    expect(within(screen.getByRole("list", { name: "Runs" })).getByText("Stopped")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Run summary" })).getByText("Stopped")).toBeInTheDocument();
   });
 
   it("start failure shows the sanitized error", async () => {
@@ -144,7 +149,7 @@ describe("Agents › Crews", () => {
 });
 
 describe("Crews › Tools", () => {
-  const tools = (_root: HTMLElement) => within(screen.getByRole("region", { name: "Tools" }));
+  const tools = (_root: HTMLElement) => within(screen.getByRole("region", { name: "Tools and guardrails" }));
   it("lists each tool as allowed or blocked with its limits", () => {
     render(<CrewsField data={snap({ tools: [{ name: "kb_query", allowed: true }, { name: "memory_query", allowed: false }] })} />);
     const t = tools(document.body);
@@ -167,11 +172,43 @@ describe("Crews › Tools", () => {
   });
   it("loading: no tool list yet", () => {
     render(<CrewsField data={{ ...INITIAL_SNAPSHOT }} />);
-    expect(screen.queryByRole("region", { name: "Tools" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Tools and guardrails" })).toBeNull();
   });
   it("never renders keys, env values or URLs", () => {
     render(<CrewsField data={snap({ tools: [{ name: "kb_query", allowed: true }] })} />);
-    expect(screen.getByRole("region", { name: "Tools" }).textContent).not.toMatch(/http|CREW_|SECRET|=/);
+    expect(screen.getByRole("region", { name: "Tools and guardrails" }).textContent).not.toMatch(/http|CREW_|SECRET|=/);
   });
 });
 
+
+describe("Crews › design-1110d panels", () => {
+  const failing = () => snap({ runs: [run(), run({ id: "r2", name: "sample research", status: "failed", task: "List three sample facts", result: "LLM unavailable" })] });
+  it("hero names the failed run; unwired panels say Needs wiring and show no sample values", () => {
+    render(<CrewsField data={failing()} adapter={unwiredCrews} />);
+    expect(screen.getByText("1 of 2 recent runs failed")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).toBeNull();
+    expect(screen.getAllByText("Needs wiring").length).toBeGreaterThan(2);
+    expect(within(screen.getByRole("region", { name: "Crew approvals" })).getByText(/appear here once crews report them/)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "n8n workflows" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("row", { name: "Open run Sample research" }));
+    expect(within(screen.getByRole("list", { name: "Run summary" })).queryByText(/\d+ s|local/)).toBeNull();
+    expect(screen.queryByRole("table", { name: "Task timeline" })).toBeNull();
+  });
+  it("sample adapter: values carry a Sample data tag; crew approvals are their own page; no yen", () => {
+    render(<CrewsField data={failing()} adapter={sampleCrews} />);
+    const queue = screen.getByRole("region", { name: "Crew approvals · 3" });
+    expect(within(queue).getByText("Sample data")).toBeInTheDocument();
+    expect(within(queue).getByText("Needs wiring · currency conversion")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/¥/);
+    fireEvent.click(within(queue).getByRole("button", { name: "View all ›" }));
+    expect(screen.getByText("3 crew approvals waiting")).toBeInTheDocument();
+    expect(screen.getByText(/Terrance's approvals stay in chat and Today/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Approve Send weekly supplier email" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Sample data: nothing was approved");
+    fireEvent.click(screen.getByRole("button", { name: "Crews" }));
+    fireEvent.click(screen.getByRole("row", { name: "Open run Sample research" }));
+    expect(screen.getByRole("table", { name: "Task timeline" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Handoffs: planner to writer/ })).toBeInTheDocument();
+    expect(screen.getAllByText("Sample data").length).toBeGreaterThan(3);
+  });
+});

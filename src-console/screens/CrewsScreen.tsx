@@ -1,11 +1,14 @@
-import { Play, RefreshCw, Square } from "lucide-react";
+import { ChevronLeft, Play, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { INITIAL_SNAPSHOT, getCrewStatus, startCrew, stopCrew } from "../bridge";
 import { dateTime, humanize, plainText, sentenceStart } from "../lib/format";
 import type { CrewInfo, CrewServiceHealth, SystemSnapshot } from "../types";
-import { Badge, Button, Card, Dialog, InsetGroup, ListRow, More, PageHero, TextField, type Tone } from "../ui";
+import { Button, Card, DataTag, Dialog, More, PageHero, StatusText, TextField, wiredTag, type StatusKind, type Tone } from "../ui";
+import { crewsAdapter, type CrewsAdapter } from "../crews/adapters";
+import { CrewApprovalsCard, CrewDecidedCard, CrewRunPage } from "./CrewPanels";
 import { CREW_TOOL_OUTPUT_CAP, CREW_TOOL_TIMEOUT_S } from "../app/statusViews";
 import "./CrewsScreen.css";
+import "./CommandCenter.css";
 
 /** Same rule as crew-service CrewStartRequest._name. */
 export const CREW_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/;
@@ -17,14 +20,6 @@ const HEALTH_BADGE: Record<CrewServiceHealth, { tone: Tone; text: string }> = {
   online: { tone: "success", text: "Online" },
   offline: { tone: "warning", text: "Offline" },
   not_configured: { tone: "neutral", text: "Not configured" },
-};
-
-const STATUS_TONE: Record<string, Tone> = {
-  running: "info",
-  completed: "success",
-  failed: "danger",
-  stopped: "neutral",
-  interrupted: "warning",
 };
 
 function errorText(e: unknown): string {
@@ -41,9 +36,11 @@ function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }
 }
 
 /** Chat & Agents › Crews (Stage 5E): crew-service health, runs, start and stop. */
-const FIRST_GLANCE = 3;
+export const RUN_STATUS: Record<string, StatusKind> = { running: "run", completed: "ok", failed: "fail", stopped: "off", interrupted: "risk" };
+type CrewPage = { kind: "overview" } | { kind: "run"; id: string } | { kind: "approvals" };
 
-export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; onRetry?: () => void; loading?: boolean }) {
+/** design-1110d D-C1–C11: Agents › Crews as a command center. Panels with no source read from `adapter`. */
+export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter() }: { data: SystemSnapshot; onRetry?: () => void; loading?: boolean; adapter?: CrewsAdapter }) {
   const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const { health } = data.crew;
   const listDown = data.unavailableSources.some((s) => s.command === "crew_list");
@@ -56,8 +53,9 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
     setSnapshotRuns(data.crew.runs);
     setRuns(data.crew.runs);
   }
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const selected = runs.find((r) => r.id === selectedId) ?? null;
+  const [page, setPage] = useState<CrewPage>({ kind: "overview" });
+  const selected = page.kind === "run" ? runs.find((r) => r.id === page.id) ?? null : null;
+  const [formOpen, setFormOpen] = useState(false);
 
   const [name, setName] = useState("");
   const [task, setTask] = useState("");
@@ -96,7 +94,6 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
     try {
       const info = await startCrew(name.trim(), task.trim());
       setRuns((prev) => [info, ...prev.filter((r) => r.id !== info.id)]);
-      setSelectedId(info.id);
       setName("");
       setTask("");
     } catch (e) {
@@ -131,15 +128,62 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
   }
 
   const badge = HEALTH_BADGE[health];
-  const runRow = (run: (typeof runs)[number]) => (
-    <ListRow key={run.id} title={sentenceStart(run.name)} selected={run.id === selectedId} onSelect={() => setSelectedId(run.id === selectedId ? null : run.id)}
-      subtitle={<span className="crews__clamp" title={run.task ?? undefined}>{run.task ?? "No task text"}</span>}
-      value={[run.started_at ? dateTime(run.started_at) : null, run.agents.length ? run.agents.join(", ") : null].filter(Boolean).join(" · ")}
-      accessory={<Badge tone={STATUS_TONE[run.status] ?? "neutral"}>{humanize(run.status)}</Badge>} />
+  const dialogs = (
+    <>
+      {actionError && <p className="crews__error" role="alert">{actionError}</p>}
+      <Dialog open={confirmStart} title="Start this run?" confirmLabel="Start run" busy={busy}
+        onConfirm={() => { void start(); }} onCancel={() => setConfirmStart(false)}>
+        Runs on the local model inside the crew service. It may take a few minutes; you can stop it from the run.
+      </Dialog>
+      <Dialog open={confirmStop !== null} title="Stop this run?" confirmLabel="Stop Run" destructive busy={busy}
+        onConfirm={() => { if (confirmStop) void stop(confirmStop); }} onCancel={() => setConfirmStop(null)}>
+        {confirmStop ? `\u201c${confirmStop.name}\u201d stops now and its partial work is discarded.` : null}
+      </Dialog>
+    </>
   );
+
+  if (selected) {
+    return (
+      <div className="crews page-inset cc-page">
+        <CrewRunPage run={selected} adapter={adapter} busy={busy} onBack={() => setPage({ kind: "overview" })}
+          onStop={() => setConfirmStop(selected)}
+          onRetry={health === "online" ? () => { setName(selected.name); setTask(selected.task ?? ""); setConfirmStart(true); } : undefined} />
+        {dialogs}
+      </div>
+    );
+  }
+
+  const approvals = adapter.approvals();
+  if (page.kind === "approvals") {
+    const count = approvals.state === "unwired" ? 0 : approvals.value.length;
+    return (
+      <div className="crews page-inset cc-page">
+        <Button className="cc-back" variant="plain" size="small" icon={ChevronLeft} onClick={() => setPage({ kind: "overview" })}>Crews</Button>
+        <PageHero title="Crews" statement={approvals.state === "unwired" ? "Crew approvals" : `${count} crew approval${count === 1 ? "" : "s"} waiting`}
+          detail={<>Only crew requests are here; Terrance&apos;s approvals stay in chat and Today.{wiredTag(approvals) && <span className="cc-hero-tag">{wiredTag(approvals)}</span>}</>} />
+        <CrewApprovalsCard approvals={approvals} full />
+        <CrewDecidedCard decided={adapter.decided()} />
+      </div>
+    );
+  }
+
+  const failed = runs.filter((r) => r.status === "failed");
+  const latestFail = failed[0];
+  const statement = health !== "online" ? badge.text : runs.length === 0 ? "No runs yet" : failed.length ? `${failed.length} of ${runs.length} recent run${runs.length === 1 ? "" : "s"} failed` : runs.some((r) => r.status === "running") ? "Running" : "All recent runs completed";
+  const detail = health !== "online" ? undefined : latestFail
+    ? [sentenceStart(latestFail.name), latestFail.result ? plainText(latestFail.result).slice(0, 80) : null, latestFail.started_at ? dateTime(latestFail.started_at) : null].filter(Boolean).join(" · ")
+    : "Runs use the local model. At most 2 run at once.";
+  const n8n = adapter.n8n();
+  const next = adapter.nextSchedule();
+  const roster = [...new Set(runs.map((r) => r.name))].map((name) => {
+    const mine = runs.filter((r) => r.name === name);
+    return { name, last: mine[0], ok: mine.filter((r) => r.status === "completed").length, total: mine.length };
+  });
+  const toolsDown = data.unavailableSources.some((s) => s.command === "crew_tools");
+
   return (
-    <div className="crews page-inset">
-      <PageHero title="Crews" statement={badge.text} detail={health === "online" ? "Runs use the local model. At most 2 run at once." : undefined} />
+    <div className="crews page-inset cc-page">
+      <PageHero title="Crews" statement={statement} detail={detail} />
       {health === "not_configured" ? (
         <p className="crews__note">No crew token found. Run <code>scripts/sync-crew-token.sh</code>, then reopen Amara OS.</p>
       ) : health === "offline" ? (
@@ -149,67 +193,76 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
         </div>
       ) : null}
 
-      {health === "online" && (
-        listDown && runs.length === 0 ? <Card title="Runs"><Unavailable label="Crew runs" onRetry={onRetry} /></Card>
-          : runs.length === 0 ? (
-            <Card title="Runs"><p className="crews__note"><strong>No runs yet</strong><br />Start one below; it appears here while it runs.</p></Card>
-          ) : (
-            <InsetGroup title="Runs">
-              {runs.slice(0, FIRST_GLANCE).map(runRow)}
-            </InsetGroup>
-          )
-      )}
+      <ul className="cc-strip" aria-label="Crew health">
+        <li className="cc-tile"><span className="cc-tile__k">Crew service</span><span className="cc-tile__v"><StatusText kind={health === "online" ? "ok" : health === "offline" ? "risk" : "off"}>{badge.text}</StatusText></span><span className="cc-tile__s">At most 2 runs at once</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">OpenClaw gateway</span><span className="cc-tile__v"><StatusText kind={data.openclaw.online ? "ok" : "off"}>{data.openclaw.online ? "Online" : "Offline"}</StatusText></span><span className="cc-tile__s">{data.openclaw.model || "No model"}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">n8n workflows</span><span className="cc-tile__v">{n8n.state === "unwired" ? <StatusText kind="off">Not connected</StatusText> : <StatusText kind={n8n.value.connected ? "ok" : "off"}>{n8n.value.workflows} workflows</StatusText>}</span><span className="cc-tile__s">{wiredTag(n8n)}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Schedules</span><span className="cc-tile__v">{data.hermes.activeSchedules} active</span><span className="cc-tile__s">Next run {next.state === "unwired" ? wiredTag(next) : next.value}</span></li>
+      </ul>
 
-      {selected && (
-        <Card title={selected.name} headingLevel={2}
-          accessory={selected.status === "running" ? <Button variant="secondary" size="small" icon={Square} disabled={busy} onClick={() => setConfirmStop(selected)}>Stop</Button> : undefined}>
-          {selected.status === "running" ? <p className="crews__note" role="status">Running… checking every 5 seconds.</p>
-            : selected.result ? (
-              <pre className={selected.status === "failed" ? "crews__result crews__result--error" : "crews__result"}>{selected.result}</pre>
-            ) : <p className="crews__note">No result recorded.</p>}
+      <CrewApprovalsCard approvals={approvals} onViewAll={() => setPage({ kind: "approvals" })} />
+
+      {health === "online" && (
+        <Card title="Runs" accessory={<span className="cc-card__acc"><Button variant="secondary" size="small" icon={Plus} onClick={() => { setFormOpen(true); requestAnimationFrame(() => document.getElementById("crews-new-run")?.scrollIntoView({ block: "nearest" })); }}>New run</Button></span>}>
+          {listDown && runs.length === 0 ? <Unavailable label="Crew runs" onRetry={onRetry} />
+            : runs.length === 0 ? <p className="crews__note"><strong>No runs yet</strong><br />Start one with New run; it appears here while it runs.</p>
+              : (
+                <table className="cc-table cc-runs" aria-label="Runs">
+                  <thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Agents</th><th scope="col">Started</th><th scope="col" className="cc-num">Duration</th><th scope="col" className="cc-num">Tokens</th><th scope="col" className="cc-num">Cost</th></tr></thead>
+                  <tbody>
+                    {runs.map((run) => (
+                      <tr key={run.id} tabIndex={0} aria-label={`Open run ${sentenceStart(run.name)}`} onClick={() => setPage({ kind: "run", id: run.id })} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPage({ kind: "run", id: run.id }); } }}>
+                        <td>{sentenceStart(run.name)}<small className="crews__clamp" title={run.task ?? undefined}>{run.task ?? "No task text"}</small></td>
+                        <td><StatusText kind={RUN_STATUS[run.status] ?? "off"}>{humanize(run.status)}</StatusText>{run.status === "failed" && run.result && <small>{plainText(run.result).slice(0, 60)}</small>}</td>
+                        <td>{run.agents.join(", ") || "\u2014"}</td>
+                        <td>{run.started_at ? dateTime(run.started_at) : "\u2014"}</td>
+                        <td className="cc-num cc-dim">{"\u2014"}</td><td className="cc-num cc-dim">{"\u2014"}</td><td className="cc-num cc-dim">{"\u2014"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+          <p className="cc-note">Duration, tokens and cost per run <DataTag kind="wire" /> · Open a run for its timeline.</p>
         </Card>
       )}
 
-      <More label={health === "online" ? "New run and tools" : "Tools"}>
-        {runs.length > FIRST_GLANCE && <InsetGroup title="Earlier runs">{runs.slice(FIRST_GLANCE).map(runRow)}</InsetGroup>}
-      {health === "online" && (
-        <Card title="New Run">
-          <form className="crews__form" onSubmit={onSubmit}>
-            <TextField label="Name" value={name} maxLength={64} autoComplete="off" error={nameError} onChange={(e) => setName(e.target.value)} />
-            <TextField label="Task" value={task} maxLength={CREW_MAX_TASK_CHARS} autoComplete="off"
-              description={`${task.length}/${CREW_MAX_TASK_CHARS}`} onChange={(e) => setTask(e.target.value)} />
-            <div className="crews__actions">
-              <Button type="submit" icon={Play} disabled={!canStart}>Start run</Button>
-            </div>
-          </form>
+      <div className="cc-grid2">
+        <Card title="Crews" accessory={<span className="cc-card__acc"><DataTag kind="wire" /></span>}>
+          {roster.length === 0 ? <p className="cc-note">Crews appear after their first run.</p> : roster.map((c) => (
+            <div className="cc-row" key={c.name}><div className="cc-row__main"><span>{c.name}</span><small>{c.last.agents.join(", ") || "No agents"} · last run {humanize(c.last.status).toLowerCase()}</small></div><StatusText kind={c.ok === c.total ? "ok" : "fail"}>{c.ok}/{c.total}</StatusText></div>
+          ))}
+          <p className="cc-note">Next scheduled run per crew needs wiring.</p>
         </Card>
-      )}
+        <Card title="Tools and guardrails">
+          {toolsDown ? <Unavailable label="Crew tools" onRetry={onRetry} />
+            : data.crew.tools.length === 0 ? <p className="crews__note">No tools enabled</p>
+              : data.crew.tools.map((t) => (
+                <div className="cc-row" key={t.name}><div className="cc-row__main"><span>{t.name}</span><small>{CREW_TOOL_TIMEOUT_S} s timeout · {CREW_TOOL_OUTPUT_CAP}-char output cap</small></div>
+                  <span aria-label={`${t.name}: ${t.allowed ? "allowed" : "blocked"}`}><StatusText kind={t.allowed ? "ok" : "off"}>{t.allowed ? "Allowed" : "Blocked"}</StatusText></span></div>
+              ))}
+          <div className="cc-row"><div className="cc-row__main"><span>Outbound (email, posts, spend)</span><small>Always asks first</small></div><StatusText kind="wait">Approval</StatusText></div>
+        </Card>
+      </div>
 
-      <Card title="Tools">
-        {data.unavailableSources.some((s) => s.command === "crew_tools") ? <Unavailable label="Crew tools" onRetry={onRetry} />
-          : data.crew.tools.length === 0 ? <p className="crews__note">No tools enabled</p>
-            : (
-              <InsetGroup>
-                {data.crew.tools.map((t) => (
-                  <ListRow key={t.name} title={t.name} subtitle={`${CREW_TOOL_TIMEOUT_S} s timeout · ${CREW_TOOL_OUTPUT_CAP}-char output cap`}
-                    accessory={<Badge tone={t.allowed ? "success" : "neutral"} aria-label={`${t.name}: ${t.allowed ? "allowed" : "blocked"}`}>{t.allowed ? "Allowed" : "Blocked"}</Badge>} />
-                ))}
-              </InsetGroup>
-            )}
+      <Card title="n8n workflows" accessory={<span className="cc-card__acc">{wiredTag(n8n)}</span>}>
+        <p className="cc-note">{n8n.state === "unwired" ? "Workflows, last execution, failures and run time appear here once n8n is connected." : `${n8n.value.workflows} workflows · ${n8n.value.failures7d} failures in 7 days`}</p>
       </Card>
 
-      </More>
-
-      {actionError && <p className="crews__error" role="alert">{actionError}</p>}
-
-      <Dialog open={confirmStart} title="Start this run?" confirmLabel="Start run" busy={busy}
-        onConfirm={() => { void start(); }} onCancel={() => setConfirmStart(false)}>
-        Runs on the local model inside the crew service. It may take a few minutes; you can stop it from the run.
-      </Dialog>
-      <Dialog open={confirmStop !== null} title="Stop this run?" confirmLabel="Stop Run" destructive busy={busy}
-        onConfirm={() => { if (confirmStop) void stop(confirmStop); }} onCancel={() => setConfirmStop(null)}>
-        {confirmStop ? `“${confirmStop.name}” stops now and its partial work is discarded.` : null}
-      </Dialog>
+      {health === "online" && (
+        <More label="New run" id="crews-new-run" open={formOpen || undefined}>
+          <Card title="New Run">
+            <form className="crews__form" onSubmit={onSubmit}>
+              <TextField label="Name" value={name} maxLength={64} autoComplete="off" error={nameError} onChange={(e) => setName(e.target.value)} />
+              <TextField label="Task" value={task} maxLength={CREW_MAX_TASK_CHARS} autoComplete="off"
+                description={`${task.length}/${CREW_MAX_TASK_CHARS}`} onChange={(e) => setTask(e.target.value)} />
+              <div className="crews__actions">
+                <Button type="submit" icon={Play} disabled={!canStart}>Start run</Button>
+              </div>
+            </form>
+          </Card>
+        </More>
+      )}
+      {dialogs}
     </div>
   );
 }
