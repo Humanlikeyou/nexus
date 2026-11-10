@@ -23,8 +23,8 @@ export function SessionGraphs({ session, others }: { session: SessionWithSamples
   if (!hasSamples(session)) {
     return (
       <div className="ns-empty" role="note">
-        <p className="ns-empty__title">Graphs over time aren&apos;t recorded yet</p>
-        <p>This session has its summary only. Bands, focus and calm over time need per-minute samples from the Muse recording, which it doesn&apos;t keep yet.</p>
+        <p className="ns-empty__title">Graphs over time aren&apos;t read back yet</p>
+        <p>The raw EEG and the focus and calm timeline are saved with this session; Nexus can&apos;t read them back into graphs yet.</p>
       </div>
     );
   }

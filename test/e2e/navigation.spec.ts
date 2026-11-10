@@ -27,7 +27,7 @@ test.describe("sub-views and anchors", () => {
     ["Agents", "Crews", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Crews")],
     ["Mind–Body", "Fitness", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Fitness")],
     ["Mind–Body", "Neuro", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro")],
-    ["Mind–Body", "Neuro history", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro history"); await expect(f.getByRole("list", { name: "History" })).toBeVisible(); }],
+    ["Mind–Body", "Neuro history", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro history"); await expect(f.getByRole("table", { name: "Recordings" })).toBeVisible(); }],
     ["Business", "Money", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Business")],
   ];
   for (const [host, view, check] of SUBVIEWS) {

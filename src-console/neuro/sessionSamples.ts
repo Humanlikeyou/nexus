@@ -1,9 +1,9 @@
 import type { RecordedSession } from "../types";
 
 /**
- * design-1110c C15–C20: the per-session time series Neuro history draws. The Muse recorder does
- * not store these yet (only a summary per session), so real sessions arrive without `samples` and
- * the UI shows "not recorded yet". This is the shape the recorder should fill; see HANDOFF.md.
+ * design-1110c C15–C20: the per-session time series Neuro history draws. The recorder saves raw EEG
+ * and the focus/calm timeline, but nothing reads them back yet, so real sessions arrive without
+ * `samples` (design-1110e: see HANDOFF-1110e.md for the reader).
  */
 export type BandKey = "gamma" | "beta" | "alpha" | "theta" | "delta";
 export type SensorKey = "TP9" | "AF7" | "AF8" | "TP10";
