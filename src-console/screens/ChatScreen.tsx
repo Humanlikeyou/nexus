@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { MODEL_LOADING_COPY } from "../app/modelLoading";
 import { HermesSubtitle } from "./agentLabels";
-import { Activity, Bot, Brain, Check, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
+import { Activity, Bot, Brain, Check, Maximize2, Mic, Minimize2, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
+import { HOME_COLLAPSED_MESSAGES, type HomeMessage, speakingIndex, withVoiceTurns } from "../app/homeThread";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
 import { tierLabel, tierTitle } from "../app/amaraChat";
 import { assistantView } from "../app/statusViews";
 import { dateTime, time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
-import type { SystemSnapshot, TerrenceAction } from "../types";
+import type { SystemSnapshot, TerrenceAction, VoiceTurn } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, More, StatTile, TextField, type Tone } from "../ui";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
 import { useAmaraVoice } from "../hooks/useAmaraVoice";
 import "./ChatScreen.css";
+import "./HomeChat.css";
 
 export interface ChatFieldProps {
   data: SystemSnapshot;
@@ -42,6 +44,15 @@ export interface ChatFieldProps {
   busy?: boolean;
   /** Current conversation: resolved action lines from other conversations are hidden. */
   conversationId?: string | null;
+  /** design-1110b A: "home" is the compact chat under the Home lens; "page" the legacy full page. */
+  variant?: "page" | "home";
+  /** Home only: Expand (the largest the chat gets) vs. the last few messages. */
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
+  /** Home only: spoken turns (voice_recent_turns), merged into the same thread. */
+  voiceTurns?: VoiceTurn[];
+  /** Home only: bumped by ⌘1; each new value focuses the composer. */
+  focusSignal?: number;
 }
 
 const ACTION_TONE: Record<TerrenceAction["status"], Tone> = {
@@ -154,7 +165,9 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 export function ChatField({
   data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onCancelPending, loadingModel = false, onOpenContext, onOpenActivity, onOpenCrews, initialDraft = "",
   onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false, conversationId = null,
+  variant = "page", expanded = false, onToggleExpanded, voiceTurns, focusSignal = 0,
 }: ChatFieldProps) {
+  const home = variant === "home";
   const [draft, setDraft] = useState(initialDraft);
   const [query, setQuery] = useState("");
   const [deep, setDeep] = useState(false);
@@ -171,8 +184,17 @@ export function ChatField({
   // Deep is the router's call; with Hermes still on Ollama directly nothing would read /deep.
   const deepAvailable = hermes.routedViaRouter === true;
 
+  // design-1110b A2: on Home, voice and typed turns are one thread.
+  const all: HomeMessage[] = useMemo(() => (home ? withVoiceTurns(messages, voiceTurns ?? []) : messages), [home, messages, voiceTurns]);
   const actions = useMemo(() => chatActions(data.actions, conversationId), [data.actions, conversationId]);
-  const thread = useMemo(() => threadItems(messages, actions), [messages, actions]);
+  const fullThread = useMemo(() => threadItems(all, actions), [all, actions]);
+  // Collapsed Home chat: the last few messages (pending approvals always stay in view).
+  const thread = useMemo(() => {
+    if (!home || expanded) return fullThread;
+    const keep = new Set(fullThread.filter((t) => t.kind === "message").slice(-HOME_COLLAPSED_MESSAGES).map((t) => t.kind === "message" ? t.index : -1));
+    return fullThread.filter((t) => (t.kind === "message" ? keep.has(t.index) : t.item.prominent || keep.size === 0));
+  }, [home, expanded, fullThread]);
+  const speakingAt = speakingIndex(all, home && voice.state === "speaking");
   const renderAction = ({ action: a, prominent }: ChatActionItem) => {
     if (!prominent) {
       return (
@@ -201,7 +223,7 @@ export function ChatField({
     );
   };
   const suggestions = data.prioritySnapshot.items.slice(0, 3).map((p) => p.title).filter(Boolean);
-  const starts = useMemo(() => groupStarts(messages), [messages]);
+  const starts = useMemo(() => groupStarts(all), [all]);
   const startedAt = messages[0]?.timestamp;
 
   const agents = [
@@ -218,7 +240,10 @@ export function ChatField({
     const lastUser = users[users.length - 1];
     const bottom = el.scrollHeight - el.clientHeight;
     el.scrollTop = lastUser ? Math.min(bottom, Math.max(0, lastUser.offsetTop - el.offsetTop - 16)) : bottom;
-  }, [messages.length, sending]);
+  }, [all.length, sending, expanded]);
+
+  // ⌘1 (design-1110b A): focus the Home composer. 0 = not asked yet.
+  useEffect(() => { if (home && focusSignal > 0) composerRef.current?.focus(); }, [home, focusSignal]);
 
   // Home → top of the conversation, End → bottom. The composer keeps focus after send, so it scrolls too while empty.
   useEffect(() => {
@@ -266,13 +291,26 @@ export function ChatField({
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(draft); }
   };
   const retry = (failed: ConversationMessage, index: number) => {
-    const user = [...messages.slice(0, index)].reverse().find((m) => m.role === "user");
+    const user = [...all.slice(0, index)].reverse().find((m) => m.role === "user");
     void send(failed.role === "user" ? failed.content : user?.content ?? "");
   };
 
+  const homeHeader = home && (
+    <header className="hchat__head">
+      {expanded && <AmaraLens state={voice.state} size={44} decorative className="hchat__lens" />}
+      <h2 id="chat-title" className="hchat__title">Amara</h2>
+      <span className="hchat__status"><i data-online={online || undefined} />{online ? "Online" : "Offline"} · <span className="chat-screen__model" title={`Hermes configured model: ${hermes.model}`}>{headerModel(messages, hermes.model, deepAvailable)}</span></span>
+      <div className="hchat__tools">
+        <Button variant="plain" size="small" icon={SquarePen} iconOnly aria-label="New chat" title="New chat (⌘N)" onClick={onNewConversation} />
+        {onToggleExpanded && <Button variant="secondary" size="small" icon={expanded ? Minimize2 : Maximize2} aria-expanded={expanded} aria-controls="home-chat-log" onClick={onToggleExpanded}>{expanded ? "Collapse" : "Expand"}</Button>}
+      </div>
+    </header>
+  );
+
   return (
-    <div className="chat-screen page-inset">
+    <div className={home ? "hchat" : "chat-screen page-inset"} data-state={home ? (expanded ? "expanded" : "collapsed") : undefined} data-speaking={speakingAt >= 0 || undefined}>
       <section className="chat-screen__conversation" aria-labelledby="chat-title">
+        {home ? homeHeader : <>
         <header className="chat-screen__header">
           <div className="chat-screen__heading">
             {voice.state === "speaking" && <AmaraLens state="speaking" size={28} className="chat-screen__lens" />}
@@ -323,27 +361,32 @@ export function ChatField({
       </aside>
           </div>
         </More>
+        </>}
 
         {loading ? (
           <div className="chat-screen__messages" role="status" aria-label="Loading">
             {[0, 1, 2].map((i) => <div key={i} className="chat-bubble chat-bubble--skeleton" data-role={i === 1 ? "user" : "assistant"} />)}
           </div>
         ) : (
-          <ol ref={listRef} className="chat-screen__messages" aria-live="polite" aria-label="Messages">
-            {messages.length === 0 && !sending && actions.length === 0 && !actionsUnavailable && (
+          <ol ref={listRef} id={home ? "home-chat-log" : undefined} className="chat-screen__messages" aria-live="polite" aria-label="Messages">
+            {home && expanded && all.length > 0 && <li className="hchat__divider" aria-hidden="true">Today</li>}
+            {all.length === 0 && !sending && actions.length === 0 && !actionsUnavailable && (home ? (
+              <li className="hchat__empty">Ask Amara anything. She knows your priorities, projects and recent activity.</li>
+            ) : (
               <li className="chat-screen__empty">
                 <Card title="Ask Amara anything" headingLevel={2}>
                   <p>Amara knows your priorities, projects and recent activity.</p>
                   {suggestions.length > 0 && <div className="chat-screen__suggestions">{suggestions.map((s) => <Button key={s} size="small" onClick={() => void send(s)}>{s}</Button>)}</div>}
                 </Card>
               </li>
-            )}
+            ))}
             {thread.map((t) => {
               if (t.kind === "action") return renderAction(t.item);
-              const i = t.index; const m = messages[i];
+              const i = t.index; const m = all[i];
+              const speakingNow = i === speakingAt;
               return (
-              <li key={m.id} className="chat-message" data-role={m.role} data-start={starts[i] || undefined}>
-                {starts[i] && <span className="chat-message__meta">{m.role === "user" ? "You" : "Amara"} · <time dateTime={m.timestamp}>{time(m.timestamp)}</time></span>}
+              <li key={m.id} className="chat-message" data-role={m.role} data-start={starts[i] || undefined} data-voice={m.voice || undefined} data-speaking={speakingNow || undefined}>
+                {(starts[i] || speakingNow) && <span className="chat-message__meta">{m.voice && <><Mic size={11} aria-hidden="true" />Voice · </>}{m.role === "user" ? "You" : "Amara"} · <time dateTime={m.timestamp}>{time(m.timestamp)}</time>{speakingNow && <span className="hchat__speaking"><span className="hchat__bars" aria-hidden="true"><i /><i /><i /></span>Speaking</span>}</span>}
                 {m.role === "assistant" && m.source === "home" && <AmaraLens state="idle" size={44} level={0.5} decorative className="chat-message__lens" />}
                 <div className="chat-bubble" data-role={m.role} data-failed={m.status === "failed" || undefined} title={m.role === "assistant" ? [m.model, time(m.timestamp)].filter(Boolean).join(" · ") : undefined}>
                   {m.content}
@@ -398,7 +441,9 @@ export function ChatField({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onComposerKey}
             placeholder={!online ? "Amara is offline — messages may fail" : deep && deepAvailable ? "Message Amara (Deep)" : "Message Amara"}
+            aria-keyshortcuts={home ? "Meta+1" : undefined}
           />
+          {home && <kbd className="hchat__kbd" title="Focus the chat from anywhere" aria-hidden="true">⌘1</kbd>}
           <Button type="submit" variant="primary" icon={Send} iconOnly aria-label="Send" disabled={sending || !draft.trim()} />
         </form>
       </section>

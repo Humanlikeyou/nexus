@@ -1,5 +1,8 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { HOST_VIEWS, SYSTEMS, TODAY_LABEL, TODAY_ROUTE, resolveRoute, screenFor } from "./app/routes";
+import { HOST_VIEWS, SECTION_ANCHORS, SYSTEMS, TODAY_LABEL, TODAY_ROUTE, resolveRoute, screenFor } from "./app/routes";
+import { PageSection } from "./ui";
+import { AgentsField } from "./screens/AgentsScreen";
+import { useVoiceTurns } from "./hooks/useVoiceTurns";
 import { useRouteNavigation } from "./app/useRouteNavigation";
 import { SegmentedControl } from "./ui";
 import { useConversation } from "./app/useConversation";
@@ -46,8 +49,8 @@ export default function App() {
   // §6: Trajectory folded into Home as the Goals card; the alias lands on Home and scrolls to it.
   // §9/§11: Devices and About live inside Settings; their aliases scroll to the anchor.
   useEffect(() => {
-    const anchor = route.id === "terrance" && route.view === "goals" ? "goals"
-      : route.id === "settings" && (route.view === "devices" || route.view === "about" || route.view === "home-assistant") ? route.view : null;
+    // design-1110b B: Lists (Today), Activity (Agents) and Voice (Settings) are sections too.
+    const anchor = SECTION_ANCHORS[route.id]?.includes(route.view) ? route.view : null;
     if (!anchor) return;
     // The host screen is lazy: retry for ~1s of frames until the anchor has mounted.
     let frame = 0, tries = 0;
@@ -82,6 +85,10 @@ export default function App() {
   const autoSave = useIdleAutoSave(messages, conversationId);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [askDraft, setAskDraft] = useState<{ text: string; n: number }>({ text: "", n: 0 });
+  // design-1110b A: the Home chat. Expand is the largest it gets; ⌘1 focuses its composer.
+  const [chatExpanded, setChatExpanded] = useState(false);
+  const [chatFocus, setChatFocus] = useState(0);
+  const voiceTurns = useVoiceTurns(screenId === "landing");
   useEffect(() => {
     const palette = (event: KeyboardEvent) => {
       if (!event.metaKey || event.ctrlKey || event.altKey || event.key.toLowerCase() !== "k") return;
@@ -98,6 +105,7 @@ export default function App() {
       if (index < 0 || index >= Math.min(9, SYSTEMS.length)) return;
       event.preventDefault();
       setActive(SYSTEMS[index].id);
+      if (index === 0) setChatFocus((n) => n + 1);
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
@@ -129,8 +137,10 @@ export default function App() {
   const onLanding = screenId === "landing";
   const fieldLabel = screenId === "terrance" ? TODAY_LABEL : selected.label;
   const retrySnapshot = () => { void refresh(); };
-  const view = onLanding ? <LandingField onSelect={setActive} onToday={() => navigate(TODAY_ROUTE)} />
-    : screenId === "terrance" ? <TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} />
+  const chat = <ChatField key={askDraft.n} variant="home" expanded={chatExpanded} onToggleExpanded={() => setChatExpanded((open) => !open)} voiceTurns={voiceTurns} focusSignal={chatFocus + askDraft.n}
+    conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />;
+  const view = onLanding ? <LandingField onSelect={setActive} onToday={() => navigate(TODAY_ROUTE)} chat={chat} chatExpanded={chatExpanded} />
+    : screenId === "terrance" ? <><TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} /><PageSection id="lists"><ListsField refreshSignal={data.refreshedAt} /></PageSection></>
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
     : screenId === "mindbody" ? <MindBodyField sessions={data.sessions} />
     : screenId === "smarthome" ? <SmartHomeField onOpenSettings={() => navigate({ id: "settings", view: "home-assistant" })} />
@@ -142,17 +152,17 @@ export default function App() {
     : screenId === "lists" ? <ListsField refreshSignal={data.refreshedAt} />
     : screenId === "crews" ? <CrewsField data={data} onRetry={retrySnapshot} />
     : screenId === "voice" ? <VoiceField />
-    : screenId === "chat" ? <ChatField key={askDraft.n} conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} onOpenActivity={() => navigate({ id: "chat", view: "activity" })} onOpenCrews={() => navigate({ id: "chat", view: "crews" })} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />
-    : <SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} />;
+    : screenId === "chat" ? <><AgentsField data={data} onOpenCrews={() => navigate({ id: "chat", view: "crews" })} onRetry={retrySnapshot} /><PageSection id="activity"><ActivityField data={data} onRetry={retrySnapshot} /></PageSection></>
+    : <><SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} /><PageSection id="voice"><VoiceField /></PageSection></>;
 
   return (
     <CommandSurface mode={screenId}>
       {!onLanding && <Toolbar label={fieldLabel} busy={busy} onRefresh={refresh} onSearch={() => setPaletteOpen(true)} />}
       <Splash loaded={data.refreshedAt !== INITIAL_SNAPSHOT.refreshedAt} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate}
-        onAsk={(text) => { setAskDraft((d) => ({ text, n: d.n + 1 })); navigate({ id: "chat", view: "main" }); }} />
+        onAsk={(text) => { setAskDraft((d) => ({ text, n: d.n + 1 })); navigate({ id: "terrance", view: "main" }); }} />
       {!onLanding && <Sidebar active={active} onSelect={setActive} data={data} />}
-      <section className="active-field" aria-label={`${fieldLabel} system`}>{subViews && <div className="subview-bar"><SegmentedControl label={`${selected.label} view`} size="small" value={route.view} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); navigate({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
+      <section className="active-field" aria-label={`${fieldLabel} system`}>{subViews && <div className="subview-bar"><SegmentedControl label={`${selected.label} view`} size="small" value={subViews.some((entry) => entry.view === route.view) ? route.view : "main"} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); navigate({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
       {!onLanding && <Footer data={data} busy={busy} />}
       {!onLanding && <AmaraVoiceAnnouncer />}
       {notice && <div className="field-notice"><i />{notice}</div>}

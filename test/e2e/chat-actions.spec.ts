@@ -1,4 +1,4 @@
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, test, openHomeChat } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 /** QA 11-04: action cards live in the thread flow; resolved ones are compact; stale ledger rows stay hidden. */
@@ -26,8 +26,7 @@ async function open(page: import("@playwright/test").Page, theme: "light" | "dar
   const base = responses();
   const health = { ...(base.get_terrence_runtime_health as object), model: "amara", routedViaRouter: true };
   await openApp(page, { theme, data: { ...base, get_terrence_runtime_health: health, list_terrence_interactions: Array.from({ length: count }, (_, i) => interaction(i)), list_terrence_actions: actions } });
-  await navButton(page, "Chat & Agents").click();
-  return activeField(page, "Chat & Agents");
+  return openHomeChat(page, { expand: true });
 }
 
 test("cancelled cards are compact lines in the flow; the reply and tier badge aren't covered", async ({ page, theme, consoleErrors }) => {

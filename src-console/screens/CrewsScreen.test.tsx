@@ -16,7 +16,7 @@ const run = (over: Partial<CrewInfo> = {}): CrewInfo => ({
   task: "Reply with the word OK", result: "OK", ...over,
 });
 
-describe("Chat & Agents › Crews", () => {
+describe("Agents › Crews", () => {
   beforeEach(() => Object.values(crew).forEach((f) => f.mockReset()));
   afterEach(() => vi.useRealTimers());
 

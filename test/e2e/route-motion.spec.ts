@@ -51,7 +51,7 @@ test.describe("motion kinds", () => {
     await openApp(page, { theme });
     await lastChunk;
     await record(page);
-    for (const label of ["Chat & Agents", "Mind–Body", "Business", "Settings", "Smart home"]) {
+    for (const label of ["Agents", "Mind–Body", "Business", "Settings", "Smart home"]) {
       await navButton(page, label).click();
       await expect(activeField(page, label).getByRole("heading", { level: 1 }).first()).toBeVisible();
     }
@@ -82,7 +82,7 @@ test.describe("interruption and input", () => {
     await expect.poll(() => motion(page)).toBeNull();
     const target = async (label: string) => { const box = (await navButton(page, label).boundingBox())!; return [box.x + box.width / 2, box.y + box.height / 2] as const; };
     const [settingsX, settingsY] = await target("Settings");
-    const [chatX, chatY] = await target("Chat & Agents");
+    const [chatX, chatY] = await target("Agents");
     // 30 ms apart: well inside each transition, and faster than a hand. WebKit can miss a click sent
     // in the same frame the capture starts, which no person can do.
     await page.mouse.click(settingsX, settingsY);
@@ -105,7 +105,8 @@ test.describe("focus and scroll", () => {
     await expect(page.locator(".landing h1")).toBeFocused();
     if (browserName !== "webkit") { // WebKit's Tab skips buttons unless the Mac's full keyboard access is on
       await page.keyboard.press("Tab");
-      await expect(page.locator(".landing__button").first()).toBeFocused();
+      // design-1110b A: the Home chat under the lens is the first stop, before the buttons.
+      await expect(page.locator(".landing .hchat button").first()).toBeFocused();
     }
     await page.keyboard.press("Meta+k");
     await page.getByRole("combobox", { name: "Search or ask Amara" }).fill("rev");

@@ -1,4 +1,4 @@
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, test, openHomeChat } from "./fixtures/tauri-mock";
 import { NOW, responses } from "./fixtures/snapshot";
 
 /** QA 11-04 retest2: router 503 model loading, router-reported tier/model, Home/End. */
@@ -19,8 +19,7 @@ const data = (interact: unknown) => {
   };
 };
 async function send(page: import("@playwright/test").Page, text: string) {
-  await navButton(page, "Chat & Agents").click();
-  const field = activeField(page, "Chat & Agents");
+  const field = await openHomeChat(page);
   await field.getByLabel("Message Amara").fill(text);
   await field.getByLabel("Message Amara").press("Enter");
   return field;
@@ -78,6 +77,8 @@ test("Home scrolls to the top, End to the bottom, from an empty composer, not wh
   const long = "Line of the plan.\n".repeat(80);
   await openApp(page, { theme, data: data(reply({ assistantMessage: long })) });
   const field = await send(page, "plan");
+  await field.getByRole("button", { name: "Expand" }).click();
+  await field.getByLabel("Message Amara").focus();
   const list = field.getByRole("list", { name: "Messages" });
   await expect(list.getByText(/Line of the plan/)).toBeVisible();
   const composer = field.getByLabel("Message Amara");

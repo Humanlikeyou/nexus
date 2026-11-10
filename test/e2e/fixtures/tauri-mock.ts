@@ -163,14 +163,34 @@ export const emitTauriEvent = (page: Page, event: string, payload: unknown) =>
 export const setMock = (page: Page, cmd: string, value: unknown) =>
   page.evaluate(([c, v]) => { (window as unknown as { __E2E_DATA: Record<string, unknown> }).__E2E_DATA[c as string] = v; }, [cmd, value] as const);
 
-/** Sidebar button for a section, e.g. "Chat & Agents". */
+/** Sidebar button for a section, e.g. "Agents". */
 export const navButton = (page: Page, label: string) =>
   page.getByRole("navigation", { name: "Amara OS navigation" }).getByRole("button", { name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }).first();
 
 /** The visible screen region ("<label> system"). */
 export const activeField = (page: Page, label: string) => page.getByRole("region", { name: `${label} system` });
 
-const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Activity: "Chat & Agents", Lists: "Chat & Agents", Crews: "Chat & Agents", Voice: "Chat & Agents", Revenue: "Business" };
+const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Crews: "Agents", Revenue: "Business" };
+/** design-1110b B: folded screens that are now a section of a host page (label → host, anchor id). */
+const SECTION_HOSTS: Record<string, [string, string]> = { Activity: ["Agents", "activity"], Lists: ["Today", "lists"], Voice: ["Settings", "voice"] };
+
+/** Goes to Today from wherever the page is: from the landing its button, from anywhere else Home first. */
+export async function gotoToday(page: Page) {
+  const today = navButton(page, "Today");
+  if (!(await today.isVisible().catch(() => false))) { await navButton(page, "Home").click(); await routeSettled(page).catch(() => undefined); }
+  await navButton(page, "Today").click();
+  return activeField(page, "Today");
+}
+
+/** The Home chat under the lens (design-1110b A). Opens Home first when it isn't showing. */
+export async function openHomeChat(page: Page, { expand = false }: { expand?: boolean } = {}) {
+  const panel = page.locator(".landing .hchat");
+  if (!(await panel.isVisible().catch(() => false))) { await navButton(page, "Home").click(); await routeSettled(page).catch(() => undefined); }
+  await expect(panel).toBeVisible();
+  // Expand is the largest the chat gets (no Full page): the whole thread, scrollable.
+  if (expand && (await panel.getAttribute("data-state")) !== "expanded") await panel.getByRole("button", { name: "Expand" }).click();
+  return panel;
+}
 
 /** Resolves once a route transition and its enter animation have finished. */
 export const routeSettled = (page: Page) => page.waitForFunction(() => !document.documentElement.dataset.routeMotion);
@@ -186,6 +206,13 @@ export async function openMore(page: Page) {
 
 /** Opens a section, or a sub-view through its host, and returns the screen region. */
 export async function openView(page: Page, label: string) {
+  const section = SECTION_HOSTS[label];
+  if (section) {
+    const [host, id] = section;
+    const field = host === "Today" ? await gotoToday(page) : (await navButton(page, host).click(), activeField(page, host));
+    await field.locator(`#${id}.page-section`).scrollIntoViewIfNeeded();
+    return field;
+  }
   const host = SUB_VIEW_HOSTS[label];
   await navButton(page, host ?? label).click();
   const field = activeField(page, host ?? label);

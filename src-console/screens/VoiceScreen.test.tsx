@@ -23,7 +23,7 @@ async function renderField() {
   await act(async () => { await Promise.resolve(); });
 }
 
-describe("Chat & Agents › Voice", () => {
+describe("Settings › Voice", () => {
   beforeEach(() => {
     Object.values(voice).forEach((f) => f.mockReset());
     voice.getVoiceStatus.mockResolvedValue(status());

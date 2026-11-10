@@ -93,7 +93,7 @@
 :root:root .lists__row .ui-list-row__value { margin-left: auto; }
 
 /* Chat: composer is chrome over the conversation, so it gets thick glass + highlight; user bubble is emerald-tinted. */
-:root:root .chat-screen__composer {
+:root:root .chat-screen .chat-screen__composer {
   background: linear-gradient(var(--glass-tint), var(--glass-tint)), var(--glass-thick);
   -webkit-backdrop-filter: blur(var(--blur-thick)) saturate(var(--saturate-thick)); backdrop-filter: blur(var(--blur-thick)) saturate(var(--saturate-thick));
   box-shadow: var(--glass-hairline), var(--glass-specular), var(--elev-2);
@@ -120,7 +120,7 @@
 :root:root .neuro__empty-lead { display: grid; gap: var(--space-3); justify-items: start; }
 /* The composer's thick glass goes solid under Reduce Transparency and Reduce Motion, like every blurred surface. */
 @media (prefers-reduced-transparency: reduce), (prefers-reduced-motion: reduce) {
-  :root:root .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  :root:root .chat-screen .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
-:root:root[data-reduce-transparency="true"] .chat-screen__composer,
-:root:root[data-reduce-motion="true"] .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root:root[data-reduce-transparency="true"] .chat-screen .chat-screen__composer,
+:root:root[data-reduce-motion="true"] .chat-screen .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }

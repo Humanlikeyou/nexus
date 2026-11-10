@@ -90,11 +90,11 @@ describe("lazy screens", () => {
     expect(errorSpy.mock.calls.map((c) => String(c[0]).slice(0, 200))).toEqual([]);
   });
 
-  it("folded screens stay reachable as host sub-views (ROUTE_ALIASES)", async () => {
+  it("folded screens stay reachable as host sub-views or sections (ROUTE_ALIASES)", async () => {
     vi.useFakeTimers();
     render(<App />);
     await flush();
-    for (const [host, view] of [["Chat & Agents", "Activity"], ["Chat & Agents", "Lists"], ["Chat & Agents", "Crews"], ["Mind–Body", "Fitness"], ["Mind–Body", "Neuro"], ["Mind–Body", "Neuro history"], ["Business", "Revenue"]] as const) {
+    for (const [host, view] of [["Agents", "Crews"], ["Mind–Body", "Fitness"], ["Mind–Body", "Neuro"], ["Mind–Body", "Neuro history"], ["Business", "Revenue"]] as const) {
       go(host);
       await settle(host);
       fireEvent.click(within(field(host)!).getByRole("radio", { name: view }));
@@ -103,6 +103,12 @@ describe("lazy screens", () => {
       await vi.waitFor(() => expect(within(f).getByRole("radio", { name: view }), `${host} › ${view}`).toHaveAttribute("aria-checked", "true"));
       await settle(host);
       expect(f.textContent!.trim().length, `${host} › ${view}: blank`).toBeGreaterThan(20);
+    }
+    // design-1110b B: Activity is a section of Agents, Lists of Today, Voice of Settings.
+    for (const [host, section] of [["Agents", "activity"], ["Settings", "voice"]] as const) {
+      go(host);
+      await settle(host);
+      await vi.waitFor(() => expect(field(host)!.querySelector(`#${section}.page-section`), `${host} › ${section}`).not.toBeNull());
     }
     expect(errorSpy.mock.calls.map((c) => String(c[0]).slice(0, 200))).toEqual([]);
   });

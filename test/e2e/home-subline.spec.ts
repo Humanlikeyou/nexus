@@ -9,7 +9,7 @@ test("(h) Home subline: greeting, status from data, and today's date from the cl
   expect(today).toMatch(/^[A-Z][a-z]+day, [A-Z][a-z]{2} \d{1,2}$/);
   const line = home.locator(".home__summary");
   await expect(line).toHaveText(new RegExp(`^(Amara has \\d+ actions? waiting for approval|Amara is tracking \\d+ priorit(y|ies) today|All clear\\. Amara is standing by\\.) · ${today}$`));
-  await expect(home.locator(".page-hero__statement")).toHaveText(/^Good (morning|afternoon|evening), Taisun$/);
+  await expect(home.locator(".home .page-hero__statement")).toHaveText(/^Good (morning|afternoon|evening), Taisun$/);
 });
 
 // screen-specs › Command center feel: one 28px status strip under the subline, plain text, no Badges.

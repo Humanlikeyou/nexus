@@ -5,7 +5,7 @@ import { Badge, Button, InsetGroup, ListRow, More, PageHero } from "../ui";
 import { activityBadge } from "./businessTone";
 import "./ActivityScreen.css";
 
-/** Chat & Agents › Activity (screen-specs §10): delivery outbox health + Amara's operation log.
+/** Agents › Activity (screen-specs §10): delivery outbox health + Amara's operation log.
  *  SignalStream (the decorative sci-fi line) is retired. */
 function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }) {
   return (

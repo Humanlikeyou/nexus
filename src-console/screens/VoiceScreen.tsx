@@ -65,7 +65,7 @@ function TurnRow({ turn }: { turn: VoiceTurn }) {
   );
 }
 
-/** Chat & Agents › Voice: the Amara Voice loop's live state, start/stop, her voice, and recent spoken turns. */
+/** Settings › Voice: the Amara Voice loop's live state, start/stop, her voice, and recent spoken turns. */
 export function VoiceField() {
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);

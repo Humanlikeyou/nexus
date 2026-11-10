@@ -1,9 +1,9 @@
-import { activeField, expect, navButton, openApp, openView, routeSettled, test, openMore } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, openHomeChat, openView, routeSettled, test, openMore } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 const SECTIONS: { label: string; h1: RegExp }[] = [
   { label: "Today", h1: /^Command Center$/ },
-  { label: "Chat & Agents", h1: /^Amara$/ },
+  { label: "Agents", h1: /^Agents$/ },
   { label: "Mind–Body", h1: /^Mind–Body$/ },
   { label: "Business", h1: /^Business$/ },
   { label: "Settings", h1: /^Settings$/ },
@@ -24,10 +24,7 @@ test.describe("sections", () => {
 test.describe("sub-views and anchors", () => {
   type Field = ReturnType<typeof activeField>;
   const SUBVIEWS: [string, string, (f: Field) => Promise<void>][] = [
-    ["Chat & Agents", "Activity", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Activity")],
-    ["Chat & Agents", "Lists", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Lists")],
-    ["Chat & Agents", "Crews", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Crews")],
-    ["Chat & Agents", "Voice", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Voice"); await f.getByText("Her voice, process and recent turns").click(); await expect(f.getByRole("list", { name: "Recent turns" })).toBeVisible(); }],
+    ["Agents", "Crews", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Crews")],
     ["Mind–Body", "Fitness", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Fitness")],
     ["Mind–Body", "Neuro", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro")],
     ["Mind–Body", "Neuro history", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro history"); await expect(f.getByRole("list", { name: "History" })).toBeVisible(); }],
@@ -49,6 +46,10 @@ test.describe("sub-views and anchors", () => {
     ["Settings", "Settings › Devices", "#devices"],
     ["Settings", "About Amara OS", "#about"],
     ["Today", "Home › Goals", "#goals"],
+    // design-1110b B: the folded screens are sections of their new host.
+    ["Today", "Today › Lists", "#lists"],
+    ["Agents", "Agents › Activity", "#activity"],
+    ["Settings", "Settings › Voice", "#voice"],
   ];
   for (const [host, command, anchor] of ANCHORS) {
     test(`(b) ${command} scrolls ${anchor} into view`, async ({ page, theme, consoleErrors }) => {
@@ -139,7 +140,8 @@ test.describe("(d) ⌘K palette", () => {
     await expect(options).toHaveCount(1);
     await expect(options.first()).toContainText("Ask Amara: “zz no such command”");
     await page.keyboard.press("Enter");
-    await expect(activeField(page, "Chat & Agents").locator("#chat-composer")).toHaveValue("zz no such command");
+    await expect(page.locator(".landing .hchat #chat-composer")).toHaveValue("zz no such command");
+    await expect(page.locator(".landing .hchat #chat-composer")).toBeFocused();
   });
 
   test("Esc closes", async ({ page, theme }) => {
@@ -166,10 +168,10 @@ test("(d) one content edge: h1s, Chat's first column and the sub-view bar line u
     return (await target.boundingBox())!.x;
   };
   const home = await left("Today");
-  for (const label of ["Mind–Body", "Fitness", "Neuro", "Activity", "Lists", "Crews", "Voice", "Business", "Revenue", "Smart home", "Chat & Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
+  for (const label of ["Mind–Body", "Fitness", "Neuro", "Crews", "Business", "Revenue", "Smart home", "Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
 
   // Sub-view bars (Mind–Body, Chat/Activity/Crews, Business) sit on the same edge.
-  for (const label of ["Mind–Body", "Chat & Agents", "Business"]) {
+  for (const label of ["Mind–Body", "Agents", "Business"]) {
     await navButton(page, label).click();
     const bar = activeField(page, label).locator(".subview-bar [role=radiogroup]").first();
     if (await bar.count()) expect((await bar.boundingBox())!.x, `${label} bar`).toBeCloseTo(home, 0);
@@ -188,8 +190,7 @@ test("(e) Chat: composer ≥ 12px above the window bottom, no horizontal scroll 
   for (const size of [{ width: 1440, height: 900 }, { width: 900, height: 620 }]) {
     await page.setViewportSize(size);
     await openApp(page, { theme });
-    await navButton(page, "Chat & Agents").click();
-    const composer = activeField(page, "Chat & Agents").locator(".chat-screen__composer");
+    const composer = (await openHomeChat(page)).locator(".chat-screen__composer");
     await composer.waitFor();
     const box = (await composer.boundingBox())!;
     expect(size.height - (box.y + box.height), `${size.width}×${size.height}`).toBeGreaterThanOrEqual(12);

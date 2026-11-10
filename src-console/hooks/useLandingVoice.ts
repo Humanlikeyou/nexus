@@ -4,7 +4,7 @@ import { LENS_LABEL } from "../components/AmaraLens/AmaraLens";
 import type { VoiceStatus } from "../types";
 import { type AmaraVoiceReason, type AmaraVoiceState, useAmaraVoice } from "./useAmaraVoice";
 
-/** Same process check as Chat & Agents › Voice; slower because this page stays open for long periods. */
+/** Same process check as Settings › Voice; slower because this page stays open for long periods. */
 export const LANDING_STATUS_POLL_MS = 2000;
 export const LANDING_STATUS_TIMEOUT_MS = 4000;
 /** One missed poll keeps the last answer; the second one means the service can't be reached. */

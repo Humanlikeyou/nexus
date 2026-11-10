@@ -24,3 +24,8 @@
 .quiet-more__chevron { width: 14px; height: 14px; flex: none; transition: transform var(--dur-fast) var(--ease-standard); }
 .quiet-more[open] .quiet-more__chevron { transform: rotate(90deg); }
 .quiet-more__body { display: grid; gap: var(--space-8); padding-top: var(--space-6); }
+
+/* design-1110b B: a folded screen shown as a section of its host page. One hairline above, no second page inset. */
+.page-section { width: 100%; max-width: var(--page-column, 1120px); margin-inline: auto; padding: var(--space-6) 0 var(--space-10); border-top: 1px solid var(--separator); scroll-margin-top: var(--space-6); }
+.page-section > .page-inset, .page-section > .settings, .page-section > div { padding-top: 0; padding-bottom: 0; max-width: none; }
+.page-hero--section .page-hero__statement { font-size: var(--text-title2, 22px); }

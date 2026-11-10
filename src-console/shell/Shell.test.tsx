@@ -32,7 +32,7 @@ describe("Sidebar", () => {
     window.localStorage.setItem("nexus.sidebarWidth", "999");
     render(<Sidebar active="chat" onSelect={() => {}} data={online} />);
     expect(screen.getByRole("separator")).toHaveAttribute("aria-valuenow", "280");
-    expect(screen.getByRole("button", { name: /Chat & Agents/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: /^Agents/ })).toHaveAttribute("aria-current", "page");
   });
 
   it("shows ⌘-number hints instead of uppercase signal labels", () => {

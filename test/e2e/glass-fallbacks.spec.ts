@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import { emulateDisplay as emulate, expect, openApp, openToday, openView, reducedTransparency, test, type Theme, openMore } from "./fixtures/tauri-mock";
 
 // Glass fallbacks and contrast (ported from the Oct 30 /tmp/glass review specs).
-const SECTIONS = ["Today", "Chat & Agents", "Mind–Body", "Fitness", "Neuro", "Business", "Settings"];
+const SECTIONS = ["Today", "Agents", "Mind–Body", "Fitness", "Neuro", "Business", "Settings"];
 
 async function openSection(page: Page, theme: Theme, label: string) {
   await openApp(page, { theme, reduceMotion: false });
@@ -51,13 +51,13 @@ for (const label of SECTIONS) {
   });
 }
 
-test("composer: blurred by default, solid under reduced transparency and reduced motion", async ({ page, theme }) => {
-  const composer = () => page.locator("form.chat-screen__composer").first();
+test("Home chat composer: solid in every mode (nothing scrolls under it), so no fallback is needed", async ({ page, theme }) => {
+  const composer = () => page.locator(".hchat form.chat-screen__composer").first();
   const bf = () => composer().evaluate((el) => getComputedStyle(el).backdropFilter);
   await emulate(page, theme, "no-preference");
-  await openSection(page, theme, "Chat & Agents");
+  await openApp(page, { theme, reduceMotion: false });
   await expect(composer()).toBeVisible();
-  expect(await bf()).not.toBe("none");
+  expect(await bf()).toBe("none");
   await emulate(page, theme, "reduce");
   expect(await bf()).toBe("none");
   await emulate(page, theme, "no-preference", "reduce");
@@ -81,10 +81,11 @@ test("palette dialog: blurred by default, solid under reduced transparency and r
 });
 
 test("worst-case backdrop: text on glass chrome is at least 4.5:1 (3:1 large)", async ({ page, theme }) => {
+  // design-1110b A: the chat composer (the last blurred page chrome) moved to the solid Home chat, so
+  // every section is measured: whatever still blurs must hold 4.5:1 over white, black and the wallpaper.
   await emulate(page, theme, "no-preference");
-  await openSection(page, theme, "Chat & Agents"); // the composer is the page chrome that still blurs
-  await page.waitForTimeout(300);
-  const res = await page.evaluate(() => {
+  await openApp(page, { theme, reduceMotion: false });
+  const measure = () => page.evaluate(() => {
     const parse = (s: string) => (s.match(/[\d.]+/g) || []).map(Number);
     const lum = ([r, g, b]: number[]) => {
       const f = (c: number) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
@@ -115,13 +116,18 @@ test("worst-case backdrop: text on glass chrome is at least 4.5:1 (3:1 large)", 
     }
     return { surfaces: glass.length, fails };
   });
-  expect(res.surfaces).toBeGreaterThan(0);
-  expect(res.fails).toEqual([]);
+  const fails: string[] = [];
+  for (const label of SECTIONS) {
+    await openView(page, label);
+    await page.waitForTimeout(300);
+    fails.push(...(await measure()).fails.map((f) => `${label}: ${f}`));
+  }
+  expect(fails).toEqual([]);
 });
 
 test("segmented control: neutral selected pill, focus ring separated from it", async ({ page, theme }) => {
   await emulate(page, theme, "no-preference");
-  await openSection(page, theme, "Chat & Agents");
+  await openSection(page, theme, "Agents");
   const group = page.getByRole("radiogroup").first();
   const checked = group.locator(".ui-segmented__segment[data-checked]");
   const label = await page.evaluate(() => {

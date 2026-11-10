@@ -1,5 +1,5 @@
 import { Heart } from "lucide-react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { LANDING_ENTRIES } from "../app/routes";
 import { AmaraLens, AmaraVoiceAnnouncer } from "../components/AmaraLens/AmaraLens";
 import { freshBrief, usableWeather, useHomeBrief } from "../hooks/useHomeBrief";
@@ -67,10 +67,10 @@ function Welcome() {
  * it stand in for the sidebar. Always dark in both themes: the lens is an object and its glow only
  * reads against the emerald field (LandingScreen.css).
  */
-export function LandingField({ onSelect, onToday }: { onSelect: (id: ModuleId) => void; onToday: () => void }) {
+export function LandingField({ onSelect, onToday, chat, chatExpanded = false }: { onSelect: (id: ModuleId) => void; onToday: () => void; chat?: ReactNode; chatExpanded?: boolean }) {
   const voice = useLandingVoice();
   return (
-    <div className="landing" data-voice={voice.state}>
+    <div className="landing" data-voice={voice.state} data-chat={chat ? (chatExpanded ? "expanded" : "collapsed") : undefined}>
       <div className="landing__drag" data-tauri-drag-region />
       <h1 className="ui-visually-hidden">Command Center</h1>
       <Wordmark size="landing" className="landing__wordmark" />
@@ -79,6 +79,8 @@ export function LandingField({ onSelect, onToday }: { onSelect: (id: ModuleId) =
       <div className="landing__lens"><AmaraLens state={voice.state} size={320} decorative /></div>
       <p className="landing__line">{voice.line}</p>
       <AmaraVoiceAnnouncer message={voice.line} />
+      {/* design-1110b A: the chat lives here, directly under the lens. */}
+      {chat}
       <nav className="landing__nav" aria-label="Amara OS navigation">
         {LANDING_ENTRIES.map((entry) => {
           const Icon = entry.icon;

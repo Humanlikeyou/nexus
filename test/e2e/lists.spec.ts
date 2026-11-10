@@ -5,17 +5,19 @@ import { FOLLOWUPS, responses, type Responses } from "./fixtures/snapshot";
 
 const open = async (page: Page, theme: Theme, data: Responses = responses()) => {
   await openApp(page, { theme, data });
-  const field = await openView(page, "Lists");
-  await expect(field.getByRole("heading", { level: 1 })).toHaveText("Lists");
+  // design-1110b B: Lists is a section of Today.
+  const field = (await openView(page, "Lists")).locator("#lists");
+  await expect(field.getByRole("heading", { level: 2 }).first()).toHaveText("Lists");
   return field;
 };
 const callsOf = (page: Page, cmd: string) => page.evaluate((name) => (window as unknown as { __E2E_CALLS: { cmd: string; args?: unknown }[] }).__E2E_CALLS.filter((c) => c.cmd === name).map((c) => c.args), cmd);
 const refocus = (page: Page) => page.evaluate(() => { window.dispatchEvent(new Event("focus")); });
 
-test.describe("Chat & Agents › Lists", () => {
+test.describe("Today › Lists", () => {
   test("shows the three sections; the other sub-views stay in place", async ({ page, theme, consoleErrors }) => {
     const field = await open(page, theme);
-    await expect(field.getByRole("radio")).toHaveText(["Chat", "Activity", "Lists", "Crews", "Voice"]);
+    // design-1110b B: Lists is a section of Today, under the dashboard.
+    await expect(field).toHaveClass(/page-section/);
     await openMore(page);
     for (const name of ["Open", "Done recently", "Not mentioning"]) await expect(field.getByRole("heading", { level: 2, name })).toBeVisible();
     await expect(field.getByRole("list", { name: "Open items" }).getByRole("listitem")).toHaveCount(4);
@@ -30,7 +32,7 @@ test.describe("Chat & Agents › Lists", () => {
     await page.keyboard.press("Meta+k");
     await page.getByRole("combobox", { name: "Search or ask Amara" }).fill("Lists");
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("radio", { name: "Lists" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator("#lists.page-section")).toBeInViewport();
   });
 
   test("empty states", async ({ page, theme }) => {

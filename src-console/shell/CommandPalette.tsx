@@ -16,6 +16,9 @@ export function paletteCommands(extra: PaletteCommand[] = []): PaletteCommand[] 
   subs.push(
     { id: "terrance:today", label: `Home › ${TODAY_LABEL}`, route: TODAY_ROUTE },
     { id: "terrance:goals", label: "Home › Goals", route: { id: "terrance", view: "goals" } },
+    { id: "terrance:lists", label: `${TODAY_LABEL} › Lists`, route: { id: "terrance", view: "lists" } },
+    { id: "chat:activity", label: "Agents › Activity", route: { id: "chat", view: "activity" } },
+    { id: "settings:voice", label: "Settings › Voice", route: { id: "settings", view: "voice" } },
     { id: "settings:devices", label: "Settings › Devices", route: { id: "settings", view: "devices" } },
     { id: "settings:about", label: "About Amara OS", route: { id: "settings", view: "about" } },
   );
@@ -32,7 +35,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onNavigate: (route: Route) => void;
-  /** No-match fallback: open Chat & Agents with the text pre-filled. */
+  /** No-match fallback: open the Home chat with the text pre-filled. */
   onAsk: (text: string) => void;
   extra?: PaletteCommand[];
 };

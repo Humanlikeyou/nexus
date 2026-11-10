@@ -1,15 +1,33 @@
 import { ChevronRight } from "lucide-react";
-import type { ReactNode } from "react";
+import { Suspense, createContext, useContext, type ReactNode } from "react";
 import "./Quiet.css";
 
 /**
  * The page language, taken from the lens page: one statement, a handful of things, and everything
  * else one quiet step away. A page says what matters in a sentence before it shows any data.
  */
-export function PageHero({ title, statement, detail }: { title: ReactNode; statement: ReactNode; detail?: ReactNode }) {
+/** True inside a PageSection: a folded screen's hero becomes a section heading (h2), not a second h1. */
+const SectionDepth = createContext(false);
+
+/**
+ * design-1110b B: a screen folded into another page as a section (Activity in Agents, Lists in Today,
+ * Voice in Settings). The id is the anchor its old route scrolls to.
+ */
+export function PageSection({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <header className="page-hero">
-      <h1 className="page-hero__title">{title}</h1>
+    <SectionDepth.Provider value={true}>
+      {/* Its own boundary: a section's lazy chunk never suspends (and blanks) the host page. */}
+      <section id={id} className="page-section" data-section={id}><Suspense fallback={null}>{children}</Suspense></section>
+    </SectionDepth.Provider>
+  );
+}
+
+export function PageHero({ title, statement, detail }: { title: ReactNode; statement: ReactNode; detail?: ReactNode }) {
+  const inSection = useContext(SectionDepth);
+  const Title = inSection ? "h2" : "h1";
+  return (
+    <header className={inSection ? "page-hero page-hero--section" : "page-hero"}>
+      <Title className="page-hero__title">{title}</Title>
       <p className="page-hero__statement">{statement}</p>
       {detail && <p className="page-hero__detail">{detail}</p>}
     </header>

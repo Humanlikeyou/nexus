@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { activeField, emitTauriEvent, expect, navButton, openApp, test, openMore } from "./fixtures/tauri-mock";
+import { activeField, emitTauriEvent, expect, navButton, openApp, test, openMore, openHomeChat } from "./fixtures/tauri-mock";
 import { HA_ENTITIES, responses } from "./fixtures/snapshot";
 
 /** Smart home (Home Assistant) + chat pre-route, all ha_* commands mocked. HA_SHOTS=<dir> saves screenshots. */
@@ -54,8 +54,7 @@ test.describe("Smart home", () => {
 
   test("chat pre-route: HA match shows a Home badge", async ({ page, theme }) => {
     await openApp(page, { theme, data: { ...responses(), ha_conversation: { kind: "match", speech: "Turned on the desk lamp." } } });
-    await navButton(page, "Chat & Agents").click();
-    const field = activeField(page, "Chat & Agents");
+    const field = await openHomeChat(page);
     await field.getByLabel("Message Amara").fill("turn on the desk lamp");
     await field.getByLabel("Message Amara").press("Enter");
     const list = field.getByRole("list", { name: "Messages" });

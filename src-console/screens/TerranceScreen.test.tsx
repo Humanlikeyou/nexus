@@ -71,7 +71,7 @@ describe("Home (TerranceField)", () => {
     // Recovery band word is colored by band; header status is sentence-case text, not a badge.
     expect(screen.getByText("High")).toHaveAttribute("data-band", "high");
     // Every linkable card uses the same "Open ›" header accessory; no in-body buttons.
-    for (const name of ["Open Fitness", "Open insights in Fitness", "Open Chat & Agents", "Open Chat", "Open Neuro", "Open Revenue"]) {
+    for (const name of ["Open Fitness", "Open insights in Fitness", "Open Agents", "Open chat on Home", "Open Neuro", "Open Revenue"]) {
       expect(screen.getByRole("button", { name })).toHaveTextContent("Open");
     }
     expect(screen.getByText(/Scheduler · next consolidation 2h 14m · next reasoning 6h 12m/)).toBeInTheDocument();
@@ -182,7 +182,7 @@ describe("Home status strip (Command center feel)", () => {
     expect([recent.tone, recent.live]).toEqual(["success", false]);
   });
 
-  it("deep links: Agents → Chat & Agents, Scheduler → Settings, NOOP → Fitness", () => {
+  it("deep links: Agents → Agents, Scheduler → Settings, NOOP → Fitness", () => {
     const onNavigate = vi.fn();
     render(<TerranceField data={fresh} now={NOW} scheduler={running} onNavigate={onNavigate} />);
     for (const key of ["agents", "scheduler", "noop"]) fireEvent.click(segment(key));

@@ -1,4 +1,4 @@
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, test, openView, openHomeChat } from "./fixtures/tauri-mock";
 import type { Page } from "@playwright/test";
 
 /** Amara speaking lens (spec-amara-speaking-hal.md). Events are mocked; Rust owns the real emit. LENS_SHOTS=<dir> saves screenshots. */
@@ -13,9 +13,7 @@ const level = (page: Page, rms: number) => emitNow(page, LEVEL, { rms, peak: rms
 async function openVoice(page: Page, theme: string, reducedMotion?: "reduce") {
   if (reducedMotion) await page.emulateMedia({ reducedMotion });
   await openApp(page, { theme: theme as never });
-  await navButton(page, "Chat & Agents").click();
-  const field = activeField(page, "Chat & Agents");
-  await field.getByRole("radio", { name: "Voice" }).click();
+  const field = (await openView(page, "Voice")).locator("#voice");
   const lens = field.locator('.amara-lens[data-size="160"]');
   await expect(lens).toHaveAttribute("data-state", "idle");
   return { field, lens };
@@ -59,19 +57,22 @@ const scaleOf = (lens: import("@playwright/test").Locator) => lens.evaluate((el)
 
 test("Lens: 2s without levels decays the meter but keeps speaking; ~12s without state falls back to idle", async ({ page, theme }) => {
   const { lens } = await openVoice(page, theme);
-  await page.getByRole("radio", { name: "Chat" }).click();
-  const header = page.locator(".chat-screen__header .amara-lens");
-  await expect(header).toHaveCount(0);
+  // design-1110b A: on the Home chat, the reply being spoken is marked while Amara speaks.
+  const chat = await openHomeChat(page, { expand: true });
+  const header = chat.locator(".hchat__head .amara-lens");
+  const spoken = chat.locator("li.chat-message[data-speaking]");
+  await expect(header).toHaveAttribute("data-size", "44");
+  await expect(spoken).toHaveCount(0);
   await state(page, "speaking");
   for (let i = 0; i < 6; i++) { await level(page, 1); await page.waitForTimeout(33); }
-  await expect(header).toHaveCount(1);
-  await expect(header).toHaveAttribute("data-size", "28");
+  await expect(spoken).toHaveCount(1);
+  await expect(header).toHaveAttribute("data-state", "speaking");
   await page.waitForTimeout(2300);
   await expect.poll(() => scaleOf(header)).toBeLessThan(1.01);
-  await expect(header).toHaveCount(1); // state holds between heartbeats
+  await expect(spoken).toHaveCount(1); // state holds between heartbeats
   await page.clock.fastForward(12_500); // missed heartbeats
-  await expect(header).toHaveCount(0);
-  await page.getByRole("radio", { name: "Voice" }).click();
+  await expect(spoken).toHaveCount(0);
+  await openView(page, "Voice");
   await expect(lens).toHaveAttribute("data-state", "idle");
 });
 
@@ -86,7 +87,7 @@ test("Lens: idle with model_loading shows a loading note; bridge starts with the
   await expect(field.getByText("Loading voice model…")).toBeVisible();
   await state(page, "listening");
   await expect(field.getByText("Loading voice model…")).toHaveCount(0);
-  await navButton(page, "Settings").click();
+  await navButton(page, "Agents").click();
   await expect.poll(calls).toEqual([...opened, "voice_bridge_stop"]);
 });
 

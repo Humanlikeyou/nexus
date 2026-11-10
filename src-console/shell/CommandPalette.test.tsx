@@ -6,9 +6,9 @@ describe("⌘K command palette", () => {
   it("lists the 6 sections with ⌘1–6 and the sub-views", () => {
     const cmds = paletteCommands();
     expect(cmds.slice(0, 6).map((c) => c.hint)).toEqual(["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6"]);
-    expect(cmds.map((c) => c.label)).toEqual(expect.arrayContaining(["Chat & Agents › Activity", "Chat & Agents › Crews", "Mind–Body › Fitness", "Mind–Body › Neuro", "Mind–Body › Neuro history", "Chat & Agents › Lists", "Business › Revenue", "Settings › Devices", "About Amara OS"]));
+    expect(cmds.map((c) => c.label)).toEqual(expect.arrayContaining(["Agents › Activity", "Agents › Crews", "Mind–Body › Fitness", "Mind–Body › Neuro", "Mind–Body › Neuro history", "Today › Lists", "Settings › Voice", "Business › Revenue", "Settings › Devices", "About Amara OS"]));
     expect(filterCommands(cmds, "devi").map((c) => c.id)).toEqual(["settings:devices"]);
-    expect(filterCommands(cmds, "crews").map((c) => c.label)).toContain("Chat & Agents › Crews");
+    expect(filterCommands(cmds, "crews").map((c) => c.label)).toContain("Agents › Crews");
   });
 
   it("navigates with arrows + Return and closes", () => {

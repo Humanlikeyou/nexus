@@ -1,0 +1,3 @@
+/* design-1110b B3: Agents overview. Same page language as every other page: hero, then inset groups. */
+.agents { display: grid; align-content: start; }
+.agents__unavailable { display: flex; justify-content: flex-end; }

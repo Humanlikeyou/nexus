@@ -1,7 +1,7 @@
-import { activeField, expect, navButton, openApp, test } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, test, openHomeChat } from "./fixtures/tauri-mock";
 import { NOW, responses } from "./fixtures/snapshot";
 
-/** Chat & Agents › Chat: Amara over Hermes, Fast/Deep badge, Deep toggle. AMARA_SHOTS=<dir> saves screenshots. */
+/** Home chat (design-1110b A): Amara over Hermes, Fast/Deep badge, Deep toggle. AMARA_SHOTS=<dir> saves screenshots. */
 const shot = async (page: import("@playwright/test").Page, name: string) => {
   if (process.env.AMARA_SHOTS) await page.screenshot({ path: `${process.env.AMARA_SHOTS}/${name}.png`, fullPage: true });
 };
@@ -28,8 +28,7 @@ const routed = () => {
 
 test("Chat: Amara's replies carry the router tier; Deep toggle sends a deep turn", async ({ page, theme, consoleErrors }) => {
   await openApp(page, { theme, data: routed() });
-  await navButton(page, "Chat & Agents").click();
-  const field = activeField(page, "Chat & Agents");
+  const field = await openHomeChat(page);
   const list = field.getByRole("list", { name: "Messages" });
   await expect(list.getByLabel("Answered on the Fast tier")).toHaveText("Fast");
   await expect(list.getByLabel("Answered on the Deep tier")).toHaveText("Deep");
@@ -52,8 +51,7 @@ test("Chat: no badge and Deep disabled while Hermes is not on the Amara Router",
   data.get_terrence_runtime_health = { ...(data.get_terrence_runtime_health as object), routedViaRouter: false };
   data.list_terrence_interactions = (data.list_terrence_interactions as Array<Record<string, unknown>>).map((i) => ({ ...i, tier: null }));
   await openApp(page, { theme, data });
-  await navButton(page, "Chat & Agents").click();
-  const field = activeField(page, "Chat & Agents");
+  const field = await openHomeChat(page);
   await expect(field.getByText("Two things: finish the release notes")).toBeVisible();
   await expect(field.getByRole("list", { name: "Messages" }).getByText(/^(Fast|Deep)$/)).toHaveCount(0);
   await expect(field.getByRole("button", { name: "Deep" })).toHaveAttribute("aria-disabled", "true");

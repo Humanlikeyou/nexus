@@ -206,7 +206,7 @@ export type TerranceFieldProps = {
   /** Test seams. */
   now?: number;
   scheduler?: SchedulerView;
-  // Legacy chat props: the conversation moved to Chat & Agents. Still accepted so App keeps compiling.
+  // Legacy chat props: the conversation moved to the Home chat (design-1110b A). Still accepted so App keeps compiling.
   messages?: ConversationMessage[];
   sending?: boolean;
   onSend?: (message: string) => Promise<void>;
@@ -332,7 +332,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
       )}
       </section>
 
-      <Card title="Priorities" accessory={<OpenLink to="chat" label="Open Chat" onNavigate={onNavigate} />}>
+      <Card title="Priorities" accessory={<OpenLink to="landing" label="Open chat on Home" onNavigate={onNavigate} />}>
         {priorities.length === 0
           ? <p className="home__note">No current priorities</p>
           : <Lines label="Priorities">{priorities.slice(0, 3).map((p) => <Line key={`${p.sourceKind}-${p.sourceId}`} title={p.title} trailing={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{humanize(p.sourceStatus)}</Badge>} />)}</Lines>}
@@ -358,7 +358,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
         </Card>
       </div>
 
-      <Card title="Agents" accessory={<OpenLink to="chat" label="Open Chat & Agents" onNavigate={onNavigate} />}>
+      <Card title="Agents" accessory={<OpenLink to="chat" label="Open Agents" onNavigate={onNavigate} />}>
         {down("get_terrence_runtime_health")
           ? <Unavailable label="Amara runtime" onRetry={onRetry} />
           : (

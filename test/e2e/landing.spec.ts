@@ -17,7 +17,7 @@ const emit = (page: Page, event: string, payload: Record<string, unknown>) =>
   page.evaluate(([e, p]) => (window as unknown as { __E2E_EMIT: (e: unknown, p: unknown) => void }).__E2E_EMIT(e, { ts: Date.now(), ...p }), [event, payload] as const);
 const lens = (page: Page) => page.locator('.amara-lens[data-size="320"]');
 const line = (page: Page) => page.locator(".landing__line");
-const NAV = ["Today", "Chat & Agents", "Mind–Body", "Business", "Settings", "Smart home"];
+const NAV = ["Today", "Agents", "Mind–Body", "Business", "Settings", "Smart home"];
 
 /** e2e Chromium reports reduced transparency; force it off so shots show the real look. */
 async function realLook(page: Page, theme: Theme) {
@@ -120,8 +120,11 @@ test("Landing: every button is keyboard reachable with the emerald focus ring", 
   const buttons = page.locator(".landing__nav").getByRole("button");
   // WebKit follows macOS: plain Tab skips buttons unless Keyboard navigation is on; Option+Tab always reaches them.
   const next = browserName === "webkit" ? "Alt+Tab" : "Tab";
-  for (const name of NAV) {
-    await page.keyboard.press(next);
+  // design-1110b A: the Home chat sits between the lens and the buttons, so its controls come first in Tab order.
+  for (let i = 0; i < 8 && !(await buttons.first().evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press(next);
+  await expect(buttons.first()).toBeFocused();
+  for (const [i, name] of NAV.entries()) {
+    if (i > 0) await page.keyboard.press(next);
     await expect(buttons.filter({ hasText: name })).toBeFocused();
   }
   const ring = await buttons.last().evaluate((el) => { const s = getComputedStyle(el); return `${s.outlineStyle} ${s.outlineWidth} ${s.outlineOffset} ${s.outlineColor}`; });
