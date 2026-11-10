@@ -382,10 +382,12 @@ export function ChatField({
               icon={Brain}
               className="chat-composer__deep"
               aria-pressed={deep && deepAvailable}
-              disabled={!deepAvailable}
-              title={deepAvailable ? "Send to Amara's deep model" : undefined}
-              onClick={() => setDeep((on) => !on)}
+              aria-disabled={deepAvailable ? undefined : true}
+              aria-describedby={deepAvailable ? undefined : "chat-deep-reason"}
+              title={deepAvailable ? "Send to Amara's deep model" : "Deep needs the Amara Router"}
+              onClick={() => { if (deepAvailable) setDeep((on) => !on); }}
             >Deep</Button>
+            {!deepAvailable && <span id="chat-deep-reason" className="ui-visually-hidden">Deep needs the Amara Router.</span>}
           </span>
           <label htmlFor="chat-composer" className="ui-visually-hidden">Message Amara</label>
           <textarea

@@ -1,5 +1,5 @@
 import { RefreshCw } from "lucide-react";
-import { dateTime, humanize, plainText, shortDuration } from "../lib/format";
+import { dateTime, humanize, plainText, sentenceStart, shortDuration } from "../lib/format";
 import type { SystemSnapshot } from "../types";
 import { Badge, Button, InsetGroup, ListRow, More, PageHero } from "../ui";
 import { activityBadge } from "./businessTone";
@@ -27,7 +27,7 @@ export function ActivityField({ data, onRetry }: { data: SystemSnapshot; onRetry
     const detail = item.detail || item.outcome || "";
     const badge = activityBadge(item.status);
     return (
-      <ListRow key={item.id} title={plainText(item.name.replace(/_/g, " "))}
+      <ListRow key={item.id} title={sentenceStart(plainText(item.name.replace(/_/g, " ")))}
         subtitle={<span className="activity__clamp" title={detail || undefined}>{humanize(item.type)}{detail ? ` · ${detail}` : ""}</span>}
         value={`${shortDuration(item.durationMs)} · ${dateTime(item.startedAt)}`}
         accessory={<Badge tone={badge.tone}>{badge.label}</Badge>} />

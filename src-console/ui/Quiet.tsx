@@ -30,7 +30,7 @@ export function Line({ title, detail, trailing }: { title: ReactNode; detail?: R
 }
 
 /** Up to four numbers set in a row: no tiles, no borders. */
-export function Figures({ children }: { children: ReactNode }) { return <dl className="quiet-figures">{children}</dl>; }
+export function Figures({ children, className }: { children: ReactNode; className?: string }) { return <dl className={className ? `quiet-figures ${className}` : "quiet-figures"}>{children}</dl>; }
 export function Figure({ label, value }: { label: ReactNode; value: ReactNode }) {
   return <div className="quiet-figure"><dt>{label}</dt><dd>{value}</dd></div>;
 }

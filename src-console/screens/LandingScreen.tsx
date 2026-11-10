@@ -18,12 +18,13 @@ const formatDate = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "l
 /** Live heart rate from NOOP, with the last 89 seconds behind it. With no live reading it's all gone. */
 function HeartRate() {
   const heart = useLiveHeartRate();
-  if (!heart) return null;
+  const beat = beatSeconds(heart?.bpm);
+  if (!heart || beat == null) return null;
   const { paths, dot } = traceShape(heart.samples, heart.at);
   return (
     <div className="landing__heart-rate" role="img" aria-label={`Heart rate ${heart.bpm} beats per minute`}>
       <p className="landing__pulse">
-        <span className="landing__heart" style={{ "--landing-beat": `${beatSeconds(heart.bpm)}s` } as CSSProperties}><Heart size={13} fill="currentColor" aria-hidden="true" /></span>
+        <span className="landing__heart" style={{ "--landing-beat": `${beat}s` } as CSSProperties}><Heart size={13} fill="currentColor" aria-hidden="true" /></span>
         <span className="landing__bpm">{heart.bpm}</span>
         <span className="landing__weather-detail">bpm</span>
       </p>

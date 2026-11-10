@@ -158,12 +158,14 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
   if (isLoading) return <FitnessSkeleton />;
 
   const status = STATUS_BADGE[health.status];
+  // "Updated today at 07:30" reads as one fact; "Up to date · Updated 07:30 · 0d old" said it three times (P9.3).
+  const dayWord = (age: number | null | undefined) => age === 0 ? "today at " : age === 1 ? "yesterday at " : age != null ? `${age} days ago at ` : "";
   const heroBand = recoveryBand(health.today?.recovery ?? null);
   const header = (
     <>
       <PageHero title="Fitness"
         statement={failed ? "Out of reach" : heroBand ? `${heroBand.word} recovery` : status.text}
-        detail={failed ? "NOOP health couldn't be read." : [heroBand && status.tone !== "warning" ? status.text : null, health.generatedAt ? `Updated ${clock(health.generatedAt)}` : null, health.dataAgeDays != null ? `${health.dataAgeDays}d old` : null, health.deviceId && health.deviceId !== EMPTY_DEVICE_ID ? health.deviceId : null].filter(Boolean).join(" · ") || undefined} />
+        detail={failed ? "NOOP health couldn't be read." : [heroBand && status.tone !== "warning" && status.tone !== "success" ? status.text : null, health.generatedAt ? `Updated ${dayWord(health.dataAgeDays)}${clock(health.generatedAt)}` : health.dataAgeDays != null ? `${health.dataAgeDays}d old` : null, health.deviceId && health.deviceId !== EMPTY_DEVICE_ID ? health.deviceId : null].filter(Boolean).join(" · ") || undefined} />
       <div className="fitness__header-trailing">
         {failed ? <Badge tone="danger">Unavailable</Badge> : heroBand && status.tone === "warning" && <Badge tone="warning">{status.text}</Badge>}
         {failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}

@@ -63,7 +63,7 @@ describe("Fitness (HealthField)", () => {
 
   it("ready: rings, band word, clamped effort, NOOP band battery, merged sessions, insights", () => {
     const { container } = render(<HealthField data={snap(ready)} />);
-    expect(screen.getByText(/^Up to date · /)).toBeInTheDocument();
+    expect(screen.getByText(/^Updated (today|yesterday|\d+ days ago) at /)).toBeInTheDocument();
     const recovery = screen.getByRole("meter", { name: "Recovery" });
     expect(recovery).toHaveAttribute("aria-valuenow", "74");
     expect(recovery).toHaveAttribute("aria-valuetext", "74%, High");
@@ -106,7 +106,7 @@ describe("Fitness (HealthField)", () => {
     const note = screen.getByRole("note");
     expect(note).toHaveTextContent("Last NOOP data Sep 20.");
     expect(note).toHaveTextContent("Open NOOP to sync.");
-    expect(screen.getByText("38d old", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("Updated 38 days ago at", { exact: false })).toBeInTheDocument();
   });
 
   it("ready data shows no stale note", () => {

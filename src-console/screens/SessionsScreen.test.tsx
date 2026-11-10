@@ -14,7 +14,7 @@ describe("Sessions (Neuro › History)", () => {
   it("shows tiles, the list and the newest session's detail", () => {
     render(<SessionsField data={snap({ sessions: [session("a", { summary: { avg_focus: 61, avg_relaxation: 48, calm_pct: 42.4, time_in_target_pct: null } }), session("b", { device_type: "polar", duration_secs: 20 })] })} />);
     expect(screen.getByText(/^\d+ sessions?, \d+ min$/)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "History" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Neuro history" })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "History" })).toBeInTheDocument();
     const detail = screen.getByRole("region", { name: "Muse session" });
     expect(within(detail).getByText("Saved locally")).toBeInTheDocument();
@@ -33,13 +33,13 @@ describe("Sessions (Neuro › History)", () => {
   it("empty state offers Start session; error state offers Retry", () => {
     const onStart = vi.fn();
     const { unmount } = render(<SessionsField data={snap({ sessions: [] })} onStartSession={onStart} />);
-    expect(screen.getByRole("heading", { level: 1, name: "History" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Neuro history" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start session" }));
     expect(onStart).toHaveBeenCalledTimes(1);
     unmount();
     const onRetry = vi.fn();
     render(<SessionsField data={snap({ sessions: [], unavailableSources: [{ command: "list_sessions", label: "Sensor sessions" }] })} onRetry={onRetry} />);
-    expect(screen.getByRole("heading", { level: 1, name: "History" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Neuro history" })).toBeInTheDocument();
     expect(screen.getByText("Sensor sessions unavailable")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalledTimes(1);

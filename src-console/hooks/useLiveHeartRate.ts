@@ -13,8 +13,10 @@ const MAX_BEAT_S = 2;
 
 export interface HeartTraceView { bpm: number; at: number; samples: HeartSample[] }
 
-/** Seconds per beat for the pulse animation, clamped so a bad value can never strobe. */
-export function beatSeconds(bpm: number): number {
+/** Seconds per beat for the pulse animation, clamped so a bad value can never strobe.
+ *  Null when there's no usable heart rate (missing, zero, negative or NaN), so the caller hides the pulse. */
+export function beatSeconds(bpm: number | null | undefined): number | null {
+  if (typeof bpm !== "number" || !Number.isFinite(bpm) || bpm <= 0) return null;
   return Math.min(MAX_BEAT_S, Math.max(MIN_BEAT_S, 60 / bpm));
 }
 
@@ -48,9 +50,15 @@ export function useLiveHeartRate(): HeartTraceView | null {
   useEffect(() => {
     if (newest == null) return undefined;
     const tick = () => setPlayhead((previous) => nextPlayhead(previous, newest));
+    // The playback clock pauses while the window is hidden and catches up when it's shown again.
+    let timer: number | undefined;
+    const start = () => { if (timer === undefined && !document.hidden) timer = window.setInterval(tick, PLAYBACK_TICK_MS); };
+    const stop = () => { if (timer !== undefined) { window.clearInterval(timer); timer = undefined; } };
+    const onVisibility = () => { if (document.hidden) stop(); else { tick(); start(); } };
     const first = window.setTimeout(tick, 0);
-    const timer = window.setInterval(tick, PLAYBACK_TICK_MS);
-    return () => { window.clearTimeout(first); window.clearInterval(timer); };
+    start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { window.clearTimeout(first); stop(); document.removeEventListener("visibilitychange", onVisibility); };
   }, [newest]);
 
   if (!feed || playhead == null) return null;

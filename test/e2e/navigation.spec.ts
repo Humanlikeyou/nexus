@@ -30,7 +30,7 @@ test.describe("sub-views and anchors", () => {
     ["Chat & Agents", "Voice", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Voice"); await f.getByText("Her voice, process and recent turns").click(); await expect(f.getByRole("list", { name: "Recent turns" })).toBeVisible(); }],
     ["Mind–Body", "Fitness", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Fitness")],
     ["Mind–Body", "Neuro", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro")],
-    ["Mind–Body", "Neuro history", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("History"); await expect(f.getByRole("list", { name: "History" })).toBeVisible(); }],
+    ["Mind–Body", "Neuro history", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro history"); await expect(f.getByRole("list", { name: "History" })).toBeVisible(); }],
     ["Business", "Revenue", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Business")],
   ];
   for (const [host, view, check] of SUBVIEWS) {
@@ -154,7 +154,7 @@ test.describe("(d) ⌘K palette", () => {
 
 /** One left edge (screen-specs › shared container): the content column starts at the same x on
  *  every section. Chat's h1 sits in its middle column, so Chat is measured by its first column;
- *  Settings is a centred 640pt preferences column by design and is pinned separately. */
+ *  Settings shares the same column (design-1110 P14.1). */
 test("(d) one content edge: h1s, Chat's first column and the sub-view bar line up", async ({ page, theme }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openApp(page, { theme });
@@ -175,13 +175,13 @@ test("(d) one content edge: h1s, Chat's first column and the sub-view bar line u
     if (await bar.count()) expect((await bar.boundingBox())!.x, `${label} bar`).toBeCloseTo(home, 0);
   }
   const history = await openView(page, "Neuro history");
-  await expect(history.getByRole("heading", { level: 1 })).toHaveText("History");
+  await expect(history.getByRole("heading", { level: 1 })).toHaveText("Neuro history");
   expect((await history.getByRole("heading", { level: 1 }).boundingBox())!.x).toBeCloseTo(home, 0);
 
-  // Settings: its own centred column.
+  // Settings joins the shared column at the shared header height (design-1110 P14.1).
   await navButton(page, "Settings").click();
   const settings = (await activeField(page, "Settings").getByRole("heading", { level: 1 }).boundingBox())!.x;
-  expect(settings).toBeGreaterThan(home);
+  expect(settings).toBeCloseTo(home, 0);
 });
 
 test("(e) Chat: composer ≥ 12px above the window bottom, no horizontal scroll at minimum width", async ({ page, theme }) => {

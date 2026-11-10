@@ -34,6 +34,8 @@
    * primary), success = grass green (distinct, yellower), warning = copper-amber, danger = warm red = destructive. */
   --tone-success: #2a8a3c; --tone-warning: #b06a1f; --tone-danger: #c2412d;
   --copper: #8c6239; --copper-hairline: rgba(140, 98, 57, .35);
+  /* Copper for text (page names): light #8c6239 on #f5f5f7 = 4.92:1 (design-1110 P0.2). */
+  --copper-text: #8c6239;
   --destructive: #c2412d; --destructive-hover: #ad3826; --destructive-pressed: #97301f; --on-destructive: #ffffff;
   --bg-window: #f5f5f7;
   --bg-content: #ffffff;
@@ -70,13 +72,13 @@
   --data-recovery-mid: #f5b800;
   --data-recovery-mid-text: #8a6500;
   --data-recovery-low: #e5484d;
-  --data-strain: var(--sys-blue);   /* Effort, 0–100 scale (NOOP native) */
+  --data-strain: var(--copper);     /* Effort, 0–100 scale (NOOP native); copper, not system blue (P0.7) */
   --data-sleep: #5e5ce6;
-  --data-sleep-deep: #5e5ce6;
-  --data-sleep-rem: #8e8cf0;
-  --data-sleep-light: #c7c6f7;
+  --data-sleep-deep: var(--accent);
+  --data-sleep-rem: var(--copper);
+  --data-sleep-light: var(--label-tertiary);
   --data-sleep-awake: rgba(60, 60, 67, .12);
-  --data-hrv: var(--sys-teal);
+  --data-hrv: var(--accent);
 
   /* Elevation */
   --elev-1: 0 1px 2px rgba(0, 0, 0, .06);
@@ -101,6 +103,8 @@
   --d-tone-success-text: #86e39a; --d-tone-warning-text: #f0b878; --d-tone-danger-text: #ff8d7b;
   --d-tone-success: #4cd36a; --d-tone-warning: #e0a458; --d-tone-danger: #ff7a66;
   --d-copper: #b4864e; --d-copper-hairline: rgba(180, 134, 78, .40);
+  /* Dark copper text: 4.88:1 on the field centre #0f3d2e, 5.51:1 on a card (P0.2); --copper stays for lines and fills. */
+  --d-copper-text: #c99c66;
   --d-destructive: #ff7a66; --d-destructive-hover: #ff9180; --d-destructive-pressed: #e9654f; --d-on-destructive: #2a0a05;
   --d-bg-window: #0b2a22;
   --d-bg-content: #10332a;
@@ -118,9 +122,9 @@
   --d-sys-blue: #0a84ff;
   /* Data colors that need a dark variant (same variable names, overridden below). */
   --d-data-recovery-mid-text: #f5b800;
-  --d-data-sleep-deep: #7d7aff;
-  --d-data-sleep-rem: #a5a3ff;
-  --d-data-sleep-light: rgba(201, 200, 255, .55);
+  --d-data-sleep-deep: var(--accent);
+  --d-data-sleep-rem: var(--copper);
+  --d-data-sleep-light: var(--label-tertiary);
   --d-data-sleep-awake: rgba(235, 235, 245, .22);
   --d-sys-green: #30d158;
   --d-sys-orange: #ff9f0a;
@@ -221,7 +225,7 @@
   --on-accent: var(--d-on-accent);
   --accent-hover: #4fd6a9;
   --tone-success: var(--d-tone-success); --tone-warning: var(--d-tone-warning); --tone-danger: var(--d-tone-danger);
-  --copper: var(--d-copper); --copper-hairline: var(--d-copper-hairline);
+  --copper: var(--d-copper); --copper-hairline: var(--d-copper-hairline); --copper-text: var(--d-copper-text);
   --destructive: var(--d-destructive); --destructive-hover: var(--d-destructive-hover); --destructive-pressed: var(--d-destructive-pressed); --on-destructive: var(--d-on-destructive);
   --accent-pressed: #2aa982; --accent-highlight: rgba(255, 255, 255, .28);
 
@@ -270,7 +274,7 @@
     --on-accent: var(--d-on-accent);
     --accent-hover: #4fd6a9;
   --tone-success: var(--d-tone-success); --tone-warning: var(--d-tone-warning); --tone-danger: var(--d-tone-danger);
-  --copper: var(--d-copper); --copper-hairline: var(--d-copper-hairline);
+  --copper: var(--d-copper); --copper-hairline: var(--d-copper-hairline); --copper-text: var(--d-copper-text);
   --destructive: var(--d-destructive); --destructive-hover: var(--d-destructive-hover); --destructive-pressed: var(--d-destructive-pressed); --on-destructive: var(--d-on-destructive);
   --accent-pressed: #2aa982; --accent-highlight: rgba(255, 255, 255, .28);
 
@@ -338,7 +342,8 @@
   --landing-muted: rgba(244, 241, 234, .66);
   --landing-wordmark: #c79a62;
   --landing-icon: #d9a76c;
-  --landing-heart: #ec7486;
+  /* Ember copper, not rose (#ec7486 was 4.29:1 and off-palette): 5.56:1 on the field (P1.1). */
+  --landing-heart: #e3a07e;
   --landing-focus: var(--lens-rim);
   --landing-button: #0d2b23;
   --landing-button-hover: #143a2f;

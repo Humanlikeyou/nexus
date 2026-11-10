@@ -24,6 +24,12 @@ export function humanize(value: string | null | undefined) {
     .replace(/\be commerce\b/i, (m) => (m[0] === "E" ? "E-commerce" : "e-commerce"));
 }
 
+/** Data titles start with a capital ("open app" → "Open app"); the rest is left as written (P0.5). */
+export function sentenceStart(value: string) {
+  const text = value.trimStart();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : value;
+}
+
 export function plainText(value: string) {
   return value
     .replace(/^\s*[-*]\s+/, "")

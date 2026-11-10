@@ -88,7 +88,7 @@ export function RevenueField({ data, onRetry }: { data: SystemSnapshot; onRetry?
   return (
     <div className="biz page-inset">
       <PageHero title="Business" statement={money(net)} detail={<>net income, on {money(revenue.total_revenue)} revenue</>} />
-      <Figures>
+      <Figures className="biz__figures">
         <Figure label="Today" value={money(revenue.today_revenue)} />
         <Figure label="7 days" value={money(revenue.week_revenue)} />
         <Figure label="30 days" value={money(revenue.month_revenue)} />

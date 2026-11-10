@@ -274,7 +274,7 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
                   </div>
                   <div className="mb-plot">
                     <StageStrip stages={stages} />
-                    {stages.some((stage) => stage.minutes > 0) && <p className="mind-body__meta">{stages.map((stage) => `${stage.label} ${hoursMinutes(stage.minutes)}`).join(" · ")}</p>}
+                    {stages.some((stage) => stage.minutes > 0) && <p className="mb-legend">{stages.map((stage) => <span key={stage.tone}><i data-tone={stage.tone} aria-hidden="true" />{`${stage.label} ${hoursMinutes(stage.minutes)}`}</span>)}</p>}
                     <BaselineChart points={inRange(merged.sleep, asOf, days)} reading={readingOf("sleep")} tall />
                   </div>
                 </div>

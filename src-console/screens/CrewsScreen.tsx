@@ -1,7 +1,7 @@
 import { Play, RefreshCw, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { INITIAL_SNAPSHOT, getCrewStatus, startCrew, stopCrew } from "../bridge";
-import { dateTime, humanize, plainText } from "../lib/format";
+import { dateTime, humanize, plainText, sentenceStart } from "../lib/format";
 import type { CrewInfo, CrewServiceHealth, SystemSnapshot } from "../types";
 import { Badge, Button, Card, Dialog, InsetGroup, ListRow, More, PageHero, TextField, type Tone } from "../ui";
 import { CREW_TOOL_OUTPUT_CAP, CREW_TOOL_TIMEOUT_S } from "../app/statusViews";
@@ -132,7 +132,7 @@ export function CrewsField({ data, onRetry, loading }: { data: SystemSnapshot; o
 
   const badge = HEALTH_BADGE[health];
   const runRow = (run: (typeof runs)[number]) => (
-    <ListRow key={run.id} title={run.name} selected={run.id === selectedId} onSelect={() => setSelectedId(run.id === selectedId ? null : run.id)}
+    <ListRow key={run.id} title={sentenceStart(run.name)} selected={run.id === selectedId} onSelect={() => setSelectedId(run.id === selectedId ? null : run.id)}
       subtitle={<span className="crews__clamp" title={run.task ?? undefined}>{run.task ?? "No task text"}</span>}
       value={[run.started_at ? dateTime(run.started_at) : null, run.agents.length ? run.agents.join(", ") : null].filter(Boolean).join(" · ")}
       accessory={<Badge tone={STATUS_TONE[run.status] ?? "neutral"}>{humanize(run.status)}</Badge>} />

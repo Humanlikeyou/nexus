@@ -219,7 +219,9 @@ describe("groupStarts", () => {
   it("Deep toggle is off and explained while Hermes is not on the Amara Router", () => {
     setup();
     const deep = screen.getByRole("button", { name: "Deep" });
-    expect(deep).toBeDisabled();
+    // aria-disabled (not disabled) so it stays focusable and announces why (design-1110 P3.4).
+    expect(deep).toHaveAttribute("aria-disabled", "true");
+    expect(deep).toHaveAccessibleDescription("Deep needs the Amara Router.");
     expect(deep).toHaveAttribute("aria-pressed", "false");
     expect(deep.closest(".chat-composer__deep-wrap")).toHaveAttribute("title", "Deep needs the Amara Router");
   });

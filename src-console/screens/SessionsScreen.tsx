@@ -23,7 +23,7 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
   if (failed && sessions.length === 0) {
     return (
       <div className="sessions page-inset">
-        <PageHero title="History" statement="Sensor sessions unavailable" />
+        <PageHero title="Neuro history" statement="Sensor sessions unavailable" />
         <Card>
           {onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
         </Card>
@@ -33,7 +33,7 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
   if (sessions.length === 0) {
     return (
       <div className="sessions page-inset">
-        <PageHero title="History" statement="No sessions yet" />
+        <PageHero title="Neuro history" statement="No sessions yet" />
         <Card>
           <p className="sessions__copy">Finish a Muse session and Amara OS keeps the recording and summary here.</p>
           {onStartSession && <div><Button variant="primary" onClick={onStartSession}>Start session</Button></div>}
@@ -55,7 +55,7 @@ export function SessionsField({ data, onRetry, onStartSession }: { data: SystemS
 
   return (
     <div className="sessions page-inset">
-        <PageHero title="History" statement={`${sessions.length} session${sessions.length === 1 ? "" : "s"}, ${totalMin} min`} detail={museCount === sessions.length ? undefined : `${museCount} with Muse`} />
+        <PageHero title="Neuro history" statement={`${sessions.length} session${sessions.length === 1 ? "" : "s"}, ${totalMin} min`} detail={museCount === sessions.length ? undefined : `${museCount} with Muse`} />
       <div className="sessions__split">
         {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- ↑/↓ moves the selection between the row buttons inside */}
         <div className="sessions__list" onKeyDown={onListKey}>

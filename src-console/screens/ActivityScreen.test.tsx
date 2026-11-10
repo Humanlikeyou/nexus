@@ -15,7 +15,7 @@ describe("Chat & Agents › Activity (§10)", () => {
     expect(screen.getByText("Gateway delivery")).toBeInTheDocument();
     expect(screen.getByText("Gateway online")).toBeInTheDocument();
     expect(screen.getByText("timeout")).toBeInTheDocument();
-    expect(screen.getByText("open app")).toBeInTheDocument();
+    expect(screen.getByText("Open app")).toBeInTheDocument();
     expect(screen.getByText("Mac action · Opened Notes")).toBeInTheDocument();
         expect(document.querySelector(".signal-stream")).toBeNull();
   });

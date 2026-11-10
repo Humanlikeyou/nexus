@@ -121,7 +121,7 @@ test.describe("focus and scroll", () => {
     await expect(field.getByRole("heading", { level: 1 })).toHaveText("Neuro");
     await expect(field.getByRole("radio", { name: "Neuro", exact: true })).toBeFocused();
     await page.keyboard.press("ArrowRight");
-    await expect(field.getByRole("heading", { level: 1 })).toHaveText("History");
+    await expect(field.getByRole("heading", { level: 1 })).toHaveText("Neuro history");
     await expect(field.getByRole("radio", { name: "Neuro history", exact: true })).toBeFocused();
   });
 

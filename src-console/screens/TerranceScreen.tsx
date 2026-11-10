@@ -6,7 +6,7 @@ import type { ConversationMessage } from "../app/conversation";
 import { ASSISTANT_TITLE, assistantBadge } from "../app/openclaw";
 import { assistantView, kbView } from "../app/statusViews";
 import { INITIAL_SNAPSHOT } from "../bridge";
-import { dateTime, money, time } from "../lib/format";
+import { dateTime, humanize, money, time } from "../lib/format";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, StatusDot, type Tone, Line, Lines, More, PageHero } from "../ui";
 import { recoveryBand } from "./HealthScreen";
@@ -314,10 +314,12 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
       {header}
 
       {sourcesNote}
-      <section className="home__first" aria-label="Recovery & sleep">
+      <section className="home__recovery-card" aria-labelledby="home-recovery-title">
+      <h2 id="home-recovery-title" className="home__recovery-title">Recovery &amp; sleep</h2>
+      <div className="home__first">
         {recoveryBody}
         <OpenLink to="health" label="Open Fitness" onNavigate={onNavigate} />
-      </section>
+      </div>
 
       {readinessLine && (
         <button type="button" className="home__readiness" disabled={!onNavigate} onClick={() => onNavigate?.("mindbody")} aria-label={`Open Mind–Body. Readiness ${readinessLine.score}, ${readinessLine.label}. ${readinessLine.reason}`}>
@@ -328,11 +330,12 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           </span>
         </button>
       )}
+      </section>
 
       <Card title="Priorities" accessory={<OpenLink to="chat" label="Open Chat" onNavigate={onNavigate} />}>
         {priorities.length === 0
           ? <p className="home__note">No current priorities</p>
-          : <Lines label="Priorities">{priorities.slice(0, 3).map((p) => <Line key={`${p.sourceKind}-${p.sourceId}`} title={p.title} trailing={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{p.sourceStatus.replace(/_/g, " ")}</Badge>} />)}</Lines>}
+          : <Lines label="Priorities">{priorities.slice(0, 3).map((p) => <Line key={`${p.sourceKind}-${p.sourceId}`} title={p.title} trailing={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{humanize(p.sourceStatus)}</Badge>} />)}</Lines>}
       </Card>
 
       <More label="Agents, schedule and everything else" id="home-more">
@@ -379,7 +382,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
         <InsetGroup title="More priorities">
           {priorities.slice(3).map((p) => (
             <ListRow key={`${p.sourceKind}-${p.sourceId}`} title={p.title} subtitle={`#${p.rank} · ${p.sourceKind}`}
-              accessory={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{p.sourceStatus.replace(/_/g, " ")}</Badge>} />
+              accessory={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{humanize(p.sourceStatus)}</Badge>} />
           ))}
         </InsetGroup>
       )}

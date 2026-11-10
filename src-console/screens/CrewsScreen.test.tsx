@@ -66,9 +66,9 @@ describe("Chat & Agents › Crews", () => {
     expect(within(runs).getByText("Stopped")).toBeInTheDocument();
     expect(within(runs).getByTitle(long)).toHaveClass("crews__clamp");
     expect(within(runs).getAllByText("writer", { exact: false })).toHaveLength(3);
-    fireEvent.click(within(runs).getByText("broken"));
+    fireEvent.click(within(runs).getByText("Broken"));
     expect(screen.getByText("LLM unavailable")).toHaveClass("crews__result--error");
-    fireEvent.click(within(runs).getByText("smoke"));
+    fireEvent.click(within(runs).getByText("Smoke"));
     expect(screen.getByText("OK")).toHaveClass("crews__result");
   });
 
@@ -122,7 +122,7 @@ describe("Chat & Agents › Crews", () => {
     crew.stopCrew.mockResolvedValue("stopped");
     crew.getCrewStatus.mockResolvedValue(run({ status: "stopped", result: null }));
     render(<CrewsField data={snap({ runs: [run({ status: "running", result: null })] })} />);
-    fireEvent.click(screen.getByText("smoke"));
+    fireEvent.click(screen.getByText("Smoke"));
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     const dialog = screen.getByRole("dialog", { name: "Stop this run?" });
     const confirm = within(dialog).getByRole("button", { name: "Stop Run" });

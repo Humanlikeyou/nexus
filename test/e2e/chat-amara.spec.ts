@@ -56,7 +56,7 @@ test("Chat: no badge and Deep disabled while Hermes is not on the Amara Router",
   const field = activeField(page, "Chat & Agents");
   await expect(field.getByText("Two things: finish the release notes")).toBeVisible();
   await expect(field.getByRole("list", { name: "Messages" }).getByText(/^(Fast|Deep)$/)).toHaveCount(0);
-  await expect(field.getByRole("button", { name: "Deep" })).toBeDisabled();
+  await expect(field.getByRole("button", { name: "Deep" })).toHaveAttribute("aria-disabled", "true");
   await shot(page, `chat-not-routed-${theme}`);
   expect(consoleErrors).toEqual([]);
 });

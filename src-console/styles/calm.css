@@ -7,7 +7,7 @@
 :root {
   --page-column: 760px;
   --page-statement: 40px;
-  --page-name: var(--copper);
+  --page-name: var(--copper-text);
   --field-bg: var(--wash-emerald), var(--bg-window);
   --sidebar-tint: transparent;
 }

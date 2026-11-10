@@ -94,7 +94,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
   const header = (
     <>
       <PageHero title="Neuro" statement={failed ? "Out of reach" : deviceBadge.text} detail={failed ? <Badge tone="danger">Unavailable</Badge> : band ? <Badge tone={band.tone}>Recovery {Math.round(recovery as number)}%</Badge> : undefined} />
-      <div className="neuro__actions">{secondary}{!connected && primary}</div>
+      {secondary && <div className="neuro__actions">{secondary}</div>}
     </>
   );
 
@@ -144,6 +144,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
             <div className="neuro__empty-lead">
               <BrainCircuit className="neuro__empty-icon" aria-hidden="true" />
               <p className="neuro__callout">{operation === "scanning" ? "Keep the headset nearby. Scanning takes about five seconds." : "Put your headset in pairing mode"}</p>
+              <div className="neuro__empty-action">{primary}</div>
             </div>
             <InsetGroup title="Nearby headsets" className="neuro__group" aria-live="polite" footer={devices.length ? undefined : operation === "scanning" ? "Looking for headsets…" : "Results appear here after a scan."}>
               {devices.map((device) => (
