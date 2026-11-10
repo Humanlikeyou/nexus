@@ -1,11 +1,12 @@
 import { RefreshCw } from "lucide-react";
-import { humanize, money } from "../lib/format";
+import { businessAdapter, type BusinessAdapter } from "../business/adapters";
+import { money } from "../lib/format";
 import type { SystemSnapshot } from "../types";
-import { Badge, Button, Card, Figure, Figures, InsetGroup, ListRow, Meter, More, PageHero } from "../ui";
-import { badgeTone } from "./businessTone";
+import { Button, Card, DataTag, PageHero, StatusText, wiredTag } from "../ui";
 import "./BusinessScreen.css";
+import "./CommandCenter.css";
 
-/** Business › Revenue (screen-specs §8). The kill switch is display-only (OQ-E). */
+/** Business › Money (design-1110d D-B9–B11). USD only; trading risk lives in Ventures (approval answer 2). */
 function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }) {
   return (
     <div className="biz__unavailable">
@@ -15,87 +16,67 @@ function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }
   );
 }
 
-export function RevenueField({ data, onRetry }: { data: SystemSnapshot; onRetry?: () => void }) {
+const acc = (node: React.ReactNode) => <span className="cc-card__acc">{node}</span>;
+
+export function RevenueField({ data, onRetry, adapter = businessAdapter() }: { data: SystemSnapshot; onRetry?: () => void; adapter?: BusinessAdapter }) {
   const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
-  const { revenue, risk, strategies } = data;
-  const riskDown = down("arm_get_risk_status");
+  const { revenue } = data;
   const isAwaitingRevenue = [revenue.total_revenue, revenue.total_expenses, revenue.net_income, revenue.today_revenue, revenue.week_revenue, revenue.month_revenue]
     .every((value) => value === 0) && revenue.by_strategy.length === 0;
+  const summaryDown = down("arm_get_revenue_summary") && isAwaitingRevenue;
+  const funds = adapter.funds();
+  const votes = adapter.fundingRequests();
+  const rules = adapter.voteRules();
+  const flags = adapter.taxFlags();
+  const top = Math.max(1, ...revenue.by_strategy.map((b) => Math.max(b.revenue, b.expenses)));
 
-  const status = riskDown ? null : risk.kill_switch_active
-    ? <Badge tone="danger">Kill switch engaged</Badge>
-    : <Badge tone="success">Risk within limits</Badge>;
-
-  const deployedPct = risk.global_capital_limit ? (risk.global_capital_deployed / risk.global_capital_limit) * 100 : null;
-
-  const strategyList = (title: string) => down("arm_list_strategies") && strategies.length === 0
-    ? <Card title={title}><Unavailable label="Revenue strategies" onRetry={onRetry} /></Card>
-    : strategies.length === 0
-      ? <Card title={title}><p className="biz__note"><strong>No strategies yet</strong><br />Strategies appear here once you configure one.</p></Card>
-      : (
-        <InsetGroup title={`${title} (${strategies.length})`}>
-          {strategies.map((s) => (
-            <ListRow key={s.id} title={s.name} subtitle={`${humanize(s.type)} · ${money(s.capital_limit)} limit`} value={money(s.total_revenue - s.total_expenses)}
-              accessory={<Badge tone={badgeTone(s.status)} title={s.health_status ? `Health: ${humanize(s.health_status)}` : undefined}>{humanize(s.status)}</Badge>} />
-          ))}
-        </InsetGroup>
-      );
-
-  const riskFooter = riskDown ? <Unavailable label="Revenue risk" onRetry={onRetry} /> : (
-    <div className="biz__risk">
-      <p>Daily P&amp;L {money(risk.global_daily_pnl)} of {money(risk.global_daily_loss_cap)} loss cap · Risk index {risk.risk_index}</p>
-      {risk.strategies_at_risk.length > 0 && <div className="biz__at-risk">{risk.strategies_at_risk.map((name) => <Badge key={name} tone="warning">{name}</Badge>)}</div>}
-    </div>
-  );
-
-  const details = (title: string) => (
-    <More label="Strategies, capital and risk">
-      {!riskDown && deployedPct != null && <Figures><Figure label="Capital deployed" value={`${Math.round(deployedPct)}%`} /><Figure label="Of limit" value={`${money(risk.global_capital_deployed)} of ${money(risk.global_capital_limit)}`} /></Figures>}
-      {strategyList(title)}
-      {revenue.by_strategy.length > 0 && (
-        <InsetGroup title="Revenue by strategy">
-          {revenue.by_strategy.map((item) => (
-            <ListRow key={item.strategy_id} title={item.strategy_name} value={money(item.net)}
-              accessory={<Meter className="biz__mix-meter" size="sm" label={`${item.strategy_name} share of revenue`} value={item.revenue} max={revenue.total_revenue || 1} />} />
-          ))}
-        </InsetGroup>
-      )}
-      {riskFooter}
-    </More>
-  );
-
-  if (down("arm_get_revenue_summary") && isAwaitingRevenue) {
-    return (
-      <div className="biz page-inset">
-        <PageHero title="Business" statement="Revenue is out of reach" detail={status} />
-        <Unavailable label="Revenue summary" onRetry={onRetry} />
-        {details("Configured strategies")}
-      </div>
-    );
-  }
-
-  if (isAwaitingRevenue) {
-    return (
-      <div className="biz page-inset">
-        <PageHero title="Business" statement="No revenue yet" detail="Tracking starts when a real source reports in." />
-        {status}
-        {details("Configured strategies")}
-      </div>
-    );
-  }
-
-  const net = revenue.net_income;
   return (
-    <div className="biz page-inset">
-      <PageHero title="Business" statement={money(net)} detail={<>net income, on {money(revenue.total_revenue)} revenue</>} />
-      <Figures className="biz__figures">
-        <Figure label="Today" value={money(revenue.today_revenue)} />
-        <Figure label="7 days" value={money(revenue.week_revenue)} />
-        <Figure label="30 days" value={money(revenue.month_revenue)} />
-        <Figure label="Expenses" value={money(revenue.total_expenses)} />
-      </Figures>
-      {status}
-      {details("Strategies")}
+    <div className="biz page-inset cc-page">
+      <PageHero title="Business" statement={summaryDown ? "Revenue is out of reach" : isAwaitingRevenue ? "No revenue yet" : `${money(revenue.net_income)} net in 30 days`}
+        detail={isAwaitingRevenue ? "Tracking starts when a real source reports in." : `On ${money(revenue.total_revenue)} revenue and ${money(revenue.total_expenses)} costs. Amounts in USD; ledger values in yen wait for currency conversion.`} />
+      {summaryDown && <Unavailable label="Revenue summary" onRetry={onRetry} />}
+      <div className="cc-grid2">
+        <Card title="Fund balances" accessory={acc(funds.state === "sample" ? <DataTag kind="sample" /> : <DataTag kind="wire" />)}>
+          {funds.state === "unwired" ? <p className="cc-note">Ledger funds appear here.</p> : (
+            <table className="cc-table" aria-label="Fund balances">
+              <thead><tr><th scope="col">Fund</th><th scope="col" className="cc-num">Balance</th></tr></thead>
+              <tbody>
+                {funds.value.map((f) => <tr key={f.name}><td>{f.name}</td><td className="cc-num">{f.balanceUsd.state === "unwired" ? "\u2014" : money(f.balanceUsd.value)}</td></tr>)}
+                <tr><td><b>Total</b></td><td className="cc-num"><b>{funds.value.every((f) => f.balanceUsd.state !== "unwired") ? money(funds.value.reduce((n, f) => n + (f.balanceUsd.state === "unwired" ? 0 : f.balanceUsd.value), 0)) : "\u2014"}</b></td></tr>
+              </tbody>
+            </table>
+          )}
+          {funds.state !== "unwired" && funds.value.some((f) => f.balanceUsd.state === "unwired") && <p className="cc-note">Ledger balances are in yen <DataTag kind="currency" /></p>}
+        </Card>
+        <Card title="Income and costs · 30 days">
+          {revenue.by_strategy.length === 0 ? <p className="cc-note">{isAwaitingRevenue ? "No strategy has reported revenue yet." : "No per-strategy breakdown."}</p> : (
+            <div className="cc-bars" role="table" aria-label="Revenue and costs by strategy">
+              {revenue.by_strategy.map((b) => (
+                <div className="cc-bars__row" role="row" key={b.strategy_id}>
+                  <span role="rowheader">{b.strategy_name}</span>
+                  <span className="cc-bars__track" role="cell" aria-label={`${money(b.revenue)} income, ${money(b.expenses)} costs`}><i className="cc-bars__in" style={{ width: `${(b.revenue / top) * 100}%` }} /><i className="cc-bars__out" style={{ width: `${(b.expenses / top) * 100}%` }} /></span>
+                  <span className="cc-num" role="cell">{money(b.revenue)} / {money(b.expenses)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="cc-note">Solid = income · striped = costs · today {money(revenue.today_revenue)} in, {money(revenue.today_expenses)} out</p>
+        </Card>
+      </div>
+      <Card title="Funding requests and votes" accessory={acc(wiredTag(votes))}>
+        {votes.state === "unwired" ? <p className="cc-note">Requests, purposes and vote results from the ledger appear here.</p> : (
+          <table className="cc-table" aria-label="Funding requests">
+            <thead><tr><th scope="col">Requester</th><th scope="col">Purpose</th><th scope="col" className="cc-num">Amount</th><th scope="col">Vote</th></tr></thead>
+            <tbody>{votes.value.map((v) => <tr key={v.id}><td>{v.requester}</td><td>{v.purpose}</td><td className="cc-num">{v.amountUsd.state === "unwired" ? "\u2014" : money(v.amountUsd.value)}</td><td><StatusText kind={v.status === "open" ? "wait" : v.status === "approved" ? "ok" : "fail"}>{v.status === "open" ? "Open" : v.status === "approved" ? "Approved" : "Denied"}</StatusText></td></tr>)}</tbody>
+          </table>
+        )}
+        {votes.state !== "unwired" && <p className="cc-note">Amounts <DataTag kind="currency" /> · vote rules {rules.state === "unwired" ? <DataTag kind="wire" /> : `${rules.value.needed} yes votes`}</p>}
+      </Card>
+      <Card title={flags.state === "unwired" ? "Tax flags" : `Tax flags \u00b7 ${flags.value.length}`} accessory={acc(wiredTag(flags))}>
+        {flags.state === "unwired" ? <p className="cc-note">Ledger tax flags appear here.</p> : flags.value.map((t) => (
+          <div className="cc-row" key={t.id}><StatusText kind="risk" /><div className="cc-row__main"><span>{t.label}</span><small>{t.area} · {t.date}</small></div><Button size="small" variant="secondary">Open</Button></div>
+        ))}
+      </Card>
     </div>
   );
 }

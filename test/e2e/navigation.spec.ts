@@ -28,7 +28,7 @@ test.describe("sub-views and anchors", () => {
     ["Mind–Body", "Fitness", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Fitness")],
     ["Mind–Body", "Neuro", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro")],
     ["Mind–Body", "Neuro history", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro history"); await expect(f.getByRole("list", { name: "History" })).toBeVisible(); }],
-    ["Business", "Revenue", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Business")],
+    ["Business", "Money", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Business")],
   ];
   for (const [host, view, check] of SUBVIEWS) {
     test(`(b) ${host} › ${view} via the SegmentedControl`, async ({ page, theme, consoleErrors }) => {
@@ -121,7 +121,7 @@ test("(c) ⌘1–6 open the six sections in order", async ({ page, theme, consol
 });
 
 test.describe("(d) ⌘K palette", () => {
-  test('"rev" + Enter opens Business › Revenue', async ({ page, theme }) => {
+  test('"rev" + Enter opens Business › Money (the old Revenue view)', async ({ page, theme }) => {
     await openApp(page, { theme });
     await page.keyboard.press("Meta+k");
     const input = page.getByRole("combobox", { name: "Search or ask Amara" });
@@ -129,7 +129,7 @@ test.describe("(d) ⌘K palette", () => {
     await input.fill("rev");
     await page.keyboard.press("Enter");
     await expect(input).toBeHidden();
-    await expect(activeField(page, "Business").getByRole("radio", { name: "Revenue" })).toHaveAttribute("aria-checked", "true");
+    await expect(activeField(page, "Business").getByRole("radio", { name: "Money" })).toHaveAttribute("aria-checked", "true");
   });
 
   test("no match → Ask Amara pre-fills the Chat composer", async ({ page, theme }) => {
@@ -168,7 +168,7 @@ test("(d) one content edge: h1s, Chat's first column and the sub-view bar line u
     return (await target.boundingBox())!.x;
   };
   const home = await left("Today");
-  for (const label of ["Mind–Body", "Fitness", "Neuro", "Crews", "Business", "Revenue", "Smart home", "Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
+  for (const label of ["Mind–Body", "Fitness", "Neuro", "Crews", "Business", "Money", "Smart home", "Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
 
   // Sub-view bars (Mind–Body, Chat/Activity/Crews, Business) sit on the same edge.
   for (const label of ["Mind–Body", "Agents", "Business"]) {

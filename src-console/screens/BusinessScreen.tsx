@@ -3,6 +3,10 @@ import { humanize, plainText } from "../lib/format";
 import type { SystemSnapshot } from "../types";
 import { Badge, Button, Figure, Figures, InsetGroup, Line, Lines, ListRow, More, PageHero } from "../ui";
 import { badgeTone } from "./businessTone";
+import { useState } from "react";
+import { businessAdapter, type BusinessAdapter } from "../business/adapters";
+import { BusinessOverview, VenturesView } from "./BusinessPanels";
+import { Card, StatusText, type StatusKind } from "../ui";
 import "./BusinessScreen.css";
 
 /** Business › Work (screen-specs §7). */
@@ -34,8 +38,36 @@ export function workStatement(tasks: Task[]): string {
   return [active ? `${active} in progress` : "", waiting ? `${waiting} waiting` : ""].filter(Boolean).join(", ");
 }
 
+const TASK_KIND: Record<string, StatusKind> = { active: "run", waiting: "wait", backlog: "off", done: "ok" };
+const STAGE_TEXT: Record<string, string> = { ideation: "Idea" };
+
+/** D-B6: Overview's bottom row, from the real task and pipeline sources. */
+function WorkCards({ data, onRetry }: { data: SystemSnapshot; onRetry?: () => void }) {
+  const tasksDown = data.unavailableSources.some((s) => s.command === "read_tasks") && data.tasks.length === 0;
+  const open = data.tasks.filter((t) => t.status !== "done").sort((a, b) => rank(a) - rank(b)).slice(0, 4);
+  return (
+    <div className="cc-grid2">
+      <Card title={tasksDown ? "Work" : `Work \u00b7 ${workStatement(data.tasks)}`}>
+        {tasksDown ? <Unavailable label="Task source" onRetry={onRetry} /> : open.length === 0 ? <p className="cc-note">No open work.</p> : open.map((t, i) => <div className="cc-row" key={`${t.title}-${i}`}><div className="cc-row__main"><span>{plainText(t.title)}</span><small>{[...(t.tags ?? []), t.priority].filter(Boolean).join(" \u00b7 ") || "Normal"}</small></div><StatusText kind={TASK_KIND[t.status] ?? "off"}>{humanize(t.status)}</StatusText></div>)}
+      </Card>
+      <Card title="Content pipeline">
+        {data.pipeline.length === 0 ? <p className="cc-note">Pipeline is clear.</p> : data.pipeline.slice(0, 4).map((p, i) => <div className="cc-row" key={`${p.title}-${i}`}><div className="cc-row__main"><span>{plainText(p.title)}</span><small>{humanize(p.content_type)}</small></div><StatusText kind={p.stage === "ideation" ? "off" : p.stage === "published" ? "ok" : "run"}>{STAGE_TEXT[p.stage] ?? humanize(p.stage)}</StatusText></div>)}
+        <p className="cc-note">Venture links for tasks need wiring.</p>
+      </Card>
+    </div>
+  );
+}
+
+/** Business host (design-1110d D-B1): Overview, Ventures and Work render here; Money is RevenueField. */
+export function BusinessField({ data, onRetry, view = "main", onView, adapter = businessAdapter() }: { data: SystemSnapshot; onRetry?: () => void; view?: string; onView?: (view: string) => void; adapter?: BusinessAdapter }) {
+  const [ventureId, setVentureId] = useState<string | null>(null);
+  if (view === "main") return <BusinessOverview data={data} adapter={adapter} onOpenVenture={(id) => { if (onView) { setVentureId(id); onView("ventures"); } }} work={<WorkCards data={data} onRetry={onRetry} />} />;
+  if (view === "ventures") return <VenturesView data={data} adapter={adapter} ventureId={ventureId} onOpen={setVentureId} />;
+  return <WorkView data={data} onRetry={onRetry} />;
+}
+
 /** Business › Work: the state, the top three, and everything else behind one disclosure. */
-export function BusinessField({ data, onRetry }: { data: SystemSnapshot; onRetry?: () => void }) {
+function WorkView({ data, onRetry }: { data: SystemSnapshot; onRetry?: () => void }) {
   const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
   const tasks = data.tasks;
   const pipeline = data.pipeline;

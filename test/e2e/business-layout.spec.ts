@@ -5,6 +5,8 @@ test("(l) pipeline: one list grouped by stage, empty stages hidden", async ({ pa
   await openApp(page, { theme, reduceMotion: true });
   await navButton(page, "Business").click();
   const field = activeField(page, "Business");
+  // design-1110d D-B1: the work list is the Work tab; Overview shows the top of it in a card.
+  await field.getByRole("radio", { name: "Work", exact: true }).click();
   await expect(field.getByRole("heading", { level: 1 })).toHaveText("Business");
   await expect(field.locator(".biz__stage").first()).toBeHidden();
   await openMore(page);
@@ -21,6 +23,8 @@ test("(l) first glance: a headline and at most three work items, however long th
   await openApp(page, { theme, reduceMotion: true, data: { ...responses(), read_tasks } });
   await navButton(page, "Business").click();
   const field = activeField(page, "Business");
+  // design-1110d D-B1: the work list is the Work tab; Overview shows the top of it in a card.
+  await field.getByRole("radio", { name: "Work", exact: true }).click();
   await expect(field.locator(".page-hero__statement")).toHaveText("12 in progress, 12 waiting");
   await expect(field.locator(".quiet-line")).toHaveCount(3);
   await expect(field.getByText("Task 24")).toBeHidden();

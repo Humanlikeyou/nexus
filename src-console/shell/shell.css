@@ -162,3 +162,9 @@ main.command-surface > .active-field:has(> .chat-screen) { display: flex; flex-d
 :root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > .nexus-mark,
 :root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > .field-clock,
 :root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > nav.system-constellation { background: var(--glass-solid); }
+/* design-1110d gap fix (a): Business tabs are pills (approved mockup). Selected = filled pill + weight + aria-checked, not colour alone; keyboard behaviour is the SegmentedControl's. */
+main.command-surface > .active-field > .subview-bar[data-host="business"] .ui-segmented { gap: 2px; padding: 2px; border: 1px solid var(--separator); border-radius: 9px; }
+main.command-surface > .active-field > .subview-bar[data-host="business"] .ui-segmented__segment { min-height: 0; padding: 5px 12px; border-radius: 7px; font-size: 12.5px; }
+main.command-surface > .active-field > .subview-bar[data-host="business"] .ui-segmented__segment[data-checked] { background: color-mix(in srgb, var(--tone-accent-text) 16%, transparent); font-weight: 600; }
+main.command-surface > .active-field > .subview-bar[data-host="business"] .ui-segmented__indicator { display: none; }
+@media (forced-colors: active) { main.command-surface > .active-field > .subview-bar[data-host="business"] .ui-segmented__segment[data-checked] { outline: 1px solid Highlight; } }

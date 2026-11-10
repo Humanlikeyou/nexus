@@ -170,7 +170,7 @@ export const navButton = (page: Page, label: string) =>
 /** The visible screen region ("<label> system"). */
 export const activeField = (page: Page, label: string) => page.getByRole("region", { name: `${label} system` });
 
-const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Crews: "Agents", Revenue: "Business" };
+const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Crews: "Agents", Money: "Business", Ventures: "Business", Work: "Business", Revenue: "Business" };
 /** design-1110b B: folded screens that are now a section of a host page (label → host, anchor id). */
 const SECTION_HOSTS: Record<string, [string, string]> = { Activity: ["Agents", "activity"], Lists: ["Today", "lists"], Voice: ["Settings", "voice"] };
 

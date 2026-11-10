@@ -40,7 +40,8 @@ export const HOST_VIEWS: Partial<Record<ModuleId, SubView[]>> = {
   // Activity is a section of Agents, Lists a section of Today, Voice a section of Settings.
   chat: [{ view: "main", label: "Agents", screen: "chat" }, { view: "crews", label: "Crews", screen: "crews" }],
   mindbody: [{ view: "main", label: "Overview", screen: "mindbody" }, { view: "fitness", label: "Fitness", screen: "health" }, { view: "neuro", label: "Neuro", screen: "neuro" }, { view: "neuro-history", label: "Neuro history", screen: "sessions" }],
-  business: [{ view: "main", label: "Work", screen: "business" }, { view: "revenue", label: "Revenue", screen: "revenue" }],
+  // design-1110d D-B1: Revenue became Money (view id kept so "revenue" links still land there).
+  business: [{ view: "main", label: "Overview", screen: "business" }, { view: "ventures", label: "Ventures", screen: "business" }, { view: "revenue", label: "Money", screen: "revenue" }, { view: "work", label: "Work", screen: "business" }],
 };
 
 /** Folded ids stay valid ModuleIds (stored state, ⌘K, onNavigate) and resolve to their host. */
