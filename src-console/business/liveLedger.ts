@@ -35,9 +35,16 @@ export function usdFrom(jpy: number | null, fx: BusinessLedger["fx"]): Wired<num
 /** The rate's as-of date, for the Money tab once Design shows it. Null when there is no rate. */
 export const ledgerAsOf = (ledger: BusinessLedger | null): string | null => ledger?.fx?.asOf ?? null;
 
-/** Live Business adapter over a loaded ledger. No ledger file: the unwired adapter, unchanged. */
-export function liveBusiness(ledger: BusinessLedger | null): BusinessAdapter {
-  if (!ledger) return unwiredBusiness;
+/** True only for a well-formed v1 ledger object (the IPC reply is untrusted: a mock or an old build can return [] or junk). */
+export function isLedger(x: unknown): x is BusinessLedger {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return false;
+  const l = x as Record<string, unknown>;
+  return l.version === 1 && ["funds", "ventures", "fundingRequests", "taxFlags"].every((k) => Array.isArray(l[k]));
+}
+
+/** Live Business adapter over a loaded ledger. No (or malformed) ledger: the unwired adapter, unchanged. */
+export function liveBusiness(ledger: unknown): BusinessAdapter {
+  if (!isLedger(ledger)) return unwiredBusiness;
   const { fx } = ledger;
   return {
     ventures: () => live(ledger.ventures.map((v) => ({
