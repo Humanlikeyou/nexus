@@ -168,7 +168,46 @@ pub async fn secrets_status() -> Result<Vec<SecretStatus>, String> {
 
 /// Write-only. Returns nothing; the value is zeroized after the Keychain write.
 #[tauri::command]
-pub async fn secret_set(name: String, value: String) -> Result<(), String> {
+pub async fn secret_set(
+    app: tauri::AppHandle,
+    name: String,
+    mut value: String,
+) -> Result<(), String> {
+    if !is_allowed(&name) {
+        value.zeroize();
+        return Err("unknown secret".to_string());
+    }
+    // Replacing a secret that is already set asks Taisun first (native dialog); a first set doesn't.
+    let n = name.clone();
+    let existing = tokio::task::spawn_blocking(move || {
+        status_with(&MacKeychain).map(|all| all.into_iter().find(|s| s.name == n))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let _held = match existing {
+        Ok(Some(s)) if s.set => {
+            let text = super::approval_gate::approval_text(
+                &format!("Replace the saved {}", s.label),
+                "The value stored in the Keychain is overwritten. Allow only if you just asked for this.",
+            );
+            let text = match text {
+                Ok(t) => t,
+                Err(e) => {
+                    value.zeroize();
+                    return Err(e);
+                }
+            };
+            let key = super::approval_gate::service_key(&format!("secret-{name}"));
+            match super::approval_gate::require_approval(&app, &[key], text).await {
+                Ok(g) => Some(g),
+                Err(e) => {
+                    value.zeroize();
+                    return Err(e);
+                }
+            }
+        }
+        _ => None,
+    };
     tokio::task::spawn_blocking(move || set_with(&MacKeychain, &name, value))
         .await
         .map_err(|e| e.to_string())?

@@ -274,7 +274,22 @@ pub async fn key_file_status() -> Result<KeyFileStatus, String> {
 }
 
 #[tauri::command]
-pub async fn key_file_make(passphrase: String, replace: Option<bool>) -> Result<(), String> {
+pub async fn key_file_make(
+    app: tauri::AppHandle,
+    passphrase: String,
+    replace: Option<bool>,
+) -> Result<(), String> {
+    // Replacing an existing key file discards the old one: only after the native dialog.
+    let _held = if replace.unwrap_or(false) && default_dir().join(KEY_FILE_NAME).exists() {
+        let text = super::approval_gate::approval_text(
+            "Replace the n8n key file",
+            "The existing amara-n8n.key is overwritten; the old passphrase will no longer open anything. Allow only if you just asked for this.",
+        )?;
+        let key = super::approval_gate::service_key("n8n-key-file");
+        Some(super::approval_gate::require_approval(&app, &[key], text).await?)
+    } else {
+        None
+    };
     tokio::task::spawn_blocking(move || {
         make_inner(
             &MacKeychain,
