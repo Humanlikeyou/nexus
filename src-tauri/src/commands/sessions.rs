@@ -323,11 +323,19 @@ pub(crate) fn list_sessions_in(dir: &Path, replays: &Path) -> Vec<RecordedSessio
 }
 
 #[tauri::command]
-pub fn save_session(
+pub fn save_session(session: RecordedSession, data: serde_json::Value) -> Result<String, String> {
+    save_session_in(&sessions_dir(), session, data)
+}
+
+/// Writes a new session file. Muse recordings are sacred (docs/decisions/0007): a session id that
+/// already has a file is refused with an error, never overwritten. `create_new` makes the check
+/// and the create one atomic step, so an existing file is never opened for writing.
+pub(crate) fn save_session_in(
+    dir: &std::path::Path,
     mut session: RecordedSession,
     data: serde_json::Value,
 ) -> Result<String, String> {
-    let dir = sessions_dir();
+    let dir = dir.to_path_buf();
     crate::app_paths::create_private_dir_all(&dir)
         .map_err(|e| format!("Failed to create sessions dir: {}", e))?;
 
@@ -348,7 +356,18 @@ pub fn save_session(
 
     let json = serde_json::to_string_pretty(&payload)
         .map_err(|e| format!("Failed to serialize: {}", e))?;
-    crate::app_paths::write_private(&path, json)
+    let mut file = crate::app_paths::private_open_options()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                "A session with this id already exists; it was not overwritten".to_string()
+            } else {
+                format!("Failed to write session: {}", e)
+            }
+        })?;
+    std::io::Write::write_all(&mut file, json.as_bytes())
         .map_err(|e| format!("Failed to write session: {}", e))?;
 
     Ok(path.to_string_lossy().to_string())
@@ -366,6 +385,32 @@ pub fn list_sessions() -> Result<Vec<RecordedSession>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_session_refuses_a_duplicate_id_and_leaves_the_existing_file_untouched() {
+        let dir =
+            std::env::temp_dir().join(format!("nexus-sess-{}", uuid::Uuid::new_v4().simple()));
+        let session = |end: &str| -> RecordedSession {
+            serde_json::from_value(serde_json::json!({
+                "id": "11111111-2222-3333-4444-555555555555", "device_type": "muse",
+                "start": "2026-11-11T10:00:00Z", "end": end, "duration_secs": 60, "data_points": 1,
+                "file_path": "eeg_20261111_100000.ndjson",
+                "summary": { "avg_focus": 50.0, "avg_relaxation": 50.0, "avg_hr": null, "max_hr": null, "avg_hrv": null }
+            }))
+            .unwrap()
+        };
+        let path = save_session_in(&dir, session("first"), serde_json::json!({ "n": 1 })).unwrap();
+        let before = fs::read(&path).unwrap();
+        let err =
+            save_session_in(&dir, session("second"), serde_json::json!({ "n": 2 })).unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            before,
+            "the existing session file must be byte-identical"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn summary_without_calm_fields_still_loads() {
