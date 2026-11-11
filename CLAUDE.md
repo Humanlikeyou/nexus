@@ -1,5 +1,7 @@
 # Nexus — Project Brief for Claude Coders
 
+> **Hard rules first:** `.claude/rules/hard-rules.md` overrides everything below. No push, no merge into `nexus-v2`, no PR without Taisun's logged OK (`docs/decisions/0001-merge-push-freeze.md`: frozen). Commit locally on `amara-integration` by explicit path. Design is out of scope (`.claude/rules/design-boundary.md`); Muse recordings are sacred (`.claude/rules/muse-recordings.md`). Dev system: agents in `.claude/agents/`, workflow in `.claude/skills/task-cycle`, gates in `.claude/skills/run-gates`, work tracked in `tasks/BOARD.md`.
+
 > **Central Goal**: Nexus is a local, private command center — a Tauri 2 desktop app combining Amara (AI agent runtime; local Ollama; the OpenClaw gateway mode was removed in 3a663eb/e183ad6), neuro sessions (Muse EEG), health signals (read-only from NOOP), business/ARM data, and goals, with n8n automation behind it.
 
 > **Naming (Decision 13, ec12efa / de94dfa):** the user-facing app is **Amara OS** (`productName`), the window and page title is "Amara OS — Command Center", and the assistant is **Amara**. Internal ids are unchanged: repo/npm/Cargo `nexus`, `nexus_lib`, `com.taisun.nexus`, Tauri command names, `terrance*` module ids, tables and file names.
