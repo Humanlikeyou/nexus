@@ -381,6 +381,7 @@ pub fn run() {
             crew::crew_list,
             crew::crew_start,
             crew::crew_status,
+            crew::crew_run_steps,
             crew::crew_stop,
             crew::crew_health,
             kb_status::kb_status,

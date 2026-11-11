@@ -5,6 +5,7 @@ FastAPI wrapper around CrewAI. Contract matches src-tauri/src/commands/crew.rs:
   GET  /crews/list             -> [CrewInfo]
   POST /crews/start            {name, task, agents?} -> CrewInfo
   GET  /crews/status?id=       -> CrewInfo
+  GET  /crews/runs/{id}/steps  -> {steps, handoffs}
   POST /crews/stop             {id} -> {"id", "status", "stopped": bool}
 
 Every /crews/* call needs header X-Crew-Token == $CREW_SERVICE_TOKEN.
@@ -155,8 +156,10 @@ def run_tool(tool: CrewTool, arg: str) -> str:
     return out
 
 
-def _to_crewai_tool(tool: CrewTool):
-    """Wrap a CrewTool as a CrewAI tool (imported lazily: only the crew child needs crewai)."""
+def _to_crewai_tool(tool: CrewTool, recorder=None, agent: str = "crew"):
+    """Wrap a CrewTool as a CrewAI tool (imported lazily: only the crew child needs crewai).
+    With a recorder, each call is timed as a tool step; a "Tool error:" result (already
+    sanitized by run_tool) marks it failed. The step never carries the query or the output."""
     from crewai.tools import BaseTool
 
     class _Tool(BaseTool):
@@ -164,7 +167,14 @@ def _to_crewai_tool(tool: CrewTool):
         description: str = tool.description
 
         def _run(self, query: str) -> str:
-            return run_tool(tool, query)
+            t0 = time.time()
+            out = run_tool(tool, query)
+            if recorder is not None:
+                failed = out.startswith("Tool error:")
+                recorder.step("tool", agent, step_label("tool", agent, tool.name), t0, time.time(),
+                              "failed" if failed else "ok",
+                              sanitize_text(out[len("Tool error:"):].strip()) if failed else None)
+            return out
 
     return _Tool()
 
@@ -311,6 +321,33 @@ class CrewInfo(BaseModel):
     task: Optional[str] = None
     result: Optional[str] = None
     llm: Optional[str] = None
+    finished_at: Optional[str] = None
+    tokens: Optional[int] = None      # prompt + completion, from the LLM responses' usage
+    requests: Optional[int] = None    # LLM calls
+    cost_usd: Optional[float] = None  # 0 for the local router; unknown (None) for the cloud path
+
+
+class CrewStepOut(BaseModel):
+    id: int
+    agent: str
+    kind: str
+    label: str
+    start_ms: int
+    end_ms: int
+    status: str
+    error: Optional[str] = None
+
+
+class CrewHandoffOut(BaseModel):
+    model_config = {"populate_by_name": True}
+    from_: str = Field(alias="from")
+    to: str
+    status: str
+
+
+class CrewRunSteps(BaseModel):
+    steps: List[CrewStepOut] = []
+    handoffs: List[CrewHandoffOut] = []
 
 
 class CrewStartRequest(BaseModel):
@@ -371,6 +408,28 @@ CREATE TABLE IF NOT EXISTS crew_runs (
     finished_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS crew_runs_started_idx ON crew_runs (started_at DESC);
+ALTER TABLE crew_runs ADD COLUMN IF NOT EXISTS tokens BIGINT;
+ALTER TABLE crew_runs ADD COLUMN IF NOT EXISTS requests INTEGER;
+CREATE TABLE IF NOT EXISTS crew_steps (
+    id       BIGSERIAL PRIMARY KEY,
+    run_id   TEXT NOT NULL,
+    agent    TEXT NOT NULL,
+    kind     TEXT NOT NULL CHECK (kind IN ('task','tool','llm')),
+    label    TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms   INTEGER NOT NULL,
+    status   TEXT NOT NULL CHECK (status IN ('ok','failed','skipped')),
+    error    TEXT
+);
+CREATE INDEX IF NOT EXISTS crew_steps_run_idx ON crew_steps (run_id, start_ms);
+CREATE TABLE IF NOT EXISTS crew_handoffs (
+    id         BIGSERIAL PRIMARY KEY,
+    run_id     TEXT NOT NULL,
+    from_agent TEXT NOT NULL,
+    to_agent   TEXT NOT NULL,
+    status     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS crew_handoffs_run_idx ON crew_handoffs (run_id, id);
 """
 
 
@@ -384,10 +443,22 @@ def _row_to_info(r) -> CrewInfo:
         started_at=r[4].strftime("%Y-%m-%dT%H:%M:%SZ") if r[4] else None,
         task=r[5], result=safe_result(r[2], r[6]),
         llm=r[7] if len(r) > 7 else None,
+        finished_at=r[8].strftime("%Y-%m-%dT%H:%M:%SZ") if len(r) > 8 and r[8] else None,
+        tokens=r[9] if len(r) > 9 else None,
+        requests=r[10] if len(r) > 10 else None,
+        cost_usd=run_cost_usd(r[7] if len(r) > 7 else None),
     )
 
 
-_SELECT = "SELECT id, name, status, agents, started_at AT TIME ZONE 'UTC', task, result, llm FROM crew_runs"
+def run_cost_usd(llm: Optional[str]) -> Optional[float]:
+    """0 for runs on the local router; None (unknown) for the cloud path or unknown rows."""
+    if not llm or not all(p.startswith("amara-") for p in llm.split(",")):
+        return None
+    return 0.0
+
+
+_SELECT = ("SELECT id, name, status, agents, started_at AT TIME ZONE 'UTC', task, result, llm, "
+           "finished_at AT TIME ZONE 'UTC', tokens, requests FROM crew_runs")
 
 
 def db_get(crew_id: str) -> Optional[CrewInfo]:
@@ -404,6 +475,67 @@ def db_finish(crew_id: str, status: str, result: Optional[str], llm: Optional[st
             "WHERE id=%s AND status='running'",
             (status, safe_result(status, result), llm, crew_id),
         )
+
+
+STEP_KINDS = ("task", "tool", "llm")
+STEP_STATUSES = ("ok", "failed", "skipped")
+MAX_LABEL_CHARS = 80
+MAX_STEPS_PER_RUN = 500
+
+
+def db_set_totals(crew_id: str, tokens: int, requests: int) -> None:
+    with db() as c:
+        c.execute("UPDATE crew_runs SET tokens=%s, requests=%s WHERE id=%s",
+                  (max(0, int(tokens)), max(0, int(requests)), crew_id))
+
+
+def db_add_step(crew_id: str, m: dict) -> None:
+    """Store one step message from the child. Re-validated here: kind/status are allowlisted,
+    the label is capped and the error text is sanitized, whatever the child sent."""
+    kind = m.get("kind") if m.get("kind") in STEP_KINDS else "task"
+    status = m.get("status") if m.get("status") in STEP_STATUSES else "failed"
+    start = max(0, int(m.get("start_ms") or 0))
+    end = max(start, int(m.get("end_ms") or 0))
+    err = sanitize_text(m.get("error")) if m.get("error") else None
+    if err and kind != "tool":  # only tool errors (our own sanitized strings) keep message text
+        err = fixed_failure("LLM call failed" if kind == "llm" else "Task failed",
+                            re.sub(r"^.*?\((\w+)\)$", r"\1", err) if re.search(r"\(\w+\)$", err) else None)
+    with db() as c:
+        c.execute(
+            "INSERT INTO crew_steps (run_id, agent, kind, label, start_ms, end_ms, status, error) "
+            "SELECT %s,%s,%s,%s,%s,%s,%s,%s WHERE (SELECT count(*) FROM crew_steps WHERE run_id=%s) < %s",
+            (crew_id, str(m.get("agent") or "crew")[:MAX_LABEL_CHARS], kind,
+             str(m.get("label") or kind)[:MAX_LABEL_CHARS], start, end, status, err,
+             crew_id, MAX_STEPS_PER_RUN))
+
+
+MAX_HANDOFFS_PER_RUN = 50
+
+
+def db_add_handoff(crew_id: str, m: dict) -> None:
+    status = m.get("status") if m.get("status") in STEP_STATUSES else "ok"
+    frm, to = str(m.get("from") or ""), str(m.get("to") or "")
+    known = set(AGENT_CATALOG) | set(TOOL_REGISTRY)  # tool names only if registered
+    if frm not in known or to not in known:
+        return
+    with db() as c:
+        c.execute(
+            "INSERT INTO crew_handoffs (run_id, from_agent, to_agent, status) "
+            "SELECT %s,%s,%s,%s WHERE (SELECT count(*) FROM crew_handoffs WHERE run_id=%s) < %s",
+            (crew_id, frm, to, status, crew_id, MAX_HANDOFFS_PER_RUN))
+
+
+def db_run_steps(crew_id: str) -> CrewRunSteps:
+    with db() as c:
+        steps = c.execute(
+            "SELECT id, agent, kind, label, start_ms, end_ms, status, error FROM crew_steps "
+            "WHERE run_id=%s ORDER BY start_ms, id", (crew_id,)).fetchall()
+        hands = c.execute("SELECT from_agent, to_agent, status FROM crew_handoffs "
+                          "WHERE run_id=%s ORDER BY id", (crew_id,)).fetchall()
+    return CrewRunSteps(
+        steps=[CrewStepOut(id=r[0], agent=r[1], kind=r[2], label=r[3], start_ms=r[4], end_ms=r[5],
+                           status=r[6], error=sanitize_text(r[7]) if r[7] else None) for r in steps],
+        handoffs=[CrewHandoffOut(**{"from": r[0]}, to=r[1], status=r[2]) for r in hands])
 
 
 # ── Error sanitizing ────────────────────────────────────────────────────────
@@ -515,20 +647,188 @@ def _build_llms(agent_keys: List[str]):
     return attempts
 
 
+def step_label(kind: str, agent: str, tool: Optional[str] = None) -> str:
+    """Short fixed-shape labels, built from role ids and tool names only: never prompt text,
+    completions or tool output."""
+    if kind == "tool":
+        return f"tool: {tool}"
+    return f"{agent}: task" if kind == "task" else f"llm: {agent}"
+
+
+class RunRecorder:
+    """Collects steps, handoffs and token totals inside the crew child and sends them to the
+    parent as dict messages over the pipe. Pure (no crewai import), thread-safe, and tolerant of
+    crewai's async event handlers delivering an end before its start: a step is emitted once both
+    ends are known. Times are epoch seconds; messages carry ms since the recorder was created."""
+
+    def __init__(self, send: Callable[[dict], None], agent_keys: List[str], now=time.time):
+        self._send, self._order, self._now = send, list(agent_keys), now
+        self._t0 = now()
+        self._lock = threading.Lock()
+        self._open: Dict[str, dict] = {}
+        self._started: set = set()
+        self._handed: set = set()
+        self.prompt_tokens = self.completion_tokens = self.requests = self.usage_missing = 0
+
+    def _ms(self, t: Optional[float]) -> int:
+        return max(0, int(((self._now() if t is None else t) - self._t0) * 1000))
+
+    def _emit_step(self, e: dict) -> None:
+        self._send({"k": "step", "agent": e["agent"], "kind": e["kind"], "label": e["label"],
+                    "start_ms": self._ms(e["start"]), "end_ms": self._ms(e["end"]),
+                    "status": e["status"], "error": e.get("error")})
+
+    def mark(self, key: str, kind: str, agent: str, label: str, *, start: Optional[float] = None,
+             end: Optional[float] = None, status: Optional[str] = None,
+             error: Optional[str] = None) -> None:
+        with self._lock:
+            e = self._open.setdefault(key, dict(kind=kind, agent=agent, label=label))
+            if start is not None:
+                e["start"] = start
+            if end is not None:
+                e.update(end=end, status=status or "ok", error=error)
+            if "start" in e and "end" in e:
+                del self._open[key]
+                self._emit_step(e)
+
+    def step(self, kind: str, agent: str, label: str, start: float, end: float, status: str,
+             error: Optional[str] = None) -> None:
+        with self._lock:
+            self._emit_step(dict(kind=kind, agent=agent, label=label, start=start, end=end,
+                                 status=status, error=error))
+
+    def task_started(self, agent: str, t: Optional[float] = None) -> None:
+        """The planned order is fixed, so task N starting means task N-1's output feeds it."""
+        with self._lock:
+            self._started.add(agent)
+            i = self._order.index(agent) if agent in self._order else 0
+            pair = (self._order[i - 1], agent) if i > 0 else None
+            if pair and pair not in self._handed:
+                self._handed.add(pair)
+                self._send({"k": "handoff", "from": pair[0], "to": pair[1], "status": "ok"})
+
+    def llm_done(self, usage: Optional[dict]) -> None:
+        with self._lock:
+            self.requests += 1
+            if isinstance(usage, dict) and usage:
+                self.prompt_tokens += int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
+                self.completion_tokens += int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
+            else:
+                self.usage_missing += 1  # reported, never estimated
+            self._send({"k": "usage", "tokens": self.prompt_tokens + self.completion_tokens,
+                        "requests": self.requests, "usage_missing": self.usage_missing})
+
+    def close(self, failed: bool) -> None:
+        """Flush steps whose end never arrived and, on failure, mark tasks that never started."""
+        with self._lock:
+            now = self._now()
+            for e in self._open.values():
+                if "start" in e:
+                    e.update(end=now, status="failed" if failed else "skipped")
+                    self._emit_step(e)
+            self._open.clear()
+            if failed:
+                for agent in self._order:
+                    if agent not in self._started:
+                        self._emit_step(dict(kind="task", agent=agent, label=step_label("task", agent),
+                                             start=now, end=now, status="skipped"))
+                        self._started.add(agent)
+
+
+def fixed_failure(text: str, exc_type=None) -> str:
+    """Fixed text plus an exception type name only. The message body is dropped: it can echo
+    prompt or completion fragments or short secrets."""
+    name = exc_type if isinstance(exc_type, str) else getattr(exc_type, "__name__", None)
+    name = name if isinstance(name, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]{0,63}", name) else None
+    return f"{text} ({name})" if name else text
+
+
+def _attach_listeners(rec: RunRecorder, role_to_key: Dict[str, str]):
+    """Wire crewai's event bus to the recorder (task and LLM events; tool steps are timed in
+    _to_crewai_tool). Returns a detach function. Handlers only read ids, roles and timings, never
+    message or response text."""
+    from crewai.events import crewai_event_bus as bus
+    from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallFailedEvent, LLMCallStartedEvent
+    from crewai.events.types.task_events import TaskCompletedEvent, TaskFailedEvent, TaskStartedEvent
+
+    def agent_of(event) -> str:
+        for obj in (getattr(event, "from_agent", None), getattr(getattr(event, "task", None), "agent", None),
+                    getattr(getattr(event, "from_task", None), "agent", None)):
+            key = role_to_key.get(getattr(obj, "role", None) or "")
+            if key:
+                return key
+        return role_to_key.get(getattr(event, "agent_role", None) or "", "crew")
+
+    def task_key(event) -> str:
+        return "task:" + str(getattr(getattr(event, "task", None), "id", None) or id(event))
+
+    def on_task_start(_src, ev):
+        a = agent_of(ev)
+        rec.task_started(a)
+        rec.mark(task_key(ev), "task", a, step_label("task", a), start=ev.timestamp.timestamp())
+
+    def on_task_done(_src, ev):
+        a = agent_of(ev)
+        rec.mark(task_key(ev), "task", a, step_label("task", a), end=ev.timestamp.timestamp(), status="ok")
+
+    def on_task_failed(_src, ev):
+        a = agent_of(ev)
+        rec.mark(task_key(ev), "task", a, step_label("task", a), end=ev.timestamp.timestamp(),
+                 status="failed", error=fixed_failure("Task failed", getattr(ev, "error_type", None)))
+
+    def on_llm_start(_src, ev):
+        a = agent_of(ev)
+        rec.mark("llm:" + ev.call_id, "llm", a, step_label("llm", a), start=ev.timestamp.timestamp())
+
+    def on_llm_done(_src, ev):
+        a = agent_of(ev)
+        rec.mark("llm:" + ev.call_id, "llm", a, step_label("llm", a), end=ev.timestamp.timestamp(), status="ok")
+        rec.llm_done(getattr(ev, "usage", None))
+
+    def on_llm_failed(_src, ev):
+        a = agent_of(ev)
+        rec.mark("llm:" + ev.call_id, "llm", a, step_label("llm", a), end=ev.timestamp.timestamp(),
+                 status="failed", error=fixed_failure("LLM call failed"))
+
+    pairs = [(TaskStartedEvent, on_task_start), (TaskCompletedEvent, on_task_done),
+             (TaskFailedEvent, on_task_failed), (LLMCallStartedEvent, on_llm_start),
+             (LLMCallCompletedEvent, on_llm_done), (LLMCallFailedEvent, on_llm_failed)]
+    for ev_type, h in pairs:
+        bus.on(ev_type)(h)
+
+    def detach() -> None:
+        bus.flush(timeout=10)  # let in-flight handlers land before the final flush
+        for ev_type, h in pairs:
+            bus.off(ev_type, h)
+
+    return detach
+
+
 def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
-    """Runs in a separate process. Sends (status, result, llm_label) back."""
+    """Runs in a separate process. Streams step/handoff/usage dicts, then one final dict."""
     # Own process group, so stop/timeout can kill the crew and anything it spawned.
     os.setsid()
+    send_lock = threading.Lock()
+
+    def send(msg: dict) -> None:
+        with send_lock:
+            conn.send(msg)
+
+    rec = RunRecorder(send, agent_keys)
+    role_to_key = {AGENT_CATALOG[k]["role"]: k for k in AGENT_CATALOG}
+    detach = None
+    final = None
     try:
         from crewai import Agent, Crew, Process, Task
 
+        detach = _attach_listeners(rec, role_to_key)
         last_err = "no LLM configured"
         for label, llms in _build_llms(agent_keys):
             try:
                 agents = [
                     Agent(role=AGENT_CATALOG[k]["role"], goal=AGENT_CATALOG[k]["goal"],
                           backstory=AGENT_CATALOG[k]["backstory"],
-                          tools=[_to_crewai_tool(t) for t in tools_for(k)],
+                          tools=[_to_crewai_tool(t, rec, k) for t in tools_for(k)],
                           llm=llms[k], allow_delegation=False, verbose=False)
                     for k in agent_keys
                 ]
@@ -542,13 +842,33 @@ def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
                     ))
                 out = Crew(agents=agents, tasks=tasks, process=Process.sequential,
                            verbose=False).kickoff()
-                conn.send(("completed", str(out), label))
-                return
+                final = ("completed", str(out), label, out)
+                break
             except Exception as e:  # try next LLM
                 last_err = f"{label}: {sanitize_error(e)}"
-        conn.send(("failed", last_err, None))
+        if final is None:
+            final = ("failed", last_err, None, None)
     except Exception as e:
-        conn.send(("failed", sanitize_error(e), None))
+        final = ("failed", sanitize_error(e), None, None)
+    try:
+        if detach:
+            detach()
+        status, result, label, out = final
+        rec.close(failed=status != "completed")
+        tokens, requests = rec.prompt_tokens + rec.completion_tokens, rec.requests
+        usage = getattr(out, "token_usage", None)  # crewai's own total over the same responses
+        if usage is not None and (rec.usage_missing or tokens == 0):
+            tokens = max(tokens, int(getattr(usage, "total_tokens", 0) or 0))
+            requests = max(requests, int(getattr(usage, "successful_requests", 0) or 0))
+        if rec.usage_missing:
+            log.warning("%d LLM call(s) returned no usage; token total may be low", rec.usage_missing)
+        send({"k": "final", "status": status, "result": result, "llm": label,
+              "tokens": tokens, "requests": requests, "usage_missing": rec.usage_missing})
+    except Exception as e:
+        try:
+            conn.send({"k": "final", "status": "failed", "result": sanitize_error(e), "llm": None})
+        except Exception:
+            pass
     finally:
         conn.close()
 
@@ -589,16 +909,65 @@ def kill_group(proc, grace_s: float = 5.0) -> None:
 
 
 def _watch(crew_id: str, proc, parent_conn) -> None:
-    proc.join(RUN_TIMEOUT_S)
-    if proc.is_alive():
+    """Drain the child's pipe while it runs (steps are written as they arrive), then settle the
+    run. Totals are written on every path, so stopped and timed-out runs keep what they used."""
+    deadline = time.monotonic() + RUN_TIMEOUT_S
+    final: Optional[dict] = None
+    totals = {"tokens": 0, "requests": 0, "missing": 0}
+    timed_out = False
+
+    def handle(msg) -> None:
+        nonlocal final
+        if not isinstance(msg, dict):
+            return
+        try:
+            k = msg.get("k")
+            if k == "step":
+                db_add_step(crew_id, msg)
+            elif k == "handoff":
+                db_add_handoff(crew_id, msg)
+            elif k in ("usage", "final"):
+                totals["tokens"] = int(msg.get("tokens", totals["tokens"]) or 0)
+                totals["requests"] = int(msg.get("requests", totals["requests"]) or 0)
+                totals["missing"] = int(msg.get("usage_missing", totals["missing"]) or 0)
+                if k == "final":
+                    final = msg
+        except Exception as e:  # a DB hiccup must not stop the run's settlement
+            log.warning("run %s: dropped a %s message: %s", crew_id, msg.get("k"), sanitize_error(e))
+
+    while final is None:
+        remain = deadline - time.monotonic()
+        if remain <= 0:
+            timed_out = True
+            break
+        try:
+            if parent_conn.poll(min(remain, 0.5)):
+                handle(parent_conn.recv())
+        except (EOFError, OSError):
+            break  # the child closed its end: it exited
+    if final is None and not timed_out:
+        try:
+            while parent_conn.poll(0):
+                handle(parent_conn.recv())
+        except (EOFError, OSError):
+            pass
+
+    if final is not None:
+        proc.join(5)
+        db_finish(crew_id, final.get("status", "failed"), final.get("result"), final.get("llm"))
+    elif timed_out and proc.is_alive():
         db_finish(crew_id, "failed", f"TimeoutError: run exceeded {RUN_TIMEOUT_S}s")
         kill_group(proc)
-    elif parent_conn.poll():
-        status, result, llm = parent_conn.recv()
-        db_finish(crew_id, status, result, llm)
     else:
+        proc.join(5)
         # Exited without a result: killed by /crews/stop or crashed.
         db_finish(crew_id, "failed", f"process exited with code {proc.exitcode}")
+    try:
+        # No usage ever reported (or some calls lacked it): leave NULL so the UI stays unwired.
+        if totals["requests"] > 0 and totals["missing"] == 0:
+            db_set_totals(crew_id, totals["tokens"], totals["requests"])
+    except Exception as e:
+        log.warning("run %s: could not store totals: %s", crew_id, sanitize_error(e))
     with _lock:
         _procs.pop(crew_id, None)
 
@@ -629,7 +998,8 @@ app = FastAPI(title="Terrance Crew Service", lifespan=lifespan)
 
 
 def require_token(x_crew_token: str = Header(default="")) -> None:
-    if not x_crew_token or not hmac.compare_digest(x_crew_token, CREW_SERVICE_TOKEN):
+    if not x_crew_token or not hmac.compare_digest(
+            x_crew_token.encode("utf-8"), CREW_SERVICE_TOKEN.encode("utf-8")):
         raise HTTPException(status_code=401, detail="invalid or missing X-Crew-Token")
 
 
@@ -673,6 +1043,19 @@ def get_status(id: str):
     if not info:
         raise HTTPException(status_code=404, detail="Crew execution not found")
     return info
+
+
+RUN_ID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
+
+
+@app.get("/crews/runs/{run_id}/steps", response_model=CrewRunSteps, response_model_by_alias=True,
+         dependencies=[Depends(require_token)])
+def get_run_steps(run_id: str):
+    if not RUN_ID_RE.match(run_id):
+        raise HTTPException(status_code=404, detail="Crew execution not found")
+    if not db_get(run_id):
+        raise HTTPException(status_code=404, detail="Crew execution not found")
+    return db_run_steps(run_id)
 
 
 @app.post("/crews/stop", dependencies=[Depends(require_token)])

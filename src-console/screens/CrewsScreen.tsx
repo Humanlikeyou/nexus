@@ -5,6 +5,7 @@ import { dateTime, humanize, plainText, sentenceStart } from "../lib/format";
 import type { CrewInfo, CrewServiceHealth, SystemSnapshot } from "../types";
 import { Button, Card, DataTag, Dialog, More, PageHero, StatusText, TextField, wiredTag, type StatusKind, type Tone } from "../ui";
 import { crewsAdapter, type CrewsAdapter } from "../crews/adapters";
+import { useLiveRunAdapter } from "../crews/runDetail";
 import { CrewApprovalsCard, CrewDecidedCard, CrewRunPage } from "./CrewPanels";
 import { crewToolsAdapter, type CrewToolsAdapter } from "../crews/toolGrant";
 import { CrewToolsPage, GrantCell } from "./CrewToolsPanels";
@@ -57,6 +58,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
   }
   const [page, setPage] = useState<CrewPage>({ kind: "overview" });
   const selected = page.kind === "run" ? runs.find((r) => r.id === page.id) ?? null : null;
+  const runAdapter = useLiveRunAdapter(adapter, selected);
   const [formOpen, setFormOpen] = useState(false);
 
   const [name, setName] = useState("");
@@ -147,7 +149,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
   if (selected) {
     return (
       <div className="crews page-inset cc-page">
-        <CrewRunPage run={selected} adapter={adapter} busy={busy} onBack={() => setPage({ kind: "overview" })}
+        <CrewRunPage run={selected} adapter={runAdapter} busy={busy} onBack={() => setPage({ kind: "overview" })}
           onStop={() => setConfirmStop(selected)}
           onRetry={health === "online" ? () => { setName(selected.name); setTask(selected.task ?? ""); setConfirmStart(true); } : undefined} />
         {dialogs}

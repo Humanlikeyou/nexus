@@ -600,5 +600,313 @@ class CrewInfoLlmTests(unittest.TestCase):
                          {"amara-fast", "amara-deep"})
 
 
+# ── R13-B: steps, handoffs, totals ──────────────────────────────────────────
+class _Conn:
+    """A fake DB connection that records every statement."""
+
+    def __init__(self, log, rows=None):
+        self.log, self.rows = log, rows or []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, sql, params=()):
+        self.log.append((sql, params))
+        return self
+
+    def fetchall(self):
+        return self.rows
+
+    def fetchone(self):
+        return None
+
+
+class _ListConn:
+    """Stands in for a multiprocessing Connection in-process: send() appends to a list."""
+
+    def __init__(self):
+        self.msgs = []
+
+    def send(self, m):
+        self.msgs.append(m)
+
+    def close(self):
+        pass
+
+
+class RunRecorderTests(unittest.TestCase):
+    def make(self, order=("researcher", "analyst")):
+        out = []
+        clock = [1000.0]
+        rec = main.RunRecorder(out.append, list(order), now=lambda: clock[0])
+        return rec, out, clock
+
+    def test_two_role_run_has_a_timeline_and_one_handoff(self):
+        rec, out, _ = self.make()
+        rec.task_started("researcher")
+        rec.mark("t1", "task", "researcher", "researcher: task", start=1000.5)
+        rec.mark("t1", "task", "researcher", "researcher: task", end=1002.0, status="ok")
+        rec.task_started("analyst")
+        rec.mark("t2", "task", "analyst", "analyst: task", start=1002.1)
+        rec.mark("t2", "task", "analyst", "analyst: task", end=1004.0, status="ok")
+        steps = [m for m in out if m["k"] == "step"]
+        hands = [m for m in out if m["k"] == "handoff"]
+        self.assertEqual([(s["label"], s["start_ms"], s["end_ms"], s["status"]) for s in steps],
+                         [("researcher: task", 500, 2000, "ok"), ("analyst: task", 2100, 4000, "ok")])
+        self.assertEqual(hands, [{"k": "handoff", "from": "researcher", "to": "analyst", "status": "ok"}])
+        rec.task_started("analyst")  # a repeat start does not duplicate the handoff
+        self.assertEqual(len([m for m in out if m["k"] == "handoff"]), 1)
+
+    def test_end_before_start_still_makes_one_step(self):
+        rec, out, _ = self.make()
+        rec.mark("c1", "llm", "analyst", "llm: analyst", end=1003.0, status="ok")
+        self.assertEqual(out, [])
+        rec.mark("c1", "llm", "analyst", "llm: analyst", start=1001.0)
+        self.assertEqual([(m["start_ms"], m["end_ms"]) for m in out], [(1000, 3000)])
+
+    def test_usage_totals_and_missing_usage_is_counted_not_estimated(self):
+        rec, out, _ = self.make()
+        rec.llm_done({"prompt_tokens": 10, "completion_tokens": 5})
+        rec.llm_done({"input_tokens": 3, "output_tokens": 2})
+        rec.llm_done(None)
+        self.assertEqual((rec.prompt_tokens, rec.completion_tokens, rec.requests, rec.usage_missing),
+                         (13, 7, 3, 1))
+        self.assertEqual(out[-1], {"k": "usage", "tokens": 20, "requests": 3, "usage_missing": 1})
+
+    def test_close_marks_unfinished_failed_and_unstarted_tasks_skipped(self):
+        rec, out, clock = self.make()
+        rec.task_started("researcher")
+        rec.mark("t1", "task", "researcher", "researcher: task", start=1000.0)
+        clock[0] = 1005.0
+        rec.close(failed=True)
+        got = {(m["label"], m["status"]) for m in out if m["k"] == "step"}
+        self.assertEqual(got, {("researcher: task", "failed"), ("analyst: task", "skipped")})
+
+    def test_tool_error_is_redacted_and_the_step_has_no_query_or_output(self):
+        out = []
+        rec = main.RunRecorder(out.append, ["researcher"])
+
+        def boom(arg):
+            raise RuntimeError("upstream said api_key=sk-LIVEKEY123456 at /app/data/x.json")
+
+        tool = main._to_crewai_tool(main.CrewTool("kb_query", "d", boom), rec, "researcher")
+        res = tool._run("QUERY-TEXT-PRIVATE")
+        self.assertTrue(res.startswith("Tool error:"))
+        [step] = [m for m in out if m["k"] == "step"]
+        self.assertEqual((step["kind"], step["label"], step["status"]), ("tool", "tool: kb_query", "failed"))
+        blob = json.dumps(step)
+        for bad in ("sk-LIVEKEY", "/app/data", "QUERY-TEXT-PRIVATE"):
+            self.assertNotIn(bad, blob)
+
+    def test_ok_tool_call_is_an_ok_step(self):
+        out = []
+        rec = main.RunRecorder(out.append, ["researcher"])
+        tool = main._to_crewai_tool(main.CrewTool("kb_query", "d", lambda a: "OUTPUT-PRIVATE"), rec, "researcher")
+        self.assertEqual(tool._run("q"), "OUTPUT-PRIVATE")
+        self.assertEqual((out[0]["status"], out[0]["error"]), ("ok", None))
+        self.assertNotIn("OUTPUT-PRIVATE", json.dumps(out))
+
+
+class CrewChildRunTests(unittest.TestCase):
+    """A real two-role crew against the mock router, run in-process (setsid patched out)."""
+
+    def test_two_role_run_streams_steps_handoff_and_exact_usage(self):
+        router = _MockRouter()
+        self.addCleanup(router.close)
+        conn = _ListConn()
+        prompt = "ZZ-PRIVATE-PROMPT-ZZ"
+        with mock.patch.object(main, "CREW_ROUTER_URL", router.url), \
+                mock.patch.object(main.os, "setsid"), mock.patch.object(main, "cloud_allowed", return_value=False):
+            main._run_crew_child(["researcher", "analyst"], prompt, conn)
+        final = conn.msgs[-1]
+        self.assertEqual((final["k"], final["status"]), ("final", "completed"))
+        steps = [m for m in conn.msgs if m["k"] == "step"]
+        tasks = [s for s in steps if s["kind"] == "task"]
+        llms = [s for s in steps if s["kind"] == "llm"]
+        self.assertEqual(sorted(t["label"] for t in tasks), ["analyst: task", "researcher: task"])
+        self.assertGreaterEqual(len(llms), 2)
+        self.assertTrue(all(s["status"] == "ok" for s in steps))
+        self.assertEqual([m for m in conn.msgs if m["k"] == "handoff"],
+                         [{"k": "handoff", "from": "researcher", "to": "analyst", "status": "ok"}])
+        # The mock router reports 2 tokens per call; the totals are exactly what it reported.
+        self.assertEqual(final["requests"], len(router.requests))
+        self.assertEqual(final["tokens"], 2 * len(router.requests))
+        self.assertNotIn(prompt, json.dumps(conn.msgs).replace(final["result"] or "", ""))
+        for s in steps:
+            self.assertRegex(s["label"], r"^(researcher|analyst): task$|^llm: (researcher|analyst)$|^tool: \w+$")
+
+
+class WatchTests(unittest.TestCase):
+    class _Proc:
+        exitcode = 0
+        pid = None
+
+        def __init__(self, alive=False):
+            self.alive = alive
+
+        def join(self, t=None):
+            pass
+
+        def is_alive(self):
+            return self.alive
+
+    def run_watch(self, msgs, proc=None):
+        r, w = mp.Pipe(duplex=False)
+        for m in msgs:
+            w.send(m)
+        w.close()
+        calls = []
+        with mock.patch.object(main, "db_add_step", lambda i, m: calls.append(("step", m["label"]))), \
+                mock.patch.object(main, "db_add_handoff", lambda i, m: calls.append(("handoff", m["from"], m["to"]))), \
+                mock.patch.object(main, "db_finish", lambda i, st, res, llm=None: calls.append(("finish", st, res, llm))), \
+                mock.patch.object(main, "db_set_totals", lambda i, t, q: calls.append(("totals", t, q))):
+            main._watch("rid", proc or self._Proc(), r)
+        return calls
+
+    def test_steps_are_written_as_they_arrive_then_the_run_settles_with_totals(self):
+        calls = self.run_watch([
+            {"k": "step", "label": "a: task"}, {"k": "handoff", "from": "a", "to": "b"},
+            {"k": "usage", "tokens": 7, "requests": 2},
+            {"k": "final", "status": "completed", "result": "ok", "llm": "amara-fast", "tokens": 9, "requests": 3}])
+        self.assertEqual(calls, [("step", "a: task"), ("handoff", "a", "b"),
+                                 ("finish", "completed", "ok", "amara-fast"), ("totals", 9, 3)])
+
+    def test_child_that_dies_keeps_its_steps_and_totals(self):
+        calls = self.run_watch([{"k": "step", "label": "a: task"}, {"k": "usage", "tokens": 4, "requests": 1}])
+        self.assertEqual(calls[0], ("step", "a: task"))
+        self.assertEqual(calls[1][:2], ("finish", "failed"))
+        self.assertEqual(calls[-1], ("totals", 4, 1))
+
+
+mp = main.mp
+
+
+class StepPersistenceTests(unittest.TestCase):
+    def test_db_add_step_allowlists_sanitizes_and_caps(self):
+        log = []
+        with mock.patch.object(main, "db", return_value=_Conn(log)):
+            main.db_add_step("rid", {"agent": "a", "kind": "evil", "label": "x" * 500, "start_ms": 5,
+                                     "end_ms": 1, "status": "weird",
+                                     "error": "bad token=abcdef /srv/x/y.json"})
+        _sql, p = log[0]
+        self.assertEqual((p[2], p[6], p[4], p[5]), ("task", "failed", 5, 5))
+        self.assertEqual(len(p[3]), main.MAX_LABEL_CHARS)
+        self.assertNotIn("abcdef", p[7])
+        self.assertNotIn("/srv", p[7])
+
+    def test_schema_is_idempotent_and_additive(self):
+        sql = main.SCHEMA
+        self.assertNotRegex(sql, r"(?i)drop |delete |truncate ")
+        for stmt in [s for s in sql.split(";") if s.strip()]:
+            self.assertRegex(stmt, r"(?i)IF NOT EXISTS")
+        for col in ("tokens", "requests"):
+            self.assertIn(f"ADD COLUMN IF NOT EXISTS {col}", sql)
+        self.assertIn("crew_steps", sql)
+        self.assertIn("crew_handoffs", sql)
+
+    def test_info_carries_totals_and_local_cost_is_zero(self):
+        import datetime as dt
+        fin = dt.datetime(2026, 1, 1, 0, 1, 0)
+        row = ("i", "n", "completed", ["a"], fin, "t", "r", "amara-fast", fin, 120, 4)
+        info = main._row_to_info(row)
+        self.assertEqual((info.tokens, info.requests, info.cost_usd, info.finished_at),
+                         (120, 4, 0.0, "2026-01-01T00:01:00Z"))
+        old = main._row_to_info(("i", "n", "completed", ["a"], None, "t", "r", "amara-fast", None, None, None))
+        self.assertEqual((old.tokens, old.requests, old.finished_at), (None, None, None))
+        cloud = main._row_to_info(("i", "n", "completed", ["a"], None, "t", "r", "minimax/M", None, None, None))
+        self.assertIsNone(cloud.cost_usd)  # cloud cost is unknown, never invented
+
+    def test_steps_endpoint_shape_and_empty_and_bad_id(self):
+        from fastapi import HTTPException
+        rid = "11111111-2222-3333-4444-555555555555"
+        info = main.CrewInfo(id=rid, name="n", status="completed", agents=["a"])
+        rows = [[(1, "researcher", "task", "researcher: task", 0, 10, "ok", None)],
+                [("researcher", "analyst", "ok")]]
+
+        class C(_Conn):
+            def execute(self, sql, params=()):
+                self.rows = rows[0] if "crew_steps" in sql else rows[1]
+                return super().execute(sql, params)
+
+        with mock.patch.object(main, "db_get", return_value=info), \
+                mock.patch.object(main, "db", return_value=C([])):
+            out = main.get_run_steps(rid)
+            body = json.loads(out.model_dump_json(by_alias=True))
+        self.assertEqual(body["handoffs"], [{"from": "researcher", "to": "analyst", "status": "ok"}])
+        self.assertEqual(body["steps"][0]["label"], "researcher: task")
+        with mock.patch.object(main, "db_get", return_value=info), \
+                mock.patch.object(main, "db", return_value=_Conn([], [])):
+            self.assertEqual(main.get_run_steps(rid).steps, [])
+        with self.assertRaises(HTTPException) as cm:
+            main.get_run_steps("../etc/passwd")
+        self.assertEqual(cm.exception.status_code, 404)
+
+    def test_llm_and_task_errors_store_fixed_text_only(self):
+        out = []
+        rec = main.RunRecorder(out.append, ["researcher"])
+        handlers = {}
+        fake_bus = mock.Mock()
+        fake_bus.on = lambda et: (lambda h: handlers.setdefault(et.__name__, h))
+        with mock.patch("crewai.events.crewai_event_bus", fake_bus):
+            main._attach_listeners(rec, {main.AGENT_CATALOG["researcher"]["role"]: "researcher"})
+        ev = mock.Mock(call_id="c", error="prompt: SECRETPROMPT key=sk-short1", from_agent=None,
+                       task=None, from_task=None, agent_role=None)
+        import datetime as dt
+        ev.timestamp = dt.datetime.now(dt.timezone.utc)
+        handlers["LLMCallStartedEvent"](None, ev)
+        handlers["LLMCallFailedEvent"](None, ev)
+        ev.error_type = ValueError
+        handlers["TaskStartedEvent"](None, ev)
+        handlers["TaskFailedEvent"](None, ev)
+        rec.close(failed=True)
+        blob = json.dumps(out)
+        self.assertNotIn("SECRETPROMPT", blob)
+        self.assertNotIn("sk-short1", blob)
+        self.assertIn("LLM call failed", blob)
+        self.assertIn("Task failed (ValueError)", blob)
+        # the parent also drops message bodies for non-tool kinds
+        log = []
+        with mock.patch.object(main, "db", return_value=_Conn(log)):
+            main.db_add_step("rid", {"kind": "llm", "status": "failed", "error": "echo SECRETPROMPT"})
+            main.db_add_step("rid", {"kind": "tool", "status": "failed", "error": "plain tool failure"})
+        self.assertEqual(log[0][1][7], "LLM call failed")
+        self.assertEqual(log[1][1][7], "plain tool failure")
+
+    def test_handoffs_need_known_roles_and_are_capped(self):
+        log = []
+        with mock.patch.object(main, "db", return_value=_Conn(log)):
+            main.db_add_handoff("rid", {"from": "researcher", "to": "analyst"})
+            main.db_add_handoff("rid", {"from": "evil", "to": "analyst"})
+            main.db_add_handoff("rid", {"from": "researcher", "to": "unregistered_tool"})
+        self.assertEqual(len(log), 1)
+        self.assertEqual(log[0][1][-1], main.MAX_HANDOFFS_PER_RUN)
+
+    def test_totals_left_null_without_usage(self):
+        for msgs in ([], [{"k": "usage", "tokens": 0, "requests": 0}],
+                     [{"k": "usage", "tokens": 4, "requests": 2, "usage_missing": 1}]):
+            calls = WatchTests().run_watch(msgs)
+            self.assertFalse([c for c in calls if c[0] == "totals"], msgs)
+
+    def test_unknown_llm_has_no_cost(self):
+        self.assertIsNone(main.run_cost_usd("weird"))
+        self.assertIsNone(main.run_cost_usd(""))
+        self.assertEqual(main.run_cost_usd("amara-deep,amara-fast"), 0.0)
+
+    def test_non_ascii_token_is_401_not_500(self):
+        from fastapi import HTTPException
+        with mock.patch.object(main, "CREW_SERVICE_TOKEN", "good-token"):
+            with self.assertRaises(HTTPException) as cm:
+                main.require_token("tökén")
+            self.assertEqual(cm.exception.status_code, 401)
+            self.assertIsNone(main.require_token("good-token"))
+
+    def test_steps_route_requires_the_token(self):
+        route = next(r for r in main.app.routes if getattr(r, "path", "") == "/crews/runs/{run_id}/steps")
+        self.assertTrue(any(d.call is main.require_token for d in route.dependant.dependencies))
+
+
 if __name__ == "__main__":
     unittest.main()

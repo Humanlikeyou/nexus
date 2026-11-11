@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { EMPTY_DEVICE_ID } from "./lib/devices";
 import type {
   CrewInfo,
+  CrewRunSteps,
   CrewServiceHealth,
   CrewSnapshot,
   CrewToolInfo,
@@ -283,6 +284,7 @@ export function pickKb(k: Partial<KbStatus> | null | undefined): KbStatus {
 
 export const startCrew = (name: string, task: string) => invoke<CrewInfo>("crew_start", { name, task, agents: null });
 export const getCrewStatus = (id: string) => invoke<CrewInfo>("crew_status", { id });
+export const getCrewRunSteps = (id: string) => invoke<CrewRunSteps>("crew_run_steps", { id });
 export const stopCrew = (id: string) => invoke<string>("crew_stop", { id });
 
 export const interactWithTerrence = (request: {
