@@ -535,11 +535,68 @@ trait Gate: Sync {
         &self,
         text: String,
     ) -> impl std::future::Future<Output = Result<Held, String>> + Send;
+    /// The approval session this gate belongs to (decision 0007 #6).
+    fn session(&self) -> &FollowupSession;
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Grant {
+    Unasked,
+    Approved,
+    Denied,
+}
+
+/// One approval per app session (decision 0007 #6): the first Lists edit asks once; Allow covers
+/// the rest of this run, Deny is final for it. Every approved edit is listed. In memory only, so a
+/// restart asks again. Writes are serialized here, which also covers the time the dialog is open.
+pub(crate) struct FollowupSession {
+    grant: std::sync::Mutex<Grant>,
+    edits: std::sync::Mutex<Vec<String>>,
+    writes: tokio::sync::Mutex<()>,
+}
+
+const MAX_SESSION_EDITS: usize = 500;
+
+impl FollowupSession {
+    const fn new() -> Self {
+        Self {
+            grant: std::sync::Mutex::new(Grant::Unasked),
+            edits: std::sync::Mutex::new(Vec::new()),
+            writes: tokio::sync::Mutex::const_new(()),
+        }
+    }
+    fn grant(&self) -> Grant {
+        *self.grant.lock().unwrap_or_else(|e| e.into_inner())
+    }
+    fn set(&self, g: Grant) {
+        *self.grant.lock().unwrap_or_else(|e| e.into_inner()) = g;
+    }
+    fn record(&self, edit: String) {
+        let mut e = self.edits.lock().unwrap_or_else(|e| e.into_inner());
+        if e.len() < MAX_SESSION_EDITS {
+            e.push(edit);
+        }
+    }
+    fn edits(&self) -> Vec<String> {
+        self.edits.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+static APP_SESSION: FollowupSession = FollowupSession::new();
+
+/// The Lists edits approved in this app session, oldest first (what the one approval covered).
+#[tauri::command]
+pub fn followups_session_edits() -> Vec<String> {
+    APP_SESSION.edits()
 }
 
 struct NativeGate(tauri::AppHandle);
 
 impl Gate for NativeGate {
+    fn session(&self) -> &FollowupSession {
+        &APP_SESSION
+    }
+
     async fn approve(&self, text: String) -> Result<Held, String> {
         let guard = super::approval_gate::require_approval(
             &self.0,
@@ -566,7 +623,9 @@ async fn off_thread<T: Send + 'static>(
         .map_err(|_| ERR_STORAGE.to_string())?
 }
 
-/// Input is validated before any dialog is shown; the file is touched only after Allow.
+/// Input is validated before any dialog is shown; the file is touched only after Allow. The
+/// first edit of an app session asks once for the whole session; later edits don't ask again
+/// (and after a Deny they are refused without a dialog). Each approved edit is recorded.
 async fn gated_write<T: Send + 'static>(
     gate: &impl Gate,
     file: &str,
@@ -574,9 +633,36 @@ async fn gated_write<T: Send + 'static>(
     store: Store,
     work: impl FnOnce(&Store) -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
-    let text = super::approval_gate::approval_text(&operation, &approval_detail(file))?;
-    let _held = gate.approve(text).await?;
-    off_thread(move || work(&store)).await
+    let session = gate.session();
+    let _one_at_a_time = session.writes.lock().await;
+    match session.grant() {
+        Grant::Denied => {
+            return Err(format!(
+                "{} Lists edits were declined for this app session. Nothing was changed.",
+                super::approval_gate::DECLINED_PREFIX
+            ))
+        }
+        Grant::Approved => {}
+        Grant::Unasked => {
+            let operation_and_scope = format!(
+                "{operation}\n\nAllow edits to your Lists for the rest of this app session? Each edit is listed."
+            );
+            let text =
+                super::approval_gate::approval_text(&operation_and_scope, &approval_detail(file))?;
+            match gate.approve(text).await {
+                Ok(_held) => session.set(Grant::Approved),
+                Err(e) => {
+                    if e.starts_with(super::approval_gate::DECLINED_PREFIX) {
+                        session.set(Grant::Denied);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+    }
+    let out = off_thread(move || work(&store)).await?;
+    session.record(operation);
+    Ok(out)
 }
 
 /// Quotes and escapes text so it can't be read as dialog copy (a `"` becomes `\"`).
@@ -1222,6 +1308,7 @@ mod tests {
     struct Stub {
         asked: std::sync::Mutex<Vec<String>>,
         allow: bool,
+        session: FollowupSession,
     }
 
     impl Stub {
@@ -1229,6 +1316,7 @@ mod tests {
             Self {
                 asked: Default::default(),
                 allow,
+                session: FollowupSession::new(),
             }
         }
         fn asked(&self) -> Vec<String> {
@@ -1237,6 +1325,9 @@ mod tests {
     }
 
     impl Gate for Stub {
+        fn session(&self) -> &FollowupSession {
+            &self.session
+        }
         async fn approve(&self, text: String) -> Result<Held, String> {
             self.asked.lock().unwrap().push(text);
             if self.allow {
@@ -1275,7 +1366,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn every_write_is_gated_and_approved_writes_land() {
+    async fn one_approval_covers_the_session_and_every_edit_is_listed() {
         let t = Temp::new();
         let gate = Stub::new(true);
         let added = add_item_gated(&gate, store_of(&t), ("one".into(), None, None), day(TODAY))
@@ -1297,8 +1388,47 @@ mod tests {
         delete_item_gated(&gate, store_of(&t), added.id)
             .await
             .unwrap();
-        assert_eq!(gate.asked().len(), 7);
+        let asked = gate.asked();
+        assert_eq!(
+            asked.len(),
+            1,
+            "one dialog for the whole session, not one per edit"
+        );
+        assert!(
+            asked[0].contains("rest of this app session"),
+            "{}",
+            asked[0]
+        );
+        let edits = gate.session.edits();
+        assert_eq!(edits.len(), 7, "{edits:?}");
+        assert!(
+            edits[0].starts_with("Add follow-up") && edits[6].starts_with("Delete follow-up"),
+            "{edits:?}"
+        );
         assert_eq!(t.json(ITEMS_FILE), json!([]));
+    }
+
+    #[tokio::test]
+    async fn deny_is_final_for_the_session_and_nothing_is_written() {
+        let t = Temp::new();
+        let gate = Stub::new(false);
+        let first = add_item_gated(&gate, store_of(&t), ("one".into(), None, None), day(TODAY))
+            .await
+            .unwrap_err();
+        assert!(
+            first.starts_with(super::super::approval_gate::DECLINED_PREFIX),
+            "{first}"
+        );
+        let second = add_item_gated(&gate, store_of(&t), ("two".into(), None, None), day(TODAY))
+            .await
+            .unwrap_err();
+        assert!(
+            second.starts_with(super::super::approval_gate::DECLINED_PREFIX),
+            "{second}"
+        );
+        assert_eq!(gate.asked().len(), 1, "no second dialog after a Deny");
+        assert!(gate.session.edits().is_empty());
+        assert_eq!(t.files(), Vec::<String>::new());
     }
 
     #[tokio::test]
@@ -1337,22 +1467,25 @@ mod tests {
             "a topic the dialog can't show exactly is refused"
         );
         assert_eq!(gate.asked().len(), before, "and never reaches the dialog");
-        delete_muted_gated(&gate, store_of(&t), "gym".into())
+        // A fresh session asks again, so each dialog text below is seen.
+        let g2 = Stub::new(true);
+        delete_muted_gated(&g2, store_of(&t), "gym".into())
             .await
             .unwrap();
         assert_eq!(
-            gate.asked().last().unwrap().lines().next().unwrap(),
+            g2.asked().last().unwrap().lines().next().unwrap(),
             "Unmute topic \"gym\""
         );
+        let g3 = Stub::new(true);
         let item = add_item_gated(
-            &gate,
+            &g3,
             store_of(&t),
             ("buy milk\". Reopen all".into(), None, None),
             day(TODAY),
         )
         .await
         .unwrap();
-        assert!(gate
+        assert!(g3
             .asked()
             .last()
             .unwrap()
@@ -1368,28 +1501,30 @@ mod tests {
         let item = add_item_gated(&gate, store_of(&t), (long, None, None), day(TODAY))
             .await
             .unwrap();
-        let before = gate.asked().len();
-        mark_done_gated(&gate, store_of(&t), item.id, day(TODAY))
+        let g2 = Stub::new(true);
+        mark_done_gated(&g2, store_of(&t), item.id, day(TODAY))
             .await
             .unwrap();
-        let text = gate.asked().last().unwrap().clone();
+        let text = g2.asked().last().unwrap().clone();
         let line = text.lines().next().unwrap();
         assert!(line.starts_with("Mark follow-up done: #1 \"xxx"), "{line}");
         assert!(line.ends_with("\"…"), "{line}");
         assert!(line.chars().count() < 120);
+        // An unasked session: a missing id must fail before any dialog.
+        let g3 = Stub::new(true);
         for err in [
-            reopen_gated(&gate, store_of(&t), 99).await.unwrap_err(),
-            delete_item_gated(&gate, store_of(&t), 99)
+            reopen_gated(&g3, store_of(&t), 99).await.unwrap_err(),
+            delete_item_gated(&g3, store_of(&t), 99)
                 .await
                 .map(|_| ())
                 .unwrap_err(),
-            mark_done_gated(&gate, store_of(&t), 99, day(TODAY))
+            mark_done_gated(&g3, store_of(&t), 99, day(TODAY))
                 .await
                 .map(|_| ())
                 .unwrap_err(),
         ] {
             assert_eq!(err, ERR_NOT_FOUND);
         }
-        assert_eq!(gate.asked().len(), before + 1);
+        assert!(g3.asked().is_empty());
     }
 }

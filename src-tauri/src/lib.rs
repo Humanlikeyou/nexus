@@ -223,6 +223,7 @@ pub fn run() {
             // Amara's follow-up lists (commands/followups.rs)
             business_ledger::read_business_ledger,
             followups::followups_list,
+            followups::followups_session_edits,
             followups::followups_add_item,
             followups::followups_update_item,
             followups::followups_mark_done,
