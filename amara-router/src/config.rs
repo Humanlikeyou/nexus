@@ -515,7 +515,7 @@ pub fn lan_api_key(cfg: &Config, secrets: &Secrets) -> Result<Option<String>, St
         .filter(|k| k.len() >= MIN_API_KEY_LEN)
         .map(Some)
         .ok_or_else(|| {
-            format!("lan_bind needs AMARA_ROUTER_API_KEY ({MIN_API_KEY_LEN}+ chars) in the 0600 secrets file")
+            format!("lan_bind needs AMARA_ROUTER_API_KEY ({MIN_API_KEY_LEN}+ chars) in the Keychain (com.taisun.amara-router / AMARA_ROUTER_API_KEY) or the 0600 secrets file")
         })
 }
 
@@ -530,7 +530,7 @@ pub fn check_secrets(cfg: &Config, secrets: &Secrets) -> Result<(), String> {
             .is_none_or(|k| k.len() < MIN_API_KEY_LEN)
     {
         return Err(format!(
-            "cloud.anthropic_enabled needs AMARA_ROUTER_API_KEY ({MIN_API_KEY_LEN}+ chars) in the 0600 secrets file: the loopback listener then requires Authorization: Bearer"
+            "cloud.anthropic_enabled needs AMARA_ROUTER_API_KEY ({MIN_API_KEY_LEN}+ chars) in the Keychain (com.taisun.amara-router / AMARA_ROUTER_API_KEY) or the 0600 secrets file: the loopback listener then requires Authorization: Bearer"
         ));
     }
     Ok(())
@@ -600,6 +600,42 @@ pub fn load_secrets(path: &Path) -> Result<Secrets, String> {
     })
 }
 
+/// Keychain item holding the router bearer (decision 0007 #7): service + account.
+pub const KEYCHAIN_SERVICE: &str = "com.taisun.amara-router";
+pub const KEYCHAIN_ACCOUNT: &str = "AMARA_ROUTER_API_KEY";
+
+impl Secrets {
+    /// Prefers the bearer from the Keychain; the 0600 secrets file stays a fallback so existing
+    /// setups keep working. `lookup(service, account)` returns the stored value, if any. The value
+    /// is never logged or returned anywhere (Debug prints `<set>`).
+    pub fn with_keychain(mut self, lookup: impl Fn(&str, &str) -> Option<String>) -> Self {
+        if let Some(k) = lookup(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+        {
+            self.api_key = Some(k);
+        }
+        self
+    }
+}
+
+/// Reads a generic password from the login Keychain via `/usr/bin/security` (macOS). Output is
+/// captured, never printed; stderr is discarded. None when absent, locked or not on macOS.
+pub fn keychain_lookup(service: &str, account: &str) -> Option<String> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let out = std::process::Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", service, "-a", account, "-w"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8(out.stdout).ok()
+}
+
 /// `NEXUS_OUTBOUND_DISABLED` = 1/true/yes/on (trimmed, any case), same rule as the Nexus app.
 pub fn outbound_disabled() -> bool {
     std::env::var("NEXUS_OUTBOUND_DISABLED")
@@ -615,6 +651,36 @@ pub fn outbound_disabled() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_keychain_bearer_wins_over_the_file_and_is_never_printed() {
+        let from_file = Secrets {
+            api_key: Some("file-key-000000000000000000".into()),
+            anthropic_key: None,
+        };
+        let kc = |s: &str, a: &str| {
+            assert_eq!((s, a), (KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT));
+            Some("keychain-key-111111111111111\n".to_string())
+        };
+        let s = from_file.clone().with_keychain(kc);
+        assert_eq!(s.api_key.as_deref(), Some("keychain-key-111111111111111"));
+        assert!(
+            !format!("{s:?}").contains("keychain-key"),
+            "Debug must not print the key"
+        );
+        // No Keychain item: the file value stays.
+        assert_eq!(
+            from_file.clone().with_keychain(|_, _| None).api_key,
+            from_file.api_key
+        );
+        assert_eq!(
+            from_file
+                .clone()
+                .with_keychain(|_, _| Some("  ".into()))
+                .api_key,
+            from_file.api_key
+        );
+    }
 
     const MIN: &str = r#"
 ollama_url = "http://127.0.0.1:11434"
