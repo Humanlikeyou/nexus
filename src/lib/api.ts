@@ -158,9 +158,6 @@ export const saveSession = (session: RecordedSession, data: unknown) =>
 export const listSessions = () =>
   invoke<RecordedSession[]>("list_sessions");
 
-export const deleteSession = (sessionId: string) =>
-  invoke<void>("delete_session", { sessionId });
-
 // ============================================================
 // Snapshots
 // ============================================================

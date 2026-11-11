@@ -1,4 +1,5 @@
 import { NEEDS_CONVERSION, UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
+import { liveBusiness, type BusinessLedger } from "./liveLedger";
 
 export type Health = "on_track" | "at_risk" | "off_track" | "done" | "waiting" | "searching";
 export interface Venture { id: string; name: string; stage: string; health: Health; progress: { done: number; total: number; label: string } | null; nextStep: string | null; note: string; target: Wired<number> }
@@ -46,4 +47,5 @@ export const sampleBusiness: BusinessAdapter = {
   taxFlags: () => sample([{ id: "t1", label: "Overseas supplier invoice has no tax line", area: "Costs", date: "Oct 21" }]),
 };
 
-export const businessAdapter = (): BusinessAdapter => (sampleAdaptersEnabled() ? sampleBusiness : unwiredBusiness);
+/** Live when a ledger file has loaded into the snapshot (decision 0005); otherwise unwired. */
+export const businessAdapter = (data?: { ledger?: BusinessLedger | null }): BusinessAdapter => (sampleAdaptersEnabled() ? sampleBusiness : liveBusiness(data?.ledger ?? null));

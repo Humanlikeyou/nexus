@@ -78,6 +78,51 @@ pub struct CrewInfo {
     pub started_at: Option<String>,
     pub task: Option<String>,
     pub result: Option<String>,
+    // R13-B totals; absent on older rows and older services.
+    #[serde(default)]
+    pub finished_at: Option<String>,
+    #[serde(default)]
+    pub tokens: Option<i64>,
+    #[serde(default)]
+    pub requests: Option<i64>,
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
+}
+
+/// One timeline step of a run (crew-service `crew_steps`). Labels are short role/tool names,
+/// never prompt text.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct CrewStepRow {
+    pub id: i64,
+    pub agent: String,
+    pub kind: String,
+    pub label: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub status: String,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct CrewHandoffRow {
+    pub from: String,
+    pub to: String,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
+pub struct CrewRunSteps {
+    #[serde(default)]
+    pub steps: Vec<CrewStepRow>,
+    #[serde(default)]
+    pub handoffs: Vec<CrewHandoffRow>,
+}
+
+/// Run ids are UUIDs minted by the crew service: 36 chars of hex and dashes, nothing else, so
+/// an id can never alter the request path.
+fn valid_run_id(id: &str) -> bool {
+    id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -158,6 +203,30 @@ pub async fn crew_status(id: String) -> Result<CrewInfo, String> {
 }
 
 #[tauri::command]
+pub async fn crew_run_steps(id: String) -> Result<CrewRunSteps, String> {
+    if !valid_run_id(&id) {
+        return Err("Invalid crew run id.".to_string());
+    }
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{}/crews/runs/{}/steps", crew_service_url(), id))
+        .header(CREW_TOKEN_HEADER, crew_token()?)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|_| "Crew service unreachable.".to_string())?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        return Err(http_error("steps", status));
+    }
+
+    resp.json::<CrewRunSteps>()
+        .await
+        .map_err(|_| "Unexpected crew steps from the crew service.".to_string())
+}
+
+#[tauri::command]
 pub async fn crew_stop(id: String) -> Result<String, String> {
     let client = reqwest::Client::new();
     let resp = client
@@ -220,6 +289,54 @@ fn http_error(op: &str, status: reqwest::StatusCode) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_id_validation_accepts_uuids_only() {
+        assert!(valid_run_id("11111111-2222-3333-4444-555555555555"));
+        assert!(valid_run_id("AbCdEf01-2222-3333-4444-555555555555"));
+        for bad in [
+            "",
+            "../etc/passwd",
+            "11111111-2222-3333-4444-55555555555/",
+            "11111111-2222-3333-4444-55555555555?",
+            "11111111-2222-3333-4444-5555555555555",
+            "11111111-2222-3333-4444-55555555555g",
+            "11111111/2222/3333/4444/555555555555",
+        ] {
+            assert!(!valid_run_id(bad), "{bad:?} accepted");
+        }
+    }
+
+    #[tokio::test]
+    async fn crew_run_steps_rejects_a_bad_id_before_any_request() {
+        let err = crew_run_steps("../x".into()).await.unwrap_err();
+        assert_eq!(err, "Invalid crew run id.");
+    }
+
+    #[test]
+    fn steps_payload_and_extended_info_deserialize_with_defaults() {
+        let doc = r#"{"steps":[{"id":1,"agent":"researcher","kind":"task","label":"researcher: task",
+            "start_ms":0,"end_ms":900,"status":"ok","error":null}],
+            "handoffs":[{"from":"researcher","to":"analyst","status":"ok"}]}"#;
+        let r: CrewRunSteps = serde_json::from_str(doc).unwrap();
+        assert_eq!(r.steps[0].end_ms, 900);
+        assert_eq!(r.handoffs[0].to, "analyst");
+        assert_eq!(
+            serde_json::from_str::<CrewRunSteps>("{}").unwrap(),
+            CrewRunSteps::default()
+        );
+        let old: CrewInfo =
+            serde_json::from_str(r#"{"id":"a","name":"n","status":"running"}"#).unwrap();
+        assert!(old.tokens.is_none() && old.cost_usd.is_none() && old.finished_at.is_none());
+        let new: CrewInfo = serde_json::from_str(
+            r#"{"id":"a","name":"n","status":"completed","tokens":12,"requests":2,"cost_usd":0.0,"finished_at":"2026-01-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            (new.tokens, new.requests, new.cost_usd),
+            (Some(12), Some(2), Some(0.0))
+        );
+    }
 
     #[test]
     fn http_error_is_fixed_text_with_status_only() {

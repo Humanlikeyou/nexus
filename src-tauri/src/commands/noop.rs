@@ -1234,6 +1234,312 @@ pub async fn live_heart_rate() -> Option<LiveHeartRate> {
     .flatten()
 }
 
+// ---------- workouts + hypnogram (read-only; no notes, no raw JSON cross the bridge) ----------
+
+const WORKOUT_DEFAULT_DAYS: u32 = 14;
+const WORKOUT_MAX_DAYS: u32 = 90;
+const WORKOUT_MAX_ROWS: i64 = 200;
+/// Sleep rows scanned for the hypnogram (newest first), enough for about two weeks with naps.
+const HYPNOGRAM_ROWS: i64 = 48;
+
+/// One workout for the Effort screen. `notes` is deliberately not read. Never log these values.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NoopWorkout {
+    pub day: String,
+    pub started_at: String,
+    pub ended_at: String,
+    pub sport: String,
+    pub duration_min: Option<f64>,
+    pub energy_kcal: Option<f64>,
+    pub avg_hr: Option<i64>,
+    pub max_hr: Option<i64>,
+    pub strain: Option<f64>,
+    pub distance_m: Option<f64>,
+    pub steps: Option<i64>,
+    /// Minutes in zones 1..5 (always five entries), or None when NOOP holds no zone data.
+    pub zone_minutes: Option<Vec<f64>>,
+}
+
+/// zonesJSON is an object {"z1".."z5": seconds}. Anything else (or all-empty) is None.
+fn decode_zone_minutes(json: Option<&str>) -> Option<Vec<f64>> {
+    let value = serde_json::from_str::<serde_json::Value>(json?).ok()?;
+    let object = value.as_object()?;
+    let minutes: Vec<f64> = ["z1", "z2", "z3", "z4", "z5"]
+        .iter()
+        .map(|key| {
+            object
+                .get(*key)
+                .and_then(serde_json::Value::as_f64)
+                .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
+                .map_or(0.0, |seconds| seconds / 60.0)
+        })
+        .collect();
+    (minutes.iter().sum::<f64>() > 0.0).then_some(minutes)
+}
+
+fn local_day(timestamp: i64) -> String {
+    DateTime::<Utc>::from_timestamp(timestamp, 0)
+        .unwrap_or_else(Utc::now)
+        .with_timezone(&Local)
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string()
+}
+
+fn recent_workouts_in(
+    path: &Path,
+    device_id: &str,
+    days: u32,
+    now: DateTime<Utc>,
+) -> Result<Vec<NoopWorkout>, String> {
+    let conn = open_store(path).map_err(|e| format!("NOOP store could not be opened: {e}"))?;
+    if !table_names(&conn)?.contains("workout") {
+        return Ok(Vec::new());
+    }
+    let days = days.clamp(1, WORKOUT_MAX_DAYS);
+    let cutoff = now.timestamp() - i64::from(days) * 86_400;
+    let mut statement = conn
+        .prepare(
+            "SELECT startTs, endTs, sport, durationS, energyKcal, avgHr, maxHr, strain,
+                    distanceM, steps, zonesJSON
+             FROM workout
+             WHERE deviceId IN (?1, ?2) AND startTs >= ?3 AND startTs <= ?4
+             ORDER BY startTs DESC, (deviceId = ?1) DESC
+             LIMIT ?5",
+        )
+        .map_err(|e| format!("NOOP workouts could not be read: {e}"))?;
+    let rows = statement
+        .query_map(
+            params![
+                device_id,
+                format!("{device_id}-noop"),
+                cutoff,
+                now.timestamp() + 86_400,
+                WORKOUT_MAX_ROWS
+            ],
+            |row| {
+                let start: i64 = row.get(0)?;
+                let end: i64 = row.get(1)?;
+                let duration_s: Option<f64> = row.get(3)?;
+                let zones: Option<String> = row.get(10)?;
+                Ok(NoopWorkout {
+                    day: local_day(start),
+                    started_at: timestamp_iso(start),
+                    ended_at: timestamp_iso(end),
+                    sport: row.get(2)?,
+                    duration_min: duration_s.filter(|s| *s >= 0.0).map(|s| s / 60.0),
+                    energy_kcal: row.get(4)?,
+                    avg_hr: row.get(5)?,
+                    max_hr: row.get(6)?,
+                    strain: row.get(7)?,
+                    distance_m: row.get(8)?,
+                    steps: row.get(9)?,
+                    zone_minutes: decode_zone_minutes(zones.as_deref()),
+                })
+            },
+        )
+        .map_err(|e| format!("NOOP workouts could not be read: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("NOOP workouts could not be read: {e}"))?;
+    // The same workout can exist under both device ids; the first (plain id) wins.
+    let mut seen = HashSet::new();
+    Ok(rows
+        .into_iter()
+        .filter(|w| seen.insert((w.started_at.clone(), w.sport.clone())))
+        .collect())
+}
+
+/// Recent workouts, newest first. `days` defaults to 14 and is capped at 90.
+#[tauri::command]
+pub async fn noop_recent_workouts(days: Option<u32>) -> Result<Vec<NoopWorkout>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let device_id = device_id_from_environment();
+        let (_, path) = NoopPaths::from_environment().resolve(&device_id)?;
+        recent_workouts_in(
+            &path,
+            &device_id,
+            days.unwrap_or(WORKOUT_DEFAULT_DAYS),
+            Utc::now(),
+        )
+    })
+    .await
+    .map_err(|e| format!("NOOP workouts task failed: {e}"))?
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HypnogramSegment {
+    /// Unix seconds, clipped to the night window.
+    pub start: i64,
+    pub end: i64,
+    /// "awake" | "light" | "deep" | "rem".
+    pub stage: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Hypnogram {
+    /// Local day the night ended on (same as `NoopSleepSession.day`).
+    pub day: String,
+    pub started_at: String,
+    pub ended_at: String,
+    pub segments: Vec<HypnogramSegment>,
+}
+
+fn normalise_stage(stage: &str) -> Option<&'static str> {
+    match stage.trim().to_ascii_lowercase().as_str() {
+        "wake" | "awake" => Some("awake"),
+        "light" | "core" => Some("light"),
+        "deep" => Some("deep"),
+        "rem" => Some("rem"),
+        _ => None,
+    }
+}
+
+/// stagesJSON segments [{start,end,stage}] clipped to [lo, hi]; unknown stages and empty
+/// or inverted segments are dropped. The dictionary shape yields no segments.
+fn decode_segments(json: Option<&str>, lo: i64, hi: i64) -> Vec<HypnogramSegment> {
+    let Some(value) = json.and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok()) else {
+        return Vec::new();
+    };
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let start = item.get("start")?.as_f64()?;
+            let end = item.get("end")?.as_f64()?;
+            let stage = normalise_stage(item.get("stage")?.as_str()?)?;
+            if !start.is_finite() || !end.is_finite() {
+                return None;
+            }
+            let (start, end) = ((start as i64).max(lo), (end as i64).min(hi));
+            (end > start).then(|| HypnogramSegment {
+                start,
+                end,
+                stage: stage.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn hypnogram_in(
+    path: &Path,
+    device_id: &str,
+    day: Option<&str>,
+) -> Result<Option<Hypnogram>, String> {
+    let conn = open_store(path).map_err(|e| format!("NOOP store could not be opened: {e}"))?;
+    let tables = table_names(&conn)?;
+    if !tables.contains("sleepSession") || !has_column(&conn, "sleepSession", "stagesJSON")? {
+        return Ok(None);
+    }
+    let sources = [device_id.to_string(), format!("{device_id}-noop")];
+    let mut selected = None;
+    let mut latest_end = i64::MIN;
+    for source in &sources {
+        let end = conn
+            .query_row(
+                "SELECT MAX(endTs) FROM sleepSession WHERE deviceId = ?1",
+                params![source],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .map_err(|e| format!("NOOP sleep sessions could not be read: {e}"))?;
+        if end.is_some_and(|v| v > latest_end) {
+            latest_end = end.unwrap_or_default();
+            selected = Some(source);
+        }
+    }
+    let Some(source) = selected else {
+        return Ok(None);
+    };
+    let mut statement = conn
+        .prepare(
+            "SELECT startTs, endTs, stagesJSON FROM sleepSession
+             WHERE deviceId = ?1 ORDER BY endTs DESC LIMIT ?2",
+        )
+        .map_err(|e| format!("NOOP sleep sessions could not be read: {e}"))?;
+    let rows = statement
+        .query_map(params![source, HYPNOGRAM_ROWS], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(|e| format!("NOOP sleep sessions could not be read: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("NOOP sleep sessions could not be read: {e}"))?;
+
+    // Group adjacent segments (gap under an hour), newest first, like `read_sleep`.
+    let mut index = 0;
+    let mut first_match = None;
+    while index < rows.len() {
+        let latest = &rows[index];
+        let mut group = vec![latest];
+        let mut earliest = latest.0;
+        for candidate in rows.iter().skip(index + 1) {
+            if !(0..3600).contains(&(earliest - candidate.1)) {
+                break;
+            }
+            group.push(candidate);
+            earliest = candidate.0.min(earliest);
+        }
+        index += group.len();
+        let started = DateTime::<Utc>::from_timestamp(earliest, 0)
+            .unwrap_or_else(Utc::now)
+            .with_timezone(&Local);
+        let ended = DateTime::<Utc>::from_timestamp(latest.1, 0)
+            .unwrap_or_else(Utc::now)
+            .with_timezone(&Local);
+        let end_day = ended.date_naive().format("%Y-%m-%d").to_string();
+        if day.is_some_and(|d| d != end_day) {
+            continue;
+        }
+        let overnight = started.hour() >= 18 || (started.hour() < 4 && ended.hour() <= 12);
+        let candidate = (group, earliest, latest.1, end_day);
+        if overnight {
+            first_match = Some(candidate);
+            break;
+        }
+        first_match.get_or_insert(candidate);
+    }
+    let Some((group, start, end, end_day)) = first_match else {
+        return Ok(None);
+    };
+    let mut segments: Vec<HypnogramSegment> = group
+        .iter()
+        .flat_map(|row| decode_segments(row.2.as_deref(), start, end))
+        .collect();
+    if segments.is_empty() {
+        return Ok(None);
+    }
+    segments.sort_by_key(|s| (s.start, s.end));
+    Ok(Some(Hypnogram {
+        day: end_day,
+        started_at: timestamp_iso(start),
+        ended_at: timestamp_iso(end),
+        segments,
+    }))
+}
+
+/// One night's stage segments. `day` is "YYYY-MM-DD" (the local day the night ended); None means
+/// the latest night. None when the night has no segments.
+#[tauri::command]
+pub async fn noop_hypnogram(day: Option<String>) -> Result<Option<Hypnogram>, String> {
+    if let Some(d) = day.as_deref() {
+        NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| "day must be YYYY-MM-DD")?;
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let device_id = device_id_from_environment();
+        let (_, path) = NoopPaths::from_environment().resolve(&device_id)?;
+        hypnogram_in(&path, &device_id, day.as_deref())
+    })
+    .await
+    .map_err(|e| format!("NOOP hypnogram task failed: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1876,6 +2182,122 @@ mod tests {
         let result = snapshot_from_database(&path, "my-whoop".to_string(), None, Utc::now());
         assert!(result.unwrap_err().contains("migration metadata"));
         assert!(path.exists());
+        let _ = fs::remove_file(path);
+    }
+
+    fn workout_db(zones: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("terrence-wk-{}.sqlite", Uuid::new_v4()));
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE workout (deviceId TEXT NOT NULL, startTs INTEGER NOT NULL, endTs INTEGER NOT NULL,
+               sport TEXT NOT NULL, source TEXT NOT NULL, durationS REAL, energyKcal REAL, avgHr INTEGER,
+               maxHr INTEGER, strain REAL, distanceM REAL, zonesJSON TEXT, notes TEXT, steps INTEGER);",
+        )
+        .unwrap();
+        let now = Utc
+            .with_ymd_and_hms(2026, 9, 10, 12, 0, 0)
+            .unwrap()
+            .timestamp();
+        for (dev, ago_days, sport) in [
+            ("my-whoop", 1, "run"),
+            ("my-whoop-noop", 1, "run"),
+            ("my-whoop", 3, "lift"),
+            ("my-whoop", 40, "old"),
+        ] {
+            conn.execute(
+                "INSERT INTO workout VALUES (?1, ?2, ?3, ?4, 'x', 1800, 300, 140, 170, 9.5, NULL, ?5, 'private note', NULL)",
+                params![dev, now - ago_days * 86_400, now - ago_days * 86_400 + 1800, sport, zones],
+            )
+            .unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn workouts_are_windowed_deduped_and_zone_minutes_parsed() {
+        let path = workout_db(r#"{"z1":60,"z2":120,"z3":0,"z4":600,"z5":"x"}"#);
+        let now = Utc.with_ymd_and_hms(2026, 9, 10, 12, 0, 0).unwrap();
+        let rows = recent_workouts_in(&path, "my-whoop", 14, now).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].sport, "run");
+        assert_eq!(rows[1].sport, "lift");
+        assert_eq!(rows[0].zone_minutes, Some(vec![1.0, 2.0, 0.0, 10.0, 0.0]));
+        assert_eq!(rows[0].duration_min, Some(30.0));
+        // Over-large day counts are capped at 90.
+        assert_eq!(
+            recent_workouts_in(&path, "my-whoop", 9999, now)
+                .unwrap()
+                .len(),
+            3
+        );
+        // notes never reach the IPC type.
+        let json = serde_json::to_string(&rows).unwrap();
+        assert!(!json.contains("notes") && !json.contains("private"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn zones_decode_rejects_other_shapes() {
+        assert_eq!(decode_zone_minutes(None), None);
+        assert_eq!(decode_zone_minutes(Some("[1,2]")), None);
+        assert_eq!(decode_zone_minutes(Some("not json")), None);
+        assert_eq!(decode_zone_minutes(Some(r#"{"z1":0}"#)), None);
+    }
+
+    #[test]
+    fn missing_workout_table_is_an_empty_list() {
+        let path = seeded_database();
+        let rows = recent_workouts_in(&path, "my-whoop", 7, Utc::now()).unwrap();
+        assert!(rows.is_empty());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn hypnogram_is_sorted_clipped_normalised_and_null_without_segments() {
+        let path = seeded_database();
+        let conn = Connection::open(&path).unwrap();
+        conn.execute("DELETE FROM sleepSession", []).unwrap();
+        let start = 1_788_611_871_i64;
+        let end = start + 3_000;
+        let stages = format!(
+            r#"[{{"start":{b},"end":{c},"stage":"deep"}},
+                {{"start":{a},"end":{b},"stage":"awake"}},
+                {{"start":{c},"end":{x},"stage":"REM"}},
+                {{"start":{c},"end":{c},"stage":"light"}},
+                {{"start":{a},"end":{c},"stage":"bogus"}}]"#,
+            a = start - 600,
+            b = start + 1_000,
+            c = start + 2_000,
+            x = end + 900
+        );
+        conn.execute(
+            "INSERT INTO sleepSession VALUES ('my-whoop', ?1, ?2, .9, 55, 62, ?3)",
+            params![start, end, stages],
+        )
+        .unwrap();
+        let night = hypnogram_in(&path, "my-whoop", None).unwrap().unwrap();
+        let got: Vec<(i64, i64, &str)> = night
+            .segments
+            .iter()
+            .map(|s| (s.start, s.end, s.stage.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (start, start + 1_000, "awake"),
+                (start + 1_000, start + 2_000, "deep"),
+                (start + 2_000, end, "rem"),
+            ]
+        );
+        let by_day = hypnogram_in(&path, "my-whoop", Some(&night.day)).unwrap();
+        assert_eq!(by_day.map(|h| h.segments.len()), Some(3));
+        assert_eq!(
+            hypnogram_in(&path, "my-whoop", Some("2001-01-01")).unwrap(),
+            None
+        );
+        conn.execute("UPDATE sleepSession SET stagesJSON = '{\"deep\":30}'", [])
+            .unwrap();
+        assert_eq!(hypnogram_in(&path, "my-whoop", None).unwrap(), None);
         let _ = fs::remove_file(path);
     }
 }

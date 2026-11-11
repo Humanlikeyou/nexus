@@ -465,6 +465,8 @@ export interface SystemSnapshot {
   crew: CrewSnapshot;
   /** Knowledge base (Verba + Weaviate) via kb_status. */
   kb: KbStatus;
+  /** Business ledger (business/ledger.json, decision 0005); null when there is no file. */
+  ledger: import("./business/liveLedger").BusinessLedger | null;
 }
 
 /** crew-service run states (crew_runs.status). */
@@ -479,7 +481,17 @@ export interface CrewInfo {
   started_at: string | null;
   task: string | null;
   result: string | null;
+  /** R13-B totals; absent on older rows. cost_usd is 0 for local runs and null when unknown. */
+  finished_at?: string | null;
+  tokens?: number | null;
+  requests?: number | null;
+  cost_usd?: number | null;
 }
+
+/** One timeline step of a run (crew.rs CrewStepRow); times are ms since the run's start. */
+export interface CrewStepRow { id: number; agent: string; kind: "task" | "tool" | "llm" | string; label: string; start_ms: number; end_ms: number; status: "ok" | "failed" | "skipped" | string; error?: string | null }
+export interface CrewHandoffRow { from: string; to: string; status: string }
+export interface CrewRunSteps { steps: CrewStepRow[]; handoffs: CrewHandoffRow[] }
 
 /** not_configured: no token in env or the app data dir; offline: unreachable or unhealthy. */
 export type CrewServiceHealth = "not_configured" | "offline" | "online";

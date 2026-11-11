@@ -392,6 +392,116 @@ fn stop_loop(p: &VoicePaths) -> Result<(), String> {
     Err("Amara Voice didn't stop within 4 s".into())
 }
 
+// ---------- stop speaking (SIGUSR1) ----------
+
+/// Process list + signalling, injectable so tests never touch a real process.
+pub(crate) trait ProcOps {
+    /// `ps -U <uid> -o pid=,etime=,args=` output for this user's processes only.
+    fn list_own(&self) -> Option<String>;
+    fn sigusr1(&self, pid: u32) -> Result<(), String>;
+}
+
+struct RealProcs;
+
+impl ProcOps for RealProcs {
+    fn list_own(&self) -> Option<String> {
+        // SAFETY: getuid(2) has no preconditions.
+        let uid = unsafe { libc::getuid() };
+        let out = Command::new("/bin/ps")
+            .args(["-U", &uid.to_string(), "-o", "pid=,etime=,args="])
+            .stdin(Stdio::null())
+            .output()
+            .ok()?;
+        Some(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    fn sigusr1(&self, pid: u32) -> Result<(), String> {
+        let pid = i32::try_from(pid).map_err(|_| "bad pid".to_string())?;
+        // SAFETY: plain kill(2) on a pid the caller verified (ps, own uid) to be amara_voice.py.
+        let rc = unsafe { libc::kill(pid, libc::SIGUSR1) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err("Could not signal Amara Voice".into())
+        }
+    }
+}
+
+/// `ps` etime ([[dd-]hh:]mm:ss) in seconds.
+fn parse_etime(s: &str) -> Option<u64> {
+    let (days, rest) = match s.split_once('-') {
+        Some((d, r)) => (d.parse::<u64>().ok()?, r),
+        None => (0, s),
+    };
+    let parts: Vec<u64> = rest
+        .split(':')
+        .map(|p| p.parse::<u64>().ok())
+        .collect::<Option<_>>()?;
+    let secs = match parts.as_slice() {
+        [m, s] => m * 60 + s,
+        [h, m, s] => h * 3600 + m * 60 + s,
+        _ => return None,
+    };
+    Some(days * 86_400 + secs)
+}
+
+/// The amara_voice.py loop among `ps -o pid=,etime=,args=` lines, with its age in seconds.
+pub(crate) fn find_own_loop(ps_out: &str) -> Option<(LoopProc, u64)> {
+    ps_out.lines().find_map(|line| {
+        let mut it = line.split_whitespace();
+        let pid = it.next()?;
+        let etime = it.next()?;
+        let rest: Vec<&str> = it.collect();
+        let proc = find_loop(&format!("{pid} 0 {}", rest.join(" ")))?;
+        Some((proc, parse_etime(etime)?))
+    })
+}
+
+/// Send SIGUSR1 (interrupt the current reply only) to the running amara_voice.py loop.
+/// Ok(false) when it is not running, or when it predates the stop-speaking patch: without a
+/// SIGUSR1 handler that signal would terminate the loop, so it is never sent then.
+pub(crate) fn stop_speaking_with(
+    ops: &dyn ProcOps,
+    script: &Path,
+    handler_files: &[PathBuf],
+) -> Result<bool, String> {
+    let Some((proc, age_secs)) = ops.list_own().and_then(|o| find_own_loop(&o)) else {
+        return Ok(false);
+    };
+    let patched = |f: &PathBuf| fs::read_to_string(f).is_ok_and(|t| t.contains("SIGUSR1"));
+    if !fs::metadata(script).is_ok_and(|m| m.is_file()) || !handler_files.iter().any(patched) {
+        return Ok(false);
+    }
+    // The running process must have started after the patched file was written.
+    let started = SystemTime::now()
+        .checked_sub(Duration::from_secs(age_secs))
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let newest = handler_files
+        .iter()
+        .chain(std::iter::once(&script.to_path_buf()))
+        .filter_map(|f| fs::metadata(f).ok()?.modified().ok())
+        .max();
+    if newest.is_some_and(|m| m > started + Duration::from_secs(2)) {
+        return Ok(false);
+    }
+    ops.sigusr1(proc.pid)?;
+    Ok(true)
+}
+
+/// Interrupt what Amara Voice is saying right now; the loop keeps running. Ok(false) = nothing sent.
+#[tauri::command]
+pub async fn voice_stop_speaking() -> Result<bool, String> {
+    blocking(|| {
+        let p = voice_paths();
+        stop_speaking_with(
+            &RealProcs,
+            &p.script(),
+            &[p.script(), p.dir.join("streaming.py")],
+        )
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn voice_start() -> Result<VoiceStatus, String> {
     blocking(|| {
@@ -560,5 +670,93 @@ mod tests {
         assert!(!s.installed && !s.running);
         assert_eq!(s.state, "not_installed");
         assert!(start_loop(&p).is_err());
+    }
+
+    struct FakeProcs {
+        ps: Option<String>,
+        sent: std::cell::RefCell<Vec<u32>>,
+    }
+    impl ProcOps for FakeProcs {
+        fn list_own(&self) -> Option<String> {
+            self.ps.clone()
+        }
+        fn sigusr1(&self, pid: u32) -> Result<(), String> {
+            self.sent.borrow_mut().push(pid);
+            Ok(())
+        }
+    }
+
+    fn fake(ps: &str) -> FakeProcs {
+        FakeProcs {
+            ps: Some(ps.into()),
+            sent: Default::default(),
+        }
+    }
+
+    const PS: &str = "  101 05:00 /bin/bash /Users/x/projects/amara-voice/service/run.sh\n\
+                      102 00:01 pgrep -f amara_voice.py\n\
+                      103 1-02:03:04 /x/.venv/bin/python -u amara_voice.py\n";
+
+    #[test]
+    fn etime_parses() {
+        assert_eq!(parse_etime("05:09"), Some(309));
+        assert_eq!(parse_etime("02:03:04"), Some(7384));
+        assert_eq!(parse_etime("1-02:03:04"), Some(86_400 + 7384));
+        assert_eq!(parse_etime("zz"), None);
+    }
+
+    #[test]
+    fn stop_speaking_signals_only_the_patched_loop() {
+        let (dir, p) = tmp();
+        let script = p.script();
+        fs::write(&script, "# loop\n").unwrap();
+        let streaming = dir.join("streaming.py");
+        fs::write(&streaming, "x\n").unwrap();
+        let files = [script.clone(), streaming.clone()];
+        // Not patched: never signalled (SIGUSR1 would kill an unpatched loop).
+        let f = fake(PS);
+        assert_eq!(stop_speaking_with(&f, &script, &files), Ok(false));
+        assert!(f.sent.borrow().is_empty());
+        // Patched (file older than the 1-day-old process): exactly pid 103.
+        fs::write(&script, "signal.signal(signal.SIGUSR1, h)\n").unwrap();
+        let old = SystemTime::now() - Duration::from_secs(10 * 86_400);
+        fs::File::options()
+            .write(true)
+            .open(&script)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&streaming)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let f = fake(PS);
+        assert_eq!(stop_speaking_with(&f, &script, &files), Ok(true));
+        assert_eq!(*f.sent.borrow(), vec![103]);
+        // Process older than the patch (started before the file changed): no signal.
+        let f = fake("103 00:30 /x/python -u amara_voice.py\n");
+        fs::File::options()
+            .write(true)
+            .open(&script)
+            .unwrap()
+            .set_modified(SystemTime::now())
+            .unwrap();
+        assert_eq!(stop_speaking_with(&f, &script, &files), Ok(false));
+        assert!(f.sent.borrow().is_empty());
+    }
+
+    #[test]
+    fn stop_speaking_is_a_noop_when_not_running() {
+        let (_, p) = tmp();
+        let f = fake("  101 05:00 /bin/bash run.sh\n  102 00:01 python other.py\n");
+        assert_eq!(stop_speaking_with(&f, &p.script(), &[]), Ok(false));
+        let none = FakeProcs {
+            ps: None,
+            sent: Default::default(),
+        };
+        assert_eq!(stop_speaking_with(&none, &p.script(), &[]), Ok(false));
+        assert!(f.sent.borrow().is_empty());
     }
 }

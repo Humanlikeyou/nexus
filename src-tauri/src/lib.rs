@@ -4,11 +4,11 @@ mod dock_icon;
 
 use commands::voice;
 use commands::{
-    arm, assistant, ble_common, continuity, crew, events, followups, goals, ha, home_brief,
-    kb_status, kv, llm_router, muse, noop, noop_query, onboarding, openclaw, outbox, packager,
-    replay, research, restart_services, sessions, snapshots, system, telegram, terrence_actions,
-    terrence_automations, terrence_context, terrence_priorities, terrence_projects,
-    terrence_runtime, terrence_runtime_bridge,
+    arm, assistant, ble_common, business_ledger, continuity, crew, events, followups, goals, ha,
+    home_brief, kb_status, kv, llm_router, muse, noop, noop_query, onboarding, openclaw, outbox,
+    packager, recordings, replay, research, restart_services, sessions, snapshots, system,
+    telegram, terrence_actions, terrence_automations, terrence_context, terrence_priorities,
+    terrence_projects, terrence_runtime, terrence_runtime_bridge,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -29,7 +29,14 @@ pub mod test_support {
     pub use crate::commands::noop::health_snapshot;
     pub use crate::commands::onboarding::{check_onboarding, complete_onboarding};
     pub use crate::commands::outbox::get_outbox_status;
-    pub use crate::commands::sessions::list_sessions;
+    pub use crate::commands::recordings;
+    pub use crate::commands::replay::{
+        mark_recording_aux, maybe_record_motion, maybe_record_ppg, maybe_record_sample,
+        start_eeg_recording, stop_eeg_recording, AuxInfo, StreamSet,
+    };
+    pub use crate::commands::sessions::{
+        list_sessions, save_session, RecordedSession, SessionSummary,
+    };
 
     /// Open events.db (events + arm) and terrence_core.db through their real open paths, so
     /// tests can check the db and -wal/-shm modes.
@@ -207,11 +214,14 @@ pub fn run() {
             // NOOP is the exclusive WHOOP/health reader. It owns strap sync and health storage.
             noop::get_noop_health_snapshot,
             noop::live_heart_rate,
+            noop::noop_recent_workouts,
+            noop::noop_hypnogram,
             noop_query::noop_query,
             noop_query::get_noop_settings,
             noop_query::set_noop_settings,
             home_brief::home_brief,
             // Amara's follow-up lists (commands/followups.rs)
+            business_ledger::read_business_ledger,
             followups::followups_list,
             followups::followups_add_item,
             followups::followups_update_item,
@@ -252,7 +262,6 @@ pub fn run() {
             // Sessions
             sessions::save_session,
             sessions::list_sessions,
-            sessions::delete_session,
             // Snapshots
             snapshots::save_snapshot,
             snapshots::list_snapshots,
@@ -362,10 +371,17 @@ pub fn run() {
             replay::stop_replay,
             replay::start_demo_eeg,
             replay::stop_demo_eeg,
+            replay::mark_recording_aux,
+            recordings::list_recordings,
+            recordings::read_recording_window,
+            recordings::read_body_window,
+            recordings::recording_series,
+            recordings::get_session_samples,
             // CrewAI
             crew::crew_list,
             crew::crew_start,
             crew::crew_status,
+            crew::crew_run_steps,
             crew::crew_stop,
             crew::crew_health,
             kb_status::kb_status,
@@ -377,6 +393,7 @@ pub fn run() {
             voice::voice_recent_turns,
             voice::voice_list_voices,
             voice::voice_set_voice,
+            voice::voice_stop_speaking,
             commands::voice_bridge::voice_bridge_start,
             commands::voice_bridge::voice_bridge_stop,
             // Appearance

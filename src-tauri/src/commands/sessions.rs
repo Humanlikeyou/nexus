@@ -201,7 +201,7 @@ pub(crate) fn nexus_data_dir() -> PathBuf {
     crate::app_paths::data_dir()
 }
 
-fn sessions_dir() -> PathBuf {
+pub(crate) fn sessions_dir() -> PathBuf {
     nexus_data_dir().join("sessions")
 }
 
@@ -217,7 +217,14 @@ pub struct SessionSummary {
     pub calm_pct: Option<f64>,
     #[serde(default)]
     pub time_in_target_pct: Option<f64>,
+    /// Scale of `avg_focus` / `avg_relaxation`. New files say 100 (0-100). Absent in older files,
+    /// which may hold 0-1 scores; those are scaled on read (nothing is rewritten on disk).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score_scale: Option<u32>,
 }
+
+/// Scale every new session is saved with.
+pub const SCORE_SCALE: u32 = 100;
 
 impl SessionSummary {
     /// Sessions recorded before the 0–100 score scale stored Avg focus / relaxation as 0–1.
@@ -225,6 +232,9 @@ impl SessionSummary {
     /// to 0–100. A real 0–100 average of ≤1 on every score is not a plausible session, so the
     /// heuristic cannot misfire on new files in practice; nothing is rewritten on disk.
     pub fn normalize_legacy_scores(&mut self) {
+        if self.score_scale == Some(SCORE_SCALE) {
+            return;
+        }
         let scores = [self.avg_focus, self.avg_relaxation];
         let present: Vec<f64> = scores.iter().flatten().copied().collect();
         let legacy = !present.is_empty()
@@ -252,6 +262,64 @@ pub struct RecordedSession {
     /// NOOP health_snapshot taken at Muse session start. Absent in older session files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_context: Option<BodyContext>,
+    /// Per-step series from the recording's `.bands.json` sidecar, attached by `list_sessions`
+    /// when that sidecar already exists. Never saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub samples: Option<super::recordings::SessionSamples>,
+}
+
+/// A session file as read from disk: the session plus its raw `data` (an object in current
+/// files, a bare array in the oldest legacy ones).
+pub(crate) struct StoredSession {
+    pub session: RecordedSession,
+    pub data: serde_json::Value,
+}
+
+/// Reads every session file in `dir` (read-only). Legacy 0-1 scores are normalised in memory.
+pub(crate) fn read_stored_sessions_in(dir: &Path) -> Vec<StoredSession> {
+    let mut out = Vec::new();
+    let Ok(rd) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let Some(session_val) = parsed.get("session").cloned() else {
+            continue;
+        };
+        if let Ok(mut session) = serde_json::from_value::<RecordedSession>(session_val) {
+            session.summary.normalize_legacy_scores();
+            let data = parsed
+                .get_mut("data")
+                .map(serde_json::Value::take)
+                .unwrap_or(serde_json::Value::Null);
+            out.push(StoredSession { session, data });
+        }
+    }
+    out
+}
+
+/// Sessions newest first; a session whose replay has a current `.bands.json` carries its samples.
+pub(crate) fn list_sessions_in(dir: &Path, replays: &Path) -> Vec<RecordedSession> {
+    let mut sessions: Vec<RecordedSession> = read_stored_sessions_in(dir)
+        .into_iter()
+        .map(|s| {
+            let mut session = s.session;
+            session.samples =
+                super::recordings::cached_session_samples(replays, &session.file_path);
+            session
+        })
+        .collect();
+    sessions.sort_by(|a, b| b.start.cmp(&a.start));
+    sessions
 }
 
 #[tauri::command]
@@ -268,6 +336,8 @@ pub fn save_session(
     let filename = format!("{}_{}.json", session.device_type, session.id);
     let path = super::path_safety::safe_join(&dir, &filename)?;
 
+    session.summary.score_scale = Some(SCORE_SCALE);
+    session.samples = None;
     if session.body_context.is_none() {
         session.body_context = take_pending_body_context();
     }
@@ -290,57 +360,7 @@ pub fn list_sessions() -> Result<Vec<RecordedSession>, String> {
     if !dir.exists() {
         return Ok(Vec::new());
     }
-
-    let mut sessions = Vec::new();
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-
-        let data = match fs::read_to_string(&path) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-
-        let parsed: serde_json::Value = match serde_json::from_str(&data) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        if let Some(session_val) = parsed.get("session") {
-            if let Ok(mut session) = serde_json::from_value::<RecordedSession>(session_val.clone())
-            {
-                session.summary.normalize_legacy_scores();
-                sessions.push(session);
-            }
-        }
-    }
-
-    // Sort by start time descending
-    sessions.sort_by(|a, b| b.start.cmp(&a.start));
-    Ok(sessions)
-}
-
-#[tauri::command]
-pub fn delete_session(session_id: String) -> Result<(), String> {
-    let dir = sessions_dir();
-    if !dir.exists() {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.contains(&session_id) {
-            fs::remove_file(entry.path())
-                .map_err(|e| format!("Failed to delete session: {}", e))?;
-            return Ok(());
-        }
-    }
-
-    Ok(())
+    Ok(list_sessions_in(&dir, &super::replay::replays_dir()))
 }
 
 #[cfg(test)]
@@ -364,6 +384,7 @@ mod tests {
             avg_hrv: None,
             calm_pct: None,
             time_in_target_pct: None,
+            score_scale: None,
         }
     }
 
@@ -378,6 +399,21 @@ mod tests {
         one_sided.normalize_legacy_scores();
         assert_eq!(one_sided.avg_focus, None);
         assert_eq!(one_sided.avg_relaxation, Some(100.0));
+    }
+
+    #[test]
+    fn score_scale_100_marks_a_new_file_that_is_never_rescaled() {
+        // A 0-100 session whose averages happen to be <= 1 must not be read as legacy 0-1.
+        let mut s = summary(Some(0.4), Some(0.6));
+        s.score_scale = Some(SCORE_SCALE);
+        s.normalize_legacy_scores();
+        assert_eq!((s.avg_focus, s.avg_relaxation), (Some(0.4), Some(0.6)));
+        assert_eq!(serde_json::to_value(&s).unwrap()["score_scale"], 100);
+        // Old files have no field and stay without it when serialised.
+        assert!(serde_json::to_value(summary(None, None))
+            .unwrap()
+            .get("score_scale")
+            .is_none());
     }
 
     #[test]

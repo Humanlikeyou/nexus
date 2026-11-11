@@ -1,0 +1,2 @@
+{"kind":"header","format":2,"sample_rate":256,"channels":["TP9","AF7","AF8","TP10","AUX"],"ppg":[],"motion":[],"start_ts":1760000000000,"session_id":"fixture-format2"}
+{"kind":"trailer","end_ts":1760000006000,"aux":null}

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { EMPTY_DEVICE_ID } from "./lib/devices";
 import type {
   CrewInfo,
+  CrewRunSteps,
   CrewServiceHealth,
   CrewSnapshot,
   CrewToolInfo,
@@ -46,6 +47,8 @@ import type {
   VoiceStatus,
   VoiceTurn,
 } from "./types";
+import type { AuxInfo, BandName, Contact, EegChannel, RecordingListItem } from "./neuro/recordings";
+import type { SensorKey } from "./neuro/sessionSamples";
 
 interface SnapshotRead<T> {
   unavailable: NexusUnavailableSource | null;
@@ -181,10 +184,11 @@ export const INITIAL_SNAPSHOT: SystemSnapshot = {
   activity: [],
   crew: { health: "offline", runs: [], tools: [] },
   kb: EMPTY_KB,
+  ledger: null,
 };
 
 export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
-  const [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, crewHealth, crewRuns, crewTools, kb] =
+  const [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, crewHealth, crewRuns, crewTools, kb, ledger] =
     await Promise.all([
       read<HermesRuntimeHealth>("get_terrence_runtime_health", INITIAL_SNAPSHOT.hermes),
       read<TerrenceCapability[]>("list_terrence_capabilities", []),
@@ -210,13 +214,14 @@ export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
       read<CrewInfo[]>("crew_list", []),
       read<CrewToolInfo[]>("crew_tools", []),
       read<KbStatus>("kb_status", EMPTY_KB),
+      read<SystemSnapshot["ledger"]>("read_business_ledger", null),
     ]);
 
   const crew = crewSnapshot(crewHealth.value, crewRuns.value, crewTools.value);
   // crew_list can only succeed when the service is configured and up; its
   // failure is expected (not a broken source) otherwise.
   if (crew.health !== "online") crewRuns.unavailable = null;
-  const reads = [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, crewHealth, crewRuns, crewTools, kb];
+  const reads = [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, crewHealth, crewRuns, crewTools, kb, ledger];
 
   return {
     refreshedAt: Date.now(),
@@ -243,6 +248,7 @@ export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
     activity: activity.value,
     crew,
     kb: pickKb(kb.value),
+    ledger: ledger.value,
   };
 }
 
@@ -265,6 +271,7 @@ export function pickKb(k: Partial<KbStatus> | null | undefined): KbStatus {
 
 export const startCrew = (name: string, task: string) => invoke<CrewInfo>("crew_start", { name, task, agents: null });
 export const getCrewStatus = (id: string) => invoke<CrewInfo>("crew_status", { id });
+export const getCrewRunSteps = (id: string) => invoke<CrewRunSteps>("crew_run_steps", { id });
 export const stopCrew = (id: string) => invoke<string>("crew_stop", { id });
 
 export const interactWithTerrence = (request: {
@@ -316,6 +323,37 @@ export const startEegStream = () => invoke<void>("start_eeg_stream");
 export const stopEegStream = () => invoke<void>("stop_eeg_stream");
 export const startEegRecording = () => invoke<string>("start_eeg_recording");
 export const stopEegRecording = () => invoke<string>("stop_eeg_recording");
+/** Muse recordings (commands/recordings.rs, replay.rs). Read-only: there is no delete command. */
+export interface RecordingListItemIpc extends Omit<RecordingListItem, "id" | "replayFile"> {
+  id: string;
+  sessionId: string | null;
+  replayFile: string | null;
+}
+/** Gaps in a recording come back as `null`. */
+export type Gapped = Array<number | null>;
+export interface RecordingWindowIpc {
+  startSecs: number; endSecs: number; sampleRate: 256;
+  lanes: Array<{ channel: EegChannel; contact: Contact; values: Gapped }>;
+}
+export interface BodyWindowIpc {
+  startSecs: number; endSecs: number;
+  heart: { ppgRate: 64; values: Gapped; bpm: number | null; estimate: true } | null;
+  motion: { rate: 52; values: Gapped; events: Array<{ atSecs: number; label: string }> } | null;
+}
+export interface SessionSeriesIpc { stepSecs: number; bands: Record<BandName, Gapped>; focus: Gapped; calm: Gapped }
+export interface SessionSamplesIpc extends SessionSeriesIpc {
+  sensors?: Partial<Record<SensorKey, Partial<Record<BandName, Gapped>>>>;
+  contact?: Partial<Record<SensorKey, number>>;
+}
+export const listRecordings = () => invoke<RecordingListItemIpc[]>("list_recordings");
+export const readRecordingWindow = (id: string, startSecs: number, spanSecs: number, points?: number) =>
+  invoke<RecordingWindowIpc>("read_recording_window", { id, startSecs, spanSecs, points });
+export const readBodyWindow = (id: string, startSecs: number, spanSecs: number) =>
+  invoke<BodyWindowIpc>("read_body_window", { id, startSecs, spanSecs });
+export const recordingSeries = (id: string) => invoke<SessionSeriesIpc>("recording_series", { id });
+export const getSessionSamples = (sessionId: string) => invoke<SessionSamplesIpc | null>("get_session_samples", { sessionId });
+/** Tells the open recording where the back-of-head electrode was found; written to its trailer. */
+export const markRecordingAux = (aux: AuxInfo) => invoke<void>("mark_recording_aux", { aux });
 export const saveMuseSession = (session: RecordedSession & { file_path: string }, data: unknown) =>
   invoke<string>("save_session", { session, data });
 
@@ -330,6 +368,8 @@ export const stopVoice = () => invoke<VoiceStatus>("voice_stop");
 export const getVoiceTurns = (n = 20) => invoke<VoiceTurn[]>("voice_recent_turns", { n });
 export const listVoices = () => invoke<VoiceList>("voice_list_voices");
 export const setVoice = (name: string) => invoke<VoiceList>("voice_set_voice", { name });
+/** Interrupt the current spoken reply only (SIGUSR1). false = nothing sent (not running / loop not patched). */
+export const stopVoiceSpeaking = () => invoke<boolean>("voice_stop_speaking");
 
 /** Amara's follow-up lists (commands/followups.rs). Errors are the bare kinds in lib/followups.ts. */
 export const listFollowups = () => invoke<FollowupLists>("followups_list");
@@ -352,3 +392,15 @@ export const getHomeBrief = () => invoke<HomeBrief>("home_brief");
 export interface HeartSample { bpm: number; at: number }
 export interface LiveHeartRate { bpm: number; at: number; trace: HeartSample[] }
 export const getLiveHeartRate = () => invoke<LiveHeartRate | null>("live_heart_rate");
+/** NOOP workouts (noop.rs): read-only, notes never cross. zoneMinutes = minutes in zones 1..5, or null. */
+export interface NoopWorkout {
+  day: string; startedAt: string; endedAt: string; sport: string;
+  durationMin: number | null; energyKcal: number | null; avgHr: number | null; maxHr: number | null;
+  strain: number | null; distanceM: number | null; steps: number | null; zoneMinutes: number[] | null;
+}
+export const getRecentWorkouts = (days = 14) => invoke<NoopWorkout[]>("noop_recent_workouts", { days });
+/** One night's sleep stages (unix seconds, clipped to the night); null when the night has no segments. */
+export type HypnogramStage = "awake" | "light" | "deep" | "rem";
+export interface HypnogramSegment { start: number; end: number; stage: HypnogramStage }
+export interface Hypnogram { day: string; startedAt: string; endedAt: string; segments: HypnogramSegment[] }
+export const getHypnogram = (day?: string) => invoke<Hypnogram | null>("noop_hypnogram", { day: day ?? null });

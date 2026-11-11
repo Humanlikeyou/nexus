@@ -61,7 +61,7 @@ function WorkCards({ data, onRetry }: { data: SystemSnapshot; onRetry?: () => vo
 }
 
 /** Business host (design-1110d D-B1): Overview, Ventures and Work render here; Money is RevenueField. */
-export function BusinessField({ data, onRetry, view = "main", onView, adapter = businessAdapter() }: { data: SystemSnapshot; onRetry?: () => void; view?: string; onView?: (view: string) => void; adapter?: BusinessAdapter }) {
+export function BusinessField({ data, onRetry, view = "main", onView, adapter = businessAdapter(data) }: { data: SystemSnapshot; onRetry?: () => void; view?: string; onView?: (view: string) => void; adapter?: BusinessAdapter }) {
   const [ventureId, setVentureId] = useState<string | null>(null);
   if (view === "main") return <BusinessOverview data={data} adapter={adapter} onOpenVenture={(id) => { if (onView) { setVentureId(id); onView("ventures"); } }} work={<WorkCards data={data} onRetry={onRetry} />} />;
   if (view === "ventures") return <VenturesView data={data} adapter={adapter} ventureId={ventureId} onOpen={setVentureId} />;

@@ -80,7 +80,7 @@ export function DecisionsCard({ adapter }: { adapter: BusinessAdapter }) {
 }
 
 /** Business › Overview (D-B2–B6). */
-export function BusinessOverview({ data, adapter = businessAdapter(), onOpenVenture, work }: { data: SystemSnapshot; adapter?: BusinessAdapter; onOpenVenture: (id: string) => void; work: React.ReactNode }) {
+export function BusinessOverview({ data, adapter = businessAdapter(data), onOpenVenture, work }: { data: SystemSnapshot; adapter?: BusinessAdapter; onOpenVenture: (id: string) => void; work: React.ReactNode }) {
   const { revenue, risk } = data;
   const riskDown = data.unavailableSources.some((s) => s.command === "arm_get_risk_status");
   const target = adapter.revenueTargetUsd();
@@ -109,7 +109,7 @@ export function BusinessOverview({ data, adapter = businessAdapter(), onOpenVent
 }
 
 /** Business › Ventures (D-B5, D-B7, D-B8): every venture, or one opened. */
-export function VenturesView({ data, adapter = businessAdapter(), ventureId, onOpen }: { data: SystemSnapshot; adapter?: BusinessAdapter; ventureId: string | null; onOpen: (id: string | null) => void }) {
+export function VenturesView({ data, adapter = businessAdapter(data), ventureId, onOpen }: { data: SystemSnapshot; adapter?: BusinessAdapter; ventureId: string | null; onOpen: (id: string | null) => void }) {
   const ventures = adapter.ventures();
   const list = ventures.state === "unwired" ? [] : ventures.value;
   const v = ventureId ? list.find((x) => x.id === ventureId) : undefined;

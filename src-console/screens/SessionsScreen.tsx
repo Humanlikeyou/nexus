@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Button, Card, PageHero, wiredTag } from "../ui";
 import type { SystemSnapshot } from "../types";
-import { recordingsAdapter, type RecordingsAdapter } from "../neuro/recordings";
+import type { RecordingsAdapter } from "../neuro/recordings";
+import { useRecordingsAdapter } from "../neuro/useRecordingsAdapter";
 import { RecordingDetail, RecordingsList, RetentionCard } from "./RecordingsPanels";
 import "./SessionsScreen.css";
 
@@ -10,7 +11,8 @@ import "./SessionsScreen.css";
 const SESSIONS_COMMAND = "list_sessions";
 
 export function SessionsField({ data, onRetry, onStartSession, adapter: given }: { data: SystemSnapshot; onRetry?: () => void; onStartSession?: () => void; adapter?: RecordingsAdapter }) {
-  const adapter = useMemo(() => given ?? recordingsAdapter(data.sessions), [given, data.sessions]);
+  const live = useRecordingsAdapter(data.sessions, !given);
+  const adapter = given ?? live;
   const list = adapter.list();
   const items = list.state === "unwired" ? [] : list.value;
   const [openId, setOpenId] = useState<string | null>(null);

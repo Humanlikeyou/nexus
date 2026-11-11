@@ -156,6 +156,47 @@ lazy_static::lazy_static! {
     static ref MUSE_BLE_STATE: Arc<Mutex<BleState>> = Arc::new(Mutex::new(BleState::Idle));
 }
 
+lazy_static::lazy_static! {
+    /// Optional streams that subscribed on the current connection; the replay header lists these.
+    static ref SUBSCRIBED: std::sync::Mutex<replay::StreamSet> = std::sync::Mutex::new(replay::StreamSet::default());
+}
+
+/// Snapshot of the optional streams subscribed so far.
+pub fn subscribed_streams() -> replay::StreamSet {
+    SUBSCRIBED.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
+/// Test hook: pretend these optional streams subscribed.
+#[doc(hidden)]
+pub fn set_subscribed_streams(set: replay::StreamSet) {
+    if let Ok(mut s) = SUBSCRIBED.lock() {
+        *s = set;
+    }
+}
+
+fn reset_subscribed() {
+    if let Ok(mut s) = SUBSCRIBED.lock() {
+        *s = replay::StreamSet::default();
+    }
+}
+
+/// Adds `stream` to `set`. `AUX_L` is subscribed for the stream but is not recorded, so it is
+/// not listed.
+fn note_subscribed(set: &mut replay::StreamSet, stream: OptionalStream) {
+    let add = |v: &mut Vec<String>, name: &str| {
+        if !v.iter().any(|n| n == name) {
+            v.push(name.to_string());
+        }
+    };
+    match stream {
+        OptionalStream::Aux("AUX") => set.aux = true,
+        OptionalStream::Aux(_) => {}
+        OptionalStream::Accelerometer => add(&mut set.motion, "accelerometer"),
+        OptionalStream::Gyroscope => add(&mut set.motion, "gyroscope"),
+        OptionalStream::Ppg(name) => add(&mut set.ppg, name),
+    }
+}
+
 /// Structured BLE state payload with data_source discriminator.
 #[derive(Serialize, Clone)]
 struct MuseBleStatePayload {
@@ -536,6 +577,10 @@ pub async fn disconnect_muse(app: AppHandle) -> Result<(), String> {
         peripheral.disconnect().await.map_err(|e| e.to_string())?;
         println!("[muse] disconnect: status=done");
     }
+    // A recording still open keeps its subscribed list for the header.
+    if replay::active_recording_name().await.is_none() {
+        reset_subscribed();
+    }
 
     emit_muse_state(&app, BleState::Idle).await;
     Ok(())
@@ -708,7 +753,7 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
             };
 
             if let Some(stream) = optional_stream(&notification.uuid) {
-                emit_optional(&app_handle, stream, &notification.value);
+                emit_optional(&app_handle, stream, &notification.value).await;
                 continue;
             }
             silent_since = std::time::Instant::now();
@@ -870,6 +915,7 @@ pub async fn get_muse_state() -> Result<MuseConnectionState, String> {
 /// doesn't answer is logged and skipped; EEG goes on without it.
 pub async fn subscribe_optional_streams(peripheral: &Peripheral) {
     let chars = peripheral.characteristics();
+    reset_subscribed();
     for (prefix, stream) in &OPTIONAL_STREAMS {
         let Some(ch) = chars.iter().find(|c| uuid_prefix_match(&c.uuid, prefix)) else {
             println!("[muse] optional_stream: missing stream={stream:?}");
@@ -880,6 +926,9 @@ pub async fn subscribe_optional_streams(peripheral: &Peripheral) {
             tokio::time::timeout(OPTIONAL_SUBSCRIBE_TIMEOUT, peripheral.subscribe(ch)).await;
         let detail = format!("uuid={} stream={stream:?}", ch.uuid);
         let event = if matches!(subscribed, Ok(Ok(()))) {
+            if let Ok(mut set) = SUBSCRIBED.lock() {
+                note_subscribed(&mut set, *stream);
+            }
             "optional_subscribed"
         } else {
             "optional_subscribe_failed"
@@ -944,13 +993,26 @@ fn parse_ppg_samples(data: &[u8]) -> Vec<u32> {
         .collect()
 }
 
-/// Aux goes out on `muse-eeg` but is not recorded, so session files keep their four channels.
-fn emit_optional(app: &AppHandle, stream: OptionalStream, data: &[u8]) {
+/// Emits one optional packet and records it when a recording is open. `AUX` is recorded with
+/// the EEG channels; `AUX_L` is emitted but never recorded.
+async fn emit_optional(app: &AppHandle, stream: OptionalStream, data: &[u8]) {
     let timestamp = chrono::Utc::now().timestamp_millis() as f64;
     let emitted = match decode_optional(stream, data, timestamp) {
-        Some(OptionalEvent::Aux(sample)) => app.emit("muse-eeg", &sample),
-        Some(OptionalEvent::Motion(sample)) => app.emit("muse-motion", &sample),
-        Some(OptionalEvent::Ppg(sample)) => app.emit("muse-ppg", &sample),
+        Some(OptionalEvent::Aux(sample)) => {
+            let r = app.emit("muse-eeg", &sample);
+            replay::maybe_record_sample(&sample).await;
+            r
+        }
+        Some(OptionalEvent::Motion(sample)) => {
+            let r = app.emit("muse-motion", &sample);
+            replay::maybe_record_motion(&sample).await;
+            r
+        }
+        Some(OptionalEvent::Ppg(sample)) => {
+            let r = app.emit("muse-ppg", &sample);
+            replay::maybe_record_ppg(&sample).await;
+            r
+        }
         None => Ok(()),
     };
     if let Err(e) = emitted {
@@ -958,9 +1020,6 @@ fn emit_optional(app: &AppHandle, stream: OptionalStream, data: &[u8]) {
     }
 }
 
-/// Encode a Muse control command with the required length-prefix byte.
-/// Protocol: [length_of_remaining_bytes, ...command_ascii, 0x0a]
-/// e.g. "d" → [0x02, 0x64, 0x0a], "p50" → [0x04, 0x70, 0x35, 0x30, 0x0a]
 pub fn muse_cmd(cmd: &str) -> Vec<u8> {
     let cmd_bytes = cmd.as_bytes();
     let len = (cmd_bytes.len() + 1) as u8; // +1 for trailing 0x0a
@@ -1135,6 +1194,21 @@ mod tests {
         assert_eq!(ppg.channel, "infrared");
         assert_eq!(ppg.sequence, 0x0102);
         assert_eq!(ppg.samples, [1, 0x010000, 0x123456, 0xffffff, 0, 0x7f0080]);
+    }
+
+    #[test]
+    fn only_the_back_electrode_and_real_streams_are_listed_as_subscribed() {
+        let mut set = replay::StreamSet::default();
+        for (_, stream) in &OPTIONAL_STREAMS {
+            note_subscribed(&mut set, *stream);
+            note_subscribed(&mut set, *stream);
+        }
+        assert!(set.aux);
+        assert_eq!(set.ppg.len(), 3);
+        assert_eq!(set.motion.len(), 2);
+        let mut left_only = replay::StreamSet::default();
+        note_subscribed(&mut left_only, OptionalStream::Aux("AUX_L"));
+        assert_eq!(left_only, replay::StreamSet::default());
     }
 
     #[test]
