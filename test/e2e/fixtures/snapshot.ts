@@ -119,6 +119,8 @@ export function responses(): Responses {
     get_allow_claude: false,
     set_allow_claude: true,
     kb_status: { state: "empty", model: "nomic-embed-text", docs: 0, detail: "knowledge base is empty" },
+    // No business/ledger.json on the mocked Mac (decision 0005): the unwired Business adapter.
+    read_business_ledger: null,
     crew_list: [crewRun("c1", "smoke", "completed", "Reply with the word OK", "OK"), crewRun("c2", "sample research", "failed", "List three sample facts", "LLM unavailable")],
     list_terrence_interactions: [
       interaction("i1", "What's on my plate this afternoon?", "Two things: finish the release notes, then review the sleep pipeline.", "2026-10-28T13:12:00+09:00"),
