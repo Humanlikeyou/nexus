@@ -5,12 +5,15 @@ import { INITIAL_SNAPSHOT } from "../bridge";
 import { EMPTY_DEVICE_ID } from "../lib/devices";
 import { date, formatMinutes, number } from "../lib/format";
 import type { NoopDailyMetric, NoopHealthInsight, NoopHealthSnapshot, SystemSnapshot } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, SegmentedControl, StatTile, type Tone } from "../ui";
+import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, SegmentedControl, StatTile, type Tone } from "../ui";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
 import { LastFourteenDays } from "./FitnessTrends";
 import { calendarDays, deltaWords, usualRange } from "../ui/charts/chartMath";
 import { SleepCard } from "./SleepCard";
+import { EffortCard, RecoveryCard } from "./FitnessRings";
+import { effortModel, recoveryModel } from "./fitnessRingsModel";
+import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
 import { sleepCardModel } from "./sleepModel";
 import "./HealthScreen.css";
 
@@ -62,7 +65,6 @@ export function dayLabel(day: string): string {
 /** Fitness keeps 24-hour times: "Oct 28, 13:38". */
 const observed = (iso: string | null | undefined) => (iso ? `${date(iso)}, ${clock(iso)}` : "No record");
 
-const Missing = () => <span title="unavailable">{DASH}</span>;
 /** StatTile renders null as a tertiary "—" and hides the unit. */
 const nullable = (text: string) => (text === DASH ? null : text);
 
@@ -215,10 +217,11 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
   const sleepMin = overnight?.durationMin ?? today?.totalSleepMin ?? null;
   const hrv = overnight?.avgHrv ?? today?.avgHrv ?? null;
   const rhr = overnight?.restingHr ?? today?.restingHr ?? null;
-  const recovery = today?.recovery ?? null;
-  const band = recoveryBand(recovery);
-  const strain = today?.strain == null ? null : clampEffort(today.strain);
   const days = health.recentDays;
+  const todayDay = today?.day ?? health.latestDay ?? overnight?.day ?? "";
+  // design-1111r B "Horizon": the Sleep tile is left out (the Sleep card is next to it).
+  const recoveryCardModel = recoveryModel({ day: todayDay, recovery: today?.recovery ?? null, hrv, rhr, nightly }, days);
+  const effortCardModel = effortModel({ day: todayDay, effort: today?.strain ?? null, sampleZones: sampleAdaptersEnabled() }, days, clampEffort);
   const everNull = (pick: (d: NoopDailyMetric) => number | null) => days.every((d) => pick(d) == null) && (today == null || pick(today) == null);
   const pending = "Arrives after the sleep record closes";
   const sleepModel = sleepCardModel({
@@ -265,26 +268,8 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
       )}
 
       <div className="fitness__row fitness__row--today">
-        <Card title="Recovery" className="fitness__ring-card">
-          {nightly
-            ? <p className="fitness__pending">{pending}</p>
-            : (
-              <div className="fitness__ring-body">
-                <Ring value={recovery} label="Recovery" size="lg" color={band?.color} valueText={band ? `${fmt(recovery)}%, ${band.word}` : undefined}>
-                  <span className="fitness__ring-value">{recovery == null ? <Missing /> : `${fmt(recovery)}%`}</span>
-                </Ring>
-                <span className="fitness__band" data-band={band?.word.toLowerCase()}>{band ? band.word : "No recovery yet"}</span>
-              </div>
-            )}
-        </Card>
-        <Card title="Effort" className="fitness__ring-card">
-          <div className="fitness__ring-body">
-            <Ring value={strain} max={EFFORT_MAX} label="Effort" size="lg" color="var(--data-strain)" valueText={strain == null ? undefined : `${fmt(strain)} of ${EFFORT_MAX}`}>
-              <span className="fitness__ring-value">{strain == null ? <Missing /> : fmt(strain)}</span>
-              <span className="fitness__ring-unit">of {EFFORT_MAX}</span>
-            </Ring>
-          </div>
-        </Card>
+        <RecoveryCard m={recoveryCardModel} />
+        <EffortCard m={effortCardModel} max={EFFORT_MAX} />
         <SleepCard model={nightly ? null : sleepModel} pending={nightly ? pending : undefined} />
       </div>
 

@@ -1,0 +1,51 @@
+/* design-1111r option B "Horizon": Recovery and Effort. Tokens only, Fibonacci spacing (test/design/scale.test.ts). */
+.rx { position: relative; overflow: hidden; }
+.rx__body { position: relative; display: grid; align-content: start; gap: var(--space-2); min-width: 0; }
+.rx__k { color: var(--label-secondary); font: var(--type-subheadline); }
+.rx__vs { color: var(--copper-text); font: var(--type-callout); white-space: nowrap; }
+.rx__vs[data-flat] { color: var(--label-secondary); white-space: normal; }
+.rx__num { margin: 0; font-size: 34px; font-weight: 300; line-height: 1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; color: var(--label); }
+.rx__num[data-empty] { color: var(--label-secondary); }
+.rx__num small { font-size: 17px; color: var(--label-secondary); margin-left: 1px; }
+.rx__take { margin: 0; padding-left: var(--space-2); border-left: 2px solid var(--copper-text); color: var(--label); font: var(--type-callout); }
+.rx__week { position: relative; display: grid; gap: 3px; }
+.rx__week svg { width: 100%; height: 34px; display: block; overflow: visible; }
+.rx__usual { stroke: var(--copper-text); stroke-dasharray: 3 3; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.rx__line { fill: none; stroke: var(--rx-c, var(--label-secondary)); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.rx__area { fill: color-mix(in srgb, var(--rx-c, var(--label-secondary)) 13%, transparent); }
+.rx__dots { position: absolute; left: 0; right: 0; bottom: 0; height: 34px; pointer-events: none; }
+.rx__dots i { position: absolute; width: 5px; height: 5px; transform: translate(-50%, -50%); border-radius: 50%; background: var(--rx-c, var(--label-secondary)); }
+.rx__dots i[data-last] { width: 8px; height: 8px; box-shadow: 0 0 0 2px var(--surface, var(--bg)); }
+.rx__wire { margin: 0; padding: var(--space-1) var(--space-2); border: 1px dashed var(--separator); border-radius: var(--radius-md); color: var(--label-secondary); font: var(--type-subheadline); }
+.rx__wire b { color: var(--label); font-weight: 500; }
+.rx__wire .data-tag { margin-inline-end: var(--space-1); vertical-align: 1px; }
+.rx__skel { display: block; height: 11px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--label) 8%, transparent); }
+/* zones (sample only until the HR-stream job exists) */
+.rx__zone-block { display: grid; gap: var(--space-1); }
+.rx__zone-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); }
+.rx__zones { display: flex; gap: 3px; height: 8px; border-radius: var(--radius-sm); overflow: hidden; }
+.rx__zones i { display: block; min-width: 2px; }
+.rx__zl { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: 3px var(--space-3); margin: 0; padding: 0; list-style: none; color: var(--label-secondary); font: var(--type-subheadline); }
+.rx__zl li { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
+.rx__zl i { width: 8px; height: 8px; border-radius: 2px; }
+.rx__zl b { color: var(--label); font-weight: 500; }
+/* Horizon */
+.rxB__top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); min-height: 55px; }
+.rxB__lead { display: grid; gap: var(--space-1); min-width: 0; }
+.rxB__ring { width: 55px; height: 55px; }
+.rxB__ring svg { width: 55px; height: 55px; display: block; }
+.rxB__seg { stroke: color-mix(in srgb, var(--label) 14%, transparent); stroke-width: 3; stroke-linecap: round; }
+.rxB__scale-wrap { display: grid; gap: 1px; }
+.rxB__scale { position: relative; height: 13px; }
+.rxB__scale .t { position: absolute; top: 5px; left: 0; right: 0; height: 3px; border-radius: 2px; background: linear-gradient(90deg, var(--rx-g)); opacity: .35; }
+.rxB__scale .v { position: absolute; top: 5px; left: 0; height: 3px; border-radius: 2px; background: var(--rx-c); }
+.rxB__scale .u { position: absolute; top: 1px; width: 2px; height: 11px; border-radius: 1px; background: var(--copper-text); }
+.rxB__scale .m { position: absolute; top: 1px; width: 11px; height: 11px; margin-left: -5px; border-radius: 50%; background: var(--rx-c); box-shadow: 0 0 0 2px var(--surface, var(--bg)), 0 0 8px color-mix(in srgb, var(--rx-c) 55%, transparent); }
+.rxB__ends { position: relative; display: flex; justify-content: space-between; color: var(--label-secondary); font: var(--type-subheadline); }
+.rxB__ends .ul { position: absolute; top: 0; transform: translateX(-50%); color: var(--copper-text); }
+/* Two drivers (HRV, resting HR) on a 1:1 split; each tile carries its usual, so the third slot isn't missed. */
+.rxB__f { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.rxB__f li { display: grid; gap: 1px; padding: var(--space-1) var(--space-2); border-radius: var(--radius-md); background: color-mix(in srgb, var(--label) 4%, transparent); font: var(--type-subheadline); color: var(--label-secondary); min-width: 0; }
+.rxB__f b { color: var(--label); font-weight: 500; font-size: 17px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rxB__f .rx__d { color: var(--copper-text); font-variant-numeric: tabular-nums; }
+.rxB__f .rx__d[data-flat] { color: var(--label-secondary); }

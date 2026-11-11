@@ -67,7 +67,8 @@ describe("Fitness (HealthField)", () => {
     const recovery = screen.getByRole("meter", { name: "Recovery" });
     expect(recovery).toHaveAttribute("aria-valuenow", "74");
     expect(recovery).toHaveAttribute("aria-valuetext", "74%, High");
-    expect(screen.getByText("High")).toBeInTheDocument();
+    // design-1111r B: the Recovery card has HRV and resting HR drivers; no Sleep tile (the Sleep card is beside it).
+    expect(within(screen.getByRole("list", { name: "What moved recovery" })).getAllByRole("listitem")).toHaveLength(2);
     const effort = screen.getByRole("meter", { name: "Effort" });
     expect(effort).toHaveAttribute("aria-valuenow", "100");
     expect(effort).toHaveAttribute("aria-valuetext", "100 of 100");

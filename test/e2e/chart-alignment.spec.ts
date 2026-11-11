@@ -81,8 +81,10 @@ for (const size of SIZES) {
       await openMore(page);
       const cards = await boxes(page, ".fitness__row--today > *");
       expect(cards).toHaveLength(3);
-      const rings = await boxes(page, ".fitness__ring-body .ui-ring");
-      for (const [i, ring] of rings.entries()) expect(Math.abs(ring.left - cards[i].inner), "ring on its column").toBeLessThanOrEqual(TOLERANCE);
+      // design-1111r B: each card's lead number starts on its card's content edge.
+      const leads = await boxes(page, ".fitness__row--today .rx__num, .fitness__row--today .sleep-dawn__dur");
+      expect(leads).toHaveLength(3);
+      for (const [i, lead] of leads.entries()) expect(Math.abs(lead.left - cards[i].inner), "lead number on its column").toBeLessThanOrEqual(TOLERANCE);
       // Tiles on the field share the three columns; tiles inside a card start at that card's content edge.
       const tiles = await boxes(page, ".fitness__tiles:not(.ui-card .fitness__tiles) > *");
       const nested = await page.locator(".ui-card .fitness__tiles").evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().width > 0).map((e) => {
