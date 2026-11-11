@@ -134,6 +134,9 @@ The stage replaces the landing content during window mode and restores it untouc
 - Motion tokens as in §2; reduced motion is a 150 ms crossfade only. Home content is `inert` while windows are up.
 - PDF caption: 3 bullets plus "Add … to Dates & deadlines…" using the 1111v add preview pattern.
 
+
+**Added after first install (Taisun, same evening):** Life shows Amara's take. `TakePage` now includes `"life"`. `<AmaraTake page="life" />` sits under the hero on Goals (the Life landing), Weekly review, Dates & deadlines, and Personal money. Same component and Wired adapter as Fitness, Neuro, Mind–Body and Enterprise. Live facts return `null` (Needs wiring, no invented numbers). Sample mode uses a Life note tagged Sample data. Personal money still also has the 1111t `MoneyTake` (page="business") under the Life take.
+
 **Deviations:**
 1. Toast copy uses "looked at least recently" (the w09 shot filename is still `fourth-replaces-oldest`).
 2. True native webview embedding and pop-out `WebviewWindow` are not in this UI pass (would need src-tauri). The pop-out control marks the window popped on the stage; live embedding is a Needs wiring adapter.

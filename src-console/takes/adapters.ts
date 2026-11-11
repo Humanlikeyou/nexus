@@ -150,6 +150,16 @@ const SUGGESTIONS: Record<TakePage, Suggestion> = {
     evidence: { level: "moderate", summary: "Bright room light in the evening delayed melatonin in a lab study; dimmer, warmer light did less.", sources: [P("Room light and melatonin (Gooley 2011)")] },
     detectRule: "Counts by itself if Home Assistant shows the evening warm scene on at 9 PM ± 15 min.", answer: { state: "waiting" },
   },
+  life: {
+    id: "s-life-1111", page: "life", type: "read_before_bed", typeLabel: "Read before bed", seen: "First time this week",
+    title: "Keep tonight's read-before-bed habit.",
+    how: "Twenty minutes before bed, as you wrote it. Five nights a week is the target.",
+    why: "You've kept it **4 of 5** nights this week. The lease notice, due **Mar 1**, is the other Life item that's coming up.",
+    facts: [{ label: "This week's habit", value: "4 of 5", note: "read before bed" }, { label: "Lease notice", value: "Mar 1", note: "Dates & deadlines" }],
+    evidence: { level: "moderate", summary: "A short, regular wind-down before bed is a habit you set. Amara doesn't treat this as medical advice.", sources: [] },
+    detectRule: "Counts when you mark the habit done.",
+    answer: { state: "waiting" },
+  },
 };
 
 const BREATH_POINTS: Point[] = [
@@ -208,6 +218,7 @@ const MEMORY: Record<TakePage, MemoryLine | null> = {
   mindBody: { day: "Oct 26", text: "Easy days when HRV is low: next-morning HRV **+4 ms** (range +1 to +7) over **13** low-HRV days. It's now one of your habits." },
   business: { day: "Oct 26", text: "Deciding before noon: **1.8 days** faster, but launch week skewed it, so I can't tell yet." },
   home: null,
+  life: null,
 };
 
 const HISTORY: HistoryEntry[] = [

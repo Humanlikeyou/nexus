@@ -1,7 +1,7 @@
 import type { Wired } from "../lib/sampleAdapters";
 
-export type TakePage = "fitness" | "neuro" | "mindBody" | "business" | "home";
-export const TAKE_PAGES: TakePage[] = ["fitness", "neuro", "mindBody", "business", "home"];
+export type TakePage = "fitness" | "neuro" | "mindBody" | "business" | "home" | "life";
+export const TAKE_PAGES: TakePage[] = ["fitness", "neuro", "mindBody", "business", "home", "life"];
 
 /** One deterministic fact. `accept` lists every number a reply may use to cite it (value, baseline, alt units). */
 export type Fact = {

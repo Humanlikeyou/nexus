@@ -5,6 +5,7 @@ import { MEMORY_LABEL, PERSONAL_DEFAULTS, type Memory, type MemoryCategory, type
 import { Bar, Confidence, PairBars, Rich, Scatter, money } from "./parts";
 import { FollowThroughView } from "../takes/FollowThrough";
 import { takesAdapter } from "../takes/adapters";
+import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { TakesSettingsCard } from "../takes/TakesSettings";
 import { moneyAdapter } from "../money/adapters";
 import { MoneyAccounts, MoneyFollowUps, MoneyOverviewSection, MoneyTake, shown, type Currency } from "../money/MoneyView";
@@ -87,6 +88,7 @@ export function PersonalMoneyView({ adapter, onOpenFinances }: { adapter: Person
   return (
     <div className="biz page-inset cc-page pk-host">
       <PageHero title="Personal money" statement={statement} detail={detail} />
+      <AmaraTake page="life" className="life__take" />
       <MoneyTake adapter={ma} />
       <MoneyOverviewSection adapter={ma} currency={cur} onCurrency={setCur} />
       <MoneyAccounts adapter={ma} />

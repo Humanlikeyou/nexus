@@ -5,6 +5,7 @@ import { Composer, LinkButton, OffButton } from "../adds/Composer";
 import type { AddPreview, Saved } from "../adds/flow";
 import { valueOf } from "../lib/sampleAdapters";
 import { PERSONAL_DEFAULTS, type LifeDate, type LifeLane, type PersonalAdapter } from "../personal/adapters";
+import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { Card, DataTag, PageHero, StatusText } from "../ui";
 import { placeLabels } from "./timeline";
 import "../ui/PanelKit.css";
@@ -83,6 +84,7 @@ export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpe
     <div className="v-page" id="dates">
       <PageHero title="Dates & deadlines" statement={v ? `Next up: ${v.next}` : "Dates that matter"}
         detail={v ? <>{v.dates.length} dates in the next 12 months · reminders at {PERSONAL_DEFAULTS.lifeAdminLadder.join(", ")} days · Enterprise dates are read-only here <DataTag kind="sample" /></> : <>Visa, residence card and contract dates come from you or your documents <DataTag kind="wire" /></>} />
+      <AmaraTake page="life" className="life__take" />
       {composer}
       {!v ? <Card title="Next 12 months" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">Needs wiring: dates appear once the life dates store exists (HANDOFF-1111a). Nothing here is made up.</p></Card> : (
         <>

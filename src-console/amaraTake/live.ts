@@ -31,6 +31,7 @@ export const liveDeps: TakeDeps = {
       case "home": return homeFacts(await snapshot(), await getHomeBrief().catch(() => null), today, Date.now());
       case "neuro": return neuroFacts(await invoke<RecordedSession[]>("list_sessions").catch(() => []), today);
       case "business": return businessFacts(await invoke<RevenueSummary>("arm_get_revenue_summary", { from: null, to: null }).catch(() => null), today);
+      case "life": return null;
     }
   },
 };

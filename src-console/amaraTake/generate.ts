@@ -7,7 +7,7 @@ import type { AmaraTake, FactSet, TakePage, TakeResult } from "./types";
 
 const PAGE_ABOUT: Record<TakePage, string> = {
   fitness: "Taisun's fitness page", neuro: "Taisun's Muse neurofeedback page", mindBody: "Taisun's mind-body page",
-  business: "Taisun's business page", home: "Taisun's home page",
+  business: "Taisun's business page", home: "Taisun's home page", life: "Taisun's Life pages (goals, weekly review, dates and personal money)",
 };
 
 /** The facts are the only data in the prompt. The router adds SOUL.md and the identity guard. */

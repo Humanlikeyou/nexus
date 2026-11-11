@@ -8,6 +8,7 @@ import { CHECKIN_EVENT, ENERGY_STEPS, MOOD_STEPS, PERSONAL_DEFAULTS, type CheckI
 import { Bar, Dots, Rich } from "./parts";
 import { ReadyToKeepCard, SuggestedLatelyCard, TakeChange, TakesThisWeekCard, WeekSuggestionsCard, WeekSuggestionsTile } from "../takes/WeekTakes";
 import { takesAdapter } from "../takes/adapters";
+import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import "../ui/PanelKit.css";
 import "./personal.css";
 import "../adds/v1111.css";
@@ -25,6 +26,7 @@ export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, a
     <div className="v-page" id="goals">
       <PageHero title="Goals" statement={w ? `${onTrack} of ${w.habits.length} habits on track this week` : "Habits and milestones"}
         detail={w ? <>{w.milestones.length} milestones{w.nextMilestone ? ` · next: ${w.nextMilestone}` : ""}{ready ? ` · ${ready} suggestion ready to become a habit` : ""} <DataTag kind="sample" /></> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
+      <AmaraTake page="life" className="life__take" />
       {composer}
       <div className="pk-g2">
         <Card title="This week's habits" accessory={<span className="pk-acc">{wiredTag(week)}</span>}>
@@ -158,6 +160,7 @@ export function WeeklyReviewSection({ adapter, onOpenCheckIn }: { adapter: Perso
   return (
     <div className="v-page" id="weekly-review">
       <PageHero title="Weekly review" statement={v ? v.title : "Your week, every Sunday"} detail={v ? <>{v.week} <DataTag kind="sample" /></> : <>Ready {PERSONAL_DEFAULTS.weeklyReview} from your health, work and money <DataTag kind="wire" /></>} />
+      <AmaraTake page="life" className="life__take" />
       {!v ? <Card title="This week" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">{WIRE_NOTE}</p></Card> : (
         <>
           <div className="t-tiles4">
