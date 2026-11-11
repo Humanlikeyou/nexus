@@ -206,11 +206,27 @@ pub async fn secret_set(
                 }
             }
         }
-        _ => None,
+        Ok(_) => None,
+        Err(e) => {
+            // Fail closed: if we can't tell whether it's set, don't write.
+            value.zeroize();
+            return Err(e);
+        }
     };
-    tokio::task::spawn_blocking(move || set_with(&MacKeychain, &name, value))
-        .await
-        .map_err(|e| e.to_string())?
+    let approved = _held.is_some();
+    tokio::task::spawn_blocking(move || {
+        // Re-check just before writing: a secret that appeared after the check needs approval too.
+        let now_set = status_with(&MacKeychain)
+            .map(|all| all.into_iter().any(|s| s.name == name && s.set))
+            .unwrap_or(true);
+        if now_set && !approved {
+            value.zeroize();
+            return Err("changed: this secret was set meanwhile; try again".to_string());
+        }
+        set_with(&MacKeychain, &name, value)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

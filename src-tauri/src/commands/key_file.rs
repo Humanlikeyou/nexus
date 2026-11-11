@@ -290,13 +290,15 @@ pub async fn key_file_make(
     } else {
         None
     };
+    let approved = _held.is_some();
     tokio::task::spawn_blocking(move || {
         make_inner(
             &MacKeychain,
             &default_dir(),
             passphrase,
             ITERATIONS,
-            replace.unwrap_or(false),
+            // Only an approved replace may overwrite; otherwise a file that appeared meanwhile fails with `exists`.
+            approved,
         )
     })
     .await
