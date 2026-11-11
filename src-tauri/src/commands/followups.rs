@@ -705,11 +705,14 @@ async fn add_muted_gated(
 }
 
 async fn delete_muted_gated(gate: &impl Gate, store: Store, topic: String) -> Result<(), String> {
-    // Shown cleaned; the store still matches the string as given.
-    let operation = format!(
-        "Unmute topic {}",
-        shown(&clean_text(&topic, 1, MAX_TOPIC_CHARS)?)
-    );
+    // The dialog must show exactly what gets deleted: a topic that cleaning would change (hidden,
+    // control or bidi characters, newlines) is refused before any dialog. Stored topics were
+    // cleaned on add, so a real topic always passes.
+    let cleaned = clean_text(&topic, 1, MAX_TOPIC_CHARS)?;
+    if cleaned != topic.trim() {
+        return Err(ERR_INVALID.to_string());
+    }
+    let operation = format!("Unmute topic {}", shown(&cleaned));
     gated_write(gate, MUTED_FILE, operation, store, move |s| {
         s.delete_muted(&topic)
     })
@@ -1325,12 +1328,22 @@ mod tests {
         add_muted_gated(&gate, store_of(&t), "gym".into(), None, day(TODAY))
             .await
             .unwrap();
-        let _ = delete_muted_gated(&gate, store_of(&t), "gym\nAllow\u{202E}evil".into()).await;
-        let asked = gate.asked();
-        let last = asked.last().unwrap();
-        let first_line = last.lines().next().unwrap();
-        assert!(!last.contains('\u{202E}'), "{last}");
-        assert_eq!(first_line, "Unmute topic \"gym Allowevil\"");
+        let before = gate.asked().len();
+        let err = delete_muted_gated(&gate, store_of(&t), "gym\nAllow\u{202E}evil".into())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err, ERR_INVALID,
+            "a topic the dialog can't show exactly is refused"
+        );
+        assert_eq!(gate.asked().len(), before, "and never reaches the dialog");
+        delete_muted_gated(&gate, store_of(&t), "gym".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            gate.asked().last().unwrap().lines().next().unwrap(),
+            "Unmute topic \"gym\""
+        );
         let item = add_item_gated(
             &gate,
             store_of(&t),
