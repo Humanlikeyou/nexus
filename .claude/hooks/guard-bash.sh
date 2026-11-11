@@ -28,15 +28,17 @@ if has ' git ' && has ' push( |$)'; then block "git push is frozen until Taisun 
 if has ' git ' && has ' merge( |$)' && has 'nexus-v2|projects/nexus( |/|$)'; then block "merging into nexus-v2 is frozen."; fi
 if has ' gh ' && has ' pr ' && has ' (create|merge)( |$)'; then block "PRs need Taisun's explicit OK."; fi
 if has ' rm ' && has ' -[a-z]*r[a-z]* | --recursive '; then block "recursive rm needs Taisun's OK."; fi
-# Protected recording paths: only a single read-only command (no ; & | chaining, no interpreter) may name them.
+# Protected recording paths: the whole raw command must be ONE plain read-only command.
 if has 'com\.taisun\.nexus/(replays|sessions|muse)'; then
-  if printf '%s' "$cmd" | grep -q '[;&|`]\|\$(' || ! has '^ *(ls|stat|wc|head|tail|cat|file|du|shasum|md5) '; then
-    block "Muse recordings are sacred: only a single ls/stat/wc/head/tail/cat/file/du/shasum may name replays/, sessions/ or muse/ paths."
+  if [[ "$cmd" == *$'\n'* || "$cmd" == *$'\r'* ]] || ! printf '%s' "$cmd" | grep -Eq '^ *(ls|stat|wc|head|tail|cat|file|du|shasum|md5)( [^<>(){};&|`$]*)?$'; then
+    block "Muse recordings are sacred: only a single plain ls/stat/wc/head/tail/cat/file/du/shasum may name replays/, sessions/ or muse/ paths."
   fi
 fi
-# Fail closed on constructs the normaliser can't resolve when a guarded verb is present.
-if has ' (git|gh|rm) ' && printf '%s' "$cmd" | grep -Eq "eval |\\$'|\\$\\{|alias\\.|-c +alias|IFS="; then
-  block "command uses eval / ANSI-C quoting / \${...} / git aliases next to a guarded verb; run it as a plain command."
+if has ' (git|gh|rm) ' && printf '%s' "$cmd" | grep -Fq "\$'"; then block "ANSI-C quoting next to a guarded verb; run it as a plain command."; fi
+# Fail closed on constructs the normaliser can't resolve when a guarded verb is present:
+# eval, any $ expansion, process substitution, git aliases, IFS tricks.
+if has ' (git|gh|rm) ' && printf '%s' "$cmd" | grep -Eq 'eval |\$[A-Za-z_0-9@*#?!{(-]|[<>]\(|alias\.|-c +alias|IFS='; then
+  block "command uses eval / \$ expansion / process substitution / git aliases next to a guarded verb; run it as a plain command."
 fi
 if has ' git ' && has ' -c [^ ]*(push|merge)'; then block "git -c values mentioning push/merge are not allowed."; fi
 
