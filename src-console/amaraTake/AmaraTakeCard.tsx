@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import { DataTag } from "../ui";
 import { useAmaraTakeStatus } from "./useAmaraTake";
-import { askMore, PREVIEW_DEPS, previewMode, sampleTakeView, TAKE_PAGE_LABEL, takeView, type TakeNote, type TakeView } from "./takeView";
+import { askMore, goToCite, PREVIEW_DEPS, previewMode, sampleTakeView, TAKE_PAGE_LABEL, takeView, type TakeNote, type TakeView } from "./takeView";
 import type { TakePage } from "./types";
 import { useTakeSlots } from "../takes/TakeExtras";
 import "./AmaraTakeCard.css";
@@ -80,7 +80,12 @@ export function AmaraTakeCard({ page, view, compact = false, onRetry, slots = {}
       <Body text={note.text} />
       {slots.memory}
       <ul className="take__chips" aria-label="Numbers Amara used">
-        {note.chips.map((c) => <li key={`${c.label}-${c.value}`} className="take__chip" data-lane={c.lane}><span>{c.label}</span>{c.value}</li>)}
+        {note.chips.map((c) => {
+          // onCite (1110f): a chip with a real source on this page jumps to it; others stay inert.
+          const go = c.sourceId ? () => { goToCite(c.sourceId); } : undefined;
+          return <li key={`${c.label}-${c.value}`} className="take__chip" data-lane={c.lane}
+            {...(go ? { role: "link", tabIndex: 0, onClick: go, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter") go(); } } : {})}><span>{c.label}</span>{c.value}</li>;
+        })}
       </ul>
       {slots.block}
       <div className="take__foot">

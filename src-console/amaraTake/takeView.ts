@@ -4,7 +4,7 @@ import type { TakeDeps } from "./generate";
 
 /** design-1110f: what the card shows. Lane colours a chip (Mind–Body: emerald = health, copper = neuro). */
 export type TakeLane = "health" | "neuro" | "business";
-export type TakeChip = { label: string; value: string; lane?: TakeLane };
+export type TakeChip = { label: string; value: string; lane?: TakeLane; sourceId?: string };
 export type TakeNote = { text: string; chips: TakeChip[]; time: string; sourceLine: string; lane?: string; question: string };
 export type TakeView =
   | { state: "fresh"; note: TakeNote; sample: boolean }
@@ -27,11 +27,32 @@ export const WAITING_FOR: Record<TakePage, string> = {
 
 const tokyoTime = (ms: number) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Tokyo" });
 
+/**
+ * Where a cited number lives on its page (1110f onCite): the element id the chip scrolls to. Only
+ * ids that really exist on that page are listed; a fact with no source element stays inert.
+ */
+export const CITE_TARGETS: Partial<Record<TakePage, Record<string, string>>> = {
+  mindBody: { hrv: "mb-readiness", recovery: "mb-readiness", rhr: "mb-readiness", sleep: "mb-sleep" },
+  fitness: { sleep: "sleep-card" },
+  home: { recovery: "home-recovery-title", hrv: "home-recovery-title", sleep: "home-recovery-title" },
+};
+
+export const citeTarget = (page: TakePage, key: string): string | undefined => CITE_TARGETS[page]?.[key];
+
+/** Scrolls to a cited number's source if that element is on the page now. Returns whether it did. */
+export function goToCite(sourceId: string | undefined, doc: Document = document): boolean {
+  const el = sourceId ? doc.getElementById(sourceId) : null;
+  if (!el) return false;
+  const reduce = doc.documentElement.dataset.reduceMotion === "true";
+  el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  return true;
+}
+
 /** A live take from useAmaraTake: the text as generated and one chip per cited data point. */
 export function liveNote(take: AmaraTake): TakeNote {
   return {
     text: take.text,
-    chips: take.cited.map((c) => ({ label: c.label, value: c.display })),
+    chips: take.cited.map((c) => ({ label: c.label, value: c.display, sourceId: citeTarget(take.page, c.key) })),
     time: `Today, ${tokyoTime(take.generatedAt)}`,
     sourceLine: `From today's ${TAKE_PAGE_LABEL[take.page]} data`,
     question: `What's behind today's ${TAKE_PAGE_LABEL[take.page]} note?`,
