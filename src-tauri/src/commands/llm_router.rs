@@ -342,6 +342,16 @@ pub fn router_headers(
     h
 }
 
+/// Local-only call (personal data such as health facts): always ask the router for no cloud,
+/// whatever the Allow Claude setting says. The router's own gate still applies on top.
+pub fn force_local(headers: &mut [(&'static str, String)]) {
+    for (k, v) in headers.iter_mut() {
+        if *k == "X-Amara-Allow-Claude" {
+            *v = "0".to_string();
+        }
+    }
+}
+
 /// OpenAI chat body: the one system prompt + the user text, non-streamed.
 pub fn router_body(system: &str, text: &str) -> Value {
     json!({
@@ -481,6 +491,7 @@ pub async fn chat_with_router(
     force_provider: Option<String>,
     anthropic_api_key: Option<String>,
     deep: Option<bool>,
+    local_only: Option<bool>,
 ) -> Result<RouterResponse, String> {
     // The cloud key now lives in the router's 0600 secrets file; a passed key is ignored.
     let _ = anthropic_api_key;
@@ -490,13 +501,16 @@ pub async fn chat_with_router(
         saved.amara_router_url.as_deref(),
     );
     let gate = claude_gate(&config, daily_spend_usd(&load_usage_records()));
-    let headers = router_headers(
+    let mut headers = router_headers(
         &config,
         &tags,
         deep.unwrap_or(false),
         force_provider.as_deref(),
         &gate,
     );
+    if local_only.unwrap_or(false) {
+        force_local(&mut headers);
+    }
     let body = router_body(&system_prompt(&amara_persona()), &text);
 
     let start = Instant::now();
@@ -746,6 +760,15 @@ mod tests {
         let b = router_body("sys", &"1. a\n2. b\n3. c ".repeat(500));
         assert_eq!(b["model"], "amara");
         assert_eq!(b["messages"][0]["content"], "sys");
+    }
+
+    #[test]
+    fn local_only_never_allows_claude_even_with_the_gate_open() {
+        let mut h = router_headers(&cfg("api"), &[], false, Some("light"), &open_gate());
+        assert_eq!(header(&h, "X-Amara-Allow-Claude"), Some("1"));
+        force_local(&mut h);
+        assert_eq!(header(&h, "X-Amara-Allow-Claude"), Some("0"));
+        assert_eq!(header(&h, "X-Amara-Route"), Some("fast"));
     }
 
     #[test]

@@ -21,7 +21,7 @@ export const liveDeps: TakeDeps = {
   // route, and SOUL.md + the identity guard are applied in llm_router.rs. No other provider path is added.
   ask: async (prompt) => {
     const routerConfig = buildRouterConfig(await getConfig());
-    const resp = await invoke<RouterResponse>("chat_with_router", { text: prompt, config: routerConfig, tags: [], forceProvider: "light", anthropicApiKey: undefined });
+    const resp = await invoke<RouterResponse>("chat_with_router", { text: prompt, config: routerConfig, tags: [], forceProvider: "light", anthropicApiKey: undefined, localOnly: true });
     return { content: resp.content, tier: resp.tier };
   },
   facts: async (page, today) => {
