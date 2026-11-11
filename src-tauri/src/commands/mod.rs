@@ -20,6 +20,8 @@ pub mod openclaw;
 pub mod outbox;
 pub mod packager;
 pub mod path_safety;
+pub mod recordings;
+pub mod recordings_dsp;
 pub mod replay;
 pub mod research;
 pub mod restart_services;

@@ -47,6 +47,8 @@ import type {
   VoiceStatus,
   VoiceTurn,
 } from "./types";
+import type { AuxInfo, BandName, Contact, EegChannel, RecordingListItem } from "./neuro/recordings";
+import type { SensorKey } from "./neuro/sessionSamples";
 
 interface SnapshotRead<T> {
   unavailable: NexusUnavailableSource | null;
@@ -329,6 +331,37 @@ export const startEegStream = () => invoke<void>("start_eeg_stream");
 export const stopEegStream = () => invoke<void>("stop_eeg_stream");
 export const startEegRecording = () => invoke<string>("start_eeg_recording");
 export const stopEegRecording = () => invoke<string>("stop_eeg_recording");
+/** Muse recordings (commands/recordings.rs, replay.rs). Read-only: there is no delete command. */
+export interface RecordingListItemIpc extends Omit<RecordingListItem, "id" | "replayFile"> {
+  id: string;
+  sessionId: string | null;
+  replayFile: string | null;
+}
+/** Gaps in a recording come back as `null`. */
+export type Gapped = Array<number | null>;
+export interface RecordingWindowIpc {
+  startSecs: number; endSecs: number; sampleRate: 256;
+  lanes: Array<{ channel: EegChannel; contact: Contact; values: Gapped }>;
+}
+export interface BodyWindowIpc {
+  startSecs: number; endSecs: number;
+  heart: { ppgRate: 64; values: Gapped; bpm: number | null; estimate: true } | null;
+  motion: { rate: 52; values: Gapped; events: Array<{ atSecs: number; label: string }> } | null;
+}
+export interface SessionSeriesIpc { stepSecs: number; bands: Record<BandName, Gapped>; focus: Gapped; calm: Gapped }
+export interface SessionSamplesIpc extends SessionSeriesIpc {
+  sensors?: Partial<Record<SensorKey, Partial<Record<BandName, Gapped>>>>;
+  contact?: Partial<Record<SensorKey, number>>;
+}
+export const listRecordings = () => invoke<RecordingListItemIpc[]>("list_recordings");
+export const readRecordingWindow = (id: string, startSecs: number, spanSecs: number, points?: number) =>
+  invoke<RecordingWindowIpc>("read_recording_window", { id, startSecs, spanSecs, points });
+export const readBodyWindow = (id: string, startSecs: number, spanSecs: number) =>
+  invoke<BodyWindowIpc>("read_body_window", { id, startSecs, spanSecs });
+export const recordingSeries = (id: string) => invoke<SessionSeriesIpc>("recording_series", { id });
+export const getSessionSamples = (sessionId: string) => invoke<SessionSamplesIpc | null>("get_session_samples", { sessionId });
+/** Tells the open recording where the back-of-head electrode was found; written to its trailer. */
+export const markRecordingAux = (aux: AuxInfo) => invoke<void>("mark_recording_aux", { aux });
 export const saveMuseSession = (session: RecordedSession & { file_path: string }, data: unknown) =>
   invoke<string>("save_session", { session, data });
 
