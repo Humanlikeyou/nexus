@@ -379,6 +379,8 @@ export const stopVoice = () => invoke<VoiceStatus>("voice_stop");
 export const getVoiceTurns = (n = 20) => invoke<VoiceTurn[]>("voice_recent_turns", { n });
 export const listVoices = () => invoke<VoiceList>("voice_list_voices");
 export const setVoice = (name: string) => invoke<VoiceList>("voice_set_voice", { name });
+/** Interrupt the current spoken reply only (SIGUSR1). false = nothing sent (not running / loop not patched). */
+export const stopVoiceSpeaking = () => invoke<boolean>("voice_stop_speaking");
 
 /** Amara's follow-up lists (commands/followups.rs). Errors are the bare kinds in lib/followups.ts. */
 export const listFollowups = () => invoke<FollowupLists>("followups_list");
@@ -401,3 +403,15 @@ export const getHomeBrief = () => invoke<HomeBrief>("home_brief");
 export interface HeartSample { bpm: number; at: number }
 export interface LiveHeartRate { bpm: number; at: number; trace: HeartSample[] }
 export const getLiveHeartRate = () => invoke<LiveHeartRate | null>("live_heart_rate");
+/** NOOP workouts (noop.rs): read-only, notes never cross. zoneMinutes = minutes in zones 1..5, or null. */
+export interface NoopWorkout {
+  day: string; startedAt: string; endedAt: string; sport: string;
+  durationMin: number | null; energyKcal: number | null; avgHr: number | null; maxHr: number | null;
+  strain: number | null; distanceM: number | null; steps: number | null; zoneMinutes: number[] | null;
+}
+export const getRecentWorkouts = (days = 14) => invoke<NoopWorkout[]>("noop_recent_workouts", { days });
+/** One night's sleep stages (unix seconds, clipped to the night); null when the night has no segments. */
+export type HypnogramStage = "awake" | "light" | "deep" | "rem";
+export interface HypnogramSegment { start: number; end: number; stage: HypnogramStage }
+export interface Hypnogram { day: string; startedAt: string; endedAt: string; segments: HypnogramSegment[] }
+export const getHypnogram = (day?: string) => invoke<Hypnogram | null>("noop_hypnogram", { day: day ?? null });

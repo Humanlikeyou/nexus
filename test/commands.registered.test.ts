@@ -37,6 +37,13 @@ describe("Tauri command registry", () => {
     expect(names.filter((n: string) => n !== "delete_chat_session").filter((n: string) => /(delete|remove|purge).*(session|recording|replay|muse)|(session|recording|replay|muse).*(delete|remove|purge)/.test(n))).toEqual([]);
   });
 
+  it("the 12a leftovers (workouts, hypnogram, stop speaking) are registered", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    for (const name of ["noop_recent_workouts", "noop_hypnogram", "voice_stop_speaking"]) expect(names).toContain(name);
+  });
+
   it("every frontend invoke/read names a registered command", async () => {
     const inv = (await inventory()) as Inventory;
     expect(inv.commands.length).toBeGreaterThan(100);

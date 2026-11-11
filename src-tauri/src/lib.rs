@@ -214,6 +214,8 @@ pub fn run() {
             // NOOP is the exclusive WHOOP/health reader. It owns strap sync and health storage.
             noop::get_noop_health_snapshot,
             noop::live_heart_rate,
+            noop::noop_recent_workouts,
+            noop::noop_hypnogram,
             noop_query::noop_query,
             noop_query::get_noop_settings,
             noop_query::set_noop_settings,
@@ -390,6 +392,7 @@ pub fn run() {
             voice::voice_recent_turns,
             voice::voice_list_voices,
             voice::voice_set_voice,
+            voice::voice_stop_speaking,
             commands::voice_bridge::voice_bridge_start,
             commands::voice_bridge::voice_bridge_stop,
             // Appearance
