@@ -3,6 +3,7 @@ import { Button, DataTag, Dialog, PageHero, StatusText } from "../ui";
 import { valueOf } from "../lib/sampleAdapters";
 import { SERVICE_GROUPS, type Service, type StandaloneAdapter } from "./adapters";
 import { SaCard, ServiceStatus, Spin, WireNote } from "./parts";
+import { SignedInSites } from "../homeWindows/SignedInSites";
 
 /** Attention means you might act: slow or not running. Restarts the supervisor is handling, stops you made and the transition wait don't count. */
 export const needsAttention = (s: Service) => s.group !== "side" && (s.state === "degraded" || s.state === "failed");
@@ -63,6 +64,7 @@ export function ServicesView({ adapter }: { adapter: StandaloneAdapter }) {
     <div className="pk-host sa-page">
       <PageHero title="Services" statement="Service health" detail={<>Status, restart and logs for everything Amara runs <DataTag kind="wire" /></>} />
       <SaCard title="Services" w={w}><WireNote>Needs wiring: Amara&apos;s supervisor reports each service here once Claude builds it (HANDOFF-1111s §2). Nothing here is made up.</WireNote></SaCard>
+      <SignedInSites />
     </div>
   );
   const list = v.services;
@@ -105,6 +107,7 @@ export function ServicesView({ adapter }: { adapter: StandaloneAdapter }) {
       <Dialog open={why} title="Why is Health sync waiting?" onCancel={() => setWhy(false)} confirmLabel="OK" onConfirm={() => setWhy(false)} className="sa-sheet">
         <p>Another app is using your WHOOP; Amara will take over. Until then Amara reads your health data read-only, and nothing is missing. You can switch now in Settings › Devices.</p>
       </Dialog>
+      <SignedInSites />
     </div>
   );
 }

@@ -12,6 +12,8 @@ import { HrTake } from "../hrTake/HrTakeCard";
 import { useTakeSlots } from "../takes/TakeExtras";
 import type { ModuleId } from "../types";
 import { Wordmark } from "../ui/Wordmark";
+import { HomeWindowsStage, landingInert } from "../homeWindows/HomeWindows";
+import { useHomeWindowsState } from "../homeWindows/store";
 import "./LandingScreen.css";
 
 const formatTime = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
@@ -79,15 +81,19 @@ function Welcome({ onSelect }: { onSelect: (id: ModuleId) => void }) {
  * it stand in for the sidebar. Always dark in both themes: the lens is an object and its glow only
  * reads against the emerald field (LandingScreen.css).
  */
-export function LandingField({ onSelect, onToday, chat, chatExpanded = false }: { onSelect: (id: ModuleId) => void; onToday: () => void; chat?: ReactNode; chatExpanded?: boolean }) {
+export function LandingField({ onSelect, onToday, chat, chatExpanded = false, onAsk }: { onSelect: (id: ModuleId) => void; onToday: () => void; chat?: ReactNode; chatExpanded?: boolean; onAsk?: (text: string) => void }) {
   const voice = useLandingVoice();
+  const windows = useHomeWindowsState();
+  const hide = landingInert(windows.phase);
   return (
-    <div className="landing" data-voice={voice.state} data-chat={chat ? (chatExpanded ? "expanded" : "collapsed") : undefined}>
+    <div className="landing" data-voice={voice.state} data-wphase={windows.phase} data-chat={chat ? (chatExpanded ? "expanded" : "collapsed") : undefined}>
       <div className="landing__drag" data-tauri-drag-region />
       <h1 className="ui-visually-hidden">Command Center</h1>
       <Wordmark size="landing" className="landing__wordmark" />
+      <div inert={hide || undefined} aria-hidden={hide || undefined}>
       <Welcome onSelect={onSelect} />
-      <div className="landing__stage">
+      </div>
+      <div className="landing__stage" inert={hide || undefined} aria-hidden={hide || undefined}>
       <div className="landing__lens"><AmaraLens state={voice.state} size={320} decorative /></div>
       <p className="landing__line">{voice.line}</p>
       <AmaraVoiceAnnouncer message={voice.line} />
@@ -105,6 +111,7 @@ export function LandingField({ onSelect, onToday, chat, chatExpanded = false }: 
         })}
       </nav>
       </div>
+      <HomeWindowsStage onAsk={onAsk} />
     </div>
   );
 }

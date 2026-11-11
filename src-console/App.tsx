@@ -37,6 +37,7 @@ import { ASK_MORE_EVENT, type AskMoreDetail } from "./amaraTake/takeView";
 import { standaloneAdapter } from "./standalone/adapters";
 import { FirstRun } from "./standalone/FirstRun";
 import { settingsTab } from "./app/settingsTabs";
+import { handleWindowPrompt, useVoiceWindowPrompts } from "./homeWindows/useHomeWindows";
 
 const BUSINESS_VIEW_KEY = "amara.business.view";
 function readBusinessView(): string | null {
@@ -113,6 +114,11 @@ export default function App() {
   const [setup, setSetup] = useState<null | "first" | "again">(() => { const d = standaloneAdapter().setupDone(); return d.state === "live" && !d.value ? "first" : null; });
   const [chatFocus, setChatFocus] = useState(0);
   const voiceTurns = useVoiceTurns(screenId === "landing");
+  useVoiceWindowPrompts(voiceTurns);
+  const sendHome = useCallback(async (message: string, options?: { deep?: boolean }) => {
+    if (handleWindowPrompt(message, "chat")) return;
+    await sendToTerrence(message, options);
+  }, [sendToTerrence]);
   useEffect(() => {
     const palette = (event: KeyboardEvent) => {
       if (!event.metaKey || event.ctrlKey || event.altKey || event.key.toLowerCase() !== "k") return;
@@ -162,8 +168,8 @@ export default function App() {
   const fieldLabel = screenId === "terrance" ? TODAY_LABEL : selected.label;
   const retrySnapshot = () => { void refresh(); };
   const chat = <ChatField key={askDraft.n} variant="home" expanded={chatExpanded} onToggleExpanded={() => setChatExpanded((open) => !open)} voiceTurns={voiceTurns} focusSignal={chatFocus + askDraft.n}
-    conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} askContext={askContext} onClearContext={() => setAskContext(null)} />;
-  const view = onLanding ? <LandingField onSelect={setActive} onToday={() => navigate(TODAY_ROUTE)} chat={chat} chatExpanded={chatExpanded} />
+    conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendHome} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} askContext={askContext} onClearContext={() => setAskContext(null)} />;
+  const view = onLanding ? <LandingField onSelect={setActive} onToday={() => navigate(TODAY_ROUTE)} chat={chat} chatExpanded={chatExpanded} onAsk={(text) => { void sendHome(text); }} />
     : screenId === "terrance" ? <TerranceField data={data} onNavigate={setActive} onOpen={navigate} onRetry={retrySnapshot} todos={<PageSection id="lists"><ListsField refreshSignal={data.refreshedAt} /></PageSection>} />
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
     : screenId === "mindbody" ? (route.view === "patterns" ? <PatternsView adapter={personalAdapter()} /> : <MindBodyField sessions={data.sessions} />)
