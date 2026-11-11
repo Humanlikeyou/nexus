@@ -1,6 +1,6 @@
 # Handoff for review — Claude Code, 2026-11-11
 
-For Nexus Lead and Nexus Design Lead. Branch `amara-integration` in `~/projects/nexus-amara`, local commits only. **Nothing pushed, merged or PR'd** (`docs/decisions/0001`). Start: `cd5e4cc`. Design's own commits that landed during the session (never touched): `11a9d6d` 1110g, `d1f2168` 1110f, `c1fcd9a` 1110i, `046eedc` 1111a, `3ca4ea2` 1111r. No conflicts with them; 1110f's card uses this session's `useAmaraTake` hook as intended.
+For Nexus Lead and Nexus Design Lead. Branch `amara-integration` in `~/projects/nexus-amara`, local commits only. **Nothing pushed, merged or PR'd** (`docs/decisions/0001`). Start: `cd5e4cc`. Design's own commits that landed during the session (never touched): `11a9d6d` 1110g, `d1f2168` 1110f, `c1fcd9a` 1110i, `046eedc` 1111a, `3ca4ea2` 1111r, `2efc057`/`1a90cbb`/`07f7ca6`/`70e90a8` 1111s (including a merge of amara-integration into their design-build branch), `e7d2ee4` 1111t, `accf8f6` 1111u, `c888c52` 1111v (**renames Business to Enterprise**, a nav-label change; Design's call, flagged for Taisun's OK per hard rule 4), `554fe28`/`b306208`/`8a2e7a0` 1111w. `70e90a8` fixed an e2e crash caused by my ledger commit; `89317c9` hardens the adapter against it. No conflicts with them; 1110f's card uses this session's `useAmaraTake` hook as intended.
 
 Taisun's 7 uncommitted doc edits (BUILD, CLAUDE, NEXT_SESSION_PROMPT, README, STAGES, TAISUN-STEPS, amara-router/README) are **still uncommitted and intact**. Two of my commits add a hunk to CLAUDE.md / TAISUN-STEPS.md via index-only patches; his lines stay unstaged.
 
@@ -53,18 +53,18 @@ tasks/                     BOARD.md · TEMPLATE.md · active/ · done/ · blocke
 
 ## 3. Wiring (section 12)
 
-- **12a:** Muse per-sample + score scale **done** `a34a224` (`get_session_samples`, `score_scale=100`). Awake / bed-wake / resting HR: **data already loaded** (Design uses it in 1110h). Workouts (`workout` table, 245 rows, incl. `zonesJSON`) and hypnogram (`sleepSession.stagesJSON` segments, 87 nights) — **sources found, commands not started**. Nutrition — **no source** (gap). Voice stop-speaking — **not started**: needs an amara-voice patch (only SIGTERM exists today) plus a Nexus command.
-- **12b:** Business ledger **done** `8b6265e` (decision 0005; no file exists yet, so the app still shows Needs wiring). Crews approvals / steps / handoffs / runMetrics / n8n / roster / nextSchedule — **blocked on 13 B/D**.
-- **12c:** chunks A+B (record all streams, read-only readers, retention computed, no delete path) **done** `a34a224`. Chunk C (frontend cache + adapter + AUX detector) **not started**. `removeConfirmed` stays unwired.
+- **12a:** Muse per-sample + score scale **done** `a34a224`. Awake / bed-wake / resting HR: **data already loaded** (Design uses it in 1110h). Workouts with zone minutes (`noop_recent_workouts`) and hypnogram (`noop_hypnogram`) **done** `153c7ce`. Voice stop-speaking **done** `153c7ce` (`voice_stop_speaking` + `stack/patches/amara-voice-stop-speaking.patch`, which Taisun applies: TAISUN-STEPS §9.10). Nutrition — **no source** (gap).
+- **12b:** Business ledger **done** `8b6265e`, `89317c9` (decision 0005; no file exists yet, so the app still shows Needs wiring). Crews steps / handoffs / runMetrics **done** `1b57e9e`. Crews approvals / decided — **in progress (13 D)**. n8n / roster / nextSchedule — **not started**.
+- **12c:** **done**: chunks A+B `a34a224` (record all streams, read-only readers, retention computed, no delete path), chunk C `e182d9f` (cache, live adapter, AUX detection in the fit stage; e2e 34 passed). `removeConfirmed` stays unwired.
 - **12d:** **done** `8d96417`, `534d19f` (local-only; rejects invented numbers).
 
 ## 4. Section 13 (local multi-agent runtime)
 
-Phase A **done** `5f4eca9` (crews → router, URL allowlist, MiniMax fail-closed). B–F **not started**.
+Phase A **done** `5f4eca9` (crews → router, URL allowlist, MiniMax fail-closed). Phase B **done** `1b57e9e` (steps, handoffs, real token totals from router usage, never 0 when unknown). Phase D **in progress**. C, E, F **not started**. All need the crew container rebuilt (TAISUN-STEPS §9.9) before they show in the app.
 
-## 5. Gates at last run (HEAD `5f4eca9`)
+## 5. Gates at last run (after `1b57e9e`)
 
-vitest 1290 passed / 9 skipped (baseline 1140) · neuro 21 · src-tauri 466 / 5 ignored (418) · amara-router 125 (112) · crew-service 56 (Docker test image) · tsc, lint, fmt, clippy -D warnings, check:secrets clean.
+vitest 1316 passed / 9 skipped (baseline 1140) · neuro 21 · src-tauri 476 / 5 ignored (418) · amara-router 125 (112) · crew-service 75 (Docker test image) · tsc, lint, fmt, clippy -D warnings, check:secrets clean.
 **Not run:** full e2e suite (only touched specs), WebKit (not configured), Linux CI, anything live (router not rebuilt, crew container not rebuilt, app not relaunched, no headset). Commit `a34a224` was staged as a split of shared files and not separately built (the next commit was).
 
 ## 6. Questions for Taisun
@@ -83,8 +83,10 @@ vitest 1290 passed / 9 skipped (baseline 1140) · neuro 21 · src-tauri 466 / 5 
 
 - Lists copy for a declined / busy follow-up approval.
 - Ledger as-of date on the Money tab: `ledgerAsOf()` in `business/liveLedger.ts` is ready to show.
+- NaN gaps in recordings: Design's charts and averages don't skip NaN yet (`RecordingsPanels.tsx`); a cold 30 s block briefly reads Needs wiring.
+- Hypnogram stage names are `awake | light | deep | rem` (NOOP's "wake" → "awake").
 - New since the prompt: 1111r "Effort zone minutes" can read `workout.zonesJSON`; 1111a personal-OS adapters; 1110i `crew_tool_grant_*` — all need backend work, none started.
 
 ## 8. Next steps (in order)
 
-12c chunk C → 12a workouts + hypnogram commands → voice stop-speaking (amara-voice patch + command) → 13 B (steps / handoffs) → 13 D (crew approvals; unblocks 12b Crews) → 13 C / E / F.
+13 D (finishing) → 12b Crews n8n / roster / nextSchedule → 13 C (task contract and loop) → 13 E / F. Then the 1111a/1111s/1111t–w wiring asks from Design.
