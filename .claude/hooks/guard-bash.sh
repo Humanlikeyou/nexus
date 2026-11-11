@@ -19,8 +19,18 @@ except Exception: print("")')"
 
 block() { echo "BLOCKED by .claude/hooks/guard-bash.sh: $1" >&2; echo "See .claude/rules/hard-rules.md. Ask Taisun; log his OK in docs/decisions/." >&2; exit 2; }
 
-# Normalise whitespace for matching.
-c="$(printf '%s' "$cmd" | tr '\n\t' '  ' | tr -s ' ')"
+# Normalise for matching: strip quotes, backslashes, backticks and $( ) so wrappers such as
+# bash -c '...', "$(...)", /usr/bin/git or g\it can't hide a command; split on ; & | ( ) too.
+c="$(printf '%s' "$cmd" | tr '\n\t' '  ' | tr -d "\"'\\\\\`" | sed -E 's/\$\(/ ( /g; s/[;&|()]/ ; /g; s#(^| )[^ ]*/(git|rm|gh|launchctl)( |$)#\1\2\3#g' | tr -s ' ')"
+# Fail-safe token checks (over-blocking is acceptable; ask Taisun to run it himself).
+has() { printf ' %s ' "$c" | grep -Eqi "$1"; }
+if has ' git ' && has ' push( |$)'; then block "git push is frozen until Taisun approves that specific push."; fi
+if has ' git ' && has ' merge( |$)' && has 'nexus-v2|projects/nexus( |/|$)'; then block "merging into nexus-v2 is frozen."; fi
+if has ' gh ' && has ' pr ' && has ' (create|merge)( |$)'; then block "PRs need Taisun's explicit OK."; fi
+if has ' rm ' && has ' -[a-z]*r[a-z]* | --recursive '; then block "recursive rm needs Taisun's OK."; fi
+if has 'com\.taisun\.nexus/(replays|sessions|muse)' && ! has '^ *(ls|stat|wc|head|tail|cat|file|du|find [^;]*-(name|type|newer|mtime)[^;]*$|python3 -I -c)'; then
+  has ' (rm|mv|truncate|shred|unlink|cp|rsync|tee|ln|touch|chmod|chflags|sed -i|perl -i|-delete|-exec)( |$)|>' && block "Muse recordings are sacred: no writes/moves/deletes under replays/, sessions/ or muse/."
+fi
 
 # --- git push / PRs (frozen) ---
 printf '%s' "$c" | grep -Eq '(^|[;&|( ]|\$\()git( +-[^ ]+( +[^- ][^ ]*)?)* +push( |$)' && block "git push is frozen until Taisun approves that specific push."

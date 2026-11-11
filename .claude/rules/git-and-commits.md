@@ -7,3 +7,4 @@
 - Untracked `tasks/claude-goal-prompt-1111.md` and `docs/architecture/local-multi-agent-design.md` are Taisun's; don't commit them without his OK.
 - Commit message: `type(scope): summary` + body with test evidence, ending with the Co-Authored-By line.
 - Checkpoint (a local commit) before any substantial change. Use a WIP commit, not `git stash` (shared stash stack).
+- The guard hook is fail-safe: a command that merely *mentions* `git … push`, or `git merge … nexus-v2`, is blocked (for example a commit message containing the word "push"). Reword the message; do not weaken the hook.
