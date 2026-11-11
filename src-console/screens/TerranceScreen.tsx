@@ -10,7 +10,8 @@ import { dateTime, humanize, money, time } from "../lib/format";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, StatusDot, type Tone, Line, Lines, More, PageHero } from "../ui";
 import { recoveryBand } from "./HealthScreen";
-import { GoalsCard } from "./GoalsCard";
+import { personalAdapter, isTokyoSunday } from "../personal/adapters";
+import { CheckInSection, GoalsSection, LifeAdminSection, WeeklyReviewSection } from "../personal/TodaySections";
 import { useReadinessLine } from "../lib/useReadiness";
 import "./TerranceScreen.css";
 
@@ -245,6 +246,9 @@ function OpenLink({ to, label, onNavigate }: { to: ModuleId; label: string; onNa
 export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNow, scheduler: schedulerOverride }: TerranceFieldProps) {
   const now = useNow(fixedNow);
   const readinessLine = useReadinessLine();
+  // design-1111a: Today hosts the check-in, goals, life admin and, on Sundays (JST), the weekly review at the top.
+  const personal = personalAdapter();
+  const sunday = isTokyoSunday(new Date(now));
   const scheduler = useSchedulerStatus(schedulerOverride);
   const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
@@ -312,6 +316,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
   return (
     <div className="home" data-state="ready">
       {header}
+      {sunday && <WeeklyReviewSection adapter={personal} />}
 
       {sourcesNote}
       <section className="home__recovery-card" aria-labelledby="home-recovery-title">
@@ -337,6 +342,11 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           ? <p className="home__note">No current priorities</p>
           : <Lines label="Priorities">{priorities.slice(0, 3).map((p) => <Line key={`${p.sourceKind}-${p.sourceId}`} title={p.title} trailing={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{humanize(p.sourceStatus)}</Badge>} />)}</Lines>}
       </Card>
+
+      <CheckInSection adapter={personal} />
+      <GoalsSection adapter={personal} goals={data.goals} goalsFailed={down("read_goals")} onRetry={onRetry} />
+      <LifeAdminSection adapter={personal} />
+      {!sunday && <WeeklyReviewSection adapter={personal} />}
 
       <More label="Agents, schedule and everything else" id="home-more">
       {!isLoading && <StatusStrip data={data} scheduler={scheduler} fixedNow={fixedNow} onNavigate={onNavigate} />}
@@ -387,7 +397,6 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
         </InsetGroup>
       )}
 
-      <GoalsCard goals={data.goals} failed={down("read_goals")} onRetry={onRetry} />
 
       <div className="home__half">
         <Card title="Neuro" accessory={<OpenLink to="neuro" label="Open Neuro" onNavigate={onNavigate} />}>

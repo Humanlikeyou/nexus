@@ -11,7 +11,7 @@ describe("navigation (6 items, 3 groups)", () => {
     expect(resolveRoute("health")).toEqual({ id: "mindbody", view: "fitness" });
     expect(resolveRoute("neuro")).toEqual({ id: "mindbody", view: "neuro" });
     expect(resolveRoute("sessions")).toEqual({ id: "mindbody", view: "neuro-history" });
-    expect(HOST_VIEWS.mindbody?.map((v) => v.label)).toEqual(["Overview", "Fitness", "Neuro", "Neuro history"]);
+    expect(HOST_VIEWS.mindbody?.map((v) => v.label)).toEqual(["Overview", "Fitness", "Neuro", "Neuro history", "Patterns"]);
     expect(HOST_VIEWS.mindbody?.[0]).toEqual({ view: "main", label: "Overview", screen: "mindbody" });
     expect(resolveRoute("trajectory")).toEqual({ id: "terrance", view: "goals" });
     expect(resolveRoute("revenue")).toEqual({ id: "business", view: "revenue" });

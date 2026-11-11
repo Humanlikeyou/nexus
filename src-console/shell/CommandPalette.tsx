@@ -16,10 +16,14 @@ export function paletteCommands(extra: PaletteCommand[] = []): PaletteCommand[] 
   subs.push(
     { id: "terrance:today", label: `Home › ${TODAY_LABEL}`, route: TODAY_ROUTE },
     { id: "terrance:goals", label: "Home › Goals", route: { id: "terrance", view: "goals" } },
+    { id: "terrance:checkin", label: `${TODAY_LABEL} › Check-in`, route: { id: "terrance", view: "checkin" } },
+    { id: "terrance:life-admin", label: `${TODAY_LABEL} › Life admin`, route: { id: "terrance", view: "life-admin" } },
+    { id: "terrance:weekly-review", label: `${TODAY_LABEL} › Weekly review`, route: { id: "terrance", view: "weekly-review" } },
     { id: "terrance:lists", label: `${TODAY_LABEL} › Lists`, route: { id: "terrance", view: "lists" } },
     { id: "chat:activity", label: "Agents › Activity", route: { id: "chat", view: "activity" } },
     { id: "settings:voice", label: "Settings › Voice", route: { id: "settings", view: "voice" } },
     { id: "settings:devices", label: "Settings › Devices", route: { id: "settings", view: "devices" } },
+    { id: "settings:memory", label: "Settings › Memory", route: { id: "settings", view: "memory" } },
     { id: "settings:about", label: "About Amara OS", route: { id: "settings", view: "about" } },
   );
   return [...sections, ...subs, ...extra];

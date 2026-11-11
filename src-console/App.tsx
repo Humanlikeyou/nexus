@@ -31,6 +31,8 @@ import { Toolbar } from "./shell/Toolbar";
 import { CommandPalette } from "./shell/CommandPalette";
 import { Splash, reducedMotion } from "./shell/Splash";
 import type { ModuleId } from "./types";
+import { personalAdapter } from "./personal/adapters";
+import { MemorySection, PatternsView } from "./personal/PageViews";
 import { ASK_MORE_EVENT, type AskMoreDetail } from "./amaraTake/takeView";
 
 const BUSINESS_VIEW_KEY = "amara.business.view";
@@ -156,7 +158,7 @@ export default function App() {
   const view = onLanding ? <LandingField onSelect={setActive} onToday={() => navigate(TODAY_ROUTE)} chat={chat} chatExpanded={chatExpanded} />
     : screenId === "terrance" ? <><TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} /><PageSection id="lists"><ListsField refreshSignal={data.refreshedAt} /></PageSection></>
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
-    : screenId === "mindbody" ? <MindBodyField sessions={data.sessions} />
+    : screenId === "mindbody" ? (route.view === "patterns" ? <PatternsView adapter={personalAdapter()} /> : <MindBodyField sessions={data.sessions} />)
     : screenId === "smarthome" ? <SmartHomeField onOpenSettings={() => navigate({ id: "settings", view: "home-assistant" })} />
     : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} onOpenHistory={() => setActive("sessions")} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => setActive("neuro")} />
@@ -167,7 +169,7 @@ export default function App() {
     : screenId === "crews" ? <CrewsField data={data} onRetry={retrySnapshot} />
     : screenId === "voice" ? <VoiceField />
     : screenId === "chat" ? <><AgentsField data={data} onOpenCrews={() => navigate({ id: "chat", view: "crews" })} onRetry={retrySnapshot} /><PageSection id="activity"><ActivityField data={data} onRetry={retrySnapshot} /></PageSection></>
-    : <><SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} /><PageSection id="voice"><VoiceField /></PageSection></>;
+    : <><SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} /><PageSection id="voice"><VoiceField /></PageSection><PageSection id="memory"><MemorySection adapter={personalAdapter()} /></PageSection></>;
 
   return (
     <CommandSurface mode={screenId}>

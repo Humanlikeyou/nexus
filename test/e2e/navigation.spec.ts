@@ -72,7 +72,7 @@ test.describe("Mind–Body host: nothing folded in is out of reach", () => {
     await navButton(page, "Mind–Body").click();
     await expect(page.locator("nav.system-constellation > .nav-group button")).toHaveCount(6);
     await expect(page.locator("nav.system-constellation").getByRole("button", { name: /^(Fitness|Neuro)/ })).toHaveCount(0);
-    await expect(activeField(page, "Mind–Body").getByRole("radiogroup", { name: "Mind–Body view" }).getByRole("radio")).toHaveText(["Overview", "Fitness", "Neuro", "Neuro history"]);
+    await expect(activeField(page, "Mind–Body").getByRole("radiogroup", { name: "Mind–Body view" }).getByRole("radio")).toHaveText(["Overview", "Fitness", "Neuro", "Neuro history", "Patterns"]);
     await expect(selected(page, "Overview")).toHaveAttribute("aria-checked", "true");
     await expect(activeField(page, "Mind–Body").getByRole("heading", { level: 1 })).toHaveText("Mind–Body");
   });

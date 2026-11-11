@@ -1,0 +1,167 @@
+import { useState } from "react";
+import { Button, Card, DataTag, PageHero, StatusText, TextField, wiredTag } from "../ui";
+import { valueOf, type Wired } from "../lib/sampleAdapters";
+import { MEMORY_LABEL, PERSONAL_DEFAULTS, type Memory, type MemoryCategory, type PersonalAdapter } from "./adapters";
+import { Bar, Confidence, PairBars, Rich, Scatter, money } from "./parts";
+import "../ui/PanelKit.css";
+import "./personal.css";
+
+const WIRE_NOTE = "Needs wiring: this appears once Claude builds its store (HANDOFF-1111a). Nothing here is made up.";
+
+/** Mind–Body › Patterns (1111a #2): findings as sentences with the numbers, strength and confidence behind them. */
+export function PatternsView({ adapter }: { adapter: PersonalAdapter }) {
+  const pw = adapter.patterns();
+  const v = valueOf(pw);
+  const [top, ...rest] = v?.findings ?? [];
+  return (
+    <div className="mind-body page-inset pk-host">
+      <PageHero title="Patterns" statement={v ? v.headline : "What moves your focus and calm"} detail={v ? <>{v.window} <DataTag kind="sample" /></> : <>Recomputed every Sunday from Fitness, Neuro and check-ins <DataTag kind="wire" /></>} />
+      {!v ? <Card title="Findings" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">No findings yet. Amara needs at least 3 days with and without each factor before it says anything. {WIRE_NOTE}</p></Card> : (
+        <>
+          {top && (
+            <Card title={top.title} accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+              <div className="pk-finding">
+                <div><Confidence n={top.confidence} label={`${top.strength} · ${top.n}`} /><h3><Rich text={top.sentence} /></h3><p><Rich text={top.detail} /></p>
+                  {top.chips && <div className="pk-chips">{top.chips.map((c, i) => <span key={c} className="pk-chip" data-on={i === 0 || undefined}>{c}</span>)}</div>}</div>
+                {top.chart.kind === "scatter" && <div><Scatter {...top.chart} /><div className="pk-legend"><span><i className="c" />under {top.chart.split} h</span><span><i />{top.chart.split} h+</span><span>x: sleep · y: focus</span></div></div>}
+              </div>
+            </Card>
+          )}
+          <div className="pk-g2">
+            {rest.map((f) => (
+              <Card key={f.id} title={f.title} accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+                <div className="pk-finding pk-finding--one"><div><Confidence n={f.confidence} label={`${f.strength} · ${f.n}`} /><h3><Rich text={f.sentence} /></h3><p><Rich text={f.detail} /></p></div>
+                  {f.chart.kind === "bars" && <><PairBars rows={f.chart.rows} legend={f.chart.legend} /><div className="pk-legend"><span><i className="c" />{f.chart.legend[0]}</span><span><i />{f.chart.legend[1]}</span></div></>}</div>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+      <p className="pk-note">How this works: Amara compares days you already track (Fitness, Neuro, check-ins), shows the numbers behind every sentence and how many days back it. A pattern, not proof. Strength: r from 0 to 1. Confidence grows with more days. Never medical advice.</p>
+    </div>
+  );
+}
+
+const amt = (w: Wired<number>) => (w.state === "unwired" ? wiredTag(w) : money(w.value));
+
+/** Business › Personal (1111a #4): USD, walled off from venture funds. */
+export function PersonalMoneyView({ adapter }: { adapter: PersonalAdapter }) {
+  const pm = adapter.money();
+  const v = valueOf(pm);
+  const wall = <div className="pk-wall" role="note"><b>Personal</b>Kept apart from Business: venture funds, Taiyo Skin and Trading never appear here, and nothing here counts toward venture numbers.</div>;
+  if (!v) {
+    return (
+      <div className="biz page-inset cc-page pk-host">
+        <PageHero title="Personal money" statement="Your own accounts, in USD" detail={<>Starts with a CSV import of your bank and card; yen amounts wait for your JPY→USD rule <DataTag kind="wire" /></>} />
+        {wall}
+        <Card title="Bills, subscriptions and spending" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">No personal accounts connected. Nothing is shown until you pick the accounts; no balances or bills are guessed. {WIRE_NOTE}</p></Card>
+      </div>
+    );
+  }
+  return (
+    <div className="biz page-inset cc-page pk-host">
+      <PageHero title="Personal money" statement={v.leftAfterBills.state === "unwired" ? "Left after bills this month" : `${money(v.leftAfterBills.value)} left after bills this month`} detail={<>{v.month} · USD · your own accounts only <DataTag kind="sample" /></>} />
+      {wall}
+      <ul className="cc-strip" aria-label="Personal money this month">
+        <li className="cc-tile"><span className="cc-tile__k">Spent in {v.month}</span><span className="cc-tile__v">{amt(v.spent)}</span><span className="cc-tile__s">{v.spentNote}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Subscriptions</span><span className="cc-tile__v">{amt(v.subsMonthly)} / mo</span><span className="cc-tile__s">{v.subsNote}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Bills due · 14 days</span><span className="cc-tile__v">{amt(v.billsDue)}</span><span className="cc-tile__s">{v.billsNote}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Left after bills</span><span className="cc-tile__v">{amt(v.leftAfterBills)}</span><span className="cc-tile__s">{v.payday}</span></li>
+      </ul>
+      <div className="pk-g2">
+        <Card title="Bills due · next 14 days" accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+          <table className="pk-table" aria-label="Bills due"><thead><tr><th scope="col">Bill</th><th scope="col">Due</th><th scope="col" className="r">Amount</th><th scope="col">Status</th></tr></thead>
+            <tbody>{v.bills.map((b) => <tr key={b.id}><td>{b.name}<small>{b.sub}</small></td><td>{b.due}</td><td className="r">{amt(b.amount)}</td><td>{b.status === "pay" ? <StatusText kind="wait">Pay</StatusText> : <StatusText kind="ok">{b.status === "auto" ? "Auto" : "Scheduled"}</StatusText>}</td></tr>)}</tbody></table>
+        </Card>
+        <Card title={`Subscriptions · ${amt(v.subsMonthly)} / mo`} accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+          {v.subscriptions.map((s) => <div className="pk-row" key={s.id}><div className="pk-row__main"><span>{s.name}</span><small>{s.sub}</small></div>{s.unusedDays != null && <span className="pk-pill" data-tone="warn">Unused {s.unusedDays} d</span>}<span className="pk-num">{amt(s.amount)}</span></div>)}
+          <p className="pk-note">{v.moreSubs}</p>
+        </Card>
+      </div>
+      <Card title={`Spending by category · ${v.month}`} accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+        <div className="pk-g2">
+          <div>{v.categories.map((c) => <div className="pk-cat" key={c.name}><span>{c.name}</span><Bar pct={c.pct} copper={c.up} /><span>{money(c.amount)}</span></div>)}</div>
+          <p className="pk-take"><Rich text={v.summary} /></p>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function MemoryRow({ m, adapter, onDone }: { m: Memory; adapter: PersonalAdapter; onDone: (note: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(m.text);
+  const [confirm, setConfirm] = useState(false);
+  const result = (r: Wired<{ ok: true }>, what: string) => onDone(r.state === "unwired" ? `${what} needs wiring, so nothing changed.` : r.state === "sample" ? `Sample data: ${what.toLowerCase()} in the preview only.` : `${what} done.`);
+  if (editing) {
+    return (
+      <form className="pk-mem" onSubmit={(e) => { e.preventDefault(); void adapter.editMemory(m.id, text.trim()).then((r) => { setEditing(false); result(r, "Editing"); }); }}>
+        <TextField label="Memory" hideLabel value={text} maxLength={500} onChange={(e) => setText(e.target.value)} />
+        <div className="pk-mem__acts"><Button size="small" onClick={() => { setEditing(false); setText(m.text); }}>Cancel</Button><Button size="small" variant="primary" type="submit" disabled={!text.trim()}>Save</Button></div>
+      </form>
+    );
+  }
+  return (
+    <div className="pk-mem">
+      <div>{m.text}<small>{m.source}</small></div>
+      <div className="pk-mem__acts">
+        {confirm ? <><Button size="small" onClick={() => setConfirm(false)}>Keep</Button><Button size="small" variant="destructive" onClick={() => { void adapter.deleteMemory(m.id).then((r) => { setConfirm(false); result(r, "Deleting"); }); }}>Delete for good</Button></>
+          : <><Button size="small" aria-label={`Edit: ${m.text}`} onClick={() => setEditing(true)}>Edit</Button><Button size="small" variant="destructive" aria-label={`Delete: ${m.text}`} onClick={() => setConfirm(true)}>Delete</Button></>}
+      </div>
+    </div>
+  );
+}
+
+/** Settings › Memory (1111a #5): what Amara remembers, grouped and searchable; edit, delete and confirm new ones. */
+export function MemorySection({ adapter }: { adapter: PersonalAdapter }) {
+  const [, bump] = useState(0);
+  const [q, setQ] = useState("");
+  const [cat, setCat] = useState<MemoryCategory | "all">("all");
+  const [note, setNote] = useState<string | null>(null);
+  const mem = adapter.memories();
+  const pend = adapter.pendingMemories();
+  const all = valueOf(mem);
+  const pending = valueOf(pend) ?? [];
+  const done = (n: string) => { setNote(n); bump((x) => x + 1); };
+  const shown = (all ?? []).filter((m) => (cat === "all" || m.category === cat) && m.text.toLowerCase().includes(q.trim().toLowerCase()));
+  const cats = (Object.keys(MEMORY_LABEL) as MemoryCategory[]).filter((c) => (all ?? []).some((m) => m.category === c));
+  return (
+    <div className="pk-host memory">
+      <PageHero title="Memory" statement="What Amara knows about you" detail={all ? <>{all.length} memories · stored on this Mac (Letta) · you can edit or delete any of them <DataTag kind="sample" /></> : <>Stored on this Mac (Letta) · editing and deleting need wiring <DataTag kind="wire" /></>} />
+      {!all ? <Card title="Memories" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">Amara&apos;s memory list appears here once Claude adds memory_list, memory_update and memory_delete. Nothing is read or changed in Letta until then.</p></Card> : (
+        <>
+          <div className="pk-search memory__search">
+            <label htmlFor="memory-q" className="ui-visually-hidden">Search memories</label>
+            <input id="memory-q" type="search" className="memory__q" placeholder="Search memories" value={q} onChange={(e) => setQ(e.target.value)} />
+            <span className="pk-chips" role="group" aria-label="Category">
+              {(["all", ...cats] as const).map((c) => <button key={c} type="button" className="pk-chip ci-chip" aria-pressed={cat === c} data-on={cat === c || undefined} onClick={() => setCat(c)}>{c === "all" ? `All ${all.length}` : `${MEMORY_LABEL[c]} ${all.filter((m) => m.category === c).length}`}</button>)}
+            </span>
+          </div>
+          {pending.length > 0 && (
+            <Card title={`Amara wants to remember · ${pending.length}`} accessory={<span className="pk-acc">{wiredTag(pend)}</span>}>
+              {pending.map((p) => (
+                <div className="pk-row" key={p.id}><StatusText kind="wait" /><div className="pk-row__main"><span>&ldquo;{p.text}&rdquo;</span><small>{p.source}</small></div>
+                  <Button size="small" onClick={() => { void adapter.decideMemory(p.id, false).then((r) => done(r.state === "unwired" ? "Needs wiring." : "Not kept.")); }}>Don&apos;t keep</Button>
+                  <Button size="small" variant="primary" onClick={() => { void adapter.decideMemory(p.id, true).then((r) => done(r.state === "unwired" ? "Needs wiring." : r.state === "sample" ? "Sample data: kept in the preview only." : "Kept.")); }}>Keep</Button></div>
+              ))}
+              <p className="pk-note">New {PERSONAL_DEFAULTS.confirmMemories.map((c) => MEMORY_LABEL[c].toLowerCase()).join(" and ")} memories, and anything Amara infers rather than hears from you, wait here until you keep them.</p>
+            </Card>
+          )}
+          <div className="pk-g2 memory__grid">
+            {(cat === "all" ? cats : [cat]).map((c) => {
+              const rows = shown.filter((m) => m.category === c);
+              return rows.length === 0 ? null : (
+                <Card key={c} title={MEMORY_LABEL[c]} accessory={<span className="pk-acc">{wiredTag(mem)}</span>}>
+                  {rows.map((m) => <MemoryRow key={`${m.id}-${m.text}`} m={m} adapter={adapter} onDone={done} />)}
+                </Card>
+              );
+            })}
+          </div>
+          {shown.length === 0 && <p className="pk-note">No memories match.</p>}
+          {note && <p className="pk-note" role="status">{note}</p>}
+        </>
+      )}
+      <div className="pk-info">Deleting removes the memory from Amara&apos;s store (Letta) on this Mac and from future answers; it can&apos;t be undone. Past chat transcripts are separate and stay until you delete them in Agents.</div>
+    </div>
+  );
+}

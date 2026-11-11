@@ -5,9 +5,9 @@ export type SystemEntry = { id: ModuleId; label: string; signal: string; icon: L
 
 /** Section anchors: a route whose view names a section of its host scrolls there (App). */
 export const SECTION_ANCHORS: Partial<Record<ModuleId, string[]>> = {
-  terrance: ["goals", "lists"],
+  terrance: ["goals", "checkin", "life-admin", "weekly-review", "lists"],
   chat: ["activity"],
-  settings: ["devices", "about", "home-assistant", "voice"],
+  settings: ["devices", "about", "home-assistant", "voice", "memory"],
 };
 
 /** Six items in three groups, like macOS Settings (screen-specs Part 2). The first group is untitled
@@ -39,9 +39,9 @@ export const HOST_VIEWS: Partial<Record<ModuleId, SubView[]>> = {
   // design-1110b B: chat lives on Home (under the lens), so this host is agents and crews only.
   // Activity is a section of Agents, Lists a section of Today, Voice a section of Settings.
   chat: [{ view: "main", label: "Agents", screen: "chat" }, { view: "crews", label: "Crews", screen: "crews" }],
-  mindbody: [{ view: "main", label: "Overview", screen: "mindbody" }, { view: "fitness", label: "Fitness", screen: "health" }, { view: "neuro", label: "Neuro", screen: "neuro" }, { view: "neuro-history", label: "Neuro history", screen: "sessions" }],
+  mindbody: [{ view: "main", label: "Overview", screen: "mindbody" }, { view: "fitness", label: "Fitness", screen: "health" }, { view: "neuro", label: "Neuro", screen: "neuro" }, { view: "neuro-history", label: "Neuro history", screen: "sessions" }, { view: "patterns", label: "Patterns", screen: "mindbody" }],
   // design-1110d D-B1: Revenue became Money (view id kept so "revenue" links still land there).
-  business: [{ view: "main", label: "Overview", screen: "business" }, { view: "ventures", label: "Ventures", screen: "business" }, { view: "revenue", label: "Money", screen: "revenue" }, { view: "work", label: "Work", screen: "business" }],
+  business: [{ view: "main", label: "Overview", screen: "business" }, { view: "ventures", label: "Ventures", screen: "business" }, { view: "revenue", label: "Money", screen: "revenue" }, { view: "work", label: "Work", screen: "business" }, { view: "personal", label: "Personal", screen: "business" }],
 };
 
 /** Folded ids stay valid ModuleIds (stored state, ⌘K, onNavigate) and resolve to their host. */

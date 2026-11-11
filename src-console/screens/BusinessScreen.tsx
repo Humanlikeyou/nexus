@@ -8,6 +8,8 @@ import { businessAdapter, type BusinessAdapter } from "../business/adapters";
 import { BusinessOverview, VenturesView } from "./BusinessPanels";
 import { Card, StatusText, type StatusKind } from "../ui";
 import "./BusinessScreen.css";
+import { personalAdapter } from "../personal/adapters";
+import { PersonalMoneyView } from "../personal/PageViews";
 
 /** Business › Work (screen-specs §7). */
 const STATES = ["active", "backlog", "waiting", "done"] as const;
@@ -63,6 +65,7 @@ export function BusinessField({ data, onRetry, view = "main", onView, adapter = 
   const [ventureId, setVentureId] = useState<string | null>(null);
   if (view === "main") return <BusinessOverview data={data} adapter={adapter} onOpenVenture={(id) => { if (onView) { setVentureId(id); onView("ventures"); } }} work={<WorkCards data={data} onRetry={onRetry} />} />;
   if (view === "ventures") return <VenturesView data={data} adapter={adapter} ventureId={ventureId} onOpen={setVentureId} />;
+  if (view === "personal") return <PersonalMoneyView adapter={personalAdapter()} />;
   return <WorkView data={data} onRetry={onRetry} />;
 }
 

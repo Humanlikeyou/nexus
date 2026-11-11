@@ -9,13 +9,13 @@ const targetDate = (value: string) => new Date(value).toLocaleDateString("en-US"
 
 export const goalProgress = (goal: Goal) => (goal.target > 0 ? Math.min(100, (goal.current / goal.target) * 100) : 0);
 
-export function GoalsCard({ goals, failed, onRetry }: { goals: Goal[]; failed?: boolean; onRetry?: () => void }) {
+export function GoalsCard({ goals, failed, onRetry, id = "goals", title = "Goals" }: { goals: Goal[]; failed?: boolean; onRetry?: () => void; id?: string; title?: string }) {
   const rows = goals.map((goal) => ({ goal, progress: goalProgress(goal) }));
   const overall = rows.length ? rows.reduce((sum, r) => sum + r.progress, 0) / rows.length : 0;
   const leader = [...rows].sort((a, b) => b.progress - a.progress)[0];
 
   return (
-    <Card id="goals" className="home__goals" title="Goals" accessory={rows.length > 0 ? <Badge>{`${rows.length} active`}</Badge> : undefined}>
+    <Card id={id || undefined} className="home__goals" title={title} accessory={rows.length > 0 ? <Badge>{`${rows.length} active`}</Badge> : undefined}>
       {failed && rows.length === 0 ? (
         <div className="home__unavailable">
           <p>Legacy goals unavailable</p>
