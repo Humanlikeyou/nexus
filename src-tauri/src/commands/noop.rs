@@ -1150,8 +1150,11 @@ const LIVE_HR_MAX_FUTURE_SECS: i64 = 60;
 const LIVE_HR_MIN_BPM: i64 = 30;
 const LIVE_HR_MAX_BPM: i64 = 240;
 
-/// The trace on the Home screen covers 89 seconds. These extra rows let it play through a late
-/// batch from NOOP without its left edge running out.
+/// The trace on the Home screen covers 89 seconds. Sending 144 seconds lets it play through a
+/// late batch from NOOP without its left edge running out.
+const LIVE_HR_TRACE_WINDOW_SECS: i64 = 144;
+/// Most rows read for the trace. At about one sample a second this is one full window; a
+/// sparser strap fills less of it and the seconds window is what bounds the trace.
 const LIVE_HR_TRACE_ROWS: i64 = 144;
 
 /// One heart rate sample. Never log these values.
@@ -1201,7 +1204,7 @@ fn latest_heart_rate(
     if now - at > LIVE_HR_MAX_AGE_SECS || !plausible_bpm(bpm) {
         return Ok(None);
     }
-    let oldest = at - LIVE_HR_TRACE_ROWS;
+    let oldest = at - LIVE_HR_TRACE_WINDOW_SECS;
     let trace = rows
         .iter()
         .rev()
@@ -1316,6 +1319,23 @@ mod tests {
         assert_eq!(trace.len() as i64, LIVE_HR_TRACE_ROWS - 1);
         assert!(trace.windows(2).all(|pair| pair[0].at < pair[1].at));
         assert!(trace.iter().all(|sample| sample.bpm == 70));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn live_heart_rate_trace_window_is_seconds_not_rows() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        let at = now.timestamp();
+        // One sample every 2 s: the row cap alone would reach 288 s back.
+        let rows: Vec<(&str, i64, i64)> = (0..200).map(|i| ("my-whoop", at - 2 * i, 70)).collect();
+        let path = heart_rate_database(&rows);
+        let trace = latest_heart_rate(&path, "my-whoop", now)
+            .unwrap()
+            .unwrap()
+            .trace;
+        let span = trace.last().unwrap().at - trace.first().unwrap().at;
+        assert!(span <= LIVE_HR_TRACE_WINDOW_SECS, "span {span}s");
+        assert_eq!(trace.len() as i64, LIVE_HR_TRACE_WINDOW_SECS / 2 + 1);
         let _ = fs::remove_file(path);
     }
 

@@ -326,7 +326,7 @@ fn model_loading(retry_after: u64) -> String {
 }
 
 /// True when error text would read to the UI as a signal to re-send.
-fn is_retry_signal(message: &str) -> bool {
+pub fn is_retry_signal(message: &str) -> bool {
     let message = message
         .trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
         .to_ascii_lowercase();

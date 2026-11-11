@@ -463,6 +463,27 @@ pub fn run_query(
     args: &Value,
     timeout: Duration,
 ) -> Result<Value, NoopQueryError> {
+    run_query_in(
+        Path::new(SANDBOX_EXEC),
+        settings,
+        roots,
+        tool,
+        args,
+        timeout,
+    )
+}
+
+/// [`run_query`] with the sandbox launcher given, so tests can run on a host without
+/// `sandbox-exec`. The launcher gets the same `-p PROFILE binary mcp` arguments; production
+/// always passes [`SANDBOX_EXEC`].
+pub(crate) fn run_query_in(
+    sandbox_exec: &Path,
+    settings: &NoopSettings,
+    roots: &Roots,
+    tool: &str,
+    args: &Value,
+    timeout: Duration,
+) -> Result<Value, NoopQueryError> {
     let args = validate(tool, args)?;
     let raw_bin = settings
         .binary_path
@@ -474,12 +495,13 @@ pub fn run_query(
         Some(d) => Some(validate_path(d, PathKind::Db, roots)?),
         None => None,
     };
-    if !Path::new(SANDBOX_EXEC).is_file() {
+    if !sandbox_exec.is_file() {
         return Err(NoopQueryError::SandboxMissing(format!(
-            "{SANDBOX_EXEC} not found; refusing to run the NOOP CLI without the network sandbox"
+            "{} not found; refusing to run the NOOP CLI without the network sandbox",
+            sandbox_exec.display()
         )));
     }
-    let mut cmd = Command::new(SANDBOX_EXEC);
+    let mut cmd = Command::new(sandbox_exec);
     cmd.arg("-p")
         .arg(SANDBOX_PROFILE)
         .arg(&binary)
@@ -616,6 +638,18 @@ pub(crate) mod test_util {
             self.file(
                 "projects/noop-main/Packages/NoopLocalAccess/.build/release/fake-noop",
                 &format!("#!/bin/sh\n{body}\n"),
+                0o755,
+            )
+        }
+        /// Stands in for `sandbox-exec` where it does not exist (Linux). It insists on the real
+        /// `-p <SANDBOX_PROFILE> <binary> mcp` arguments, then runs the binary.
+        pub fn sandbox(&self) -> PathBuf {
+            self.file(
+                "bin/fake-sandbox-exec",
+                &format!(
+                    "#!/bin/sh\n[ \"$1\" = \"-p\" ] && [ \"$2\" = '{}' ] && [ \"$4\" = mcp ] || exit 97\nshift 2\nexec \"$@\"\n",
+                    super::SANDBOX_PROFILE
+                ),
                 0o755,
             )
         }

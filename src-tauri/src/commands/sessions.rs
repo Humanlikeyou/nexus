@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -133,12 +133,34 @@ pub(crate) fn capture_body_context_with(
     roots: &noop_query::Roots,
     timeout: Duration,
 ) -> Option<BodyContext> {
+    capture_body_context_in(
+        Path::new(noop_query::SANDBOX_EXEC),
+        settings,
+        roots,
+        timeout,
+    )
+}
+
+/// Same, with the sandbox launcher given (tests on hosts without `sandbox-exec`).
+pub(crate) fn capture_body_context_in(
+    sandbox_exec: &Path,
+    settings: &NoopSettings,
+    roots: &noop_query::Roots,
+    timeout: Duration,
+) -> Option<BodyContext> {
     if settings.whoop_ble_allowed() {
         return None;
     }
     settings.binary_path.as_deref().filter(|p| !p.is_empty())?;
     let args = serde_json::json!({ "days": BODY_CONTEXT_DAYS });
-    match noop_query::run_query(settings, roots, "health_snapshot", &args, timeout) {
+    match noop_query::run_query_in(
+        sandbox_exec,
+        settings,
+        roots,
+        "health_snapshot",
+        &args,
+        timeout,
+    ) {
         Ok(v) => {
             println!("[sessions] body_context: status=ok");
             Some(BodyContext::from_snapshot(&v))
@@ -500,25 +522,26 @@ mod tests {
         assert!(saved["today"].get("day").is_none());
     }
 
-    // noop_query runs under macOS sandbox-exec, so this can only pass on macOS.
-    #[cfg(target_os = "macos")]
+    // `sandbox-exec` exists only on macOS, so the launcher is injected: a stand-in that checks
+    // the real sandbox arguments and runs the fake CLI. Nothing here is skipped on Linux.
     #[test]
     fn body_context_capture_is_best_effort() {
         use super::noop_query::test_util::{s as sp, FakeHome};
         use super::noop_query::WhoopSource;
         let h = FakeHome::new();
         let r = h.roots();
+        let sb = h.sandbox();
         let ok = h.script(r#"cat >/dev/null; echo '{"jsonrpc":"2.0","id":2,"result":{"structuredContent":{"today":{"day":"2026-01-01","avgHrv":1.23,"spo2Pct":1.0},"battery":{}}}}'"#);
         let mut s = NoopSettings {
             binary_path: sp(&ok),
             ..Default::default()
         };
-        let bc = capture_body_context_with(&s, &r, Duration::from_secs(15)).unwrap();
+        let bc = capture_body_context_in(&sb, &s, &r, Duration::from_secs(15)).unwrap();
         assert_eq!(bc.today.unwrap().hrv, Some(1.23));
         s.whoop_source = WhoopSource::Ble;
-        assert!(capture_body_context_with(&s, &r, Duration::from_secs(5)).is_none());
+        assert!(capture_body_context_in(&sb, &s, &r, Duration::from_secs(5)).is_none());
         assert!(
-            capture_body_context_with(&NoopSettings::default(), &r, Duration::from_secs(5))
+            capture_body_context_in(&sb, &NoopSettings::default(), &r, Duration::from_secs(5))
                 .is_none()
         );
         let h2 = FakeHome::new();
@@ -528,7 +551,13 @@ mod tests {
             ..Default::default()
         };
         let t = std::time::Instant::now();
-        assert!(capture_body_context_with(&s2, &h2.roots(), Duration::from_millis(300)).is_none());
+        assert!(capture_body_context_in(
+            &h2.sandbox(),
+            &s2,
+            &h2.roots(),
+            Duration::from_millis(300)
+        )
+        .is_none());
         assert!(t.elapsed() < Duration::from_secs(5));
         let h3 = FakeHome::new();
         let bad = h3.script("cat >/dev/null; echo nope");
@@ -536,6 +565,9 @@ mod tests {
             binary_path: sp(&bad),
             ..Default::default()
         };
-        assert!(capture_body_context_with(&s3, &h3.roots(), Duration::from_secs(5)).is_none());
+        assert!(
+            capture_body_context_in(&h3.sandbox(), &s3, &h3.roots(), Duration::from_secs(5))
+                .is_none()
+        );
     }
 }

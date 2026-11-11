@@ -1,4 +1,5 @@
 import type { AmaraTierInfo, TerrenceAction, TerrenceInteraction } from "../types";
+import { modelLoadingDelay } from "./modelLoading";
 import { routeInfoFrom } from "./routeInfo";
 
 export type ConversationMessage = {
@@ -86,7 +87,7 @@ export function messagesFromInteractions(interactions: TerrenceInteraction[]): C
         ...(route.model ? { servedModel: route.model } : {}),
         ...(interaction.source === "home" ? { source: "home" as const } : {}),
       });
-    } else if (interaction.error) {
+    } else if (interaction.error && modelLoadingDelay(interaction.error) === null) {
       messages.push({
         id: `${interaction.id}-failed`,
         role: "assistant",

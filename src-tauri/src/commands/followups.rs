@@ -5,6 +5,10 @@
 //! file fresh and replaces it atomically. `items.py` writes without a lock, so a change it makes
 //! in the instant between our read and rename can still be lost.
 //!
+//! Every change asks first through the native approval dialog (`approval_gate`); the webview
+//! cannot click it. Reads need no approval. File work runs on the blocking pool, never on the
+//! async runtime. Tests use a `Gate` stub and a temp-dir `Store`, never the real `~/.hermes`.
+//!
 //! A malformed file is an error and is never overwritten. Errors are the fixed `ERR_*` kinds.
 
 use super::terrence_runtime::injection_guard;
@@ -522,51 +526,251 @@ fn today() -> NaiveDate {
     Local::now().date_naive()
 }
 
-#[tauri::command]
-pub fn followups_list() -> Result<FollowupLists, String> {
-    Store::home()?.list(today())
+/// Hands back whatever must stay alive until the write is done (the in-flight lock).
+type Held = Box<dyn Send>;
+
+/// Asks the human before a write. The real one is the native dialog; tests pass their own.
+trait Gate: Sync {
+    fn approve(
+        &self,
+        text: String,
+    ) -> impl std::future::Future<Output = Result<Held, String>> + Send;
+}
+
+struct NativeGate(tauri::AppHandle);
+
+impl Gate for NativeGate {
+    async fn approve(&self, text: String) -> Result<Held, String> {
+        let guard = super::approval_gate::require_approval(
+            &self.0,
+            &[super::approval_gate::service_key("followups")],
+            text,
+        )
+        .await?;
+        Ok(Box::new(guard))
+    }
+}
+
+fn approval_detail(file: &str) -> String {
+    format!(
+        "Writes ~/.hermes/amara/{file}, which Hermes reads. Allow only if you asked for this change."
+    )
+}
+
+/// Runs the blocking file work off the async runtime.
+async fn off_thread<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|_| ERR_STORAGE.to_string())?
+}
+
+/// Input is validated before any dialog is shown; the file is touched only after Allow.
+async fn gated_write<T: Send + 'static>(
+    gate: &impl Gate,
+    file: &str,
+    operation: String,
+    store: Store,
+    work: impl FnOnce(&Store) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let text = super::approval_gate::approval_text(&operation, &approval_detail(file))?;
+    let _held = gate.approve(text).await?;
+    off_thread(move || work(&store)).await
+}
+
+/// Quotes and escapes text so it can't be read as dialog copy (a `"` becomes `\"`).
+fn shown(text: &str) -> String {
+    format!("{text:?}")
+}
+
+const SHOWN_ITEM_CHARS: usize = 80;
+
+/// The row as the dialog names it: cleaned, cut at a char boundary. Not found means no dialog.
+async fn item_label(store: &Store, id: i64) -> Result<String, String> {
+    let dir = Store {
+        dir: store.dir.clone(),
+        uid: store.uid,
+    };
+    let item = off_thread(move || {
+        dir.load(ITEMS_FILE, valid_item)?
+            .rows
+            .iter()
+            .find(|row| row.get("id").and_then(Value::as_i64) == Some(id))
+            .map(item_view)
+            .ok_or_else(|| ERR_NOT_FOUND.to_string())
+    })
+    .await?;
+    let clean = clean_text(&item.text, 0, usize::MAX).unwrap_or_default();
+    let cut: String = clean.chars().take(SHOWN_ITEM_CHARS).collect();
+    let ellipsis = if clean.chars().count() > SHOWN_ITEM_CHARS {
+        "…"
+    } else {
+        ""
+    };
+    Ok(format!("#{id} {}{ellipsis}", shown(&cut)))
+}
+
+async fn add_item_gated(
+    gate: &impl Gate,
+    store: Store,
+    (text, due, next): (String, Option<String>, Option<String>),
+    today: NaiveDate,
+) -> Result<FollowupItem, String> {
+    let text = clean_text(&text, 1, MAX_TEXT_CHARS)?;
+    let (due, next) = (clean_date(due.as_deref())?, clean_next(next.as_deref())?);
+    let operation = format!("Add follow-up: {}", shown(&text));
+    gated_write(gate, ITEMS_FILE, operation, store, move |s| {
+        s.add_item(&text, due.as_deref(), next.as_deref(), today)
+    })
+    .await
+}
+
+async fn update_item_gated(
+    gate: &impl Gate,
+    store: Store,
+    id: i64,
+    patch: FollowupItemPatch,
+) -> Result<FollowupItem, String> {
+    // Same checks the store runs, so bad input never reaches the dialog.
+    let mut changes = Vec::new();
+    if let Some(text) = &patch.text {
+        changes.push(format!(
+            "text {}",
+            shown(&clean_text(text, 1, MAX_TEXT_CHARS)?)
+        ));
+    }
+    if let Some(due) = &patch.due {
+        let due = clean_date(due.as_deref())?;
+        changes.push(format!("due {}", due.as_deref().unwrap_or("cleared")));
+    }
+    if let Some(next) = &patch.next {
+        let next = clean_next(next.as_deref())?;
+        changes.push(format!(
+            "next {}",
+            next.as_deref().map_or("cleared".into(), shown)
+        ));
+    }
+    let operation = format!("Edit follow-up #{id}: {}", changes.join(", "));
+    gated_write(gate, ITEMS_FILE, operation, store, move |s| {
+        s.update_item(id, patch)
+    })
+    .await
+}
+
+async fn mark_done_gated(
+    gate: &impl Gate,
+    store: Store,
+    id: i64,
+    today: NaiveDate,
+) -> Result<FollowupItem, String> {
+    let operation = format!("Mark follow-up done: {}", item_label(&store, id).await?);
+    gated_write(gate, ITEMS_FILE, operation, store, move |s| {
+        s.mark_done(id, today)
+    })
+    .await
+}
+
+async fn reopen_gated(gate: &impl Gate, store: Store, id: i64) -> Result<FollowupItem, String> {
+    let operation = format!("Reopen follow-up: {}", item_label(&store, id).await?);
+    gated_write(gate, ITEMS_FILE, operation, store, move |s| s.reopen(id)).await
+}
+
+async fn delete_item_gated(gate: &impl Gate, store: Store, id: i64) -> Result<(), String> {
+    let operation = format!("Delete follow-up: {}", item_label(&store, id).await?);
+    gated_write(gate, ITEMS_FILE, operation, store, move |s| {
+        s.delete_item(id)
+    })
+    .await
+}
+
+async fn add_muted_gated(
+    gate: &impl Gate,
+    store: Store,
+    topic: String,
+    until: Option<String>,
+    today: NaiveDate,
+) -> Result<MutedTopic, String> {
+    let topic = clean_text(&topic, MIN_TOPIC_CHARS, MAX_TOPIC_CHARS)?;
+    let until = clean_date(until.as_deref())?;
+    let operation = format!(
+        "Mute topic {} until {}",
+        shown(&topic),
+        until.as_deref().unwrap_or("further notice")
+    );
+    gated_write(gate, MUTED_FILE, operation, store, move |s| {
+        s.add_muted(&topic, until.as_deref(), today)
+    })
+    .await
+}
+
+async fn delete_muted_gated(gate: &impl Gate, store: Store, topic: String) -> Result<(), String> {
+    // Shown cleaned; the store still matches the string as given.
+    let operation = format!(
+        "Unmute topic {}",
+        shown(&clean_text(&topic, 1, MAX_TOPIC_CHARS)?)
+    );
+    gated_write(gate, MUTED_FILE, operation, store, move |s| {
+        s.delete_muted(&topic)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn followups_add_item(
+pub async fn followups_list() -> Result<FollowupLists, String> {
+    let store = Store::home()?;
+    off_thread(move || store.list(today())).await
+}
+
+#[tauri::command]
+pub async fn followups_add_item(
+    app: tauri::AppHandle,
     text: String,
     due: Option<String>,
     next: Option<String>,
 ) -> Result<FollowupItem, String> {
-    Store::home()?.add_item(&text, due.as_deref(), next.as_deref(), today())
+    add_item_gated(&NativeGate(app), Store::home()?, (text, due, next), today()).await
 }
 
 #[tauri::command]
-pub fn followups_update_item(id: i64, patch: FollowupItemPatch) -> Result<FollowupItem, String> {
-    Store::home()?.update_item(id, patch)
+pub async fn followups_update_item(
+    app: tauri::AppHandle,
+    id: i64,
+    patch: FollowupItemPatch,
+) -> Result<FollowupItem, String> {
+    update_item_gated(&NativeGate(app), Store::home()?, id, patch).await
 }
 
 #[tauri::command]
-pub fn followups_mark_done(id: i64) -> Result<FollowupItem, String> {
-    Store::home()?.mark_done(id, today())
+pub async fn followups_mark_done(app: tauri::AppHandle, id: i64) -> Result<FollowupItem, String> {
+    mark_done_gated(&NativeGate(app), Store::home()?, id, today()).await
 }
 
 #[tauri::command]
-pub fn followups_reopen_item(id: i64) -> Result<FollowupItem, String> {
-    Store::home()?.reopen(id)
+pub async fn followups_reopen_item(app: tauri::AppHandle, id: i64) -> Result<FollowupItem, String> {
+    reopen_gated(&NativeGate(app), Store::home()?, id).await
 }
 
 #[tauri::command]
-pub fn followups_delete_item(id: i64) -> Result<(), String> {
-    Store::home()?.delete_item(id)
+pub async fn followups_delete_item(app: tauri::AppHandle, id: i64) -> Result<(), String> {
+    delete_item_gated(&NativeGate(app), Store::home()?, id).await
 }
 
 #[tauri::command]
-pub fn followups_add_muted_topic(
+pub async fn followups_add_muted_topic(
+    app: tauri::AppHandle,
     topic: String,
     until: Option<String>,
 ) -> Result<MutedTopic, String> {
-    Store::home()?.add_muted(&topic, until.as_deref(), today())
+    add_muted_gated(&NativeGate(app), Store::home()?, topic, until, today()).await
 }
 
 #[tauri::command]
-pub fn followups_delete_muted_topic(topic: String) -> Result<(), String> {
-    Store::home()?.delete_muted(&topic)
+pub async fn followups_delete_muted_topic(
+    app: tauri::AppHandle,
+    topic: String,
+) -> Result<(), String> {
+    delete_muted_gated(&NativeGate(app), Store::home()?, topic).await
 }
 
 #[cfg(test)]
@@ -1010,5 +1214,169 @@ mod tests {
             .collect();
         ids.sort();
         assert_eq!(ids, [1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    struct Stub {
+        asked: std::sync::Mutex<Vec<String>>,
+        allow: bool,
+    }
+
+    impl Stub {
+        fn new(allow: bool) -> Self {
+            Self {
+                asked: Default::default(),
+                allow,
+            }
+        }
+        fn asked(&self) -> Vec<String> {
+            self.asked.lock().unwrap().clone()
+        }
+    }
+
+    impl Gate for Stub {
+        async fn approve(&self, text: String) -> Result<Held, String> {
+            self.asked.lock().unwrap().push(text);
+            if self.allow {
+                Ok(Box::new(()))
+            } else {
+                Err(super::super::approval_gate::denied_message())
+            }
+        }
+    }
+
+    fn store_of(t: &Temp) -> Store {
+        Store {
+            dir: t.0.dir.clone(),
+            uid: t.0.uid,
+        }
+    }
+
+    #[tokio::test]
+    async fn denied_write_asks_once_and_leaves_the_file_alone() {
+        let t = Temp::new();
+        t.put(ITEMS_FILE, "[]");
+        let gate = Stub::new(false);
+        let err = add_item_gated(
+            &gate,
+            store_of(&t),
+            ("buy milk".into(), None, None),
+            day(TODAY),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.starts_with("declined:"), "{err}");
+        assert_eq!(gate.asked().len(), 1);
+        assert!(gate.asked()[0].contains("buy milk"));
+        assert_eq!(fs::read_to_string(t.path(ITEMS_FILE)).unwrap(), "[]");
+        assert_eq!(t.files(), [ITEMS_FILE]);
+    }
+
+    #[tokio::test]
+    async fn every_write_is_gated_and_approved_writes_land() {
+        let t = Temp::new();
+        let gate = Stub::new(true);
+        let added = add_item_gated(&gate, store_of(&t), ("one".into(), None, None), day(TODAY))
+            .await
+            .unwrap();
+        update_item_gated(&gate, store_of(&t), added.id, patch(json!({"text": "uno"})))
+            .await
+            .unwrap();
+        mark_done_gated(&gate, store_of(&t), added.id, day(TODAY))
+            .await
+            .unwrap();
+        reopen_gated(&gate, store_of(&t), added.id).await.unwrap();
+        add_muted_gated(&gate, store_of(&t), "gym".into(), None, day(TODAY))
+            .await
+            .unwrap();
+        delete_muted_gated(&gate, store_of(&t), "gym".into())
+            .await
+            .unwrap();
+        delete_item_gated(&gate, store_of(&t), added.id)
+            .await
+            .unwrap();
+        assert_eq!(gate.asked().len(), 7);
+        assert_eq!(t.json(ITEMS_FILE), json!([]));
+    }
+
+    #[tokio::test]
+    async fn invalid_input_never_reaches_the_dialog() {
+        let t = Temp::new();
+        let gate = Stub::new(true);
+        let err = add_item_gated(&gate, store_of(&t), ("  ".into(), None, None), day(TODAY))
+            .await
+            .unwrap_err();
+        assert_eq!(err, ERR_INVALID);
+        let err = update_item_gated(&gate, store_of(&t), 1, patch(json!({"due": "tomorrow"})))
+            .await
+            .unwrap_err();
+        assert_eq!(err, ERR_INVALID);
+        assert!(gate.asked().is_empty());
+        assert_eq!(t.files(), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn dialog_text_cannot_be_forged_by_topic_or_item_text() {
+        let t = Temp::new();
+        let gate = Stub::new(true);
+        let err = delete_muted_gated(&gate, store_of(&t), "\u{202E}".into())
+            .await
+            .unwrap_err();
+        assert_eq!(err, ERR_INVALID);
+        add_muted_gated(&gate, store_of(&t), "gym".into(), None, day(TODAY))
+            .await
+            .unwrap();
+        let _ = delete_muted_gated(&gate, store_of(&t), "gym\nAllow\u{202E}evil".into()).await;
+        let asked = gate.asked();
+        let last = asked.last().unwrap();
+        let first_line = last.lines().next().unwrap();
+        assert!(!last.contains('\u{202E}'), "{last}");
+        assert_eq!(first_line, "Unmute topic \"gym Allowevil\"");
+        let item = add_item_gated(
+            &gate,
+            store_of(&t),
+            ("buy milk\". Reopen all".into(), None, None),
+            day(TODAY),
+        )
+        .await
+        .unwrap();
+        assert!(gate
+            .asked()
+            .last()
+            .unwrap()
+            .starts_with("Add follow-up: \"buy milk\\\". Reopen all\""));
+        assert_eq!(item.id, 1);
+    }
+
+    #[tokio::test]
+    async fn id_dialogs_name_the_item_and_missing_ids_never_prompt() {
+        let t = Temp::new();
+        let gate = Stub::new(true);
+        let long = "x".repeat(200);
+        let item = add_item_gated(&gate, store_of(&t), (long, None, None), day(TODAY))
+            .await
+            .unwrap();
+        let before = gate.asked().len();
+        mark_done_gated(&gate, store_of(&t), item.id, day(TODAY))
+            .await
+            .unwrap();
+        let text = gate.asked().last().unwrap().clone();
+        let line = text.lines().next().unwrap();
+        assert!(line.starts_with("Mark follow-up done: #1 \"xxx"), "{line}");
+        assert!(line.ends_with("\"…"), "{line}");
+        assert!(line.chars().count() < 120);
+        for err in [
+            reopen_gated(&gate, store_of(&t), 99).await.unwrap_err(),
+            delete_item_gated(&gate, store_of(&t), 99)
+                .await
+                .map(|_| ())
+                .unwrap_err(),
+            mark_done_gated(&gate, store_of(&t), 99, day(TODAY))
+                .await
+                .map(|_| ())
+                .unwrap_err(),
+        ] {
+            assert_eq!(err, ERR_NOT_FOUND);
+        }
+        assert_eq!(gate.asked().len(), before + 1);
     }
 }

@@ -525,8 +525,30 @@ fn active_schedule_count(home: &Path) -> u64 {
 }
 
 fn persist_interaction(interaction: &TerrenceInteraction) -> Result<(), String> {
-    let directory = interaction_dir();
-    crate::app_paths::create_private_dir_all(&directory)
+    persist_interaction_in(&interaction_dir(), interaction)
+}
+
+/// Saves a failed turn, except one the UI is about to re-send (`model_loading`, Hermes busy):
+/// saved, each retry would come back as a raw error bubble after a reload.
+fn persist_failed_interaction_in(
+    directory: &Path,
+    interaction: &TerrenceInteraction,
+) -> Result<(), String> {
+    let retrying = interaction
+        .error
+        .as_deref()
+        .is_some_and(terrence_runtime_bridge::is_retry_signal);
+    if retrying {
+        return Ok(());
+    }
+    persist_interaction_in(directory, interaction)
+}
+
+fn persist_interaction_in(
+    directory: &Path,
+    interaction: &TerrenceInteraction,
+) -> Result<(), String> {
+    crate::app_paths::create_private_dir_all(directory)
         .map_err(|error| format!("Failed to create interaction store: {error}"))?;
     let path = directory.join(format!("{}.json", interaction.id));
     let temporary = directory.join(format!("{}.tmp", interaction.id));
@@ -1242,7 +1264,7 @@ pub async fn interact_with_terrence(
             started.elapsed().as_millis() as u64,
             error.clone(),
         );
-        let _ = persist_interaction(&interaction);
+        let _ = persist_failed_interaction_in(&interaction_dir(), &interaction);
         error
     };
     if request.conversation_id.trim().is_empty() || message.is_empty() {
@@ -1332,7 +1354,7 @@ pub async fn interact_with_terrence(
                 message.clone(),
             );
             interaction.route = route;
-            let _ = persist_interaction(&interaction);
+            let _ = persist_failed_interaction_in(&interaction_dir(), &interaction);
             return Err(message);
         }
     };
@@ -1657,6 +1679,52 @@ pub fn list_terrence_interactions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn failed(error: &str) -> TerrenceInteraction {
+        let request = TerrenceInteractionRequest {
+            conversation_id: "c1".to_string(),
+            message: "hello".to_string(),
+            hermes_session_id: None,
+            history: Vec::new(),
+            deep: false,
+            context: Vec::new(),
+            context_item_ids: Vec::new(),
+        };
+        interaction_failure(
+            &request,
+            "m",
+            "p",
+            Utc::now().to_rfc3339(),
+            1,
+            error.to_string(),
+        )
+    }
+
+    fn saved_files(dir: &Path) -> usize {
+        fs::read_dir(dir).map(|d| d.count()).unwrap_or(0)
+    }
+
+    #[test]
+    fn retryable_failures_are_not_saved_but_real_ones_are() {
+        let dir = std::env::temp_dir().join(format!("nexus-interactions-{}", Uuid::new_v4()));
+        for retryable in [
+            "model_loading: retry_after=10",
+            "Model_Loading: retry_after=1",
+            "Hermes is busy with another request. Try again in a moment.",
+        ] {
+            persist_failed_interaction_in(&dir, &failed(retryable)).unwrap();
+            assert_eq!(saved_files(&dir), 0, "{retryable} was saved");
+        }
+        for real in [
+            "Hermes could not complete the request.",
+            "Hermes refused the request: the API_SERVER_KEY in ~/.hermes/.env does not match the running Hermes.",
+            "A model_loading mention that is not a prefix.",
+        ] {
+            persist_failed_interaction_in(&dir, &failed(real)).unwrap();
+        }
+        assert_eq!(saved_files(&dir), 3);
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn clock_section_names_the_local_weekday() {
