@@ -44,7 +44,7 @@ async fn main() {
         None => config::Secrets::default(),
     };
     if check {
-        if let Err(e) = config::lan_api_key(&cfg, &secrets) {
+        if let Err(e) = config::check_secrets(&cfg, &secrets) {
             fail(e);
         }
         println!(

@@ -7,7 +7,7 @@ use crate::think::ThinkStripper;
 use futures::stream::{BoxStream, StreamExt};
 use serde_json::{json, Value};
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -70,22 +70,73 @@ pub struct State {
     /// Held while deep is unloaded for fast, so a deep request can't start mid-swap.
     restoring_fast: tokio::sync::Mutex<()>,
     deep_retry_at: Mutex<Option<Instant>>,
+    /// When the last deep reply (or load) ended; a fast request leaves deep alone for a grace period.
+    last_deep_use: Arc<Mutex<Option<Instant>>>,
+    /// Fast's `size_vram` (bytes) the last time `/api/ps` listed it, for the headroom check.
+    fast_vram_seen: AtomicU64,
     fast_watch_running: AtomicBool,
 }
 
 /// Counts one open reply until dropped.
-struct InFlight(Arc<AtomicUsize>);
+struct InFlight(Arc<AtomicUsize>, Option<Arc<Mutex<Option<Instant>>>>);
 
 impl InFlight {
     fn new(count: &Arc<AtomicUsize>) -> Self {
         count.fetch_add(1, Ordering::SeqCst);
-        Self(Arc::clone(count))
+        Self(Arc::clone(count), None)
+    }
+
+    /// Like [`Self::new`], and stamps `last_use` when dropped (the end of a deep reply).
+    fn stamped(count: &Arc<AtomicUsize>, last_use: &Arc<Mutex<Option<Instant>>>) -> Self {
+        let mut f = Self::new(count);
+        f.1 = Some(Arc::clone(last_use));
+        f
     }
 }
 
 impl Drop for InFlight {
     fn drop(&mut self) {
+        if let Some(stamp) = &self.1 {
+            *stamp.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
+        }
         self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// What a fast request does about a resident deep model.
+#[derive(Debug, PartialEq)]
+enum Restore {
+    /// Leave deep alone (not loaded, fast already there, or both fit the GPU budget).
+    Keep,
+    /// Deep was used within the grace period and does not fit beside fast: wait this long.
+    Wait(Duration),
+    /// Move deep out of memory.
+    Unload,
+}
+
+/// Decides [`Restore`] from `/api/ps` (`(model, size_vram bytes)`), the time since deep was last
+/// used (None: never, e.g. loaded before this router started), the grace period, fast's last seen
+/// size (0 = unknown, so no headroom is assumed) and `gpu_budget_gb`.
+fn plan_restore(
+    ps: &[(String, u64)],
+    (fast, deep): (&str, &str),
+    since_deep_use: Option<Duration>,
+    grace: Duration,
+    fast_vram_seen: u64,
+    gpu_budget_gb: f64,
+) -> Restore {
+    let has = |m: &str| ps.iter().any(|(n, _)| same_model(n, m));
+    if !has(deep) || has(fast) {
+        return Restore::Keep;
+    }
+    let loaded: u64 = ps.iter().map(|(_, b)| *b).sum();
+    let budget = (gpu_budget_gb * 1e9) as u64;
+    if fast_vram_seen > 0 && loaded.saturating_add(fast_vram_seen) <= budget {
+        return Restore::Keep;
+    }
+    match since_deep_use {
+        Some(age) if age < grace => Restore::Wait(grace - age),
+        _ => Restore::Unload,
     }
 }
 
@@ -114,6 +165,8 @@ impl State {
             deep_in_flight: Arc::new(AtomicUsize::new(0)),
             restoring_fast: tokio::sync::Mutex::new(()),
             deep_retry_at: Mutex::new(None),
+            last_deep_use: Arc::new(Mutex::new(None)),
+            fast_vram_seen: AtomicU64::new(0),
             fast_watch_running: AtomicBool::new(false),
         })
     }
@@ -163,13 +216,20 @@ impl State {
                     let has = |m: &str| ps.iter().any(|(n, _)| same_model(n, m));
                     (has(&self.cfg.models.fast), has(&self.cfg.models.deep))
                 });
-                let hard = route::looks_hard(text).is_some();
+                let hard = self.cfg.routing.auto_deep && route::looks_hard(text).is_some();
                 let decided = |tier, reason: &str| Decision {
                     tier,
                     reason: reason.into(),
                 };
                 match resident {
-                    Ok((true, _)) => self.classify(text).await,
+                    Ok((true, _)) => {
+                        let d = self.classify(text).await;
+                        if !self.cfg.routing.auto_deep && d.tier == Tier::Deep {
+                            decided(Tier::Fast, "classifier_hard_auto_deep_off")
+                        } else {
+                            d
+                        }
+                    }
                     // Fast not loaded: the classifier would only time out.
                     // A load is needed either way, so load the right model: deep for a
                     // hard-looking prompt (no parallel fast warm competing for RAM), else fast.
@@ -272,7 +332,7 @@ impl State {
         let in_flight = if tier == Tier::Fast {
             self.enter_fast().await?
         } else {
-            InFlight::new(&self.deep_in_flight)
+            InFlight::stamped(&self.deep_in_flight, &self.last_deep_use)
         };
         let mut b = body.clone();
         b["model"] = json!(self.model_for(tier));
@@ -431,7 +491,8 @@ impl State {
         let mut last = String::new();
         for &tier in plan {
             // Counted from here, so fast requests hold back through the load and the answer.
-            let _deep_work = (tier == Tier::Deep).then(|| InFlight::new(&self.deep_in_flight));
+            let _deep_work = (tier == Tier::Deep)
+                .then(|| InFlight::stamped(&self.deep_in_flight, &self.last_deep_use));
             if tier == Tier::Deep && !self.ensure_deep().await {
                 reason.push_str("; deep_unavailable");
                 continue;
@@ -629,8 +690,7 @@ impl State {
             let in_flight = InFlight::new(&self.fast_in_flight);
             // A deep request counts itself before it takes this lock, so it can't slip past.
             let restoring = self.restoring_fast.lock().await;
-            if !self.deep_busy() {
-                self.restore_fast().await;
+            if !self.deep_busy() && self.restore_fast().await.is_none() {
                 return Ok(in_flight);
             }
             drop(restoring);
@@ -643,16 +703,35 @@ impl State {
         }
     }
 
-    /// Deep is idle but in memory: move it out by hand, for the same reason as [`Self::load_deep`].
-    async fn restore_fast(&self) {
+    /// Deep is idle but in memory and fast is not: move deep out by hand, for the same reason as
+    /// [`Self::load_deep`], unless it was used within `deep_grace_secs` or both fit
+    /// `gpu_budget_gb`. Returns how long the caller should wait before asking again.
+    async fn restore_fast(&self) -> Option<Duration> {
         let timeout = Duration::from_millis(self.cfg.routing.residency_check_timeout_ms);
         let Ok(ps) = self.ps_within(timeout).await else {
-            return;
+            return None;
         };
-        let has = |m: &str| ps.iter().any(|(n, _)| same_model(n, m));
-        if has(&self.cfg.models.deep) && !has(&self.cfg.models.fast) {
-            if let Err(e) = self.unload_and_confirm(Tier::Deep).await {
-                eprintln!("[amara-router] could not unload deep for fast: {e}");
+        let since = self
+            .last_deep_use
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .map(|t| t.elapsed());
+        let plan = plan_restore(
+            &ps,
+            (&self.cfg.models.fast, &self.cfg.models.deep),
+            since,
+            Duration::from_secs(self.cfg.loading.deep_grace_secs),
+            self.fast_vram_seen.load(Ordering::SeqCst),
+            self.cfg.loading.gpu_budget_gb,
+        );
+        match plan {
+            Restore::Keep => None,
+            Restore::Wait(d) => Some(d),
+            Restore::Unload => {
+                if let Err(e) = self.unload_and_confirm(Tier::Deep).await {
+                    eprintln!("[amara-router] could not unload deep for fast: {e}");
+                }
+                None
             }
         }
     }
@@ -772,7 +851,7 @@ impl State {
             .json()
             .await
             .map_err(|_| "ps: unparseable reply".to_string())?;
-        Ok(v["models"]
+        let ps: Vec<(String, u64)> = v["models"]
             .as_array()
             .into_iter()
             .flatten()
@@ -780,7 +859,14 @@ impl State {
                 let name = m["model"].as_str().or_else(|| m["name"].as_str())?;
                 Some((name.to_string(), m["size_vram"].as_u64().unwrap_or(0)))
             })
-            .collect())
+            .collect();
+        if let Some((_, bytes)) = ps
+            .iter()
+            .find(|(n, b)| *b > 0 && same_model(n, &self.cfg.models.fast))
+        {
+            self.fast_vram_seen.store(*bytes, Ordering::SeqCst);
+        }
+        Ok(ps)
     }
 
     // ── log ──────────────────────────────────────────────────────────────────
@@ -975,6 +1061,45 @@ pub fn strip_stream(s: EvStream) -> EvStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ps_(i: &[(&str, u64)]) -> Vec<(String, u64)> {
+        i.iter().map(|(n, b)| (n.to_string(), *b)).collect()
+    }
+
+    #[test]
+    fn plan_restore_rules() {
+        const G: u64 = 1_000_000_000;
+        let secs = Duration::from_secs;
+        let plan = |ps: &[(&str, u64)], since, seen, budget| {
+            plan_restore(&ps_(ps), ("fast", "deep"), since, secs(60), seen, budget)
+        };
+        // Fast already resident, or deep absent: nothing to do.
+        assert_eq!(
+            plan(&[("fast", G), ("deep", G)], None, 0, 21.0),
+            Restore::Keep
+        );
+        assert_eq!(plan(&[], None, 0, 21.0), Restore::Keep);
+        // Deep just used, fast size unknown: wait out the rest of the grace.
+        assert_eq!(
+            plan(&[("deep", 10 * G)], Some(secs(20)), 0, 21.0),
+            Restore::Wait(secs(40))
+        );
+        // Grace over, or deep never used by this router: unload.
+        assert_eq!(
+            plan(&[("deep", 10 * G)], Some(secs(61)), 0, 21.0),
+            Restore::Unload
+        );
+        assert_eq!(plan(&[("deep", 10 * G)], None, 0, 21.0), Restore::Unload);
+        // Fits together: keep, even inside the grace; one byte over: do not.
+        assert_eq!(
+            plan(&[("deep", 10 * G)], Some(secs(1)), 5 * G, 15.0),
+            Restore::Keep
+        );
+        assert_eq!(
+            plan(&[("deep", 10 * G)], None, 5 * G + 1, 15.0),
+            Restore::Unload
+        );
+    }
 
     #[test]
     fn same_model_ignores_latest() {

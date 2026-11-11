@@ -40,6 +40,10 @@ pub struct Config {
     #[serde(default)]
     pub secrets_file: Option<String>,
     pub models: Models,
+    /// Allow `ollama_url` to be a non-loopback host (prompts then leave this Mac). Off by default;
+    /// refused anyway while `NEXUS_OUTBOUND_DISABLED` is set. Independent of `cloud.anthropic_enabled`.
+    #[serde(default)]
+    pub allow_remote_ollama: bool,
     #[serde(default)]
     pub routing: Routing,
     #[serde(default)]
@@ -101,6 +105,8 @@ pub const FIRST_TOKEN_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 1_000..=300
 pub const FIRST_TOKEN_RESIDENT_RANGE: std::ops::RangeInclusive<u64> = 1_000..=600_000;
 /// Accepted `loading.deep_load_timeout_ms` range.
 pub const DEEP_LOAD_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 100..=300_000;
+/// Accepted `loading.deep_grace_secs` range.
+pub const DEEP_GRACE_RANGE: std::ops::RangeInclusive<u64> = 0..=3_600;
 /// Accepted `loading.fast_wait_ms` range.
 pub const FAST_WAIT_RANGE: std::ops::RangeInclusive<u64> = 100..=600_000;
 
@@ -132,8 +138,9 @@ fn default_deep_keep_alive() -> KeepAlive {
 pub struct Routing {
     /// Latest user message over this many estimated tokens (~4 chars each) goes deep.
     pub token_threshold: u32,
-    /// Send long prompts and code blocks to deep automatically. Off keeps deep to explicit
-    /// asks (`/deep`, a route header, the deep alias or a trigger phrase).
+    /// Send long prompts, code blocks and classifier/heuristic HARD verdicts to deep
+    /// automatically. Off (the default) keeps deep to explicit asks (`/deep`, a route header,
+    /// the deep alias or a trigger phrase).
     pub auto_deep: bool,
     /// Case-insensitive phrases that send a message deep (stripped before forwarding).
     pub trigger_phrases: Vec<String>,
@@ -154,7 +161,7 @@ impl Default for Routing {
     fn default() -> Self {
         Self {
             token_threshold: 2000,
-            auto_deep: true,
+            auto_deep: false,
             trigger_phrases: vec![
                 "think deeper".into(),
                 "think harder".into(),
@@ -182,8 +189,14 @@ pub struct Loading {
     pub rewarm_fast_after_deep: bool,
     /// Seconds between `/api/ps` checks after deep work, to re-warm fast once deep has unloaded.
     pub poll_secs: u64,
-    /// Unused now that fast and deep are swapped by hand; kept so older configs parse.
+    /// GPU memory the router may fill (GB, 1-512). Before a fast request moves an idle deep model
+    /// out of memory, `/api/ps` is read: if everything loaded plus fast's last seen `size_vram`
+    /// fits in this budget, deep stays and fast loads beside it.
     pub gpu_budget_gb: f64,
+    /// Seconds after the last deep reply during which a fast request does NOT unload deep (0-3600;
+    /// 0 = unload at once, the old behaviour). The fast request waits out the grace (up to
+    /// `fast_wait_ms`) unless fast and deep fit together in `gpu_budget_gb`.
+    pub deep_grace_secs: u64,
     /// Ollama must send its first byte within this time (1000-300000 ms), or the request gets
     /// a 503 "model loading" reply while the load continues in the background.
     pub first_token_timeout_ms: u64,
@@ -207,6 +220,7 @@ impl Default for Loading {
             rewarm_fast_after_deep: true,
             poll_secs: 20,
             gpu_budget_gb: 21.0,
+            deep_grace_secs: 60,
             first_token_timeout_ms: 20_000,
             first_token_timeout_resident_ms: 300_000,
             deep_load_timeout_ms: 90_000,
@@ -312,8 +326,8 @@ impl Config {
         }
         let host = url_host(&self.ollama_url).ok_or("config: ollama_url has no host")?;
         if !is_loopback_host(host) {
-            if !self.cloud.anthropic_enabled {
-                return Err("config: ollama_url must be a loopback host (127.0.0.0/8, ::1, localhost) unless cloud.anthropic_enabled is true".into());
+            if !self.allow_remote_ollama {
+                return Err("config: ollama_url must be a loopback host (127.0.0.0/8, ::1, localhost) unless allow_remote_ollama is true".into());
             }
             if outbound_disabled {
                 return Err("config: ollama_url must be a loopback host while NEXUS_OUTBOUND_DISABLED is set".into());
@@ -365,6 +379,11 @@ impl Config {
                 self.loading.fast_wait_ms,
                 FAST_WAIT_RANGE,
             ),
+            (
+                "loading.deep_grace_secs",
+                self.loading.deep_grace_secs,
+                DEEP_GRACE_RANGE,
+            ),
         ] {
             if !r.contains(&v) {
                 return Err(format!(
@@ -373,6 +392,9 @@ impl Config {
                     r.end()
                 ));
             }
+        }
+        if self.loading.deep_grace_secs.saturating_mul(1000) > self.loading.fast_wait_ms {
+            return Err("config: loading.deep_grace_secs must not exceed loading.fast_wait_ms (a fast request waits out the grace and would otherwise get a 503 every time)".into());
         }
         if !GPU_BUDGET_GB_RANGE.contains(&self.loading.gpu_budget_gb) {
             return Err(format!(
@@ -495,6 +517,23 @@ pub fn lan_api_key(cfg: &Config, secrets: &Secrets) -> Result<Option<String>, St
         .ok_or_else(|| {
             format!("lan_bind needs AMARA_ROUTER_API_KEY ({MIN_API_KEY_LEN}+ chars) in the 0600 secrets file")
         })
+}
+
+/// Startup secret rules: the LAN key rule, and: with `cloud.anthropic_enabled` the loopback
+/// listener (which can spend the Anthropic key and send data off the Mac) needs a bearer key too.
+pub fn check_secrets(cfg: &Config, secrets: &Secrets) -> Result<(), String> {
+    lan_api_key(cfg, secrets)?;
+    if cfg.cloud.anthropic_enabled
+        && secrets
+            .api_key
+            .as_ref()
+            .is_none_or(|k| k.len() < MIN_API_KEY_LEN)
+    {
+        return Err(format!(
+            "cloud.anthropic_enabled needs AMARA_ROUTER_API_KEY ({MIN_API_KEY_LEN}+ chars) in the 0600 secrets file: the loopback listener then requires Authorization: Bearer"
+        ));
+    }
+    Ok(())
 }
 
 /// Secrets read from the 0600 env file.
@@ -711,6 +750,57 @@ deep = "d:latest"
     }
 
     #[test]
+    fn remote_ollama_needs_its_own_flag_not_anthropic_enabled() {
+        let remote = "http://192.168.1.5:11434";
+        // anthropic_enabled alone no longer opens a remote Ollama.
+        let e = Config::parse_with(&with_ollama(remote, true), false).unwrap_err();
+        assert!(e.contains("allow_remote_ollama"), "{e}");
+        // The flag does, unless outbound is disabled.
+        let mut t = with_ollama(remote, false);
+        t = format!("allow_remote_ollama = true\n{t}");
+        assert!(Config::parse_with(&t, false).is_ok());
+        assert!(Config::parse_with(&t, true).is_err());
+        // Default is off.
+        assert!(!Config::parse(MIN).unwrap().allow_remote_ollama);
+    }
+
+    #[test]
+    fn cloud_tier_needs_a_bearer_key() {
+        let mut c = Config::parse(MIN).unwrap();
+        let none = Secrets::default();
+        let keyed = Secrets {
+            api_key: Some("k".repeat(MIN_API_KEY_LEN)),
+            anthropic_key: None,
+        };
+        let short = Secrets {
+            api_key: Some("k".into()),
+            anthropic_key: None,
+        };
+        assert!(check_secrets(&c, &none).is_ok());
+        c.cloud.anthropic_enabled = true;
+        assert!(check_secrets(&c, &none)
+            .unwrap_err()
+            .contains("AMARA_ROUTER_API_KEY"));
+        assert!(check_secrets(&c, &short).is_err());
+        assert!(check_secrets(&c, &keyed).is_ok());
+    }
+
+    #[test]
+    fn deep_grace_cannot_exceed_fast_wait() {
+        let t = |extra: &str| format!("{MIN}\n[loading]\n{extra}\n");
+        assert!(Config::parse(&t("deep_grace_secs = 120\nfast_wait_ms = 120000")).is_ok());
+        let e = Config::parse(&t("deep_grace_secs = 121\nfast_wait_ms = 120000")).unwrap_err();
+        assert!(e.contains("deep_grace_secs"), "{e}");
+        assert!(Config::parse(&t("deep_grace_secs = 60\nfast_wait_ms = 100")).is_err());
+    }
+
+    #[test]
+    fn auto_deep_defaults_to_off() {
+        assert!(!Routing::default().auto_deep);
+        assert!(!Config::parse(MIN).unwrap().routing.auto_deep);
+    }
+
+    #[test]
     fn ollama_url_must_be_loopback_unless_cloud_and_outbound_allowed() {
         for ok in [
             "http://127.0.0.1:11434",
@@ -735,7 +825,10 @@ deep = "d:latest"
                 "{bad}"
             );
         }
-        let lan = with_ollama("http://192.168.1.5:11434", true);
+        let lan = format!(
+            "allow_remote_ollama = true\n{}",
+            with_ollama("http://192.168.1.5:11434", false)
+        );
         assert!(Config::parse_with(&lan, false).is_ok());
         let e = Config::parse_with(&lan, true).unwrap_err();
         assert!(e.contains("NEXUS_OUTBOUND_DISABLED"));

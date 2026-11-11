@@ -65,17 +65,46 @@ pub fn router(state: St) -> Router {
 /// than loopback (DNS rebinding) and any request carrying an Origin header (cross-site fetches from a
 /// browser). Hermes and Nexus's Rust client send neither.
 pub fn local_router(state: St) -> Router {
-    router(state).layer(middleware::from_fn(|req: Request, next: Next| async move {
-        let headers = req.headers();
-        if headers.contains_key(header::ORIGIN) || !loopback_host(headers) {
-            return (
-                StatusCode::FORBIDDEN,
-                axum::Json(json!({"error": {"message":
+    // With the cloud tier on, any local process could otherwise spend the Anthropic key or send
+    // data off the Mac, so this listener also needs the bearer key (startup refuses to run
+    // without one: `config::check_secrets`).
+    let key: Option<Arc<String>> = state
+        .cfg
+        .cloud
+        .anthropic_enabled
+        .then(|| state.secrets.api_key.clone().map(Arc::new))
+        .flatten();
+    router(state).layer(middleware::from_fn(move |req: Request, next: Next| {
+        let key = key.clone();
+        async move {
+            let headers = req.headers();
+            // /health carries no secrets or content (model names, Ollama URL, load state) and
+            // launchd/Nexus probe it without a key.
+            let probe = req.method() == axum::http::Method::GET && req.uri().path() == "/health";
+            if let Some(key) = key.as_ref().filter(|_| !probe) {
+                let given = headers
+                    .get(header::AUTHORIZATION)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.strip_prefix("Bearer "))
+                    .unwrap_or("");
+                if !constant_time_eq(given.as_bytes(), key.as_bytes()) {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        axum::Json(json!({"error": "unauthorized"})),
+                    )
+                        .into_response();
+                }
+            }
+            if headers.contains_key(header::ORIGIN) || !loopback_host(headers) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    axum::Json(json!({"error": {"message":
                 "amara-router only accepts local, non-browser requests on this port"}})),
-            )
-                .into_response();
+                )
+                    .into_response();
+            }
+            next.run(req).await
         }
-        next.run(req).await
     }))
 }
 

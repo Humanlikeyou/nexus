@@ -142,22 +142,49 @@ fn strip_command(text: &str, cmd: &str) -> Option<String> {
     }
 }
 
-/// Removes every case-insensitive occurrence of `phrase` and tidies the gap.
+/// Byte length of the prefix of `rest` that equals `phrase` (already lowercased, as chars) when
+/// compared case-insensitively char by char; None if `rest` does not start with it.
+fn prefix_len_ci(rest: &str, phrase: &[char]) -> Option<usize> {
+    let mut k = 0;
+    for (i, c) in rest.char_indices() {
+        for lc in c.to_lowercase() {
+            if phrase.get(k) != Some(&lc) {
+                return None;
+            }
+            k += 1;
+        }
+        if k == phrase.len() {
+            return Some(i + c.len_utf8());
+        }
+    }
+    None
+}
+
+/// Removes every case-insensitive occurrence of `phrase` and tidies the gap. Matching walks the
+/// original text by char boundaries, so offsets never come from a lowercased copy (whose byte
+/// lengths can differ, e.g. İ, ẞ, the Kelvin sign) and no slice can land inside a character.
 fn strip_phrase(text: &str, phrase: &str) -> Option<String> {
-    let lower = text.to_lowercase();
-    let p = phrase.to_lowercase();
-    if p.is_empty() || !lower.contains(&p) || lower.len() != text.len() {
-        // Lowercasing changed byte lengths (rare non-ASCII): fall back to a plain search.
-        return text
-            .contains(phrase)
-            .then(|| tidy(&text.replace(phrase, " ")));
+    let p: Vec<char> = phrase.to_lowercase().chars().collect();
+    if p.is_empty() {
+        return None;
     }
     let mut out = String::new();
-    let mut i = 0;
-    while let Some(off) = lower[i..].find(&p) {
-        out.push_str(&text[i..i + off]);
-        out.push(' ');
-        i += off + p.len();
+    let mut found = false;
+    let mut i = 0; // start of the text not yet copied
+    let mut at = 0; // where to look next
+    while at < text.len() {
+        if let Some(len) = prefix_len_ci(&text[at..], &p) {
+            out.push_str(&text[i..at]);
+            out.push(' ');
+            at += len;
+            i = at;
+            found = true;
+        } else {
+            at += text[at..].chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    if !found {
+        return None;
     }
     out.push_str(&text[i..]);
     Some(tidy(&out))
@@ -380,6 +407,16 @@ mod tests {
         let r = pre_route(&Routing::default(), &mut t, &hints, &closed());
         (r, t)
     }
+    /// Like `route`, with `auto_deep` on (it is off by default).
+    fn auto(text: &str, hints: Hints) -> (PreRoute, String) {
+        let cfg = Routing {
+            auto_deep: true,
+            ..Routing::default()
+        };
+        let mut t = text.to_string();
+        let r = pre_route(&cfg, &mut t, &hints, &closed());
+        (r, t)
+    }
     fn d(tier: Tier, reason: &str) -> PreRoute {
         PreRoute::Decided(Decision {
             tier,
@@ -505,21 +542,50 @@ mod tests {
     #[test]
     fn token_threshold_and_code_block() {
         assert_eq!(
-            route(&"a".repeat(8_004), Hints::default()).0,
+            auto(&"a".repeat(8_004), Hints::default()).0,
             d(Tier::Deep, "over_token_threshold")
         );
         assert_eq!(
-            route(&"a".repeat(8_000), Hints::default()).0,
+            auto(&"a".repeat(8_000), Hints::default()).0,
             PreRoute::Classify
         );
         assert_eq!(
-            route(
+            auto(
                 "why does this fail?\n```rust\nfn main(){}\n```",
                 Hints::default()
             )
             .0,
             d(Tier::Deep, "code_block")
         );
+    }
+
+    #[test]
+    fn strip_phrase_is_char_boundary_safe() {
+        // Japanese and emoji around and inside the phrase.
+        assert_eq!(
+            strip_phrase("日本語 深く考えて 🙂", "深く考えて").as_deref(),
+            Some("日本語 🙂")
+        );
+        assert_eq!(
+            strip_phrase("🙂🙂 THINK DEEPER 🙂", "think deeper").as_deref(),
+            Some("🙂🙂 🙂")
+        );
+        // Characters whose lowercase has a different byte length (İ grows by 1, ẞ and the Kelvin
+        // sign shrink) used to put the cut inside a character (panic) or in the wrong place,
+        // even when the whole string kept its length.
+        assert_eq!(
+            strip_phrase("Ⱥ もっと深く考えて ẞ", "もっと深く考えて").as_deref(),
+            Some("Ⱥ ẞ")
+        );
+        assert_eq!(
+            strip_phrase("İ 深く考えて ẞ", "深く考えて").as_deref(),
+            Some("İ ẞ")
+        );
+        assert_eq!(
+            strip_phrase("ẞ日 think deeper Ⱥ日", "think deeper").as_deref(),
+            Some("ẞ日 Ⱥ日")
+        );
+        assert_eq!(strip_phrase("日本語 🙂", "think deeper"), None);
     }
 
     #[test]
