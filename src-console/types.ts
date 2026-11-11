@@ -268,6 +268,8 @@ export interface TaskItem {
   status: string;
   priority: string | null;
   tags: string[];
+  /** From a #venture:<id> tag (adds.rs). */
+  venture?: string | null;
 }
 
 export interface PipelineItem {
@@ -275,6 +277,7 @@ export interface PipelineItem {
   stage: string;
   content_type: string;
   notes: string | null;
+  venture?: string | null;
 }
 
 export interface MuseState {
@@ -512,6 +515,16 @@ export interface CrewApprovalRow {
 export interface CrewStepRow { id: number; agent: string; kind: "task" | "tool" | "llm" | string; label: string; start_ms: number; end_ms: number; status: "ok" | "failed" | "skipped" | string; error?: string | null }
 export interface CrewHandoffRow { from: string; to: string; status: string }
 export interface CrewRunSteps { steps: CrewStepRow[]; handoffs: CrewHandoffRow[] }
+
+/** n8n_status (read-only probe). Counts are null unless obtainable without new secrets in the repo. */
+export interface N8nStatusRow { connected: boolean; workflows: number | null; failures7d: number | null }
+/** crew_tool_grant_get: what crew-service enforces for one crew (1110i). */
+export interface CrewToolGrantRow {
+  enabled: boolean; tools: string[]; scope_path?: string | null; duration?: string | null; granted_at?: number | null;
+  expires_at?: number | null; granted_by?: string | null; enforced_allowlist: string[];
+  pending_request?: { id: string; tools: string[]; duration: string; reason: string; scope_path: string; requested_at?: string | null; expires_at?: string | null } | null;
+}
+export interface CrewAuditApiRow { id: number; at: number; actor: string; kind: string; text: string; target?: string | null; exit_code?: number | null; duration_ms?: number | null; checkpoint?: string | null; run_id?: string | null }
 
 /** not_configured: no token in env or the app data dir; offline: unreachable or unhealthy. */
 export type CrewServiceHealth = "not_configured" | "offline" | "online";

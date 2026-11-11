@@ -1,4 +1,5 @@
 import { UNWIRED, sample, sampleAdaptersEnabled } from "../lib/sampleAdapters";
+import { announceAdds, announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
 import type { AddAdapter, AddPreview, HistoryItem, ParseResult, Saved } from "./flow";
 
 /**
@@ -96,10 +97,50 @@ function sampleAdd(kind: AddKind, parse: (text: string) => ParseResult): AddAdap
   };
 }
 
+/**
+ * The real write path (src-tauri adds.rs): add_preview → add_save → add_undo (≤ 8 s) and add_history. Typed, chat
+ * and voice all call this one adapter. wired flips true after the first History read succeeds, so a missing backend
+ * stays "Needs wiring". Failed calls reject; the Composer keeps the text and shows Try again.
+ */
+export function makeLiveAdd(kind: AddKind, call: Invoke = realInvoke): AddAdapter & { probe(): Promise<void> } {
+  let ok = false;
+  let items: HistoryItem[] = [];
+  const probe = async () => {
+    try { items = await call<HistoryItem[]>("add_history", { kind }); ok = true; } catch { ok = false; }
+    announceStores();
+  };
+  return {
+    command: ADD_COMMANDS[kind],
+    get wired() { return ok; },
+    probe,
+    parse: async (text) => live(await call<ParseResult>("add_preview", { kind, text })),
+    save: async (preview: AddPreview, via = "typed") => {
+      const saved = await call<Saved>("add_save", { kind, preview, via });
+      await probe();
+      announceAdds();
+      return live(saved);
+    },
+    undo: async (id) => {
+      const done = await call<boolean>("add_undo", { kind, id });
+      if (!done) throw new Error("The 8 second undo window has passed.");
+      await probe();
+      announceAdds();
+      return live({ ok: true as const });
+    },
+    history: () => (ok ? live([...items]) : UNWIRED),
+  };
+}
+
 const samples = new Map<AddKind, AddAdapter>();
+const lives = new Map<AddKind, AddAdapter>();
 /** The one write path for an add (HANDOFF-1111v §5): the page composer, chat and voice all call this. */
 export function addAdapter(kind: AddKind, now: () => Date = () => new Date()): AddAdapter {
-  if (!sampleAdaptersEnabled()) return unwired(kind);
+  if (!sampleAdaptersEnabled()) {
+    if (!inTauri()) return unwired(kind);
+    let l = lives.get(kind);
+    if (!l) { const made = makeLiveAdd(kind); l = made; lives.set(kind, l); void made.probe(); }
+    return l;
+  }
   let a = samples.get(kind);
   if (!a) {
     const parse = kind === "date" ? (t: string) => parseDateSample(t, now()) : kind === "task" ? parseTaskSample : kind === "idea" ? parseIdeaSample : parseGoalSample;

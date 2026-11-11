@@ -9,7 +9,7 @@ import type { Wired } from "../lib/sampleAdapters";
 export const UNDO_MS = 8_000;
 
 export type PreviewField = [label: string, value: string];
-export type AddPreview = { title: string; fields: PreviewField[]; note?: string };
+export type AddPreview = { title: string; fields: PreviewField[]; note?: string; /** What the backend saves; opaque, handed back unchanged. */ payload?: unknown };
 /** What reading the text gave: a preview to check, a question (never a guessed legal date), or "this lives elsewhere". */
 export type ParseResult =
   | { kind: "preview"; preview: AddPreview }
@@ -24,7 +24,8 @@ export interface AddAdapter {
   command: string;
   wired: boolean;
   parse(text: string): Promise<Wired<ParseResult>>;
-  save(preview: AddPreview): Promise<Wired<Saved>>;
+  /** `via` records how it was added in History; the page composer is "typed". */
+  save(preview: AddPreview, via?: HistoryItem["via"]): Promise<Wired<Saved>>;
   undo(id: string): Promise<Wired<{ ok: true }>>;
   history(): Wired<HistoryItem[]>;
 }

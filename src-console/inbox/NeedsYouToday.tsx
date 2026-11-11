@@ -5,11 +5,12 @@ import { listFollowups } from "../bridge";
 import { businessAdapter } from "../business/adapters";
 import { DECISIONS_EVENT, decisionsLog } from "../decisions/log";
 import { todayIso } from "../lib/followups";
+import { inTauri, needsYouList, STORES_EVENT, type NeedsYouReport } from "../lib/localStores";
 import { UNWIRED, sample, sampleAdaptersEnabled, valueOf, type Wired } from "../lib/sampleAdapters";
 import { CHECKIN_EVENT, PERSONAL_DEFAULTS, personalAdapter } from "../personal/adapters";
 import type { FollowupLists, SystemSnapshot } from "../types";
 import { Badge, Button, Card, DataTag } from "../ui";
-import { OPEN_LABEL, SOURCE_LABEL, TODOS_EVENT, UNWIRED_REASON, approvalPointers, checkinPointer, datePointers, decisionPointers, doneAtSource, mergeInbox, todoPointers, type Inbox, type InboxPointer, type SourceState } from "./needsYou";
+import { OPEN_LABEL, SOURCE_LABEL, TODOS_EVENT, UNWIRED_REASON, approvalPointers, checkinPointer, datePointers, decisionPointers, doneAtSource, mergeInbox, todoPointers, type Inbox, type InboxPointer, type InboxSource, type SourceState } from "./needsYou";
 import "../adds/v1111.css";
 
 
@@ -32,6 +33,9 @@ export function useNeedsYou(data: SystemSnapshot, now: number): NeedsYou {
   const [todos, setTodos] = useState<{ state: "loading" | "ok" | "failed"; lists: FollowupLists | null }>({ state: "loading", lists: null });
   const [done, setDone] = useState<InboxPointer[]>([]);
   const [tick, setTick] = useState(0);
+  // Live backend (needs_you_list): dates, check-in, decisions and crew approvals come from one read-only aggregator.
+  // null while it loads or when the backend has no such command (then the UI merge below stays in charge).
+  const [agg, setAgg] = useState<NeedsYouReport[] | null>(null);
   const prev = useRef<InboxPointer[]>([]);
   const today = todayIso(new Date(now));
 
@@ -43,13 +47,21 @@ export function useNeedsYou(data: SystemSnapshot, now: number): NeedsYou {
   }, [today]);
   const load = useCallback(() => { listFollowups().then(take, () => setTodos((t) => ({ state: "failed", lists: t.lists }))); }, [take]);
   useEffect(() => { load(); }, [load, data.refreshedAt]);
+  const useAgg = inTauri() && !sampleAdaptersEnabled();
+  useEffect(() => {
+    if (!useAgg) return;
+    let live = true;
+    needsYouList().then((r) => { if (live) setAgg(r); }, () => { if (live) setAgg(null); });
+    return () => { live = false; };
+  }, [useAgg, data.refreshedAt, tick]);
   useEffect(() => {
     const onTodos = (e: Event) => { const lists = (e as CustomEvent<FollowupLists>).detail; if (lists) take(lists); };
     const onDecisions = () => setTick((n) => n + 1);
     window.addEventListener(TODOS_EVENT, onTodos);
     window.addEventListener(DECISIONS_EVENT, onDecisions);
     window.addEventListener(CHECKIN_EVENT, onDecisions);
-    return () => { window.removeEventListener(TODOS_EVENT, onTodos); window.removeEventListener(DECISIONS_EVENT, onDecisions); window.removeEventListener(CHECKIN_EVENT, onDecisions); };
+    window.addEventListener(STORES_EVENT, onDecisions);
+    return () => { window.removeEventListener(TODOS_EVENT, onTodos); window.removeEventListener(DECISIONS_EVENT, onDecisions); window.removeEventListener(CHECKIN_EVENT, onDecisions); window.removeEventListener(STORES_EVENT, onDecisions); };
   }, [take]);
 
   const states = useMemo<SourceState[]>(() => {
@@ -61,16 +73,20 @@ export function useNeedsYou(data: SystemSnapshot, now: number): NeedsYou {
     const log = valueOf(decisionsLog().list()) ?? [];
     const decided = new Set(log.map((r) => r.itemId));
     const crew = crewApprovals();
+    const fromAgg = (source: NeedsYouReport["source"]): SourceState | null => {
+      const r = agg?.find((x) => x.source === source);
+      return r ? { source: r.source as InboxSource, state: r.state, rows: r.rows as InboxPointer[] } : null;
+    };
     return [
       { source: "todos", state: todos.state === "ok" ? "ok" : todos.state, rows: todos.lists ? todoPointers(todos.lists, today) : [] },
-      admin.state === "unwired" ? { source: "dates", state: "unwired", rows: [] } : { source: "dates", state: "ok", rows: datePointers(admin.value), sample: admin.state === "sample" },
-      { source: "checkin", state: "ok", rows: checkinPointer(checkinDone(), PERSONAL_DEFAULTS.checkInReminder) },
-      votes.state === "unwired" && flags.state === "unwired" ? { source: "decisions", state: "unwired", rows: [] }
-        : { source: "decisions", state: "ok", rows: decisionPointers(valueOf(votes) ?? [], valueOf(flags) ?? [], decided), sample: votes.state === "sample" || flags.state === "sample" },
+      fromAgg("dates") ?? (admin.state === "unwired" ? { source: "dates", state: "unwired", rows: [] } : { source: "dates", state: "ok", rows: datePointers(admin.value), sample: admin.state === "sample" }),
+      fromAgg("checkin") ?? { source: "checkin", state: "ok", rows: checkinPointer(checkinDone(), PERSONAL_DEFAULTS.checkInReminder) },
+      fromAgg("decisions") ?? (votes.state === "unwired" && flags.state === "unwired" ? { source: "decisions", state: "unwired", rows: [] }
+        : { source: "decisions", state: "ok", rows: decisionPointers(valueOf(votes) ?? [], valueOf(flags) ?? [], decided), sample: votes.state === "sample" || flags.state === "sample" }),
       { source: "approvals", state: data.unavailableSources.some((s) => s.command === "list_terrence_actions") ? "failed" : "ok", rows: approvalPointers(data.actions) },
-      crew.state === "unwired" ? { source: "crew", state: "unwired", rows: [] } : { source: "crew", state: "ok", rows: crew.value, sample: crew.state === "sample" },
+      fromAgg("crew") ?? (crew.state === "unwired" ? { source: "crew", state: "unwired", rows: [] } : { source: "crew", state: "ok", rows: crew.value, sample: crew.state === "sample" }),
     ];
-  }, [data, todos, today, tick]);
+  }, [data, todos, today, tick, agg]);
   const inbox = mergeInbox(states);
   return { ...inbox, states, done, retry: () => { setDone([]); load(); } };
 }

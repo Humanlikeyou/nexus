@@ -2,10 +2,39 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// The old OpenClaw folder. READ-ONLY legacy fallback: nothing in this file may create, write or delete
+/// anything under it (OpenClaw was removed and the folder moved aside).
 fn openclaw_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".openclaw")
+}
+
+/// Where tasks, the content pipeline and skills are written now: `<data dir>/workspace`.
+pub(crate) fn workspace_dir_in(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("workspace")
+}
+
+fn app_workspace() -> PathBuf {
+    workspace_dir_in(&crate::app_paths::data_dir())
+}
+
+/// The file to read: the app-data copy first, else the legacy file when it exists, else the app-data path.
+fn read_path(
+    app_ws: &std::path::Path,
+    legacy_ws: &std::path::Path,
+    requested: Option<String>,
+    name: &str,
+) -> Result<PathBuf, String> {
+    if requested.as_deref().is_some_and(|r| !r.trim().is_empty()) {
+        let base = if app_ws.is_dir() { app_ws } else { legacy_ws };
+        return workspace_file(base, requested, name);
+    }
+    if app_ws.join(name).exists() || !legacy_ws.join(name).exists() {
+        Ok(app_ws.join(name))
+    } else {
+        Ok(legacy_ws.join(name))
+    }
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -158,21 +187,26 @@ pub fn read_skills() -> Result<Vec<Skill>, String> {
         }
     }
 
-    // 2. OpenClaw skills: ~/.openclaw/skills/
+    // 2. Learned skills: <data dir>/workspace/skills first, then the legacy ~/.openclaw/skills (read-only).
+    load_from(&app_workspace().join("skills"), &mut skills, &mut seen);
     load_from(&openclaw_dir().join("skills"), &mut skills, &mut seen);
 
     Ok(skills)
 }
 
-/// Write or update a skill file in ~/.openclaw/skills/.
+/// Write or update a skill file in `<data dir>/workspace/skills/` (never ~/.openclaw).
 /// Used by the skills self-improvement loop to create/update learned skills.
 #[tauri::command]
 pub fn save_skill(name: String, content: String) -> Result<(), String> {
-    let dir = openclaw_dir().join("skills");
+    save_skill_in(&app_workspace().join("skills"), &name, content)
+}
+
+fn save_skill_in(dir: &std::path::Path, name: &str, content: String) -> Result<(), String> {
     if content.len() > MAX_SKILL_BYTES {
         return Err(format!("Skill is larger than {MAX_SKILL_BYTES} bytes"));
     }
-    let path = skill_path(&dir, &name)?;
+    let path = skill_path(dir, name)?;
+    crate::app_paths::create_private_dir_all(dir).map_err(|e| e.to_string())?;
     crate::app_paths::write_private(&path, content).map_err(|e| e.to_string())
 }
 
@@ -184,11 +218,14 @@ fn skill_path(dir: &std::path::Path, name: &str) -> Result<PathBuf, String> {
     super::path_safety::safe_join(dir, &format!("{stem}.md"))
 }
 
-/// Delete a skill file from ~/.openclaw/skills/.
+/// Delete a skill file from `<data dir>/workspace/skills/`. A legacy skill is read-only: it reports false.
 #[tauri::command]
 pub fn delete_skill(name: String) -> Result<bool, String> {
-    let dir = openclaw_dir().join("skills");
-    let path = skill_path(&dir, &name)?;
+    delete_skill_in(&app_workspace().join("skills"), &name)
+}
+
+fn delete_skill_in(dir: &std::path::Path, name: &str) -> Result<bool, String> {
+    let path = skill_path(dir, name)?;
     if path.is_file() {
         fs::remove_file(&path).map_err(|e| e.to_string())?;
         Ok(true)
@@ -199,7 +236,8 @@ pub fn delete_skill(name: String) -> Result<bool, String> {
 
 #[tauri::command]
 pub fn read_tasks(workspace_path: Option<String>) -> Result<Vec<TaskItem>, String> {
-    let path = workspace_file(
+    let path = read_path(
+        &app_workspace(),
         &openclaw_dir().join("workspace"),
         workspace_path,
         "TASKS.md",
@@ -324,7 +362,8 @@ pub(crate) fn parse_tasks_md(content: &str) -> Vec<TaskItem> {
 pub fn read_content_pipeline(
     workspace_path: Option<String>,
 ) -> Result<Vec<ContentPipelineItem>, String> {
-    let path = workspace_file(
+    let path = read_path(
+        &app_workspace(),
         &openclaw_dir().join("workspace"),
         workspace_path,
         "CONTENT-PIPELINE.md",
@@ -489,5 +528,51 @@ mod input_tests {
     fn save_skill_refuses_oversized_content_before_touching_disk() {
         let err = save_skill("too-big".into(), "x".repeat(MAX_SKILL_BYTES + 1)).unwrap_err();
         assert!(err.contains("larger"), "{err}");
+    }
+
+    #[test]
+    fn reads_prefer_app_data_then_fall_back_to_the_legacy_file() {
+        let root = tmp("rp");
+        let (app, legacy) = (root.join("app"), root.join("legacy"));
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&legacy).unwrap();
+        // Neither has it: the app-data path (never the legacy one).
+        assert_eq!(
+            read_path(&app, &legacy, None, "TASKS.md").unwrap(),
+            app.join("TASKS.md")
+        );
+        fs::write(legacy.join("TASKS.md"), "- [ ] old").unwrap();
+        assert_eq!(
+            read_path(&app, &legacy, None, "TASKS.md").unwrap(),
+            legacy.join("TASKS.md")
+        );
+        fs::write(app.join("TASKS.md"), "- [ ] new").unwrap();
+        assert_eq!(
+            read_path(&app, &legacy, None, "TASKS.md").unwrap(),
+            app.join("TASKS.md")
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn skills_are_written_and_deleted_in_app_data_only() {
+        let root = tmp("sk");
+        let (app, legacy) = (
+            root.join("app").join("skills"),
+            root.join("home").join(".openclaw").join("skills"),
+        );
+        save_skill_in(&app, "Daily Brief", "# brief".into()).unwrap();
+        assert_eq!(
+            fs::read_to_string(app.join("daily-brief.md")).unwrap(),
+            "# brief"
+        );
+        assert!(!legacy.exists() && !legacy.parent().unwrap().exists());
+        // A legacy skill is never deleted: delete only looks in the app-data folder.
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("old.md"), "# old").unwrap();
+        assert!(!delete_skill_in(&app, "old").unwrap());
+        assert!(legacy.join("old.md").exists());
+        assert!(delete_skill_in(&app, "daily-brief").unwrap());
+        let _ = fs::remove_dir_all(&root);
     }
 }

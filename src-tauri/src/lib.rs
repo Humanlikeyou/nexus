@@ -11,6 +11,8 @@ use commands::{
     terrence_context, terrence_priorities, terrence_projects, terrence_runtime,
     terrence_runtime_bridge,
 };
+// design-1111v stores
+use commands::{adds, checkin, decisions_log, life_dates, needs_you};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
@@ -220,6 +222,22 @@ pub fn run() {
             take_log::take_log_list,
             take_log::take_log_forget,
             take_log::take_log_migrate,
+            // design-1111v: decisions log, life dates, adds, check-in, Needs you today
+            decisions_log::decisions_list,
+            decisions_log::decisions_append,
+            decisions_log::decisions_undo,
+            decisions_log::decisions_add_outcome,
+            life_dates::life_date_list,
+            life_dates::life_date_upsert,
+            life_dates::life_date_delete,
+            life_dates::life_date_preview,
+            adds::add_preview,
+            adds::add_save,
+            adds::add_undo,
+            adds::add_history,
+            checkin::checkin_save,
+            checkin::checkin_list,
+            needs_you::needs_you_list,
             noop_query::noop_query,
             noop_query::get_noop_settings,
             noop_query::set_noop_settings,

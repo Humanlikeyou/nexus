@@ -4,6 +4,7 @@ import { Button, Card, DataTag, PageHero, PageSection, StatusText, wiredTag } fr
 import { valueOf } from "../lib/sampleAdapters";
 import { GoalsCard } from "../screens/GoalsCard";
 import type { Goal } from "../types";
+import { useStoresTick } from "../lib/localStores";
 import { CHECKIN_EVENT, ENERGY_STEPS, MOOD_STEPS, PERSONAL_DEFAULTS, type CheckIn, type PersonalAdapter } from "./adapters";
 import { Bar, Dots, Rich } from "./parts";
 import { ReadyToKeepCard, SuggestedLatelyCard, TakeChange, TakesThisWeekCard, WeekSuggestionsCard, WeekSuggestionsTile } from "../takes/WeekTakes";
@@ -82,6 +83,7 @@ function Scale({ label, steps, value, onChange }: { label: string; steps: readon
 
 /** Home › Today check-in (1111a #3): 5-step mood, energy, tags and text. Voice is transcribed to text; no audio is kept. */
 export function CheckInSection({ adapter }: { adapter: PersonalAdapter }) {
+  useStoresTick();
   const list = adapter.checkins();
   const [mood, setMood] = useState<number | null>(null);
   const [energy, setEnergy] = useState<number | null>(null);

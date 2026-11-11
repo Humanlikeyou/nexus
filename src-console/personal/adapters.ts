@@ -1,4 +1,5 @@
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
+import { ADDS_EVENT, announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
 
 /**
  * design-1111a: Amara as a personal OS. Every surface reads from this adapter. In the app it is
@@ -201,8 +202,70 @@ export function makeSamplePersonal(): PersonalAdapter {
   };
 }
 
+/** Rows as src-tauri life_dates.rs and checkin.rs return them. */
+export type LifeDateWire = { id: string; title: string; date: string; lane: "personal" | "residence"; sub: string; inDays: number; reminders: Array<{ days: number; on: string; passed: boolean }>; activeWindow: number | null };
+export type CheckInWire = { id: string; at: string; day: string; mood: number; energy: number; tags: string[]; text: string; transcribed: boolean };
+
+const SHORT_MONTH = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const dayLabel = (iso: string) => SHORT_MONTH.format(new Date(`${iso}T00:00:00Z`));
+
+/** Upcoming dates only (the page shows the next 12 months); `month` is months from today for the timeline. */
+export function lifeAdminFrom(rows: LifeDateWire[]): LifeAdmin {
+  const dates: LifeDate[] = rows.filter((r) => r.inDays >= 0).map((r) => {
+    const next = r.reminders.find((x) => !x.passed) ?? r.reminders[r.reminders.length - 1];
+    return {
+      id: r.id, title: r.title, short: r.title, sub: r.sub || (r.lane === "residence" ? "Japan · residence" : "Personal"), date: dayLabel(r.date),
+      month: r.inDays / 30.4, inDays: r.inDays, reminder: next ? `${next.days} days · ${dayLabel(next.on)}` : "", due: r.activeWindow != null, lane: r.lane,
+    };
+  });
+  const first = dates[0];
+  return { next: first ? `${first.title} in ${first.inDays} days` : "Nothing coming up", dates };
+}
+
+const WHEN = new Intl.DateTimeFormat("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Tokyo" });
+export const checkInFrom = (r: CheckInWire): CheckIn => ({ id: r.id, when: WHEN.format(new Date(r.at)).replace(",", ""), mood: r.mood, energy: r.energy, tags: r.tags, text: r.text, transcribed: r.transcribed || undefined });
+
+/**
+ * The stores built so far (life dates, check-ins). Everything else stays unwired. Each reads as unwired until its
+ * first successful read, so a missing backend never shows an empty live list.
+ */
+export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & { refresh(): Promise<void> } {
+  let admin: LifeAdmin | null = null;
+  let checkins: CheckIn[] | null = null;
+  const refresh = async () => {
+    await Promise.all([
+      call<LifeDateWire[]>("life_date_list").then((r) => { admin = lifeAdminFrom(r); }, () => { admin = null; }),
+      call<CheckInWire[]>("checkin_list", { limit: 30 }).then((r) => { checkins = r.map(checkInFrom); }, () => { checkins = null; }),
+    ]);
+    announceStores();
+  };
+  try { window.addEventListener(ADDS_EVENT, () => { void refresh(); }); } catch { /* no window in node tests */ }
+  return {
+    ...unwiredPersonal,
+    refresh,
+    lifeAdmin: () => (admin ? live(admin) : UNWIRED),
+    checkins: () => (checkins ? live([...checkins]) : UNWIRED),
+    saveCheckIn: async (d) => {
+      if (d.mood == null || d.energy == null) return UNWIRED;
+      try {
+        const r = await call<CheckInWire>("checkin_save", { draft: { mood: d.mood, energy: d.energy, tags: d.tags, text: d.text } });
+        await refresh();
+        return live(checkInFrom(r));
+      } catch { return UNWIRED; }
+    },
+  };
+}
+
 let sampleSingleton: PersonalAdapter | null = null;
-export const personalAdapter = (): PersonalAdapter => (sampleAdaptersEnabled() ? (sampleSingleton ??= makeSamplePersonal()) : unwiredPersonal);
+let liveSingleton: ReturnType<typeof makeLivePersonal> | null = null;
+export const personalAdapter = (): PersonalAdapter => {
+  if (sampleAdaptersEnabled()) return (sampleSingleton ??= makeSamplePersonal());
+  if (!inTauri()) return unwiredPersonal;
+  if (!liveSingleton) { liveSingleton = makeLivePersonal(); void liveSingleton.refresh(); }
+  return liveSingleton;
+};
+/** Test seam. */
+export const resetLivePersonal = () => { liveSingleton = null; };
 
 /** design-1111v: Needs you today drops its quiet check-in row when a check-in is saved. */
 export const CHECKIN_EVENT = "amara:checkin";

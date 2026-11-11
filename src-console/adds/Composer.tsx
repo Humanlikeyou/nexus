@@ -1,6 +1,7 @@
 import { Mic } from "lucide-react";
 import { useCallback, useEffect, useId, useReducer, useRef, useState, type ReactNode } from "react";
 import type { Route } from "../app/routes";
+import { useStoresTick } from "../lib/localStores";
 import { valueOf } from "../lib/sampleAdapters";
 import { Button, Card, DataTag, Dialog } from "../ui";
 import { IDLE, UNDO_MS, busy, flow, type AddAdapter, type AddPreview, type Saved } from "./flow";
@@ -93,6 +94,7 @@ export type ComposerProps = {
 /** design-1111v §5 composer: label, free text, mic, Add; then working → preview → saved with Undo → History. */
 export function Composer({ title, kind, placeholder, hint, addLabel = "Add", saveLabel = "Save", working, adapter, onSaved, onUndone, onOpen, savedText }: ComposerProps) {
   const [state, send] = useReducer(flow, IDLE);
+  useStoresTick();
   const input = useRef<HTMLInputElement>(null);
   const id = useId();
   const sample = adapter.history().state === "sample";

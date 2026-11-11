@@ -1,6 +1,7 @@
 import type { Route } from "../app/routes";
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
 import { UNDO_MS } from "../adds/flow";
+import { announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
 
 /**
  * design-1111v §4: the decisions log, separate from the business ledger. Append-only; Undo within 8 s deletes
@@ -88,7 +89,41 @@ export function makeSampleDecisions(): DecisionsLog {
   };
 }
 
+/**
+ * The real log (src-tauri decisions_log.rs). It calls only decisions_* commands: there is no path to the business
+ * ledger or to anyone outside. wired flips to true after the first successful read; until then (or when the
+ * backend is missing) it reads as unwired. A failed write resolves unwired and records nothing.
+ */
+export function makeLiveDecisions(call: Invoke = realInvoke): DecisionsLog & { refresh(): Promise<void> } {
+  let cache: DecisionRecord[] = [];
+  let ok = false;
+  const refresh = async () => {
+    try { cache = await call<DecisionRecord[]>("decisions_list"); ok = true; } catch { ok = false; }
+    announceStores();
+  };
+  return {
+    get wired() { return ok; },
+    refresh,
+    list: () => (ok ? live([...cache]) : UNWIRED),
+    append: async (draft) => {
+      try { const r = await call<DecisionRecord>("decisions_append", { draft }); cache = [r, ...cache]; return live(r); } catch { return UNWIRED; }
+    },
+    undo: async (id) => {
+      try { const done = await call<boolean>("decisions_undo", { id }); if (done) cache = cache.filter((x) => x.id !== id); return live({ ok: done }); } catch { return UNWIRED; }
+    },
+    addOutcome: async (id, outcome) => {
+      try { const r = await call<DecisionRecord>("decisions_add_outcome", { id, outcome }); cache = cache.map((x) => (x.id === id ? r : x)); return live(r); } catch { return UNWIRED; }
+    },
+  };
+}
+
 let sampleLog: DecisionsLog | null = null;
-export const decisionsLog = (): DecisionsLog => (sampleAdaptersEnabled() ? (sampleLog ??= makeSampleDecisions()) : unwiredDecisions);
+let liveLog: ReturnType<typeof makeLiveDecisions> | null = null;
+export const decisionsLog = (): DecisionsLog => {
+  if (sampleAdaptersEnabled()) return (sampleLog ??= makeSampleDecisions());
+  if (!inTauri()) return unwiredDecisions;
+  if (!liveLog) { liveLog = makeLiveDecisions(); void liveLog.refresh(); }
+  return liveLog;
+};
 /** Test seam. */
-export const resetSampleDecisions = () => { sampleLog = null; };
+export const resetSampleDecisions = () => { sampleLog = null; liveLog = null; };

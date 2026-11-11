@@ -44,3 +44,10 @@ pub mod terrence_runtime;
 pub mod terrence_runtime_bridge;
 pub mod voice;
 pub mod voice_bridge;
+// design-1111v stores (decisions, life dates, adds, check-in, Needs you today)
+pub mod adds;
+pub mod checkin;
+pub mod decisions_log;
+pub mod life_dates;
+pub mod local_store;
+pub mod needs_you;

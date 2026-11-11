@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Route } from "../app/routes";
 import { addAdapter } from "../adds/adapters";
+import { useStoresTick } from "../lib/localStores";
 import { Composer, LinkButton, OffButton } from "../adds/Composer";
 import type { AddPreview, Saved } from "../adds/flow";
 import { valueOf } from "../lib/sampleAdapters";
@@ -67,12 +68,14 @@ function fromPreview(saved: Saved, p: AddPreview): LifeDate {
 
 /** Life › Dates & deadlines (was Today › Life admin): add, timeline, upcoming. Dates only from Taisun or his documents. */
 export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpen?: (route: Route) => void }) {
+  useStoresTick();
   const la = adapter.lifeAdmin();
   const v = valueOf(la);
   const [added, setAdded] = useState<LifeDate[]>([]);
   const add = addAdapter("date");
-  const all = v ? [...v.dates, ...added].sort((a, b) => a.month - b.month) : added;
   const fresh = new Set(added.map((d) => d.id));
+  // A live list already holds the saved date once re-read; the highlighted copy replaces it, never doubles it.
+  const all = v ? [...v.dates.filter((d) => !fresh.has(d.id)), ...added].sort((a, b) => a.month - b.month) : added;
   const composer = (
     <Composer title="Add a date" kind="Date" adapter={add} placeholder="e.g. Visa expires Sept 14 next year, remind me 3 months before"
       hint="Amara fills in the date and reminders and shows a preview. Dates come from you or your documents; she never guesses a legal deadline. An Enterprise date goes to Enterprise › Ventures."
@@ -83,15 +86,15 @@ export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpe
   return (
     <div className="v-page" id="dates">
       <PageHero title="Dates & deadlines" statement={v ? `Next up: ${v.next}` : "Dates that matter"}
-        detail={v ? <>{v.dates.length} dates in the next 12 months · reminders at {PERSONAL_DEFAULTS.lifeAdminLadder.join(", ")} days · Enterprise dates are read-only here <DataTag kind="sample" /></> : <>Visa, residence card and contract dates come from you or your documents <DataTag kind="wire" /></>} />
+        detail={v ? <>{v.dates.length} dates in the next 12 months · reminders at {PERSONAL_DEFAULTS.lifeAdminLadder.join(", ")} days · Enterprise dates are read-only here {la.state === "sample" && <DataTag kind="sample" />}</> : <>Visa, residence card and contract dates come from you or your documents <DataTag kind="wire" /></>} />
       <AmaraTake page="life" className="life__take" />
       {composer}
       {!v ? <Card title="Next 12 months" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">Needs wiring: dates appear once the life dates store exists (HANDOFF-1111a). Nothing here is made up.</p></Card> : (
         <>
-          <Card title="Timeline" accessory={<span className="pk-acc"><DataTag kind="sample" /><span className="v-note">Next 12 months</span></span>}>
+          <Card title="Timeline" accessory={<span className="pk-acc">{la.state === "sample" && <DataTag kind="sample" />}<span className="v-note">Next 12 months</span></span>}>
             <LaneTimeline dates={all} highlight={fresh} />
           </Card>
-          <Card title="Upcoming" accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+          <Card title="Upcoming" accessory={<span className="pk-acc">{la.state === "sample" && <DataTag kind="sample" />}</span>}>
             <table className="pk-table" aria-label="Upcoming">
               <thead><tr><th scope="col">What</th><th scope="col">Lane</th><th scope="col">Date</th><th scope="col">Reminder</th><th scope="col"><span className="ui-visually-hidden">Action</span></th></tr></thead>
               <tbody>{all.map((d) => (
