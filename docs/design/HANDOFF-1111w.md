@@ -135,7 +135,7 @@ The stage replaces the landing content during window mode and restores it untouc
 - PDF caption: 3 bullets plus "Add … to Dates & deadlines…" using the 1111v add preview pattern.
 
 
-**Added after first install (Taisun, same evening):** Life shows Amara's take. `TakePage` now includes `"life"`. `<AmaraTake page="life" />` sits under the hero on Goals (the Life landing), Weekly review, Dates & deadlines, and Personal money. Same component and Wired adapter as Fitness, Neuro, Mind–Body and Enterprise. Live facts return `null` (Needs wiring, no invented numbers). Sample mode uses a Life note tagged Sample data. Personal money still also has the 1111t `MoneyTake` (page="business") under the Life take.
+**Added after first install (Taisun, same evening):** Life shows Amara's take. `TakePage` now includes `"life"`. `<AmaraTake page="life" />` sits under the hero on Goals (the Life landing), Weekly review, Dates & deadlines, and Personal money. Same component and Wired adapter as Fitness, Neuro, Mind–Body and Enterprise. Live facts return `null` (Needs wiring, no invented numbers). Sample mode uses a Life note tagged Sample data. Personal money folds the 1111t money insight and recommendation into that same Life take card (one "Amara's take" and one recommendation per page). `MoneyAdapter.take()` is unchanged. Needs wiring when there's no data.
 
 **Deviations:**
 1. Toast copy uses "looked at least recently" (the w09 shot filename is still `fourth-replaces-oldest`).

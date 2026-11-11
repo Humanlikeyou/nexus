@@ -53,3 +53,8 @@
 .m-input:focus-within { outline: 2px solid var(--focus-ring, var(--tone-accent-text)); outline-offset: 1px; }
 .m-guard { font-size: 11px; white-space: nowrap; color: var(--label-secondary); }
 .m-guard[data-k="public"] { color: var(--tone-accent-text); }
+
+/* 1111w: money insight + recommendation folded into the Life take card (one "Amara's take"). */
+.life-money { display: grid; gap: 8px; margin-top: 5px; padding-top: 13px; border-top: 1px solid var(--separator); }
+.life-money__k { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--label-secondary); }
+.life-money .take__body { font-size: 15px; }

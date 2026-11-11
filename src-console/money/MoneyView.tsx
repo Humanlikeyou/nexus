@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Button, Card, DataTag, SegmentedControl } from "../ui";
 import { valueOf } from "../lib/sampleAdapters";
-import { AmaraTakeCard } from "../amaraTake/AmaraTakeCard";
-import type { TakeView } from "../amaraTake/takeView";
+import { AmaraTakeCard, type TakeCardSlots } from "../amaraTake/AmaraTakeCard";
+import { PREVIEW_DEPS, previewMode, sampleTakeView, takeView, type TakeView } from "../amaraTake/takeView";
+import { useAmaraTakeStatus } from "../amaraTake/useAmaraTake";
 import { MemoryLineView } from "../takes/TakeExtras";
 import { SuggestionBlock } from "../takes/SuggestionBlock";
 import { Nums, Rich } from "../takes/parts";
@@ -134,6 +135,67 @@ export function MoneyTake({ adapter = moneyAdapter() }: { adapter?: MoneyAdapter
         onAnswer={(st, r) => adapter.answer(t.suggestion.id, st, r)} onUndo={() => adapter.undo(t.suggestion.id)} />
       <p className="m-nfa" role="note">{NFA_LINE}</p></>;
   return <div className="take-slot m-take"><AmaraTakeCard page="business" view={view} slots={{ memory: t.kind === "suggestion" && t.memory ? <MemoryLineView text={t.memory} /> : null, history: <span className="take__hist take__hist--static">History · {t.historyCount} takes</span>, block, refresh: "refreshes once after the next sync" }} /></div>;
+}
+
+/** Life › Personal money (1111w fix): one "Amara's take". The 1111t money insight and
+ *  recommendation live inside the Life take card. MoneyAdapter.take() is unchanged. */
+function MoneyInsight({ adapter }: { adapter: MoneyAdapter }) {
+  const w = adapter.take();
+  const t = valueOf(w);
+  if (!t) {
+    return (
+      <div className="life-money">
+        <p className="life-money__k">Money</p>
+        <p className="take__quiet">The money take needs at least one connected account. It appears once a read-only account is connected and the money adapter answers. Nothing here is written by Amara today. <DataTag kind="wire" /></p>
+      </div>
+    );
+  }
+  const rec = t.kind === "partial"
+    ? <div className="t-empty"><b>No money suggestion today.</b><span>{t.why}</span></div>
+    : <><SuggestionBlock s={t.suggestion} detects eyebrow="Today's one thing · Money" footnote="Amara judges this by what you do (saving, fees), never by next month's market."
+        onAnswer={(st, r) => adapter.answer(t.suggestion.id, st, r)} onUndo={() => adapter.undo(t.suggestion.id)} />
+      <p className="m-nfa" role="note">{NFA_LINE}</p></>;
+  return (
+    <div className="life-money">
+      <p className="life-money__k">Money</p>
+      <p className="take__body"><Rich text={t.note.text} /></p>
+      {t.note.chips.length > 0 && (
+        <ul className="take__chips" aria-label="Numbers Amara used for money">
+          {t.note.chips.map((c) => <li key={`${c.label}-${c.value}`} className="take__chip"><span>{c.label}</span>{c.value}</li>)}
+        </ul>
+      )}
+      {t.kind === "suggestion" && t.memory ? <MemoryLineView text={t.memory} /> : null}
+      {rec}
+    </div>
+  );
+}
+
+export function PersonalMoneyTake({ adapter = moneyAdapter() }: { adapter?: MoneyAdapter }) {
+  const preview = previewMode();
+  const status = useAmaraTakeStatus("life", preview ? PREVIEW_DEPS : undefined);
+  const lifeView = preview ? sampleTakeView("life") : takeView("life", status.value, status.checking);
+  const w = adapter.take();
+  const t = valueOf(w);
+  // If Life isn't a fresh note, AmaraTakeCard won't render slots. When money has data, use the
+  // money note as the card body (still page="life") so the insight isn't dropped. When both are
+  // unwired, the Life unwired card is the single Needs wiring state.
+  const view: TakeView = lifeView.state === "fresh" || !t
+    ? lifeView
+    : { state: "fresh", note: t.note, sample: w.state === "sample" };
+  const history = t ? <span className="take__hist take__hist--static">History · {t.historyCount} takes</span> : undefined;
+  const slots: TakeCardSlots = lifeView.state === "fresh" || !t
+    ? { history, block: <MoneyInsight adapter={adapter} />, refresh: t ? "refreshes once after the next sync" : undefined }
+    : {
+        memory: t.kind === "suggestion" && t.memory ? <MemoryLineView text={t.memory} /> : null,
+        history,
+        block: t.kind === "partial"
+          ? <div className="t-empty"><b>No money suggestion today.</b><span>{t.why}</span></div>
+          : <><SuggestionBlock s={t.suggestion} detects eyebrow="Today's one thing · Money" footnote="Amara judges this by what you do (saving, fees), never by next month's market."
+              onAnswer={(st, r) => adapter.answer(t.suggestion.id, st, r)} onUndo={() => adapter.undo(t.suggestion.id)} />
+            <p className="m-nfa" role="note">{NFA_LINE}</p></>,
+        refresh: "refreshes once after the next sync",
+      };
+  return <div className="take-slot life__take m-take"><AmaraTakeCard page="life" view={view} slots={slots} /></div>;
 }
 
 /** m5: money follow-ups grade only what you control. Market returns are shown, never judged; FX is "can't tell" by design. */

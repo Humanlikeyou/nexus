@@ -5,10 +5,9 @@ import { MEMORY_LABEL, PERSONAL_DEFAULTS, type Memory, type MemoryCategory, type
 import { Bar, Confidence, PairBars, Rich, Scatter, money } from "./parts";
 import { FollowThroughView } from "../takes/FollowThrough";
 import { takesAdapter } from "../takes/adapters";
-import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { TakesSettingsCard } from "../takes/TakesSettings";
 import { moneyAdapter } from "../money/adapters";
-import { MoneyAccounts, MoneyFollowUps, MoneyOverviewSection, MoneyTake, shown, type Currency } from "../money/MoneyView";
+import { MoneyAccounts, MoneyFollowUps, MoneyOverviewSection, PersonalMoneyTake, shown, type Currency } from "../money/MoneyView";
 import "../ui/PanelKit.css";
 import "./personal.css";
 import "../adds/v1111.css";
@@ -70,7 +69,7 @@ export function PatternsView({ adapter, initialTab = "findings" }: { adapter: Pe
 const amt = (w: Wired<number>) => (w.state === "unwired" ? wiredTag(w) : money(w.value));
 
 /** Life › Personal money (1111a #4 + 1111t money; moved from Business › Personal in design-1111v, contract unchanged):
- *  read-only accounts, balances in USD with a JPY view, the money take, follow-ups, then bills and subscriptions.
+ *  read-only accounts, balances in USD with a JPY view, one Life take card with the money insight and recommendation folded in, follow-ups, then bills and subscriptions.
  *  Personal only: venture funds never appear here; Enterprise money is in Enterprise › Finances. */
 export function PersonalMoneyView({ adapter, onOpenFinances }: { adapter: PersonalAdapter; onOpenFinances?: () => void }) {
   const pm = adapter.money();
@@ -88,8 +87,7 @@ export function PersonalMoneyView({ adapter, onOpenFinances }: { adapter: Person
   return (
     <div className="biz page-inset cc-page pk-host">
       <PageHero title="Personal money" statement={statement} detail={detail} />
-      <AmaraTake page="life" className="life__take" />
-      <MoneyTake adapter={ma} />
+      <PersonalMoneyTake adapter={ma} />
       <MoneyOverviewSection adapter={ma} currency={cur} onCurrency={setCur} />
       <MoneyAccounts adapter={ma} />
       <MoneyFollowUps adapter={ma} />

@@ -21,9 +21,16 @@ test("Life Goals, Weekly review, Dates and Personal money each show Amara's take
     await expect(field.getByRole("heading", { level: 1, name: label === "Dates & deadlines" ? "Dates & deadlines" : label === "Personal money" ? "Personal money" : label })).toBeVisible();
     const take = lifeTake(field);
     await expect(take).toBeVisible();
+    await expect(field.getByRole("region", { name: /^Amara's take$/ })).toHaveCount(1);
     await expect(take).toHaveAttribute("data-state", "fresh");
     await expect(take).toContainText("Sample data");
     await expect(take).toContainText("4 of 5");
+    if (label === "Personal money") {
+      await expect(take).toContainText("5.5 months");
+      await expect(take).toContainText("Today's one thing · Money");
+      await expect(take).not.toContainText("Today's one thing · Life");
+      await expect(take).toContainText("Not financial advice");
+    }
   }
   expect(consoleErrors).toEqual([]);
 });
