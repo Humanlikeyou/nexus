@@ -103,7 +103,7 @@
 
 /* Charts: emerald = you, copper = baseline/effort, tertiary = context. No off-palette blue or indigo. */
 :root:root .mb-legend { display: flex; gap: var(--space-4); margin: 0; color: var(--label-secondary); font: var(--type-callout); }
-:root:root .mb-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+:root:root .mb-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
 
 
 /* Reduce Transparency / no backdrop-filter: the sidebar fallback goes solid like every other glass surface. */

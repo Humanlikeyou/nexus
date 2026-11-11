@@ -24,27 +24,27 @@
   color: var(--landing-label);
   overflow: hidden;
 }
-:root:root .hchat .chat-screen__conversation { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 6px; padding: 10px 12px 12px; min-height: 0; height: 100%; box-sizing: border-box; }
-:root:root .hchat__head { display: flex; align-items: center; gap: 10px; min-height: 26px; }
+:root:root .hchat .chat-screen__conversation { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 5px; padding: 8px 13px 13px; min-height: 0; height: 100%; box-sizing: border-box; }
+:root:root .hchat__head { display: flex; align-items: center; gap: 8px; min-height: 26px; }
 :root:root .hchat__title { margin: 0; font: 500 13px/16px var(--font-text); color: var(--landing-wordmark); letter-spacing: .02em; }
-:root:root .hchat__status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--landing-muted); font: 400 12px/15px var(--font-text); }
+:root:root .hchat__status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--landing-muted); font: 400 12px/15px var(--font-text); }
 :root:root .hchat__status i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--landing-muted); }
 :root:root .hchat__status i[data-online] { background: var(--lens-rim); }
-:root:root .hchat__tools { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+:root:root .hchat__tools { margin-left: auto; display: flex; align-items: center; gap: 5px; }
 :root:root .hchat__lens { flex: none; }
 
-:root:root .hchat .chat-screen__messages { padding: 0 2px; gap: 6px; overflow-y: auto; }
+:root:root .hchat .chat-screen__messages { padding: 0 3px; gap: 5px; overflow-y: auto; }
 :root:root .hchat[data-state="collapsed"] .chat-screen__messages { max-height: 136px; overflow: hidden; justify-content: flex-end;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 44px); mask-image: linear-gradient(to bottom, transparent 0, #000 44px); }
 :root:root .hchat .chat-message { max-width: 86%; }
-:root:root .hchat .chat-message[data-start] { margin-top: 6px; }
-:root:root .hchat .chat-message__meta { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 3px; color: var(--landing-muted); font: 400 11px/14px var(--font-text); }
+:root:root .hchat .chat-message[data-start] { margin-top: 5px; }
+:root:root .hchat .chat-message__meta { display: inline-flex; align-items: center; gap: 5px; margin: 0 0 3px; color: var(--landing-muted); font: 400 11px/14px var(--font-text); }
 :root:root .hchat .chat-bubble { padding: 0; background: transparent; font: 400 14px/20px var(--font-text); color: var(--landing-label); }
-:root:root .hchat .chat-bubble[data-role="user"] { padding: 7px 12px; border-radius: 14px; background: rgba(52, 199, 154, .16); box-shadow: inset 0 0 0 1px rgba(52, 199, 154, .22); }
-:root:root .hchat .chat-bubble[data-failed] { padding: 7px 12px; border-radius: 14px; background: rgba(255, 122, 102, .14); }
-:root:root .hchat .chat-message[data-speaking] .chat-bubble { padding-left: 10px; box-shadow: inset 2px 0 0 var(--landing-icon); }
-:root:root .hchat__speaking { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; color: var(--landing-icon); font: 500 11px/14px var(--font-text); }
-:root:root .hchat__bars { display: inline-flex; gap: 2px; align-items: flex-end; height: 10px; }
+:root:root .hchat .chat-bubble[data-role="user"] { padding: 8px 13px; border-radius: 14px; background: rgba(52, 199, 154, .16); box-shadow: inset 0 0 0 1px rgba(52, 199, 154, .22); }
+:root:root .hchat .chat-bubble[data-failed] { padding: 8px 13px; border-radius: 14px; background: rgba(255, 122, 102, .14); }
+:root:root .hchat .chat-message[data-speaking] .chat-bubble { padding-left: 8px; box-shadow: inset 2px 0 0 var(--landing-icon); }
+:root:root .hchat__speaking { display: inline-flex; align-items: center; gap: 5px; margin-left: 5px; color: var(--landing-icon); font: 500 11px/14px var(--font-text); }
+:root:root .hchat__bars { display: inline-flex; gap: 3px; align-items: flex-end; height: 10px; }
 :root:root .hchat__bars i { width: 2px; height: 6px; border-radius: 1px; background: var(--landing-icon); transform-origin: bottom; animation: hchat-bar 900ms ease-in-out infinite; }
 :root:root .hchat__bars i:nth-child(2) { height: 10px; animation-delay: -300ms; }
 :root:root .hchat__bars i:nth-child(3) { height: 7px; animation-delay: -600ms; }
@@ -52,13 +52,13 @@
 @media (prefers-reduced-motion: reduce) { :root:root .hchat__bars i { animation: none; } }
 :root:root[data-reduce-motion="true"] .hchat__bars i { animation: none; }
 :root:root .hchat__divider { align-self: center; color: var(--landing-muted); font: 400 11px/14px var(--font-text); }
-:root:root .hchat__empty { align-self: center; color: var(--landing-muted); font: 400 13px/18px var(--font-text); padding: 6px 0; }
+:root:root .hchat__empty { align-self: center; color: var(--landing-muted); font: 400 13px/18px var(--font-text); padding: 5px 0; }
 
-:root:root .hchat .chat-screen__composer { align-items: center; padding: 6px; border: 0; border-radius: 12px; background: var(--landing-button-active); box-shadow: inset 0 0 0 1px var(--landing-hairline); -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root:root .hchat .chat-screen__composer { align-items: center; padding: 5px; border: 0; border-radius: 12px; background: var(--landing-button-active); box-shadow: inset 0 0 0 1px var(--landing-hairline); -webkit-backdrop-filter: none; backdrop-filter: none; }
 /* Always solid (nothing moves under it), so Reduce Transparency and Reduce Motion need no fallback here. */
-:root:root .hchat .chat-screen__composer textarea { min-height: 30px; padding: 5px 10px; border: 0; background: transparent; color: var(--landing-label); }
+:root:root .hchat .chat-screen__composer textarea { min-height: 30px; padding: 5px 8px; border: 0; background: transparent; color: var(--landing-label); }
 :root:root .hchat .chat-screen__composer textarea::placeholder { color: var(--landing-muted); }
-:root:root .hchat__kbd { flex: none; padding: 2px 6px; border-radius: 5px; color: var(--landing-muted); font: 500 11px/14px var(--font-text); box-shadow: inset 0 0 0 1px var(--landing-hairline); }
+:root:root .hchat__kbd { flex: none; padding: 3px 5px; border-radius: 5px; color: var(--landing-muted); font: 500 11px/14px var(--font-text); box-shadow: inset 0 0 0 1px var(--landing-hairline); }
 
 /* Expanded (A3): the panel takes the stage; the big lens and its line fold into the 44px header lens. */
 :root:root .landing[data-chat="expanded"] .landing__stage { justify-content: flex-start; }
@@ -75,7 +75,7 @@
   :root:root .hchat[data-state="collapsed"] .hchat__head { order: 2; }
   :root:root .hchat[data-state="collapsed"] .hchat__title, :root:root .hchat[data-state="collapsed"] .hchat__status { display: none; }
   :root:root .landing[data-chat] .landing__stage { gap: var(--fib-8); }
-  :root:root .hchat[data-state="collapsed"] .chat-screen__conversation { padding: 8px 10px; }
-  :root:root .hchat[data-state="collapsed"] .chat-screen__composer { padding: 4px; }
+  :root:root .hchat[data-state="collapsed"] .chat-screen__conversation { padding: 8px 8px; }
+  :root:root .hchat[data-state="collapsed"] .chat-screen__composer { padding: 5px; }
 }
 @media (forced-colors: active) { .hchat { border: 1px solid CanvasText; background: Canvas; color: CanvasText; } }

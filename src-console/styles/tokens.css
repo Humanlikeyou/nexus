@@ -139,16 +139,16 @@
   --d-material-toolbar: rgba(30, 30, 32, .80);
   --d-material-popover: rgba(44, 44, 46, .78);
 
-  /* ── Type roles: size / line-height (weights alongside) ────────── */
-  --text-large-title: 26px;  --lh-large-title: 32px;   /* 700 */
-  --text-title1: 22px;       --lh-title1: 28px;        /* 700 */
+  /* ── Type roles: phi scale 11·13·17·21·27·34 (13 × √φ steps), never under 11px ── */
+  --text-large-title: 27px;  --lh-large-title: 34px;   /* 700 */
+  --text-title1: 21px;       --lh-title1: 27px;        /* 700 */
   --text-title2: 17px;       --lh-title2: 22px;        /* 600 */
-  --text-title3: 15px;       --lh-title3: 20px;        /* 600 */
+  --text-title3: 17px;       --lh-title3: 22px;        /* 600 */
   --text-headline: 13px;     --lh-headline: 16px;      /* 600 */
   --text-body: 13px;         --lh-body: 16px;          /* 400 */
-  --text-callout: 12px;      --lh-callout: 15px;
+  --text-callout: 13px;      --lh-callout: 16px;
   --text-subheadline: 11px;  --lh-subheadline: 14px;   /* minimum for text */
-  --text-badge: 10px;        --tracking-badge: .02em;  /* UPPERCASE badges only */
+  --text-badge: 11px;        --tracking-badge: .02em;  /* UPPERCASE badges only */
   --text-display: 34px;      --lh-display: 40px;       /* 600, tabular-nums */
   --type-large-title: 700 var(--text-large-title)/var(--lh-large-title) var(--font-text);
   --type-title1: 700 var(--text-title1)/var(--lh-title1) var(--font-text);
@@ -160,29 +160,34 @@
   --type-subheadline: 400 var(--text-subheadline)/var(--lh-subheadline) var(--font-text);
   --type-display: 600 var(--text-display)/var(--lh-display) var(--font-text);
 
-  /* ── Spacing (4pt grid) ────────────────────────────────────────── */
-  --space-0_5: 2px;
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
-  --space-8: 32px;
-  --space-12: 48px;
-  --inset-content: 20px;
-  --pad-card: 16px;
+  /* ── Spacing: Fibonacci scale (design-1110g). Names kept so components don't churn. ── */
+  --fib-3: 3px; --fib-5: 5px; --fib-8: 8px; --fib-13: 13px; --fib-21: 21px; --fib-34: 34px; --fib-55: 55px; --fib-89: 89px;
+  --phi: 1.618;
+  --space-0_5: var(--fib-3);
+  --space-1: var(--fib-5);
+  --space-2: var(--fib-8);
+  --space-3: var(--fib-13);
+  --space-4: var(--fib-13);
+  --space-5: var(--fib-21);
+  --space-6: var(--fib-21);
+  --space-8: var(--fib-34);
+  --space-10: var(--fib-34);
+  --space-12: var(--fib-55);
+  --space-16: var(--fib-55);
+  --space-24: var(--fib-89);
+  --inset-content: var(--fib-21);
+  --pad-card: var(--fib-13);
   --row-h: 28px;
   --row-h-lg: 32px;
   --control-h: 28px;
   --control-h-sm: 22px;
 
-  /* ── Radius (concentric: inner = outer − padding) ──────────────── */
-  --radius-xs: 4px;     /* badges */
-  --radius-sm: 6px;     /* controls */
-  --radius-md: 10px;    /* cards, list groups */
-  --radius-lg: 14px;    /* panels, sheets */
-  --radius-xl: 20px;    /* popover windows */
+  /* ── Radius: Fibonacci (3/5/8/13/21), concentric: inner = outer − padding ── */
+  --radius-xs: 3px;     /* badges */
+  --radius-sm: 5px;     /* controls */
+  --radius-md: 8px;    /* cards, list groups */
+  --radius-lg: 13px;    /* panels, sheets */
+  --radius-xl: 21px;    /* popover windows */
   --radius-pill: 999px;
 
   /* ── Motion ────────────────────────────────────────────────────── */

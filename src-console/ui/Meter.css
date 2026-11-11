@@ -16,7 +16,7 @@
   background: var(--ui-meter-color);
   transition: width var(--dur-state) var(--ease-standard);
 }
-.ui-meter[data-variant="stacked"] { gap: 2px; background: transparent; }
+.ui-meter[data-variant="stacked"] { gap: 3px; background: transparent; }
 .ui-meter[data-variant="stacked"][data-empty] { background: var(--fill-secondary); }
 .ui-meter__segment {
   --ui-meter-color: var(--accent);

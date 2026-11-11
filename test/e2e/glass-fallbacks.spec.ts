@@ -144,7 +144,8 @@ test("segmented control: neutral selected pill, focus ring separated from it", a
   const focused = group.locator(".ui-segmented__segment:focus-visible");
   await expect(focused).toHaveCount(1);
   await expect(focused).toHaveCSS("outline-style", "solid");
-  await expect(focused).toHaveCSS("outline-offset", "2px");
+  // design-1110g: the segment inset moved onto the Fibonacci scale (2px → 3px), so the ring sits 3px out.
+  await expect(focused).toHaveCSS("outline-offset", "3px");
 });
 
 test("settings: Allow Claude is off by default, notes data leaves the Mac, turns on", async ({ page, theme }) => {

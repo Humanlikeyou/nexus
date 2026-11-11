@@ -11,8 +11,8 @@
 .lists__editor { display: block; padding: var(--space-3); }
 .lists__add { padding-top: var(--space-1); }
 .lists__form { display: grid; gap: var(--space-3); min-width: 0; }
-.lists__form-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--space-3); align-items: start; }
-.lists__form-row--end { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; }
+.lists__form-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.618fr); gap: var(--space-3); align-items: start; }
+.lists__form-row--end { grid-template-columns: minmax(0, 1.618fr) minmax(0, 1fr) auto; }
 .lists__form-row--end > .ui-button { margin-top: calc(var(--type-headline-line, 1.3em) + var(--space-2)); }
 .lists__form-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
 

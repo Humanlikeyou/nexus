@@ -1,10 +1,10 @@
-.status-text { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; color: var(--label); }
+.status-text { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; color: var(--label); }
 .status-text__glyph { font-size: 11px; }
 .status-text[data-s="ok"] .status-text__glyph, .status-text[data-s="run"] .status-text__glyph { color: var(--tone-accent-text); }
 .status-text[data-s="fail"] .status-text__glyph { color: var(--tone-danger-text); }
 .status-text[data-s="wait"] .status-text__glyph, .status-text[data-s="risk"] .status-text__glyph { color: var(--copper-text); }
 .status-text[data-s="off"] .status-text__glyph { color: var(--label-secondary); }
-.data-tag { display: inline-block; font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 6px; border: 1px dashed var(--separator-strong); color: var(--label-secondary); white-space: nowrap; font-weight: 400; }
+.data-tag { display: inline-block; font-size: 11px; line-height: 1; padding: 3px 5px; border-radius: 6px; border: 1px dashed var(--separator-strong); color: var(--label-secondary); white-space: nowrap; font-weight: 400; }
 .data-tag[data-kind="sample"]::before { content: "◇ "; }
 .data-tag[data-kind="wire"] { border-style: dotted; }
 .data-tag[data-kind="wire"]::before { content: "⚙ "; }
