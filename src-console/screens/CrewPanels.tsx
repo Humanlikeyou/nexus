@@ -6,17 +6,20 @@ import type { Wired } from "../lib/sampleAdapters";
 import type { CrewInfo } from "../types";
 import { Button, Card, DataTag, PageHero, StatusText, wiredTag, type StatusKind } from "../ui";
 
-const RUN_KIND: Record<string, StatusKind> = { running: "run", completed: "ok", failed: "fail", stopped: "off", interrupted: "risk" };
+const RUN_KIND: Record<string, StatusKind> = { running: "run", awaiting_approval: "wait", completed: "ok", failed: "fail", stopped: "off", interrupted: "risk", cancelled: "off" };
 const acc = (node: React.ReactNode) => <span className="cc-card__acc">{node}</span>;
 
 /** D-C3/C4: crew requests only (Terrance's approvals keep their own queue in chat and Today). */
-export function CrewApprovalsCard({ approvals, full = false, onViewAll }: { approvals: Wired<CrewApproval[]>; full?: boolean; onViewAll?: () => void }) {
+export function CrewApprovalsCard({ approvals, full = false, onViewAll, onDecide }: { approvals: Wired<CrewApproval[]>; full?: boolean; onViewAll?: () => void; onDecide?: (id: string, approve: boolean) => Promise<string | null> }) {
   const [note, setNote] = useState<string | null>(null);
   if (approvals.state === "unwired") {
     return <Card title="Crew approvals" accessory={acc(wiredTag(approvals))}><p className="cc-note">Crew requests that need your yes (outbound email, posts, spending) appear here once crews report them.</p></Card>;
   }
   const items = full ? approvals.value : approvals.value.slice(0, 2);
-  const decide = (item: CrewApproval, yes: boolean) => setNote(approvals.state === "sample" ? `Sample data: nothing was ${yes ? "approved" : "denied"} for \u201c${item.title}\u201d.` : null);
+  const decide = (item: CrewApproval, yes: boolean) => {
+    if (approvals.state === "live" && onDecide) { void onDecide(item.id, yes).then(setNote); return; }
+    setNote(approvals.state === "sample" ? `Sample data: nothing was ${yes ? "approved" : "denied"} for \u201c${item.title}\u201d.` : null);
+  };
   return (
     <Card title={`Crew approvals \u00b7 ${approvals.value.length}`} accessory={acc(<>{wiredTag(approvals)}{!full && onViewAll && approvals.value.length > 0 && <button type="button" className="cc-link" onClick={onViewAll}>View all ›</button>}</>)}>
       {items.length === 0 ? <p className="cc-note">Nothing waiting.</p> : items.map((item) => (
@@ -74,6 +77,7 @@ export function CrewRunPage({ run, adapter, busy, onBack, onStop, onRetry }: { r
   const steps = adapter.steps(run.id);
   const handoffs = adapter.handoffs(run.id);
   const m = metrics.state === "unwired" ? null : metrics.value;
+  const live = run.status === "running" || run.status === "awaiting_approval";
   const failedStep = steps.state === "unwired" ? null : steps.value.find((s) => s.status === "failed")?.agent ?? null;
   const result = run.result ? plainText(run.result) : null;
   const tile = (k: string, v: string, w: Wired<unknown>) => <li className="cc-tile"><span className="cc-tile__k">{k}</span><span className="cc-tile__v">{v}</span><span className="cc-tile__s">{wiredTag(w)}</span></li>;
@@ -83,7 +87,7 @@ export function CrewRunPage({ run, adapter, busy, onBack, onStop, onRetry }: { r
       <PageHero title="Crew run" statement={`${sentenceStart(run.name)} ${humanize(run.status).toLowerCase()}`}
         detail={[run.task, run.agents.join(", "), run.started_at ? `started ${dateTime(run.started_at)}` : null].filter(Boolean).join(" · ")} />
       <ul className="cc-strip" aria-label="Run summary">
-        <li className="cc-tile"><span className="cc-tile__k">Status</span><span className="cc-tile__v"><StatusText kind={RUN_KIND[run.status] ?? "off"}>{humanize(run.status)}</StatusText></span><span className="cc-tile__s">{run.status === "failed" && result ? result.slice(0, 40) : run.status === "running" ? "Checking every 5 seconds" : ""}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Status</span><span className="cc-tile__v"><StatusText kind={RUN_KIND[run.status] ?? "off"}>{humanize(run.status)}</StatusText></span><span className="cc-tile__s">{run.status === "failed" && result ? result.slice(0, 40) : live ? "Checking every 5 seconds" : ""}</span></li>
         {tile("Duration", m ? `${m.durationS} s` : "\u2014", metrics)}
         {tile("Tokens \u00b7 requests", m ? `${m.tokens.toLocaleString("en-US")} \u00b7 ${m.requests}` : "\u2014", metrics)}
         {tile("Cost", m ? (m.costUsd === 0 ? "$0.00 local" : `$${m.costUsd.toFixed(2)}`) : "\u2014", metrics)}
@@ -103,12 +107,12 @@ export function CrewRunPage({ run, adapter, busy, onBack, onStop, onRetry }: { r
         <Card title="Handoffs" accessory={acc(wiredTag(handoffs))}>
           {handoffs.state === "unwired" ? <p className="cc-note">Which agent passed work to which appears here once runs report handoffs.</p> : <HandoffGraph handoffs={handoffs.value} failed={failedStep} />}
         </Card>
-        <Card title="Output" accessory={run.status === "running" ? <Button variant="secondary" size="small" icon={Square} disabled={busy} onClick={onStop}>Stop</Button> : undefined}>
+        <Card title="Output" accessory={live ? <Button variant="secondary" size="small" icon={Square} disabled={busy} onClick={onStop}>Stop</Button> : undefined}>
           <dl className="cc-kv"><dt>Task</dt><dd>{run.task ?? "No task text"}</dd><dt>Agents</dt><dd>{run.agents.join(", ") || "\u2014"}</dd><dt>Result</dt><dd><StatusText kind={RUN_KIND[run.status] ?? "off"}>{humanize(run.status)}</StatusText></dd></dl>
-          {run.status === "running" ? <p className="crews__note" role="status">Running… checking every 5 seconds.</p>
+          {live ? <p className="crews__note" role="status">Running… checking every 5 seconds.</p>
             : result ? <pre className={run.status === "failed" ? "crews__result crews__result--error" : "crews__result"}>{run.result}</pre>
               : <p className="crews__note">No result recorded.</p>}
-          {run.status !== "running" && (
+          {!live && (
             <div className="cc-actions">
               {onRetry && <Button size="small" variant="primary" icon={RotateCcw} onClick={onRetry}>Retry run</Button>}
               {result && <Button size="small" variant="secondary" icon={Copy} onClick={() => { void navigator.clipboard?.writeText(result).catch(() => undefined); }}>{run.status === "failed" ? "Copy error" : "Copy result"}</Button>}

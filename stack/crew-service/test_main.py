@@ -278,9 +278,9 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertNotIn("more", out)
 
     def test_crewai_wrapper_goes_through_run_tool(self):
-        big = _tool("capped", fn=lambda q: q * 50, max_output_chars=10)
+        big = _tool("kb_query", fn=lambda q: q * 50, max_output_chars=10)  # read-only: no approval
         wrapped = main._to_crewai_tool(big)
-        self.assertEqual(wrapped.name, "capped")
+        self.assertEqual(wrapped.name, "kb_query")
         self.assertEqual(wrapped._run("ab"), "ababababab…[truncated]")
 
 
@@ -540,25 +540,25 @@ class RouterLLMTests(unittest.TestCase):
         self.assertEqual(os.environ.get("CREWAI_DISABLE_TELEMETRY"), "true")
 
 
-class CloudGateTests(unittest.TestCase):
-    def test_default_off(self):
-        self.assertFalse(main.cloud_allowed("", "", ""))
-        self.assertFalse(main.cloud_allowed("", "", "k"))
+class MiniMaxRemovedTests(unittest.TestCase):
+    def test_no_cloud_path_remains(self):
+        for name in ("cloud_allowed", "MINIMAX_API_KEY", "MINIMAX_BASE_URL", "MINIMAX_MODEL", "CREW_ALLOW_CLOUD"):
+            self.assertFalse(hasattr(main, name), name)
+        src = open(main.__file__).read().lower()
+        self.assertNotIn("minimax/", src)
+        self.assertNotIn("api.minimax", src)
 
-    def test_each_gate_blocks_alone(self):
-        self.assertTrue(main.cloud_allowed("1", "", "k"))
-        self.assertFalse(main.cloud_allowed("0", "", "k"))          # opt-in missing
-        self.assertFalse(main.cloud_allowed("1", "1", "k"))         # outbound disabled
-        self.assertFalse(main.cloud_allowed("1", "", ""))           # no key
-        self.assertFalse(main.cloud_allowed("1", "", "  "))
+    def test_build_llms_is_router_only(self):
+        attempts = main._build_llms(["writer"])
+        self.assertEqual([a[0] for a in attempts], ["amara-fast"])
 
-    def test_build_llms_adds_minimax_only_when_gate_open(self):
-        with mock.patch.object(main, "cloud_allowed", return_value=False):
-            self.assertEqual(len(main._build_llms(["writer"])), 1)
-        with mock.patch.object(main, "cloud_allowed", return_value=True), \
-                mock.patch.object(main, "MINIMAX_API_KEY", "dummy-key"):
-            attempts = main._build_llms(["writer"])
-        self.assertEqual([a[0] for a in attempts], ["amara-fast", "minimax/" + main.MINIMAX_MODEL])
+    def test_concurrency_defaults_to_one(self):
+        self.assertEqual(main.MAX_CONCURRENT, 1)
+        compose = open(os.path.join(os.path.dirname(main.__file__), "..", "docker-compose.yml")).read() \
+            if os.path.exists(os.path.join(os.path.dirname(main.__file__), "..", "docker-compose.yml")) else None
+        if compose:  # not copied into the test image; checked on the host by the executor too
+            self.assertIn("CREW_MAX_CONCURRENT:-1}", compose)
+            self.assertNotIn("MINIMAX", compose)
 
 
 class CrewInfoLlmTests(unittest.TestCase):
@@ -595,7 +595,8 @@ class CrewInfoLlmTests(unittest.TestCase):
             main._procs.clear()
         sql, params = inserts[0]
         self.assertIn("llm", sql)
-        self.assertEqual(params[-1], "amara-fast")
+        self.assertEqual(params[-2:], ("amara-fast", None))  # llm, retry_of
+        main._resp_pipes.clear()
         self.assertEqual(set(main.planned_llm_label(list(main.AGENT_CATALOG)).split(",")),
                          {"amara-fast", "amara-deep"})
 
@@ -719,7 +720,7 @@ class CrewChildRunTests(unittest.TestCase):
         conn = _ListConn()
         prompt = "ZZ-PRIVATE-PROMPT-ZZ"
         with mock.patch.object(main, "CREW_ROUTER_URL", router.url), \
-                mock.patch.object(main.os, "setsid"), mock.patch.object(main, "cloud_allowed", return_value=False):
+                mock.patch.object(main.os, "setsid"):
             main._run_crew_child(["researcher", "analyst"], prompt, conn)
         final = conn.msgs[-1]
         self.assertEqual((final["k"], final["status"]), ("final", "completed"))
@@ -762,7 +763,9 @@ class WatchTests(unittest.TestCase):
         with mock.patch.object(main, "db_add_step", lambda i, m: calls.append(("step", m["label"]))), \
                 mock.patch.object(main, "db_add_handoff", lambda i, m: calls.append(("handoff", m["from"], m["to"]))), \
                 mock.patch.object(main, "db_finish", lambda i, st, res, llm=None: calls.append(("finish", st, res, llm))), \
-                mock.patch.object(main, "db_set_totals", lambda i, t, q: calls.append(("totals", t, q))):
+                mock.patch.object(main, "db_set_totals", lambda i, t, q: calls.append(("totals", t, q))), \
+                mock.patch.object(main, "db_create_approval", lambda i, m: calls.append(("approval", m["kind"])) or "a1"), \
+                mock.patch.object(main, "db_expire_approvals", lambda i, by="system": calls.append(("expire",))):
             main._watch("rid", proc or self._Proc(), r)
         return calls
 
@@ -772,13 +775,13 @@ class WatchTests(unittest.TestCase):
             {"k": "usage", "tokens": 7, "requests": 2},
             {"k": "final", "status": "completed", "result": "ok", "llm": "amara-fast", "tokens": 9, "requests": 3}])
         self.assertEqual(calls, [("step", "a: task"), ("handoff", "a", "b"),
-                                 ("finish", "completed", "ok", "amara-fast"), ("totals", 9, 3)])
+                                 ("finish", "completed", "ok", "amara-fast"), ("totals", 9, 3), ("expire",)])
 
     def test_child_that_dies_keeps_its_steps_and_totals(self):
         calls = self.run_watch([{"k": "step", "label": "a: task"}, {"k": "usage", "tokens": 4, "requests": 1}])
         self.assertEqual(calls[0], ("step", "a: task"))
         self.assertEqual(calls[1][:2], ("finish", "failed"))
-        self.assertEqual(calls[-1], ("totals", 4, 1))
+        self.assertEqual(calls[-2], ("totals", 4, 1))
 
 
 mp = main.mp
@@ -906,6 +909,429 @@ class StepPersistenceTests(unittest.TestCase):
     def test_steps_route_requires_the_token(self):
         route = next(r for r in main.app.routes if getattr(r, "path", "") == "/crews/runs/{run_id}/steps")
         self.assertTrue(any(d.call is main.require_token for d in route.dependant.dependencies))
+
+
+# ── R13-D approvals ─────────────────────────────────────────────────────────
+class _Boom(BaseException):
+    """Stands in for ChildApprover's os._exit in tests."""
+
+
+def _write_tool(calls):
+    """A test-only tool that is NOT read-only (so it needs approval). Never registered globally."""
+    return main.CrewTool("send_note", "test-only write tool", lambda q: calls.append(q) or "sent")
+
+
+class ApprovalGateTests(unittest.TestCase):
+    def make(self, timeout=5.0, candidates=None):
+        sent = []
+        r, w = mp.Pipe(duplex=False)  # parent -> child
+
+        def abort():
+            raise _Boom()
+        return main.ChildApprover(sent.append, r, timeout, abort, candidates), sent, w
+
+    def test_read_only_tools_never_ask(self):
+        self.assertIsNone(main.gate_tool_call(_tool("kb_query"), None))
+        self.assertIsNone(main.gate_tool_call(_tool("memory_query"), None))
+
+    def test_write_tool_without_an_approver_fails_closed(self):
+        calls = []
+        wrapped = main._to_crewai_tool(_write_tool(calls), None, "researcher", None)
+        self.assertEqual(wrapped._run("hi"), main.APPROVAL_DENIED)
+        self.assertEqual(calls, [])
+
+    def test_blocked_kinds_are_refused_with_no_request(self):
+        for kind in ("outbound", "spend", "network", "git_push", "sudo"):
+            approver, sent, w = self.make()
+            w.send({"k": "decision", "approve": True})  # even a waiting yes can't help
+            tool = main.CrewTool("x_" + kind, "d", lambda q: "ran", approval_kind=kind)
+            self.assertEqual(main.gate_tool_call(tool, approver), main.TOOL_BLOCKED)
+            self.assertEqual(sent, [])
+            self.assertEqual(main.write_candidates([tool]), {})
+
+    def test_claude_tier_is_blocked_while_outbound_is_disabled(self):
+        tool = main.CrewTool("ask_claude", "d", lambda q: "ran", approval_kind="claude_tier")
+        with mock.patch.object(main, "NEXUS_OUTBOUND_DISABLED", "1"):
+            self.assertEqual(main.gate_tool_call(tool, None), main.TOOL_BLOCKED)
+        with mock.patch.object(main, "NEXUS_OUTBOUND_DISABLED", ""):
+            self.assertEqual(main.gate_tool_call(tool, None), main.APPROVAL_DENIED)  # needs a yes, none given
+
+    def test_request_blocks_until_approved_then_the_batch_is_covered_for_the_run(self):
+        a, b = _write_tool([]), main.CrewTool("edit_file", "d", lambda q: "edited", approval_kind="destructive")
+        approver, sent, w = self.make(candidates=main.write_candidates([a, b]))
+        calls, out = [], []
+        wrapped = main._to_crewai_tool(_write_tool(calls), None, "researcher", approver)
+        t = threading.Thread(target=lambda: out.append(wrapped._run("hi")))
+        t.start()
+        for _ in range(100):
+            if sent:
+                break
+            time.sleep(0.02)
+        # ONE request lists every write action the run may take; the riskiest kind labels it.
+        self.assertEqual(sent, [{"k": "approval", "kind": "destructive", "items": ["edit_file", "send_note"]}])
+        time.sleep(0.2)
+        self.assertTrue(t.is_alive(), "the call must wait for the human")
+        self.assertEqual(calls, [])
+        w.send({"k": "decision", "approve": True})
+        t.join(5)
+        self.assertEqual((out, calls), (["sent"], ["hi"]))
+        # Both tools in the batch now run without another request.
+        self.assertIsNone(main.gate_tool_call(b, approver))
+        self.assertEqual(wrapped._run("again"), "sent")
+        self.assertEqual(len(sent), 1)
+
+    def test_deny_cancels_and_the_tool_never_runs(self):
+        approver, sent, w = self.make()
+        calls = []
+        w.send({"k": "decision", "approve": False})
+        with self.assertRaises(_Boom):
+            main.gate_tool_call(_write_tool(calls), approver)
+        self.assertEqual(calls, [])
+        self.assertEqual((sent[-1]["status"], sent[-1]["result"]), ("cancelled", "approval denied"))
+
+    def test_timeout_and_closed_pipe_are_denials(self):
+        approver, sent, w = self.make(timeout=0.1)
+        with self.assertRaises(_Boom):
+            approver.request("write", ["x"])
+        self.assertEqual(sent[-1]["result"], "approval timed out")
+        approver, sent, w = self.make()
+        w.close()
+        with self.assertRaises(_Boom):
+            approver.request("write", ["x"])
+        self.assertEqual(sent[-1]["result"], "approval channel closed")
+
+    def test_anything_but_an_explicit_true_is_a_denial(self):
+        for bad in ({"k": "decision", "approve": "yes"}, {"k": "decision"}, "approve", {"k": "other", "approve": True}):
+            approver, sent, w = self.make()
+            w.send(bad)
+            with self.assertRaises(_Boom):
+                approver.request("write", ["x"])
+
+
+class RetryLimitTests(unittest.TestCase):
+    def make(self):
+        return ApprovalGateTests().make()
+
+    def test_succeeds_without_asking(self):
+        approver, sent, w = self.make()
+        self.assertEqual(main.run_with_retries(lambda: "ok", approver, 2, 0, lambda t: None), (True, "ok"))
+        self.assertEqual(sent, [])
+
+    def test_at_most_two_automatic_retries_then_a_needs_you_item(self):
+        approver, sent, w = self.make()
+        runs = []
+
+        def flaky():
+            runs.append(1)
+            raise RuntimeError("router 503")
+        w.send({"k": "decision", "approve": False})
+        with self.assertRaises(_Boom):
+            main.run_with_retries(flaky, approver, 2, 0, lambda t: None)
+        self.assertEqual(len(runs), 3)  # the first try plus two retries, no more
+        self.assertEqual(sent[0], {"k": "approval", "kind": "retry_limit", "items": ["Retry the failed task"]})
+        self.assertEqual(sent[-1]["status"], "cancelled")
+
+    def test_approve_buys_exactly_one_more_attempt_then_asks_again(self):
+        approver, sent, w = self.make()
+        runs = []
+
+        def flaky():
+            runs.append(1)
+            if len(runs) == 4:
+                return "finally"
+            raise RuntimeError("x")
+        w.send({"k": "decision", "approve": True})
+        self.assertEqual(main.run_with_retries(flaky, approver, 2, 0, lambda t: None), (True, "finally"))
+        self.assertEqual(len(runs), 4)
+        self.assertEqual([m["kind"] for m in sent], ["retry_limit"])
+        # a fifth failure would have asked a second time
+        approver, sent, w = self.make()
+        w.send({"k": "decision", "approve": True})
+        w.send({"k": "decision", "approve": False})
+        n = []
+        with self.assertRaises(_Boom):
+            main.run_with_retries(lambda: n.append(1) or (_ for _ in ()).throw(RuntimeError("x")), approver, 2, 0, lambda t: None)
+        self.assertEqual(len(n), 4)
+        self.assertEqual([m["kind"] for m in sent if m["k"] == "approval"], ["retry_limit", "retry_limit"])
+
+    def test_without_a_pipe_it_fails_with_the_sanitized_error(self):
+        ok, err = main.run_with_retries(lambda: (_ for _ in ()).throw(ValueError("/srv/secret/x")), None, 2, 0, lambda t: None)
+        self.assertFalse(ok)
+        self.assertNotIn("/srv", err)
+
+    def test_backoff_grows_between_retries(self):
+        waits = []
+        main.run_with_retries(lambda: (_ for _ in ()).throw(RuntimeError("x")), None, 2, 1.5, waits.append)
+        self.assertEqual(waits, [1.5, 3.0])
+
+
+class DeepWaitTests(unittest.TestCase):
+    def test_waits_while_deep_is_resident_then_goes(self):
+        states = iter([True, True, False])
+        sleeps, clock = [], [0.0]
+
+        def sleep(t):
+            sleeps.append(t)
+            clock[0] += t
+        waited = main.wait_for_deep_idle(100, 5, lambda: next(states), sleep, lambda: clock[0])
+        self.assertEqual((sleeps, waited), ([5, 5], 10.0))
+
+    def test_unknown_or_idle_does_not_wait_and_the_wait_is_capped(self):
+        for state in (None, False):
+            self.assertEqual(main.wait_for_deep_idle(100, 5, lambda s=state: s, lambda t: self.fail("slept"), lambda: 0.0), 0.0)
+        clock = [0.0]
+
+        def sleep(t):
+            clock[0] += t
+        self.assertEqual(main.wait_for_deep_idle(20, 5, lambda: True, sleep, lambda: clock[0]), 20.0)  # gives up
+        self.assertEqual(main.wait_for_deep_idle(0, 5, lambda: self.fail("probed"), sleep, lambda: 0.0), 0.0)  # off
+
+    def test_residency_is_read_from_router_health_on_the_router_host(self):
+        self.assertEqual(main.router_health_url("http://host.docker.internal:8787/v1"), "http://host.docker.internal:8787/health")
+
+        def opener(doc):
+            return lambda req, timeout=0: _Resp(doc)
+        self.assertIs(main.deep_resident("http://127.0.0.1:8787/v1", opener({"loaded": {"fast": True, "deep": True}})), True)
+        self.assertIs(main.deep_resident("http://127.0.0.1:8787/v1", opener({"loaded": {"fast": True, "deep": False}})), False)
+        self.assertIsNone(main.deep_resident("http://127.0.0.1:8787/v1", opener({"status": "ok"})))
+        self.assertIsNone(main.deep_resident("http://127.0.0.1:8787/v1", lambda req, timeout=0: (_ for _ in ()).throw(OSError("down"))))
+
+    def test_a_child_run_waits_before_building_agents(self):
+        conn = _ListConn()
+        order = []
+        with mock.patch.object(main.os, "setsid"), mock.patch.object(main, "_attach_listeners", lambda *a: (lambda: None)), \
+                mock.patch.object(main, "wait_for_deep_idle", lambda: order.append("wait") or 0.0), \
+                mock.patch.object(main, "_build_llms", lambda keys: order.append("build") or []):
+            main._run_crew_child(["writer"], "task", conn)
+        self.assertEqual(order, ["wait", "build"])
+
+
+class _Resp:
+    def __init__(self, doc):
+        self._b = json.dumps(doc).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self, n=-1):
+        return self._b
+
+
+class ApprovalPersistenceTests(unittest.TestCase):
+    def test_create_allowlists_kind_and_derives_risk_and_reason(self):
+        log = []
+        with mock.patch.object(main, "db", return_value=_Conn(log)):
+            aid = main.db_create_approval("rid", {"kind": "rm -rf", "title": "attacker", "risk": "Low",
+                                                  "reason": "attacker text", "items": ["edit_file", "x\nsecret", ""] + ["t"] * 40})
+        ins, upd = log[0], log[1]
+        self.assertEqual(ins[1][0], aid)
+        kind, title, items, reason, risk = ins[1][2:]
+        self.assertEqual((kind, title, reason, risk), ("write", main.APPROVAL_TITLE["write"],
+                                                       main.APPROVAL_REASON["write"], "Medium"))
+        self.assertEqual(items[:2], ["edit_file", "x"])  # first line only, blanks dropped
+        self.assertLessEqual(len(items), main.MAX_APPROVAL_ITEMS)
+        self.assertIn("status='awaiting_approval'", upd[0])
+
+    def test_every_kind_has_risk_and_reason(self):
+        for k in main.APPROVAL_KINDS:
+            self.assertIn(main.APPROVAL_RISK[k], ("Low", "Medium", "High"))
+            self.assertTrue(main.APPROVAL_REASON[k] and main.APPROVAL_TITLE[k])
+        self.assertFalse(set(main.APPROVAL_KINDS) & main.BLOCKED_KINDS)
+        self.assertEqual(main.riskiest_kind(["write", "destructive"]), "destructive")
+
+    def test_finish_and_resume_only_touch_live_runs(self):
+        log = []
+        with mock.patch.object(main, "db", return_value=_Conn(log)):
+            main.db_finish("rid", "cancelled", "approval denied")
+            main.db_resume_run("rid")
+        self.assertIn("'running','awaiting_approval'", log[0][0])
+        self.assertIn("status='awaiting_approval'", log[1][0])
+
+
+class _Store:
+    """In-memory crew_approvals for the endpoint tests."""
+
+    def __init__(self, decided=False):
+        self.decided = decided
+        self.delivered = []
+
+    def decide(self, aid, approve, by="user"):
+        if aid != AID or self.decided:
+            return None
+        self.decided = True
+        return ("11111111-2222-3333-4444-555555555555",)
+
+    def exists(self, aid):
+        return aid == AID
+
+
+AID = "aaaaaaaa-2222-3333-4444-555555555555"
+
+
+class ApprovalEndpointTests(unittest.TestCase):
+    def call(self, store, approve, aid=AID):
+        with mock.patch.object(main, "db_decide_approval", store.decide), \
+                mock.patch.object(main, "db_approval_exists", store.exists), \
+                mock.patch.object(main, "deliver_decision", lambda r, a: store.delivered.append((r, a))), \
+                mock.patch.object(main, "db_get_approval", lambda a: "row"):
+            return main.decide_approval(aid, main.DecideRequest(approve=approve))
+
+    def test_decide_twice_is_409(self):
+        from fastapi import HTTPException
+        store = _Store()
+        self.assertEqual(self.call(store, True), "row")
+        with self.assertRaises(HTTPException) as cm:
+            self.call(store, False)
+        self.assertEqual(cm.exception.status_code, 409)
+        self.assertEqual(store.delivered, [("11111111-2222-3333-4444-555555555555", True)])
+
+    def test_decide_body_is_strict_only_a_real_true_approves(self):
+        from pydantic import ValidationError
+        for loose in ("yes", 1, "true", None):
+            with self.assertRaises(ValidationError):
+                main.DecideRequest(approve=loose)
+        self.assertIs(main.DecideRequest(approve=True).approve, True)
+
+    def test_parallel_first_writes_ask_once(self):
+        asked = []
+        gate = threading.Event()
+        def send(msg):
+            asked.append(msg)
+        class Resp:
+            def poll(self, t=None):
+                gate.wait(2); return True
+            def recv(self):
+                return {"k": "decision", "approve": True}
+        ap = main.ChildApprover(send, Resp(), timeout_s=5, abort=lambda: None,
+                                candidates={"tool_a": "write"})
+        tool = type("T", (), {"name": "tool_a", "approval_kind": "write"})()
+        results = []
+        ths = [threading.Thread(target=lambda: results.append(ap.allow_tool(tool))) for _ in range(2)]
+        for th in ths: th.start()
+        gate.set()
+        for th in ths: th.join(5)
+        self.assertEqual(results, [True, True])
+        self.assertEqual(sum(1 for m in asked if m.get("kind") == "approval_request" or "items" in m), 1, asked)
+
+    def test_bad_or_unknown_id_is_404_and_delivers_nothing(self):
+        from fastapi import HTTPException
+        store = _Store()
+        for aid in ("../x", "bbbbbbbb-2222-3333-4444-555555555555"):
+            with self.assertRaises(HTTPException) as cm:
+                self.call(store, True, aid)
+            self.assertEqual(cm.exception.status_code, 404)
+        self.assertEqual(store.delivered, [])
+
+    def test_routes_need_the_token(self):
+        for path in ("/crews/approvals", "/crews/approvals/{approval_id}/decide", "/crews/retry"):
+            route = next(r for r in main.app.routes if getattr(r, "path", "") == path)
+            self.assertTrue(any(d.call is main.require_token for d in route.dependant.dependencies), path)
+
+
+class DeliverDecisionTests(unittest.TestCase):
+    def setUp(self):
+        self.ctx = mp.get_context("spawn")
+
+    def live_proc(self):
+        proc = self.ctx.Process(target=_plain_child, daemon=True)
+        proc.start()
+        self.addCleanup(lambda: proc.is_alive() and proc.kill())
+        return proc
+
+    def test_approve_resumes_the_run_and_sends_the_decision(self):
+        r, w = mp.Pipe(duplex=False)
+        main._resp_pipes["rid"] = w
+        self.addCleanup(main._resp_pipes.pop, "rid", None)
+        with mock.patch.object(main, "db_resume_run") as resume, mock.patch.object(main, "db_finish") as fin:
+            main.deliver_decision("rid", True)
+        resume.assert_called_once_with("rid")
+        fin.assert_not_called()
+        self.assertEqual(r.recv(), {"k": "decision", "approve": True})
+
+    def test_deny_cancels_the_run_and_kills_the_waiting_child(self):
+        proc = self.live_proc()
+        main._procs["rid"] = proc
+        self.addCleanup(main._procs.pop, "rid", None)
+        with mock.patch.object(main, "db_finish") as fin:
+            main.deliver_decision("rid", False)
+        fin.assert_called_once_with("rid", "cancelled", "approval denied")
+        proc.join(10)
+        self.assertFalse(proc.is_alive())
+
+    def test_stop_kills_a_child_waiting_for_approval_and_expires_its_request(self):
+        proc = self.live_proc()
+        main._procs["rid2"] = proc
+        self.addCleanup(main._procs.pop, "rid2", None)
+        info = main.CrewInfo(id="rid2", name="n", status="awaiting_approval", agents=["researcher"])
+        with mock.patch.object(main, "db_get", return_value=info), mock.patch.object(main, "db_finish") as fin, \
+                mock.patch.object(main, "db_expire_approvals") as exp:
+            out = main.stop_crew(main.CrewStopRequest(id="rid2"))
+        self.assertEqual(out["stopped"], True)
+        fin.assert_called_once_with("rid2", "stopped", "stopped by user")
+        exp.assert_called_once()
+        proc.join(10)
+        self.assertFalse(proc.is_alive())
+
+
+class WatchApprovalTests(unittest.TestCase):
+    def test_approval_message_creates_a_request_and_the_run_keeps_going(self):
+        calls = WatchTests().run_watch([
+            {"k": "approval", "kind": "destructive", "items": ["x"]},
+            {"k": "step", "label": "a: task"},
+            {"k": "final", "status": "completed", "result": "ok", "llm": "amara-fast"}])
+        self.assertEqual(calls[0], ("approval", "destructive"))
+        self.assertIn(("finish", "completed", "ok", "amara-fast"), calls)
+        self.assertEqual(calls[-1], ("expire",))  # nothing stays pending after the run settles
+
+    def test_cancelled_final_settles_as_cancelled(self):
+        calls = WatchTests().run_watch([{"k": "final", "status": "cancelled", "result": "approval denied"}])
+        self.assertIn(("finish", "cancelled", "approval denied", None), calls)
+
+
+class RetryTests(unittest.TestCase):
+    ID = "11111111-2222-3333-4444-555555555555"
+
+    def info(self, status="failed", task="do it"):
+        return main.CrewInfo(id=self.ID, name="Research", status=status, agents=["researcher", "writer"], task=task)
+
+    def test_retry_clones_name_task_agents_and_links_retry_of(self):
+        with mock.patch.object(main, "db_get", return_value=self.info()), \
+                mock.patch.object(main, "_launch", return_value="new") as launch:
+            self.assertEqual(main.retry_crew(main.RetryRequest(id=self.ID)), "new")
+        launch.assert_called_once_with("Research", "do it", ["researcher", "writer"], self.ID)
+
+    def test_retry_refuses_active_unknown_and_bad_ids(self):
+        from fastapi import HTTPException
+        cases = [(self.info("running"), self.ID, 409), (self.info("awaiting_approval"), self.ID, 409),
+                 (None, self.ID, 404), (self.info(), "../x", 404)]
+        for found, rid, code in cases:
+            with mock.patch.object(main, "db_get", return_value=found), mock.patch.object(main, "_launch") as launch:
+                with self.assertRaises(HTTPException) as cm:
+                    main.retry_crew(main.RetryRequest(id=rid))
+            self.assertEqual(cm.exception.status_code, code)
+            launch.assert_not_called()
+
+    def test_start_with_retry_of_links_and_validates(self):
+        from fastapi import HTTPException
+        req = main.CrewStartRequest(name="n", task="t", retry_of=self.ID)
+        with mock.patch.object(main, "db_get", return_value=self.info()), \
+                mock.patch.object(main, "_launch", return_value="new") as launch:
+            main.start_crew(req)
+        launch.assert_called_once_with("n", "t", main.DEFAULT_AGENTS, self.ID)
+        with mock.patch.object(main, "db_get", return_value=None), mock.patch.object(main, "_launch"):
+            with self.assertRaises(HTTPException):
+                main.start_crew(req)
+        with self.assertRaises(ValueError):
+            main.CrewStartRequest(name="n", task="t", retry_of="../etc")
+
+    def test_row_carries_retry_of(self):
+        import datetime
+        row = (self.ID, "n", "failed", ["researcher"], datetime.datetime(2026, 1, 1), "t", None, "amara-fast",
+               None, None, None, "99999999-2222-3333-4444-555555555555")
+        self.assertEqual(main._row_to_info(row).retry_of, "99999999-2222-3333-4444-555555555555")
 
 
 if __name__ == "__main__":

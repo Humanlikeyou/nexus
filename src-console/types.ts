@@ -470,7 +470,7 @@ export interface SystemSnapshot {
 }
 
 /** crew-service run states (crew_runs.status). */
-export type CrewRunStatus = "running" | "completed" | "failed" | "stopped" | "interrupted";
+export type CrewRunStatus = "running" | "awaiting_approval" | "completed" | "failed" | "stopped" | "interrupted" | "cancelled";
 
 /** One crew run (crew.rs CrewInfo). For failed runs `result` holds the sanitized error. */
 export interface CrewInfo {
@@ -486,6 +486,26 @@ export interface CrewInfo {
   tokens?: number | null;
   requests?: number | null;
   cost_usd?: number | null;
+  /** R13-D: the run this one retries. */
+  retry_of?: string | null;
+}
+
+/** One crew approval request (crew.rs CrewApprovalRow). A separate queue from Terrance's actions. */
+export interface CrewApprovalRow {
+  id: string;
+  run_id: string;
+  crew: string;
+  agents: string[];
+  kind: "write" | "destructive" | "skill" | "retry_limit" | "claude_tier" | string;
+  title: string;
+  /** What this one approval covers: a run asks once for every write action it may take. */
+  items?: string[];
+  reason: string;
+  risk: "Low" | "Medium" | "High" | string;
+  requested_at: string;
+  decided_at?: string | null;
+  approved?: boolean | null;
+  decided_by?: string | null;
 }
 
 /** One timeline step of a run (crew.rs CrewStepRow); times are ms since the run's start. */

@@ -8,3 +8,7 @@ Claude Code does not act on these. Each says where it came from.
 ## W12c Chunk C: recordings loading and gaps (frontend-executor, 2026-11-11)
 - Detail view: a 30 s block loads asynchronously, so the first paint of a window (and after a scrub into a new block) reads as "Needs wiring" for a moment before the trace appears. Wanted: a loading state for the lanes, or keep as is?
 - Gaps in a recording (dropouts, > 0.5 s) arrive as NaN in lane values and in the focus/calm/band series. `linePath`/stack polygons in RecordingsPanels.tsx and the lane drawing do not break lines at NaN, and "avg focus" over a series with a gap shows NaN. Wanted: how gaps should draw (break the line) and be averaged (ignore). No code changed.
+
+## R13-D crew approvals (frontend-executor, 2026-11-11)
+- A run waiting for an approval has status `awaiting_approval` ("Awaiting approval", wait tone). The run page reuses the running copy ("Running… checking every 5 seconds.") and keeps the Stop button for it; a denied run ends `cancelled` (off tone). Wanted: dedicated copy for a run that is waiting for you, and a link from the run page to its approval?
+- Approve now opens the native "Approve Action" dialog; a Deny or an error shows as the card's existing status note. Wanted: how an error or a declined dialog should look.

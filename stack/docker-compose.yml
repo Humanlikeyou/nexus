@@ -206,7 +206,7 @@ services:
       CREW_SERVICE_PORT: "8400"
       CREW_SERVICE_TOKEN: ${CREW_SERVICE_TOKEN:?set CREW_SERVICE_TOKEN in .env}
       CREW_MAX_TASK_CHARS: ${CREW_MAX_TASK_CHARS:-4000}
-      CREW_MAX_CONCURRENT: ${CREW_MAX_CONCURRENT:-2}
+      CREW_MAX_CONCURRENT: ${CREW_MAX_CONCURRENT:-1}
       CREW_RUN_TIMEOUT_SECONDS: ${CREW_RUN_TIMEOUT_SECONDS:-900}
       CREW_ALLOWED_NAMES: ${CREW_ALLOWED_NAMES:-}
       # Tools: allowlist (empty = none) and the read-only Ingress webhook they call
@@ -216,12 +216,9 @@ services:
       # (amara-fast / amara-deep) plus X-Amara-Route. Never Ollama directly.
       CREW_ROUTER_URL: ${CREW_ROUTER_URL:-http://host.docker.internal:8787/v1}
       CREW_ROUTER_KEY: ${CREW_ROUTER_KEY:-}
-      # MiniMax is fail-closed: needs CREW_ALLOW_CLOUD=1, NEXUS_OUTBOUND_DISABLED unset, and a key
-      CREW_ALLOW_CLOUD: ${CREW_ALLOW_CLOUD:-}
+      CREW_DEEP_WAIT_MAX_SECONDS: ${CREW_DEEP_WAIT_MAX_SECONDS:-300}
+      # No cloud path here (MiniMax removed). The kill switch also blocks any future Claude tier.
       NEXUS_OUTBOUND_DISABLED: ${NEXUS_OUTBOUND_DISABLED:-}
-      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
-      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.io/anthropic}
-      MINIMAX_MODEL: ${MINIMAX_MODEL:-MiniMax-M2.5}
       # Persistence — crew_runs table in the shared terrance DB
       CREW_DB_HOST: postgres
       CREW_DB_PORT: "5432"

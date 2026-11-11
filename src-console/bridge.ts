@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { EMPTY_DEVICE_ID } from "./lib/devices";
 import type {
+  CrewApprovalRow,
   CrewInfo,
   CrewRunSteps,
   CrewServiceHealth,
@@ -269,7 +270,10 @@ export function pickKb(k: Partial<KbStatus> | null | undefined): KbStatus {
   return { state, model, docs, detail: null };
 }
 
-export const startCrew = (name: string, task: string) => invoke<CrewInfo>("crew_start", { name, task, agents: null });
+export const startCrew = (name: string, task: string, retryOf: string | null = null) => invoke<CrewInfo>("crew_start", { name, task, agents: null, retryOf });
+export const listCrewApprovals = (state: "pending" | "decided") => invoke<CrewApprovalRow[]>("crew_list_approvals", { state });
+/** Approve opens the native dialog first; deny does not. Errors carry a "declined:" etc. prefix. */
+export const decideCrewApproval = (id: string, approve: boolean) => invoke<CrewApprovalRow>("crew_decide_approval", { id, approve });
 export const getCrewStatus = (id: string) => invoke<CrewInfo>("crew_status", { id });
 export const getCrewRunSteps = (id: string) => invoke<CrewRunSteps>("crew_run_steps", { id });
 export const stopCrew = (id: string) => invoke<string>("crew_stop", { id });

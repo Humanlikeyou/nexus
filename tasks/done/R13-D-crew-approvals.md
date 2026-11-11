@@ -1,0 +1,32 @@
+# R13-D: crew approvals queue (separate from Terrance) + Retry
+- **Owner:** executor. Design doc §6, §11 Phase D; prompt §12b (crew approvals are a separate queue from list_terrence_actions / approve_terrence_action).
+- **Status:** implemented, not committed (orchestrator commits). Gates below.
+- **Taisun's decisions (11-11 18:10 JST, final)** folded in: MiniMax removed; concurrency 1; one batched approval per run; tools read-only by default; outbound/spend/git push/sudo never approvable; at most 2 automatic retries then a retry_limit item; crews wait while deep is resident; $0.00 local cost, null otherwise.
+
+## Acceptance criteria
+- [x] crew-service: `crew_approvals` table (id, run_id, kind write|destructive|skill|retry_limit|claude_tier, title, items[], reason, risk Low|Medium|High, requested_at, decided_at, approved, decided_by). A run that needs approval sets the run `awaiting_approval`; the child is **blocked** (no later task starts) until decided. Deny is final for the batch: run `cancelled`, child killed. Stop still kills a waiting child and expires its request. Service restart marks live runs interrupted and expires pending requests.
+- [x] Blocking design: the **child sends the request over the pipe and waits** on a second parent-to-child pipe (rather than the parent re-queuing the task). Reason: a tool call happens mid-task inside crewAI's loop; re-queuing would re-run the LLM work and lose context. Timeout (CREW_APPROVAL_TIMEOUT_SECONDS, 1800), closed pipe, or anything but an explicit `approve: true` is a deny (fail closed). A request extends the run's own deadline by the same cap.
+- [x] **Once per run, with a list:** the first write call asks for one batch listing every write tool the run's agents hold; one approve covers them all for the run. Risk/title/reason come from the kind (riskiest item), never from the child; items are sanitized and capped (20).
+- [x] Tools read-only by default: `kb_query`/`memory_query` run free; any other registered+allowlisted tool needs the batch approval; no approver = refused. **Never approvable** (no request is created): kinds outbound, spend, network, git_push, sudo. A `claude_tier` tool is also blocked while NEXUS_OUTBOUND_DISABLED is set.
+- [x] Retries: at most 2 automatic retries (CREW_AUTO_RETRIES, backoff), then a `retry_limit` "Needs you" item; approve buys exactly one more attempt, then asks again; deny cancels.
+- [x] MiniMax removed entirely (code, compose, `.env.example`, tests assert it is gone). No cloud path remains in crew-service. `CREW_MAX_CONCURRENT` default 1 (compose, `.env.example`, code).
+- [x] Crews wait while a deep chat turn is in progress: router `GET /health` exposes `loaded.deep` (residency, not an in-flight flag; deep is on-demand/manual so resident deep is the best signal). `wait_for_deep_idle()` polls it before a run builds agents, capped by CREW_DEEP_WAIT_MAX_SECONDS (default 300, 0 = off), unknown = no wait. Caveat: a crew's own deep-tier agent leaves deep resident, so the next run can wait until it unloads (max 300 s). No router change.
+- [x] Cost: `cost_usd` 0.0 for local router runs, null otherwise (unchanged; real cost only if a Claude tier is ever wired).
+- [x] Endpoints (X-Crew-Token, loopback): GET /crews/approvals?state=pending|decided, POST /crews/approvals/{id}/decide {approve}; second decision -> 409, unknown/bad id -> 404.
+- [x] POST /crews/retry {id} clones name/task/agents into a new run with `retry_of`; 409 while the run is live. `/crews/start` also accepts `retry_of`, and the Crews UI "Retry run" (crew_start confirm flow) now passes `retryOf` so the link is recorded.
+- [x] Tauri: `crew_list_approvals(state)`, `crew_decide_approval(id, approve)`: approve lists pending, builds the dialog from the service's own row (title, crew, risk, items) and goes through `approval_gate::require_approval`; deny needs no dialog; ids validated; fixed error text. Registered in `lib.rs`; bridge wrappers `listCrewApprovals`/`decideCrewApproval`/`startCrew(.., retryOf)`.
+- [x] Crews adapter: `approvals()`/`decided()` live from `crews/approvals.ts` cache + `useLiveApprovals` (5 s poll while online); unwired when the service is down or the reply is malformed; amount stays UNWIRED. Terrance rows are dropped by `isCrewApproval`; source tests assert crews never touch Terrance's ledger commands and the snapshot/Terrance reads never touch crew approvals.
+- [x] Tests: Python (request blocks the call, approve resumes and covers the batch, deny cancels, blocked kinds refused, 409 on re-decide, retry links retry_of, retry limit, deep wait, MiniMax gone), Rust (id validation, gate on approve only, dialog lists items), vitest (mapping, separation, bridge args, screen approve/deny/declined/Retry link).
+
+## Evidence (2026-11-11, executor)
+- Docker crew tests: `docker build -t crew-base stack/crew-service`, `docker build -f stack/crew-service/Dockerfile.test --build-arg BASE=crew-base -t crew-test ...`, `docker run --rm --network none crew-test`: **107 passed** (was 75 at the brief; 98 before the scope update). No container rebuilt or restarted.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` clean; `cargo test` (src-tauri): lib **488 passed / 5 ignored** plus integration suites all ok (this tree had 467 lib tests at the first run; the count rose by 21 from my 9 new tests and other files changed in the tree meanwhile).
+- `npx tsc --noEmit` clean; `npm run lint` clean; `npm run test:unit`: **155 files passed, 1464 passed / 9 skipped**.
+- `npm run test:neuro`: 21 passed; `npm run check:secrets` ok.
+- Not run: e2e (`test:e2e`); a live service run (no rebuild allowed), so the pipe handshake is covered by in-process pipes and real child processes in tests, not by a live crew.
+
+## Files
+- `stack/crew-service/main.py`, `test_main.py`; `stack/docker-compose.yml`, `stack/.env.example`.
+- `src-tauri/src/commands/crew.rs`, `src-tauri/src/lib.rs`.
+- `src-console/types.ts`, `bridge.ts`, `crews/approvals.ts` (+ test), `screens/CrewsScreen.tsx`, `screens/CrewPanels.tsx` (logic only: handlers, `awaiting_approval`/`cancelled` status kinds; markup, classes and copy unchanged), `screens/CrewsScreen.test.tsx`, `test/unit/crewApprovalsSeparation.test.ts`, `tasks/design-questions.md`.
+- Needs Taisun/orchestrator: `TAISUN-STEPS.md` line 204 still says "leave CREW_ALLOW_CLOUD empty (MiniMax stays off)" (his uncommitted doc, untouched); `FirstRun.tsx` row "Cloud AI (Claude, MiniMax)" is Design-owned copy (not touched). Rebuild of the crew container is needed to pick all this up.

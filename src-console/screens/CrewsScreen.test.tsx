@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const crew = vi.hoisted(() => ({ startCrew: vi.fn(), getCrewStatus: vi.fn(), stopCrew: vi.fn() }));
+const crew = vi.hoisted(() => ({ startCrew: vi.fn(), getCrewStatus: vi.fn(), stopCrew: vi.fn(), listCrewApprovals: vi.fn(), decideCrewApproval: vi.fn() }));
 vi.mock("../bridge", async (orig) => ({ ...(await orig<typeof import("../bridge")>()), ...crew }));
 
 import { INITIAL_SNAPSHOT, crewSnapshot } from "../bridge";
@@ -99,6 +99,37 @@ describe("Agents › Crews", () => {
     await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Start run" })); });
     expect(crew.startCrew).toHaveBeenCalledWith("smoke", "Reply with the word OK");
     expect(within(screen.getByRole("table", { name: "Runs" })).getByText("Running")).toBeInTheDocument();
+  });
+
+  it("Retry run starts a new run linked to the old one (retryOf)", async () => {
+    crew.startCrew.mockResolvedValue(run({ id: "n2", status: "running", result: null, retry_of: "r1" }));
+    render(<CrewsField data={snap({ runs: [run({ status: "failed", result: "boom" })] })} />);
+    fireEvent.click(screen.getByRole("row", { name: "Open run Smoke" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry run" }));
+    const dialog = screen.getByRole("dialog", { name: "Start this run?" });
+    await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Start run" })); });
+    expect(crew.startCrew).toHaveBeenCalledWith("smoke", "Reply with the word OK", "r1");
+  });
+
+  it("live crew approvals: listed from the crew service; Approve and Deny call crew_decide_approval", async () => {
+    const row = { id: "a1", run_id: "r1", crew: "smoke", agents: ["writer"], kind: "write", title: "Run tool send_note", reason: "the action leaves the Mac", risk: "Medium", requested_at: new Date().toISOString() };
+    crew.listCrewApprovals.mockImplementation(async (state: string) => (state === "pending" ? [row] : []));
+    crew.decideCrewApproval.mockResolvedValue({ ...row, approved: true });
+    await act(async () => { render(<CrewsField data={snap({ runs: [run({ status: "awaiting_approval", result: null })] })} />); });
+    expect(await screen.findByText("Run tool send_note")).toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Approve Run tool send_note" })); });
+    expect(crew.decideCrewApproval).toHaveBeenCalledWith("a1", true);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Deny Run tool send_note" })); });
+    expect(crew.decideCrewApproval).toHaveBeenLastCalledWith("a1", false);
+  });
+
+  it("a declined native dialog shows its message and approves nothing", async () => {
+    const row = { id: "a1", run_id: "r1", crew: "smoke", agents: ["writer"], kind: "write", title: "Run tool send_note", reason: "x", risk: "Low", requested_at: new Date().toISOString() };
+    crew.listCrewApprovals.mockImplementation(async (state: string) => (state === "pending" ? [row] : []));
+    crew.decideCrewApproval.mockRejectedValue("declined: Denied in the native approval dialog. Nothing was changed.");
+    await act(async () => { render(<CrewsField data={snap({ runs: [run()] })} />); });
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: "Approve Run tool send_note" })); });
+    expect(await screen.findByRole("status")).toHaveTextContent(/declined/i);
   });
 
   it("running: polls crew_status every 5 s while mounted, stops polling when done or unmounted", async () => {

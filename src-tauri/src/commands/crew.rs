@@ -87,6 +87,9 @@ pub struct CrewInfo {
     pub requests: Option<i64>,
     #[serde(default)]
     pub cost_usd: Option<f64>,
+    // R13-D: the run this one retries; absent on older rows and older services.
+    #[serde(default)]
+    pub retry_of: Option<String>,
 }
 
 /// One timeline step of a run (crew-service `crew_steps`). Labels are short role/tool names,
@@ -130,6 +133,33 @@ pub struct CrewStartRequest {
     pub name: String,
     pub task: String,
     pub agents: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_of: Option<String>,
+}
+
+/// One crew approval request (crew-service `crew_approvals`). Separate from Terrance's action
+/// ledger (`list_terrence_actions` / `approve_terrence_action`): crew rows never go through those.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct CrewApprovalRow {
+    pub id: String,
+    pub run_id: String,
+    pub crew: String,
+    #[serde(default)]
+    pub agents: Vec<String>,
+    pub kind: String,
+    pub title: String,
+    /// What this one approval covers (a run asks once, listing every write action it may take).
+    #[serde(default)]
+    pub items: Vec<String>,
+    pub reason: String,
+    pub risk: String,
+    pub requested_at: String,
+    #[serde(default)]
+    pub decided_at: Option<String>,
+    #[serde(default)]
+    pub approved: Option<bool>,
+    #[serde(default)]
+    pub decided_by: Option<String>,
 }
 
 #[tauri::command]
@@ -158,9 +188,18 @@ pub async fn crew_start(
     name: String,
     task: String,
     agents: Option<Vec<String>>,
+    retry_of: Option<String>,
 ) -> Result<CrewInfo, String> {
+    if retry_of.as_deref().is_some_and(|r| !valid_run_id(r)) {
+        return Err("Invalid crew run id.".to_string());
+    }
     let client = reqwest::Client::new();
-    let body = CrewStartRequest { name, task, agents };
+    let body = CrewStartRequest {
+        name,
+        task,
+        agents,
+        retry_of,
+    };
     let resp = client
         .post(format!("{}/crews/start", crew_service_url()))
         .header(CREW_TOKEN_HEADER, crew_token()?)
@@ -255,6 +294,166 @@ pub async fn crew_stop(id: String) -> Result<String, String> {
     }
 }
 
+// ---- R13-D: crew approvals --------------------------------------------------------------
+
+/// Where the crew approvals live. The real one is the crew service over loopback; tests stub it.
+trait Backend: Sync {
+    fn list(
+        &self,
+        state: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<CrewApprovalRow>, String>> + Send;
+    fn decide(
+        &self,
+        id: &str,
+        approve: bool,
+    ) -> impl std::future::Future<Output = Result<CrewApprovalRow, String>> + Send;
+}
+
+struct HttpBackend;
+
+impl Backend for HttpBackend {
+    async fn list(&self, state: &str) -> Result<Vec<CrewApprovalRow>, String> {
+        let resp = reqwest::Client::new()
+            .get(format!("{}/crews/approvals", crew_service_url()))
+            .header(CREW_TOKEN_HEADER, crew_token()?)
+            .query(&[("state", state)])
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+            .map_err(|_| "Crew service unreachable.".to_string())?;
+        if !resp.status().is_success() {
+            return Err(http_error("approvals", resp.status()));
+        }
+        resp.json::<Vec<CrewApprovalRow>>()
+            .await
+            .map_err(|_| "Unexpected crew approvals from the crew service.".to_string())
+    }
+
+    async fn decide(&self, id: &str, approve: bool) -> Result<CrewApprovalRow, String> {
+        let resp = reqwest::Client::new()
+            .post(format!(
+                "{}/crews/approvals/{}/decide",
+                crew_service_url(),
+                id
+            ))
+            .header(CREW_TOKEN_HEADER, crew_token()?)
+            .json(&serde_json::json!({ "approve": approve }))
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|_| "Crew service unreachable.".to_string())?;
+        match resp.status().as_u16() {
+            200..=299 => {}
+            404 => return Err(ERR_APPROVAL_GONE.to_string()),
+            409 => return Err(ERR_APPROVAL_DONE.to_string()),
+            _ => return Err(http_error("decision", resp.status())),
+        }
+        resp.json::<CrewApprovalRow>()
+            .await
+            .map_err(|_| "Unexpected crew decision from the crew service.".to_string())
+    }
+}
+
+const ERR_APPROVAL_GONE: &str = "This crew approval no longer exists.";
+const ERR_APPROVAL_DONE: &str = "This crew approval was already decided.";
+
+/// Hands back whatever must stay alive until the decision is sent (the in-flight lock).
+type Held = Box<dyn Send>;
+
+/// Asks the human before an approval is sent. The real one is the native dialog; tests pass theirs.
+trait Gate: Sync {
+    fn approve(
+        &self,
+        key: String,
+        text: String,
+    ) -> impl std::future::Future<Output = Result<Held, String>> + Send;
+}
+
+struct NativeGate(tauri::AppHandle);
+
+impl Gate for NativeGate {
+    async fn approve(&self, key: String, text: String) -> Result<Held, String> {
+        let guard = super::approval_gate::require_approval(&self.0, &[key], text).await?;
+        Ok(Box::new(guard))
+    }
+}
+
+/// First `max` chars (char-boundary safe).
+fn clip(text: &str, max: usize) -> String {
+    text.chars().take(max).collect()
+}
+
+/// The dialog body: exactly what is being approved, from the service's own (sanitized) fields.
+fn approval_dialog(row: &CrewApprovalRow) -> Result<String, String> {
+    super::approval_gate::approval_text(
+        &format!(
+            "Approve crew request: {}\nCrew: {} \u{b7} Risk: {}\nCovers: {}",
+            clip(&row.title, 200),
+            clip(&row.crew, 64),
+            clip(&row.risk, 16),
+            row.items
+                .iter()
+                .take(20)
+                .map(|i| clip(i, 80))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        &format!(
+            "Asked because {}. One Allow covers every item listed for this run. Allow only if you want this crew to continue.",
+            clip(&row.reason, 200)
+        ),
+    )
+}
+
+/// Approve goes through the native dialog (a click in the page alone can never approve); deny does
+/// not need one. The id is validated before anything is sent, and the dialog is built from the
+/// pending row the service reports, never from caller text.
+async fn decide_gated(
+    gate: &impl Gate,
+    backend: &impl Backend,
+    id: String,
+    approve: bool,
+) -> Result<CrewApprovalRow, String> {
+    if !valid_run_id(&id) {
+        return Err("Invalid crew approval id.".to_string());
+    }
+    if !approve {
+        return backend.decide(&id, false).await;
+    }
+    let row = backend
+        .list("pending")
+        .await?
+        .into_iter()
+        .find(|r| r.id == id)
+        .ok_or_else(|| ERR_APPROVAL_GONE.to_string())?;
+    let text = approval_dialog(&row)?;
+    let _held = gate
+        .approve(
+            super::approval_gate::service_key(&format!("crew-approval:{id}")),
+            text,
+        )
+        .await?;
+    backend.decide(&id, true).await
+}
+
+/// `state` is "pending" or "decided".
+#[tauri::command]
+pub async fn crew_list_approvals(state: String) -> Result<Vec<CrewApprovalRow>, String> {
+    if state != "pending" && state != "decided" {
+        return Err("Invalid approval state.".to_string());
+    }
+    HttpBackend.list(&state).await
+}
+
+#[tauri::command]
+pub async fn crew_decide_approval(
+    app: tauri::AppHandle,
+    id: String,
+    approve: bool,
+) -> Result<CrewApprovalRow, String> {
+    decide_gated(&NativeGate(app), &HttpBackend, id, approve).await
+}
+
 /// One of "not_configured" (no token), "offline" (unreachable), "degraded"
 /// (reachable but unhealthy) or "operational". Never an error: every state is
 /// something the UI shows.
@@ -336,6 +535,184 @@ mod tests {
             (new.tokens, new.requests, new.cost_usd),
             (Some(12), Some(2), Some(0.0))
         );
+    }
+
+    // ---- R13-D approvals ----
+
+    use std::sync::Mutex;
+
+    const AID: &str = "aaaaaaaa-2222-3333-4444-555555555555";
+
+    fn row(id: &str) -> CrewApprovalRow {
+        CrewApprovalRow {
+            id: id.into(),
+            run_id: "11111111-2222-3333-4444-555555555555".into(),
+            crew: "Research".into(),
+            agents: vec!["researcher".into()],
+            kind: "outbound".into(),
+            title: "Allow this run to make changes".into(),
+            items: vec!["edit_file".into(), "send_note".into()],
+            reason: "the action leaves the Mac".into(),
+            risk: "Medium".into(),
+            requested_at: "2026-01-01T00:00:00Z".into(),
+            decided_at: None,
+            approved: None,
+            decided_by: None,
+        }
+    }
+
+    struct Stub {
+        asked: Mutex<Vec<String>>,
+        allow: bool,
+    }
+    impl Gate for Stub {
+        async fn approve(&self, _key: String, text: String) -> Result<Held, String> {
+            self.asked.lock().unwrap().push(text);
+            if self.allow {
+                Ok(Box::new(()))
+            } else {
+                Err(super::super::approval_gate::denied_message())
+            }
+        }
+    }
+    fn stub(allow: bool) -> Stub {
+        Stub {
+            asked: Default::default(),
+            allow,
+        }
+    }
+
+    #[derive(Default)]
+    struct Fake {
+        pending: Vec<CrewApprovalRow>,
+        decided: Mutex<Vec<(String, bool)>>,
+    }
+    impl Backend for Fake {
+        async fn list(&self, _state: &str) -> Result<Vec<CrewApprovalRow>, String> {
+            Ok(self.pending.clone())
+        }
+        async fn decide(&self, id: &str, approve: bool) -> Result<CrewApprovalRow, String> {
+            self.decided.lock().unwrap().push((id.into(), approve));
+            Ok(row(id))
+        }
+    }
+
+    #[tokio::test]
+    async fn approve_asks_the_native_gate_and_shows_the_exact_request() {
+        let gate = stub(true);
+        let backend = Fake {
+            pending: vec![row(AID)],
+            ..Default::default()
+        };
+        decide_gated(&gate, &backend, AID.into(), true)
+            .await
+            .unwrap();
+        let asked = gate.asked.lock().unwrap();
+        assert_eq!(asked.len(), 1);
+        assert!(
+            asked[0].contains("Allow this run to make changes")
+                && asked[0].contains("Research")
+                && asked[0].contains("edit_file, send_note"),
+            "{}",
+            asked[0]
+        );
+        assert_eq!(
+            *backend.decided.lock().unwrap(),
+            vec![(AID.to_string(), true)]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_denied_dialog_sends_nothing() {
+        let gate = stub(false);
+        let backend = Fake {
+            pending: vec![row(AID)],
+            ..Default::default()
+        };
+        let err = decide_gated(&gate, &backend, AID.into(), true)
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("declined:"));
+        assert!(backend.decided.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn deny_needs_no_dialog() {
+        let gate = stub(false);
+        let backend = Fake::default();
+        decide_gated(&gate, &backend, AID.into(), false)
+            .await
+            .unwrap();
+        assert!(gate.asked.lock().unwrap().is_empty());
+        assert_eq!(
+            *backend.decided.lock().unwrap(),
+            vec![(AID.to_string(), false)]
+        );
+    }
+
+    #[tokio::test]
+    async fn bad_ids_are_refused_before_any_dialog_or_request() {
+        for approve in [true, false] {
+            let gate = stub(true);
+            let backend = Fake::default();
+            for bad in ["", "../x", "aaaaaaaa-2222-3333-4444-55555555555/"] {
+                let err = decide_gated(&gate, &backend, bad.into(), approve)
+                    .await
+                    .unwrap_err();
+                assert_eq!(err, "Invalid crew approval id.");
+            }
+            assert!(gate.asked.lock().unwrap().is_empty());
+            assert!(backend.decided.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn approving_an_id_that_is_not_pending_never_reaches_the_gate() {
+        let gate = stub(true);
+        let backend = Fake::default();
+        let err = decide_gated(&gate, &backend, AID.into(), true)
+            .await
+            .unwrap_err();
+        assert_eq!(err, ERR_APPROVAL_GONE);
+        assert!(gate.asked.lock().unwrap().is_empty());
+        assert!(backend.decided.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_rejects_an_unknown_state_before_any_request() {
+        assert_eq!(
+            crew_list_approvals("../x".into()).await.unwrap_err(),
+            "Invalid approval state."
+        );
+    }
+
+    #[tokio::test]
+    async fn start_rejects_a_bad_retry_of_before_any_request() {
+        let err = crew_start("n".into(), "t".into(), None, Some("../x".into()))
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Invalid crew run id.");
+    }
+
+    #[test]
+    fn dialog_text_is_clipped_and_char_safe() {
+        let mut r = row(AID);
+        r.title = "\u{e9}".repeat(500);
+        let text = approval_dialog(&r).unwrap();
+        assert!(text.chars().count() < 600);
+    }
+
+    #[test]
+    fn approval_rows_and_retry_of_deserialize() {
+        let r: CrewApprovalRow = serde_json::from_str(
+            r#"{"id":"a","run_id":"b","crew":"c","kind":"outbound","title":"t","reason":"r","risk":"Low","requested_at":"x"}"#,
+        )
+        .unwrap();
+        assert!(r.agents.is_empty() && r.approved.is_none());
+        let i: CrewInfo =
+            serde_json::from_str(r#"{"id":"a","name":"n","status":"cancelled","retry_of":"z"}"#)
+                .unwrap();
+        assert_eq!(i.retry_of.as_deref(), Some("z"));
     }
 
     #[test]

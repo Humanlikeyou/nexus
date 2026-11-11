@@ -7,12 +7,15 @@ FastAPI wrapper around CrewAI. Contract matches src-tauri/src/commands/crew.rs:
   GET  /crews/status?id=       -> CrewInfo
   GET  /crews/runs/{id}/steps  -> {steps, handoffs}
   POST /crews/stop             {id} -> {"id", "status", "stopped": bool}
+  GET  /crews/approvals?state= pending|decided -> [ApprovalOut]
+  POST /crews/approvals/{id}/decide {approve} -> ApprovalOut (409 if already decided)
+  POST /crews/retry            {id} -> CrewInfo (new run, retry_of = id)
 
 Every /crews/* call needs header X-Crew-Token == $CREW_SERVICE_TOKEN.
 LLM: every model call goes through the Amara Router (OpenAI /v1, CREW_ROUTER_URL). Each agent
 role has a tier (fast|deep) pinned by model alias (amara-fast / amara-deep) and an
-X-Amara-Route header. Never Ollama directly. The MiniMax path (Anthropic-messages API) is
-fail-closed: used only if CREW_ALLOW_CLOUD=1, NEXUS_OUTBOUND_DISABLED is unset and a key is set.
+X-Amara-Route header. Never Ollama directly. There is no cloud path in this service (MiniMax was
+removed); a Claude tier, if one is ever added, must also be off while NEXUS_OUTBOUND_DISABLED is set.
 Runs persist to Postgres table crew_runs (created at startup).
 Each crew runs in its own process so /crews/stop can really cancel it.
 Tools: an agent gets a tool only if it is implemented in TOOL_REGISTRY and named in
@@ -39,7 +42,7 @@ from typing import Callable, Dict, List, Optional
 
 import psycopg
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator
 
 log = logging.getLogger("crew-service")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -52,16 +55,21 @@ def _env(name: str, default: str = "") -> str:
 # ── Config (env) ────────────────────────────────────────────────────────────
 CREW_SERVICE_TOKEN = _env("CREW_SERVICE_TOKEN")
 MAX_TASK_CHARS = int(_env("CREW_MAX_TASK_CHARS", "4000"))
-MAX_CONCURRENT = int(_env("CREW_MAX_CONCURRENT", "2"))
+MAX_CONCURRENT = int(_env("CREW_MAX_CONCURRENT", "1"))  # one crew = one in-flight LLM generation
 RUN_TIMEOUT_S = int(_env("CREW_RUN_TIMEOUT_SECONDS", "900"))
+# Automatic retries of a failed attempt before a person must decide (kind retry_limit).
+AUTO_RETRIES = int(_env("CREW_AUTO_RETRIES", "2"))
+RETRY_BACKOFF_S = float(_env("CREW_RETRY_BACKOFF_SECONDS", "2"))
+# A crew run starts only once the deep model is not resident (a deep chat turn is using it).
+# 0 turns the wait off. The wait is capped so a crew can't starve.
+DEEP_WAIT_MAX_S = float(_env("CREW_DEEP_WAIT_MAX_SECONDS", "300"))
+DEEP_WAIT_POLL_S = 5.0
+# How long a child waits for a human decision. A request also extends the run's deadline by this.
+APPROVAL_TIMEOUT_S = int(_env("CREW_APPROVAL_TIMEOUT_SECONDS", "1800"))
 
-MINIMAX_API_KEY = _env("MINIMAX_API_KEY")
-MINIMAX_BASE_URL = _env("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic")
-MINIMAX_MODEL = _env("MINIMAX_MODEL", "MiniMax-M2.5")
 # OLLAMA_BASE_URL / CREW_OLLAMA_MODEL are no longer read here: the router owns model residency.
 CREW_ROUTER_URL = _env("CREW_ROUTER_URL", "http://host.docker.internal:8787/v1")
 CREW_ROUTER_KEY = _env("CREW_ROUTER_KEY")  # optional bearer; the loopback router needs none today
-CREW_ALLOW_CLOUD = _env("CREW_ALLOW_CLOUD")
 NEXUS_OUTBOUND_DISABLED = _env("NEXUS_OUTBOUND_DISABLED")
 ROUTER_TIERS = ("fast", "deep")
 OLLAMA_PORT = 11 * 1000 + 434  # refused as a router port (see router_llm_kwargs)
@@ -94,6 +102,14 @@ class CrewTool:
     fn: Callable[[str], str]
     timeout_s: float = DEFAULT_TOOL_TIMEOUT_S
     max_output_chars: int = DEFAULT_TOOL_OUTPUT_CHARS
+    # What a human is asked when this tool is called (ignored for READ_ONLY_TOOLS). Kinds in
+    # BLOCKED_KINDS are never approvable: the call is refused and no request is made.
+    approval_kind: str = "write"
+
+
+# Tools that run without asking. Anything else that reaches an agent (registered + allowlisted)
+# blocks on an approval request first: an unknown or non-read-only tool fails closed.
+READ_ONLY_TOOLS = frozenset({"kb_query", "memory_query"})
 
 
 TOOL_REGISTRY: Dict[str, CrewTool] = {}
@@ -156,7 +172,180 @@ def run_tool(tool: CrewTool, arg: str) -> str:
     return out
 
 
-def _to_crewai_tool(tool: CrewTool, recorder=None, agent: str = "crew"):
+# Approvable kinds. A run asks ONCE for everything its write tools may do (a batch with a list of
+# items); one approve covers the batch, a deny is final (task cancelled).
+APPROVAL_KINDS = ("write", "destructive", "skill", "retry_limit", "claude_tier")
+# Never approvable, whoever asks: network/outbound, spending, git push, sudo. No request is created.
+BLOCKED_KINDS = frozenset({"outbound", "spend", "network", "git_push", "sudo"})
+# Risk is decided here from the kind, never taken from the child; a batch takes its riskiest item.
+APPROVAL_RISK = {"write": "Medium", "destructive": "High", "skill": "Medium",
+                 "retry_limit": "Low", "claude_tier": "Medium"}
+_RISK_ORDER = ("destructive", "skill", "claude_tier", "write", "retry_limit")
+APPROVAL_REASON = {
+    "write": "the run wants to change something", "destructive": "the run wants to do something destructive",
+    "skill": "it changes a skill or instruction", "retry_limit": "the task failed after its automatic retries",
+    "claude_tier": "it asks for the Claude tier",
+}
+APPROVAL_TITLE = {
+    "write": "Allow this run to make changes", "destructive": "Allow this run to make destructive changes",
+    "skill": "Allow this run to change a skill", "retry_limit": "Retry after repeated failures",
+    "claude_tier": "Allow this run to use the Claude tier",
+}
+MAX_APPROVAL_ITEMS = 20
+APPROVAL_DENIED = "Tool error: approval was denied"
+TOOL_BLOCKED = "Tool error: this action is not allowed"
+
+
+def outbound_disabled() -> bool:
+    return bool(NEXUS_OUTBOUND_DISABLED.strip())
+
+
+def tool_blocked(tool: CrewTool) -> bool:
+    """Never approvable. The Claude tier is also off while the outbound kill switch is set."""
+    return tool.approval_kind in BLOCKED_KINDS or (tool.approval_kind == "claude_tier" and outbound_disabled())
+
+
+def riskiest_kind(kinds) -> str:
+    kinds = [k for k in kinds if k in APPROVAL_KINDS]
+    return min(kinds, key=_RISK_ORDER.index) if kinds else "write"
+
+
+def write_candidates(tools) -> Dict[str, str]:
+    """name -> kind of the tools in a run that need approval and may ever be approved."""
+    return {t.name: t.approval_kind for t in tools
+            if t.name not in READ_ONLY_TOOLS and not tool_blocked(t)}
+
+
+class ChildApprover:
+    """Child side of the approval pipe. A request goes to the parent and BLOCKS the calling tool
+    until the parent answers on `resp`. Per run the first write call asks once, listing every write
+    action the run could take (`candidates`); an approve covers all of them for the rest of the run.
+    Deny, timeout or a closed pipe abort the run (fail closed): the parent marks it cancelled.
+    Messages carry a kind and tool names only, never prompt text or tool arguments."""
+
+    def __init__(self, send: Callable[[dict], None], resp, timeout_s: float = APPROVAL_TIMEOUT_S,
+                 abort: Optional[Callable[[], None]] = None, candidates: Optional[Dict[str, str]] = None):
+        self._send, self._resp, self._timeout = send, resp, timeout_s
+        self._abort = abort or self._exit
+        self._candidates = dict(candidates or {})
+        self.approved: set = set()
+        self._lock = threading.Lock()  # one outstanding request per run
+        self._ask_lock = threading.Lock()  # one prompt for parallel first writes
+
+    @staticmethod
+    def _exit() -> None:
+        os._exit(0)  # the final message was already sent; nothing else may run after a denial
+
+    def request(self, kind: str, items: List[str]) -> bool:
+        if kind not in APPROVAL_KINDS:
+            kind = "write"
+        with self._lock:
+            self._send({"k": "approval", "kind": kind, "items": [str(i)[:MAX_LABEL_CHARS] for i in items][:MAX_APPROVAL_ITEMS]})
+            why = "approval timed out"
+            try:
+                if self._resp.poll(self._timeout):
+                    m = self._resp.recv()
+                    if isinstance(m, dict) and m.get("k") == "decision" and m.get("approve") is True:
+                        return True
+                    why = "approval denied"
+            except (EOFError, OSError):
+                why = "approval channel closed"
+            try:
+                self._send({"k": "final", "status": "cancelled", "result": why, "llm": None})
+            finally:
+                self._abort()
+            return False
+
+    def allow_tool(self, tool: CrewTool) -> bool:
+        """True if this tool is covered by an approved batch; otherwise ask once for the batch."""
+        with self._lock:
+            if tool.name in self.approved:
+                return True
+        # One request at a time: a second parallel first-write waits here and then re-checks, so
+        # the human sees one prompt for the batch, not two.
+        with self._ask_lock:
+            with self._lock:
+                if tool.name in self.approved:
+                    return True
+            batch = dict(self._candidates)
+            batch[tool.name] = tool.approval_kind
+            if not self.request(riskiest_kind(batch.values()), sorted(batch)):
+                return False
+            with self._lock:
+                self.approved |= set(batch)
+            return True
+
+
+def gate_tool_call(tool: CrewTool, approver: Optional[ChildApprover]) -> Optional[str]:
+    """None if the call may run; otherwise the tool-error string to return instead. Read-only tools
+    pass. Blocked kinds are refused outright. Everything else needs an approver and a yes (once per
+    run, for the batch); no approver means no."""
+    if tool.name in READ_ONLY_TOOLS:
+        return None
+    if tool_blocked(tool):
+        return TOOL_BLOCKED
+    if approver is None or not approver.allow_tool(tool):
+        return APPROVAL_DENIED
+    return None
+
+
+def run_with_retries(attempt: Callable[[], object], approver: Optional[ChildApprover],
+                     max_retries: Optional[int] = None, backoff_s: Optional[float] = None,
+                     sleep: Callable[[float], None] = time.sleep):
+    """Run attempt(); on failure retry automatically up to max_retries times, then ask a person
+    (kind retry_limit). An approve buys exactly one more attempt; a deny cancels the run.
+    Returns (True, result) or (False, sanitized error)."""
+    max_retries = AUTO_RETRIES if max_retries is None else max_retries
+    backoff_s = RETRY_BACKOFF_S if backoff_s is None else backoff_s
+    failures, last = 0, "no attempt ran"
+    while True:
+        try:
+            return True, attempt()
+        except Exception as e:
+            last = sanitize_error(e)
+            failures += 1
+        if failures <= max_retries:
+            sleep(backoff_s * failures)
+            continue
+        if approver is None or not approver.request("retry_limit", ["Retry the failed task"]):
+            return False, last
+        failures = max_retries  # one more attempt, then ask again
+
+
+def router_health_url(url: str = "") -> str:
+    base = check_router_url(url or CREW_ROUTER_URL)
+    return (base[:-3] if base.endswith("/v1") else base) + "/health"
+
+
+def deep_resident(url: str = "", opener=None) -> Optional[bool]:
+    """Is the deep model resident, per the router's GET /health (`loaded.deep`)? None if unknown.
+    The router exposes residency, not an in-flight flag: deep is manual/on-demand, so a resident deep
+    model is the best signal that a deep chat turn is using the GPU. Same local host as the LLM calls."""
+    import json
+    import urllib.request
+    try:
+        with (opener or urllib.request.urlopen)(router_health_url(url), timeout=3) as resp:
+            doc = json.loads(resp.read(64 * 1024))
+        deep = (doc.get("loaded") or {}).get("deep")
+        return deep if isinstance(deep, bool) else None
+    except Exception:
+        return None
+
+
+def wait_for_deep_idle(max_wait_s: Optional[float] = None, poll_s: Optional[float] = None,
+                       probe: Callable[[], Optional[bool]] = deep_resident,
+                       sleep: Callable[[float], None] = time.sleep, now: Callable[[], float] = time.monotonic) -> float:
+    """Hold a crew run while the deep model is resident, up to max_wait_s. Unknown (router down or
+    no field) does not wait: the run's own LLM calls report that. Returns seconds waited."""
+    max_wait_s = DEEP_WAIT_MAX_S if max_wait_s is None else max_wait_s
+    poll_s = DEEP_WAIT_POLL_S if poll_s is None else poll_s
+    t0 = now()
+    while max_wait_s > 0 and probe() is True and now() - t0 < max_wait_s:
+        sleep(poll_s)
+    return now() - t0
+
+
+def _to_crewai_tool(tool: CrewTool, recorder=None, agent: str = "crew", approver=None):
     """Wrap a CrewTool as a CrewAI tool (imported lazily: only the crew child needs crewai).
     With a recorder, each call is timed as a tool step; a "Tool error:" result (already
     sanitized by run_tool) marks it failed. The step never carries the query or the output."""
@@ -167,6 +356,9 @@ def _to_crewai_tool(tool: CrewTool, recorder=None, agent: str = "crew"):
         description: str = tool.description
 
         def _run(self, query: str) -> str:
+            blocked = gate_tool_call(tool, approver)
+            if blocked is not None:
+                return blocked
             t0 = time.time()
             out = run_tool(tool, query)
             if recorder is not None:
@@ -324,7 +516,8 @@ class CrewInfo(BaseModel):
     finished_at: Optional[str] = None
     tokens: Optional[int] = None      # prompt + completion, from the LLM responses' usage
     requests: Optional[int] = None    # LLM calls
-    cost_usd: Optional[float] = None  # 0 for the local router; unknown (None) for the cloud path
+    cost_usd: Optional[float] = None  # 0 for the local router; None when unknown (real cost only if a Claude tier is ever used)
+    retry_of: Optional[str] = None    # the run this one retries, if any
 
 
 class CrewStepOut(BaseModel):
@@ -354,6 +547,14 @@ class CrewStartRequest(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     task: str = Field(min_length=1)
     agents: Optional[List[str]] = None
+    retry_of: Optional[str] = None
+
+    @field_validator("retry_of")
+    @classmethod
+    def _retry_of(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not re.fullmatch(r"[0-9a-fA-F-]{36}", v):
+            raise ValueError("retry_of must be a run id")
+        return v
 
     @field_validator("name")
     @classmethod
@@ -394,6 +595,31 @@ class CrewStopRequest(BaseModel):
     id: str
 
 
+class ApprovalOut(BaseModel):
+    id: str
+    run_id: str
+    crew: str
+    agents: List[str]
+    kind: str
+    title: str
+    items: List[str] = []
+    reason: str
+    risk: str
+    requested_at: str
+    decided_at: Optional[str] = None
+    approved: Optional[bool] = None
+    decided_by: Optional[str] = None
+
+
+class DecideRequest(BaseModel):
+    # Strict: only a real JSON true/false. "yes" or 1 is a 422, never an approval.
+    approve: StrictBool
+
+
+class RetryRequest(BaseModel):
+    id: str
+
+
 # ── Persistence ─────────────────────────────────────────────────────────────
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS crew_runs (
@@ -430,6 +656,22 @@ CREATE TABLE IF NOT EXISTS crew_handoffs (
     status     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS crew_handoffs_run_idx ON crew_handoffs (run_id, id);
+ALTER TABLE crew_runs ADD COLUMN IF NOT EXISTS retry_of TEXT;
+CREATE TABLE IF NOT EXISTS crew_approvals (
+    id           TEXT PRIMARY KEY,
+    run_id       TEXT NOT NULL,
+    kind         TEXT NOT NULL CHECK (kind IN ('write','destructive','skill','retry_limit','claude_tier')),
+    title        TEXT NOT NULL,
+    items        TEXT[] NOT NULL DEFAULT '{}',
+    reason       TEXT NOT NULL,
+    risk         TEXT NOT NULL CHECK (risk IN ('Low','Medium','High')),
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    decided_at   TIMESTAMPTZ,
+    approved     BOOLEAN,
+    decided_by   TEXT
+);
+CREATE INDEX IF NOT EXISTS crew_approvals_run_idx ON crew_approvals (run_id);
+CREATE INDEX IF NOT EXISTS crew_approvals_pending_idx ON crew_approvals (decided_at, requested_at);
 """
 
 
@@ -447,18 +689,19 @@ def _row_to_info(r) -> CrewInfo:
         tokens=r[9] if len(r) > 9 else None,
         requests=r[10] if len(r) > 10 else None,
         cost_usd=run_cost_usd(r[7] if len(r) > 7 else None),
+        retry_of=r[11] if len(r) > 11 else None,
     )
 
 
 def run_cost_usd(llm: Optional[str]) -> Optional[float]:
-    """0 for runs on the local router; None (unknown) for the cloud path or unknown rows."""
+    """0 for runs on the local router; None (unknown) for anything else."""
     if not llm or not all(p.startswith("amara-") for p in llm.split(",")):
         return None
     return 0.0
 
 
 _SELECT = ("SELECT id, name, status, agents, started_at AT TIME ZONE 'UTC', task, result, llm, "
-           "finished_at AT TIME ZONE 'UTC', tokens, requests FROM crew_runs")
+           "finished_at AT TIME ZONE 'UTC', tokens, requests, retry_of FROM crew_runs")
 
 
 def db_get(crew_id: str) -> Optional[CrewInfo]:
@@ -472,9 +715,94 @@ def db_finish(crew_id: str, status: str, result: Optional[str], llm: Optional[st
     with db() as c:
         c.execute(
             "UPDATE crew_runs SET status=%s, result=%s, llm=COALESCE(%s, llm), finished_at=now() "
-            "WHERE id=%s AND status='running'",
+            "WHERE id=%s AND status IN ('running','awaiting_approval')",
             (status, safe_result(status, result), llm, crew_id),
         )
+
+
+LIVE_STATUSES = ("running", "awaiting_approval")
+
+
+# ── Approvals ───────────────────────────────────────────────────────────────
+_APPROVAL_SELECT = (
+    "SELECT a.id, a.run_id, r.name, r.agents, a.kind, a.title, a.items, a.reason, a.risk, "
+    "a.requested_at AT TIME ZONE 'UTC', a.decided_at AT TIME ZONE 'UTC', a.approved, a.decided_by "
+    "FROM crew_approvals a JOIN crew_runs r ON r.id = a.run_id")
+APPROVAL_ID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
+
+
+def _iso(t) -> Optional[str]:
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ") if t else None
+
+
+def _row_to_approval(r) -> ApprovalOut:
+    return ApprovalOut(id=r[0], run_id=r[1], crew=r[2], agents=list(r[3]), kind=r[4],
+                       title=sanitize_text(r[5]), items=[sanitize_text(i) for i in (r[6] or [])],
+                       reason=sanitize_text(r[7]), risk=r[8],
+                       requested_at=_iso(r[9]) or "", decided_at=_iso(r[10]), approved=r[11],
+                       decided_by=r[12])
+
+
+def db_create_approval(crew_id: str, m: dict) -> str:
+    """Store a child's batch request and park the run as awaiting_approval. kind is allowlisted;
+    title, reason and risk come from the kind (never the child); items are sanitized and capped."""
+    kind = m.get("kind") if m.get("kind") in APPROVAL_KINDS else "write"
+    raw = m.get("items") if isinstance(m.get("items"), list) else []
+    items = [t for t in (sanitize_text(i)[:MAX_LABEL_CHARS] for i in raw[:MAX_APPROVAL_ITEMS]) if t]
+    approval_id = str(uuid.uuid4())
+    with db() as c:
+        c.execute("INSERT INTO crew_approvals (id, run_id, kind, title, items, reason, risk) "
+                  "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                  (approval_id, crew_id, kind, APPROVAL_TITLE[kind], items, APPROVAL_REASON[kind],
+                   APPROVAL_RISK[kind]))
+        c.execute("UPDATE crew_runs SET status='awaiting_approval' WHERE id=%s AND status='running'",
+                  (crew_id,))
+    return approval_id
+
+
+def db_list_approvals(state: str, limit: int = 50) -> List[ApprovalOut]:
+    if state == "pending":
+        sql, params = _APPROVAL_SELECT + " WHERE a.decided_at IS NULL ORDER BY a.requested_at", ()
+    else:
+        sql, params = (_APPROVAL_SELECT + " WHERE a.decided_at IS NOT NULL "
+                       "ORDER BY a.decided_at DESC LIMIT %s"), (limit,)
+    with db() as c:
+        rows = c.execute(sql, params).fetchall()
+    return [_row_to_approval(r) for r in rows]
+
+
+def db_decide_approval(approval_id: str, approve: bool, by: str = "user") -> Optional[tuple]:
+    """Atomically record a decision. Returns (run_id,) if this call decided it, None if it was
+    already decided (the caller answers 409) or does not exist (see db_approval_exists)."""
+    with db() as c:
+        r = c.execute("UPDATE crew_approvals SET decided_at=now(), approved=%s, decided_by=%s "
+                      "WHERE id=%s AND decided_at IS NULL RETURNING run_id",
+                      (approve, by, approval_id)).fetchone()
+    return (r[0],) if r else None
+
+
+def db_approval_exists(approval_id: str) -> bool:
+    with db() as c:
+        return c.execute("SELECT 1 FROM crew_approvals WHERE id=%s", (approval_id,)).fetchone() is not None
+
+
+def db_get_approval(approval_id: str) -> Optional[ApprovalOut]:
+    with db() as c:
+        r = c.execute(_APPROVAL_SELECT + " WHERE a.id=%s", (approval_id,)).fetchone()
+    return _row_to_approval(r) if r else None
+
+
+def db_expire_approvals(crew_id: str, by: str = "system") -> None:
+    """A run that ended (stopped, crashed, timed out, restarted) can't use a pending request."""
+    with db() as c:
+        c.execute("UPDATE crew_approvals SET decided_at=now(), approved=false, decided_by=%s "
+                  "WHERE run_id=%s AND decided_at IS NULL", (by, crew_id))
+
+
+def db_resume_run(crew_id: str) -> None:
+    with db() as c:
+        c.execute("UPDATE crew_runs SET status='running' WHERE id=%s AND status='awaiting_approval'",
+                  (crew_id,))
 
 
 STEP_KINDS = ("task", "tool", "llm")
@@ -620,31 +948,18 @@ def router_llm_kwargs(tier: str, url: str = "", key: str = "") -> dict:
     )
 
 
-def cloud_allowed(allow: Optional[str] = None, outbound_disabled: Optional[str] = None,
-                  key: Optional[str] = None) -> bool:
-    """Fail-closed MiniMax gate: CREW_ALLOW_CLOUD=1 AND NEXUS_OUTBOUND_DISABLED unset AND a key."""
-    allow = CREW_ALLOW_CLOUD if allow is None else allow
-    off = NEXUS_OUTBOUND_DISABLED if outbound_disabled is None else outbound_disabled
-    key = MINIMAX_API_KEY if key is None else key
-    return allow.strip() == "1" and not off.strip() and bool(key.strip())
-
-
 def planned_llm_label(agent_keys: List[str]) -> str:
     """Router model names for a run's agents, e.g. 'amara-deep,amara-fast'."""
     return ",".join(sorted({router_model(AGENT_CATALOG[k]["tier"]) for k in agent_keys}))
 
 
 def _build_llms(agent_keys: List[str]):
-    """Attempts, in order: [(label, {agent_key: LLM})]. The router first; MiniMax only if gated."""
+    """Attempts, in order: [(label, {agent_key: LLM})]. The Amara Router only: there is no cloud
+    path in the crew service."""
     from crewai import LLM
 
-    attempts = [(planned_llm_label(agent_keys), {
+    return [(planned_llm_label(agent_keys), {
         k: LLM(**router_llm_kwargs(AGENT_CATALOG[k]["tier"])) for k in agent_keys})]
-    if cloud_allowed():
-        cloud = LLM(model=MINIMAX_MODEL, provider="anthropic",
-                    base_url=MINIMAX_BASE_URL, api_key=MINIMAX_API_KEY)
-        attempts.append(("minimax/" + MINIMAX_MODEL, {k: cloud for k in agent_keys}))
-    return attempts
 
 
 def step_label(kind: str, agent: str, tool: Optional[str] = None) -> str:
@@ -804,7 +1119,7 @@ def _attach_listeners(rec: RunRecorder, role_to_key: Dict[str, str]):
     return detach
 
 
-def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
+def _run_crew_child(agent_keys: List[str], task_description: str, conn, resp_conn=None) -> None:
     """Runs in a separate process. Streams step/handoff/usage dicts, then one final dict."""
     # Own process group, so stop/timeout can kill the crew and anything it spawned.
     os.setsid()
@@ -815,6 +1130,9 @@ def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
             conn.send(msg)
 
     rec = RunRecorder(send, agent_keys)
+    run_tools = [t for k in agent_keys for t in tools_for(k)]
+    approver = (ChildApprover(send, resp_conn, candidates=write_candidates(run_tools))
+                if resp_conn is not None else None)
     role_to_key = {AGENT_CATALOG[k]["role"]: k for k in AGENT_CATALOG}
     detach = None
     final = None
@@ -822,13 +1140,16 @@ def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
         from crewai import Agent, Crew, Process, Task
 
         detach = _attach_listeners(rec, role_to_key)
+        waited = wait_for_deep_idle()  # a deep chat turn goes first
+        if waited >= 1:
+            log.info("crew run waited %.0fs for the deep model to go idle", waited)
         last_err = "no LLM configured"
         for label, llms in _build_llms(agent_keys):
-            try:
+            def attempt(label=label, llms=llms):
                 agents = [
                     Agent(role=AGENT_CATALOG[k]["role"], goal=AGENT_CATALOG[k]["goal"],
                           backstory=AGENT_CATALOG[k]["backstory"],
-                          tools=[_to_crewai_tool(t, rec, k) for t in tools_for(k)],
+                          tools=[_to_crewai_tool(t, rec, k, approver) for t in tools_for(k)],
                           llm=llms[k], allow_delegation=False, verbose=False)
                     for k in agent_keys
                 ]
@@ -840,12 +1161,14 @@ def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
                         agent=a, expected_output="An improved, concise result.",
                         context=[tasks[-1]],
                     ))
-                out = Crew(agents=agents, tasks=tasks, process=Process.sequential,
-                           verbose=False).kickoff()
-                final = ("completed", str(out), label, out)
+                return Crew(agents=agents, tasks=tasks, process=Process.sequential,
+                            verbose=False).kickoff()
+
+            ok, res = run_with_retries(attempt, approver)
+            if ok:
+                final = ("completed", str(res), label, res)
                 break
-            except Exception as e:  # try next LLM
-                last_err = f"{label}: {sanitize_error(e)}"
+            last_err = f"{label}: {res}"
         if final is None:
             final = ("failed", last_err, None, None)
     except Exception as e:
@@ -875,6 +1198,7 @@ def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
 
 _ctx = mp.get_context("spawn")
 _procs: Dict[str, mp.Process] = {}
+_resp_pipes: Dict[str, object] = {}  # parent -> child decision pipes, by run id
 _lock = threading.Lock()
 
 
@@ -908,10 +1232,10 @@ def kill_group(proc, grace_s: float = 5.0) -> None:
             break  # group fully gone
 
 
-def _watch(crew_id: str, proc, parent_conn) -> None:
+def _watch(crew_id: str, proc, parent_conn, resp_conn=None) -> None:
     """Drain the child's pipe while it runs (steps are written as they arrive), then settle the
     run. Totals are written on every path, so stopped and timed-out runs keep what they used."""
-    deadline = time.monotonic() + RUN_TIMEOUT_S
+    deadline_box = [time.monotonic() + RUN_TIMEOUT_S]
     final: Optional[dict] = None
     totals = {"tokens": 0, "requests": 0, "missing": 0}
     timed_out = False
@@ -926,6 +1250,10 @@ def _watch(crew_id: str, proc, parent_conn) -> None:
                 db_add_step(crew_id, msg)
             elif k == "handoff":
                 db_add_handoff(crew_id, msg)
+            elif k == "approval":
+                db_create_approval(crew_id, msg)
+                # The human may take a while; the wait must not eat the run's own budget.
+                deadline_box[0] += APPROVAL_TIMEOUT_S
             elif k in ("usage", "final"):
                 totals["tokens"] = int(msg.get("tokens", totals["tokens"]) or 0)
                 totals["requests"] = int(msg.get("requests", totals["requests"]) or 0)
@@ -936,7 +1264,7 @@ def _watch(crew_id: str, proc, parent_conn) -> None:
             log.warning("run %s: dropped a %s message: %s", crew_id, msg.get("k"), sanitize_error(e))
 
     while final is None:
-        remain = deadline - time.monotonic()
+        remain = deadline_box[0] - time.monotonic()
         if remain <= 0:
             timed_out = True
             break
@@ -968,8 +1296,37 @@ def _watch(crew_id: str, proc, parent_conn) -> None:
             db_set_totals(crew_id, totals["tokens"], totals["requests"])
     except Exception as e:
         log.warning("run %s: could not store totals: %s", crew_id, sanitize_error(e))
+    try:
+        db_expire_approvals(crew_id)
+    except Exception as e:
+        log.warning("run %s: could not expire approvals: %s", crew_id, sanitize_error(e))
     with _lock:
         _procs.pop(crew_id, None)
+        pipe = _resp_pipes.pop(crew_id, None)
+    for c in (pipe, resp_conn):
+        try:
+            if c is not None:
+                c.close()
+        except OSError:
+            pass
+
+
+def deliver_decision(crew_id: str, approve: bool) -> None:
+    """Act on a recorded decision. Approve resumes the blocked child (run back to running); deny
+    cancels the run and kills the child, so nothing after the denied call can start."""
+    with _lock:
+        proc, pipe = _procs.get(crew_id), _resp_pipes.get(crew_id)
+    if approve:
+        db_resume_run(crew_id)
+        try:
+            if pipe is not None:
+                pipe.send({"k": "decision", "approve": True})
+        except (OSError, ValueError):
+            log.warning("run %s: could not deliver the approval to the child", crew_id)
+    else:
+        db_finish(crew_id, "cancelled", "approval denied")
+        if proc is not None and proc.is_alive():
+            kill_group(proc)
 
 
 # ── App ─────────────────────────────────────────────────────────────────────
@@ -980,13 +1337,15 @@ async def lifespan(_app: FastAPI):
     with db() as c:
         c.execute(SCHEMA)
         n = c.execute(
-            "UPDATE crew_runs SET status='interrupted', finished_at=now() WHERE status='running'"
+            "UPDATE crew_runs SET status='interrupted', finished_at=now() "
+            "WHERE status IN ('running','awaiting_approval')"
         ).rowcount
+        c.execute("UPDATE crew_approvals SET decided_at=now(), approved=false, decided_by='system' "
+                  "WHERE decided_at IS NULL")
     if n:
         log.info("marked %d orphaned runs as interrupted", n)
     check_router_url(CREW_ROUTER_URL)  # fail at startup, not on the first run
-    log.info("crew LLM: Amara Router %s; cloud path %s", CREW_ROUTER_URL,
-             "enabled" if cloud_allowed() else "off")
+    log.info("crew LLM: Amara Router %s (no cloud path); max %d concurrent", CREW_ROUTER_URL, MAX_CONCURRENT)
     log.info("crew tools allowed: %s", ", ".join(sorted(ALLOWED_TOOLS)) or "none")
     yield
     with _lock:
@@ -1015,26 +1374,51 @@ def list_crews(limit: int = Query(default=50, ge=1, le=500)):
     return [_row_to_info(r) for r in rows]
 
 
-@app.post("/crews/start", response_model=CrewInfo, dependencies=[Depends(require_token)])
-def start_crew(req: CrewStartRequest):
-    agents = req.agents or DEFAULT_AGENTS
+def _launch(name: str, task: str, agents: List[str], retry_of: Optional[str] = None) -> CrewInfo:
     with _lock:
         if sum(p.is_alive() for p in _procs.values()) >= MAX_CONCURRENT:
             raise HTTPException(status_code=429, detail=f"max {MAX_CONCURRENT} concurrent crews")
         crew_id = str(uuid.uuid4())
         with db() as c:
             c.execute(
-                "INSERT INTO crew_runs (id, name, status, agents, task, llm) "
-                "VALUES (%s,%s,'running',%s,%s,%s)",
-                (crew_id, req.name, agents, req.task, planned_llm_label(agents)),
+                "INSERT INTO crew_runs (id, name, status, agents, task, llm, retry_of) "
+                "VALUES (%s,%s,'running',%s,%s,%s,%s)",
+                (crew_id, name, agents, task, planned_llm_label(agents), retry_of),
             )
         parent_conn, child_conn = _ctx.Pipe(duplex=False)
-        proc = _ctx.Process(target=_run_crew_child, args=(agents, req.task, child_conn), daemon=True)
+        resp_recv, resp_send = _ctx.Pipe(duplex=False)  # parent -> child: approval decisions
+        proc = _ctx.Process(target=_run_crew_child, args=(agents, task, child_conn, resp_recv), daemon=True)
         proc.start()
         child_conn.close()
+        resp_recv.close()
         _procs[crew_id] = proc
+        _resp_pipes[crew_id] = resp_send
     threading.Thread(target=_watch, args=(crew_id, proc, parent_conn), daemon=True).start()
     return db_get(crew_id)
+
+
+@app.post("/crews/start", response_model=CrewInfo, dependencies=[Depends(require_token)])
+def start_crew(req: CrewStartRequest):
+    if req.retry_of and not db_get(req.retry_of):
+        raise HTTPException(status_code=404, detail="Crew execution not found")
+    return _launch(req.name, req.task, req.agents or DEFAULT_AGENTS, req.retry_of)
+
+
+@app.post("/crews/retry", response_model=CrewInfo, dependencies=[Depends(require_token)])
+def retry_crew(req: RetryRequest):
+    """Clone a finished run's name, task and agents into a new run linked by retry_of."""
+    if not RUN_ID_RE.match(req.id):
+        raise HTTPException(status_code=404, detail="Crew execution not found")
+    old = db_get(req.id)
+    if not old or not old.task:
+        raise HTTPException(status_code=404, detail="Crew execution not found")
+    if old.status in LIVE_STATUSES:
+        raise HTTPException(status_code=409, detail="Crew execution is still active")
+    try:
+        again = CrewStartRequest(name=old.name, task=old.task, agents=old.agents, retry_of=old.id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="This run can no longer be retried") from None
+    return _launch(again.name, again.task, again.agents or DEFAULT_AGENTS, old.id)
 
 
 @app.get("/crews/status", response_model=CrewInfo, dependencies=[Depends(require_token)])
@@ -1058,19 +1442,41 @@ def get_run_steps(run_id: str):
     return db_run_steps(run_id)
 
 
+@app.get("/crews/approvals", response_model=List[ApprovalOut], dependencies=[Depends(require_token)])
+def list_approvals(state: str = Query(default="pending", pattern="^(pending|decided)$"),
+                   limit: int = Query(default=50, ge=1, le=200)):
+    return db_list_approvals(state, limit)
+
+
+@app.post("/crews/approvals/{approval_id}/decide", response_model=ApprovalOut,
+          dependencies=[Depends(require_token)])
+def decide_approval(approval_id: str, req: DecideRequest):
+    """The only way a request is approved. Idempotent by refusal: a second decision is 409."""
+    if not APPROVAL_ID_RE.match(approval_id):
+        raise HTTPException(status_code=404, detail="Approval not found")
+    got = db_decide_approval(approval_id, req.approve)
+    if got is None:
+        if db_approval_exists(approval_id):
+            raise HTTPException(status_code=409, detail="Already decided")
+        raise HTTPException(status_code=404, detail="Approval not found")
+    deliver_decision(got[0], req.approve)
+    return db_get_approval(approval_id)
+
+
 @app.post("/crews/stop", dependencies=[Depends(require_token)])
 def stop_crew(req: CrewStopRequest):
     info = db_get(req.id)
     if not info:
         raise HTTPException(status_code=404, detail="Crew execution not found")
-    if info.status != "running":
+    if info.status not in LIVE_STATUSES:
         return {"id": req.id, "status": info.status, "stopped": False}
     with _lock:
         proc = _procs.get(req.id)
     # Mark stopped first so the watcher can't overwrite it with "failed".
     db_finish(req.id, "stopped", "stopped by user")
+    db_expire_approvals(req.id, "system")
     if proc and proc.is_alive():
-        kill_group(proc)
+        kill_group(proc)  # also kills a child that is blocked waiting for an approval
     return {"id": req.id, "status": "stopped", "stopped": True}
 
 

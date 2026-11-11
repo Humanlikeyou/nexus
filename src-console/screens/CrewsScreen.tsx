@@ -1,10 +1,11 @@
 import { ChevronLeft, Play, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { INITIAL_SNAPSHOT, getCrewStatus, startCrew, stopCrew } from "../bridge";
+import { INITIAL_SNAPSHOT, decideCrewApproval, getCrewStatus, startCrew, stopCrew } from "../bridge";
 import { dateTime, humanize, plainText, sentenceStart } from "../lib/format";
 import type { CrewInfo, CrewServiceHealth, SystemSnapshot } from "../types";
 import { Button, Card, DataTag, Dialog, More, PageHero, StatusText, TextField, wiredTag, type StatusKind, type Tone } from "../ui";
 import { crewsAdapter, type CrewsAdapter } from "../crews/adapters";
+import { loadApprovals, useLiveApprovals } from "../crews/approvals";
 import { useLiveRunAdapter } from "../crews/runDetail";
 import { CrewApprovalsCard, CrewDecidedCard, CrewRunPage } from "./CrewPanels";
 import { crewToolsAdapter, type CrewToolsAdapter } from "../crews/toolGrant";
@@ -59,11 +60,13 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
   const [page, setPage] = useState<CrewPage>({ kind: "overview" });
   const selected = page.kind === "run" ? runs.find((r) => r.id === page.id) ?? null : null;
   const runAdapter = useLiveRunAdapter(adapter, selected);
+  const approvalAdapter = useLiveApprovals(runAdapter, data.crew.health === "online");
   const [formOpen, setFormOpen] = useState(false);
 
   const [name, setName] = useState("");
   const [task, setTask] = useState("");
   const [confirmStart, setConfirmStart] = useState(false);
+  const [retryOf, setRetryOf] = useState<string | null>(null); // set by Retry run, so the new run links back
   const [confirmStop, setConfirmStop] = useState<CrewInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -72,7 +75,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
   const canStart = health === "online" && !busy && CREW_NAME_RE.test(name) && task.trim().length > 0 && task.length <= CREW_MAX_TASK_CHARS;
 
   // Poll crew_status every 5 s, only while a run is running and this view is mounted.
-  const runningIds = useMemo(() => runs.filter((r) => r.status === "running").map((r) => r.id).join(","), [runs]);
+  const runningIds = useMemo(() => runs.filter((r) => r.status === "running" || r.status === "awaiting_approval").map((r) => r.id).join(","), [runs]);
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
   useEffect(() => {
@@ -96,7 +99,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
     setBusy(true);
     setActionError(null);
     try {
-      const info = await startCrew(name.trim(), task.trim());
+      const info = await (retryOf ? startCrew(name.trim(), task.trim(), retryOf) : startCrew(name.trim(), task.trim()));
       setRuns((prev) => [info, ...prev.filter((r) => r.id !== info.id)]);
       setName("");
       setTask("");
@@ -105,6 +108,22 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
     } finally {
       setBusy(false);
       setConfirmStart(false);
+      setRetryOf(null);
+    }
+  };
+
+  /** Approve opens the native dialog in the backend; this only reports the outcome as a note. */
+  const decide = async (id: string, approve: boolean): Promise<string | null> => {
+    try {
+      await decideCrewApproval(id, approve);
+      return null;
+    } catch (e) {
+      return errorText(e);
+    } finally {
+      void loadApprovals();
+      for (const r of runs) {
+        if (r.status === "awaiting_approval") void Promise.resolve(getCrewStatus(r.id)).then((info) => { if (mounted.current && info) setRuns((prev) => prev.map((x) => (x.id === info.id ? info : x))); }).catch(() => undefined);
+      }
     }
   };
 
@@ -136,7 +155,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
     <>
       {actionError && <p className="crews__error" role="alert">{actionError}</p>}
       <Dialog open={confirmStart} title="Start this run?" confirmLabel="Start run" busy={busy}
-        onConfirm={() => { void start(); }} onCancel={() => setConfirmStart(false)}>
+        onConfirm={() => { void start(); }} onCancel={() => { setConfirmStart(false); setRetryOf(null); }}>
         Runs on the local model inside the crew service. It may take a few minutes; you can stop it from the run.
       </Dialog>
       <Dialog open={confirmStop !== null} title="Stop this run?" confirmLabel="Stop Run" destructive busy={busy}
@@ -151,7 +170,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
       <div className="crews page-inset cc-page">
         <CrewRunPage run={selected} adapter={runAdapter} busy={busy} onBack={() => setPage({ kind: "overview" })}
           onStop={() => setConfirmStop(selected)}
-          onRetry={health === "online" ? () => { setName(selected.name); setTask(selected.task ?? ""); setConfirmStart(true); } : undefined} />
+          onRetry={health === "online" ? () => { setName(selected.name); setTask(selected.task ?? ""); setRetryOf(selected.id); setConfirmStart(true); } : undefined} />
         {dialogs}
       </div>
     );
@@ -169,7 +188,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
     );
   }
 
-  const approvals = adapter.approvals();
+  const approvals = approvalAdapter.approvals();
   if (page.kind === "approvals") {
     const count = approvals.state === "unwired" ? 0 : approvals.value.length;
     return (
@@ -177,8 +196,8 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
         <Button className="cc-back" variant="plain" size="small" icon={ChevronLeft} onClick={() => setPage({ kind: "overview" })}>Crews</Button>
         <PageHero title="Crews" statement={approvals.state === "unwired" ? "Crew approvals" : `${count} crew approval${count === 1 ? "" : "s"} waiting`}
           detail={<>Only crew requests are here; Terrance&apos;s approvals stay in chat and Today.{wiredTag(approvals) && <span className="cc-hero-tag">{wiredTag(approvals)}</span>}</>} />
-        <CrewApprovalsCard approvals={approvals} full />
-        <CrewDecidedCard decided={adapter.decided()} />
+        <CrewApprovalsCard approvals={approvals} full onDecide={decide} />
+        <CrewDecidedCard decided={approvalAdapter.decided()} />
       </div>
     );
   }
@@ -215,7 +234,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
         <li className="cc-tile"><span className="cc-tile__k">Schedules</span><span className="cc-tile__v">{data.hermes.activeSchedules} active</span><span className="cc-tile__s">Next run {next.state === "unwired" ? wiredTag(next) : next.value}</span></li>
       </ul>
 
-      <CrewApprovalsCard approvals={approvals} onViewAll={() => setPage({ kind: "approvals" })} />
+      <CrewApprovalsCard approvals={approvals} onViewAll={() => setPage({ kind: "approvals" })} onDecide={decide} />
 
       {health === "online" && (
         <Card title="Runs" accessory={<span className="cc-card__acc"><Button variant="secondary" size="small" icon={Plus} onClick={() => { setFormOpen(true); requestAnimationFrame(() => document.getElementById("crews-new-run")?.scrollIntoView({ block: "nearest" })); }}>New run</Button></span>}>
