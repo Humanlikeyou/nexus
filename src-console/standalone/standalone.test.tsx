@@ -18,7 +18,7 @@ import { valueOf } from "../lib/sampleAdapters";
 const data: SystemSnapshot = { ...INITIAL_SNAPSHOT, refreshedAt: INITIAL_SNAPSHOT.refreshedAt + 1 };
 /** Absorbed into Amara (Taisun, 14:59 JST Nov 11): no NOOP / NOOP.app / "separate program" / OpenClaw framing anywhere. */
 const FORBIDDEN = /NOOP|OpenClaw|separate program/;
-const SENTINEL = "sk-SENTINEL-7f3a-never-render";
+const SENTINEL = "SENTINEL-telegram-7f3a-never-render";
 
 afterEach(() => { localStorage.clear(); resetStandaloneAdapter(); });
 
