@@ -113,14 +113,9 @@ Registered: 129 · live: 129 · legacy-only: 0 · no callers: 0
 | `restart_docker_service` | live | `src/lib/api.ts` | — |
 | `restart_services` | live | `src/terrance/system/selfDiagnosis.ts` | — |
 | `check_service_port` | live | `src/lib/api.ts`, `src/terrance/system/selfDiagnosis.ts` | — |
-| `read_openclaw_status` | live | `src-console/bridge.ts`, `src/lib/api.ts` | — |
-| `read_cron_jobs` | live | `src/lib/api.ts` | — |
 | `read_skills` | live | `src/lib/api.ts`, `src/terrance/system/continuity.ts`, `src/terrance/system/skillsEvolution.ts` | — |
 | `read_tasks` | live | `src-console/bridge.ts`, `src/lib/api.ts` | — |
 | `read_content_pipeline` | live | `src-console/bridge.ts`, `src/lib/api.ts` | — |
-| `read_daily_log` | live | `src/lib/api.ts` | — |
-| `get_openclaw_health` | live | `src/lib/api.ts`, `src/terrance/system/selfDiagnosis.ts` | `src/terrance/system/openclawHealth.ts` |
-| `restart_openclaw` | live | `src/lib/api.ts` | — |
 | `save_skill` | live | `src/lib/api.ts`, `src/terrance/system/skillsEvolution.ts` | — |
 | `delete_skill` | live | `src/lib/api.ts` | — |
 | `scan_muse` | live | `src-console/bridge.ts`, `src/lib/api.ts` | — |

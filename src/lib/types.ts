@@ -1,39 +1,6 @@
 // ============================================================
-// Amara / OpenClaw types
+// Amara types
 // ============================================================
-
-export interface OpenClawStatus {
-  status: "online" | "configured" | "not_installed" | "offline";
-  online: boolean;
-  model: string;
-  gateway_url: string;
-  last_heartbeat: string | null;
-}
-
-export interface OpenClawChannels {
-  telegram: string; // "connected" | "disconnected" | "unknown"
-  whatsapp: string; // "connected" | "not_linked" | "unknown"
-}
-
-export interface OpenClawHealth {
-  status: "healthy" | "degraded" | "offline";
-  version: string | null;
-  gateway: boolean;
-  rpc: boolean;
-  memory_search: "configured" | "missing";
-  channels: OpenClawChannels;
-  timestamp: string;
-  /** False when no gateway listens and launchd has no ai.openclaw.gateway job (absent from older builds). */
-  installed?: boolean;
-}
-
-export interface CronJob {
-  name: string;
-  schedule: string;
-  next_run: string | null;
-  last_run: string | null;
-  enabled: boolean;
-}
 
 export interface Skill {
   name: string;
@@ -872,16 +839,10 @@ export interface TerranceContext {
 
 export interface DiagnosticReport {
   timestamp: number;
-  openclawOnline: boolean;
-  openclawGateway: boolean;
   n8nReachable: boolean;
   ollamaReachable: boolean;
   diskSpaceOk: boolean;
   issues: DiagnosticIssue[];
-  /** False: OpenClaw isn't installed here. Neutral, not an issue, never auto-healed. */
-  openclawInstalled?: boolean;
-  /** True: compute_mode is local, so the router never calls OpenClaw. A down gateway is neutral, never auto-healed. */
-  openclawLocalMode?: boolean;
 }
 
 export interface DiagnosticIssue {

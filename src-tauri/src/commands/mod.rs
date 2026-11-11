@@ -12,6 +12,8 @@ pub mod ha;
 pub mod home_brief;
 pub mod home_hr_take;
 pub mod kb_status;
+pub mod key_file;
+pub mod keychain;
 pub mod kv;
 pub mod llm_router;
 pub mod muse;

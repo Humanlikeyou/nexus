@@ -468,16 +468,14 @@ async function tick() {
         fn: async () => {
           const startedAt = Date.now(); // job start: drives the restart deadline and cooldown checks
           const report = await runDiagnostics();
-          const note = report.openclawInstalled === false ? "; OpenClaw not installed (local gemma4 in use)"
-            : report.openclawLocalMode && !report.openclawGateway ? "; OpenClaw offline, not restarted (local mode)" : "";
           if (report.issues.length > 0) {
             // "addressed" only when every restart tried was allowed and succeeded.
             const healed = await autoHeal(report, startedAt);
             const status = healed?.status ?? "awaiting";
             const label = status === "none" ? "awaiting" : status;
-            return { ok: status !== "failed", detail: `${report.issues.length} issue(s) ${label}${note}` };
+            return { ok: status !== "failed", detail: `${report.issues.length} issue(s) ${label}` };
           }
-          return { ok: true, detail: `All systems healthy${note}` };
+          return { ok: true, detail: `All systems healthy` };
         },
       },
       consolidation: { label: "Memory Consolidation", kind: "consolidation", heavy: true, fn: consolidationJob },
@@ -587,7 +585,7 @@ export function startScheduler(): void {
   // Run first tick after a short delay to let the app fully initialize
   startupTimerId = setTimeout(tick, 30_000);
   checkIntervalId = setInterval(tick, CHECK_INTERVAL_MS);
-  // Telegram bridge disabled — OpenClaw handles Telegram directly.
+  // Telegram bridge disabled.
   // startTelegramBridge();
 }
 

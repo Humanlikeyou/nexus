@@ -37,11 +37,13 @@ tar = "0.4"
 flate2 = "1"
 libc = "0.2"
 zeroize = "1"
+ring = "0.17"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Already in the tree via tauri/tao; used for the Dock icon (dock_icon.rs) and to read the Reduce
 # Transparency setting (system.rs).
+security-framework = "2.11"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSImage", "NSResponder", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }

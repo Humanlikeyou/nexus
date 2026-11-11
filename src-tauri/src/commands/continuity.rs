@@ -1267,7 +1267,7 @@ mod tests {
     fn atomic_write_preserves_restrictive_mode_and_defaults_new_files_to_0600() {
         use std::os::unix::fs::PermissionsExt;
         let dir = temp_dir("mode");
-        let existing = dir.join("openclaw.json");
+        let existing = dir.join("settings.json");
         fs::write(&existing, b"{}").unwrap();
         fs::set_permissions(&existing, fs::Permissions::from_mode(0o600)).unwrap();
         atomic_write(&existing, b"{\"a\":1}").unwrap();

@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+import { liveVersion, subscribeLive } from "../standalone/liveAdapter";
 import { Info, RefreshCw } from "lucide-react";
 import type { ThemePreference } from "../design/useAppearance";
 import { APP_NAME, APP_VERSION } from "../app/version";
@@ -61,6 +63,7 @@ export function AboutHeader() {
 /** Settings (screen-specs §11, design-1111s tabs). Changes apply immediately. */
 export function SettingsField(props: SettingsFieldProps) {
   const { data, devices = [], operation = null, error = null, onScan = noop, onConnect = noop, onDisconnect = noop, onRetry, view, adapter = standaloneAdapter() } = props;
+  useSyncExternalStore(subscribeLive, liveVersion); // re-render when the live secrets / key file status loads
   const tab = settingsTab(view);
   if (tab === "services") return <div className="page-inset cc-page settings-tab" data-tab="services"><ServicesView adapter={adapter} /></div>;
   if (tab === "notifications") return <div className="page-inset cc-page settings-tab" data-tab="notifications"><NotificationsView adapter={adapter} /></div>;

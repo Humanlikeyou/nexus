@@ -52,10 +52,10 @@ describe("approvalOutcome prefixes", () => {
 
 describe("autoHeal (batched restart_services)", () => {
   it("one prompt for several services, deadline inside the 60 s health timeout", async () => {
-    const r = await autoHeal(report("openclaw", "n8n", "ollama"), NOW);
+    const r = await autoHeal(report("n8n", "ollama"), NOW);
     const rs = calls("restart_services");
     expect(rs).toHaveLength(1);
-    expect(rs[0][1]).toEqual({ services: ["openclaw", "docker:stack-n8n-1"], deadlineMs: NOW + RESTART_DEADLINE_MS });
+    expect(rs[0][1]).toEqual({ services: ["docker:stack-n8n-1"], deadlineMs: NOW + RESTART_DEADLINE_MS });
     expect(RESTART_DEADLINE_MS).toBeLessThan(60_000);
     expect(r.status).toBe("addressed");
     expect(calls("send_telegram_message")).toHaveLength(0);
@@ -71,28 +71,26 @@ describe("autoHeal (batched restart_services)", () => {
     restart = async () => { throw "declined: Denied in the native approval dialog. Nothing was changed."; };
     const notices: string[] = [];
     window.addEventListener(NEXUS_NOTICE_EVENT, (e) => notices.push((e as CustomEvent).detail.message));
-    const r = await autoHeal(report("openclaw", "n8n"), NOW);
+    const r = await autoHeal(report("n8n"), NOW);
     expect(r.status).toBe("declined");
     expect(calls("send_telegram_message")).toHaveLength(0);
     expect(notices).toContain(RESTART_DECLINED_NOTICE);
-    expect(JSON.parse(kv[DECLINE_COOLDOWN_KV_KEY])).toEqual({
-      openclaw: NOW + DECLINE_COOLDOWN_MS, "docker:stack-n8n-1": NOW + DECLINE_COOLDOWN_MS,
-    });
+    expect(JSON.parse(kv[DECLINE_COOLDOWN_KV_KEY])).toEqual({ "docker:stack-n8n-1": NOW + DECLINE_COOLDOWN_MS });
   });
 
   it("persisted cooldown is reloaded (e.g. after relaunch) and expires after 4h", async () => {
-    kv[DECLINE_COOLDOWN_KV_KEY] = JSON.stringify({ openclaw: NOW + DECLINE_COOLDOWN_MS });
-    const during = await autoHeal(report("openclaw"), NOW + 60 * 60_000);
+    kv[DECLINE_COOLDOWN_KV_KEY] = JSON.stringify({ "docker:stack-n8n-1": NOW + DECLINE_COOLDOWN_MS });
+    const during = await autoHeal(report("n8n"), NOW + 60 * 60_000);
     expect(during.status).toBe("declined");
     expect(calls("restart_services")).toHaveLength(0);
-    const after = await autoHeal(report("openclaw"), NOW + DECLINE_COOLDOWN_MS + 1);
+    const after = await autoHeal(report("n8n"), NOW + DECLINE_COOLDOWN_MS + 1);
     expect(after.status).toBe("addressed");
     expect(calls("restart_services")).toHaveLength(1);
   });
 
   it("busy: skip this cycle, no cooldown, no alert, status awaiting", async () => {
     restart = async () => { throw "busy: An approval dialog for this operation is already open."; };
-    const r = await autoHeal(report("openclaw"), NOW);
+    const r = await autoHeal(report("n8n"), NOW);
     expect(r.status).toBe("awaiting");
     expect(kv[DECLINE_COOLDOWN_KV_KEY]).toBeUndefined();
     expect(calls("send_telegram_message")).toHaveLength(0);
@@ -100,7 +98,7 @@ describe("autoHeal (batched restart_services)", () => {
 
   it("expired: (late Allow after the deadline) nothing ran, no alert, status awaiting", async () => {
     restart = async () => { throw "expired: The restart request's deadline passed; nothing was run."; };
-    const r = await autoHeal(report("openclaw"), NOW);
+    const r = await autoHeal(report("n8n"), NOW);
     expect(r.status).toBe("awaiting");
     expect(r.actions).toHaveLength(0);
     expect(calls("send_telegram_message")).toHaveLength(0);
@@ -109,7 +107,7 @@ describe("autoHeal (batched restart_services)", () => {
   it("refused: logged as a bug, no Telegram", async () => {
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
     restart = async () => { throw "refused: too large to show"; };
-    const r = await autoHeal(report("openclaw"), NOW);
+    const r = await autoHeal(report("n8n"), NOW);
     expect(r.status).toBe("failed");
     expect(calls("send_telegram_message")).toHaveLength(0);
     expect(err.mock.calls.some((c) => String(c[0]).includes("BUG"))).toBe(true);
@@ -124,10 +122,9 @@ describe("autoHeal (batched restart_services)", () => {
 
   it("per-service ok:false after Allow alerts only for that service; not 'addressed'", async () => {
     restart = async () => [
-      { service: "openclaw", ok: true, error: null },
       { service: "docker:stack-n8n-1", ok: false, error: "exit 1" },
     ];
-    const r = await autoHeal(report("openclaw", "n8n"), NOW);
+    const r = await autoHeal(report("n8n"), NOW);
     expect(r.status).toBe("failed");
     const tg = calls("send_telegram_message");
     expect(tg).toHaveLength(1);
@@ -137,8 +134,8 @@ describe("autoHeal (batched restart_services)", () => {
   it("dedupes concurrent cycles: only one prompt in flight", async () => {
     let release!: () => void;
     restart = (a) => new Promise((res) => { release = () => res(a.services.map((s: string) => ({ service: s, ok: true, error: null }))); });
-    const first = autoHeal(report("openclaw"), NOW);
-    const second = await autoHeal(report("openclaw"), NOW);
+    const first = autoHeal(report("n8n"), NOW);
+    const second = await autoHeal(report("n8n"), NOW);
     expect(second.status).toBe("awaiting");
     await vi.waitFor(() => expect(calls("restart_services")).toHaveLength(1));
     release();
@@ -147,32 +144,31 @@ describe("autoHeal (batched restart_services)", () => {
 
   it("per-service expired: mid-batch is awaiting/not-run: no Telegram, no cooldown", async () => {
     restart = async () => [
-      { service: "openclaw", ok: true, error: null },
       { service: "docker:stack-n8n-1", ok: false, error: "expired: deadline passed before this service ran" },
     ];
-    const r = await autoHeal(report("openclaw", "n8n"), NOW);
+    const r = await autoHeal(report("n8n"), NOW);
     expect(r.status).toBe("awaiting");
     expect(calls("send_telegram_message")).toHaveLength(0);
     expect(kv[DECLINE_COOLDOWN_KV_KEY]).toBeUndefined();
-    expect(r.actions.map((a) => a.service)).toEqual(["openclaw"]);
+    expect(r.actions).toHaveLength(0);
   });
 
   it("Telegram never contains raw error text (whole-call or per-service)", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const secret = "token=abc123 /Users/me/.secret stderr dump";
     restart = async () => { throw secret; };
-    await autoHeal(report("openclaw"), NOW);
-    restart = async () => [{ service: "openclaw", ok: false, error: secret }];
-    await autoHeal(report("openclaw"), NOW);
+    await autoHeal(report("n8n"), NOW);
+    restart = async () => [{ service: "docker:stack-n8n-1", ok: false, error: secret }];
+    await autoHeal(report("n8n"), NOW);
     const texts = calls("send_telegram_message").map((c) => String(c[1].text));
-    expect(texts).toEqual(["Auto-heal: restart failed (openclaw)", "Auto-heal: restart failed (openclaw)"]);
+    expect(texts).toEqual(["Auto-heal: restart failed (docker:stack-n8n-1)", "Auto-heal: restart failed (docker:stack-n8n-1)"]);
     expect(texts.join(" ")).not.toContain("abc123");
   });
 });
 
 describe("decline cooldown fails closed", () => {
   const CAP = NOW + DECLINE_COOLDOWN_MS;
-  const cands = ["openclaw", "docker:stack-n8n-1"];
+  const cands = ["docker:ollama", "docker:stack-n8n-1"];
   const load = async (value: string | null | Error) => {
     invoke.mockImplementation(async (cmd: string) => {
       if (cmd !== "load_kv") return undefined;
@@ -189,32 +185,32 @@ describe("decline cooldown fails closed", () => {
   it.each([
     ["array", "[1,2]"], ["null", "null"], ["number", "42"], ["string", '"x"'],
   ])("non-object value (%s) cools every candidate until now+4h", async (_n, raw) => {
-    expect(await load(raw)).toEqual({ openclaw: CAP, "docker:stack-n8n-1": CAP });
+    expect(await load(raw)).toEqual({ "docker:ollama": CAP, "docker:stack-n8n-1": CAP });
   });
   it("parse error or load error cools every candidate until now+4h", async () => {
-    expect(await load("{not json")).toEqual({ openclaw: CAP, "docker:stack-n8n-1": CAP });
-    expect(await load(new Error("io"))).toEqual({ openclaw: CAP, "docker:stack-n8n-1": CAP });
+    expect(await load("{not json")).toEqual({ "docker:ollama": CAP, "docker:stack-n8n-1": CAP });
+    expect(await load(new Error("io"))).toEqual({ "docker:ollama": CAP, "docker:stack-n8n-1": CAP });
   });
   it("malformed per-service values (NaN/null/string/object) mean now+4h", async () => {
     for (const bad of ['"soon"', "null", "{}", '"NaN"']) {
-      expect(await load(`{"openclaw": ${bad}}`)).toEqual({ openclaw: CAP });
+      expect(await load(`{"docker:ollama": ${bad}}`)).toEqual({ "docker:ollama": CAP });
     }
   });
   it("values beyond now+4h are expired (dropped); exactly now+4h and past values pass through", async () => {
-    expect(await load(JSON.stringify({ openclaw: 9e15, "docker:stack-n8n-1": NOW - 1, "docker:other": CAP })))
+    expect(await load(JSON.stringify({ "docker:ollama": 9e15, "docker:stack-n8n-1": NOW - 1, "docker:other": CAP })))
       .toEqual({ "docker:stack-n8n-1": NOW - 1 });
-    expect(await load(JSON.stringify({ openclaw: CAP + 1, "docker:stack-n8n-1": CAP })))
+    expect(await load(JSON.stringify({ "docker:ollama": CAP + 1, "docker:stack-n8n-1": CAP })))
       .toEqual({ "docker:stack-n8n-1": CAP });
   });
   it("a declinedUntil more than 4h in the future does not block the prompt", async () => {
-    kv[DECLINE_COOLDOWN_KV_KEY] = JSON.stringify({ openclaw: NOW + DECLINE_COOLDOWN_MS + 60_000 });
-    await autoHeal(report("openclaw"), NOW);
+    kv[DECLINE_COOLDOWN_KV_KEY] = JSON.stringify({ "docker:stack-n8n-1": NOW + DECLINE_COOLDOWN_MS + 60_000 });
+    await autoHeal(report("n8n"), NOW);
     expect(calls("restart_services")).toHaveLength(1);
   });
   it("a malformed store blocks the prompt (no restart_services call)", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     kv[DECLINE_COOLDOWN_KV_KEY] = "[]";
-    const r = await autoHeal(report("openclaw"), NOW);
+    const r = await autoHeal(report("n8n"), NOW);
     expect(r.status).toBe("declined");
     expect(calls("restart_services")).toHaveLength(0);
   });
@@ -229,9 +225,9 @@ describe("cooldown resilience", () => {
       return base(cmd, args);
     });
     restart = async () => { throw "declined: Denied"; };
-    expect((await autoHeal(report("openclaw"), NOW)).status).toBe("declined");
+    expect((await autoHeal(report("n8n"), NOW)).status).toBe("declined");
     expect(kv[DECLINE_COOLDOWN_KV_KEY]).toBeUndefined();
-    const next = await autoHeal(report("openclaw"), NOW + 5 * 60_000);
+    const next = await autoHeal(report("n8n"), NOW + 5 * 60_000);
     expect(next.status).toBe("declined");
     expect(calls("restart_services")).toHaveLength(1);
   });
@@ -240,12 +236,12 @@ describe("cooldown resilience", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     kv[DECLINE_COOLDOWN_KV_KEY] = "{garbage";
-    expect((await autoHeal(report("openclaw"), NOW)).status).toBe("declined");
-    expect(JSON.parse(kv[DECLINE_COOLDOWN_KV_KEY])).toEqual({ openclaw: NOW + DECLINE_COOLDOWN_MS });
+    expect((await autoHeal(report("n8n"), NOW)).status).toBe("declined");
+    expect(JSON.parse(kv[DECLINE_COOLDOWN_KV_KEY])).toEqual({ "docker:stack-n8n-1": NOW + DECLINE_COOLDOWN_MS });
     expect(warn.mock.calls.some((c) => String(c[0]).includes("repairing"))).toBe(true);
-    expect((await autoHeal(report("openclaw"), NOW + 3 * 60 * 60_000)).status).toBe("declined");
+    expect((await autoHeal(report("n8n"), NOW + 3 * 60 * 60_000)).status).toBe("declined");
     expect(calls("restart_services")).toHaveLength(0);
-    expect((await autoHeal(report("openclaw"), NOW + DECLINE_COOLDOWN_MS + 1)).status).toBe("addressed");
+    expect((await autoHeal(report("n8n"), NOW + DECLINE_COOLDOWN_MS + 1)).status).toBe("addressed");
     expect(calls("restart_services")).toHaveLength(1);
   });
 
@@ -258,98 +254,54 @@ describe("cooldown resilience", () => {
       if (cmd === "save_kv") throw new Error("read-only");
       return base(cmd, args);
     });
-    expect((await autoHeal(report("openclaw"), NOW)).status).toBe("declined");
-    expect((await autoHeal(report("openclaw"), NOW + 60 * 60_000)).status).toBe("declined");
+    expect((await autoHeal(report("n8n"), NOW)).status).toBe("declined");
+    expect((await autoHeal(report("n8n"), NOW + 60 * 60_000)).status).toBe("declined");
     expect(calls("restart_services")).toHaveLength(0);
     // kv is still corrupted, but the in-memory deadline from the first repair (NOW+4h) holds.
-    expect((await autoHeal(report("openclaw"), NOW + DECLINE_COOLDOWN_MS + 1)).status).toBe("addressed");
+    expect((await autoHeal(report("n8n"), NOW + DECLINE_COOLDOWN_MS + 1)).status).toBe("addressed");
     expect(calls("restart_services")).toHaveLength(1);
   });
 });
 
-// Live check 2026-10-29: OpenClaw isn't installed on this Mac (no listener on 18789, no
-// ai.openclaw.gateway launchd job), yet every health check proposed and failed a restart.
-describe("runDiagnostics: OpenClaw not installed", () => {
-  const health = (h: Record<string, unknown>, cfg: unknown = { compute_mode: "gateway" }) => {
-    invoke.mockImplementation(async (cmd: string) => {
-      switch (cmd) {
-        case "get_config": return cfg;
-        case "get_openclaw_health": return { status: "offline", rpc: false, ...h };
-        case "check_docker_service": return "running";
-        case "check_service_port": return "open";
-        default: return undefined;
-      }
-    });
-  };
-
-  it("is neutral: no issue, nothing to auto-heal, no restart", async () => {
-    health({ gateway: false, installed: false });
-    const r = await runDiagnostics();
-    expect(r.openclawInstalled).toBe(false);
-    expect(r.issues).toEqual([]);
-    expect(await autoHeal(r, NOW)).toEqual({ status: "none", actions: [] });
-    expect(calls("restart_services")).toHaveLength(0);
-  });
-
-  it("installed but down is never an issue: the gateway mode is retired, the router never calls OpenClaw", async () => {
-    for (const h of [{ gateway: false, installed: true }, { gateway: false }]) {
-      health(h);
-      const r = await runDiagnostics();
-      expect(r.openclawInstalled).toBe(true);
-      expect(r.openclawLocalMode).toBe(true);
-      expect(r.issues.filter((i) => i.service === "openclaw")).toEqual([]);
-    }
-  });
-});
-
-describe("runDiagnostics: local mode skips the OpenClaw restart", () => {
-  const setup = (cfg: () => unknown, openclaw: () => unknown) => {
-    invoke.mockImplementation(async (cmd: string) => {
-      switch (cmd) {
-        case "get_config": return cfg();
-        case "get_openclaw_health": return openclaw();
-        case "check_docker_service": return "running";
-        case "check_service_port": return "open";
-        default: return undefined;
-      }
-    });
-  };
-  const down = () => ({ status: "offline", gateway: false, rpc: false, installed: true });
-
-  it.each([
-    ["compute_mode local", () => ({ compute_mode: "local" })],
-    ["compute_mode unset (router default: local)", () => ({})],
-    ["no config", () => null],
-    ["get_config throws", () => { throw new Error("config unreadable"); }],
-  ])("%s: installed-but-down OpenClaw is no issue and never restarted", async (_label, cfg) => {
-    setup(cfg, down);
-    const r = await runDiagnostics();
-    expect(r.openclawInstalled).toBe(true);
-    expect(r.openclawLocalMode).toBe(true);
-    expect(r.issues).toEqual([]);
-    expect(await autoHeal(r, NOW)).toEqual({ status: "none", actions: [] });
-    expect(calls("restart_services")).toHaveLength(0);
-  });
-
-  it("a failed OpenClaw health check is no issue in local mode", async () => {
-    setup(() => ({ compute_mode: "local" }), () => { throw new Error("health check failed"); });
-    const r = await runDiagnostics();
-    expect(r.issues).toEqual([]);
-    expect(calls("restart_services")).toHaveLength(0);
-  });
-
-  it("n8n is still healed in local mode, without OpenClaw in the batch", async () => {
+// OpenClaw is uninstalled: diagnostics never ask for its health, never report it, never restart it.
+describe("runDiagnostics: no OpenClaw", () => {
+  const setup = (cfg: () => unknown, dockerState = "running") => {
     invoke.mockImplementation(async (cmd: string, args: any) => {
       switch (cmd) {
-        case "get_config": return { compute_mode: "local" };
-        case "get_openclaw_health": return down();
-        case "check_docker_service": return "exited";
+        case "get_config": return cfg();
+        case "check_docker_service": return dockerState;
         case "check_service_port": return "open";
         case "load_kv": return null;
         case "restart_services": return args.services.map((s: string) => ({ service: s, ok: true, error: null }));
         default: return undefined;
       }
     });
+  };
+
+  it.each([
+    ["compute_mode local", () => ({ compute_mode: "local" })],
+    ["compute_mode gateway (retired alias)", () => ({ compute_mode: "gateway" })],
+    ["compute_mode unset", () => ({})],
+    ["no config", () => null],
+    ["get_config throws", () => { throw new Error("config unreadable"); }],
+  ])("%s: no OpenClaw call, no issue, no restart, no openclaw fields", async (_label, cfg) => {
+    setup(cfg);
+    const r = await runDiagnostics();
+    expect(calls("get_openclaw_health")).toHaveLength(0);
+    expect(r.issues).toEqual([]);
+    expect(Object.keys(r).filter((k) => /openclaw/i.test(k))).toEqual([]);
+    expect(await autoHeal(r, NOW)).toEqual({ status: "none", actions: [] });
+    expect(calls("restart_services")).toHaveLength(0);
+  });
+
+  it("an openclaw issue id is never mapped to a restart", async () => {
+    const r = await autoHeal(report("openclaw"), NOW);
+    expect(r).toEqual({ status: "none", actions: [] });
+    expect(calls("restart_services")).toHaveLength(0);
+  });
+
+  it("n8n is still healed, with no OpenClaw in the batch", async () => {
+    setup(() => ({ compute_mode: "local" }), "exited");
     const r = await runDiagnostics();
     expect(r.issues.map((i) => i.service)).toEqual(["n8n"]);
     await autoHeal(r, NOW);

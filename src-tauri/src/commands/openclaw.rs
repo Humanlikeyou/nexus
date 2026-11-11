@@ -1,55 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::time::Duration;
 
 fn openclaw_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".openclaw")
-}
-
-/// What the UI may see about OpenClaw. Deliberately a closed, typed shape: the raw
-/// openclaw.json (tokens, keys, paths) and heartbeat file never leave Rust.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct OpenClawStatus {
-    /// "online" (fresh heartbeat or gateway reachable), "configured" (config present,
-    /// no live signal), "not_installed" (config present but nothing listens on the
-    /// gateway port and no launchd job exists) or "offline" (no config).
-    pub status: OpenClawState,
-    /// `status == online`, kept for older callers.
-    pub online: bool,
-    pub model: String,
-    /// scheme://host[:port] only; userinfo, path, query and fragment are dropped.
-    pub gateway_url: String,
-    /// Normalised RFC 3339 (UTC) time of the last heartbeat, if any.
-    pub last_heartbeat: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum OpenClawState {
-    Online,
-    Configured,
-    #[serde(rename = "not_installed")]
-    NotInstalled,
-    Offline,
-}
-
-/// A heartbeat newer than this counts as "online".
-const HEARTBEAT_FRESH_SECS: i64 = 5 * 60;
-/// Tolerated clock skew for heartbeats stamped slightly in the future.
-const HEARTBEAT_SKEW_SECS: i64 = 60;
-const DEFAULT_GATEWAY_URL: &str = "ws://127.0.0.1:18789";
-const MODEL_MAX_LEN: usize = 80;
-
-#[derive(Serialize, Deserialize, Default)]
-pub struct CronJob {
-    pub name: String,
-    pub schedule: String,
-    pub next_run: Option<String>,
-    pub last_run: Option<String>,
-    pub enabled: bool,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -67,6 +23,9 @@ pub struct TaskItem {
     pub status: String,
     pub priority: Option<String>,
     pub tags: Vec<String>,
+    /// From a `#venture:<id>` tag (written by the add flow, commands/adds.rs).
+    #[serde(default)]
+    pub venture: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -75,163 +34,12 @@ pub struct ContentPipelineItem {
     pub stage: String,
     pub content_type: String,
     pub notes: Option<String>,
+    /// From a `#venture:<id>` tag (written by the add flow, commands/adds.rs).
+    #[serde(default)]
+    pub venture: Option<String>,
 }
 
-/// Keep only scheme://host[:port] of a gateway URL; "" if it is not a ws/http URL.
-fn sanitize_gateway_url(raw: &str) -> String {
-    let Ok(url) = reqwest::Url::parse(raw.trim()) else {
-        return String::new();
-    };
-    if !matches!(url.scheme(), "ws" | "wss" | "http" | "https") {
-        return String::new();
-    }
-    let Some(host) = url.host_str() else {
-        return String::new();
-    };
-    match url.port() {
-        Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
-        None => format!("{}://{}", url.scheme(), host),
-    }
-}
-
-/// Loopback host and port of a sanitised gateway URL, for the reachability probe.
-/// Remote gateways are not probed (no network calls from a status read).
-fn loopback_target(url: &str) -> Option<(String, u16)> {
-    let parsed = reqwest::Url::parse(url).ok()?;
-    let host = parsed
-        .host_str()?
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .to_string();
-    if !matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1") {
-        return None;
-    }
-    let port = parsed.port_or_known_default().or(match parsed.scheme() {
-        "ws" => Some(80),
-        "wss" => Some(443),
-        _ => None,
-    })?;
-    Some((host, port))
-}
-
-/// A model id is shown as-is only if it looks like one ("anthropic/claude-x", "llama3:8b").
-/// Paths are reduced to their file name; anything else (keys, URLs, objects) is "unknown".
-fn sanitize_model(raw: Option<&serde_json::Value>) -> String {
-    let Some(s) = raw.and_then(|v| v.as_str()).map(str::trim) else {
-        return "unknown".to_string();
-    };
-    let s = if s.starts_with('/') || s.starts_with('~') || s.contains('\\') {
-        s.rsplit(['/', '\\']).next().unwrap_or("")
-    } else {
-        s
-    };
-    let ok_chars = s
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/' | '@'));
-    let looks_secret =
-        s.starts_with("sk-") || s.contains("://") || s.contains('@') && s.contains(':');
-    if s.is_empty() || s.len() > MODEL_MAX_LEN || !ok_chars || looks_secret {
-        "unknown".to_string()
-    } else {
-        s.to_string()
-    }
-}
-
-/// `last_run` as RFC 3339, or epoch seconds / milliseconds.
-fn parse_heartbeat(hb: Option<&serde_json::Value>) -> Option<chrono::DateTime<chrono::Utc>> {
-    let v = hb?.get("last_run")?;
-    if let Some(s) = v.as_str() {
-        return chrono::DateTime::parse_from_rfc3339(s.trim())
-            .ok()
-            .map(|d| d.with_timezone(&chrono::Utc));
-    }
-    let n = v.as_f64()?;
-    if !n.is_finite() || n <= 0.0 {
-        return None;
-    }
-    let ms = if n > 1e12 { n } else { n * 1000.0 } as i64;
-    chrono::DateTime::from_timestamp_millis(ms)
-}
-
-fn heartbeat_is_fresh(
-    hb: Option<chrono::DateTime<chrono::Utc>>,
-    now: chrono::DateTime<chrono::Utc>,
-) -> bool {
-    hb.map(|t| {
-        let age = (now - t).num_seconds();
-        (-HEARTBEAT_SKEW_SECS..=HEARTBEAT_FRESH_SECS).contains(&age)
-    })
-    .unwrap_or(false)
-}
-
-fn derive_state(
-    config_present: bool,
-    heartbeat_fresh: bool,
-    gateway_reachable: bool,
-) -> OpenClawState {
-    if heartbeat_fresh || gateway_reachable {
-        OpenClawState::Online
-    } else if config_present {
-        OpenClawState::Configured
-    } else {
-        OpenClawState::Offline
-    }
-}
-
-/// Pure part of `read_openclaw_status`: picks typed, redacted fields out of the files.
-fn build_status(
-    config: Option<&serde_json::Value>,
-    heartbeat: Option<&serde_json::Value>,
-    now: chrono::DateTime<chrono::Utc>,
-    gateway_reachable: bool,
-) -> OpenClawStatus {
-    let raw_url = config
-        .and_then(|v| v.get("gateway"))
-        .and_then(|v| v.get("url"))
-        .and_then(|v| v.as_str())
-        .unwrap_or(DEFAULT_GATEWAY_URL);
-    let model_value = config.and_then(|v| v.get("model")).or_else(|| {
-        config
-            .and_then(|v| v.get("agents"))
-            .and_then(|v| v.get("defaults"))
-            .and_then(|v| v.get("model"))
-            .and_then(|v| v.get("primary"))
-    });
-    let hb = parse_heartbeat(heartbeat);
-    let status = derive_state(
-        config.is_some(),
-        heartbeat_is_fresh(hb, now),
-        gateway_reachable,
-    );
-    OpenClawStatus {
-        status,
-        online: status == OpenClawState::Online,
-        model: sanitize_model(model_value),
-        gateway_url: sanitize_gateway_url(raw_url),
-        last_heartbeat: hb.map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
-    }
-}
-
-async fn loopback_reachable(url: &str) -> bool {
-    let Some((host, port)) = loopback_target(url) else {
-        return false;
-    };
-    tokio::time::timeout(
-        Duration::from_millis(300),
-        tokio::net::TcpStream::connect((host.as_str(), port)),
-    )
-    .await
-    .map(|r| r.is_ok())
-    .unwrap_or(false)
-}
-
-fn read_json(path: &std::path::Path) -> Option<serde_json::Value> {
-    read_capped(path, MAX_READ_BYTES)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-}
-
-/// Largest OpenClaw file (config, heartbeat, cron, tasks, logs, one skill) read into memory.
+/// Largest file (tasks, pipeline, one skill) read into memory.
 const MAX_READ_BYTES: u64 = 1024 * 1024;
 /// Largest skill body `save_skill` will write.
 const MAX_SKILL_BYTES: usize = 256 * 1024;
@@ -271,7 +79,7 @@ fn workspace_file(
     };
     let base = workspace
         .canonicalize()
-        .map_err(|_| "OpenClaw workspace not found".to_string())?;
+        .map_err(|_| "Workspace not found".to_string())?;
     let resolved = candidate
         .canonicalize()
         .map_err(|_| "Workspace file not found".to_string())?;
@@ -279,270 +87,9 @@ fn workspace_file(
         || !resolved.is_file()
         || resolved.extension().and_then(|e| e.to_str()) != Some("md")
     {
-        return Err("Only .md files inside the OpenClaw workspace can be read".to_string());
+        return Err("Only .md files inside the workspace can be read".to_string());
     }
     Ok(resolved)
-}
-
-/// Daily log names are exactly `YYYY-MM-DD`.
-fn daily_log_date(date: Option<String>) -> Result<String, String> {
-    match date {
-        None => Ok(chrono::Local::now().format("%Y-%m-%d").to_string()),
-        Some(d) => {
-            let d = d.trim();
-            let ok = d.len() == 10 && chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok();
-            if ok {
-                Ok(d.to_string())
-            } else {
-                Err("Invalid date: expected YYYY-MM-DD".to_string())
-            }
-        }
-    }
-}
-
-/// Version strings from config/CLI are shown only if they look like versions.
-fn sanitize_version(raw: &str) -> Option<String> {
-    let v = raw.trim();
-    let ok = !v.is_empty()
-        && v.len() <= 40
-        && v.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | ' ' | '_'));
-    ok.then(|| v.to_string())
-}
-
-#[tauri::command]
-pub async fn read_openclaw_status() -> Result<OpenClawStatus, String> {
-    let paths = InstallPaths::system();
-    Ok(status_at(&openclaw_dir(), chrono::Utc::now(), || paths.detect()).await)
-}
-
-/// Never fails: a missing install is the typed `not_installed` state, not an error.
-async fn status_at<F, Fut>(
-    base: &std::path::Path,
-    now: chrono::DateTime<chrono::Utc>,
-    installed: F,
-) -> OpenClawStatus
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = bool>,
-{
-    let config = read_json(&base.join("openclaw.json"));
-    let heartbeat = read_json(&base.join("memory").join("heartbeat-state.json"));
-
-    // Only probe the (loopback) gateway when the heartbeat alone does not prove liveness.
-    let mut status = build_status(config.as_ref(), heartbeat.as_ref(), now, false);
-    if !status.online && config.is_some() && loopback_reachable(&status.gateway_url).await {
-        status = build_status(config.as_ref(), heartbeat.as_ref(), now, true);
-    }
-    // Silent and not installed (no plist/binary, or launchd has no such job): neutral, not a
-    // dead gateway.
-    if !status.online && !installed().await {
-        status.status = OpenClawState::NotInstalled;
-    }
-    status
-}
-
-#[cfg(test)]
-mod not_installed_state_tests {
-    use super::*;
-
-    #[test]
-    fn serializes_as_snake_case() {
-        assert_eq!(
-            serde_json::to_value(OpenClawState::NotInstalled).unwrap(),
-            "not_installed"
-        );
-    }
-}
-
-#[cfg(test)]
-mod status_tests {
-    use super::*;
-    use serde_json::json;
-
-    fn at(s: &str) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::parse_from_rfc3339(s)
-            .unwrap()
-            .with_timezone(&chrono::Utc)
-    }
-
-    #[test]
-    fn gateway_url_keeps_only_scheme_host_port() {
-        assert_eq!(
-            sanitize_gateway_url("ws://127.0.0.1:18789"),
-            "ws://127.0.0.1:18789"
-        );
-        assert_eq!(
-            sanitize_gateway_url("wss://user:s3cret@gw.example.com:8443/rpc?token=abc#x"),
-            "wss://gw.example.com:8443"
-        );
-        assert_eq!(
-            sanitize_gateway_url("https://gw.example.com/?key=k"),
-            "https://gw.example.com"
-        );
-        assert_eq!(
-            sanitize_gateway_url("http://[::1]:18789/a"),
-            "http://[::1]:18789"
-        );
-        for bad in [
-            "",
-            "not a url",
-            "file:///Users/me/.openclaw/sock",
-            "javascript:alert(1)",
-            "/tmp/gw.sock",
-        ] {
-            assert_eq!(sanitize_gateway_url(bad), "", "{bad:?}");
-        }
-    }
-
-    #[test]
-    fn model_is_redacted_unless_it_looks_like_an_id() {
-        assert_eq!(
-            sanitize_model(Some(&json!("anthropic/claude-sonnet-4"))),
-            "anthropic/claude-sonnet-4"
-        );
-        assert_eq!(sanitize_model(Some(&json!("llama3.1:8b"))), "llama3.1:8b");
-        assert_eq!(
-            sanitize_model(Some(&json!("/Users/me/models/qwen-7b.gguf"))),
-            "qwen-7b.gguf"
-        );
-        assert_eq!(sanitize_model(Some(&json!("~/m/x.gguf"))), "x.gguf");
-        for bad in [
-            json!("sk-ant-abc123"),
-            json!("https://u:p@host/m"),
-            json!("has space"),
-            json!({"primary": "x"}),
-            json!("a".repeat(81)),
-        ] {
-            assert_eq!(sanitize_model(Some(&bad)), "unknown", "{bad}");
-        }
-        assert_eq!(sanitize_model(None), "unknown");
-    }
-
-    #[test]
-    fn heartbeat_parses_rfc3339_and_epochs() {
-        let t = at("2026-10-28T05:00:00Z");
-        assert_eq!(
-            parse_heartbeat(Some(&json!({"last_run": "2026-10-28T14:00:00+09:00"}))),
-            Some(t)
-        );
-        assert_eq!(
-            parse_heartbeat(Some(&json!({"last_run": t.timestamp()}))),
-            Some(t)
-        );
-        assert_eq!(
-            parse_heartbeat(Some(&json!({"last_run": t.timestamp_millis()}))),
-            Some(t)
-        );
-        for bad in [
-            json!({}),
-            json!({"last_run": "yesterday"}),
-            json!({"last_run": -5}),
-            json!({"last_run": null}),
-        ] {
-            assert_eq!(parse_heartbeat(Some(&bad)), None, "{bad}");
-        }
-        assert_eq!(parse_heartbeat(None), None);
-    }
-
-    #[test]
-    fn freshness_window_is_five_minutes_with_small_skew() {
-        let now = at("2026-10-28T05:10:00Z");
-        assert!(heartbeat_is_fresh(Some(at("2026-10-28T05:05:00Z")), now));
-        assert!(heartbeat_is_fresh(Some(at("2026-10-28T05:10:30Z")), now));
-        assert!(!heartbeat_is_fresh(Some(at("2026-10-28T05:04:59Z")), now));
-        assert!(!heartbeat_is_fresh(Some(at("2026-10-28T05:12:00Z")), now));
-        assert!(!heartbeat_is_fresh(None, now));
-    }
-
-    #[test]
-    fn state_needs_a_live_signal_to_be_online() {
-        assert_eq!(derive_state(true, true, false), OpenClawState::Online);
-        assert_eq!(derive_state(true, false, true), OpenClawState::Online);
-        assert_eq!(derive_state(true, false, false), OpenClawState::Configured);
-        assert_eq!(derive_state(false, false, false), OpenClawState::Offline);
-    }
-
-    #[test]
-    fn loopback_only_probe_targets() {
-        assert_eq!(
-            loopback_target("ws://127.0.0.1:18789"),
-            Some(("127.0.0.1".into(), 18789))
-        );
-        assert_eq!(
-            loopback_target("ws://localhost"),
-            Some(("localhost".into(), 80))
-        );
-        assert_eq!(loopback_target("http://[::1]:9"), Some(("::1".into(), 9)));
-        assert_eq!(loopback_target("wss://gw.example.com:8443"), None);
-        assert_eq!(loopback_target(""), None);
-    }
-
-    #[test]
-    fn build_status_serialises_only_typed_redacted_fields() {
-        let config = json!({
-            "model": "anthropic/claude-sonnet-4",
-            "gateway": {"url": "ws://admin:FAKE_PASSWORD@127.0.0.1:18789/ws?token=FAKE_TOKEN_NOT_REAL", "auth": {"token": "FAKE_TOKEN_NOT_REAL"}},
-            "env": {"ANTHROPIC_API_KEY": "FAKE_API_KEY_NOT_REAL"},
-            "workspace": "/Users/me/.openclaw/workspace"
-        });
-        let hb = json!({"last_run": "2026-10-28T05:08:00Z", "notes": "FAKE_API_KEY_NOT_REAL in /Users/me"});
-        let status = build_status(Some(&config), Some(&hb), at("2026-10-28T05:10:00Z"), false);
-        assert_eq!(status.status, OpenClawState::Online);
-        assert!(status.online);
-        assert_eq!(status.gateway_url, "ws://127.0.0.1:18789");
-        assert_eq!(
-            status.last_heartbeat.as_deref(),
-            Some("2026-10-28T05:08:00Z")
-        );
-
-        let v = serde_json::to_value(&status).unwrap();
-        let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
-        keys.sort();
-        assert_eq!(
-            keys,
-            ["gateway_url", "last_heartbeat", "model", "online", "status"]
-        );
-        assert_eq!(v["status"], "online");
-        let text = v.to_string();
-        for leak in [
-            "FAKE_PASSWORD",
-            "admin",
-            "FAKE_TOKEN",
-            "FAKE_API_KEY",
-            "/Users",
-            "token",
-            "notes",
-        ] {
-            assert!(!text.contains(leak), "{leak} leaked: {text}");
-        }
-    }
-
-    #[test]
-    fn build_status_without_live_signal() {
-        let now = at("2026-10-28T05:10:00Z");
-        let stale = json!({"last_run": "2026-10-28T04:00:00Z"});
-        let s = build_status(Some(&json!({})), Some(&stale), now, false);
-        assert_eq!((s.status, s.online), (OpenClawState::Configured, false));
-        assert_eq!(s.gateway_url, DEFAULT_GATEWAY_URL);
-        assert_eq!(s.model, "unknown");
-        assert_eq!(s.last_heartbeat.as_deref(), Some("2026-10-28T04:00:00Z"));
-        let s = build_status(Some(&json!({})), None, now, true);
-        assert_eq!(s.status, OpenClawState::Online);
-        let s = build_status(None, None, now, false);
-        assert_eq!(
-            (s.status, s.online, s.last_heartbeat),
-            (OpenClawState::Offline, false, None)
-        );
-    }
-}
-
-#[tauri::command]
-pub fn read_cron_jobs() -> Result<Vec<CronJob>, String> {
-    let path = openclaw_dir().join("cron").join("jobs.json");
-    let content = read_capped(&path, MAX_READ_BYTES).unwrap_or_else(|_| "[]".to_string());
-    let jobs: Vec<CronJob> = serde_json::from_str(&content).unwrap_or_default();
-    Ok(jobs)
 }
 
 #[tauri::command]
@@ -662,7 +209,7 @@ pub fn read_tasks(workspace_path: Option<String>) -> Result<Vec<TaskItem>, Strin
     Ok(tasks)
 }
 
-fn parse_tasks_md(content: &str) -> Vec<TaskItem> {
+pub(crate) fn parse_tasks_md(content: &str) -> Vec<TaskItem> {
     let mut tasks = Vec::new();
     let mut current_status = "backlog".to_string();
 
@@ -708,11 +255,16 @@ fn parse_tasks_md(content: &str) -> Vec<TaskItem> {
                 .map(|w| w.trim_start_matches('#').to_string())
                 .collect();
 
+            let venture = tags
+                .iter()
+                .find_map(|t| t.strip_prefix("venture:"))
+                .map(str::to_string);
             tasks.push(TaskItem {
                 title: title.split('#').next().unwrap_or(&title).trim().to_string(),
                 status,
                 priority: None,
                 tags,
+                venture,
             });
         }
     }
@@ -721,36 +273,42 @@ fn parse_tasks_md(content: &str) -> Vec<TaskItem> {
         // Placeholder tasks
         tasks = vec![
             TaskItem {
+                venture: None,
                 title: "Launch TaiyoSkin landing page".to_string(),
                 status: "active".to_string(),
                 priority: Some("high".to_string()),
                 tags: vec!["launch".to_string()],
             },
             TaskItem {
+                venture: None,
                 title: "Design product photography shoot".to_string(),
                 status: "active".to_string(),
                 priority: Some("medium".to_string()),
                 tags: vec!["content".to_string()],
             },
             TaskItem {
+                venture: None,
                 title: "Set up Stripe payments".to_string(),
                 status: "backlog".to_string(),
                 priority: Some("high".to_string()),
                 tags: vec!["payments".to_string()],
             },
             TaskItem {
+                venture: None,
                 title: "Create Instagram content calendar".to_string(),
                 status: "backlog".to_string(),
                 priority: Some("medium".to_string()),
                 tags: vec!["content".to_string(), "social".to_string()],
             },
             TaskItem {
+                venture: None,
                 title: "Research shipping providers".to_string(),
                 status: "waiting".to_string(),
                 priority: Some("low".to_string()),
                 tags: vec!["logistics".to_string()],
             },
             TaskItem {
+                venture: None,
                 title: "Brand identity guidelines".to_string(),
                 status: "done".to_string(),
                 priority: Some("high".to_string()),
@@ -776,7 +334,7 @@ pub fn read_content_pipeline(
     Ok(items)
 }
 
-fn parse_content_pipeline(content: &str) -> Vec<ContentPipelineItem> {
+pub(crate) fn parse_content_pipeline(content: &str) -> Vec<ContentPipelineItem> {
     let mut items = Vec::new();
     let mut current_stage = "ideation".to_string();
 
@@ -799,12 +357,19 @@ fn parse_content_pipeline(content: &str) -> Vec<ContentPipelineItem> {
         }
 
         if trimmed.starts_with("- ") && !trimmed.starts_with("- [") {
-            let title = trimmed.trim_start_matches("- ").to_string();
+            let line = trimmed.trim_start_matches("- ");
+            let tag = |key: &str| {
+                line.split_whitespace()
+                    .filter_map(|w| w.strip_prefix('#'))
+                    .find_map(|t| t.strip_prefix(key))
+                    .map(str::to_string)
+            };
             items.push(ContentPipelineItem {
-                title,
+                title: line.split(" #").next().unwrap_or(line).trim().to_string(),
                 stage: current_stage.clone(),
-                content_type: "post".to_string(),
+                content_type: tag("type:").unwrap_or_else(|| "post".to_string()),
                 notes: None,
+                venture: tag("venture:"),
             });
         }
     }
@@ -812,30 +377,35 @@ fn parse_content_pipeline(content: &str) -> Vec<ContentPipelineItem> {
     if items.is_empty() {
         items = vec![
             ContentPipelineItem {
+                venture: None,
                 title: "Skincare routine for melanin-rich skin".to_string(),
                 stage: "ideation".to_string(),
                 content_type: "blog".to_string(),
                 notes: None,
             },
             ContentPipelineItem {
+                venture: None,
                 title: "Morning glow tutorial — TikTok".to_string(),
                 stage: "drafting".to_string(),
                 content_type: "video".to_string(),
                 notes: None,
             },
             ContentPipelineItem {
+                venture: None,
                 title: "Ingredient spotlight: Niacinamide".to_string(),
                 stage: "review".to_string(),
                 content_type: "carousel".to_string(),
                 notes: None,
             },
             ContentPipelineItem {
+                venture: None,
                 title: "Product launch announcement".to_string(),
                 stage: "scheduled".to_string(),
                 content_type: "post".to_string(),
                 notes: Some("Scheduled for next Monday".to_string()),
             },
             ContentPipelineItem {
+                venture: None,
                 title: "Brand story — our 'why'".to_string(),
                 stage: "published".to_string(),
                 content_type: "blog".to_string(),
@@ -845,684 +415,6 @@ fn parse_content_pipeline(content: &str) -> Vec<ContentPipelineItem> {
     }
 
     items
-}
-
-#[tauri::command]
-pub fn read_daily_log(date: Option<String>) -> Result<String, String> {
-    let date_str = daily_log_date(date)?;
-
-    let path = openclaw_dir()
-        .join("memory")
-        .join(format!("{}.md", date_str));
-
-    let content = read_capped(&path, MAX_READ_BYTES).unwrap_or_else(|_| {
-        format!(
-            "# Daily Log — {}\n\nNo log entry found for this date. Logs are created automatically by Amara during daily operations.\n\n## Notes\n- Start your day with intention\n- Review yesterday's accomplishments\n- Set today's priorities",
-            date_str
-        )
-    });
-
-    Ok(content)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OpenClaw Process Control
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Restart the OpenClaw LaunchAgent via `launchctl kickstart -k`.
-/// Works on macOS; returns an error string on failure.
-#[tauri::command]
-pub async fn restart_openclaw(app: tauri::AppHandle) -> Result<String, String> {
-    // Not installed: refuse before any dialog.
-    if !InstallPaths::system().detect().await {
-        return Err(NOT_INSTALLED_ERROR.to_string());
-    }
-    let _approval = super::approval_gate::require_approval(
-        &app,
-        &[super::approval_gate::service_key("openclaw")],
-        super::approval_gate::approval_text(
-            OPENCLAW_RESTART_OPERATION,
-            "Restarts the OpenClaw gateway LaunchAgent. Connected channels reconnect.",
-        )?,
-    )
-    .await?;
-    kickstart_openclaw().await
-}
-
-/// Exact operation shown for an OpenClaw restart (uid is resolved at run time).
-pub(super) const OPENCLAW_RESTART_OPERATION: &str =
-    "Run: launchctl kickstart -k gui/<your uid>/ai.openclaw.gateway";
-
-/// The ungated restart. Only call after approval has been obtained.
-pub(super) async fn kickstart_openclaw() -> Result<String, String> {
-    if !InstallPaths::system().detect().await {
-        return Err(NOT_INSTALLED_ERROR.to_string());
-    }
-    // Resolve the current user UID so we can address the gui/<uid>/ domain.
-    let uid_out = tokio::process::Command::new("id")
-        .arg("-u")
-        .output()
-        .await
-        .map_err(|e| format!("Failed to get UID: {}", e))?;
-    if !uid_out.status.success() {
-        return Err(
-            "Could not determine the current user id; refusing to restart OpenClaw.".to_string(),
-        );
-    }
-    let uid = parse_uid(&String::from_utf8_lossy(&uid_out.stdout))?;
-
-    let output = tokio::process::Command::new("launchctl")
-        .args([
-            "kickstart",
-            "-k",
-            &format!("gui/{}/ai.openclaw.gateway", uid),
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run launchctl: {}", e))?;
-
-    if output.status.success() {
-        Ok("OpenClaw gateway restarting…".to_string())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(if stderr.is_empty() {
-            "launchctl kickstart failed — is the LaunchAgent installed?".to_string()
-        } else {
-            stderr
-        })
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OpenClaw Sandbox Toggle
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SandboxStatus {
-    pub mode: String,
-    pub restarted: bool,
-}
-
-/// Read the current sandbox mode from ~/.openclaw/openclaw.json.
-// Not registered in generate_handler! (no live caller); kept so it can be restored.
-#[allow(dead_code)]
-#[tauri::command]
-pub fn get_openclaw_sandbox() -> Result<String, String> {
-    let config_path = openclaw_dir().join("openclaw.json");
-    let config = read_sandbox_config(&config_path)?;
-
-    let mode = config
-        .get("agents")
-        .and_then(|v| v.get("defaults"))
-        .and_then(|v| v.get("sandbox"))
-        .and_then(|v| v.get("mode"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("off");
-
-    Ok(mode.to_string())
-}
-
-fn read_sandbox_config(path: &std::path::Path) -> Result<serde_json::Value, String> {
-    let content = read_capped(path, MAX_READ_BYTES)?;
-    serde_json::from_str(&content).map_err(|e| e.to_string())
-}
-
-fn sandbox_mode_of(config: &serde_json::Value) -> String {
-    config
-        .get("agents")
-        .and_then(|v| v.get("defaults"))
-        .and_then(|v| v.get("sandbox"))
-        .and_then(|v| v.get("mode"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("off")
-        .to_string()
-}
-
-/// Re-read the config, require the mode to still be `expected_old` (what the
-/// approval dialog showed), set `new_mode`, and write atomically.
-fn apply_sandbox_change(
-    config_path: &std::path::Path,
-    expected_old: &str,
-    new_mode: &str,
-) -> Result<(), String> {
-    let mut config = read_sandbox_config(config_path)?;
-    let now = sandbox_mode_of(&config);
-    if now != expected_old {
-        return Err(format!(
-            "changed: sandbox mode is now \"{now}\", not the \"{expected_old}\" shown for approval; nothing was written"
-        ));
-    }
-    let agents = config
-        .as_object_mut()
-        .ok_or("invalid config")?
-        .entry("agents")
-        .or_insert_with(|| serde_json::json!({}));
-    let defaults = agents
-        .as_object_mut()
-        .ok_or("invalid agents")?
-        .entry("defaults")
-        .or_insert_with(|| serde_json::json!({}));
-    let sandbox = defaults
-        .as_object_mut()
-        .ok_or("invalid defaults")?
-        .entry("sandbox")
-        .or_insert_with(|| serde_json::json!({}));
-    sandbox.as_object_mut().ok_or("invalid sandbox")?.insert(
-        "mode".to_string(),
-        serde_json::Value::String(new_mode.to_string()),
-    );
-    let out = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    super::continuity::atomic_write(config_path, out.as_bytes()).map_err(|e| e.to_string())
-}
-
-/// `id -u` output must be a plain non-empty decimal uid.
-fn parse_uid(raw: &str) -> Result<u32, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() || !trimmed.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(
-            "Could not determine the current user id; refusing to restart OpenClaw.".to_string(),
-        );
-    }
-    trimmed.parse::<u32>().map_err(|_| {
-        "Could not determine the current user id; refusing to restart OpenClaw.".to_string()
-    })
-}
-
-const SANDBOX_MODES: [&str; 3] = ["off", "non-main", "all"];
-
-/// Explicit mode must be a known OpenClaw sandbox mode; `None` toggles off <-> all.
-fn resolve_sandbox_mode(current: &str, requested: Option<String>) -> Result<String, String> {
-    match requested {
-        Some(m) if SANDBOX_MODES.contains(&m.as_str()) => Ok(m),
-        Some(_) => Err(format!(
-            "Invalid sandbox mode. Allowed: {}",
-            SANDBOX_MODES.join(", ")
-        )),
-        None if current == "off" => Ok("all".to_string()),
-        None => Ok("off".to_string()),
-    }
-}
-
-fn sandbox_operation(config_path: &std::path::Path, current: &str, new_mode: &str) -> String {
-    format!(
-        "Set agents.defaults.sandbox.mode: \"{current}\" -> \"{new_mode}\"\nin {}\nthen run: launchctl kickstart -k gui/<your uid>/ai.openclaw.gateway",
-        config_path.display()
-    )
-}
-
-/// Toggle sandbox mode between "off" and "all", then restart OpenClaw
-/// (requires native approval).
-// Not registered in generate_handler! (no live caller); kept so it can be restored.
-#[allow(dead_code)]
-#[tauri::command]
-pub async fn toggle_openclaw_sandbox(
-    app: tauri::AppHandle,
-    mode: Option<String>,
-) -> Result<SandboxStatus, String> {
-    let config_path = openclaw_dir().join("openclaw.json");
-    let current = read_sandbox_config(&config_path).map(|c| sandbox_mode_of(&c))?;
-
-    let new_mode = resolve_sandbox_mode(&current, mode)?;
-    let _approval = super::approval_gate::require_approval(
-        &app,
-        // Same key as restarts: this command restarts OpenClaw too.
-        &[super::approval_gate::service_key("openclaw")],
-        super::approval_gate::approval_text(
-            &sandbox_operation(&config_path, &current, &new_mode),
-            "Writes this setting to the OpenClaw config, then restarts the OpenClaw gateway.",
-        )?,
-    )
-    .await?;
-
-    // Re-read after approval: refuse if the mode changed under the dialog,
-    // then write atomically.
-    apply_sandbox_change(&config_path, &current, &new_mode)?;
-
-    // Restart OpenClaw so it picks up the change (covered by the same approval).
-    let restarted = kickstart_openclaw().await.is_ok();
-
-    Ok(SandboxStatus {
-        mode: new_mode,
-        restarted,
-    })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OpenClaw Health Check
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct OpenClawChannels {
-    pub telegram: String, // "connected" | "disconnected" | "unknown"
-    pub whatsapp: String, // "connected" | "not_linked" | "unknown"
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct OpenClawHealth {
-    pub status: String, // "healthy" | "degraded" | "offline"
-    pub version: Option<String>,
-    pub gateway: bool,
-    pub rpc: bool,
-    pub memory_search: String, // "configured" | "missing"
-    pub channels: OpenClawChannels,
-    pub timestamp: String,
-    /// False only when nothing listens on the gateway port AND launchd has no
-    /// `ai.openclaw.gateway` job: there is nothing to restart, so this is not a failure.
-    pub installed: bool,
-}
-
-pub(super) const OPENCLAW_LAUNCHD_LABEL: &str = "ai.openclaw.gateway";
-
-/// Returned wherever OpenClaw is asked for but not installed (restart, router).
-pub const NOT_INSTALLED_ERROR: &str = "unavailable: openclaw not installed";
-
-/// Where an OpenClaw install lives. Injectable so tests use temp dirs, never the real ~.
-pub(super) struct InstallPaths {
-    pub plist: PathBuf,
-    pub binaries: Vec<PathBuf>,
-}
-
-impl InstallPaths {
-    pub(super) fn system() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        InstallPaths {
-            plist: home
-                .join("Library/LaunchAgents")
-                .join(format!("{OPENCLAW_LAUNCHD_LABEL}.plist")),
-            binaries: vec![
-                PathBuf::from("/opt/homebrew/bin/openclaw"),
-                PathBuf::from("/usr/local/bin/openclaw"),
-            ],
-        }
-    }
-
-    /// First binary that exists (a symlink counts only if its target does).
-    pub(super) fn binary(&self) -> Option<&std::path::Path> {
-        self.binaries
-            .iter()
-            .map(PathBuf::as_path)
-            .find(|p| p.exists())
-    }
-
-    /// LaunchAgent plist and binary both present. Files only: no launchctl.
-    pub(super) fn installed(&self) -> bool {
-        self.plist.is_file() && self.binary().is_some()
-    }
-
-    /// Installed and loaded: the files exist and launchd doesn't deny the job (a plist left
-    /// behind after `launchctl bootout` is not installed). Files missing: false without
-    /// running launchctl.
-    pub(super) async fn detect(&self) -> bool {
-        detect_installed(self, openclaw_launchd_job).await
-    }
-}
-
-async fn detect_installed<F, Fut>(paths: &InstallPaths, launchd_job: F) -> bool
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Option<bool>>,
-{
-    paths.installed() && launchd_job().await != Some(false)
-}
-
-/// `Some(true)` if launchd knows the gateway job for this user, `Some(false)` if it
-/// says it doesn't, `None` if launchctl couldn't be asked (treated as installed).
-/// Only called once the plist and binary exist.
-async fn openclaw_launchd_job() -> Option<bool> {
-    let uid_out = tokio::process::Command::new("id")
-        .arg("-u")
-        .output()
-        .await
-        .ok()?;
-    let uid = parse_uid(&String::from_utf8_lossy(&uid_out.stdout)).ok()?;
-    let out = tokio::process::Command::new("launchctl")
-        .args(["print", &format!("gui/{}/{}", uid, OPENCLAW_LAUNCHD_LABEL)])
-        .output()
-        .await
-        .ok()?;
-    Some(out.status.success())
-}
-
-async fn get_openclaw_version(binary: Option<&std::path::Path>) -> Option<String> {
-    // Prefer reading from config metadata (always available, no PATH issues)
-    let config_path = openclaw_dir().join("openclaw.json");
-    if let Some(ver) = read_json(&config_path).as_ref().and_then(|v| {
-        v.get("meta")
-            .and_then(|m| m.get("lastTouchedVersion"))
-            .and_then(|v| v.as_str())
-            .and_then(sanitize_version)
-    }) {
-        return Some(ver);
-    }
-    // Fallback to CLI (fixed binary and args; bounded so a hung CLI cannot stall health).
-    // No binary: nothing to run.
-    let out = tokio::time::timeout(
-        Duration::from_secs(3),
-        tokio::process::Command::new(binary?)
-            .arg("--version")
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await
-    .ok()?
-    .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    sanitize_version(&String::from_utf8_lossy(&out.stdout))
-}
-
-async fn check_gateway_port() -> bool {
-    tokio::time::timeout(
-        Duration::from_secs(3),
-        tokio::net::TcpStream::connect("127.0.0.1:18789"),
-    )
-    .await
-    .map(|r| r.is_ok())
-    .unwrap_or(false)
-}
-
-async fn probe_gateway_rpc() -> bool {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(4))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-    client
-        .get("http://127.0.0.1:18789/")
-        .send()
-        .await
-        .map(|r| r.status().as_u16() < 500)
-        .unwrap_or(false)
-}
-
-fn check_memory_search(config: &Option<serde_json::Value>) -> String {
-    let provider = config
-        .as_ref()
-        .and_then(|v| v.get("agents"))
-        .and_then(|v| v.get("defaults"))
-        .and_then(|v| v.get("memorySearch"))
-        .and_then(|v| v.get("provider"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("none");
-
-    match provider {
-        "local" => {
-            // First check explicit modelPath/localModel config keys
-            let model_path = config
-                .as_ref()
-                .and_then(|v| v.get("agents"))
-                .and_then(|v| v.get("defaults"))
-                .and_then(|v| v.get("memorySearch"))
-                .and_then(|v| v.get("modelPath").or_else(|| v.get("localModel")))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if !model_path.is_empty() && PathBuf::from(model_path).exists() {
-                return "configured".to_string();
-            }
-            // Fallback: OpenClaw downloads models to ~/.node-llama-cpp/models/ and
-            // references them via HF specifier (not a config path). Check if any
-            // .gguf file exists there — presence means the model was auto-downloaded.
-            let gguf_dir = dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".node-llama-cpp")
-                .join("models");
-            let has_model = gguf_dir
-                .read_dir()
-                .map(|rd| {
-                    rd.flatten().any(|e| {
-                        e.path()
-                            .extension()
-                            .and_then(|x| x.to_str())
-                            .map(|x| x.eq_ignore_ascii_case("gguf"))
-                            .unwrap_or(false)
-                    })
-                })
-                .unwrap_or(false);
-            if has_model {
-                "configured".to_string()
-            } else {
-                "missing".to_string()
-            }
-        }
-        "openai" | "anthropic" | "ollama" | "cohere" | "azure" | "gemini" | "minimax" => {
-            "configured".to_string()
-        }
-        _ => "missing".to_string(),
-    }
-}
-
-fn get_channel_status(config: &Option<serde_json::Value>) -> OpenClawChannels {
-    let creds_dir = openclaw_dir().join("credentials");
-
-    let telegram_enabled = config
-        .as_ref()
-        .and_then(|v| v.get("channels"))
-        .and_then(|v| v.get("telegram"))
-        .and_then(|v| v.get("enabled"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let telegram = if telegram_enabled {
-        let has_creds = creds_dir.join("telegram-default-allowFrom.json").exists()
-            || creds_dir.join("telegram-allowFrom.json").exists();
-        if has_creds {
-            "connected".to_string()
-        } else {
-            "disconnected".to_string()
-        }
-    } else {
-        "unknown".to_string()
-    };
-
-    // WhatsApp: check for session file in ~/.openclaw/sessions/
-    let sessions_dir = openclaw_dir().join("sessions");
-    let whatsapp_linked = sessions_dir
-        .read_dir()
-        .map(|rd| {
-            rd.flatten().any(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .to_lowercase()
-                    .contains("whatsapp")
-            })
-        })
-        .unwrap_or(false);
-
-    let whatsapp = if whatsapp_linked {
-        "connected".to_string()
-    } else {
-        "not_linked".to_string()
-    };
-
-    OpenClawChannels { telegram, whatsapp }
-}
-
-#[tauri::command]
-pub async fn get_openclaw_health() -> Result<OpenClawHealth, String> {
-    let paths = InstallPaths::system();
-    let base = openclaw_dir();
-
-    // Read main config
-    let config = read_json(&base.join("openclaw.json"));
-
-    // Not installed and nothing listening: report it without spawning anything.
-    let gateway = check_gateway_port().await;
-    let files_installed = gateway || paths.detect().await;
-    if !files_installed {
-        return Ok(not_installed_health(&config));
-    }
-    let rpc = probe_gateway_rpc().await;
-
-    let version = get_openclaw_version(paths.binary()).await;
-    let memory_search = check_memory_search(&config);
-    let channels = get_channel_status(&config);
-
-    let installed = openclaw_installed(gateway, files_installed);
-
-    let status = if !gateway || !rpc {
-        "offline"
-    } else if memory_search == "missing" || channels.telegram == "disconnected" {
-        "degraded"
-    } else {
-        "healthy"
-    };
-
-    Ok(OpenClawHealth {
-        status: status.to_string(),
-        version,
-        gateway,
-        rpc,
-        memory_search,
-        channels,
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        installed,
-    })
-}
-
-/// Installed when something listens on the gateway port or the plist and binary exist.
-fn openclaw_installed(gateway_listening: bool, files_present: bool) -> bool {
-    gateway_listening || files_present
-}
-
-fn not_installed_health(config: &Option<serde_json::Value>) -> OpenClawHealth {
-    OpenClawHealth {
-        status: "offline".to_string(),
-        version: None,
-        gateway: false,
-        rpc: false,
-        memory_search: check_memory_search(config),
-        channels: get_channel_status(config),
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        installed: false,
-    }
-}
-
-#[cfg(test)]
-mod installed_tests {
-    use super::*;
-
-    fn tmp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "nexus-openclaw-install-{tag}-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    fn paths_in(dir: &std::path::Path) -> InstallPaths {
-        InstallPaths {
-            plist: dir.join("LaunchAgents/ai.openclaw.gateway.plist"),
-            binaries: vec![dir.join("bin/openclaw")],
-        }
-    }
-
-    #[test]
-    fn installed_needs_plist_and_binary() {
-        let dir = tmp("files");
-        let paths = paths_in(&dir);
-        assert!(!paths.installed());
-        fs::create_dir_all(dir.join("LaunchAgents")).unwrap();
-        fs::write(&paths.plist, "<plist/>").unwrap();
-        assert!(!paths.installed(), "plist without binary");
-        fs::create_dir_all(dir.join("bin")).unwrap();
-        fs::write(&paths.binaries[0], "#!/bin/sh").unwrap();
-        assert!(paths.installed());
-        assert_eq!(paths.binary(), Some(paths.binaries[0].as_path()));
-        fs::remove_file(&paths.plist).unwrap();
-        assert!(!paths.installed(), "binary without plist");
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn listener_or_files_count_as_installed() {
-        assert!(!openclaw_installed(false, false));
-        assert!(openclaw_installed(true, false));
-        assert!(openclaw_installed(false, true));
-        assert_eq!(OPENCLAW_LAUNCHD_LABEL, "ai.openclaw.gateway");
-        assert!(OPENCLAW_RESTART_OPERATION.contains(OPENCLAW_LAUNCHD_LABEL));
-        assert!(NOT_INSTALLED_ERROR.starts_with("unavailable:"));
-    }
-
-    #[tokio::test]
-    async fn status_is_not_installed_without_files_never_an_error() {
-        let dir = tmp("status");
-        let now = chrono::Utc::now();
-        // No ~/.openclaw at all.
-        let paths = paths_in(&dir);
-        let no_launchctl = || async { panic!("launchctl must not run when files are missing") };
-        let s = status_at(&dir.join("missing"), now, || {
-            detect_installed(&paths, no_launchctl)
-        })
-        .await;
-        assert_eq!(s.status, OpenClawState::NotInstalled);
-        assert!(!s.online);
-        // Config present but no plist/binary and nothing on the (closed) port.
-        let base = dir.join(".openclaw");
-        fs::create_dir_all(&base).unwrap();
-        fs::write(
-            base.join("openclaw.json"),
-            r#"{"gateway":{"url":"ws://127.0.0.1:1"}}"#,
-        )
-        .unwrap();
-        let s = status_at(&base, now, || detect_installed(&paths, no_launchctl)).await;
-        assert_eq!(s.status, OpenClawState::NotInstalled);
-        assert_eq!(
-            serde_json::to_value(s.status).unwrap(),
-            serde_json::json!("not_installed")
-        );
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[tokio::test]
-    async fn installed_but_silent_keeps_the_existing_states() {
-        let dir = tmp("silent");
-        let paths = paths_in(&dir);
-        fs::create_dir_all(dir.join("LaunchAgents")).unwrap();
-        fs::create_dir_all(dir.join("bin")).unwrap();
-        fs::write(&paths.plist, "<plist/>").unwrap();
-        fs::write(&paths.binaries[0], "#!/bin/sh").unwrap();
-        let now = chrono::Utc::now();
-        let loaded = || async { Some(true) };
-        let s = status_at(&dir.join("missing"), now, || {
-            detect_installed(&paths, loaded)
-        })
-        .await;
-        assert_eq!(s.status, OpenClawState::Offline);
-        let base = dir.join(".openclaw");
-        fs::create_dir_all(&base).unwrap();
-        fs::write(
-            base.join("openclaw.json"),
-            r#"{"gateway":{"url":"ws://127.0.0.1:1"}}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            status_at(&base, now, || detect_installed(&paths, loaded))
-                .await
-                .status,
-            OpenClawState::Configured
-        );
-        // Plist left behind but launchd has no job: not installed.
-        let unloaded = || async { Some(false) };
-        assert_eq!(
-            status_at(&base, now, || detect_installed(&paths, unloaded))
-                .await
-                .status,
-            OpenClawState::NotInstalled
-        );
-        // launchctl couldn't be asked: treated as installed.
-        assert!(detect_installed(&paths, || async { None }).await);
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn not_installed_health_is_offline_and_not_installed() {
-        let h = not_installed_health(&None);
-        assert_eq!(h.status, "offline");
-        assert!(!h.installed && !h.gateway && !h.rpc);
-        assert_eq!(h.version, None);
-    }
 }
 
 #[cfg(test)]
@@ -1594,119 +486,8 @@ mod input_tests {
     }
 
     #[test]
-    fn daily_log_date_must_be_iso() {
-        assert_eq!(
-            daily_log_date(Some("2026-10-28".into())).unwrap(),
-            "2026-10-28"
-        );
-        assert_eq!(daily_log_date(None).unwrap().len(), 10);
-        for bad in [
-            "../../.ssh/id_rsa",
-            "2026-10-28/../../x",
-            "2026-13-01",
-            "2026-1-2",
-            "",
-            "2026-10-28.md",
-        ] {
-            assert!(daily_log_date(Some(bad.into())).is_err(), "{bad:?}");
-        }
-    }
-
-    #[test]
-    fn versions_are_sanitised() {
-        assert_eq!(
-            sanitize_version("2026.10.1\n").as_deref(),
-            Some("2026.10.1")
-        );
-        assert_eq!(
-            sanitize_version("openclaw 1.2.3-beta+4").as_deref(),
-            Some("openclaw 1.2.3-beta+4")
-        );
-        assert_eq!(sanitize_version("token=abc; rm -rf /"), None);
-        assert_eq!(sanitize_version(&"9".repeat(41)), None);
-        assert_eq!(sanitize_version(""), None);
-    }
-
-    #[test]
     fn save_skill_refuses_oversized_content_before_touching_disk() {
         let err = save_skill("too-big".into(), "x".repeat(MAX_SKILL_BYTES + 1)).unwrap_err();
         assert!(err.contains("larger"), "{err}");
-    }
-}
-
-#[cfg(test)]
-mod approval_tests {
-    use super::*;
-
-    #[test]
-    fn sandbox_mode_is_validated_and_toggles() {
-        assert_eq!(resolve_sandbox_mode("off", None).unwrap(), "all");
-        assert_eq!(resolve_sandbox_mode("all", None).unwrap(), "off");
-        assert_eq!(
-            resolve_sandbox_mode("off", Some("non-main".into())).unwrap(),
-            "non-main"
-        );
-        assert!(resolve_sandbox_mode("off", Some("everything; rm -rf".into())).is_err());
-    }
-
-    fn tmp_config(body: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("nexus-sbx-{}", uuid::Uuid::new_v4().simple()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join("openclaw.json");
-        std::fs::write(&p, body).unwrap();
-        p
-    }
-
-    #[test]
-    fn sandbox_change_applies_when_mode_unchanged() {
-        let p = tmp_config(r#"{"agents":{"defaults":{"sandbox":{"mode":"off"}}},"keep":1}"#);
-        apply_sandbox_change(&p, "off", "all").unwrap();
-        let v = read_sandbox_config(&p).unwrap();
-        assert_eq!(sandbox_mode_of(&v), "all");
-        assert_eq!(v["keep"], 1);
-        let leftovers = std::fs::read_dir(p.parent().unwrap()).unwrap().count();
-        assert_eq!(leftovers, 1, "no temp files left behind");
-        let _ = std::fs::remove_dir_all(p.parent().unwrap());
-    }
-
-    #[test]
-    fn sandbox_config_read_is_capped() {
-        let p = tmp_config(&format!(
-            "{{\"pad\":\"{}\"}}",
-            "x".repeat(MAX_READ_BYTES as usize)
-        ));
-        assert!(read_sandbox_config(&p).unwrap_err().contains("larger"));
-        assert!(apply_sandbox_change(&p, "off", "all").is_err());
-        let _ = std::fs::remove_dir_all(p.parent().unwrap());
-    }
-
-    #[test]
-    fn sandbox_change_refused_if_mode_changed_after_dialog() {
-        let body = r#"{"agents":{"defaults":{"sandbox":{"mode":"non-main"}}}}"#;
-        let p = tmp_config(body);
-        let err = apply_sandbox_change(&p, "off", "all").unwrap_err();
-        assert!(err.starts_with("changed:"), "{err}");
-        assert_eq!(std::fs::read_to_string(&p).unwrap(), body, "file untouched");
-        let _ = std::fs::remove_dir_all(p.parent().unwrap());
-    }
-
-    #[test]
-    fn uid_must_be_numeric_and_non_empty() {
-        assert_eq!(parse_uid("501\n").unwrap(), 501);
-        for bad in ["", "  \n", "abc", "-1", "501 502", "5O1"] {
-            assert!(parse_uid(bad).is_err(), "{bad:?}");
-        }
-    }
-
-    #[test]
-    fn sandbox_operation_names_exact_change() {
-        let op = sandbox_operation(
-            std::path::Path::new("/h/.openclaw/openclaw.json"),
-            "off",
-            "all",
-        );
-        assert!(op.starts_with("Set agents.defaults.sandbox.mode: \"off\" -> \"all\""));
-        assert!(op.contains("/h/.openclaw/openclaw.json"));
-        assert!(op.contains("launchctl kickstart -k"));
     }
 }

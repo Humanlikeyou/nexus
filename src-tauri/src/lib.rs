@@ -99,7 +99,7 @@ pub mod test_support {
         )
     }
 
-    /// Whether a pack-relative path (e.g. `["openclaw", "skills", "a.md"]`) may be restored.
+    /// Whether a pack-relative path (e.g. `["sessions", "a.json"]`) may be restored.
     pub fn restore_allowed(rel: &[&str]) -> bool {
         let rel: Vec<String> = rel.iter().map(|s| s.to_string()).collect();
         crate::commands::packager::restore_target(&rel).is_some()
@@ -180,7 +180,6 @@ pub fn run() {
         })
         // Unregistered 2026-10-29: no live frontend caller (docs/terrance-merge-inventory.md).
         // The fns stay; re-add the `module::fn` line to restore one:
-        // openclaw::{get_openclaw_sandbox, toggle_openclaw_sandbox},
         // terrence_actions::{list_terrence_tools, request_terrence_action},
         // terrence_context::create_context_item,
         // terrence_priorities::{record_terrence_decision, resolve_terrence_decision},
@@ -194,15 +193,10 @@ pub fn run() {
             system::restart_docker_service,
             restart_services::restart_services,
             system::check_service_port,
-            // OpenClaw / Amara
-            openclaw::read_openclaw_status,
-            openclaw::read_cron_jobs,
+            // Skills / tasks / content pipeline
             openclaw::read_skills,
             openclaw::read_tasks,
             openclaw::read_content_pipeline,
-            openclaw::read_daily_log,
-            openclaw::get_openclaw_health,
-            openclaw::restart_openclaw,
             openclaw::save_skill,
             openclaw::delete_skill,
             // Muse BLE
@@ -265,6 +259,12 @@ pub fn run() {
             packager::pack_it_up,
             packager::unpack_backup,
             packager::get_app_paths,
+            // Keychain secrets + n8n key file (write-only; never return a value)
+            commands::keychain::secrets_status,
+            commands::keychain::secret_set,
+            commands::key_file::key_file_status,
+            commands::key_file::key_file_make,
+            commands::key_file::key_file_unlock,
             // Goals
             goals::read_goals,
             goals::save_goals,

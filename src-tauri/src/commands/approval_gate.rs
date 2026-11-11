@@ -36,7 +36,7 @@ pub fn denied_message() -> String {
 static IN_FLIGHT: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
 /// Lock key for one restartable service, shared by single and batch commands:
-/// `svc:openclaw`, `svc:docker:<name>`.
+/// `svc:docker:<name>`.
 pub fn service_key(service_id: &str) -> String {
     format!("svc:{service_id}")
 }

@@ -1,5 +1,6 @@
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
 import { APP_VERSION } from "../app/version";
+import { makeLiveStandalone } from "./liveAdapter";
 
 /**
  * design-1111s: Amara OS as a standalone app (first-run, Services, Backup, Updates, Notifications, WHOOP 4).
@@ -254,8 +255,13 @@ function previewOpts(): Parameters<typeof sampleStandalone>[0] {
 }
 
 let cached: StandaloneAdapter | null = null;
+let live: StandaloneAdapter | null = null;
 export function standaloneAdapter(): StandaloneAdapter {
-  if (!sampleAdaptersEnabled()) return unwiredStandalone;
+  if (!sampleAdaptersEnabled()) {
+    // Live reads exist only inside the Tauri app; elsewhere (tests, browser) everything stays unwired.
+    const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    return inTauri ? (live ??= makeLiveStandalone(unwiredStandalone)) : unwiredStandalone;
+  }
   return (cached ??= sampleStandalone(previewOpts()));
 }
 /** Tests only. */

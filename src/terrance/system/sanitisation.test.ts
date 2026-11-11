@@ -156,7 +156,7 @@ describe.each(HOSTILE)("hostile error: %s", (_label, hostile) => {
     m.ok.set("send_telegram_message", () => undefined);
     m.ok.set("load_terrance_context", () => "{}");
     m.ok.set("save_terrance_context", () => undefined);
-    const report = { issues: [{ service: "openclaw", status: "down", message: "x", canAutoHeal: true }] } as never;
+    const report = { issues: [{ service: "n8n", status: "down", message: "x", canAutoHeal: true }] } as never;
     const NOW = 1_800_000_000_000;
 
     sd.__resetAutoHealForTests();
@@ -165,7 +165,7 @@ describe.each(HOSTILE)("hostile error: %s", (_label, hostile) => {
     m.ok.set("restart_services", () => { throw typeof hostile === "string" ? `refused: ${hostile}` : new Error(`refused: ${String((hostile as Error)?.message ?? hostile)}`); });
     await sd.autoHeal(report, NOW + 5 * H);
     sd.__resetAutoHealForTests();
-    m.ok.set("restart_services", () => [{ service: "openclaw", ok: false, error: String((hostile as Error)?.message ?? hostile) }]);
+    m.ok.set("restart_services", () => [{ service: "docker:stack-n8n-1", ok: false, error: String((hostile as Error)?.message ?? hostile) }]);
     await sd.autoHeal(report, NOW + 10 * H);
 
     expect(m.bus.fail).toHaveBeenCalledTimes(3);

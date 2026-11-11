@@ -8,12 +8,6 @@ pub(crate) fn nexus_data_dir() -> PathBuf {
     crate::app_paths::data_dir()
 }
 
-fn openclaw_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".openclaw")
-}
-
 #[derive(Serialize)]
 pub struct PackageInfo {
     pub path: String,
@@ -23,9 +17,6 @@ pub struct PackageInfo {
     pub skipped: Vec<String>,
 }
 
-/// Recorded in `PackageInfo::skipped` when there is no ~/.openclaw to back up.
-pub(crate) const OPENCLAW_NOT_INSTALLED: &str = "openclaw not installed";
-
 #[tauri::command]
 pub async fn pack_it_up() -> Result<PackageInfo, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
@@ -33,7 +24,7 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
 }
 
 /// `pack_it_up` with the home and data dirs injected (tests use temp dirs).
-async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
+pub(crate) async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
     let desktop = home.join("Desktop");
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let archive_name = format!("nexus-backup-{}.tar.gz", timestamp);
@@ -60,22 +51,6 @@ async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
         let dest = staging.join("nexus-config");
         copy_dir_recursive(&config_src, &dest, Some(MAX_PACK_FILE_BYTES), &mut skipped)?;
         includes.push("Amara OS settings & config".to_string());
-    }
-
-    // 2. Copy OpenClaw data (optional: no ~/.openclaw is recorded, not an error)
-    let openclaw = home.join(".openclaw");
-    if openclaw.is_dir() {
-        let dest = staging.join("openclaw");
-        copy_dir_selective(
-            &openclaw,
-            &dest,
-            &["openclaw.json", "cron", "skills", "memory", "workspace"],
-            Some(MAX_PACK_FILE_BYTES),
-            &mut skipped,
-        )?;
-        includes.push("OpenClaw workspace & memory".to_string());
-    } else {
-        skipped.push(OPENCLAW_NOT_INSTALLED.to_string());
     }
 
     // 3. Copy local session data
@@ -234,7 +209,6 @@ pub async fn unpack_backup(
 
     let extracted = find_pack_root(&staging)?;
     let roots = RestoreRoots {
-        openclaw: openclaw_dir(),
         data: nexus_data_dir(),
     };
     let plan = plan_restore(&extracted)?;
@@ -266,7 +240,7 @@ pub async fn unpack_backup(
     }
     // What gets replaced must still be what the dialog showed.
     if replaced_files(&plan, &roots) != replaced {
-        return Err("changed: files in ~/.openclaw or the Amara OS data folder changed while the dialog was open; nothing was restored".to_string());
+        return Err("changed: files in the Amara OS data folder changed while the dialog was open; nothing was restored".to_string());
     }
 
     // Full safety copy of the current data before anything is overwritten.
@@ -285,8 +259,8 @@ pub async fn unpack_backup(
     Ok(restored)
 }
 
-/// Copy the current data dir (minus earlier restore backups) and the
-/// OpenClaw files a backup covers into `<data>/restore-backups/<stamp>-full/`
+/// Copy the current data dir (minus earlier restore backups) into
+/// `<data>/restore-backups/<stamp>-full/`
 /// (0700), so a restore can be undone by hand. Symlinks are listed, not followed.
 fn snapshot_before_restore(
     roots: &RestoreRoots,
@@ -316,15 +290,6 @@ fn snapshot_before_restore(
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         copy_dir_selective(&roots.data, &target.join("data"), &refs, None, &mut skipped)?;
     }
-    if roots.openclaw.is_dir() {
-        copy_dir_selective(
-            &roots.openclaw,
-            &target.join("openclaw"),
-            &["openclaw.json", "cron", "skills", "memory", "workspace"],
-            None,
-            &mut skipped,
-        )?;
-    }
     Ok((target, skipped))
 }
 
@@ -344,19 +309,16 @@ fn find_pack_root(staging: &Path) -> Result<PathBuf, String> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum RestoreRoot {
-    OpenClaw,
     Data,
 }
 
 struct RestoreRoots {
-    openclaw: PathBuf,
     data: PathBuf,
 }
 
 impl RestoreRoots {
     fn get(&self, root: RestoreRoot) -> &Path {
         match root {
-            RestoreRoot::OpenClaw => &self.openclaw,
             RestoreRoot::Data => &self.data,
         }
     }
@@ -375,40 +337,10 @@ pub(crate) struct RestorePlan {
     pub(crate) skipped: Vec<String>,
 }
 
-/// Lower-case extension of the last component, if any.
-fn ext_of(rel: &Path) -> Option<String> {
-    rel.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-}
-
-/// Files pack_it_up writes under `openclaw/` (openclaw.json, cron, skills,
-/// memory, workspace), restricted to the file types those folders hold.
-fn openclaw_allowed(rel: &[String]) -> bool {
-    let path: PathBuf = rel.iter().collect();
-    let ext = ext_of(&path);
-    let ext = ext.as_deref();
-    match rel {
-        [only] => only == "openclaw.json",
-        [dir, _] if dir == "cron" => ext == Some("json"),
-        [dir, _] if dir == "skills" => ext == Some("md"),
-        [dir, rest @ ..] if dir == "memory" && rest.len() <= 3 => {
-            matches!(ext, Some("md" | "json" | "jsonl" | "txt"))
-        }
-        [dir, rest @ ..] if dir == "workspace" && rest.len() <= 3 => {
-            matches!(ext, Some("md" | "json" | "txt"))
-        }
-        _ => false,
-    }
-}
-
 /// Map an archive file (path relative to the pack root) to where it may be restored.
 pub(crate) fn restore_target(rel: &[String]) -> Option<(RestoreRoot, PathBuf)> {
     let join = |parts: &[String]| parts.iter().collect::<PathBuf>();
     match rel {
-        [top, rest @ ..] if top == "openclaw" && !rest.is_empty() => {
-            openclaw_allowed(rest).then(|| (RestoreRoot::OpenClaw, join(rest)))
-        }
         [top, rest @ ..]
             if (top == "nexus-config" || top == "electron-config")
                 && !rest.is_empty()
@@ -503,10 +435,7 @@ fn restore_operation(
     let count = |r: RestoreRoot| plan.items.iter().filter(|i| i.root == r).count();
     let rcount = |r: RestoreRoot| replaced.iter().filter(|(x, _)| *x == r).count();
     let mut out = format!(
-        "Restore backup {archive_name}:\n- {} files into {} ({} replaced)\n- {} files into {} ({} replaced)\nReplaced files are first copied to {}/{stamp} in each folder.",
-        count(RestoreRoot::OpenClaw),
-        roots.openclaw.display(),
-        rcount(RestoreRoot::OpenClaw),
+        "Restore backup {archive_name}:\n- {} files into {} ({} replaced)\nReplaced files are first copied to {}/{stamp} in each folder.",
         count(RestoreRoot::Data),
         roots.data.display(),
         rcount(RestoreRoot::Data),
@@ -515,10 +444,8 @@ fn restore_operation(
     if !replaced.is_empty() {
         out.push_str("\nReplaces:");
         for (root, rel) in replaced.iter().take(12) {
-            let label = if *root == RestoreRoot::OpenClaw {
-                "~/.openclaw"
-            } else {
-                "data"
+            let label = match root {
+                RestoreRoot::Data => "data",
             };
             out.push_str(&format!("\n  {label}/{}", rel.display()));
         }
@@ -602,9 +529,6 @@ fn apply_restore(
         *counts.entry(item.root).or_insert(0usize) += 1;
     }
     let mut out = Vec::new();
-    if let Some(n) = counts.get(&RestoreRoot::OpenClaw) {
-        out.push(format!("OpenClaw: {n} files restored"));
-    }
     if let Some(n) = counts.get(&RestoreRoot::Data) {
         out.push(format!("Amara OS data: {n} files restored"));
     }
@@ -764,7 +688,6 @@ pub(crate) fn unpack_archive_checked(
 pub fn get_app_paths() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "data_dir": nexus_data_dir().to_string_lossy(),
-        "openclaw_dir": openclaw_dir().to_string_lossy(),
         "home_dir": dirs::home_dir().map(|p| p.to_string_lossy().to_string()),
     }))
 }
@@ -775,7 +698,11 @@ const MAX_PACK_FILE_BYTES: u64 = 50_000_000;
 
 /// macOS metadata that is not user data (never packed or restored).
 fn is_os_junk(name: &str) -> bool {
-    name == ".DS_Store" || name.starts_with("._")
+    // The n8n key file (and its temp files) never goes into a backup or a restore.
+    name == ".DS_Store"
+        || name.starts_with("._")
+        || name == super::key_file::KEY_FILE_NAME
+        || (name.starts_with(".amara-n8n.key.") && name.ends_with(".tmp"))
 }
 
 /// Recursively copy `src` into `dst`. Dot-files are copied. Symlinks are never
@@ -1152,15 +1079,11 @@ mod restore_tests {
     fn snapshot_before_restore_copies_current_data_but_not_old_backups() {
         let base = tmp("snapshot");
         let roots = RestoreRoots {
-            openclaw: base.join("openclaw"),
             data: base.join("data"),
         };
         put(&roots.data, "goals.json", "[1]");
         put(&roots.data, "sessions/a.ndjson", "x");
         put(&roots.data, "restore-backups/old/goals.json", "old");
-        put(&roots.openclaw, "openclaw.json", "{}");
-        put(&roots.openclaw, "skills/s.md", "s");
-        put(&roots.openclaw, "secrets/not-in-backups.txt", "no");
 
         let (dir, skipped) = snapshot_before_restore(&roots, "20261029_100000").unwrap();
         assert_eq!(dir, roots.data.join("restore-backups/20261029_100000-full"));
@@ -1171,9 +1094,10 @@ mod restore_tests {
         );
         assert!(dir.join("data/sessions/a.ndjson").is_file());
         assert!(!dir.join("data/restore-backups").exists());
-        assert!(dir.join("openclaw/openclaw.json").is_file());
-        assert!(dir.join("openclaw/skills/s.md").is_file());
-        assert!(!dir.join("openclaw/secrets").exists());
+        assert!(
+            !dir.join("openclaw").exists(),
+            "no OpenClaw files in the safety copy"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1189,7 +1113,6 @@ mod restore_tests {
     fn snapshot_refuses_a_symlinked_backup_folder() {
         let base = tmp("snapshot-link");
         let roots = RestoreRoots {
-            openclaw: base.join("openclaw"),
             data: base.join("data"),
         };
         fs::create_dir_all(&roots.data).unwrap();
@@ -1208,26 +1131,6 @@ mod restore_tests {
     fn allow_list_matches_what_pack_it_up_writes() {
         let ok = |p: &[&str]| restore_target(&s(p));
         assert_eq!(
-            ok(&["openclaw", "openclaw.json"]),
-            Some((RestoreRoot::OpenClaw, "openclaw.json".into()))
-        );
-        assert_eq!(
-            ok(&["openclaw", "skills", "brief.md"]),
-            Some((RestoreRoot::OpenClaw, "skills/brief.md".into()))
-        );
-        assert_eq!(
-            ok(&["openclaw", "workspace", "TASKS.md"]),
-            Some((RestoreRoot::OpenClaw, "workspace/TASKS.md".into()))
-        );
-        assert_eq!(
-            ok(&["openclaw", "cron", "jobs.json"]),
-            Some((RestoreRoot::OpenClaw, "cron/jobs.json".into()))
-        );
-        assert_eq!(
-            ok(&["openclaw", "memory", "2026-10-28.md"]).map(|t| t.0),
-            Some(RestoreRoot::OpenClaw)
-        );
-        assert_eq!(
             ok(&["sessions", "eeg.ndjson"]),
             Some((RestoreRoot::Data, "sessions/eeg.ndjson".into()))
         );
@@ -1239,13 +1142,15 @@ mod restore_tests {
             ok(&["nexus-config", "settings.json"]),
             Some((RestoreRoot::Data, "settings.json".into()))
         );
+        // Old backups may still hold an `openclaw/` folder: nothing in it is ever restored.
         for bad in [
-            &["openclaw", "credentials", "telegram.json"][..],
+            &["openclaw", "openclaw.json"][..],
+            &["openclaw", "skills", "brief.md"],
+            &["openclaw", "workspace", "TASKS.md"],
+            &["openclaw", "cron", "jobs.json"],
+            &["openclaw", "memory", "2026-10-28.md"],
+            &["openclaw", "credentials", "telegram.json"],
             &["openclaw", "skills", "evil.sh"],
-            &["openclaw", "skills", "nested", "x.md"],
-            &["openclaw", "LaunchAgents", "x.plist"],
-            &["openclaw", "workspace", "run.sh"],
-            &["openclaw", "sessions", "whatsapp.json"],
             &["nexus-config", "restore-backups", "x.json"],
             &["random.txt"],
         ] {
@@ -1271,21 +1176,15 @@ mod restore_tests {
             .collect();
         assert_eq!(goals.len(), 1, "one write per destination");
         assert_eq!(fs::read_to_string(&goals[0].src).unwrap(), "top");
-        let plan = RestorePlan {
-            items: plan
-                .items
-                .into_iter()
-                .filter(|i| i.root == RestoreRoot::OpenClaw)
-                .collect(),
-            skipped: plan.skipped,
-        };
-        let rels: Vec<_> = plan
-            .items
+        assert!(
+            plan.items.iter().all(|i| !i.rel.starts_with("skills")),
+            "nothing under openclaw/ is planned"
+        );
+        assert_eq!(plan.skipped.len(), 4, "{:?}", plan.skipped);
+        assert!(plan
+            .skipped
             .iter()
-            .map(|i| i.rel.to_string_lossy().to_string())
-            .collect();
-        assert_eq!(rels, ["openclaw.json", "skills/a.md"]);
-        assert_eq!(plan.skipped.len(), 2, "{:?}", plan.skipped);
+            .any(|s| s.starts_with("openclaw/openclaw.json")));
         let _ = fs::remove_dir_all(&pack);
     }
 
@@ -1294,55 +1193,47 @@ mod restore_tests {
         let base = tmp("apply");
         let pack = base.join("pack");
         put(&pack, "openclaw/openclaw.json", "NEW");
-        put(&pack, "openclaw/skills/a.md", "# new skill");
         put(&pack, "goals.json", "[1]");
         let roots = RestoreRoots {
-            openclaw: base.join("home/.openclaw"),
             data: base.join("data"),
         };
-        put(&roots.openclaw, "openclaw.json", "OLD");
+        put(&roots.data, "goals.json", "OLD");
         let plan = plan_restore(&pack).unwrap();
         let replaced = replaced_files(&plan, &roots);
         assert_eq!(
             replaced,
-            vec![(RestoreRoot::OpenClaw, PathBuf::from("openclaw.json"))]
+            vec![(RestoreRoot::Data, PathBuf::from("goals.json"))]
         );
         let op = restore_operation("b.tar.gz", &plan, &replaced, &roots, "20261028_140000");
         assert!(
-            op.contains("2 files into")
+            op.contains("1 files into")
                 && op.contains("(1 replaced)")
-                && op.contains("~/.openclaw/openclaw.json"),
+                && op.contains("data/goals.json"),
             "{op}"
         );
+        assert!(!op.to_lowercase().contains("openclaw"), "{op}");
 
         let out = apply_restore(&plan, &roots, "20261028_140000").unwrap();
         assert_eq!(
-            fs::read_to_string(roots.openclaw.join("openclaw.json")).unwrap(),
-            "NEW"
+            fs::read_to_string(roots.data.join("goals.json")).unwrap(),
+            "[1]"
         );
         assert_eq!(
             fs::read_to_string(
                 roots
-                    .openclaw
-                    .join("restore-backups/20261028_140000/openclaw.json")
+                    .data
+                    .join("restore-backups/20261028_140000/goals.json")
             )
             .unwrap(),
             "OLD"
-        );
-        assert_eq!(
-            fs::read_to_string(roots.openclaw.join("skills/a.md")).unwrap(),
-            "# new skill"
-        );
-        assert_eq!(
-            fs::read_to_string(roots.data.join("goals.json")).unwrap(),
-            "[1]"
         );
         assert!(
             out.iter().any(|l| l.contains("1 replaced files saved")),
             "{out:?}"
         );
+        assert!(!roots.data.join("openclaw").exists());
         // No temp files left next to restored files.
-        let leftovers: Vec<_> = fs::read_dir(&roots.openclaw)
+        let leftovers: Vec<_> = fs::read_dir(&roots.data)
             .unwrap()
             .flatten()
             .filter(|e| e.file_name().to_string_lossy().contains(".restore-"))
@@ -1357,12 +1248,12 @@ mod restore_tests {
         let base = tmp("link");
         let outside = base.join("outside");
         fs::create_dir_all(&outside).unwrap();
-        let root = base.join(".openclaw");
+        let root = base.join("data");
         fs::create_dir_all(&root).unwrap();
         std::os::unix::fs::symlink(&outside, root.join("skills")).unwrap();
         assert!(safe_dest(&root, Path::new("skills/a.md")).is_err());
-        std::os::unix::fs::symlink(outside.join("x.json"), root.join("openclaw.json")).unwrap();
-        assert!(safe_dest(&root, Path::new("openclaw.json")).is_err());
+        std::os::unix::fs::symlink(outside.join("x.json"), root.join("goals.json")).unwrap();
+        assert!(safe_dest(&root, Path::new("goals.json")).is_err());
         assert!(safe_dest(&root, Path::new("../x")).is_err());
         assert!(safe_dest(&root, Path::new("/etc/hosts")).is_err());
         assert!(safe_dest(&root, Path::new("workspace/ok.md"))
@@ -1441,10 +1332,10 @@ mod pack_tests {
     }
 
     #[tokio::test]
-    async fn without_openclaw_it_skips_and_succeeds() {
+    async fn packing_never_expects_or_reads_openclaw() {
         let (home, data) = fake_home("no-openclaw");
         let info = pack_at(&home, &data).await.unwrap();
-        assert_eq!(info.skipped, vec![OPENCLAW_NOT_INSTALLED.to_string()]);
+        assert!(info.skipped.is_empty(), "{:?}", info.skipped);
         assert!(!info.includes.iter().any(|i| i.contains("OpenClaw")));
         let entries = archive_entries(&info.path);
         assert!(entries.iter().any(|e| e.ends_with("/goals.json")));
@@ -1453,32 +1344,26 @@ mod pack_tests {
     }
 
     #[tokio::test]
-    async fn with_openclaw_it_packs_the_allow_listed_files() {
+    async fn an_existing_dot_openclaw_is_not_backed_up() {
         let (home, data) = fake_home("with-openclaw");
         let oc = home.join(".openclaw");
         fs::create_dir_all(oc.join("skills")).unwrap();
         fs::write(oc.join("openclaw.json"), "{}").unwrap();
         fs::write(oc.join("skills/s.md"), "s").unwrap();
-        fs::write(oc.join("skills/.DS_Store"), "junk").unwrap();
-        fs::write(oc.join("not-backed-up.txt"), "x").unwrap();
         let info = pack_at(&home, &data).await.unwrap();
-        assert!(!info.skipped.contains(&OPENCLAW_NOT_INSTALLED.to_string()));
-        assert!(info
-            .includes
-            .contains(&"OpenClaw workspace & memory".to_string()));
+        assert!(info.skipped.is_empty(), "{:?}", info.skipped);
+        assert!(!info.includes.iter().any(|i| i.contains("OpenClaw")));
         let entries = archive_entries(&info.path);
-        assert!(entries
-            .iter()
-            .any(|e| e.ends_with("/openclaw/openclaw.json")));
-        assert!(entries.iter().any(|e| e.ends_with("/openclaw/skills/s.md")));
-        assert!(!entries.iter().any(|e| e.ends_with("not-backed-up.txt")));
-        // (macOS bsdtar may add its own ._* xattr entries; unpack skips those.)
-        assert!(!entries.iter().any(|e| e.ends_with(".DS_Store")));
+        assert!(
+            !entries.iter().any(|e| e.contains("openclaw")),
+            "{entries:?}"
+        );
+        assert!(oc.join("openclaw.json").is_file(), "left untouched");
         let _ = fs::remove_dir_all(&home);
     }
 
     #[tokio::test]
-    async fn a_backup_without_openclaw_restores() {
+    async fn a_backup_round_trips_without_openclaw() {
         let (home, data) = fake_home("roundtrip");
         let info = pack_at(&home, &data).await.unwrap();
 
@@ -1492,23 +1377,24 @@ mod pack_tests {
         )
         .unwrap();
         let plan = plan_restore(&find_pack_root(&staging).unwrap()).unwrap();
-        assert!(!plan.items.iter().any(|i| i.root == RestoreRoot::OpenClaw));
 
         let target = home.join("new-machine");
         let roots = RestoreRoots {
-            openclaw: target.join(".openclaw"),
             data: target.join("data"),
         };
         fs::create_dir_all(&roots.data).unwrap();
         snapshot_before_restore(&roots, "20261030_120000").unwrap();
         let out = apply_restore(&plan, &roots, "20261030_120000").unwrap();
         assert!(out.iter().any(|l| l.starts_with("Amara OS data:")));
-        assert!(!out.iter().any(|l| l.starts_with("OpenClaw")));
+        assert!(!out.iter().any(|l| l.to_lowercase().contains("openclaw")));
         assert_eq!(
             fs::read_to_string(roots.data.join("goals.json")).unwrap(),
             "[1]"
         );
-        assert!(!roots.openclaw.exists(), "no ~/.openclaw is created");
+        assert!(
+            !target.join(".openclaw").exists(),
+            "no ~/.openclaw is created"
+        );
         let _ = fs::remove_dir_all(&home);
     }
 }

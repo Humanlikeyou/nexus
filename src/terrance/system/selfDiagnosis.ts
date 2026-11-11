@@ -2,7 +2,6 @@
  * Amara Self-Diagnosis + Auto-Healing
  *
  * Checks health of:
- *  - OpenClaw gateway (port 18789)
  *  - n8n (Docker container stack-n8n-1)
  *  - Ollama (port 11434)
  *
@@ -51,7 +50,6 @@ export interface AutoHealResult {
 /** Map a diagnostic issue to a restart_services id. */
 function serviceIdFor(issue: DiagnosticIssue): string | null {
   switch (issue.service) {
-    case "openclaw": return "openclaw";
     case "n8n": return "docker:stack-n8n-1";
     default: return null;
   }
@@ -172,42 +170,6 @@ export function __resetAutoHealForTests(): void {
 export async function runDiagnostics(): Promise<DiagnosticReport> {
   const issues: DiagnosticIssue[] = [];
 
-  // The router's OpenClaw "gateway" mode is retired: no compute mode calls OpenClaw, so a down
-  // gateway is never an issue and is never restarted (10-28/10-29: every health check failed an
-  // OpenClaw restart). A degraded but running OpenClaw is still reported.
-
-  // Check OpenClaw gateway
-  let openclawOnline = false;
-  let openclawGateway = false;
-  let openclawInstalled = true;
-  try {
-    const health = await invoke<{
-      status: string;
-      gateway: boolean;
-      rpc: boolean;
-      installed?: boolean;
-    }>("get_openclaw_health");
-    openclawOnline = health.status !== "offline";
-    openclawGateway = health.gateway;
-    // Nothing listening and no launchd job: not installed, so nothing to restart or report as
-    // down (live check 2026-10-29: every health check failed a launchctl kickstart).
-    openclawInstalled = openclawGateway || health.installed !== false;
-    if (!openclawInstalled) {
-      console.log("[self-diagnosis] OpenClaw not installed (no listener on 18789, no launchd job); skipping");
-    } else if (!openclawGateway) {
-      console.log("[self-diagnosis] OpenClaw gateway down; the router never calls it, not restarting");
-    } else if (health.status === "degraded") {
-      issues.push({
-        service: "openclaw",
-        status: "degraded",
-        message: "OpenClaw is degraded (check memory search or channels)",
-        canAutoHeal: false,
-      });
-    }
-  } catch {
-    /* unreadable health: not an issue, the router never calls OpenClaw */
-  }
-
   // Check n8n (Docker)
   let n8nReachable = false;
   try {
@@ -256,14 +218,10 @@ export async function runDiagnostics(): Promise<DiagnosticReport> {
 
   return {
     timestamp: Date.now(),
-    openclawOnline,
-    openclawGateway,
     n8nReachable,
     ollamaReachable,
     diskSpaceOk: true, // Simplified — could add disk space check later
     issues,
-    openclawInstalled,
-    openclawLocalMode: true,
   };
 }
 

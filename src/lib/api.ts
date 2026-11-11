@@ -1,8 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  OpenClawStatus,
-  OpenClawHealth,
-  CronJob,
   Skill,
   TaskItem,
   ContentPipelineItem,
@@ -43,19 +40,8 @@ export const getSystemInfo = () => invoke<SystemInfo>("get_system_info");
 export const healthCheck = () => invoke<string>("health_check");
 
 // ============================================================
-// OpenClaw / Amara
+// Skills / tasks / content pipeline
 // ============================================================
-
-export const readOpenClawStatus = () =>
-  invoke<OpenClawStatus>("read_openclaw_status");
-
-export const getOpenClawHealth = () =>
-  invoke<OpenClawHealth>("get_openclaw_health");
-
-export const restartOpenclaw = () =>
-  invoke<string>("restart_openclaw");
-
-export const readCronJobs = () => invoke<CronJob[]>("read_cron_jobs");
 
 export const readSkills = () => invoke<Skill[]>("read_skills");
 
@@ -64,9 +50,6 @@ export const readTasks = (workspacePath?: string) =>
 
 export const readContentPipeline = (workspacePath?: string) =>
   invoke<ContentPipelineItem[]>("read_content_pipeline", { workspacePath });
-
-export const readDailyLog = (date?: string) =>
-  invoke<string>("read_daily_log", { date });
 
 // ============================================================
 // Muse BLE
