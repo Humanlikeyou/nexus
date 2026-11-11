@@ -212,12 +212,16 @@ services:
       # Tools: allowlist (empty = none) and the read-only Ingress webhook they call
       CREW_ALLOWED_TOOLS: ${CREW_ALLOWED_TOOLS:-}
       CREW_INGRESS_URL: ${CREW_INGRESS_URL:-http://n8n:5678/webhook/terrance/ingress-crew}
-      # LLM — local Ollama (gemma4) primary; MiniMax optional, only if MINIMAX_API_KEY is set
+      # LLM — every model call goes through the Amara Router (OpenAI /v1); tier by model alias
+      # (amara-fast / amara-deep) plus X-Amara-Route. Never Ollama directly.
+      CREW_ROUTER_URL: ${CREW_ROUTER_URL:-http://host.docker.internal:8787/v1}
+      CREW_ROUTER_KEY: ${CREW_ROUTER_KEY:-}
+      # MiniMax is fail-closed: needs CREW_ALLOW_CLOUD=1, NEXUS_OUTBOUND_DISABLED unset, and a key
+      CREW_ALLOW_CLOUD: ${CREW_ALLOW_CLOUD:-}
+      NEXUS_OUTBOUND_DISABLED: ${NEXUS_OUTBOUND_DISABLED:-}
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.io/anthropic}
       MINIMAX_MODEL: ${MINIMAX_MODEL:-MiniMax-M2.5}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      CREW_OLLAMA_MODEL: ${CREW_OLLAMA_MODEL:-gemma4:latest}
       # Persistence — crew_runs table in the shared terrance DB
       CREW_DB_HOST: postgres
       CREW_DB_PORT: "5432"

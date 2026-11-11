@@ -428,5 +428,177 @@ class IngressToolTests(unittest.TestCase):
         self.assertEqual(main.TOOL_REGISTRY, {})
 
 
+# ── R13-A: model calls go through the Amara Router ──────────────────────────
+import http.server
+import socketserver
+
+
+class _MockRouter:
+    """A local stand-in for the router: records each request, answers OpenAI chat completions."""
+
+    def __init__(self):
+        outer = self
+        self.requests = []
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length", "0"))
+                outer.requests.append({"path": self.path, "headers": dict(self.headers.items()),
+                                       "body": json.loads(self.rfile.read(n) or b"{}")})
+                body = json.dumps({
+                    "id": "c1", "object": "chat.completion", "created": 0,
+                    "model": outer.requests[-1]["body"].get("model"),
+                    "choices": [{"index": 0, "finish_reason": "stop",
+                                 "message": {"role": "assistant", "content": "pong"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        self.server = socketserver.TCPServer(("127.0.0.1", 0), H)
+        self.port = self.server.server_address[1]
+        self.url = f"http://127.0.0.1:{self.port}/v1"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+class RouterLLMTests(unittest.TestCase):
+    def setUp(self):
+        self.router = _MockRouter()
+        self.addCleanup(self.router.close)
+
+    def _call(self, tier, key=""):
+        from crewai import LLM
+        llm = LLM(**main.router_llm_kwargs(tier, url=self.router.url, key=key))
+        return llm.call("ping")
+
+    def test_default_url_is_router_on_8787(self):
+        self.assertEqual(main.CREW_ROUTER_URL, "http://host.docker.internal:8787/v1")
+        kw = main.router_llm_kwargs("fast")
+        self.assertEqual(kw["base_url"], "http://host.docker.internal:8787/v1")
+
+    def test_fast_and_deep_pin_alias_and_header(self):
+        for tier in ("fast", "deep"):
+            self.router.requests.clear()
+            self._call(tier)
+            self.assertEqual(len(self.router.requests), 1)
+            r = self.router.requests[0]
+            self.assertEqual(r["path"], "/v1/chat/completions")
+            self.assertEqual(r["body"]["model"], f"amara-{tier}")
+            self.assertEqual(r["headers"].get("X-Amara-Route"), tier)
+            self.assertTrue(r["headers"]["Host"].startswith(f"127.0.0.1:{self.router.port}"))
+
+    def test_no_ollama_residency_fields_sent(self):
+        self._call("fast")
+        body = self.router.requests[0]["body"]
+        for field in ("keep_alive", "num_ctx", "options"):
+            self.assertNotIn(field, body)
+
+    def test_optional_bearer_only_when_configured(self):
+        self._call("fast", key="")
+        self.assertNotIn("sk-", self.router.requests[-1]["headers"].get("Authorization", ""))
+        self._call("deep", key="router-bearer-xyz")
+        self.assertEqual(self.router.requests[-1]["headers"]["Authorization"], "Bearer router-bearer-xyz")
+
+    def test_ollama_url_is_refused(self):
+        for bad in ("http://host.docker.internal:11434", "http://127.0.0.1:11434/v1", "ftp://x/v1",
+                    "http://h:011434/v1", "http://127.0.0.1:011434/v1", "http://127.0.0.1:11434?x",
+                    "http://127.0.0.1:11434#a", "http://127.0.0.1:11434\\x", "http://127.0.0.1/v1",
+                    "http://evil.example:8787/v1", "http://u:p@127.0.0.1:8787/v1", "http://127.0.0.1:8787/v1?a=1"):
+            with self.assertRaises(ValueError):
+                main.router_llm_kwargs("fast", url=bad)
+        with self.assertRaises(ValueError):
+            main.router_llm_kwargs("medium")
+
+    def test_source_never_targets_11434(self):
+        with open(main.__file__) as f:
+            self.assertNotIn("11434", f.read())
+
+    def test_build_llms_uses_router_for_every_agent_with_its_tier(self):
+        with mock.patch.object(main, "CREW_ROUTER_URL", self.router.url):
+            [(label, llms)] = main._build_llms(["researcher", "analyst"])
+        self.assertEqual(label, "amara-deep,amara-fast")
+        self.assertEqual(llms["researcher"].model, "amara-fast")
+        self.assertEqual(llms["analyst"].model, "amara-deep")
+        for llm in llms.values():
+            self.assertEqual(llm.base_url, self.router.url)
+
+    def test_ollama_env_no_longer_drives_model_calls(self):
+        self.assertFalse(hasattr(main, "OLLAMA_BASE_URL"))
+        self.assertFalse(hasattr(main, "CREW_OLLAMA_MODEL"))
+
+    def test_telemetry_stays_disabled(self):
+        self.assertEqual(os.environ.get("CREWAI_DISABLE_TELEMETRY"), "true")
+
+
+class CloudGateTests(unittest.TestCase):
+    def test_default_off(self):
+        self.assertFalse(main.cloud_allowed("", "", ""))
+        self.assertFalse(main.cloud_allowed("", "", "k"))
+
+    def test_each_gate_blocks_alone(self):
+        self.assertTrue(main.cloud_allowed("1", "", "k"))
+        self.assertFalse(main.cloud_allowed("0", "", "k"))          # opt-in missing
+        self.assertFalse(main.cloud_allowed("1", "1", "k"))         # outbound disabled
+        self.assertFalse(main.cloud_allowed("1", "", ""))           # no key
+        self.assertFalse(main.cloud_allowed("1", "", "  "))
+
+    def test_build_llms_adds_minimax_only_when_gate_open(self):
+        with mock.patch.object(main, "cloud_allowed", return_value=False):
+            self.assertEqual(len(main._build_llms(["writer"])), 1)
+        with mock.patch.object(main, "cloud_allowed", return_value=True), \
+                mock.patch.object(main, "MINIMAX_API_KEY", "dummy-key"):
+            attempts = main._build_llms(["writer"])
+        self.assertEqual([a[0] for a in attempts], ["amara-fast", "minimax/" + main.MINIMAX_MODEL])
+
+
+class CrewInfoLlmTests(unittest.TestCase):
+    def test_row_to_info_carries_router_model(self):
+        info = main._row_to_info(("i", "n", "running", ["a"], None, "t", None, "amara-fast"))
+        self.assertEqual(info.llm, "amara-fast")
+        self.assertIsNone(main._row_to_info(("i", "n", "running", ["a"], None, "t", None)).llm)
+
+    def test_start_records_router_model_not_ollama_or_cloud(self):
+        inserts = []
+
+        class Conn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def execute(self, sql, params=()):
+                inserts.append((sql, params))
+                return self
+
+            def fetchone(self):
+                return None
+
+        ctx = mock.Mock()
+        ctx.Pipe.return_value = (mock.Mock(), mock.Mock())
+        with mock.patch.object(main, "db", return_value=Conn()), mock.patch.object(main, "_ctx", ctx), \
+                mock.patch.object(main.threading, "Thread"), \
+                mock.patch.object(main, "db_get", return_value=main.CrewInfo(
+                    id="x", name="n", status="running", agents=["researcher"], llm="amara-fast")):
+            main._procs.clear()
+            main.start_crew(main.CrewStartRequest(name="n", task="t"))
+            main._procs.clear()
+        sql, params = inserts[0]
+        self.assertIn("llm", sql)
+        self.assertEqual(params[-1], "amara-fast")
+        self.assertEqual(set(main.planned_llm_label(list(main.AGENT_CATALOG)).split(",")),
+                         {"amara-fast", "amara-deep"})
+
+
 if __name__ == "__main__":
     unittest.main()

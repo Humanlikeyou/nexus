@@ -8,8 +8,10 @@ FastAPI wrapper around CrewAI. Contract matches src-tauri/src/commands/crew.rs:
   POST /crews/stop             {id} -> {"id", "status", "stopped": bool}
 
 Every /crews/* call needs header X-Crew-Token == $CREW_SERVICE_TOKEN.
-LLM: local Ollama gemma4 primary. MiniMax-M2.5 (Anthropic-messages API, same endpoint
-OpenClaw uses) is an optional fallback, enabled only when MINIMAX_API_KEY is non-empty.
+LLM: every model call goes through the Amara Router (OpenAI /v1, CREW_ROUTER_URL). Each agent
+role has a tier (fast|deep) pinned by model alias (amara-fast / amara-deep) and an
+X-Amara-Route header. Never Ollama directly. The MiniMax path (Anthropic-messages API) is
+fail-closed: used only if CREW_ALLOW_CLOUD=1, NEXUS_OUTBOUND_DISABLED is unset and a key is set.
 Runs persist to Postgres table crew_runs (created at startup).
 Each crew runs in its own process so /crews/stop can really cancel it.
 Tools: an agent gets a tool only if it is implemented in TOOL_REGISTRY and named in
@@ -26,6 +28,7 @@ import re
 import signal
 import threading
 import time
+import urllib.parse
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
@@ -54,8 +57,13 @@ RUN_TIMEOUT_S = int(_env("CREW_RUN_TIMEOUT_SECONDS", "900"))
 MINIMAX_API_KEY = _env("MINIMAX_API_KEY")
 MINIMAX_BASE_URL = _env("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic")
 MINIMAX_MODEL = _env("MINIMAX_MODEL", "MiniMax-M2.5")
-OLLAMA_BASE_URL = _env("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-CREW_OLLAMA_MODEL = _env("CREW_OLLAMA_MODEL", "gemma4:latest")
+# OLLAMA_BASE_URL / CREW_OLLAMA_MODEL are no longer read here: the router owns model residency.
+CREW_ROUTER_URL = _env("CREW_ROUTER_URL", "http://host.docker.internal:8787/v1")
+CREW_ROUTER_KEY = _env("CREW_ROUTER_KEY")  # optional bearer; the loopback router needs none today
+CREW_ALLOW_CLOUD = _env("CREW_ALLOW_CLOUD")
+NEXUS_OUTBOUND_DISABLED = _env("NEXUS_OUTBOUND_DISABLED")
+ROUTER_TIERS = ("fast", "deep")
+OLLAMA_PORT = 11 * 1000 + 434  # refused as a router port (see router_llm_kwargs)
 
 PG = dict(
     host=_env("CREW_DB_HOST", "postgres"),
@@ -271,18 +279,21 @@ AGENT_CATALOG: Dict[str, dict] = {
         goal="Investigate the task thoroughly and report verified findings.",
         backstory="A precise, efficient researcher in the Terrance ecosystem.",
         tools=["kb_query", "memory_query"],
+        tier="fast",
     ),
     "analyst": dict(
         role="Terrance Analyst",
         goal="Turn findings into clear analysis, trade-offs and recommendations.",
         backstory="A careful analyst who separates evidence from opinion.",
         tools=[],
+        tier="deep",
     ),
     "writer": dict(
         role="Terrance Writer",
         goal="Produce a concise, well-structured final write-up.",
         backstory="A clear writer who keeps output short and actionable.",
         tools=[],
+        tier="fast",
     ),
 }
 DEFAULT_AGENTS = ["researcher"]
@@ -299,6 +310,7 @@ class CrewInfo(BaseModel):
     started_at: Optional[str] = None
     task: Optional[str] = None
     result: Optional[str] = None
+    llm: Optional[str] = None
 
 
 class CrewStartRequest(BaseModel):
@@ -371,10 +383,11 @@ def _row_to_info(r) -> CrewInfo:
         id=r[0], name=r[1], status=r[2], agents=list(r[3]),
         started_at=r[4].strftime("%Y-%m-%dT%H:%M:%SZ") if r[4] else None,
         task=r[5], result=safe_result(r[2], r[6]),
+        llm=r[7] if len(r) > 7 else None,
     )
 
 
-_SELECT = "SELECT id, name, status, agents, started_at AT TIME ZONE 'UTC', task, result FROM crew_runs"
+_SELECT = "SELECT id, name, status, agents, started_at AT TIME ZONE 'UTC', task, result, llm FROM crew_runs"
 
 
 def db_get(crew_id: str) -> Optional[CrewInfo]:
@@ -431,19 +444,75 @@ def safe_result(status: Optional[str], result: Optional[str]) -> Optional[str]:
 
 
 # ── Crew execution (child process) ──────────────────────────────────────────
-def _build_llms():
+def router_model(tier: str) -> str:
+    if tier not in ROUTER_TIERS:
+        raise ValueError(f"unknown router tier {tier!r}")
+    return f"amara-{tier}"
+
+
+ROUTER_HOSTS = {"host.docker.internal", "localhost", "127.0.0.1", "::1"}
+
+
+def check_router_url(url: str) -> str:
+    """The router URL must be a plain http(s) URL to a local host with an explicit port that is
+    not Ollama's. Parsed, not pattern-matched, so a zero-padded port, ?x or #a can't slip by,
+    and no new outbound host can be configured (hard rule 3)."""
+    url = url.strip().rstrip("/")
+    u = urllib.parse.urlsplit(url)
+    if u.scheme not in ("http", "https"):
+        raise ValueError("CREW_ROUTER_URL must be http(s)")
+    if u.username or u.password or u.query or u.fragment or "\\" in url:
+        raise ValueError("CREW_ROUTER_URL must have no userinfo, query or fragment")
+    if (u.hostname or "").lower() not in ROUTER_HOSTS:
+        raise ValueError("CREW_ROUTER_URL must point at a local host")
+    try:
+        port = u.port
+    except ValueError:
+        raise ValueError("CREW_ROUTER_URL has a bad port") from None
+    if port is None:
+        raise ValueError("CREW_ROUTER_URL needs an explicit port")
+    if port == OLLAMA_PORT:
+        raise ValueError("CREW_ROUTER_URL must be the Amara Router, not Ollama")
+    return url
+
+
+def router_llm_kwargs(tier: str, url: str = "", key: str = "") -> dict:
+    """LLM() kwargs for one tier against the router. The tier is pinned twice: by model alias and
+    by X-Amara-Route. No keep_alive / num_ctx: the router manages residency. Refuses Ollama."""
+    url = check_router_url(url or CREW_ROUTER_URL)
+    key = key or CREW_ROUTER_KEY
+    return dict(
+        model=router_model(tier), custom_openai=True, base_url=url,
+        api_key=key or "router-no-key",  # the SDK needs a non-empty value; loopback ignores it
+        default_headers={"X-Amara-Route": tier},
+    )
+
+
+def cloud_allowed(allow: Optional[str] = None, outbound_disabled: Optional[str] = None,
+                  key: Optional[str] = None) -> bool:
+    """Fail-closed MiniMax gate: CREW_ALLOW_CLOUD=1 AND NEXUS_OUTBOUND_DISABLED unset AND a key."""
+    allow = CREW_ALLOW_CLOUD if allow is None else allow
+    off = NEXUS_OUTBOUND_DISABLED if outbound_disabled is None else outbound_disabled
+    key = MINIMAX_API_KEY if key is None else key
+    return allow.strip() == "1" and not off.strip() and bool(key.strip())
+
+
+def planned_llm_label(agent_keys: List[str]) -> str:
+    """Router model names for a run's agents, e.g. 'amara-deep,amara-fast'."""
+    return ",".join(sorted({router_model(AGENT_CATALOG[k]["tier"]) for k in agent_keys}))
+
+
+def _build_llms(agent_keys: List[str]):
+    """Attempts, in order: [(label, {agent_key: LLM})]. The router first; MiniMax only if gated."""
     from crewai import LLM
 
-    # Local-first: Ollama is primary. MiniMax is optional and only added when a key is set.
-    llms = [("ollama/" + CREW_OLLAMA_MODEL, LLM(
-        model=CREW_OLLAMA_MODEL, provider="ollama", base_url=OLLAMA_BASE_URL,
-    ))]
-    if MINIMAX_API_KEY:
-        llms.append(("minimax/" + MINIMAX_MODEL, LLM(
-            model=MINIMAX_MODEL, provider="anthropic",
-            base_url=MINIMAX_BASE_URL, api_key=MINIMAX_API_KEY,
-        )))
-    return llms
+    attempts = [(planned_llm_label(agent_keys), {
+        k: LLM(**router_llm_kwargs(AGENT_CATALOG[k]["tier"])) for k in agent_keys})]
+    if cloud_allowed():
+        cloud = LLM(model=MINIMAX_MODEL, provider="anthropic",
+                    base_url=MINIMAX_BASE_URL, api_key=MINIMAX_API_KEY)
+        attempts.append(("minimax/" + MINIMAX_MODEL, {k: cloud for k in agent_keys}))
+    return attempts
 
 
 def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
@@ -454,13 +523,13 @@ def _run_crew_child(agent_keys: List[str], task_description: str, conn) -> None:
         from crewai import Agent, Crew, Process, Task
 
         last_err = "no LLM configured"
-        for label, llm in _build_llms():
+        for label, llms in _build_llms(agent_keys):
             try:
                 agents = [
                     Agent(role=AGENT_CATALOG[k]["role"], goal=AGENT_CATALOG[k]["goal"],
                           backstory=AGENT_CATALOG[k]["backstory"],
                           tools=[_to_crewai_tool(t) for t in tools_for(k)],
-                          llm=llm, allow_delegation=False, verbose=False)
+                          llm=llms[k], allow_delegation=False, verbose=False)
                     for k in agent_keys
                 ]
                 tasks = [Task(description=task_description, agent=agents[0],
@@ -546,8 +615,9 @@ async def lifespan(_app: FastAPI):
         ).rowcount
     if n:
         log.info("marked %d orphaned runs as interrupted", n)
-    if not MINIMAX_API_KEY:
-        log.info("MINIMAX_API_KEY not set; local Ollama only (%s)", CREW_OLLAMA_MODEL)
+    check_router_url(CREW_ROUTER_URL)  # fail at startup, not on the first run
+    log.info("crew LLM: Amara Router %s; cloud path %s", CREW_ROUTER_URL,
+             "enabled" if cloud_allowed() else "off")
     log.info("crew tools allowed: %s", ", ".join(sorted(ALLOWED_TOOLS)) or "none")
     yield
     with _lock:
@@ -584,8 +654,9 @@ def start_crew(req: CrewStartRequest):
         crew_id = str(uuid.uuid4())
         with db() as c:
             c.execute(
-                "INSERT INTO crew_runs (id, name, status, agents, task) VALUES (%s,%s,'running',%s,%s)",
-                (crew_id, req.name, agents, req.task),
+                "INSERT INTO crew_runs (id, name, status, agents, task, llm) "
+                "VALUES (%s,%s,'running',%s,%s,%s)",
+                (crew_id, req.name, agents, req.task, planned_llm_label(agents)),
             )
         parent_conn, child_conn = _ctx.Pipe(duplex=False)
         proc = _ctx.Process(target=_run_crew_child, args=(agents, req.task, child_conn), daemon=True)
