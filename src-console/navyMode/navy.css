@@ -1,0 +1,288 @@
+/* design-1111x: session-only dark look. No visible name. Accent is steel blue; red is only Amara's light. Errors are amber. */
+
+html[data-navy="on"],
+html[data-navy-phase="entering"],
+html[data-navy-phase="exiting"],
+html[data-navy="on"][data-theme="light"],
+html[data-navy="on"][data-theme="dark"] {
+  color-scheme: dark;
+  --nv-void: #070A12;
+  --nv-bg: #0B1220;
+  --nv-content: #111A2C;
+  --nv-raised: #18233A;
+  --nv-chip: #1C2844;
+  --nv-text: #E8EEF8;
+  --nv-muted: #A8B6CC;
+  --nv-faint: #8E9BB3;
+  --nv-line: rgba(168, 182, 204, .22);
+  --nv-red: #FF2B3D;
+  --nv-red-text: #FF8A96;
+  --nv-red-deep: #7A1018;
+  --nv-red-glow: rgba(255, 43, 61, .55);
+  --nv-amber: #F0B429;
+  --nv-amber-text: #F5C14A;
+  --nv-amber-deep: #3A2A08;
+  --nv-ok: #3DDC97;
+  --nv-ok-text: #7AE0B0;
+  --nv-copper: #E0A878;
+  /* Steel blue accent (links ≥7.3:1 on bg, 6.1:1 on raised). Fill #35617C with #E8EEF8 = 5.72:1. */
+  --nv-steel: #8FB8D0;
+  --nv-steel-fill: #35617C;
+  --nv-steel-fill-hover: #3D6F8A;
+  --nv-on-steel: #E8EEF8;
+
+  --label: var(--nv-text);
+  --label-secondary: var(--nv-muted);
+  --label-tertiary: var(--nv-faint);
+  --label-quaternary: #5C6A82;
+  --wordmark: var(--nv-copper);
+  --d-label: var(--nv-text);
+  --d-label-secondary: var(--nv-muted);
+  --d-label-tertiary: var(--nv-faint);
+  --bg-window: var(--nv-bg);
+  --bg-content: var(--nv-content);
+  --bg-rgb: 11, 18, 32;
+  --d-bg-window: var(--nv-bg);
+  --d-bg-content: var(--nv-content);
+  --d-bg-rgb: 11, 18, 32;
+  --fill-secondary: rgba(168, 182, 204, .14);
+  --fill-tertiary: rgba(168, 182, 204, .08);
+  --fill-quaternary: rgba(168, 182, 204, .06);
+  --field-bg: #0B1220;
+  --sidebar-tint: #0B1220;
+  --glass-solid: #0B1220;
+  --surface: #18233A;
+  --text: #E8EEF8;
+  --text-secondary: #A8B6CC;
+  --text-tertiary: #8E9BB3;
+  --separator: var(--nv-line);
+  --separator-strong: rgba(168, 182, 204, .34);
+  --hairline-color: rgba(232, 238, 248, .1);
+  --d-separator: var(--nv-line);
+  --d-separator-strong: rgba(168, 182, 204, .34);
+  --accent: var(--nv-steel-fill);
+  --accent-strong: var(--nv-steel);
+  --accent-hover: var(--nv-steel-fill-hover);
+  --tone-accent-text: var(--nv-steel);
+  --on-accent: var(--nv-on-steel);
+  --d-accent: var(--nv-steel-fill);
+  --d-accent-strong: var(--nv-steel);
+  --d-tone-accent-text: var(--nv-steel);
+  --focus-ring: var(--nv-steel);
+  --tone-success: var(--nv-ok);
+  --tone-success-text: var(--nv-ok-text);
+  --d-tone-success: var(--nv-ok);
+  --d-tone-success-text: var(--nv-ok-text);
+  --tone-warning: var(--nv-amber);
+  --tone-warning-text: var(--nv-amber-text);
+  --tone-danger: var(--nv-amber);
+  --tone-danger-text: var(--nv-amber-text);
+  --d-tone-warning: var(--nv-amber);
+  --d-tone-warning-text: var(--nv-amber-text);
+  --d-tone-danger: var(--nv-amber);
+  --d-tone-danger-text: var(--nv-amber-text);
+  --destructive: var(--nv-amber);
+  --destructive-hover: var(--nv-amber-text);
+  --on-destructive: var(--nv-amber-deep);
+  --d-destructive: var(--nv-amber);
+  --d-on-destructive: var(--nv-amber-deep);
+  --sys-red: var(--nv-amber);
+  --d-sys-red: var(--nv-amber);
+  --data-recovery-low: var(--nv-amber);
+  --copper: var(--nv-copper);
+  --copper-text: var(--nv-copper);
+  --d-copper: var(--nv-copper);
+  --d-copper-text: var(--nv-copper);
+  --material-sidebar: rgba(11, 18, 32, .82);
+  --material-toolbar: rgba(11, 18, 32, .88);
+  --d-material-sidebar: rgba(11, 18, 32, .82);
+  --d-material-toolbar: rgba(11, 18, 32, .88);
+  --shell-sidebar-bg: #0B1220;
+  --shell-toolbar-bg: #0B1220;
+  --chrome-label-secondary: #A8B6CC;
+  --active-emerald: #18233A;
+  --landing-deep: #04060C;
+  --landing-bg: radial-gradient(ellipse 78% 96% at 50% 44%, #152038 0%, #0B1220 52%, #04060C 100%);
+  --landing-label: var(--nv-text);
+  --landing-muted: color-mix(in srgb, var(--nv-text) 66%, transparent);
+  --landing-wordmark: var(--nv-copper);
+  --landing-icon: var(--nv-copper);
+  --landing-heart: var(--nv-red-text);
+  --landing-button: #121A2C;
+  --landing-button-hover: #1A2540;
+  --landing-button-active: #0C1322;
+  --landing-hairline: rgba(232, 238, 248, .13);
+  --landing-highlight: rgba(232, 238, 248, .08);
+  --landing-focus: var(--nv-steel);
+  --lens-hot: #FFD0D4;
+  --lens-mid: #FF2B3D;
+  --lens-deep: #7A1018;
+  --lens-rim: #FF4D5C;
+  --lens-glow: #FF2B3D;
+  --lens-iris-shadow: #2A080C;
+  --lens-iris-edge: #0E0405;
+  --lens-rim-body: #C41E32;
+  --lens-rim-hi: #FF6B78;
+  --lens-rim-deep: #5A0C14;
+  --lens-error-mid: #F0B429;
+  --lens-error-deep: #3A2A08;
+}
+
+html[data-navy="on"],
+html[data-navy="on"] body {
+  background: #0B1220 !important;
+  color: #E8EEF8 !important;
+}
+html[data-navy="on"] body,
+html[data-navy="on"] .landing,
+html[data-navy-phase="entering"] .landing,
+html[data-navy-phase="exiting"] .landing { background: var(--landing-bg, #0B1220) !important; }
+
+html[data-navy="on"] main.command-surface,
+html[data-navy="on"] main.command-surface > .active-field,
+html[data-navy="on"] main.command-surface > .field-footer,
+html[data-navy="on"] main.command-surface > nav.system-constellation,
+html[data-navy="on"] main.command-surface > .intelligence-overlay > .nexus-mark,
+html[data-navy="on"] main.command-surface > .intelligence-overlay > .field-clock,
+html[data-navy="on"]:root main.command-surface > .intelligence-overlay > .nexus-mark.nexus-mark,
+html[data-navy="on"]:root main.command-surface > .intelligence-overlay > .field-clock.field-clock,
+html[data-navy="on"]:root main.command-surface > nav.system-constellation,
+html[data-navy="on"] .system-constellation,
+html[data-navy="on"] .nexus-mark,
+html[data-navy="on"] .field-clock,
+html[data-navy="on"] .field-footer {
+  background: #0B1220 !important;
+  color: #E8EEF8 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html[data-navy="on"] .nav-group button,
+html[data-navy="on"] .nav-group button > span,
+html[data-navy="on"] .nav-group h2,
+html[data-navy="on"] .nexus-mark .wordmark-lockup > .wordmark-os,
+html[data-navy="on"] .wordmark-lockup > .wordmark-os,
+html[data-navy="on"] .sidebar-status,
+html[data-navy="on"] .field-clock > span,
+html[data-navy="on"] .field-clock > strong,
+html[data-navy="on"] .field-clock .toolbar-location { color: #E8EEF8 !important; }
+html[data-navy="on"] .nav-group button.is-active { background: #18233A !important; color: #E8EEF8 !important; }
+html[data-navy="on"] .nav-group button.is-active > span { color: #E8EEF8 !important; }
+html[data-navy="on"] .nav-group button.is-active > i { color: #8FB8D0 !important; }
+html[data-navy="on"] .field-clock button.toolbar-search,
+html[data-navy="on"] .field-clock button.toolbar-search:hover {
+  background: #1C2844 !important;
+  color: #A8B6CC !important;
+  border-color: rgba(168, 182, 204, .34) !important;
+}
+html[data-navy="on"] .field-clock button.toolbar-search span,
+html[data-navy="on"] .field-clock button.toolbar-search kbd,
+html[data-navy="on"] .field-clock .toolbar-search .keycap {
+  color: #A8B6CC !important;
+  background: transparent !important;
+  border-color: rgba(168, 182, 204, .34) !important;
+}
+html[data-navy="on"] .sidebar-status,
+html[data-navy="on"] .sidebar-status .status-indicator,
+html[data-navy="on"] .status-indicator,
+html[data-navy="on"] .field-state {
+  color: #E8EEF8 !important;
+  background-color: transparent;
+}
+html[data-navy="on"] .sidebar-status {
+  background: #0B1220 !important;
+}
+html[data-navy="on"] .status-indicator--success i { background: #3DDC97 !important; }
+html[data-navy="on"] .status-indicator--warning i,
+html[data-navy="on"] .status-indicator--danger i { background: #F0B429 !important; }
+html[data-navy="on"] .status-indicator--accent i { background: #8FB8D0 !important; }
+
+html[data-navy="on"] .amara-lens,
+html[data-navy-phase="entering"] .amara-lens,
+html[data-navy-phase="exiting"] .amara-lens { --lens-level: .72; --lens-scale: 1.08; --hero-halo: .55; --hero-core: .92; }
+
+html[data-navy="on"] .landing::after {
+  content: "";
+  position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  background: radial-gradient(circle at var(--orb-x, 70%) var(--orb-y, 38%), rgba(255, 43, 61, .16) 0%, transparent 34%);
+}
+
+html[data-navy="on"] .w-stage { background: #070A12; --w-label: #E8EEF8; --label: #E8EEF8; --label-secondary: #A8B6CC; }
+html[data-navy="on"] .w-win { border-color: color-mix(in srgb, #FF2B3D 28%, rgba(168, 182, 204, .22)); background: #0A101C; }
+
+/* The orb is the only on-screen off switch. */
+html[data-navy="on"] .amara-lens-wrap,
+html[data-navy="on"] .landing__lens,
+html[data-navy="on"] .w-orb { pointer-events: auto; cursor: pointer; }
+
+/* Caption: her line, no name for the look. */
+.nv-caption {
+  position: fixed; left: 50%; bottom: 21px; transform: translateX(-50%);
+  z-index: 90; max-width: 89%; padding: 8px 13px; border-radius: 8px;
+  background: color-mix(in srgb, #070A12 82%, transparent);
+  border: 1px solid rgba(168, 182, 204, .22);
+  color: #E8EEF8; font-size: 13px; line-height: 1.45;
+  display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+}
+.nv-caption b { color: #FF8A96; font-weight: 600; }
+.nv-caption .nv-tag { font-size: 11px; color: #8E9BB3; }
+
+/* Glitch overlay. Mid-frames are inert and aria-hidden. */
+.nv-fx { position: fixed; inset: 0; z-index: 80; pointer-events: none; overflow: hidden; }
+.nv-fx[data-opt="glitch"] .nv-rgb {
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, rgba(255, 43, 61, .45), transparent 40%, rgba(0, 200, 255, .35));
+  mix-blend-mode: screen; opacity: 0;
+}
+.nv-fx[data-opt="glitch"] .nv-flash {
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at var(--orb-x, 70%) var(--orb-y, 38%), #fff 0%, #FF2B3D 30%, #000 80%);
+  opacity: 0;
+}
+.nv-fx[data-opt="glitch"] .nv-tear {
+  position: absolute; left: 0; right: 0; height: 34px;
+  background: repeating-linear-gradient(90deg, #FF2B3D 0 5px, #0B1220 5px 13px, #00e5ff 13px 21px, transparent 21px 34px);
+  opacity: 0; mix-blend-mode: lighten;
+}
+.nv-fx[data-opt="glitch"] .nv-tear:nth-child(1) { top: 21%; transform: translateX(-13px); }
+.nv-fx[data-opt="glitch"] .nv-tear:nth-child(2) { top: 48%; height: 13px; transform: translateX(21px); }
+.nv-fx[data-opt="glitch"] .nv-tear:nth-child(3) { top: 67%; height: 21px; transform: translateX(-8px); }
+.nv-fx[data-opt="glitch"] .nv-end { position: absolute; inset: 0; background: #0B1220; opacity: 0; }
+
+.nv-fx[data-opt="glitch"][data-beat="1"] .nv-rgb { opacity: .85; }
+.nv-fx[data-opt="glitch"][data-beat="1"] .nv-tear { opacity: .9; }
+.nv-fx[data-opt="glitch"][data-beat="2"] .nv-rgb { opacity: .3; }
+.nv-fx[data-opt="glitch"][data-beat="2"] .nv-flash { opacity: .92; }
+.nv-fx[data-opt="glitch"][data-beat="2"] .nv-tear { opacity: .4; }
+.nv-fx[data-opt="glitch"][data-beat="3"] .nv-rgb { opacity: .2; }
+.nv-fx[data-opt="glitch"][data-beat="3"] .nv-end { opacity: .65; }
+.nv-fx[data-opt="glitch"][data-beat="3"] .nv-tear { opacity: .5; }
+
+.nv-fx[data-opt="reduce"] .nv-fade {
+  position: absolute; inset: 0; background: #0B1220; opacity: var(--navy-t, 0);
+}
+
+/* Long-press ring + confirm. Wording does not name the look. */
+.nv-hold {
+  position: fixed; left: var(--orb-x, 50%); top: var(--orb-y, 42%);
+  width: 144px; height: 144px; transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 5px solid color-mix(in srgb, #FF2B3D 35%, transparent);
+  border-top-color: #FF2B3D;
+  box-shadow: 0 0 21px rgba(255, 43, 61, .55);
+  pointer-events: none; z-index: 85;
+  transform-origin: center;
+}
+.nv-confirm {
+  position: fixed; left: var(--orb-x, 50%); top: calc(var(--orb-y, 42%) + 89px);
+  transform: translateX(-50%); z-index: 91;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  background: #18233A; border: 1px solid rgba(168, 182, 204, .34);
+  border-radius: 8px; padding: 8px 13px; color: #E8EEF8; font-size: 13px;
+}
+.nv-confirm button {
+  font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+  border-radius: 8px; padding: 5px 13px; border: 1px solid rgba(168, 182, 204, .34);
+  background: transparent; color: #E8EEF8;
+}
+.nv-confirm button[data-primary] { background: #35617C; border-color: #35617C; color: #E8EEF8; }
+.nv-confirm button:focus-visible { outline: 3px solid #8FB8D0; outline-offset: 3px; }

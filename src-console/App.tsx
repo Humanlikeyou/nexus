@@ -38,6 +38,7 @@ import { standaloneAdapter } from "./standalone/adapters";
 import { FirstRun } from "./standalone/FirstRun";
 import { settingsTab } from "./app/settingsTabs";
 import { handleWindowPrompt, useVoiceWindowPrompts } from "./homeWindows/useHomeWindows";
+import { handleNavyPrompt, NavyRoot, useVoiceNavyPrompts } from "./navyMode";
 
 const BUSINESS_VIEW_KEY = "amara.business.view";
 function readBusinessView(): string | null {
@@ -114,8 +115,10 @@ export default function App() {
   const [setup, setSetup] = useState<null | "first" | "again">(() => { const d = standaloneAdapter().setupDone(); return d.state === "live" && !d.value ? "first" : null; });
   const [chatFocus, setChatFocus] = useState(0);
   const voiceTurns = useVoiceTurns(screenId === "landing");
+  useVoiceNavyPrompts(voiceTurns);
   useVoiceWindowPrompts(voiceTurns);
   const sendHome = useCallback(async (message: string, options?: { deep?: boolean }) => {
+    if (handleNavyPrompt(message, "chat")) return;
     if (handleWindowPrompt(message, "chat")) return;
     await sendToTerrence(message, options);
   }, [sendToTerrence]);
@@ -187,6 +190,7 @@ export default function App() {
     : <SettingsField view={route.view} onRunSetup={() => setSetup("again")} data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} />;
 
   return (
+    <NavyRoot>
     <CommandSurface mode={screenId}>
       {!onLanding && <Toolbar label={fieldLabel} busy={busy} onRefresh={refresh} onSearch={() => setPaletteOpen(true)} />}
       <Splash loaded={data.refreshedAt !== INITIAL_SNAPSHOT.refreshedAt} />
@@ -200,5 +204,6 @@ export default function App() {
       {setup && <FirstRun adapter={standaloneAdapter()} again={setup === "again"} onClose={() => setSetup(null)} />}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />
     </CommandSurface>
+    </NavyRoot>
   );
 }
