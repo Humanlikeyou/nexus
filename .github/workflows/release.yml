@@ -37,14 +37,20 @@ jobs:
 
       # Notarization needs the App Store Connect key as a FILE (APPLE_API_KEY_PATH). The .p8
       # contents live in the APPLE_API_KEY_P8 secret; write them to a 0600 temp file and
-      # pass its path. Skipped (unsigned build) while the secret is unset.
+      # pass its path. Skipped (unsigned build) only while BOTH secrets are unset: an
+      # APPLE_API_KEY id without its .p8 fails the release instead of silently shipping an
+      # unnotarized build (633cbb9 renamed the secret from APPLE_API_PRIVATE_KEY).
       - name: Write App Store Connect API key
         env:
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY }}
         run: |
           if [ -z "$APPLE_API_KEY_P8" ]; then
-            echo "APPLE_API_KEY_P8 not set; building without notarization"
+            if [ -n "$APPLE_API_KEY_ID" ]; then
+              echo "::error::APPLE_API_KEY is set but APPLE_API_KEY_P8 is missing; refusing to build unnotarized"
+              exit 1
+            fi
+            echo "APPLE_API_KEY_P8 and APPLE_API_KEY not set; building without notarization"
             exit 0
           fi
           umask 077
@@ -52,7 +58,7 @@ jobs:
           printf '%s\n' "$APPLE_API_KEY_P8" > "$key_path"
           echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2 (was @v0)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signing + notarization. NOT SET YET: until Taisun adds these repo
