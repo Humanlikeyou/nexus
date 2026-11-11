@@ -16,7 +16,7 @@ import { score } from "../neuro/sessionSamples";
 import { NeuroFlow } from "./NeuroFlow";
 import { type MuseScreenProps, museSignalState } from "./muse";
 import { LiveSignal } from "../neuro/LiveSignal";
-import { recordingsAdapter } from "../neuro/recordings";
+import { useRecordingsAdapter } from "../neuro/useRecordingsAdapter";
 import "./NeuroScreen.css";
 
 const MUSE_COMMAND = "get_muse_state";
@@ -58,6 +58,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
   const history = useBandHistory();
   const now = useNow(); // 1 s tick scoped to this screen
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const recordings = useRecordingsAdapter(data.sessions);
 
   if (loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt) return <NeuroSkeleton />;
 
@@ -124,7 +125,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
       ? { tone: "warning", text: state.label }
       : { tone: state.signal?.action === "reward" ? "success" : "neutral", text: state.label };
 
-  const liveAux = recordingsAdapter(data.sessions).liveAux();
+  const liveAux = recordings.liveAux();
   const sinceLastPacket = telemetry.lastPacketAt ? Math.max(0, Math.round((now.getTime() - telemetry.lastPacketAt) / 1000)) : null;
   const heroIdle = connected && !streaming && !running;
 

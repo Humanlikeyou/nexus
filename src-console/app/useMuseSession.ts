@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { connectMuse, disconnectMuse, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "../bridge";
+import { connectMuse, disconnectMuse, markRecordingAux, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "../bridge";
 import { readableError } from "../lib/format";
+import { AUX_STEP, AuxDetector, auxInfoDetected } from "../neuro/auxDetect";
+import type { AuxInfo } from "../neuro/recordings";
 import { RecordingSummarizer } from "../neuro/recordingSummary";
 import { SessionFinalizer } from "../neuro/sessionFinalizer";
 import { museTelemetry } from "../neuro/telemetryStore";
@@ -25,6 +27,9 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
   const sessionStopTime = useRef<number | null>(null);
   // Plain-recording summary (no training protocol): sampled from live telemetry while recording.
   const recordingSummarizer = useRef<RecordingSummarizer | null>(null);
+  // W12c: back-of-head electrode detection, fit stage only; the result goes to the recording trailer and the saved session.
+  const auxDetector = useRef(new AuxDetector());
+  const auxFound = useRef<AuxInfo | null>(null);
   // Live telemetry lives in an external store; this hook never re-renders on packets.
   useEffect(() => museTelemetry.start(), []);
   const resetTelemetry = museTelemetry.reset;
@@ -38,6 +43,23 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     const timer = window.setInterval(() => recordingSummarizer.current?.tick(museTelemetry.getSnapshot(), Date.now()), 500);
     return () => window.clearInterval(timer);
   }, [recording]);
+
+  const fitStage = recording && training.state.stage === "fit";
+  useEffect(() => {
+    if (!fitStage) return;
+    const timer = window.setInterval(() => {
+      if (auxFound.current) return;
+      const snap = museTelemetry.getSnapshot();
+      const fresh = snap.aux && Date.now() - snap.aux.lastPacketAt < 1500;
+      const window1s = fresh ? (snap.trace?.AUX ?? null) : null;
+      // 1 s steps over the newest samples (a little more than 1 s warms the high-pass up).
+      if (!auxDetector.current.step(window1s && window1s.length >= AUX_STEP ? window1s.slice(-(AUX_STEP + 64)) : null)) return;
+      const info = auxInfoDetected();
+      auxFound.current = info;
+      void markRecordingAux(info).catch(() => undefined);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [fitStage]);
 
   const scanForMuse = useCallback(async () => {
     setMuseOperation("scanning");
@@ -113,6 +135,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
           channel_samples: counters.channelSamples,
           neurofeedback: trainingSummary,
           recording_summary: trainingSummary ? null : plain,
+          aux: auxFound.current,
         } };
       },
       save: (payload) => saveMuseSession(payload.session, payload.data),
@@ -134,6 +157,8 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       setRecordingFile(file);
       sessionStopTime.current = null;
       recordingSummarizer.current = new RecordingSummarizer();
+      auxDetector.current = new AuxDetector();
+      auxFound.current = null;
       setSessionStartedAt(startedAt);
       beginTraining();
       setNotice("Muse session started");

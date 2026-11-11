@@ -1,6 +1,8 @@
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
 import type { RecordedSession } from "../types";
 import { score } from "./sessionSamples";
+import type { BodyWindowIpc, Gapped, RecordingListItemIpc } from "../bridge";
+import { BLOCK_POINTS, BLOCK_SECS, type RecordingsCache } from "./recordingsCache";
 
 /**
  * design-1110e: Neuro recordings (data contract in HANDOFF-1110e.md). The recorder keeps raw EEG for
@@ -64,13 +66,81 @@ export function recordingFromSession(s: RecordedSession, now: number): Recording
   };
 }
 
-export function liveRecordings(sessions: RecordedSession[], now = Date.now()): RecordingsAdapter {
-  const items = sessions.filter((s) => s.device_type === "muse").map((s) => recordingFromSession(s, now));
+const CONTACT_ORDER: Contact[] = ["none", "poor", "fair", "good"];
+const worst = (a: Contact, b: Contact): Contact => (CONTACT_ORDER.indexOf(a) <= CONTACT_ORDER.indexOf(b) ? a : b);
+const gaps = (v: ReadonlyArray<number | null>): number[] => v.map((x) => (x == null ? NaN : x));
+/** Slice [from, to) seconds out of a block that starts at `blockStart` and is sampled at `rate` per second. */
+const sliceBlock = <T,>(values: readonly T[], blockStart: number, from: number, to: number, rate: number): T[] =>
+  values.slice(Math.max(0, Math.round((from - blockStart) * rate)), Math.max(0, Math.round((to - blockStart) * rate)));
+const blockIndexes = (start: number, end: number): number[] => {
+  const first = Math.floor(start / BLOCK_SECS + 1e-9); const last = Math.max(first, Math.ceil(end / BLOCK_SECS - 1e-9) - 1);
+  return Array.from({ length: last - first + 1 }, (_, i) => first + i);
+};
+const fromIpc = ({ sessionId: _sessionId, ...item }: RecordingListItemIpc): RecordingListItem => item;
+
+/**
+ * Live adapter over saved sessions and, when a cache is given, the read-only recording readers.
+ * Synchronous: a block that is not loaded yet reads as UNWIRED (the cache loads it and the hook re-renders).
+ * Without a cache every reader is UNWIRED. `removeConfirmed` stays UNWIRED (docs/decisions: no delete path).
+ */
+export function liveRecordings(sessions: RecordedSession[], now = Date.now(), cache?: RecordingsCache): RecordingsAdapter {
+  const fallback = sessions.filter((s) => s.device_type === "muse").map((s) => recordingFromSession(s, now));
+  const loaded = () => (cache ? cache.list() : null);
+  const items = (): RecordingListItem[] => { const l = loaded(); return l?.state === "ready" && (l.value.length > 0 || fallback.length === 0) ? l.value.map(fromIpc) : fallback; };
+  const known = (id: string) => items().find((r) => r.id === id);
+  const readable = (id: string) => { const r = known(id); return !r || (r.raw !== "summary-only" && r.raw !== "missing"); };
   return {
-    list: () => ({ state: "live", value: items }),
-    window: () => UNWIRED, body: () => UNWIRED, series: () => UNWIRED, contact: () => UNWIRED,
+    list: () => ({ state: "live", value: items() }),
+    window: (id, startSecs, spanSecs, points = 900) => {
+      if (!cache || !readable(id)) return UNWIRED;
+      const end = startSecs + spanSecs; const duration = known(id)?.durationSecs;
+      const blocks = blockIndexes(startSecs, end).map((i) => ({ i, e: cache.block("eeg", id, i, { windowEnd: end, durationSecs: duration }) }));
+      const ready = blocks.flatMap(({ i, e }) => (e.state === "ready" ? [{ i, v: e.value }] : []));
+      if (ready.length !== blocks.length) return UNWIRED;
+      const rate = BLOCK_POINTS / BLOCK_SECS;
+      const lanes: Lane[] = ready[0].v.lanes.map((lane): Lane | null => {
+        const values: number[] = []; let contact = lane.contact;
+        for (const { i, v } of ready) {
+          const l = v.lanes.find((x) => x.channel === lane.channel); if (!l) return null;
+          values.push(...gaps(sliceBlock(l.values, i * BLOCK_SECS, startSecs, end, rate))); contact = worst(contact, l.contact);
+        }
+        return { channel: lane.channel, contact, values: bucket(values, points) };
+      }).filter((l): l is Lane => l !== null);
+      return { state: "live", value: { startSecs, endSecs: end, sampleRate: 256, lanes } };
+    },
+    body: (id, startSecs, spanSecs) => {
+      if (!cache || !readable(id)) return UNWIRED;
+      const end = startSecs + spanSecs; const duration = known(id)?.durationSecs;
+      const blocks = blockIndexes(startSecs, end).map((i) => ({ i, e: cache.block("body", id, i, { windowEnd: end, durationSecs: duration }) }));
+      const ready = blocks.flatMap(({ i, e }) => (e.state === "ready" ? [{ i, v: e.value }] : []));
+      if (ready.length !== blocks.length) return UNWIRED;
+      const stitch = <R extends 64 | 52>(rate: R, pick: (b: BodyWindowIpc) => Gapped | undefined): number[] => {
+        const out: number[] = [];
+        for (const { i, v } of ready) {
+          const vals = pick(v); const want = Math.round((Math.min(end, (i + 1) * BLOCK_SECS) - Math.max(startSecs, i * BLOCK_SECS)) * rate);
+          out.push(...(vals ? gaps(sliceBlock(vals, i * BLOCK_SECS, startSecs, end, rate)) : Array.from({ length: want }, () => NaN)));
+        }
+        return out;
+      };
+      return { state: "live", value: {
+        startSecs, endSecs: end,
+        heart: ready.some(({ v }) => v.heart) ? { ppgRate: 64, values: stitch(64, (b) => b.heart?.values), bpm: ready.find(({ v }) => v.heart)?.v.heart?.bpm ?? null, estimate: true } : null,
+        motion: ready.some(({ v }) => v.motion) ? { rate: 52, values: stitch(52, (b) => b.motion?.values), events: ready.flatMap(({ v }) => v.motion?.events ?? []).filter((e) => e.atSecs >= startSecs && e.atSecs < end) } : null,
+      } };
+    },
+    series: (id) => {
+      if (!cache || !readable(id)) return UNWIRED;
+      const e = cache.series(id);
+      if (e.state !== "ready") return UNWIRED;
+      const v = e.value;
+      return { state: "live", value: { stepSecs: v.stepSecs, bands: Object.fromEntries(Object.entries(v.bands).map(([k, xs]) => [k, gaps(xs)])) as Record<BandName, number[]>, focus: gaps(v.focus), calm: gaps(v.calm) } };
+    },
+    contact: (id) => {
+      const w = cache?.latestEeg(id); if (!w) return UNWIRED;
+      return { state: "live", value: Object.fromEntries(w.lanes.map((l) => [l.channel, l.contact])) as Partial<Record<EegChannel, Contact>> };
+    },
     // Which recordings are past 90 days is a fact from their dates; removing them is not wired.
-    retention: () => ({ state: "live", value: { retentionDays: RETENTION_DAYS, expiring: items.filter((r) => r.retention === "expiring") } }),
+    retention: () => ({ state: "live", value: { retentionDays: RETENTION_DAYS, expiring: items().filter((r) => r.retention === "expiring") } }),
     removeConfirmed: () => UNWIRED,
     liveAux: () => UNWIRED,
   };
@@ -161,6 +231,6 @@ export function createSampleRecordings(list: RecordingListItem[] = SAMPLE_LIST):
   };
 }
 
-export function recordingsAdapter(sessions: RecordedSession[]): RecordingsAdapter {
-  return sampleAdaptersEnabled() ? createSampleRecordings() : liveRecordings(sessions);
+export function recordingsAdapter(sessions: RecordedSession[], cache?: RecordingsCache): RecordingsAdapter {
+  return sampleAdaptersEnabled() ? createSampleRecordings() : liveRecordings(sessions, Date.now(), cache);
 }
