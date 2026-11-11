@@ -8,7 +8,8 @@ import { beatSeconds, useLiveHeartRate } from "../hooks/useLiveHeartRate";
 import { localGreeting } from "../lib/greeting";
 import { TRACE_HEIGHT, TRACE_WIDTH, traceShape } from "../lib/heartTrace";
 import { useNow } from "../shell/useNow";
-import { AmaraTake } from "../amaraTake/AmaraTakeCard";
+import { HrTake } from "../hrTake/HrTakeCard";
+import { useTakeSlots } from "../takes/TakeExtras";
 import type { ModuleId } from "../types";
 import { Wordmark } from "../ui/Wordmark";
 import "./LandingScreen.css";
@@ -42,8 +43,15 @@ function HeartRate() {
   );
 }
 
+/** design-1111u: Amara's take from the last 15 minutes of heart rate, with today's one thing (1111t) under it.
+ *  No button: it refreshes on open, focus and navigation, and the backend's 30-minute rule decides. */
+function HomeTake({ onSelect }: { onSelect: (id: ModuleId) => void }) {
+  const { block } = useTakeSlots("home", true);
+  return <HrTake variant="landing" block={block} onOpenDevices={() => onSelect("devices")} />;
+}
+
 /** Greeting, time, date and weather. Nothing here is a box; the type scale does the work. */
-function Welcome() {
+function Welcome({ onSelect }: { onSelect: (id: ModuleId) => void }) {
   const now = useNow(1_000);
   const brief = freshBrief(useHomeBrief(), now.getTime());
   const weather = usableWeather(brief?.weather);
@@ -61,7 +69,7 @@ function Welcome() {
         </p>
       )}
       <HeartRate />
-      <AmaraTake page="home" compact />
+      <HomeTake onSelect={onSelect} />
     </section>
   );
 }
@@ -78,7 +86,7 @@ export function LandingField({ onSelect, onToday, chat, chatExpanded = false }: 
       <div className="landing__drag" data-tauri-drag-region />
       <h1 className="ui-visually-hidden">Command Center</h1>
       <Wordmark size="landing" className="landing__wordmark" />
-      <Welcome />
+      <Welcome onSelect={onSelect} />
       <div className="landing__stage">
       <div className="landing__lens"><AmaraLens state={voice.state} size={320} decorative /></div>
       <p className="landing__line">{voice.line}</p>

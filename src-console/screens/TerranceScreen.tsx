@@ -12,6 +12,8 @@ import { recoveryBand } from "./HealthScreen";
 import { personalAdapter, isTokyoSunday } from "../personal/adapters";
 import { CheckInSection, GoalsSection, LifeAdminSection, WeeklyReviewSection } from "../personal/TodaySections";
 import { useReadinessLine } from "../lib/useReadiness";
+import { usualRange } from "../ui/charts/chartMath";
+import { HrTake } from "../hrTake/HrTakeCard";
 import "./TerranceScreen.css";
 
 const DASH = "—";
@@ -294,20 +296,36 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
   const nextConsolidation = nextIn(next.consolidation, now);
   const nextReasoning = nextIn(next.reasoning, now);
 
+  // design-1111u C: "vs usual" from the days before today (median of at least 5), never made up.
+  const before = noop.recentDays.filter((d) => d.day !== noop.today?.day);
+  const usualOf = (pick: (d: (typeof before)[number]) => number | null) => usualRange(before.map(pick))?.median ?? null;
+  const vs = (value: number | null, usual: number | null, unit: string) => {
+    if (value == null || usual == null) return null;
+    const d = Math.round(value - usual);
+    if (d === 0) return <span className="body-today__vs" data-dir="flat">≈ usual</span>;
+    return <span className="body-today__vs" data-dir={d > 0 ? "up" : "down"}>{d > 0 ? "▲" : "▼"} {Math.abs(d)}{unit} vs usual</span>;
+  };
+  const sleepText = sleepMin == null ? DASH : `${Math.floor(sleepMin / 60)}h ${Math.round(sleepMin % 60)}m`;
+
   let recoveryBody: ReactNode;
   if (down("get_noop_health_snapshot")) recoveryBody = <Unavailable label="Health data" onRetry={onRetry} />;
   else recoveryBody = (
-    <div className="home__recovery">
-      <Ring value={recovery} label="Recovery" color={band?.color} valueText={band ? `${recovery}%, ${band.word}` : undefined}>
-        <span className="home__ring-value">{recovery == null ? DASH : `${Math.round(recovery)}%`}</span>
-        {band && <span className="home__ring-band" data-band={band.word.toLowerCase()}>{band.word}</span>}
-      </Ring>
-      <div className="home__recovery-stats">
-        <StatTile label="Sleep" value={sleepMin == null ? DASH : `${Math.floor(sleepMin / 60)}h ${Math.round(sleepMin % 60)}m`} />
-        <StatTile label="HRV" value={hrv == null ? DASH : Math.round(hrv)} unit="ms" />
+    <>
+      <div className="body-today__ring">
+        <Ring value={recovery} label="Recovery" color={band?.color} valueText={band ? `${recovery}%, ${band.word}` : undefined} size="sm">
+          <span className="home__ring-value">{recovery == null ? DASH : `${Math.round(recovery)}%`}</span>
+        </Ring>
+        <span className="body-today__k">Recovery
+          {band && <span className="home__ring-band" data-band={band.word.toLowerCase()}>{band.word}</span>}
+          {vs(recovery, usualOf((d) => d.recovery), "")}
+        </span>
       </div>
+      <dl className="body-today__mini" aria-label="Last night">
+        <dt>Sleep</dt><dd>{sleepText}</dd><dd>{vs(sleepMin, usualOf((d) => d.totalSleepMin), " min")}</dd>
+        <dt>HRV</dt><dd>{hrv == null ? DASH : `${Math.round(hrv)} ms`}</dd><dd>{vs(hrv, usualOf((d) => d.avgHrv), " ms")}</dd>
+      </dl>
       {recovery == null && <p className="home__note">No recovery yet{noop.message ? ` · ${noop.message}` : ""}</p>}
-    </div>
+    </>
   );
 
   return (
@@ -316,11 +334,16 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
       {sunday && <WeeklyReviewSection adapter={personal} />}
 
       {sourcesNote}
+      {/* design-1111u C (Taisun, 17:36 JST): Recovery & sleep merged with the heart-rate take; readiness keeps its own row. */}
       <section className="home__recovery-card" aria-labelledby="home-recovery-title">
-      <h2 id="home-recovery-title" className="home__recovery-title">Recovery &amp; sleep</h2>
-      <div className="home__first">
-        {recoveryBody}
+      <div className="body-today__head">
+        <h2 id="home-recovery-title" className="home__recovery-title">Your body today</h2>
+        <span className="body-today__grow" />
         <OpenLink to="health" label="Open Fitness" onNavigate={onNavigate} />
+      </div>
+      <div className="body-today">
+        <div className="body-today__left">{recoveryBody}</div>
+        <HrTake variant="inline" onOpenDevices={onNavigate ? () => onNavigate("devices") : undefined} />
       </div>
 
       {readinessLine && (
