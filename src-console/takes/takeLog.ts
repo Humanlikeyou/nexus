@@ -65,12 +65,17 @@ export function memoryLineView(entries: readonly TakeLogEntry[], page: TakePage,
   return { day: dayLabel(prev.day), text: `On ${dayLabel(prev.day)} I said: “${first.trim()}”` };
 }
 
+export const tokyoSafe = (iso: string): string | null => tokyoDay(iso);
+
 // ---- cache (loaded from Rust, never invented) ----
 let cache: TakeLogEntry[] | null = null;
 let version = 0;
 let migrated = false;
 const listeners = new Set<() => void>();
 const notify = () => { version += 1; listeners.forEach((l) => l()); };
+
+/** Lets sibling stores (events, today's suggestion) re-render subscribers when they load. */
+export const notifyTakeLog = () => notify();
 
 export function setTakeLogCache(entries: TakeLogEntry[] | null) { cache = entries; notify(); }
 export const takeLogEntries = (): TakeLogEntry[] | null => cache;

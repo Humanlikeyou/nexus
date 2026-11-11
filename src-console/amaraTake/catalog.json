@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "note": "Human-reviewed list. The model never adds or edits entries. Every citation is a placeholder (verified:false) until a person checks it against the source; the UI marks it as not checked.",
+  "entries": [
+    {
+      "id": "breathe_before_session", "page": "neuro", "version": 1,
+      "title": "Breathe slowly for 5 minutes right before your next Muse session.",
+      "how": "About 6 breaths a minute: in for 4 seconds, out for 6. The Muse breathing guide can pace it, or do it on your own.",
+      "typeLabel": "Breathing before a session", "shortTitle": "Breathe 5 min before a session",
+      "trigger": { "factKey": "relax", "op": "below_baseline", "by": 0.05 },
+      "outcome": { "source": "muse_relax", "metric": "calm in that session", "lag": "same_session", "better": "up", "wobbleFloor": 3, "unit": "" },
+      "detector": "muse_breathing_before_session", "cooldownDays": 60,
+      "evidence": { "level": "moderate", "summary": "Slow breathing near 6 a minute raised heart-rate variability and lowered self-rated anxiety across small studies. Effects are short-term; long-term evidence is thinner.",
+        "sources": [ { "cite": "Systematic review of slow breathing, 15 studies (Zaccaro 2018)", "verified": false }, { "cite": "HRV-biofeedback meta-analysis, 58 studies (Lehrer 2020)", "verified": false } ] }
+    },
+    {
+      "id": "reading_before_session", "page": "neuro", "version": 1,
+      "title": "Read for 10 minutes before a session.", "how": "Any book, no screens.",
+      "typeLabel": "Reading before a session", "shortTitle": "Read before a session",
+      "trigger": { "factKey": "relax", "op": "below_baseline", "by": 0.05 },
+      "outcome": { "source": "muse_relax", "metric": "calm in that session", "lag": "same_session", "better": "up", "wobbleFloor": 3, "unit": "" },
+      "detector": null, "cooldownDays": 60,
+      "evidence": { "level": "weak", "summary": "One small unpublished test. Shown as also considered, never suggested.", "sources": [ { "cite": "Reading before a session, 2009 unpublished test (rated weak)", "verified": false } ] }
+    },
+    {
+      "id": "brisk_walk", "page": "fitness", "version": 1,
+      "title": "Take a 25-minute brisk walk outside before 5 PM.",
+      "how": "Brisk means you can talk but not sing. Outside beats a treadmill: you get the daylight too.",
+      "typeLabel": "Brisk walk before 5 PM", "shortTitle": "25-min brisk walk outside",
+      "trigger": { "factKey": "exercises", "op": "below", "by": 1 },
+      "outcome": { "source": "noop_efficiency", "metric": "that night's sleep efficiency", "lag": "that_night", "better": "up", "wobbleFloor": 2, "unit": "%" },
+      "detector": "whoop_walk", "cooldownDays": 60,
+      "contraindications": [ { "factKey": "recovery", "op": "below", "value": 34 } ],
+      "evidence": { "level": "strong", "summary": "Regular moderate activity improves sleep quality in large reviews.",
+        "sources": [ { "cite": "2018 US Physical Activity Guidelines Advisory Committee report", "verified": false } ] }
+    },
+    {
+      "id": "easy_day_low_hrv", "page": "mindBody", "version": 1,
+      "title": "Keep today's training easy: a walk or mobility, not intervals.",
+      "how": "Easy means effort under 10 on WHOOP. A hard day can wait until HRV is back near your usual.",
+      "typeLabel": "Easy day when HRV is low", "shortTitle": "Easy training when HRV is under your usual",
+      "trigger": { "factKey": "hrv", "op": "below_baseline", "by": 0.05 },
+      "outcome": { "source": "noop_hrv", "metric": "next-morning HRV", "lag": "next_morning", "better": "up", "wobbleFloor": 3, "unit": " ms" },
+      "detector": "whoop_easy_day", "cooldownDays": 60,
+      "evidence": { "level": "moderate", "summary": "Adjusting training to morning HRV gave similar or better fitness with fewer hard days in small trials.",
+        "sources": [ { "cite": "HRV-guided training trial (Kiviniemi 2007)", "verified": false } ] }
+    },
+    {
+      "id": "decide_before_noon", "page": "business", "version": 1,
+      "title": "Decide the oldest waiting funding request before noon.",
+      "how": "Open Business, read the request, and decide. Amara won't decide for you.",
+      "typeLabel": "Top decision before noon", "shortTitle": "Top decision before noon",
+      "trigger": { "factKey": "openRequests", "op": "above", "by": 0 },
+      "outcome": { "source": "none", "metric": "days to decide", "lag": "event", "better": "down", "wobbleFloor": 1, "unit": " days" },
+      "detector": "ledger_decision_before_noon", "cooldownDays": 60,
+      "evidence": { "level": "own", "summary": "From your own ledger only. There's no outside science claim for business habits.", "sources": [] }
+    },
+    {
+      "id": "warm_lights", "page": "home", "version": 1,
+      "title": "Lights warm and dim after 9 PM.",
+      "how": "Switch the living room and bedroom to the warm evening scene yourself. Amara only suggests and checks.",
+      "typeLabel": "Lights warm after 9 PM", "shortTitle": "Lights warm and dim after 9 PM",
+      "trigger": { "factKey": "sleep", "op": "below_baseline", "by": 0.1 },
+      "outcome": { "source": "noop_efficiency", "metric": "that night's sleep efficiency", "lag": "that_night", "better": "up", "wobbleFloor": 2, "unit": "%" },
+      "detector": "ha_evening_lights", "cooldownDays": 60,
+      "evidence": { "level": "moderate", "summary": "Bright room light in the evening delayed melatonin in a lab study; dimmer, warmer light did less.",
+        "sources": [ { "cite": "Room light and melatonin (Gooley 2011)", "verified": false } ] }
+    }
+  ]
+}

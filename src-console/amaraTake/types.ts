@@ -13,6 +13,8 @@ export type Fact = {
   display: string;
   baseline: { mean: number; n: number; display: string } | null;
   accept: number[];
+  /** How many prior-day values the baseline had to work with (before the 7-value gate), when known. */
+  priorN?: number;
 };
 
 export type FactSet = { page: TakePage; day: string; facts: Fact[]; fingerprint: string };

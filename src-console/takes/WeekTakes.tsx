@@ -5,11 +5,13 @@ import { TAKE_PAGE_LABEL } from "../amaraTake/takeView";
 import { takesAdapter, VERDICT_WORD, type Action, type TakesAdapter } from "./adapters";
 import { AnswerDots, Rich, VerdictChip } from "./parts";
 import "./takes.css";
+import { useTakeLogVersion } from "./takeLog";
 
 const said = (r: Action, done: string) => (r.state === "unwired" ? "Needs wiring, so nothing was set." : `${r.state === "sample" ? "Sample data: " : ""}${done}`);
 
 /** Weekly review tile: how many of this week's suggestions were done (t5). */
 export function WeekSuggestionsTile({ adapter = takesAdapter(), title = "AMARA'S SUGGESTIONS" }: { adapter?: TakesAdapter; title?: string }) {
+  useTakeLogVersion(); // re-render when the suggestion layer loads
   const w = adapter.week();
   const v = valueOf(w);
   return (
@@ -24,6 +26,7 @@ export function WeekSuggestionsTile({ adapter = takesAdapter(), title = "AMARA'S
 
 /** "Suggestions this week": one row per page with Mon→Sun dots, done count and how it's going so far. */
 export function WeekSuggestionsCard({ adapter = takesAdapter() }: { adapter?: TakesAdapter }) {
+  useTakeLogVersion(); // re-render when the suggestion layer loads
   const w = adapter.week();
   const v = valueOf(w);
   return (
@@ -42,6 +45,7 @@ export function WeekSuggestionsCard({ adapter = takesAdapter() }: { adapter?: Ta
 
 /** The Weekly review's "One change", picked from the clearest follow-through result. Null when there isn't one. */
 export function TakeChange({ adapter = takesAdapter() }: { adapter?: TakesAdapter }) {
+  useTakeLogVersion(); // re-render when the suggestion layer loads
   const w = adapter.week();
   const v = valueOf(w);
   const [note, setNote] = useState<string | null>(null);
@@ -62,6 +66,7 @@ export function TakeChange({ adapter = takesAdapter() }: { adapter?: TakesAdapte
 }
 
 export function TakesThisWeekCard({ adapter = takesAdapter() }: { adapter?: TakesAdapter }) {
+  useTakeLogVersion(); // re-render when the suggestion layer loads
   const w = adapter.week();
   const v = valueOf(w);
   if (!v) return null;
@@ -74,6 +79,7 @@ export function TakesThisWeekCard({ adapter = takesAdapter() }: { adapter?: Take
 
 /** Goals: a suggestion that looks better can become a habit; nothing changes a goal until you tap (t6). */
 export function ReadyToKeepCard({ adapter = takesAdapter(), title = "Ready to keep" }: { adapter?: TakesAdapter; title?: string }) {
+  useTakeLogVersion(); // re-render when the suggestion layer loads
   const w = adapter.goals();
   const v = valueOf(w);
   const [note, setNote] = useState<string | null>(null);
@@ -97,6 +103,7 @@ export function ReadyToKeepCard({ adapter = takesAdapter(), title = "Ready to ke
 }
 
 export function SuggestedLatelyCard({ adapter = takesAdapter(), title = "Suggested lately" }: { adapter?: TakesAdapter; title?: string }) {
+  useTakeLogVersion(); // re-render when the suggestion layer loads
   const w = adapter.goals();
   const v = valueOf(w);
   if (!v) return null;

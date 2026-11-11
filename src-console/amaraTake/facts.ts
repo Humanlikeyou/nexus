@@ -23,6 +23,7 @@ export function makeFact(spec: Spec, raw: number | null | undefined, prior: Arra
     key: spec.key, label: spec.label, value, unit: spec.unit, display: `${fmt(value, d)}${unit}`,
     baseline: base && mean !== null ? { mean, n: base.n, display: `${fmt(mean, d)}${unit}` } : null,
     accept: [value, ...(mean !== null ? [mean] : []), ...(spec.alt?.(raw) ?? [])],
+    priorN: prior.filter(finite).length,
   };
 }
 

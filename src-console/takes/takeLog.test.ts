@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args: unknown) => {
     calls.push([cmd, args]);
     if (cmd === "take_log_list") return log;
+    if (cmd === "take_events_list") return [];
     if (cmd === "take_log_forget") { const id = (args as { id: string }).id; const e = log.find((x) => (x as { id: string }).id === id) as { text: string; forgottenAt: number | null } | undefined; if (!e) return false; e.text = ""; e.forgottenAt = 1; return true; }
     if (cmd === "take_log_append") { log.push((args as { entry: unknown }).entry); return true; }
     return 0;
@@ -58,16 +59,17 @@ describe("take log selectors", () => {
 });
 
 describe("live takes adapter", () => {
-  it("is unwired until the log loads, then wires memory, count, history and settings; the rest stay unwired", async () => {
+  it("is unwired until the log loads, then wires memory, count, history and settings; suggestions stay unwired until the first refresh and an answer with no suggestion is refused", async () => {
     log = [e("a", "fitness", DAY, "Sleep ran 7.2 h."), e("b", "fitness", 0, "Today.")];
     expect(liveTakes.historyCount("fitness").state).toBe("unwired");
     await vi.waitFor(() => expect(liveTakes.historyCount("fitness")).toEqual({ state: "live", value: 2 }));
     expect(calls[0][0]).toBe("take_log_migrate");
     expect(liveTakes.memory("fitness").state).toBe("live");
-    expect(liveTakes.settings()).toEqual({ state: "live", value: { keepDays: 365, summarizeAfter: true, autoDone: true } });
+    await vi.waitFor(() => expect(liveTakes.settings()).toEqual({ state: "live", value: { keepDays: 365, summarizeAfter: true, autoDone: true } }));
     for (const w of [liveTakes.today("fitness"), liveTakes.outcomes(), liveTakes.week(), liveTakes.goals()]) expect(w.state).toBe("unwired");
     expect((await liveTakes.answer("fitness", "x", "done")).state).toBe("unwired");
-    expect(liveTakes.detects("fitness")).toBe(false);
+    expect(liveTakes.detects("fitness")).toBe(true); // WHOOP walk detector exists
+    expect(liveTakes.detects("neuro")).toBe(false); // Muse breathing has no session type field
   });
   it("forget blanks one entry and the history drops it", async () => {
     log = [e("a", "fitness", DAY, "keep"), e("b", "fitness", 0, "forget me")];

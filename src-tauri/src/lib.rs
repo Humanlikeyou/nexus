@@ -7,7 +7,7 @@ use commands::{
     arm, assistant, ble_common, business_ledger, continuity, crew, events, followups, goals, ha,
     home_brief, home_hr_take, kb_status, kv, llm_router, muse, noop, noop_query, onboarding,
     openclaw, outbox, packager, recordings, replay, research, restart_services, sessions,
-    snapshots, system, take_log, telegram, terrence_actions, terrence_automations,
+    snapshots, system, take_events, take_log, telegram, terrence_actions, terrence_automations,
     terrence_context, terrence_priorities, terrence_projects, terrence_runtime,
     terrence_runtime_bridge,
 };
@@ -214,6 +214,8 @@ pub fn run() {
             home_hr_take::hr_window,
             home_hr_take::home_hr_take_status,
             home_hr_take::home_hr_take_maybe_refresh,
+            take_events::take_events_append,
+            take_events::take_events_list,
             take_log::take_log_append,
             take_log::take_log_list,
             take_log::take_log_forget,

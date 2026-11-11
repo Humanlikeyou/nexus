@@ -3,9 +3,11 @@ import { Card, DataTag, Toggle } from "../ui";
 import { valueOf } from "../lib/sampleAdapters";
 import { takesAdapter, type TakesAdapter } from "./adapters";
 import "./takes.css";
+import { useTakeLogVersion } from "./takeLog";
 
 /** Settings › Memory › Takes: how long takes are kept, and whether Amara may mark a suggestion Done from data (Taisun: yes, with Undo). */
 export function TakesSettingsCard({ adapter = takesAdapter() }: { adapter?: TakesAdapter }) {
+  useTakeLogVersion(); // re-render when the suggestion layer loads
   const w = adapter.settings();
   const v = valueOf(w);
   const [auto, setAuto] = useState<boolean | null>(null);

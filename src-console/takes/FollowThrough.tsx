@@ -6,6 +6,7 @@ import { takesAdapter, VERDICT_WORD, type Action, type TakesAdapter, type TypeOu
 import { OutcomeChart } from "./FollowUp";
 import { VerdictChip } from "./parts";
 import "./takes.css";
+import { useTakeLogVersion } from "./takeLog";
 
 const NOT_CLAIMED: Record<TypeOutcome["verdict"], string> = {
   better: "that the suggestion made the difference. Days you did it may differ in other ways.",
@@ -17,6 +18,7 @@ const NOT_CLAIMED: Record<TypeOutcome["verdict"], string> = {
 
 /** Patterns › Follow-through (t7, reworked for daily suggestions): results grouped by suggestion type over time. */
 export function FollowThroughView({ adapter = takesAdapter() }: { adapter?: TakesAdapter }) {
+  useTakeLogVersion(); // re-render when the suggestion layer loads
   const w = adapter.outcomes();
   const list = valueOf(w);
   const [pick, setPick] = useState<string | null>(null);

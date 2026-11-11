@@ -2,6 +2,7 @@ import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampl
 import type { TakePage } from "../amaraTake/types";
 import { ensureTakeLog, forgetTake, historyView, memoryLineView, takeLogEntries } from "./takeLog";
 import { tokyoDay } from "../lib/mindBody";
+import { liveSuggestMethods } from "./liveSuggest";
 
 /**
  * design-1111t: take memory, one suggestion a day per page, follow-through and outcomes.
@@ -120,8 +121,10 @@ export const liveTakes: TakesAdapter = {
     return { state: "live", value: historyView(log, page, filter, q, Date.now()) };
   },
   forget: async (_page, id) => ((await forgetTake(id)) ? { state: "live", value: { ok: true } } : UNWIRED),
-  // autoDone shows the Design default (on); `setAutoDone` stays unwired, so nothing is persisted or detected yet.
-  settings: () => ({ state: "live", value: { keepDays: 365, summarizeAfter: true, autoDone: true } }),
+  // Steps 2 to 5 (HANDOFF-1111t §11): selection, answers, detectors and outcomes live in liveSuggest.ts.
+  today: liveSuggestMethods.today, answer: liveSuggestMethods.answer, undo: liveSuggestMethods.undo, typeAction: liveSuggestMethods.typeAction,
+  outcomes: liveSuggestMethods.outcomes, week: liveSuggestMethods.week, goals: liveSuggestMethods.goals,
+  settings: liveSuggestMethods.settings, setAutoDone: liveSuggestMethods.setAutoDone, detects: liveSuggestMethods.detects,
 };
 
 // ---------------- sample (preview and tests only; numbers match the 1111t mockups) ----------------
@@ -336,5 +339,4 @@ export function takesAdapter(): TakesAdapter {
 }
 export function resetTakesAdapter() { cached = null; }
 
-/** Causal words a take, why or follow-up may never use (HANDOFF-1111t §3). Verdict words come from code. */
-export const CAUSAL = /\b(caus\w*|prove[sdn]?|proof that|because of|fixed|cured?|guarantee\w*)\b/i;
+export { CAUSAL } from "./causal";
