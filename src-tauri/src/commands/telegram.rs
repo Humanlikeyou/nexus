@@ -223,7 +223,23 @@ pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMes
 pub const OUTBOUND_DISABLED_ENV: &str = "NEXUS_OUTBOUND_DISABLED";
 
 pub fn outbound_disabled() -> bool {
-    parse_outbound_disabled(std::env::var(OUTBOUND_DISABLED_ENV).ok().as_deref())
+    local_only_on() || parse_outbound_disabled(std::env::var(OUTBOUND_DISABLED_ENV).ok().as_deref())
+}
+
+/// Session-only "nothing leaves this Mac" switch (navy mode, design-1111x). In memory only: it
+/// resets to off on restart and is never written to disk. While on, everything that honours
+/// NEXUS_OUTBOUND_DISABLED is blocked the same way (Telegram, outbox, research, the Claude tier).
+static LOCAL_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn local_only_on() -> bool {
+    LOCAL_ONLY.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Turns the session's local-only switch on or off; returns the new state (what the UI shows).
+#[tauri::command]
+pub fn set_local_only(on: bool) -> bool {
+    LOCAL_ONLY.store(on, std::sync::atomic::Ordering::SeqCst);
+    local_only_on()
 }
 
 /// NEXUS_OUTBOUND_DISABLED value → kill switch on? Trimmed, case-insensitive "1", "true", "yes"

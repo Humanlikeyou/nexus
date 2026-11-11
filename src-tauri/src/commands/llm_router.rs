@@ -763,6 +763,18 @@ mod tests {
     }
 
     #[test]
+    fn navy_local_only_closes_the_claude_gate_like_the_kill_switch() {
+        let c = cfg("api");
+        crate::commands::telegram::set_local_only(true);
+        let on = claude_gate(&c, 0.0).blocked();
+        let headers = router_headers(&c, &[], false, Some("anthropic"), &claude_gate(&c, 0.0));
+        crate::commands::telegram::set_local_only(false);
+        assert_eq!(on, Some("outbound_disabled"));
+        assert_eq!(header(&headers, "X-Amara-Allow-Claude"), Some("0"));
+        assert!(!crate::commands::telegram::local_only_on(), "resets to off");
+    }
+
+    #[test]
     fn local_only_never_allows_claude_even_with_the_gate_open() {
         let mut h = router_headers(&cfg("api"), &[], false, Some("light"), &open_gate());
         assert_eq!(header(&h, "X-Amara-Allow-Claude"), Some("1"));

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
-import { navyAdapter } from "./adapters";
+import { navyAdapter, setNavyLocalOnly } from "./adapters";
 import { nextOffLine, nextOnLine, resetLines } from "./lines";
 import { parseNavyPrompt } from "./parse";
 import { initialNavyState, NAVY_PREVIEW_KEY, type NavyPreview, type NavySource, type NavyState } from "./types";
@@ -50,6 +50,7 @@ function captionFor(kind: "on" | "off", openedBy: NavySource): NavyState["captio
 /** Turn the look on. No-op if it's already entering or on. */
 export function enterNavy(openedBy: NavySource): void {
   if (state.phase === "on" || state.phase === "entering") return;
+  void setNavyLocalOnly(true); // nothing leaves the Mac from the moment the look starts
   set({ phase: "entering", openedBy, caption: captionFor("on", openedBy), hold: "idle", holdAt: 0 });
 }
 
@@ -67,6 +68,7 @@ export function finishEnter(): void {
 export function finishExit(): void {
   if (state.phase !== "exiting") return;
   set({ phase: "off", openedBy: null, caption: null, hold: "idle", holdAt: 0 });
+  void setNavyLocalOnly(false); // only once the look is fully off
 }
 
 export function beginHold(): void {

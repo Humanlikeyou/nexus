@@ -248,6 +248,7 @@ pub fn run() {
             telegram::save_settings,
             telegram::get_telegram_messages,
             telegram::send_telegram_message,
+            telegram::set_local_only,
             telegram::test_telegram_connection,
             telegram::send_to_terrance,
             telegram::poll_telegram_updates,
