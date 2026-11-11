@@ -1,10 +1,9 @@
-import { Bot, Brain, ChevronRight, CircleDollarSign, Cpu, Library, RefreshCw } from "lucide-react";
+import { Bot, Brain, ChevronRight, CircleDollarSign, Library, RefreshCw } from "lucide-react";
 import { HermesSubtitle } from "./agentLabels";
 import { useEffect, useState, type ReactNode } from "react";
 import { getSchedulerStatus, type SchedulerStatus } from "@/terrance/system/scheduler";
 import type { ConversationMessage } from "../app/conversation";
-import { ASSISTANT_TITLE, assistantBadge } from "../app/openclaw";
-import { assistantView, kbView } from "../app/statusViews";
+import { kbView } from "../app/statusViews";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import { dateTime, humanize, money, time } from "../lib/format";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
@@ -147,10 +146,9 @@ export const NOOP_STALE_AFTER_MS = 2 * 60 * 60 * 1000;
 
 export function statusStrip(data: SystemSnapshot, scheduler: SchedulerView, now: number): StripSegment[] {
   const amaraOnline = data.hermes.status === "online";
-  const assistant = assistantBadge(data.openclaw);
   const agents: StripSegment = {
     key: "agents", to: "chat", tone: amaraOnline ? "success" : "danger", live: amaraOnline,
-    text: `Amara ${amaraOnline ? "online" : "offline"}${assistant ? ` · ${ASSISTANT_TITLE} connected` : ""}`,
+    text: `Amara ${amaraOnline ? "online" : "offline"}`,
   };
 
   const runs = nextRuns(scheduler);
@@ -168,13 +166,13 @@ export function statusStrip(data: SystemSnapshot, scheduler: SchedulerView, now:
   const synced = noop.generatedAt ? Date.parse(noop.generatedAt) : NaN;
   const syncedText = Number.isNaN(synced) ? null : `synced ${ago(synced, now)}`;
   const health: StripSegment = noopDown
-    ? { key: "noop", to: "health", tone: "danger", live: false, text: "NOOP unavailable" }
+    ? { key: "noop", to: "health", tone: "danger", live: false, text: "Health sync unavailable" }
     : noop.status === "stale"
-      ? { key: "noop", to: "health", tone: "warning", live: false, text: `NOOP stale${syncedText ? ` · ${syncedText}` : ""}`, title: dateTime(synced) }
+      ? { key: "noop", to: "health", tone: "warning", live: false, text: `Health sync stale${syncedText ? ` · ${syncedText}` : ""}`, title: dateTime(synced) }
       : noop.status === "ready"
         // NOOP is a nightly sync, not a live feed: never pulses; an old sync reads as a warning.
-        ? { key: "noop", to: "health", tone: !Number.isNaN(synced) && now - synced > NOOP_STALE_AFTER_MS ? "warning" : "success", live: false, text: `NOOP ${syncedText ?? "synced"}`, title: dateTime(synced) }
-        : { key: "noop", to: "health", tone: "neutral", live: false, text: noop.status === "waiting_for_nightly_data" ? "NOOP waiting for tonight's data" : "NOOP waiting for data" };
+        ? { key: "noop", to: "health", tone: !Number.isNaN(synced) && now - synced > NOOP_STALE_AFTER_MS ? "warning" : "success", live: false, text: `Health ${syncedText ?? "synced"}`, title: dateTime(synced) }
+        : { key: "noop", to: "health", tone: "neutral", live: false, text: noop.status === "waiting_for_nightly_data" ? "Health sync waiting for tonight's data" : "Health sync waiting for data" };
   return [agents, sched, health];
 }
 
@@ -292,13 +290,12 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
   const muse = data.sessions.find((s) => s.device_type === "muse");
   const hermes = data.hermes;
   const hermesOnline = hermes.status === "online";
-  const assistant = assistantView(data.openclaw, { loading: false, unavailable: down("read_openclaw_status") });
   const kb = kbView(data.kb, down("kb_status"));
   const nextConsolidation = nextIn(next.consolidation, now);
   const nextReasoning = nextIn(next.reasoning, now);
 
   let recoveryBody: ReactNode;
-  if (down("get_noop_health_snapshot")) recoveryBody = <Unavailable label="NOOP health" onRetry={onRetry} />;
+  if (down("get_noop_health_snapshot")) recoveryBody = <Unavailable label="Health data" onRetry={onRetry} />;
   else recoveryBody = (
     <div className="home__recovery">
       <Ring value={recovery} label="Recovery" color={band?.color} valueText={band ? `${recovery}%, ${band.word}` : undefined}>
@@ -361,10 +358,10 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
 
         <Card title="Latest insight" accessory={<OpenLink to="health" label="Open insights in Fitness" onNavigate={onNavigate} />}>
           {down("get_noop_health_snapshot")
-            ? <Unavailable label="NOOP health" onRetry={onRetry} />
+            ? <Unavailable label="Health data" onRetry={onRetry} />
             : insight
               ? <div className="home__insight"><p className="home__insight-fact">{insight.fact}</p>{insight.context && <p className="home__note">{insight.context}</p>}</div>
-              : <p className="home__note">Insights appear after NOOP&apos;s nightly sync.</p>}
+              : <p className="home__note">Insights appear after tonight&apos;s health sync.</p>}
         </Card>
       </div>
 
@@ -376,10 +373,8 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
               <ListRow icon={Bot} title="Amara" subtitle={<HermesSubtitle model={hermes.model} />}
                 accessory={<Badge tone={hermesOnline ? "success" : "warning"}>{hermesOnline ? "Online" : hermes.status ? hermes.status.replace(/_/g, " ") : "Offline"}</Badge>}
                 value={hermes.telegramStatus ? `Telegram ${hermes.telegramStatus}` : `Checked ${clock(hermes.checkedAt)}`} />
-              {assistant?.kind === "row" && <ListRow icon={Cpu} title={assistant.title} subtitle={assistant.subtitle} accessory={<Badge tone={assistant.tone} aria-label={`${assistant.title} status: ${assistant.label}`}>{assistant.label}</Badge>} />}
             </InsetGroup>
           )}
-        {assistant?.kind === "unreachable" && <StatusRetry tone="warning" badge="Not reachable" text={assistant.message} onRetry={onRetry} />}
       </Card>
 
       <Card title="Knowledge base" accessory={<Badge tone={kb.tone} aria-label={`Knowledge base status: ${kb.label}`}>{kb.label}</Badge>}>

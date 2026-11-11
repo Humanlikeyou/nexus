@@ -4,7 +4,7 @@
  */
 export const EMPTY_DEVICE_ID = "my-whoop";
 
-/** The NOOP band's display title: its real id, or "NOOP band" for none or the placeholder. */
+/** The NOOP band's display title: its real id, or "WHOOP 4" for none or the placeholder. */
 export function deviceTitle(deviceId: string | null | undefined): string {
-  return deviceId && deviceId !== EMPTY_DEVICE_ID ? deviceId : "NOOP band";
+  return deviceId && deviceId !== EMPTY_DEVICE_ID ? deviceId : "WHOOP 4";
 }

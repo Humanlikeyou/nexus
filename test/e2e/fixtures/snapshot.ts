@@ -114,7 +114,6 @@ export function responses(): Responses {
       { id: "a1", type: "mac_action", name: "open_app", status: "completed", startedAt: Date.parse("2026-10-28T13:38:00+09:00"), completedAt: Date.parse("2026-10-28T13:38:01+09:00"), durationMs: 1200, detail: "Opened Notes", outcome: null },
       { id: "a2", type: "agent_task", name: "daily_brief", status: "failed", startedAt: Date.parse("2026-10-28T07:30:00+09:00"), completedAt: Date.parse("2026-10-28T07:30:42+09:00"), durationMs: 42000, detail: "Delivery failed", outcome: null },
     ],
-    read_openclaw_status: { status: "online", online: true, model: "sample-model", gateway_url: "http://127.0.0.1:18789", last_heartbeat: NOW },
     crew_health: "operational",
     crew_tools: [{ name: "kb_query", allowed: true }, { name: "memory_query", allowed: true }],
     get_allow_claude: false,

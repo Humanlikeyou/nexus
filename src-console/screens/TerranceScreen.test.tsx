@@ -83,7 +83,7 @@ describe("Home (TerranceField)", () => {
   it("empty: no recovery, insights, priorities; scheduler stopped", () => {
     render(<TerranceField data={snap({ noop: { ...INITIAL_SNAPSHOT.noop, message: "No local store yet." } })} now={NOW} scheduler={{ running: false, lastConsolidation: null, lastReasoning: null }} />);
     expect(screen.getByText("No recovery yet · No local store yet.")).toBeInTheDocument();
-    expect(screen.getByText("Insights appear after NOOP's nightly sync.")).toBeInTheDocument();
+    expect(screen.getByText("Insights appear after tonight's health sync.")).toBeInTheDocument();
     expect(screen.getByText("No current priorities")).toBeInTheDocument();
     expect(screen.queryByText("Stopped")).toBeNull(); // no duplicate badge under the strip
     expect(screen.getByText("Background jobs aren't running.")).toBeInTheDocument();
@@ -93,9 +93,9 @@ describe("Home (TerranceField)", () => {
 
   it("error: per-card unavailable with Retry and a header count", () => {
     const onRetry = vi.fn();
-    render(<TerranceField onRetry={onRetry} now={NOW} scheduler={running} data={snap({ unavailableSources: [{ command: "get_noop_health_snapshot", label: "NOOP health" }, { command: "get_terrence_runtime_health", label: "Amara runtime" }] })} />);
-    expect(screen.getByText("2 sources unavailable")).toHaveAttribute("title", "NOOP health, Amara runtime");
-    expect(screen.getAllByText("NOOP health unavailable")).toHaveLength(2);
+    render(<TerranceField onRetry={onRetry} now={NOW} scheduler={running} data={snap({ unavailableSources: [{ command: "get_noop_health_snapshot", label: "Health sync" }, { command: "get_terrence_runtime_health", label: "Amara runtime" }] })} />);
+    expect(screen.getByText("2 sources unavailable")).toHaveAttribute("title", "Health sync, Amara runtime");
+    expect(screen.getAllByText("Health data unavailable")).toHaveLength(2);
     expect(screen.getByText("Amara runtime unavailable")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "Retry" })[0]);
     expect(onRetry).toHaveBeenCalledOnce();
@@ -164,7 +164,7 @@ describe("Home status strip (Command center feel)", () => {
     expect(segment("agents")).toHaveTextContent(/^Amara online$/);
     expect(segment("scheduler")).toHaveTextContent("Next: Consolidation in 2h 14m");
     expect(segment("scheduler")).toHaveAttribute("title", "Oct 28, 4:14 PM");
-    expect(segment("noop")).toHaveTextContent("NOOP synced 6 min ago");
+    expect(segment("noop")).toHaveTextContent("Health synced 6 min ago");
     expect(segment("noop")).toHaveAttribute("title", "Oct 28, 1:54 PM");
     for (const key of ["agents", "scheduler", "noop"]) {
       expect(segment(key).tagName).toBe("BUTTON");
@@ -177,7 +177,7 @@ describe("Home status strip (Command center feel)", () => {
   it("a ready NOOP sync older than 2 h uses the warning tone and never pulses", () => {
     const old = { ...full, noop: { ...full.noop, status: "ready" as const, generatedAt: new Date(NOW - 6 * H).toISOString() } };
     const seg = statusStrip(old, running, NOW)[2];
-    expect([seg.text, seg.tone, seg.live]).toEqual(["NOOP synced 6 h ago", "warning", false]);
+    expect([seg.text, seg.tone, seg.live]).toEqual(["Health synced 6 h ago", "warning", false]);
     const recent = statusStrip(fresh, running, NOW)[2];
     expect([recent.tone, recent.live]).toEqual(["success", false]);
   });
@@ -195,10 +195,10 @@ describe("Home status strip (Command center feel)", () => {
     expect(segs.map((x) => [x.key, x.text, x.tone, x.live])).toEqual([
       ["agents", "Amara offline", "danger", false],
       ["scheduler", "Background jobs stopped", "danger", false],
-      ["noop", "NOOP stale · synced 2 d ago", "warning", false],
+      ["noop", "Health sync stale · synced 2 d ago", "warning", false],
     ]);
     const down = statusStrip({ ...full, noop: { ...full.noop, status: "unavailable" } }, running, NOW)[2];
-    expect([down.text, down.tone, down.live]).toEqual(["NOOP unavailable", "danger", false]);
+    expect([down.text, down.tone, down.live]).toEqual(["Health sync unavailable", "danger", false]);
   });
 
   it("the soonest of consolidation, reasoning and daily summary is shown", () => {
@@ -222,31 +222,13 @@ describe("NOOP stale tone on the strip's own 30s tick", () => {
   });
 });
 
-describe("Home: Assistant badge", () => {
-  const oc = (status: "online" | "configured" | "not_installed") => ({ status, online: status === "online", model: "minimax-m2.5", gateway_url: "", last_heartbeat: null });
-  it("backend reachable: an 'Amara' row with an aria-label, strip says connected", () => {
-    const on = { ...full, openclaw: oc("online") };
-    render(<TerranceField data={on} now={NOW} scheduler={running} onNavigate={vi.fn()} />);
+describe("Home: no assistant backend (design-1111s: OpenClaw removed)", () => {
+  it("the Agents card lists Amara only and the strip never mentions an assistant backend", () => {
+    render(<TerranceField data={full} now={NOW} scheduler={running} onNavigate={vi.fn()} />);
     const agents = screen.getByRole("region", { name: "Agents" });
-    expect(within(agents).getByLabelText("Amara status: Online")).toBeInTheDocument();
-    expect(within(agents).getByText("minimax-m2.5")).toBeInTheDocument();
-    expect(statusStrip(on, running, NOW)[0].text).toBe("Amara online · Assistant connected");
-    expect(document.body.textContent).not.toMatch(/OpenClaw/);
-  });
-  it("status unreadable: neutral 'Assistant' (ambiguous)", () => {
-    render(<TerranceField data={{ ...full, unavailableSources: [{ command: "read_openclaw_status", label: "Assistant backend" }] }} now={NOW} scheduler={running} onNavigate={vi.fn()} />);
-    expect(within(screen.getByRole("region", { name: "Agents" })).getByLabelText("Assistant status: Checking")).toBeInTheDocument();
-  });
-  it("installed but silent: 'Assistant backend not reachable' + Retry (warning), no raw error", () => {
-    const onRetry = vi.fn();
-    render(<TerranceField data={{ ...full, openclaw: oc("configured") }} now={NOW} scheduler={running} onNavigate={vi.fn()} onRetry={onRetry} />);
-    const agents = screen.getByRole("region", { name: "Agents" });
-    const block = within(agents).getByRole("status");
-    expect(block).toHaveTextContent("Assistant backend not reachable");
-    expect(block).toHaveAttribute("data-tone", "warning");
-    fireEvent.click(within(block).getByRole("button", { name: "Retry" }));
-    expect(onRetry).toHaveBeenCalled();
-    expect(agents.textContent).not.toMatch(/18789|launchd|OpenClaw/);
+    expect(within(agents).queryByText("Assistant")).toBeNull();
+    expect(statusStrip(full, running, NOW)[0].text).toBe("Amara online");
+    expect(document.body.textContent).not.toMatch(/OpenClaw|Assistant connected/);
   });
 });
 

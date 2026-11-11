@@ -33,12 +33,12 @@ describe("Fitness (HealthField)", () => {
     expect(container.textContent).not.toContain("--");
   });
 
-  it("empty (waiting_for_data): first-record card, NOOP copy, no WHOOP", () => {
+  it("empty (waiting_for_data): first-record card, health copy (no NOOP framing)", () => {
     const { container } = render(<HealthField data={snap({ status: "waiting_for_data", message: "No local store yet." })} />);
-    expect(screen.getByRole("heading", { name: "Waiting for the first NOOP record" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Waiting for the first health record" })).toBeInTheDocument();
     expect(screen.getByText("No local store yet.")).toBeInTheDocument();
     expect(screen.getByText("Waiting for data")).toBeInTheDocument();
-    expect(container.textContent).not.toMatch(/whoop/i);
+    expect(container.textContent).not.toMatch(/my-whoop|NOOP/);
   });
 
   it("empty: Check again action, null tiles hide units, readiness values are badges", () => {
@@ -49,7 +49,7 @@ describe("Fitness (HealthField)", () => {
     expect(container.querySelectorAll(".ui-stat__value[data-empty]")).toHaveLength(3);
     expect(screen.queryByText("ms")).toBeNull();
     expect(screen.getByText("Store missing")).toHaveClass("ui-badge");
-    expect(screen.getByText("Amara has no NOOP daily record to read yet.")).toBeInTheDocument();
+    expect(screen.getByText("Amara has no daily health record to read yet.")).toBeInTheDocument();
   });
 
   it("error: NOOP command unavailable shows Unavailable badge and Retry", () => {
@@ -73,7 +73,7 @@ describe("Fitness (HealthField)", () => {
     expect(effort).toHaveAttribute("aria-valuenow", "100");
     expect(effort).toHaveAttribute("aria-valuetext", "100 of 100");
     expect(screen.getByRole("radio", { name: "Effort" })).toBeInTheDocument();
-    expect(screen.getByText(/NOOP band 82% · On strap/)).toHaveClass("fitness__status");
+    expect(screen.getByText(/WHOOP 82% · On strap/)).toHaveClass("fitness__status");
     // No duplicate numbers: Row 2 (SpO2/skin/resp) is hidden when all are null, Last night keeps RHR + HRV only.
     expect(screen.queryByText("Duration")).toBeNull();
     expect(screen.getAllByText("Resting HR", { selector: "dt" })).toHaveLength(1);
@@ -90,8 +90,8 @@ describe("Fitness (HealthField)", () => {
     expect(within(trends).getByRole("img", { name: /Recovery, last 14 days: min 60%, max 74%, last 74%/ })).toBeInTheDocument();
     expect(within(trends).getByRole("heading", { name: "Recovery" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "More trends" })).toBeInTheDocument();
-    expect(container.textContent).not.toMatch(/whoop/i);
-    expect(screen.getByText("NOOP band battery is 82%")).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/my-whoop|NOOP/);
+    expect(screen.getByText("WHOOP battery is 82%")).toBeInTheDocument();
   });
 
   it("waiting_for_nightly_data: effort shown, recovery/sleep pending", () => {
@@ -107,14 +107,14 @@ describe("Fitness (HealthField)", () => {
     const badge = screen.getByText("Stale");
     expect(badge.closest("[data-tone]")?.getAttribute("data-tone") ?? badge.getAttribute("data-tone")).toBe("warning");
     const note = screen.getByRole("note");
-    expect(note).toHaveTextContent("Last NOOP data Sep 20.");
-    expect(note).toHaveTextContent("Open NOOP to sync.");
+    expect(note).toHaveTextContent("Last health data Sep 20.");
+    expect(note).toHaveTextContent("Sync from Settings › Devices.");
     expect(screen.getByText("Updated 38 days ago at", { exact: false })).toBeInTheDocument();
   });
 
   it("ready data shows no stale note", () => {
     render(<HealthField data={snap(ready)} />);
-    expect(screen.queryByText("Open NOOP to sync.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sync from Settings › Devices.")).not.toBeInTheDocument();
     expect(screen.queryByText("Stale")).not.toBeInTheDocument();
   });
 

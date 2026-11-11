@@ -9,7 +9,7 @@ const shot = async (page: import("@playwright/test").Page, name: string) => {
 test("Voice: live state, voice picker and recent turns", async ({ page, theme, consoleErrors }) => {
   await openApp(page, { theme });
   const field = (await openView(page, "Voice")).locator("#voice");
-  await expect(field.getByRole("heading", { level: 2 }).first()).toHaveText("Voice");
+  await expect(field.getByRole("heading", { level: 1 }).first()).toHaveText("Voice");
   const card = field;
   await expect(card.getByLabel("Amara Voice: Listening")).toBeVisible();
   await expect(card.getByRole("button", { name: "Stop" })).toBeVisible();

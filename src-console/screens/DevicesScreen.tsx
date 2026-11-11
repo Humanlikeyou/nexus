@@ -7,7 +7,7 @@ import { Badge, Button, InsetGroup, ListRow, type Tone } from "../ui";
 import type { MuseOperation } from "./muse";
 import { rssiText } from "./NeuroScreen";
 
-/** Settings › Devices (screen-specs §9). Muse + NOOP band rows; pairing for NOOP stays in NOOP. */
+/** Settings › Devices (screen-specs §9). Muse + WHOOP rows (WHOOP pairing: standalone/WhoopPanel). */
 export type DevicesGroupProps = {
   data: SystemSnapshot;
   devices: MuseDevice[];
@@ -49,7 +49,7 @@ export function DevicesGroup({ data, devices, operation, error, onScan: scan, on
             </span>
           } />
         <ListRow icon={HeartPulse} title={deviceTitle(noop.deviceId)}
-          subtitle={noopDown ? "NOOP health unavailable" : noop.generatedAt ? `Updated ${dateTime(noop.generatedAt)} · Recovery, HRV, sleep, Effort` : noop.message || "No local NOOP record"}
+          subtitle={noopDown ? "Health sync unavailable" : noop.generatedAt ? `Updated ${dateTime(noop.generatedAt)} · Recovery, HRV, sleep, Effort` : noop.message || "No health record on this Mac yet"}
           value={battery}
           accessory={noopDown && onRetry
             ? <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>

@@ -3,28 +3,6 @@ export type { CrewToolInfo, KbState, KbStatus } from "../src/lib/types";
 
 export type ModuleId = "landing" | "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings" | "voice" | "lists" | "mindbody" | "smarthome";
 
-export type OpenClawState = "online" | "configured" | "not_installed" | "offline";
-
-export interface OpenClawStatus {
-  /** online = fresh heartbeat (<5 min) or reachable loopback gateway; configured = config only. Optional for older backends. */
-  status?: OpenClawState;
-  online: boolean;
-  model: string;
-  gateway_url: string;
-  last_heartbeat: string | null;
-}
-
-export interface OpenClawHealth {
-  status: string;
-  version: string | null;
-  gateway: boolean;
-  rpc: boolean;
-  memory_search: string;
-  channels: { telegram: string; whatsapp: string };
-  timestamp: string;
-  installed?: boolean;
-}
-
 export interface HermesRuntimeHealth {
   runtime: string;
   status: string;
@@ -483,8 +461,6 @@ export interface SystemSnapshot {
   goals: Goal[];
   outbox: OutboxStatus;
   activity: ActivityEntry[];
-  /** OpenClaw gateway (local config + heartbeat file). `online` = config present. */
-  openclaw: OpenClawStatus;
   /** CrewAI service (stack/crew-service via crew.rs). */
   crew: CrewSnapshot;
   /** Knowledge base (Verba + Weaviate) via kb_status. */

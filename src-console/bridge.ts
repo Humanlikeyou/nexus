@@ -19,7 +19,6 @@ import type {
   MutedTopic,
   NexusUnavailableSource,
   NoopHealthSnapshot,
-  OpenClawStatus,
   OutboxStatus,
   PipelineItem,
   RecordedSession,
@@ -63,7 +62,7 @@ const SOURCE_LABELS: Record<string, string> = {
   list_terrence_automations: "Automations",
   list_terrence_automation_runs: "Automation history",
   list_terrence_projects: "Project state",
-  get_noop_health_snapshot: "NOOP health",
+  get_noop_health_snapshot: "Health sync",
   get_muse_state: "Muse",
   list_sessions: "Sensor sessions",
   read_tasks: "Task source",
@@ -74,7 +73,6 @@ const SOURCE_LABELS: Record<string, string> = {
   read_goals: "Legacy goals",
   get_outbox_status: "Delivery outbox",
   list_activity_entries: "Activity log",
-  read_openclaw_status: "Assistant backend",
   crew_health: "Crew service",
   crew_list: "Crew runs",
   crew_tools: "Crew tools",
@@ -107,18 +105,10 @@ const EMPTY_NOOP: NoopHealthSnapshot = {
   latestNight: null,
   battery: null,
   insights: [],
-  message: "NOOP health data is not available yet.",
+  message: "Health data is not available yet.",
 };
 
 const EMPTY_KB: KbStatus = { state: "not_running", model: null, docs: null, detail: null };
-const EMPTY_OPENCLAW: OpenClawStatus = { status: "offline", online: false, model: "unknown", gateway_url: "", last_heartbeat: null };
-
-/** Keep only the typed fields (defence in depth; the Rust command already returns just these). */
-function pickOpenClaw(s: OpenClawStatus): OpenClawStatus {
-  const status = s?.status === "online" || s?.status === "configured" || s?.status === "not_installed" || s?.status === "offline" ? s.status : s?.online ? "online" : "offline";
-  return { status, online: status === "online", model: s?.model ?? "unknown", gateway_url: s?.gateway_url ?? "", last_heartbeat: s?.last_heartbeat ?? null };
-}
-
 const EMPTY_REVENUE: RevenueSummary = {
   total_revenue: 0,
   total_expenses: 0,
@@ -189,13 +179,12 @@ export const INITIAL_SNAPSHOT: SystemSnapshot = {
   goals: [],
   outbox: { gateway_online: false, queue_depth: 0, last_delivered_at: null, last_error: null, total_delivered: 0 },
   activity: [],
-  openclaw: EMPTY_OPENCLAW,
   crew: { health: "offline", runs: [], tools: [] },
   kb: EMPTY_KB,
 };
 
 export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
-  const [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw, crewHealth, crewRuns, crewTools, kb] =
+  const [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, crewHealth, crewRuns, crewTools, kb] =
     await Promise.all([
       read<HermesRuntimeHealth>("get_terrence_runtime_health", INITIAL_SNAPSHOT.hermes),
       read<TerrenceCapability[]>("list_terrence_capabilities", []),
@@ -217,7 +206,6 @@ export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
       read<Goal[]>("read_goals", []),
       read<OutboxStatus>("get_outbox_status", INITIAL_SNAPSHOT.outbox),
       read<ActivityEntry[]>("list_activity_entries", [], { limit: 30 }),
-      read<OpenClawStatus>("read_openclaw_status", EMPTY_OPENCLAW),
       read<string>("crew_health", "offline"),
       read<CrewInfo[]>("crew_list", []),
       read<CrewToolInfo[]>("crew_tools", []),
@@ -228,7 +216,7 @@ export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
   // crew_list can only succeed when the service is configured and up; its
   // failure is expected (not a broken source) otherwise.
   if (crew.health !== "online") crewRuns.unavailable = null;
-  const reads = [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw, crewHealth, crewRuns, crewTools, kb];
+  const reads = [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, crewHealth, crewRuns, crewTools, kb];
 
   return {
     refreshedAt: Date.now(),
@@ -253,7 +241,6 @@ export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
     goals: goals.value,
     outbox: outbox.value,
     activity: activity.value,
-    openclaw: pickOpenClaw(openclaw.value),
     crew,
     kb: pickKb(kb.value),
   };

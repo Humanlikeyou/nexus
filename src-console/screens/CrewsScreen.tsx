@@ -209,7 +209,6 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
 
       <ul className="cc-strip" aria-label="Crew health">
         <li className="cc-tile"><span className="cc-tile__k">Crew service</span><span className="cc-tile__v"><StatusText kind={health === "online" ? "ok" : health === "offline" ? "risk" : "off"}>{badge.text}</StatusText></span><span className="cc-tile__s">At most 2 runs at once</span></li>
-        <li className="cc-tile"><span className="cc-tile__k">OpenClaw gateway</span><span className="cc-tile__v"><StatusText kind={data.openclaw.online ? "ok" : "off"}>{data.openclaw.online ? "Online" : "Offline"}</StatusText></span><span className="cc-tile__s">{data.openclaw.model || "No model"}</span></li>
         <li className="cc-tile"><span className="cc-tile__k">n8n workflows</span><span className="cc-tile__v">{n8n.state === "unwired" ? <StatusText kind="off">Not connected</StatusText> : <StatusText kind={n8n.value.connected ? "ok" : "off"}>{n8n.value.workflows} workflows</StatusText>}</span><span className="cc-tile__s">{wiredTag(n8n)}</span></li>
         <li className="cc-tile"><span className="cc-tile__k">Schedules</span><span className="cc-tile__v">{data.hermes.activeSchedules} active</span><span className="cc-tile__s">Next run {next.state === "unwired" ? wiredTag(next) : next.value}</span></li>
       </ul>

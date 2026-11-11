@@ -94,7 +94,7 @@ describe("lazy screens", () => {
     vi.useFakeTimers();
     render(<App />);
     await flush();
-    for (const [host, view] of [["Agents", "Crews"], ["Mind–Body", "Fitness"], ["Mind–Body", "Neuro"], ["Mind–Body", "Neuro history"], ["Business", "Money"], ["Business", "Ventures"], ["Business", "Work"]] as const) {
+    for (const [host, view] of [["Agents", "Crews"], ["Mind–Body", "Fitness"], ["Mind–Body", "Neuro"], ["Mind–Body", "Neuro history"], ["Business", "Money"], ["Business", "Ventures"], ["Business", "Work"], ["Settings", "Services"], ["Settings", "Devices"], ["Settings", "Notifications"], ["Settings", "Backup"], ["Settings", "Voice"], ["Settings", "Memory"]] as const) {
       go(host);
       await settle(host);
       fireEvent.click(within(field(host)!).getByRole("radio", { name: view }));
@@ -104,8 +104,8 @@ describe("lazy screens", () => {
       await settle(host);
       expect(f.textContent!.trim().length, `${host} › ${view}: blank`).toBeGreaterThan(20);
     }
-    // design-1110b B: Activity is a section of Agents, Lists of Today, Voice of Settings.
-    for (const [host, section] of [["Agents", "activity"], ["Settings", "voice"]] as const) {
+    // design-1110b B: Activity is a section of Agents, Lists of Today. design-1111s: Voice is a Settings tab (above).
+    for (const [host, section] of [["Agents", "activity"]] as const) {
       go(host);
       await settle(host);
       await vi.waitFor(() => expect(field(host)!.querySelector(`#${section}.page-section`), `${host} › ${section}`).not.toBeNull());

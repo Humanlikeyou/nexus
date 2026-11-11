@@ -1,6 +1,5 @@
-import type { KbStatus, OpenClawStatus } from "../types";
+import type { KbStatus } from "../types";
 import type { Tone } from "../ui";
-import { openClawBadge } from "./openclaw";
 
 /** Fixed copy for each knowledge-base state. Backend text (detail, errors) is never shown. */
 export interface KbView { tone: Tone; label: string; body: string; retry: boolean; title?: string }
@@ -17,26 +16,6 @@ export function kbView(kb: KbStatus, unavailable: boolean): KbView {
     case "not_running": return { tone: "warning", label: "Unavailable", body: "not running", retry: true };
     default: return { tone: "danger", label: "Error", body: "query failed", retry: true };
   }
-}
-
-/**
- * Assistant row for Home and Chat. Ambiguous (loading, status unreadable): neutral "Assistant".
- * Gateway reachable: "Amara". Installed but silent: "Assistant backend not reachable"
- * (Unavailable + Retry, warning). Not installed / offline (local mode): hidden.
- */
-export type AssistantView =
-  | { kind: "row"; title: string; tone: Tone; label: string; subtitle: string }
-  | { kind: "unreachable"; message: string }
-  | null;
-
-export const BACKEND_UNREACHABLE_COPY = "Assistant backend not reachable";
-
-export function assistantView(s: OpenClawStatus, opts: { loading: boolean; unavailable: boolean }): AssistantView {
-  if (opts.loading || opts.unavailable) return { kind: "row", title: "Assistant", tone: "neutral", label: "Checking", subtitle: "Backend status unknown" };
-  const status = s.status ?? (s.online ? "online" : "offline");
-  if (status === "online") return { kind: "row", title: "Amara", tone: "success", label: "Online", subtitle: openClawBadge(s).subtitle === "Gateway reachable" ? "Backend reachable" : openClawBadge(s).subtitle };
-  if (status === "configured") return { kind: "unreachable", message: BACKEND_UNREACHABLE_COPY };
-  return null;
 }
 
 /** crew_tools rows: fixed per-tool limits from the crew registry (15 s timeout, 4000-char cap). */

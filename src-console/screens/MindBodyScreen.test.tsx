@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { mockDayRow, mockSeriesPayload, mockSnapshot } from "../lib/mindBody";
-import { DISCLAIMER, INVALID_PATH_STEPS, MindBodyField, SANDBOX_STEPS, loadMindBody, seriesFromSnapshot, type MindBodyState } from "./MindBodyScreen";
+import { DISCLAIMER, INVALID_PATH_STEPS, MISSING_STEPS, MindBodyField, SANDBOX_STEPS, loadMindBody, seriesFromSnapshot, type MindBodyState } from "./MindBodyScreen";
 
 describe("Mind-Body", () => {
   it("shows setup steps when NOOP is missing", async () => {
     const { container } = render(<MindBodyField sessions={[]} load={() => Promise.resolve<MindBodyState>({ status: "inactive", steps: null })} />);
-    expect(await screen.findByRole("region", { name: "NOOP setup" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Health sync setup" })).toBeInTheDocument();
     expect(container.querySelector(".subsystem-inactive")).not.toBeNull();
     expect(screen.getByText(DISCLAIMER)).toBeInTheDocument();
   });
@@ -66,7 +66,8 @@ describe("loadMindBody", () => {
   });
   it("binary_missing → inactive with detail", async () => {
     invokeMock.mockRejectedValue({ kind: "binary_missing", detail: "Build NOOP first." });
-    expect(await loadMindBody()).toEqual({ status: "inactive", steps: "Build NOOP first." });
+    // design-1111s: fixed copy; the backend detail (which named the legacy helper) is never shown.
+    expect(await loadMindBody()).toEqual({ status: "inactive", steps: MISSING_STEPS });
   });
   it("invalid_path / sandbox_missing → inactive with fixed copy, no raw detail", async () => {
     invokeMock.mockRejectedValue({ kind: "invalid_path", detail: "/Users/x/noop" });
@@ -89,7 +90,7 @@ describe("loadMindBody", () => {
     const series = { hrv: { key: "hrv", points: [...days, blank] }, recovery: { key: "recovery", points: [...days, blank] }, sleep: { key: "sleep_total_min", points: [...days, blank] }, resting_hr: { key: "rhr", points: [] }, strain: { key: "strain", points: [] } };
     render(<MindBodyField sessions={[]} load={async () => ({ status: "ready", series, drivers: { sleep: [], hrv: [], recovery: [] } } as never)} />);
     expect(await screen.findByText("No recent reading")).toBeInTheDocument();
-    expect(screen.getByText("The last reading was Oct 10. Open NOOP to sync.")).toBeInTheDocument();
+    expect(screen.getByText("The last reading was Oct 10. Sync from Settings › Devices.")).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Readiness:/)).not.toBeInTheDocument();
   });
 });

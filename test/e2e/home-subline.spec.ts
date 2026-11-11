@@ -21,9 +21,9 @@ test("(i) Home status strip: three text segments under the subline, deep links, 
   await expect(strip).toBeVisible();
   const buttons = strip.getByRole("button");
   await expect(buttons).toHaveCount(3);
-  await expect(buttons.nth(0)).toHaveText(/^Amara (online|offline)( · Assistant connected)?$/);
+  await expect(buttons.nth(0)).toHaveText(/^Amara (online|offline)$/);
   await expect(buttons.nth(1)).toHaveText(/^(Next: (Consolidation|Reasoning|Daily summary) (in .+|due now)|Background jobs (stopped|running))$/);
-  await expect(buttons.nth(2)).toHaveText(/^NOOP /);
+  await expect(buttons.nth(2)).toHaveText(/^Health sync/);
   await expect(strip.locator(".ui-badge")).toHaveCount(0);
   const box = (await strip.boundingBox())!;
   expect(box.height).toBeGreaterThanOrEqual(28);

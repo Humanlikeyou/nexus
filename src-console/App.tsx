@@ -32,8 +32,11 @@ import { CommandPalette } from "./shell/CommandPalette";
 import { Splash, reducedMotion } from "./shell/Splash";
 import type { ModuleId } from "./types";
 import { personalAdapter } from "./personal/adapters";
-import { MemorySection, PatternsView } from "./personal/PageViews";
+import { PatternsView } from "./personal/PageViews";
 import { ASK_MORE_EVENT, type AskMoreDetail } from "./amaraTake/takeView";
+import { standaloneAdapter } from "./standalone/adapters";
+import { FirstRun } from "./standalone/FirstRun";
+import { settingsTab } from "./app/settingsTabs";
 
 const BUSINESS_VIEW_KEY = "amara.business.view";
 function readBusinessView(): string | null {
@@ -103,6 +106,8 @@ export default function App() {
   }, [navigate]);
   // design-1110b A: the Home chat. Expand is the largest it gets; ⌘1 focuses its composer.
   const [chatExpanded, setChatExpanded] = useState(false);
+  // design-1111s first-run: opens on launch only when setup_state is live and not done; any time from Settings › General.
+  const [setup, setSetup] = useState<null | "first" | "again">(() => { const d = standaloneAdapter().setupDone(); return d.state === "live" && !d.value ? "first" : null; });
   const [chatFocus, setChatFocus] = useState(0);
   const voiceTurns = useVoiceTurns(screenId === "landing");
   useEffect(() => {
@@ -169,7 +174,7 @@ export default function App() {
     : screenId === "crews" ? <CrewsField data={data} onRetry={retrySnapshot} />
     : screenId === "voice" ? <VoiceField />
     : screenId === "chat" ? <><AgentsField data={data} onOpenCrews={() => navigate({ id: "chat", view: "crews" })} onRetry={retrySnapshot} /><PageSection id="activity"><ActivityField data={data} onRetry={retrySnapshot} /></PageSection></>
-    : <><SettingsField data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} /><PageSection id="voice"><VoiceField /></PageSection><PageSection id="memory"><MemorySection adapter={personalAdapter()} /></PageSection></>;
+    : <SettingsField view={route.view} onRunSetup={() => setSetup("again")} data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} />;
 
   return (
     <CommandSurface mode={screenId}>
@@ -177,11 +182,12 @@ export default function App() {
       <Splash loaded={data.refreshedAt !== INITIAL_SNAPSHOT.refreshedAt} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate}
         onAsk={(text) => { setAskContext(null); setAskDraft((d) => ({ text, n: d.n + 1 })); navigate({ id: "terrance", view: "main" }); }} />
-      {!onLanding && <Sidebar active={active} onSelect={setActive} data={data} />}
-      <section className="active-field" aria-label={`${fieldLabel} system`}>{subViews && <div className="subview-bar" data-host={active}><SegmentedControl label={`${selected.label} view`} size="small" value={subViews.some((entry) => entry.view === route.view) ? route.view : "main"} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); navigate({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
+      {!onLanding && <Sidebar active={active} onSelect={setActive} data={data} onOpenServices={() => navigate({ id: "settings", view: "services" })} />}
+      <section className="active-field" aria-label={`${fieldLabel} system`}>{subViews && <div className="subview-bar" data-host={active}><SegmentedControl label={`${selected.label} view`} size="small" value={active === "settings" ? settingsTab(route.view) : subViews.some((entry) => entry.view === route.view) ? route.view : "main"} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); navigate({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
       {!onLanding && <Footer data={data} busy={busy} />}
       {!onLanding && <AmaraVoiceAnnouncer />}
       {notice && <div className="field-notice"><i />{notice}</div>}
+      {setup && <FirstRun adapter={standaloneAdapter()} again={setup === "again"} onClose={() => setSetup(null)} />}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />
     </CommandSurface>
   );

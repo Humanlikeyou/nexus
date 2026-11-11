@@ -43,13 +43,15 @@ test.describe("sub-views and anchors", () => {
   }
 
   const ANCHORS: [string, string, string][] = [
-    ["Settings", "Settings › Devices", "#devices"],
+    // design-1111s: Devices and Voice are Settings tabs; the command opens the tab at its top.
+    ["Settings", "Settings › Devices", "[data-tab=devices]"],
     ["Settings", "About Amara OS", "#about"],
     ["Today", "Home › Goals", "#goals"],
     // design-1110b B: the folded screens are sections of their new host.
     ["Today", "Today › Lists", "#lists"],
     ["Agents", "Agents › Activity", "#activity"],
     ["Settings", "Settings › Voice", "#voice"],
+    ["Settings", "Settings › General › Updates", "#updates"],
   ];
   for (const [host, command, anchor] of ANCHORS) {
     test(`(b) ${command} scrolls ${anchor} into view`, async ({ page, theme, consoleErrors }) => {

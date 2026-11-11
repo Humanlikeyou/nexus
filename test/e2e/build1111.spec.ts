@@ -17,7 +17,7 @@ const SURFACES: Array<[string, (p: Page) => Promise<void>]> = [
   ["Today sections", async (p) => { await gotoToday(p); }],
   ["Patterns", async (p) => { await sub(p, "Mind–Body", "Patterns"); }],
   ["Personal money", async (p) => { await sub(p, "Business", "Personal"); }],
-  ["Settings memory", async (p) => { await navButton(p, "Settings").click(); }],
+  ["Settings memory", async (p) => { await sub(p, "Settings", "Memory"); }],
 ];
 
 for (const sample of [false, true]) {
@@ -70,6 +70,6 @@ test("(1111a) check-in: 5-step mood; Today shows goals, life admin and the weekl
   const today = await gotoToday(page);
   await expect(today.getByRole("radiogroup", { name: "Mood" }).getByRole("radio")).toHaveCount(5);
   for (const id of ["checkin", "goals", "life-admin", "weekly-review"]) await expect(today.locator(`#${id}.page-section`)).toHaveCount(1);
-  await navButton(page, "Settings").click();
-  await expect(activeField(page, "Settings").locator("#memory.page-section")).toHaveCount(1);
+  await sub(page, "Settings", "Memory");
+  await expect(activeField(page, "Settings").locator("#memory")).toHaveCount(1);
 });

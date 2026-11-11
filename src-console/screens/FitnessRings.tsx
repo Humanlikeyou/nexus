@@ -113,7 +113,7 @@ function Pending({ title, m, unit, text, ring }: { title: string; m: RingModel; 
 }
 
 export function RecoveryCard({ m }: { m: RecoveryModel }) {
-  if (m.state === "unwired") return <Unwired title="Recovery" src="Appears once NOOP or another band sends a nightly score." />;
+  if (m.state === "unwired") return <Unwired title="Recovery" src="Appears once your WHOOP sends a nightly score." />;
   if (m.state === "pending" || m.value == null) return <Pending title="Recovery" m={m} unit="%" text={PENDING} />;
   const color = m.band ? BAND_COLOR[m.band] : "var(--data-recovery-high)";
   return (
@@ -133,7 +133,7 @@ export function RecoveryCard({ m }: { m: RecoveryModel }) {
 }
 
 function Zones({ zones }: { zones: EffortModel["zones"] }) {
-  if (zones.state === "unwired") return <p className="rx__wire"><b>Zone minutes</b> <DataTag kind="wire" /> NOOP stores the day&apos;s Effort score only; minutes per heart-rate zone need the HR stream.</p>;
+  if (zones.state === "unwired") return <p className="rx__wire"><b>Zone minutes</b> <DataTag kind="wire" /> Health sync stores the day&apos;s Effort score only; minutes per heart-rate zone need the HR stream.</p>;
   const z = zones.value, total = z.reduce((s, x) => s + x.minutes, 0);
   return (
     <div className="rx__zone-block">
@@ -148,7 +148,7 @@ function Zones({ zones }: { zones: EffortModel["zones"] }) {
 }
 
 export function EffortCard({ m, max }: { m: EffortModel; max: number }) {
-  if (m.state === "unwired") return <Unwired title="Effort" src="Appears once NOOP sends today's strain." />;
+  if (m.state === "unwired") return <Unwired title="Effort" src="Appears once health sync has today's strain." />;
   if (m.state === "pending" || m.value == null) return <Pending title="Effort" m={m} unit="" text="No Effort score for today yet" ring={<SegRing value={null} max={max} label="Effort" color="var(--data-strain)" />} />;
   return (
     <Card title="Effort" className="fitness__ring-card rx" data-state={m.state}>

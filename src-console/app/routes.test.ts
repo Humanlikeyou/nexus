@@ -26,11 +26,17 @@ describe("navigation (6 items, 3 groups)", () => {
     expect(screenFor(resolveRoute("trajectory"))).toBe("terrance");
     expect(screenFor(resolveRoute("devices"))).toBe("settings");
     // Section aliases (design-1110b B) render their host and scroll to the section.
-    const sections: Record<string, string> = { trajectory: "terrance", devices: "settings", lists: "terrance", assistant: "chat", voice: "settings" };
+    // design-1111s: devices and voice are Settings tabs now, so they resolve to a host view.
+    const sections: Record<string, string> = { trajectory: "terrance", lists: "terrance", assistant: "chat" };
     for (const [old, target] of Object.entries(ROUTE_ALIASES)) {
       if (sections[old]) {
         expect(screenFor(resolveRoute(old as never))).toBe(sections[old]);
         expect(SECTION_ANCHORS[target!.id]).toContain(target!.view);
+        continue;
+      }
+      if (old === "devices" || old === "voice") {
+        expect(screenFor(resolveRoute(old as never))).toBe("settings");
+        expect(HOST_VIEWS.settings?.some((v) => v.view === target!.view)).toBe(true);
         continue;
       }
       expect(screenFor(resolveRoute(old as never))).toBe(old);

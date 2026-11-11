@@ -21,10 +21,8 @@ export function paletteCommands(extra: PaletteCommand[] = []): PaletteCommand[] 
     { id: "terrance:weekly-review", label: `${TODAY_LABEL} › Weekly review`, route: { id: "terrance", view: "weekly-review" } },
     { id: "terrance:lists", label: `${TODAY_LABEL} › Lists`, route: { id: "terrance", view: "lists" } },
     { id: "chat:activity", label: "Agents › Activity", route: { id: "chat", view: "activity" } },
-    { id: "settings:voice", label: "Settings › Voice", route: { id: "settings", view: "voice" } },
-    { id: "settings:devices", label: "Settings › Devices", route: { id: "settings", view: "devices" } },
-    { id: "settings:memory", label: "Settings › Memory", route: { id: "settings", view: "memory" } },
     { id: "settings:about", label: "About Amara OS", route: { id: "settings", view: "about" } },
+    { id: "settings:updates", label: "Settings › General › Updates", route: { id: "settings", view: "updates" } },
   );
   return [...sections, ...subs, ...extra];
 }

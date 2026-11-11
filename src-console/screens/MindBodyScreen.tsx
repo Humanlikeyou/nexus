@@ -10,8 +10,10 @@ import { BaselineChart, DeltaBar, SleepSpan, StageStrip, readingDelta } from "./
 import { ChartHeader } from "../ui/charts/TrendChart";
 import "./MindBodyScreen.css";
 
-export const INVALID_PATH_STEPS = "The NOOP binary or database path in Settings isn't valid. Open Settings › WHOOP and set full paths that start with /.";
-export const SANDBOX_STEPS = "NOOP's local data access isn't set up yet. Open NOOP once so it can create its data folder, then check again.";
+export const INVALID_PATH_STEPS = "The health reader or health store path in Settings isn't valid. Open Settings › Devices › WHOOP connection and set full paths that start with /.";
+export const SANDBOX_STEPS = "Amara's health store isn't set up yet. Run a first sync from Settings › Devices, then check again.";
+/** Fixed copy for binary_missing (the backend detail named a separate program and build steps). */
+export const MISSING_STEPS = "Amara's health reader isn't set up on this Mac yet. Open Settings › Devices › WHOOP connection and check the paths, then come back here.";
 export const DISCLAIMER = "Personal estimates, not medical data.";
 const DASH = "—";
 /* Every plot fills its column edge to edge: no inner gutter, so plots line up across sections. */
@@ -54,8 +56,8 @@ export async function loadMindBody(): Promise<MindBodyState> {
   const failed = [snap, ...series].find((r) => !r.ok);
   if (failed && !failed.ok) {
     const kind = failed.error.kind;
-    // binary_missing detail is NOOP's own setup text; other kinds get fixed copy (details may hold paths).
-    if (kind === "binary_missing") return { status: "inactive", steps: failed.error.detail };
+    // Every kind gets fixed copy: backend details may hold paths or name the legacy helper.
+    if (kind === "binary_missing") return { status: "inactive", steps: MISSING_STEPS };
     if (kind === "invalid_path") return { status: "inactive", steps: INVALID_PATH_STEPS };
     if (kind === "sandbox_missing") return { status: "inactive", steps: SANDBOX_STEPS };
     if (kind === "spawn_failed") return { status: "inactive", steps: null };
@@ -162,13 +164,13 @@ const DRIVERS: Array<{ key: DriverKey; label: string; noun: string; unit: string
 
 export function Inactive({ steps }: { steps: string | null }) {
   return (
-    <div className="subsystem-inactive" role="region" aria-label="NOOP setup">
-      <h2>NOOP isn't connected</h2>
-      <p>Mind-Body needs NOOP's local health data. To set it up:</p>
+    <div className="subsystem-inactive" role="region" aria-label="Health sync setup">
+      <h2>Health sync isn't connected</h2>
+      <p>Mind-Body needs your health data on this Mac. To set it up:</p>
       {steps ? <p className="subsystem-inactive__detail">{steps}</p> : <ol>
-        <li>Build the NOOP CLI: run <code>swift build -c release</code> in Packages/NoopLocalAccess.</li>
-        <li>In Settings, set the NOOP binary path and database path.</li>
-        <li>Set WHOOP source to "NOOP (recommended)", then come back here.</li>
+        <li>Open Settings › Devices and check your WHOOP 4.</li>
+        <li>Under WHOOP connection, choose &ldquo;Health sync (recommended)&rdquo;.</li>
+        <li>Come back here once the first sync is done.</li>
       </ol>}
     </div>
   );
@@ -242,7 +244,7 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
 
   return (
     <div className="mind-body page-inset">
-      <PageHero title="Mind–Body" statement={statement} detail={ready && ready.level !== "none" ? copy.help : stale && lastDay ? `The last reading was ${shortDay(lastDay)}. Open NOOP to sync.` : undefined} />
+      <PageHero title="Mind–Body" statement={statement} detail={ready && ready.level !== "none" ? copy.help : stale && lastDay ? `The last reading was ${shortDay(lastDay)}. Sync from Settings › Devices.` : undefined} />
       {state.status === "inactive" ? <Inactive steps={state.steps} /> : state.status === "error" ? <ChartBox state="error" label="Mind–Body" onRetry={refresh} /> : (
         <>
           {!loading && <p className="mind-body__meta mb-reading">{asOf ? `Reading for ${shortDay(asOf)}${earlier ? ", the latest with data" : ""}` : "No reading day yet"} · Compared with your own 28-day baseline</p>}
@@ -391,7 +393,7 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
                 <div><dt>Resting HR</dt><dd>{num(ctx.resting_hr)} bpm</dd></div>
                 <div><dt>Sleep</dt><dd>{typeof ctx.sleep_minutes === "number" ? hoursMinutes(ctx.sleep_minutes) : DASH}</dd></div>
               </dl>
-            ) : <p className="mind-body__hint">{lastSession ? "No body context saved for this session. Sessions recorded before NOOP was set up don't have one." : "No sessions yet."}</p>}
+            ) : <p className="mind-body__hint">{lastSession ? "No body context saved for this session. Sessions recorded before health sync was set up don't have one." : "No sessions yet."}</p>}
           </section>
         </>
       )}

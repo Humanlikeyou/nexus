@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Poin
 import type { ModuleId, SystemSnapshot } from "../types";
 import { SYSTEM_GROUPS, SYSTEMS } from "../app/routes";
 import { StatusIndicator } from "../design/ProductUI";
+import { standaloneAdapter } from "../standalone/adapters";
+import { servicesFooter } from "../standalone/servicesSummary";
 import "./shell.css";
 
 export const SIDEBAR_MIN = 200;
@@ -73,8 +75,10 @@ function Resizer({ width, setWidth }: { width: number; setWidth: (w: number) => 
   );
 }
 
-export function Sidebar({ active, onSelect, data }: { active: ModuleId; onSelect: (id: ModuleId) => void; data: SystemSnapshot }) {
+export function Sidebar({ active, onSelect, data, onOpenServices }: { active: ModuleId; onSelect: (id: ModuleId) => void; data: SystemSnapshot; onOpenServices?: () => void }) {
   const [width, setWidth] = useSidebarWidth();
+  // design-1111s: the footer becomes a live service summary once services_summary exists (sample in preview).
+  const summary = servicesFooter(standaloneAdapter());
   return (
     <nav className="system-constellation" aria-label="Amara OS navigation">
       {SYSTEM_GROUPS.map((group) => (
@@ -92,7 +96,9 @@ export function Sidebar({ active, onSelect, data }: { active: ModuleId; onSelect
           })}
         </section>
       ))}
-      <div className="sidebar-status" title={data.hermes.model}><StatusIndicator tone={data.hermes.status === "online" ? "success" : "danger"}>{data.hermes.status === "online" ? "Amara ready" : "Amara offline"}</StatusIndicator><span className="ui-visually-hidden">{data.hermes.model}</span></div>
+      {summary && onOpenServices
+        ? <div className="sidebar-status"><button type="button" className="sidebar-status__link" onClick={onOpenServices} aria-label={`${summary.text}. Open Settings, Services`}><StatusIndicator tone={summary.attention ? "warning" : "accent"}>{summary.text} ›</StatusIndicator></button></div>
+        : <div className="sidebar-status" title={data.hermes.model}><StatusIndicator tone={data.hermes.status === "online" ? "success" : "danger"}>{data.hermes.status === "online" ? "Amara ready" : "Amara offline"}</StatusIndicator><span className="ui-visually-hidden">{data.hermes.model}</span></div>}
       <Resizer width={width} setWidth={setWidth} />
     </nav>
   );

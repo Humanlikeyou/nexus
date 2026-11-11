@@ -9,7 +9,7 @@ export const getNoopSettings = () => invoke<NoopSettings>("get_noop_settings");
 export const setNoopSettings = (settings: NoopSettings) => invoke<void>("set_noop_settings", { settings });
 
 const DEFAULTS: NoopSettings = { whoop_source: "noop", binary_path: null, db_path: null };
-const SOURCES = [{ value: "noop", label: "NOOP (recommended)" }, { value: "ble", label: "Direct BLE" }] as const;
+const SOURCES = [{ value: "noop", label: "Health sync (recommended)" }, { value: "ble", label: "Direct Bluetooth" }] as const;
 
 /** Empty is allowed (use NOOP's default); otherwise the path must be absolute. */
 export function pathError(value: string): string | null {
@@ -70,16 +70,16 @@ export function NoopSettingsGroup() {
   const edit = () => setSave({ state: "idle" });
 
   return (
-    <form id="noop-settings" onSubmit={(e) => { void onSubmit(e); }}>
-      <InsetGroup title="WHOOP" footer="With NOOP selected, Amara OS reads WHOOP data through NOOP and doesn't connect over Bluetooth.">
+    <form id="noop-settings" aria-label="WHOOP connection" onSubmit={(e) => { void onSubmit(e); }}>
+      <InsetGroup title="WHOOP connection" footer="With Health sync selected, Amara reads your WHOOP data from its health store and doesn't connect over Bluetooth itself. Leave the paths empty to use the defaults.">
         <ListRow title="WHOOP source" accessory={
           <SegmentedControl label="WHOOP source" size="small" value={source} options={SOURCES} onChange={(v) => { setSource(v); edit(); }} />
         } />
       </InsetGroup>
       <div className="settings__fields">
-        <TextField label="NOOP binary path" value={binary} placeholder="/usr/local/bin/noop" error={binaryError ?? undefined} spellCheck={false} autoComplete="off"
+        <TextField label="Health reader path" value={binary} placeholder="/usr/local/bin/noop" error={binaryError ?? undefined} spellCheck={false} autoComplete="off"
           onChange={(e) => { setBinary(e.target.value); edit(); }} />
-        <TextField label="NOOP database path" value={db} placeholder="Leave empty to use NOOP's default" error={dbError ?? undefined} spellCheck={false} autoComplete="off"
+        <TextField label="Health store path" value={db} placeholder="Leave empty to use the default" error={dbError ?? undefined} spellCheck={false} autoComplete="off"
           onChange={(e) => { setDb(e.target.value); edit(); }} />
         <div className="settings__row-actions">
           <Button type="submit" variant="primary" size="small" loading={save.state === "saving"} disabled={!loaded}>Save</Button>

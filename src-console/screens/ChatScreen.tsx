@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { MODEL_LOADING_COPY } from "../app/modelLoading";
 import { HermesSubtitle } from "./agentLabels";
-import { Activity, Bot, Brain, Check, Maximize2, Mic, Minimize2, PanelRight, RotateCcw, Search, Send, SquarePen, Users, Workflow, X } from "lucide-react";
+import { Activity, Bot, Brain, Check, Maximize2, Mic, Minimize2, PanelRight, RotateCcw, Search, Send, SquarePen, Users, X } from "lucide-react";
 import { HOME_COLLAPSED_MESSAGES, type HomeMessage, speakingIndex, withVoiceTurns } from "../app/homeThread";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
 import { tierLabel, tierTitle } from "../app/amaraChat";
-import { assistantView } from "../app/statusViews";
 import { dateTime, time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction, VoiceTurn } from "../types";
@@ -184,7 +183,6 @@ export function ChatField({
   const loading = (loadingProp ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt) && messages.length === 0;
   const hermes = data.hermes;
   const online = hermes.status === "online";
-  const assistant = assistantView(data.openclaw, { loading, unavailable: data.unavailableSources.some((s) => s.command === "read_openclaw_status") });
   const actionsUnavailable = data.unavailableSources.some((s) => s.command === "list_terrence_actions");
   const hermesUnavailable = data.unavailableSources.some((s) => s.command === "get_terrence_runtime_health");
   // Deep is the router's call; with Hermes still on Ollama directly nothing would read /deep.
@@ -234,8 +232,6 @@ export function ChatField({
 
   const agents = [
     { id: "hermes", icon: Bot, title: "Amara", subtitle: hermesUnavailable ? "Status unavailable" : <HermesSubtitle model={hermes.model} />, searchText: hermesUnavailable ? "Status unavailable" : `Hermes Agent ${hermes.model}`, tone: (online ? "success" : "warning") as Tone, label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
-    ...(assistant?.kind === "row" ? [{ id: "assistant", icon: Workflow, title: assistant.title, subtitle: assistant.subtitle, searchText: `${assistant.title} ${assistant.subtitle}`, tone: assistant.tone, label: assistant.label }] : []),
-    ...(assistant?.kind === "unreachable" ? [{ id: "assistant", icon: Workflow, title: "Assistant", subtitle: assistant.message, searchText: assistant.message, tone: "warning" as Tone, label: "Not reachable" }] : []),
   ].filter((a) => !query.trim() || `${a.title} ${a.searchText}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   // Keep the newest exchange in view: scroll to the bottom, but never past the latest user message.
@@ -343,12 +339,6 @@ export function ChatField({
           {agents.length === 0 && <ListRow title="No matching agents" />}
           {onOpenCrews && <ListRow icon={Users} title="Crews" value={crewsValue(data.crew)} onSelect={onOpenCrews} />}
         </InsetGroup>
-        {assistant?.kind === "unreachable" && onRetrySources && (
-          <div className="chat-screen__unavailable" data-tone="warning" role="status">
-            <p>{assistant.message}</p>
-            <Button variant="secondary" size="small" icon={RotateCcw} onClick={onRetrySources}>Retry</Button>
-          </div>
-        )}
         <InsetGroup title="Conversation" footer="Earlier conversations will be listed here later.">
           <ListRow icon={SquarePen} title="Current" subtitle={startedAt ? `Started ${time(startedAt)}` : "No messages yet"} selected onSelect={() => composerRef.current?.focus()} />
         </InsetGroup>

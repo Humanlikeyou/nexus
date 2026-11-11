@@ -188,9 +188,11 @@ export const navButton = (page: Page, label: string) =>
 /** The visible screen region ("<label> system"). */
 export const activeField = (page: Page, label: string) => page.getByRole("region", { name: `${label} system` });
 
-const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Crews: "Agents", Money: "Business", Ventures: "Business", Work: "Business", Revenue: "Business" };
+const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Crews: "Agents", Money: "Business", Ventures: "Business", Work: "Business", Revenue: "Business",
+  // design-1111s: Settings tabs.
+  Services: "Settings", Devices: "Settings", Notifications: "Settings", Backup: "Settings", Voice: "Settings", Memory: "Settings" };
 /** design-1110b B: folded screens that are now a section of a host page (label → host, anchor id). */
-const SECTION_HOSTS: Record<string, [string, string]> = { Activity: ["Agents", "activity"], Lists: ["Today", "lists"], Voice: ["Settings", "voice"] };
+const SECTION_HOSTS: Record<string, [string, string]> = { Activity: ["Agents", "activity"], Lists: ["Today", "lists"] };
 
 /** Goes to Today from wherever the page is: from the landing its button, from anywhere else Home first. */
 export async function gotoToday(page: Page) {
@@ -220,6 +222,19 @@ export async function openMore(page: Page) {
   await routeSettled(page);
   const closed = page.locator(".active-field details.quiet-more:not([open]) > summary");
   while (await closed.count()) await closed.first().click();
+}
+
+/** design-1111s: opens Settings on a tab (General · Services · Devices · Notifications · Backup · Voice · Memory). */
+export async function openSettingsTab(page: Page, tab: string) {
+  await navButton(page, "Settings").click();
+  const field = activeField(page, "Settings");
+  if (tab !== "General") {
+    const radio = field.getByRole("radio", { name: tab, exact: true });
+    await radio.click();
+    await expect(radio).toHaveAttribute("aria-checked", "true");
+  }
+  await routeSettled(page).catch(() => undefined);
+  return field;
 }
 
 /** Opens a section, or a sub-view through its host, and returns the screen region. */

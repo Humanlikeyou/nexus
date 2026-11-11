@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import { Bot, Database, RotateCcw, Users, Wrench, Workflow } from "lucide-react";
-import { assistantView } from "../app/statusViews";
+import { Bot, Database, RotateCcw, Users, Wrench } from "lucide-react";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot } from "../types";
 import { Badge, Button, InsetGroup, ListRow, PageHero, type Tone } from "../ui";
@@ -20,16 +19,13 @@ export function crewsValue(crew: SystemSnapshot["crew"]): string {
 
 type AgentRow = { id: string; icon: typeof Bot; title: string; subtitle: ReactNode; tone: Tone; label: string };
 
-/** Agent runtimes shown on the Agents page: Hermes (Amara) plus the assistant backend when known. */
-export function agentRows(data: SystemSnapshot, loading: boolean): AgentRow[] {
+/** Agent runtimes shown on the Agents page: Hermes (Amara). */
+export function agentRows(data: SystemSnapshot, _loading?: boolean): AgentRow[] {
   const hermes = data.hermes;
   const online = hermes.status === "online";
   const hermesUnavailable = data.unavailableSources.some((s) => s.command === "get_terrence_runtime_health");
-  const assistant = assistantView(data.openclaw, { loading, unavailable: data.unavailableSources.some((s) => s.command === "read_openclaw_status") });
   return [
     { id: "hermes", icon: Bot, title: "Amara", subtitle: hermesUnavailable ? "Status unavailable" : <HermesSubtitle model={hermes.model} />, tone: online ? "success" : "warning", label: online ? "Online" : hermesUnavailable ? "Unknown" : "Offline" },
-    ...(assistant?.kind === "row" ? [{ id: "assistant", icon: Workflow, title: assistant.title, subtitle: assistant.subtitle, tone: assistant.tone, label: assistant.label }] : []),
-    ...(assistant?.kind === "unreachable" ? [{ id: "assistant", icon: Workflow, title: "Assistant", subtitle: assistant.message, tone: "warning" as Tone, label: "Not reachable" }] : []),
   ];
 }
 

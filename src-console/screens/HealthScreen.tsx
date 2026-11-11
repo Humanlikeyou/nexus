@@ -105,7 +105,7 @@ export function buildInsights(health: NoopHealthSnapshot): NoopHealthInsight[] {
     out.push({
       metric: "latest_sleep",
       fact: `${hm(sleepMin)} of sleep`,
-      context: overnight ? `NOOP recorded the latest night from ${clock(overnight.startedAt)} to ${clock(overnight.endedAt)}.` : "Taken from the latest completed NOOP daily record.",
+      context: overnight ? `Your WHOOP recorded the latest night from ${clock(overnight.startedAt)} to ${clock(overnight.endedAt)}.` : "Taken from the latest completed daily record.",
     });
   }
   if (stages.length > 0 && overnight) {
@@ -120,13 +120,13 @@ export function buildInsights(health: NoopHealthSnapshot): NoopHealthInsight[] {
   }
   if (hrv != null || rhr != null) {
     const readings = [hrv == null ? null : `HRV ${number(hrv)} ms`, rhr == null ? null : `resting heart rate ${number(rhr)} bpm`].filter(Boolean).join(", ");
-    out.push({ metric: "overnight_signals", fact: readings.charAt(0).toUpperCase() + readings.slice(1), context: "These are measured overnight signals from the latest NOOP sleep record." });
+    out.push({ metric: "overnight_signals", fact: readings.charAt(0).toUpperCase() + readings.slice(1), context: "These are measured overnight signals from the latest sleep record." });
   }
   if (health.battery) {
     out.push({
-      // Internal id kept from the WHOOP era; user-facing copy says NOOP band.
+      // Internal id kept from the WHOOP era; user-facing copy says WHOOP.
       metric: "whoop_battery",
-      fact: `NOOP band battery is ${number(health.battery.percentage)}%`,
+      fact: `WHOOP battery is ${number(health.battery.percentage)}%`,
       context: `${health.battery.charging === true ? "Charging" : health.battery.charging === false ? "On strap" : "Charge state unavailable"}; last observed ${observed(health.battery.observedAt)}.`,
     });
   }
@@ -137,13 +137,13 @@ export function buildInsights(health: NoopHealthSnapshot): NoopHealthInsight[] {
 
 /** Sentence-case status text with a battery glyph (badges are for 1–2 word tags). */
 function BatteryStatus({ battery }: { battery: NoopHealthSnapshot["battery"] }) {
-  if (!battery) return <span className="fitness__status"><BatteryMedium className="fitness__status-icon" aria-hidden="true" />NOOP band · no reading</span>;
+  if (!battery) return <span className="fitness__status"><BatteryMedium className="fitness__status-icon" aria-hidden="true" />WHOOP · no reading</span>;
   const state = battery.charging === true ? "Charging" : battery.charging === false ? "On strap" : "Charge state unknown";
   const low = battery.percentage <= 15 && battery.charging !== true;
   const Icon = battery.charging === true ? BatteryCharging : low ? BatteryLow : BatteryMedium;
   return (
     <span className="fitness__status" data-tone={low ? "danger" : undefined} title={`Observed ${observed(battery.observedAt)}`}>
-      <Icon className="fitness__status-icon" aria-hidden="true" />NOOP band {number(battery.percentage)}% · {state}
+      <Icon className="fitness__status-icon" aria-hidden="true" />WHOOP {number(battery.percentage)}% · {state}
     </span>
   );
 }
@@ -171,7 +171,7 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
     <>
       <PageHero title="Fitness"
         statement={failed ? "Out of reach" : heroBand ? `${heroBand.word} recovery` : status.text}
-        detail={failed ? "NOOP health couldn't be read." : [heroBand && status.tone !== "warning" && status.tone !== "success" ? status.text : null, health.generatedAt ? `Updated ${dayWord(health.dataAgeDays)}${clock(health.generatedAt)}` : health.dataAgeDays != null ? `${health.dataAgeDays}d old` : null, health.deviceId && health.deviceId !== EMPTY_DEVICE_ID ? health.deviceId : null].filter(Boolean).join(" · ") || undefined} />
+        detail={failed ? "Health data couldn't be read." : [heroBand && status.tone !== "warning" && status.tone !== "success" ? status.text : null, health.generatedAt ? `Updated ${dayWord(health.dataAgeDays)}${clock(health.generatedAt)}` : health.dataAgeDays != null ? `${health.dataAgeDays}d old` : null, health.deviceId && health.deviceId !== EMPTY_DEVICE_ID ? health.deviceId : null].filter(Boolean).join(" · ") || undefined} />
       <div className="fitness__header-trailing">
         {failed ? <Badge tone="danger">Unavailable</Badge> : heroBand && status.tone === "warning" && <Badge tone="warning">{status.text}</Badge>}
         {failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
@@ -183,10 +183,10 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
     return (
       <div className="fitness" data-state={failed ? "error" : "empty"}>
         {header}
-        <Card className="fitness__empty" title={failed ? "NOOP health is unavailable" : "Waiting for the first NOOP record"} headingLevel={2}>
+        <Card className="fitness__empty" title={failed ? "Health sync is unavailable" : "Waiting for the first health record"} headingLevel={2}>
           <div className="fitness__empty-lead">
             <Inbox className="fitness__empty-icon" aria-hidden="true" />
-            <p className="fitness__callout">{failed ? "Amara OS couldn't read the local NOOP store. Try again in a moment." : health.message || "NOOP health data is not available yet."}</p>
+            <p className="fitness__callout">{failed ? "Amara couldn't read the health store on this Mac. Try again in a moment." : health.message || "Health data is not available yet."}</p>
             {!failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Check again</Button>}
           </div>
           <More label="Readiness">
@@ -196,9 +196,9 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
             <StatTile label="Sleep" value={null} />
           </div>
           <InsetGroup title="Readiness" className="fitness__readiness">
-            <ListRow icon={HeartPulse} title="Data access" subtitle="Amara has no NOOP daily record to read yet." accessory={<Badge tone="neutral">Store missing</Badge>} />
+            <ListRow icon={HeartPulse} title="Data access" subtitle="Amara has no daily health record to read yet." accessory={<Badge tone="neutral">Store missing</Badge>} />
             <ListRow icon={Sparkles} title="Morning briefing" subtitle="Amara stays quiet until a fresh sleep session is available." accessory={<Badge tone="neutral">Waiting</Badge>} />
-            <ListRow icon={BatteryMedium} title="Battery watch" subtitle={health.battery ? "A current NOOP band reading is available." : "No NOOP band battery reading is available locally."} accessory={<Badge tone="neutral">{health.battery ? `${number(health.battery.percentage)}%` : "No reading"}</Badge>} />
+            <ListRow icon={BatteryMedium} title="Battery watch" subtitle={health.battery ? "A current WHOOP reading is available." : "No WHOOP battery reading on this Mac yet."} accessory={<Badge tone="neutral">{health.battery ? `${number(health.battery.percentage)}%` : "No reading"}</Badge>} />
           </InsetGroup>
           </More>
         </Card>
@@ -263,7 +263,7 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
       <AmaraTake page="fitness" className="fitness__take" />
       {health.status === "stale" && (
         <p className="fitness__callout" role="note">
-          Last NOOP data {health.latestDay ? dayLabel(health.latestDay) : "unknown"}. <span className="fitness__hint">Open NOOP to sync.</span>
+          Last health data {health.latestDay ? dayLabel(health.latestDay) : "unknown"}. <span className="fitness__hint">Sync from Settings › Devices.</span>
         </p>
       )}
 
@@ -327,7 +327,7 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
           {insights.map((i) => <ListRow key={i.metric} icon={insightIcon(i.metric)} title={i.fact} subtitle={i.context ?? undefined} />)}
         </InsetGroup>
       )}
-      {insights.length === 0 && <p className="fitness__pending">Insights appear after NOOP&apos;s nightly sync.</p>}
+      {insights.length === 0 && <p className="fitness__pending">Insights appear after tonight&apos;s health sync.</p>}
       </More>
     </div>
   );

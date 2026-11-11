@@ -87,30 +87,11 @@ describe("ChatField", () => {
     expect(screen.queryByText("Not connected")).not.toBeInTheDocument();
   });
 
-  it.each(["not_installed", "offline"] as const)("backend %s (local mode): no assistant row, no OpenClaw label", (status) => {
-    setup({ data: { ...loaded, openclaw: { status, online: false, model: "unknown", gateway_url: "ws://127.0.0.1:18789", last_heartbeat: null } } });
+  it("design-1111s: OpenClaw is removed: only Amara is listed, with no assistant-backend row", () => {
+    setup({ data: loaded });
     const agents = screen.getByLabelText("Agents and conversations");
     expect(within(agents).queryByText("Assistant")).not.toBeInTheDocument();
-    expect(within(agents).queryByText(/OpenClaw|No heartbeat|Not installed/)).not.toBeInTheDocument();
-  });
-
-  it("backend installed but silent: 'Assistant backend not reachable' with Retry (warning)", () => {
-    const props = setup({ onRetrySources: vi.fn(), data: { ...loaded, openclaw: { status: "configured", online: false, model: "unknown", gateway_url: "ws://127.0.0.1:18789", last_heartbeat: null } } });
-    const agents = screen.getByLabelText("Agents and conversations");
-    expect(within(agents).getByLabelText("Assistant status: Not reachable")).toBeInTheDocument();
-    const block = within(agents).getByRole("status");
-    expect(block).toHaveAttribute("data-tone", "warning");
-    fireEvent.click(within(block).getByRole("button", { name: "Retry" }));
-    expect(props.onRetrySources).toHaveBeenCalled();
-    expect(agents.textContent).not.toMatch(/18789|OpenClaw/);
-  });
-
-  it("backend reachable: 'Amara' gateway row with its model and an aria-label", () => {
-    setup({ data: { ...loaded, openclaw: { status: "online", online: true, model: "minimax-m2.5", gateway_url: "ws://127.0.0.1:18789", last_heartbeat: null } } });
-    const agents = screen.getByLabelText("Agents and conversations");
-    expect(within(agents).getByText("minimax-m2.5")).toBeInTheDocument();
-    expect(within(agents).getAllByLabelText("Amara status: Online").length).toBeGreaterThan(0);
-    expect(within(agents).queryByText(/OpenClaw/)).not.toBeInTheDocument();
+    expect(agents.textContent).not.toMatch(/OpenClaw|18789|Not reachable/);
   });
 
   it("failed reply shows Retry that resends the previous user message; pending shows Thinking", async () => {

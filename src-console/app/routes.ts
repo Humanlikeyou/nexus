@@ -7,7 +7,8 @@ export type SystemEntry = { id: ModuleId; label: string; signal: string; icon: L
 export const SECTION_ANCHORS: Partial<Record<ModuleId, string[]>> = {
   terrance: ["goals", "checkin", "life-admin", "weekly-review", "lists"],
   chat: ["activity"],
-  settings: ["devices", "about", "home-assistant", "voice", "memory"],
+  // design-1111s: devices, voice and memory are Settings tabs now (they open at the top); these stay anchors.
+  settings: ["about", "home-assistant", "updates"],
 };
 
 /** Six items in three groups, like macOS Settings (screen-specs Part 2). The first group is untitled
@@ -41,6 +42,8 @@ export const HOST_VIEWS: Partial<Record<ModuleId, SubView[]>> = {
   chat: [{ view: "main", label: "Agents", screen: "chat" }, { view: "crews", label: "Crews", screen: "crews" }],
   mindbody: [{ view: "main", label: "Overview", screen: "mindbody" }, { view: "fitness", label: "Fitness", screen: "health" }, { view: "neuro", label: "Neuro", screen: "neuro" }, { view: "neuro-history", label: "Neuro history", screen: "sessions" }, { view: "patterns", label: "Patterns", screen: "mindbody" }],
   // design-1110d D-B1: Revenue became Money (view id kept so "revenue" links still land there).
+  // design-1111s: Settings gets section tabs, the same bar Business uses (Taisun, 14:59 JST Nov 11).
+  settings: [{ view: "main", label: "General", screen: "settings" }, { view: "services", label: "Services", screen: "settings" }, { view: "devices", label: "Devices", screen: "settings" }, { view: "notifications", label: "Notifications", screen: "settings" }, { view: "backup", label: "Backup", screen: "settings" }, { view: "voice", label: "Voice", screen: "settings" }, { view: "memory", label: "Memory", screen: "settings" }],
   business: [{ view: "main", label: "Overview", screen: "business" }, { view: "ventures", label: "Ventures", screen: "business" }, { view: "revenue", label: "Money", screen: "revenue" }, { view: "work", label: "Work", screen: "business" }, { view: "personal", label: "Personal", screen: "business" }],
 };
 
@@ -57,7 +60,7 @@ export const ROUTE_ALIASES: Partial<Record<ModuleId, { id: ModuleId; view: strin
   lists: { id: "terrance", view: "lists" },
   crews: { id: "chat", view: "crews" },
   voice: { id: "settings", view: "voice" },
-  // Anchor alias: Settings renders Devices inline (§9) and App scrolls to #devices.
+  // design-1111s: Devices and Voice are Settings tabs.
   devices: { id: "settings", view: "devices" },
 };
 
