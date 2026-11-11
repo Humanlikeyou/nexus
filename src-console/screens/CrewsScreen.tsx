@@ -6,6 +6,8 @@ import type { CrewInfo, CrewServiceHealth, SystemSnapshot } from "../types";
 import { Button, Card, DataTag, Dialog, More, PageHero, StatusText, TextField, wiredTag, type StatusKind, type Tone } from "../ui";
 import { crewsAdapter, type CrewsAdapter } from "../crews/adapters";
 import { CrewApprovalsCard, CrewDecidedCard, CrewRunPage } from "./CrewPanels";
+import { crewToolsAdapter, type CrewToolsAdapter } from "../crews/toolGrant";
+import { CrewToolsPage, GrantCell } from "./CrewToolsPanels";
 import { CREW_TOOL_OUTPUT_CAP, CREW_TOOL_TIMEOUT_S } from "../app/statusViews";
 import "./CrewsScreen.css";
 import "./CommandCenter.css";
@@ -37,10 +39,10 @@ function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }
 
 /** Chat & Agents › Crews (Stage 5E): crew-service health, runs, start and stop. */
 export const RUN_STATUS: Record<string, StatusKind> = { running: "run", completed: "ok", failed: "fail", stopped: "off", interrupted: "risk" };
-type CrewPage = { kind: "overview" } | { kind: "run"; id: string } | { kind: "approvals" };
+type CrewPage = { kind: "overview" } | { kind: "run"; id: string } | { kind: "approvals" } | { kind: "crew"; name: string };
 
 /** design-1110d D-C1–C11: Agents › Crews as a command center. Panels with no source read from `adapter`. */
-export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter() }: { data: SystemSnapshot; onRetry?: () => void; loading?: boolean; adapter?: CrewsAdapter }) {
+export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), tools = crewToolsAdapter() }: { data: SystemSnapshot; onRetry?: () => void; loading?: boolean; adapter?: CrewsAdapter; tools?: CrewToolsAdapter }) {
   const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const { health } = data.crew;
   const listDown = data.unavailableSources.some((s) => s.command === "crew_list");
@@ -153,6 +155,18 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter() }:
     );
   }
 
+  if (page.kind === "crew") {
+    const mine = runs.filter((r) => r.name === page.name);
+    const last = mine[0];
+    return (
+      <div className="crews page-inset cc-page">
+        <CrewToolsPage crew={page.name} agents={[...new Set(mine.flatMap((r) => r.agents))]} adapter={tools}
+          lastRun={last ? `last run ${humanize(last.status).toLowerCase()}${last.started_at ? ` · ${dateTime(last.started_at)}` : ""}` : "no runs yet"}
+          onBack={() => setPage({ kind: "overview" })} />
+      </div>
+    );
+  }
+
   const approvals = adapter.approvals();
   if (page.kind === "approvals") {
     const count = approvals.state === "unwired" ? 0 : approvals.value.length;
@@ -227,11 +241,27 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter() }:
       )}
 
       <div className="cc-grid2">
-        <Card title="Crews" accessory={<span className="cc-card__acc"><DataTag kind="wire" /></span>}>
-          {roster.length === 0 ? <p className="cc-note">Crews appear after their first run.</p> : roster.map((c) => (
-            <div className="cc-row" key={c.name}><div className="cc-row__main"><span>{c.name}</span><small>{c.last.agents.join(", ") || "No agents"} · last run {humanize(c.last.status).toLowerCase()}</small></div><StatusText kind={c.ok === c.total ? "ok" : "fail"}>{c.ok}/{c.total}</StatusText></div>
-          ))}
-          <p className="cc-note">Next scheduled run per crew needs wiring.</p>
+        <Card title="Crews" accessory={<span className="cc-card__acc">{wiredTag<unknown>(roster.length ? tools.grant(roster[0].name) : tools.audit(""))}</span>}>
+          {roster.length === 0 ? <p className="cc-note">Crews appear after their first run.</p> : (
+            <table className="cc-table cc-crews" aria-label="Crews">
+              <thead><tr><th scope="col">Crew</th><th scope="col">Last run</th><th scope="col">Files and terminal</th><th scope="col"><span className="ui-visually-hidden">Open</span></th></tr></thead>
+              <tbody>
+                {roster.map((c) => {
+                  const grant = tools.grant(c.name);
+                  const asked = grant.state !== "unwired" && grant.value.status === "pending";
+                  return (
+                    <tr key={c.name}>
+                      <td>{c.name}<small>{c.last.agents.join(" · ") || "No agents"} · {c.ok}/{c.total} ok</small></td>
+                      <td><StatusText kind={RUN_STATUS[c.last.status] ?? "off"}>{humanize(c.last.status)}</StatusText></td>
+                      <td className="cc-grant"><GrantCell grant={grant} /></td>
+                      <td className="cc-num"><Button variant="plain" size="small" aria-label={`${asked ? "Review" : "Manage"} ${c.name}`} onClick={() => setPage({ kind: "crew", name: c.name })}>{asked ? "Review ›" : "Manage ›"}</Button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+          <p className="cc-note">Files and terminal: per crew, off by default. Open a crew to turn it on or off. Next scheduled run per crew needs wiring.</p>
         </Card>
         <Card title="Tools and guardrails">
           {toolsDown ? <Unavailable label="Crew tools" onRetry={onRetry} />
@@ -240,7 +270,9 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter() }:
                 <div className="cc-row" key={t.name}><div className="cc-row__main"><span>{t.name}</span><small>{CREW_TOOL_TIMEOUT_S} s timeout · {CREW_TOOL_OUTPUT_CAP}-char output cap</small></div>
                   <span aria-label={`${t.name}: ${t.allowed ? "allowed" : "blocked"}`}><StatusText kind={t.allowed ? "ok" : "off"}>{t.allowed ? "Allowed" : "Blocked"}</StatusText></span></div>
               ))}
+          <div className="cc-row"><div className="cc-row__main"><span>Files and terminal</span><small>Per crew · off by default · only you can turn it on</small></div><StatusText kind="wait">Per crew</StatusText></div>
           <div className="cc-row"><div className="cc-row__main"><span>Outbound (email, posts, spend)</span><small>Always asks first</small></div><StatusText kind="wait">Approval</StatusText></div>
+          <div className="cc-row"><div className="cc-row__main"><span>git push, sudo</span><small>Never for crews</small></div><StatusText kind="fail">Blocked</StatusText></div>
         </Card>
       </div>
 

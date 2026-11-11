@@ -111,7 +111,7 @@ describe("Agents › Crews", () => {
     expect(crew.getCrewStatus).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(CREW_POLL_MS); });
     expect(crew.getCrewStatus).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "Runs" })).getByText("Completed")).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(CREW_POLL_MS * 3); });
     expect(crew.getCrewStatus).toHaveBeenCalledTimes(2);
     view.unmount();
