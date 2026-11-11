@@ -18,7 +18,8 @@ function focusHeading(field: HTMLElement): boolean {
   if (focused && focused !== document.body && field.contains(focused)) return true;
   if (!heading.hasAttribute("tabindex")) heading.tabIndex = -1;
   heading.focus({ preventScroll: true });
-  return true;
+  // focus() is a no-op while the element can't take it yet (mid view-transition, not yet rendered): report whether it landed.
+  return document.activeElement === heading;
 }
 
 /** The app's route, with one `navigate` for every link, tab, shortcut and ⌘K jump. */

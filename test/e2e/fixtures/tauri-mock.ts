@@ -40,9 +40,27 @@ export async function emulateDisplay(page: Page, theme: Theme, rt: Reduce, rm: R
   await page.evaluate(apply, rt === "reduce");
 }
 
-/** Whether emulateDisplay's reduced transparency took effect in this engine. */
-export const reducedTransparency = (page: Page) =>
-  page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches || document.documentElement.getAttribute("data-reduce-transparency") === "true");
+/**
+ * The app's own reduced-transparency state: the sidebar drops its blur and paints the solid glass
+ * fill (--glass-solid). This reads what the app's CSS actually computed, so it is false if the app's
+ * fallback breaks, whatever the fixture set up.
+ */
+export const appFallbackApplied = (page: Page) =>
+  page.evaluate(() => {
+    const nav = document.querySelector("main.command-surface > nav.system-constellation");
+    if (!nav) return false;
+    const style = getComputedStyle(nav);
+    const probe = document.createElement("i");
+    probe.style.background = "var(--glass-solid)";
+    document.body.appendChild(probe);
+    const solid = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return (style.backdropFilter || "none") === "none" && solid !== "rgba(0, 0, 0, 0)" && style.backgroundColor === solid;
+  });
+
+/** Whether reduced transparency took effect in the engine AND the app's fallback is really applied (appFallbackApplied). */
+export const reducedTransparency = async (page: Page) =>
+  (await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches || document.documentElement.getAttribute("data-reduce-transparency") === "true")) && (await appFallbackApplied(page));
 
 export interface MockOptions {
   theme: Theme;

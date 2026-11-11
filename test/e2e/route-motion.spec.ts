@@ -99,10 +99,13 @@ test.describe("interruption and input", () => {
 test.describe("focus and scroll", () => {
   test("focus lands on the new page's heading, for the sidebar, Home and ⌘K", async ({ page, theme, browserName }) => {
     await openApp(page, { theme });
+    // The app clears data-route-motion when the transition and the enter animation are both done: wait on that, not a timeout.
     await navButton(page, "Settings").click();
     await expect(activeField(page, "Settings").getByRole("heading", { level: 1 })).toBeFocused();
+    await expect.poll(() => motion(page)).toBeNull();
     await navButton(page, "Home").click();
     await expect(page.locator(".landing h1")).toBeFocused();
+    await expect.poll(() => motion(page)).toBeNull();
     if (browserName !== "webkit") { // WebKit's Tab skips buttons unless the Mac's full keyboard access is on
       await page.keyboard.press("Tab");
       // design-1110b A: the Home chat under the lens is the first stop, before the buttons.
