@@ -1,48 +1,47 @@
 # Board (read this first when resuming)
 
-Baseline at cd5e4cc: vitest 1140/9 skipped · neuro 21 · src-tauri 418/5 ignored · router 112 · fmt/clippy clean.
-Status: `todo` · `active` · `done <hash>` · `blocked` (see blocked.md) · `waiting` (Taisun).
+Branch `amara-integration`, local commits only, nothing pushed. Decisions: `docs/decisions/0001–0007`.
+Last full gates (after `021ddea`): vitest 1474 / 9 skipped · neuro 21 · src-tauri 507 / 5 ignored · router 126 · crew-service 109 · fmt / clippy / secrets clean. Full e2e: **not run yet** (step G).
+Status: `todo` · `active` (lane running) · `done <hash>` · `blocked` · `waiting` (Taisun).
 
-## 0. Dev system
+## Dev system
 | id | item | status |
 |---|---|---|
-| S00 | .claude/ agents, rules, hooks, skills; docs/decisions; tasks/ | done 0cc6d7e (+ hook 5f3a579 19b3bc8 b4b251d) |
+| S00 | .claude/ agents, rules, guard hook, skills; decisions; tasks | done 0cc6d7e (+ 5f3a579 19b3bc8 b4b251d) |
+| S01 | Local pre-push hook (NEXUS_PUSH_OK=1) in ~/projects/nexus/.git/hooks | done (installed, not versioned; decision 0007 #9) |
 
-## 11. Fix backlog (priority order)
-| id | P | item | status |
-|---|---|---|---|
-| B01 | P1 | Router: stop evicting deep in restore_fast; grace/VRAM headroom via gpu_budget_gb; re-warm tests | done bb6669a |
-| B02 | P1 | Router: auto_deep default false; gate classifier hard→deep paths | done bb6669a |
-| B03 | P1 | Router stability (exit -9, "no first token", "fast stayed busy") | done bb6669a (documented, amara-router/STABILITY.md; -9 cause unproven) |
-| B04 | P1 | Docs: fast_num_ctx is 65536 | done (no change needed: committed docs already say 65536) |
-| B05 | P1 | Router config: allow_remote_ollama; refuse anthropic_enabled without loopback bearer | done bb6669a |
-| B06 | P1 | Hermes 8642 reachable from Docker? API_SERVER_KEY? → SECURITY-NOTES | done b869bf0 |
-| B07 | P1 | gemma_tools recovery: allowlist excludes vault/credential tools | done bb6669a |
-| B08 | P1 | followups.rs ~/.hermes writes: approval gate + async IO; decision for Taisun | done 7a1f47e + 8b0456f |
-| B09 | P1 | strip_phrase char-boundary safe | done bb6669a |
-| B10 | P2 | Don't persist/render model_loading or refused failures | done 7a1f47e |
-| B11 | P2 | noop.rs live HR window seconds constant | done 7a1f47e |
-| B12 | P2 | useLiveHeartRate NaN guard + pause when hidden | done (already in HEAD; verified by break test) |
-| B13 | P2 | Pin tauri-action to a SHA | done 9609615 |
-| B14 | P2 | Fail release on APPLE_API_KEY without APPLE_API_KEY_P8 + TAISUN step for secret name | done 9609615 (TAISUN step pending) |
-| B15 | P2 | Reduced-transparency e2e reads real app state | done 47e95a1 |
-| B16 | P2 | Unit tests: NeuroFlow, LandingScreen, useRouteNavigation, MindBodyCharts, Quiet | done 47e95a1 |
-| B17 | P2 | body_context_capture test runs on Linux CI | done 7a1f47e (not run on Linux) |
-| B18 | P3 | Docs: Amara Voice not running; TAISUN step to load it | done (verified running 2026-11-11; no change) |
-| B19 | P3 | README nav: Neuro history, Today, "Mind–Body", Agents | proposed patch bb2d574 (his uncommitted README) |
-| B20 | P3 | Hermes route passthrough → ~/projects/hermes-patches + re-apply step | done (patch matches live; TAISUN step) |
-| B21 | — | route-motion e2e flakes (deterministic wait) | done 47e95a1 |
+## Section 11 fix backlog
+All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 README nav: patch in `tasks/proposed/`.
 
-## 12. Wiring
-| id | item | status |
-|---|---|---|
-| W12a | Health leftovers | partial: samples+scale done a34a224; awake/bed/wake/RHR already loaded; workouts+hypnogram sources found (todo); nutrition no source; voice stop todo (amara-voice patch) |
-| W12b | Crews + Business live adapters | Business done 8b6265e (no ledger file yet); Crews blocked on R13-B/D |
-| W12c | Muse recordings | A+B done a34a224; chunk C (frontend) todo |
-| W12d | Amara's take backend + useAmaraTake | done 8d96417 + 534d19f |
+## Tonight's decisions (0007), work order A–G
+| item | status |
+|---|---|
+| A pre-push hook | done (S01) |
+| A save_session refuses duplicate id | done a2a7ac5 |
+| A MiniMax removed, concurrency 1, read-only tools, batch approval, retries 2 | done 021ddea |
+| A follow-ups: one approval per session with edit list | done a6fd349 |
+| A recording delete path: none (removeConfirmed no-op) | done (e182d9f, a34a224 tests) |
+| A Letta upgrade plan / n8n + container inventory | done 58374e6 (plan/list only) |
+| A router bearer from Keychain | done b9e9efe |
+| B liveBusiness crash | done 89317c9 |
+| 1111u Home heart-rate take (card C) | done 8f6eba5 |
+| 1111x navy localOnly | done 6215a12 (Hermes web tools not covered: open question) |
+| C R13-D approvals | done 021ddea |
+| C R13-C / R13-E / R13-F + 1110i enforcement | active |
+| D 1110f take live wiring | done 8d96417, 534d19f |
+| D 1111a personal-OS adapters | todo |
+| D 1111s secrets status/set, n8n key file, backups | todo |
+| D 1111t step 1 take log | done 8f6eba5 |
+| D 1111t steps 2–5 | active |
+| D 1111t step 6 money (spike first; no sign-ups) | todo |
+| 1111v backend (decisions log, dates, adds, check-in, needs-you) | active |
+| 1111w windows (webviews, profiles, home_window_open, Life take facts) | todo |
+| E take chips → source | done 84333aa (Neuro/Enterprise inert: no ids) |
+| F OpenClaw code cleanup | active |
+| G full e2e + gates | todo (last) |
 
-## 13. Local multi-agent runtime (after 11 + 12)
-| id | item | status |
-|---|---|---|
-| R13-A | crews via router | done 5f4eca9 |
-| R13-B…F | Phases B–F | todo |
+## Section 12 / 13 status
+12a done except nutrition (no source) · 12b Business done, Crews steps/handoffs/metrics/approvals done, n8n/roster/nextSchedule pending R13-F · 12c done · 12d done · 13 A B D done, C E F active.
+
+## Out of scope tonight (Taisun)
+NOOP merge, live Telegram relay send path, standalone phases (bundling, signing, notarization, DMG, updater, WHOOP takeover), Letta upgrade apply.
