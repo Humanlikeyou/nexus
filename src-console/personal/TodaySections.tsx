@@ -6,6 +6,8 @@ import { GoalsCard } from "../screens/GoalsCard";
 import type { Goal } from "../types";
 import { ENERGY_STEPS, MOOD_STEPS, PERSONAL_DEFAULTS, type CheckIn, type PersonalAdapter } from "./adapters";
 import { Bar, Dots, Rich } from "./parts";
+import { ReadyToKeepCard, SuggestedLatelyCard, TakeChange, TakesThisWeekCard, WeekSuggestionsCard, WeekSuggestionsTile } from "../takes/WeekTakes";
+import { takesAdapter } from "../takes/adapters";
 import "../ui/PanelKit.css";
 import "./personal.css";
 
@@ -16,10 +18,11 @@ export function GoalsSection({ adapter, goals, goalsFailed, onRetry }: { adapter
   const week = adapter.goals();
   const w = valueOf(week);
   const onTrack = w ? w.habits.filter((h) => h.target - h.done <= 1).length : 0;
+  const ready = valueOf(takesAdapter().goals())?.ready.length ?? 0;
   return (
     <PageSection id="goals">
       <PageHero title="Goals" statement={w ? `${onTrack} of ${w.habits.length} habits on track this week` : "Habits and milestones"}
-        detail={w ? <>{w.milestones.length} milestones{w.nextMilestone ? ` · next: ${w.nextMilestone}` : ""} <DataTag kind="sample" /></> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
+        detail={w ? <>{w.milestones.length} milestones{w.nextMilestone ? ` · next: ${w.nextMilestone}` : ""}{ready ? ` · ${ready} suggestion ready to become a habit` : ""} <DataTag kind="sample" /></> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
       <div className="pk-g2">
         <Card title="Habits · this week" accessory={<span className="pk-acc">{wiredTag(week)}</span>}>
           {!w ? <p className="pk-note">{WIRE_NOTE}</p> : (
@@ -36,6 +39,8 @@ export function GoalsSection({ adapter, goals, goalsFailed, onRetry }: { adapter
           )}
         </Card>
         <div className="pk-stack">
+          <ReadyToKeepCard />
+          <SuggestedLatelyCard />
           {w ? (
             <Card title="Milestones" accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
               {w.milestones.map((m) => (
@@ -185,6 +190,7 @@ export function WeeklyReviewSection({ adapter }: { adapter: PersonalAdapter }) {
   const v = valueOf(wr);
   const [why, setWhy] = useState(false);
   const [decided, setDecided] = useState<string | null>(null);
+  const hasTakeChange = valueOf(takesAdapter().week())?.change != null;
   const decide = async (take: boolean) => {
     const r = await adapter.tryChange(take);
     setDecided(r.state === "unwired" ? "Needs wiring, so nothing was set." : take ? `${r.state === "sample" ? "Sample data: " : ""}${r.value.reminder ?? "Reminder set"}. Your goals didn't change.` : `${r.state === "sample" ? "Sample data: " : ""}Skipped for this week.`);
@@ -194,13 +200,15 @@ export function WeeklyReviewSection({ adapter }: { adapter: PersonalAdapter }) {
       <PageHero title="Weekly review" statement={v ? v.title : "Your week, every Sunday"} detail={v ? <>{v.week} <DataTag kind="sample" /></> : <>Ready {PERSONAL_DEFAULTS.weeklyReview} from your health, work and money <DataTag kind="wire" /></>} />
       {!v ? <Card title="This week" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">{WIRE_NOTE}</p></Card> : (
         <>
-          <div className="pk-g3">
+          <div className="t-tiles4">
             {v.tiles.map((t) => (
               <div className="pk-review" key={t.key}><h3>{t.key.toUpperCase()}</h3><span className="pk-big">{t.big} <small>{t.unit}</small></span>
                 <span className="pk-delta" data-d={t.up ? "up" : "down"}>{t.delta}</span><span className="pk-sub">{t.sub}</span></div>
             ))}
+            <WeekSuggestionsTile />
           </div>
-          <div className="pk-change">
+          <WeekSuggestionsCard />
+          {hasTakeChange ? <TakeChange /> : <div className="pk-change">
             <span className="pk-eyebrow">ONE CHANGE TO TRY THIS WEEK</span>
             <h3>{v.change.title}</h3>
             <p><Rich text={v.change.body} /> <DataTag kind="sample" /></p>
@@ -211,7 +219,8 @@ export function WeeklyReviewSection({ adapter }: { adapter: PersonalAdapter }) {
               <button type="button" className="pk-link" aria-expanded={why} onClick={() => setWhy((x) => !x)}>Why? ›</button>
             </div>
             {decided && <p className="pk-note" role="status">{decided}</p>}
-          </div>
+          </div>}
+          <TakesThisWeekCard />
           <div className="pk-g2">
             <Card title="Highlights" accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
               {v.highlights.map((h) => <div className="pk-row" key={h.title}><StatusText kind={h.ok ? "ok" : "wait"} /><div className="pk-row__main"><span>{h.title}</span><small>{h.sub}</small></div></div>)}

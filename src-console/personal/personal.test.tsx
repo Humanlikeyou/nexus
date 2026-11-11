@@ -46,9 +46,11 @@ describe("design-1111a personal OS", () => {
   });
   it("personal money is walled off from Business and in USD", () => {
     render(<PersonalMoneyView adapter={makeSamplePersonal()} />);
-    expect(screen.getByRole("note")).toHaveTextContent("nothing here counts toward venture numbers");
-    expect(screen.getByText("$1,412 left after bills this month")).toBeInTheDocument();
-    expect(screen.queryByText(/¥|JPY/)).toBeNull();
+    expect(screen.getAllByRole("note").some((n) => /nothing here counts toward venture numbers/.test(n.textContent ?? ""))).toBe(true);
+    expect(screen.getByText("Left after bills").parentElement).toHaveTextContent("$1,412");
+    // 1111t: accounts are unwired here, so no balance or yen figure is shown and the read-only rule is stated.
+    expect(screen.queryByText(/¥/)).toBeNull();
+    expect(screen.getByText(/Read-only by design/)).toBeInTheDocument();
   });
   it("Sunday is judged in Tokyo", () => {
     expect(isTokyoSunday(new Date("2026-11-14T16:00:00Z"))).toBe(true); // Sun 01:00 JST

@@ -1,0 +1,160 @@
+import { useState } from "react";
+import { Button, Card, DataTag, SegmentedControl } from "../ui";
+import { valueOf } from "../lib/sampleAdapters";
+import { AmaraTakeCard } from "../amaraTake/AmaraTakeCard";
+import type { TakeView } from "../amaraTake/takeView";
+import { MemoryLineView } from "../takes/TakeExtras";
+import { SuggestionBlock } from "../takes/SuggestionBlock";
+import { Nums, Rich } from "../takes/parts";
+import { moneyAdapter, NFA_LINE, type MoneyAccount, type MoneyAdapter, type Region } from "./adapters";
+import { ConnectSheet } from "./ConnectSheet";
+import "../takes/takes.css";
+import "./money.css";
+
+export type Currency = "USD" | "JPY";
+const usd = (v: number) => v.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+const jpy = (v: number) => `¥${Math.round(v).toLocaleString("en-US")}`;
+export const shown = (v: number, cur: Currency, rate: number) => (cur === "USD" ? usd(v) : jpy(v * rate));
+
+const REGION: Record<Region, string> = { us: "United States · USD", jp: "Japan · JPY", crypto: "Crypto · Ledger" };
+const STATUS_WORD: Record<MoneyAccount["status"], string> = { ok: "", stale: "Out of date", expired: "Expired", error: "Error", not_connected: "Not connected" };
+
+function AccountRow({ a, adapter }: { a: MoneyAccount; adapter: MoneyAdapter }) {
+  const [note, setNote] = useState<string | null>(null);
+  const greyed = a.status === "expired" || a.status === "stale" || a.status === "not_connected";
+  const badge = a.route === "watch_only" ? <span className="m-badge" data-k="watch"><span aria-hidden="true">👁</span> Watch-only</span> : <span className="m-badge"><span aria-hidden="true">🔒</span> Read-only</span>;
+  return (
+    <div className="m-acct" data-status={a.status} data-greyed={greyed || undefined}>
+      <span className="m-mono" aria-hidden="true">{a.institution === "jp_bank" ? "銀" : a.institution === "ledger" ? (a.currency === "ETH" ? "Ξ" : "₿") : a.nickname[0]}</span>
+      <div className="m-acct__main"><span>{a.nickname}</span><small>{a.via}</small>{a.note && <small className="m-acct__note">{a.note}</small>}</div>
+      <div className="m-acct__badges">{badge}<span className="m-badge m-badge--quiet">Can&apos;t move money</span></div>
+      <span className="m-acct__sync" data-status={a.status}>{a.status === "ok" ? <><span aria-hidden="true">{a.route === "csv" ? "◔" : "✓"}</span> {a.synced}</> : <><span aria-hidden="true">!</span> {STATUS_WORD[a.status]}{a.status !== "not_connected" ? ` · ${a.synced}` : ""}</>}</span>
+      <span className="m-acct__amt"><b>{a.native}</b>{a.asOf ? <small>as of {a.asOf}</small> : a.currency !== "USD" && (a.usd != null ? <small>≈ {usd(a.usd)}</small> : <small>USD <DataTag kind="wire" /></small>)}</span>
+      {(a.status === "expired" || a.status === "stale") && (
+        <div className="m-acct__acts">
+          {a.status === "expired" ? <><Button size="small" variant="primary" onClick={() => { void adapter.reconnect(a.id).then((r) => setNote(r.state === "unwired" ? "Signing in again needs wiring." : "Sample data: opens Chime's own sign-in page in your browser.")); }}>Sign in again…</Button>
+            <Button size="small" onClick={() => { void adapter.disconnect(a.id).then((r) => setNote(r.state === "unwired" ? "Needs wiring, so nothing changed." : "Sample data: disconnected in the preview only.")); }}>Disconnect</Button></>
+            : <Button size="small" onClick={() => { void adapter.importStatement().then((r) => setNote(r.state === "unwired" ? "Statement import needs wiring." : "Sample data: no file is read in the preview.")); }}>Import a statement…</Button>}
+          {note && <span className="pk-note" role="status">{note}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** m1 + m6: connected accounts with read-only / watch-only badges, plus what Amara can and can't do. */
+export function MoneyAccounts({ adapter = moneyAdapter() }: { adapter?: MoneyAdapter }) {
+  const [open, setOpen] = useState(false);
+  const w = adapter.accounts();
+  const list = valueOf(w);
+  const connect = <Button size="small" variant="primary" onClick={() => setOpen(true)}>Connect an account…</Button>;
+  return (
+    <>
+      <div className="m-callout" role="note"><b><span aria-hidden="true">🔒</span> Read-only by design.</b> Each connection only has permission to read. There&apos;s no transfer, payment, trade or withdrawal permission anywhere in Amara, and no button for one. Sign-in details and access tokens stay in this Mac&apos;s Keychain, never in backups, logs or chat.</div>
+      <Card title="Connected accounts" accessory={<span className="pk-acc">{w.state === "sample" ? <DataTag kind="sample" /> : <DataTag kind="wire" />}{connect}</span>}>
+        {!list ? <p className="pk-note">Account connections <DataTag kind="wire" />. Chime and Fidelity need a read-only data service, Japanese banks a statement import and Ledger a watch-only address. No balances are shown and no money suggestions are made until one is connected.</p>
+          : list.length === 0 ? <div className="t-empty"><b>Connect your accounts to see personal money</b><span>Nothing is connected. Amara shows only what you type into Personal (bills, subscriptions) until you connect a read-only account.</span></div>
+          : (["us", "jp", "crypto"] as Region[]).map((r) => {
+            const rows = list.filter((a) => a.region === r);
+            return rows.length === 0 ? null : <div key={r} className="m-group"><h3 className="m-region">{REGION[r]}</h3>{rows.map((a) => <AccountRow key={a.id} a={a} adapter={adapter} />)}</div>;
+          })}
+        <p className="pk-note">Account numbers are never shown. Amara stores a nickname and the last sync time; the connection itself lives in the Keychain (shown only as Set or Not set). Japanese bank amounts stay in yen, with the USD equivalent beside them.</p>
+      </Card>
+      <div className="m-split">
+        <Card title="What Amara can and can't do">
+          <div className="pk-row"><span className="m-yes" aria-hidden="true">✓</span><div className="pk-row__main"><span>Read balances, transactions and holdings</span><small>To show your totals and spot fees, idle cash and savings rate</small></div></div>
+          <div className="pk-row"><span className="m-yes" aria-hidden="true">✓</span><div className="pk-row__main"><span>Suggest one thing a day, with its reasons</span><small>You do it in your own bank or Fidelity app</small></div></div>
+          <div className="pk-row"><span className="m-no" aria-hidden="true">–</span><div className="pk-row__main"><span>Move, pay, trade, convert or withdraw</span><small>Not possible: no connection has that permission</small></div></div>
+          <div className="pk-row"><span className="m-no" aria-hidden="true">–</span><div className="pk-row__main"><span>See your Ledger recovery phrase or private keys</span><small>Never asked for, and refused if pasted</small></div></div>
+        </Card>
+        <Card title="Ledger safety">
+          <div className="m-warn" role="note"><b>Amara will never ask for your 24 words.</b>Watch-only uses public addresses or an xpub, which can see balances but can&apos;t spend. If anything, including a message that looks like Amara, asks for your recovery phrase, it&apos;s a scam.</div>
+        </Card>
+      </div>
+      <ConnectSheet open={open} onClose={() => setOpen(false)} adapter={adapter} />
+    </>
+  );
+}
+
+/** m3: personal total, tiles, allocation, native + USD, the "FX moved it" split; venture funds kept out. USD with a JPY view. */
+export function MoneyOverviewSection({ adapter = moneyAdapter(), currency, onCurrency }: { adapter?: MoneyAdapter; currency: Currency; onCurrency: (c: Currency) => void }) {
+  const w = adapter.overview();
+  const v = valueOf(w);
+  if (!v) return null;
+  const s = (n: number) => shown(n, currency, v.fx.rate);
+  const tag = <DataTag kind="sample" />;
+  return (
+    <>
+      <div className="m-bar"><SegmentedControl label="Show amounts in" size="small" value={currency} options={[{ value: "USD", label: "USD" }, { value: "JPY", label: "JPY" }]} onChange={(c) => onCurrency(c as Currency)} />
+        <span className="pk-note">{currency === "USD" ? "Yen converted" : "Dollars converted"} at ¥{v.fx.rate.toFixed(2)} = $1 ({v.fx.at}, {v.fx.source}) {tag}</span></div>
+      <ul className="cc-strip" aria-label="Personal money">
+        <li className="cc-tile"><span className="cc-tile__k">Cash</span><span className="cc-tile__v">{s(v.cash.usd)}</span><span className="cc-tile__s">{v.cash.note}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Investments</span><span className="cc-tile__v">{s(v.investments.usd)}</span><span className="cc-tile__s">{v.investments.note}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Crypto (watch-only)</span><span className="cc-tile__v">{v.crypto.usd == null ? <DataTag kind="wire" /> : s(v.crypto.usd)}</span><span className="cc-tile__s">{v.crypto.note}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Emergency buffer</span><span className="cc-tile__v">{v.bufferMonths} months</span><span className="cc-tile__s">{v.bufferNote}</span></li>
+      </ul>
+      <div className="m-split">
+        <Card title="Where it sits" accessory={<span className="pk-acc">{tag}</span>}>
+          <div className="m-alloc" role="img" aria-label={v.allocation.map((a) => `${a.label} ${a.pct}%`).join(", ")}>{v.allocation.map((a) => <i key={a.label} data-t={a.tone} style={{ flexGrow: a.pct }} />)}</div>
+          <div className="t-legend">{v.allocation.map((a) => <span key={a.label}><i className="m-sw" data-t={a.tone} />{a.label} {a.pct}%</span>)}</div>
+          <table className="pk-table" aria-label="Balances by account">
+            <thead><tr><th scope="col">Account</th><th scope="col" className="r">Native</th><th scope="col" className="r">{currency}</th><th scope="col" className="r">30 days</th></tr></thead>
+            <tbody>{v.rows.map((r) => <tr key={r.name}><td>{r.name}</td><td className="r">{r.native}</td><td className="r">{r.usd == null ? <DataTag kind="wire" /> : s(r.usd)}</td><td className="r">{r.d30}{r.d30note && <small>{r.d30note}</small>}</td></tr>)}</tbody>
+          </table>
+          <p className="pk-note"><b>JPY note:</b> yen stays yen in your banks. The USD figures use one daily reference rate, so a USD total can move when you didn&apos;t do anything. The &ldquo;FX moved it&rdquo; line separates that from what you saved.</p>
+        </Card>
+        <div className="pk-stack">
+          <Card title="Venture funds · not in your personal total" accessory={<span className="pk-acc">{tag}</span>}>
+            {v.venture.map((x) => <div className="pk-row" key={x.name}><div className="pk-row__main"><span>{x.name}</span><small>{x.sub}</small></div><span className="pk-num">{s(x.usd)}</span></div>)}
+            <p className="pk-note">Kept apart so a good venture month never looks like personal savings, and a venture loss never hides inside them. Moving money between them is your call, in your bank.</p>
+          </Card>
+          <Card title="Savings rate" accessory={<span className="pk-acc">{tag}</span>}>
+            <p className="m-big">{v.savingsRate.pct}% <small>of income, {v.savingsRate.month}</small></p>
+            <p className="pk-delta" data-d="up">{v.savingsRate.delta}</p>
+            <p className="pk-note">{v.savingsRate.note}</p>
+          </Card>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** m4 / m6 #6: the money take on Business › Personal. Business Overview keeps its venture take. */
+export function MoneyTake({ adapter = moneyAdapter() }: { adapter?: MoneyAdapter }) {
+  const w = adapter.take();
+  const t = valueOf(w);
+  if (!t) {
+    const view: TakeView = { state: "unwired", reason: "The money take needs at least one connected account" };
+    return <div className="take-slot m-take"><AmaraTakeCard page="business" view={view} /></div>;
+  }
+  const view: TakeView = { state: "fresh", note: t.note, sample: w.state === "sample" };
+  const block = t.kind === "partial"
+    ? <div className="t-empty"><b>No money suggestion today.</b><span>{t.why}</span></div>
+    : <><SuggestionBlock s={t.suggestion} detects eyebrow="Today's one thing · Money" footnote="Amara judges this by what you do (saving, fees), never by next month's market."
+        onAnswer={(st, r) => adapter.answer(t.suggestion.id, st, r)} onUndo={() => adapter.undo(t.suggestion.id)} />
+      <p className="m-nfa" role="note">{NFA_LINE}</p></>;
+  return <div className="take-slot m-take"><AmaraTakeCard page="business" view={view} slots={{ memory: t.kind === "suggestion" && t.memory ? <MemoryLineView text={t.memory} /> : null, history: <span className="take__hist take__hist--static">History · {t.historyCount} takes</span>, block, refresh: "refreshes once after the next sync" }} /></div>;
+}
+
+/** m5: money follow-ups grade only what you control. Market returns are shown, never judged; FX is "can't tell" by design. */
+export function MoneyFollowUps({ adapter = moneyAdapter() }: { adapter?: MoneyAdapter }) {
+  const w = adapter.followUps();
+  const list = valueOf(w);
+  if (!list) return null;
+  return (
+    <Card title="Money follow-ups · Amara grades what you control, not the market" accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+      <div className="t-board">
+        {list.map((f) => (
+          <div key={f.id} className="t-mini">
+            <span className="m-group__k">{f.group}</span>
+            <span className="t-verdict" data-v={f.verdict === "locked_in" || f.verdict === "better" ? "better" : "unclear"}>{f.verdict === "locked_in" || f.verdict === "better" ? "▲" : "?"} {f.chip}</span>
+            <h4>{f.title}</h4>
+            <p><Rich text={f.body} /></p>
+            <Nums rows={f.rows} />
+          </div>
+        ))}
+      </div>
+      <p className="t-rules"><b>Money rules.</b> Suggestions are conservative and come from a reviewed list: buffer first (3–6 months), then high-interest debt, then low fees, broad diversification and automatic saving. No single stocks, no crypto top-ups, no leverage, no market timing, no tips. Every money take ends with &ldquo;Not financial advice&rdquo;, and Amara can&apos;t move money.</p>
+    </Card>
+  );
+}

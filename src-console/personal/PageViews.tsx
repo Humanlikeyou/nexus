@@ -3,19 +3,42 @@ import { Button, Card, DataTag, PageHero, StatusText, TextField, wiredTag } from
 import { valueOf, type Wired } from "../lib/sampleAdapters";
 import { MEMORY_LABEL, PERSONAL_DEFAULTS, type Memory, type MemoryCategory, type PersonalAdapter } from "./adapters";
 import { Bar, Confidence, PairBars, Rich, Scatter, money } from "./parts";
+import { FollowThroughView } from "../takes/FollowThrough";
+import { takesAdapter } from "../takes/adapters";
+import { TakesSettingsCard } from "../takes/TakesSettings";
+import { moneyAdapter } from "../money/adapters";
+import { MoneyAccounts, MoneyFollowUps, MoneyOverviewSection, MoneyTake, shown, type Currency } from "../money/MoneyView";
 import "../ui/PanelKit.css";
 import "./personal.css";
 
 const WIRE_NOTE = "Needs wiring: this appears once Claude builds its store (HANDOFF-1111a). Nothing here is made up.";
 
 /** Mind–Body › Patterns (1111a #2): findings as sentences with the numbers, strength and confidence behind them. */
-export function PatternsView({ adapter }: { adapter: PersonalAdapter }) {
+export function PatternsView({ adapter, initialTab = "findings" }: { adapter: PersonalAdapter; initialTab?: "findings" | "follow" }) {
   const pw = adapter.patterns();
   const v = valueOf(pw);
   const [top, ...rest] = v?.findings ?? [];
+  const [tab, setTab] = useState<"findings" | "follow">(initialTab);
+  const outcomes = valueOf(takesAdapter().outcomes());
+  const chips = (
+    <div className="pk-chips" role="group" aria-label="Show">
+      <button type="button" className="pk-chip ci-chip" aria-pressed={tab === "findings"} data-on={tab === "findings" || undefined} onClick={() => setTab("findings")}>Findings</button>
+      <button type="button" className="pk-chip ci-chip" aria-pressed={tab === "follow"} data-on={tab === "follow" || undefined} onClick={() => setTab("follow")}>Follow-through{outcomes ? ` ${outcomes.length}` : ""}</button>
+    </div>
+  );
+  if (tab === "follow") {
+    return (
+      <div className="mind-body page-inset pk-host">
+        <PageHero title="Patterns" statement="Follow-through: what Amara suggested and what changed" detail={outcomes ? <>{outcomes.length} suggestion types · grouped by type over time · every result shows its numbers <DataTag kind="sample" /></> : <>Grouped by suggestion type over time <DataTag kind="wire" /></>} />
+        {chips}
+        <FollowThroughView />
+      </div>
+    );
+  }
   return (
     <div className="mind-body page-inset pk-host">
       <PageHero title="Patterns" statement={v ? v.headline : "What moves your focus and calm"} detail={v ? <>{v.window} <DataTag kind="sample" /></> : <>Recomputed every Sunday from Fitness, Neuro and check-ins <DataTag kind="wire" /></>} />
+      {chips}
       {!v ? <Card title="Findings" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">No findings yet. Amara needs at least 3 days with and without each factor before it says anything. {WIRE_NOTE}</p></Card> : (
         <>
           {top && (
@@ -44,46 +67,54 @@ export function PatternsView({ adapter }: { adapter: PersonalAdapter }) {
 
 const amt = (w: Wired<number>) => (w.state === "unwired" ? wiredTag(w) : money(w.value));
 
-/** Business › Personal (1111a #4): USD, walled off from venture funds. */
+/** Business › Personal (1111a #4 + 1111t money): read-only accounts, balances in USD with a JPY view, the money take,
+ *  follow-ups, then bills and subscriptions. Walled off from venture funds. */
 export function PersonalMoneyView({ adapter }: { adapter: PersonalAdapter }) {
   const pm = adapter.money();
   const v = valueOf(pm);
+  const ma = moneyAdapter();
+  const ov = valueOf(ma.overview());
+  const accts = valueOf(ma.accounts());
+  const [cur, setCur] = useState<Currency>("USD");
   const wall = <div className="pk-wall" role="note"><b>Personal</b>Kept apart from Business: venture funds, Taiyo Skin and Trading never appear here, and nothing here counts toward venture numbers.</div>;
-  if (!v) {
-    return (
-      <div className="biz page-inset cc-page pk-host">
-        <PageHero title="Personal money" statement="Your own accounts, in USD" detail={<>Starts with a CSV import of your bank and card; yen amounts wait for your JPY→USD rule <DataTag kind="wire" /></>} />
-        {wall}
-        <Card title="Bills, subscriptions and spending" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">No personal accounts connected. Nothing is shown until you pick the accounts; no balances or bills are guessed. {WIRE_NOTE}</p></Card>
-      </div>
-    );
-  }
+  const statement = ov ? `${shown(ov.totalUsd, cur, ov.fx.rate)} personal, across ${ov.balances} balances` : accts && accts.length ? `${accts.filter((a) => a.status !== "not_connected").length} accounts connected, all read-only` : "Your own accounts, read-only";
+  const detail = ov ? <>Business › Personal · {cur} · yen converted at ¥{ov.fx.rate.toFixed(2)} = $1 · venture funds kept separate <DataTag kind="sample" /></>
+    : accts ? <>Business › Personal · Amara can see balances and transactions; she can never move money <DataTag kind="sample" /></>
+    : <>Business › Personal · read-only connections and statement import <DataTag kind="wire" /></>;
   return (
     <div className="biz page-inset cc-page pk-host">
-      <PageHero title="Personal money" statement={v.leftAfterBills.state === "unwired" ? "Left after bills this month" : `${money(v.leftAfterBills.value)} left after bills this month`} detail={<>{v.month} · USD · your own accounts only <DataTag kind="sample" /></>} />
+      <PageHero title="Personal money" statement={statement} detail={detail} />
       {wall}
-      <ul className="cc-strip" aria-label="Personal money this month">
-        <li className="cc-tile"><span className="cc-tile__k">Spent in {v.month}</span><span className="cc-tile__v">{amt(v.spent)}</span><span className="cc-tile__s">{v.spentNote}</span></li>
-        <li className="cc-tile"><span className="cc-tile__k">Subscriptions</span><span className="cc-tile__v">{amt(v.subsMonthly)} / mo</span><span className="cc-tile__s">{v.subsNote}</span></li>
-        <li className="cc-tile"><span className="cc-tile__k">Bills due · 14 days</span><span className="cc-tile__v">{amt(v.billsDue)}</span><span className="cc-tile__s">{v.billsNote}</span></li>
-        <li className="cc-tile"><span className="cc-tile__k">Left after bills</span><span className="cc-tile__v">{amt(v.leftAfterBills)}</span><span className="cc-tile__s">{v.payday}</span></li>
-      </ul>
-      <div className="pk-g2">
-        <Card title="Bills due · next 14 days" accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
-          <table className="pk-table" aria-label="Bills due"><thead><tr><th scope="col">Bill</th><th scope="col">Due</th><th scope="col" className="r">Amount</th><th scope="col">Status</th></tr></thead>
-            <tbody>{v.bills.map((b) => <tr key={b.id}><td>{b.name}<small>{b.sub}</small></td><td>{b.due}</td><td className="r">{amt(b.amount)}</td><td>{b.status === "pay" ? <StatusText kind="wait">Pay</StatusText> : <StatusText kind="ok">{b.status === "auto" ? "Auto" : "Scheduled"}</StatusText>}</td></tr>)}</tbody></table>
-        </Card>
-        <Card title={`Subscriptions · ${amt(v.subsMonthly)} / mo`} accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
-          {v.subscriptions.map((s) => <div className="pk-row" key={s.id}><div className="pk-row__main"><span>{s.name}</span><small>{s.sub}</small></div>{s.unusedDays != null && <span className="pk-pill" data-tone="warn">Unused {s.unusedDays} d</span>}<span className="pk-num">{amt(s.amount)}</span></div>)}
-          <p className="pk-note">{v.moreSubs}</p>
-        </Card>
-      </div>
-      <Card title={`Spending by category · ${v.month}`} accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
-        <div className="pk-g2">
-          <div>{v.categories.map((c) => <div className="pk-cat" key={c.name}><span>{c.name}</span><Bar pct={c.pct} copper={c.up} /><span>{money(c.amount)}</span></div>)}</div>
-          <p className="pk-take"><Rich text={v.summary} /></p>
-        </div>
-      </Card>
+      <MoneyTake adapter={ma} />
+      <MoneyOverviewSection adapter={ma} currency={cur} onCurrency={setCur} />
+      <MoneyAccounts adapter={ma} />
+      <MoneyFollowUps adapter={ma} />
+      {!v ? <Card title="Bills, subscriptions and spending" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">No bills or subscriptions yet. Nothing is shown until you pick the accounts; no balances or bills are guessed. {WIRE_NOTE}</p></Card> : (
+        <>
+          <ul className="cc-strip" aria-label="Personal money this month">
+            <li className="cc-tile"><span className="cc-tile__k">Spent in {v.month}</span><span className="cc-tile__v">{amt(v.spent)}</span><span className="cc-tile__s">{v.spentNote}</span></li>
+            <li className="cc-tile"><span className="cc-tile__k">Subscriptions</span><span className="cc-tile__v">{amt(v.subsMonthly)} / mo</span><span className="cc-tile__s">{v.subsNote}</span></li>
+            <li className="cc-tile"><span className="cc-tile__k">Bills due · 14 days</span><span className="cc-tile__v">{amt(v.billsDue)}</span><span className="cc-tile__s">{v.billsNote}</span></li>
+            <li className="cc-tile"><span className="cc-tile__k">Left after bills</span><span className="cc-tile__v">{amt(v.leftAfterBills)}</span><span className="cc-tile__s">{v.payday}</span></li>
+          </ul>
+          <div className="pk-g2">
+            <Card title="Bills due · next 14 days" accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+              <table className="pk-table" aria-label="Bills due"><thead><tr><th scope="col">Bill</th><th scope="col">Due</th><th scope="col" className="r">Amount</th><th scope="col">Status</th></tr></thead>
+                <tbody>{v.bills.map((b) => <tr key={b.id}><td>{b.name}<small>{b.sub}</small></td><td>{b.due}</td><td className="r">{amt(b.amount)}</td><td>{b.status === "pay" ? <StatusText kind="wait">Pay</StatusText> : <StatusText kind="ok">{b.status === "auto" ? "Auto" : "Scheduled"}</StatusText>}</td></tr>)}</tbody></table>
+            </Card>
+            <Card title={`Subscriptions · ${amt(v.subsMonthly)} / mo`} accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+              {v.subscriptions.map((s) => <div className="pk-row" key={s.id}><div className="pk-row__main"><span>{s.name}</span><small>{s.sub}</small></div>{s.unusedDays != null && <span className="pk-pill" data-tone="warn">Unused {s.unusedDays} d</span>}<span className="pk-num">{amt(s.amount)}</span></div>)}
+              <p className="pk-note">{v.moreSubs}</p>
+            </Card>
+          </div>
+          <Card title={`Spending by category · ${v.month}`} accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+            <div className="pk-g2">
+              <div>{v.categories.map((c) => <div className="pk-cat" key={c.name}><span>{c.name}</span><Bar pct={c.pct} copper={c.up} /><span>{money(c.amount)}</span></div>)}</div>
+              <p className="pk-take"><Rich text={v.summary} /></p>
+            </div>
+          </Card>
+        </>
+      )}
     </div>
   );
 }
@@ -161,6 +192,7 @@ export function MemorySection({ adapter }: { adapter: PersonalAdapter }) {
           {note && <p className="pk-note" role="status">{note}</p>}
         </>
       )}
+      <TakesSettingsCard />
       <div className="pk-info">Deleting removes the memory from Amara&apos;s store (Letta) on this Mac and from future answers; it can&apos;t be undone. Past chat transcripts are separate and stay until you delete them in Agents.</div>
     </div>
   );

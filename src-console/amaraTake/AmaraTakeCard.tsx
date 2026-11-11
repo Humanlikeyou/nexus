@@ -3,6 +3,7 @@ import { DataTag } from "../ui";
 import { useAmaraTakeStatus } from "./useAmaraTake";
 import { askMore, PREVIEW_DEPS, previewMode, sampleTakeView, TAKE_PAGE_LABEL, takeView, type TakeNote, type TakeView } from "./takeView";
 import type { TakePage } from "./types";
+import { useTakeSlots } from "../takes/TakeExtras";
 import "./AmaraTakeCard.css";
 
 /** Amara's mark: ember heart, copper core, emerald ring (design-1110f). */
@@ -32,10 +33,12 @@ function Head({ lane, children }: { lane?: string; children?: ReactNode }) {
   );
 }
 
-export type AmaraTakeCardProps = { page: TakePage; view: TakeView; compact?: boolean; onRetry?: () => void };
+/** design-1111t slots: the memory line under the first sentence, History in the header, today's one thing under the chips. */
+export type TakeCardSlots = { memory?: ReactNode; history?: ReactNode; block?: ReactNode; sheet?: ReactNode; refresh?: string };
+export type AmaraTakeCardProps = { page: TakePage; view: TakeView; compact?: boolean; onRetry?: () => void; slots?: TakeCardSlots };
 
 /** The card for one state. Pure: screens use <AmaraTake page=… />, tests and previews render states directly. */
-export function AmaraTakeCard({ page, view, compact = false, onRetry }: AmaraTakeCardProps) {
+export function AmaraTakeCard({ page, view, compact = false, onRetry, slots = {} }: AmaraTakeCardProps) {
   const cls = compact ? "take take--compact" : "take";
   if (view.state === "generating") {
     return (
@@ -73,14 +76,17 @@ export function AmaraTakeCard({ page, view, compact = false, onRetry }: AmaraTak
   const note: TakeNote = view.note;
   return (
     <section className={cls} aria-label="Amara's take" data-state="fresh">
-      <Head lane={note.lane}><span className="take__when"><time>{note.time}</time></span>{view.sample && <DataTag kind="sample" />}</Head>
+      <Head lane={note.lane}><span className="take__when"><time>{note.time}</time></span>{view.sample && <DataTag kind="sample" />}{slots.history}</Head>
       <Body text={note.text} />
+      {slots.memory}
       <ul className="take__chips" aria-label="Numbers Amara used">
         {note.chips.map((c) => <li key={`${c.label}-${c.value}`} className="take__chip" data-lane={c.lane}><span>{c.label}</span>{c.value}</li>)}
       </ul>
+      {slots.block}
       <div className="take__foot">
-        {!compact && <span className="take__src">{note.sourceLine} · refreshes once if a new session lands</span>}
+        {!compact && <span className="take__src">{note.sourceLine} · {slots.refresh ?? "refreshes once if a new session lands"}</span>}
         <span className="take__spacer" />
+        {slots.sheet}
         <button type="button" className="take__ask" onClick={() => askMore({ from: TAKE_PAGE_LABEL[page], chips: note.chips, question: note.question, sample: view.sample })}>Ask more ›</button>
       </div>
     </section>
@@ -92,5 +98,6 @@ export function AmaraTake({ page, compact = false, className }: { page: TakePage
   const preview = previewMode();
   const status = useAmaraTakeStatus(page, preview ? PREVIEW_DEPS : undefined);
   const view = preview ? sampleTakeView(page) : takeView(page, status.value, status.checking);
-  return <div className={className ? `take-slot ${className}` : "take-slot"}><AmaraTakeCard page={page} view={view} compact={compact} /></div>;
+  const slots = useTakeSlots(page, compact);
+  return <div className={className ? `take-slot ${className}` : "take-slot"}><AmaraTakeCard page={page} view={view} compact={compact} slots={slots} /></div>;
 }
