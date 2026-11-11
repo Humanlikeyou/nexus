@@ -489,6 +489,8 @@ export interface SystemSnapshot {
   crew: CrewSnapshot;
   /** Knowledge base (Verba + Weaviate) via kb_status. */
   kb: KbStatus;
+  /** Business ledger (business/ledger.json, decision 0005); null when there is no file. */
+  ledger: import("./business/liveLedger").BusinessLedger | null;
 }
 
 /** crew-service run states (crew_runs.status). */

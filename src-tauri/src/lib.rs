@@ -4,10 +4,10 @@ mod dock_icon;
 
 use commands::voice;
 use commands::{
-    arm, assistant, ble_common, continuity, crew, events, followups, goals, ha, home_brief,
-    kb_status, kv, llm_router, muse, noop, noop_query, onboarding, openclaw, outbox, packager,
-    recordings, replay, research, restart_services, sessions, snapshots, system, telegram,
-    terrence_actions, terrence_automations, terrence_context, terrence_priorities,
+    arm, assistant, ble_common, business_ledger, continuity, crew, events, followups, goals, ha,
+    home_brief, kb_status, kv, llm_router, muse, noop, noop_query, onboarding, openclaw, outbox,
+    packager, recordings, replay, research, restart_services, sessions, snapshots, system,
+    telegram, terrence_actions, terrence_automations, terrence_context, terrence_priorities,
     terrence_projects, terrence_runtime, terrence_runtime_bridge,
 };
 use tauri::menu::{Menu, MenuItem};
@@ -219,6 +219,7 @@ pub fn run() {
             noop_query::set_noop_settings,
             home_brief::home_brief,
             // Amara's follow-up lists (commands/followups.rs)
+            business_ledger::read_business_ledger,
             followups::followups_list,
             followups::followups_add_item,
             followups::followups_update_item,

@@ -28,6 +28,7 @@ describe("Tauri command registry", () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
     const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    expect(names).toContain("read_business_ledger");
     for (const name of ["list_recordings", "read_recording_window", "read_body_window", "recording_series", "get_session_samples", "mark_recording_aux"]) {
       expect(names).toContain(name);
     }

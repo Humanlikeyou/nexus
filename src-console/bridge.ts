@@ -194,10 +194,11 @@ export const INITIAL_SNAPSHOT: SystemSnapshot = {
   openclaw: EMPTY_OPENCLAW,
   crew: { health: "offline", runs: [], tools: [] },
   kb: EMPTY_KB,
+  ledger: null,
 };
 
 export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
-  const [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw, crewHealth, crewRuns, crewTools, kb] =
+  const [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw, crewHealth, crewRuns, crewTools, kb, ledger] =
     await Promise.all([
       read<HermesRuntimeHealth>("get_terrence_runtime_health", INITIAL_SNAPSHOT.hermes),
       read<TerrenceCapability[]>("list_terrence_capabilities", []),
@@ -224,13 +225,14 @@ export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
       read<CrewInfo[]>("crew_list", []),
       read<CrewToolInfo[]>("crew_tools", []),
       read<KbStatus>("kb_status", EMPTY_KB),
+      read<SystemSnapshot["ledger"]>("read_business_ledger", null),
     ]);
 
   const crew = crewSnapshot(crewHealth.value, crewRuns.value, crewTools.value);
   // crew_list can only succeed when the service is configured and up; its
   // failure is expected (not a broken source) otherwise.
   if (crew.health !== "online") crewRuns.unavailable = null;
-  const reads = [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw, crewHealth, crewRuns, crewTools, kb];
+  const reads = [hermes, capabilities, context, prioritySnapshot, decisions, actions, automations, automationRuns, projects, noop, muse, sessions, tasks, pipeline, revenue, strategies, risk, goals, outbox, activity, openclaw, crewHealth, crewRuns, crewTools, kb, ledger];
 
   return {
     refreshedAt: Date.now(),
@@ -258,6 +260,7 @@ export async function loadSystemSnapshot(): Promise<SystemSnapshot> {
     openclaw: pickOpenClaw(openclaw.value),
     crew,
     kb: pickKb(kb.value),
+    ledger: ledger.value,
   };
 }
 

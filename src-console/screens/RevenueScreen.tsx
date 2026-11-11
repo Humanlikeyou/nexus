@@ -18,7 +18,7 @@ function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }
 
 const acc = (node: React.ReactNode) => <span className="cc-card__acc">{node}</span>;
 
-export function RevenueField({ data, onRetry, adapter = businessAdapter() }: { data: SystemSnapshot; onRetry?: () => void; adapter?: BusinessAdapter }) {
+export function RevenueField({ data, onRetry, adapter = businessAdapter(data) }: { data: SystemSnapshot; onRetry?: () => void; adapter?: BusinessAdapter }) {
   const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
   const { revenue } = data;
   const isAwaitingRevenue = [revenue.total_revenue, revenue.total_expenses, revenue.net_income, revenue.today_revenue, revenue.week_revenue, revenue.month_revenue]
