@@ -5,6 +5,7 @@ import { TAKE_PAGE_LABEL } from "../amaraTake/takeView";
 import type { TakePage } from "../amaraTake/types";
 import type { Answer, HistoryEntry, HistoryFilter, TakesAdapter } from "./adapters";
 import { Rich, VerdictChip } from "./parts";
+import { useTakeLogVersion } from "./takeLog";
 
 const ANSWER_WORD = (a: Answer) => a.state === "done" ? (a.source === "detected" ? "✓ Done · detected" : "✓ Done") : a.state === "skipped" ? "× Skipped" : a.state === "not_today" ? "Not today" : a.state === "unknown" ? "– Unknown" : "◔ Waiting";
 
@@ -16,6 +17,7 @@ export function HistorySheet({ page, open, onClose, adapter }: { page: TakePage;
   const [confirm, setConfirm] = useState<HistoryEntry | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [, bump] = useState(0);
+  useTakeLogVersion(); // re-render when the take log loads or a take is forgotten
   const w = adapter.history(page, filter, q);
   const list = valueOf(w);
   const all = valueOf(adapter.history(page, "all", ""));

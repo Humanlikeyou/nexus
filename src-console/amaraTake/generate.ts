@@ -27,6 +27,8 @@ export type TakeDeps = {
   ask: (prompt: string) => Promise<{ content: string; tier: string }>;
   /** Today's facts for the page, or null when that day's data does not exist yet. */
   facts: (page: TakePage, today: string) => Promise<FactSet | null>;
+  /** Append each accepted take to the TakeLog (HANDOFF-1111t §11 step 1). Optional; a failure never blocks the take. */
+  log?: (take: AmaraTake, tier: string) => Promise<void>;
 };
 
 /**
@@ -45,14 +47,16 @@ export async function runTake(page: TakePage, deps: TakeDeps): Promise<TakeResul
   if (stored.attempts >= MAX_ATTEMPTS_PER_DAY) return keep();
   const attempt = { ...stored, attempts: stored.attempts + 1 };
   let take: AmaraTake | null = null;
+  let tier = "";
   try {
     const reply = await deps.ask(buildPrompt(set));
     // A cloud answer would be a path the gate did not approve for this feature: not used.
     const verdict = reply.tier === "claude" ? null : validateTake(reply.content, set.facts);
     if (verdict?.ok) take = { page, day: today, text: verdict.text, cited: verdict.cited, fingerprint: set.fingerprint, generatedAt: deps.now() };
+    tier = reply.tier;
   } catch { take = null; }
   // Record the attempt either way so a bad reply cannot loop; the fingerprint is kept only with a take.
   await saveStored(page, take ? { day: today, attempts: attempt.attempts, fingerprint: set.fingerprint, take } : attempt, deps.kv);
-  if (take) return { state: "live", value: take };
+  if (take) { try { await deps.log?.(take, tier); } catch { /* the daily cache still holds it */ } return { state: "live", value: take }; }
   return keep();
 }

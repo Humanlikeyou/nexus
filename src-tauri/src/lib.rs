@@ -5,10 +5,11 @@ mod dock_icon;
 use commands::voice;
 use commands::{
     arm, assistant, ble_common, business_ledger, continuity, crew, events, followups, goals, ha,
-    home_brief, kb_status, kv, llm_router, muse, noop, noop_query, onboarding, openclaw, outbox,
-    packager, recordings, replay, research, restart_services, sessions, snapshots, system,
-    telegram, terrence_actions, terrence_automations, terrence_context, terrence_priorities,
-    terrence_projects, terrence_runtime, terrence_runtime_bridge,
+    home_brief, home_hr_take, kb_status, kv, llm_router, muse, noop, noop_query, onboarding,
+    openclaw, outbox, packager, recordings, replay, research, restart_services, sessions,
+    snapshots, system, take_log, telegram, terrence_actions, terrence_automations,
+    terrence_context, terrence_priorities, terrence_projects, terrence_runtime,
+    terrence_runtime_bridge,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -216,6 +217,13 @@ pub fn run() {
             noop::live_heart_rate,
             noop::noop_recent_workouts,
             noop::noop_hypnogram,
+            home_hr_take::hr_window,
+            home_hr_take::home_hr_take_status,
+            home_hr_take::home_hr_take_maybe_refresh,
+            take_log::take_log_append,
+            take_log::take_log_list,
+            take_log::take_log_forget,
+            take_log::take_log_migrate,
             noop_query::noop_query,
             noop_query::get_noop_settings,
             noop_query::set_noop_settings,

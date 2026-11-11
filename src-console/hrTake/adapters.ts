@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { sample, sampleAdaptersEnabled, UNWIRED, type Wired } from "../lib/sampleAdapters";
 
 /**
@@ -141,8 +142,8 @@ export function isHrStatus(v: unknown): v is HrTakeStatus {
  * No numbers are ever made up here.
  */
 export const liveHrTake: HrTakeAdapter = {
-  async status() { return UNWIRED; },
-  async refresh() { return UNWIRED; },
+  async status() { try { return liveOf(await invoke<unknown>("home_hr_take_status")); } catch { return UNWIRED; } },
+  async refresh(trigger) { try { return liveOf(await invoke<unknown>("home_hr_take_maybe_refresh", { trigger })); } catch { return UNWIRED; } },
 };
 /** For the wiring: a backend answer becomes live only when it has the right shape. */
 export const liveOf = (v: unknown): Wired<HrTakeStatus> => (isHrStatus(v) ? { state: "live", value: v } : UNWIRED);

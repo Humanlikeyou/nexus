@@ -3,6 +3,7 @@ import { DataTag } from "../ui";
 import { valueOf } from "../lib/sampleAdapters";
 import type { TakePage } from "../amaraTake/types";
 import { takesAdapter, type TakesAdapter } from "./adapters";
+import { useTakeLogVersion } from "./takeLog";
 import { FollowUpBlock } from "./FollowUp";
 import { HistorySheet } from "./HistorySheet";
 import { Rich } from "./parts";
@@ -19,6 +20,7 @@ export function MemoryLineView({ text }: { text: string }) {
 /** design-1111t: what the take card adds on top of today's note. The take keeps working when this layer is unwired. */
 export function useTakeSlots(page: TakePage, compact: boolean, adapter: TakesAdapter = takesAdapter()): TakeSlots {
   const [open, setOpen] = useState(false);
+  useTakeLogVersion(); // re-render when the take log loads
   const today = adapter.today(page);
   const t = valueOf(today);
   const mem = valueOf(adapter.memory(page));

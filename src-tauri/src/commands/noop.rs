@@ -1221,6 +1221,57 @@ fn latest_heart_rate(
     }))
 }
 
+/// Read-only heart rate samples `(ts seconds, bpm)` with `from <= ts <= to`, oldest first,
+/// implausible readings dropped. For the Home heart-rate window. Never log these values.
+pub(crate) fn heart_rate_samples(
+    path: &Path,
+    device_id: &str,
+    from: i64,
+    to: i64,
+) -> rusqlite::Result<Vec<(i64, i64)>> {
+    let conn = open_store(path)?;
+    let mut statement = conn.prepare(
+        "SELECT ts, bpm FROM hrSample WHERE deviceId = ?1 AND ts >= ?2 AND ts <= ?3 ORDER BY ts",
+    )?;
+    let rows = statement
+        .query_map(params![device_id, from, to], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows
+        .into_iter()
+        .filter(|(_, bpm)| plausible_bpm(*bpm))
+        .collect())
+}
+
+/// The newest plausible sample timestamp (seconds) at or before `to`, or None.
+pub(crate) fn newest_heart_rate_ts(
+    path: &Path,
+    device_id: &str,
+    to: i64,
+) -> rusqlite::Result<Option<i64>> {
+    let conn = open_store(path)?;
+    let mut statement = conn.prepare(
+        "SELECT ts, bpm FROM hrSample WHERE deviceId = ?1 AND ts <= ?2 ORDER BY ts DESC LIMIT 50",
+    )?;
+    let rows = statement
+        .query_map(params![device_id, to], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows
+        .into_iter()
+        .find(|(_, bpm)| plausible_bpm(*bpm))
+        .map(|(ts, _)| ts))
+}
+
+/// The resolved NOOP store `(device id, path)` from the environment, if one exists.
+pub(crate) fn current_store() -> Option<(String, PathBuf)> {
+    let device_id = device_id_from_environment();
+    let (_, path) = NoopPaths::from_environment().resolve(&device_id).ok()?;
+    Some((device_id, path))
+}
+
 /// Runs off the main thread: the screen polls this, and NOOP may be holding the store for a moment.
 #[tauri::command]
 pub async fn live_heart_rate() -> Option<LiveHeartRate> {

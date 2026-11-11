@@ -1,5 +1,7 @@
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
 import type { TakePage } from "../amaraTake/types";
+import { ensureTakeLog, forgetTake, historyView, memoryLineView, takeLogEntries } from "./takeLog";
+import { tokyoDay } from "../lib/mindBody";
 
 /**
  * design-1111t: take memory, one suggestion a day per page, follow-through and outcomes.
@@ -95,6 +97,31 @@ export const unwiredTakes: TakesAdapter = {
   answer: never, undo: never, forget: never, typeAction: never,
   outcomes: () => UNWIRED, week: () => UNWIRED, goals: () => UNWIRED, settings: () => UNWIRED, setAutoDone: never,
   detects: () => false,
+};
+
+/**
+ * The app (HANDOFF-1111t §11 step 1): the take log is wired (`memory`, `historyCount`, `history`, `forget`,
+ * `settings`); everything else stays unwired. Reads are synchronous over the cached log (takeLog.ts); a log that
+ * has not loaded yet reads as unwired, never as empty.
+ */
+export const liveTakes: TakesAdapter = {
+  ...unwiredTakes,
+  memory: (page) => {
+    ensureTakeLog(); const log = takeLogEntries(); if (!log) return UNWIRED;
+    const now = Date.now();
+    return { state: "live", value: memoryLineView(log, page, tokyoDay(new Date(now).toISOString()) ?? "", now) };
+  },
+  historyCount: (page) => {
+    ensureTakeLog(); const log = takeLogEntries(); if (!log) return UNWIRED;
+    return { state: "live", value: historyView(log, page, "all", "", Date.now()).length };
+  },
+  history: (page, filter, q) => {
+    ensureTakeLog(); const log = takeLogEntries(); if (!log) return UNWIRED;
+    return { state: "live", value: historyView(log, page, filter, q, Date.now()) };
+  },
+  forget: async (_page, id) => ((await forgetTake(id)) ? { state: "live", value: { ok: true } } : UNWIRED),
+  // autoDone shows the Design default (on); `setAutoDone` stays unwired, so nothing is persisted or detected yet.
+  settings: () => ({ state: "live", value: { keepDays: 365, summarizeAfter: true, autoDone: true } }),
 };
 
 // ---------------- sample (preview and tests only; numbers match the 1111t mockups) ----------------
@@ -304,7 +331,7 @@ function previewOpts(): TakesPreview {
 }
 let cached: TakesAdapter | null = null;
 export function takesAdapter(): TakesAdapter {
-  if (!sampleAdaptersEnabled()) return unwiredTakes;
+  if (!sampleAdaptersEnabled()) return liveTakes;
   return (cached ??= sampleTakes(previewOpts()));
 }
 export function resetTakesAdapter() { cached = null; }

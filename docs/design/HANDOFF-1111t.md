@@ -270,6 +270,8 @@ Tests: `takes/takes.test.tsx`, `money/money.test.tsx` (seed never reaches adapte
 ## 11. Wiring order for Claude (replaces §7 / §9.5 where they differ)
 Every adapter is unwired in the live app today, so the take works exactly as before plus a "Today's one thing · Needs wiring" box. Replace `unwiredTakes` / `unwiredMoney` with live adapters; keep the `Wired<T>` shapes.
 1. **Take log** (`TakeLog`, migration from `amara_take_<page>`, retention 365 days then a summary into Letta Memory). Wire `memory`, `historyCount`, `history`, `forget`, `settings`.
+   - **Built (D-takes-hr):** Rust JSONL log (`commands/take_log.rs`), migration, retention computed in `takes/takeLog.ts`, live adapter wired for those five methods.
+   - **TODO (not built):** the 365-day summary into Memory. Taisun: do not write into live Letta; keep it local/planned. Until then entries older than 365 days are only hidden, never deleted.
 2. **Daily selection** (catalog with verified sources, one per page per day, why-sentence via router with the `CAUSAL` guard + template fallback, "own data only" for Business). Wire `today` (kinds `suggestion`, `learning`, `none_today`, `followup`).
 3. **Answers** (`answer`, `undo`; midnight → `unknown`, never skipped; Not today excluded). Wire `setAutoDone`.
 4. **Detectors** (WHOOP walk / easy day, check-in, business ledger, Home Assistant read-only, Muse breathing) → `answer` with `source: "detected"` and a `detail` string; `detects(page)` true once that page's detector exists.
