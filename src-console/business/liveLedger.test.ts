@@ -23,6 +23,12 @@ describe("live Business adapter over the ledger", () => {
     expect(liveBusiness(null)).toBe(unwiredBusiness);
   });
 
+  it("a malformed reply (e.g. the e2e mock's []) is treated as no ledger, never crashes", () => {
+    for (const junk of [[], {}, "x", 1, { version: 2, funds: [], ventures: [], fundingRequests: [], taxFlags: [] }, { version: 1, funds: [] }]) {
+      expect(liveBusiness(junk)).toBe(unwiredBusiness);
+    }
+  });
+
   it("converts yen with the ledger's dated rate, never otherwise", () => {
     expect(usdFrom(150000, base.fx)).toEqual({ state: "live", value: 990 });
     expect(usdFrom(150000, null)).toEqual(NEEDS_CONVERSION);
