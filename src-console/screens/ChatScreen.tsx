@@ -9,7 +9,10 @@ import { assistantView } from "../app/statusViews";
 import { dateTime, time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction, VoiceTurn } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, More, StatTile, TextField, type Tone } from "../ui";
+import { Badge, Button, Card, DataTag, InsetGroup, ListRow, More, StatTile, TextField, type Tone } from "../ui";
+import { TakeEmber } from "../amaraTake/AmaraTakeCard";
+import type { AskMoreDetail } from "../amaraTake/takeView";
+import "../amaraTake/AmaraTakeCard.css";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
 import { useAmaraVoice } from "../hooks/useAmaraVoice";
 import "./ChatScreen.css";
@@ -53,6 +56,9 @@ export interface ChatFieldProps {
   voiceTurns?: VoiceTurn[];
   /** Home only: bumped by ⌘1; each new value focuses the composer. */
   focusSignal?: number;
+  /** design-1110f "Ask more ›": the take this question comes from, shown above the composer until sent or dismissed. */
+  askContext?: AskMoreDetail | null;
+  onClearContext?: () => void;
 }
 
 const ACTION_TONE: Record<TerrenceAction["status"], Tone> = {
@@ -165,7 +171,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 export function ChatField({
   data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onCancelPending, loadingModel = false, onOpenContext, onOpenActivity, onOpenCrews, initialDraft = "",
   onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false, conversationId = null,
-  variant = "page", expanded = false, onToggleExpanded, voiceTurns, focusSignal = 0,
+  variant = "page", expanded = false, onToggleExpanded, voiceTurns, focusSignal = 0, askContext = null, onClearContext,
 }: ChatFieldProps) {
   const home = variant === "home";
   const [draft, setDraft] = useState(initialDraft);
@@ -284,7 +290,10 @@ export function ChatField({
     const message = text.trim();
     if (!message || sending) return;
     setDraft("");
-    await onSend(message, { deep: deep && deepAvailable });
+    // A live take's numbers go with the question; sample numbers never reach Amara as if they were real.
+    const context = askContext && !askContext.sample ? `\n\n(From Amara's take on ${askContext.from}: ${askContext.chips.map((c) => `${c.label} ${c.value}`).join(", ")})` : "";
+    if (askContext) onClearContext?.();
+    await onSend(message + context, { deep: deep && deepAvailable });
   };
   const submit = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); void send(draft); };
   const onComposerKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -417,6 +426,14 @@ export function ChatField({
           </div>
         )}
 
+        {askContext && (
+          <div className="take-ctx" role="note" aria-label="Context for this question">
+            <TakeEmber small /><b>From Amara&apos;s take · {askContext.from}</b>
+            <span>{askContext.chips.map((c) => `${c.label} ${c.value}`).join(" · ")}</span>
+            {askContext.sample && <DataTag kind="sample" />}
+            <button type="button" className="take-ctx__x" aria-label="Remove this context" onClick={onClearContext}>✕</button>
+          </div>
+        )}
         <form className="chat-screen__composer" onSubmit={submit}>
           {/* Wrapper carries the hint: WebKit fires no hover (so no tooltip) on a disabled button. */}
           <span className="chat-composer__deep-wrap" title={deepAvailable ? undefined : "Deep needs the Amara Router"}>

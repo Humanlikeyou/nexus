@@ -8,6 +8,7 @@ import type { useTraining } from "../neuro/useTraining";
 import { useNow } from "../shell/useNow";
 import type { RecordedSession } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, Select, Sparkline, StatTile, type Tone } from "../ui";
+import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { recoveryBand } from "./HealthScreen";
 import { parseBodyContext } from "../lib/noop";
 import { hoursMinutes } from "../lib/mindBodyDeep";
@@ -130,6 +131,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
   return (
     <div className="neuro" data-state={!connected ? "empty" : streaming ? "streaming" : "ready"}>
       {header}
+      {!running && !streaming && <AmaraTake page="neuro" className="neuro__take" />}
 
       {error && (
         <Card className="neuro__alert" data-tone="danger" role="alert">

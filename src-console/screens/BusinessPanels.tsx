@@ -4,6 +4,7 @@ import { humanize, money } from "../lib/format";
 import type { Wired } from "../lib/sampleAdapters";
 import type { SystemSnapshot } from "../types";
 import { Button, Card, DataTag, Meter, PageHero, StatusText, wiredTag, type StatusKind } from "../ui";
+import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import "./CommandCenter.css";
 
 const HEALTH: Record<Health, { kind: StatusKind; text: string }> = {
@@ -99,6 +100,7 @@ export function BusinessOverview({ data, adapter = businessAdapter(), onOpenVent
         <li className="cc-tile"><span className="cc-tile__k">This week</span><span className="cc-tile__v">{money(revenue.week_revenue)}</span><span className="cc-tile__s">Today {money(revenue.today_revenue)}</span></li>
         <li className="cc-tile"><span className="cc-tile__k">Trading risk</span><span className="cc-tile__v">{riskDown ? <StatusText kind="off">Unavailable</StatusText> : risk.kill_switch_active ? <StatusText kind="fail">Kill switch</StatusText> : <StatusText kind="ok">Within limits</StatusText>}</span><span className="cc-tile__s">{riskDown ? "" : `Risk index ${risk.risk_index} · kill switch ${risk.kill_switch_active ? "on" : "off"}`}</span></li>
       </ul>
+      <AmaraTake page="business" className="biz__take" />
       <DecisionsCard adapter={adapter} />
       <VenturesCard data={data} adapter={adapter} onOpen={onOpenVenture} />
       {work}

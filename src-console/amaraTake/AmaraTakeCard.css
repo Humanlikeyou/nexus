@@ -1,0 +1,50 @@
+/* design-1110f: "Amara's take" daily note. Ember mark, copper title, copper→emerald rule on the left edge. */
+.take { position: relative; display: grid; gap: 8px; padding: 13px 13px 13px 21px; border-radius: 13px;
+  border: 1px solid color-mix(in srgb, var(--copper-text) 28%, var(--separator));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--copper-text) 9%, var(--bg-content, #fff)) 0%, color-mix(in srgb, var(--tone-accent-text) 7%, var(--bg-content, #fff)) 100%);
+  box-shadow: var(--elev-1, none); color: var(--label); }
+.take::before { content: ""; position: absolute; left: 0; top: 13px; bottom: 13px; width: 3px; border-radius: 3px; background: linear-gradient(180deg, var(--copper-text), var(--tone-accent-text)); }
+.take__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.take__ember { width: 21px; height: 21px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: radial-gradient(circle at 40% 35%, color-mix(in srgb, var(--copper-text) 75%, #fff) 0%, var(--copper-text) 55%, color-mix(in srgb, var(--copper-text) 60%, #000) 100%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tone-accent-text) 55%, transparent), 0 0 13px color-mix(in srgb, var(--copper-text) 45%, transparent); }
+.take__ember svg { width: 11px; height: 11px; fill: #fff7ee; }
+.take__ember--sm { width: 17px; height: 17px; }
+.take__title { font-size: 13px; font-weight: 600; margin: 0; color: var(--copper-text); letter-spacing: .01em; }
+.take__when { font-size: 11px; color: var(--label-secondary); }
+.take__spacer { flex: 1; }
+.take__lane { font-size: 11px; color: var(--tone-accent-text); border: 1px solid color-mix(in srgb, var(--tone-accent-text) 40%, transparent); border-radius: 999px; padding: 1px 8px; }
+.take__body { margin: 0; font-size: 15px; line-height: 1.5; color: var(--label); text-wrap: pretty; }
+.take__body b { font-weight: 600; }
+.take__chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.take__chip { display: inline-flex; align-items: baseline; gap: 5px; font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--separator); background: color-mix(in srgb, var(--bg-content, #fff) 70%, transparent); color: var(--label); }
+.take__chip span { color: var(--label-secondary); }
+.take__chip[data-lane="neuro"] { border-color: color-mix(in srgb, var(--copper-text) 45%, var(--separator)); }
+.take__chip[data-lane="health"] { border-color: color-mix(in srgb, var(--tone-accent-text) 45%, var(--separator)); }
+.take__foot { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--label-secondary); }
+.take__src { font-size: 11px; color: var(--label-secondary); }
+.take__ask { font: inherit; font-size: 11px; font-weight: 500; white-space: nowrap; color: var(--tone-accent-text); background: none; border: 1px solid color-mix(in srgb, var(--tone-accent-text) 45%, transparent); border-radius: 999px; padding: 3px 13px; cursor: pointer; }
+.take__ask:focus-visible, .take__link:focus-visible { outline: 2px solid var(--focus-ring, var(--tone-accent-text)); outline-offset: 3px; }
+.take__link { font: inherit; background: none; border: 0; padding: 0; color: var(--tone-accent-text); cursor: pointer; text-decoration: underline; }
+.take__skel { display: grid; gap: 8px; }
+.take__skel i { display: block; height: 11px; border-radius: 5px; background: linear-gradient(90deg, color-mix(in srgb, var(--label) 8%, transparent), color-mix(in srgb, var(--copper-text) 22%, transparent), color-mix(in srgb, var(--label) 8%, transparent)); }
+.take__skel i:nth-child(2) { width: 88%; }
+.take__skel i:nth-child(3) { width: 61%; }
+.take__quiet { margin: 0; font-size: 13px; color: var(--label-secondary); line-height: 1.45; }
+.take--compact { padding: 8px 13px 8px 21px; gap: 8px; max-width: 340px; }
+.take--compact .take__body { font-size: 13px; }
+.take-slot { display: grid; }
+/* Home: on-glass, always dark like the rest of the landing page. */
+.landing .take { background: color-mix(in srgb, #0d2a22 86%, transparent); border-color: color-mix(in srgb, #c98a5a 40%, transparent); color: #f1ece4; box-shadow: none; }
+.landing .take__body, .landing .take__body b, .landing .take__chip { color: #f1ece4; }
+.landing .take__when, .landing .take__chip span, .landing .take__quiet, .landing .take .data-tag { color: rgba(241, 236, 228, .78); border-color: rgba(241, 236, 228, .3); }
+.landing .take__chip { background: rgba(255, 255, 255, .06); border-color: rgba(241, 236, 228, .22); }
+.landing .take__title { color: #e0a878; }
+.landing .take__ask { color: #5fd3ad; border-color: rgba(95, 211, 173, .5); }
+.landing .take-slot { margin-top: 13px; max-width: 340px; }
+/* Short windows: the lens keeps its room; the take stays on Fitness, Neuro, Mind–Body and Business. */
+@media (max-height: 760px) { .landing .take-slot { display: none; } }
+/* Ask more: the context strip above the Home composer. */
+.take-ctx { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--label-secondary); padding: 5px 8px; margin: 0 0 5px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--copper-text) 35%, var(--separator)); background: color-mix(in srgb, var(--copper-text) 8%, transparent); }
+.take-ctx b { color: var(--copper-text); font-weight: 600; }
+.take-ctx__x { margin-left: auto; font: inherit; font-size: 11px; background: none; border: 0; color: var(--label-secondary); cursor: pointer; padding: 0 3px; }

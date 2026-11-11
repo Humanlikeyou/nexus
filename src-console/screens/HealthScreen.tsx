@@ -6,6 +6,7 @@ import { EMPTY_DEVICE_ID } from "../lib/devices";
 import { date, formatMinutes, number } from "../lib/format";
 import type { NoopDailyMetric, NoopHealthInsight, NoopHealthSnapshot, SystemSnapshot } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, SegmentedControl, StatTile, type Tone } from "../ui";
+import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
 import { LastFourteenDays } from "./FitnessTrends";
 import { calendarDays, deltaWords, usualRange } from "../ui/charts/chartMath";
@@ -256,6 +257,7 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
   return (
     <div className="fitness" data-state={health.status}>
       {header}
+      <AmaraTake page="fitness" className="fitness__take" />
       {health.status === "stale" && (
         <p className="fitness__callout" role="note">
           Last NOOP data {health.latestDay ? dayLabel(health.latestDay) : "unknown"}. <span className="fitness__hint">Open NOOP to sync.</span>

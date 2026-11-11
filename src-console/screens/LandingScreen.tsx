@@ -8,6 +8,7 @@ import { beatSeconds, useLiveHeartRate } from "../hooks/useLiveHeartRate";
 import { localGreeting } from "../lib/greeting";
 import { TRACE_HEIGHT, TRACE_WIDTH, traceShape } from "../lib/heartTrace";
 import { useNow } from "../shell/useNow";
+import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import type { ModuleId } from "../types";
 import { Wordmark } from "../ui/Wordmark";
 import "./LandingScreen.css";
@@ -60,6 +61,7 @@ function Welcome() {
         </p>
       )}
       <HeartRate />
+      <AmaraTake page="home" compact />
     </section>
   );
 }

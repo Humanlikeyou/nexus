@@ -17,8 +17,8 @@ export function checkTake(page: TakePage, deps: TakeDeps = liveDeps): Promise<Ta
   return p;
 }
 
-/** Amara's take for a page today: unwired until that day's data exists and a valid take is generated. Not wired into any screen yet. */
-export function useAmaraTake(page: TakePage, deps?: TakeDeps): TakeResult {
+/** Amara's take for a page today plus whether the first check is still running (design-1110f "Generating"). */
+export function useAmaraTakeStatus(page: TakePage, deps?: TakeDeps): { value: TakeResult; checking: boolean } {
   const [result, setResult] = useState<{ page: TakePage; value: TakeResult } | null>(null);
   useEffect(() => {
     let live = true;
@@ -28,5 +28,10 @@ export function useAmaraTake(page: TakePage, deps?: TakeDeps): TakeResult {
     window.addEventListener("focus", check);
     return () => { live = false; window.clearInterval(timer); window.removeEventListener("focus", check); };
   }, [page, deps]);
-  return result?.page === page ? result.value : UNWIRED;
+  return result?.page === page ? { value: result.value, checking: false } : { value: UNWIRED, checking: true };
+}
+
+/** Amara's take for a page today: unwired until that day's data exists and a valid take is generated. */
+export function useAmaraTake(page: TakePage, deps?: TakeDeps): TakeResult {
+  return useAmaraTakeStatus(page, deps).value;
 }

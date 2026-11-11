@@ -4,6 +4,7 @@ import { METRICS, driverSentence, drivers as rankDrivers, hoursMinutes, inRange,
 import { NoopShapeError, isSnapshot, noopQuery, parseBodyContext, parseMetricSeries, snapshotDays } from "../lib/noop";
 import type { NoopDayRow, NoopLatestNight, NoopMetricPoint, NoopMetricSeries, NoopSnapshotPayload, RecordedSession } from "../types";
 import { Badge, Button, PageHero, SegmentedControl } from "../ui";
+import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { monotonePath } from "../ui/charts/chartMath";
 import { BaselineChart, DeltaBar, SleepSpan, StageStrip, readingDelta } from "./MindBodyCharts";
 import { ChartHeader } from "../ui/charts/TrendChart";
@@ -245,6 +246,7 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
       {state.status === "inactive" ? <Inactive steps={state.steps} /> : state.status === "error" ? <ChartBox state="error" label="Mind–Body" onRetry={refresh} /> : (
         <>
           {!loading && <p className="mind-body__meta mb-reading">{asOf ? `Reading for ${shortDay(asOf)}${earlier ? ", the latest with data" : ""}` : "No reading day yet"} · Compared with your own 28-day baseline</p>}
+          {!loading && <AmaraTake page="mindBody" className="mb-take" />}
 
           <section className="mb-section" aria-labelledby="mb-readiness">
             <h2 id="mb-readiness" className="mb-section__title">Readiness</h2>

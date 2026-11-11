@@ -31,6 +31,7 @@ import { Toolbar } from "./shell/Toolbar";
 import { CommandPalette } from "./shell/CommandPalette";
 import { Splash, reducedMotion } from "./shell/Splash";
 import type { ModuleId } from "./types";
+import { ASK_MORE_EVENT, type AskMoreDetail } from "./amaraTake/takeView";
 
 const BUSINESS_VIEW_KEY = "amara.business.view";
 function readBusinessView(): string | null {
@@ -85,6 +86,19 @@ export default function App() {
   const autoSave = useIdleAutoSave(messages, conversationId);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [askDraft, setAskDraft] = useState<{ text: string; n: number }>({ text: "", n: 0 });
+  // design-1110f "Ask more ›": Home chat opens with the take as context and its question pre-filled; nothing is sent.
+  const [askContext, setAskContext] = useState<AskMoreDetail | null>(null);
+  useEffect(() => {
+    const onAsk = (event: Event) => {
+      const detail = (event as CustomEvent<AskMoreDetail>).detail;
+      if (!detail) return;
+      setAskContext(detail);
+      setAskDraft((d) => ({ text: detail.question, n: d.n + 1 }));
+      navigate({ id: "terrance", view: "main" });
+    };
+    window.addEventListener(ASK_MORE_EVENT, onAsk);
+    return () => window.removeEventListener(ASK_MORE_EVENT, onAsk);
+  }, [navigate]);
   // design-1110b A: the Home chat. Expand is the largest it gets; ⌘1 focuses its composer.
   const [chatExpanded, setChatExpanded] = useState(false);
   const [chatFocus, setChatFocus] = useState(0);
@@ -138,7 +152,7 @@ export default function App() {
   const fieldLabel = screenId === "terrance" ? TODAY_LABEL : selected.label;
   const retrySnapshot = () => { void refresh(); };
   const chat = <ChatField key={askDraft.n} variant="home" expanded={chatExpanded} onToggleExpanded={() => setChatExpanded((open) => !open)} voiceTurns={voiceTurns} focusSignal={chatFocus + askDraft.n}
-    conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} />;
+    conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} askContext={askContext} onClearContext={() => setAskContext(null)} />;
   const view = onLanding ? <LandingField onSelect={setActive} onToday={() => navigate(TODAY_ROUTE)} chat={chat} chatExpanded={chatExpanded} />
     : screenId === "terrance" ? <><TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} /><PageSection id="lists"><ListsField refreshSignal={data.refreshedAt} /></PageSection></>
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
@@ -160,7 +174,7 @@ export default function App() {
       {!onLanding && <Toolbar label={fieldLabel} busy={busy} onRefresh={refresh} onSearch={() => setPaletteOpen(true)} />}
       <Splash loaded={data.refreshedAt !== INITIAL_SNAPSHOT.refreshedAt} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate}
-        onAsk={(text) => { setAskDraft((d) => ({ text, n: d.n + 1 })); navigate({ id: "terrance", view: "main" }); }} />
+        onAsk={(text) => { setAskContext(null); setAskDraft((d) => ({ text, n: d.n + 1 })); navigate({ id: "terrance", view: "main" }); }} />
       {!onLanding && <Sidebar active={active} onSelect={setActive} data={data} />}
       <section className="active-field" aria-label={`${fieldLabel} system`}>{subViews && <div className="subview-bar" data-host={active}><SegmentedControl label={`${selected.label} view`} size="small" value={subViews.some((entry) => entry.view === route.view) ? route.view : "main"} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); navigate({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
       {!onLanding && <Footer data={data} busy={busy} />}
