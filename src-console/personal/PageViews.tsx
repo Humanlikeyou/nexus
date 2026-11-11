@@ -10,6 +10,7 @@ import { moneyAdapter } from "../money/adapters";
 import { MoneyAccounts, MoneyFollowUps, MoneyOverviewSection, MoneyTake, shown, type Currency } from "../money/MoneyView";
 import "../ui/PanelKit.css";
 import "./personal.css";
+import "../adds/v1111.css";
 
 const WIRE_NOTE = "Needs wiring: this appears once Claude builds its store (HANDOFF-1111a). Nothing here is made up.";
 
@@ -67,24 +68,25 @@ export function PatternsView({ adapter, initialTab = "findings" }: { adapter: Pe
 
 const amt = (w: Wired<number>) => (w.state === "unwired" ? wiredTag(w) : money(w.value));
 
-/** Business › Personal (1111a #4 + 1111t money): read-only accounts, balances in USD with a JPY view, the money take,
- *  follow-ups, then bills and subscriptions. Walled off from venture funds. */
-export function PersonalMoneyView({ adapter }: { adapter: PersonalAdapter }) {
+/** Life › Personal money (1111a #4 + 1111t money; moved from Business › Personal in design-1111v, contract unchanged):
+ *  read-only accounts, balances in USD with a JPY view, the money take, follow-ups, then bills and subscriptions.
+ *  Personal only: venture funds never appear here; Enterprise money is in Enterprise › Finances. */
+export function PersonalMoneyView({ adapter, onOpenFinances }: { adapter: PersonalAdapter; onOpenFinances?: () => void }) {
   const pm = adapter.money();
   const v = valueOf(pm);
   const ma = moneyAdapter();
   const ov = valueOf(ma.overview());
   const accts = valueOf(ma.accounts());
   const [cur, setCur] = useState<Currency>("USD");
-  const wall = <div className="pk-wall" role="note"><b>Personal</b>Kept apart from Business: venture funds, Taiyo Skin and Trading never appear here, and nothing here counts toward venture numbers.</div>;
+  // design-1111v: the "Kept apart" banner and the "Business › Personal" eyebrow are gone; a link points to Finances.
+  const finances = <> · Enterprise money is in {onOpenFinances ? <button type="button" className="v-link" onClick={onOpenFinances}>Enterprise › Finances ›</button> : "Enterprise › Finances"}</>;
   const statement = ov ? `${shown(ov.totalUsd, cur, ov.fx.rate)} personal, across ${ov.balances} balances` : accts && accts.length ? `${accts.filter((a) => a.status !== "not_connected").length} accounts connected, all read-only` : "Your own accounts, read-only";
-  const detail = ov ? <>Business › Personal · {cur} · yen converted at ¥{ov.fx.rate.toFixed(2)} = $1 · venture funds kept separate <DataTag kind="sample" /></>
-    : accts ? <>Business › Personal · Amara can see balances and transactions; she can never move money <DataTag kind="sample" /></>
-    : <>Business › Personal · read-only connections and statement import <DataTag kind="wire" /></>;
+  const detail = ov ? <>Personal only · {cur} · yen converted at ¥{ov.fx.rate.toFixed(2)} = $1{finances} <DataTag kind="sample" /></>
+    : accts ? <>Personal only · Amara can see balances and transactions; she can never move money{finances} <DataTag kind="sample" /></>
+    : <>Personal only · read-only connections and statement import{finances} <DataTag kind="wire" /></>;
   return (
     <div className="biz page-inset cc-page pk-host">
       <PageHero title="Personal money" statement={statement} detail={detail} />
-      {wall}
       <MoneyTake adapter={ma} />
       <MoneyOverviewSection adapter={ma} currency={cur} onCurrency={setCur} />
       <MoneyAccounts adapter={ma} />

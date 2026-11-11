@@ -82,7 +82,7 @@ export function Sidebar({ active, onSelect, data, onOpenServices }: { active: Mo
   return (
     <nav className="system-constellation" aria-label="Amara OS navigation">
       {SYSTEM_GROUPS.map((group) => (
-        <section className="nav-group" key={group.label || "main"} aria-label={group.label || undefined}>
+        <section className="nav-group" key={group.label || group.systems.map((s) => s.id).join("+")} aria-label={group.label || undefined}>
           {group.label && <h2>{group.label}</h2>}
           {group.systems.map((system) => {
             const Icon = system.icon;

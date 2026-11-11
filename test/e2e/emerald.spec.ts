@@ -14,7 +14,7 @@ test("emerald wash never targets the vibrancy layers", () => {
 
 test("emerald wash: vibrancy layers stay transparent, content pane gets the wash", async ({ page, theme }) => {
   await openToday(page, { theme, reduceMotion: true });
-  await expect(activeField(page, "Today").getByRole("heading", { level: 1 })).toHaveText("Command Center");
+  await expect(activeField(page, "Today").getByRole("heading", { level: 1 })).toHaveText("Today");
   await page.evaluate(() => document.documentElement.setAttribute("data-vibrancy", "true"));
   const bg = (sel: string) => page.locator(sel).first().evaluate((el) => {
     const s = getComputedStyle(el); return `${s.backgroundColor}|${s.backgroundImage}`;

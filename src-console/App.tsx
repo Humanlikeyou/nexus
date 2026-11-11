@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { HOST_VIEWS, SECTION_ANCHORS, SYSTEMS, TODAY_LABEL, TODAY_ROUTE, resolveRoute, screenFor } from "./app/routes";
+import { HOST_VIEWS, SECTION_ANCHORS, SYSTEMS, TODAY_LABEL, TODAY_ROUTE, canonicalRoute, resolveRoute, screenFor, tabOf } from "./app/routes";
 import { PageSection } from "./ui";
 import { AgentsField } from "./screens/AgentsScreen";
 import { useVoiceTurns } from "./hooks/useVoiceTurns";
@@ -11,7 +11,7 @@ import { useMuseSession } from "./app/useMuseSession";
 import { runApproval } from "./lib/approval";
 import type { TerrenceAction } from "./types";
 import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
-import { ActivityField, BusinessField, CrewsField, ListsField, HealthField, MindBodyField, NeuroField, SmartHomeField, RevenueField, SessionsField, SettingsField, VoiceField, retryLazyScreens } from "./app/lazyScreens";
+import { ActivityField, BusinessField, CrewsField, LifeField, ListsField, HealthField, MindBodyField, NeuroField, SmartHomeField, RevenueField, SessionsField, SettingsField, VoiceField, retryLazyScreens } from "./app/lazyScreens";
 import { ScreenErrorBoundary } from "./shell/ScreenErrorBoundary";
 import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";
 import { CommandSurface } from "./design/SystemPrimitives";
@@ -71,10 +71,13 @@ export default function App() {
     return () => cancelAnimationFrame(frame);
   }, [route]);
   // Old ids (health, neuro, sessions, trajectory, revenue, assistant, devices) resolve to their host + sub-view.
-  // §7+8: the Business Work | Revenue choice persists for the session.
+  // §7+8: the Enterprise Overview | Finances choice persists for the session (design-1111v: the stored
+  // "revenue" view now means Finances; a stored view that moved out of Enterprise, like "personal", is ignored).
   const setActive = useCallback((id: ModuleId) => {
     const next = resolveRoute(id);
-    navigate(id === "business" && next.view === "main" && readBusinessView() === "revenue" ? { ...next, view: "revenue" } : next);
+    const stored = readBusinessView();
+    const restored = next.id === "enterprise" && next.view === "main" && stored ? canonicalRoute({ id: "enterprise", view: stored }) : null;
+    navigate(restored && restored.id === "enterprise" && restored.view === "finances" ? restored : next);
   }, [navigate]);
   const { data, busy, setBusy, refresh } = useSnapshot();
   const [notice, setNotice] = useState<string | null>(null);
@@ -161,14 +164,15 @@ export default function App() {
   const chat = <ChatField key={askDraft.n} variant="home" expanded={chatExpanded} onToggleExpanded={() => setChatExpanded((open) => !open)} voiceTurns={voiceTurns} focusSignal={chatFocus + askDraft.n}
     conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendToTerrence} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} askContext={askContext} onClearContext={() => setAskContext(null)} />;
   const view = onLanding ? <LandingField onSelect={setActive} onToday={() => navigate(TODAY_ROUTE)} chat={chat} chatExpanded={chatExpanded} />
-    : screenId === "terrance" ? <><TerranceField data={data} onNavigate={setActive} onRetry={retrySnapshot} /><PageSection id="lists"><ListsField refreshSignal={data.refreshedAt} /></PageSection></>
+    : screenId === "terrance" ? <TerranceField data={data} onNavigate={setActive} onOpen={navigate} onRetry={retrySnapshot} todos={<PageSection id="lists"><ListsField refreshSignal={data.refreshedAt} /></PageSection>} />
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
     : screenId === "mindbody" ? (route.view === "patterns" ? <PatternsView adapter={personalAdapter()} /> : <MindBodyField sessions={data.sessions} />)
     : screenId === "smarthome" ? <SmartHomeField onOpenSettings={() => navigate({ id: "settings", view: "home-assistant" })} />
     : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} onOpenHistory={() => setActive("sessions")} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => setActive("neuro")} />
-    : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} view={route.view} onView={(view) => navigate({ id: "business", view })} />
-    : screenId === "revenue" ? <RevenueField data={data} onRetry={retrySnapshot} />
+    : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} view={route.view} onView={(view) => navigate({ id: "enterprise", view })} onOpen={navigate} />
+    : screenId === "revenue" ? <RevenueField data={data} onRetry={retrySnapshot} onOpen={navigate} />
+    : screenId === "life" ? <LifeField data={data} view={route.view} onOpen={navigate} onRetry={retrySnapshot} />
     : screenId === "assistant" ? <ActivityField data={data} onRetry={retrySnapshot} />
     : screenId === "lists" ? <ListsField refreshSignal={data.refreshedAt} />
     : screenId === "crews" ? <CrewsField data={data} onRetry={retrySnapshot} />
@@ -183,7 +187,7 @@ export default function App() {
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate}
         onAsk={(text) => { setAskContext(null); setAskDraft((d) => ({ text, n: d.n + 1 })); navigate({ id: "terrance", view: "main" }); }} />
       {!onLanding && <Sidebar active={active} onSelect={setActive} data={data} onOpenServices={() => navigate({ id: "settings", view: "services" })} />}
-      <section className="active-field" aria-label={`${fieldLabel} system`}>{subViews && <div className="subview-bar" data-host={active}><SegmentedControl label={`${selected.label} view`} size="small" value={active === "settings" ? settingsTab(route.view) : subViews.some((entry) => entry.view === route.view) ? route.view : "main"} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "business") writeBusinessView(view); navigate({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
+      <section className="active-field" aria-label={`${fieldLabel} system`}>{subViews && <div className="subview-bar" data-host={active}><SegmentedControl label={`${selected.label} view`} size="small" value={active === "settings" ? settingsTab(route.view) : tabOf(route)} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "enterprise") writeBusinessView(view); navigate({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
       {!onLanding && <Footer data={data} busy={busy} />}
       {!onLanding && <AmaraVoiceAnnouncer />}
       {notice && <div className="field-notice"><i />{notice}</div>}

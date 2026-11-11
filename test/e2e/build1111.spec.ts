@@ -11,12 +11,15 @@ const sub = async (p: Page, host: string, label: string) => { await navButton(p,
 const SURFACES: Array<[string, (p: Page) => Promise<void>]> = [
   ["Home take", async () => {}],
   ["Fitness take", async (p) => { await openView(p, "Fitness"); }],
-  ["Business take", async (p) => { await navButton(p, "Business").click(); }],
+  ["Enterprise take", async (p) => { await navButton(p, "Enterprise").click(); }],
   ["Crews list", async (p) => { await openView(p, "Crews"); }],
   ["Crew detail", async (p) => { await openView(p, "Crews"); await p.getByRole("button", { name: /^(Manage|Review) smoke/ }).click(); }],
   ["Today sections", async (p) => { await gotoToday(p); }],
   ["Patterns", async (p) => { await sub(p, "Mind–Body", "Patterns"); }],
-  ["Personal money", async (p) => { await sub(p, "Business", "Personal"); }],
+  ["Personal money", async (p) => { await sub(p, "Life", "Personal money"); }],
+  // design-1111v: Life pages.
+  ["Life goals", async (p) => { await navButton(p, "Life").click(); }],
+  ["Weekly review", async (p) => { await sub(p, "Life", "Weekly review"); }],
   ["Settings memory", async (p) => { await sub(p, "Settings", "Memory"); }],
 ];
 
@@ -64,12 +67,19 @@ test("(1110i) the switch turns on only after crew-service confirms; sends, spend
   expect(await blocking(page)).toEqual([]);
 });
 
-test("(1111a) check-in: 5-step mood; Today shows goals, life admin and the weekly review; Memory is in Settings", async ({ page, theme }) => {
+test("(1111a + 1111v) check-in: 5-step mood; goals, dates and the weekly review moved to Life; Memory is in Settings", async ({ page, theme }) => {
   await page.addInitScript(() => localStorage.setItem("nexus.sampleAdapters", "1"));
   await openApp(page, { theme, reduceMotion: true });
   const today = await gotoToday(page);
   await expect(today.getByRole("radiogroup", { name: "Mood" }).getByRole("radio")).toHaveCount(5);
-  for (const id of ["checkin", "goals", "life-admin", "weekly-review"]) await expect(today.locator(`#${id}.page-section`)).toHaveCount(1);
+  await expect(today.locator("#checkin.page-section")).toHaveCount(1);
+  for (const id of ["goals", "life-admin", "weekly-review"]) await expect(today.locator(`#${id}`)).toHaveCount(0);
+  await sub(page, "Life", "Goals");
+  await expect(activeField(page, "Life").locator("#goals")).toHaveCount(1);
+  await sub(page, "Life", "Dates & deadlines");
+  await expect(activeField(page, "Life").locator("#dates")).toHaveCount(1);
+  await sub(page, "Life", "Weekly review");
+  await expect(activeField(page, "Life").locator("#weekly-review")).toHaveCount(1);
   await sub(page, "Settings", "Memory");
   await expect(activeField(page, "Settings").locator("#memory")).toHaveCount(1);
 });

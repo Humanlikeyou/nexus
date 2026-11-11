@@ -1,31 +1,85 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { Strategy, SystemSnapshot } from "../types";
 import { BusinessField } from "./BusinessScreen";
 import { RevenueField } from "./RevenueScreen";
 import { sampleBusiness, unwiredBusiness } from "../business/adapters";
+import { resetSampleDecisions } from "../decisions/log";
+import { invoke } from "@tauri-apps/api/core";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => null) }));
 
 const snap = (extra: Partial<SystemSnapshot>): SystemSnapshot => ({ ...INITIAL_SNAPSHOT, refreshedAt: INITIAL_SNAPSHOT.refreshedAt + 1, ...extra });
 const strategy: Strategy = { id: "s1", name: "TaiyoSkin shop", type: "e_commerce", status: "active", capital_limit: 5000, daily_loss_cap: 200, total_revenue: 1200, total_expenses: 300, last_health: null, health_status: "healthy" };
 const risk = { global_capital_deployed: 2500, global_capital_limit: 10000, global_daily_pnl: -40, global_daily_loss_cap: 500, kill_switch_active: false, active_strategies: 1, strategies_at_risk: ["Ads test"], risk_index: 0.2 };
 const revenue = { total_revenue: 1200, total_expenses: 300, net_income: 900, today_revenue: 50, today_expenses: 0, week_revenue: 400, month_revenue: 1200, by_strategy: [{ strategy_id: "s1", strategy_name: "TaiyoSkin shop", revenue: 1200, expenses: 300, net: 900 }] };
 
-describe("Business › Work (§7)", () => {
-  it("counts statuses incl. Other, lists work items and pipeline stages", () => {
-    render(<BusinessField view="work" data={snap({ tasks: [{ title: "Ship", status: "active", priority: "high", tags: ["launch_week"] }, { title: "Odd", status: "blocked", priority: null, tags: [] }], pipeline: [{ title: "Post", stage: "drafting", content_type: "blog_post", notes: "n" }] })} />);
-    expect(screen.getByRole("heading", { level: 1, name: "Business" })).toBeInTheDocument();
-    expect(screen.getByText("Other")).toBeInTheDocument();
-    expect(screen.getByText("2 tracked")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Drafting · 1" })).toBeInTheDocument();
+describe("Enterprise › Tasks (was Business › Work)", () => {
+  it("groups tasks by status, keeps unknown statuses, and the add is disabled with its reason while unwired", () => {
+    render(<BusinessField view="tasks" data={snap({ tasks: [{ title: "Ship", status: "active", priority: "high", tags: ["launch_week"] }, { title: "Odd", status: "blocked", priority: null, tags: [] }], pipeline: [] })} />);
+    expect(screen.getByRole("heading", { level: 1, name: "Tasks" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "In progress · 1" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Other · 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add task" })).toBeDisabled();
+    expect(screen.getByText("Needs wiring · task add command")).toBeInTheDocument();
   });
   it("empty and per-source error states", () => {
     const onRetry = vi.fn();
-    render(<BusinessField view="work" onRetry={onRetry} data={snap({ tasks: [], pipeline: [], unavailableSources: [{ command: "read_tasks", label: "Task source" }] })} />);
+    render(<BusinessField view="tasks" onRetry={onRetry} data={snap({ tasks: [], pipeline: [], unavailableSources: [{ command: "read_tasks", label: "Task source" }] })} />);
     expect(screen.getByText("Task source unavailable")).toBeInTheDocument();
-    expect(screen.getByText("Pipeline is clear. Content moves here from idea to publication.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalled();
+  });
+  it("old view id 'work' still renders Tasks", () => {
+    render(<BusinessField view="work" data={snap({ tasks: [], pipeline: [] })} />);
+    expect(screen.getByRole("heading", { level: 1, name: "Tasks" })).toBeInTheDocument();
+  });
+});
+
+describe("Enterprise › Content", () => {
+  it("is a pipeline from Idea to Published, and Publish is disabled: Amara doesn't post for you", () => {
+    render(<BusinessField view="content" data={snap({ pipeline: [{ title: "Post", stage: "review", content_type: "blog_post", notes: null }, { title: "Idea", stage: "ideation", content_type: "reel", notes: null }] })} />);
+    expect(screen.getByRole("heading", { level: 1, name: "Content" })).toBeInTheDocument();
+    for (const col of ["Idea · 1", "Drafting · 0", "Review · 1", "Scheduled · 0", "Published · 0"]) expect(screen.getByRole("region", { name: col })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByText("Amara doesn't post for you")).toBeInTheDocument();
+  });
+});
+
+describe("Enterprise › Decisions (design-1111v §4)", () => {
+  it("Record vote writes one decisions-log record, moves no money and invokes no ledger write; Undo removes it", async () => {
+    localStorage.setItem("nexus.sampleAdapters", "1");
+    resetSampleDecisions();
+    vi.mocked(invoke).mockClear();
+    const onOpen = vi.fn();
+    render(<BusinessField view="decisions" adapter={sampleBusiness} onOpen={onOpen} data={snap({})} />);
+    expect(screen.getByRole("heading", { level: 1, name: "Decisions" })).toBeInTheDocument();
+    const before = within(screen.getByRole("table", { name: "Decisions log" })).getAllByRole("row").length;
+    fireEvent.click(screen.getByRole("button", { name: "Vote yes" }));
+    const preview = screen.getByRole("region", { name: "Preview: vote" });
+    expect(preview).toHaveTextContent("Nothing moves money. Nothing is sent.");
+    expect(preview).toHaveTextContent("Taiyo Skin crew");
+    await act(async () => { fireEvent.click(within(preview).getByRole("button", { name: "Record vote" })); });
+    expect(within(screen.getByRole("table", { name: "Decisions log" })).getAllByRole("row")).toHaveLength(before + 1);
+    expect(screen.getByRole("status")).toHaveTextContent(/Recorded: Yes on first batch/);
+    expect(screen.queryByRole("button", { name: "Vote yes" })).toBeNull();
+    // No Tauri command at all: nothing reaches the ledger, a bank or anyone outside.
+    expect(invoke).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Also shows on Taiyo Skin/ }));
+    expect(onOpen).toHaveBeenCalledWith({ id: "enterprise", view: "ventures/taiyo-skin" });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^Undo/ })); });
+    expect(within(screen.getByRole("table", { name: "Decisions log" })).getAllByRole("row")).toHaveLength(before);
+    expect(screen.getByRole("button", { name: "Vote yes" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask the accountant" })).toBeDisabled();
+    expect(screen.getByText("Amara doesn't contact anyone outside")).toBeInTheDocument();
+    localStorage.removeItem("nexus.sampleAdapters");
+  });
+  it("unwired: votes are disabled with the reason and no log is shown", () => {
+    render(<BusinessField view="decisions" adapter={sampleBusiness} data={snap({})} />);
+    expect(screen.getByRole("button", { name: "Vote yes" })).toBeDisabled();
+    expect(screen.getAllByText("Needs wiring · decisions log").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("table", { name: "Decisions log" })).toBeNull();
   });
 });
 
@@ -59,20 +113,27 @@ describe("Business › Ventures: Trading (design-1110d D-B5, answer 2)", () => {
 
 describe("Business › Overview (design-1110d D-B2–B6)", () => {
   it("leads with real net income; unwired panels show no sample values", () => {
-    render(<BusinessField adapter={unwiredBusiness} data={snap({ revenue, strategies: [strategy], risk, tasks: [{ title: "Ship", status: "active", priority: "high", tags: [] }] })} />);
-    expect(screen.getByRole("heading", { level: 1, name: "Business" })).toBeInTheDocument();
+    const onView = vi.fn();
+    render(<BusinessField adapter={unwiredBusiness} onView={onView} data={snap({ revenue, strategies: [strategy], risk, tasks: [{ title: "Ship", status: "active", priority: "high", tags: [] }] })} />);
+    expect(screen.getByRole("heading", { level: 1, name: "Enterprise" })).toBeInTheDocument();
     expect(screen.getByText("$900 net in 30 days")).toBeInTheDocument();
     expect(within(screen.getByRole("list", { name: "Revenue, last 30 days" })).getByText("$1,200")).toBeInTheDocument();
     expect(screen.queryByText("Sample data")).toBeNull();
-    expect(screen.getByRole("region", { name: "Work · 1 in progress" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Tasks · 1 in progress" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open Tasks ›" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Decisions ›" }));
+    expect(onView.mock.calls).toEqual([["tasks"], ["decisions"]]);
   });
 });
 
-describe("Business › Money (design-1110d D-B9–B11, USD only)", () => {
+describe("Enterprise › Finances (was Money; design-1110d D-B9–B11, USD only)", () => {
   it("income vs costs per strategy from the revenue summary; ledger funds wait for currency conversion", () => {
     render(<RevenueField adapter={unwiredBusiness} data={snap({ revenue, strategies: [strategy], risk })} />);
     expect(screen.getByText("$900 net in 30 days")).toBeInTheDocument();
     expect(screen.getByLabelText("$1,200 income, $300 costs")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Finances" })).toBeInTheDocument();
+    expect(screen.getByText(/Read-only, from the business ledger/)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "In Decisions" })).toBeInTheDocument();
     const funds = screen.getByRole("table", { name: "Fund balances" });
     expect(within(funds).getAllByText("\u2014")).toHaveLength(5);
     expect(screen.getByText("Needs wiring · currency conversion")).toBeInTheDocument();
@@ -83,6 +144,6 @@ describe("Business › Money (design-1110d D-B9–B11, USD only)", () => {
   it("awaiting state", () => {
     render(<RevenueField adapter={unwiredBusiness} data={snap({ strategies: [strategy] })} />);
     expect(screen.getByText("No revenue yet")).toBeInTheDocument();
-    expect(screen.getByText("Tracking starts when a real source reports in.")).toBeInTheDocument();
+    expect(screen.getByText(/Tracking starts when a real source reports in\./)).toBeInTheDocument();
   });
 });

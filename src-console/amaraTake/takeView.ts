@@ -13,7 +13,7 @@ export type TakeView =
   | { state: "failed"; reason: string }
   | { state: "unwired"; reason?: string };
 
-export const TAKE_PAGE_LABEL: Record<TakePage, string> = { home: "Home", fitness: "Fitness", neuro: "Neuro", mindBody: "Mind–Body", business: "Business" };
+export const TAKE_PAGE_LABEL: Record<TakePage, string> = { home: "Home", fitness: "Fitness", neuro: "Neuro", mindBody: "Mind–Body", business: "Enterprise" };
 
 /** What each page waits for before Amara writes (HANDOFF-1110f triggers). */
 export const WAITING_FOR: Record<TakePage, string> = {
@@ -43,7 +43,7 @@ export const SAMPLE_NOTES: Record<TakePage, TakeNote> = {
   fitness: { text: "Recovery is high at **74%** after **7h 32m** asleep at **91%** efficiency. Effort so far is **35 of 100**, so there's room for a harder session today.", chips: [{ label: "Recovery", value: "74%" }, { label: "Sleep", value: "7h 32m" }, { label: "Efficiency", value: "91%" }, { label: "Effort", value: "35 / 100" }], time: "Today, 7:40", sourceLine: "From last night's sleep and today's effort", question: "Why is there room for a harder session today?" },
   neuro: { text: "Last night's **20-minute** session averaged **62 focus** and **71 calm**. You went in on **74%** recovery, and calm led focus, so a short focus block may suit you today.", chips: [{ label: "Focus", value: "62 / 100" }, { label: "Calm", value: "71 / 100" }, { label: "Session", value: "20 min" }, { label: "Recovery", value: "74%" }], time: "Today, 7:40", sourceLine: "From the Oct 27 session", question: "What kind of focus block would suit me today?" },
   mindBody: { lane: "Health + Neuro", text: "Body and mind mostly agree today. Resting HR is **50 bpm**, 2 below your usual, and HRV is **56 ms**, a little under your 60. Last night's session held calm at **71** and focus at **62**. Favour steady work over a hard workout.", chips: [{ label: "Resting HR", value: "50 bpm", lane: "health" }, { label: "HRV", value: "56 ms", lane: "health" }, { label: "Sleep", value: "7h 32m", lane: "health" }, { label: "Calm", value: "71", lane: "neuro" }, { label: "Focus", value: "62", lane: "neuro" }], time: "Today, 7:40", sourceLine: "From today's readiness and the Oct 27 session", question: "Why steady work over a hard workout today?" },
-  business: { text: "Net is **$1,580** over 30 days on **$1,820** revenue. Two things need you: the Taiyo Skin funding vote and the supplier invoice with no tax line. Trading is within limits at risk index **0.18**.", chips: [{ label: "Net · 30 days", value: "$1,580" }, { label: "Revenue", value: "$1,820" }, { label: "Needs a decision", value: "2" }, { label: "Risk index", value: "0.18" }], time: "Today, 7:40", sourceLine: "From Business overview", question: "Which decision should I take first?" },
+  business: { text: "Net is **$1,580** over 30 days on **$1,820** revenue. Two things need you: the Taiyo Skin funding vote and the supplier invoice with no tax line. Trading is within limits at risk index **0.18**.", chips: [{ label: "Net · 30 days", value: "$1,580" }, { label: "Revenue", value: "$1,820" }, { label: "Needs a decision", value: "2" }, { label: "Risk index", value: "0.18" }], time: "Today, 7:40", sourceLine: "From Enterprise overview", question: "Which decision should I take first?" },
 };
 
 /** Preview only: `nexus.sampleTakeState` shows one of the other states with sample adapters on. */

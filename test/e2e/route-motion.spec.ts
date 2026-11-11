@@ -51,7 +51,7 @@ test.describe("motion kinds", () => {
     await openApp(page, { theme });
     await lastChunk;
     await record(page);
-    for (const label of ["Agents", "Mind–Body", "Business", "Settings", "Smart home"]) {
+    for (const label of ["Agents", "Mind–Body", "Life", "Enterprise", "Settings", "Smart home"]) {
       await navButton(page, label).click();
       await expect(activeField(page, label).getByRole("heading", { level: 1 }).first()).toBeVisible();
     }
@@ -62,8 +62,8 @@ test.describe("motion kinds", () => {
 test.describe("interruption and input", () => {
   test("the new page is live while it enters", async ({ page, theme }) => {
     await openApp(page, { theme });
-    await navButton(page, "Business").click();
-    await activeField(page, "Business").getByRole("heading", { level: 1 }).waitFor();
+    await navButton(page, "Enterprise").click();
+    await activeField(page, "Enterprise").getByRole("heading", { level: 1 }).waitFor();
     await expect.poll(() => motion(page)).toBeNull();
     const hit = await page.evaluate(async () => {
       document.querySelector<HTMLElement>("[data-system=settings]")!.click();
@@ -77,8 +77,8 @@ test.describe("interruption and input", () => {
 
   test("clicks land during a transition, and the last click wins", async ({ page, theme, consoleErrors }) => {
     await openApp(page, { theme });
-    await navButton(page, "Business").click();
-    await expect(activeField(page, "Business").getByRole("heading", { level: 1 })).toHaveText("Business");
+    await navButton(page, "Enterprise").click();
+    await expect(activeField(page, "Enterprise").getByRole("heading", { level: 1 })).toHaveText("Enterprise");
     await expect.poll(() => motion(page)).toBeNull();
     const target = async (label: string) => { const box = (await navButton(page, label).boundingBox())!; return [box.x + box.width / 2, box.y + box.height / 2] as const; };
     const [settingsX, settingsY] = await target("Settings");
@@ -114,7 +114,7 @@ test.describe("focus and scroll", () => {
     await page.keyboard.press("Meta+k");
     await page.getByRole("combobox", { name: "Search or ask Amara" }).fill("rev");
     await page.keyboard.press("Enter");
-    await expect(activeField(page, "Business").getByRole("heading", { level: 1 })).toBeFocused();
+    await expect(activeField(page, "Enterprise").getByRole("heading", { level: 1 })).toBeFocused();
   });
 
   test("arrow keys stay on the segmented control while its sub-views change", async ({ page, theme }) => {
@@ -138,8 +138,8 @@ test.describe("focus and scroll", () => {
     const pane = page.locator(".active-field");
     await pane.evaluate((el) => { el.scrollTop = 400; });
     expect(await pane.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-    await navButton(page, "Business").click();
-    await activeField(page, "Business").getByRole("heading", { level: 1 }).waitFor();
+    await navButton(page, "Enterprise").click();
+    await activeField(page, "Enterprise").getByRole("heading", { level: 1 }).waitFor();
     await expect.poll(() => pane.evaluate((el) => el.scrollTop)).toBe(0);
   });
 });
@@ -162,8 +162,8 @@ test.describe("fallbacks", () => {
     await navButton(page, "Settings").click();
     await expect(page.locator(".active-field").getByRole("heading", { level: 1 })).toHaveText("Settings");
     await expect.poll(() => motion(page)).toBeNull();
-    await navButton(page, "Business").click();
-    await expect(page.locator(".active-field").getByRole("heading", { level: 1 })).toHaveText("Business");
+    await navButton(page, "Enterprise").click();
+    await expect(page.locator(".active-field").getByRole("heading", { level: 1 })).toHaveText("Enterprise");
     expect(consoleErrors).toEqual([]);
   });
 });

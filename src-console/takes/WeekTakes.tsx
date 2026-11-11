@@ -9,11 +9,11 @@ import "./takes.css";
 const said = (r: Action, done: string) => (r.state === "unwired" ? "Needs wiring, so nothing was set." : `${r.state === "sample" ? "Sample data: " : ""}${done}`);
 
 /** Weekly review tile: how many of this week's suggestions were done (t5). */
-export function WeekSuggestionsTile({ adapter = takesAdapter() }: { adapter?: TakesAdapter }) {
+export function WeekSuggestionsTile({ adapter = takesAdapter(), title = "AMARA'S SUGGESTIONS" }: { adapter?: TakesAdapter; title?: string }) {
   const w = adapter.week();
   const v = valueOf(w);
   return (
-    <div className="pk-review"><h3>AMARA&apos;S SUGGESTIONS</h3>
+    <div className="pk-review"><h3>{title}</h3>
       {!v ? <><span className="pk-big">–</span><span className="pk-sub">Answer log <DataTag kind="wire" /></span></> : <>
         <span className="pk-big">{v.done} <small>of {v.of} done</small></span>
         <span className="pk-delta" data-d="up">{Math.round((v.done / Math.max(1, v.of)) * 100)}% · {v.detected} counted by themselves</span>
@@ -73,7 +73,7 @@ export function TakesThisWeekCard({ adapter = takesAdapter() }: { adapter?: Take
 }
 
 /** Goals: a suggestion that looks better can become a habit; nothing changes a goal until you tap (t6). */
-export function ReadyToKeepCard({ adapter = takesAdapter() }: { adapter?: TakesAdapter }) {
+export function ReadyToKeepCard({ adapter = takesAdapter(), title = "Ready to keep" }: { adapter?: TakesAdapter; title?: string }) {
   const w = adapter.goals();
   const v = valueOf(w);
   const [note, setNote] = useState<string | null>(null);
@@ -81,7 +81,7 @@ export function ReadyToKeepCard({ adapter = takesAdapter() }: { adapter?: TakesA
   const r = v.ready[0];
   const o = r.outcome;
   return (
-    <Card title="Ready to keep" accessory={<span className="pk-acc">{w.state === "sample" && <DataTag kind="sample" />}</span>}>
+    <Card title={title} accessory={<span className="pk-acc">{w.state === "sample" && <DataTag kind="sample" />}</span>}>
       <div className="t-out__text">
         <VerdictChip v={o.verdict} />
         <h4 className="t-mini__h">{o.title}</h4>
@@ -96,12 +96,12 @@ export function ReadyToKeepCard({ adapter = takesAdapter() }: { adapter?: TakesA
   );
 }
 
-export function SuggestedLatelyCard({ adapter = takesAdapter() }: { adapter?: TakesAdapter }) {
+export function SuggestedLatelyCard({ adapter = takesAdapter(), title = "Suggested lately" }: { adapter?: TakesAdapter; title?: string }) {
   const w = adapter.goals();
   const v = valueOf(w);
   if (!v) return null;
   return (
-    <Card title="Suggested lately" accessory={<span className="pk-acc">{w.state === "sample" && <DataTag kind="sample" />}</span>}>
+    <Card title={title} accessory={<span className="pk-acc">{w.state === "sample" && <DataTag kind="sample" />}</span>}>
       {v.lately.map((l) => <div className="pk-row" key={`${l.page}-${l.title}`}><div className="pk-row__main"><span>{TAKE_PAGE_LABEL[l.page]} · {l.title}</span><small>{l.sub}</small></div><AnswerDots days={l.days} label={l.title} /></div>)}
       <p className="pk-note">Suggestions aren&apos;t goals. Nothing here changes a goal until you tap Make it a habit.</p>
     </Card>

@@ -4,11 +4,12 @@ import { activeField, expect, openToday, test, openMore } from "./fixtures/tauri
 test("(h) Home subline: greeting, status from data, and today's date from the clock", async ({ page, theme }) => {
   await openToday(page, { theme, reduceMotion: true });
   const home = activeField(page, "Today");
-  await expect(home.getByRole("heading", { level: 1 })).toHaveText("Command Center");
+  await expect(home.getByRole("heading", { level: 1 })).toHaveText("Today");
   const today = await page.evaluate(() => new Date(Date.now()).toLocaleDateString("en-US", { timeZone: "Asia/Tokyo", weekday: "long", month: "short", day: "numeric" }));
   expect(today).toMatch(/^[A-Z][a-z]+day, [A-Z][a-z]{2} \d{1,2}$/);
   const line = home.locator(".home__summary");
-  await expect(line).toHaveText(new RegExp(`^(Amara has \\d+ actions? waiting for approval|Amara is tracking \\d+ priorit(y|ies) today|All clear\\. Amara is standing by\\.) · ${today}$`));
+  // design-1111v: "<date> · N things need you", counted from Needs you today (the quiet check-in isn't counted).
+  await expect(line).toHaveText(new RegExp(`^${today} · (nothing needs you|1 thing needs you|\\d+ things need you)$`));
   await expect(home.locator(".home .page-hero:not(.page-hero--section) .page-hero__statement")).toHaveText(/^Good (morning|afternoon|evening), Taisun$/);
 });
 

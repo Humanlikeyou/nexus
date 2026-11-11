@@ -17,7 +17,7 @@ const emit = (page: Page, event: string, payload: Record<string, unknown>) =>
   page.evaluate(([e, p]) => (window as unknown as { __E2E_EMIT: (e: unknown, p: unknown) => void }).__E2E_EMIT(e, { ts: Date.now(), ...p }), [event, payload] as const);
 const lens = (page: Page) => page.locator('.amara-lens[data-size="320"]');
 const line = (page: Page) => page.locator(".landing__line");
-const NAV = ["Today", "Agents", "Mind–Body", "Business", "Settings", "Smart home"];
+const NAV = ["Today", "Agents", "Mind–Body", "Life", "Enterprise", "Settings", "Smart home"];
 
 /** e2e Chromium reports reduced transparency; force it off so shots show the real look. */
 async function realLook(page: Page, theme: Theme) {
@@ -98,7 +98,7 @@ test("Landing: Today opens the dashboard, Home returns to the lens, ⌘1 and ⌘
   await openApp(page, { theme, data: waiting });
   await navButton(page, "Today").click();
   const today = activeField(page, "Today");
-  await expect(today.getByRole("heading", { level: 1 })).toHaveText("Command Center");
+  await expect(today.getByRole("heading", { level: 1 })).toHaveText("Today");
   await expect(today.locator(".home__summary")).toBeVisible();
   await expect(page.locator(".toolbar-location")).toHaveText("Today");
   await expect(lens(page)).toHaveCount(0);
@@ -151,17 +151,17 @@ test("Landing: fits the window at every size with no clipping or page scroll", a
   }
 });
 
-test("Landing: the six buttons sit in one centred row at both window sizes", async ({ page, theme }) => {
+test("Landing: the seven buttons sit in one centred row at both window sizes", async ({ page, theme }) => {
   await openApp(page, { theme, data: waiting });
   for (const viewport of [WIDE, SMALL]) {
     await page.setViewportSize(viewport);
     const boxes = await Promise.all((await page.locator(".landing__nav").getByRole("button").all()).map(async (b) => (await b.boundingBox())!));
-    expect(boxes).toHaveLength(6);
+    expect(boxes).toHaveLength(7);
     expect(new Set(boxes.map((b) => b.y)).size, `${viewport.width}: one row`).toBe(1);
     // Centred under the lens, which sits in the larger golden section on a wide window.
     const stage = (await page.locator(".landing__stage").boundingBox())!;
     const left = boxes[0].x;
-    const right = stage.x + stage.width - (boxes[5].x + boxes[5].width);
+    const right = stage.x + stage.width - (boxes[6].x + boxes[6].width);
     expect(Math.abs(left - stage.x - right), `${viewport.width}: centred`).toBeLessThanOrEqual(1);
     expect(left, `${viewport.width}: side margin`).toBeGreaterThanOrEqual(24);
     const gaps = boxes.slice(1).map((b, i) => Math.round(b.x - (boxes[i].x + boxes[i].width)));

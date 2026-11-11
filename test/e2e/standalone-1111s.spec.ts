@@ -48,7 +48,7 @@ test("(1111s) the Settings tab bar is the Business bar, in order, and old anchor
 test("(1111s) sidebar summary opens Services; services show every state in plain words", async ({ page, theme }) => {
   await preview(page);
   await openApp(page, { theme, reduceMotion: true });
-  await navButton(page, "Business").click();
+  await navButton(page, "Enterprise").click();
   await page.getByRole("button", { name: /1 service needs attention/ }).click();
   const field = activeField(page, "Settings");
   await expect(field.getByRole("heading", { level: 1 })).toHaveText("Services");

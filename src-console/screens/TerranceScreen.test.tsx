@@ -21,11 +21,48 @@ const full = snap({
 });
 
 describe("Home (TerranceField)", () => {
-  it("revenue uses grouped currency", () => {
+  it("design-1111v: Revenue today and Priorities are gone from Today (Enterprise owns money)", () => {
     render(<TerranceField data={{ ...full, revenue: { ...full.revenue, today_revenue: 1820, net_income: -12345.6 } }} now={NOW} scheduler={running} />);
-    const revenue = screen.getByRole("region", { name: "Revenue today" });
-    expect(revenue).toHaveTextContent("$1,820");
-    expect(revenue).toHaveTextContent("-$12,346");
+    expect(screen.queryByRole("region", { name: "Revenue today" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Priorities" })).toBeNull();
+    expect(document.body.textContent).not.toContain("$1,820");
+  });
+
+  it("design-1111v: card C first, Needs you today second; no Goals, Life admin or Weekly review sections", () => {
+    const { container } = render(<TerranceField data={full} now={NOW} scheduler={running} todos={<section id="lists" className="page-section">To-dos</section>} />);
+    const order = [...container.querySelectorAll(".home > section, .home > .page-section, .home > details")].map((n) => n.id || n.className.split(" ")[0]);
+    expect(order.slice(0, 4)).toEqual(["home__recovery-card", "needs-you", "checkin", "lists"]);
+    for (const id of ["goals", "life-admin", "weekly-review"]) expect(container.querySelector(`#${id}`)).toBeNull();
+    expect(screen.queryByText("Your weekly review is ready ›")).toBeNull();
+    expect(screen.getByText("Agents, schedule and insights")).toBeInTheDocument();
+  });
+
+  it("design-1111v: Sundays show 'Your weekly review is ready ›' under card C, opening Life › Weekly review", () => {
+    const onOpen = vi.fn();
+    const sunday = new Date("2026-10-25T14:00:00+09:00").getTime();
+    const { container } = render(<TerranceField data={full} now={sunday} scheduler={running} onOpen={onOpen} />);
+    const ready = screen.getByRole("button", { name: "Your weekly review is ready. Open Life, Weekly review" });
+    expect(container.querySelector(".home__recovery-card")?.nextElementSibling).toBe(ready);
+    fireEvent.click(ready);
+    expect(onOpen).toHaveBeenCalledWith({ id: "life", view: "weekly-review" });
+  });
+
+  it("design-1111v: Needs you today only links; the check-in is a quiet row all day", async () => {
+    const onOpen = vi.fn();
+    const action = { id: "a1", toolId: "mac.open_app", title: "Open Notes", status: "awaiting_approval" } as unknown as SystemSnapshot["actions"][number];
+    render(<TerranceField data={{ ...full, actions: [action] }} now={NOW} scheduler={running} onOpen={onOpen} />);
+    const inbox = screen.getByRole("list", { name: "Needs you today" });
+    const checkin = within(inbox).getByText("Evening check-in").closest("li")!;
+    expect(checkin).toHaveAttribute("data-quiet");
+    // Every enabled control in the inbox is an "Open …" link; unwired sources are disabled with a reason.
+    for (const b of within(inbox).getAllByRole("button")) {
+      if ((b as HTMLButtonElement).disabled) expect(b.getAttribute("aria-describedby")).toBeTruthy();
+      else expect(b.textContent).toMatch(/^(Open|Go to)/);
+    }
+    fireEvent.click(within(inbox).getByRole("button", { name: "Open on Home: Open Notes" }));
+    expect(onOpen).toHaveBeenCalledWith({ id: "terrance", view: "main" });
+    fireEvent.click(within(inbox).getByRole("button", { name: "Go to Check-in: Evening check-in" }));
+    expect(onOpen).toHaveBeenCalledWith({ id: "terrance", view: "checkin" });
   });
 
   it("neuro: Calm shows the saved calm_pct, rounded, with the Beta badge", () => {
@@ -38,7 +75,7 @@ describe("Home (TerranceField)", () => {
 
   it("loading: skeleton cards, heading, no dashes", () => {
     const { container } = render(<TerranceField data={INITIAL_SNAPSHOT} now={NOW} scheduler={running} />);
-    expect(screen.getByRole("heading", { level: 1, name: "Command Center" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeInTheDocument();
     expect(screen.getByText("Good afternoon, Taisun")).toBeInTheDocument();
     // Loading: date only, no "All clear" before data lands.
     expect(screen.getByText("Wednesday, Oct 28")).toBeInTheDocument();
@@ -62,7 +99,6 @@ describe("Home (TerranceField)", () => {
     // OpenClaw isn't the active backend here: no Assistant row and no OpenClaw label.
     expect(within(agents).queryByText("Assistant")).toBeNull();
     expect(within(agents).queryByText(/OpenClaw|Not connected/)).toBeNull();
-    expect(screen.getByText("Ship Amara OS v2")).toBeInTheDocument();
     const neuro = screen.getByRole("region", { name: "Neuro" });
     expect(neuro).toHaveTextContent("Last session20min");
     // A session saved before calm_pct existed: Calm shows "—" + Beta (Decision 5).
@@ -71,7 +107,7 @@ describe("Home (TerranceField)", () => {
     // Recovery band word is colored by band; header status is sentence-case text, not a badge.
     expect(screen.getByText("High")).toHaveAttribute("data-band", "high");
     // Every linkable card uses the same "Open ›" header accessory; no in-body buttons.
-    for (const name of ["Open Fitness", "Open insights in Fitness", "Open Agents", "Open chat on Home", "Open Neuro", "Open Revenue"]) {
+    for (const name of ["Open Fitness", "Open insights in Fitness", "Open Agents", "Open Neuro"]) {
       expect(screen.getByRole("button", { name })).toHaveTextContent("Open");
     }
     expect(screen.getByText(/Scheduler · next consolidation 2h 14m · next reasoning 6h 12m/)).toBeInTheDocument();
@@ -84,7 +120,6 @@ describe("Home (TerranceField)", () => {
     render(<TerranceField data={snap({ noop: { ...INITIAL_SNAPSHOT.noop, message: "No local store yet." } })} now={NOW} scheduler={{ running: false, lastConsolidation: null, lastReasoning: null }} />);
     expect(screen.getByText("No recovery yet · No local store yet.")).toBeInTheDocument();
     expect(screen.getByText("Insights appear after tonight's health sync.")).toBeInTheDocument();
-    expect(screen.getByText("No current priorities")).toBeInTheDocument();
     expect(screen.queryByText("Stopped")).toBeNull(); // no duplicate badge under the strip
     expect(screen.getByText("Background jobs aren't running.")).toBeInTheDocument();
     expect(screen.getByText("Your first completed session will appear here.")).toBeInTheDocument();
@@ -139,16 +174,16 @@ describe("Home (TerranceField)", () => {
       expect(homeSummary(snap({ unavailableSources: [{ command: "list_terrence_actions", label: "Action ledger" }] }))).toBeNull();
     });
 
-    it("renders the status · date line; actions waiting is a button to Chat", () => {
-      const onNavigate = vi.fn();
-      const { rerender, container } = render(<TerranceField data={full} now={NOW} scheduler={running} onNavigate={onNavigate} />);
-      expect(container.querySelector(".home__summary")?.textContent).toBe("Amara is tracking 1 priority today · Wednesday, Oct 28");
+    it("design-1111v: renders '<date> · N things need you'; the count opens Needs you today", async () => {
+      const onOpen = vi.fn();
+      const { rerender, container } = render(<TerranceField data={full} now={NOW} scheduler={running} onOpen={onOpen} />);
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
       expect(container.querySelector(".home__summary time")).toHaveAttribute("dateTime", "2026-10-28");
-      rerender(<TerranceField data={{ ...full, actions: [action("awaiting_approval")] }} now={NOW} scheduler={running} onNavigate={onNavigate} />);
-      fireEvent.click(screen.getByRole("button", { name: "Amara has 1 action waiting for approval" }));
-      expect(onNavigate).toHaveBeenCalledWith("chat");
-      rerender(<TerranceField data={snap()} now={NOW} scheduler={running} onNavigate={onNavigate} />);
-      expect(container.querySelector(".home__summary")?.textContent).toBe("All clear. Amara is standing by. · Wednesday, Oct 28");
+      expect(container.querySelector(".home__summary")?.textContent).toBe("Wednesday, Oct 28 · nothing needs you");
+      rerender(<TerranceField data={{ ...full, actions: [action("awaiting_approval"), { ...action("awaiting_approval"), id: "b" }] }} now={NOW} scheduler={running} onOpen={onOpen} />);
+      expect(container.querySelector(".home__summary")?.textContent).toBe("Wednesday, Oct 28 · 2 things need you");
+      fireEvent.click(screen.getByRole("button", { name: "2 things need you" }));
+      expect(onOpen).toHaveBeenCalledWith({ id: "terrance", view: "needs-you" });
     });
   });
 });

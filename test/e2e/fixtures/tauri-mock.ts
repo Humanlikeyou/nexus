@@ -69,6 +69,8 @@ export interface MockOptions {
   data?: Responses;
   /** Per-command response delay in ms (e.g. to make the boot splash appear). */
   delays?: Record<string, number>;
+  /** design-1111v: clock start (ISO); defaults to NOW (Wed Oct 28 14:00 JST). E.g. a Sunday for the weekly-review card. */
+  now?: string;
 }
 
 type InitArgs = { data: Responses; theme: Theme; reduceMotion: boolean; failing: string[]; delays: Record<string, number> };
@@ -132,7 +134,7 @@ function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
 
 /** Install the mock and a running clock at NOW, then open the app. */
 export async function openApp(page: Page, options: MockOptions): Promise<void> {
-  await page.clock.install({ time: new Date(NOW) });
+  await page.clock.install({ time: new Date(options.now ?? NOW) });
   // A frozen Date.now() would make every snapshot look like INITIAL_SNAPSHOT (= loading).
   await page.clock.resume();
   await page.addInitScript(initScript, {
@@ -188,11 +190,17 @@ export const navButton = (page: Page, label: string) =>
 /** The visible screen region ("<label> system"). */
 export const activeField = (page: Page, label: string) => page.getByRole("region", { name: `${label} system` });
 
-const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Crews: "Agents", Money: "Business", Ventures: "Business", Work: "Business", Revenue: "Business",
+const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Crews: "Agents",
+  // design-1111v: Enterprise tabs (Business renamed) and Life tabs. Old labels map to the renamed tab (RADIO_ALIAS).
+  Overview: "Enterprise", Decisions: "Enterprise", Ventures: "Enterprise", Finances: "Enterprise", Tasks: "Enterprise", Content: "Enterprise",
+  Money: "Enterprise", Work: "Enterprise", Revenue: "Enterprise",
+  Goals: "Life", "Weekly review": "Life", "Dates & deadlines": "Life", "Personal money": "Life",
   // design-1111s: Settings tabs.
   Services: "Settings", Devices: "Settings", Notifications: "Settings", Backup: "Settings", Voice: "Settings", Memory: "Settings" };
 /** design-1110b B: folded screens that are now a section of a host page (label → host, anchor id). */
-const SECTION_HOSTS: Record<string, [string, string]> = { Activity: ["Agents", "activity"], Lists: ["Today", "lists"] };
+const SECTION_HOSTS: Record<string, [string, string]> = { Activity: ["Agents", "activity"], Lists: ["Today", "lists"], "To-dos": ["Today", "lists"], "Needs you today": ["Today", "needs-you"] };
+/** design-1111v renames: the label a spec used → the tab it is now. */
+const RADIO_ALIAS: Record<string, string> = { Money: "Finances", Revenue: "Finances", Work: "Tasks" };
 
 /** Goes to Today from wherever the page is: from the landing its button, from anywhere else Home first. */
 export async function gotoToday(page: Page) {
@@ -250,7 +258,7 @@ export async function openView(page: Page, label: string) {
   await navButton(page, host ?? label).click();
   const field = activeField(page, host ?? label);
   if (host) {
-    const radio = field.getByRole("radio", { name: label, exact: true });
+    const radio = field.getByRole("radio", { name: RADIO_ALIAS[label] ?? label, exact: true });
     await radio.click();
     await expect(radio).toHaveAttribute("aria-checked", "true");
   }

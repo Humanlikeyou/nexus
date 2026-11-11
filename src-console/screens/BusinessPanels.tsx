@@ -1,11 +1,14 @@
 import { ChevronLeft } from "lucide-react";
 import { businessAdapter, type BusinessAdapter, type Health, type Venture } from "../business/adapters";
 import { humanize, money } from "../lib/format";
-import type { Wired } from "../lib/sampleAdapters";
+import { valueOf, type Wired } from "../lib/sampleAdapters";
 import type { SystemSnapshot } from "../types";
 import { Button, Card, DataTag, Meter, PageHero, StatusText, wiredTag, type StatusKind } from "../ui";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
+import { LinkButton, OffButton } from "../adds/Composer";
+import { decisionsLog, jst } from "../decisions/log";
 import "./CommandCenter.css";
+import "../adds/v1111.css";
 
 const HEALTH: Record<Health, { kind: StatusKind; text: string }> = {
   on_track: { kind: "off", text: "On track" }, at_risk: { kind: "risk", text: "At risk" }, off_track: { kind: "fail", text: "Off track" },
@@ -47,8 +50,12 @@ function VentureCell({ v, w, onOpen }: { v: Venture; w: Wired<Venture[]>; onOpen
   );
 }
 
+/** design-1111v (Taisun, 19:23 JST): Akiya is a personal item now and lives in Life, not in Ventures. */
+export const PERSONAL_ITEMS = new Set(["akiya"]);
+const enterpriseVentures = (w: Wired<Venture[]>): Wired<Venture[]> => (w.state === "unwired" ? w : { ...w, value: w.value.filter((v) => !PERSONAL_ITEMS.has(v.id)) });
+
 export function VenturesCard({ data, adapter, onOpen }: { data: SystemSnapshot; adapter: BusinessAdapter; onOpen?: (id: string) => void }) {
-  const ventures = adapter.ventures();
+  const ventures = enterpriseVentures(adapter.ventures());
   return (
     <Card title="Ventures" accessory={acc(<span>Health · next step</span>)}>
       <div className="cc-grid2">
@@ -56,43 +63,50 @@ export function VenturesCard({ data, adapter, onOpen }: { data: SystemSnapshot; 
         <TradingVenture data={data} />
         {ventures.state !== "unwired" && ventures.value.slice(1).map((v) => <VentureCell key={v.id} v={v} w={ventures} onOpen={onOpen} />)}
       </div>
-      {ventures.state === "unwired" && <p className="cc-note">Taiyo Skin, Akiya and other ventures appear here once venture tracking is connected <DataTag kind="wire" /></p>}
+      {ventures.state === "unwired" && <p className="cc-note">Taiyo Skin and other ventures appear here once venture tracking is connected <DataTag kind="wire" /></p>}
     </Card>
   );
 }
 
-export function DecisionsCard({ adapter }: { adapter: BusinessAdapter }) {
-  const votes = adapter.fundingRequests(), flags = adapter.taxFlags(), rules = adapter.voteRules();
-  const open = votes.state === "unwired" ? [] : votes.value.filter((v) => v.status === "open");
-  const tax = flags.state === "unwired" ? [] : flags.value;
-  const n = open.length + tax.length;
-  const tag = votes.state === "sample" || flags.state === "sample" ? <DataTag kind="sample" /> : <DataTag kind="wire" />;
+/** Overview's one-line link card (design-1111v): what is waiting, and a link to the page that handles it. */
+export function LinkCard({ title, line, open, onOpen, tag }: { title: string; line: React.ReactNode; open: string; onOpen?: () => void; tag?: React.ReactNode }) {
   return (
-    <Card title={votes.state === "unwired" && flags.state === "unwired" ? "Needs a decision" : `Needs a decision \u00b7 ${n}`} accessory={acc(tag)}>
-      {votes.state === "unwired" && flags.state === "unwired" && <p className="cc-note">Funding votes and tax flags from the ledger appear here.</p>}
-      {open.map((v) => (
-        <div className="cc-row" key={v.id}><StatusText kind="wait" /><div className="cc-row__main"><span>Funding request: {v.requester} {v.purpose.replace(/ \(.*\)$/, "").toLowerCase()}</span><small>Requested by {v.requester} · amount {wiredTag(v.amountUsd) ?? money((v.amountUsd as { value: number }).value)} · vote rules {rules.state === "unwired" ? wiredTag(rules) : `${rules.value.needed} yes votes`}</small></div>
-          <Button size="small" variant="secondary">Vote no</Button><Button size="small" variant="primary">Vote yes</Button></div>
-      ))}
-      {tax.map((t) => <div className="cc-row" key={t.id}><StatusText kind="risk" /><div className="cc-row__main"><span>Tax flag: {t.label.charAt(0).toLowerCase() + t.label.slice(1)}</span><small>{t.area} · {t.date}</small></div><Button size="small" variant="secondary">Open</Button></div>)}
+    <Card title={title} accessory={acc(tag)}>
+      <div className="v-linkrow"><p>{line}</p><span className="v-grow" /><LinkButton onClick={onOpen}>{open}</LinkButton></div>
     </Card>
   );
 }
 
-/** Business › Overview (D-B2–B6). */
-export function BusinessOverview({ data, adapter = businessAdapter(data), onOpenVenture, work }: { data: SystemSnapshot; adapter?: BusinessAdapter; onOpenVenture: (id: string) => void; work: React.ReactNode }) {
+/** Open votes and tax flags with no record in the decisions log. */
+export function waitingDecisions(adapter: BusinessAdapter) {
+  const votes = adapter.fundingRequests(), flags = adapter.taxFlags();
+  const decided = new Set((valueOf(decisionsLog().list()) ?? []).map((r) => r.itemId));
+  const open = (valueOf(votes) ?? []).filter((v) => v.status === "open" && !decided.has(v.id));
+  const tax = (valueOf(flags) ?? []).filter((t) => !decided.has(t.id));
+  const unwired = votes.state === "unwired" && flags.state === "unwired";
+  const sample = votes.state === "sample" || flags.state === "sample";
+  return { open, tax, n: open.length + tax.length, unwired, sample };
+}
+
+export function DecisionsCard({ adapter, onOpen }: { adapter: BusinessAdapter; onOpen?: () => void }) {
+  const w = waitingDecisions(adapter);
+  const line = w.unwired ? "Funding votes and tax flags from the ledger appear here." : w.n === 0 ? "Nothing is waiting for a decision." : [...w.open.map((v) => `${v.requester} ${v.purpose.replace(/ \(.*\)$/, "").toLowerCase()} vote`), ...w.tax.map((t) => `tax flag: ${t.label.charAt(0).toLowerCase()}${t.label.slice(1)}`)].join(" · ");
+  return <LinkCard title={w.unwired ? "Decisions" : `Decisions · ${w.n} waiting`} line={line} open="Open Decisions ›" onOpen={onOpen} tag={w.unwired ? <DataTag kind="wire" /> : w.sample ? <DataTag kind="sample" /> : null} />;
+}
+
+/** Enterprise › Overview (D-B2–B6, design-1111v): the take and recommendation stay here; Decisions, Tasks and Content are link cards. */
+export function BusinessOverview({ data, adapter = businessAdapter(data), onOpenVenture, onView, work }: { data: SystemSnapshot; adapter?: BusinessAdapter; onOpenVenture: (id: string) => void; onView?: (view: string) => void; work: React.ReactNode }) {
   const { revenue, risk } = data;
   const riskDown = data.unavailableSources.some((s) => s.command === "arm_get_risk_status");
   const target = adapter.revenueTargetUsd();
-  const ventures = adapter.ventures();
+  const ventures = enterpriseVentures(adapter.ventures());
   const atRisk = ventures.state === "unwired" ? [] : ventures.value.filter((v) => v.health === "at_risk");
-  const votes = adapter.fundingRequests(), flags = adapter.taxFlags();
-  const decisions = (votes.state === "unwired" ? 0 : votes.value.filter((v) => v.status === "open").length) + (flags.state === "unwired" ? 0 : flags.value.length);
+  const decisions = waitingDecisions(adapter).n;
   const sampleLine = [decisions ? `${decisions} need a decision` : null, atRisk.length ? `${atRisk.map((v) => v.name).join(", ")} at risk` : null].filter(Boolean).join(", ");
   const live = hasRevenue(revenue);
   return (
     <div className="biz page-inset cc-page">
-      <PageHero title="Business" statement={live ? `${money(revenue.net_income)} net in 30 days` : "No revenue yet"}
+      <PageHero title="Enterprise" statement={live ? `${money(revenue.net_income)} net in 30 days` : "No revenue yet"}
         detail={<>{live ? `On ${money(revenue.total_revenue)} revenue` : "Tracking starts when a real source reports in"}{riskDown ? "" : ` · risk ${risk.kill_switch_active ? "kill switch engaged" : "within limits"}`}{sampleLine ? <> · {sampleLine} <span className="cc-hero-tag"><DataTag kind="sample" /></span></> : null}</>} />
       <ul className="cc-strip" aria-label="Revenue, last 30 days">
         <li className="cc-tile"><span className="cc-tile__k">Revenue · 30 days</span><span className="cc-tile__v">{money(revenue.month_revenue)}</span><span className="cc-tile__s">Target {target.state === "unwired" ? wiredTag(target) : money(target.value)}</span></li>
@@ -101,16 +115,16 @@ export function BusinessOverview({ data, adapter = businessAdapter(data), onOpen
         <li className="cc-tile"><span className="cc-tile__k">Trading risk</span><span className="cc-tile__v">{riskDown ? <StatusText kind="off">Unavailable</StatusText> : risk.kill_switch_active ? <StatusText kind="fail">Kill switch</StatusText> : <StatusText kind="ok">Within limits</StatusText>}</span><span className="cc-tile__s">{riskDown ? "" : `Risk index ${risk.risk_index} · kill switch ${risk.kill_switch_active ? "on" : "off"}`}</span></li>
       </ul>
       <AmaraTake page="business" className="biz__take" />
-      <DecisionsCard adapter={adapter} />
+      <DecisionsCard adapter={adapter} onOpen={onView ? () => onView("decisions") : undefined} />
       <VenturesCard data={data} adapter={adapter} onOpen={onOpenVenture} />
       {work}
     </div>
   );
 }
 
-/** Business › Ventures (D-B5, D-B7, D-B8): every venture, or one opened. */
-export function VenturesView({ data, adapter = businessAdapter(data), ventureId, onOpen }: { data: SystemSnapshot; adapter?: BusinessAdapter; ventureId: string | null; onOpen: (id: string | null) => void }) {
-  const ventures = adapter.ventures();
+/** Enterprise › Ventures (D-B5, D-B7, D-B8): every venture, or one on its own page (design-1111v: route ventures/<id>). */
+export function VenturesView({ data, adapter = businessAdapter(data), ventureId, onOpen, onView }: { data: SystemSnapshot; adapter?: BusinessAdapter; ventureId: string | null; onOpen: (id: string | null) => void; onView?: (view: string) => void }) {
+  const ventures = enterpriseVentures(adapter.ventures());
   const list = ventures.state === "unwired" ? [] : ventures.value;
   const v = ventureId ? list.find((x) => x.id === ventureId) : undefined;
   const detail = v ? adapter.venture(v.id) : null;
@@ -118,22 +132,34 @@ export function VenturesView({ data, adapter = businessAdapter(data), ventureId,
     const d = detail.state === "unwired" ? null : detail.value;
     const h = HEALTH[v.health];
     const tag = wiredTag(detail);
+    // design-1111v §4: the venture page reads the decisions log; nothing copies it.
+    const logged = (valueOf(decisionsLog().list()) ?? []).filter((r) => r.sourceLink.view === `ventures/${v.id}`);
+    const waiting = waitingDecisions(adapter).open.filter((r) => r.requester === v.name).length;
     return (
       <div className="biz page-inset cc-page">
         <nav className="cc-crumb" aria-label="Breadcrumb"><Button className="cc-back" variant="plain" size="small" icon={ChevronLeft} onClick={() => onOpen(null)}>Ventures</Button> › {v.name}</nav>
         <PageHero title={`Venture · ${v.stage.toLowerCase()}`} statement={`${v.name} is ${h.text.toLowerCase()}`} detail={<>{d?.headline ?? "Venture details need wiring."} <span className="cc-hero-tag">{tag}</span></>} />
         <ul className="cc-strip" aria-label="Venture summary">
-          <li className="cc-tile"><span className="cc-tile__k">Launch checklist</span><span className="cc-tile__v">{d ? `${d.checklist.filter((c) => c.done).length} of ${d.checklist.length}` : "\u2014"}</span><span className="cc-tile__s">{tag}</span></li>
+          <li className="cc-tile"><span className="cc-tile__k">Tasks done</span><span className="cc-tile__v">{d ? `${d.checklist.filter((c) => c.done).length} of ${d.checklist.length}` : "\u2014"}</span><span className="cc-tile__s">{tag}</span></li>
           <li className="cc-tile"><span className="cc-tile__k">Budget used</span><span className="cc-tile__v">{d ? usd(d.budgetUsedUsd) : "\u2014"}</span><span className="cc-tile__s">{d ? wiredTag(d.budgetUsedUsd) : tag}</span></li>
           <li className="cc-tile"><span className="cc-tile__k">Fund balance</span><span className="cc-tile__v">{d ? usd(d.fundUsd) : "\u2014"}</span><span className="cc-tile__s">{d ? wiredTag(d.fundUsd) : tag}</span></li>
-          <li className="cc-tile"><span className="cc-tile__k">Open votes</span><span className="cc-tile__v">{d ? d.openVotes : "\u2014"}</span><span className="cc-tile__s">{tag}</span></li>
+          <li className="cc-tile"><span className="cc-tile__k">Waiting decisions</span><span className="cc-tile__v">{d ? waiting : "\u2014"}</span><span className="cc-tile__s">{tag}</span></li>
         </ul>
         {d && <>
           <div className="cc-grid2">
-            <Card title="Launch checklist" accessory={acc(tag)}><ul className="cc-check">{d.checklist.map((c) => <li key={c.label} data-done={c.done || undefined}><span className="cc-sr">{c.done ? "Done: " : "To do: "}</span>{c.label}</li>)}</ul></Card>
-            <Card title="Milestones" accessory={acc(tag)}>{d.milestones.map((m) => <div className="cc-row" key={m.label}><div className="cc-row__main"><span>{m.label}</span><small>{m.due}</small></div><StatusText kind={HEALTH[m.health].kind}>{HEALTH[m.health].text}</StatusText></div>)}</Card>
+            <Card title="Launch tasks" accessory={acc(tag)}><ul className="cc-check">{d.checklist.map((c) => <li key={c.label} data-done={c.done || undefined}><span className="cc-sr">{c.done ? "Done: " : "To do: "}</span>{c.label}</li>)}</ul></Card>
+            <Card title="Milestones" accessory={acc(tag)}>
+              {d.milestones.map((m) => <div className="cc-row" key={m.label}><div className="cc-row__main"><span>{m.label}</span><small>{m.due}</small></div><StatusText kind={HEALTH[m.health].kind}>{HEALTH[m.health].text}</StatusText></div>)}
+              {logged.map((r) => <div className="cc-row" key={r.id}><div className="cc-row__main"><span>Decided: {r.title.replace(/^[^·]+· /, "")}</span><small>{jst(r.decidedAt)} JST · from the decisions log</small></div><StatusText kind="ok">{r.choice === "handled" ? "Handled" : r.choice === "yes" ? "Yes" : "No"}</StatusText></div>)}
+            </Card>
           </div>
-          <Card title="Next actions" accessory={acc(tag)}>{d.nextActions.map((a, i) => <div className="cc-row" key={a.label}><div className="cc-row__main"><span>{a.label}</span><small>{a.detail}</small></div><Button size="small" variant={i === 0 ? "primary" : "secondary"}>{a.action}</Button></div>)}</Card>
+          <Card title="Next steps" accessory={acc(tag)}>{d.nextActions.map((a, i) => (
+            <div className="cc-row" key={a.label}><div className="cc-row__main"><span>{a.label}</span><small>{a.detail}</small></div>
+              {a.action === "Draft with crew" ? <OffButton variant={i === 0 ? "primary" : "secondary"} reason="Needs wiring · crew drafts from a venture">{a.action}</OffButton>
+                : a.action === "Open vote" ? <LinkButton small onClick={onView ? () => onView("decisions") : undefined}>Open in Decisions ›</LinkButton>
+                  : <OffButton reason="Needs wiring">{a.action}</OffButton>}
+            </div>
+          ))}</Card>
         </>}
       </div>
     );
@@ -141,9 +167,10 @@ export function VenturesView({ data, adapter = businessAdapter(data), ventureId,
   const atRisk = list.filter((x) => x.health === "at_risk").length;
   return (
     <div className="biz page-inset cc-page">
-      <PageHero title="Business" statement={ventures.state === "unwired" ? "Trading" : `${list.length + 1} ventures${atRisk ? `, ${atRisk} at risk` : ""}`}
+      <PageHero title="Ventures" statement={ventures.state === "unwired" ? "Trading" : `${list.length + 1} ventures${atRisk ? `, ${atRisk} at risk` : ""}`}
         detail={<>Trading from the revenue engine&apos;s live data{list.length ? <>; {list.map((x) => x.name).join(" and ")} <span className="cc-hero-tag">{wiredTag(ventures)}</span></> : null}</>} />
       <VenturesCard data={data} adapter={adapter} onOpen={(id) => onOpen(id)} />
+      <p className="cc-note">Akiya is a personal item now: its dates are in Life › Dates &amp; deadlines.</p>
     </div>
   );
 }

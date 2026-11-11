@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { activeField, expect, gotoToday, navButton, openApp, openView, routeSettled, test } from "./fixtures/tauri-mock";
 
-/** build-1111t: take memory, one daily suggestion per page, follow-through by type, and Business › Personal money (read-only). */
+/** build-1111t: take memory, one daily suggestion per page, follow-through by type, and personal money (read-only; Life › Personal money since 1111v). */
 async function blocking(page: Page) {
   const r = await new AxeBuilder({ page }).analyze();
   return r.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => `${v.id}: ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
@@ -18,8 +18,11 @@ const FORBIDDEN = /Let Home do it|3-week|Trial day|NOOP|OpenClaw/;
 const SURFACES: Array<[string, (p: Page) => Promise<void>]> = [
   ["Neuro take + suggestion", async (p) => { await openView(p, "Neuro"); }],
   ["Patterns › Follow-through", async (p) => { await sub(p, "Mind–Body", "Patterns"); await p.getByRole("button", { name: /^Follow-through/ }).click(); }],
-  ["Business › Personal", async (p) => { await sub(p, "Business", "Personal"); }],
-  ["Today (weekly review, goals)", async (p) => { await gotoToday(p); }],
+  // design-1111v: Business › Personal moved to Life › Personal money; goals and the weekly review moved to Life.
+  ["Life › Personal money", async (p) => { await sub(p, "Life", "Personal money"); }],
+  ["Today", async (p) => { await gotoToday(p); }],
+  ["Life › Goals", async (p) => { await sub(p, "Life", "Goals"); }],
+  ["Life › Weekly review", async (p) => { await sub(p, "Life", "Weekly review"); }],
 ];
 for (const sample of [false, true]) {
   for (const [name, go] of SURFACES) {
@@ -77,8 +80,8 @@ test("(1111t) fitness auto-detected Done can be undone", async ({ page, theme })
 test("(1111t) money: read-only badges, seed phrase refused and cleared, JPY view, Not financial advice", async ({ page, theme }) => {
   await preview(page);
   await openApp(page, { theme, reduceMotion: true });
-  await sub(page, "Business", "Personal");
-  const field = activeField(page, "Business");
+  await sub(page, "Life", "Personal money");
+  const field = activeField(page, "Life");
   await expect(field.getByText("Can't move money", { exact: true })).toHaveCount(8);
   await expect(field.getByText(/^Not financial advice\./)).toBeVisible();
   await field.getByRole("radio", { name: "JPY" }).click();
@@ -99,8 +102,8 @@ test("(1111t) money: read-only badges, seed phrase refused and cleared, JPY view
 test("(1111t) money states: expired is greyed and left out; no suggestion on partial data", async ({ page, theme }) => {
   await preview(page, {}, { scenario: "states" });
   await openApp(page, { theme, reduceMotion: true });
-  await sub(page, "Business", "Personal");
-  const field = activeField(page, "Business");
+  await sub(page, "Life", "Personal money");
+  const field = activeField(page, "Life");
   await expect(field.getByText("as of Oct 19")).toBeVisible();
   await expect(field.getByText("No money suggestion today.")).toBeVisible();
   await page.waitForTimeout(300);

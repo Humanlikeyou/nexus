@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { HOST_VIEWS, LANDING_ENTRIES, ROUTE_ALIASES, SECTION_ANCHORS, SYSTEM_GROUPS, SYSTEMS, TODAY_ROUTE, resolveRoute, screenFor } from "./routes";
+import { HOST_VIEWS, LANDING_ENTRIES, ROUTE_ALIASES, SECTION_ANCHORS, SYSTEM_GROUPS, SYSTEMS, TODAY_ROUTE, VIEW_REDIRECTS, canonicalRoute, resolveRoute, screenFor, tabOf, ventureOf, ventureRoute } from "./routes";
 
-describe("navigation (6 items, 3 groups)", () => {
-  it("has the spec order and grouping", () => {
-    expect(SYSTEM_GROUPS.map((g) => g.label)).toEqual(["", "Work", "System"]);
-    expect(SYSTEMS.map((s) => s.id)).toEqual(["terrance", "chat", "mindbody", "business", "settings", "smarthome"]);
+describe("navigation (7 items, 3 groups)", () => {
+  it("has the spec order and grouping (design-1111v: Life ⌘4, Enterprise ⌘5)", () => {
+    expect(SYSTEM_GROUPS.map((g) => g.label)).toEqual(["", "", "System"]);
+    expect(SYSTEMS.map((s) => s.id)).toEqual(["terrance", "chat", "mindbody", "life", "enterprise", "settings", "smarthome"]);
   });
 
   it("resolves every folded id to its host and back to the legacy screen", () => {
@@ -13,8 +13,8 @@ describe("navigation (6 items, 3 groups)", () => {
     expect(resolveRoute("sessions")).toEqual({ id: "mindbody", view: "neuro-history" });
     expect(HOST_VIEWS.mindbody?.map((v) => v.label)).toEqual(["Overview", "Fitness", "Neuro", "Neuro history", "Patterns"]);
     expect(HOST_VIEWS.mindbody?.[0]).toEqual({ view: "main", label: "Overview", screen: "mindbody" });
-    expect(resolveRoute("trajectory")).toEqual({ id: "terrance", view: "goals" });
-    expect(resolveRoute("revenue")).toEqual({ id: "business", view: "revenue" });
+    expect(resolveRoute("trajectory")).toEqual({ id: "life", view: "goals" });
+    expect(resolveRoute("revenue")).toEqual({ id: "enterprise", view: "finances" });
     expect(resolveRoute("assistant")).toEqual({ id: "chat", view: "activity" });
     expect(resolveRoute("crews")).toEqual({ id: "chat", view: "crews" });
     expect(HOST_VIEWS.chat?.map((v) => v.label)).toEqual(["Agents", "Crews"]);
@@ -23,48 +23,96 @@ describe("navigation (6 items, 3 groups)", () => {
     expect(screenFor(resolveRoute("lists"))).toBe("terrance");
     expect(screenFor(resolveRoute("assistant"))).toBe("chat");
     expect(resolveRoute("devices")).toEqual({ id: "settings", view: "devices" });
-    expect(screenFor(resolveRoute("trajectory"))).toBe("terrance");
+    expect(screenFor(resolveRoute("trajectory"))).toBe("life");
+    expect(screenFor(resolveRoute("revenue"))).toBe("revenue");
     expect(screenFor(resolveRoute("devices"))).toBe("settings");
-    // Section aliases (design-1110b B) render their host and scroll to the section.
-    // design-1111s: devices and voice are Settings tabs now, so they resolve to a host view.
-    const sections: Record<string, string> = { trajectory: "terrance", lists: "terrance", assistant: "chat" };
+    const sections: Record<string, string> = { lists: "terrance", assistant: "chat" };
     for (const [old, target] of Object.entries(ROUTE_ALIASES)) {
+      const resolved = resolveRoute(old as never);
       if (sections[old]) {
-        expect(screenFor(resolveRoute(old as never))).toBe(sections[old]);
+        expect(screenFor(resolved)).toBe(sections[old]);
         expect(SECTION_ANCHORS[target!.id]).toContain(target!.view);
         continue;
       }
-      if (old === "devices" || old === "voice") {
-        expect(screenFor(resolveRoute(old as never))).toBe("settings");
-        expect(HOST_VIEWS.settings?.some((v) => v.view === target!.view)).toBe(true);
-        continue;
-      }
-      expect(screenFor(resolveRoute(old as never))).toBe(old);
-      expect(HOST_VIEWS[target!.id]?.some((v) => v.view === target!.view)).toBe(true);
+      // Every other alias lands on a real tab of a host.
+      expect(HOST_VIEWS[resolved.id]?.some((v) => v.view === resolved.view)).toBe(true);
     }
   });
 
-  it("labels Mind–Body with an en dash; Fitness and Neuro are its sub-views", () => {
-    expect(SYSTEMS.map((s) => s.label)).toEqual(["Home", "Agents", "Mind–Body", "Business", "Settings", "Smart home"]);
+  it("labels Mind–Body with an en dash; Life and Enterprise follow it", () => {
+    expect(SYSTEMS.map((s) => s.label)).toEqual(["Home", "Agents", "Mind–Body", "Life", "Enterprise", "Settings", "Smart home"]);
   });
 
-  it("keeps host ids and their main views", () => {
+  it("keeps host ids; Life opens on Goals and Enterprise on Overview", () => {
     for (const s of SYSTEMS) {
-      expect(resolveRoute(s.id)).toEqual({ id: s.id, view: "main" });
-      expect(screenFor(resolveRoute(s.id))).toBe(s.id === "terrance" ? "landing" : s.id);
+      const r = resolveRoute(s.id);
+      expect(r).toEqual({ id: s.id, view: s.id === "life" ? "goals" : "main" });
     }
+    expect(screenFor(resolveRoute("life"))).toBe("life");
+    expect(screenFor(resolveRoute("enterprise"))).toBe("business");
+    expect(screenFor(resolveRoute("terrance"))).toBe("landing");
   });
 
-  it("Home is the landing page; the dashboard stays reachable as Today and through #goals", () => {
+  it("Home is the landing page; the dashboard stays reachable as Today", () => {
     expect(screenFor({ id: "terrance", view: "main" })).toBe("landing");
     expect(screenFor(TODAY_ROUTE)).toBe("terrance");
-    expect(screenFor(resolveRoute("trajectory"))).toBe("terrance");
     expect(resolveRoute("landing")).toEqual({ id: "terrance", view: "main" });
   });
 
   it("landing buttons are Today plus every other section, with the sidebar's shortcuts", () => {
-    expect(LANDING_ENTRIES.map((e) => e.label)).toEqual(["Today", "Agents", "Mind–Body", "Business", "Settings", "Smart home"]);
-    expect(LANDING_ENTRIES.map((e) => e.shortcut)).toEqual([null, 2, 3, 4, 5, 6]);
+    expect(LANDING_ENTRIES.map((e) => e.label)).toEqual(["Today", "Agents", "Mind–Body", "Life", "Enterprise", "Settings", "Smart home"]);
+    expect(LANDING_ENTRIES.map((e) => e.shortcut)).toEqual([null, 2, 3, 4, 5, 6, 7]);
     expect(LANDING_ENTRIES.map((e) => e.icon)).toEqual(SYSTEMS.map((s) => s.icon));
+  });
+});
+
+describe("design-1111v redirects (HANDOFF-1111v §2): old routes keep working", () => {
+  const PAIRS: Array<[{ id: never; view: string }, { id: string; view: string }]> = [
+    [{ id: "terrance" as never, view: "goals" }, { id: "life", view: "goals" }],
+    [{ id: "trajectory" as never, view: "main" }, { id: "life", view: "goals" }],
+    [{ id: "terrance" as never, view: "weekly-review" }, { id: "life", view: "weekly-review" }],
+    [{ id: "terrance" as never, view: "life-admin" }, { id: "life", view: "dates" }],
+    [{ id: "business" as never, view: "personal" }, { id: "life", view: "money" }],
+    [{ id: "business" as never, view: "revenue" }, { id: "enterprise", view: "finances" }],
+    [{ id: "revenue" as never, view: "main" }, { id: "enterprise", view: "finances" }],
+    [{ id: "business" as never, view: "work" }, { id: "enterprise", view: "tasks" }],
+    [{ id: "business" as never, view: "main" }, { id: "enterprise", view: "main" }],
+    [{ id: "business" as never, view: "ventures" }, { id: "enterprise", view: "ventures" }],
+    [{ id: "business" as never, view: "decisions" }, { id: "enterprise", view: "decisions" }],
+    [{ id: "business" as never, view: "content" }, { id: "enterprise", view: "content" }],
+    [{ id: "business" as never, view: "ventures/taiyo-skin" }, { id: "enterprise", view: "ventures/taiyo-skin" }],
+    [{ id: "lists" as never, view: "main" }, { id: "terrance", view: "lists" }],
+    [{ id: "life" as never, view: "main" }, { id: "life", view: "goals" }],
+  ];
+  it.each(PAIRS)("%o → %o", (from, to) => {
+    expect(resolveRoute(from.id, from.view)).toEqual(to);
+    expect(screenFor(resolveRoute(from.id, from.view))).toBe(screenFor(to as never));
+  });
+
+  it("canonicalRoute is what navigate() applies, and it is idempotent", () => {
+    for (const [k, to] of Object.entries(VIEW_REDIRECTS)) {
+      const [id, view] = k.split(":");
+      expect(canonicalRoute({ id: id as never, view })).toEqual(to);
+      expect(canonicalRoute(to)).toEqual(to);
+    }
+  });
+
+  it("Today keeps only its own anchors", () => {
+    expect(SECTION_ANCHORS.terrance).toEqual(["needs-you", "checkin", "lists"]);
+  });
+
+  it("a venture is its own route on the Ventures tab", () => {
+    const r = ventureRoute("taiyo-skin");
+    expect(r).toEqual({ id: "enterprise", view: "ventures/taiyo-skin" });
+    expect(tabOf(r)).toBe("ventures");
+    expect(screenFor(r)).toBe("business");
+    expect(ventureOf(r)).toBe("taiyo-skin");
+    expect(ventureOf({ id: "enterprise", view: "ventures" })).toBeNull();
+  });
+
+  it("the tabs keep Taisun's names", () => {
+    expect(HOST_VIEWS.life?.map((v) => v.label)).toEqual(["Goals", "Weekly review", "Dates & deadlines", "Personal money"]);
+    expect(HOST_VIEWS.enterprise?.map((v) => v.label)).toEqual(["Overview", "Decisions", "Ventures", "Finances", "Tasks", "Content"]);
+    expect(HOST_VIEWS.business).toBeUndefined();
   });
 });

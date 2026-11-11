@@ -3,12 +3,63 @@ import { describe, expect, it, vi } from "vitest";
 import { CommandPalette, filterCommands, paletteCommands } from "./CommandPalette";
 
 describe("⌘K command palette", () => {
-  it("lists the 6 sections with ⌘1–6 and the sub-views", () => {
+  it("lists the 7 sections with ⌘1–7 and the sub-views", () => {
     const cmds = paletteCommands();
-    expect(cmds.slice(0, 6).map((c) => c.hint)).toEqual(["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6"]);
-    expect(cmds.map((c) => c.label)).toEqual(expect.arrayContaining(["Agents › Activity", "Agents › Crews", "Mind–Body › Fitness", "Mind–Body › Neuro", "Mind–Body › Neuro history", "Today › Lists", "Settings › Voice", "Business › Money", "Business › Ventures", "Business › Work", "Settings › Devices", "About Amara OS"]));
+    expect(cmds.slice(0, 7).map((c) => `${c.label} ${c.hint}`)).toEqual(["Home ⌘1", "Agents ⌘2", "Mind–Body ⌘3", "Life ⌘4", "Enterprise ⌘5", "Settings ⌘6", "Smart home ⌘7"]);
+    expect(cmds.map((c) => c.label)).toEqual(expect.arrayContaining(["Agents › Activity", "Agents › Crews", "Mind–Body › Fitness", "Mind–Body › Neuro", "Mind–Body › Neuro history", "Today › To-dos", "Settings › Voice", "Enterprise › Finances", "Enterprise › Ventures", "Enterprise › Tasks", "Enterprise › Decisions", "Enterprise › Content", "Life › Goals", "Life › Weekly review", "Life › Dates & deadlines", "Life › Personal money", "Settings › Devices", "About Amara OS"]));
+    for (const gone of ["Today › Lists", "Today › Life admin", "Today › Weekly review", "Home › Goals", "Business › Money", "Business › Work", "Business › Personal"]) expect(cmds.map((c) => c.label)).not.toContain(gone);
     expect(filterCommands(cmds, "devi").map((c) => c.id)).toEqual(["settings:devices"]);
     expect(filterCommands(cmds, "crews").map((c) => c.label)).toContain("Agents › Crews");
+  });
+
+  it("design-1111v: ⌘K labels snapshot", () => {
+    expect(paletteCommands().map((c) => c.label)).toMatchInlineSnapshot(`
+      [
+        "Home",
+        "Agents",
+        "Mind–Body",
+        "Life",
+        "Enterprise",
+        "Settings",
+        "Smart home",
+        "Agents › Crews",
+        "Mind–Body › Fitness",
+        "Mind–Body › Neuro",
+        "Mind–Body › Neuro history",
+        "Mind–Body › Patterns",
+        "Life › Goals",
+        "Life › Weekly review",
+        "Life › Dates & deadlines",
+        "Life › Personal money",
+        "Enterprise › Decisions",
+        "Enterprise › Ventures",
+        "Enterprise › Finances",
+        "Enterprise › Tasks",
+        "Enterprise › Content",
+        "Settings › Services",
+        "Settings › Devices",
+        "Settings › Notifications",
+        "Settings › Backup",
+        "Settings › Voice",
+        "Settings › Memory",
+        "Home › Today",
+        "Today › Needs you today",
+        "Today › Check-in",
+        "Today › To-dos",
+        "Agents › Activity",
+        "About Amara OS",
+        "Settings › General › Updates",
+      ]
+    `);
+  });
+
+  it("design-1111v: an old name typed from habit ranks where that page went ('rev' → Finances, before Weekly review)", () => {
+    const labels = (q: string) => filterCommands(paletteCommands(), q).map((c) => c.label);
+    expect(labels("rev")[0]).toBe("Enterprise › Finances");
+    expect(labels("rev")).toContain("Life › Weekly review");
+    expect(labels("review")[0]).toBe("Life › Weekly review");
+    expect(labels("life admin")[0]).toBe("Life › Dates & deadlines");
+    expect(labels("work")[0]).toBe("Enterprise › Tasks");
   });
 
   it("navigates with arrows + Return and closes", () => {
@@ -18,7 +69,7 @@ describe("⌘K command palette", () => {
     expect(input).toHaveAttribute("placeholder", "Search or ask Amara…");
     fireEvent.change(input, { target: { value: "revenue" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onNavigate).toHaveBeenCalledWith({ id: "business", view: "revenue" });
+    expect(onNavigate).toHaveBeenCalledWith({ id: "enterprise", view: "finances" });
     expect(onClose).toHaveBeenCalled();
   });
 

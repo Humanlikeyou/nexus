@@ -2,11 +2,14 @@ import { RefreshCw } from "lucide-react";
 import { businessAdapter, type BusinessAdapter } from "../business/adapters";
 import { money } from "../lib/format";
 import type { SystemSnapshot } from "../types";
-import { Button, Card, DataTag, PageHero, StatusText, wiredTag } from "../ui";
+import { Button, Card, DataTag, PageHero } from "../ui";
+import type { Route } from "../app/routes";
+import { LinkCard, waitingDecisions } from "./BusinessPanels";
 import "./BusinessScreen.css";
 import "./CommandCenter.css";
 
-/** Business › Money (design-1110d D-B9–B11). USD only; trading risk lives in Ventures (approval answer 2). */
+/** Enterprise › Finances (was Business › Money; design-1110d D-B9–B11, design-1111v). Read-only from the business ledger
+ *  (read_business_ledger). USD only; trading risk lives in Ventures. Votes and flags are handled in Decisions. */
 function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }) {
   return (
     <div className="biz__unavailable">
@@ -18,25 +21,23 @@ function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }
 
 const acc = (node: React.ReactNode) => <span className="cc-card__acc">{node}</span>;
 
-export function RevenueField({ data, onRetry, adapter = businessAdapter(data) }: { data: SystemSnapshot; onRetry?: () => void; adapter?: BusinessAdapter }) {
+export function RevenueField({ data, onRetry, onOpen, adapter = businessAdapter(data) }: { data: SystemSnapshot; onRetry?: () => void; onOpen?: (route: Route) => void; adapter?: BusinessAdapter }) {
   const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
   const { revenue } = data;
   const isAwaitingRevenue = [revenue.total_revenue, revenue.total_expenses, revenue.net_income, revenue.today_revenue, revenue.week_revenue, revenue.month_revenue]
     .every((value) => value === 0) && revenue.by_strategy.length === 0;
   const summaryDown = down("arm_get_revenue_summary") && isAwaitingRevenue;
   const funds = adapter.funds();
-  const votes = adapter.fundingRequests();
-  const rules = adapter.voteRules();
-  const flags = adapter.taxFlags();
+  const waiting = waitingDecisions(adapter);
   const top = Math.max(1, ...revenue.by_strategy.map((b) => Math.max(b.revenue, b.expenses)));
 
   return (
     <div className="biz page-inset cc-page">
-      <PageHero title="Business" statement={summaryDown ? "Revenue is out of reach" : isAwaitingRevenue ? "No revenue yet" : `${money(revenue.net_income)} net in 30 days`}
-        detail={isAwaitingRevenue ? "Tracking starts when a real source reports in." : `On ${money(revenue.total_revenue)} revenue and ${money(revenue.total_expenses)} costs. Amounts in USD; ledger values in yen wait for currency conversion.`} />
+      <PageHero title="Finances" statement={summaryDown ? "Revenue is out of reach" : isAwaitingRevenue ? "No revenue yet" : `${money(revenue.net_income)} net in 30 days`}
+        detail={<>{isAwaitingRevenue ? "Tracking starts when a real source reports in." : `On ${money(revenue.total_revenue)} revenue and ${money(revenue.total_expenses)} costs. Amounts in USD; ledger values in yen wait for currency conversion.`} Read-only, from the business ledger. Personal money is in {onOpen ? <button type="button" className="v-link" onClick={() => onOpen({ id: "life", view: "money" })}>Life › Personal money ›</button> : "Life › Personal money"}.</>} />
       {summaryDown && <Unavailable label="Revenue summary" onRetry={onRetry} />}
       <div className="cc-grid2">
-        <Card title="Fund balances" accessory={acc(funds.state === "sample" ? <DataTag kind="sample" /> : <DataTag kind="wire" />)}>
+        <Card title="Venture funds" accessory={acc(funds.state === "sample" ? <DataTag kind="sample" /> : <DataTag kind="wire" />)}>
           {funds.state === "unwired" ? <p className="cc-note">Ledger funds appear here.</p> : (
             <table className="cc-table" aria-label="Fund balances">
               <thead><tr><th scope="col">Fund</th><th scope="col" className="cc-num">Balance</th></tr></thead>
@@ -48,7 +49,7 @@ export function RevenueField({ data, onRetry, adapter = businessAdapter(data) }:
           )}
           {funds.state !== "unwired" && funds.value.some((f) => f.balanceUsd.state === "unwired") && <p className="cc-note">Ledger balances are in yen <DataTag kind="currency" /></p>}
         </Card>
-        <Card title="Income and costs · 30 days">
+        <Card title="Income & costs · 30 days">
           {revenue.by_strategy.length === 0 ? <p className="cc-note">{isAwaitingRevenue ? "No strategy has reported revenue yet." : "No per-strategy breakdown."}</p> : (
             <div className="cc-bars" role="table" aria-label="Revenue and costs by strategy">
               {revenue.by_strategy.map((b) => (
@@ -63,20 +64,8 @@ export function RevenueField({ data, onRetry, adapter = businessAdapter(data) }:
           <p className="cc-note">Solid = income · striped = costs · today {money(revenue.today_revenue)} in, {money(revenue.today_expenses)} out</p>
         </Card>
       </div>
-      <Card title="Funding requests and votes" accessory={acc(wiredTag(votes))}>
-        {votes.state === "unwired" ? <p className="cc-note">Requests, purposes and vote results from the ledger appear here.</p> : (
-          <table className="cc-table" aria-label="Funding requests">
-            <thead><tr><th scope="col">Requester</th><th scope="col">Purpose</th><th scope="col" className="cc-num">Amount</th><th scope="col">Vote</th></tr></thead>
-            <tbody>{votes.value.map((v) => <tr key={v.id}><td>{v.requester}</td><td>{v.purpose}</td><td className="cc-num">{v.amountUsd.state === "unwired" ? "\u2014" : money(v.amountUsd.value)}</td><td><StatusText kind={v.status === "open" ? "wait" : v.status === "approved" ? "ok" : "fail"}>{v.status === "open" ? "Open" : v.status === "approved" ? "Approved" : "Denied"}</StatusText></td></tr>)}</tbody>
-          </table>
-        )}
-        {votes.state !== "unwired" && <p className="cc-note">Amounts <DataTag kind="currency" /> · vote rules {rules.state === "unwired" ? <DataTag kind="wire" /> : `${rules.value.needed} yes votes`}</p>}
-      </Card>
-      <Card title={flags.state === "unwired" ? "Tax flags" : `Tax flags \u00b7 ${flags.value.length}`} accessory={acc(wiredTag(flags))}>
-        {flags.state === "unwired" ? <p className="cc-note">Ledger tax flags appear here.</p> : flags.value.map((t) => (
-          <div className="cc-row" key={t.id}><StatusText kind="risk" /><div className="cc-row__main"><span>{t.label}</span><small>{t.area} · {t.date}</small></div><Button size="small" variant="secondary">Open</Button></div>
-        ))}
-      </Card>
+      <LinkCard title="In Decisions" line={waiting.unwired ? "Funding votes and tax flags from the ledger are handled in Decisions." : `${waiting.open.length} funding vote${waiting.open.length === 1 ? "" : "s"} and ${waiting.tax.length} tax flag${waiting.tax.length === 1 ? "" : "s"} are waiting. Votes and flags are handled in one place.`}
+        open="Open Decisions ›" onOpen={onOpen ? () => onOpen({ id: "enterprise", view: "decisions" }) : undefined} tag={waiting.unwired ? <DataTag kind="wire" /> : waiting.sample ? <DataTag kind="sample" /> : null} />
     </div>
   );
 }

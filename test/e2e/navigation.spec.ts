@@ -2,10 +2,12 @@ import { activeField, expect, navButton, openApp, openHomeChat, openView, routeS
 import { responses } from "./fixtures/snapshot";
 
 const SECTIONS: { label: string; h1: RegExp }[] = [
-  { label: "Today", h1: /^Command Center$/ },
+  { label: "Today", h1: /^Today$/ },
   { label: "Agents", h1: /^Agents$/ },
   { label: "Mind–Body", h1: /^Mind–Body$/ },
-  { label: "Business", h1: /^Business$/ },
+  // design-1111v: Life (opens on Goals) and Enterprise (Business renamed) between Mind–Body and Settings.
+  { label: "Life", h1: /^Goals$/ },
+  { label: "Enterprise", h1: /^Enterprise$/ },
   { label: "Settings", h1: /^Settings$/ },
   { label: "Smart home", h1: /^Smart home$/ },
 ];
@@ -28,7 +30,10 @@ test.describe("sub-views and anchors", () => {
     ["Mind–Body", "Fitness", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Fitness")],
     ["Mind–Body", "Neuro", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro")],
     ["Mind–Body", "Neuro history", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro history"); await expect(f.getByRole("table", { name: "Recordings" })).toBeVisible(); }],
-    ["Business", "Money", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Business")],
+    ["Enterprise", "Finances", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Finances")],
+    ["Enterprise", "Decisions", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Decisions")],
+    ["Life", "Dates & deadlines", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Dates & deadlines")],
+    ["Life", "Weekly review", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Weekly review")],
   ];
   for (const [host, view, check] of SUBVIEWS) {
     test(`(b) ${host} › ${view} via the SegmentedControl`, async ({ page, theme, consoleErrors }) => {
@@ -46,9 +51,9 @@ test.describe("sub-views and anchors", () => {
     // design-1111s: Devices and Voice are Settings tabs; the command opens the tab at its top.
     ["Settings", "Settings › Devices", "[data-tab=devices]"],
     ["Settings", "About Amara OS", "#about"],
-    ["Today", "Home › Goals", "#goals"],
-    // design-1110b B: the folded screens are sections of their new host.
-    ["Today", "Today › Lists", "#lists"],
+    // design-1111v: Goals moved to Life; Today keeps Needs you today and To-dos (was Lists).
+    ["Today", "Today › Needs you today", "#needs-you"],
+    ["Today", "Today › To-dos", "#lists"],
     ["Agents", "Agents › Activity", "#activity"],
     ["Settings", "Settings › Voice", "#voice"],
     ["Settings", "Settings › General › Updates", "#updates"],
@@ -69,10 +74,10 @@ test.describe("sub-views and anchors", () => {
 test.describe("Mind–Body host: nothing folded in is out of reach", () => {
   const selected = (page: import("@playwright/test").Page, name: string) => activeField(page, "Mind–Body").getByRole("radio", { name, exact: true });
 
-  test("the sidebar has six items and Overview is the default", async ({ page, theme }) => {
+  test("the sidebar has seven items and Overview is the default", async ({ page, theme }) => {
     await openApp(page, { theme });
     await navButton(page, "Mind–Body").click();
-    await expect(page.locator("nav.system-constellation > .nav-group button")).toHaveCount(6);
+    await expect(page.locator("nav.system-constellation > .nav-group button")).toHaveCount(7);
     await expect(page.locator("nav.system-constellation").getByRole("button", { name: /^(Fitness|Neuro)/ })).toHaveCount(0);
     await expect(activeField(page, "Mind–Body").getByRole("radiogroup", { name: "Mind–Body view" }).getByRole("radio")).toHaveText(["Overview", "Fitness", "Neuro", "Neuro history", "Patterns"]);
     await expect(selected(page, "Overview")).toHaveAttribute("aria-checked", "true");
@@ -112,18 +117,19 @@ test.describe("Mind–Body host: nothing folded in is out of reach", () => {
   });
 });
 
-test("(c) ⌘1–6 open the six sections in order", async ({ page, theme, consoleErrors }) => {
+test("(c) ⌘1–7 open the seven sections in order", async ({ page, theme, consoleErrors }) => {
   await openApp(page, { theme });
   for (const [i, { label, h1 }] of SECTIONS.entries()) {
     await page.keyboard.press(`Meta+${i + 1}`);
     // ⌘1 is Home, the lens landing page; Today is its sub-view and has no shortcut.
-    await expect(activeField(page, i === 0 ? "Home" : label).getByRole("heading", { level: 1 })).toHaveText(h1);
+    // design-1111v: Today's h1 is "Today" now; the Home lens keeps its hidden "Command Center" h1.
+    await expect(activeField(page, i === 0 ? "Home" : label).getByRole("heading", { level: 1 })).toHaveText(i === 0 ? "Command Center" : h1);
   }
   expect(consoleErrors).toEqual([]);
 });
 
 test.describe("(d) ⌘K palette", () => {
-  test('"rev" + Enter opens Business › Money (the old Revenue view)', async ({ page, theme }) => {
+  test('"rev" + Enter opens Enterprise › Finances (the old Revenue view)', async ({ page, theme }) => {
     await openApp(page, { theme });
     await page.keyboard.press("Meta+k");
     const input = page.getByRole("combobox", { name: "Search or ask Amara" });
@@ -131,7 +137,7 @@ test.describe("(d) ⌘K palette", () => {
     await input.fill("rev");
     await page.keyboard.press("Enter");
     await expect(input).toBeHidden();
-    await expect(activeField(page, "Business").getByRole("radio", { name: "Money" })).toHaveAttribute("aria-checked", "true");
+    await expect(activeField(page, "Enterprise").getByRole("radio", { name: "Finances" })).toHaveAttribute("aria-checked", "true");
   });
 
   test("no match → Ask Amara pre-fills the Chat composer", async ({ page, theme }) => {
@@ -170,10 +176,10 @@ test("(d) one content edge: h1s, Chat's first column and the sub-view bar line u
     return (await target.boundingBox())!.x;
   };
   const home = await left("Today");
-  for (const label of ["Mind–Body", "Fitness", "Neuro", "Crews", "Business", "Money", "Smart home", "Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
+  for (const label of ["Mind–Body", "Fitness", "Neuro", "Crews", "Enterprise", "Finances", "Decisions", "Life", "Dates & deadlines", "Smart home", "Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
 
-  // Sub-view bars (Mind–Body, Chat/Activity/Crews, Business) sit on the same edge.
-  for (const label of ["Mind–Body", "Agents", "Business"]) {
+  // Sub-view bars (Mind–Body, Chat/Activity/Crews, Life, Enterprise) sit on the same edge.
+  for (const label of ["Mind–Body", "Agents", "Life", "Enterprise"]) {
     await navButton(page, label).click();
     const bar = activeField(page, label).locator(".subview-bar [role=radiogroup]").first();
     if (await bar.count()) expect((await bar.boundingBox())!.x, `${label} bar`).toBeCloseTo(home, 0);

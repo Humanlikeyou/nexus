@@ -64,8 +64,11 @@ describe("lazy screens", () => {
   // Pre-warm every screen chunk so lazy() resolves in microtasks, not on module-transform
   // time; makes resolution independent of machine load (fake timers throughout).
   beforeAll(async () => {
-    await Promise.all(["Health", "Neuro", "Sessions", "Devices", "Settings", "Business", "Revenue", "Activity", "Lists", "Crews", "MindBody", "SmartHome"]
-      .map((n) => import(`../../src-console/screens/${n}Screen.tsx`)));
+    await Promise.all([
+      ...["Health", "Neuro", "Sessions", "Devices", "Settings", "Business", "Revenue", "Activity", "Lists", "Crews", "MindBody", "SmartHome"]
+        .map((n) => import(`../../src-console/screens/${n}Screen.tsx`)),
+      import("../../src-console/life/LifeScreen.tsx"),
+    ]);
   });
   const flush = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(0); }); };
   const loading = (label: string) => within(field(label)!).queryByRole("status", { name: "Loading" });
@@ -94,7 +97,8 @@ describe("lazy screens", () => {
     vi.useFakeTimers();
     render(<App />);
     await flush();
-    for (const [host, view] of [["Agents", "Crews"], ["Mind–Body", "Fitness"], ["Mind–Body", "Neuro"], ["Mind–Body", "Neuro history"], ["Business", "Money"], ["Business", "Ventures"], ["Business", "Work"], ["Settings", "Services"], ["Settings", "Devices"], ["Settings", "Notifications"], ["Settings", "Backup"], ["Settings", "Voice"], ["Settings", "Memory"]] as const) {
+    // design-1111v: Business is Enterprise; Money lives under Life as Personal money; Work is Tasks.
+    for (const [host, view] of [["Agents", "Crews"], ["Mind–Body", "Fitness"], ["Mind–Body", "Neuro"], ["Mind–Body", "Neuro history"], ["Life", "Goals"], ["Life", "Weekly review"], ["Life", "Dates & deadlines"], ["Life", "Personal money"], ["Enterprise", "Decisions"], ["Enterprise", "Ventures"], ["Enterprise", "Finances"], ["Enterprise", "Tasks"], ["Enterprise", "Content"], ["Settings", "Services"], ["Settings", "Devices"], ["Settings", "Notifications"], ["Settings", "Backup"], ["Settings", "Voice"], ["Settings", "Memory"]] as const) {
       go(host);
       await settle(host);
       fireEvent.click(within(field(host)!).getByRole("radio", { name: view }));
@@ -159,7 +163,7 @@ describe("Neuro (Live) session timer (fake timers)", () => {
     await click(/Start session/);
     await flush(15_000);
     expect(readout()).toBe("00:15");
-    go("Business"); await flush(); await flush();
+    go("Enterprise"); await flush(); await flush();
     await flush(10_000);
     await openNeuro(); await flush();
     expect(readout()).toBe("00:25");

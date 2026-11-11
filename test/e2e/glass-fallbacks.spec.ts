@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import { emulateDisplay as emulate, expect, openApp, openToday, openView, reducedTransparency, test, type Theme, openMore } from "./fixtures/tauri-mock";
 
 // Glass fallbacks and contrast (ported from the Oct 30 /tmp/glass review specs).
-const SECTIONS = ["Today", "Agents", "Mind–Body", "Fitness", "Neuro", "Business", "Settings"];
+const SECTIONS = ["Today", "Agents", "Mind–Body", "Fitness", "Neuro", "Life", "Enterprise", "Settings"];
 
 async function openSection(page: Page, theme: Theme, label: string) {
   await openApp(page, { theme, reduceMotion: false });

@@ -7,7 +7,7 @@ const open = async (page: Page, theme: Theme, data: Responses = responses()) => 
   await openApp(page, { theme, data });
   // design-1110b B: Lists is a section of Today.
   const field = (await openView(page, "Lists")).locator("#lists");
-  await expect(field.getByRole("heading", { level: 2 }).first()).toHaveText("Lists");
+  await expect(field.getByRole("heading", { level: 2 }).first()).toHaveText("To-dos"); // design-1111v: Lists → To-dos
   return field;
 };
 const callsOf = (page: Page, cmd: string) => page.evaluate((name) => (window as unknown as { __E2E_CALLS: { cmd: string; args?: unknown }[] }).__E2E_CALLS.filter((c) => c.cmd === name).map((c) => c.args), cmd);

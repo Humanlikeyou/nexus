@@ -45,7 +45,10 @@ export type PendingMemory = { id: string; text: string; source: string; category
 export type MemoryWrite = Wired<{ ok: true }>;
 
 // ---- Life admin ----
-export type LifeDate = { id: string; title: string; sub: string; date: string; month: number; inDays?: number; reminder: string; due: boolean; lane: "residence" | "work" };
+/** design-1111v: three lanes. "enterprise" dates are read-only in Life (they live in Enterprise › Ventures).
+ *  `month` is months from Nov 1 on the 12-month timeline; `short` is its timeline label. */
+export type LifeLane = "personal" | "residence" | "enterprise";
+export type LifeDate = { id: string; title: string; short?: string; sub: string; date: string; month: number; inDays?: number; reminder: string; due: boolean; lane: LifeLane };
 export type LifeAdmin = { next: string; dates: LifeDate[] };
 
 // ---- Weekly review ----
@@ -167,14 +170,16 @@ export function makeSamplePersonal(): PersonalAdapter {
       return ok;
     },
     lifeAdmin: () => sample({
-      next: "Taiyo Skin launch in 24 days",
+      next: "National health insurance payment in 3 days",
+      // design-1111v (Taisun, 19:23 JST): Akiya is a personal item now, so its offer deadline sits in the Personal lane.
       dates: [
-        { id: "l1", title: "Taiyo Skin launch", sub: "Business › Ventures", date: "Nov 21", month: 0.77, inDays: 24, reminder: "7 days · Nov 14", due: true, lane: "work" },
-        { id: "l2", title: "Akiya offer deadline", sub: "Kamakura listing · offer + deposit", date: "Dec 18", month: 1.65, inDays: 51, reminder: "30 days · Nov 18", due: true, lane: "work" },
-        { id: "l3", title: "Taiyo Skin tax filing", sub: "with the accountant", date: "Feb 15", month: 3.57, reminder: "90 days · Nov 17", due: false, lane: "work" },
-        { id: "l4", title: "Apartment contract renewal", sub: "2-year lease · notice 1 month before", date: "Apr 1", month: 5.1, reminder: "90 days · Jan 1", due: false, lane: "residence" },
-        { id: "l5", title: "Visa renewal window opens", sub: "3 months before expiry · immigration bureau", date: "Jun 14", month: 7.55, reminder: "30 days · May 15", due: false, lane: "residence" },
-        { id: "l6", title: "Residence card expires", sub: "renew before this date", date: "Sep 14", month: 10.55, reminder: "90 days · Jun 16", due: false, lane: "residence" },
+        { id: "l0", title: "National health insurance payment", short: "Health insurance", sub: "monthly · bank transfer", date: "Oct 31", month: 0.1, inDays: 3, reminder: "7 days · Oct 24", due: true, lane: "personal" },
+        { id: "l1", title: "Taiyo Skin launch", short: "Launch", sub: "Enterprise › Ventures › Taiyo Skin", date: "Nov 21", month: 0.67, inDays: 24, reminder: "7 days · Nov 14", due: false, lane: "enterprise" },
+        { id: "l2", title: "Akiya offer deadline", short: "Akiya offer", sub: "Akiya · Kamakura listing · offer + deposit", date: "Dec 18", month: 1.57, inDays: 51, reminder: "30 days · Nov 18", due: false, lane: "personal" },
+        { id: "l3", title: "Taiyo Skin tax filing", short: "Tax filing", sub: "Enterprise › Finances · with the accountant", date: "Feb 15", month: 3.47, reminder: "90 days · Nov 17", due: false, lane: "enterprise" },
+        { id: "l4", title: "Apartment contract renewal", short: "Lease renewal", sub: "2-year lease · notice 1 month before", date: "Apr 1", month: 5, reminder: "90 days · Jan 1", due: false, lane: "personal" },
+        { id: "l5", title: "Visa renewal window opens", short: "Visa window", sub: "3 months before expiry · immigration bureau", date: "Jun 14", month: 7.45, reminder: "30 days · May 15", due: false, lane: "residence" },
+        { id: "l6", title: "Residence card expires", short: "Residence card", sub: "renew before this date", date: "Sep 14", month: 10.45, reminder: "90 days · Jun 16", due: false, lane: "residence" },
       ],
     }),
     weeklyReview: () => sample({
@@ -198,6 +203,9 @@ export function makeSamplePersonal(): PersonalAdapter {
 
 let sampleSingleton: PersonalAdapter | null = null;
 export const personalAdapter = (): PersonalAdapter => (sampleAdaptersEnabled() ? (sampleSingleton ??= makeSamplePersonal()) : unwiredPersonal);
+
+/** design-1111v: Needs you today drops its quiet check-in row when a check-in is saved. */
+export const CHECKIN_EVENT = "amara:checkin";
 
 /** Built defaults for Taisun's open 1111a choices (HANDOFF-1111a "Built"). */
 export const PERSONAL_DEFAULTS = {

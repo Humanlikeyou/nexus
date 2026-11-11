@@ -1,7 +1,7 @@
 import type { CrewToolInfo, KbStatus } from "../src/lib/types";
 export type { CrewToolInfo, KbState, KbStatus } from "../src/lib/types";
 
-export type ModuleId = "landing" | "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings" | "voice" | "lists" | "mindbody" | "smarthome";
+export type ModuleId = "landing" | "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings" | "voice" | "lists" | "mindbody" | "smarthome" | "life" | "enterprise";
 
 export interface HermesRuntimeHealth {
   runtime: string;

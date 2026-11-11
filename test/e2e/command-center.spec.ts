@@ -7,10 +7,14 @@ const STATES: Array<[string, string, (p: Page) => Promise<void>]> = [
   ["Crews", "Crews", async () => {}],
   ["Crew run", "Crews", async (p) => { await activeField(p, "Agents").getByRole("row", { name: "Open run Sample research" }).click(); }],
   ["Crew approvals", "Crews", async (p) => { const b = activeField(p, "Agents").getByRole("button", { name: "View all ›" }); if (await b.count()) await b.click(); }],
-  ["Business overview", "Business", async () => {}],
+  ["Enterprise overview", "Overview", async () => {}],
   ["Ventures", "Ventures", async () => {}],
-  ["Taiyo Skin", "Ventures", async (p) => { const b = activeField(p, "Business").getByRole("button", { name: "Taiyo Skin" }); if (await b.count()) await b.click(); }],
-  ["Money", "Money", async () => {}],
+  ["Taiyo Skin", "Ventures", async (p) => { const b = activeField(p, "Enterprise").getByRole("button", { name: /^Taiyo Skin/ }).first(); if (await b.count()) await b.click(); }],
+  ["Finances", "Finances", async () => {}],
+  // design-1111v: the new Enterprise tabs.
+  ["Decisions", "Decisions", async () => {}],
+  ["Tasks", "Tasks", async () => {}],
+  ["Content", "Content", async () => {}],
 ];
 
 async function blocking(page: Page) {

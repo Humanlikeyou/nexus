@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { expect, openApp, openView, test } from "./fixtures/tauri-mock";
 
-const SECTIONS = ["Landing", "Today", "Agents", "Lists", "Voice", "Mind–Body", "Fitness", "Neuro", "Business", "Settings"];
+const SECTIONS = ["Landing", "Today", "Agents", "Lists", "Voice", "Mind–Body", "Fitness", "Neuro", "Life", "Dates & deadlines", "Enterprise", "Decisions", "Finances", "Settings"];
 
 async function blockingViolations(page: Page, disableRules: string[] = [], exclude: string[] = []) {
   let builder = new AxeBuilder({ page }).disableRules(disableRules);

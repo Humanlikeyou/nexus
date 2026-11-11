@@ -135,11 +135,11 @@ const SUGGESTIONS: Record<TakePage, Suggestion> = {
   business: {
     id: "s-biz-1028", page: "business", type: "decide_before_noon", typeLabel: "Top decision before noon", seen: "Suggested on 8 days since Oct 12",
     title: "Decide the Taiyo Skin funding vote before noon.",
-    how: "Read the two options in Business › Ventures, pick one, and record it. Amara won't vote for you.",
+    how: "Read the two options in Enterprise › Decisions, pick one, and record it. Amara won't vote for you.",
     why: "The vote has waited **5 days**. Your decisions made before noon closed **1.8 days** sooner last month, from your own ledger.",
     facts: [{ label: "Waiting", value: "5 days", note: "opened Oct 23" }, { label: "Decided before noon", value: "1.4 days", note: "7 decisions" }, { label: "Decided later", value: "3.2 days", note: "6 decisions" }],
     evidence: { level: "own", summary: "From your own decisions only. There's no outside science claim for business habits." , sources: [] },
-    detectRule: "Counts by itself when the decision is recorded in the Business ledger before 12:00.", answer: { state: "waiting" },
+    detectRule: "Counts by itself when the decision is recorded in the decisions log before 12:00 JST.", answer: { state: "waiting" },
   },
   home: {
     id: "s-home-1028", page: "home", type: "warm_lights", typeLabel: "Lights warm after 9 PM", seen: "Suggested on 9 evenings since Oct 12",
