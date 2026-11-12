@@ -51,5 +51,9 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 - done 47b89cb / 79d76da: system map in Settings › Services (decision 0011)
 - Taisun: rebuild + install, then: Import the Hemi-Sync collection, try one track with the Muse, check the map live
 
+## Next session
+- Decision 0013: habit tracker research + design, goal roadmaps (deep, overnight), step questions in takes
+- money_balances_list read command; weekly review + patterns jobs; habit data sources
+
 ## Out of scope tonight (Taisun)
 NOOP merge, live Telegram relay send path, standalone phases (bundling, signing, notarization, DMG, updater, WHOOP takeover), Letta upgrade apply.

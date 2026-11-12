@@ -112,3 +112,12 @@ Three automated commit reviews plus one agent security review ran on this work; 
 
 ## 10. Installed (decision 0012, 2026-11-12 ~18:10 JST)
 Built from `amara-integration` at `9f1867c` in `~/projects/nexus-amara` (`APPLE_SIGNING_IDENTITY=- npx tauri build --bundles app`, ad-hoc signed, not notarized), quit the running app with a normal Quit, moved the old copy to `~/Backups/Amara OS-backup-20261112.app` (the new rollback), installed with `ditto`. Bundle id `com.taisun.nexus`, name "Amara OS". Not relaunched: Taisun opens it. No merge into nexus-v2, no push. Rollback: quit, remove `/Applications/Amara OS.app`, move the backup back.
+
+## 11. Wiring pass (Taisun: "do as much as you can … about one hour", 2026-11-12 18:20–19:20)
+- `9812b70` Sample-data tags only on sample values (Goals, Weekly review, Patterns, Money, Memory): unblocks live wiring of those panels.
+- `f21284c` Life › Goals live (milestones from goals.json; habits listed with no met/missed until a data source is linked) and Settings › Services list live from the system map.
+
+**Still unwired (base adapters; a live adapter may override some):** personal: patterns, weeklyReview, memories/pending/edit/delete/decide (Letta writes not approved), money, transcribe, tryChange · crews: nextSchedule, roster parts · standalone: services summary footer, serviceLogs/actions, relay, updates, WHOOP, first-run tiers/download/setupDone, restorePreview · business: ventures, fundingRequests, taxFlags, voteRules, revenueTargetUsd · takes: parts of history/outcomes/week · homeWindows: embedding, signedSites (needs the 1111w OK) · money: overview/take/followUps/import/watch (backend exists; UI wiring partial) · navy: speak · neuro: liveAux (AUX_PROVEN false), removeConfirmed (no delete path, by decision).
+**Habits:** need a data source per habit (a source picker in the add preview, or manual ticks): design question logged.
+- Money UI: accounts list + JPY/USD rate live (backend from 7b448bb). Next: a `money_balances_list` read command (security review) so balances/overview can go live; Design to place the rate (`fx()` has no UI slot yet).
+- Decision 0013 (goal roadmaps by Amara overnight on the deep tier, one step question per day across the app, weighted progress, "not yet" ×2 → smaller step, plus a researched habit tracker): planned, not started.
