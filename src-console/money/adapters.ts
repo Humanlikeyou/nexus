@@ -1,13 +1,15 @@
 import { sample, sampleAdaptersEnabled, UNWIRED, type Wired } from "../lib/sampleAdapters";
 import type { TakeNote } from "../amaraTake/takeView";
 import type { Action, AnswerState, SkipReason, Suggestion } from "../takes/adapters";
+import { inTauri } from "../lib/localStores";
+import { makeLiveMoney } from "./live";
 
 /** design-1111t §9: Business › Personal money. READ-ONLY / WATCH-ONLY. There is no method here that moves, pays,
  *  trades or converts anything, and none may be added (see money.test.ts). Secrets never pass through this layer:
  *  the UI only ever sees `keychain: "set" | "not_set"`. */
 
 export type Institution = "chime" | "fidelity" | "jp_bank" | "ledger";
-export type Route = "aggregator" | "csv" | "bank_api" | "watch_only";
+export type Route = "aggregator" | "csv" | "bank_api" | "watch_only" | "manual";
 export type AccountStatus = "ok" | "stale" | "expired" | "error" | "not_connected";
 export type Region = "us" | "jp" | "crypto";
 
@@ -42,6 +44,8 @@ export type ConnectRoute = { id: Institution; name: string; mono: string; sub: s
 
 export interface MoneyAdapter {
   accounts(): Wired<MoneyAccount[]>;
+  /** The one JPY-per-USD reference rate with its own date and source. Unwired when none is stored; never a guess. */
+  fx(): Wired<Fx>;
   overview(): Wired<MoneyOverview>;
   take(): Wired<MoneyTake>;
   followUps(): Wired<MoneyFollowUp[]>;
@@ -70,7 +74,7 @@ const ROUTES_UNWIRED: ConnectRoute[] = [
 ];
 
 export const unwiredMoney: MoneyAdapter = {
-  accounts: () => UNWIRED, overview: () => UNWIRED, take: () => UNWIRED, followUps: () => UNWIRED,
+  accounts: () => UNWIRED, fx: () => UNWIRED, overview: () => UNWIRED, take: () => UNWIRED, followUps: () => UNWIRED,
   routes: () => ROUTES_UNWIRED,
   addWatchOnly: async () => UNWIRED, importStatement: async () => UNWIRED, answer: async () => UNWIRED, undo: async () => UNWIRED, reconnect: async () => UNWIRED, disconnect: async () => UNWIRED,
 };
@@ -156,6 +160,7 @@ export function sampleMoney(opts: MoneyPreview = {}): MoneyAdapter {
   const ok = async (): Promise<Action> => sample({ ok: true });
   return {
     accounts: () => (scenario === "none" ? sample([]) : sample(scenario === "states" ? ACCOUNTS_STATES : ACCOUNTS)),
+    fx: () => sample(SAMPLE_FX),
     overview: () => (scenario === "connected" ? sample(OVERVIEW) : UNWIRED),
     take: () => (scenario === "none" ? UNWIRED : sample(scenario === "states"
       ? { kind: "partial", note: { ...TAKE_NOTE, text: "Chime needs you to sign in again, so today's numbers are partial.", chips: [] }, why: "Chime is expired, so Amara doesn't have a full picture. She won't advise on half the data. Sign in to Chime again and tomorrow's take will include it.", historyCount: 22 }
@@ -171,10 +176,12 @@ function readPreview(): MoneyPreview {
 }
 
 let cached: MoneyAdapter | null = null;
-/** Unwired unless sample mode is on (localStorage nexus.sampleAdapters=1). Claude swaps in the live adapter (HANDOFF-1111t §9.5). */
+let liveCached: MoneyAdapter | null = null;
+/** Sample when sample mode is on (localStorage nexus.sampleAdapters=1); the live read-only adapter inside Tauri; otherwise unwired. */
 export function moneyAdapter(): MoneyAdapter {
-  if (!sampleAdaptersEnabled()) return unwiredMoney;
-  return (cached ??= sampleMoney(readPreview()));
+  if (sampleAdaptersEnabled()) return (cached ??= sampleMoney(readPreview()));
+  if (inTauri()) return (liveCached ??= makeLiveMoney());
+  return unwiredMoney;
 }
-export function resetMoneyAdapter() { cached = null; }
+export function resetMoneyAdapter() { cached = null; liveCached = null; }
 export const SAMPLE_MONEY_TEXT = [TAKE_NOTE.text, MEMORY, MONEY_SUGGESTION.title, MONEY_SUGGESTION.how, MONEY_SUGGESTION.why, MONEY_SUGGESTION.evidence.summary, MONEY_SUGGESTION.evidence.risk ?? "", MONEY_SUGGESTION.evidence.alsoConsidered ?? "", ...FOLLOWUPS.flatMap((f) => [f.title, f.body])];
