@@ -20,6 +20,7 @@ pub mod key_file;
 pub mod keychain;
 pub mod kv;
 pub mod llm_router;
+pub mod memory_read;
 pub mod money;
 pub mod muse;
 pub mod n8n_status;

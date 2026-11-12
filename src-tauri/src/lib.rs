@@ -282,6 +282,7 @@ pub fn run() {
             telegram::poll_telegram_updates,
             // Money, read-only (commands/money.rs)
             commands::money::money_accounts_list,
+            commands::money::money_balances_list,
             commands::money::money_account_add,
             commands::money::money_watch_add,
             commands::money::money_balance_set_manual,
@@ -453,6 +454,7 @@ pub fn run() {
             crew_grants::crew_tool_grant_set,
             crew_grants::crew_tool_grant_revoke,
             crew_grants::crew_tool_audit,
+            commands::memory_read::memory_list,
             n8n_status::n8n_status,
             kb_status::kb_status,
             commands::system_map::system_map_status,

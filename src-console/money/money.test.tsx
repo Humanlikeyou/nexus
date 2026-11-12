@@ -73,6 +73,16 @@ describe("design-1111t money: read-only", () => {
     expect(screen.getByText("¥3,115,778")).toBeInTheDocument();
     expect(screen.getAllByText("Sample data").length).toBeGreaterThan(0);
   });
+  it("live overview: no Sample tag, buffer and savings rate stay Needs wiring, no USD without fx", () => {
+    const overview = { totalUsd: null, balances: 0, fx: null, cash: { usd: null, note: "300,000 JPY · no USD value until an FX rate is stored" }, investments: { usd: null, note: "No investment balance entered" }, crypto: { usd: null, note: "No crypto balance entered" }, bufferMonths: null, bufferNote: "n", allocation: [], rows: [{ name: "SMBC main", native: "300,000 JPY", usd: null, d30: "–" }], venture: [], savingsRate: null };
+    const adapter: MoneyAdapter = { ...unwiredMoney, overview: () => ({ state: "live", value: overview }) };
+    render(<MoneyOverviewSection adapter={adapter} currency="USD" onCurrency={() => {}} />);
+    expect(screen.queryByText("Sample data")).toBeNull();
+    expect(screen.getAllByText("Needs wiring").length).toBeGreaterThanOrEqual(5);
+    expect(screen.getByText("300,000 JPY")).toBeInTheDocument();
+    expect(screen.queryByText(/Venture funds/)).toBeNull();
+    expect(screen.queryByText(/\$\d/)).toBeNull();
+  });
   it("states: expired is greyed with as-of and no suggestion on partial data", () => {
     render(<><MoneyAccounts adapter={sampleMoney({ scenario: "states" })} /><MoneyTake adapter={sampleMoney({ scenario: "states" })} /></>);
     expect(screen.getByText("as of Oct 19")).toBeInTheDocument();

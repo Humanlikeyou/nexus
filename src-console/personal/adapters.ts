@@ -44,6 +44,8 @@ export const MEMORY_LABEL: Record<MemoryCategory, string> = { about: "About you"
 export type Memory = { id: string; text: string; category: MemoryCategory; source: string };
 export type PendingMemory = { id: string; text: string; source: string; category: MemoryCategory };
 export type MemoryWrite = Wired<{ ok: true }>;
+/** Row as src-tauri memory_read.rs `memory_list` returns it (read-only Letta core-memory blocks). */
+export type MemoryWire = { id: string; label: string; value: string; agent: string; updatedAt?: string | null; truncated?: boolean };
 
 // ---- Life admin ----
 /** design-1111v: three lanes. "enterprise" dates are read-only in Life (they live in Enterprise › Ventures).
@@ -70,6 +72,8 @@ export interface PersonalAdapter {
   transcribe(): Promise<Wired<string>>;
   money(): Wired<PersonalMoney>;
   memories(): Wired<Memory[]>;
+  /** Why `memories()` is unwired when a live read failed (plain words, fixed per error code); null otherwise. */
+  memoriesNote?(): string | null;
   pendingMemories(): Wired<PendingMemory[]>;
   editMemory(id: string, text: string): Promise<MemoryWrite>;
   deleteMemory(id: string): Promise<MemoryWrite>;
@@ -260,19 +264,47 @@ export function goalsFrom(rows: GoalWire[]): GoalsWeek {
   return { habits, milestones: items.map((x) => x.m), nextMilestone: next ? next.m.title : null };
 }
 
+const BLOCK_CATEGORY: Record<string, MemoryCategory> = { human: "about", persona: "preferences" };
+const isMemoryWire = (m: unknown): m is MemoryWire => { const o = m as Record<string, unknown> | null; return !!o && typeof o.id === "string" && typeof o.value === "string"; };
+
+/** Letta core-memory blocks as Memory rows. Only the `human` and `persona` labels have a known category; the rest read as "About you". */
+export function memoriesFrom(rows: MemoryWire[]): Memory[] {
+  return rows.filter(isMemoryWire).map((m) => {
+    const label = typeof m.label === "string" && m.label ? m.label : "block";
+    const agent = typeof m.agent === "string" && m.agent ? m.agent : "Amara";
+    const when = typeof m.updatedAt === "string" && /^\d{4}-\d{2}-\d{2}/.test(m.updatedAt) ? ` · updated ${dayLabel(m.updatedAt.slice(0, 10))}` : "";
+    return { id: m.id, text: m.truncated ? `${m.value} …` : m.value, category: BLOCK_CATEGORY[label] ?? "about", source: `${agent} · ${label} block${when}` };
+  });
+}
+
+/** Fixed text per memory_list error code. Nothing from the error itself is shown. */
+export function memoryNote(e: unknown): string {
+  const code = typeof e === "string" ? e : "";
+  if (code === "letta_no_key") return "Add the Letta password in Settings › Secrets, then Amara's memory shows here. Nothing was read.";
+  if (code === "letta_off") return "Letta isn't answering on this Mac. Start the stack, then reopen this page. Nothing was read.";
+  if (code === "letta_unauthorized") return "Letta refused the saved password. Save it again in Settings › Secrets. Nothing was read.";
+  return "Letta sent something Amara couldn't read. Nothing was changed.";
+}
+
 /**
- * The stores built so far (life dates, check-ins, goals). Everything else stays unwired. Each reads as unwired until its
+ * The stores built so far (life dates, check-ins, goals, Letta memory blocks, read-only). Everything else stays unwired. Each reads as unwired until its
  * first successful read, so a missing backend never shows an empty live list.
  */
 export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & { refresh(): Promise<void> } {
   let admin: LifeAdmin | null = null;
   let checkins: CheckIn[] | null = null;
   let goals: GoalsWeek | null = null;
+  let memories: Memory[] | null = null;
+  let memoriesNote: string | null = null;
   const refresh = async () => {
     await Promise.all([
       call<LifeDateWire[]>("life_date_list").then((r) => { admin = lifeAdminFrom(r); }, () => { admin = null; }),
       call<CheckInWire[]>("checkin_list", { limit: 30 }).then((r) => { checkins = r.map(checkInFrom); }, () => { checkins = null; }),
       call<GoalWire[]>("read_goals").then((r) => { goals = Array.isArray(r) ? goalsFrom(r) : null; }, () => { goals = null; }),
+      call<MemoryWire[]>("memory_list").then(
+        (r) => { memories = Array.isArray(r) ? memoriesFrom(r) : null; memoriesNote = memories ? null : memoryNote(null); },
+        (e) => { memories = null; memoriesNote = memoryNote(e); },
+      ),
     ]);
     announceStores();
   };
@@ -281,6 +313,8 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
     ...unwiredPersonal,
     refresh,
     goals: () => (goals ? live(goals) : UNWIRED),
+    memories: () => (memories ? live([...memories]) : UNWIRED),
+    memoriesNote: () => memoriesNote,
     lifeAdmin: () => (admin ? live(admin) : UNWIRED),
     checkins: () => (checkins ? live([...checkins]) : UNWIRED),
     saveCheckIn: async (d) => {

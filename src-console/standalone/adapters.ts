@@ -34,7 +34,7 @@ export type ServicesOverview = { services: Service[]; checked: string };
 export type ServicesSummary = { attention: number; updateReady: boolean };
 
 // ---- Keys (Set / Not set only) ----
-export type SecretName = "telegram_bot_token" | "telegram_chat_id" | "n8n_encryption_key" | "ha_token" | "freqtrade_api" | "coach_keys";
+export type SecretName = "telegram_bot_token" | "telegram_chat_id" | "n8n_encryption_key" | "ha_token" | "freqtrade_api" | "coach_keys" | "letta_server_password";
 export type SecretStatus = { name: SecretName; label: string; hint?: string; set: boolean };
 
 // ---- Backup and Move to a new Mac ----

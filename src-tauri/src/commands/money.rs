@@ -1160,6 +1160,128 @@ async fn fetch_ecb() -> Result<String, String> {
     String::from_utf8(body).map_err(|_| "fetch_failed".to_string())
 }
 
+// ───────────────────────────── balances (read-only) ─────────────────────────────
+
+/// How far back `history` reaches, in days.
+const HISTORY_DAYS: i64 = 30;
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct BalancePoint {
+    pub date: String,
+    pub amount: f64,
+}
+
+/// One account's current balance. Only accounts with a real stored value appear; nothing is estimated.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct AccountBalance {
+    pub account_id: String,
+    pub currency: String,
+    /// In the account's own currency.
+    pub amount: f64,
+    pub as_of: String,
+    /// "manual" (typed by the user) | "statement" (the running balance in an imported CSV).
+    pub source: String,
+    /// One point per day, last `HISTORY_DAYS` days, oldest first. Manual balances keep no history (the
+    /// store holds the latest value only), so they have at most their own point.
+    pub history: Vec<BalancePoint>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MoneyBalances {
+    pub balances: Vec<AccountBalance>,
+    /// The stored JPY-per-USD reference rate, or `None`. Never invented.
+    pub fx: Option<FxRate>,
+}
+
+fn safe_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+}
+
+/// The last running balance per day from imported rows (rows without a balance are ignored).
+fn statement_points(records: &[TxRecord]) -> Vec<BalancePoint> {
+    let mut rows: Vec<(&str, i64)> = records
+        .iter()
+        .filter_map(|r| r.balance.map(|b| (r.date.as_str(), b)))
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(b.0)); // stable: file order breaks same-day ties, the last one wins
+    let mut out: Vec<BalancePoint> = Vec::new();
+    for (date, b) in rows {
+        let point = BalancePoint {
+            date: date.to_string(),
+            amount: b as f64,
+        };
+        match out.last_mut() {
+            Some(last) if last.date == date => *last = point,
+            _ => out.push(point),
+        }
+    }
+    out
+}
+
+pub(crate) fn balances_list_in(data: &Path, today: NaiveDate) -> Result<MoneyBalances, String> {
+    let _g = lock();
+    let accounts = load_accounts(data)?;
+    let manual: Vec<ManualBalance> =
+        read_json(&money_dir(data).join("balances.json"), MAX_STORE_BYTES)
+            .map_err(|_| "store_error".to_string())?;
+    let cutoff = (today - chrono::Duration::days(HISTORY_DAYS))
+        .format("%Y-%m-%d")
+        .to_string();
+    let mut balances = Vec::new();
+    for a in &accounts {
+        if a.route == "csv" {
+            if !safe_id(&a.id) {
+                return Err("store_error".to_string());
+            }
+            let file = money_dir(data).join("tx").join(format!("{}.jsonl", a.id));
+            let records = parse_tx_records(&read_tx_text(&file)?)?;
+            if records.len() > MAX_ROWS {
+                return Err("store_error".to_string());
+            }
+            let points = statement_points(&records);
+            if let Some(last) = points.last() {
+                balances.push(AccountBalance {
+                    account_id: a.id.clone(),
+                    currency: a.currency.clone(),
+                    amount: last.amount,
+                    as_of: last.date.clone(),
+                    source: "statement".to_string(),
+                    history: points
+                        .iter()
+                        .filter(|p| p.date >= cutoff)
+                        .cloned()
+                        .collect(),
+                });
+            }
+        } else if let Some(m) = manual.iter().find(|m| m.account_id == a.id) {
+            if !m.native_amount.is_finite() {
+                continue;
+            }
+            balances.push(AccountBalance {
+                account_id: a.id.clone(),
+                currency: a.currency.clone(),
+                amount: m.native_amount,
+                as_of: m.as_of.clone(),
+                source: "manual".to_string(),
+                history: if m.as_of >= cutoff {
+                    vec![BalancePoint {
+                        date: m.as_of.clone(),
+                        amount: m.native_amount,
+                    }]
+                } else {
+                    Vec::new()
+                },
+            });
+        }
+    }
+    let fx = fx_get_in(data)?.filter(|r| valid_rate(r.rate));
+    Ok(MoneyBalances { balances, fx })
+}
+
 // ───────────────────────────── commands (all read-only) ─────────────────────────────
 
 fn data_dir() -> PathBuf {
@@ -1177,6 +1299,11 @@ async fn blocking<T: Send + 'static>(
 #[tauri::command]
 pub async fn money_accounts_list() -> Result<Vec<MoneyAccount>, String> {
     blocking(|| accounts_list_in(&data_dir())).await
+}
+
+#[tauri::command]
+pub async fn money_balances_list() -> Result<MoneyBalances, String> {
+    blocking(|| balances_list_in(&data_dir(), now_jst().date_naive())).await
 }
 
 #[tauri::command]
@@ -2158,6 +2285,198 @@ mod tests {
         assert!(client.contains(".no_proxy()") && client.contains(".https_only(true)"));
     }
 
+    // ── balances (read-only) ──
+
+    fn day(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn balances_empty_store_is_empty_with_null_fx() {
+        let d = temp_dir("money-bal-empty");
+        let r = balances_list_in(&d, day("2026-11-12")).unwrap();
+        assert!(r.balances.is_empty());
+        assert!(r.fx.is_none());
+        // A read creates nothing.
+        assert!(!d.join("money").exists());
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn balances_manual_has_source_and_as_of_and_fx_when_stored() {
+        let d = temp_dir("money-bal-manual");
+        let ledger = account_add_in(&d, &ledger_draft("manual", "BTC")).unwrap();
+        let empty = account_add_in(&d, &ledger_draft("manual", "ETH")).unwrap();
+        balance_set_manual_in(&d, &ledger.id, 0.75, "2026-11-10").unwrap();
+        let r = balances_list_in(&d, day("2026-11-12")).unwrap();
+        assert!(r.fx.is_none());
+        // An account with no stored balance is absent, never 0.
+        assert_eq!(r.balances.len(), 1);
+        assert!(r.balances.iter().all(|b| b.account_id != empty.id));
+        let b = &r.balances[0];
+        assert_eq!(
+            (
+                b.account_id.as_str(),
+                b.currency.as_str(),
+                b.amount,
+                b.as_of.as_str(),
+                b.source.as_str()
+            ),
+            (ledger.id.as_str(), "BTC", 0.75, "2026-11-10", "manual")
+        );
+        assert_eq!(b.history.len(), 1);
+        fx_set_manual_in(&d, 150.5, "2026-11-11").unwrap();
+        let fx = balances_list_in(&d, day("2026-11-12")).unwrap().fx.unwrap();
+        assert_eq!(
+            (fx.rate, fx.date.as_str(), fx.source.as_str()),
+            (150.5, "2026-11-11", "manual")
+        );
+        // Stale manual balance: still reported, but no history point in the window.
+        let r = balances_list_in(&d, day("2026-12-31")).unwrap();
+        assert_eq!(r.balances[0].amount, 0.75);
+        assert!(r.balances[0].history.is_empty());
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn balances_statement_current_and_history_window() {
+        let d = temp_dir("money-bal-stmt");
+        let a = csv_account(&d);
+        let text = format!(
+            "{SPLIT_HEADER}2026/09/01,\"1,000\",,old,\"50,000\"\n2026/10/20,\"1,000\",,a,\"49,000\"\n2026/11/02,\"3,000\",,b,\"46,000\"\n2026/11/02,\"1,000\",,c,\"45,000\"\n2026/11/10,,\"5,000\",d,\"50,000\"\n"
+        );
+        let p = write_file(&d, "s.csv", text.as_bytes());
+        import_statement_in(&d, &a.id, &p).unwrap();
+        let r = balances_list_in(&d, day("2026-11-12")).unwrap();
+        assert_eq!(r.balances.len(), 1);
+        let b = &r.balances[0];
+        assert_eq!(
+            (
+                b.amount,
+                b.as_of.as_str(),
+                b.source.as_str(),
+                b.currency.as_str()
+            ),
+            (50_000.0, "2026-11-10", "statement", "JPY")
+        );
+        // Window is 2026-10-13..: the September row is out, same-day rows collapse to the last one.
+        let pts: Vec<(&str, f64)> = b
+            .history
+            .iter()
+            .map(|p| (p.date.as_str(), p.amount))
+            .collect();
+        assert_eq!(
+            pts,
+            vec![
+                ("2026-10-20", 49_000.0),
+                ("2026-11-02", 45_000.0),
+                ("2026-11-10", 50_000.0)
+            ]
+        );
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn balances_statement_without_running_balance_is_absent_not_zero() {
+        let d = temp_dir("money-bal-nobal");
+        let a = csv_account(&d);
+        let p = write_file(
+            &d,
+            "s.csv",
+            "年月日,お引出し,お預入れ,お取り扱い内容\n2026/11/02,\"1,200\",,x\n".as_bytes(),
+        );
+        assert_eq!(import_statement_in(&d, &a.id, &p).unwrap().added, 1);
+        assert!(balances_list_in(&d, day("2026-11-12"))
+            .unwrap()
+            .balances
+            .is_empty());
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn balances_bad_fx_is_null_and_caps_are_fixed_errors() {
+        let d = temp_dir("money-bal-caps");
+        let a = csv_account(&d);
+        let mdir = d.join("money");
+        fs::create_dir_all(&mdir).unwrap();
+        fs::write(
+            mdir.join("fx.json"),
+            r#"{"rate":0,"date":"2026-11-11","source":"ecb","fetched_at":"x"}"#,
+        )
+        .unwrap();
+        assert!(balances_list_in(&d, day("2026-11-12"))
+            .unwrap()
+            .fx
+            .is_none());
+        // Oversize balances.json and oversize tx file are refused with a fixed code.
+        fs::write(
+            mdir.join("balances.json"),
+            vec![b' '; MAX_STORE_BYTES as usize + 1],
+        )
+        .unwrap();
+        assert_eq!(
+            balances_list_in(&d, day("2026-11-12")).unwrap_err(),
+            "store_error"
+        );
+        fs::write(mdir.join("balances.json"), "[]").unwrap();
+        fs::create_dir_all(mdir.join("tx")).unwrap();
+        let f = fs::File::create(tx_file(&d, &a.id)).unwrap();
+        f.set_len(MAX_TX_FILE_BYTES + 1).unwrap();
+        assert_eq!(
+            balances_list_in(&d, day("2026-11-12")).unwrap_err(),
+            "store_error"
+        );
+        // Corrupt JSON: fixed code, nothing echoed.
+        fs::write(tx_file(&d, &a.id), "SECRET-ish {not json\n").unwrap();
+        let e = balances_list_in(&d, day("2026-11-12")).unwrap_err();
+        assert_eq!(e, "store_error");
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn balances_read_changes_no_file_or_permission() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = temp_dir("money-bal-perms");
+        let a = csv_account(&d);
+        let l = account_add_in(&d, &ledger_draft("manual", "BTC")).unwrap();
+        balance_set_manual_in(&d, &l.id, 1.0, "2026-11-10").unwrap();
+        fx_set_manual_in(&d, 150.0, "2026-11-11").unwrap();
+        let p = write_file(
+            &d,
+            "s.csv",
+            format!("{SPLIT_HEADER}2026/11/02,\"1,000\",,x,\"9,000\"\n").as_bytes(),
+        );
+        import_statement_in(&d, &a.id, &p).unwrap();
+        let snap = || {
+            let mut v: Vec<(PathBuf, u32, u64)> = Vec::new();
+            let mut stack = vec![d.join("money")];
+            while let Some(dir) = stack.pop() {
+                v.push((
+                    dir.clone(),
+                    fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+                    0,
+                ));
+                for e in fs::read_dir(&dir).unwrap() {
+                    let e = e.unwrap().path();
+                    if e.is_dir() {
+                        stack.push(e);
+                    } else {
+                        let m = fs::metadata(&e).unwrap();
+                        v.push((e, m.permissions().mode() & 0o777, m.len()));
+                    }
+                }
+            }
+            v.sort();
+            v
+        };
+        let before = snap();
+        assert!(before.iter().any(|(_, m, _)| *m == 0o600));
+        balances_list_in(&d, day("2026-11-12")).unwrap();
+        assert_eq!(before, snap());
+        let _ = fs::remove_dir_all(d);
+    }
+
     // ── source scans ──
 
     fn production_source() -> String {
@@ -2184,7 +2503,7 @@ mod tests {
                 names.push(name);
             }
         }
-        assert_eq!(names.len(), 8, "{names:?}");
+        assert_eq!(names.len(), 9, "{names:?}");
         for n in &names {
             for banned in [
                 "transfer",

@@ -23,6 +23,7 @@ pub(crate) const SECRETS: &[(&str, &str)] = &[
     ("ha_token", "Home Assistant token"),
     ("freqtrade_api", "Freqtrade API login"),
     ("coach_keys", "Oura, Hevy, AI coach"),
+    ("letta_server_password", "Letta memory password"),
 ];
 
 pub(crate) const N8N_KEY: &str = "n8n_encryption_key";

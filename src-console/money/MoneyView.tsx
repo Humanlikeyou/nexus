@@ -82,37 +82,41 @@ export function MoneyOverviewSection({ adapter = moneyAdapter(), currency, onCur
   const w = adapter.overview();
   const v = valueOf(w);
   if (!v) return null;
-  const s = (n: number) => shown(n, currency, v.fx.rate);
-  const tag = <DataTag kind="sample" />;
+  // JPY view needs a stored rate; without one the figure is "Needs wiring" rather than a guess.
+  const s = (n: number) => (currency === "JPY" && !v.fx ? <DataTag kind="currency" /> : shown(n, currency, v.fx?.rate ?? 1));
+  const usdOrWire = (n: number | null) => (n == null ? <DataTag kind="wire" /> : s(n));
+  const tag = w.state === "sample" ? <DataTag kind="sample" /> : null;
   return (
     <>
       <div className="m-bar"><SegmentedControl label="Show amounts in" size="small" value={currency} options={[{ value: "USD", label: "USD" }, { value: "JPY", label: "JPY" }]} onChange={(c) => onCurrency(c as Currency)} />
-        <span className="pk-note">{currency === "USD" ? "Yen converted" : "Dollars converted"} at ¥{v.fx.rate.toFixed(2)} = $1 ({v.fx.at}, {v.fx.source}) {tag}</span></div>
+        <span className="pk-note">{v.fx ? <>{currency === "USD" ? "Yen converted" : "Dollars converted"} at ¥{v.fx.rate.toFixed(2)} = $1 ({v.fx.at}, {v.fx.source}) {tag}</> : <>No FX rate stored, so yen has no USD value <DataTag kind="wire" /></>}</span></div>
       <ul className="cc-strip" aria-label="Personal money">
-        <li className="cc-tile"><span className="cc-tile__k">Cash</span><span className="cc-tile__v">{s(v.cash.usd)}</span><span className="cc-tile__s">{v.cash.note}</span></li>
-        <li className="cc-tile"><span className="cc-tile__k">Investments</span><span className="cc-tile__v">{s(v.investments.usd)}</span><span className="cc-tile__s">{v.investments.note}</span></li>
-        <li className="cc-tile"><span className="cc-tile__k">Crypto (watch-only)</span><span className="cc-tile__v">{v.crypto.usd == null ? <DataTag kind="wire" /> : s(v.crypto.usd)}</span><span className="cc-tile__s">{v.crypto.note}</span></li>
-        <li className="cc-tile"><span className="cc-tile__k">Emergency buffer</span><span className="cc-tile__v">{v.bufferMonths} months</span><span className="cc-tile__s">{v.bufferNote}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Cash</span><span className="cc-tile__v">{usdOrWire(v.cash.usd)}</span><span className="cc-tile__s">{v.cash.note}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Investments</span><span className="cc-tile__v">{usdOrWire(v.investments.usd)}</span><span className="cc-tile__s">{v.investments.note}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Crypto (watch-only)</span><span className="cc-tile__v">{usdOrWire(v.crypto.usd)}</span><span className="cc-tile__s">{v.crypto.note}</span></li>
+        <li className="cc-tile"><span className="cc-tile__k">Emergency buffer</span><span className="cc-tile__v">{v.bufferMonths == null ? <DataTag kind="wire" /> : `${v.bufferMonths} months`}</span><span className="cc-tile__s">{v.bufferNote}</span></li>
       </ul>
       <div className="m-split">
         <Card title="Where it sits" accessory={<span className="pk-acc">{tag}</span>}>
-          <div className="m-alloc" role="img" aria-label={v.allocation.map((a) => `${a.label} ${a.pct}%`).join(", ")}>{v.allocation.map((a) => <i key={a.label} data-t={a.tone} style={{ flexGrow: a.pct }} />)}</div>
-          <div className="t-legend">{v.allocation.map((a) => <span key={a.label}><i className="m-sw" data-t={a.tone} />{a.label} {a.pct}%</span>)}</div>
+          {v.allocation.length > 0 && <><div className="m-alloc" role="img" aria-label={v.allocation.map((a) => `${a.label} ${a.pct}%`).join(", ")}>{v.allocation.map((a) => <i key={a.label} data-t={a.tone} style={{ flexGrow: a.pct }} />)}</div>
+          <div className="t-legend">{v.allocation.map((a) => <span key={a.label}><i className="m-sw" data-t={a.tone} />{a.label} {a.pct}%</span>)}</div></>}
           <table className="pk-table" aria-label="Balances by account">
             <thead><tr><th scope="col">Account</th><th scope="col" className="r">Native</th><th scope="col" className="r">{currency}</th><th scope="col" className="r">30 days</th></tr></thead>
-            <tbody>{v.rows.map((r) => <tr key={r.name}><td>{r.name}</td><td className="r">{r.native}</td><td className="r">{r.usd == null ? <DataTag kind="wire" /> : s(r.usd)}</td><td className="r">{r.d30}{r.d30note && <small>{r.d30note}</small>}</td></tr>)}</tbody>
+            <tbody>{v.rows.map((r) => <tr key={r.name}><td>{r.name}</td><td className="r">{r.native}</td><td className="r">{usdOrWire(r.usd)}</td><td className="r">{r.d30}{r.d30note && <small>{r.d30note}</small>}</td></tr>)}</tbody>
           </table>
           <p className="pk-note"><b>JPY note:</b> yen stays yen in your banks. The USD figures use one daily reference rate, so a USD total can move when you didn&apos;t do anything. The &ldquo;FX moved it&rdquo; line separates that from what you saved.</p>
         </Card>
         <div className="pk-stack">
-          <Card title="Venture funds · not in your personal total" accessory={<span className="pk-acc">{tag}</span>}>
-            {v.venture.map((x) => <div className="pk-row" key={x.name}><div className="pk-row__main"><span>{x.name}</span><small>{x.sub}</small></div><span className="pk-num">{s(x.usd)}</span></div>)}
+          {v.venture.length > 0 && <Card title="Venture funds · not in your personal total" accessory={<span className="pk-acc">{tag}</span>}>
+            {v.venture.map((x) => <div className="pk-row" key={x.name}><div className="pk-row__main"><span>{x.name}</span><small>{x.sub}</small></div><span className="pk-num">{usdOrWire(x.usd)}</span></div>)}
             <p className="pk-note">Kept apart so a good venture month never looks like personal savings, and a venture loss never hides inside them. Moving money between them is your call, in your bank.</p>
-          </Card>
-          <Card title="Savings rate" accessory={<span className="pk-acc">{tag}</span>}>
-            <p className="m-big">{v.savingsRate.pct}% <small>of income, {v.savingsRate.month}</small></p>
-            <p className="pk-delta" data-d="up">{v.savingsRate.delta}</p>
-            <p className="pk-note">{v.savingsRate.note}</p>
+          </Card>}
+          <Card title="Savings rate" accessory={<span className="pk-acc">{v.savingsRate ? tag : null}</span>}>
+            {v.savingsRate ? <>
+              <p className="m-big">{v.savingsRate.pct}% <small>of income, {v.savingsRate.month}</small></p>
+              <p className="pk-delta" data-d="up">{v.savingsRate.delta}</p>
+              <p className="pk-note">{v.savingsRate.note}</p></>
+              : <p className="pk-note">Needs income and spending data, which aren&apos;t wired yet. <DataTag kind="wire" /></p>}
           </Card>
         </div>
       </div>

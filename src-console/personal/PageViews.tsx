@@ -83,8 +83,8 @@ export function PersonalMoneyView({ adapter, onOpenFinances }: { adapter: Person
   const [cur, setCur] = useState<Currency>("USD");
   // design-1111v: the "Kept apart" banner and the "Business › Personal" eyebrow are gone; a link points to Finances.
   const finances = <> · Enterprise money is in {onOpenFinances ? <button type="button" className="v-link" onClick={onOpenFinances}>Enterprise › Finances ›</button> : "Enterprise › Finances"}</>;
-  const statement = ov ? `${shown(ov.totalUsd, cur, ov.fx.rate)} personal, across ${ov.balances} balances` : accts && accts.length ? `${accts.filter((a) => a.status !== "not_connected").length} accounts connected, all read-only` : "Your own accounts, read-only";
-  const detail = ov ? <>Personal only · {cur} · yen converted at ¥{ov.fx.rate.toFixed(2)} = $1{finances} {ovw.state === "sample" && <DataTag kind="sample" />}</>
+  const statement = ov ? (ov.totalUsd != null ? `${shown(ov.totalUsd, ov.fx ? cur : "USD", ov.fx?.rate ?? 1)} personal, across ${ov.balances} balances` : "Balances entered, no personal total yet") : accts && accts.length ? `${accts.filter((a) => a.status !== "not_connected").length} accounts connected, all read-only` : "Your own accounts, read-only";
+  const detail = ov ? <>Personal only · {ov.fx ? cur : "USD"}{ov.fx ? <> · yen converted at ¥{ov.fx.rate.toFixed(2)} = $1</> : " · no FX rate stored"}{finances} {ovw.state === "sample" && <DataTag kind="sample" />}</>
     : accts ? <>Personal only · Amara can see balances and transactions; she can never move money{finances} {acctsw.state === "sample" && <DataTag kind="sample" />}</>
     : <>Personal only · read-only connections and statement import{finances} <DataTag kind="wire" /></>;
   return (
@@ -158,13 +158,14 @@ export function MemorySection({ adapter }: { adapter: PersonalAdapter }) {
   const pend = adapter.pendingMemories();
   const all = valueOf(mem);
   const pending = valueOf(pend) ?? [];
+  const note0 = adapter.memoriesNote?.() ?? null;
   const done = (n: string) => { setNote(n); bump((x) => x + 1); };
   const shown = (all ?? []).filter((m) => (cat === "all" || m.category === cat) && m.text.toLowerCase().includes(q.trim().toLowerCase()));
   const cats = (Object.keys(MEMORY_LABEL) as MemoryCategory[]).filter((c) => (all ?? []).some((m) => m.category === c));
   return (
     <div className="pk-host memory">
-      <PageHero title="Memory" statement="What Amara knows about you" detail={all ? <>{all.length} memories · stored on this Mac (Letta) · you can edit or delete any of them {mem.state === "sample" && <DataTag kind="sample" />}</> : <>Stored on this Mac (Letta) · editing and deleting need wiring <DataTag kind="wire" /></>} />
-      {!all ? <Card title="Memories" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">Amara&apos;s memory list appears here once Claude adds memory_list, memory_update and memory_delete. Nothing is read or changed in Letta until then.</p></Card> : (
+      <PageHero title="Memory" statement="What Amara knows about you" detail={all ? (mem.state === "live" ? <>{all.length} memory {all.length === 1 ? "block" : "blocks"} · stored on this Mac (Letta) · read only for now: editing and deleting need wiring</> : <>{all.length} memories · stored on this Mac (Letta) · you can edit or delete any of them {mem.state === "sample" && <DataTag kind="sample" />}</>) : <>Stored on this Mac (Letta) · editing and deleting need wiring <DataTag kind="wire" /></>} />
+      {!all ? <Card title="Memories" accessory={<span className="pk-acc">{!note0 && <DataTag kind="wire" />}</span>}><p className="pk-note" role={note0 ? "status" : undefined}>{note0 ?? "Amara's memory list appears here once the app can read it from Letta. Nothing is read or changed in Letta until then."}</p></Card> : (
         <>
           <div className="pk-search memory__search">
             <label htmlFor="memory-q" className="ui-visually-hidden">Search memories</label>

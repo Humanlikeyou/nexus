@@ -23,14 +23,16 @@ export type MoneyAccount = {
 
 export type Fx = { rate: number; at: string; source: string };
 export type MoneyRow = { name: string; native: string; usd: number | null; d30: string; d30note?: string };
+/** A null amount is "unknown" (no balance, no FX rate, or no price source), never 0. */
 export type MoneyOverview = {
-  totalUsd: number; balances: number; fx: Fx;
-  cash: { usd: number; note: string }; investments: { usd: number; note: string }; crypto: { usd: number | null; note: string };
-  bufferMonths: number; bufferNote: string;
+  totalUsd: number | null; balances: number; fx: Fx | null;
+  cash: { usd: number | null; note: string }; investments: { usd: number | null; note: string }; crypto: { usd: number | null; note: string };
+  bufferMonths: number | null; bufferNote: string;
   allocation: Array<{ label: string; pct: number; tone: "a" | "b" | "c" | "d" }>;
   rows: MoneyRow[];
-  venture: Array<{ name: string; sub: string; usd: number }>;
-  savingsRate: { pct: number; delta: string; note: string; month: string };
+  venture: Array<{ name: string; sub: string; usd: number | null }>;
+  /** Null when income and spend aren't available (the live adapter has neither). */
+  savingsRate: { pct: number; delta: string; note: string; month: string } | null;
 };
 
 export type MoneyVerdict = "locked_in" | "better" | "not_judged" | "unclear";
