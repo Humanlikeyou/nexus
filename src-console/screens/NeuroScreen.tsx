@@ -17,6 +17,8 @@ import { NeuroFlow } from "./NeuroFlow";
 import { type MuseScreenProps, museSignalState } from "./muse";
 import { LiveSignal } from "../neuro/LiveSignal";
 import { useRecordingsAdapter } from "../neuro/useRecordingsAdapter";
+import { HemisyncSection } from "./HemisyncSection";
+import { NeuroTrends } from "./NeuroTrends";
 import "./NeuroScreen.css";
 
 const MUSE_COMMAND = "get_muse_state";
@@ -49,11 +51,13 @@ export type NeuroFieldProps = MuseScreenProps & {
   onRetry?: () => void;
   /** design-1110c C12: "Session history ›" on the Last session card. */
   onOpenHistory?: () => void;
+  /** Muse session id of the running recording (Hemi-Sync links its track to it). */
+  sessionId?: string | null;
   /** Overrides the first-load detection (refreshedAt still equals INITIAL_SNAPSHOT's). */
   loading?: boolean;
 };
 
-export function NeuroField({ data, devices, operation, error, sessionStartedAt, sessionEndedAt, onScan, onConnect, onDisconnect, onStart, onStop, training, onRetry, loading, onOpenHistory }: NeuroFieldProps) {
+export function NeuroField({ data, devices, operation, error, sessionId = null, sessionStartedAt, sessionEndedAt, onScan, onConnect, onDisconnect, onStart, onStop, training, onRetry, loading, onOpenHistory }: NeuroFieldProps) {
   const telemetry = useMuseTelemetry(); // only this screen subscribes to live readings
   const history = useBandHistory();
   const now = useNow(); // 1 s tick scoped to this screen
@@ -108,7 +112,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
 
   if (failed) {
     return (
-      <div className="neuro" data-state="error">
+      <div className="neuro page-inset" data-state="error">
         {header}
         <Card className="neuro__alert" data-tone="danger" role="alert" title="Muse status couldn't be read" headingLevel={2}>
           <p className="neuro__callout">Amara OS couldn't reach the Muse bridge. Try again in a moment.</p>
@@ -130,7 +134,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
   const heroIdle = connected && !streaming && !running;
 
   return (
-    <div className="neuro" data-state={!connected ? "empty" : streaming ? "streaming" : "ready"}>
+    <div className="neuro page-inset" data-state={!connected ? "empty" : streaming ? "streaming" : "ready"}>
       {header}
       {!running && !streaming && <AmaraTake page="neuro" className="neuro__take" />}
 
@@ -168,7 +172,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
         : (
           <>
             <NeuroFlow training={training} telemetry={telemetry} sessions={data.sessions} running={running} action={primary} />
-            <More label="Live readings and signal" open={running && !training.state.stage ? true : undefined}>
+            <More label="Live readings and signal" open={(running && !training.state.stage) || streaming ? true : undefined}>
             <Card className="neuro__strip" aria-label="Session">
               <Select className="neuro__protocol" label="Protocol" hideLabel value={training.protocolId} options={protocolOptions}
                 onChange={(e) => training.setProtocolId(e.target.value)} disabled={running || busy} />
@@ -222,8 +226,10 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
           </>
         )}
 
+      <HemisyncSection connected={connected} recording={running && !pendingSave} sessionId={sessionId} operation={operation} protocolId={training.protocolId} setProtocolId={training.setProtocolId} onStartMuse={onStart} onStopMuse={onStop} />
+      <NeuroTrends recordings={recordings} />
+
       <div className="neuro__row neuro__row--sessions">
-        <More label="Recent sessions">
         <InsetGroup title="Recent sessions" className="neuro__sessions"
           footer={sessionsFailed ? "Saved sessions couldn't be read." : sessions.length ? undefined : "Your first completed session will appear here."}>
           {sessions.slice(0, 5).map((s) => (
@@ -231,7 +237,6 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
               subtitle={<span className="neuro__num">{Math.max(1, Math.round(s.duration_secs / 60))} min · {s.data_points.toLocaleString()} samples · calm {whole(s.summary.avg_relaxation) ?? DASH}</span>} />
           ))}
         </InsetGroup>
-        </More>
         {selected && <SessionPanel session={selected} onClose={() => setSelectedId(null)} />}
       </div>
     </div>
@@ -313,7 +318,7 @@ function useBandHistory() {
 
 function NeuroSkeleton() {
   return (
-    <div className="neuro" data-state="loading" aria-busy="true" aria-label="Loading Neuro">
+    <div className="neuro page-inset" data-state="loading" aria-busy="true" aria-label="Loading Neuro">
       <header className="neuro__header"><div className="neuro__title-row"><h1>Neuro</h1><span className="neuro__skel neuro__skel--badge" /></div></header>
       <span className="neuro__skel neuro__skel--strip" />
       <div className="neuro__hero">{[0, 1, 2].map((i) => <span key={i} className="neuro__skel neuro__skel--tile" />)}</div>

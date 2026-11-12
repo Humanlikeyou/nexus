@@ -27,3 +27,6 @@ Also for Goals: habits added through the one add path have no `source`, so their
 - `backup_settings_*`, `backup_now`, `backup_list` are live. No nightly timer and no keep-14 prune exist (prune needs Taisun's OK, hard rule 7), so the "Every night" toggle and "keeps the last 14" are stored preferences only; the hero keeps its Needs wiring tag because `last` is null. Wanted: copy that says nightly/keep aren't running yet, or keep as is until the scheduler lands.
 - `backups[].version` is "" (the archive name has no app version; the dialog shows "—"); `last` needs a stored checksum verify (not built); `BackupRun` done/total/left are "" (progress events carry phase + pct only).
 - Files ≥ 50 MB (large Muse replays) are skipped and listed in the result, so a backup doesn't hold big raw EEG captures. Taisun's call whether backups should include them.
+
+## takes-1111t money e2e: light-theme contrast (2026-11-12)
+`test/e2e/takes-1111t.spec.ts:80` fails in light theme only, 3/3, on `0b2a312`, HEAD and the working tree alike (dark passes): axe `color-contrast` on `div[role="alert"] > b` in the Connect-an-account sheet after the seed phrase is refused. It passed in the 0b2a312 full run earlier the same day, so it is likely date/time-dependent content. Design-owned styling (money/ConnectSheet); not changed by Claude.

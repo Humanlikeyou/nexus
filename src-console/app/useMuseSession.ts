@@ -10,6 +10,8 @@ import { useTraining } from "../neuro/useTraining";
 import type { MuseOperation } from "../screens/muse";
 import type { MuseDevice, RecordedSession, SystemSnapshot } from "../types";
 
+const newSessionId = (startedAt: number) => (typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `muse-${startedAt}`);
+
 /**
  * Muse headset + recording session state and actions (scan, connect, start,
  * stop/save, disconnect). A plain hook, not a context: live telemetry stays
@@ -22,6 +24,9 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
   const [recordingFile, setRecordingFile] = useState<string | null>(null);
   const [sessionEndedAt, setSessionEndedAt] = useState<number | null>(null);
+  // Allocated when the recording starts, so Hemi-Sync can link to it while it runs. The saved session reuses it.
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
   const sessionFinalizer = useRef<SessionFinalizer<{ session: RecordedSession & { file_path: string }; data: Record<string, unknown> }> | null>(null);
   const sessionOperation = useRef(false);
   const sessionStopTime = useRef<number | null>(null);
@@ -118,7 +123,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
         const plain = recordingSummarizer.current?.summary() ?? null;
         const pick = <K extends "avg_focus" | "avg_relaxation" | "calm_pct">(key: K) => trainingSummary?.[key] ?? plain?.[key] ?? null;
         const session: RecordedSession & { file_path: string } = {
-          id: typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `muse-${sessionStartedAt}`,
+          id: sessionIdRef.current ?? newSessionId(sessionStartedAt),
           device_type: "muse",
           start: new Date(sessionStartedAt).toISOString(),
           end: new Date(endedAt).toISOString(),
@@ -159,6 +164,8 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       recordingSummarizer.current = new RecordingSummarizer();
       auxDetector.current = new AuxDetector();
       auxFound.current = null;
+      sessionIdRef.current = newSessionId(startedAt);
+      setSessionId(sessionIdRef.current);
       setSessionStartedAt(startedAt);
       beginTraining();
       setNotice("Muse session started");
@@ -182,6 +189,8 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       const saved = await persistMuseSession();
       finishTraining();
       setSessionStartedAt(null);
+      sessionIdRef.current = null;
+      setSessionId(null);
       setRecordingFile(null);
       setSessionEndedAt(null);
       sessionFinalizer.current = null;
@@ -208,6 +217,8 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       await disconnectMuse();
       finishTraining();
       setSessionStartedAt(null);
+      sessionIdRef.current = null;
+      setSessionId(null);
       setRecordingFile(null);
       setSessionEndedAt(null);
       sessionFinalizer.current = null;
@@ -223,5 +234,5 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     }
   }, [data.muse.streaming, sessionStartedAt, persistMuseSession, refresh, resetTelemetry, finishTraining, setNotice]);
 
-  return { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession };
+  return { museDevices, museOperation, museError, sessionId, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession };
 }

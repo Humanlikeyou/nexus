@@ -83,7 +83,7 @@ export default function App() {
   }, [navigate]);
   const { data, busy, setBusy, refresh } = useSnapshot();
   const [notice, setNotice] = useState<string | null>(null);
-  const { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession } = useMuseSession(data, refresh, setNotice);
+  const { museDevices, museOperation, museError, sessionId, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession } = useMuseSession(data, refresh, setNotice);
   const [contextInspectorOpen, setContextInspectorOpen] = useState(false);
   const { theme, setTheme, reduceMotion, setReduceMotion } = useAppearance();
   // Key-window state → <html data-window-active> (Decision 21).
@@ -177,7 +177,7 @@ export default function App() {
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} />
     : screenId === "mindbody" ? (route.view === "patterns" ? <PatternsView adapter={personalAdapter()} /> : <MindBodyField sessions={data.sessions} />)
     : screenId === "smarthome" ? <SmartHomeField onOpenSettings={() => navigate({ id: "settings", view: "home-assistant" })} />
-    : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} onOpenHistory={() => setActive("sessions")} devices={museDevices} operation={museOperation} error={museError} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
+    : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} onOpenHistory={() => setActive("sessions")} devices={museDevices} operation={museOperation} error={museError} sessionId={sessionId} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
     : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => setActive("neuro")} />
     : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} view={route.view} onView={(view) => navigate({ id: "enterprise", view })} onOpen={navigate} />
     : screenId === "revenue" ? <RevenueField data={data} onRetry={retrySnapshot} onOpen={navigate} />

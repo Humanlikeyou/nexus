@@ -1,0 +1,30 @@
+/* Neuro sections (Taisun, Nov 12): the Mind–Body page language on Neuro. Tokens only. */
+.neuro { --mb-gutter: 150px; --mb-gap: var(--space-5); }
+.neuro .mb-section { align-content: start; }
+.hs-note { margin: 0; color: var(--label-secondary); font: var(--type-callout); }
+.hs-note[data-tone="warning"] { color: var(--tone-warning-text); }
+.hs-import { display: grid; justify-items: start; gap: var(--space-2); }
+.hs-import__bar { width: min(320px, 100%); height: 3px; border-radius: 2px; background: var(--separator); overflow: hidden; }
+.hs-import__bar i { display: block; height: 100%; background: var(--accent); transform-origin: left; transition: transform var(--dur-page) linear; }
+.hs-waves { display: grid; gap: var(--space-1); }
+.hs-group .ui-inset-group__title { padding-inline: 0; }
+.hs-start { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-4); box-shadow: inset 0 1px 0 var(--separator); }
+.hs-start__track { display: grid; gap: 3px; margin: 0; color: var(--label); font: 300 var(--text-title3)/1.3 var(--font-text); }
+.hs-start__track span { color: var(--label-secondary); font: var(--type-callout); }
+.hs-start__track strong { font-weight: 300; }
+.hs-start .ui-button[aria-disabled="true"] { opacity: .72; }
+.hs-playing { display: grid; gap: var(--space-2); color: var(--label); font: var(--type-callout); font-variant-numeric: tabular-nums; }
+.hs-done__bar { width: min(320px, 100%); height: 3px; border-radius: 2px; background: var(--separator); overflow: hidden; }
+.hs-done__bar i { display: block; height: 100%; background: var(--accent); transform-origin: left; }
+.hs-checklist { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-4) var(--space-5); }
+.hs-checklist h3 { display: flex; justify-content: space-between; margin: 0 0 var(--space-1); color: var(--label-secondary); font: 400 var(--text-callout)/var(--lh-callout) var(--font-text); }
+.hs-checklist h3 small { font: var(--type-subheadline); font-variant-numeric: tabular-nums; }
+.hs-checklist ul { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; color: var(--label); font: var(--type-callout); }
+.hs-charts { display: grid; gap: var(--space-6); }
+.hs-table th small { display: block; color: var(--label-secondary); font: var(--type-subheadline); }
+.hs-field { display: grid; gap: var(--space-1); color: var(--label); font: var(--type-callout); }
+.hs-field textarea { width: 100%; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-sm); background: var(--fill-tertiary); box-shadow: inset 0 0 0 1px var(--separator); color: var(--label); font: var(--type-body); resize: vertical; }
+.hs-field textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.hs-sheet .ui-dialog__body { display: grid; gap: var(--space-3); }
+@media (prefers-reduced-motion: reduce) { .hs-import__bar i { transition: none; } }
+:root[data-reduce-motion="true"] .hs-import__bar i { transition: none; }
