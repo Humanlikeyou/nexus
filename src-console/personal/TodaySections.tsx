@@ -26,7 +26,7 @@ export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, a
   return (
     <div className="v-page" id="goals">
       <PageHero title="Goals" statement={w ? `${onTrack} of ${w.habits.length} habits on track this week` : "Habits and milestones"}
-        detail={w ? <>{w.milestones.length} milestones{w.nextMilestone ? ` · next: ${w.nextMilestone}` : ""}{ready ? ` · ${ready} suggestion ready to become a habit` : ""} <DataTag kind="sample" /></> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
+        detail={w ? <>{w.milestones.length} milestones{w.nextMilestone ? ` · next: ${w.nextMilestone}` : ""}{ready ? ` · ${ready} suggestion ready to become a habit` : ""} {week.state === "sample" && <DataTag kind="sample" />}</> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
       <AmaraTake page="life" className="life__take" />
       {composer}
       <div className="pk-g2">
@@ -48,7 +48,7 @@ export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, a
         <div className="pk-stack">
           <ReadyToKeepCard title="Ready to become a habit" />
           {w ? (
-            <Card title="Milestones" accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+            <Card title="Milestones" accessory={<span className="pk-acc">{week.state === "sample" && <DataTag kind="sample" />}</span>}>
               {w.milestones.map((m) => (
                 <div className="pk-ms" key={m.id}>
                   <div className="pk-ms__top"><span>{m.title}</span><span>{m.right}</span></div>
@@ -161,7 +161,7 @@ export function WeeklyReviewSection({ adapter, onOpenCheckIn }: { adapter: Perso
   };
   return (
     <div className="v-page" id="weekly-review">
-      <PageHero title="Weekly review" statement={v ? v.title : "Your week, every Sunday"} detail={v ? <>{v.week} <DataTag kind="sample" /></> : <>Ready {PERSONAL_DEFAULTS.weeklyReview} from your health, work and money <DataTag kind="wire" /></>} />
+      <PageHero title="Weekly review" statement={v ? v.title : "Your week, every Sunday"} detail={v ? <>{v.week} {wr.state === "sample" && <DataTag kind="sample" />}</> : <>Ready {PERSONAL_DEFAULTS.weeklyReview} from your health, work and money <DataTag kind="wire" /></>} />
       <AmaraTake page="life" className="life__take" />
       {!v ? <Card title="This week" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">{WIRE_NOTE}</p></Card> : (
         <>
@@ -176,7 +176,7 @@ export function WeeklyReviewSection({ adapter, onOpenCheckIn }: { adapter: Perso
           {hasTakeChange ? <TakeChange /> : <div className="pk-change">
             <span className="pk-eyebrow">ONE CHANGE TO TRY THIS WEEK</span>
             <h3>{v.change.title}</h3>
-            <p><Rich text={v.change.body} /> <DataTag kind="sample" /></p>
+            <p><Rich text={v.change.body} /> {wr.state === "sample" && <DataTag kind="sample" />}</p>
             {why && <p className="pk-note">From the pattern &ldquo;Training load → focus&rdquo; (Mind–Body › Patterns, medium confidence, 21 days). Try it sets a reminder; it never changes a goal by itself.</p>}
             <div className="pk-actions">
               <Button size="small" variant="primary" onClick={() => { void decide(true); }} disabled={decided !== null}>Try it this week</Button>
@@ -187,15 +187,15 @@ export function WeeklyReviewSection({ adapter, onOpenCheckIn }: { adapter: Perso
           </div>}
           <TakesThisWeekCard />
           <div className="pk-g2">
-            <Card title="Highlights" accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+            <Card title="Highlights" accessory={<span className="pk-acc">{wr.state === "sample" && <DataTag kind="sample" />}</span>}>
               {v.highlights.map((h) => <div className="pk-row" key={h.title}><StatusText kind={h.ok ? "ok" : "wait"} /><div className="pk-row__main"><span>{h.title}</span><small>{h.sub}</small></div></div>)}
             </Card>
-            <Card title="Your notes this week" accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+            <Card title="Your notes this week" accessory={<span className="pk-acc">{wr.state === "sample" && <DataTag kind="sample" />}</span>}>
               {v.notes.map((n) => <p className="pk-take" key={n.text}>&ldquo;{n.text}&rdquo; · {n.day}</p>)}
             </Card>
           </div>
           <SuggestedLatelyCard title="Suggested lately · not goals yet" />
-          <Card title="Journal" accessory={<span className="pk-acc"><DataTag kind="sample" /></span>}>
+          <Card title="Journal" accessory={<span className="pk-acc">{wr.state === "sample" && <DataTag kind="sample" />}</span>}>
             <div className="v-linkrow"><p>Your evening check-ins live on Today. Each one shows on the Mind–Body timeline.</p><span className="v-grow" />{onOpenCheckIn && <button type="button" className="v-link" onClick={onOpenCheckIn}>Open Check-in ›</button>}</div>
           </Card>
         </>

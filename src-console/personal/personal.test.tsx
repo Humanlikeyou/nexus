@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { makeSamplePersonal, MOOD_STEPS, unwiredPersonal, isTokyoSunday } from "./adapters";
 import { CheckInSection, GoalsSection, WeeklyReviewSection } from "./TodaySections";
 import { DatesView } from "../life/DatesView";
+import type { PersonalAdapter } from "./adapters";
 import { MemorySection, PatternsView, PersonalMoneyView } from "./PageViews";
 
 describe("design-1111a personal OS", () => {
@@ -62,5 +63,30 @@ describe("design-1111a personal OS", () => {
   it("Sunday is judged in Tokyo", () => {
     expect(isTokyoSunday(new Date("2026-11-14T16:00:00Z"))).toBe(true); // Sun 01:00 JST
     expect(isTokyoSunday(new Date("2026-11-14T14:00:00Z"))).toBe(false); // Sat 23:00 JST
+  });
+});
+
+/** The sample adapter with every sample value re-stated as live: same data, state "live". */
+function makeLivePersonal(): PersonalAdapter {
+  const base = makeSamplePersonal();
+  const toLive = (w: unknown) => (w && typeof w === "object" && (w as { state?: string }).state === "sample" ? { ...(w as object), state: "live" } : w);
+  return new Proxy(base, { get: (t, k) => { const f = (t as unknown as Record<string | symbol, unknown>)[k]; return typeof f === "function" ? (...a: unknown[]) => { const r = (f as (...x: unknown[]) => unknown).apply(t, a); return r instanceof Promise ? r.then(toLive) : toLive(r); } : f; } }) as PersonalAdapter;
+}
+
+describe("design-1111a sample tag only on sample values", () => {
+  const panels = (a: PersonalAdapter) => <>
+    <GoalsSection adapter={a} goals={[]} /><WeeklyReviewSection adapter={a} /><PatternsView adapter={a} /><PersonalMoneyView adapter={a} /><MemorySection adapter={a} />
+  </>;
+  it("sample values show the Sample data tag on every panel", () => {
+    render(panels(makeSamplePersonal()));
+    expect(screen.getAllByText("Sample data").length).toBeGreaterThanOrEqual(15);
+  });
+  it("live values never show a Sample data tag, and still show their content", () => {
+    render(panels(makeLivePersonal()));
+    expect(screen.queryByText("Sample data")).toBeNull();
+    expect(screen.getByText("Left after bills").parentElement).toHaveTextContent("$1,412");
+    expect(screen.getByText("Milestones")).toBeInTheDocument();
+    expect(screen.getByText("Highlights")).toBeInTheDocument();
+    expect(screen.getByText("Journal")).toBeInTheDocument();
   });
 });
