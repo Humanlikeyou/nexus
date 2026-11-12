@@ -1,7 +1,7 @@
 # Board (read this first when resuming)
 
 Branch `amara-integration`, local commits only, nothing pushed. Decisions: `docs/decisions/0001–0007`.
-Full gates on HEAD (2026-11-12, after `7de5b4b`): vitest 1523 / 9 skipped · neuro 21 · src-tauri 542 / 5 ignored · router 126 · crew-service 222 · tsc / lint / fmt / clippy / secrets clean · **full e2e 728 passed / 12 skipped / 0 failed**. Review gate reached: see `tasks/HANDOFF-FOR-REVIEW.md`.
+Full gates on HEAD (2026-11-13, after `8af876a`): src-tauri 769 / 5 ignored · router 126 · vitest 1710 / 9 skipped · neuro 21 · full e2e 754 passed / 12 skipped / 0 failed. Older: (2026-11-12, after `7de5b4b`): vitest 1523 / 9 skipped · neuro 21 · src-tauri 542 / 5 ignored · router 126 · crew-service 222 · tsc / lint / fmt / clippy / secrets clean · **full e2e 728 passed / 12 skipped / 0 failed**. Review gate reached: see `tasks/HANDOFF-FOR-REVIEW.md`.
 Status: `todo` · `active` (lane running) · `done <hash>` · `blocked` · `waiting` (Taisun).
 
 ## Dev system
@@ -64,6 +64,19 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 - Muse LOW follow-ups (see handoff §12); life-enterprise-1111v:166 light contrast; re-run the commit security review (429)
 - Decision 0013: habit tracker research + design, goal roadmaps (deep, overnight), step questions in takes
 - money_balances_list read command; weekly review + patterns jobs; habit data sources
+
+## Night of 2026-11-12 → 13 (Taisun asleep; autonomy granted "keep working")
+| item | status |
+|---|---|
+| Heart-rate take back on Home + Today (Taisun: removal was a mistake) | done c3a15a6 (not installed) |
+| memory_list (Settings › Memory read-only) + money_balances_list (money overview) | done b438574 (security review PASS) |
+| Decision 0015: Letta writes on 0.16.8 (option A); plan recheck, DB is letta_db | done 7e075d6 |
+| Letta password in Keychain | done (Taisun re-saved it 2026-11-13; live read check 200) |
+| L1 Letta writes (edit / delete-as-clear / undo, backup first, approval dialog) | done 8af876a (PATCH not run live: Taisun, after pg_dump of letta_db) |
+| L2 patterns_read + weekly_review_read | done 8af876a |
+| L3 navy localOnly covers chat (fail-closed, Q1 still open) | done 0dd3996 + cf93fd0; voice loop: waiting (Taisun applies tasks/proposed/amara-voice-navy-gate.diff); speak() unwired (no local TTS entry) |
+| L4 money account rows + backup_verify_last / Backup "last" | done 1c93d5e (sha256 per file in new backups) |
+| takes-1111t:80 light contrast: REAL 4.28:1 on .m-warn b (not a flake) | waiting (Design, tasks/design-questions.md) |
 
 ## Out of scope tonight (Taisun)
 NOOP merge, live Telegram relay send path, standalone phases (bundling, signing, notarization, DMG, updater, WHOOP takeover), Letta upgrade apply.

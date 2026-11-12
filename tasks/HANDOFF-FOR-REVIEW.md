@@ -143,3 +143,36 @@ Full e2e on `1af2316`: 732 passed / 12 skipped / 8 failed (a11y Mind–Body ×2,
 - Class A left: backup `last` (make `checksumOk` nullable or add `backup_verify_last`), jp_bank CSV import (needs `importStatement(accountId, path)` + an approved JS dialog package), Dates Edit (`editDate` on the personal adapter → `life_date_upsert`), crew approvals prefetch on Home.
 - Class B (new read-only commands, each with a security review): `money_balances_list` → money overview; `weekly_review_read`; `patterns_read`; `memory_list` (read-only Letta; writes stay off); `whoop_status`; `service_logs`; `backup_verify_last`.
 - Class C (Taisun): business ledger file (unblocks most of Enterprise), Letta writes (Memory edits), WHOOP takeover, Telegram relay, updater/signing, Home windows (new hosts + unstable webview), AUX (eyes-closed test), recording delete path (no).
+
+## 15. Night of 2026-11-12 → 13 (Taisun: "keep working… spin up some agents")
+
+Commits: c3a15a6 (heart-rate take back on Home and Today), b438574 (memory_list + money_balances_list, security review PASS), 7e075d6 (decision 0015 + Letta plan recheck).
+
+**Letta password (Taisun step).** The Keychain item `com.taisun.nexus.letta_server_password` exists, but Letta answers 401 with it. The running stack is `~/projects/nexus/stack` (compose working dir), so the right value is `LETTA_SERVER_PASSWORD` in `~/projects/nexus/stack/.env`. The assistant may not read that file (auto mode: credential exploration). Re-store it without showing it:
+
+    security add-generic-password -U -s com.taisun.nexus.letta_server_password -a amara -w "$(grep '^LETTA_SERVER_PASSWORD=' ~/projects/nexus/stack/.env | cut -d= -f2- | tr -d "\"'")"
+
+Then ask the assistant to re-run the check, which prints only the HTTP status. If it's still 401 with the right value, 0.16.8 wants a different header and `memory_read.rs` gets fixed.
+
+**Flake:** takes-1111t:80 [light] axe color-contrast on `div[role=alert] > b` (seed-phrase alert caught mid-fade under full-suite load). 13/13 passes in isolation. Not weakened. Fix belongs to Design (no fade on alerts) or the test waiting for the animation to end.
+
+Lanes running (not committed yet): L1 Letta writes, L2 patterns + weekly review, L3 navy localOnly for chat + local speak, L4 money rows + backup verify. Results are filled in below as they land.
+
+**Letta password fixed (2026-11-13 morning).** Taisun re-saved the Keychain item from the stack `.env`. Live read-only check: `GET /v1/agents` 200 (1 agent), `GET /v1/agents/{id}/core-memory/blocks` 200 (2 blocks: human, persona; `updated_at` absent on 0.16.8, already optional), `GET /v1/blocks/{id}` 200. No values were printed. PATCH (the edit/delete path) was **not run live**. It waits for Taisun, after a `pg_dump` of `letta_db`.
+
+**Lanes landed (2026-11-13 morning):** 0dd3996 + cf93fd0 navy, 1c93d5e backups/money rows, 8af876a memory writes + patterns + weekly review. Every lane got a security review (all FIX NEEDED at first, all fixed with tests; details in each commit body). Gates on the combined tree: src-tauri 769 / 5 ignored, router 126, vitest 1710 / 9 skipped, neuro 21, full e2e 754 / 12 skipped / 0 failed.
+
+The first e2e run (44 min, 23 failures) was the Mac under load. The second (10 failures, ENOENT on artifacts) was self-inflicted: probe runs shared test-results/. The clean third run is the one recorded.
+
+**Taisun steps from this batch**
+1. Voice + navy: apply `tasks/proposed/amara-voice-navy-gate.diff`. Back up both files first, `patch -p1 --dry-run`, then apply, restart the loop, and test "go dark", a question, then "back to normal". Until then, voice turns during navy still reach Hermes.
+2. Before the first real memory delete: `pg_dump` of `letta_db` (letta-upgrade-plan.md).
+3. Rebuild and install when you want these live (install only when asked).
+
+**Open questions (new)**
+- Q1 is still open (navy vs Hermes web tools); fail-closed is shipped.
+- Should voice skills (Spotify, Home Assistant) also be blocked in navy?
+- Should goals get an explicit personal/venture scope? Today only category names "business/venture/enterprise" are excluded from the personal review.
+- Should the weekly review get an LLM-written summary (local router)?
+- Undo button for memory edits (Design).
+- The seed-alert contrast is 4.28:1 in light (Design).

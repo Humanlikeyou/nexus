@@ -30,3 +30,11 @@ Also for Goals: habits added through the one add path have no `source`, so their
 
 ## takes-1111t money e2e: light-theme contrast (2026-11-12)
 `test/e2e/takes-1111t.spec.ts:80` fails in light theme only, 3/3, on `0b2a312`, HEAD and the working tree alike (dark passes): axe `color-contrast` on `div[role="alert"] > b` in the Connect-an-account sheet after the seed phrase is refused. It passed in the 0b2a312 full run earlier the same day, so it is likely date/time-dependent content. Design-owned styling (money/ConnectSheet); not changed by Claude.
+
+## 2026-11-13: light-theme contrast failure on the seed-phrase alert (real, not a flake)
+
+`takes-1111t.spec.ts:80` [light] fails the axe check `color-contrast: div[role="alert"] > b`. Measured with axe on a stable page at 0, 300 and 1500 ms after the alert shows: **4.28:1 in light every time** (needs 4.5:1), 5.99:1 in dark.
+
+The element is `.m-warn b` (`src-console/money/money.css:28`): `color: var(--copper-text)` (light `#8c6239`, `tokens.css:38`) on the `.m-warn` background `color-mix(copper-text 10%, transparent)` over the sheet.
+
+Earlier sessions called this a flake because it sometimes passed. Today's probe shows a stable 4.28. Design's call, for example a darker light-theme copper for text on tinted fills, or no tint behind the bold line. Claude Code hasn't touched the CSS or tokens, and the test stays as it is.
