@@ -52,6 +52,7 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 - Taisun: rebuild + install, then: Import the Hemi-Sync collection, try one track with the Muse, check the map live
 
 ## Installed
+- 540f051 installed 2026-11-12 23:08 JST (rollback: ~/Backups/Amara OS-backup-20261112d.app)
 - 73f53a5 installed 2026-11-12 22:21 JST (rollback: ~/Backups/Amara OS-backup-20261112c.app)
 
 ## Next session
