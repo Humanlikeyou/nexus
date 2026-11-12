@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { BackupRun, BackupSettings, BackupStatus, KeyFileStatus, SecretName, SecretStatus, StandaloneAdapter } from "./adapters";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
+import { servicesFromMap } from "./servicesFromMap";
+import type { SystemMap } from "./systemMap";
 
 /**
  * Live standalone adapter (HANDOFF-1111s wiring steps 1-2): secrets and the n8n key file, over
@@ -18,8 +20,9 @@ type Cache = {
   backupSettings: BackupSettings | null;
   backupList: BackupRow[] | null;
   run: BackupRun | null;
+  map: SystemMap | null;
 };
-const cache: Cache = { secrets: null, keyFile: null, backupSettings: null, backupList: null, run: null };
+const cache: Cache = { secrets: null, keyFile: null, backupSettings: null, backupList: null, run: null, map: null };
 let version = 0;
 const listeners = new Set<() => void>();
 const notify = () => { version += 1; listeners.forEach((l) => l()); };
@@ -46,16 +49,18 @@ const fmtMadeAt = (iso: string) => {
 };
 
 export async function refreshLive(): Promise<void> {
-  const [s, k, bs, bl] = await Promise.allSettled([
+  const [s, k, bs, bl, sm] = await Promise.allSettled([
     invoke<SecretStatus[]>("secrets_status"),
     invoke<KeyFileStatus>("key_file_status"),
     invoke<BackupSettings>("backup_settings_get"),
     invoke<BackupRow[]>("backup_list"),
+    invoke<SystemMap>("system_map_status"),
   ]);
   cache.secrets = s.status === "fulfilled" ? s.value : null;
   cache.keyFile = k.status === "fulfilled" ? k.value : null;
   cache.backupSettings = bs.status === "fulfilled" && isSettings(bs.value) ? bs.value : null;
   cache.backupList = bl.status === "fulfilled" && Array.isArray(bl.value) && bl.value.every(isRow) ? bl.value : null;
+  cache.map = sm.status === "fulfilled" && sm.value && Array.isArray(sm.value.nodes) && Array.isArray(sm.value.paths) ? sm.value : null;
   notify();
 }
 
@@ -77,6 +82,7 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
   if (!started) { started = true; void refreshLive(); listenBackupProgress(); }
   return {
     ...base,
+    services: () => live(cache.map ? servicesFromMap(cache.map) : null),
     secrets: () => live(cache.secrets),
     setSecret: async (name: SecretName, value: string) => {
       try { await invoke("secret_set", { name, value }); } catch (e) { console.warn("[standalone] secret_set refused:", code(e)); return UNWIRED; }

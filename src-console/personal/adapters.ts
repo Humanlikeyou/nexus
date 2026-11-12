@@ -225,17 +225,54 @@ export function lifeAdminFrom(rows: LifeDateWire[]): LifeAdmin {
 const WHEN = new Intl.DateTimeFormat("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Tokyo" });
 export const checkInFrom = (r: CheckInWire): CheckIn => ({ id: r.id, when: WHEN.format(new Date(r.at)).replace(",", ""), mood: r.mood, energy: r.energy, tags: r.tags, text: r.text, transcribed: r.transcribed || undefined });
 
+/** Row as src-tauri goals.rs `read_goals` returns it. Habits are `category === "habit"` (adds.rs). */
+export type GoalWire = { id: string; title: string; category: string; target: number; current: number; unit: string; deadline?: string | null };
+
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const isGoalWire = (g: unknown): g is GoalWire => { const o = g as Record<string, unknown> | null; return !!o && typeof o.id === "string" && typeof o.title === "string"; };
+const deadlineLabel = (d: string) => (/^\d{4}-\d{2}-\d{2}/.test(d) ? dayLabel(d.slice(0, 10)) : d);
+const deadlineTime = (d: string | null | undefined): number | null => {
+  if (!d) return null;
+  const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T00:00:00Z` : d);
+  return Number.isNaN(t) ? null : t;
+};
+
+/** Goals and habits from `read_goals`. Habit days stay "none": no source data is linked to them, so nothing is ever met or missed. */
+export function goalsFrom(rows: GoalWire[]): GoalsWeek {
+  const clamp = (n: number) => Math.max(0, Math.min(100, n));
+  const rowsOk = rows.filter(isGoalWire);
+  const items = rowsOk.filter((g) => g.category !== "habit").map((g) => {
+    const target = num(g.target), current = num(g.current), unit = typeof g.unit === "string" ? g.unit.trim() : "";
+    const pct = target > 0 ? Math.round(clamp((current / target) * 100)) : 0;
+    const right = unit === "%" ? `${pct}%` : target > 0 ? `${current} of ${target}${unit ? ` ${unit}` : ""}` : `${current}${unit ? ` ${unit}` : ""}`;
+    const dl = g.deadline ? deadlineLabel(g.deadline) : "";
+    const m: Milestone = { id: g.id, title: g.title, detail: [g.category, dl].filter(Boolean).join(" · "), right, pct };
+    return { m, t: deadlineTime(g.deadline) };
+  });
+  const open = items.filter((x) => x.m.pct < 100);
+  const dated = open.filter((x) => x.t !== null).sort((a, b) => (a.t as number) - (b.t as number));
+  const next = dated[0] ?? [...open].sort((a, b) => b.m.pct - a.m.pct)[0];
+  const habits: Habit[] = rowsOk.filter((g) => g.category === "habit").map((g) => {
+    const unit = typeof g.unit === "string" ? g.unit : "";
+    const t = num(g.target);
+    return { id: g.id, title: g.title, source: "You", rule: unit, days: Array.from({ length: 7 }, () => "none" as DayMark), done: 0, target: t > 0 ? Math.min(7, Math.round(t)) : 7, note: "No data source linked yet" };
+  });
+  return { habits, milestones: items.map((x) => x.m), nextMilestone: next ? next.m.title : null };
+}
+
 /**
- * The stores built so far (life dates, check-ins). Everything else stays unwired. Each reads as unwired until its
+ * The stores built so far (life dates, check-ins, goals). Everything else stays unwired. Each reads as unwired until its
  * first successful read, so a missing backend never shows an empty live list.
  */
 export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & { refresh(): Promise<void> } {
   let admin: LifeAdmin | null = null;
   let checkins: CheckIn[] | null = null;
+  let goals: GoalsWeek | null = null;
   const refresh = async () => {
     await Promise.all([
       call<LifeDateWire[]>("life_date_list").then((r) => { admin = lifeAdminFrom(r); }, () => { admin = null; }),
       call<CheckInWire[]>("checkin_list", { limit: 30 }).then((r) => { checkins = r.map(checkInFrom); }, () => { checkins = null; }),
+      call<GoalWire[]>("read_goals").then((r) => { goals = Array.isArray(r) ? goalsFrom(r) : null; }, () => { goals = null; }),
     ]);
     announceStores();
   };
@@ -243,6 +280,7 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
   return {
     ...unwiredPersonal,
     refresh,
+    goals: () => (goals ? live(goals) : UNWIRED),
     lifeAdmin: () => (admin ? live(admin) : UNWIRED),
     checkins: () => (checkins ? live([...checkins]) : UNWIRED),
     saveCheckIn: async (d) => {
