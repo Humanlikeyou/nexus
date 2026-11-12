@@ -180,15 +180,29 @@ export function NeuroFlow({ training, telemetry, sessions, running, action }: { 
 
   // Sound can only start from his click, which is the session's Start button.
   const armed = useRef(false);
+  const audioOn = useRef(false);
   useEffect(() => {
-    if (!running || armed.current) return;
-    armed.current = true;
-    setSoundOn(!!protocol?.eyesClosed);
+    if (!running) return;
+    if (!armed.current) {
+      armed.current = true;
+      setSoundOn(!!protocol?.eyesClosed);
+    }
     // Recording only (and Hemi-Sync, which switches to it) makes no sound: init() starts a continuous drone and 432 Hz tone.
-    if (!protocol) return;
-    try { init(); setMode("tone"); } catch { /* no audio on this machine: the light still works */ }
-  }, [running, protocol, init, setMode]);
-  useEffect(() => { if (!running && armed.current) { armed.current = false; try { cleanup(); } catch { /* nothing to close */ } } }, [running, cleanup]);
+    // A protocol that changes to a real one mid-run starts audio then; back to "off" tears it down.
+    if (protocol && !audioOn.current) {
+      audioOn.current = true;
+      try { init(); setMode("tone"); } catch { /* no audio on this machine: the light still works */ }
+    } else if (!protocol && audioOn.current) {
+      audioOn.current = false;
+      try { cleanup(); } catch { /* nothing to close */ }
+    }
+  }, [running, protocol, init, setMode, cleanup]);
+  useEffect(() => () => { if (audioOn.current) { audioOn.current = false; try { cleanup(); } catch { /* nothing to close */ } } }, [cleanup]);
+  useEffect(() => {
+    if (running) return;
+    armed.current = false;
+    if (audioOn.current) { audioOn.current = false; try { cleanup(); } catch { /* nothing to close */ } }
+  }, [running, cleanup]);
   useEffect(() => { setMuted(!soundOn); }, [soundOn, setMuted]);
 
   // Bells carry the session when his eyes are closed.

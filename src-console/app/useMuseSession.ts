@@ -195,7 +195,8 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     setMuseOperation("stopping");
     setMuseError(null);
     try {
-      const saved = await persistMuseSession();
+      // Same bounded wait as disconnect; a retry joins the finalizer's in-flight save, so there is never a second save.
+      const saved = await withTimeout(persistMuseSession(), SAVE_TIMEOUT_MS, "The headset didn't answer while saving the session. The recording is kept. Press Stop session to retry.");
       finishTraining();
       setSessionStartedAt(null);
       sessionIdRef.current = null;
@@ -234,7 +235,9 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       resetTelemetry();
       setNotice("Muse disconnected");
     } catch (error) {
-      setMuseError(readableError(error));
+      // "superseded" is internal: a newer connect or disconnect overtook this one.
+      const text = readableError(error);
+      setMuseError(/superseded/i.test(text) ? "The headset didn't answer; try again" : text);
     } finally {
       sessionOperation.current = false;
       setMuseOperation(null);
