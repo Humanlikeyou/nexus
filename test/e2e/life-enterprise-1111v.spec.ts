@@ -11,14 +11,17 @@ async function blocking(page: Page) {
   return r.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => `${v.id}: ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
 }
 
-test("sidebar: Life ⌘4 and Enterprise ⌘5 after Mind–Body; no Business; Settings ⌘6, Smart home ⌘7", async ({ page, theme, consoleErrors }) => {
+test("sidebar (decision 0009): Home ⌘1, Life ⌘2, Mind–Body ⌘3, Enterprise ⌘4, Agents ⌘5, Smart home ⌘6, Settings ⌘7; no Business", async ({ page, theme, consoleErrors }) => {
   await openApp(page, { theme, reduceMotion: true });
   await gotoToday(page);
   const nav = page.getByRole("navigation", { name: "Amara OS navigation" });
   await expect(nav.getByRole("button", { name: /^Business/ })).toHaveCount(0);
   await expect(nav.locator(".nav-shortcut")).toHaveText(["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6", "⌘7"]);
-  await expect(nav.getByRole("button", { name: /^Life/ })).toContainText("⌘4");
-  await expect(nav.getByRole("button", { name: /^Enterprise/ })).toContainText("⌘5");
+  await expect(nav.getByRole("button", { name: /^Life/ })).toContainText("⌘2");
+  await expect(nav.getByRole("button", { name: /^Enterprise/ })).toContainText("⌘4");
+  await expect(nav.getByRole("button", { name: /^Agents/ })).toContainText("⌘5");
+  await expect(nav.getByRole("button", { name: /^Smart home/ })).toContainText("⌘6");
+  await expect(nav.getByRole("button", { name: /^Settings/ })).toContainText("⌘7");
   await navButton(page, "Life").click();
   await expect(activeField(page, "Life")).toBeVisible();
   await expect(tab(page, "Life", "Goals")).toHaveAttribute("aria-checked", "true");

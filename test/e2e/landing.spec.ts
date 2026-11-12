@@ -17,7 +17,7 @@ const emit = (page: Page, event: string, payload: Record<string, unknown>) =>
   page.evaluate(([e, p]) => (window as unknown as { __E2E_EMIT: (e: unknown, p: unknown) => void }).__E2E_EMIT(e, { ts: Date.now(), ...p }), [event, payload] as const);
 const lens = (page: Page) => page.locator('.amara-lens[data-size="320"]');
 const line = (page: Page) => page.locator(".landing__line");
-const NAV = ["Today", "Agents", "Mind–Body", "Life", "Enterprise", "Settings", "Smart home"];
+const NAV = ["Today", "Life", "Mind–Body", "Enterprise", "Agents", "Smart home", "Settings"]; // decision 0009
 
 /** e2e Chromium reports reduced transparency; force it off so shots show the real look. */
 async function realLook(page: Page, theme: Theme) {

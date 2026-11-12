@@ -5,7 +5,7 @@ import { CommandPalette, filterCommands, paletteCommands } from "./CommandPalett
 describe("⌘K command palette", () => {
   it("lists the 7 sections with ⌘1–7 and the sub-views", () => {
     const cmds = paletteCommands();
-    expect(cmds.slice(0, 7).map((c) => `${c.label} ${c.hint}`)).toEqual(["Home ⌘1", "Agents ⌘2", "Mind–Body ⌘3", "Life ⌘4", "Enterprise ⌘5", "Settings ⌘6", "Smart home ⌘7"]);
+    expect(cmds.slice(0, 7).map((c) => `${c.label} ${c.hint}`)).toEqual(["Home ⌘1", "Life ⌘2", "Mind–Body ⌘3", "Enterprise ⌘4", "Agents ⌘5", "Smart home ⌘6", "Settings ⌘7"]);
     expect(cmds.map((c) => c.label)).toEqual(expect.arrayContaining(["Agents › Activity", "Agents › Crews", "Mind–Body › Fitness", "Mind–Body › Neuro", "Mind–Body › Neuro history", "Today › To-dos", "Settings › Voice", "Enterprise › Finances", "Enterprise › Ventures", "Enterprise › Tasks", "Enterprise › Decisions", "Enterprise › Content", "Life › Goals", "Life › Weekly review", "Life › Dates & deadlines", "Life › Personal money", "Settings › Devices", "About Amara OS"]));
     for (const gone of ["Today › Lists", "Today › Life admin", "Today › Weekly review", "Home › Goals", "Business › Money", "Business › Work", "Business › Personal"]) expect(cmds.map((c) => c.label)).not.toContain(gone);
     expect(filterCommands(cmds, "devi").map((c) => c.id)).toEqual(["settings:devices"]);
@@ -16,26 +16,26 @@ describe("⌘K command palette", () => {
     expect(paletteCommands().map((c) => c.label)).toMatchInlineSnapshot(`
       [
         "Home",
-        "Agents",
-        "Mind–Body",
         "Life",
+        "Mind–Body",
         "Enterprise",
-        "Settings",
+        "Agents",
         "Smart home",
-        "Agents › Crews",
-        "Mind–Body › Fitness",
-        "Mind–Body › Neuro",
-        "Mind–Body › Neuro history",
-        "Mind–Body › Patterns",
+        "Settings",
         "Life › Goals",
         "Life › Weekly review",
         "Life › Dates & deadlines",
         "Life › Personal money",
+        "Mind–Body › Fitness",
+        "Mind–Body › Neuro",
+        "Mind–Body › Neuro history",
+        "Mind–Body › Patterns",
         "Enterprise › Decisions",
         "Enterprise › Ventures",
         "Enterprise › Finances",
         "Enterprise › Tasks",
         "Enterprise › Content",
+        "Agents › Crews",
         "Settings › Services",
         "Settings › Devices",
         "Settings › Notifications",

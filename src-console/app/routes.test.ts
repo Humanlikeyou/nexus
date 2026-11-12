@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { HOST_VIEWS, LANDING_ENTRIES, ROUTE_ALIASES, SECTION_ANCHORS, SYSTEM_GROUPS, SYSTEMS, TODAY_ROUTE, VIEW_REDIRECTS, canonicalRoute, resolveRoute, screenFor, tabOf, ventureOf, ventureRoute } from "./routes";
 
-describe("navigation (7 items, 3 groups)", () => {
-  it("has the spec order and grouping (design-1111v: Life ⌘4, Enterprise ⌘5)", () => {
-    expect(SYSTEM_GROUPS.map((g) => g.label)).toEqual(["", "", "System"]);
-    expect(SYSTEMS.map((s) => s.id)).toEqual(["terrance", "chat", "mindbody", "life", "enterprise", "settings", "smarthome"]);
+describe("navigation (7 items, 2 groups)", () => {
+  it("has the spec order and grouping (decision 0009: Home, Life, Mind–Body, Enterprise, Agents · System: Smart home, Settings)", () => {
+    expect(SYSTEM_GROUPS.map((g) => g.label)).toEqual(["", "System"]);
+    expect(SYSTEMS.map((s) => s.id)).toEqual(["terrance", "life", "mindbody", "enterprise", "chat", "smarthome", "settings"]);
   });
 
   it("resolves every folded id to its host and back to the legacy screen", () => {
@@ -40,7 +40,7 @@ describe("navigation (7 items, 3 groups)", () => {
   });
 
   it("labels Mind–Body with an en dash; Life and Enterprise follow it", () => {
-    expect(SYSTEMS.map((s) => s.label)).toEqual(["Home", "Agents", "Mind–Body", "Life", "Enterprise", "Settings", "Smart home"]);
+    expect(SYSTEMS.map((s) => s.label)).toEqual(["Home", "Life", "Mind–Body", "Enterprise", "Agents", "Smart home", "Settings"]);
   });
 
   it("keeps host ids; Life opens on Goals and Enterprise on Overview", () => {
@@ -60,7 +60,7 @@ describe("navigation (7 items, 3 groups)", () => {
   });
 
   it("landing buttons are Today plus every other section, with the sidebar's shortcuts", () => {
-    expect(LANDING_ENTRIES.map((e) => e.label)).toEqual(["Today", "Agents", "Mind–Body", "Life", "Enterprise", "Settings", "Smart home"]);
+    expect(LANDING_ENTRIES.map((e) => e.label)).toEqual(["Today", "Life", "Mind–Body", "Enterprise", "Agents", "Smart home", "Settings"]);
     expect(LANDING_ENTRIES.map((e) => e.shortcut)).toEqual([null, 2, 3, 4, 5, 6, 7]);
     expect(LANDING_ENTRIES.map((e) => e.icon)).toEqual(SYSTEMS.map((s) => s.icon));
   });

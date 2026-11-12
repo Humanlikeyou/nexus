@@ -2,14 +2,14 @@ import { activeField, expect, navButton, openApp, openHomeChat, openView, routeS
 import { responses } from "./fixtures/snapshot";
 
 const SECTIONS: { label: string; h1: RegExp }[] = [
+  // Order = ⌘1–7 (decision 0009). Life opens on Goals.
   { label: "Today", h1: /^Today$/ },
-  { label: "Agents", h1: /^Agents$/ },
-  { label: "Mind–Body", h1: /^Mind–Body$/ },
-  // design-1111v: Life (opens on Goals) and Enterprise (Business renamed) between Mind–Body and Settings.
   { label: "Life", h1: /^Goals$/ },
+  { label: "Mind–Body", h1: /^Mind–Body$/ },
   { label: "Enterprise", h1: /^Enterprise$/ },
-  { label: "Settings", h1: /^Settings$/ },
+  { label: "Agents", h1: /^Agents$/ },
   { label: "Smart home", h1: /^Smart home$/ },
+  { label: "Settings", h1: /^Settings$/ },
 ];
 
 test.describe("sections", () => {

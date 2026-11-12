@@ -14,20 +14,19 @@ export const SECTION_ANCHORS: Partial<Record<ModuleId, string[]>> = {
 
 /** Seven items in three groups, like macOS Settings (screen-specs Part 2). The first group is untitled
  *  (it sits under the wordmark). ⌘1–7 follow this order. Mind–Body hosts Fitness and Neuro as sub-views.
- *  design-1111v (Taisun, 19:23 JST Nov 11): Life ⌘4 and Enterprise ⌘5 (was Business) share an untitled group. */
+ *  Order per decision 0009: ⌘1 Home, ⌘2 Life, ⌘3 Mind–Body, ⌘4 Enterprise, ⌘5 Agents, ⌘6 Smart home, ⌘7 Settings. */
+// Taisun, 2026-11-12 (decision 0009): Home, Life, Mind–Body, Enterprise, Agents, then System: Smart home, Settings.
 export const SYSTEM_GROUPS: Array<{ label: string; systems: SystemEntry[] }> = [
   { label: "", systems: [
     { id: "terrance", label: "Home", signal: "AI", icon: Bot },
-    { id: "chat", label: "Agents", signal: "AGENTS", icon: Users },
-    { id: "mindbody", label: "Mind–Body", signal: "BODY", icon: Activity },
-  ] },
-  { label: "", systems: [
     { id: "life", label: "Life", signal: "LIFE", icon: Sprout },
+    { id: "mindbody", label: "Mind–Body", signal: "BODY", icon: Activity },
     { id: "enterprise", label: "Enterprise", signal: "WORK", icon: BriefcaseBusiness },
+    { id: "chat", label: "Agents", signal: "AGENTS", icon: Users },
   ] },
   { label: "System", systems: [
-    { id: "settings", label: "Settings", signal: "APP", icon: Settings2 },
     { id: "smarthome", label: "Smart home", signal: "HA", icon: House },
+    { id: "settings", label: "Settings", signal: "APP", icon: Settings2 },
   ] },
 ];
 
