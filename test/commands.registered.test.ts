@@ -44,6 +44,15 @@ describe("Tauri command registry", () => {
     for (const name of ["noop_recent_workouts", "noop_hypnogram", "voice_stop_speaking"]) expect(names).toContain(name);
   });
 
+  it("the money commands are registered and none can move money", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    const money = ["money_accounts_list", "money_account_add", "money_watch_add", "money_balance_set_manual", "money_import_statement", "fx_rate_get", "fx_rate_set_manual", "fx_rate_refresh"];
+    for (const name of money) expect(names).toContain(name);
+    expect(names.filter((n: string) => /^(money|fx)_/.test(n) && /transfer|pay|trade|convert|withdraw|send|buy|sell/.test(n))).toEqual([]);
+  });
+
   it("every frontend invoke/read names a registered command", async () => {
     const inv = (await inventory()) as Inventory;
     expect(inv.commands.length).toBeGreaterThan(100);

@@ -276,6 +276,15 @@ pub fn run() {
             telegram::test_telegram_connection,
             telegram::send_to_terrance,
             telegram::poll_telegram_updates,
+            // Money, read-only (commands/money.rs)
+            commands::money::money_accounts_list,
+            commands::money::money_account_add,
+            commands::money::money_watch_add,
+            commands::money::money_balance_set_manual,
+            commands::money::money_import_statement,
+            commands::money::fx_rate_get,
+            commands::money::fx_rate_set_manual,
+            commands::money::fx_rate_refresh,
             // Packager
             packager::pack_it_up,
             packager::unpack_backup,

@@ -2439,6 +2439,7 @@ dependencies = [
  "btleplug",
  "chrono",
  "dirs 5.0.1",
+ "encoding_rs",
  "flate2",
  "futures",
  "glob",
