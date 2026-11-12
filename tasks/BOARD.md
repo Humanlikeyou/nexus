@@ -27,17 +27,17 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 | 1111u Home heart-rate take (card C) | done 8f6eba5 |
 | 1111x navy localOnly | done 6215a12 (Hermes web tools not covered: open question) |
 | C R13-D approvals | done 021ddea |
-| C R13-C / R13-E / R13-F + 1110i enforcement | active |
+| C R13-C / R13-E / R13-F + 1110i enforcement | built, UNCOMMITTED: awaiting security review (review was cut off by the usage limit) |
 | D 1110f take live wiring | done 8d96417, 534d19f |
 | D 1111a personal-OS adapters | todo |
-| D 1111s secrets status/set, n8n key file, backups | todo |
+| D 1111s secrets status/set, n8n key file | done 889bd19 + 65ffe02 + 149cd68 (backups step 3 not built) |
 | D 1111t step 1 take log | done 8f6eba5 |
-| D 1111t steps 2–5 | active |
+| D 1111t steps 2–5 | done 65663f3 |
 | D 1111t step 6 money (spike first; no sign-ups) | todo |
-| 1111v backend (decisions log, dates, adds, check-in, needs-you) | active |
+| 1111v backend (decisions log, dates, adds, check-in, needs-you) | done 97eddbb |
 | 1111w windows (webviews, profiles, home_window_open, Life take facts) | todo |
 | E take chips → source | done 84333aa (Neuro/Enterprise inert: no ids) |
-| F OpenClaw code cleanup | active |
+| F OpenClaw code cleanup | done 889bd19 |
 | G full e2e + gates | todo (last) |
 
 ## Section 12 / 13 status
