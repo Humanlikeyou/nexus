@@ -42,7 +42,15 @@ export async function setNavyLocalOnly(on: boolean): Promise<boolean> {
   }
 }
 
-/** Live adapter: localOnly() is live once the backend confirmed it; speak() waits for on-device TTS. */
+/**
+ * Live adapter: localOnly() is live once the backend confirmed it.
+ *
+ * speak() is deliberately UNWIRED. The existing voice path (src-tauri voice.rs / voice_bridge.rs +
+ * the amara-voice loop) has no "speak this text" entry point: it only speaks its own replies to
+ * what it heard, and exposes status, voices and stop-speaking. Inventing one (or falling back to
+ * any cloud TTS) is not allowed, so nothing here speaks. The store already only asks to speak when
+ * openedBy === "voice"; when a local entry point exists, wire it here and fail closed on error.
+ */
 export const liveNavy: NavyAdapter = {
   speak: () => UNWIRED,
   localOnly: () => (localOnlyConfirmed ? { state: "live", value: { ok: true as const } } : UNWIRED),

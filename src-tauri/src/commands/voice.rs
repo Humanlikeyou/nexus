@@ -353,6 +353,8 @@ fn start_loop(p: &VoicePaths) -> Result<(), String> {
         .env("PATH", path_env)
         .env("PYTHONWARNINGS", "ignore")
         .env("HF_HUB_OFFLINE", "1")
+        // Where amara-voice finds the navy local-only flag file (telegram::NAVY_FLAG_FILE).
+        .env("NEXUS_DATA_DIR", crate::app_paths::data_dir())
         .stdin(Stdio::null())
         .stdout(log)
         .stderr(err)
@@ -562,6 +564,14 @@ pub async fn voice_set_voice(name: String) -> Result<VoiceList, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn spawned_voice_loop_is_told_where_the_navy_flag_file_lives() {
+        let src = include_str!("voice.rs");
+        let f = &src[src.find("fn start_loop").unwrap()..];
+        assert!(f[..f.find("fn stop_loop").unwrap()]
+            .contains(".env(\"NEXUS_DATA_DIR\", crate::app_paths::data_dir())"));
+    }
+
     use super::*;
 
     fn tmp() -> (PathBuf, VoicePaths) {

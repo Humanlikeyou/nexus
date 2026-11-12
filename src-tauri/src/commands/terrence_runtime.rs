@@ -1263,6 +1263,62 @@ pub fn prepare_amara_turn(message: String) -> Result<AmaraTurnContext, String> {
     })
 }
 
+/// Navy local-only turn result as an interaction: answered by the local router, or refused with
+/// the "Local only right now" copy. Never calls Hermes.
+async fn navy_local_interaction(
+    request: &TerrenceInteractionRequest,
+    message: String,
+    model: &str,
+    provider: &str,
+    started_at: String,
+    started: Instant,
+) -> Result<TerrenceInteraction, String> {
+    use super::llm_router::NavyTurn;
+    let (text, tier) = match super::llm_router::navy_chat(&message).await? {
+        NavyTurn::Refused => (super::llm_router::LOCAL_ONLY_COPY.to_string(), None),
+        NavyTurn::Answered {
+            content,
+            tier,
+            reason,
+        } => (
+            content,
+            Some(terrence_runtime_bridge::AmaraTier {
+                tier: if tier == super::llm_router::Tier::Deep {
+                    "deep"
+                } else {
+                    "fast"
+                }
+                .to_string(),
+                reason,
+                source: "router_reply".to_string(),
+            }),
+        ),
+    };
+    let interaction = TerrenceInteraction {
+        id: Uuid::new_v4().to_string(),
+        conversation_id: request.conversation_id.clone(),
+        hermes_session_id: request.hermes_session_id.clone(),
+        runtime: "amara-router-local".to_string(),
+        model: model.to_string(),
+        provider: provider.to_string(),
+        status: "succeeded".to_string(),
+        user_message: message,
+        assistant_message: Some(text),
+        error: None,
+        started_at,
+        completed_at: Utc::now().to_rfc3339(),
+        duration_ms: started.elapsed().as_millis() as u64,
+        context_item_ids: request.context_item_ids.clone(),
+        action_id: None,
+        runtime_profile: NEXUS_RUNTIME_PROFILE.to_string(),
+        tier,
+        source: None,
+        route: None,
+    };
+    persist_interaction(&interaction)?;
+    Ok(interaction)
+}
+
 #[tauri::command]
 pub async fn interact_with_terrence(
     bridge: State<'_, terrence_runtime_bridge::NexusRuntimeBridge>,
@@ -1301,6 +1357,13 @@ pub async fn interact_with_terrence(
         ));
     }
 
+    // Navy local-only: ONE switch, enforced here where the Hermes send happens. While it is on, the
+    // turn never reaches Hermes (whose own web tools can reach out); it goes straight to the local
+    // router, local tier, no tools, or is refused calmly. Same in-memory flag as set_local_only.
+    if super::telegram::local_only_on() {
+        return navy_local_interaction(&request, message, &model, &provider, started_at, started)
+            .await;
+    }
     let (routed, router_base) = hermes_router_link(&config);
     let outgoing = terrence_runtime_bridge::outgoing_message(&message, request.deep, routed);
     if outgoing.is_empty() {
@@ -1361,8 +1424,22 @@ pub async fn interact_with_terrence(
     };
     let turn_started_at = Utc::now().to_rfc3339();
 
-    let bridge_response = match bridge
-        .request(
+    // Re-check right before the send (the switch may have flipped while the context was built),
+    // then count this turn and drop it if local-only turns on while it is in flight.
+    if super::telegram::local_only_on() {
+        if let Some(action_id) = action_id.as_deref() {
+            let _ = terrence_actions::fail_terrence_action(
+                action_id,
+                super::llm_router::LOCAL_ONLY_COPY.to_string(),
+            );
+        }
+        return navy_local_interaction(&request, message, &model, &provider, started_at, started)
+            .await;
+    }
+    let _in_flight = super::telegram::HermesTurnGuard::begin();
+    let navy_epoch = super::telegram::navy_epoch();
+    let sent = tokio::select! {
+        r = bridge.request(
             &home,
             terrence_runtime_bridge::HermesTurn {
                 system: system.clone(),
@@ -1371,9 +1448,19 @@ pub async fn interact_with_terrence(
                 message: &outgoing,
                 routed,
             },
-        )
-        .await
-    {
+        ) => Some(r),
+        _ = super::telegram::navy_switched_on_since(navy_epoch) => None,
+    };
+    let Some(sent) = sent else {
+        if let Some(action_id) = action_id.as_deref() {
+            let _ = terrence_actions::fail_terrence_action(
+                action_id,
+                super::llm_router::LOCAL_ONLY_COPY.to_string(),
+            );
+        }
+        return Err(super::llm_router::LOCAL_ONLY_COPY.to_string());
+    };
+    let bridge_response = match sent {
         Ok(response) => response,
         Err(terrence_runtime_bridge::HermesError { message, route, .. }) => {
             if let Some(action_id) = action_id.as_deref() {
@@ -1772,6 +1859,31 @@ mod tests {
             "{section}"
         );
         assert!(nexus_clock_section(&thursday).contains("Thursday, November 5, 2026, 00:01"));
+    }
+
+    // Source-order test, kept on purpose: interact_with_terrence is a Tauri command that needs
+    // managed state and a live Hermes, so it can't be driven here. The behaviour it protects is
+    // covered by the navy_local_turn tests and the in-flight tests in telegram.rs; this only pins
+    // the order (early gate, then a re-check right before the send, with the turn counted).
+    #[test]
+    fn navy_local_only_is_checked_before_anything_can_reach_hermes() {
+        let src = include_str!("terrence_runtime.rs");
+        let body = &src[src.find("pub async fn interact_with_terrence").unwrap()..];
+        let gate = body.find("super::telegram::local_only_on()").unwrap();
+        let hermes = body.find("bridge.request(").unwrap();
+        let link = body.find("hermes_router_link(&config)").unwrap();
+        let dry = body.find("dry_run_tier").unwrap();
+        assert!(gate < link && gate < dry && gate < hermes);
+        assert!(body[gate..hermes].contains("navy_local_interaction"));
+        let recheck = body[gate + 10..]
+            .find("super::telegram::local_only_on()")
+            .unwrap()
+            + gate
+            + 10;
+        assert!(recheck < hermes, "re-check sits right before the send");
+        let guard = body.find("HermesTurnGuard::begin()").unwrap();
+        assert!(recheck < guard && guard < hermes);
+        assert!(body[hermes..].contains("navy_switched_on_since(navy_epoch)"));
     }
 
     #[test]

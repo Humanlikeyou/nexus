@@ -140,6 +140,8 @@ pub fn run() {
         .setup(|app| {
             // A process cannot resume an in-flight Hermes child after restart.
             let _ = terrence_actions::reconcile_interrupted_conversations();
+            // Navy local-only is session-only: off at every start, and the voice loop's flag file says so.
+            commands::telegram::init_navy_flag();
 
             // System tray
             let quit = MenuItem::with_id(app, "quit", "Quit Amara OS", true, None::<&str>)?;

@@ -44,14 +44,29 @@ function captionFor(kind: "on" | "off", openedBy: NavySource): NavyState["captio
   const spoken = openedBy === "voice";
   const spokenResult = spoken ? navyAdapter().speak(text) : null;
   const sample = sampleAdaptersEnabled() || spokenResult?.state === "sample";
-  return { text, sample, spoken };
+  return { text, sample, spoken: spoken && spokenResult?.state !== "unwired" };
 }
 
-/** Turn the look on. No-op if it's already entering or on. */
-export function enterNavy(openedBy: NavySource): void {
-  if (state.phase === "on" || state.phase === "entering") return;
-  void setNavyLocalOnly(true); // nothing leaves the Mac from the moment the look starts
+function beginEnter(openedBy: NavySource): void {
   set({ phase: "entering", openedBy, caption: captionFor("on", openedBy), hold: "idle", holdAt: 0 });
+}
+
+let enterPending = false;
+
+/**
+ * Turn the look on. No-op if it's already entering, on, or waiting for the backend. In live mode
+ * the look starts only after the backend confirmed its local-only switch; if it can't confirm,
+ * entry is aborted (fail closed: the look never claims a guarantee that isn't in force).
+ */
+export function enterNavy(openedBy: NavySource): void {
+  if (state.phase === "on" || state.phase === "entering" || enterPending) return;
+  if (sampleAdaptersEnabled()) { beginEnter(openedBy); return; }
+  enterPending = true;
+  void setNavyLocalOnly(true).then(async (confirmed) => {
+    enterPending = false;
+    if (confirmed) { beginEnter(openedBy); return; }
+    await setNavyLocalOnly(false); // don't leave a half-set switch behind
+  });
 }
 
 /** Turn it off. `hold` is the orb fallback; voice/chat use the same write path as enter. */

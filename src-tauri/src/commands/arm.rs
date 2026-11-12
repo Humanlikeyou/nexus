@@ -543,8 +543,14 @@ fn get_worker_key(config: &serde_json::Value) -> Option<String> {
 
 // ─── Revenue Tracking ────────────────────────────────────
 
+/// Fixed text when an ARM poll is refused (kill switch or navy local-only).
+const ARM_OUTBOUND_BLOCKED: &str = "Local only right now. I can't reach the revenue workers.";
+
 #[tauri::command]
 pub async fn arm_poll_revenue(strategy_id: String) -> Result<f64, String> {
+    if super::telegram::outbound_disabled() {
+        return Err(ARM_OUTBOUND_BLOCKED.to_string());
+    }
     println!("[arm] poll_revenue: strategy_id={strategy_id}");
     let conn = get_db()?;
     let strategy = get_strategy_by_id(&conn, &strategy_id)?;
@@ -941,6 +947,9 @@ pub fn arm_kill_switch(active: bool, reasoning: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn arm_health_check(strategy_id: String) -> Result<WorkerHealthResponse, String> {
+    if super::telegram::outbound_disabled() {
+        return Err(ARM_OUTBOUND_BLOCKED.to_string());
+    }
     println!("[arm] health_check: strategy_id={strategy_id}");
     let conn = get_db()?;
     let strategy = get_strategy_by_id(&conn, &strategy_id)?;
@@ -1001,6 +1010,9 @@ pub async fn arm_health_check(strategy_id: String) -> Result<WorkerHealthRespons
 
 #[tauri::command]
 pub async fn arm_poll_all() -> Result<Vec<ArmStrategy>, String> {
+    if super::telegram::outbound_disabled() {
+        return Err(ARM_OUTBOUND_BLOCKED.to_string());
+    }
     println!("[arm] poll_all: status=starting");
     let config = load_arm_config();
 
@@ -1087,4 +1099,22 @@ pub fn arm_save_config(config: ArmConfig) -> Result<(), String> {
     save_arm_config_to_disk(&config)?;
     println!("[arm] save_config: status=saved");
     Ok(())
+}
+
+#[cfg(test)]
+mod outbound_gate_tests {
+    /// Each network-reaching ARM command refuses first, with fixed text, before touching the db or network.
+    #[test]
+    fn poll_and_health_commands_are_gated_on_the_outbound_switch() {
+        let src = include_str!("arm.rs");
+        for name in ["arm_poll_revenue", "arm_health_check", "arm_poll_all"] {
+            let f = &src[src.find(&format!("pub async fn {name}(")).unwrap()..];
+            let head = &f[..f.find("println!").unwrap()];
+            assert!(
+                head.contains("super::telegram::outbound_disabled()")
+                    && head.contains("ARM_OUTBOUND_BLOCKED"),
+                "{name} must be gated first"
+            );
+        }
+    }
 }

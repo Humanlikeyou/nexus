@@ -183,6 +183,10 @@ pub async fn crew_list() -> Result<Vec<CrewInfo>, String> {
         .map_err(|_| "Unexpected crew list from the crew service.".to_string())
 }
 
+/// Fixed text when starting a crew is refused (kill switch or navy local-only): crews can reach out.
+const CREW_OUTBOUND_BLOCKED: &str =
+    "Local only right now. Crews can reach the internet, so I haven't started one.";
+
 #[tauri::command]
 pub async fn crew_start(
     name: String,
@@ -192,6 +196,9 @@ pub async fn crew_start(
 ) -> Result<CrewInfo, String> {
     if retry_of.as_deref().is_some_and(|r| !valid_run_id(r)) {
         return Err("Invalid crew run id.".to_string());
+    }
+    if super::telegram::outbound_disabled() {
+        return Err(CREW_OUTBOUND_BLOCKED.to_string());
     }
     let client = reqwest::Client::new();
     let body = CrewStartRequest {
@@ -487,6 +494,15 @@ pub(crate) fn http_error(op: &str, status: reqwest::StatusCode) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn crew_start_is_gated_on_the_outbound_switch_before_any_request() {
+        let src = include_str!("crew.rs");
+        let f = &src[src.find("pub async fn crew_start").unwrap()..];
+        let gate = f.find("super::telegram::outbound_disabled()").unwrap();
+        assert!(gate < f.find("reqwest::Client::new()").unwrap());
+        assert!(f[gate..].contains("CREW_OUTBOUND_BLOCKED"));
+    }
+
     use super::*;
 
     #[test]

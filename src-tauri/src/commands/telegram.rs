@@ -235,11 +235,76 @@ pub fn local_only_on() -> bool {
     LOCAL_ONLY.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-/// Turns the session's local-only switch on or off; returns the new state (what the UI shows).
+/// Bumped each time local-only is switched on, so a Hermes turn that started earlier can tell.
+static NAVY_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Hermes turns currently in flight (for tests and so the switch can account for them).
+static HERMES_IN_FLIGHT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn navy_epoch() -> u64 {
+    NAVY_EPOCH.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[cfg(test)]
+pub fn hermes_in_flight() -> usize {
+    HERMES_IN_FLIGHT.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Counts one Hermes turn while alive.
+pub struct HermesTurnGuard;
+
+impl HermesTurnGuard {
+    pub fn begin() -> Self {
+        HERMES_IN_FLIGHT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        HermesTurnGuard
+    }
+}
+
+impl Drop for HermesTurnGuard {
+    fn drop(&mut self) {
+        HERMES_IN_FLIGHT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Resolves once local-only has been switched on after `epoch` (or is on now). Used to drop an
+/// in-flight Hermes request, which closes its connection.
+pub async fn navy_switched_on_since(epoch: u64) {
+    while !(local_only_on() || navy_epoch() != epoch) {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+/// File the amara-voice loop reads before every turn (it talks to Hermes directly, outside this
+/// app). Holds "1" while local-only is on, "0" otherwise; written "0" at every app start.
+pub const NAVY_FLAG_FILE: &str = "navy_local_only";
+
+/// Atomic, owner-only write of the flag file ("1" / "0") into `dir`.
+pub(crate) fn write_navy_flag_in(dir: &std::path::Path, on: bool) -> std::io::Result<()> {
+    crate::app_paths::create_private_dir_all(dir)?;
+    let tmp = dir.join(format!("{NAVY_FLAG_FILE}.tmp"));
+    crate::app_paths::write_private(&tmp, if on { "1" } else { "0" })?;
+    std::fs::rename(&tmp, dir.join(NAVY_FLAG_FILE))
+}
+
+/// App start: the session-only switch is off, and the file says so.
+pub fn init_navy_flag() {
+    #[cfg(not(test))]
+    let _ = write_navy_flag_in(&crate::app_paths::data_dir(), false);
+}
+
+/// Turns the session's local-only switch on or off; returns whether the state the UI asked for is
+/// in force. Turning on also writes the voice loop's flag file; if that can't be written the
+/// in-memory switch stays on (safe) but this returns false so the look doesn't claim a guarantee.
 #[tauri::command]
 pub fn set_local_only(on: bool) -> bool {
+    #[cfg(not(test))]
+    let flag_ok = write_navy_flag_in(&crate::app_paths::data_dir(), on).is_ok();
+    #[cfg(test)]
+    let flag_ok = true;
+    if on {
+        NAVY_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
     LOCAL_ONLY.store(on, std::sync::atomic::Ordering::SeqCst);
-    local_only_on()
+    local_only_on() && (!on || flag_ok)
 }
 
 /// NEXUS_OUTBOUND_DISABLED value → kill switch on? Trimmed, case-insensitive "1", "true", "yes"
@@ -569,6 +634,60 @@ pub async fn send_to_terrance(text: String) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn navy_flag_file_is_atomic_owner_only_and_one_or_zero() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("navy-flag-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_navy_flag_in(&dir, true).unwrap();
+        let f = dir.join(NAVY_FLAG_FILE);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "1");
+        assert_eq!(
+            std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(
+            !dir.join(format!("{NAVY_FLAG_FILE}.tmp")).exists(),
+            "tmp renamed away"
+        );
+        write_navy_flag_in(&dir, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "0");
+        let _ = std::fs::remove_dir_all(&dir);
+        // set_local_only writes the file and app start resets it (source-scan; tests skip the real dir).
+        let src = include_str!("telegram.rs");
+        let set = &src[src.find("pub fn set_local_only").unwrap()..];
+        assert!(set[..set.find("local_only_on() &&").unwrap()]
+            .contains("write_navy_flag_in(&crate::app_paths::data_dir(), on)"));
+        assert!(src[src.find("pub fn init_navy_flag").unwrap()..]
+            .contains("write_navy_flag_in(&crate::app_paths::data_dir(), false)"));
+        assert!(include_str!("../lib.rs").contains("telegram::init_navy_flag()"));
+    }
+
+    #[test]
+    fn hermes_turns_are_counted_and_the_epoch_moves_when_local_only_turns_on() {
+        let before = hermes_in_flight();
+        let g = HermesTurnGuard::begin();
+        assert_eq!(hermes_in_flight(), before + 1);
+        drop(g);
+        assert_eq!(hermes_in_flight(), before);
+        let e = navy_epoch();
+        set_local_only(true);
+        assert!(navy_epoch() > e);
+        set_local_only(false);
+    }
+
+    #[tokio::test]
+    async fn an_in_flight_wait_resolves_when_local_only_switches_on() {
+        let e = navy_epoch();
+        let waiter = tokio::spawn(navy_switched_on_since(e));
+        set_local_only(true);
+        tokio::time::timeout(std::time::Duration::from_secs(2), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+        set_local_only(false);
+    }
+
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 

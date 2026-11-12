@@ -1290,13 +1290,29 @@ fn move_local_path(from: &str, to: &str) -> Result<(), String> {
     fs::rename(&source, &destination).map_err(|error| format!("Could not move local path: {error}"))
 }
 
+/// Fixed text when a network-shaped action is refused (kill switch or navy local-only).
+const OUTBOUND_BLOCKED_TEXT: &str =
+    "Local only right now. I can't open links or reach the internet.";
+
+/// Network-shaped actions (open a link, run a Shortcut that may call out) honour the same switch
+/// as every other outbound path: NEXUS_OUTBOUND_DISABLED or navy local-only.
+fn outbound_gate() -> Result<(), String> {
+    if super::telegram::outbound_disabled() {
+        return Err(OUTBOUND_BLOCKED_TEXT.to_string());
+    }
+    Ok(())
+}
+
 fn execute_workflow_step(step: &ManagedWorkflowStep) -> Result<(), String> {
     match step {
-        ManagedWorkflowStep::OpenUrl { url } => command_status(
-            Command::new("/usr/bin/open")
-                .arg(normalize_http_url(url)?)
-                .status(),
-        ),
+        ManagedWorkflowStep::OpenUrl { url } => {
+            outbound_gate()?;
+            command_status(
+                Command::new("/usr/bin/open")
+                    .arg(normalize_http_url(url)?)
+                    .status(),
+            )
+        }
         ManagedWorkflowStep::OpenApplication { application } => command_status(
             Command::new("/usr/bin/open")
                 .args([
@@ -1348,11 +1364,14 @@ fn execute_workflow_step(step: &ManagedWorkflowStep) -> Result<(), String> {
                 .join(name);
             move_local_path(&path_to_string(&source), &path_to_string(&destination))
         }
-        ManagedWorkflowStep::RunShortcut { name } => command_status(
-            Command::new("/usr/bin/shortcuts")
-                .args(["run", clean_required(name, "Shortcut name", 180)?.as_str()])
-                .status(),
-        ),
+        ManagedWorkflowStep::RunShortcut { name } => {
+            outbound_gate()?;
+            command_status(
+                Command::new("/usr/bin/shortcuts")
+                    .args(["run", clean_required(name, "Shortcut name", 180)?.as_str()])
+                    .status(),
+            )
+        }
     }
 }
 
@@ -1426,9 +1445,12 @@ fn execute_local_action(action: &TerrenceAction) -> Result<String, String> {
         .as_object()
         .ok_or_else(|| "Stored action parameters are invalid.".to_string())?;
     let status = match action.tool_id.as_str() {
-        "system.open_url" => Command::new("/usr/bin/open")
-            .arg(string_parameter(object, "url")?)
-            .status(),
+        "system.open_url" => {
+            outbound_gate()?;
+            Command::new("/usr/bin/open")
+                .arg(string_parameter(object, "url")?)
+                .status()
+        }
         "system.open_application" => Command::new("/usr/bin/open")
             .args(["-a", string_parameter(object, "application")?.as_str()])
             .status(),
@@ -2104,6 +2126,24 @@ mod tests {
             conversation_id: Some("conversation-1".to_string()),
             context_item_ids: Some(vec!["context-1".to_string()]),
         }
+    }
+
+    #[test]
+    fn network_shaped_actions_are_gated_on_the_outbound_switch() {
+        let src = include_str!("terrence_actions.rs");
+        let local = &src[src.find("fn execute_local_action").unwrap()..];
+        let arm = &local[local.find("\"system.open_url\" =>").unwrap()..];
+        assert!(arm[..arm.find("/usr/bin/open").unwrap()].contains("outbound_gate()?"));
+        let step = &src[src.find("fn execute_workflow_step").unwrap()..];
+        let open = &step[step.find("OpenUrl { url }").unwrap()..];
+        assert!(open[..open.find("/usr/bin/open").unwrap()].contains("outbound_gate()?"));
+        let sc = &step[step.find("RunShortcut { name }").unwrap()..];
+        assert!(sc[..sc.find("/usr/bin/shortcuts").unwrap()].contains("outbound_gate()?"));
+        assert!(src.contains("super::telegram::outbound_disabled()"));
+        crate::commands::telegram::set_local_only(true);
+        let blocked = outbound_gate();
+        crate::commands::telegram::set_local_only(false);
+        assert_eq!(blocked, Err(OUTBOUND_BLOCKED_TEXT.to_string()));
     }
 
     #[test]

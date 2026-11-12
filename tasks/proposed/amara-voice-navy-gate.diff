@@ -1,0 +1,60 @@
+--- a/amara_voice.py	2026-11-13 07:30:47
++++ b/amara_voice.py	2026-11-13 07:31:05
+@@ -39,7 +39,7 @@
+ from asr import Whisper
+ from barge_in import STOP_RE, BargeIn
+ from skills import Skills
+-from streaming import REPEAT_TEXT, SYNTH_LOCK, Player, Voice, load_fillers, load_repeat, speak_streaming, speakable
++from streaming import REPEAT_TEXT, SYNTH_LOCK, Player, Voice, load_fillers, load_repeat, navy_local_only, speak_streaming, speakable
+ from wake import WAKE_RE, WHISPER_MODEL, heard_wake
+ 
+ HERE = Path(__file__).parent
+@@ -159,6 +159,8 @@
+     def warm(self):
+         """Throwaway first turn so Hermes reads her whole prompt before he talks. Runs in the background
+         while the loop already listens; kept out of history so it can't race a real turn."""
++        if navy_local_only():  # no Hermes call while the navy look is on
++            return
+         t = time.time()
+         try:
+             requests.post(
+--- a/streaming.py	2026-11-13 07:30:47
++++ b/streaming.py	2026-11-13 07:31:05
+@@ -24,6 +24,23 @@
+ 
+ HERE = Path(__file__).parent
+ load_dotenv(HERE / ".env")
++
++# Navy "local only" gate (Amara OS). While the look is on, nothing may be sent to Hermes: it has web
++# tools. Amara OS writes "1"/"0" to <app data>/navy_local_only (0600); it resets to "0" at every app start.
++NAVY_FLAG = Path(os.environ.get("NEXUS_DATA_DIR") or Path.home() / "Library/Application Support/com.taisun.nexus") / "navy_local_only"
++NAVY_REFUSAL = "Local only right now. Say, Amara, back to normal, when you want me back."
++NAVY_BACK_RE = re.compile(r"^\W*(?:amara\W+)?back to normal\W*$", re.I)
++
++
++def navy_local_only():
++    """True while local-only is on. Fails closed: a flag file that exists but can't be read, or holds
++    anything other than "0", counts as on. A missing file means Amara OS never set it: off."""
++    try:
++        return NAVY_FLAG.read_text().strip() != "0"
++    except FileNotFoundError:
++        return False
++    except (OSError, UnicodeDecodeError):
++        return True
+ HERMES_URL = os.environ["HERMES_URL"]
+ HERMES_KEY = os.environ["HERMES_KEY"]
+ FILLER_DIR = HERE / "voices" / "fillers" / os.getenv("AMARA_VOICE", "neosoul_g")  # one set per voice
+@@ -64,7 +81,12 @@
+ def stream_chunks(amara, text, session_key, style, cancel, stats):
+     """Ask Hermes with stream=True and yield speakable chunks as they complete.
+     The first chunk may end at a comma so the first audio comes sooner.
+-    Appends the turn to amara.history; if cancelled, only what was handed out is kept."""
++    Appends the turn to amara.history; if cancelled, only what was handed out is kept.
++    While navy local-only is on, Hermes is never called: she says a short refusal instead (and just
++    "Okay." for "back to normal", which Amara OS reads from the turn log to leave the look)."""
++    if navy_local_only():
++        yield "Okay." if NAVY_BACK_RE.match(text) else NAVY_REFUSAL
++        return
+     amara.history.append({"role": "user", "content": f"{style}\n{text}" if style else text})
+     buf, said, t0 = "", [], time.time()
+     try:
