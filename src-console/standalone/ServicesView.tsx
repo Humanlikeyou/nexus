@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, DataTag, Dialog, PageHero, StatusText } from "../ui";
+import { Button, DataTag, Dialog, PageHero, StatusText, wiredTag } from "../ui";
 import { valueOf } from "../lib/sampleAdapters";
 import { SERVICE_GROUPS, type Service, type StandaloneAdapter } from "./adapters";
 import { SaCard, ServiceStatus, Spin, WireNote } from "./parts";
@@ -94,7 +94,7 @@ export function ServicesView({ adapter }: { adapter: StandaloneAdapter }) {
         <div className="pk-stack">{group("automation")}{group("memory")}</div>
         <div className="pk-stack">{group("health")}{group("side")}</div>
       </div>
-      <p className="pk-note">Every service listens on this Mac only and needs Amara&apos;s key, which changes each launch. Amara restarts a stopped service up to 3 times, then tells you. Logs hide keys and passwords. <DataTag kind="wire" /></p>
+      <p className="pk-note">Every service listens on this Mac only and needs Amara&apos;s key, which changes each launch. Amara restarts a stopped service up to 3 times, then tells you. Logs hide keys and passwords. {wiredTag(w)}</p>
       {note && <p className="pk-note" role="status">{note}</p>}
       <Dialog open={logsFor !== null} title={logsFor ? `${logsFor.name} · what happened` : "Logs"} onCancel={() => setLogsFor(null)} className="sa-sheet sa-sheet--wide">
         <p>In plain words, newest first. {logs && <DataTag kind="sample" />}</p>

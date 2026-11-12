@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { DataTag } from "../ui";
 import { valueOf } from "../lib/sampleAdapters";
 import type { TakePage } from "../amaraTake/types";
+import { SUGGEST_PAGES } from "./suggestions";
 import { takesAdapter, type TakesAdapter } from "./adapters";
 import { useTakeLogVersion } from "./takeLog";
 import { FollowUpBlock } from "./FollowUp";
@@ -30,7 +31,7 @@ export function useTakeSlots(page: TakePage, compact: boolean, adapter: TakesAda
   const sheet = compact ? null : <HistorySheet page={page} open={open} onClose={() => setOpen(false)} adapter={adapter} />;
   const memory = !compact && mem ? <MemoryLineView text={mem.text} /> : null;
   let block: ReactNode = null;
-  if (!t) block = compact ? null : <div className="t-empty"><b>Today&apos;s one thing</b><span>Suggestions <DataTag kind="wire" /> (the reviewed suggestion list and the answer store). Nothing here is a suggestion from Amara.</span></div>;
+  if (!t) block = compact || !SUGGEST_PAGES.includes(page) ? null : <div className="t-empty"><b>Today&apos;s one thing</b><span>Suggestions <DataTag kind="wire" /> (the reviewed suggestion list and the answer store). Nothing here is a suggestion from Amara.</span></div>;
   else if (t.kind === "learning") block = compact ? null : <div className="t-empty"><b>No suggestion yet.</b><span>I need {t.need} {t.unit} to know your usual before I suggest anything. {t.have} of {t.need} so far.</span></div>;
   else if (t.kind === "none_today") block = compact ? null : <div className="t-empty"><b>No suggestion today, on purpose.</b><span>{t.why}</span></div>;
   else if (t.kind === "followup") block = compact ? null : <FollowUpBlock o={t.outcome} sample={sampleTag} onAction={(a) => adapter.typeAction(t.outcome.type, a)} />;

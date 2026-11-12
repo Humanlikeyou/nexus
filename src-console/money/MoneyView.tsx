@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, DataTag, SegmentedControl } from "../ui";
+import { Button, Card, DataTag, SegmentedControl, wiredTag } from "../ui";
 import { valueOf } from "../lib/sampleAdapters";
 import { AmaraTakeCard, type TakeCardSlots } from "../amaraTake/AmaraTakeCard";
 import { PREVIEW_DEPS, previewMode, sampleTakeView, takeView, type TakeView } from "../amaraTake/takeView";
@@ -52,7 +52,7 @@ export function MoneyAccounts({ adapter = moneyAdapter() }: { adapter?: MoneyAda
   return (
     <>
       <div className="m-callout" role="note"><b><span aria-hidden="true">🔒</span> Read-only by design.</b> Each connection only has permission to read. There&apos;s no transfer, payment, trade or withdrawal permission anywhere in Amara, and no button for one. Sign-in details and access tokens stay in this Mac&apos;s Keychain, never in backups, logs or chat.</div>
-      <Card title="Connected accounts" accessory={<span className="pk-acc">{w.state === "sample" ? <DataTag kind="sample" /> : <DataTag kind="wire" />}{connect}</span>}>
+      <Card title="Connected accounts" accessory={<span className="pk-acc">{wiredTag(w)}{connect}</span>}>
         {!list ? <p className="pk-note">Account connections <DataTag kind="wire" />. Chime and Fidelity need a read-only data service, Japanese banks a statement import and Ledger a watch-only address. No balances are shown and no money suggestions are made until one is connected.</p>
           : list.length === 0 ? <div className="t-empty"><b>Connect your accounts to see personal money</b><span>Nothing is connected. Amara shows only what you type into Personal (bills, subscriptions) until you connect a read-only account.</span></div>
           : (["us", "jp", "crypto"] as Region[]).map((r) => {

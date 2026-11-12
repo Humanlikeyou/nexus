@@ -71,7 +71,7 @@ export function RetentionCard({ adapter }: { adapter: RecordingsAdapter }) {
     setNote(result.state === "unwired" ? "Removing recordings needs wiring, so nothing was deleted." : result.state === "sample" ? `Sample data: nothing was deleted (${result.value.removed.length} would be removed).` : `${result.value.removed.length} removed.`);
   };
   return (
-    <Card title="Keep raw recordings" headingLevel={2} className="rec-card" accessory={<span className="rec-acc"><span className="rec-select">{RETENTION_DAYS} days</span>{state.state === "sample" ? wiredTag(state) : <DataTag kind="wire" />}</span>}>
+    <Card title="Keep raw recordings" headingLevel={2} className="rec-card" accessory={<span className="rec-acc"><span className="rec-select">{RETENTION_DAYS} days</span>{wiredTag(state)}</span>}>
       {expiring.length > 0 && !kept && !note && (
         <div className="rec-banner" role="note">
           <StatusText kind="risk"><b>{expiring.length} recording{expiring.length === 1 ? " is" : "s are"} older than {RETENTION_DAYS} days.</b></StatusText>

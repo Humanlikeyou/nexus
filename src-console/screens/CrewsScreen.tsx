@@ -6,7 +6,7 @@ import type { CrewInfo, CrewServiceHealth, SystemSnapshot } from "../types";
 import { Button, Card, DataTag, Dialog, More, PageHero, StatusText, TextField, wiredTag, type StatusKind, type Tone } from "../ui";
 import { crewsAdapter, type CrewsAdapter } from "../crews/adapters";
 import { loadApprovals, useLiveApprovals } from "../crews/approvals";
-import { useLiveRunAdapter } from "../crews/runDetail";
+import { mapMetrics, useLiveRunAdapter } from "../crews/runDetail";
 import { useLiveN8n } from "../crews/n8n";
 import { useLiveCrewTools } from "../crews/toolGrantLive";
 import { CrewApprovalsCard, CrewDecidedCard, CrewRunPage } from "./CrewPanels";
@@ -27,6 +27,18 @@ const HEALTH_BADGE: Record<CrewServiceHealth, { tone: Tone; text: string }> = {
   offline: { tone: "warning", text: "Offline" },
   not_configured: { tone: "neutral", text: "Not configured" },
 };
+
+/** Duration, tokens and cost for a run row: real values once the run has finished and reported them, a dash until then. */
+function runMetricCells(run: CrewInfo) {
+  const m = mapMetrics(run);
+  return (
+    <>
+      <td className="cc-num cc-dim">{m ? `${m.durationS} s` : "—"}</td>
+      <td className="cc-num cc-dim">{m ? m.tokens.toLocaleString("en-US") : "—"}</td>
+      <td className="cc-num cc-dim">{m ? (m.costUsd === 0 ? "$0.00 local" : `$${m.costUsd.toFixed(2)}`) : "—"}</td>
+    </>
+  );
+}
 
 function errorText(e: unknown): string {
   return plainText(String(e instanceof Error ? e.message : e)).slice(0, 300);
@@ -253,13 +265,13 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
                         <td><StatusText kind={RUN_STATUS[run.status] ?? "off"}>{humanize(run.status)}</StatusText>{run.status === "failed" && run.result && <small>{plainText(run.result).slice(0, 60)}</small>}</td>
                         <td>{run.agents.join(", ") || "\u2014"}</td>
                         <td>{run.started_at ? dateTime(run.started_at) : "\u2014"}</td>
-                        <td className="cc-num cc-dim">{"\u2014"}</td><td className="cc-num cc-dim">{"\u2014"}</td><td className="cc-num cc-dim">{"\u2014"}</td>
+                        {runMetricCells(run)}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               )}
-          <p className="cc-note">Duration, tokens and cost per run <DataTag kind="wire" /> · Open a run for its timeline.</p>
+          <p className="cc-note">Duration, tokens and cost per run{runs.some((r) => !mapMetrics(r)) && <> <DataTag kind="wire" /></>} · Open a run for its timeline.</p>
         </Card>
       )}
 

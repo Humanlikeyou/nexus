@@ -80,10 +80,12 @@ function PdfDateAdd({ hint }: { hint: string }) {
   const [preview, setPreview] = useState<AddPreview | null>(null);
   const [saved, setSaved] = useState<Saved | null>(null);
   const [savedAt, setSavedAt] = useState(0);
+  const [unwired, setUnwired] = useState(false);
   const sample = sampleAdaptersEnabled();
   const start = () => {
     const a = addAdapter("date");
     void a.parse(`Lease notice due ${hint}`).then((r) => {
+      setUnwired(r.state === "unwired");
       if (r.state === "unwired") { setPhase("preview"); setPreview({ title: "Lease notice", fields: [["Date", hint], ["Lane", "Personal"]], note: "Needs wiring to save to Dates & deadlines." }); return; }
       if (r.value.kind === "preview") { setPreview(r.value.preview); setPhase("preview"); }
     });
@@ -105,7 +107,7 @@ function PdfDateAdd({ hint }: { hint: string }) {
       <PreviewCard kind="Date" preview={preview} sample={sample} label="Preview: add to Dates & deadlines">
         <Button size="small" onClick={confirm}>{sample ? "Save date" : "Save date"}</Button>
         <Button size="small" variant="secondary" onClick={() => setPhase("idle")}>Cancel</Button>
-        {!sample && <DataTag kind="wire" />}
+        {unwired && <DataTag kind="wire" />}
       </PreviewCard>
     );
   }
