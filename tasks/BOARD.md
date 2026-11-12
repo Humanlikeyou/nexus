@@ -55,6 +55,8 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 - 73f53a5 installed 2026-11-12 22:21 JST (rollback: ~/Backups/Amara OS-backup-20261112c.app)
 
 ## Next session
+- Decision 0014 approved: Letta writes (after the CVE upgrade), WHOOP takeover, Telegram sends, updater (needs Developer ID + updater key), Home windows: one lane each, security review each
+- Wiring classes A/B from tasks/wiring-inventory-2026-11-12.md
 - Intelligence gap A/B (Hermes vs Telegram vs command center); route Telegram through Hermes; slim the chat context
 - Personal money section from docs/research/personal-money-best-practices-2026-11-12.md
 - Wire StepQuestion into the takes; Life goal facts for goal-tied encouragement
