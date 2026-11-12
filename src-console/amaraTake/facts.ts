@@ -135,6 +135,22 @@ export function businessFacts(rev: RevenueSummary | null, today: string): FactSe
 }
 
 /** The prompt body: only these lines carry data. */
+/** Minimal goal shapes so facts stay pure (the live wiring passes personal/adapters milestones and roadmap pct). */
+export type GoalFactInput = { id: string; title: string; right: string; pct: number; roadmapPct: number | null };
+
+/** Life goal facts: key goal_<id>. A goal with a roadmap reads "<pct>% of the roadmap done" (the adapter's pct);
+ *  otherwise the milestone's own "<current> of <target>" text. Nothing here is computed beyond the data's numbers. */
+export function lifeGoalFacts(goals: GoalFactInput[], today: string): FactSet | null {
+  const facts = goals.filter((g) => g.title.trim()).map((g): Fact => {
+    const road = g.roadmapPct !== null;
+    const display = road ? `${g.roadmapPct}% of the roadmap done` : g.right;
+    const value = road ? (g.roadmapPct as number) : g.pct;
+    const nums = (display.match(/\d+(?:\.\d+)?/g) ?? []).map(Number);
+    return { key: `goal_${g.id}`, label: g.title, value, unit: "%", display, baseline: null, accept: [...new Set([value, ...nums])] };
+  });
+  return build("life", today, facts);
+}
+
 export function factLines(set: FactSet): string {
   return set.facts.map((f) => `- ${f.label}: ${f.display}${f.baseline ? ` (usual over the last ${f.baseline.n} days: ${f.baseline.display})` : ""}`).join("\n");
 }

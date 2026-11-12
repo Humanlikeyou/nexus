@@ -1,19 +1,27 @@
 import { useState } from "react";
 import { Button, DataTag } from "../ui";
-import { roadmapAdapter, type RoadmapAdapter } from "./roadmap";
+import { roadmapAdapter, type RoadmapAdapter, type StepQuestion as Q } from "./roadmap";
 import "./goals.css";
 
-/** Today's one step question ("Have you done: <step>?"). Exported for the takes; not wired into AmaraTake yet. */
-export function StepQuestion({ adapter }: { adapter?: RoadmapAdapter }) {
+/** Today's one step question ("Have you done: <step>?"). Mounted inside the take by TakeStepQuestion. */
+export function StepQuestion({ adapter, onAnswered }: { adapter?: RoadmapAdapter; onAnswered?: () => void }) {
   const a = adapter ?? roadmapAdapter();
   const [reply, setReply] = useState("");
+  const [held, setHeld] = useState<Q | null>(null);
   const w = a.todaysQuestion();
-  const q = w.state === "unwired" ? null : w.value;
-  if (!q || reply === "gone") return null;
+  // Keep the question on screen after the answer: the backend returns null once it is answered.
+  const q = held ?? (w.state === "unwired" ? null : w.value);
+  if (!q) return null;
   const answer = async (ans: "yes" | "not_yet") => {
+    setHeld(q);
     try {
       const r = await a.answerStep(q.goalId, q.stepId, ans);
-      setReply(r.state === "unwired" ? "Not saved. This needs the roadmap store to be wired first." : ans === "yes" ? "Marked done." : "No problem. Amara will ask again in a few days.");
+      if (r.state === "unwired") { setReply("Not saved. This needs the roadmap store to be wired first."); return; }
+      onAnswered?.();
+      if (ans === "not_yet") { setReply("No problem. Amara will ask again in a few days."); return; }
+      const rm = a.roadmap(q.goalId); // the adapter's own percentage, never computed here
+      const pct = rm.state !== "unwired" && rm.value ? rm.value.pct : null;
+      setReply(pct === null ? "Marked done." : `Marked done. ${q.goalTitle} is now ${pct}% of the roadmap done.`);
     } catch { setReply("That didn't save. Try again in a moment."); }
   };
   return (

@@ -37,8 +37,9 @@
 .body-today__head { display: flex; align-items: center; gap: 8px; }
 :root:root .body-today__head .home__recovery-title { padding: 0; margin: 0; }
 .body-today__head .body-today__grow { flex: 1; }
-.body-today { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.618fr); gap: 21px; align-items: start; }
-.body-today__left { display: grid; gap: 13px; padding-right: 21px; box-shadow: inset -1px 0 0 var(--separator); align-content: start; }
+/* 2026-11-12: the HR take column is off Home, so the recovery column stands alone. */
+.body-today { display: grid; grid-template-columns: minmax(0, 1fr); gap: 21px; align-items: start; }
+.body-today__left { display: grid; gap: 13px; align-content: start; }
 .body-today__ring { display: flex; gap: 13px; align-items: center; }
 .body-today__ring .ui-ring { --ui-ring-size: 55px; }
 .body-today__ring .home__ring-value { font: 500 13px/1 var(--font-text); font-variant-numeric: tabular-nums; }

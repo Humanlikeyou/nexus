@@ -45,3 +45,24 @@ test("Life › Goals unwired: honest notes, no fake ticks, axe clean", async ({ 
   expect(await blocking(page)).toEqual([]);
   expect(consoleErrors).toEqual([]);
 });
+
+// design-1112h: today's one step question lives inside Amara's take (first take he sees), once per day.
+test("Step question in the take (sample): shown once, Yes confirms with the roadmap's percentage, then gone; axe clean", async ({ page, theme, consoleErrors }) => {
+  await page.addInitScript(() => localStorage.setItem("nexus.sampleAdapters", "1"));
+  await openApp(page, { theme, reduceMotion: true });
+  await gotoToday(page);
+  await navButton(page, "Life").click();
+  const field = activeField(page, "Life");
+  const q = field.getByRole("region", { name: "Step question" });
+  await expect(q).toHaveCount(1);
+  await expect(q).toContainText("Have you done:");
+  await expect(q.getByText("Sample data")).toBeVisible();
+  expect(await blocking(page)).toEqual([]);
+  await q.getByRole("button", { name: "Yes", exact: true }).click();
+  await expect(q.getByRole("status")).toContainText(/is now \d+% of the roadmap done\./);
+  expect(await blocking(page)).toEqual([]);
+  // Another take later the same day does not ask again.
+  await navButton(page, "Enterprise").click();
+  await expect(page.getByRole("region", { name: "Step question" })).toHaveCount(0);
+  expect(consoleErrors).toEqual([]);
+});

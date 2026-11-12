@@ -5,7 +5,9 @@ import type { RouterResponse } from "@/lib/types";
 import { getHomeBrief, loadKv, saveKv } from "../bridge";
 import { isSnapshot, noopQuery } from "../lib/noop";
 import type { NoopSnapshotPayload, RecordedSession, RevenueSummary } from "../types";
-import { businessFacts, fitnessFacts, homeFacts, mindBodyFacts, neuroFacts } from "./facts";
+import { personalAdapter } from "../personal/adapters";
+import { roadmapAdapter } from "../goals/roadmap";
+import { businessFacts, lifeGoalFacts, fitnessFacts, homeFacts, mindBodyFacts, neuroFacts } from "./facts";
 import type { TakeDeps } from "./generate";
 import { appendTake, entryFromTake, takeLogEntries } from "../takes/takeLog";
 
@@ -34,7 +36,15 @@ export const liveDeps: TakeDeps = {
       case "home": return homeFacts(await snapshot(), await getHomeBrief().catch(() => null), today, Date.now());
       case "neuro": return neuroFacts(await invoke<RecordedSession[]>("list_sessions").catch(() => []), today);
       case "business": return businessFacts(await invoke<RevenueSummary>("arm_get_revenue_summary", { from: null, to: null }).catch(() => null), today);
-      case "life": return null;
+      case "life": {
+        const g = personalAdapter().goals();
+        if (g.state !== "live") return null; // sample or unwired goals are never facts
+        const rm = roadmapAdapter();
+        return lifeGoalFacts(g.value.milestones.map((m) => {
+          const r = rm.roadmap(m.id);
+          return { id: m.id, title: m.title, right: m.right, pct: m.pct, roadmapPct: r.state === "live" && r.value && r.value.steps.length ? r.value.pct : null };
+        }), today);
+      }
     }
   },
 };

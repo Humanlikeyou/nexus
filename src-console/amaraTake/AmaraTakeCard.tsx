@@ -4,6 +4,7 @@ import { useAmaraTakeStatus } from "./useAmaraTake";
 import { askMore, goToCite, PREVIEW_DEPS, previewMode, sampleTakeView, TAKE_PAGE_LABEL, takeView, type TakeNote, type TakeView } from "./takeView";
 import type { TakePage } from "./types";
 import { useTakeSlots } from "../takes/TakeExtras";
+import { TakeStepQuestion } from "../goals/TakeStepQuestion";
 import "./AmaraTakeCard.css";
 
 /** Amara's mark: ember heart, copper core, emerald ring (design-1110f). */
@@ -104,5 +105,5 @@ export function AmaraTake({ page, compact = false, className }: { page: TakePage
   const status = useAmaraTakeStatus(page, preview ? PREVIEW_DEPS : undefined);
   const view = preview ? sampleTakeView(page) : takeView(page, status.value, status.checking);
   const slots = useTakeSlots(page, compact);
-  return <div className={className ? `take-slot ${className}` : "take-slot"}><AmaraTakeCard page={page} view={view} compact={compact} slots={slots} /></div>;
+  return <div className={className ? `take-slot ${className}` : "take-slot"}><AmaraTakeCard page={page} view={view} compact={compact} slots={slots} /><TakeStepQuestion /></div>;
 }

@@ -8,7 +8,6 @@ import { beatSeconds, useLiveHeartRate } from "../hooks/useLiveHeartRate";
 import { localGreeting } from "../lib/greeting";
 import { TRACE_HEIGHT, TRACE_WIDTH, traceShape } from "../lib/heartTrace";
 import { useNow } from "../shell/useNow";
-import { HrTake } from "../hrTake/HrTakeCard";
 import { useTakeSlots } from "../takes/TakeExtras";
 import type { ModuleId } from "../types";
 import { Wordmark } from "../ui/Wordmark";
@@ -45,15 +44,15 @@ function HeartRate() {
   );
 }
 
-/** design-1111u: Amara's take from the last 15 minutes of heart rate, with today's one thing (1111t) under it.
- *  No button: it refreshes on open, focus and navigation, and the backend's 30-minute rule decides. */
-function HomeTake({ onSelect }: { onSelect: (id: ModuleId) => void }) {
+/** Taisun, 2026-11-12: the heart-rate take is off the home page ("all of this we can take off"). Backend (home_hr_take.rs)
+ *  and src-console/hrTake are kept, just not rendered here. Only today's one thing (1111t) still shows, when there is one. */
+function HomeTake() {
   const { block } = useTakeSlots("home", true);
-  return <HrTake variant="landing" block={block} onOpenDevices={() => onSelect("devices")} />;
+  return block ? <div className="take-slot">{block}</div> : null;
 }
 
 /** Greeting, time, date and weather. Nothing here is a box; the type scale does the work. */
-function Welcome({ onSelect }: { onSelect: (id: ModuleId) => void }) {
+function Welcome() {
   const now = useNow(1_000);
   const brief = freshBrief(useHomeBrief(), now.getTime());
   const weather = usableWeather(brief?.weather);
@@ -71,7 +70,7 @@ function Welcome({ onSelect }: { onSelect: (id: ModuleId) => void }) {
         </p>
       )}
       <HeartRate />
-      <HomeTake onSelect={onSelect} />
+      <HomeTake />
     </section>
   );
 }
@@ -91,7 +90,7 @@ export function LandingField({ onSelect, onToday, chat, chatExpanded = false, on
       <h1 className="ui-visually-hidden">Command Center</h1>
       <Wordmark size="landing" className="landing__wordmark" />
       <div inert={hide || undefined} aria-hidden={hide || undefined}>
-      <Welcome onSelect={onSelect} />
+      <Welcome />
       </div>
       <div className="landing__stage" inert={hide || undefined} aria-hidden={hide || undefined}>
       <div className="landing__lens"><AmaraLens state={voice.state} size={320} decorative /></div>
