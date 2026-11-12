@@ -304,7 +304,11 @@ pub fn set_local_only(on: bool) -> bool {
         NAVY_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
     LOCAL_ONLY.store(on, std::sync::atomic::Ordering::SeqCst);
-    local_only_on() && (!on || flag_ok)
+    // A Hermes turn that started before the switch may still be running its tools on Hermes's side
+    // (dropping our request doesn't cancel it there), so don't confirm local-only while one is in
+    // flight. The switch itself stays on (safe); the UI won't claim the guarantee and can retry.
+    let hermes_busy = on && HERMES_IN_FLIGHT.load(std::sync::atomic::Ordering::SeqCst) > 0;
+    local_only_on() && (!on || (flag_ok && !hermes_busy))
 }
 
 /// NEXUS_OUTBOUND_DISABLED value → kill switch on? Trimmed, case-insensitive "1", "true", "yes"
@@ -663,8 +667,12 @@ mod tests {
         assert!(include_str!("../lib.rs").contains("telegram::init_navy_flag()"));
     }
 
+    /// Serialises tests that touch the process-wide navy switch and Hermes in-flight counter.
+    static NAVY_GLOBALS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn hermes_turns_are_counted_and_the_epoch_moves_when_local_only_turns_on() {
+        let _g = NAVY_GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
         let before = hermes_in_flight();
         let g = HermesTurnGuard::begin();
         assert_eq!(hermes_in_flight(), before + 1);
@@ -674,6 +682,20 @@ mod tests {
         set_local_only(true);
         assert!(navy_epoch() > e);
         set_local_only(false);
+    }
+
+    #[test]
+    fn local_only_is_not_confirmed_while_a_hermes_turn_is_in_flight() {
+        let _g = NAVY_GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        // The switch still goes on (safe), but the UI is told it isn't guaranteed yet.
+        let g = HermesTurnGuard::begin();
+        assert!(!set_local_only(true));
+        assert!(local_only_on());
+        drop(g);
+        set_local_only(false);
+        let src = include_str!("telegram.rs");
+        let set = &src[src.find("pub fn set_local_only").unwrap()..];
+        assert!(set[..set.find("\n}\n").unwrap()].contains("!hermes_busy"));
     }
 
     #[tokio::test]

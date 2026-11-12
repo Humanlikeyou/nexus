@@ -1439,6 +1439,9 @@ pub async fn interact_with_terrence(
     let _in_flight = super::telegram::HermesTurnGuard::begin();
     let navy_epoch = super::telegram::navy_epoch();
     let sent = tokio::select! {
+        // Navy first: if local-only came on, never prefer a Hermes reply that raced it.
+        biased;
+        _ = super::telegram::navy_switched_on_since(navy_epoch) => None,
         r = bridge.request(
             &home,
             terrence_runtime_bridge::HermesTurn {
@@ -1449,7 +1452,6 @@ pub async fn interact_with_terrence(
                 routed,
             },
         ) => Some(r),
-        _ = super::telegram::navy_switched_on_since(navy_epoch) => None,
     };
     let Some(sent) = sent else {
         if let Some(action_id) = action_id.as_deref() {
@@ -1883,7 +1885,14 @@ mod tests {
         assert!(recheck < hermes, "re-check sits right before the send");
         let guard = body.find("HermesTurnGuard::begin()").unwrap();
         assert!(recheck < guard && guard < hermes);
-        assert!(body[hermes..].contains("navy_switched_on_since(navy_epoch)"));
+        // The select is biased with the navy arm first, so a racing Hermes reply never wins.
+        let select = body[guard..].find("tokio::select!").unwrap() + guard;
+        let biased = body[select..].find("biased;").unwrap() + select;
+        let navy_arm = body[select..]
+            .find("navy_switched_on_since(navy_epoch)")
+            .unwrap()
+            + select;
+        assert!(select < biased && biased < navy_arm && navy_arm < hermes);
     }
 
     #[test]
