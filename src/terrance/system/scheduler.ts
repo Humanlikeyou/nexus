@@ -32,6 +32,7 @@ import { evolveSkills } from "./skillsEvolution";
 import { activityBus } from "./activityBus";
 import { Backoff } from "./backoff";
 import { tickSubagents } from "./subagents";
+import { tickRoadmapNight } from "./roadmapNight";
 import { startTelegramBridge, stopTelegramBridge } from "./telegramBridge";
 
 const CONSOLIDATION_INTERVAL_MS = 6 * 60 * 60 * 1000;  // 6 hours
@@ -536,6 +537,15 @@ async function tick() {
         } catch (e) {
           console.error("[scheduler] Skills evolution error:", e);
         }
+      }
+    }
+
+    // Goal roadmaps: one deep-tier drafting pass a night (02:00-05:00, only when nothing else runs).
+    if (heavyBudget > 0) {
+      try {
+        await withTimeout(tickRoadmapNight(now), TASK_TIMEOUTS_MS.reasoning, "goal roadmaps");
+      } catch (e) {
+        console.error("[scheduler] Goal roadmaps error:", e);
       }
     }
 

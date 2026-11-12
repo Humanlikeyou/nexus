@@ -1,3 +1,5 @@
+import { inTauri } from "../lib/localStores";
+import { makeLiveRoadmaps } from "./roadmapLive";
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
 
 /**
@@ -68,8 +70,10 @@ export function makeSampleRoadmaps(): RoadmapAdapter {
 }
 
 let sampleSingleton: RoadmapAdapter | null = null;
-/** Backend: add the live branch (inside Tauri) here; keep this export's name. */
+let liveSingleton: RoadmapAdapter | null = null;
+/** Sample in mock mode; the live adapter (roadmapLive.ts) inside Tauri; otherwise unwired. */
 export function roadmapAdapter(): RoadmapAdapter {
   if (sampleAdaptersEnabled()) return (sampleSingleton ??= makeSampleRoadmaps());
+  if (inTauri()) return (liveSingleton ??= makeLiveRoadmaps());
   return unwiredRoadmaps;
 }

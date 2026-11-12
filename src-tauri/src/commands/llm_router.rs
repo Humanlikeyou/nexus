@@ -552,6 +552,23 @@ pub async fn chat_with_router(
     })
 }
 
+/// One background completion on the deep tier (nightly jobs). Same router client, loopback base
+/// and Claude gate as chat; the gate stays closed unless the existing Allow Claude path opens it.
+/// Errors are fixed text; nothing is logged beyond what `ask_router` already logs.
+pub(crate) async fn deep_complete(system: &str, user: &str) -> Result<String, String> {
+    let config = RouterConfig::default();
+    let saved = crate::commands::telegram::load_config();
+    let base = router_base(None, saved.amara_router_url.as_deref());
+    let gate = claude_gate(&config, daily_spend_usd(&load_usage_records()));
+    let headers = router_headers(&config, &[], true, Some("deep"), &gate);
+    let body = router_body(system, user);
+    let transport = HttpTransport {
+        client: no_redirect_client(),
+    };
+    let (content, ..) = ask_router(&transport, &base, &headers, &body).await?;
+    Ok(content)
+}
+
 /// Asks the router's dry-run endpoint which tier it would use (may run its classifier).
 #[tauri::command]
 pub async fn get_cost_estimate(

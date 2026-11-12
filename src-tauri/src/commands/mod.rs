@@ -9,6 +9,7 @@ pub mod crew;
 pub mod crew_grants;
 pub mod events;
 pub mod followups;
+pub mod goal_roadmap;
 pub mod goals;
 pub mod ha;
 pub mod hemisync;

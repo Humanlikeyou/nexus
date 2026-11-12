@@ -6,11 +6,11 @@ use commands::n8n_status;
 use commands::voice;
 use commands::{
     arm, assistant, ble_common, business_ledger, continuity, crew, crew_grants, events, followups,
-    goals, ha, home_brief, home_hr_take, kb_status, kv, llm_router, muse, noop, noop_query,
-    onboarding, openclaw, outbox, packager, recordings, replay, research, restart_services,
-    sessions, snapshots, system, take_events, take_log, telegram, terrence_actions,
-    terrence_automations, terrence_context, terrence_priorities, terrence_projects,
-    terrence_runtime, terrence_runtime_bridge,
+    goal_roadmap, goals, ha, home_brief, home_hr_take, kb_status, kv, llm_router, muse, noop,
+    noop_query, onboarding, openclaw, outbox, packager, recordings, replay, research,
+    restart_services, sessions, snapshots, system, take_events, take_log, telegram,
+    terrence_actions, terrence_automations, terrence_context, terrence_priorities,
+    terrence_projects, terrence_runtime, terrence_runtime_bridge,
 };
 // design-1111v stores
 use commands::{adds, checkin, decisions_log, life_dates, needs_you};
@@ -315,6 +315,13 @@ pub fn run() {
             goals::read_goals,
             goals::save_goals,
             goals::delete_goal,
+            goal_roadmap::roadmap_get,
+            goal_roadmap::roadmap_request,
+            goal_roadmap::roadmap_accept,
+            goal_roadmap::roadmap_edit_step,
+            goal_roadmap::roadmap_answer_step,
+            goal_roadmap::roadmap_todays_question,
+            goal_roadmap::roadmap_draft_pending,
             // Sessions
             sessions::save_session,
             sessions::list_sessions,
