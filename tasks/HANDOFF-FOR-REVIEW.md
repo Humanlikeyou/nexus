@@ -78,3 +78,23 @@ Rebuild the crew image (TAISUN-STEPS §9.9); startup then creates `crew_tasks`, 
 6. 1110i/R13-E mounts: `~/crew-sandbox` + `CREW_SANDBOX_ROOT`; where `CREW_SKILLS_DIR` / `CREW_MEMORY_DIR` map in app data.
 7. A real shell for crews needs a network-less sandbox; until then shell stays file utilities only.
 8. Then the NEXT_SESSION_PROMPT order: home control, real Muse session, voice with headphones, slow first Chat turn, calendar, eyes-closed test, key rotation, backup prune, push (each with his OK).
+
+## 8. Since 1f84665 (2026-11-12, continued at Taisun's "keep working")
+
+| Commit | What |
+|---|---|
+| `32f1d8c` | Crews: git control files refused in any case/Unicode spelling + same-inode check + `attr.tree` empty (a `.GIT/config` filter could run a command on the case-insensitive mount); triggered runs get no grant or request tool; `sync-crew-env.sh` carries `CREW_TRIGGER_SECRET` |
+| `60a72e6` | Crews: run origin stored (`crew_runs.triggered`); a retry of a triggered run stays grant-free |
+| `d6bee73` | Design question: 1111a panels tag live values "Sample" (blocks goals/patterns/weekly review/money/memory wiring) |
+| `3be01d3` | Money research spike (`docs/research/money-spike-2026-11-12.md`) |
+| `b8a3740` | Decision 0008: SMBC + Yucho CSV, ECB/Plaid hosts approved, no aggregator in v1, Ledger watch-only |
+| `6507382` `9ceaadd` `0b2a312` `d44a4d7` | 1111s backup step 3: settings, Back Up Now, list (no restore UI, no prune, no nightly timer); secrets never in any archive (files + secret JSON fields); Desktop `pack_it_up` too (Taisun OK); a restore keeps live secrets only while their endpoints are unchanged |
+| `60a47d8` | Decision 0009: sidebar Home, Life, Mind–Body, Enterprise, Agents · System: Smart home, Settings (⌘1–7 follow) |
+| `3a3a935` | Voice test flake (wall clock) fixed with a frozen Date; proven with an injected stall |
+| `7b448bb` | Money backend, read-only: seed guard (hardened after review), accounts/watch/manual balance, SMBC/Yucho CSV import (ASSUMED formats, synthetic fixtures; real samples last, per Taisun), ECB rate (kill switch + navy, no proxy, https only) |
+
+Three automated commit reviews plus one agent security review ran on this work; every finding was fixed with a fail-before/pass-after test (one LOW, the shared check-then-reopen pattern in `local_store.rs`, is left and noted).
+
+**Gates on HEAD:** src-tauri 590 passed / 5 ignored · vitest 1535 / 9 skipped · neuro 21 (not rerun since 1f84665: no neuro change) · router 126 (untouched) · crew-service 228 · fmt, clippy -D warnings, tsc, lint, check:secrets clean · full e2e on 0b2a312: 725 passed / 12 skipped / 3 failed → the 2 landing failures were the order change (fixed in d44a4d7, spec now 46/46); `route-motion.spec.ts:78` failed once under full-suite load and passes 3/3 alone (logged flaky, not loosened).
+
+**Blocked / needs Taisun:** 1111w windows (browsing arbitrary sites = new outbound hosts; needs his OK + Tauri unstable multi-webview); voice adds (an amara-voice transcription endpoint patch he applies); money UI + 1111a live wiring wait on Design's sample-tag fix; money read commands (balances/transactions) not built yet. App rebuild/install to see the new sidebar is his step.

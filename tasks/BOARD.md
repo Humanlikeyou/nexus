@@ -29,13 +29,13 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 | C R13-D approvals | done 021ddea |
 | C R13-C / R13-E / R13-F + 1110i enforcement | done 7de5b4b (security review re-run: 5 fixes with tests) |
 | D 1110f take live wiring | done 8d96417, 534d19f |
-| D 1111a personal-OS adapters | todo |
-| D 1111s secrets status/set, n8n key file | done 889bd19 + 65ffe02 + 149cd68 (backups step 3 not built) |
+| D 1111a personal-OS adapters | blocked: Design sample-tag fix (tasks/design-questions.md); life dates + check-ins live |
+| D 1111s secrets status/set, n8n key file | done 889bd19 + 65ffe02 + 149cd68 (backups step 3 done 6507382 + 9ceaadd 0b2a312 d44a4d7) |
 | D 1111t step 1 take log | done 8f6eba5 |
 | D 1111t steps 2–5 | done 65663f3 |
-| D 1111t step 6 money (spike first; no sign-ups) | todo |
+| D 1111t step 6 money (spike first; no sign-ups) | backend done 7b448bb (spike 3be01d3, decision 0008); UI wiring waits on Design; real bank samples last |
 | 1111v backend (decisions log, dates, adds, check-in, needs-you) | done 97eddbb |
-| 1111w windows (webviews, profiles, home_window_open, Life take facts) | todo |
+| 1111w windows (webviews, profiles, home_window_open, Life take facts) | blocked: needs Taisun's OK for browsing new hosts |
 | E take chips → source | done 84333aa (Neuro/Enterprise inert: no ids) |
 | F OpenClaw code cleanup | done 889bd19 |
 | G full e2e + gates | done on HEAD 2026-11-12 (728 e2e passed, 0 failed) |
@@ -45,6 +45,9 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 
 ## Follow-ups
 - `scripts/sync-crew-env.sh` must carry `CREW_TRIGGER_SECRET` before the trigger is enabled (today it is dropped: fails closed).
+
+## Next
+- Neuro tab: redesign to match the other pages + Hemi-Sync audio sessions tracked with Muse (Taisun, 2026-11-12; questions asked first)
 
 ## Out of scope tonight (Taisun)
 NOOP merge, live Telegram relay send path, standalone phases (bundling, signing, notarization, DMG, updater, WHOOP takeover), Letta upgrade apply.
