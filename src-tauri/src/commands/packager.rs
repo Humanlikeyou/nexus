@@ -27,11 +27,16 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
 pub(crate) async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let archive_name = format!("nexus-backup-{}.tar.gz", timestamp);
+    // Taisun, 2026-11-12: the Desktop archive leaves secrets out too (key file, tokens, .env, and
+    // secret fields of every JSON store), like Back Up Now. A restore of it asks for those again.
     pack_to(
         data_dir,
         &home.join("Desktop"),
         &archive_name,
-        &PackOpts::default(),
+        &PackOpts {
+            exclude_secrets: true,
+            progress: None,
+        },
     )
     .await
 }
@@ -43,7 +48,7 @@ pub(crate) type Progress<'a> = &'a (dyn Fn(&str, u8) + Send + Sync);
 #[derive(Default)]
 pub(crate) struct PackOpts<'a> {
     /// Leave every secret file out and strip secret fields from `config.json`
-    /// (see `backups::EXCLUDED_*`). `pack_it_up` keeps its old behaviour (false).
+    /// (see `backups::EXCLUDED_*`). Both pack_it_up and Back Up Now set it (2026-11-12).
     pub exclude_secrets: bool,
     pub progress: Option<Progress<'a>>,
 }
@@ -581,7 +586,22 @@ fn apply_restore(
             dest.file_name().unwrap_or_default().to_string_lossy(),
             uuid::Uuid::new_v4().simple()
         ));
-        fs::copy(&item.src, &tmp).map_err(|e| format!("restore {}: {}", item.rel.display(), e))?;
+        // A JSON file restored over a live one keeps the live secret fields the backup left out
+        // (backups are written without secrets), so a restore never wipes this Mac's tokens.
+        let merged = (item.rel.extension().is_some_and(|e| e == "json") && dest.is_file())
+            .then(|| {
+                let (r, c) = (fs::read(&item.src).ok()?, fs::read(&dest).ok()?);
+                super::backups::merge_kept_secrets(&r, &c)
+            })
+            .flatten();
+        match merged {
+            Some(bytes) => crate::app_paths::write_private(&tmp, bytes)
+                .map_err(|e| format!("restore {}: {}", item.rel.display(), e))?,
+            None => {
+                fs::copy(&item.src, &tmp)
+                    .map_err(|e| format!("restore {}: {}", item.rel.display(), e))?;
+            }
+        }
         fs::rename(&tmp, &dest).map_err(|e| {
             let _ = fs::remove_file(&tmp);
             format!("restore {}: {}", item.rel.display(), e)
