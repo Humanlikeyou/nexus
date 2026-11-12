@@ -133,6 +133,10 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_dialog::init())
+        // Hemi-Sync audio: hemisync://localhost/<track id>, id-only, read-only (commands/hemisync.rs).
+        .register_asynchronous_uri_scheme_protocol("hemisync", |_ctx, request, responder| {
+            std::thread::spawn(move || responder.respond(commands::hemisync::handle(&request)));
+        })
         .setup(|app| {
             // A process cannot resume an in-flight Hermes child after restart.
             let _ = terrence_actions::reconcile_interrupted_conversations();
@@ -293,6 +297,14 @@ pub fn run() {
             commands::backups::backup_settings_set,
             commands::backups::backup_now,
             commands::backups::backup_list,
+            // Hemi-Sync (decision 0010)
+            commands::hemisync::hemisync_import,
+            commands::hemisync::hemisync_library,
+            commands::hemisync::hemisync_session_link,
+            commands::hemisync::hemisync_session_finish,
+            commands::hemisync::hemisync_session_rate,
+            commands::hemisync::hemisync_sessions,
+            commands::hemisync::hemisync_stats,
             // Keychain secrets + n8n key file (write-only; never return a value)
             commands::keychain::secrets_status,
             commands::keychain::secret_set,

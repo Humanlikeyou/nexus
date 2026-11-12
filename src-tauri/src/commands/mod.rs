@@ -11,6 +11,7 @@ pub mod events;
 pub mod followups;
 pub mod goals;
 pub mod ha;
+pub mod hemisync;
 pub mod home_brief;
 pub mod home_hr_take;
 pub mod kb_status;
