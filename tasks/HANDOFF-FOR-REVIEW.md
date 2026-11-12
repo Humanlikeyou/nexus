@@ -1,92 +1,80 @@
-# Handoff for review — Claude Code, 2026-11-11
+# Handoff for review — Claude Code, 2026-11-11 → 2026-11-12
 
-For Nexus Lead and Nexus Design Lead. Branch `amara-integration` in `~/projects/nexus-amara`, local commits only. **Nothing pushed, merged or PR'd** (`docs/decisions/0001`). Start: `cd5e4cc`. Design's own commits that landed during the session (never touched): `11a9d6d` 1110g, `d1f2168` 1110f, `c1fcd9a` 1110i, `046eedc` 1111a, `3ca4ea2` 1111r, `2efc057`/`1a90cbb`/`07f7ca6`/`70e90a8` 1111s (including a merge of amara-integration into their design-build branch), `e7d2ee4` 1111t, `accf8f6` 1111u, `c888c52` 1111v (renames Business to Enterprise; approved by Taisun, `docs/decisions/0006`), `554fe28`/`b306208`/`8a2e7a0` 1111w. `70e90a8` fixed an e2e crash caused by my ledger commit; `89317c9` hardens the adapter against it. No conflicts with them; 1110f's card uses this session's `useAmaraTake` hook as intended.
+For Taisun, Nexus Lead and Nexus Design Lead. Branch `amara-integration` in `~/projects/nexus-amara`, **local commits only. Nothing pushed, merged or PR'd** (`docs/decisions/0001`; the local pre-push hook refuses without `NEXUS_PUSH_OK=1`, decision 0007 #9). Range: `cd5e4cc..HEAD` (HEAD = this commit, after `7de5b4b`).
 
-Taisun's 7 uncommitted doc edits (BUILD, CLAUDE, NEXT_SESSION_PROMPT, README, STAGES, TAISUN-STEPS, amara-router/README) are **still uncommitted and intact**. Two of my commits add a hunk to CLAUDE.md / TAISUN-STEPS.md via index-only patches; his lines stay unstaged.
+Taisun's 7 uncommitted docs (BUILD, CLAUDE, NEXT_SESSION_PROMPT, README, STAGES, TAISUN-STEPS, amara-router/README) are **still uncommitted and intact**; earlier index-only hunks left his lines unstaged. `tasks/claude-goal-prompt-1111.md` and `docs/architecture/local-multi-agent-design.md` are his and untracked.
 
-## 1. Dev system (what was built)
+Design's own commits in the range (never touched): `11a9d6d` 1110g, `d1f2168` 1110f, `c1fcd9a` 1110i, `046eedc` 1111a, `3ca4ea2` 1111r, `2efc057` `1a90cbb` `07f7ca6` `70e90a8` 1111s, `e7d2ee4` 1111t, `accf8f6` 1111u, `c888c52` 1111v, `554fe28` `b306208` `8a2e7a0` 1111w, `66b7272` `bffe1e4` 1111x.
 
-```
-.claude/
-  settings.json            env NEXUS_OUTBOUND_DISABLED=1; permissions.deny (push, PRs, reset --hard, launchctl load, ~/.hermes, memory/, Muse folders); PreToolUse Bash hook
-  hooks/guard-bash.sh      blocks push / merge into nexus-v2 / PRs / force & destructive git / add -A / rm -r / launchctl / ~/.hermes writes / any non-read command naming replays|sessions|muse; runs check:secrets before commits
-  hooks/test-guard.py      13 regression cases (all ok)
-  agents/                  architect (opus, plan only) · rust-executor (sonnet) · frontend-executor (sonnet/haiku) · researcher (haiku, read-only) · qa-reviewer (sonnet) · security-reviewer (sonnet)
-  rules/                   hard-rules · git-and-commits · verification · design-boundary (path-scoped) · muse-recordings (path-scoped) · rust · frontend
-  skills/                  run-gates (gates.sh) · task-cycle · local-commit · skill-improvement
-docs/decisions/            0001 merge/push freeze · 0002 context management · 0003–0005 Taisun-delegated calls
-docs/lessons-learned/      verified lessons only
-tasks/                     BOARD.md · TEMPLATE.md · active/ · done/ · blocked.md · design-questions.md · skill-proposals/ · proposed/ · this file
-```
+## 1. Gates on HEAD (2026-11-12, first full combined run since `021ddea`)
 
-- **Orchestration:** the main session plans, writes `tasks/active/<id>.md`, delegates to the cheapest capable agent in non-overlapping lanes, reviews each result itself, sends security-surface diffs to the security reviewer, fixes, runs gates, and is the only committer (explicit paths, one commit at a time).
-- **Verification:** `.claude/skills/run-gates/gates.sh` (tsc, lint, vitest, neuro, check:secrets, fmt / clippy -D warnings / test for both crates). Fail-before / pass-after tests per fix. Counts never dropped.
-- **Context management:** native auto-compaction at default; the 60% threshold was evaluated, and no documented setting exists, so none was added (`docs/decisions/0002`). Continuity lives in `tasks/BOARD.md`, task files and decisions.
-- **Skill improvement:** `.claude/skills/skill-improvement` covers proposal → cause → verify → approve → apply. Hard rules, hooks, settings and agent tools need Taisun's logged OK. No proposals were made this session.
-- **Known limits:** project agents load at session start, so this session ran them as general-purpose agents that read the agent files. The guard hook is pattern-based defence in depth (4 automated reviews hardened it); a real backstop (pre-push hook / `chflags`) is Taisun's call (TAISUN-STEPS §9.8).
+| Gate | Result | Baseline cd5e4cc |
+|---|---|---|
+| tsc, lint | clean | clean |
+| vitest | **1523 passed / 9 skipped** | 1140 / 9 |
+| test:neuro | 21 | 21 |
+| check:secrets | ok (821 tracked files) | ok |
+| src-tauri fmt / clippy -D warnings / test | clean / clean / **542 passed, 5 ignored** | 418 / 5 |
+| amara-router fmt / clippy / test | clean / clean / **126** | 112 |
+| crew-service (Docker test image, `--network none`) | **222 passed** | 56 at 5f4eca9 |
+| **Full e2e** (`npm run test:e2e`, port 4179) | **728 passed, 12 skipped, 0 failed, 0 flaky** (3.0 min) | not run before |
 
-## 2. Backlog status (section 11)
+No counts dropped. **Not run:** WebKit (not configured), Linux CI, anything live: the app was not relaunched, the router and the crew container were not rebuilt, no headset, no live Postgres for the new crew tables (they are created at crew startup after the rebuild).
 
-| # | Item | Status | Evidence |
-|---|---|---|---|
-| 1 | Deep eviction / gpu_budget_gb | done `bb6669a` | grace + headroom tests fail before |
-| 2 | auto_deep default false + classifier gate | done `bb6669a` | 3 tests fail before |
-| 3 | Router stability | done `bb6669a` (documented) | `amara-router/STABILITY.md`; −9 = SIGKILL, cause **not proven** |
-| 4 | fast_num_ctx docs | done, no change needed | all committed docs already say 65536 |
-| 5 | allow_remote_ollama + bearer when cloud on | done `bb6669a` | tests; /health exempt |
-| 6 | Hermes 8642 from Docker | done `b869bf0` | containers reach it, get 401; key 24 bytes → rotation batch |
-| 7 | gemma_tools vault | done `bb6669a` | followups-only `[a-z0-9_]` allowlist |
-| 8 | followups IPC gate + async | done `7a1f47e`, `8b0456f` | 7 writes behind native dialog; dialog text can't be forged |
-| 9 | strip_phrase char-safe | done `bb6669a` | panicked before on İ/ẞ |
-| 10 | model_loading bubbles | done `7a1f47e` | Rust + vitest fail before |
-| 11 | HR window seconds | done `7a1f47e` | |
-| 12 | useLiveHeartRate NaN / hidden pause | already in HEAD | verified by temporary break (2 tests fail) |
-| 13 | Pin tauri-action | done `9609615` | 84b9d35 = v0.6.2 |
-| 14 | Fail release without P8 | done `9609615` | test 2 fail before → 4 pass; secret-name step in TAISUN-STEPS §9.2 |
-| 15 | Reduced-transparency e2e | done `47e95a1` | CSS break → 6 fail; restored |
-| 16 | Unit tests ×5 | done `47e95a1` | 33 tests |
-| 17 | body_context_capture on Linux | done `7a1f47e` | launcher injected; **not run on Linux** |
-| 18 | Voice docs | no change | verified 11-11: LaunchAgent loaded, 8791 listening |
-| 19 | README nav names | proposed patch `bb2d574` | `git apply tasks/proposed/README-nav.patch` (his uncommitted README) |
-| 20 | Hermes patch versioning | done | patch == live edits file-for-file; pytest step §9.3 |
-| — | route-motion flakes | done `47e95a1` | real focus bug; 79/80 → 80/80 ×20 |
+## 2. Commits by area (mine; Design's listed above)
 
-## 3. Wiring (section 12)
+- **Dev system:** `0cc6d7e` agents/rules/guard hook/skills/decisions/board; hook hardening `5f3a579` `19b3bc8` `b4b251d`. Pre-push hook installed locally (not versioned).
+- **Section 11 backlog (all 20 + route-motion flake):** `bb6669a` router (deep warm, auto_deep off, remote-Ollama flag, cloud needs bearer, phrase strip), `7a1f47e` `8b0456f` follow-ups gate + app fixes, `47e95a1` nav focus + e2e + unit tests, `9609615` CI pin + notarization guard, `b869bf0` Hermes 8642 note, `bb2d574` README nav patch (proposed; his README). Router SIGKILL cause **not proven** (`amara-router/STABILITY.md`). Item 17 not run on Linux.
+- **Section 12 wiring:** `8d96417` `534d19f` take backend (local only), `a34a224` `e182d9f` Muse recordings (no delete path), `153c7ce` workouts/hypnogram/voice stop-speaking, `8b6265e` `89317c9` Business ledger. Nutrition: **no data source** (gap, nothing invented).
+- **Decisions 0007 (A):** pre-push hook; `a2a7ac5` save_session refuses a duplicate id (fail-before/pass-after); `021ddea` MiniMax removed, concurrency 1, read-only tools by default, batch approvals, retries 2; `a6fd349` follow-ups one approval per session with the edit list; recording delete path: none (`removeConfirmed` no-op); `58374e6` Letta plan + inventory (plan/list only); `b9e9efe` router bearer from Keychain.
+- **B liveBusiness crash:** `89317c9`: a missing file, a non-object (incl. `[]`) or a ledger without ventures/funds is unwired, never throws; fail-before/pass-after unit test incl. `[]`. Design's e2e mock (`70e90a8`) kept. Still "Needs wiring" until the ledger file exists.
+- **1111u Home HR take:** `8f6eba5` (15-min query, 30-min rule in the backend, take store, trigger on open/focus).
+- **1111x navy localOnly:** `6215a12` (cloud tiers off + outbound blocked while on, tested).
+- **Section 13 crews:** A `5f4eca9`, B `1b57e9e`, D `021ddea`, **C/E/F + 1110i `7de5b4b`** (below).
+- **D HANDOFF wiring:** 1110f `8d96417` `534d19f`; 1110i `7de5b4b`; 1111s secrets status/set + n8n passphrase key file `889bd19` `65ffe02` `149cd68`; 1111t take log `8f6eba5`, steps 2–5 `65663f3`; 1111v backend `97eddbb`.
+- **E take → source:** `84333aa` (Neuro/Enterprise chips stay inert: no source ids on those pages; nothing invented).
+- **F OpenClaw cleanup:** `889bd19` (not-installed default with tests; packager no longer expects ~/.openclaw; `gateway` alias kept; tokens untouched; backup at ~/Applications-backup untouched).
 
-- **12a:** Muse per-sample + score scale **done** `a34a224`. Awake / bed-wake / resting HR: **data already loaded** (Design uses it in 1110h). Workouts with zone minutes (`noop_recent_workouts`) and hypnogram (`noop_hypnogram`) **done** `153c7ce`. Voice stop-speaking **done** `153c7ce` (`voice_stop_speaking` + `stack/patches/amara-voice-stop-speaking.patch`, which Taisun applies: TAISUN-STEPS §9.10). Nutrition — **no source** (gap).
-- **12b:** Business ledger **done** `8b6265e`, `89317c9` (decision 0005; no file exists yet, so the app still shows Needs wiring). Crews steps / handoffs / runMetrics **done** `1b57e9e`. Crews approvals / decided — **in progress (13 D)**. n8n / roster / nextSchedule — **not started**.
-- **12c:** **done**: chunks A+B `a34a224` (record all streams, read-only readers, retention computed, no delete path), chunk C `e182d9f` (cache, live adapter, AUX detection in the fit stage; e2e 34 passed). `removeConfirmed` stays unwired.
-- **12d:** **done** `8d96417`, `534d19f` (local-only; rejects invented numbers).
+## 3. Crew lane `7de5b4b` and its security review
 
-## 4. Section 13 (local multi-agent runtime)
+Built: R13-C task contract and loop (retry limit 2; no success without evidence; verification runner executes nothing unless BOTH `CREW_VERIFY_EXEC=1` and `CREW_VERIFY_NO_NETWORK=1`, set nowhere). R13-E capped, redacted run summaries (no-op or local file writer; **no Letta writer**: `select_writer("letta")` refuses) and skill proposals as data only through Needs you. R13-F `POST /crews/trigger` (HMAC-SHA256 over `ts.body`, 5 min skew, replay refused, 403 on any failure, own secret) and read-only loopback `n8n_status`. 1110i Files/terminal switch per decision 0007 #8.
 
-Phase A **done** `5f4eca9` (crews → router, URL allowlist, MiniMax fail-closed). Phase B **done** `1b57e9e` (steps, handoffs, real token totals from router usage, never 0 when unknown). Phase D **in progress**. C, E, F **not started**. All need the crew container rebuilt (TAISUN-STEPS §9.9) before they show in the app.
+The security review, cut off last night, was re-run in full this session. Checked: no interpreter, socket or network program reachable from `shell`; per-program option grammar; every path inside the crew folder after symlinks; fs_write refuses symlinks and `.git`; git read-only and hardened; no out-of-sandbox writes; approve and turn-on go through the native dialog; no secrets in logs or audit. **Fixed** (each with a test: 5 failed with the fixes reverted, 222 passed with them):
+1. Trigger replay bypass: the same signature with whitespace around it replayed (check used `strip()`, replay key didn't).
+2. Runs started by the n8n trigger could claim/use Taisun's files/terminal grant. Now they never get one.
+3. `rm -rf .` / `mv .` on the sandbox folder would destroy the git checkpoint. Refused.
+4. `grep -R` (follows symlinks out of the folder) removed; `-r` stays.
+5. Compose `environment:` blanked `CREW_TRIGGER_SECRET` over `env_file`, so the trigger could never be enabled. Removed.
 
-## 5. Gates at last run (after `1b57e9e`)
+Known, left: `diff -r` dereferences nested symlinks, but a crew cannot create one; `scripts/sync-crew-env.sh` rewrites `.env.crew` with only the Ingress key, so a hand-added trigger secret is dropped (fails closed) — teach the script before enabling the trigger.
 
-vitest 1316 passed / 9 skipped (baseline 1140) · neuro 21 · src-tauri 476 / 5 ignored (418) · amara-router 125 (112) · crew-service 75 (Docker test image) · tsc, lint, fmt, clippy -D warnings, check:secrets clean.
-**Not run:** full e2e suite (only touched specs), WebKit (not configured), Linux CI, anything live (router not rebuilt, crew container not rebuilt, app not relaunched, no headset). Commit `a34a224` was staged as a split of shared files and not separately built (the next commit was).
+Design-owned file touched: `CrewsScreen.tsx`, logic only (adapter hooks chained; no markup, class or token change).
 
-## 6. Questions for Taisun
+## 4. Ops (list/plan only)
 
-1. Were the 8 pushes / 23 merges (4–5 Nov) approved? (Freeze stays.)
-2. Commit or discard the 7 uncommitted docs?
-3. Delete `/tmp/rev1110*` (4.5 GB)? Letta CVE, duplicate n8n workflows, stale containers?
-4. May the confirm-only recording delete path exist at all?
-5. `save_session` overwrites a session JSON on a duplicate id (pre-existing): refuse instead?
-6. Follow-ups: one dialog per edit OK, or one per session / app-side copy?
-7. Router grace 60 s OK? Cloud on now needs the router bearer on loopback (Hermes / Nexus would send it).
-8. Crew runtime open questions (design doc §12): executor tools, approver, retry limit, cost column, SOUL.md access, MiniMax removal, concurrency 2→1, chat vs crew contention, where skill proposals live. 1110i's per-crew Files/terminal switch depends on the executor-tools answer.
-9. Then the NEXT_SESSION_PROMPT order: home control, real Muse session, voice with headphones, slow first Chat turn, calendar, eyes-closed test, key rotation, backup prune, push.
+- `docs/ops/inventory-2026-11-11.md`: n8n duplicates `sMtd9mnMhXid8MQn`, `laKQPqbtCQcWT3XL` (inactive Ingress copies), OpenClaw monitor `WxCNKfPXqcn6YY4Q` (keep off), `envProbeStage5E1`; stale containers `freqtrade` (exited), `nexus5etest-postgres-1` (never started), an unnamed old openclaw-sandbox container. Nothing deleted, stopped or modified.
+- `docs/ops/letta-upgrade-plan.md`: Letta 0.16.8 → first release fixing CVE-2026-77937 (target tag not verified: outbound off). Backup, migration notes, pin, check, rollback. **Not applied**; Letta data untouched.
 
-## 7. Design questions (tasks/design-questions.md)
+## 5. Not started (left for the next session)
 
-- Lists copy for a declined / busy follow-up approval.
-- Ledger as-of date on the Money tab: `ledgerAsOf()` in `business/liveLedger.ts` is ready to show.
-- NaN gaps in recordings: Design's charts and averages don't skip NaN yet (`RecordingsPanels.tsx`); a cold 30 s block briefly reads Needs wiring.
-- Hypnogram stage names are `awake | light | deep | rem` (NOOP's "wake" → "awake").
-- New since the prompt: 1111r "Effort zone minutes" can read `workout.zonesJSON`; 1111a personal-OS adapters; 1110i `crew_tool_grant_*` — all need backend work, none started.
+- **1111a** personal-OS adapters (goals, patterns, journal/mood, memory, life admin, weekly review).
+- **1111t step 6 money:** research spike first; no sign-ups/aggregators; Rust seed guard; `money.test.ts` must keep failing on transfer/pay/trade/convert/withdraw; never invent an FX rate.
+- **1111w Jarvis windows:** child webview + pop-out, per-site profile, `home_window_open`, local-only comments, Life take facts.
+- **1111s backups step 3** (restore never automatic).
+- Voice adds via on-device transcription; chat/voice call sites for the one add path.
+- `scripts/sync-crew-env.sh` to carry `CREW_TRIGGER_SECRET`.
 
-## 8. Next steps (in order)
+## 6. Taisun steps (folded from `tasks/active/TAISUN-NOTES-draft.md`; his TAISUN-STEPS.md not edited)
 
-13 D (finishing) → 12b Crews n8n / roster / nextSchedule → 13 C (task contract and loop) → 13 E / F. Then the 1111a/1111s/1111t–w wiring asks from Design.
+Rebuild the crew image (TAISUN-STEPS §9.9); startup then creates `crew_tasks`, `crew_tool_grants`, `crew_tool_audit` and widens `crew_approvals.kind`. Optional, all default off: `CREW_TRIGGER_SECRET` in `stack/.env.crew`, `~/crew-sandbox` + volume + `CREW_SANDBOX_ROOT` (run the container network-less before ever enabling shell), `CREW_MEMORY_WRITER=file` + `CREW_MEMORY_DIR`, `CREW_SKILLS_DIR`, app-data `n8n_api_key` (0600). Router rebuild/install and the fast-model switch (decision 0004). Hermes `API_SERVER_KEY` rotation (24 bytes → ≥32) in the final rotation batch. Confirm GitHub secret `APPLE_API_KEY_P8`.
+
+## 7. Open questions for Taisun
+
+1. Navy mode can't stop Hermes's own web tools: route chat to the local router while navy is on, or pause chat?
+2. Follow-ups once-per-session approval OK as built?
+3. `save_skill` etc. now write app-data `workspace/` (legacy ~/.openclaw is a read-only fallback). OK?
+4. The n8n key file uses PBKDF2 (600k) + AES-256-GCM (ring) instead of Argon2id (offline build). OK?
+5. 1110i: Design's `toolGrant.ts` default says "1 hour" vs decision "this run only" (backend enforces this-run-only; Design to align copy).
+6. 1110i/R13-E mounts: `~/crew-sandbox` + `CREW_SANDBOX_ROOT`; where `CREW_SKILLS_DIR` / `CREW_MEMORY_DIR` map in app data.
+7. A real shell for crews needs a network-less sandbox; until then shell stays file utilities only.
+8. Then the NEXT_SESSION_PROMPT order: home control, real Muse session, voice with headphones, slow first Chat turn, calendar, eyes-closed test, key rotation, backup prune, push (each with his OK).
