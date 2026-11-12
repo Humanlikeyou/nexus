@@ -24,6 +24,15 @@ describe("Tauri command registry", () => {
     expect(names).toEqual(["one", "two"]);
   });
 
+  it("the Letta memory commands are registered, and there is no memory delete-block command", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    for (const name of ["memory_list", "memory_edit", "memory_delete", "memory_restore_last"]) expect(names).toContain(name);
+    // "memory_delete" clears a block's value (after approval); it never calls Letta's DELETE (src-tauri memory_write.rs).
+    expect(names.filter((n: string) => /^memory_/.test(n)).sort()).toEqual(["memory_delete", "memory_edit", "memory_list", "memory_restore_last"]);
+  });
+
   it("the Muse recording readers are registered and no recording or session delete command exists", async () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
@@ -58,6 +67,14 @@ describe("Tauri command registry", () => {
     const money = ["money_accounts_list", "money_account_add", "money_watch_add", "money_balance_set_manual", "money_import_statement", "fx_rate_get", "fx_rate_set_manual", "fx_rate_refresh"];
     for (const name of money) expect(names).toContain(name);
     expect(names.filter((n: string) => /^(money|fx)_/.test(n) && /transfer|pay|trade|convert|withdraw|send|buy|sell/.test(n))).toEqual([]);
+  });
+
+  it("patterns_read and weekly_review_read are registered", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    expect(names).toContain("patterns_read");
+    expect(names).toContain("weekly_review_read");
   });
 
   it("system_map_status is registered", async () => {

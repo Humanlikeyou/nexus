@@ -26,17 +26,17 @@ use zeroize::Zeroizing;
 
 use super::keychain::{service_for, Keychain, KeychainError, MacKeychain};
 
-const LETTA_BASE: &str = "http://127.0.0.1:8283";
+pub(crate) const LETTA_BASE: &str = "http://127.0.0.1:8283";
 /// Keychain item name (service `com.taisun.nexus.letta_server_password`).
 pub(crate) const LETTA_SECRET: &str = "letta_server_password";
 
 const MAX_AGENTS: usize = 10;
 const MAX_BLOCKS_PER_AGENT: usize = 20;
 const MAX_ITEMS: usize = 50;
-const MAX_VALUE_CHARS: usize = 2000;
-const MAX_BODY_BYTES: usize = 512 * 1024;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
-const CALL_TIMEOUT: Duration = Duration::from_secs(8);
+pub(crate) const MAX_VALUE_CHARS: usize = 2000;
+pub(crate) const MAX_BODY_BYTES: usize = 512 * 1024;
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+pub(crate) const CALL_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -107,7 +107,7 @@ fn clip(s: &str) -> (String, bool) {
 }
 
 /// Letta ids look like `agent-<uuid>`. Anything else never goes into a URL path.
-fn safe_id(id: &str) -> bool {
+pub(crate) fn safe_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 80
         && id
@@ -158,15 +158,29 @@ pub(crate) fn parse_blocks(v: &Value, agent: &str) -> Result<Vec<MemoryItem>, Me
         .collect())
 }
 
+/// Loopback client: no redirects, no system proxy. Shared with `memory_write`.
+pub(crate) fn build_client() -> Result<reqwest::Client, MemoryError> {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .build()
+        .map_err(|_| MemoryError::Off)
+}
+
 /// The only HTTP call in this module: GET with the bearer, capped body, no redirects, no proxy.
 async fn get_json(client: &reqwest::Client, url: &str, key: &str) -> Result<Value, MemoryError> {
-    let mut resp = client
+    let resp = client
         .get(url)
         .bearer_auth(key)
         .timeout(REQUEST_TIMEOUT)
         .send()
         .await
         .map_err(|_| MemoryError::Off)?;
+    read_json_body(resp).await
+}
+
+/// Status check + capped body read + JSON parse. Shared with `memory_write`.
+pub(crate) async fn read_json_body(mut resp: reqwest::Response) -> Result<Value, MemoryError> {
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         return Err(MemoryError::Unauthorized);
@@ -191,11 +205,7 @@ async fn get_json(client: &reqwest::Client, url: &str, key: &str) -> Result<Valu
 }
 
 pub(crate) async fn list_from(base: &str, key: &str) -> Result<Vec<MemoryItem>, MemoryError> {
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .no_proxy()
-        .build()
-        .map_err(|_| MemoryError::Off)?;
+    let client = build_client()?;
     let agents = parse_agents(
         &get_json(
             &client,

@@ -1,4 +1,5 @@
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
+import { patternsFrom, weeklyReviewFrom, type PatternsWire, type ReviewWire } from "./liveInsights";
 import { ADDS_EVENT, announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
 
 /**
@@ -78,6 +79,10 @@ export interface PersonalAdapter {
   editMemory(id: string, text: string): Promise<MemoryWrite>;
   deleteMemory(id: string): Promise<MemoryWrite>;
   decideMemory(id: string, keep: boolean): Promise<MemoryWrite>;
+  /** Undo: puts back the text the last edit or delete replaced (Letta rows only). No button calls it yet. */
+  restoreMemory?(id: string): Promise<MemoryWrite>;
+  /** Plain-words result of the last edit, delete or undo (also set on success); null before any. */
+  memoryWriteNote?(): string | null;
   lifeAdmin(): Wired<LifeAdmin>;
   weeklyReview(): Wired<WeeklyReview>;
   /** "Try it this week" sets a reminder; it never changes a goal by itself. */
@@ -269,7 +274,8 @@ const isMemoryWire = (m: unknown): m is MemoryWire => { const o = m as Record<st
 
 /** Letta core-memory blocks as Memory rows. Only the `human` and `persona` labels have a known category; the rest read as "About you". */
 export function memoriesFrom(rows: MemoryWire[]): Memory[] {
-  return rows.filter(isMemoryWire).map((m) => {
+  // A cleared block (what "Delete" leaves behind) has no text left to show.
+  return rows.filter(isMemoryWire).filter((m) => m.value.trim() !== "").map((m) => {
     const label = typeof m.label === "string" && m.label ? m.label : "block";
     const agent = typeof m.agent === "string" && m.agent ? m.agent : "Amara";
     const when = typeof m.updatedAt === "string" && /^\d{4}-\d{2}-\d{2}/.test(m.updatedAt) ? ` · updated ${dayLabel(m.updatedAt.slice(0, 10))}` : "";
@@ -286,20 +292,43 @@ export function memoryNote(e: unknown): string {
   return "Letta sent something Amara couldn't read. Nothing was changed.";
 }
 
+/** Fixed text per memory_edit / memory_delete / memory_restore_last error code. Nothing from the error itself is shown. */
+export function memoryWriteNote(e: unknown, what: "Edit" | "Delete" | "Undo"): string {
+  const code = typeof e === "string" ? e : "";
+  if (code === "cancelled") return "Cancelled. Nothing was changed.";
+  if (code === "letta_no_key") return "Add the Letta password in Settings › Secrets first. Nothing was changed.";
+  if (code === "letta_off") return "Letta isn't answering on this Mac. Nothing was changed.";
+  if (code === "letta_unauthorized") return "Letta refused the saved password. Nothing was changed.";
+  if (code === "letta_value_too_long") return "That memory is too long (2000 characters at most). Nothing was changed.";
+  if (code === "letta_block_too_long") return "This memory block is longer than the app shows, so it can't be edited here without losing text. Nothing was changed.";
+  if (code === "letta_bad_input") return "That memory can't be empty or changed this way. Nothing was changed.";
+  if (code === "letta_backup_failed") return "Amara couldn't save the old text first, so nothing was changed.";
+  if (code === "changed") return "That memory changed while you were deciding, so nothing was written. Reopen Memory and try again.";
+  if (code === "letta_busy") return "Another memory change is still open. Finish or cancel it first. Nothing was changed.";
+  if (code === "letta_unconfirmed") return "It may or may not have changed — reopen Memory to check.";
+  if (code === "letta_no_backup") return "There's no earlier version of this memory to put back.";
+  return `${what} didn't go through. It may or may not have changed — reopen Memory to check.`;
+}
+
 /**
- * The stores built so far (life dates, check-ins, goals, Letta memory blocks, read-only). Everything else stays unwired. Each reads as unwired until its
+ * The stores built so far (life dates, check-ins, goals, Letta memory blocks: read, edit, clear, undo). Everything else stays unwired. Each reads as unwired until its
  * first successful read, so a missing backend never shows an empty live list.
  */
 export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & { refresh(): Promise<void> } {
   let admin: LifeAdmin | null = null;
   let checkins: CheckIn[] | null = null;
   let goals: GoalsWeek | null = null;
+  let patterns: Patterns | null = null;
+  let review: WeeklyReview | null = null;
   let memories: Memory[] | null = null;
   let memoriesNote: string | null = null;
+  let writeNote: string | null = null;
   const refresh = async () => {
     await Promise.all([
       call<LifeDateWire[]>("life_date_list").then((r) => { admin = lifeAdminFrom(r); }, () => { admin = null; }),
       call<CheckInWire[]>("checkin_list", { limit: 30 }).then((r) => { checkins = r.map(checkInFrom); }, () => { checkins = null; }),
+      call<PatternsWire>("patterns_read").then((r) => { patterns = r && Array.isArray(r.findings) ? patternsFrom(r) : null; }, () => { patterns = null; }),
+      call<ReviewWire>("weekly_review_read").then((r) => { review = r && r.health ? weeklyReviewFrom(r) : null; }, () => { review = null; }),
       call<GoalWire[]>("read_goals").then((r) => { goals = Array.isArray(r) ? goalsFrom(r) : null; }, () => { goals = null; }),
       call<MemoryWire[]>("memory_list").then(
         (r) => { memories = Array.isArray(r) ? memoriesFrom(r) : null; memoriesNote = memories ? null : memoryNote(null); },
@@ -308,13 +337,32 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
     ]);
     announceStores();
   };
+  const writeMemory = async (cmd: string, args: Record<string, unknown>, what: "Edit" | "Delete" | "Undo", okNote: string): Promise<MemoryWrite> => {
+    writeNote = null;
+    try {
+      await call<void>(cmd, args);
+      writeNote = okNote;
+      await refresh();
+      return live({ ok: true as const });
+    } catch (e) {
+      writeNote = memoryWriteNote(e, what);
+      return UNWIRED;
+    }
+  };
   try { window.addEventListener(ADDS_EVENT, () => { void refresh(); }); } catch { /* no window in node tests */ }
   return {
     ...unwiredPersonal,
     refresh,
     goals: () => (goals ? live(goals) : UNWIRED),
+    patterns: () => (patterns ? live(patterns) : UNWIRED),
+    weeklyReview: () => (review ? live(review) : UNWIRED),
     memories: () => (memories ? live([...memories]) : UNWIRED),
     memoriesNote: () => memoriesNote,
+    memoryWriteNote: () => writeNote,
+    // Edit saves the old text first; "delete" empties the Letta block (the block stays) after a native approval dialog. No source for pendingMemories / decideMemory.
+    editMemory: (id, text) => writeMemory("memory_edit", { blockId: id, value: text }, "Edit", "Saved. The old text is kept on this Mac, so it can be put back."),
+    deleteMemory: (id) => writeMemory("memory_delete", { blockId: id }, "Delete", "Cleared. The old text is kept on this Mac, so it can be put back."),
+    restoreMemory: (id) => writeMemory("memory_restore_last", { blockId: id }, "Undo", "Put back the earlier text."),
     lifeAdmin: () => (admin ? live(admin) : UNWIRED),
     checkins: () => (checkins ? live([...checkins]) : UNWIRED),
     saveCheckIn: async (d) => {

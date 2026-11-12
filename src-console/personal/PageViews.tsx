@@ -128,11 +128,11 @@ function MemoryRow({ m, adapter, onDone }: { m: Memory; adapter: PersonalAdapter
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(m.text);
   const [confirm, setConfirm] = useState(false);
-  const result = (r: Wired<{ ok: true }>, what: string) => onDone(r.state === "unwired" ? `${what} needs wiring, so nothing changed.` : r.state === "sample" ? `Sample data: ${what.toLowerCase()} in the preview only.` : `${what} done.`);
+  const result = (r: Wired<{ ok: true }>, what: string) => onDone(adapter.memoryWriteNote?.() ?? (r.state === "unwired" ? `${what} needs wiring, so nothing changed.` : r.state === "sample" ? `Sample data: ${what.toLowerCase()} in the preview only.` : `${what} done.`));
   if (editing) {
     return (
       <form className="pk-mem" onSubmit={(e) => { e.preventDefault(); void adapter.editMemory(m.id, text.trim()).then((r) => { setEditing(false); result(r, "Editing"); }); }}>
-        <TextField label="Memory" hideLabel value={text} maxLength={500} onChange={(e) => setText(e.target.value)} />
+        <TextField label="Memory" hideLabel value={text} maxLength={2000} onChange={(e) => setText(e.target.value)} />
         <div className="pk-mem__acts"><Button size="small" onClick={() => { setEditing(false); setText(m.text); }}>Cancel</Button><Button size="small" variant="primary" type="submit" disabled={!text.trim()}>Save</Button></div>
       </form>
     );
@@ -164,7 +164,7 @@ export function MemorySection({ adapter }: { adapter: PersonalAdapter }) {
   const cats = (Object.keys(MEMORY_LABEL) as MemoryCategory[]).filter((c) => (all ?? []).some((m) => m.category === c));
   return (
     <div className="pk-host memory">
-      <PageHero title="Memory" statement="What Amara knows about you" detail={all ? (mem.state === "live" ? <>{all.length} memory {all.length === 1 ? "block" : "blocks"} · stored on this Mac (Letta) · read only for now: editing and deleting need wiring</> : <>{all.length} memories · stored on this Mac (Letta) · you can edit or delete any of them {mem.state === "sample" && <DataTag kind="sample" />}</>) : <>Stored on this Mac (Letta) · editing and deleting need wiring <DataTag kind="wire" /></>} />
+      <PageHero title="Memory" statement="What Amara knows about you" detail={all ? (mem.state === "live" ? <>{all.length} memory {all.length === 1 ? "block" : "blocks"} · stored on this Mac (Letta) · edits and deletes change Amara&apos;s memory here, and the old text is saved first</> : <>{all.length} memories · stored on this Mac (Letta) · you can edit or delete any of them {mem.state === "sample" && <DataTag kind="sample" />}</>) : <>Stored on this Mac (Letta) · editing and deleting need wiring <DataTag kind="wire" /></>} />
       {!all ? <Card title="Memories" accessory={<span className="pk-acc">{!note0 && <DataTag kind="wire" />}</span>}><p className="pk-note" role={note0 ? "status" : undefined}>{note0 ?? "Amara's memory list appears here once the app can read it from Letta. Nothing is read or changed in Letta until then."}</p></Card> : (
         <>
           <div className="pk-search memory__search">
@@ -199,7 +199,7 @@ export function MemorySection({ adapter }: { adapter: PersonalAdapter }) {
         </>
       )}
       <TakesSettingsCard />
-      <div className="pk-info">Deleting removes the memory from Amara&apos;s store (Letta) on this Mac and from future answers; it can&apos;t be undone. Past chat transcripts are separate and stay until you delete them in Agents.</div>
+      <div className="pk-info">{mem.state === "live" ? <>Deleting empties the memory in Amara&apos;s store (Letta) on this Mac and asks you first. The block itself stays, and the old text is saved on this Mac so it can be put back (there&apos;s no Undo button yet). Amara&apos;s own &ldquo;wants to remember&rdquo; suggestions aren&apos;t connected yet. Past chat transcripts are separate and stay until you delete them in Agents.</> : <>Deleting removes the memory from Amara&apos;s store (Letta) on this Mac and from future answers; it can&apos;t be undone. Past chat transcripts are separate and stay until you delete them in Agents.</>}</div>
     </div>
   );
 }

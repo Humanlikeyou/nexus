@@ -1223,6 +1223,17 @@ fn statement_points(records: &[TxRecord]) -> Vec<BalancePoint> {
 }
 
 pub(crate) fn balances_list_in(data: &Path, today: NaiveDate) -> Result<MoneyBalances, String> {
+    balances_list_scoped_in(data, today, None)
+}
+
+/// [`balances_list_in`] limited to one account scope (`personal` or `venture`). Accounts of any other scope
+/// are skipped BEFORE their statement file is touched, so a venture's file is never opened by a personal
+/// read. A scoped read never reads the FX rate (`fx` is `None`); callers that need it use `fx_get_in`.
+pub(crate) fn balances_list_scoped_in(
+    data: &Path,
+    today: NaiveDate,
+    scope: Option<&str>,
+) -> Result<MoneyBalances, String> {
     let _g = lock();
     let accounts = load_accounts(data)?;
     let manual: Vec<ManualBalance> =
@@ -1233,6 +1244,9 @@ pub(crate) fn balances_list_in(data: &Path, today: NaiveDate) -> Result<MoneyBal
         .to_string();
     let mut balances = Vec::new();
     for a in &accounts {
+        if scope.is_some_and(|s| a.scope != s) {
+            continue;
+        }
         if a.route == "csv" {
             if !safe_id(&a.id) {
                 return Err("store_error".to_string());
@@ -1278,7 +1292,11 @@ pub(crate) fn balances_list_in(data: &Path, today: NaiveDate) -> Result<MoneyBal
             });
         }
     }
-    let fx = fx_get_in(data)?.filter(|r| valid_rate(r.rate));
+    let fx = if scope.is_some() {
+        None
+    } else {
+        fx_get_in(data)?.filter(|r| valid_rate(r.rate))
+    };
     Ok(MoneyBalances { balances, fx })
 }
 
