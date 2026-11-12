@@ -76,9 +76,28 @@ pub(crate) fn is_excluded_name(name: &str, depth: usize) -> bool {
         || EXCLUDED_SUFFIXES.iter().any(|s| lower.ends_with(s))
 }
 
+/// Field names that are a secret on their own (`arm_config.json` `worker_api_keys[].key`).
+const SECRET_FIELD_NAMES: &[&str] = &[
+    "key",
+    "token",
+    "secret",
+    "password",
+    "passphrase",
+    "apikey",
+    "api_key",
+    "auth",
+    "authorization",
+    "bearer",
+    "cookie",
+    "private_key",
+    "seed",
+    "mnemonic",
+];
+
 fn is_secret_field(key: &str) -> bool {
     let k = key.to_ascii_lowercase();
-    SECRET_FIELD_SUFFIXES.iter().any(|s| k.ends_with(s))
+    SECRET_FIELD_NAMES.contains(&k.as_str())
+        || SECRET_FIELD_SUFFIXES.iter().any(|s| k.ends_with(s))
         || EXCLUDED_NAME_FRAGMENTS
             .iter()
             .any(|f| !f.starts_with('.') && k.contains(f) && !k.contains("threshold"))
@@ -100,6 +119,17 @@ fn redact(v: &mut Value, removed: &mut Vec<String>) {
         Value::Array(items) => items.iter_mut().for_each(|i| redact(i, removed)),
         _ => {}
     }
+}
+
+/// Parse JSON and drop every secret field at any depth. `None` if it isn't JSON (the caller
+/// leaves the file out). Returns the cleaned bytes and the removed field names (never values).
+pub(crate) fn redact_json_bytes(bytes: &[u8]) -> Option<(Vec<u8>, Vec<String>)> {
+    let mut value: Value = serde_json::from_slice(bytes).ok()?;
+    let mut removed = Vec::new();
+    redact(&mut value, &mut removed);
+    removed.sort();
+    removed.dedup();
+    serde_json::to_vec(&value).ok().map(|b| (b, removed))
 }
 
 /// Copy `<data>/config.json` into `<dest>/config.json` without its secret fields (names are
@@ -762,6 +792,18 @@ mod tests {
         fs::write(data.join("sessions/sub/amara-n8n.key"), "SENTINEL-NESTED").unwrap();
         fs::write(data.join("sessions/sub/x.pem"), "SENTINEL-PEM").unwrap();
         fs::write(data.join("sessions/rec.ndjson"), "keepme").unwrap();
+        // JSON stores whose secret field is a plain name (arm_config.json worker_api_keys[].key)
+        fs::write(
+            data.join("arm_config.json"),
+            r#"{"poll_interval_secs":5,"worker_api_keys":[{"name":"w1","key":"SENTINEL-ARM"}]}"#,
+        )
+        .unwrap();
+        fs::write(
+            data.join("sessions/s1.json"),
+            r#"{"auth":"SENTINEL-AUTH","eeg":[1,2]}"#,
+        )
+        .unwrap();
+        fs::write(data.join("broken.json"), "{SENTINEL-BROKEN").unwrap();
         fs::write(
             data.join("config.json"),
             r#"{"theme":"dark","telegram_bot_token":"SENTINEL-TG","anthropic_api_key":"SENTINEL-AK","n8n_webhook_secret":"SENTINEL-WH","gateway_auth_token":"SENTINEL-GW","llm_token_threshold":512,"nested":{"x_password":"SENTINEL-PW","ok":1}}"#,
@@ -818,6 +860,8 @@ mod tests {
         assert!(names.iter().any(|n| n.ends_with("/goals.json")));
         assert!(names.iter().any(|n| n.ends_with("sessions/rec.ndjson")));
         assert!(text.contains("keepme") && text.contains("\"theme\": \"dark\""));
+        // non-secret fields of redacted JSON stores survive (worker_api_keys goes whole: its name holds api_key)
+        assert!(text.contains("poll_interval_secs") && text.contains("\"eeg\":[1,2]"));
         assert!(text.contains("llm_token_threshold") && text.contains("\"ok\": 1"));
         assert!(!text.contains("\"telegram_bot_token\""));
         assert!(r.skipped.iter().any(|x| x.contains("telegram_bot_token")));

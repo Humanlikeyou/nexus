@@ -98,6 +98,7 @@ pub(crate) async fn pack_to(
             &mut skipped,
             0,
             skip_secret,
+            opts.exclude_secrets,
         )?;
         if opts.exclude_secrets {
             super::backups::write_redacted_config(&config_src, &dest, &mut skipped)?;
@@ -117,6 +118,7 @@ pub(crate) async fn pack_to(
             &mut skipped,
             1,
             skip_secret,
+            opts.exclude_secrets,
         )?;
         includes.push("BLE session recordings".to_string());
     }
@@ -772,11 +774,15 @@ fn copy_dir_recursive(
     max_file_bytes: Option<u64>,
     skipped: &mut Vec<String>,
 ) -> Result<(), String> {
-    copy_dir_filtered(src, dst, max_file_bytes, skipped, 0, &|_, _| false)
+    copy_dir_filtered(src, dst, max_file_bytes, skipped, 0, &|_, _| false, false)
 }
 
 /// `copy_dir_recursive` with an exclusion hook: `exclude(name, depth)` true leaves the
 /// entry (file or folder) out and records its name (never its contents) in `skipped`.
+/// `redact_json`: every `*.json` file is parsed and written without its secret fields
+/// (`backups::redact_json_bytes`); one that can't be parsed is left out and noted. Used only
+/// when a backup excludes secrets.
+#[allow(clippy::too_many_arguments)]
 fn copy_dir_filtered(
     src: &Path,
     dst: &Path,
@@ -784,6 +790,7 @@ fn copy_dir_filtered(
     skipped: &mut Vec<String>,
     depth: usize,
     exclude: &dyn Fn(&str, usize) -> bool,
+    redact_json: bool,
 ) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("mkdir {}: {}", dst.display(), e))?;
 
@@ -813,6 +820,7 @@ fn copy_dir_filtered(
                 skipped,
                 depth + 1,
                 exclude,
+                redact_json,
             )?;
             continue;
         }
@@ -824,6 +832,20 @@ fn copy_dir_filtered(
                 size as f64 / 1_000_000.0,
                 max_file_bytes.unwrap_or(0) / 1_000_000
             ));
+            continue;
+        }
+        if redact_json && name.to_ascii_lowercase().ends_with(".json") {
+            let bytes = fs::read(&src_path).map_err(|e| format!("read {name}: {e}"))?;
+            match super::backups::redact_json_bytes(&bytes) {
+                Some((clean, removed)) => {
+                    for k in removed {
+                        skipped.push(format!("{name} field {k} (secret, removed)"));
+                    }
+                    crate::app_paths::write_private(&dst_path, clean)
+                        .map_err(|e| format!("write {name}: {e}"))?;
+                }
+                None => skipped.push(format!("{name} (not valid JSON, left out)")),
+            }
             continue;
         }
         fs::copy(&src_path, &dst_path)
