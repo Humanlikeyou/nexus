@@ -25,10 +25,51 @@ pub async fn pack_it_up() -> Result<PackageInfo, String> {
 
 /// `pack_it_up` with the home and data dirs injected (tests use temp dirs).
 pub(crate) async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
-    let desktop = home.join("Desktop");
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let archive_name = format!("nexus-backup-{}.tar.gz", timestamp);
-    let archive_path = desktop.join(&archive_name);
+    pack_to(
+        data_dir,
+        &home.join("Desktop"),
+        &archive_name,
+        &PackOpts::default(),
+    )
+    .await
+}
+
+/// Progress callback: `(phase label, percent 0..=100)`.
+pub(crate) type Progress<'a> = &'a (dyn Fn(&str, u8) + Send + Sync);
+
+/// How `pack_to` differs between the one-off Desktop pack and a scheduled-style backup.
+#[derive(Default)]
+pub(crate) struct PackOpts<'a> {
+    /// Leave every secret file out and strip secret fields from `config.json`
+    /// (see `backups::EXCLUDED_*`). `pack_it_up` keeps its old behaviour (false).
+    pub exclude_secrets: bool,
+    pub progress: Option<Progress<'a>>,
+}
+
+/// Pack the app data into `<out_dir>/<file_name>` (a `.tar.gz` whose top folder is
+/// `nexus-pack-*`, which restore looks for). `out_dir` must already exist; the archive is
+/// created 0600 and never overwrites an existing file.
+pub(crate) async fn pack_to(
+    data_dir: &Path,
+    out_dir: &Path,
+    file_name: &str,
+    opts: &PackOpts<'_>,
+) -> Result<PackageInfo, String> {
+    let report = |phase: &str, pct: u8| {
+        if let Some(p) = opts.progress {
+            p(phase, pct);
+        }
+    };
+    let skip_secret: &dyn Fn(&str, usize) -> bool = if opts.exclude_secrets {
+        &|name, depth| super::backups::is_excluded_name(name, depth)
+    } else {
+        &|_, _| false
+    };
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let archive_path = out_dir.join(file_name);
+    report("Preparing", 3);
 
     // Fresh, unguessable staging dir (create_dir fails if it already exists, so a
     // pre-planted dir or symlink in the temp dir is never reused). The archive's
@@ -49,7 +90,18 @@ pub(crate) async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo,
     let config_src = data_dir.to_path_buf();
     if config_src.exists() {
         let dest = staging.join("nexus-config");
-        copy_dir_recursive(&config_src, &dest, Some(MAX_PACK_FILE_BYTES), &mut skipped)?;
+        report("Copying settings", 10);
+        copy_dir_filtered(
+            &config_src,
+            &dest,
+            Some(MAX_PACK_FILE_BYTES),
+            &mut skipped,
+            0,
+            skip_secret,
+        )?;
+        if opts.exclude_secrets {
+            super::backups::write_redacted_config(&config_src, &dest, &mut skipped)?;
+        }
         includes.push("Amara OS settings & config".to_string());
     }
 
@@ -57,11 +109,14 @@ pub(crate) async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo,
     let sessions_dir = data_dir.join("sessions");
     if sessions_dir.exists() {
         let dest = staging.join("sessions");
-        copy_dir_recursive(
+        report("Copying recordings", 40);
+        copy_dir_filtered(
             &sessions_dir,
             &dest,
             Some(MAX_PACK_FILE_BYTES),
             &mut skipped,
+            1,
+            skip_secret,
         )?;
         includes.push("BLE session recordings".to_string());
     }
@@ -76,6 +131,7 @@ pub(crate) async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo,
 
     // 5. Copy events database
     let events_db = data_dir.join("events.db");
+    report("Copying databases", 60);
     if events_db.exists() {
         fs::copy(&events_db, staging.join("events.db"))
             .map_err(|e| format!("Failed to copy events.db: {}", e))?;
@@ -92,6 +148,7 @@ pub(crate) async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo,
     }
 
     // 5. Write a manifest with metadata
+    report("Writing manifest", 70);
     let manifest = serde_json::json!({
         "version": "0.1.0",
         "packed_at": chrono::Local::now().to_rfc3339(),
@@ -123,6 +180,7 @@ pub(crate) async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo,
     ))?;
     // Pre-create the archive 0600 (tar truncates it but keeps the mode), so the
     // backup is never readable by other users, even briefly.
+    report("Compressing", 75);
     create_private_file(&archive_path)
         .map_err(|e| format!("Failed to create archive file: {}", e))?;
     let output = Command::new("tar")
@@ -294,7 +352,7 @@ fn snapshot_before_restore(
 }
 
 /// The `nexus-pack-*` (or legacy `electron-pack-*`) folder inside staging, else staging.
-fn find_pack_root(staging: &Path) -> Result<PathBuf, String> {
+pub(crate) fn find_pack_root(staging: &Path) -> Result<PathBuf, String> {
     Ok(fs::read_dir(staging)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
@@ -541,7 +599,7 @@ fn apply_restore(
 }
 
 /// New directory readable only by the user (0700 on Unix); fails if it exists.
-fn create_private_dir(path: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
     let mut b = fs::DirBuilder::new();
     #[cfg(unix)]
     {
@@ -552,7 +610,7 @@ fn create_private_dir(path: &Path) -> std::io::Result<()> {
 }
 
 /// New empty file readable only by the user (0600 on Unix); fails if it exists.
-fn create_private_file(path: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_file(path: &Path) -> std::io::Result<()> {
     let mut o = fs::OpenOptions::new();
     o.write(true).create_new(true);
     #[cfg(unix)]
@@ -714,6 +772,19 @@ fn copy_dir_recursive(
     max_file_bytes: Option<u64>,
     skipped: &mut Vec<String>,
 ) -> Result<(), String> {
+    copy_dir_filtered(src, dst, max_file_bytes, skipped, 0, &|_, _| false)
+}
+
+/// `copy_dir_recursive` with an exclusion hook: `exclude(name, depth)` true leaves the
+/// entry (file or folder) out and records its name (never its contents) in `skipped`.
+fn copy_dir_filtered(
+    src: &Path,
+    dst: &Path,
+    max_file_bytes: Option<u64>,
+    skipped: &mut Vec<String>,
+    depth: usize,
+    exclude: &dyn Fn(&str, usize) -> bool,
+) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("mkdir {}: {}", dst.display(), e))?;
 
     for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
@@ -724,6 +795,10 @@ fn copy_dir_recursive(
         if is_os_junk(&name) {
             continue;
         }
+        if exclude(&name, depth) {
+            skipped.push(format!("{name} (left out on purpose)"));
+            continue;
+        }
 
         let file_type = entry.file_type().map_err(|e| e.to_string())?;
         if file_type.is_symlink() {
@@ -731,7 +806,14 @@ fn copy_dir_recursive(
             continue;
         }
         if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path, max_file_bytes, skipped)?;
+            copy_dir_filtered(
+                &src_path,
+                &dst_path,
+                max_file_bytes,
+                skipped,
+                depth + 1,
+                exclude,
+            )?;
             continue;
         }
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);

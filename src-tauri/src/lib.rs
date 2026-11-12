@@ -280,6 +280,10 @@ pub fn run() {
             packager::pack_it_up,
             packager::unpack_backup,
             packager::get_app_paths,
+            commands::backups::backup_settings_get,
+            commands::backups::backup_settings_set,
+            commands::backups::backup_now,
+            commands::backups::backup_list,
             // Keychain secrets + n8n key file (write-only; never return a value)
             commands::keychain::secrets_status,
             commands::keychain::secret_set,
