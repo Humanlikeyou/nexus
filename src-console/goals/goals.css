@@ -1,0 +1,49 @@
+/* Goals page (design-1112g). Existing tokens only; hairlines are inset shadows, never borders. */
+.gl-note { margin: 0; font-size: 11px; line-height: 1.45; color: var(--label-secondary); }
+.gl-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.gl-today { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.gl-today__item { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-radius: var(--radius-pill); box-shadow: inset 0 0 0 1px var(--separator); font-size: 13px; color: var(--label); }
+.gl-today__item small { font-size: 11px; color: var(--label-secondary); }
+.gl-today__dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--label-secondary); }
+.gl-today__item[data-m="met"] .gl-today__dot { background: var(--tone-accent-text); box-shadow: none; }
+.gl-today__item[data-m="nearly"] .gl-today__dot { background: linear-gradient(90deg, var(--tone-accent-text) 50%, transparent 50%); }
+.gl-habit { display: grid; gap: var(--space-2); padding: var(--space-3) 0; box-shadow: 0 1px 0 var(--separator); }
+.gl-habit:last-of-type { box-shadow: none; }
+.gl-habit__head { display: flex; justify-content: space-between; gap: var(--space-4); align-items: flex-start; font-size: 13px; color: var(--label); }
+.gl-habit__t { font-weight: 500; display: block; }
+.gl-streak { text-align: right; font-variant-numeric: tabular-nums; }
+.gl-streak b { font-size: 17px; font-weight: 500; display: block; }
+.gl-heat { display: grid; grid-template-rows: repeat(7, 9px); grid-auto-flow: column; grid-auto-columns: 9px; gap: var(--space-0_5); width: max-content; max-width: 100%; }
+.gl-heat i { border-radius: 2px; background: var(--fill-tertiary); }
+.gl-heat i[data-m="met"] { background: var(--tone-accent-text); }
+.gl-heat i[data-m="nearly"] { background: linear-gradient(180deg, var(--tone-accent-text) 50%, var(--fill-tertiary) 50%); }
+.gl-heat i[data-m="missed"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--label-secondary); }
+.gl-heat i[data-today] { outline: 1px solid var(--label-secondary); outline-offset: 1px; }
+.gl-rm { margin-top: var(--space-2); }
+.gl-rm > summary { display: flex; gap: var(--space-3); align-items: baseline; cursor: pointer; font-size: 13px; color: var(--label); padding: var(--space-1) 0; border-radius: var(--radius-sm); }
+.gl-rm > summary:focus-visible { outline: 3px solid var(--tone-accent-text); outline-offset: 2px; }
+.gl-rm__sum { margin-left: auto; font-size: 11px; color: var(--label-secondary); font-variant-numeric: tabular-nums; }
+.gl-rm__body { display: grid; gap: var(--space-3); padding-top: var(--space-2); }
+.gl-pct { display: flex; align-items: center; gap: var(--space-3); }
+.gl-pct .pk-bar { flex: 1; }
+.gl-pct__n { font-size: 11px; color: var(--label-secondary); font-variant-numeric: tabular-nums; }
+.gl-suggest, .gl-empty { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.gl-steps { list-style: none; margin: 0; padding: 0; display: grid; }
+.gl-step { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-3); align-items: start; padding: var(--space-2) 0; box-shadow: 0 1px 0 var(--separator); font-size: 13px; color: var(--label); }
+.gl-step:last-child { box-shadow: none; }
+.gl-step[data-done] .gl-step__title { color: var(--label-secondary); }
+.gl-tick { width: 16px; height: 16px; margin-top: 1px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--label-secondary); display: grid; place-items: center; color: Canvas; }
+.gl-tick[data-on] { background: var(--tone-accent-text); box-shadow: none; }
+.gl-step__title { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; }
+.gl-size { font-size: 11px; padding: 0 var(--space-2); border-radius: var(--radius-pill); box-shadow: inset 0 0 0 1px var(--separator); color: var(--label-secondary); }
+.gl-size[data-size="big"] { color: var(--copper-text); }
+.gl-step__act { display: flex; gap: var(--space-1); align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.gl-smaller { margin: var(--space-1) 0 0; font-size: 12px; color: var(--copper-text); }
+.gl-edit { grid-column: 1 / -1; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end; }
+.gl-done { margin: 0; display: flex; align-items: center; gap: var(--space-2); font-size: 13px; color: var(--tone-accent-text); }
+.gl-msg { margin: 0; min-height: 0; font-size: 11px; color: var(--label-secondary); }
+.gl-msg:empty { display: none; }
+.gl-q { display: grid; gap: var(--space-2); padding: var(--space-4); border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--separator); }
+.gl-q__text { margin: 0; font-size: 14px; color: var(--label); }
+@media (prefers-reduced-motion: no-preference) { .gl-heat i, .gl-tick { transition: background-color .2s; } }
+@media (forced-colors: active) { .gl-heat i[data-m="met"], .gl-tick[data-on] { forced-color-adjust: none; background: Highlight; } .gl-heat i[data-m="missed"] { box-shadow: inset 0 0 0 1.5px CanvasText; } }

@@ -6,7 +6,9 @@ import { GoalsCard } from "../screens/GoalsCard";
 import type { Goal } from "../types";
 import { useStoresTick } from "../lib/localStores";
 import { CHECKIN_EVENT, ENERGY_STEPS, MOOD_STEPS, PERSONAL_DEFAULTS, type CheckIn, type PersonalAdapter } from "./adapters";
-import { Bar, Dots, Rich } from "./parts";
+import { Bar, Rich } from "./parts";
+import { GoalRoadmap } from "../goals/GoalRoadmap";
+import { HabitRow, TodayStrip } from "../goals/HabitTracker";
 import { ReadyToKeepCard, SuggestedLatelyCard, TakeChange, TakesThisWeekCard, WeekSuggestionsCard, WeekSuggestionsTile } from "../takes/WeekTakes";
 import { takesAdapter } from "../takes/adapters";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
@@ -29,37 +31,42 @@ export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, a
         detail={w ? <>{w.milestones.length} milestones{w.nextMilestone ? ` · next: ${w.nextMilestone}` : ""}{ready ? ` · ${ready} suggestion ready to become a habit` : ""} {week.state === "sample" && <DataTag kind="sample" />}</> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
       <AmaraTake page="life" className="life__take" />
       {composer}
+      {w && w.habits.length > 0 && (
+        <Card title="Today" accessory={<span className="pk-acc">{wiredTag(week)}</span>}>
+          <TodayStrip habits={w.habits} />
+        </Card>
+      )}
       <div className="pk-g2">
         <Card title="This week's habits" accessory={<span className="pk-acc">{wiredTag(week)}</span>}>
           {!w ? <p className="pk-note">{WIRE_NOTE}</p> : (
             <>
               {added.map((h) => <div className="pk-habit v-new" key={h.id}><div>{h.title}<small>You · added just now · starts Monday</small></div><span /><div className="pk-streak"><b>0</b> / –<small>new</small></div></div>)}
-              {w.habits.map((h) => (
-                <div className="pk-habit" key={h.id}>
-                  <div>{h.title}<small>{h.source} · {h.rule}</small></div>
-                  <Dots days={h.days} label={h.title} />
-                  <div className="pk-streak"><b>{h.done}</b> / {h.target}<small>{h.note}</small></div>
-                </div>
-              ))}
-              <p className="pk-note">Days run Thu → today. Half squares: nearly (within 15 min). Amara counts from the source data; you can&apos;t tick these by hand unless a source is missing.</p>
+              {w.habits.map((h) => <HabitRow h={h} key={h.id} />)}
+              <p className="pk-note">Each square is a day, newest on the right. Half squares: nearly (within 15 min). Amara counts from the source data; you can&apos;t tick these by hand unless a source is missing.</p>
             </>
           )}
         </Card>
         <div className="pk-stack">
           <ReadyToKeepCard title="Ready to become a habit" />
-          {w ? (
-            <Card title="Milestones" accessory={<span className="pk-acc">{week.state === "sample" && <DataTag kind="sample" />}</span>}>
-              {w.milestones.map((m) => (
-                <div className="pk-ms" key={m.id}>
-                  <div className="pk-ms__top"><span>{m.title}</span><span>{m.right}</span></div>
-                  <Bar pct={m.pct} copper={m.tone === "copper"} />
-                  <small className="pk-sub">{m.detail}</small>
-                </div>
-              ))}
-            </Card>
-          ) : <GoalsCard goals={goals} failed={goalsFailed} onRetry={onRetry} id="" title="Milestones" />}
         </div>
       </div>
+      {w ? (
+        <Card title="Milestones" accessory={<span className="pk-acc">{week.state === "sample" && <DataTag kind="sample" />}</span>}>
+          {w.milestones.map((m, i) => (
+            <div className="pk-ms" key={m.id}>
+              <div className="pk-ms__top"><span>{m.title}</span><span>{m.right}</span></div>
+              <Bar pct={m.pct} copper={m.tone === "copper"} />
+              <small className="pk-sub">{m.detail}</small>
+              <GoalRoadmap goalId={m.id} defaultOpen={i === 0} />
+            </div>
+          ))}
+        </Card>
+      ) : (
+        <>
+          <GoalsCard goals={goals} failed={goalsFailed} onRetry={onRetry} id="" title="Milestones" />
+          <GoalRoadmap goalId={goals[0]?.id ?? "none"} />
+        </>
+      )}
     </div>
   );
 }
