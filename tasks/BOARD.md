@@ -51,7 +51,14 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 - done 47b89cb / 79d76da: system map in Settings › Services (decision 0011)
 - Taisun: rebuild + install, then: Import the Hemi-Sync collection, try one track with the Muse, check the map live
 
+## Installed
+- 73f53a5 installed 2026-11-12 22:21 JST (rollback: ~/Backups/Amara OS-backup-20261112c.app)
+
 ## Next session
+- Intelligence gap A/B (Hermes vs Telegram vs command center); route Telegram through Hermes; slim the chat context
+- Personal money section from docs/research/personal-money-best-practices-2026-11-12.md
+- Wire StepQuestion into the takes; Life goal facts for goal-tied encouragement
+- Muse LOW follow-ups (see handoff §12); life-enterprise-1111v:166 light contrast; re-run the commit security review (429)
 - Decision 0013: habit tracker research + design, goal roadmaps (deep, overnight), step questions in takes
 - money_balances_list read command; weekly review + patterns jobs; habit data sources
 
