@@ -164,6 +164,10 @@ describe("AmaraLens", () => {
 
 describe("useAmaraVoice store", () => {
   it("sanitises (peak >= rms), drops stale and older-utterance events", async () => {
+    // Freeze Date only (timers stay real): "b" is stamped on arrival and "a" is 100 ms older; under a loaded
+    // full run more than 100 ms could pass between the two emits and make "a" look newer (flake).
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-12T03:00:00Z"));
     render(<AmaraVoiceAnnouncer />);
     await flush();
     emit(AMARA_VOICE_LEVEL_EVENT, { rms: 7, peak: NaN, state: "speaking", utteranceId: "b" });
@@ -176,6 +180,7 @@ describe("useAmaraVoice store", () => {
     expect(amaraVoiceLevel.current).toEqual({ rms: 0.4, peak: 0.4 });
     emit(AMARA_VOICE_STATE_EVENT, { state: "bogus" });
     expect(amaraVoiceLevel.current.rms).toBe(0.4);
+    vi.useRealTimers();
   });
 
   it("2s without levels decays the meter only; state holds until ~12s without a state event", async () => {
