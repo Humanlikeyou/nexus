@@ -238,11 +238,27 @@ async fn backup_then_patch(
 
 /// Letta text for a dialog: control characters and newlines become spaces, then cut to `max`
 /// characters (with an ellipsis when cut).
+/// Invisible format characters that could reorder or hide dialog text: zero-width, bidi marks,
+/// embeddings, overrides and isolates, word joiners, BOM, soft hyphen, Arabic letter mark, Mongolian
+/// vowel separator, and tag characters.
+fn is_hidden_format(c: char) -> bool {
+    matches!(c as u32,
+        0x00AD | 0x061C | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064
+        | 0x2066..=0x2069 | 0xFEFF | 0xE0000..=0xE007F)
+}
+
+/// One flat line for the approval dialog: hidden format characters removed, control characters
+/// flattened, cut to `max` characters with a count of what isn't shown.
 fn flat(raw: &str, max: usize) -> String {
-    let head: String = raw.chars().take(max * 4).collect();
-    let text = local_store::clean_text(&head, 0, usize::MAX).unwrap_or_default();
+    let visible: String = raw.chars().filter(|c| !is_hidden_format(*c)).collect();
+    let text = local_store::clean_text(&visible, 0, usize::MAX).unwrap_or_default();
+    let total = text.chars().count();
     match text.char_indices().nth(max) {
-        Some((i, _)) => format!("{}…", &text[..i]),
+        Some((i, _)) => format!(
+            "{}… (+{} more characters not shown)",
+            &text[..i],
+            total - max
+        ),
         None => text,
     }
 }
@@ -985,16 +1001,22 @@ mod tests {
             .lines()
             .filter(|l| l.starts_with("Old: ") || l.starts_with("New: "))
         {
+            // "Old: " + the preview + "… (+N more characters not shown)"
             assert!(
-                l.chars().count() <= 5 + PREVIEW_CHARS + 1,
+                l.chars().count() <= 5 + PREVIEW_CHARS + 40,
                 "{}",
                 l.chars().count()
             );
-            assert!(l.ends_with('…'));
+            assert!(l.ends_with("more characters not shown)"), "{l}");
         }
         assert!(detail.contains("Old: line1 line2"), "{detail:?}");
         assert_eq!(flat("a\r\nb\tc", 50), "a b c");
-        assert_eq!(flat(&"é".repeat(300), 200).chars().count(), 201);
+        let cut = flat(&"é".repeat(300), 200);
+        assert!(
+            cut.starts_with(&"é".repeat(200))
+                && cut.ends_with("… (+100 more characters not shown)"),
+            "{cut}"
+        );
     }
 
     #[tokio::test]
@@ -1166,5 +1188,25 @@ mod tests {
             assert!(!prod.contains(banned), "found {banned}");
         }
         assert!(prod.contains(".patch(") && prod.contains(".get("));
+    }
+}
+
+#[cfg(test)]
+mod dialog_text_tests {
+    use super::*;
+
+    #[test]
+    fn dialog_text_drops_hidden_format_characters_and_counts_what_is_cut() {
+        let sneaky = "ok\u{202E}evil\u{200B}\u{2066}x\u{E0041}\u{00AD}y";
+        let f = flat(sneaky, 200);
+        assert_eq!(f, "okevilxy");
+        assert!(f.chars().all(|c| !is_hidden_format(c)));
+        let long = "a".repeat(250);
+        let cut = flat(&long, 200);
+        assert!(cut.ends_with("… (+50 more characters not shown)"), "{cut}");
+        let d = dialog_detail("hu\u{202E}man", "old", &long);
+        assert!(d.contains("Block: human"));
+        assert!(d.contains("(+50 more characters not shown)"));
+        assert_eq!(d.lines().count(), 6);
     }
 }
