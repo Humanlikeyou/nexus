@@ -130,7 +130,7 @@ test("Landing: every button is keyboard reachable with the emerald focus ring", 
   const ring = await buttons.last().evaluate((el) => { const s = getComputedStyle(el); return `${s.outlineStyle} ${s.outlineWidth} ${s.outlineOffset} ${s.outlineColor}`; });
   expect(ring).toBe("solid 3px 2px rgb(52, 199, 154)");
   await page.keyboard.press("Enter");
-  await expect(activeField(page, "Smart home")).toBeVisible();
+  await expect(activeField(page, NAV[NAV.length - 1])).toBeVisible(); // the last button (Settings, decision 0009)
 });
 
 test("Landing: fits the window at every size with no clipping or page scroll", async ({ page, theme }) => {

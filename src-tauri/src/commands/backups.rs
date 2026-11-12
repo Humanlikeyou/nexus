@@ -135,15 +135,38 @@ pub(crate) fn redact_json_bytes(bytes: &[u8]) -> Option<(Vec<u8>, Vec<String>)> 
 /// Restore side of the redaction: `restored` (from a backup, secrets stripped) wins for every
 /// field, but a secret field it lacks is kept from `current` (the live file), at any depth, so a
 /// restore never wipes this Mac's tokens. `None` if either side isn't JSON (caller copies as before).
+///
+/// A secret is kept only while every endpoint-like field (url, host, endpoint, ...) of its object
+/// and of every enclosing object is unchanged by the restore: a crafted archive that points an
+/// endpoint elsewhere gets no live token for it (the secret is dropped and must be re-entered).
 pub(crate) fn merge_kept_secrets(restored: &[u8], current: &[u8]) -> Option<Vec<u8>> {
-    fn merge(r: &mut Value, c: &Value) {
+    fn is_endpoint(k: &str) -> bool {
+        let k = k.to_ascii_lowercase();
+        [
+            "url", "uri", "host", "endpoint", "server", "domain", "port", "address", "base",
+            "chat_id",
+        ]
+        .iter()
+        .any(|m| k.contains(m))
+    }
+    fn endpoints_same(
+        r: &serde_json::Map<String, Value>,
+        c: &serde_json::Map<String, Value>,
+    ) -> bool {
+        r.keys()
+            .chain(c.keys())
+            .filter(|k| is_endpoint(k) && !is_secret_field(k))
+            .all(|k| r.get(k) == c.get(k))
+    }
+    fn merge(r: &mut Value, c: &Value, outer_same: bool) {
         if let (Value::Object(rm), Value::Object(cm)) = (r, c) {
+            let same = outer_same && endpoints_same(rm, cm);
             for (k, cv) in cm {
                 match rm.get_mut(k) {
-                    None if is_secret_field(k) => {
+                    None if same && is_secret_field(k) => {
                         rm.insert(k.clone(), cv.clone());
                     }
-                    Some(rv) => merge(rv, cv),
+                    Some(rv) => merge(rv, cv, same),
                     None => {}
                 }
             }
@@ -151,7 +174,7 @@ pub(crate) fn merge_kept_secrets(restored: &[u8], current: &[u8]) -> Option<Vec<
     }
     let mut r: Value = serde_json::from_slice(restored).ok()?;
     let c: Value = serde_json::from_slice(current).ok()?;
-    merge(&mut r, &c);
+    merge(&mut r, &c, true);
     serde_json::to_vec_pretty(&r).ok()
 }
 
@@ -935,6 +958,29 @@ mod tests {
         assert_eq!(v["worker_api_keys"], serde_json::json!([])); // present in the backup: backup wins
         assert!(v.get("plain").is_none()); // non-secret live-only fields are not resurrected
         assert!(merge_kept_secrets(b"not json", current).is_none());
+    }
+
+    #[test]
+    fn a_restore_that_moves_an_endpoint_does_not_get_the_live_token() {
+        let current = br#"{"worker_base_url":"http://127.0.0.1:9000","gateway_auth_token":"LIVE-GW","telegram_bot_token":"LIVE-TG","n8n":{"url":"http://127.0.0.1:5678","webhook_secret":"LIVE-WH"}}"#;
+        // top-level endpoint moved: no top-level or nested secret is carried over
+        let moved =
+            br#"{"worker_base_url":"https://evil.example","n8n":{"url":"http://127.0.0.1:5678"}}"#;
+        let v: Value =
+            serde_json::from_slice(&merge_kept_secrets(moved, current).unwrap()).unwrap();
+        assert!(v.get("gateway_auth_token").is_none() && v.get("telegram_bot_token").is_none());
+        assert!(v["n8n"].get("webhook_secret").is_none());
+        // only the nested endpoint moved: top-level secrets stay, the nested one is dropped
+        let nested =
+            br#"{"worker_base_url":"http://127.0.0.1:9000","n8n":{"url":"https://evil.example"}}"#;
+        let v: Value =
+            serde_json::from_slice(&merge_kept_secrets(nested, current).unwrap()).unwrap();
+        assert_eq!(v["gateway_auth_token"], "LIVE-GW");
+        assert!(v["n8n"].get("webhook_secret").is_none());
+        // a removed endpoint counts as a change too
+        let gone = br#"{"n8n":{"url":"http://127.0.0.1:5678"}}"#;
+        let v: Value = serde_json::from_slice(&merge_kept_secrets(gone, current).unwrap()).unwrap();
+        assert!(v.get("gateway_auth_token").is_none());
     }
 
     #[tokio::test]
