@@ -134,3 +134,12 @@ New asks (lanes started 18:50, see the commits that follow):
 
 ## 13. Intelligence gap: first evidence (2026-11-12 ~22:30, read-only)
 `~/Library/Logs/amara-router/routes.jsonl`, last 2000 requests: fast gemma4 8B n=1317, **median prompt 17,352 tokens, max 51,417**; gemma4-12b fast n=83, median 12,446; deep qwen n=47, median 267. An 8B model with ~17k tokens of system prompt + tools + context per turn reasons worse than with a short prompt; short spoken turns feel sharper. The log has no caller field, so command center vs Telegram vs voice can't be split yet. Next: (1) have Nexus send an `X-Amara-Caller` header the router logs (router change + rebuild = Taisun step), (2) measure the Nexus context block per turn and cut it to what the turn needs (section budget, drop always-on sections), (3) A/B the same question through each path, (4) consider the 12B fast model (decision 0004) for text chat, (5) offer deep for reflective chats.
+
+## 14. Late session (2026-11-12 ~22:30 → close): commits and where wiring stands
+Commits: `686340d` step question in takes + Life goal facts + HR take off Home · `834cf19` goals/takes review fixes (chat/crew busy guard, single-flight, caps, no engagement claims) · `412ceac` Muse disconnect bounded end to end (2 reviews; PASS) · `55f9c15` wiring inventory · `4e5ad29` wrong Needs-wiring tags fixed · `1af2316` Crews next run, services summary, Ledger watch-only.
+Full e2e on `1af2316`: 732 passed / 12 skipped / 8 failed (a11y Mind–Body ×2, build1111 Home take, life-take-1111w — both themes); a QA lane is fixing them; **do not install until they're green**. Installed app is still `73f53a5`.
+
+**Wiring: next steps (see `tasks/wiring-inventory-2026-11-12.md`)**
+- Class A left: backup `last` (make `checksumOk` nullable or add `backup_verify_last`), jp_bank CSV import (needs `importStatement(accountId, path)` + an approved JS dialog package), Dates Edit (`editDate` on the personal adapter → `life_date_upsert`), crew approvals prefetch on Home.
+- Class B (new read-only commands, each with a security review): `money_balances_list` → money overview; `weekly_review_read`; `patterns_read`; `memory_list` (read-only Letta; writes stay off); `whoop_status`; `service_logs`; `backup_verify_last`.
+- Class C (Taisun): business ledger file (unblocks most of Enterprise), Letta writes (Memory edits), WHOOP takeover, Telegram relay, updater/signing, Home windows (new hosts + unstable webview), AUX (eyes-closed test), recording delete path (no).

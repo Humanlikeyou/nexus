@@ -35,12 +35,22 @@ test("Life Goals, Weekly review, Dates and Personal money each show Amara's take
   expect(consoleErrors).toEqual([]);
 });
 
-test("without sample adapters, the Life take is Needs wiring and invents no numbers", async ({ page, theme }) => {
+// Expectation updated for two intentional changes, not weakened:
+//  - 686340d gave Life takes live goal facts (goal_<id>: the roadmap's own %, or "current of target unit") from the live
+//    goals the backend returns. The fixture's read_goals (snapshot.ts: "Run 300 km", 212 of 300) is live, not sample, so the
+//    take is now "fresh" from those facts instead of "unwired"/"Needs wiring" (4e5ad29 also dropped the tag where data is live).
+//  - 4e5ad29 hid the empty "Today's one thing" box on Life.
+// The "invents no numbers" guarantee is kept and made stricter: no Sample data tag, none of the sample take's numbers, and
+// every number in the take text must come from the fixture's live goal (212 and 300).
+test("without sample adapters, the Life take is built only from live goal facts and invents no numbers", async ({ page, theme }) => {
   await openApp(page, { theme, reduceMotion: true });
   const field = await lifeTab(page, "Goals");
   const take = lifeTake(field);
   await expect(take).toBeVisible();
-  await expect(take).toHaveAttribute("data-state", "unwired");
-  await expect(take).toContainText("Needs wiring");
+  await expect(take).toHaveAttribute("data-state", "fresh");
+  await expect(take).not.toContainText("Sample data");
   await expect(take).not.toContainText("4 of 5");
+  await expect(take).not.toContainText("Today's one thing");
+  const numbers = ((await take.locator(".take__body").innerText()).match(/\d+(?:\.\d+)?/g)) ?? [];
+  for (const n of numbers) expect(["212", "300"]).toContain(n);
 });

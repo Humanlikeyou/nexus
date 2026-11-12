@@ -84,8 +84,10 @@ export function AmaraTakeCard({ page, view, compact = false, onRetry, slots = {}
         {note.chips.map((c) => {
           // onCite (1110f): a chip with a real source on this page jumps to it; others stay inert.
           const go = c.sourceId ? () => { goToCite(c.sourceId); } : undefined;
-          return <li key={`${c.label}-${c.value}`} className="take__chip" data-lane={c.lane}
-            {...(go ? { role: "link", tabIndex: 0, onClick: go, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter") go(); } } : {})}><span>{c.label}</span>{c.value}</li>;
+          // The link role sits on an inner element: a role on the <li> breaks the list's required children (axe "list").
+          const inner = <><span>{c.label}</span>{c.value}</>;
+          return <li key={`${c.label}-${c.value}`} className="take__chip" data-lane={c.lane}>
+            {go ? <div className="take__chip-link" role="link" tabIndex={0} onClick={go} onKeyDown={(e: React.KeyboardEvent) => { if (e.key === "Enter") go(); }}>{inner}</div> : inner}</li>;
         })}
       </ul>
       {slots.block}

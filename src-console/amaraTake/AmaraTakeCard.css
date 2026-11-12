@@ -19,6 +19,7 @@
 .take__chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .take__chip { display: inline-flex; align-items: baseline; gap: 5px; font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--separator); background: color-mix(in srgb, var(--bg-content, #fff) 70%, transparent); color: var(--label); }
 .take__chip span { color: var(--label-secondary); }
+.take__chip-link { display: inline-flex; align-items: baseline; gap: 5px; border-radius: inherit; }
 .take__chip[data-lane="neuro"] { border-color: color-mix(in srgb, var(--copper-text) 45%, var(--separator)); }
 .take__chip[data-lane="health"] { border-color: color-mix(in srgb, var(--tone-accent-text) 45%, var(--separator)); }
 .take__foot { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--label-secondary); }
