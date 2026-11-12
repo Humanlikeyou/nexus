@@ -6,4 +6,4 @@ Scope applied: build the app from `amara-integration` (HEAD in `~/projects/nexus
 
 Not covered (still frozen by 0001): merging into `nexus-v2`, any push, PR. "etc." is not read as an OK for those.
 
-Second OK, 2026-11-12 ~18:30 JST: "when you're done with all that you have my OK to update and reinstall the app" (same scope).
+Second OK, 2026-11-12 ~18:30 JST: "when you're done with all that you have my OK to update and reinstall the app", then clarified: "once you're done wiring everything up and doing the goals thing … then you can rebuild and reinstall." So the next install waits until the wiring and decision 0013 (goals) are done. A bundle built at 2616099 was NOT installed.
