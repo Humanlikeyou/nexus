@@ -36,7 +36,15 @@ const writeLast = (day: string): void => {
   try { globalThis.localStorage?.setItem(ROADMAP_NIGHT_KEY, day); } catch { /* it just may run again, which is harmless */ }
 };
 
-/** Called from the scheduler tick. Never throws. A failed run is retried at the next tick in the window. */
+/** What a refusal from `roadmap_draft_pending` means for the scheduler. */
+export function roadmapOutcome(err: unknown): "retry" | "done" | "failed" {
+  const m = typeof err === "string" ? err : err instanceof Error ? err.message : "";
+  if (m === "busy") return "retry"; // a chat turn, crew run or other draft is active: next tick inside the window
+  if (m === "already_ran") return "done"; // Rust already completed a run today
+  return "failed";
+}
+
+/** Called from the scheduler tick. Never throws. A busy or failed run is retried at the next tick in the window. */
 export async function tickRoadmapNight(now: number = Date.now()): Promise<void> {
   let busy = true;
   try { busy = activityBus.getActiveTasks().length > 0; } catch { return; }
@@ -46,7 +54,15 @@ export async function tickRoadmapNight(now: number = Date.now()): Promise<void> 
     const n = await invoke<number>("roadmap_draft_pending");
     writeLast(localDayKey(now));
     activityBus.complete(id, n > 0 ? `${n} roadmap update(s) drafted` : "Nothing to draft");
-  } catch {
-    activityBus.fail(id, "Roadmap drafting failed; retrying next tick");
+  } catch (e) {
+    const o = roadmapOutcome(e);
+    if (o === "done") {
+      writeLast(localDayKey(now));
+      activityBus.complete(id, "Already drafted today");
+    } else if (o === "retry") {
+      activityBus.complete(id, "Busy; will try again next tick"); // lastDay is not written
+    } else {
+      activityBus.fail(id, "Roadmap drafting failed; retrying next tick");
+    }
   }
 }

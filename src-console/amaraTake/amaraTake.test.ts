@@ -206,6 +206,15 @@ describe("encouragement lift", () => {
     const all = TEMPLATES.filter((t) => !t.fact || !t.goal).map((t) => ({ text: t.text.replace("{fact}", "x"), generatedAt: NOW - 1000 }));
     expect(templateLift(ctx(all))).toBeNull();
   });
+  it("no line asserts engagement the data does not show, even after many days of takes", () => {
+    const CLAIM = /\b(?:keep|kept|keeping)\s+(?:coming|turning|going|showing|putting|returning)|all week|you (?:are|have) (?:paying|been|kept)|you bring it|because you/i;
+    for (const t of TEMPLATES) expect(t.text, t.text).not.toMatch(CLAIM);
+    const facts = [fact("hrv", 45)];
+    const log = [1, 2, 3, 4].map((d) => ({ text: "something else entirely", generatedAt: NOW - d * 86_400_000 }));
+    const text = templateLift({ page: "mindBody", facts, log, now: NOW })!;
+    expect(text).not.toMatch(CLAIM);
+    expect(text).not.toMatch(/kept coming back/i);
+  });
   it("a goal fact selects goal-tied encouragement using only that fact's numbers", () => {
     const g = fact("goalRun", 12, { label: "Goal: runs", display: "12 runs" });
     const text = templateLift({ page: "life", facts: [g], log: [], now: NOW })!;

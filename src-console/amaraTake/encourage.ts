@@ -39,19 +39,19 @@ const PAGE_DIMS: Record<TakePage, Dimension[]> = {
 type Template = { dim: Dimension; text: string; /** Needs a fact: `{fact}` becomes its label and display, both from the facts. */ fact?: boolean; goal?: boolean };
 
 export const TEMPLATES: Template[] = [
-  { dim: "body", text: "Your body is doing steady work today, and listening to it is a strength." },
+  { dim: "body", text: "Your body works steadily every day, and listening to it is a strength." },
   { dim: "body", text: "Showing up for your body, one day at a time, is how it stays on your side." },
-  { dim: "body", fact: true, text: "{fact} is a real reading of the care you keep putting in." },
-  { dim: "mind", text: "A clear, patient mind is built session by session, and you keep turning up." },
+  { dim: "body", fact: true, text: "{fact} is a real reading from your own data." },
+  { dim: "mind", text: "A clear, patient mind is built session by session." },
   { dim: "mind", text: "Choosing to pay attention to your own mind is quiet, real work." },
-  { dim: "mind", fact: true, text: "{fact} shows you are paying attention, and that matters." },
-  { dim: "spirit", text: "There is steadiness in how you keep your practice, and it is worth honouring." },
-  { dim: "spirit", text: "Take a breath here; the way you keep going says a lot about what you value." },
-  { dim: "leadership", text: "Leading well starts with the calm you bring to your own day, and you bring it." },
+  { dim: "mind", fact: true, text: "{fact} is a real reading of your own mind, and it is worth a look." },
+  { dim: "spirit", text: "Steadiness in a practice is worth honouring, whatever shape yours takes." },
+  { dim: "spirit", text: "Take a breath here; what you choose to give your attention says a lot about what you value." },
+  { dim: "leadership", text: "Leading well starts with the calm you bring to your own day." },
   { dim: "leadership", text: "Steady follow-through is what people learn to trust in a leader." },
   { dim: "leadership", fact: true, text: "{fact} is the kind of honest tracking good leaders rely on." },
-  { dim: "leadership", goal: true, fact: true, text: "{fact}: that is real movement toward a goal you chose, and it counts." },
-  { dim: "spirit", goal: true, fact: true, text: "{fact} is a goal moving forward because you keep coming back to it." },
+  { dim: "leadership", goal: true, fact: true, text: "{fact}: that is where a goal you chose stands today." },
+  { dim: "spirit", goal: true, fact: true, text: "{fact} is where this goal stands today, and it is yours to move." },
 ];
 
 type LogLike = { text: string; generatedAt: number };
@@ -74,11 +74,12 @@ export type LiftContext = { page: TakePage; facts: Fact[]; log: readonly LogLike
 
 /**
  * The template lift: the least-engaged fitting dimension first (counted from lines in the last 14 days of the
- * log), skipping any line already used in that window. Null when every fitting line was used. After three or
- * more days of takes in the last week, a plain follow-through sentence opens the lift (it carries no number).
+ * log), skipping any line already used in that window. Null when every fitting line was used.
+ * No line claims the user's own engagement or behaviour: the take log records only that a take was generated,
+ * never that it was read or acted on.
  */
 export function templateLift(ctx: LiftContext): string | null {
-  const { used, perDim, recent } = usage(ctx.log, ctx.now);
+  const { used, perDim } = usage(ctx.log, ctx.now);
   const dims = PAGE_DIMS[ctx.page];
   const goalFact = ctx.facts.find((f) => /^goal/i.test(f.key));
   const order = [...dims].sort((a, b) => perDim[a] - perDim[b] || dims.indexOf(a) - dims.indexOf(b));
@@ -88,9 +89,7 @@ export function templateLift(ctx: LiftContext): string | null {
     const pick = options.find(({ t }) => t.goal && goalFact) ?? options.find(({ t }) => !t.fact) ?? options[0];
     if (!pick) continue;
     const fact = goalFact ?? ctx.facts[0];
-    let text = pick.t.text.replace("{fact}", fact ? factText(fact) : "");
-    const days = new Set(recent.filter((e) => ctx.now - e.generatedAt < 7 * DAY_MS).map((e) => Math.floor(e.generatedAt / DAY_MS)));
-    if (days.size >= 3 && sentenceCount(text) === 1 && !pick.t.fact) text = `You have kept coming back to this all week. ${text}`;
+    const text = pick.t.text.replace("{fact}", fact ? factText(fact) : "");
     if (validateLift(text, ctx.facts).ok) return text;
   }
   return null;

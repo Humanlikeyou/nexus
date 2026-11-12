@@ -7,7 +7,9 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 pub const MAX_ROADMAPS: usize = 50;
 pub const MAX_STEPS: usize = 30;
@@ -18,6 +20,17 @@ const MAX_DRAFT: usize = 10;
 /// A step he answered "not yet" is not asked again for this many days.
 const NOT_YET_COOLDOWN_DAYS: i64 = 3;
 const FILE: &str = "roadmaps.json";
+/// Largest store file read.
+const MAX_STORE_BYTES: u64 = 1024 * 1024;
+/// Per nightly run: roadmaps drafted, smaller moves written, and the wall-clock budget.
+pub const MAX_DRAFTS_PER_RUN: usize = 5;
+pub const MAX_SMALLER_PER_RUN: usize = 10;
+pub const RUN_DEADLINE: Duration = Duration::from_secs(30 * 60);
+/// Fixed refusals of `roadmap_draft_pending`.
+pub const ERR_BUSY: &str = "busy";
+pub const ERR_ALREADY_RAN: &str = "already_ran";
+/// Largest gap between the renderer's date and Rust local time.
+const MAX_DAY_SKEW_DAYS: i64 = 1;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
@@ -99,6 +112,9 @@ pub struct Store {
     pub version: u32,
     pub roadmaps: Vec<Roadmap>,
     pub question: Option<DayQuestion>,
+    /// YYYY-MM-DD (Rust local) of the last completed nightly draft run.
+    #[serde(default)]
+    pub last_run_on: Option<String>,
 }
 
 impl Default for Store {
@@ -107,6 +123,7 @@ impl Default for Store {
             version: 1,
             roadmaps: Vec::new(),
             question: None,
+            last_run_on: None,
         }
     }
 }
@@ -118,13 +135,34 @@ fn store_dir(data: &Path) -> PathBuf {
 }
 
 fn load(data: &Path) -> Result<Store, String> {
+    use std::io::Read;
     let p = store_dir(data).join(FILE);
-    if !p.exists() {
-        return Ok(Store::default());
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_NOFOLLOW);
     }
-    let text =
-        std::fs::read_to_string(&p).map_err(|_| "roadmaps: could not read store".to_string())?;
-    serde_json::from_str(&text).map_err(|_| "roadmaps: store is not valid".to_string())
+    let f = match opts.open(&p) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Store::default()),
+        Err(_) => return Err("roadmaps: could not read store".to_string()),
+    };
+    let meta = f
+        .metadata()
+        .map_err(|_| "roadmaps: could not read store".to_string())?;
+    if !meta.is_file() {
+        return Err("roadmaps: store is not a regular file".to_string());
+    }
+    let mut buf = Vec::new();
+    f.take(MAX_STORE_BYTES + 1)
+        .read_to_end(&mut buf)
+        .map_err(|_| "roadmaps: could not read store".to_string())?;
+    if buf.len() as u64 > MAX_STORE_BYTES {
+        return Err("roadmaps: store is too large".to_string());
+    }
+    serde_json::from_slice(&buf).map_err(|_| "roadmaps: store is not valid".to_string())
 }
 
 fn save(data: &Path, store: &Store) -> Result<(), String> {
@@ -174,9 +212,15 @@ fn find_mut<'a>(store: &'a mut Store, goal_id: &str) -> Result<&'a mut Roadmap, 
         .ok_or_else(|| "roadmap: not found".to_string())
 }
 
+/// Invisible Unicode format characters (zero-width, bidi marks and overrides, word joiner, BOM).
+fn is_format_char(c: char) -> bool {
+    matches!(c as u32, 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x2069 | 0xFEFF)
+}
+
 fn clean_text(s: &str, cap: usize) -> String {
     let flat: String = s
         .chars()
+        .filter(|c| !is_format_char(*c))
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     let trimmed = flat.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -271,6 +315,15 @@ pub fn answer_step(
         if q.goal_id == goal_id && q.step_id == step_id {
             q.answered = true;
         }
+    }
+    Ok(())
+}
+
+/// The renderer's `today` must be within a day of Rust's local date (fixed error otherwise).
+pub fn check_day_skew(today: &str, local: NaiveDate) -> Result<(), String> {
+    let d = parse_day(today).ok_or_else(|| "roadmap: today must be YYYY-MM-DD".to_string())?;
+    if (d - local).num_days().abs() > MAX_DAY_SKEW_DAYS {
+        return Err("roadmap: today is out of range".to_string());
     }
     Ok(())
 }
@@ -528,37 +581,114 @@ pub fn roadmap_answer_step(
 
 #[tauri::command]
 pub fn roadmap_todays_question(today: String) -> Result<Option<StepQuestion>, String> {
+    check_day_skew(&today, chrono::Local::now().date_naive())?;
     let goals = crate::commands::goals::read_goals()?;
     let title_of = |id: &str| goals.iter().find(|g| g.id == id).map(|g| g.title.clone());
     with_store(|s| todays_question(s, &today, &title_of))
 }
 
-/// Nightly job: draft every "drafting" roadmap, then a smaller first move for steps with 2+
-/// "not yet"s. Returns how many things were written. A failed or junk deep reply leaves the work
+/// Single-flight for the nightly job: a second caller gets `busy`. Released on drop.
+static DRAFT_RUNNING: AtomicBool = AtomicBool::new(false);
+
+pub struct RunGuard(&'static AtomicBool);
+
+impl RunGuard {
+    pub fn claim(flag: &'static AtomicBool) -> Result<Self, String> {
+        flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map(|_| RunGuard(flag))
+            .map_err(|_| ERR_BUSY.to_string())
+    }
+}
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// True when a crew run is live (crew-service statuses `running` / `awaiting_approval`).
+pub fn crew_rows_busy(statuses: &[&str]) -> bool {
+    statuses
+        .iter()
+        .any(|s| matches!(*s, "running" | "awaiting_approval"))
+}
+
+/// A Hermes chat turn or a crew run is active. A crew service that is down counts as not busy.
+async fn system_busy() -> bool {
+    if crate::commands::terrence_runtime_bridge::chat_in_flight() {
+        return true;
+    }
+    match crate::commands::crew::crew_list().await {
+        Ok(rows) => {
+            let st: Vec<&str> = rows.iter().map(|r| r.status.as_str()).collect();
+            crew_rows_busy(&st)
+        }
+        Err(_) => false,
+    }
+}
+
+/// Refuses a second completed run on the same local day.
+pub fn check_not_run_today(store: &Store, today: &str) -> Result<(), String> {
+    if store.last_run_on.as_deref() == Some(today) {
+        return Err(ERR_ALREADY_RAN.to_string());
+    }
+    Ok(())
+}
+
+/// What one run will do: up to 5 drafts, up to 10 smaller moves (in store order).
+pub fn plan_run(store: &Store) -> (Vec<String>, Vec<(String, String, String)>) {
+    let d = store
+        .roadmaps
+        .iter()
+        .filter(|r| r.status == "drafting" && r.steps.is_empty())
+        .map(|r| r.goal_id.clone())
+        .take(MAX_DRAFTS_PER_RUN)
+        .collect();
+    let s = store
+        .roadmaps
+        .iter()
+        .flat_map(|r| {
+            r.steps
+                .iter()
+                .filter(|s| !s.done && s.not_yet_count >= 2 && s.smaller_suggestion.is_none())
+                .map(|s| (r.goal_id.clone(), s.id.clone(), s.title.clone()))
+        })
+        .take(MAX_SMALLER_PER_RUN)
+        .collect();
+    (d, s)
+}
+
+/// One deep call inside what is left of the run budget; None on error or when time is up.
+async fn deep_within(started: Instant, prompt: &str) -> Option<String> {
+    let left = RUN_DEADLINE.checked_sub(started.elapsed())?;
+    tokio::time::timeout(
+        left,
+        crate::commands::llm_router::deep_complete(DRAFT_SYSTEM, prompt),
+    )
+    .await
+    .ok()?
+    .ok()
+}
+
+/// Nightly job: draft every "drafting" roadmap (at most 5), then a smaller first move for steps
+/// with 2+ "not yet"s (at most 10), within ~30 minutes, once a day. Refuses with `busy` while a
+/// chat turn or crew run is active or another run is going, and `already_ran` after a completed
+/// run today. Returns how many things were written. A failed or junk deep reply leaves the work
 /// queued for the next night; nothing is invented.
 #[tauri::command]
 pub async fn roadmap_draft_pending() -> Result<u32, String> {
+    let _run = RunGuard::claim(&DRAFT_RUNNING)?;
+    if system_busy().await {
+        return Err(ERR_BUSY.to_string());
+    }
+    let started = Instant::now();
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let goals = crate::commands::goals::read_goals()?;
-    let (drafting, smaller): (Vec<String>, Vec<(String, String, String)>) = {
+    let (drafting, smaller) = {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let store = load(&crate::app_paths::data_dir())?;
-        let d = store
-            .roadmaps
-            .iter()
-            .filter(|r| r.status == "drafting" && r.steps.is_empty())
-            .map(|r| r.goal_id.clone())
-            .collect();
-        let s = store
-            .roadmaps
-            .iter()
-            .flat_map(|r| {
-                r.steps
-                    .iter()
-                    .filter(|s| !s.done && s.not_yet_count >= 2 && s.smaller_suggestion.is_none())
-                    .map(|s| (r.goal_id.clone(), s.id.clone(), s.title.clone()))
-            })
-            .collect();
-        (d, s)
+        check_not_run_today(&store, &today)?;
+        plan_run(&store)
     };
     let mut written = 0u32;
     for goal_id in drafting {
@@ -570,8 +700,7 @@ pub async fn roadmap_draft_pending() -> Result<u32, String> {
             category: &g.category,
             deadline: g.deadline.as_deref(),
         });
-        let Ok(reply) = crate::commands::llm_router::deep_complete(DRAFT_SYSTEM, &prompt).await
-        else {
+        let Some(reply) = deep_within(started, &prompt).await else {
             continue;
         };
         let Some(steps) = parse_draft(&reply) else {
@@ -587,8 +716,7 @@ pub async fn roadmap_draft_pending() -> Result<u32, String> {
             continue;
         };
         let prompt = smaller_prompt(&g.title, &step_title);
-        let Ok(reply) = crate::commands::llm_router::deep_complete(DRAFT_SYSTEM, &prompt).await
-        else {
+        let Some(reply) = deep_within(started, &prompt).await else {
             continue;
         };
         let Some(text) = parse_smaller(&reply) else {
@@ -611,6 +739,12 @@ pub async fn roadmap_draft_pending() -> Result<u32, String> {
         if ok {
             written += 1;
         }
+    }
+    if started.elapsed() < RUN_DEADLINE {
+        with_store(|s| {
+            s.last_run_on = Some(today.clone());
+            Ok(())
+        })?;
     }
     Ok(written)
 }
@@ -859,6 +993,104 @@ mod tests {
         assert_eq!(leftovers, 1);
         std::fs::write(store_dir(&d).join(FILE), "{bad").unwrap();
         assert!(load(&d).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn single_flight_second_claim_is_busy_and_drop_releases() {
+        static F: AtomicBool = AtomicBool::new(false);
+        let a = RunGuard::claim(&F).unwrap();
+        assert_eq!(RunGuard::claim(&F).err().as_deref(), Some("busy"));
+        drop(a);
+        assert!(RunGuard::claim(&F).is_ok());
+    }
+
+    #[test]
+    fn crew_busy_only_for_live_statuses() {
+        assert!(crew_rows_busy(&["done", "running"]));
+        assert!(crew_rows_busy(&["awaiting_approval"]));
+        assert!(!crew_rows_busy(&["done", "failed", "stopped"]));
+        assert!(!crew_rows_busy(&[]));
+    }
+
+    #[test]
+    fn a_run_is_capped_and_once_a_day() {
+        let mut s = Store::default();
+        for i in 0..9 {
+            request(&mut s, &format!("d{i}")).unwrap();
+        }
+        let (d, _) = plan_run(&s);
+        assert_eq!(d.len(), MAX_DRAFTS_PER_RUN);
+        drafted(&mut s, "g1");
+        for st in s.roadmaps.iter_mut().filter(|r| r.goal_id == "g1") {
+            st.steps.truncate(4);
+        }
+        let mut s2 = Store::default();
+        for g in 0..3 {
+            drafted(&mut s2, &format!("m{g}"));
+            for st in &mut s2.roadmaps[g].steps {
+                st.not_yet_count = 2;
+            }
+        }
+        let (_, sm) = plan_run(&s2);
+        assert_eq!(sm.len(), MAX_SMALLER_PER_RUN);
+        assert!(check_not_run_today(&s, "2026-11-12").is_ok());
+        s.last_run_on = Some("2026-11-12".to_string());
+        assert_eq!(
+            check_not_run_today(&s, "2026-11-12").unwrap_err(),
+            "already_ran"
+        );
+        assert!(check_not_run_today(&s, "2026-11-13").is_ok());
+    }
+
+    #[test]
+    fn invisible_format_chars_are_stripped() {
+        let t = "a\u{200B}b\u{202E}c\u{2066}d\u{FEFF}e\u{2060}f\u{200F}g";
+        assert_eq!(clean_text(t, 50), "abcdefg");
+        let v = parse_draft(
+            r#"[{"title":"x\u200By","size":"small"},{"title":"B","size":"small"},{"title":"C","size":"big"},{"title":"D","size":"big"}]"#,
+        )
+        .unwrap();
+        assert_eq!(v[0].title, "xy");
+        assert_eq!(
+            smaller_prompt("g\u{202E}x", "s\u{200B}t")
+                .matches('\u{202E}')
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn today_must_be_within_a_day_of_local() {
+        let local = NaiveDate::from_ymd_opt(2026, 11, 12).unwrap();
+        assert!(check_day_skew("2026-11-12", local).is_ok());
+        assert!(check_day_skew("2026-11-13", local).is_ok());
+        assert!(check_day_skew("2026-11-11", local).is_ok());
+        assert_eq!(
+            check_day_skew("2026-11-14", local).unwrap_err(),
+            "roadmap: today is out of range"
+        );
+        assert!(check_day_skew("2099-01-01", local).is_err());
+        assert!(check_day_skew("junk", local).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_refuses_symlink_non_regular_and_oversize() {
+        let d = tmp();
+        crate::app_paths::create_private_dir_all(&store_dir(&d)).ok();
+        std::fs::create_dir_all(store_dir(&d)).unwrap();
+        let target = d.join("elsewhere.json");
+        std::fs::write(&target, "{\"version\":1,\"roadmaps\":[],\"question\":null}").unwrap();
+        std::os::unix::fs::symlink(&target, store_dir(&d).join(FILE)).unwrap();
+        assert!(load(&d).is_err());
+        std::fs::remove_file(store_dir(&d).join(FILE)).unwrap();
+        std::fs::create_dir(store_dir(&d).join(FILE)).unwrap();
+        assert!(load(&d).is_err());
+        std::fs::remove_dir(store_dir(&d).join(FILE)).unwrap();
+        let big = format!("{{\"pad\":\"{}\"}}", "a".repeat(MAX_STORE_BYTES as usize));
+        std::fs::write(store_dir(&d).join(FILE), big).unwrap();
+        assert_eq!(load(&d).unwrap_err(), "roadmaps: store is too large");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

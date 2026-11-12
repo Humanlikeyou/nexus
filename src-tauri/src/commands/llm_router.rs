@@ -420,6 +420,30 @@ pub(crate) trait RouterTransport {
 
 struct HttpTransport {
     client: reqwest::Client,
+    /// Largest reply body read, in bytes (None = unbounded; chat keeps its existing behaviour).
+    body_cap: Option<usize>,
+}
+
+/// Cap on a background (`deep_complete`) reply body.
+pub(crate) const DEEP_BODY_CAP: usize = 256 * 1024;
+
+/// Reads a JSON body, refusing more than `cap` bytes: Content-Length first, then a capped stream.
+async fn read_json_capped(mut resp: reqwest::Response, cap: usize) -> Result<Value, String> {
+    if resp.content_length().is_some_and(|n| n > cap as u64) {
+        return Err("router reply too large".to_string());
+    }
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|_| "router reply unreadable".to_string())?
+    {
+        if buf.len() + chunk.len() > cap {
+            return Err("router reply too large".to_string());
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(serde_json::from_slice(&buf).unwrap_or(Value::Null))
 }
 
 impl RouterTransport for HttpTransport {
@@ -443,7 +467,10 @@ impl RouterTransport for HttpTransport {
             .await
             .map_err(|e| format!("router unreachable: {e}"))?;
         let status = resp.status().as_u16();
-        let v = resp.json().await.unwrap_or(Value::Null);
+        let v = match self.body_cap {
+            Some(cap) => read_json_capped(resp, cap).await?,
+            None => resp.json().await.unwrap_or(Value::Null),
+        };
         Ok((status, v))
     }
 }
@@ -516,6 +543,7 @@ pub async fn chat_with_router(
     let start = Instant::now();
     let transport = HttpTransport {
         client: no_redirect_client(),
+        body_cap: None,
     };
     let (content, tier, mut reason, prompt_tokens, completion_tokens) =
         ask_router(&transport, &base, &headers, &body).await?;
@@ -564,6 +592,7 @@ pub(crate) async fn deep_complete(system: &str, user: &str) -> Result<String, St
     let body = router_body(system, user);
     let transport = HttpTransport {
         client: no_redirect_client(),
+        body_cap: Some(DEEP_BODY_CAP),
     };
     let (content, ..) = ask_router(&transport, &base, &headers, &body).await?;
     Ok(content)
@@ -587,6 +616,7 @@ pub async fn get_cost_estimate(
     let headers = router_headers(&config, &tags, deep.unwrap_or(false), None, &gate);
     let transport = HttpTransport {
         client: no_redirect_client(),
+        body_cap: None,
     };
     let (tier, reason) = match transport
         .post(
@@ -983,5 +1013,48 @@ mod tests {
         assert!((opus - 0.0525).abs() < 1e-9);
         assert_eq!(tier_cost(Tier::Deep, &cfg("api"), 1000, 500), 0.0);
         assert!(tier_cost(Tier::Claude, &cfg("api"), 1000, 500) > 0.0);
+    }
+
+    async fn serve_once(head: &'static str, body: Vec<u8>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/x", l.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut c, _) = l.accept().await.unwrap();
+            let mut b = [0u8; 4096];
+            let _ = c.read(&mut b).await;
+            let _ = c.write_all(head.as_bytes()).await;
+            let _ = c.write_all(&body).await;
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn deep_body_is_capped_by_length_and_by_stream() {
+        let t = HttpTransport {
+            client: reqwest::Client::new(),
+            body_cap: Some(DEEP_BODY_CAP),
+        };
+        let big = vec![b'a'; DEEP_BODY_CAP + 10];
+        // Content-Length over the cap is refused up front.
+        let url = serve_once(
+            "HTTP/1.1 200 OK\r\nContent-Length: 262154\r\nConnection: close\r\n\r\n",
+            big.clone(),
+        )
+        .await;
+        let e = t.post(&url, &[], &json!({}), 5).await.unwrap_err();
+        assert_eq!(e, "router reply too large");
+        // No Content-Length (read until close): the stream is cut at the cap.
+        let url = serve_once("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n", big).await;
+        let e = t.post(&url, &[], &json!({}), 5).await.unwrap_err();
+        assert_eq!(e, "router reply too large");
+        // A small reply still parses.
+        let url = serve_once(
+            "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\n",
+            b"{\"a\": 1}".to_vec(),
+        )
+        .await;
+        let (st, v) = t.post(&url, &[], &json!({}), 5).await.unwrap();
+        assert_eq!((st, v["a"].as_i64()), (200, Some(1)));
     }
 }

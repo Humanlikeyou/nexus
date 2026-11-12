@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::Mutex;
 
@@ -744,6 +745,34 @@ pub fn default_route_log_path() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|h| h.join("Library/Logs/amara-router/routes.jsonl"))
 }
 
+/// Hermes chat turns in flight (queued or sending). Background jobs (the nightly roadmap draft)
+/// read this and stand down while it is above zero.
+pub(crate) static CHAT_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// Counts one chat turn in `CHAT_IN_FLIGHT` for as long as it lives (panic/cancel safe).
+pub(crate) struct ChatGuard(&'static AtomicUsize);
+
+impl ChatGuard {
+    pub(crate) fn enter() -> Self {
+        Self::on(&CHAT_IN_FLIGHT)
+    }
+
+    fn on(counter: &'static AtomicUsize) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
+        ChatGuard(counter)
+    }
+}
+
+impl Drop for ChatGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+pub(crate) fn chat_in_flight() -> bool {
+    CHAT_IN_FLIGHT.load(Ordering::SeqCst) > 0
+}
+
 impl NexusRuntimeBridge {
     /// The conversation's system message: the first one built for it, so Hermes keeps one session.
     pub fn system_prompt_for(
@@ -772,6 +801,7 @@ impl NexusRuntimeBridge {
         hermes_home: &Path,
         turn: HermesTurn<'_>,
     ) -> Result<HermesReply, HermesError> {
+        let _in_flight = ChatGuard::enter();
         let env_text = std::fs::read_to_string(hermes_home.join(".env")).unwrap_or_default();
         let api_key = env_value(&env_text, "API_SERVER_KEY")
             .ok_or_else(|| HermesError::from(HERMES_NO_KEY.to_string()))?;
@@ -1696,5 +1726,22 @@ mod tests {
         )));
         let reply = send_turn(&ok, "b", "k", "s", &json!({})).await.unwrap();
         assert_eq!(reply.route.unwrap().tier, "fast");
+    }
+
+    #[test]
+    fn chat_guard_counts_and_releases_even_on_unwind() {
+        static C: AtomicUsize = AtomicUsize::new(0);
+        {
+            let _a = ChatGuard::on(&C);
+            let _b = ChatGuard::on(&C);
+            assert_eq!(C.load(Ordering::SeqCst), 2);
+        }
+        assert_eq!(C.load(Ordering::SeqCst), 0);
+        let r = std::panic::catch_unwind(|| {
+            let _g = ChatGuard::on(&C);
+            panic!("boom");
+        });
+        assert!(r.is_err());
+        assert_eq!(C.load(Ordering::SeqCst), 0);
     }
 }
