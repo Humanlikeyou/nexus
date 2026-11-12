@@ -7,6 +7,8 @@ import { Button, Card, DataTag, Dialog, More, PageHero, StatusText, TextField, w
 import { crewsAdapter, type CrewsAdapter } from "../crews/adapters";
 import { loadApprovals, useLiveApprovals } from "../crews/approvals";
 import { useLiveRunAdapter } from "../crews/runDetail";
+import { useLiveN8n } from "../crews/n8n";
+import { useLiveCrewTools } from "../crews/toolGrantLive";
 import { CrewApprovalsCard, CrewDecidedCard, CrewRunPage } from "./CrewPanels";
 import { crewToolsAdapter, type CrewToolsAdapter } from "../crews/toolGrant";
 import { CrewToolsPage, GrantCell } from "./CrewToolsPanels";
@@ -60,7 +62,8 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
   const [page, setPage] = useState<CrewPage>({ kind: "overview" });
   const selected = page.kind === "run" ? runs.find((r) => r.id === page.id) ?? null : null;
   const runAdapter = useLiveRunAdapter(adapter, selected);
-  const approvalAdapter = useLiveApprovals(runAdapter, data.crew.health === "online");
+  const approvalAdapter = useLiveN8n(useLiveApprovals(runAdapter, data.crew.health === "online"), data.crew.health === "online");
+  const toolsAdapter = useLiveCrewTools(tools, data.crew.health === "online");
   const [formOpen, setFormOpen] = useState(false);
 
   const [name, setName] = useState("");
@@ -181,7 +184,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
     const last = mine[0];
     return (
       <div className="crews page-inset cc-page">
-        <CrewToolsPage crew={page.name} agents={[...new Set(mine.flatMap((r) => r.agents))]} adapter={tools}
+        <CrewToolsPage crew={page.name} agents={[...new Set(mine.flatMap((r) => r.agents))]} adapter={toolsAdapter}
           lastRun={last ? `last run ${humanize(last.status).toLowerCase()}${last.started_at ? ` · ${dateTime(last.started_at)}` : ""}` : "no runs yet"}
           onBack={() => setPage({ kind: "overview" })} />
       </div>
@@ -208,7 +211,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
   const detail = health !== "online" ? undefined : latestFail
     ? [sentenceStart(latestFail.name), latestFail.result ? plainText(latestFail.result).slice(0, 80) : null, latestFail.started_at ? dateTime(latestFail.started_at) : null].filter(Boolean).join(" · ")
     : "Runs use the local model. At most 2 run at once.";
-  const n8n = adapter.n8n();
+  const n8n = approvalAdapter.n8n();
   const next = adapter.nextSchedule();
   const roster = [...new Set(runs.map((r) => r.name))].map((name) => {
     const mine = runs.filter((r) => r.name === name);
@@ -261,13 +264,13 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
       )}
 
       <div className="cc-grid2">
-        <Card title="Crews" accessory={<span className="cc-card__acc">{wiredTag<unknown>(roster.length ? tools.grant(roster[0].name) : tools.audit(""))}</span>}>
+        <Card title="Crews" accessory={<span className="cc-card__acc">{wiredTag<unknown>(roster.length ? toolsAdapter.grant(roster[0].name) : toolsAdapter.audit(""))}</span>}>
           {roster.length === 0 ? <p className="cc-note">Crews appear after their first run.</p> : (
             <table className="cc-table cc-crews" aria-label="Crews">
               <thead><tr><th scope="col">Crew</th><th scope="col">Last run</th><th scope="col">Files and terminal</th><th scope="col"><span className="ui-visually-hidden">Open</span></th></tr></thead>
               <tbody>
                 {roster.map((c) => {
-                  const grant = tools.grant(c.name);
+                  const grant = toolsAdapter.grant(c.name);
                   const asked = grant.state !== "unwired" && grant.value.status === "pending";
                   return (
                     <tr key={c.name}>

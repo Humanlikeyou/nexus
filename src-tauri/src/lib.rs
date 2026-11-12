@@ -2,14 +2,15 @@ mod app_paths;
 mod commands;
 mod dock_icon;
 
+use commands::n8n_status;
 use commands::voice;
 use commands::{
-    arm, assistant, ble_common, business_ledger, continuity, crew, events, followups, goals, ha,
-    home_brief, home_hr_take, kb_status, kv, llm_router, muse, noop, noop_query, onboarding,
-    openclaw, outbox, packager, recordings, replay, research, restart_services, sessions,
-    snapshots, system, take_events, take_log, telegram, terrence_actions, terrence_automations,
-    terrence_context, terrence_priorities, terrence_projects, terrence_runtime,
-    terrence_runtime_bridge,
+    arm, assistant, ble_common, business_ledger, continuity, crew, crew_grants, events, followups,
+    goals, ha, home_brief, home_hr_take, kb_status, kv, llm_router, muse, noop, noop_query,
+    onboarding, openclaw, outbox, packager, recordings, replay, research, restart_services,
+    sessions, snapshots, system, take_events, take_log, telegram, terrence_actions,
+    terrence_automations, terrence_context, terrence_priorities, terrence_projects,
+    terrence_runtime, terrence_runtime_bridge,
 };
 // design-1111v stores
 use commands::{adds, checkin, decisions_log, life_dates, needs_you};
@@ -416,6 +417,11 @@ pub fn run() {
             crew::crew_list_approvals,
             crew::crew_decide_approval,
             crew::crew_health,
+            crew_grants::crew_tool_grant_get,
+            crew_grants::crew_tool_grant_set,
+            crew_grants::crew_tool_grant_revoke,
+            crew_grants::crew_tool_audit,
+            n8n_status::n8n_status,
             kb_status::kb_status,
             kb_status::crew_tools,
             // Amara Voice (~/projects/amara-voice)

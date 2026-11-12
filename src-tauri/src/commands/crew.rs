@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 
 /// Loopback-only crew-service base URL (no env override, by design).
 const CREW_SERVICE_URL: &str = "http://127.0.0.1:8400";
-const CREW_TOKEN_HEADER: &str = "X-Crew-Token";
+pub(crate) const CREW_TOKEN_HEADER: &str = "X-Crew-Token";
 
 /// Base URL of the local crew-service. Always loopback.
-fn crew_service_url() -> String {
+pub(crate) fn crew_service_url() -> String {
     CREW_SERVICE_URL.to_string()
 }
 
@@ -18,7 +18,7 @@ const NOT_CONFIGURED: &str =
 
 /// Shared secret (must match stack/.env): env `CREW_SERVICE_TOKEN` first,
 /// then `<app data dir>/crew_service_token`.
-fn crew_token() -> Result<String, String> {
+pub(crate) fn crew_token() -> Result<String, String> {
     crew_token_from(
         std::env::var(CREW_TOKEN_ENV).ok(),
         &crate::app_paths::data_dir().join(CREW_TOKEN_FILE),
@@ -124,7 +124,7 @@ pub struct CrewRunSteps {
 
 /// Run ids are UUIDs minted by the crew service: 36 chars of hex and dashes, nothing else, so
 /// an id can never alter the request path.
-fn valid_run_id(id: &str) -> bool {
+pub(crate) fn valid_run_id(id: &str) -> bool {
     id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
 }
 
@@ -481,7 +481,7 @@ pub async fn crew_health() -> Result<String, String> {
 }
 
 /// Fixed text plus the HTTP status only: the response body may echo paths or upstream errors.
-fn http_error(op: &str, status: reqwest::StatusCode) -> String {
+pub(crate) fn http_error(op: &str, status: reqwest::StatusCode) -> String {
     format!("Crew {op} failed (HTTP {}).", status.as_u16())
 }
 

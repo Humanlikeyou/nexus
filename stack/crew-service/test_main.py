@@ -236,9 +236,9 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("http_get", logs.output[0])
 
     def test_agent_declaring_an_unknown_tool_is_rejected(self):
-        main.AGENT_CATALOG["bad"] = dict(role="r", goal="g", backstory="b", tools=["shell"])
-        with self.assertRaisesRegex(ValueError, "unknown tool shell"):
-            main.tools_for("bad", frozenset({"shell"}), self.reg)
+        main.AGENT_CATALOG["bad"] = dict(role="r", goal="g", backstory="b", tools=["http_get"])
+        with self.assertRaisesRegex(ValueError, "unknown tool http_get"):
+            main.tools_for("bad", frozenset({"http_get"}), self.reg)
 
     def test_duplicate_registration_is_rejected(self):
         with self.assertRaises(ValueError):

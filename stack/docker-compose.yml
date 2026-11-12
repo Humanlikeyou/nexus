@@ -217,6 +217,12 @@ services:
       CREW_ROUTER_URL: ${CREW_ROUTER_URL:-http://host.docker.internal:8787/v1}
       CREW_ROUTER_KEY: ${CREW_ROUTER_KEY:-}
       CREW_DEEP_WAIT_MAX_SECONDS: ${CREW_DEEP_WAIT_MAX_SECONDS:-300}
+      # R13-F signed n8n trigger: CREW_TRIGGER_SECRET is read from .env.crew (env_file) only. It is
+      # deliberately NOT listed here: an `environment:` entry would override env_file with a blank.
+      # Unset = endpoint disabled (every call 403).
+      # 1110i files/terminal sandbox: UNSET = the tools do not exist. TAISUN step, see tasks/active/D-1110i.md:
+      #   CREW_SANDBOX_ROOT: /crew-sandbox    and under `volumes:`  - ${HOME}/crew-sandbox:/crew-sandbox
+      # R13-E (optional, mapped app-data folders): CREW_MEMORY_WRITER=file, CREW_MEMORY_DIR=/crew-memory, CREW_SKILLS_DIR=/crew-skills
       # No cloud path here (MiniMax removed). The kill switch also blocks any future Claude tier.
       NEXUS_OUTBOUND_DISABLED: ${NEXUS_OUTBOUND_DISABLED:-}
       # Persistence — crew_runs table in the shared terrance DB

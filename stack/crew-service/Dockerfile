@@ -5,12 +5,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+COPY main.py crew_safety.py crew_tasks.py crew_memory.py crew_grants.py ./
 
 RUN useradd --create-home --uid 10001 crew
 USER crew
@@ -20,6 +21,7 @@ EXPOSE 8400
 ENV PYTHONUNBUFFERED=1 \
     CREWAI_DISABLE_TELEMETRY=true \
     OTEL_SDK_DISABLED=true \
+    CREW_CONTAINER=1 \
     CREW_SERVICE_HOST=127.0.0.1 \
     CREW_SERVICE_PORT=8400
 

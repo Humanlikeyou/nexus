@@ -2,10 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { EMPTY_DEVICE_ID } from "./lib/devices";
 import type {
   CrewApprovalRow,
+  CrewAuditApiRow,
   CrewInfo,
   CrewRunSteps,
   CrewServiceHealth,
   CrewSnapshot,
+  CrewToolGrantRow,
   CrewToolInfo,
   FollowupItem,
   FollowupItemInput,
@@ -17,6 +19,7 @@ import type {
   Goal,
   HermesRuntimeHealth,
   MuseDevice,
+  N8nStatusRow,
   MuseState,
   MutedTopic,
   NexusUnavailableSource,
@@ -277,6 +280,13 @@ export const decideCrewApproval = (id: string, approve: boolean) => invoke<CrewA
 export const getCrewStatus = (id: string) => invoke<CrewInfo>("crew_status", { id });
 export const getCrewRunSteps = (id: string) => invoke<CrewRunSteps>("crew_run_steps", { id });
 export const stopCrew = (id: string) => invoke<string>("crew_stop", { id });
+/** R13-F: read-only n8n probe; never errors (connected:false when it is down). */
+export const getN8nStatus = () => invoke<N8nStatusRow>("n8n_status");
+/** 1110i. Turning on opens the native dialog first and resolves only after crew-service confirms. */
+export const getCrewToolGrant = (crewId: string) => invoke<CrewToolGrantRow>("crew_tool_grant_get", { crewId });
+export const setCrewToolGrant = (crewId: string, tools: string[], duration: "run" | "1h" | "24h") => invoke<CrewToolGrantRow>("crew_tool_grant_set", { crewId, tools, duration });
+export const revokeCrewToolGrant = (crewId: string) => invoke<CrewToolGrantRow>("crew_tool_grant_revoke", { crewId });
+export const getCrewToolAudit = (crewId: string, limit = 50, before: number | null = null) => invoke<CrewAuditApiRow[]>("crew_tool_audit", { crewId, limit, before });
 
 export const interactWithTerrence = (request: {
   message: string;
