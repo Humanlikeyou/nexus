@@ -87,6 +87,8 @@ class TriggerTests(unittest.TestCase):
             launch.assert_not_called()
 
     def test_triggered_run_gets_no_grant_context_and_claims_no_run_grant(self):
+        conn_log = []
+
         class Conn:
             def __enter__(self):
                 return self
@@ -95,6 +97,7 @@ class TriggerTests(unittest.TestCase):
                 return False
 
             def execute(self, sql, params=()):
+                conn_log.append((sql, params))
                 return self
 
         ctx = mock.Mock()
@@ -115,6 +118,7 @@ class TriggerTests(unittest.TestCase):
                 main._resp_pipes.clear()
             self.assertEqual(ctx.Process.call_args.kwargs["kwargs"]["grant_ctx"], want_ctx)
             self.assertEqual(svc.store.claim_run.called, allowed)
+            self.assertIs(conn_log[-1][1][-1], not allowed)  # crew_runs.triggered is stored
 
     def test_body_is_validated_like_start_and_cannot_link_a_retry(self):
         for body in (b"{}", b"not json", json.dumps({"name": "x", "task": "t", "retry_of": "11111111-2222-3333-4444-555555555555"}).encode(),

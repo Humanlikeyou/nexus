@@ -595,7 +595,7 @@ class CrewInfoLlmTests(unittest.TestCase):
             main._procs.clear()
         sql, params = inserts[0]
         self.assertIn("llm", sql)
-        self.assertEqual(params[-2:], ("amara-fast", None))  # llm, retry_of
+        self.assertEqual(params[-3:], ("amara-fast", None, False))  # llm, retry_of, triggered (app start)
         main._resp_pipes.clear()
         self.assertEqual(set(main.planned_llm_label(list(main.AGENT_CATALOG)).split(",")),
                          {"amara-fast", "amara-deep"})
@@ -1299,9 +1299,40 @@ class RetryTests(unittest.TestCase):
 
     def test_retry_clones_name_task_agents_and_links_retry_of(self):
         with mock.patch.object(main, "db_get", return_value=self.info()), \
+                mock.patch.object(main, "db_run_triggered", return_value=False), \
                 mock.patch.object(main, "_launch", return_value="new") as launch:
             self.assertEqual(main.retry_crew(main.RetryRequest(id=self.ID)), "new")
-        launch.assert_called_once_with("Research", "do it", ["researcher", "writer"], self.ID)
+        launch.assert_called_once_with("Research", "do it", ["researcher", "writer"], self.ID, grants_allowed=True)
+
+    def test_retry_of_a_triggered_run_never_gets_files_or_terminal(self):
+        with mock.patch.object(main, "db_get", return_value=self.info()), \
+                mock.patch.object(main, "db_run_triggered", return_value=True), \
+                mock.patch.object(main, "_launch", return_value="new") as launch:
+            main.retry_crew(main.RetryRequest(id=self.ID))
+        self.assertIs(launch.call_args.kwargs["grants_allowed"], False)
+
+    def test_run_origin_is_stored_and_an_unreadable_origin_counts_as_triggered(self):
+        class C:
+            def __init__(self, row=None, boom=False):
+                self.row, self.boom = row, boom
+
+            def __enter__(self):
+                if self.boom:
+                    raise RuntimeError("db down")
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def execute(self, sql, params=()):
+                return self
+
+            def fetchone(self):
+                return self.row
+        for conn, want in ((C((False,)), False), (C((True,)), True), (C(None), True), (C(boom=True), True)):
+            with mock.patch.object(main, "db", return_value=conn):
+                self.assertIs(main.db_run_triggered(self.ID), want)
+        self.assertIn("triggered BOOLEAN NOT NULL DEFAULT false", main.SCHEMA)
 
     def test_retry_refuses_active_unknown_and_bad_ids(self):
         from fastapi import HTTPException

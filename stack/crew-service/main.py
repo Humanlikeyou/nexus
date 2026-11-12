@@ -742,6 +742,7 @@ CREATE TABLE IF NOT EXISTS crew_handoffs (
 );
 CREATE INDEX IF NOT EXISTS crew_handoffs_run_idx ON crew_handoffs (run_id, id);
 ALTER TABLE crew_runs ADD COLUMN IF NOT EXISTS retry_of TEXT;
+ALTER TABLE crew_runs ADD COLUMN IF NOT EXISTS triggered BOOLEAN NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS crew_approvals (
     id           TEXT PRIMARY KEY,
     run_id       TEXT NOT NULL,
@@ -1612,9 +1613,9 @@ def _launch(name: str, task: str, agents: List[str], retry_of: Optional[str] = N
         crew_id = str(uuid.uuid4())
         with db() as c:
             c.execute(
-                "INSERT INTO crew_runs (id, name, status, agents, task, llm, retry_of) "
-                "VALUES (%s,%s,'running',%s,%s,%s,%s)",
-                (crew_id, name, agents, task, planned_llm_label(agents), retry_of),
+                "INSERT INTO crew_runs (id, name, status, agents, task, llm, retry_of, triggered) "
+                "VALUES (%s,%s,'running',%s,%s,%s,%s,%s)",
+                (crew_id, name, agents, task, planned_llm_label(agents), retry_of, not grants_allowed),
             )
         parent_conn, child_conn = _ctx.Pipe(duplex=False)
         resp_recv, resp_send = _ctx.Pipe(duplex=False)  # parent -> child: approval decisions
@@ -1658,7 +1659,20 @@ def retry_crew(req: RetryRequest):
         again = CrewStartRequest(name=old.name, task=old.task, agents=old.agents, retry_of=old.id)
     except ValueError:
         raise HTTPException(status_code=422, detail="This run can no longer be retried") from None
-    return _launch(again.name, again.task, again.agents or DEFAULT_AGENTS, old.id)
+    # A retry keeps its origin: a run the signed trigger started (or a retry of one) never gets
+    # files/terminal, whoever presses Retry. The origin is stored, not held in memory.
+    return _launch(again.name, again.task, again.agents or DEFAULT_AGENTS, old.id,
+                   grants_allowed=not db_run_triggered(old.id))
+
+
+def db_run_triggered(run_id: str) -> bool:
+    """True if the run came from /crews/trigger. Fails closed: an unreadable origin counts as triggered."""
+    try:
+        with db() as c:
+            r = c.execute("SELECT triggered FROM crew_runs WHERE id=%s", (run_id,)).fetchone()
+    except Exception:
+        return True
+    return True if r is None or r[0] is None else bool(r[0])
 
 
 @app.get("/crews/status", response_model=CrewInfo, dependencies=[Depends(require_token)])
