@@ -98,3 +98,14 @@ Three automated commit reviews plus one agent security review ran on this work; 
 **Gates on HEAD:** src-tauri 590 passed / 5 ignored · vitest 1535 / 9 skipped · neuro 21 (not rerun since 1f84665: no neuro change) · router 126 (untouched) · crew-service 228 · fmt, clippy -D warnings, tsc, lint, check:secrets clean · full e2e on 0b2a312: 725 passed / 12 skipped / 3 failed → the 2 landing failures were the order change (fixed in d44a4d7, spec now 46/46); `route-motion.spec.ts:78` failed once under full-suite load and passes 3/3 alone (logged flaky, not loosened).
 
 **Blocked / needs Taisun:** 1111w windows (browsing arbitrary sites = new outbound hosts; needs his OK + Tauri unstable multi-webview); voice adds (an amara-voice transcription endpoint patch he applies); money UI + 1111a live wiring wait on Design's sample-tag fix; money read commands (balances/transactions) not built yet. App rebuild/install to see the new sidebar is his step.
+
+## 9. Neuro, Hemi-Sync and the system map (2026-11-12, late)
+
+| Commit | What |
+|---|---|
+| `318aa17` `a972a7e` | Decision 0010 + Hemi-Sync backend: import (copy into app data; source read-only), library by wave, id-only `hemisync://` audio scheme (CSP `media-src` only), session links/finish/rating, local `<nexus_hemisync>` Amara section through the injection guard. Security review: 2 MEDIUM + 5 LOW fixed with tests. |
+| `779b590` | Neuro redesigned in the Mind–Body language (Design Lead, HANDOFF-1112n) + Hemi-Sync UI: one Start (Recording only + track), rating sheet, wave of the last session open, 42-track checklist. Muse session id now exists from recording start (reviewed: no recording can be lost). |
+| `bbe906f` `b00c3a6` `47b89cb` `79d76da` | Decision 0011 + system map at the top of Settings › Services: 16 paths, 11 read-only loopback probes, green / blinking red / grey / hollow, click for reason + documented fix, 10 s refresh while visible (HANDOFF-1112m). |
+
+**Gates on HEAD:** src-tauri 648 passed / 5 ignored · vitest 1580 / 9 skipped · neuro 21 · fmt, clippy -D warnings, tsc, lint, check:secrets clean · full e2e 747 passed / 12 skipped / 1 failed (`takes-1111t.spec.ts:80` light-theme contrast in the money Connect sheet: fails on `0b2a312` too; logged in design-questions). `route-motion.spec.ts:63/:78` fail occasionally under full-suite load only (8/8 and 3/3 alone; logged, not loosened).
+**Not run live:** real Hemi-Sync audio playback through `hemisync://` in WebKit, a real import of the Desktop collection, a Muse session with a track, and the system map against the real services. All need the app rebuilt and installed (Taisun's step); a live screenshot of the map is still owed (the Design Lead flagged some lines passing behind nodes in the straight-line layout).

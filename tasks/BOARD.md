@@ -47,7 +47,9 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 - `scripts/sync-crew-env.sh` must carry `CREW_TRIGGER_SECRET` before the trigger is enabled (today it is dropped: fails closed).
 
 ## Next
-- Neuro tab: redesign to match the other pages + Hemi-Sync audio sessions tracked with Muse (Taisun, 2026-11-12; questions asked first)
+- done 779b590 / a972a7e: Neuro redesign + Hemi-Sync (decision 0010)
+- done 47b89cb / 79d76da: system map in Settings › Services (decision 0011)
+- Taisun: rebuild + install, then: Import the Hemi-Sync collection, try one track with the Muse, check the map live
 
 ## Out of scope tonight (Taisun)
 NOOP merge, live Telegram relay send path, standalone phases (bundling, signing, notarization, DMG, updater, WHOOP takeover), Letta upgrade apply.
