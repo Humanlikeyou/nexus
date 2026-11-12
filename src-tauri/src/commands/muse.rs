@@ -574,7 +574,13 @@ pub async fn disconnect_muse(app: AppHandle) -> Result<(), String> {
 
     let mut stored = MUSE_PERIPHERAL.lock().await;
     if let Some(peripheral) = stored.take() {
-        peripheral.disconnect().await.map_err(|e| e.to_string())?;
+        match tokio::time::timeout(std::time::Duration::from_secs(8), peripheral.disconnect()).await
+        {
+            Ok(result) => result.map_err(|e| e.to_string())?,
+            Err(_) => {
+                println!("[muse] disconnect: status=timeout (headset did not answer; dropped)")
+            }
+        }
         println!("[muse] disconnect: status=done");
     }
     // A recording still open keeps its subscribed list for the header.

@@ -217,4 +217,12 @@ describe("Hemi-Sync section", () => {
     start();
     expect(await screen.findByText(/link isn't saved yet/)).toBeInTheDocument();
   });
+
+  it("won't join a running training session that plays feedback sounds", async () => {
+    const { onStartMuse } = setup(liveAdapter(), { recording: true, sessionId: "s1", protocolId: "calm" });
+    pick("Orientation"); start();
+    expect(await screen.findByText(/Hemi-Sync records only/)).toBeInTheDocument();
+    expect(FakeAudio.count).toBe(0);
+    expect(onStartMuse).not.toHaveBeenCalled();
+  });
 });

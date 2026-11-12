@@ -184,6 +184,8 @@ export function NeuroFlow({ training, telemetry, sessions, running, action }: { 
     if (!running || armed.current) return;
     armed.current = true;
     setSoundOn(!!protocol?.eyesClosed);
+    // Recording only (and Hemi-Sync, which switches to it) makes no sound: init() starts a continuous drone and 432 Hz tone.
+    if (!protocol) return;
     try { init(); setMode("tone"); } catch { /* no audio on this machine: the light still works */ }
   }, [running, protocol, init, setMode]);
   useEffect(() => { if (!running && armed.current) { armed.current = false; try { cleanup(); } catch { /* nothing to close */ } } }, [running, cleanup]);

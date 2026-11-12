@@ -17,6 +17,15 @@ const newSessionId = (startedAt: number) => (typeof crypto?.randomUUID === "func
  * stop/save, disconnect). A plain hook, not a context: live telemetry stays
  * local to the component that calls it instead of fanning out app-wide.
  */
+export const DISCONNECT_TIMEOUT_MS = 10_000;
+export const SAVE_TIMEOUT_MS = 30_000;
+function withTimeout<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    work.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
 export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void>, setNotice: (notice: string | null) => void) {
   const [museDevices, setMuseDevices] = useState<MuseDevice[]>([]);
   const [museOperation, setMuseOperation] = useState<MuseOperation>(null);
@@ -212,9 +221,9 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     setMuseError(null);
     try {
       if (data.muse.streaming || sessionStartedAt !== null) {
-        await persistMuseSession();
+        await withTimeout(persistMuseSession(), SAVE_TIMEOUT_MS, "The headset didn't answer while saving the session. The recording is kept. Press Stop session to retry.");
       }
-      await disconnectMuse();
+      await withTimeout(disconnectMuse(), DISCONNECT_TIMEOUT_MS, "The Muse didn't answer the disconnect. Switch it off or move it closer, then try again.");
       finishTraining();
       setSessionStartedAt(null);
       sessionIdRef.current = null;

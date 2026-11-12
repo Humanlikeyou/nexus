@@ -72,6 +72,7 @@ export function useHemisyncRun({ adapter, connected, recording, sessionId, opera
     setUnsaved(false);
     if (!connected) { setMessage("Connect your Muse first. Start records with the Muse and plays the track together, so it won't play on its own."); return; }
     if (!track.src) { setMessage("This track has no audio file here, so nothing was started."); return; }
+    if (recording && protocolId !== "off") { setMessage("A training session is already running with feedback sounds. Stop it, then press Start so Hemi-Sync records only."); return; }
     const el = new Audio(track.src);
     el.preload = "auto";
     try {
