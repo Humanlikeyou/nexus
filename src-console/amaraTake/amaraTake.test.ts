@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { businessFacts, fitnessFacts, homeFacts, mindBodyFacts, neuroFacts } from "./facts";
 import { runTake, type TakeDeps } from "./generate";
 import { takeKey, type KvDeps } from "./store";
-import { numbersIn, validateTake } from "./validate";
+import { MAX_TAKE_CHARS, numbersIn, validateTake } from "./validate";
+import { hasBannedPhrase, sentenceCount, templateLift, TEMPLATES, validateLift } from "./encourage";
 import type { NoopDayRow, NoopSnapshotPayload, RecordedSession, RevenueSummary } from "../types";
 import type { Fact, FactSet, TakePage } from "./types";
 
@@ -75,7 +76,7 @@ describe("validateTake", () => {
     expect(validateTake("HRV 45.0 today", facts).ok).toBe(true);
   });
   it("rejects a vague take, other numbers, empty, currency", () => {
-    expect(validateTake("You are doing great today, keep it up!", facts)).toEqual({ ok: false, reason: "no_fact_cited" });
+    expect(validateTake("You are doing well today, steady as ever.", facts)).toEqual({ ok: false, reason: "no_fact_cited" });
     expect(validateTake("HRV is 99.", facts).ok).toBe(false);
     expect(validateTake("  ", facts)).toEqual({ ok: false, reason: "empty" });
     expect(validateTake("Revenue 45 ¥", facts)).toEqual({ ok: false, reason: "currency" });
@@ -153,5 +154,72 @@ describe("runTake", () => {
     h.set({ page: "mindBody", day: TODAY, facts: [fact("hrv", 52)], fingerprint: "hrv=52" });
     h.ask.mockResolvedValueOnce({ content: "vague", tier: "light" });
     expect(await runTake("mindBody", h.deps)).toMatchObject({ state: "live", value: { text: "HRV is 45 today." } });
+  });
+});
+
+describe("encouragement lift", () => {
+  const withRecent = (log: Array<{ text: string; generatedAt: number }>, over: Partial<TakeDeps> = {}) => harness({ recent: () => log, ...over });
+  it("banned phrases are rejected in takes and lifts", () => {
+    const facts = [fact("hrv", 45)];
+    for (const p of ["you've got this", "crushing it", "Amazing", "so proud of you", "keep it up", "nailed it"]) {
+      expect(validateTake(`HRV is 45, ${p}.`, facts)).toEqual({ ok: false, reason: "banned_phrase" });
+      expect(validateLift(`That is ${p}.`, facts)).toEqual({ ok: false, reason: "banned_phrase" });
+    }
+  });
+  it("lift guard: at most two sentences, no unsourced numbers, no causal or medical wording", () => {
+    const facts = [fact("hrv", 45)];
+    expect(validateLift("Steady work. Well kept.", facts).ok).toBe(true);
+    expect(validateLift("One. Two. Three.", facts)).toEqual({ ok: false, reason: "too_many_sentences" });
+    expect(validateLift("You did 7 sessions.", facts)).toEqual({ ok: false, reason: "unsupported_number" });
+    expect(validateLift("HRV 45 is steady.", facts).ok).toBe(true);
+    expect(validateLift("Your practice fixed it.", facts)).toEqual({ ok: false, reason: "causal" });
+    expect(validateLift("See a doctor.", facts)).toEqual({ ok: false, reason: "medical" });
+  });
+  it("every template passes its own guard with a numbered fact, and none is banned", () => {
+    const facts = [fact("goalRun", 12, { label: "Goal: runs", display: "12 runs" })];
+    for (const t of TEMPLATES) {
+      const text = t.text.replace("{fact}", "Goal: runs at 12 runs");
+      expect(validateLift(text, facts), t.text).toEqual({ ok: true });
+    }
+  });
+  it("a take gets one lift, stays within 3 sentences and the length cap, and cites a fact", async () => {
+    const h = withRecent([]);
+    const r = await runTake("mindBody", h.deps);
+    if (r.state !== "live") throw new Error("expected live");
+    expect(r.value.text.startsWith("HRV is 45 today. ")).toBe(true);
+    expect(sentenceCount(r.value.text)).toBeLessThanOrEqual(3);
+    expect(r.value.text.length).toBeLessThanOrEqual(MAX_TAKE_CHARS);
+    expect(hasBannedPhrase(r.value.text)).toBe(false);
+  });
+  it("rotates to the least-engaged dimension and never repeats a line within 14 days", () => {
+    const facts = [fact("hrv", 45)];
+    const ctx = (log: Array<{ text: string; generatedAt: number }>) => ({ page: "mindBody" as TakePage, facts, log, now: NOW });
+    const first = templateLift(ctx([]))!;
+    const dim1 = TEMPLATES.find((t) => t.text === first)!.dim;
+    expect(dim1).toBe("body");
+    const second = templateLift(ctx([{ text: first, generatedAt: NOW - 86_400_000 }]))!;
+    expect(second).not.toBe(first);
+    expect(TEMPLATES.find((t) => t.text === second)!.dim).toBe("mind");
+    // After 14 days the line is free again.
+    expect(templateLift(ctx([{ text: first, generatedAt: NOW - 15 * 86_400_000 }]))).toBe(first);
+    // Once every fitting line was used recently there is no lift rather than a repeat.
+    const all = TEMPLATES.filter((t) => !t.fact || !t.goal).map((t) => ({ text: t.text.replace("{fact}", "x"), generatedAt: NOW - 1000 }));
+    expect(templateLift(ctx(all))).toBeNull();
+  });
+  it("a goal fact selects goal-tied encouragement using only that fact's numbers", () => {
+    const g = fact("goalRun", 12, { label: "Goal: runs", display: "12 runs" });
+    const text = templateLift({ page: "life", facts: [g], log: [], now: NOW })!;
+    expect(text).toContain("Goal: runs at 12 runs");
+    expect(validateLift(text, [g]).ok).toBe(true);
+  });
+  it("router down falls back to a template take with a lift; without the log it stays unwired", async () => {
+    const h = withRecent([]);
+    h.ask.mockRejectedValue(new Error("router down"));
+    const r = await runTake("mindBody", h.deps);
+    expect(r).toMatchObject({ state: "live", value: { cited: [{ key: "hrv" }] } });
+    if (r.state === "live") { expect(r.value.text.startsWith("hrv: 45.")).toBe(true); expect(sentenceCount(r.value.text)).toBeLessThanOrEqual(3); }
+    const plain = harness();
+    plain.ask.mockRejectedValue(new Error("router down"));
+    expect(await runTake("mindBody", plain.deps)).toEqual({ state: "unwired" });
   });
 });

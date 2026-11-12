@@ -1,3 +1,4 @@
+import { BANNED_PHRASES } from "./bannedPhrases";
 import type { CitedPoint, Fact } from "./types";
 
 export const MAX_TAKE_CHARS = 600;
@@ -21,7 +22,7 @@ export const citedFacts = (text: string, facts: Fact[]): Fact[] => {
 
 export const toCited = (f: Fact): CitedPoint => ({ key: f.key, label: f.label, display: f.display, baseline: f.baseline?.display ?? null });
 
-export type Validation = { ok: true; text: string; cited: CitedPoint[] } | { ok: false; reason: "empty" | "too_long" | "currency" | "no_fact_cited" | "unsupported_number" };
+export type Validation = { ok: true; text: string; cited: CitedPoint[] } | { ok: false; reason: "empty" | "too_long" | "currency" | "banned_phrase" | "no_fact_cited" | "unsupported_number" };
 
 /** Every number a reply may contain: each fact's accepted values, its baseline mean and the baseline window size. */
 export function allowedNumbers(facts: Fact[]): number[] {
@@ -34,6 +35,7 @@ export function validateTake(raw: string, facts: Fact[]): Validation {
   if (!text) return { ok: false, reason: "empty" };
   if (text.length > MAX_TAKE_CHARS) return { ok: false, reason: "too_long" };
   if (/[¥$€£]|\b(?:yen|jpy)\b/i.test(text)) return { ok: false, reason: "currency" };
+  if (BANNED_PHRASES.some((r) => r.test(text))) return { ok: false, reason: "banned_phrase" };
   const allowed = allowedNumbers(facts);
   if (numbersIn(text).some((n) => !allowed.some((a) => matches(n, a)))) return { ok: false, reason: "unsupported_number" };
   const cited = citedFacts(text, facts);

@@ -7,7 +7,7 @@ import { isSnapshot, noopQuery } from "../lib/noop";
 import type { NoopSnapshotPayload, RecordedSession, RevenueSummary } from "../types";
 import { businessFacts, fitnessFacts, homeFacts, mindBodyFacts, neuroFacts } from "./facts";
 import type { TakeDeps } from "./generate";
-import { appendTake, entryFromTake } from "../takes/takeLog";
+import { appendTake, entryFromTake, takeLogEntries } from "../takes/takeLog";
 
 const snapshot = async (): Promise<NoopSnapshotPayload | null> => {
   const read = await noopQuery("health_snapshot", { days: 29 });
@@ -18,6 +18,7 @@ const snapshot = async (): Promise<NoopSnapshotPayload | null> => {
 export const liveDeps: TakeDeps = {
   now: () => Date.now(),
   kv: { load: loadKv, save: saveKv },
+  recent: () => takeLogEntries() ?? [],
   log: (take, tier) => appendTake(entryFromTake(take, tier)),
   // Light tier through the existing chat_with_router client: forceProvider "light" maps to the router's fast
   // route, and SOUL.md + the identity guard are applied in llm_router.rs. No other provider path is added.
