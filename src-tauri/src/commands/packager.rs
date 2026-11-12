@@ -156,8 +156,11 @@ pub(crate) async fn pack_to(
 
     // 5. Write a manifest with metadata
     report("Writing manifest", 70);
+    // Hash every staged file (the manifest itself excluded) so a backup can be verified later.
+    let sha256 = hash_tree(&staging)?;
     let manifest = serde_json::json!({
         "version": "0.1.0",
+        "sha256": &sha256,
         "packed_at": chrono::Local::now().to_rfc3339(),
         "hostname": hostname::get().map(|h| h.to_string_lossy().to_string()).unwrap_or_default(),
         "includes": &includes,
@@ -224,6 +227,48 @@ pub(crate) async fn pack_to(
         includes,
         skipped,
     })
+}
+
+/// sha256 (hex) of every regular file under `root`, keyed by its `/`-joined path relative to `root`.
+/// Symlinks and special files are not followed or listed (the copy step never stages them).
+fn hash_tree(root: &Path) -> Result<std::collections::BTreeMap<String, String>, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut out = std::collections::BTreeMap::new();
+    let mut stack = vec![(root.to_path_buf(), String::new())];
+    while let Some((dir, prefix)) = stack.pop() {
+        for e in fs::read_dir(&dir).map_err(|e| format!("Failed to hash backup: {e}"))? {
+            let e = e.map_err(|e| format!("Failed to hash backup: {e}"))?;
+            let name = e.file_name().to_string_lossy().into_owned();
+            let rel = if prefix.is_empty() {
+                name
+            } else {
+                format!("{prefix}/{name}")
+            };
+            let ft = e
+                .file_type()
+                .map_err(|e| format!("Failed to hash backup: {e}"))?;
+            if ft.is_dir() {
+                stack.push((e.path(), rel));
+            } else if ft.is_file() {
+                let mut f =
+                    fs::File::open(e.path()).map_err(|e| format!("Failed to hash backup: {e}"))?;
+                let mut h = Sha256::new();
+                let mut buf = [0u8; 64 * 1024];
+                loop {
+                    let n = f
+                        .read(&mut buf)
+                        .map_err(|e| format!("Failed to hash backup: {e}"))?;
+                    if n == 0 {
+                        break;
+                    }
+                    h.update(&buf[..n]);
+                }
+                out.insert(rel, hex::encode(h.finalize()));
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// `~/x` → `$HOME/x` (the Settings path field accepts it); anything else unchanged.

@@ -15,15 +15,18 @@ import type { SystemMap } from "./systemMap";
  */
 /** Row shape of `backup_list` (src-tauri backups.rs). `sizeBytes` is not shown by the UI yet. */
 type BackupRow = { id: string; label: string; madeAt: string; sizeBytes: number; daysOld: number };
+/** Result of `backup_verify_last` (null = no backup). */
+export type VerifyRow = { file: string; at: string; size: number; ok: boolean; checked: number; mismatched: string[]; mode: string };
 type Cache = {
   secrets: SecretStatus[] | null;
   keyFile: KeyFileStatus | null;
   backupSettings: BackupSettings | null;
   backupList: BackupRow[] | null;
+  verify: VerifyRow | null;
   run: BackupRun | null;
   map: SystemMap | null;
 };
-const cache: Cache = { secrets: null, keyFile: null, backupSettings: null, backupList: null, run: null, map: null };
+const cache: Cache = { secrets: null, keyFile: null, backupSettings: null, backupList: null, verify: null, run: null, map: null };
 let version = 0;
 const listeners = new Set<() => void>();
 const notify = () => { version += 1; listeners.forEach((l) => l()); };
@@ -48,6 +51,48 @@ const fmtMadeAt = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 };
+const isVerify = (v: unknown): v is VerifyRow => {
+  const o = v as Record<string, unknown> | null;
+  return !!o && typeof o.file === "string" && typeof o.ok === "boolean" && Array.isArray(o.mismatched) && o.mismatched.every((m) => typeof m === "string")
+    && typeof o.size === "number" && typeof o.checked === "number" && typeof o.mode === "string";
+};
+const fmtSize = (n: number) => {
+  if (!Number.isFinite(n) || n < 0) return "";
+  const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; let v = n;
+  while (v >= 1000 && i < u.length - 1) { v /= 1000; i += 1; }
+  return `${i === 0 ? v : v.toFixed(v >= 100 ? 0 : 1)} ${u[i]}`;
+};
+/** Newest `backup_list` row (time, size) plus the verify result when it is for that same file. Null with no backups. */
+export function mapLast(list: BackupRow[], verify: VerifyRow | null): BackupStatus["last"] {
+  // Newest by madeAt, not by position: the order of backup_list is not relied on.
+  const stamp = (r: BackupRow) => { const t = new Date(r.madeAt).getTime(); return Number.isNaN(t) ? -Infinity : t; };
+  const newest = [...list].sort((a, b) => stamp(b) - stamp(a))[0];
+  if (!newest) return null;
+  const v = verify && verify.file === newest.id ? verify : null;
+  return { at: fmtMadeAt(newest.madeAt), size: fmtSize(newest.sizeBytes), checksumOk: v ? v.ok : null, checks: v ? (v.mode === "sha256" ? "sha256" : "structure") : undefined };
+}
+
+/**
+ * `backup_verify_last` reads the whole newest archive, so it is heavy: it runs once on startup only, never
+ * from refreshLive or after a setting, key or backup change. One run at a time, cached per file+size.
+ * A refusal (backup running, already busy) or any error leaves the checksum "not checked yet", never "failed".
+ */
+let verifyInflight: Promise<void> | null = null;
+let verifiedKey: string | null = null;
+export function verifyLast(call: typeof invoke = invoke): Promise<void> {
+  const row = cache.backupList?.[0];
+  const key = row ? `${row.id}:${row.sizeBytes}` : null;
+  if (key && key === verifiedKey) return Promise.resolve();
+  verifyInflight ??= (async () => {
+    try {
+      const v = await call<VerifyRow | null>("backup_verify_last");
+      cache.verify = isVerify(v) ? v : null;
+      verifiedKey = key;
+    } catch { cache.verify = null; } finally { verifyInflight = null; notify(); }
+  })();
+  return verifyInflight;
+}
+export const resetVerifyForTests = () => { verifyInflight = null; verifiedKey = null; cache.verify = null; };
 
 export async function refreshLive(): Promise<void> {
   const [s, k, bs, bl, sm] = await Promise.allSettled([
@@ -80,7 +125,7 @@ function listenBackupProgress() {
 
 let started = false;
 export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
-  if (!started) { started = true; void refreshLive(); listenBackupProgress(); }
+  if (!started) { started = true; void refreshLive().then(() => verifyLast()); listenBackupProgress(); }
   return {
     ...base,
     services: () => live(cache.map ? servicesFromMap(cache.map) : null),
@@ -94,10 +139,10 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
     backup: () => {
       const { backupSettings: settings, backupList: list } = cache;
       if (!settings || !list) return UNWIRED;
-      // `last` (needs a stored checksum result) and `version` (not in the file name) have no
-      // source yet, so `last` is null and `version` is empty instead of a made-up value.
+      // `last` is the newest backup_list row plus the backup_verify_last result. `version` is not
+      // in the file name, so it stays empty instead of a made-up value.
       return live<BackupStatus>({
-        last: null,
+        last: mapLast(list, cache.verify),
         running: cache.run,
         settings,
         backups: list.map((r) => ({ id: r.id, label: r.label, madeAt: fmtMadeAt(r.madeAt), version: "", daysOld: r.daysOld })),

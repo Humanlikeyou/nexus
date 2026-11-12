@@ -68,7 +68,9 @@ describe("live standalone adapter (secrets + n8n key file + backups)", () => {
     const b = a.backup();
     if (b.state !== "live") throw new Error("expected live");
     expect(b.value.settings).toEqual(SETTINGS);
-    expect(b.value.last).toBeNull();
+    // newest backup_list row gives time and size; the mock has no verify result, so the checksum is unknown (null), not "OK".
+    expect(b.value.last).toMatchObject({ checksumOk: null });
+    expect(b.value.last?.at).toMatch(/Nov 12, 2026/);
     expect(b.value.running).toBeNull();
     expect(b.value.backups).toHaveLength(1);
     expect(b.value.backups[0]).toMatchObject({ id: ROWS[0].id, label: "Nov 12, 3:00 AM", version: "", daysOld: 0 });
@@ -158,7 +160,7 @@ describe("live standalone adapter (secrets + n8n key file + backups)", () => {
 
 describe("live standalone adapter (summary + last backup)", () => {
   beforeEach(() => { vi.resetModules(); invoke.mockReset(); });
-  it("summary derives attention from the system map; backup last stays null (no checksum source)", async () => {
+  it("summary derives attention from the system map; backup last maps the newest row with an unknown checksum", async () => {
     const map = { checkedAt: "2026-11-12T10:00:00+09:00", nodes: [{ id: "app", label: "A", kind: "app" }, { id: "crew", label: "Crews", kind: "service" }],
       paths: [{ id: "x", from: "app", to: "crew", carries: "c", status: "broken", lastOkAt: null, reason: "down", fix: null }] };
     const settings = { nightly: true, at: "03:00", dir: "d", keep: 7, beforeUpdate: true, skipOnBatteryBelow: 20 };
@@ -171,6 +173,58 @@ describe("live standalone adapter (summary + last backup)", () => {
     await refreshLive();
     expect(a.summary()).toEqual({ state: "live", value: { attention: 1, updateReady: false } });
     const b = a.backup();
-    expect(b.state === "live" && b.value.last).toBeNull();
+    expect(b.state === "live" && b.value.last).toMatchObject({ size: "5 B", checksumOk: null });
+  });
+});
+
+describe("backup_verify_last is heavy: startup only, one at a time", () => {
+  beforeEach(() => { vi.resetModules(); invoke.mockReset(); });
+  const settings = { nightly: true, at: "03:00", dir: "~/Amara Backups", keep: 14, beforeUpdate: true, skipOnBatteryBelow: 20 };
+  const rows = [{ id: "amara-backup-20261112-030000.tar.gz", label: "l", madeAt: "2026-11-12T03:00:00+09:00", sizeBytes: 5, daysOld: 0 }];
+  const good = { file: rows[0].id, at: rows[0].madeAt, size: 5, ok: true, checked: 3, mismatched: [], mode: "sha256" };
+  const mock = (verify: unknown) => async (cmd: string) => cmd === "backup_settings_get" ? settings : cmd === "backup_list" ? rows : cmd === "backup_verify_last" ? (verify instanceof Error ? Promise.reject("backup_running") : verify) : cmd === "secrets_status" ? [] : { made: false, where: "w" };
+  const verifyCalls = () => invoke.mock.calls.filter((c) => c[0] === "backup_verify_last").length;
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  it("runs once at startup, and not from refreshLive, setSecret, backupNow, setBackupSettings or makeKeyFile", async () => {
+    invoke.mockImplementation(mock(good));
+    const { unwiredStandalone } = await import("./adapters");
+    const { makeLiveStandalone, refreshLive } = await import("./liveAdapter");
+    const a = makeLiveStandalone(unwiredStandalone);
+    await flush(); await flush();
+    expect(verifyCalls()).toBe(1);
+    const b = a.backup();
+    expect(b.state === "live" && b.value.last).toMatchObject({ checksumOk: true, checks: "sha256" });
+    await refreshLive();
+    await a.setSecret("ha_token", "x"); await a.backupNow(); await a.setBackupSettings({ nightly: false }); await a.makeKeyFile("passphrase1");
+    await flush();
+    expect(verifyCalls()).toBe(1);
+  });
+
+  it("verifyLast never overlaps and is cached per file+size", async () => {
+    let release: (v: unknown) => void = () => {};
+    invoke.mockImplementation(async (cmd: string) => cmd === "backup_verify_last" ? new Promise((r) => { release = r; }) : mock(good)(cmd));
+    const { unwiredStandalone } = await import("./adapters");
+    const { makeLiveStandalone, verifyLast } = await import("./liveAdapter");
+    makeLiveStandalone(unwiredStandalone);
+    await flush(); await flush();
+    const p1 = verifyLast(invoke as never), p2 = verifyLast(invoke as never);
+    expect(p1).toBe(p2);
+    expect(verifyCalls()).toBe(1);
+    release(good); await p1;
+    await verifyLast(invoke as never);
+    expect(verifyCalls()).toBe(1);
+  });
+
+  it("a refusal or a malformed row leaves the checksum 'not checked yet', never failed", async () => {
+    for (const v of [new Error("busy"), { file: 5, ok: "yes" }, { ...good, mismatched: [1] }, null]) {
+      vi.resetModules(); invoke.mockReset(); invoke.mockImplementation(mock(v));
+      const { unwiredStandalone } = await import("./adapters");
+      const { makeLiveStandalone } = await import("./liveAdapter");
+      const a = makeLiveStandalone(unwiredStandalone);
+      await flush(); await flush();
+      const b = a.backup();
+      expect(b.state === "live" && b.value.last).toMatchObject({ checksumOk: null });
+    }
   });
 });

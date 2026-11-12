@@ -5,6 +5,8 @@ import { BACKUP_CONTENTS, BACKUP_DEFAULTS, type StandaloneAdapter } from "./adap
 import { Bar, KeyState, Row, SaCard, WireNote } from "./parts";
 import { BackupSection } from "../settings/BackupSection";
 
+/** Wording for the verify result: only a per-file sha256 match is called a checksum. */
+const checkWord = (l: { checksumOk: boolean | null; checks?: string }) => (l.checksumOk === null ? "not checked yet" : l.checksumOk ? (l.checks === "sha256" ? "checksum OK" : "readable, no key files found") : "check failed");
 const at12 = (hhmm: string) => { const [h, m] = hhmm.split(":").map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
 
 /** The n8n key file (Taisun, 14:59 JST): passphrase-locked, kept beside the backups and never inside one. */
@@ -54,7 +56,7 @@ export function BackupView({ adapter }: { adapter: StandaloneAdapter }) {
   return (
     <div className="pk-host sa-page">
       <PageHero title="Backup" statement={run ? `Backing up… ${run.pct}%` : b?.last ? `Backed up at ${b.last.at.replace(/^.*, /, "")}` : "Backups"}
-        detail={run ? `${run.done} of ${run.total} · ${run.left} · Amara keeps working` : b?.last ? `Every night at ${at12(s.at)} · ${s.keep} kept · ${b.last.size} · checksum ${b.last.checksumOk ? "OK" : "failed"}` : <>Every night at {at12(s.at)} to {s.dir}, {s.keep} kept, plus one before every update <DataTag kind="wire" /></>} />
+        detail={run ? `${run.done} of ${run.total} · ${run.left} · Amara keeps working` : b?.last ? `Every night at ${at12(s.at)} · ${s.keep} kept · ${b.last.size} · ${checkWord(b.last)}` : <>Every night at {at12(s.at)} to {s.dir}, {s.keep} kept, plus one before every update <DataTag kind="wire" /></>} />
       {run && <div className="pk-ok"><strong>Backing up</strong><span className="sa-grow"><Bar pct={run.pct} label="Backup progress" /></span><span>{run.phase}</span><Button size="small" variant="secondary" onClick={() => setNote("Stop needs wiring.")}>Stop</Button></div>}
       <div className="pk-g2">
         <div className="pk-stack">
@@ -64,7 +66,8 @@ export function BackupView({ adapter }: { adapter: StandaloneAdapter }) {
               <Button size="small" variant="secondary" disabled={!b} onClick={() => setRestoring(true)}>Restore from a Backup…</Button>
               <Button size="small" variant="secondary" disabled={!b}>Show Backups in Finder</Button>
             </div>
-            {b?.last ? <Row title="Last backup" sub={`${b.last.at} · ${b.last.size} · checksum ${b.last.checksumOk ? "OK" : "failed"}`}><StatusText kind={b.last.checksumOk ? "ok" : "fail"}>{b.last.checksumOk ? "Done" : "Check failed"}</StatusText></Row>
+            {b?.last ? <Row title="Last backup" sub={`${b.last.at} · ${b.last.size} · ${checkWord(b.last)}`}><StatusText kind={b.last.checksumOk === false ? "fail" : "ok"}>{b.last.checksumOk === false ? "Check failed" : "Done"}</StatusText></Row>
+              : bw.state === "live" ? <Row title="Last backup" sub="No backup yet in the backup folder"><StatusText kind="off">None</StatusText></Row>
               : <Row title="Last backup" sub="Shows here once nightly backups are wired"><DataTag kind="wire" /></Row>}
             <Row title={`Every night at ${at12(s.at)}`} sub={`Skipped on battery under ${s.skipOnBatteryBelow}%`}><Toggle aria-label="Nightly backup" checked={s.nightly} disabled={!b} onCheckedChange={(v) => { void adapter.setBackupSettings({ nightly: v }).then((r) => say(r, v ? "Nightly backup on." : "Nightly backup off.")); }} /></Row>
             <Row title="Where" sub={`${s.dir} · keeps the last ${s.keep}`}><Button size="small" variant="secondary" disabled={!b}>Change…</Button></Row>

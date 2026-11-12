@@ -126,3 +126,19 @@ describe("live money watch-only", () => {
     expect((await m.addWatchOnly("btc", XPUB, "x")).state).toBe("unwired");
   });
 });
+
+describe("live money account rows", () => {
+  it("native from balances, USD only with an fx rate, never for crypto, dash with no balance", () => {
+    const bals = [stmt, btc];
+    expect(mapAccount(jp, bals, null)).toMatchObject({ native: "300,000 JPY", usd: null });
+    expect(mapAccount(jp, bals, { rate: 150, at: "2026-11-11", source: "x" })).toMatchObject({ native: "300,000 JPY", usd: 2000 });
+    expect(mapAccount(ledger, bals, { rate: 150, at: "x", source: "x" })).toMatchObject({ native: "0.5 BTC", usd: null });
+    expect(mapAccount(jp, [], null)).toMatchObject({ native: "–", usd: null });
+  });
+  it("adapter rows carry the balances once read", async () => {
+    const m = makeLiveMoney(backend([stmt, btc], fxRaw) as never, vi.fn());
+    m.accounts(); await flush();
+    const a = m.accounts();
+    expect(a.state === "live" && a.value.map((x) => [x.native, x.usd])).toEqual([["300,000 JPY", 2000], ["0.5 BTC", null]]);
+  });
+});

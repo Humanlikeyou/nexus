@@ -2,13 +2,13 @@ import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 import { announceStores, live, realInvoke, type Invoke } from "../lib/localStores";
 import { guardWatchInput } from "./seedGuard";
 import { unwiredMoney, type ConnectRoute, type Fx, type Institution, type MoneyAccount, type MoneyAdapter, type MoneyOverview, type Region, type Route } from "./adapters";
-import { buildOverview, type RawBalance } from "./overview";
+import { buildOverview, formatNative, type RawBalance } from "./overview";
 
 /**
  * Live money adapter over the READ-ONLY Rust commands `money_accounts_list` and `fx_rate_get`
  * (src-tauri/src/commands/money.rs). Reads are synchronous over a cache; a store is wired only after its
  * first successful read, so a missing backend keeps showing "Needs wiring". Nothing here invents a value:
- * account rows still show no balance (only the overview reads balances), so every account balance stays "–" (not 0) with no USD value, and a
+ * account rows take their native amount from `money_balances_list` ("–", not 0, with none) and a USD value only for USD or JPY with a stored rate (never BTC/ETH), and a
  * null FX rate is unwired. `money.overview` is built from accounts + `money_balances_list` (see overview.ts). `fx_rate_refresh` is never called here (it is an outbound fetch Taisun triggers).
  */
 
@@ -25,19 +25,22 @@ const VIA: Record<string, string> = { csv: "Statement import (CSV)", watch_only:
 const words = (s: string) => s.replace(/_/g, " ");
 
 /** Maps one stored account. Unknown enum values return null so a row is dropped rather than guessed. */
-export function mapAccount(r: RawAccount): MoneyAccount | null {
+export function mapAccount(r: RawAccount, balances: RawBalance[] = [], rate: Fx | null = null): MoneyAccount | null {
   const institution = INSTITUTION[r.institution];
   const route = ROUTE[r.route];
   const currency = CURRENCY[r.currency];
   if (!institution || !route || !currency || (r.scope !== "personal" && r.scope !== "venture") || typeof r.id !== "string" || typeof r.nickname !== "string") return null;
+  const b = balances.find((x) => (x.account_id ?? x.accountId) === r.id && Number.isFinite(x.amount));
+  // Native amount from the stored balance; "–" (never 0) with none. USD only for USD itself or JPY with a stored rate; BTC/ETH have no price source.
+  const native = b ? formatNative(b.amount, currency) : "–";
+  const usd = !b ? null : currency === "USD" ? b.amount : currency === "JPY" && rate ? b.amount / rate.rate : null;
   const added = (r.createdAt ?? r.created_at ?? "").slice(0, 10);
   return {
     id: r.id, nickname: r.nickname, institution, route, region: REGION[currency],
     via: `${VIA[r.route]} · ${words(r.kind)}`,
     status: "ok", synced: added ? `Added ${added}` : "Added",
     asOf: null,
-    // The command returns no balances, so there is no amount to show and no USD value (never 0).
-    native: "–", usd: null, currency, scope: r.scope, keychain: "not_set",
+    native, usd, currency, scope: r.scope, keychain: "not_set",
   };
 }
 
@@ -59,13 +62,17 @@ export function makeLiveMoney(call: Invoke = realInvoke, notify: () => void = an
   let started = false;
   let inflight: Promise<void> | null = null;
 
-  const readAccounts = async () => { rawAccounts = await call<RawAccount[]>("money_accounts_list"); accounts = rawAccounts.map(mapAccount).filter((a): a is MoneyAccount => a !== null); };
+  const readAccounts = async () => { rawAccounts = await call<RawAccount[]>("money_accounts_list"); accounts = rawAccounts.map((r) => mapAccount(r)).filter((a): a is MoneyAccount => a !== null); };
   const readFx = async () => { fx = mapFx(await call<RawFx | null>("fx_rate_get")); fxRead = true; };
   // Read-only: balances come from money_balances_list (manual balances + statement running balances).
   let balances: RawBalances | null = null;
   const readBalances = async () => { balances = await call<RawBalances>("money_balances_list"); };
   function refresh(): Promise<void> {
     inflight ??= Promise.allSettled([readAccounts(), readFx(), readBalances()]).then(() => {
+      if (accounts && balances && Array.isArray(balances.balances)) {
+        const rate = mapFx(balances.fx) ?? fx;
+        accounts = rawAccounts.map((r) => mapAccount(r, balances!.balances, rate)).filter((a): a is MoneyAccount => a !== null);
+      }
       overview = accounts && balances && Array.isArray(balances.balances) ? buildOverview(rawAccounts.filter((r) => mapAccount(r) !== null), balances.balances, mapFx(balances.fx)) : null;
       overviewRead = true;
     }).finally(() => { inflight = null; notify(); });

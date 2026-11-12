@@ -300,6 +300,7 @@ pub fn run() {
             commands::backups::backup_settings_set,
             commands::backups::backup_now,
             commands::backups::backup_list,
+            commands::backups::backup_verify_last,
             // Hemi-Sync (decision 0010)
             commands::hemisync::hemisync_import,
             commands::hemisync::hemisync_library,

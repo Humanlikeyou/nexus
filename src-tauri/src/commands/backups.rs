@@ -605,6 +605,359 @@ pub async fn backup_list() -> Result<Vec<BackupEntry>, String> {
     .map_err(|_| "io_error".to_string())?
 }
 
+// ---- verify (read-only) ----
+
+/// Caps so a huge or hostile archive can't tie the app up.
+/// Dirs count too. The app data is ~2.2 GB today (checked read-only), so 16 GiB leaves ~7x headroom.
+const VERIFY_MAX_ENTRIES: usize = 200_000;
+const VERIFY_MAX_TOTAL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+/// A per-file hash map is ~100 bytes per file, so 32 MiB covers the entry cap.
+const VERIFY_MAX_MANIFEST_BYTES: u64 = 32 * 1024 * 1024;
+const VERIFY_RATIO_FLOOR: u64 = 1024 * 1024 * 1024;
+const VERIFY_MAX_RATIO: u64 = 200;
+const VERIFY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(600);
+static VERIFY_BUSY: AtomicBool = AtomicBool::new(false);
+const VERIFY_MAX_MISMATCHES: usize = 50;
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyReport {
+    /// Archive file name.
+    pub file: String,
+    /// When it was made (RFC 3339, from the file name).
+    pub at: String,
+    pub size: u64,
+    pub ok: bool,
+    /// Entries read through to the end (and, with hashes, compared).
+    pub checked: usize,
+    /// Names only: hash differs, listed but missing, secret-looking, link, or unreadable.
+    pub mismatched: Vec<String>,
+    /// `sha256` when the manifest carries per-file hashes, else `structure`: the packager's manifest
+    /// holds metadata only, so every entry is read to its end (gzip CRC) and names are screened.
+    pub mode: String,
+}
+
+/// Names go back to the UI: no control, zero-width or bidi characters, at most 200 chars.
+fn clean_name(s: &str) -> String {
+    s.chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(*c as u32,
+                    0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x2069 | 0xFEFF)
+        })
+        .take(200)
+        .collect()
+}
+
+/// Counts the compressed bytes read, for the compression-ratio guard.
+struct CountingReader<R> {
+    inner: R,
+    n: std::rc::Rc<std::cell::Cell<u64>>,
+}
+impl<R: std::io::Read> std::io::Read for CountingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let k = self.inner.read(buf)?;
+        self.n.set(self.n.get() + k as u64);
+        Ok(k)
+    }
+}
+
+fn is_hex64(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The limits in force for one verification (tests pass small ones).
+#[derive(Clone, Copy)]
+struct VerifyCaps {
+    entries: usize,
+    total: u64,
+    ratio_floor: u64,
+    deadline: std::time::Duration,
+}
+const VERIFY_CAPS: VerifyCaps = VerifyCaps {
+    entries: VERIFY_MAX_ENTRIES,
+    total: VERIFY_MAX_TOTAL_BYTES,
+    ratio_floor: VERIFY_RATIO_FLOOR,
+    deadline: VERIFY_DEADLINE,
+};
+
+fn verify_archive(
+    path: &Path,
+    file: &str,
+    at: String,
+    caps: VerifyCaps,
+) -> Result<VerifyReport, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::time::Instant;
+    let f = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|_| "symlink_refused_or_unreadable".to_string())?;
+    let meta = f.metadata().map_err(|_| "io_error".to_string())?;
+    if !meta.is_file() {
+        return Err("not_a_file".into());
+    }
+    let mut report = VerifyReport {
+        file: clean_name(file),
+        at,
+        size: meta.len(),
+        ok: false,
+        checked: 0,
+        mismatched: Vec::new(),
+        mode: "structure".into(),
+    };
+    let flag = |report: &mut VerifyReport, name: &str| {
+        if report.mismatched.len() < VERIFY_MAX_MISMATCHES {
+            report.mismatched.push(clean_name(name));
+        }
+    };
+    let started = Instant::now();
+    let compressed = std::rc::Rc::new(std::cell::Cell::new(0u64));
+    let reader = CountingReader {
+        inner: f,
+        n: compressed.clone(),
+    };
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(reader));
+    let mut digests: std::collections::HashMap<String, String> = Default::default();
+    let mut manifest: Option<Vec<u8>> = None;
+    let mut manifest_bad = false;
+    let mut seen: std::collections::HashSet<String> = Default::default();
+    let mut total: u64 = 0;
+    let mut count = 0usize;
+    let mut broken = false;
+    // Every streamed byte (entries and the gzip tail) passes through here.
+    let mut account = |n: usize| -> Result<(), String> {
+        total = total.saturating_add(n as u64);
+        if total > caps.total {
+            return Err("archive_too_large".into());
+        }
+        if total > caps.ratio_floor
+            && total > VERIFY_MAX_RATIO.saturating_mul(compressed.get().max(1))
+        {
+            return Err("compression_ratio".into());
+        }
+        if started.elapsed() > caps.deadline {
+            return Err("verify_timeout".into());
+        }
+        Ok(())
+    };
+    match tar.entries() {
+        Err(_) => {
+            flag(&mut report, "archive_unreadable");
+            broken = true;
+        }
+        Ok(entries) => {
+            for entry in entries {
+                let mut entry = match entry {
+                    Ok(e) => e,
+                    Err(_) => {
+                        flag(&mut report, "archive_unreadable");
+                        broken = true;
+                        break;
+                    }
+                };
+                count += 1;
+                if count > caps.entries {
+                    return Err("too_many_entries".into());
+                }
+                let name = entry
+                    .path()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| "bad_name".into());
+                let ty = entry.header().entry_type();
+                if ty.is_dir() {
+                    continue;
+                }
+                if !ty.is_file() {
+                    flag(&mut report, &name);
+                    continue;
+                }
+                if entry.size() > caps.total {
+                    return Err("archive_too_large".into());
+                }
+                let rel: Vec<&str> = name.split('/').filter(|s| !s.is_empty()).skip(1).collect();
+                let rel_s = rel.join("/");
+                let last = rel.last().copied().unwrap_or("");
+                let is_manifest = rel_s == "manifest.json";
+                let skip_hash = last.starts_with("._"); // AppleDouble metadata is never restored
+                if !skip_hash {
+                    if is_excluded_name(&clean_name(last), 1) {
+                        flag(&mut report, &name);
+                    }
+                    if !seen.insert(rel_s.clone()) {
+                        if is_manifest {
+                            manifest_bad = true;
+                        } else {
+                            flag(&mut report, &name);
+                        }
+                    }
+                }
+                let mut hasher = Sha256::new();
+                let mut buf = [0u8; 64 * 1024];
+                let mut kept: Vec<u8> = Vec::new();
+                let mut kept_over = false;
+                loop {
+                    match entry.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            account(n)?;
+                            hasher.update(&buf[..n]);
+                            if is_manifest {
+                                if (kept.len() + n) as u64 <= VERIFY_MAX_MANIFEST_BYTES {
+                                    kept.extend_from_slice(&buf[..n]);
+                                } else {
+                                    kept_over = true;
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            flag(&mut report, "archive_unreadable");
+                            broken = true;
+                            break;
+                        }
+                    }
+                }
+                if broken {
+                    break;
+                }
+                report.checked += 1;
+                if is_manifest {
+                    if kept_over {
+                        manifest_bad = true;
+                    } else if manifest.is_none() {
+                        manifest = Some(kept);
+                    }
+                }
+                if !skip_hash {
+                    digests.insert(rel_s, hex::encode(hasher.finalize()));
+                }
+            }
+        }
+    }
+    // Drain the gzip stream to its end so the CRC / length trailer is checked.
+    if !broken {
+        let mut gz = tar.into_inner();
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            match gz.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => account(n)?,
+                Err(_) => {
+                    flag(&mut report, "archive_unreadable");
+                    broken = true;
+                    break;
+                }
+            }
+        }
+    }
+    // Per-file hashes, if the manifest carries them (`sha256`: { "relative/path": "hex" }).
+    let mut listed: Option<serde_json::Map<String, Value>> = None;
+    if !broken {
+        match manifest.as_deref() {
+            None => flag(&mut report, "manifest_missing"),
+            Some(m) => match serde_json::from_slice::<Value>(m) {
+                Ok(Value::Object(o)) => match o.get("sha256") {
+                    None => {}
+                    Some(Value::Object(map))
+                        if map.values().all(|v| v.as_str().is_some_and(is_hex64)) =>
+                    {
+                        listed = Some(map.clone());
+                    }
+                    Some(_) => manifest_bad = true,
+                },
+                _ => manifest_bad = true,
+            },
+        }
+        if manifest_bad {
+            flag(&mut report, "manifest_invalid");
+        }
+    }
+    if let Some(map) = listed.filter(|_| !manifest_bad) {
+        report.mode = "sha256".into();
+        let mut keys: Vec<&String> = map.keys().collect();
+        keys.sort();
+        for k in keys {
+            let want = map[k].as_str().unwrap_or("").to_ascii_lowercase();
+            match digests.get(k.as_str()) {
+                None => flag(&mut report, &format!("missing: {k}")),
+                Some(got) if *got != want => flag(&mut report, k),
+                Some(_) => {}
+            }
+        }
+    }
+    report.ok = !broken && report.mismatched.is_empty() && report.checked > 0;
+    Ok(report)
+}
+
+/// Newest Amara backup in the configured dir, checked without writing anything. `None` when there
+/// is no backup. A symlink where a backup should be is refused, not followed.
+pub(crate) fn verify_last_in(
+    home: &Path,
+    data_dir: &Path,
+    dir_setting: &str,
+    backup_busy: &AtomicBool,
+    verify_busy: &AtomicBool,
+) -> Result<Option<VerifyReport>, String> {
+    // A backup being written is not a damaged one: the caller shows "not checked yet".
+    if backup_busy.load(Ordering::Acquire) {
+        return Err("backup_running".into());
+    }
+    let _guard = BusyGuard::acquire(verify_busy).ok_or_else(|| "busy".to_string())?;
+    let dir = resolve_dir(dir_setting, home, data_dir)?;
+    let rd = match fs::read_dir(&dir) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("io_error".into()),
+    };
+    let mut newest: Option<(NaiveDateTime, String)> = None;
+    for entry in rd.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let Some(t) = parse_backup_name(&name) else {
+            continue;
+        };
+        if newest
+            .as_ref()
+            .is_none_or(|(bt, bn)| (t, &name) > (*bt, bn))
+        {
+            newest = Some((t, name));
+        }
+    }
+    let Some((naive, name)) = newest else {
+        return Ok(None);
+    };
+    let path = dir.join(&name);
+    let meta = fs::symlink_metadata(&path).map_err(|_| "io_error".to_string())?;
+    if meta.file_type().is_symlink() {
+        return Err("symlink_refused".into());
+    }
+    if !meta.is_file() {
+        return Err("not_a_file".into());
+    }
+    let at = Local
+        .from_local_datetime(&naive)
+        .earliest()
+        .map(|d| d.to_rfc3339())
+        .unwrap_or_default();
+    verify_archive(&path, &name, at, VERIFY_CAPS).map(Some)
+}
+
+/// Read-only: checks the newest backup and reports. Writes and deletes nothing.
+#[tauri::command]
+pub async fn backup_verify_last() -> Result<Option<VerifyReport>, String> {
+    let (home, data) = (home_dir()?, crate::app_paths::data_dir());
+    tokio::task::spawn_blocking(move || {
+        let s = load_settings(&data)?;
+        verify_last_in(&home, &data, &s.dir, &BUSY, &VERIFY_BUSY)
+    })
+    .await
+    .map_err(|_| "io_error".to_string())?
+}
+
 #[derive(Serialize, Clone)]
 struct ProgressEvent<'a> {
     phase: &'a str,
@@ -1257,6 +1610,475 @@ mod tests {
             fs::read_dir(&dir).unwrap().count(),
             21,
             "keep=1 deleted nothing"
+        );
+    }
+
+    // ---- backup_verify_last ----
+
+    fn make_archive(path: &Path, files: &[(&str, &[u8])]) {
+        let gz = flate2::write::GzEncoder::new(
+            fs::File::create(path).unwrap(),
+            flate2::Compression::fast(),
+        );
+        let mut b = tar::Builder::new(gz);
+        for (n, data) in files {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(data.len() as u64);
+            h.set_mode(0o600);
+            h.set_cksum();
+            b.append_data(&mut h, format!("amara-pack-1/{n}"), *data)
+                .unwrap();
+        }
+        b.into_inner().unwrap().finish().unwrap();
+    }
+
+    fn snapshot(dir: &Path) -> Vec<(String, u64, std::time::SystemTime)> {
+        let mut v: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| {
+                let m = fs::symlink_metadata(e.path()).unwrap();
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    m.len(),
+                    m.modified().unwrap(),
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    }
+
+    fn sha_hex(b: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(b))
+    }
+
+    const NEWEST: &str = "amara-backup-20261112-030000.tar.gz";
+
+    #[test]
+    fn verify_none_when_there_is_no_archive() {
+        let (home, data) = fake_home("vnone");
+        assert_eq!(
+            verify_last_in(
+                &home,
+                &data,
+                "~/Amara Backups",
+                &AtomicBool::new(false),
+                &AtomicBool::new(false)
+            )
+            .unwrap(),
+            None
+        );
+        fs::create_dir_all(home.join("Amara Backups")).unwrap();
+        fs::write(home.join("Amara Backups/notes.txt"), "x").unwrap();
+        assert_eq!(
+            verify_last_in(
+                &home,
+                &data,
+                "~/Amara Backups",
+                &AtomicBool::new(false),
+                &AtomicBool::new(false)
+            )
+            .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn verify_a_good_archive_reads_every_entry_and_changes_nothing() {
+        let (home, data) = fake_home("vgood");
+        let dir = home.join("Amara Backups");
+        fs::create_dir_all(&dir).unwrap();
+        make_archive(
+            &dir.join("amara-backup-20261101-030000.tar.gz"),
+            &[("manifest.json", b"{}")],
+        );
+        make_archive(
+            &dir.join(NEWEST),
+            &[
+                ("manifest.json", b"{\"version\":\"0.1.0\"}"),
+                ("goals.json", b"[1]"),
+            ],
+        );
+        let before = snapshot(&dir);
+        let r = verify_last_in(
+            &home,
+            &data,
+            "~/Amara Backups",
+            &AtomicBool::new(false),
+            &AtomicBool::new(false),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(r.file, NEWEST);
+        assert!(r.ok, "{r:?}");
+        assert_eq!((r.checked, r.mode.as_str()), (2, "structure"));
+        assert!(r.mismatched.is_empty() && r.size > 0 && !r.at.is_empty());
+        assert_eq!(snapshot(&dir), before);
+    }
+
+    #[test]
+    fn verify_with_hashes_flags_a_tampered_entry() {
+        let (home, data) = fake_home("vtamper");
+        let dir = home.join("Amara Backups");
+        fs::create_dir_all(&dir).unwrap();
+        let man = |h: &str| format!("{{\"sha256\":{{\"goals.json\":\"{h}\"}}}}").into_bytes();
+        make_archive(
+            &dir.join(NEWEST),
+            &[
+                ("manifest.json", &man(&sha_hex(b"[1]"))),
+                ("goals.json", b"[1]"),
+            ],
+        );
+        let r = verify_last_in(
+            &home,
+            &data,
+            "~/Amara Backups",
+            &AtomicBool::new(false),
+            &AtomicBool::new(false),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(r.ok && r.mode == "sha256", "{r:?}");
+        make_archive(
+            &dir.join(NEWEST),
+            &[
+                ("manifest.json", &man(&sha_hex(b"[1]"))),
+                ("goals.json", b"[2]"),
+            ],
+        );
+        let before = snapshot(&dir);
+        let r = verify_last_in(
+            &home,
+            &data,
+            "~/Amara Backups",
+            &AtomicBool::new(false),
+            &AtomicBool::new(false),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!r.ok);
+        assert_eq!(r.mismatched, vec!["goals.json".to_string()]);
+        assert_eq!(snapshot(&dir), before);
+    }
+
+    #[test]
+    fn verify_flags_secret_names_and_a_truncated_archive() {
+        let (home, data) = fake_home("vsecret");
+        let dir = home.join("Amara Backups");
+        fs::create_dir_all(&dir).unwrap();
+        make_archive(
+            &dir.join(NEWEST),
+            &[("manifest.json", b"{}"), ("telegram_token.txt", b"x")],
+        );
+        let r = verify_last_in(
+            &home,
+            &data,
+            "~/Amara Backups",
+            &AtomicBool::new(false),
+            &AtomicBool::new(false),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!r.ok);
+        assert_eq!(
+            r.mismatched,
+            vec!["amara-pack-1/telegram_token.txt".to_string()]
+        );
+        let bytes = fs::read(dir.join(NEWEST)).unwrap();
+        fs::write(dir.join(NEWEST), &bytes[..bytes.len() / 2]).unwrap();
+        let r = verify_last_in(
+            &home,
+            &data,
+            "~/Amara Backups",
+            &AtomicBool::new(false),
+            &AtomicBool::new(false),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!r.ok && !r.mismatched.is_empty());
+    }
+
+    #[test]
+    fn verify_refuses_a_symlinked_archive() {
+        let (home, data) = fake_home("vsym");
+        let dir = home.join("Amara Backups");
+        fs::create_dir_all(&dir).unwrap();
+        let real = home.join("elsewhere.tar.gz");
+        make_archive(&real, &[("manifest.json", b"{}")]);
+        std::os::unix::fs::symlink(&real, dir.join(NEWEST)).unwrap();
+        let before = snapshot(&dir);
+        assert_eq!(
+            verify_last_in(
+                &home,
+                &data,
+                "~/Amara Backups",
+                &AtomicBool::new(false),
+                &AtomicBool::new(false)
+            )
+            .unwrap_err(),
+            "symlink_refused"
+        );
+        assert_eq!(snapshot(&dir), before);
+    }
+
+    // ---- verify hardening ----
+
+    fn vopen(home: &Path, data: &Path) -> Result<Option<VerifyReport>, String> {
+        verify_last_in(
+            home,
+            data,
+            "~/Amara Backups",
+            &AtomicBool::new(false),
+            &AtomicBool::new(false),
+        )
+    }
+
+    fn setup(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let (home, data) = fake_home(tag);
+        let dir = home.join("Amara Backups");
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(NEWEST);
+        (home, data, p)
+    }
+
+    #[test]
+    fn verify_is_refused_while_a_backup_runs_or_another_verify_is_running() {
+        let (home, data, p) = setup("vbusy");
+        make_archive(&p, &[("manifest.json", b"{}")]);
+        let on = AtomicBool::new(true);
+        let off = AtomicBool::new(false);
+        assert_eq!(
+            verify_last_in(&home, &data, "~/Amara Backups", &on, &off).unwrap_err(),
+            "backup_running"
+        );
+        assert_eq!(
+            verify_last_in(&home, &data, "~/Amara Backups", &off, &on).unwrap_err(),
+            "busy"
+        );
+        assert!(
+            on.load(Ordering::SeqCst),
+            "a refused call must not release the other flag"
+        );
+        assert!(vopen(&home, &data).unwrap().unwrap().ok);
+    }
+
+    #[test]
+    fn verify_checks_the_gzip_trailer() {
+        let (home, data, p) = setup("vtrailer");
+        make_archive(&p, &[("manifest.json", b"{}"), ("goals.json", b"[1]")]);
+        let mut b = fs::read(&p).unwrap();
+        let n = b.len();
+        b[n - 8] ^= 0xff; // CRC32 in the trailer
+        fs::write(&p, &b).unwrap();
+        let r = vopen(&home, &data).unwrap().unwrap();
+        assert!(!r.ok, "{r:?}");
+        assert!(r.mismatched.contains(&"archive_unreadable".to_string()));
+    }
+
+    #[test]
+    fn verify_aborts_on_streamed_size_ratio_deadline_and_entry_caps() {
+        let (home, data, p) = setup("vcaps");
+        make_archive(
+            &p,
+            &[("manifest.json", b"{}"), ("big.bin", &vec![0u8; 1 << 20])],
+        );
+        let go = |caps: VerifyCaps| verify_archive(&p, NEWEST, String::new(), caps);
+        let loose = VerifyCaps {
+            entries: 100,
+            total: u64::MAX,
+            ratio_floor: u64::MAX,
+            deadline: std::time::Duration::from_secs(60),
+        };
+        assert!(go(loose).unwrap().ok);
+        assert_eq!(
+            go(VerifyCaps {
+                total: 1000,
+                ..loose
+            })
+            .unwrap_err(),
+            "archive_too_large"
+        );
+        assert_eq!(
+            go(VerifyCaps {
+                ratio_floor: 1000,
+                ..loose
+            })
+            .unwrap_err(),
+            "compression_ratio"
+        );
+        assert_eq!(
+            go(VerifyCaps {
+                deadline: std::time::Duration::ZERO,
+                ..loose
+            })
+            .unwrap_err(),
+            "verify_timeout"
+        );
+        assert_eq!(
+            go(VerifyCaps {
+                entries: 1,
+                ..loose
+            })
+            .unwrap_err(),
+            "too_many_entries"
+        );
+        let _ = (home, data);
+    }
+
+    #[test]
+    fn verify_counts_directories_toward_the_entry_cap() {
+        let (_h, _d, p) = setup("vdirs");
+        let gz = flate2::write::GzEncoder::new(
+            fs::File::create(&p).unwrap(),
+            flate2::Compression::fast(),
+        );
+        let mut b = tar::Builder::new(gz);
+        for i in 0..5 {
+            let mut h = tar::Header::new_gnu();
+            h.set_entry_type(tar::EntryType::Directory);
+            h.set_size(0);
+            h.set_mode(0o700);
+            h.set_cksum();
+            b.append_data(&mut h, format!("amara-pack-1/d{i}/"), &b""[..])
+                .unwrap();
+        }
+        b.into_inner().unwrap().finish().unwrap();
+        let caps = VerifyCaps {
+            entries: 3,
+            ..VERIFY_CAPS
+        };
+        assert_eq!(
+            verify_archive(&p, NEWEST, String::new(), caps).unwrap_err(),
+            "too_many_entries"
+        );
+    }
+
+    #[test]
+    fn verify_treats_a_bad_manifest_as_broken_not_structure_mode() {
+        let hex = sha_hex(b"[1]");
+        type Case = (&'static str, Vec<(&'static str, Vec<u8>)>);
+        let cases: Vec<Case> = vec![
+            ("unparseable", vec![("manifest.json", b"{nope".to_vec())]),
+            ("not_object", vec![("manifest.json", b"[1]".to_vec())]),
+            (
+                "bad_hash",
+                vec![("manifest.json", b"{\"sha256\":{\"a\":\"zz\"}}".to_vec())],
+            ),
+            (
+                "bad_map",
+                vec![("manifest.json", b"{\"sha256\":5}".to_vec())],
+            ),
+            (
+                "duplicate",
+                vec![
+                    ("manifest.json", b"{}".to_vec()),
+                    ("manifest.json", b"{}".to_vec()),
+                ],
+            ),
+            (
+                "oversized",
+                vec![("manifest.json", {
+                    let mut v = b"{\"x\":\"".to_vec();
+                    v.extend(vec![b'a'; (VERIFY_MAX_MANIFEST_BYTES as usize) + 10]);
+                    v.extend(b"\"}");
+                    v
+                })],
+            ),
+            (
+                "missing_listed",
+                vec![(
+                    "manifest.json",
+                    format!("{{\"sha256\":{{\"gone.json\":\"{hex}\"}}}}").into_bytes(),
+                )],
+            ),
+        ];
+        for (tag, files) in cases {
+            let (home, data, p) = setup(&format!("vman-{tag}"));
+            let refs: Vec<(&str, &[u8])> = files.iter().map(|(n, d)| (*n, d.as_slice())).collect();
+            make_archive(&p, &refs);
+            let r = vopen(&home, &data).unwrap().unwrap();
+            assert!(!r.ok, "{tag}: {r:?}");
+            if tag == "missing_listed" {
+                assert_eq!(r.mismatched, vec!["missing: gone.json".to_string()]);
+            } else {
+                assert!(
+                    r.mismatched.contains(&"manifest_invalid".to_string()),
+                    "{tag}: {r:?}"
+                );
+            }
+        }
+        let (home, data, p) = setup("vman-none");
+        make_archive(&p, &[("goals.json", b"[1]")]);
+        let r = vopen(&home, &data).unwrap().unwrap();
+        assert!(!r.ok && r.mismatched == vec!["manifest_missing".to_string()]);
+    }
+
+    #[test]
+    fn returned_names_are_short_and_free_of_control_and_bidi_characters() {
+        let dirty = format!("a\u{202E}b\u{200B}c\nd\u{0}{}", "x".repeat(500));
+        let c = clean_name(&dirty);
+        assert!(c.starts_with("abcd") && c.chars().count() == 200);
+        assert!(!c
+            .chars()
+            .any(|ch| ch.is_control() || ch == '\u{202E}' || ch == '\u{200B}'));
+        let (home, data, p) = setup("vnames");
+        make_archive(&p, &[("manifest.json", b"{}"), ("tok\u{202E}en.txt", b"x")]);
+        let r = vopen(&home, &data).unwrap().unwrap();
+        assert_eq!(r.mismatched, vec!["amara-pack-1/token.txt".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_fresh_pack_verifies_in_sha256_mode_and_a_tampered_one_does_not() {
+        let (home, data) = fake_home("vpack");
+        fs::write(data.join("notes.txt"), "hello").unwrap();
+        let busy = AtomicBool::new(false);
+        let r = run_backup(
+            &home,
+            &data,
+            &BackupSettings::default(),
+            PLENTY,
+            &quiet(),
+            &busy,
+        )
+        .await
+        .unwrap();
+        let v = vopen(&home, &data).unwrap().unwrap();
+        assert_eq!(v.file, r.entry.id);
+        assert!(v.ok && v.mode == "sha256" && v.checked >= 3, "{v:?}");
+        // Rewrite the archive with one entry's bytes changed and the manifest left alone.
+        let path = home.join("Amara Backups").join(&r.entry.id);
+        let mut a = tar::Archive::new(flate2::read::GzDecoder::new(fs::File::open(&path).unwrap()));
+        let mut items: Vec<(String, Vec<u8>)> = Vec::new();
+        for e in a.entries().unwrap() {
+            let mut e = e.unwrap();
+            if e.header().entry_type().is_file() {
+                let mut b = Vec::new();
+                std::io::Read::read_to_end(&mut e, &mut b).unwrap();
+                if e.path().unwrap().ends_with("goals.json") {
+                    b = b"[666]".to_vec();
+                }
+                items.push((e.path().unwrap().to_string_lossy().into_owned(), b));
+            }
+        }
+        let gz = flate2::write::GzEncoder::new(
+            fs::File::create(&path).unwrap(),
+            flate2::Compression::fast(),
+        );
+        let mut b = tar::Builder::new(gz);
+        for (n, d) in &items {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(d.len() as u64);
+            h.set_mode(0o600);
+            h.set_cksum();
+            b.append_data(&mut h, n, d.as_slice()).unwrap();
+        }
+        b.into_inner().unwrap().finish().unwrap();
+        let v = vopen(&home, &data).unwrap().unwrap();
+        assert!(
+            !v.ok && v.mismatched.contains(&"goals.json".to_string()),
+            "{v:?}"
         );
     }
 }

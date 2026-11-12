@@ -101,3 +101,17 @@ describe("design-1111t money: read-only", () => {
     expect(screen.getByText(/Can't tell, by design/)).toBeInTheDocument();
   });
 });
+
+describe("live account rows", () => {
+  const row = (o: object) => ({ id: "x", nickname: "Row", institution: "ledger", route: "watch_only", region: "crypto", via: "v", status: "ok", synced: "s", asOf: null, native: "0.5 BTC", usd: null, currency: "BTC", scope: "personal", keychain: "not_set", ...o });
+  it("shows the native amount, no USD tag for crypto or a missing balance, tag only for JPY without a rate", () => {
+    const mk = (a: object): MoneyAdapter => ({ ...unwiredMoney, accounts: () => ({ state: "live", value: [row(a) as never] }) });
+    const { container, rerender } = render(<MoneyAccounts adapter={mk({})} />);
+    const amt = () => container.querySelector(".m-acct__amt")?.textContent ?? "";
+    expect(amt()).toBe("0.5 BTC");
+    rerender(<MoneyAccounts adapter={mk({ currency: "JPY", region: "jp", native: "–" })} />);
+    expect(amt()).toBe("–");
+    rerender(<MoneyAccounts adapter={mk({ currency: "JPY", region: "jp", native: "300,000 JPY" })} />);
+    expect(amt()).toMatch(/USD/);
+  });
+});

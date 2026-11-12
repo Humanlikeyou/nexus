@@ -43,7 +43,8 @@ export type BackupSettings = { nightly: boolean; at: string; dir: string; keep: 
 export const BACKUP_DEFAULTS: BackupSettings = { nightly: true, at: "03:00", dir: "~/Amara Backups", keep: 14, beforeUpdate: true, skipOnBatteryBelow: 20 };
 export type BackupRun = { pct: number; done: string; total: string; left: string; phase: string };
 export type BackupStatus = {
-  last: { at: string; size: string; checksumOk: boolean } | null;
+  /** `checksumOk` is null until `backup_verify_last` has answered for this file. `checks` says what ran: per-file sha256 against the manifest, or a structure read (the packager's manifest has no hashes). */
+  last: { at: string; size: string; checksumOk: boolean | null; checks?: "sha256" | "structure" } | null;
   running: BackupRun | null;
   settings: BackupSettings;
   backups: Array<{ id: string; label: string; madeAt: string; version: string; daysOld: number }>;

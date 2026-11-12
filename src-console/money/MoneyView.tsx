@@ -30,7 +30,7 @@ function AccountRow({ a, adapter }: { a: MoneyAccount; adapter: MoneyAdapter }) 
       <div className="m-acct__main"><span>{a.nickname}</span><small>{a.via}</small>{a.note && <small className="m-acct__note">{a.note}</small>}</div>
       <div className="m-acct__badges">{badge}<span className="m-badge m-badge--quiet">Can&apos;t move money</span></div>
       <span className="m-acct__sync" data-status={a.status}>{a.status === "ok" ? <><span aria-hidden="true">{a.route === "csv" ? "◔" : "✓"}</span> {a.synced}</> : <><span aria-hidden="true">!</span> {STATUS_WORD[a.status]}{a.status !== "not_connected" ? ` · ${a.synced}` : ""}</>}</span>
-      <span className="m-acct__amt"><b>{a.native}</b>{a.asOf ? <small>as of {a.asOf}</small> : a.currency !== "USD" && (a.usd != null ? <small>≈ {usd(a.usd)}</small> : <small>USD <DataTag kind="wire" /></small>)}</span>
+      <span className="m-acct__amt"><b>{a.native}</b>{a.asOf ? <small>as of {a.asOf}</small> : a.currency !== "USD" && (a.usd != null ? <small>≈ {usd(a.usd)}</small> : a.currency === "BTC" || a.currency === "ETH" || a.native === "–" ? null : <small>USD <DataTag kind="wire" /></small>)}</span>
       {(a.status === "expired" || a.status === "stale") && (
         <div className="m-acct__acts">
           {a.status === "expired" ? <><Button size="small" variant="primary" onClick={() => { void adapter.reconnect(a.id).then((r) => setNote(r.state === "unwired" ? "Signing in again needs wiring." : "Sample data: opens Chime's own sign-in page in your browser.")); }}>Sign in again…</Button>
