@@ -496,6 +496,7 @@ register_ingress_tools(TOOL_REGISTRY, CREW_INGRESS_SECRET, CREW_INGRESS_URL)
 # Having them registered grants nothing: every call also needs an active per-crew grant.
 CREW_SANDBOX_ROOT = _env("CREW_SANDBOX_ROOT")
 _RUN_APPROVER: Optional["ChildApprover"] = None  # set inside the crew child process
+_no_grant_runs: set = set()  # parent side: runs started by the signed trigger (never get a grant)
 
 
 def request_tool_grant_fn(arg: str) -> str:
@@ -527,9 +528,12 @@ if CREW_SANDBOX_ROOT:
 ALLOWED_TOOLS = parse_allowed_tools(_env("CREW_ALLOWED_TOOLS"), TOOL_REGISTRY)
 
 
-def child_allowed_tools() -> frozenset:
+def child_allowed_tools(grants: bool = True) -> frozenset:
     """Tools a run's agents are built with: CREW_ALLOWED_TOOLS plus the grant-controlled tools and
-    the request tool when the sandbox exists. The grant itself is re-checked on every call."""
+    the request tool when the sandbox exists. The grant itself is re-checked on every call.
+    grants=False (a run started by the signed trigger): none of them, not even the request tool."""
+    if not grants:
+        return ALLOWED_TOOLS - frozenset(crew_grants.GRANT_TOOLS) - {"request_tool_grant"}
     extra = (set(crew_grants.GRANT_TOOLS) | {"request_tool_grant"}) & TOOL_REGISTRY.keys()
     return ALLOWED_TOOLS | frozenset(extra)
 
@@ -1264,7 +1268,7 @@ def _run_crew_child(agent_keys: List[str], task_description: str, conn, resp_con
             conn.send(msg)
 
     rec = RunRecorder(send, agent_keys)
-    allowed = child_allowed_tools()
+    allowed = child_allowed_tools(grants=grant_ctx is not None)
     run_tools = [t for k in agent_keys for t in tools_for(k, allowed)]
     approver = (ChildApprover(send, resp_conn, candidates=write_candidates(run_tools))
                 if resp_conn is not None else None)
@@ -1439,6 +1443,14 @@ def _watch(crew_id: str, proc, parent_conn, resp_conn=None) -> None:
             elif k == "handoff":
                 db_add_handoff(crew_id, msg)
             elif k == "approval":
+                if msg.get("kind") == "tool_grant" and crew_id in _no_grant_runs:
+                    # a triggered run cannot ask for files/terminal: no request reaches Taisun
+                    log.warning("run %s: refused a files/terminal request from a triggered run", crew_id)
+                    with _lock:
+                        pipe = _resp_pipes.get(crew_id)
+                    if pipe is not None:
+                        pipe.send({"k": "decision", "approve": False})
+                    return
                 db_create_approval(crew_id, msg)
                 # The human may take a while; the wait must not eat the run's own budget.
                 deadline_box[0] += APPROVAL_TIMEOUT_S
@@ -1490,6 +1502,7 @@ def _watch(crew_id: str, proc, parent_conn, resp_conn=None) -> None:
         log.warning("run %s: could not expire approvals: %s", crew_id, sanitize_error(e))
     post_run(crew_id)
     with _lock:
+        _no_grant_runs.discard(crew_id)
         _procs.pop(crew_id, None)
         pipe = _resp_pipes.pop(crew_id, None)
     for c in (pipe, resp_conn):
@@ -1605,6 +1618,8 @@ def _launch(name: str, task: str, agents: List[str], retry_of: Optional[str] = N
             )
         parent_conn, child_conn = _ctx.Pipe(duplex=False)
         resp_recv, resp_send = _ctx.Pipe(duplex=False)  # parent -> child: approval decisions
+        if not grants_allowed:
+            _no_grant_runs.add(crew_id)
         if CREW_SANDBOX_ROOT and grants_allowed:  # a "this run only" grant belongs to the first run that starts after it
             try:
                 grant_service().store.claim_run(name, crew_id, time.time())

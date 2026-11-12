@@ -307,6 +307,33 @@ describe("sync-crew-env.sh: own 32+ byte key, 0600, revoke on clear", () => {
     expect(statSync(conf).mode & 0o777).toBe(0o600);
   }));
 
+  it("carries CREW_TRIGGER_SECRET (R13-F) so a sync never drops it, without printing it", () => withTmp((dir) => {
+    const key = randomBytes(48).toString("base64url");
+    const trig = randomBytes(48).toString("base64url");
+    const r = syncWith(dir, `NEXUS_SECRET=${NEXUS}\nCREW_INGRESS_SECRET=${key}\nCREW_TRIGGER_SECRET=${trig}\n`);
+    expect(r).toEqual({ code: 0, out: "written\n" });
+    const body = readFileSync(join(dir, ".env.crew"), "utf8");
+    expect(body).toContain(`\nCREW_TRIGGER_SECRET=${trig}\n`);
+    expect(body).not.toContain(NEXUS);
+    const off = syncWith(dir, `NEXUS_SECRET=${NEXUS}\nCREW_INGRESS_SECRET=${key}\n`);
+    expect(off.code).toBe(0);
+    expect(readFileSync(join(dir, ".env.crew"), "utf8")).toContain("\nCREW_TRIGGER_SECRET=\n"); // unset = trigger disabled
+  }));
+
+  it.each([
+    ["reuses NEXUS_SECRET", (n: string, k: string) => `NEXUS_SECRET=${n}\nCREW_INGRESS_SECRET=${k}\nCREW_TRIGGER_SECRET=${n}\n`, "CREW_TRIGGER_SECRET must differ"],
+    ["reuses the Ingress key", (n: string, k: string) => `NEXUS_SECRET=${n}\nCREW_INGRESS_SECRET=${k}\nCREW_TRIGGER_SECRET=${k}\n`, "CREW_TRIGGER_SECRET must differ"],
+    ["is under 32 bytes", (n: string, k: string) => `NEXUS_SECRET=${n}\nCREW_INGRESS_SECRET=${k}\nCREW_TRIGGER_SECRET=${"a".repeat(42)}\n`, "CREW_TRIGGER_SECRET is shorter than 43"],
+    ["has shell characters", (n: string, k: string) => `NEXUS_SECRET=${n}\nCREW_INGRESS_SECRET=${k}\nCREW_TRIGGER_SECRET=${"a".repeat(44)}$x\n`, "CREW_TRIGGER_SECRET has characters outside"],
+  ])("refuses a trigger secret that %s", (_l, env, msg) => withTmp((dir) => {
+    const key = randomBytes(48).toString("base64url");
+    const r = syncWith(dir, env(NEXUS, key));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(msg);
+    expect(r.out).not.toContain(NEXUS);
+    expect(r.out).not.toContain(key);
+  }));
+
   it("stack/crew-tools.conf is git-ignored", () => {
     expect(execFileSync("git", ["check-ignore", "stack/crew-tools.conf"], { cwd: REPO, encoding: "utf8" }).trim()).toBe("stack/crew-tools.conf");
   });

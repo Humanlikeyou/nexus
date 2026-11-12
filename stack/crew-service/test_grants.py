@@ -251,6 +251,32 @@ class WriteTests(unittest.TestCase):
         h2 = cg.git_checkpoint(d)
         self.assertNotEqual(h, h2)
 
+    def test_git_control_files_are_refused_in_any_case_or_unicode_spelling(self):
+        env = Env(self)
+        env.grant()
+        os.makedirs(os.path.join(env.scope, ".git"), exist_ok=True)
+        for path in (".GIT/config", ".Git/hooks/pre-commit", "sub/.GiT/config", ".git\u200c/config", "\uff0egit/config",
+                     ".gitattributes", ".GITATTRIBUTES", "d/.gitattributes", ".gitmodules", ".git./config"):
+            out = cg.fs_write(json.dumps({"path": path, "content": "[filter \"x\"]\n\tclean = touch PWNED"}))
+            self.assertTrue(out.startswith("Tool error"), f"{path!r}: {out}")
+            with self.assertRaises(cg.Blocked, msg=path):
+                cg.parse_shell(f"touch {path}", env.scope)
+        self.assertFalse(os.path.exists(os.path.join(env.scope, ".git", "config")))
+        self.assertTrue(cg.fs_write(json.dumps({"path": "gitnotes.txt", "content": "ok"})).startswith("wrote"))
+
+    def test_checkpoint_ignores_in_folder_attributes_so_no_filter_driver_runs(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        self.assertIn(f"attr.tree={cg.EMPTY_TREE}", cg.GIT_HARDENING)
+        cg.git_checkpoint(d)  # creates .git
+        marker = os.path.join(d, "PWNED")
+        with open(os.path.join(d, ".git", "config"), "a") as f:  # as if a crew had reached .git
+            f.write(f"[filter \"evil\"]\n\tclean = touch {marker}\n\tsmudge = touch {marker}\n")
+        open(os.path.join(d, ".gitattributes"), "w").write("* filter=evil\n")
+        open(os.path.join(d, "f.txt"), "w").write("v1")
+        cg.git_checkpoint(d)
+        self.assertFalse(os.path.exists(marker), "a filter driver ran during the checkpoint")
+
     def test_write_still_needs_the_batch_approval_when_the_grant_is_on(self):
         env = Env(self)
         env.grant()
@@ -659,6 +685,25 @@ class RequestFlowTests(unittest.TestCase):
         fin.assert_not_called()
         resume.assert_called_once_with("rid")
         self.assertEqual(r.recv(), {"k": "decision", "approve": False})
+
+    def test_triggered_run_is_built_without_any_grant_or_request_tool(self):
+        names = set(cg.GRANT_TOOLS) | {"request_tool_grant"}
+        with mock.patch.object(main, "ALLOWED_TOOLS", frozenset({"kb_query"}) | names):
+            self.assertFalse(names & main.child_allowed_tools(grants=False))
+            self.assertIn("kb_query", main.child_allowed_tools(grants=False))
+
+    def test_parent_refuses_a_grant_request_from_a_triggered_run_without_asking_taisun(self):
+        import test_main
+        r2, w2 = main.mp.Pipe(duplex=False)
+        main._no_grant_runs.add("rid")
+        main._resp_pipes["rid"] = w2
+        self.addCleanup(main._resp_pipes.pop, "rid", None)
+        calls = test_main.WatchTests().run_watch([
+            {"k": "approval", "kind": "tool_grant", "items": [], "payload": {"tools": ["shell"], "duration": "24h"}},
+            {"k": "final", "status": "completed", "result": "ok", "llm": "amara-fast", "tokens": 1, "requests": 1}])
+        self.assertNotIn(("approval", "tool_grant"), calls)
+        self.assertEqual(r2.recv(), {"k": "decision", "approve": False})
+        self.assertNotIn("rid", main._no_grant_runs)  # forgotten when the run settles
 
     def test_tool_registry_absent_without_a_sandbox_root(self):
         self.assertNotIn("shell", main.TOOL_REGISTRY)  # this image sets no CREW_SANDBOX_ROOT

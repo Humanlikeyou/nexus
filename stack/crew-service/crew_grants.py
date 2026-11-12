@@ -21,6 +21,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -424,6 +425,39 @@ _MODPATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 _MAX_TEXT = 200
 
 
+# Git control names, compared case- and Unicode-insensitively: the sandbox is a bind mount of a
+# macOS folder, which is usually case-insensitive, so `.GIT/config` IS `.git/config` there.
+_GIT_CONTROL = frozenset({".git", ".gitattributes", ".gitmodules"})
+
+
+def _norm_part(part: str) -> str:
+    part = "".join(ch for ch in unicodedata.normalize("NFKC", part) if unicodedata.category(ch) != "Cf")
+    return part.casefold().rstrip(". ")
+
+
+def _git_blocked(full: str, scope: str, raw: str = "") -> bool:
+    """True if `full` (or the raw text) names .git / .gitattributes / .gitmodules in any spelling, or
+    resolves (same inode) to or into the folder's real .git."""
+    for text in (raw, os.path.relpath(full, scope) if within(full, scope) else full):
+        if any(_norm_part(p) in _GIT_CONTROL for p in text.replace("\\", "/").split("/") if p):
+            return True
+    real_git = os.path.join(scope, ".git")
+    if not os.path.exists(real_git):
+        return False
+    cur, root = os.path.abspath(full), os.path.realpath(scope)
+    while True:
+        if os.path.exists(cur):
+            try:
+                if os.path.samefile(cur, real_git):
+                    return True
+            except OSError:
+                return True  # cannot tell: fail closed
+        parent = os.path.dirname(cur)
+        if parent == cur or os.path.realpath(cur) == root:
+            return False
+        cur = parent
+
+
 def _check_path(val: str, scope: str) -> None:
     """Every path-like value, wherever it came from: no NUL, no `..`, and after resolving symlinks
     it must be inside the folder."""
@@ -433,13 +467,12 @@ def _check_path(val: str, scope: str) -> None:
     parts = base.replace("\\", "/").split("/")
     if ".." in parts:
         raise Blocked("path", "path leaves the folder")
-    if ".git" in parts:
-        raise Blocked("path", ".git is off limits")
     cand = base if os.path.isabs(base) else os.path.join(scope, base)
+    if _git_blocked(cand, scope, base):
+        raise Blocked("path", ".git is off limits")
     if not within(cand, scope):
         raise Blocked("path", "path is outside the folder")
-    rel = os.path.relpath(os.path.realpath(cand), os.path.realpath(scope))
-    if ".git" in rel.split(os.sep):  # a symlink into .git
+    if _git_blocked(os.path.realpath(cand), os.path.realpath(scope)):  # a symlink into .git
         raise Blocked("path", ".git is off limits")
 
 
@@ -568,8 +601,12 @@ def parse_shell(command: str, scope: str) -> List[str]:
 
 
 # No hooks, no fsmonitor, no pager, no external diff or attribute files, no network protocols.
+# attr.tree = the empty tree: in-folder .gitattributes are ignored, so no filter/textconv/diff driver
+# can be selected by a file the crew wrote (git >= 2.42; an unresolvable value also means "empty").
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 GIT_HARDENING = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", "-c", "core.pager=cat",
-                 "-c", "protocol.allow=never", "-c", "diff.external=", "-c", "core.attributesFile=/dev/null"]
+                 "-c", "protocol.allow=never", "-c", "diff.external=", "-c", "core.attributesFile=/dev/null",
+                 "-c", f"attr.tree={EMPTY_TREE}"]
 
 
 _GIT_ENV = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0", "GIT_AUTHOR_NAME": "crew", "GIT_AUTHOR_EMAIL": "crew@localhost",
@@ -649,7 +686,7 @@ def _safe_path(scope: str, rel: str, must_exist: bool = False) -> str:
     full = rel if os.path.isabs(rel) else os.path.join(scope, rel)
     if not within(full, scope):
         raise Blocked("path", "path is outside the folder")
-    if ".git" in os.path.relpath(os.path.realpath(full), os.path.realpath(scope)).split(os.sep) or ".git" in rel.replace("\\", "/").split("/"):
+    if _git_blocked(full, scope, rel) or _git_blocked(os.path.realpath(full), os.path.realpath(scope)):
         raise Blocked("path", ".git is off limits")
     if must_exist and not os.path.exists(full):
         raise Blocked("path", "no such file")
@@ -720,7 +757,7 @@ def fs_write(arg: str) -> str:
         if len(content.encode("utf-8")) > FS_WRITE_MAX_BYTES:
             raise Blocked("size", "content is too large")
         p = _safe_path(g.scope_path, rel)
-        if ".git" in os.path.relpath(p, g.scope_path).split(os.sep):
+        if _git_blocked(p, g.scope_path, rel):
             raise Blocked("path", ".git is off limits")
         if os.path.islink(p):
             raise Blocked("path", "refusing to write through a symlink")
