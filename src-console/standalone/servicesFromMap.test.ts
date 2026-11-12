@@ -33,3 +33,11 @@ describe("servicesFromMap", () => {
     expect(nodeState([])).toBe("waiting");
   });
 });
+
+describe("summaryFromServices", () => {
+  it("counts failed, degraded and restarting only; updateReady stays false", async () => {
+    const { summaryFromServices } = await import("./servicesSummary");
+    const { services } = servicesFromMap(map);
+    expect(summaryFromServices(services)).toEqual({ attention: 1, updateReady: false });
+  });
+});

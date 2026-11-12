@@ -155,3 +155,22 @@ describe("live standalone adapter (secrets + n8n key file + backups)", () => {
     await p;
   });
 });
+
+describe("live standalone adapter (summary + last backup)", () => {
+  beforeEach(() => { vi.resetModules(); invoke.mockReset(); });
+  it("summary derives attention from the system map; backup last stays null (no checksum source)", async () => {
+    const map = { checkedAt: "2026-11-12T10:00:00+09:00", nodes: [{ id: "app", label: "A", kind: "app" }, { id: "crew", label: "Crews", kind: "service" }],
+      paths: [{ id: "x", from: "app", to: "crew", carries: "c", status: "broken", lastOkAt: null, reason: "down", fix: null }] };
+    const settings = { nightly: true, at: "03:00", dir: "d", keep: 7, beforeUpdate: true, skipOnBatteryBelow: 20 };
+    invoke.mockImplementation(async (cmd: string) => cmd === "system_map_status" ? map : cmd === "backup_settings_get" ? settings
+      : cmd === "backup_list" ? [{ id: "b", label: "l", madeAt: "2026-11-12T03:00:00Z", sizeBytes: 5, daysOld: 0 }] : cmd === "secrets_status" ? [] : { made: false, where: "w" });
+    const { unwiredStandalone } = await import("./adapters");
+    const { makeLiveStandalone, refreshLive } = await import("./liveAdapter");
+    const a = makeLiveStandalone(unwiredStandalone);
+    expect(a.summary().state).toBe("unwired");
+    await refreshLive();
+    expect(a.summary()).toEqual({ state: "live", value: { attention: 1, updateReady: false } });
+    const b = a.backup();
+    expect(b.state === "live" && b.value.last).toBeNull();
+  });
+});

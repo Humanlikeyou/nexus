@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { BackupRun, BackupSettings, BackupStatus, KeyFileStatus, SecretName, SecretStatus, StandaloneAdapter } from "./adapters";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 import { servicesFromMap } from "./servicesFromMap";
+import { summaryFromServices } from "./servicesSummary";
 import type { SystemMap } from "./systemMap";
 
 /**
@@ -83,6 +84,7 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
   return {
     ...base,
     services: () => live(cache.map ? servicesFromMap(cache.map) : null),
+    summary: () => live(cache.map ? summaryFromServices(servicesFromMap(cache.map).services) : null),
     secrets: () => live(cache.secrets),
     setSecret: async (name: SecretName, value: string) => {
       try { await invoke("secret_set", { name, value }); } catch (e) { console.warn("[standalone] secret_set refused:", code(e)); return UNWIRED; }

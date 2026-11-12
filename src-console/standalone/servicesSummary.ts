@@ -1,5 +1,14 @@
 import { valueOf } from "../lib/sampleAdapters";
-import type { StandaloneAdapter } from "./adapters";
+import type { Service, ServicesSummary, StandaloneAdapter } from "./adapters";
+
+/**
+ * Live sidebar summary. `attention` counts services that are failed, degraded or restarting.
+ * `waiting` (not checked yet) and `stopped` (all off) are not alarms. `updateReady` has no source
+ * (the updater is not built), so it is always false rather than guessed.
+ */
+export function summaryFromServices(services: Service[]): ServicesSummary {
+  return { attention: services.filter((s) => s.state === "failed" || s.state === "degraded" || s.state === "restarting").length, updateReady: false };
+}
 
 /** Sidebar footer line (design-1111s): "1 service needs attention ›" in preview, otherwise null (keep "Amara ready"). */
 export function servicesFooter(adapter: StandaloneAdapter): { text: string; attention: number } | null {

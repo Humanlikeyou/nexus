@@ -48,3 +48,28 @@ describe("live money adapter", () => {
     expect(n.accounts()).toEqual({ state: "live", value: [] });
   });
 });
+
+describe("live money watch-only", () => {
+  const XPUB = "xpub" + "6".repeat(107);
+  it("ledger route is ready, jp_bank stays unwired", () => {
+    const m = makeLiveMoney((async () => []) as never, vi.fn());
+    const by = Object.fromEntries(m.routes().map((r) => [r.id, r.ready.state]));
+    expect(by).toMatchObject({ ledger: "live", jp_bank: "unwired", chime: "unwired", fidelity: "unwired" });
+  });
+  it("creates the account then adds the public value; never sends a refused value", async () => {
+    const call = vi.fn(async (cmd: string) => (cmd === "money_account_add" ? { id: "a1" } : []));
+    const m = makeLiveMoney(call as never, vi.fn());
+    expect((await m.addWatchOnly("btc", XPUB, "Ledger")).state).toBe("live");
+    expect(call).toHaveBeenCalledWith("money_watch_add", { accountId: "a1", value: XPUB });
+    call.mockClear();
+    const phrase = "abandon ability able about above absent absorb abstract absurd abuse access accident";
+    expect((await m.addWatchOnly("btc", phrase, "x")).state).toBe("unwired");
+    expect((await m.addWatchOnly("eth", XPUB, "x")).state).toBe("unwired"); // chain mismatch
+    expect(call.mock.calls.filter((c) => c[0] === "money_account_add" || c[0] === "money_watch_add")).toHaveLength(0);
+  });
+  it("a backend refusal is unwired", async () => {
+    const call = vi.fn(async (cmd: string) => { if (cmd === "money_account_add") throw "invalid_input"; return []; });
+    const m = makeLiveMoney(call as never, vi.fn());
+    expect((await m.addWatchOnly("btc", XPUB, "x")).state).toBe("unwired");
+  });
+});

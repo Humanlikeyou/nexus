@@ -1,6 +1,7 @@
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 import { announceStores, live, realInvoke, type Invoke } from "../lib/localStores";
-import { unwiredMoney, type Fx, type Institution, type MoneyAccount, type MoneyAdapter, type Region, type Route } from "./adapters";
+import { guardWatchInput } from "./seedGuard";
+import { unwiredMoney, type ConnectRoute, type Fx, type Institution, type MoneyAccount, type MoneyAdapter, type Region, type Route } from "./adapters";
 
 /**
  * Live money adapter over the READ-ONLY Rust commands `money_accounts_list` and `fx_rate_get`
@@ -61,8 +62,23 @@ export function makeLiveMoney(call: Invoke = realInvoke, notify: () => void = an
   }
   const start = () => { if (!started) { started = true; void refresh(); } };
 
+  const ledgerReady = { state: "live", value: { ok: true } } as const;
   return {
     ...unwiredMoney,
+    // Ledger watch-only is wired. jp_bank stays unwired: money_import_statement needs an account id and a
+    // file path, and importStatement() carries neither (no file picker is reachable from here).
+    routes: (): ConnectRoute[] => unwiredMoney.routes().map((r) => (r.id === "ledger" ? { ...r, ready: ledgerReady } : r)),
+    addWatchOnly: async (chain, publicValue, nickname) => {
+      // The seed guard runs first, again, so a refused value never reaches invoke.
+      const g = guardWatchInput(publicValue);
+      if (g.kind !== "public" || g.chain !== chain) return UNWIRED;
+      try {
+        const acct = await call<{ id: string }>("money_account_add", { draft: { nickname: nickname.trim() || "Ledger", institution: "ledger", kind: chain, route: "watch_only", currency: chain === "btc" ? "BTC" : "ETH", scope: "personal" } });
+        await call("money_watch_add", { accountId: acct.id, value: publicValue.trim() });
+      } catch (e) { console.warn("[money] watch-only add refused:", typeof e === "string" ? e.slice(0, 40) : "failed"); return UNWIRED; }
+      await refresh();
+      return live({ ok: true as const });
+    },
     accounts: (): Wired<MoneyAccount[]> => { start(); return accounts ? live(accounts) : UNWIRED; },
     fx: (): Wired<Fx> => { start(); return fxRead && fx ? live(fx) : UNWIRED; },
   };

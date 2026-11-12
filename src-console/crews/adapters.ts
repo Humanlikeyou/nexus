@@ -1,3 +1,5 @@
+import { inTauri } from "../lib/localStores";
+import { makeLiveCrewsSchedule } from "./liveSchedule";
 import { NEEDS_CONVERSION, UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
 
 /** A request from a crew that waits for Taisun (separate from Terrance's approvals). */
@@ -48,4 +50,4 @@ export const sampleCrews: CrewsAdapter = {
   handoffs: () => sample([{ from: "planner", to: "writer" }, { from: "writer", to: "reviewer" }, { from: "writer", to: "kb_query" }]),
 };
 
-export const crewsAdapter = (): CrewsAdapter => (sampleAdaptersEnabled() ? sampleCrews : unwiredCrews);
+export const crewsAdapter = (): CrewsAdapter => (sampleAdaptersEnabled() ? sampleCrews : inTauri() ? makeLiveCrewsSchedule(unwiredCrews) : unwiredCrews);
