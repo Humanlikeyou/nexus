@@ -448,6 +448,7 @@ pub fn run() {
             crew_grants::crew_tool_audit,
             n8n_status::n8n_status,
             kb_status::kb_status,
+            commands::system_map::system_map_status,
             kb_status::crew_tools,
             // Amara Voice (~/projects/amara-voice)
             voice::voice_status,

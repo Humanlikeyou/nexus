@@ -37,6 +37,7 @@ pub mod restart_services;
 pub mod sessions;
 pub mod snapshots;
 pub mod system;
+pub mod system_map;
 pub mod take_events;
 pub mod take_log;
 pub mod telegram;

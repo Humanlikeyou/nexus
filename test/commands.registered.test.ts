@@ -60,6 +60,13 @@ describe("Tauri command registry", () => {
     expect(names.filter((n: string) => /^(money|fx)_/.test(n) && /transfer|pay|trade|convert|withdraw|send|buy|sell/.test(n))).toEqual([]);
   });
 
+  it("system_map_status is registered", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    expect(names).toContain("system_map_status");
+  });
+
   it("every frontend invoke/read names a registered command", async () => {
     const inv = (await inventory()) as Inventory;
     expect(inv.commands.length).toBeGreaterThan(100);

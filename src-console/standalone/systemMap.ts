@@ -37,7 +37,7 @@ export function makeSampleSystemMap(): SystemMapAdapter {
   const n = (id: string, label: string, kind: MapNodeKind): MapNode => ({ id, label, kind });
   const nodes = [
     n("app", "Amara OS", "app"), n("router", "Amara Router", "backend"), n("ollama", "Local models", "backend"),
-    n("hermes", "Hermes (Chat)", "backend"), n("noop", "Health sync (NOOP)", "store"), n("muse", "Muse headset", "device"),
+    n("hermes", "Hermes (Chat)", "backend"), n("noop", "Health sync", "store"), n("muse", "Muse headset", "device"),
     n("crew", "Crews", "service"), n("n8n", "n8n", "service"), n("postgres", "Postgres", "store"), n("letta", "Letta memory", "store"),
     n("verba", "Knowledge base", "service"), n("ha", "Home Assistant", "service"), n("voice", "Amara Voice", "service"),
     n("telegram", "Telegram", "external"), n("backups", "Backups", "store"),

@@ -65,17 +65,22 @@ async fn get_json(client: &reqwest::Client, path: &str, key: &str) -> Option<Val
     resp.json::<Value>().await.ok()
 }
 
+/// n8n's unauthenticated /healthz, GET only (also used by the system map).
+pub(crate) async fn n8n_healthz(client: &reqwest::Client, timeout: std::time::Duration) -> bool {
+    client
+        .get(format!("{N8N_URL}/healthz"))
+        .timeout(timeout)
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
 /// Never an error: every state is something the UI shows.
 #[tauri::command]
 pub async fn n8n_status() -> Result<N8nStatus, String> {
     let client = reqwest::Client::new();
-    let up = client
-        .get(format!("{N8N_URL}/healthz"))
-        .timeout(std::time::Duration::from_secs(3))
-        .send()
-        .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false);
+    let up = n8n_healthz(&client, std::time::Duration::from_secs(3)).await;
     if !up {
         return Ok(N8nStatus::default());
     }
