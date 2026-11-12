@@ -4,6 +4,7 @@ import { valueOf } from "../lib/sampleAdapters";
 import { SERVICE_GROUPS, type Service, type StandaloneAdapter } from "./adapters";
 import { SaCard, ServiceStatus, Spin, WireNote } from "./parts";
 import { SignedInSites } from "../homeWindows/SignedInSites";
+import { SystemMap } from "./SystemMapView";
 
 /** Attention means you might act: slow or not running. Restarts the supervisor is handling, stops you made and the transition wait don't count. */
 export const needsAttention = (s: Service) => s.group !== "side" && (s.state === "degraded" || s.state === "failed");
@@ -63,6 +64,7 @@ export function ServicesView({ adapter }: { adapter: StandaloneAdapter }) {
   if (!v) return (
     <div className="pk-host sa-page">
       <PageHero title="Services" statement="Service health" detail={<>Status, restart and logs for everything Amara runs <DataTag kind="wire" /></>} />
+      <SystemMap />
       <SaCard title="Services" w={w}><WireNote>Needs wiring: Amara&apos;s supervisor reports each service here once Claude builds it (HANDOFF-1111s §2). Nothing here is made up.</WireNote></SaCard>
       <SignedInSites />
     </div>
@@ -80,6 +82,7 @@ export function ServicesView({ adapter }: { adapter: StandaloneAdapter }) {
   return (
     <div className="pk-host sa-page">
       <PageHero title="Services" statement={servicesStatement(list)} detail={servicesDetail(list, v.checked)} />
+      <SystemMap />
       <div className="pk-sum">
         <div className="pk-tile"><span className="pk-tile__k">Healthy</span><span className="pk-tile__v">{c((s) => s.state === "healthy").length}</span><span className="pk-tile__s"><StatusText kind="ok">Working normally</StatusText></span></div>
         <div className="pk-tile"><span className="pk-tile__k">Slow</span><span className="pk-tile__v">{slow.length}</span><span className="pk-tile__s">{slow.length ? <StatusText kind="wait">{slow.map((s) => s.name.replace(/^Automations \((.+)\)$/, "$1")).join(" · ")}</StatusText> : "None"}</span></div>
