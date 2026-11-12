@@ -12,7 +12,7 @@ const data: SystemSnapshot = { ...INITIAL_SNAPSHOT, refreshedAt: INITIAL_SNAPSHO
 const scheduler = { running: true, lastConsolidation: NOW - 3_600_000, lastReasoning: NOW - 7_200_000 };
 
 describe("design-1111u C: Your body today", () => {
-  it("one card: recovery ring, sleep and HRV once each with vs usual from earlier days (the heart-rate take is off Home, 2026-11-12)", async () => {
+  it("one card: recovery ring, sleep and HRV once each with vs usual from earlier days, and the heart-rate take beside them", async () => {
     render(<TerranceField data={data} now={NOW} scheduler={scheduler} onNavigate={() => undefined} />);
     await act(async () => {});
     const card = screen.getByRole("region", { name: "Your body today" });
@@ -20,8 +20,9 @@ describe("design-1111u C: Your body today", () => {
     expect(within(card).getByText("High")).toHaveAttribute("data-band", "high");
     expect(card).toHaveTextContent("▲ 7 vs usual");
     expect(within(card).getByLabelText("Last night")).toHaveTextContent("Sleep6h 40m▼ 40 min vs usualHRV38 ms▼ 14 ms vs usual");
-    // Taisun removed the heart-rate take from this card on 2026-11-12; it must not render here.
-    expect(within(card).queryByRole("region", { name: "Amara's take" })).toBeNull();
+    // The take column: unwired here (no backend command yet), so no numbers and a Needs wiring tag.
+    const take = within(card).getByRole("region", { name: "Amara's take" });
+    expect(within(take).getByText("Needs wiring")).toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Open Fitness" })).toBeInTheDocument();
     expect(screen.queryByText("Recovery & sleep")).toBeNull();
     // Each number appears once on the card.

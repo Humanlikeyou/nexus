@@ -23,11 +23,6 @@ const SURFACES: Array<[string, (p: Page) => Promise<void>]> = [
   ["Settings memory", async (p) => { await sub(p, "Settings", "Memory"); }],
 ];
 
-// Obsolete expectation, intentionally changed in 686340d (Taisun's request): the heart-rate take, which carried the
-// "Sample data" tag, was removed from Home. Home now shows only today's one thing when there is one, and that block
-// carries no tag. Home is still checked for axe, and for no tag without sample adapters; it just has no tag to find with them.
-const NO_SAMPLE_TAG_ON = new Set(["Home take"]);
-
 for (const sample of [false, true]) {
   for (const [name, go] of SURFACES) {
     test(`(1111) ${name}${sample ? " with sample adapters" : ""}: axe clean (incl. 4.5:1 contrast), honest tags`, async ({ page, theme }) => {
@@ -38,7 +33,7 @@ for (const sample of [false, true]) {
       await page.waitForTimeout(300);
       expect(await blocking(page)).toEqual([]);
       if (!sample) await expect(page.getByText("Sample data")).toHaveCount(0);
-      else if (!NO_SAMPLE_TAG_ON.has(name)) await expect(page.getByText("Sample data").first()).toBeVisible();
+      else await expect(page.getByText("Sample data").first()).toBeVisible();
     });
   }
 }

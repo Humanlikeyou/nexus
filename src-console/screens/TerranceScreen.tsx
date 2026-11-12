@@ -15,6 +15,7 @@ import { NeedsYouToday, WeeklyReadyCard, useNeedsYou } from "../inbox/NeedsYouTo
 import type { Route } from "../app/routes";
 import { useReadinessLine } from "../lib/useReadiness";
 import { usualRange } from "../ui/charts/chartMath";
+import { HrTake } from "../hrTake/HrTakeCard";
 import "./TerranceScreen.css";
 
 const DASH = "—";
@@ -344,6 +345,7 @@ export function TerranceField({ data, onNavigate, onOpen, todos, onRetry, loadin
       </div>
       <div className="body-today">
         <div className="body-today__left">{recoveryBody}</div>
+        <HrTake variant="inline" onOpenDevices={onNavigate ? () => onNavigate("devices") : undefined} />
       </div>
 
       {readinessLine && (
