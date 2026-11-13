@@ -409,7 +409,7 @@ fn has_math(t: &str) -> bool {
 }
 
 /// Home commands that are never auto-run by the pre-route.
-const SENSITIVE_HOME_WORDS: [&str; 20] = [
+const SENSITIVE_HOME_WORDS: [&str; 30] = [
     "lock",
     "locks",
     "locked",
@@ -430,6 +430,16 @@ const SENSITIVE_HOME_WORDS: [&str; 20] = [
     "unlocking",
     "locking",
     "alarms",
+    "deadbolt",
+    "gate",
+    "gates",
+    "window",
+    "windows",
+    "siren",
+    "latch",
+    "bolt",
+    "disarm",
+    "arm-away",
 ];
 
 const HOME_VERBS: [&str; 18] = [

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { EMPTY_DEVICE_ID } from "./lib/devices";
 import type {
   CrewApprovalRow,
@@ -42,6 +42,7 @@ import type {
   AmaraTierInfo,
   AmaraTurnContext,
   ChatTurn,
+  TurnEvent,
   TerrenceAction,
   TerrenceAutomation,
   TerrenceAutomationRun,
@@ -287,6 +288,18 @@ export const getCrewToolGrant = (crewId: string) => invoke<CrewToolGrantRow>("cr
 export const setCrewToolGrant = (crewId: string, tools: string[], duration: "run" | "1h" | "24h") => invoke<CrewToolGrantRow>("crew_tool_grant_set", { crewId, tools, duration });
 export const revokeCrewToolGrant = (crewId: string) => invoke<CrewToolGrantRow>("crew_tool_grant_revoke", { crewId });
 export const getCrewToolAudit = (crewId: string, limit = 50, before: number | null = null) => invoke<CrewAuditApiRow[]>("crew_tool_audit", { crewId, limit, before });
+
+/** Turn pipeline (flag nexus.turnPipeline). Resolves with the turn id at once; events arrive on `onEvent`. */
+export const amaraTurn = (
+  input: { conversationId: string; text: string; deep?: boolean; haNames?: string[] },
+  surface: "typed" | "voice" | "lens" | "window",
+  onEvent: (event: TurnEvent) => void,
+) => {
+  const channel = new Channel<TurnEvent>();
+  channel.onmessage = onEvent;
+  return invoke<string>("amara_turn", { input, surface, channel });
+};
+export const amaraTurnCancel = (turnId: string) => invoke<boolean>("amara_turn_cancel", { turnId });
 
 export const interactWithTerrence = (request: {
   message: string;

@@ -26,6 +26,14 @@ export interface AmaraTierInfo {
   source: string;
 }
 
+/** One event from the Rust turn pipeline (`amara_turn`, src-tauri commands/amara_turn.rs). Fields are snake_case as serialised. */
+export type TurnEvent =
+  | { type: "status"; phase: "routing" | "context" | "loading_model" | "sending" | "tools" | string; tier?: "fast" | "deep" | "claude"; sections?: string[] }
+  | { type: "delta"; text: string }
+  | { type: "action"; kind: "nexus_action" | "add_preview" | "navy" | "window_open" | "home" | string; payload?: unknown }
+  | { type: "done"; interaction_id: string; text: string; tier?: "fast" | "deep" | "claude"; path: "router" | "hermes" | "navy" | "home" | "add" | string; duration_ms: number; sections_used: string[] }
+  | { type: "error"; code: string; message: string };
+
 export interface ChatTurn {
   role: "user" | "assistant";
   content: string;

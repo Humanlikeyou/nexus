@@ -38,8 +38,10 @@ import { ASK_MORE_EVENT, type AskMoreDetail } from "./amaraTake/takeView";
 import { standaloneAdapter } from "./standalone/adapters";
 import { FirstRun } from "./standalone/FirstRun";
 import { settingsTab } from "./app/settingsTabs";
-import { handleWindowPrompt, useVoiceWindowPrompts } from "./homeWindows/useHomeWindows";
-import { handleNavyPrompt, NavyRoot, useVoiceNavyPrompts } from "./navyMode";
+import { applyIntent, handleWindowPrompt, useVoiceWindowPrompts } from "./homeWindows/useHomeWindows";
+import { homeWindowsStore, resolveVoiceTarget } from "./homeWindows";
+import { createSendHome } from "./app/turnChannel";
+import { enterNavy, exitNavy, handleNavyPrompt, NavyRoot, useVoiceNavyPrompts } from "./navyMode";
 
 const BUSINESS_VIEW_KEY = "amara.business.view";
 function readBusinessView(): string | null {
@@ -119,12 +121,12 @@ export default function App() {
   useVoiceNavyPrompts(voiceTurns);
   useVoiceWindowPrompts(voiceTurns);
   const { handleTyped: handleChatAdd } = useChatAdds(postLocal, voiceTurns);
-  const sendHome = useCallback(async (message: string, options?: { deep?: boolean }) => {
-    if (await handleChatAdd(message)) return;
-    if (handleNavyPrompt(message, "chat")) return;
-    if (handleWindowPrompt(message, "chat")) return;
-    await sendToTerrence(message, options);
-  }, [sendToTerrence, handleChatAdd]);
+  // Flag off: the old renderer pre-route and send. Flag on (nexus.turnPipeline): Rust owns adds, navy, window open and HA.
+  const sendHome = useMemo(() => createSendHome({
+    handleChatAdd, handleNavyPrompt, handleWindowPrompt, enterNavy, exitNavy, sendToTerrence,
+    resolveWindowIntent: (message) => resolveVoiceTarget(homeWindowsStore.get(), message),
+    applyWindowIntent: applyIntent,
+  }), [sendToTerrence, handleChatAdd]);
   useEffect(() => {
     const palette = (event: KeyboardEvent) => {
       if (!event.metaKey || event.ctrlKey || event.altKey || event.key.toLowerCase() !== "k") return;
