@@ -657,12 +657,11 @@ pub(crate) fn router_facts(status: u16, body: &str) -> Probe<RouterFacts> {
 async fn router_probe() -> Probe<RouterFacts> {
     let saved = super::telegram::load_config().amara_router_url;
     let base = super::llm_router::router_base(None, saved.as_deref());
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(PROBE_TIMEOUT)
-        .build()
-        .map_err(|_| Fail::Failed)?;
+    let client = super::shared::http::builder(
+        super::shared::http::HttpSpec::loopback().timeout(PROBE_TIMEOUT),
+    )
+    .build()
+    .map_err(|_| Fail::Failed)?;
     let resp = client
         .get(format!("{base}/health"))
         .send()
@@ -787,10 +786,12 @@ async fn collect_probes() -> Probes {
             }
         }),
         probe(async {
-            let client = reqwest::Client::builder()
-                .no_proxy()
-                .build()
-                .map_err(|_| Fail::Failed)?;
+            let client = super::shared::http::builder(super::shared::http::HttpSpec {
+                no_proxy: true,
+                ..Default::default()
+            })
+            .build()
+            .map_err(|_| Fail::Failed)?;
             Ok(super::n8n_status::n8n_healthz(&client, PROBE_TIMEOUT).await)
         }),
         probe(async {

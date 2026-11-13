@@ -2,7 +2,7 @@
 //!
 //! Every client built here has no proxy, no redirects and a named connect timeout. The parsed
 //! loopback check (`loopback_base`, moved from `llm_router.rs`) and a body cap helper live here too,
-//! so later lanes do not copy them. `ha.rs` still has its own `loopback_base` copy (separate task).
+//! so later lanes do not copy them. `ha.rs` uses this `loopback_base` too (its private copy is gone).
 
 use std::time::Duration;
 
@@ -12,12 +12,11 @@ pub(crate) const LOOPBACK_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// A loopback client: no redirects (one off the Mac is never legitimate) and no environment proxy
 /// (a proxy must never carry a loopback call off the Mac). Per-request timeouts stay with the caller.
 pub(crate) fn loopback_client(connect_timeout: Duration) -> reqwest::Client {
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .no_proxy()
-        .connect_timeout(connect_timeout)
-        .build()
-        .unwrap_or_default()
+    super::shared::http::builder(
+        super::shared::http::HttpSpec::loopback().connect_timeout(connect_timeout),
+    )
+    .build()
+    .unwrap_or_default()
 }
 
 /// True when the parsed URL's host is `localhost` or a loopback IP. Parsing (not string splitting)
@@ -95,12 +94,21 @@ mod tests {
 
     #[test]
     fn builder_sets_no_proxy_and_no_redirects_source_pin() {
+        // loopback_client must build from the shared loopback spec with the caller's connect timeout...
         let src = include_str!("loopback_http.rs");
         let f = &src[src.find("pub(crate) fn loopback_client").unwrap()..];
         let f = &f[..f.find(".build()").unwrap()];
-        assert!(f.contains(".no_proxy()"));
-        assert!(f.contains("redirect::Policy::none()"));
+        assert!(f.contains("HttpSpec::loopback()"));
         assert!(f.contains(".connect_timeout(connect_timeout)"));
+        // ...and that spec must be no-proxy + no-redirects, applied by the shared builder.
+        let http = include_str!("shared/http.rs");
+        let spec = &http[http.find("pub(crate) const fn loopback()").unwrap()..];
+        let spec = &spec[..spec.find("\n    }\n").unwrap()];
+        assert!(spec.contains("no_proxy: true"));
+        assert!(spec.contains("no_redirects: true"));
+        let b = &http[http.find("pub(crate) fn builder(").unwrap()..];
+        assert!(b.contains("b = b.no_proxy();"));
+        assert!(b.contains("redirect(reqwest::redirect::Policy::none())"));
     }
 
     #[test]

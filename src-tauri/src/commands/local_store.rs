@@ -4,27 +4,20 @@
 //! same folder and renamed over the old one (a crash never leaves half a file), capped in size, and
 //! read through `symlink_metadata` so a symlink or an oversized file is refused, not followed.
 
-use chrono::{DateTime, FixedOffset, NaiveDate, SecondsFormat, Utc};
+use chrono::{DateTime, FixedOffset, SecondsFormat};
 use serde::{de::DeserializeOwned, Serialize};
 use std::fs;
 use std::path::Path;
 
 /// Taisun's clock: every stored time and every "today" is JST.
-pub(crate) fn jst() -> FixedOffset {
-    FixedOffset::east_opt(9 * 3600).expect("valid offset")
-}
-
-pub(crate) fn now_jst() -> DateTime<FixedOffset> {
-    Utc::now().with_timezone(&jst())
-}
+pub(crate) use super::shared::time::{jst, now_jst};
 
 pub(crate) fn iso(t: &DateTime<FixedOffset>) -> String {
     t.to_rfc3339_opts(SecondsFormat::Millis, false)
 }
 
-pub(crate) fn day_of(t: &DateTime<FixedOffset>) -> NaiveDate {
-    t.date_naive()
-}
+/// The local (JST) day of an instant: the one day-key rule lives in `shared::time::day_key`.
+pub(crate) use super::shared::time::day_key as day_of;
 
 /// Trimmed text with control characters turned into spaces; `Err` outside `min..=max` characters.
 pub(crate) fn clean_text(raw: &str, min: usize, max: usize) -> Result<String, String> {
@@ -88,19 +81,11 @@ pub(crate) fn write_text_atomic(path: &Path, text: &str, max_bytes: u64) -> Resu
     let dir = path.parent().ok_or("store: bad path")?;
     crate::app_paths::create_private_dir_all(dir)
         .map_err(|_| "store: can't create the folder".to_string())?;
-    let name = path
-        .file_name()
+    path.file_name()
         .and_then(|n| n.to_str())
         .ok_or("store: bad path")?;
-    let tmp = dir.join(format!(".{name}.tmp"));
-    if let Err(_e) = crate::app_paths::write_private(&tmp, text) {
-        let _ = fs::remove_file(&tmp);
-        return Err("store: can't write the file".to_string());
-    }
-    fs::rename(&tmp, path).map_err(|_| {
-        let _ = fs::remove_file(&tmp);
-        "store: can't write the file".to_string()
-    })
+    super::shared::fsx::atomic_write_with_mode(path, text.as_bytes(), Some(0o600))
+        .map_err(|_| "store: can't write the file".to_string())
 }
 
 pub(crate) fn write_json_atomic<T: Serialize>(
@@ -144,6 +129,26 @@ pub(crate) mod tests {
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
         assert_eq!(names, vec!["a.json"]);
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_refuses_a_symlink_at_the_target_and_leaves_its_destination_alone() {
+        let d = temp_dir("lssym");
+        let real = d.join("real.json");
+        fs::write(&real, "keep").unwrap();
+        let link = d.join("link.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(
+            write_text_atomic(&link, "[1]", 1000).unwrap_err(),
+            "store: can't write the file"
+        );
+        assert_eq!(fs::read_to_string(&real).unwrap(), "keep");
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
         let _ = fs::remove_dir_all(d);
     }
 

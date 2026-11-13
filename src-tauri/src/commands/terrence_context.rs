@@ -167,20 +167,17 @@ fn db_path() -> PathBuf {
 }
 
 pub(crate) fn open_terrence_core_db() -> Result<Connection, String> {
+    use super::shared::sqlite::{open_private_wal, OpenStep};
     let path = db_path();
-    let parent = path
-        .parent()
-        .ok_or_else(|| "Amara context database has no parent directory.".to_string())?;
-    crate::app_paths::create_private_dir_all(parent)
-        .map_err(|error| format!("Failed to create Amara context directory: {error}"))?;
-    crate::app_paths::ensure_private_file(&path)
-        .map_err(|error| format!("Failed to create Amara context database: {error}"))?;
-    let conn = Connection::open(&path)
-        .map_err(|error| format!("Failed to open Amara context database: {error}"))?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|error| format!("Failed to configure Amara context database: {error}"))?;
-    crate::app_paths::restrict_sqlite_files(&path)
-        .map_err(|error| format!("Failed to secure Amara context database: {error}"))?;
+    let conn = open_private_wal(&path).map_err(|step| match step {
+        OpenStep::Dir(error) => format!("Failed to create Amara context directory: {error}"),
+        OpenStep::File(error) => format!("Failed to create Amara context database: {error}"),
+        OpenStep::Open(error) => format!("Failed to open Amara context database: {error}"),
+        OpenStep::Configure(error) => {
+            format!("Failed to configure Amara context database: {error}")
+        }
+        OpenStep::Secure(error) => format!("Failed to secure Amara context database: {error}"),
+    })?;
     init_db(&conn)?;
     Ok(conn)
 }

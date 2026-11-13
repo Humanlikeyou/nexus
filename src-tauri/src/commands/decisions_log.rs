@@ -7,6 +7,7 @@
 use super::local_store::{
     clean_slug, clean_text, iso, new_id, now_jst, read_json, write_json_atomic,
 };
+use super::shared::task::{blocking, JoinErr};
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -188,32 +189,30 @@ fn data_dir() -> PathBuf {
     dir_in(&crate::app_paths::data_dir())
 }
 
-async fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(f)
-        .await
-        .map_err(|e| e.to_string())?
-}
-
 #[tauri::command]
 pub async fn decisions_list() -> Result<Vec<DecisionRecord>, String> {
-    blocking(|| list_in(&data_dir())).await
+    blocking(JoinErr::Plain, || list_in(&data_dir())).await
 }
 
 #[tauri::command]
 pub async fn decisions_append(draft: DecisionDraft) -> Result<DecisionRecord, String> {
-    blocking(move || append_in(&data_dir(), &draft, now_jst())).await
+    blocking(JoinErr::Plain, move || {
+        append_in(&data_dir(), &draft, now_jst())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn decisions_undo(id: String) -> Result<bool, String> {
-    blocking(move || undo_in(&data_dir(), &id, now_jst())).await
+    blocking(JoinErr::Plain, move || undo_in(&data_dir(), &id, now_jst())).await
 }
 
 #[tauri::command]
 pub async fn decisions_add_outcome(id: String, outcome: String) -> Result<DecisionRecord, String> {
-    blocking(move || outcome_in(&data_dir(), &id, &outcome, now_jst())).await
+    blocking(JoinErr::Plain, move || {
+        outcome_in(&data_dir(), &id, &outcome, now_jst())
+    })
+    .await
 }
 
 #[cfg(test)]

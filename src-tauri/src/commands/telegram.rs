@@ -109,7 +109,7 @@ fn save_config_at(path: &std::path::Path, config: &NexusConfig) -> Result<(), St
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    crate::commands::continuity::atomic_write_with_mode(path, json.as_bytes(), Some(0o600))
+    crate::commands::shared::fsx::atomic_write_with_mode(path, json.as_bytes(), Some(0o600))
         .map_err(|e| e.to_string())
 }
 

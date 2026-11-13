@@ -140,12 +140,8 @@ fn percentile(sorted: &[i64], p: f64) -> f64 {
     sorted[lo] as f64 + (sorted[hi] - sorted[lo]) as f64 * (idx - lo as f64)
 }
 
-fn tokyo() -> FixedOffset {
-    FixedOffset::east_opt(9 * 3600).expect("valid offset")
-}
-
 fn tokyo_time(ms: i64) -> DateTime<FixedOffset> {
-    tokyo().from_utc_datetime(
+    super::shared::time::jst().from_utc_datetime(
         &DateTime::<Utc>::from_timestamp_millis(ms)
             .unwrap_or_default()
             .naive_utc(),

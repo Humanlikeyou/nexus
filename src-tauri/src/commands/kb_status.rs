@@ -60,12 +60,10 @@ fn loopback_url(port: u16) -> String {
 
 #[tauri::command]
 pub async fn kb_status() -> Result<KbStatus, String> {
-    let client = reqwest::Client::builder()
-        .timeout(TIMEOUT)
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| "kb status client failed".to_string())?;
+    let client =
+        super::shared::http::builder(super::shared::http::HttpSpec::loopback().timeout(TIMEOUT))
+            .build()
+            .map_err(|_| "kb status client failed".to_string())?;
     Ok(kb_status_at(
         &client,
         &loopback_url(VERBA_PORT),
@@ -328,12 +326,11 @@ mod tests {
     }
 
     fn client() -> reqwest::Client {
-        reqwest::Client::builder()
-            .timeout(TIMEOUT)
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap()
+        crate::commands::shared::http::builder(
+            crate::commands::shared::http::HttpSpec::loopback().timeout(TIMEOUT),
+        )
+        .build()
+        .unwrap()
     }
 
     const ALIVE: &str = r#"{"message":"Alive!"}"#;

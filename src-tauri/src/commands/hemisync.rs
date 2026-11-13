@@ -11,6 +11,7 @@
 //!   and never writes under `sessions/`, `replays/` or `muse/` (a test scans this source).
 //! * Amara gets a small local `<nexus_hemisync>` context section. Nothing leaves this Mac.
 
+use super::shared::task::{blocking, JoinErr};
 use super::{backups, local_store, path_safety, sessions};
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
@@ -1252,21 +1253,13 @@ fn home_dir() -> Result<PathBuf, String> {
     dirs::home_dir().ok_or_else(|| "dir_invalid".to_string())
 }
 
-async fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|_| "io_error".to_string())?
-}
-
 #[tauri::command]
 pub async fn hemisync_import(
     app: tauri::AppHandle,
     folder: Option<String>,
 ) -> Result<ImportResult, String> {
     let (home, data) = (home_dir()?, crate::app_paths::data_dir());
-    blocking(move || {
+    blocking(JoinErr::Code("io_error"), move || {
         let emit = |copied: u64, total: u64, phase: &str| {
             let _ = app.emit(
                 IMPORT_EVENT,
@@ -1292,7 +1285,7 @@ pub async fn hemisync_import(
 #[tauri::command]
 pub async fn hemisync_library() -> Result<Library, String> {
     let data = crate::app_paths::data_dir();
-    blocking(move || Ok(scan_library(&data))).await
+    blocking(JoinErr::Code("io_error"), move || Ok(scan_library(&data))).await
 }
 
 #[tauri::command]
@@ -1302,7 +1295,10 @@ pub async fn hemisync_session_link(
     started_at: String,
 ) -> Result<(), String> {
     let data = crate::app_paths::data_dir();
-    blocking(move || link_in(&data, &session_id, &track_id, &started_at)).await
+    blocking(JoinErr::Code("io_error"), move || {
+        link_in(&data, &session_id, &track_id, &started_at)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1312,7 +1308,10 @@ pub async fn hemisync_session_finish(
     completed: bool,
 ) -> Result<(), String> {
     let data = crate::app_paths::data_dir();
-    blocking(move || finish_in(&data, &session_id, listened_ms, completed)).await
+    blocking(JoinErr::Code("io_error"), move || {
+        finish_in(&data, &session_id, listened_ms, completed)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1322,19 +1321,28 @@ pub async fn hemisync_session_rate(
     note: Option<String>,
 ) -> Result<(), String> {
     let data = crate::app_paths::data_dir();
-    blocking(move || rate_in(&data, &session_id, rating, note.as_deref())).await
+    blocking(JoinErr::Code("io_error"), move || {
+        rate_in(&data, &session_id, rating, note.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn hemisync_sessions() -> Result<Vec<SessionRow>, String> {
     let data = crate::app_paths::data_dir();
-    blocking(move || sessions_in(&data, &sessions::sessions_dir())).await
+    blocking(JoinErr::Code("io_error"), move || {
+        sessions_in(&data, &sessions::sessions_dir())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn hemisync_stats() -> Result<Vec<TrackStats>, String> {
     let data = crate::app_paths::data_dir();
-    blocking(move || sessions_in(&data, &sessions::sessions_dir()).map(|r| stats_from(&r))).await
+    blocking(JoinErr::Code("io_error"), move || {
+        sessions_in(&data, &sessions::sessions_dir()).map(|r| stats_from(&r))
+    })
+    .await
 }
 
 // ---------------------------------------------------------------- tests

@@ -15,6 +15,7 @@
 //! Remote pages get no IPC: the capability file names only the `main` window and has no `remote`
 //! block (a test pins both).
 
+use super::shared::time::now_ms;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
@@ -605,13 +606,6 @@ pub fn read_allowed(id: &str) -> bool {
         .lock()
         .map(|m| m.get(id).copied().unwrap_or(false))
         .unwrap_or(false)
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 // --------------------------------------------------------- profile records

@@ -4,6 +4,7 @@
 //! where `services` are ids like `"docker:<container>"`.
 
 use super::approval_gate;
+use super::shared::time::now_ms;
 use serde::Serialize;
 
 /// Max services in one request.
@@ -85,13 +86,6 @@ fn dialog_text(services: &[Service]) -> Result<String, String> {
         &lines.join("\n"),
         "Auto-heal restarts these services in order. Running requests may be interrupted.",
     )
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 /// Longest a restart approval stays valid, whatever the caller asks for.

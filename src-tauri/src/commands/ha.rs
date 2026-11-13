@@ -25,6 +25,10 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio_tungstenite::tungstenite::Message;
 
+// One parsed-loopback rule shared with llm_router: `http://<loopback host>[:port]`, rebuilt from the
+// parsed URL; userinfo, path, query and fragment refused.
+use super::loopback_http::loopback_base;
+
 const DEFAULT_HA_URL: &str = "http://127.0.0.1:8123";
 const ENV_MAX_BYTES: u64 = 16 * 1024;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -268,33 +272,6 @@ fn current_uid() -> u32 {
     unsafe { libc::getuid() }
 }
 
-/// Same rule as llm_router's private `loopback_base` (copied, not shared, because llm_router.rs
-/// is Integrations-owned): `http://<loopback host>[:port]`, rebuilt from the parsed URL; userinfo,
-/// path, query and fragment refused.
-fn loopback_base(raw: &str) -> Option<String> {
-    let u = reqwest::Url::parse(raw.trim()).ok()?;
-    let host = u.host_str()?.to_string();
-    let loopback = host == "localhost"
-        || host
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|ip| ip.is_loopback());
-    if !loopback {
-        return None;
-    }
-    let clean = u.scheme() == "http"
-        && u.username().is_empty()
-        && u.password().is_none()
-        && matches!(u.path(), "" | "/")
-        && u.query().is_none()
-        && u.fragment().is_none();
-    clean.then(|| match u.port() {
-        Some(port) => format!("http://{host}:{port}"),
-        None => format!("http://{host}"),
-    })
-}
-
 /// Reads only `HA_URL` and `HA_TOKEN` from `file` inside `dir`. The file is opened once with
 /// O_NOFOLLOW|O_NONBLOCK and must be a regular file owned by `expected_uid`, mode without
 /// group/other bits, at most 16 KiB. Errors are fixed text.
@@ -360,10 +337,7 @@ fn load_config() -> Result<HaConfig, String> {
 }
 
 fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(HTTP_TIMEOUT)
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
+    super::shared::http::builder(super::shared::http::HttpSpec::loopback().timeout(HTTP_TIMEOUT))
         .build()
         .unwrap_or_default()
 }

@@ -14,18 +14,14 @@ fn db_path() -> PathBuf {
 
 fn get_db() -> Result<Connection, String> {
     let path = db_path();
-    crate::app_paths::create_private_dir_all(path.parent().unwrap())
-        .map_err(|e| format!("Failed to create data dir: {}", e))?;
-    crate::app_paths::ensure_private_file(&path)
-        .map_err(|e| format!("Failed to create events.db: {}", e))?;
-
-    let conn = Connection::open(&path).map_err(|e| format!("Failed to open events.db: {}", e))?;
-
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| format!("Failed to set WAL mode: {}", e))?;
-    crate::app_paths::restrict_sqlite_files(&path)
-        .map_err(|e| format!("Failed to secure events.db: {}", e))?;
-
+    use super::shared::sqlite::{open_private_wal, OpenStep};
+    let conn = open_private_wal(&path).map_err(|step| match step {
+        OpenStep::Dir(e) => format!("Failed to create data dir: {e}"),
+        OpenStep::File(e) => format!("Failed to create events.db: {e}"),
+        OpenStep::Open(e) => format!("Failed to open events.db: {e}"),
+        OpenStep::Configure(e) => format!("Failed to set WAL mode: {e}"),
+        OpenStep::Secure(e) => format!("Failed to secure events.db: {e}"),
+    })?;
     init_db(&conn)?;
     Ok(conn)
 }

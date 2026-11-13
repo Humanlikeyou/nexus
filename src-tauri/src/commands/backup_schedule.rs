@@ -16,7 +16,8 @@ use super::backups::{
     verify_archive, BackupSettings, BusyGuard, VerifyReport, BUSY, VERIFY_BUSY, VERIFY_CAPS,
     VERIFY_MAX_ENTRIES, VERIFY_MAX_MANIFEST_BYTES,
 };
-use chrono::{DateTime, Duration, FixedOffset, Local, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use super::shared::time::jst;
+use chrono::{DateTime, Duration, Local, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -25,17 +26,12 @@ use std::path::Path;
 // ---- nightly scheduler ----
 
 /// Japan Standard Time: UTC+9, no daylight saving.
-const JST_SECS: i32 = 9 * 3600;
 /// How long after launch before any run (so a catch-up never competes with startup).
 pub(crate) const STARTUP_DELAY: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 /// After a failed run: wait this long, and give up on the slot after this many failures.
 const RETRY_AFTER: Duration = Duration::hours(1);
 const MAX_ATTEMPTS: u32 = 3;
 const TICK: std::time::Duration = std::time::Duration::from_secs(60);
-
-fn jst() -> FixedOffset {
-    FixedOffset::east_opt(JST_SECS).expect("valid offset")
-}
 
 fn parse_at(at: &str) -> Option<NaiveTime> {
     let b = at.as_bytes();

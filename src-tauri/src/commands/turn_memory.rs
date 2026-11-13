@@ -22,6 +22,7 @@ use sha2::{Digest, Sha256};
 use super::continuity::redact_sensitive_text;
 use super::keychain::MacKeychain;
 use super::memory_read::{list_from, read_key, MemoryError, MemoryItem, CALL_TIMEOUT, LETTA_BASE};
+use super::shared::time::now_secs;
 use super::terrence_runtime::{escape_section_text, injection_guard};
 
 // ── Letta blocks (read-only) ─────────────────────────────────────────────────
@@ -429,13 +430,6 @@ fn finish_summary(raw: &str) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-fn unix_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 // ── Single flight ────────────────────────────────────────────────────────────
 
 fn in_flight() -> &'static Mutex<HashSet<String>> {
@@ -719,7 +713,7 @@ where
     let stored = StoredSummary {
         summary,
         summarized_count: middle.len(),
-        built_at: unix_now(),
+        built_at: now_secs(),
     };
     if save_summary(data_dir, conversation_id, &stored).is_err() {
         eprintln!("[turn-memory] summary_save_failed");
@@ -1187,7 +1181,7 @@ mod tests {
         let evil = StoredSummary {
             summary: hostile.into(),
             summarized_count: 1,
-            built_at: unix_now(),
+            built_at: now_secs(),
         };
         save_summary(&dir, "conv-hostile", &evil).unwrap();
         let back = load_summary_file(&dir, "conv-hostile").unwrap().summary;
@@ -1251,7 +1245,7 @@ mod tests {
         let good = StoredSummary {
             summary: "fine".into(),
             summarized_count: 1,
-            built_at: unix_now(),
+            built_at: now_secs(),
         };
         save_summary(&dir, "conv-a", &good).unwrap();
         assert!(load_summary_file(&dir, "conv-a").is_some());
@@ -1290,7 +1284,7 @@ mod tests {
         let s = StoredSummary {
             summary: "s".into(),
             summarized_count: 1,
-            built_at: unix_now(),
+            built_at: now_secs(),
         };
         assert!(save_summary(&dir, &id, &s).is_err());
         assert!(load_summary_file(&dir, &id).is_none());

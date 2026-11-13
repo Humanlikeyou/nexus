@@ -11,6 +11,7 @@
 //! in the app's config.json, else ~/projects/amara-voice and ~/projects/ming-mac/.venv/bin/python.
 //! Every process is started with a fixed argv (no shell string is ever built).
 
+use super::shared::task::{blocking, JoinErr};
 use serde::Serialize;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -290,17 +291,12 @@ fn status_for(p: &VoicePaths) -> VoiceStatus {
     }
 }
 
-async fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| format!("voice task failed: {e}"))?
-}
-
 #[tauri::command]
 pub async fn voice_status() -> Result<VoiceStatus, String> {
-    blocking(|| Ok(status_for(&voice_paths()))).await
+    blocking(JoinErr::Prefix("voice task failed: "), || {
+        Ok(status_for(&voice_paths()))
+    })
+    .await
 }
 
 fn start_loop(p: &VoicePaths) -> Result<(), String> {
@@ -493,7 +489,7 @@ pub(crate) fn stop_speaking_with(
 /// Interrupt what Amara Voice is saying right now; the loop keeps running. Ok(false) = nothing sent.
 #[tauri::command]
 pub async fn voice_stop_speaking() -> Result<bool, String> {
-    blocking(|| {
+    blocking(JoinErr::Prefix("voice task failed: "), || {
         let p = voice_paths();
         stop_speaking_with(
             &RealProcs,
@@ -506,7 +502,7 @@ pub async fn voice_stop_speaking() -> Result<bool, String> {
 
 #[tauri::command]
 pub async fn voice_start() -> Result<VoiceStatus, String> {
-    blocking(|| {
+    blocking(JoinErr::Prefix("voice task failed: "), || {
         let p = voice_paths();
         start_loop(&p)?;
         std::thread::sleep(Duration::from_millis(600));
@@ -517,7 +513,7 @@ pub async fn voice_start() -> Result<VoiceStatus, String> {
 
 #[tauri::command]
 pub async fn voice_stop() -> Result<VoiceStatus, String> {
-    blocking(|| {
+    blocking(JoinErr::Prefix("voice task failed: "), || {
         let p = voice_paths();
         stop_loop(&p)?;
         Ok(status_for(&p))
@@ -527,7 +523,10 @@ pub async fn voice_stop() -> Result<VoiceStatus, String> {
 
 #[tauri::command]
 pub async fn voice_recent_turns(n: Option<usize>) -> Result<Vec<serde_json::Value>, String> {
-    blocking(move || Ok(tail_turns(&voice_paths().turns_file(), n.unwrap_or(20)))).await
+    blocking(JoinErr::Prefix("voice task failed: "), move || {
+        Ok(tail_turns(&voice_paths().turns_file(), n.unwrap_or(20)))
+    })
+    .await
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -538,7 +537,7 @@ pub struct VoiceList {
 
 #[tauri::command]
 pub async fn voice_list_voices() -> Result<VoiceList, String> {
-    blocking(|| {
+    blocking(JoinErr::Prefix("voice task failed: "), || {
         let p = voice_paths();
         Ok(VoiceList {
             voices: list_voices_in(&p),
@@ -551,7 +550,7 @@ pub async fn voice_list_voices() -> Result<VoiceList, String> {
 /// Saves the voice for the next start; the panel offers a restart when the loop is running.
 #[tauri::command]
 pub async fn voice_set_voice(name: String) -> Result<VoiceList, String> {
-    blocking(move || {
+    blocking(JoinErr::Prefix("voice task failed: "), move || {
         let p = voice_paths();
         set_voice_in(&p, &name)?;
         Ok(VoiceList {

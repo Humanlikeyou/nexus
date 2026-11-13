@@ -9,11 +9,12 @@
 //! Both run as one background pair, started/stopped with `voice_bridge_start` / `voice_bridge_stop`
 //! (idempotent, same pattern as `ha_live_start` / `ha_live_stop`).
 
+use super::shared::time::now_ms;
 use futures::StreamExt;
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Mutex as StdMutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
@@ -88,13 +89,6 @@ pub struct VoiceLevelEvent {
     pub state: VoiceState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub utterance_id: Option<String>,
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 // ─── state: mapping + change detection (pure, tested) ───────────────────────

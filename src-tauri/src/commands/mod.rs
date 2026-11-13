@@ -44,6 +44,7 @@ pub mod research;
 pub mod restart_services;
 pub mod router_stream;
 pub mod sessions;
+pub(crate) mod shared;
 pub mod snapshots;
 pub mod system;
 pub mod system_map;

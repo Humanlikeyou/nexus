@@ -86,7 +86,7 @@ pub mod test_support {
     pub use crate::commands::path_safety::{safe_join, validate_file_name, validate_name};
 
     pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-        crate::commands::continuity::atomic_write(path, bytes)
+        crate::commands::shared::fsx::atomic_write(path, bytes)
     }
 
     pub fn unpack_archive_checked(

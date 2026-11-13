@@ -112,7 +112,7 @@ pub fn merge_legacy_config_in(base: &Path) -> std::io::Result<Vec<String>> {
         std::io::Write::write_all(&mut opts.open(&backup)?, &current_bytes)?;
         let json = serde_json::to_string_pretty(&serde_json::Value::Object(current))
             .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
-        crate::commands::continuity::atomic_write_with_mode(
+        crate::commands::shared::fsx::atomic_write_with_mode(
             &new_cfg,
             json.as_bytes(),
             Some(0o600),

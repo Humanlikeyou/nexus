@@ -13,6 +13,7 @@
 //! Gaps: a jump of more than 0.5 s between packets of one stream leaves NaN (JSON `null`) for the
 //! missing time instead of joining the two sides.
 
+use super::shared::task::{blocking, JoinErr};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
@@ -1262,18 +1263,10 @@ fn to_series_view(s: SessionSamples) -> SessionSeries {
     }
 }
 
-async fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| format!("Task failed: {e}"))?
-}
-
 #[tauri::command]
 pub async fn list_recordings() -> Result<Vec<RecordingListItem>, String> {
     let active = super::replay::active_recording_name().await;
-    blocking(move || {
+    blocking(JoinErr::Prefix("Task failed: "), move || {
         let stored = sessions::read_stored_sessions_in(&sessions::sessions_dir());
         let now = chrono::Utc::now().timestamp_millis() as f64;
         Ok(list_recordings_in(
@@ -1293,7 +1286,7 @@ pub async fn read_recording_window(
     span_secs: f64,
     points: Option<usize>,
 ) -> Result<SignalWindow, String> {
-    blocking(move || {
+    blocking(JoinErr::Prefix("Task failed: "), move || {
         read_recording_window_in(
             &super::replay::replays_dir(),
             &id,
@@ -1311,14 +1304,16 @@ pub async fn read_body_window(
     start_secs: f64,
     span_secs: f64,
 ) -> Result<BodyWindow, String> {
-    blocking(move || read_body_window_in(&super::replay::replays_dir(), &id, start_secs, span_secs))
-        .await
+    blocking(JoinErr::Prefix("Task failed: "), move || {
+        read_body_window_in(&super::replay::replays_dir(), &id, start_secs, span_secs)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn recording_series(id: String) -> Result<SessionSeries, String> {
     let active = super::replay::active_recording_name().await;
-    blocking(move || {
+    blocking(JoinErr::Prefix("Task failed: "), move || {
         let stored = sessions::read_stored_sessions_in(&sessions::sessions_dir());
         samples_for(
             &super::replay::replays_dir(),
@@ -1336,7 +1331,7 @@ pub async fn recording_series(id: String) -> Result<SessionSeries, String> {
 pub async fn get_session_samples(session_id: String) -> Result<Option<SessionSamples>, String> {
     validate_name(&session_id)?;
     let active = super::replay::active_recording_name().await;
-    blocking(move || {
+    blocking(JoinErr::Prefix("Task failed: "), move || {
         let stored = sessions::read_stored_sessions_in(&sessions::sessions_dir());
         let Some(s) = stored.iter().find(|s| s.session.id == session_id) else {
             return Ok(None);

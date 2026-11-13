@@ -975,7 +975,12 @@ mod tests {
         assert!(f[..f.find("\n}\n").unwrap()].contains("loopback_client("));
         let lh = include_str!("loopback_http.rs");
         let lf = &lh[lh.find("pub(crate) fn loopback_client").unwrap()..];
-        assert!(lf[..lf.find(".build()").unwrap()].contains(".no_proxy()"));
+        assert!(lf[..lf.find(".build()").unwrap()].contains("HttpSpec::loopback()"));
+        // ...and the shared loopback spec turns proxies off (package 2 moved the builder there).
+        let sh = include_str!("shared/http.rs");
+        let sl = &sh[sh.find("pub(crate) const fn loopback").unwrap()..];
+        assert!(sl[..sl.find("\n    }\n").unwrap()].contains("no_proxy: true"));
+        assert!(sh.contains("b = b.no_proxy();"));
         let nc = &src[src.find("pub(crate) async fn navy_chat").unwrap()..];
         assert!(
             nc[..nc.find("navy_local_turn(").unwrap()].contains("body_cap: Some(DEEP_BODY_CAP)")

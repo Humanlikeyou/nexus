@@ -14,6 +14,7 @@ use super::local_store::{
     clean_slug, clean_text, day_of, iso, new_id, now_jst, read_json, write_json_atomic,
     write_text_atomic,
 };
+use super::shared::task::{blocking, JoinErr};
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Weekday};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -875,17 +876,9 @@ pub(crate) fn history_in(kind: &str, dirs: &Dirs) -> Result<Vec<HistoryItem>, St
         .collect())
 }
 
-async fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(f)
-        .await
-        .map_err(|e| e.to_string())?
-}
-
 #[tauri::command]
 pub async fn add_preview(kind: String, text: String) -> Result<ParseResult, String> {
-    blocking(move || {
+    blocking(JoinErr::Plain, move || {
         let mut r = preview_in(&kind, &text, &Dirs::real(), day_of(&now_jst()))?;
         if let ParseResult::Preview { preview } = &mut r {
             if let Some(payload) = preview.payload.take() {
@@ -908,7 +901,7 @@ pub async fn add_save(
     preview: AddPreview,
     via: Option<String>,
 ) -> Result<Saved, String> {
-    blocking(move || {
+    blocking(JoinErr::Plain, move || {
         let payload =
             TOKENS
                 .lock()
@@ -925,12 +918,15 @@ pub async fn add_save(
 
 #[tauri::command]
 pub async fn add_undo(kind: String, id: String) -> Result<bool, String> {
-    blocking(move || undo_in(&kind, &id, &Dirs::real(), now_jst())).await
+    blocking(JoinErr::Plain, move || {
+        undo_in(&kind, &id, &Dirs::real(), now_jst())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn add_history(kind: String) -> Result<Vec<HistoryItem>, String> {
-    blocking(move || history_in(&kind, &Dirs::real())).await
+    blocking(JoinErr::Plain, move || history_in(&kind, &Dirs::real())).await
 }
 
 #[cfg(test)]

@@ -126,7 +126,7 @@ fn write_private(path: &Path, json: &str) -> Result<(), String> {
         if let Some(p) = path.parent() {
             std::fs::create_dir_all(p)?;
         }
-        crate::commands::continuity::atomic_write_with_mode(path, json.as_bytes(), Some(0o600))
+        crate::commands::shared::fsx::atomic_write_with_mode(path, json.as_bytes(), Some(0o600))
     };
     go().map_err(|_| SAVE_FAILED.to_string())
 }

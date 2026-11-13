@@ -12,6 +12,7 @@
 //! Errors are fixed codes (`invalid_input`, `refused_secret`, ...) that never echo the input.
 
 use super::local_store::{clean_text, iso, new_id, now_jst, read_json, write_json_atomic};
+use super::shared::task::{blocking, JoinErr};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1401,32 +1402,36 @@ fn data_dir() -> PathBuf {
     crate::app_paths::data_dir()
 }
 
-async fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(f)
-        .await
-        .map_err(|_| "store_error".to_string())?
-}
-
 #[tauri::command]
 pub async fn money_accounts_list() -> Result<Vec<MoneyAccount>, String> {
-    blocking(|| accounts_list_in(&data_dir())).await
+    blocking(JoinErr::Code("store_error"), || {
+        accounts_list_in(&data_dir())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn money_balances_list() -> Result<MoneyBalances, String> {
-    blocking(|| balances_list_in(&data_dir(), now_jst().date_naive())).await
+    blocking(JoinErr::Code("store_error"), || {
+        balances_list_in(&data_dir(), now_jst().date_naive())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn money_account_add(draft: MoneyAccountDraft) -> Result<MoneyAccount, String> {
-    blocking(move || account_add_in(&data_dir(), &draft)).await
+    blocking(JoinErr::Code("store_error"), move || {
+        account_add_in(&data_dir(), &draft)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn money_watch_add(account_id: String, value: String) -> Result<WatchAdded, String> {
-    blocking(move || watch_add_in(&data_dir(), &account_id, &value)).await
+    blocking(JoinErr::Code("store_error"), move || {
+        watch_add_in(&data_dir(), &account_id, &value)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1435,17 +1440,23 @@ pub async fn money_balance_set_manual(
     native_amount: f64,
     as_of: String,
 ) -> Result<(), String> {
-    blocking(move || balance_set_manual_in(&data_dir(), &account_id, native_amount, &as_of)).await
+    blocking(JoinErr::Code("store_error"), move || {
+        balance_set_manual_in(&data_dir(), &account_id, native_amount, &as_of)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn fx_rate_get() -> Result<Option<FxRate>, String> {
-    blocking(|| fx_get_in(&data_dir())).await
+    blocking(JoinErr::Code("store_error"), || fx_get_in(&data_dir())).await
 }
 
 #[tauri::command]
 pub async fn fx_rate_set_manual(rate: f64, date: String) -> Result<FxRate, String> {
-    blocking(move || fx_set_manual_in(&data_dir(), rate, &date)).await
+    blocking(JoinErr::Code("store_error"), move || {
+        fx_set_manual_in(&data_dir(), rate, &date)
+    })
+    .await
 }
 
 #[tauri::command]

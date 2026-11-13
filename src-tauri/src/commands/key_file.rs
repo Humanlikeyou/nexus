@@ -156,7 +156,6 @@ pub(crate) fn status_in(dir: &Path) -> KeyFileStatus {
 }
 
 fn write_private_atomic(dir: &Path, bytes: &[u8], replace: bool) -> Result<(), String> {
-    use std::io::Write;
     crate::app_paths::create_private_dir_all(dir)
         .map_err(|e| format!("cannot create folder: {e}"))?;
     let dest = dir.join(KEY_FILE_NAME);
@@ -165,24 +164,8 @@ fn write_private_atomic(dir: &Path, bytes: &[u8], replace: bool) -> Result<(), S
         Ok(_) if !replace => return Err("exists".into()),
         _ => {}
     }
-    let tmp = dir.join(format!(
-        ".{KEY_FILE_NAME}.{}.tmp",
-        uuid::Uuid::new_v4().simple()
-    ));
-    let write = || -> std::io::Result<()> {
-        // create_new: never reuse or truncate a pre-planted file; 0600 at creation.
-        let mut f = crate::app_paths::private_open_options()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        std::fs::rename(&tmp, &dest)
-    };
-    write().map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("cannot write key file: {e}")
-    })
+    super::shared::fsx::atomic_write_with_mode(&dest, bytes, Some(0o600))
+        .map_err(|e| format!("cannot write key file: {e}"))
 }
 
 pub(crate) fn make_inner(

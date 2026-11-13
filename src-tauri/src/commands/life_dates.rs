@@ -6,6 +6,7 @@
 use super::local_store::{
     clean_slug, clean_text, day_of, new_id, now_jst, read_json, write_json_atomic,
 };
+use super::shared::task::{blocking, JoinErr};
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -393,29 +394,21 @@ fn data_dir() -> PathBuf {
     dir_in(&crate::app_paths::data_dir())
 }
 
-async fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(f)
-        .await
-        .map_err(|e| e.to_string())?
-}
-
 #[tauri::command]
 pub async fn life_date_list() -> Result<Vec<LifeDateView>, String> {
-    blocking(|| list_in(&data_dir(), day_of(&now_jst()))).await
+    blocking(JoinErr::Plain, || list_in(&data_dir(), day_of(&now_jst()))).await
 }
 
 /// Direct save (an edit, or a caller that already holds a checked date). The add flow goes through
 /// `add_preview` → `add_save`, which ends here too.
 #[tauri::command]
 pub async fn life_date_upsert(draft: LifeDateDraft) -> Result<LifeDateRecord, String> {
-    blocking(move || upsert_in(&data_dir(), &draft)).await
+    blocking(JoinErr::Plain, move || upsert_in(&data_dir(), &draft)).await
 }
 
 #[tauri::command]
 pub async fn life_date_delete(id: String) -> Result<bool, String> {
-    blocking(move || delete_in(&data_dir(), &id)).await
+    blocking(JoinErr::Plain, move || delete_in(&data_dir(), &id)).await
 }
 
 /// The preview before save: the same reading `add_preview("date", …)` gives.
