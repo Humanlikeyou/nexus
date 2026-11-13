@@ -58,3 +58,20 @@ describe("Weekly review › Try it this week (live)", () => {
     expect(localDatePlus(new Date(2026, 10, 28), 6)).toBe("2026-12-04");
   });
 });
+
+describe("live personal refresh", () => {
+  it("a malformed reply clears only its own store; the others still load", async () => {
+    const call = vi.fn(async (cmd: string) => {
+      if (cmd === "weekly_review_read") return { health: { state: "data" } }; // malformed: the mapper throws
+      if (cmd === "read_goals") return [];
+      if (cmd === "checkin_list") return [];
+      if (cmd === "life_date_list") return [];
+      throw new Error("off");
+    });
+    const a = makeLivePersonal(call as never);
+    await expect(a.refresh()).resolves.toBeUndefined();
+    expect(a.weeklyReview().state).toBe("unwired");
+    expect(a.goals().state).toBe("live");
+    expect(a.checkins().state).toBe("live");
+  });
+});

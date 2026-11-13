@@ -13,3 +13,7 @@ Which lane each file belongs to (from the lane briefs):
 - Shared: `lib.rs`, `mod.rs`, `test/commands.registered.test.ts`
 
 The agents can be resumed (SendMessage) after the reset. They keep their context and will need to re-apply this first.
+
+## Review notes to fix when resuming
+
+- **N4 `notify_relay.rs` (automated review, MEDIUM):** `notify_settings_set` turning the relay on and `notify_dispatch_due` sending need approval parity with Send Test. Fix: the native approval when the relay is enabled; pin the approved chat id in settings at that moment, and refuse dispatch if the Keychain chat id later differs; approval on the first set of the `telegram_*` secrets.

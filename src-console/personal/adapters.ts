@@ -346,15 +346,15 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
   let memoriesNote: string | null = null;
   let writeNote: string | null = null;
   const refresh = async () => {
-    await Promise.all([
-      call<LifeDateWire[]>("life_date_list").then((r) => { admin = lifeAdminFrom(r); }, () => { admin = null; }),
-      call<CheckInWire[]>("checkin_list", { limit: 30 }).then((r) => { checkins = r.map(checkInFrom); }, () => { checkins = null; }),
-      call<PatternsWire>("patterns_read").then((r) => { patterns = r && Array.isArray(r.findings) ? patternsFrom(r) : null; }, () => { patterns = null; }),
-      call<ReviewWire>("weekly_review_read").then(
-        (r) => { review = r && r.health ? weeklyReviewFrom(r) : null; suggestionTitle = review && r.suggestion ? r.suggestion.title : null; },
-        () => { review = null; suggestionTitle = null; },
-      ),
-      call<GoalWire[]>("read_goals").then((r) => { goals = Array.isArray(r) ? goalsFrom(r) : null; }, () => { goals = null; }),
+    // Each store settles on its own: a malformed reply (a mapper that throws) clears only that store.
+    await Promise.allSettled([
+      call<LifeDateWire[]>("life_date_list").then((r) => { admin = lifeAdminFrom(r); }).catch(() => { admin = null; }),
+      call<CheckInWire[]>("checkin_list", { limit: 30 }).then((r) => { checkins = r.map(checkInFrom); }).catch(() => { checkins = null; }),
+      call<PatternsWire>("patterns_read").then((r) => { patterns = r && Array.isArray(r.findings) ? patternsFrom(r) : null; }).catch(() => { patterns = null; }),
+      call<ReviewWire>("weekly_review_read")
+        .then((r) => { review = r && r.health ? weeklyReviewFrom(r) : null; suggestionTitle = review && r.suggestion ? r.suggestion.title : null; })
+        .catch(() => { review = null; suggestionTitle = null; }),
+      call<GoalWire[]>("read_goals").then((r) => { goals = Array.isArray(r) ? goalsFrom(r) : null; }).catch(() => { goals = null; }),
       call<MemoryWire[]>("memory_list").then(
         (r) => { memories = Array.isArray(r) ? memoriesFrom(r) : null; memoriesNote = memories ? null : memoryNote(null); },
         (e) => { memories = null; memoriesNote = memoryNote(e); },
