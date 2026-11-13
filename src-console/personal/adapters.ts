@@ -292,6 +292,27 @@ export function memoryNote(e: unknown): string {
   return "Letta sent something Amara couldn't read. Nothing was changed.";
 }
 
+/** Local YYYY-MM-DD `days` from `now`. */
+export function localDatePlus(now: Date, days: number): string {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Weekly review › "Try it this week" / "Not this week". Only a real suggestion can be tried; the follow-up add asks
+ *  first (native dialog), and a cancel or error says nothing was set. Goals are never touched. */
+export async function tryChangeWith(call: Invoke, take: boolean, suggestion: string | null, now = new Date()): Promise<Wired<{ reminder: string | null }>> {
+  if (!suggestion) return UNWIRED;
+  if (!take) return live({ reminder: null });
+  const due = localDatePlus(now, 6);
+  try {
+    await call("followups_add_item", { text: `Try this week: ${suggestion}`, due, next: null });
+    return live({ reminder: `Follow-up added for ${due}: ${suggestion}` });
+  } catch {
+    return live({ reminder: "Nothing was set (cancelled or couldn't save)" });
+  }
+}
+
 /** Fixed text per memory_edit / memory_delete / memory_restore_last error code. Nothing from the error itself is shown. */
 export function memoryWriteNote(e: unknown, what: "Edit" | "Delete" | "Undo"): string {
   const code = typeof e === "string" ? e : "";
@@ -320,6 +341,7 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
   let goals: GoalsWeek | null = null;
   let patterns: Patterns | null = null;
   let review: WeeklyReview | null = null;
+  let suggestionTitle: string | null = null;
   let memories: Memory[] | null = null;
   let memoriesNote: string | null = null;
   let writeNote: string | null = null;
@@ -328,7 +350,10 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
       call<LifeDateWire[]>("life_date_list").then((r) => { admin = lifeAdminFrom(r); }, () => { admin = null; }),
       call<CheckInWire[]>("checkin_list", { limit: 30 }).then((r) => { checkins = r.map(checkInFrom); }, () => { checkins = null; }),
       call<PatternsWire>("patterns_read").then((r) => { patterns = r && Array.isArray(r.findings) ? patternsFrom(r) : null; }, () => { patterns = null; }),
-      call<ReviewWire>("weekly_review_read").then((r) => { review = r && r.health ? weeklyReviewFrom(r) : null; }, () => { review = null; }),
+      call<ReviewWire>("weekly_review_read").then(
+        (r) => { review = r && r.health ? weeklyReviewFrom(r) : null; suggestionTitle = review && r.suggestion ? r.suggestion.title : null; },
+        () => { review = null; suggestionTitle = null; },
+      ),
       call<GoalWire[]>("read_goals").then((r) => { goals = Array.isArray(r) ? goalsFrom(r) : null; }, () => { goals = null; }),
       call<MemoryWire[]>("memory_list").then(
         (r) => { memories = Array.isArray(r) ? memoriesFrom(r) : null; memoriesNote = memories ? null : memoryNote(null); },
@@ -364,6 +389,9 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
     deleteMemory: (id) => writeMemory("memory_delete", { blockId: id }, "Delete", "Cleared. The old text is kept on this Mac, so it can be put back."),
     restoreMemory: (id) => writeMemory("memory_restore_last", { blockId: id }, "Undo", "Put back the earlier text."),
     lifeAdmin: () => (admin ? live(admin) : UNWIRED),
+    // "Try it this week" adds one follow-up (native approval dialog in Rust), due in 6 days; it never changes a goal.
+    // "Not this week" stores nothing. With no real suggestion from the weekly review there's nothing to try.
+    tryChange: async (take) => tryChangeWith(call, take, suggestionTitle),
     checkins: () => (checkins ? live([...checkins]) : UNWIRED),
     saveCheckIn: async (d) => {
       if (d.mood == null || d.energy == null) return UNWIRED;

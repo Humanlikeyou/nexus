@@ -38,3 +38,7 @@ Also for Goals: habits added through the one add path have no `source`, so their
 The element is `.m-warn b` (`src-console/money/money.css:28`): `color: var(--copper-text)` (light `#8c6239`, `tokens.css:38`) on the `.m-warn` background `color-mix(copper-text 10%, transparent)` over the sheet.
 
 Earlier sessions called this a flake because it sometimes passed. Today's probe shows a stable 4.28. Design's call, for example a darker light-theme copper for text on tinted fills, or no tint behind the bold line. Claude Code hasn't touched the CSS or tokens, and the test stays as it is.
+
+## 2026-11-13: Life › Dates "Edit" needs an edit form (wiring blocked on Design)
+
+`life/DatesView.tsx:108` renders Edit as an `OffButton` ("Needs wiring · life_date_upsert"). The backend `life_date_upsert(draft)` is ready (no delete). Wiring needs an edit sheet or inline form (title, lane, date, reminder), which is new markup. Design's call. Once a form exists, its submit maps 1:1 to `life_date_upsert`.
