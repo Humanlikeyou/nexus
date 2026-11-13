@@ -27,6 +27,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use super::loopback_http::{loopback_base, loopback_client, LOOPBACK_CONNECT_TIMEOUT};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -267,40 +269,9 @@ pub fn router_base(passed: Option<&str>, saved: Option<&str>) -> String {
         .unwrap_or_else(|| DEFAULT_ROUTER_URL.to_string())
 }
 
-/// `http://<loopback host>[:port]`, rebuilt from the parsed URL, or None. Parsing (rather than
-/// splitting the string) closes userinfo tricks like `http://127.0.0.1@evil.example` and
-/// `http://localhost:1@evil.example:8787`; any path, query or fragment is refused too.
-fn loopback_base(raw: &str) -> Option<String> {
-    let u = reqwest::Url::parse(raw.trim()).ok()?;
-    let host = u.host_str()?.to_string();
-    let loopback = host == "localhost"
-        || host
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|ip| ip.is_loopback());
-    if !loopback {
-        return None;
-    }
-    let clean = u.scheme() == "http"
-        && u.username().is_empty()
-        && u.password().is_none()
-        && matches!(u.path(), "" | "/")
-        && u.query().is_none()
-        && u.fragment().is_none();
-    clean.then(|| match u.port() {
-        Some(port) => format!("http://{host}:{port}"),
-        None => format!("http://{host}"),
-    })
-}
-
 /// The router is loopback-only, so a redirect from it is never legitimate: don't follow one off the Mac.
 fn no_redirect_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .no_proxy() // loopback only: an environment proxy must never carry a router call off the Mac
-        .build()
-        .unwrap_or_default()
+    loopback_client(LOOPBACK_CONNECT_TIMEOUT)
 }
 
 /// Routing hints for the router as header pairs. The router decides; these only ask.
@@ -999,8 +970,12 @@ mod tests {
     #[test]
     fn router_clients_skip_proxies_and_navy_ignores_the_renderer_router_url() {
         let src = include_str!("llm_router.rs");
+        // The no-proxy / no-redirect builder now lives in loopback_http.rs (its own source pin).
         let f = &src[src.find("fn no_redirect_client").unwrap()..];
-        assert!(f[..f.find("build()").unwrap()].contains(".no_proxy()"));
+        assert!(f[..f.find("\n}\n").unwrap()].contains("loopback_client("));
+        let lh = include_str!("loopback_http.rs");
+        let lf = &lh[lh.find("pub(crate) fn loopback_client").unwrap()..];
+        assert!(lf[..lf.find(".build()").unwrap()].contains(".no_proxy()"));
         let nc = &src[src.find("pub(crate) async fn navy_chat").unwrap()..];
         assert!(
             nc[..nc.find("navy_local_turn(").unwrap()].contains("body_cap: Some(DEEP_BODY_CAP)")

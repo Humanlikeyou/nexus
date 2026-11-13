@@ -25,6 +25,7 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use super::keychain::{service_for, Keychain, KeychainError, MacKeychain};
+use super::loopback_http::{loopback_client, LOOPBACK_CONNECT_TIMEOUT};
 
 pub(crate) const LETTA_BASE: &str = "http://127.0.0.1:8283";
 /// Keychain item name (service `com.taisun.nexus.letta_server_password`).
@@ -160,11 +161,7 @@ pub(crate) fn parse_blocks(v: &Value, agent: &str) -> Result<Vec<MemoryItem>, Me
 
 /// Loopback client: no redirects, no system proxy. Shared with `memory_write`.
 pub(crate) fn build_client() -> Result<reqwest::Client, MemoryError> {
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .no_proxy()
-        .build()
-        .map_err(|_| MemoryError::Off)
+    Ok(loopback_client(LOOPBACK_CONNECT_TIMEOUT))
 }
 
 /// The only HTTP call in this module: GET with the bearer, capped body, no redirects, no proxy.

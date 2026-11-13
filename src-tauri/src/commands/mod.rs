@@ -21,6 +21,7 @@ pub mod key_file;
 pub mod keychain;
 pub mod kv;
 pub mod llm_router;
+pub mod loopback_http;
 pub mod memory_read;
 pub mod memory_write;
 pub mod money;

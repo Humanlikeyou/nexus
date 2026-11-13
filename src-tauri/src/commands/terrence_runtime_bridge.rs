@@ -26,6 +26,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::Mutex;
 
+use super::loopback_http::{loopback_client, LOOPBACK_CONNECT_TIMEOUT};
+
 pub const HERMES_API_BASE: &str = "http://127.0.0.1:8642";
 /// One long-term-memory scope for the app. A new key cold-starts Hermes (minutes on this Mac).
 pub const DEFAULT_SESSION_KEY: &str = "nexus-chat";
@@ -600,10 +602,7 @@ impl Default for HttpTransport {
     fn default() -> Self {
         Self {
             // Both servers are loopback-only; a redirect off the Mac is never legitimate.
-            client: reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .unwrap_or_default(),
+            client: loopback_client(LOOPBACK_CONNECT_TIMEOUT),
         }
     }
 }
