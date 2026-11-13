@@ -686,6 +686,30 @@ fn load_store(data: &Path) -> Result<Store, String> {
     local_store::read_json(&store_path(data), MAX_STORE_BYTES).map_err(|_| "store_error".into())
 }
 
+/// The Hemi-Sync link rows (id, startedAt, listenedMs, rating) straight from the store file, with
+/// the module's capped, no-follow read. Never touches Muse sessions. Read-only.
+pub(crate) fn link_rows_in(data: &Path) -> Result<Vec<LinkSummary>, String> {
+    Ok(load_store(data)?
+        .sessions
+        .into_iter()
+        .map(|s| LinkSummary {
+            id: s.id,
+            started_at: s.started_at,
+            listened_ms: s.listened_ms,
+            rating: s.rating,
+        })
+        .collect())
+}
+
+/// The few link-row fields other readers need.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LinkSummary {
+    pub id: String,
+    pub started_at: String,
+    pub listened_ms: u64,
+    pub rating: Option<u8>,
+}
+
 fn save_store(data: &Path, store: &Store) -> Result<(), String> {
     check_root(data)?;
     local_store::write_json_atomic(&store_path(data), store, MAX_STORE_BYTES)

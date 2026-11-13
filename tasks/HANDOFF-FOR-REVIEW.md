@@ -294,3 +294,57 @@ Taisun's answers to the §16 questions are in decision 0020 (`docs/decisions/002
 **Lanes.** Sonnet did the Rust store and the renderer hook. The parent then made two fixes:
 1. It excluded future rows, with a new test.
 2. It moved the new bridge block so it no longer split getN8nStatus from its doc comment, and made the counts read surface errors.
+
+## 18. Package 3: daily table (2026-11-14)
+
+Decision 0020 (Taisun's answers) was corrected from code facts before building:
+- No helpful/worse rating existed anywhere, so the recording path is new.
+- The app has no follow-ups store of its own: `followups.rs` reads `~/.hermes/amara/open_items.json`, read-only, and the items carry no goal id.
+
+**Built.**
+- `src-tauri/src/commands/daily_table.rs` writes `daily.db` in the app data dir (0600, through `shared::sqlite`). It has three tables:
+  - `daily`: one row per JST day, with `sleep_total_min`, `hrv_ms`, `recovery`, `strain` (raw), `workout_min`, `muse_min`, `focus_mean`, `calm_mean` (calm_pct), `hemisync_min`, `hemisync_rating_mean`, `mood_mean`, `energy_mean`, `checkin_tags`, `takes_shown`, `takes_rated`, `takes_helpful`, `followups_closed`, and `sources` (a JSON list of source refs for every non-NULL cell).
+  - `daily_goal`: per goal per day, `roadmap_steps_done`. `followups_closed` there is always NULL ("follow-ups carry no goal id").
+  - `meta`: `built_at`, the window and the `partial` list.
+- It is built from a pure `Inputs` → `build()` over existing read-only readers. A source that fails to load gives NULL plus a `partial` entry. A missing value is NULL, never 0. The one day rule is `shared::time::day_key`; already-dated sources keep their own label.
+- Commands:
+  - `daily_rebuild`: refused if the last build is under 60 s old.
+  - `daily_range(from, to)`: at most 400 days.
+  - Bridge: `dailyRebuild` and `dailyRange`, whose errors reach the caller.
+- The nightly loop rebuilds 10 min after launch if today isn't built yet, and otherwise once per JST day after 05:30. It is single-flight and never logs.
+- Takes:
+  - New take-event kinds `take_shown` and `take_rating`, strictly validated in `take_events.rs`.
+  - "Shown" is recorded by `useAmaraTake.ts` (logic only) when a live take reaches the page, once per take per JST day.
+  - `recordTakeRating(page, takeId, helpful)` exists but has no caller until Design adds a control (`tasks/design-questions.md`, 2026-11-14).
+- Read-only helpers added in other modules:
+  - `patterns::fetch_noop_series`, for raw NOOP minutes.
+  - `noop::recent_workouts_live`, an extraction; the NOOP open settings are unchanged.
+  - `goal_roadmap::load`, now pub(crate).
+  - `followups::closed_days(_live)`.
+  - `hemisync::link_rows_in`, which reads the store only and never loads Muse session files.
+
+**Limits to know.**
+- Workout minutes cover only the last 90 days, because the existing NOOP workout reader caps at 90 days / 200 rows. Older days are NULL.
+- Muse sessions come from the newest 400 files.
+- Roadmap counts reflect each step's current `doneAt` only, with no history of reopened steps.
+- "Shown" means a live take reached the page's hook, which can be before the card is scrolled into view.
+- Strain is stored raw. Its scale (0–100 vs the 7–11 test fixtures) is still unconfirmed (source map Q1).
+
+**Security review:** FIX NEEDED (1 MEDIUM, 3 LOW), all fixed:
+- MEDIUM: Hemi-Sync went through a reader that loaded every Muse session in full. Fixed with the store-only reader.
+- LOW: OpenStep text reached the renderer. It's now a fixed string.
+- LOW: the source-pin ban list was widened.
+- LOW: the rebuild throttle was added.
+
+**Gates** (on eac9c0d + this change):
+- src-tauri: **980 passed / 6 ignored / 0 failed** (963 + 15 daily_table + 2 take_events).
+- router: 126.
+- vitest: **1892 passed / 9 skipped** (1886 + 6).
+- neuro: 21.
+- fmt, clippy -D warnings, tsc, lint and check:secrets: clean.
+- **Full e2e, alone: 777 passed / 12 skipped / 1 failed.** The failure is takes-1111t:80 [light] color-contrast, the known Design bug, and the total is unchanged at 778. It ran before the security fixes, which are Rust-only.
+- One vitest run inside a lane showed a timing failure in `scheduler.pruneUnderFailures.test.ts` (untouched code) that passed on re-run. That test may be flaky.
+
+**Not run:** the table has never been built from real data. That's the first live check once installed. There's no UI yet, so wait for the build 10 min after launch (or 05:30), then read it with `daily_range`.
+
+**Lanes:** both Sonnet. T did take recording; D did the table, plus the four review fixes. The parent integrated and ran the security review and all gates.

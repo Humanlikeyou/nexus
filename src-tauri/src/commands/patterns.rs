@@ -898,17 +898,24 @@ pub(crate) fn rows_from_series(series: &[(&str, Vec<(String, f64)>)]) -> Vec<Day
 
 /// Four `metric_series` queries through the sandboxed, no-network NOOP path. `Err` when NOOP is unreachable.
 pub(crate) fn fetch_noop_days(days: i64) -> Result<Vec<DayRow>, String> {
+    fetch_noop_series(days).map(|series| rows_from_series(&series))
+}
+
+/// The raw per-metric series (minutes for sleep, no unit change), same sandboxed path and backoff.
+pub(crate) fn fetch_noop_series(days: i64) -> Result<NoopSeries, String> {
     let now = Instant::now();
     if NOOP_BACKOFF.blocked(now, NOOP_BACKOFF_TTL) {
         return Err("noop unavailable".to_string());
     }
-    let r = fetch_noop_days_uncached(days);
+    let r = fetch_noop_series_uncached(days);
     match &r {
         Ok(_) => NOOP_BACKOFF.clear(),
         Err(_) => NOOP_BACKOFF.mark(now),
     }
     r
 }
+
+pub(crate) type NoopSeries = Vec<(&'static str, Vec<(String, f64)>)>;
 
 /// Remembers when NOOP last failed, so the pages don't spawn the CLI again for 5 minutes.
 pub(crate) struct Backoff(Mutex<Option<Instant>>);
@@ -927,7 +934,7 @@ impl Backoff {
     }
 }
 
-fn fetch_noop_days_uncached(days: i64) -> Result<Vec<DayRow>, String> {
+fn fetch_noop_series_uncached(days: i64) -> Result<NoopSeries, String> {
     use super::noop_query::{load_settings, run_query, with_resolved_db, Roots, DEFAULT_TIMEOUT};
     let settings = with_resolved_db(load_settings());
     let roots = Roots::current()?;
@@ -943,7 +950,7 @@ fn fetch_noop_days_uncached(days: i64) -> Result<Vec<DayRow>, String> {
         .map_err(|_| "noop unavailable".to_string())?;
         series.push((key, series_points(&v)));
     }
-    Ok(rows_from_series(&series))
+    Ok(series)
 }
 
 pub(crate) fn session_rows(list: &[super::sessions::RecordedSession]) -> Vec<SessionRow> {

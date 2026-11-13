@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { TakePage } from "../amaraTake/types";
 import type { Answer, AnswerState, SkipReason } from "./adapters";
+import { tokyoDay } from "../lib/mindBody";
 import { notifyTakeLog } from "./takeLog";
 
 /**
@@ -8,7 +9,7 @@ import { notifyTakeLog } from "./takeLog";
  * Everything the adapter shows (today's answer, the week, outcomes) is a pure reduction over these events,
  * so a reload gives the same answer and an Undo or a midnight is just another event or a derived state.
  */
-export type TakeEvent = { id: string; kind: "today" | "answer" | "undo" | "setting" | "type_action" | "ledger_seen"; at: number; page?: TakePage | null; day?: string | null; data: Record<string, unknown> };
+export type TakeEvent = { id: string; kind: "today" | "answer" | "undo" | "setting" | "type_action" | "ledger_seen" | "take_shown" | "take_rating"; at: number; page?: TakePage | null; day?: string | null; data: Record<string, unknown> };
 
 let cache: TakeEvent[] | null = null;
 let attempted = false;
@@ -28,6 +29,22 @@ export async function appendTakeEvent(e: TakeEvent): Promise<boolean> {
   if (cache && !cache.some((x) => x.id === e.id)) cache = [...cache, e];
   notifyTakeLog();
   return true;
+}
+
+/**
+ * Decision 0020: one `take_shown` per (takeId, day), so the daily table can count shown takes. The cache is the
+ * dedupe; before it loads (null) nothing is skipped and the store's unique id (`shown-<takeId>-<day>`) still
+ * refuses a repeat, so a double call never makes two rows.
+ */
+export async function recordTakeShown(page: TakePage, takeId: string, day: string): Promise<boolean> {
+  if (cache?.some((x) => x.kind === "take_shown" && x.day === day && x.data.takeId === takeId)) return false;
+  return appendTakeEvent({ id: `shown-${takeId}-${day}`, kind: "take_shown", at: Date.now(), day, page, data: { takeId } });
+}
+
+/** Records whether a take was helpful. Several ratings of one take are allowed; the latest counts. No control calls this yet. */
+export async function recordTakeRating(page: TakePage, takeId: string, helpful: boolean): Promise<boolean> {
+  const at = Date.now();
+  return appendTakeEvent({ id: `rate-${takeId}-${at}`, kind: "take_rating", at, day: tokyoDay(new Date(at).toISOString()) ?? "", page, data: { takeId, helpful } });
 }
 
 // ---------------- pure reducers ----------------

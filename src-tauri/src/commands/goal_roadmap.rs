@@ -138,7 +138,7 @@ fn store_dir(data: &Path) -> PathBuf {
     data.join("goals")
 }
 
-fn load(data: &Path) -> Result<Store, String> {
+pub(crate) fn load(data: &Path) -> Result<Store, String> {
     use std::io::Read;
     let p = store_dir(data).join(FILE);
     let mut opts = std::fs::OpenOptions::new();

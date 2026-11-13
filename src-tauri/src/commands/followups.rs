@@ -378,6 +378,17 @@ impl Store {
         })
     }
 
+    /// Every closed item's (id, `done` date text), no age limit. Read-only.
+    fn closed_days(&self) -> Result<Vec<(i64, String)>, String> {
+        Ok(self
+            .load(ITEMS_FILE, valid_item)?
+            .rows
+            .iter()
+            .filter(|row| is_done(row))
+            .filter_map(|row| Some((row.get("id")?.as_i64()?, text_field(row, "done")?)))
+            .collect())
+    }
+
     fn list(&self, today: NaiveDate) -> Result<FollowupLists, String> {
         let items = self.load(ITEMS_FILE, valid_item)?.rows;
         let muted = self.load(MUTED_FILE, valid_muted)?.rows;
@@ -663,6 +674,12 @@ async fn gated_write<T: Send + 'static>(
     let out = off_thread(move || work(&store)).await?;
     session.record(operation);
     Ok(out)
+}
+
+/// Closed follow-ups (id, `done` date) from Amara's list at `~/.hermes/amara`, read-only, no age
+/// limit (the screen's `recentlyDone` stops at 30 days). For the daily table.
+pub(crate) fn closed_days_live() -> Result<Vec<(i64, String)>, String> {
+    Store::home()?.closed_days()
 }
 
 /// Quotes and escapes text so it can't be read as dialog copy (a `"` becomes `\"`).

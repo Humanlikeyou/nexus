@@ -46,3 +46,7 @@ Earlier sessions called this a flake because it sometimes passed. Today's probe 
 ## 2026-11-13: Ledger watch-only "balance now" field (wiring ready, field is Design's)
 
 `addWatchOnly(chain, value, nickname, balance)` saves an optional typed balance via `money_balance_set_manual`. Lane N3 added an input for it to `ConnectSheet.tsx`; the parent removed it because new markup is Design's. If wanted, a field like "Balance now, in BTC/ETH (optional, you type it)" under Nickname passes a number (or null) as the 4th argument.
+
+## 2026-11-14: Take rating control (backend ready, no control calls it)
+
+Decision 0020 asks to record whether a take was helpful. The backend and `recordTakeRating(page, takeId, helpful)` exist; no control calls it. Design: add a helpful / not helpful control on the take card (or say where).

@@ -9,6 +9,7 @@ pub mod business_ledger;
 pub mod continuity;
 pub mod crew;
 pub mod crew_grants;
+pub mod daily_table;
 pub mod events;
 pub mod followups;
 pub mod goal_roadmap;

@@ -16,13 +16,15 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-const KINDS: [&str; 6] = [
+const KINDS: [&str; 8] = [
     "today",
     "answer",
     "undo",
     "setting",
     "type_action",
     "ledger_seen",
+    "take_shown",
+    "take_rating",
 ];
 const MAX_ID_CHARS: usize = 160;
 const MAX_EVENT_BYTES: usize = 4096;
@@ -69,8 +71,51 @@ fn valid(e: &TakeEvent) -> Result<(), String> {
             return Err("unknown page".into());
         }
     }
+    if e.kind == "take_shown" || e.kind == "take_rating" {
+        valid_take_fact(e)?;
+    }
     if serde_json::to_string(e).map_err(|x| x.to_string())?.len() > MAX_EVENT_BYTES {
         return Err("event too large".into());
+    }
+    Ok(())
+}
+
+/// `take_shown` data is exactly `{takeId}`; `take_rating` is exactly `{takeId, helpful}`. Both carry a page and a
+/// `YYYY-MM-DD` day (the daily table counts them per day). Nothing else may ride along.
+fn valid_take_fact(e: &TakeEvent) -> Result<(), String> {
+    if e.page.is_none() {
+        return Err("take event needs a page".into());
+    }
+    let day_ok = e.day.as_deref().is_some_and(|d| {
+        let b = d.as_bytes();
+        b.len() == 10
+            && b.iter().enumerate().all(|(i, c)| {
+                if i == 4 || i == 7 {
+                    *c == b'-'
+                } else {
+                    c.is_ascii_digit()
+                }
+            })
+    });
+    if !day_ok {
+        return Err("take event needs a YYYY-MM-DD day".into());
+    }
+    let obj = e
+        .data
+        .as_object()
+        .ok_or("take event data must be an object")?;
+    let want = if e.kind == "take_rating" { 2 } else { 1 };
+    if obj.len() != want {
+        return Err("unexpected take event data keys".into());
+    }
+    match obj.get("takeId").and_then(Value::as_str) {
+        Some(t)
+            if (1..=MAX_ID_CHARS).contains(&t.chars().count())
+                && !t.chars().any(char::is_control) => {}
+        _ => return Err("bad takeId".into()),
+    }
+    if e.kind == "take_rating" && !obj.get("helpful").is_some_and(Value::is_boolean) {
+        return Err("helpful must be a boolean".into());
     }
     Ok(())
 }
@@ -197,5 +242,81 @@ mod tests {
         f.write_all(b"{not json\n").unwrap();
         append_in(&d, &ev("b", "answer", 2), 10).unwrap();
         assert_eq!(list_in(&d).len(), 2);
+    }
+
+    fn fact(id: &str, kind: &str, data: Value) -> TakeEvent {
+        TakeEvent {
+            id: id.into(),
+            kind: kind.into(),
+            at: 1,
+            page: Some("fitness".into()),
+            day: Some("2026-11-14".into()),
+            data,
+        }
+    }
+
+    #[test]
+    fn take_shown_and_rating_accept_the_contract_shape() {
+        let d = tmp("d");
+        let shown = fact(
+            "s1",
+            "take_shown",
+            serde_json::json!({"takeId": "fitness-1"}),
+        );
+        let rate = fact(
+            "r1",
+            "take_rating",
+            serde_json::json!({"takeId": "fitness-1", "helpful": false}),
+        );
+        assert!(append_in(&d, &shown, 10).unwrap());
+        assert!(append_in(&d, &rate, 10).unwrap());
+        assert_eq!(list_in(&d).len(), 2);
+    }
+
+    #[test]
+    fn take_shown_and_rating_reject_bad_shapes() {
+        let d = tmp("e");
+        let long = "x".repeat(161);
+        let bad = [
+            fact("a", "take_shown", serde_json::json!({})),
+            fact(
+                "b",
+                "take_shown",
+                serde_json::json!({"takeId": "t", "extra": 1}),
+            ),
+            fact("c", "take_shown", serde_json::json!({"takeId": 5})),
+            fact("d", "take_shown", serde_json::json!({"takeId": ""})),
+            fact("e", "take_shown", serde_json::json!({"takeId": long})),
+            fact("f", "take_shown", serde_json::json!({"takeId": "a\nb"})),
+            fact(
+                "g",
+                "take_shown",
+                serde_json::json!({"takeId": "t", "helpful": true}),
+            ),
+            fact("h", "take_shown", serde_json::json!("t")),
+            fact("i", "take_rating", serde_json::json!({"takeId": "t"})),
+            fact(
+                "j",
+                "take_rating",
+                serde_json::json!({"takeId": "t", "helpful": "yes"}),
+            ),
+            fact(
+                "k",
+                "take_rating",
+                serde_json::json!({"takeId": "t", "helpful": true, "x": 1}),
+            ),
+        ];
+        for e in &bad {
+            assert!(append_in(&d, e, 10).is_err(), "{} should be rejected", e.id);
+        }
+        let mut no_page = fact("l", "take_shown", serde_json::json!({"takeId": "t"}));
+        no_page.page = None;
+        assert!(append_in(&d, &no_page, 10).is_err());
+        let mut bad_day = fact("m", "take_shown", serde_json::json!({"takeId": "t"}));
+        bad_day.day = Some("14-11-2026".into());
+        assert!(append_in(&d, &bad_day, 10).is_err());
+        bad_day.day = None;
+        assert!(append_in(&d, &bad_day, 10).is_err());
+        assert!(list_in(&d).is_empty());
     }
 }

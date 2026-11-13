@@ -438,3 +438,18 @@ export type HypnogramStage = "awake" | "light" | "deep" | "rem";
 export interface HypnogramSegment { start: number; end: number; stage: HypnogramStage }
 export interface Hypnogram { day: string; startedAt: string; endedAt: string; segments: HypnogramSegment[] }
 export const getHypnogram = (day?: string) => invoke<Hypnogram | null>("noop_hypnogram", { day: day ?? null });
+
+/** Daily table (commands/daily_table.rs): one row per JST day. null = no source rows, never 0. Errors reach the caller. */
+export type DailySources = Record<string, string[]>;
+export interface DailyRow {
+  day: string; sleepTotalMin: number | null; hrvMs: number | null; recovery: number | null; strain: number | null;
+  workoutMin: number | null; museMin: number | null; focusMean: number | null; calmMean: number | null;
+  hemisyncMin: number | null; hemisyncRatingMean: number | null; moodMean: number | null; energyMean: number | null;
+  checkinTags: string[] | null; takesShown: number | null; takesRated: number | null; takesHelpful: number | null;
+  followupsClosed: number | null; sources: DailySources;
+}
+export interface DailyGoalRow { day: string; goalId: string; roadmapStepsDone: number | null; followupsClosed: number | null; sources: DailySources }
+export interface DailyBuild { days: number; builtAtMs: number; partial: string[] }
+export interface DailyRange { rows: DailyRow[]; goals: DailyGoalRow[]; builtAtMs: number }
+export const dailyRebuild = () => invoke<DailyBuild>("daily_rebuild");
+export const dailyRange = (from: string, to: string) => invoke<DailyRange>("daily_range", { from, to });

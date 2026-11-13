@@ -172,6 +172,7 @@ pub fn run() {
             outbox::start_delivery_worker(app.handle().clone());
             // Nightly backup scheduler (in-app only; nothing runs while the app is closed).
             commands::backup_schedule::start(app.handle().clone());
+            commands::daily_table::start(app.handle().clone());
 
             if let Some(window) = app.get_webview_window("main") {
                 dock_icon::sync(&window);
@@ -318,6 +319,8 @@ pub fn run() {
             commands::backups::backup_verify_last,
             commands::backup_schedule::backup_prune_plan,
             commands::backup_schedule::restore_preview,
+            commands::daily_table::daily_rebuild,
+            commands::daily_table::daily_range,
             // Hemi-Sync (decision 0010)
             commands::hemisync::hemisync_import,
             commands::hemisync::hemisync_library,

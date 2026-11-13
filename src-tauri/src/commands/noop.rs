@@ -1401,18 +1401,18 @@ fn recent_workouts_in(
         .collect())
 }
 
+/// The live read behind `noop_recent_workouts` (read-only), for in-process readers.
+pub(crate) fn recent_workouts_live(days: u32) -> Result<Vec<NoopWorkout>, String> {
+    let device_id = device_id_from_environment();
+    let (_, path) = NoopPaths::from_environment().resolve(&device_id)?;
+    recent_workouts_in(&path, &device_id, days, Utc::now())
+}
+
 /// Recent workouts, newest first. `days` defaults to 14 and is capped at 90.
 #[tauri::command]
 pub async fn noop_recent_workouts(days: Option<u32>) -> Result<Vec<NoopWorkout>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let device_id = device_id_from_environment();
-        let (_, path) = NoopPaths::from_environment().resolve(&device_id)?;
-        recent_workouts_in(
-            &path,
-            &device_id,
-            days.unwrap_or(WORKOUT_DEFAULT_DAYS),
-            Utc::now(),
-        )
+        recent_workouts_live(days.unwrap_or(WORKOUT_DEFAULT_DAYS))
     })
     .await
     .map_err(|e| format!("NOOP workouts task failed: {e}"))?
