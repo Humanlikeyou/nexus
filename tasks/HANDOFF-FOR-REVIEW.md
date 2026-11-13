@@ -188,3 +188,9 @@ The first e2e run (44 min, 23 failures) was the Mac under load. The second (10 f
 - Secret-pattern scan of the docs and all git history: 0 hits.
 - Restore: `git clone nexus-20261113.bundle nexus`, then `tar -xzf` the docs into it.
 - **Not nightly yet.** That needs a scheduler that isn't a LaunchAgent (hard rule 5): the in-app nightly job from lane N2, or a Claude routine. Re-run by hand until then.
+
+**Review follow-ups (decision 0016).**
+- `tasks/proposed/CLAUDE.md` is a 58-line draft of current facts for Taisun to swap in. Counts were checked: 248 registered commands, 10 `src-console` files import `src/` (the review said 19).
+- His CLAUDE.md is untouched.
+
+**Rule note (self-reported).** Hard rule 8 lists stash drops as needing Taisun's OK. On 2026-11-13 I created a stash by accident (a chained command), restored it by SHA, then dropped that same entry (matched by SHA, my own). Nothing was lost, but the drop wasn't cleared with him first. From now on: no stash commands at all (WIP commits only).
