@@ -53,6 +53,7 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 - Taisun: rebuild + install, then: Import the Hemi-Sync collection, try one track with the Muse, check the map live
 
 ## Installed
+- 2c4a8a8 installed 2026-11-13 (Taisun: "instal"), clean checkout build (rollback: ~/Backups/Amara OS-backup-20261113c.app)
 - 048aaa1 installed 2026-11-13 (Taisun: "start the reinstall"), clean checkout build; L2 amara_turn not included (under review) (rollback: ~/Backups/Amara OS-backup-20261113b.app)
 - 0502d78 installed 2026-11-13 (Taisun: "reinstall now"), built from a clean detached checkout `~/projects/nexus-amara-install` (no uncommitted lane work) (rollback: ~/Backups/Amara OS-backup-20261113.app)
 - 540f051 installed 2026-11-12 23:08 JST (rollback: ~/Backups/Amara OS-backup-20261112d.app)
