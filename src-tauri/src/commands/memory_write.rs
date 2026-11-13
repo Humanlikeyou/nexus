@@ -250,7 +250,17 @@ fn is_hidden_format(c: char) -> bool {
 /// One flat line for the approval dialog: hidden format characters removed, control characters
 /// flattened, cut to `max` characters with a count of what isn't shown.
 fn flat(raw: &str, max: usize) -> String {
-    let visible: String = raw.chars().filter(|c| !is_hidden_format(*c)).collect();
+    // Hidden characters are shown, not dropped, so the dialog never differs from what's stored.
+    let visible: String = raw
+        .chars()
+        .map(|c| {
+            if is_hidden_format(c) {
+                format!("⟨U+{:04X}⟩", c as u32)
+            } else {
+                c.to_string()
+            }
+        })
+        .collect();
     let text = local_store::clean_text(&visible, 0, usize::MAX).unwrap_or_default();
     let total = text.chars().count();
     match text.char_indices().nth(max) {
@@ -334,7 +344,8 @@ where
     A: FnOnce(&'static str, String) -> Fut,
     Fut: Future<Output = Result<G, String>>,
 {
-    if !safe_id(id) || value.trim().is_empty() {
+    // New text may not carry hidden format characters: what's approved is exactly what's written.
+    if !safe_id(id) || value.trim().is_empty() || value.chars().any(is_hidden_format) {
         return Err(WriteError::BadInput);
     }
     if value.chars().count() > MAX_VALUE_CHARS {
@@ -1043,6 +1054,16 @@ mod tests {
                 WriteError::BadInput
             );
         }
+        // A new value with a hidden format character is refused before any request.
+        for sneaky in ["safe\u{202E}txt", "a\u{200B}b", "x\u{E0041}"] {
+            assert_eq!(
+                edit_from(&c, "block-1", sneaky, no_lock, approve_ok)
+                    .await
+                    .unwrap_err(),
+                WriteError::BadInput,
+                "{sneaky:?}"
+            );
+        }
         assert_eq!(
             edit_from(&c, "b1", "  ", no_lock, approve_ok)
                 .await
@@ -1199,13 +1220,13 @@ mod dialog_text_tests {
     fn dialog_text_drops_hidden_format_characters_and_counts_what_is_cut() {
         let sneaky = "ok\u{202E}evil\u{200B}\u{2066}x\u{E0041}\u{00AD}y";
         let f = flat(sneaky, 200);
-        assert_eq!(f, "okevilxy");
+        assert_eq!(f, "ok⟨U+202E⟩evil⟨U+200B⟩⟨U+2066⟩x⟨U+E0041⟩⟨U+00AD⟩y");
         assert!(f.chars().all(|c| !is_hidden_format(c)));
         let long = "a".repeat(250);
         let cut = flat(&long, 200);
         assert!(cut.ends_with("… (+50 more characters not shown)"), "{cut}");
         let d = dialog_detail("hu\u{202E}man", "old", &long);
-        assert!(d.contains("Block: human"));
+        assert!(d.contains("Block: hu⟨U+202E⟩man"));
         assert!(d.contains("(+50 more characters not shown)"));
         assert_eq!(d.lines().count(), 6);
     }
