@@ -58,6 +58,7 @@ describe("design-1111t takes", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "No time" })); });
     expect(screen.getByRole("button", { name: "No time" })).toHaveAttribute("aria-pressed", "true");
     await act(async () => { fireEvent.click(within(group).getByRole("button", { name: "Done" })); });
+    expect(screen.queryByRole("group", { name: /Your answer/ })).toBeNull(); // Done folds the block (Taisun 2026-11-14)
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })); });
     expect(within(group).getByRole("button", { name: "Done" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getAllByText(/Sample data: undone\./).length).toBe(1);
@@ -67,6 +68,56 @@ describe("design-1111t takes", () => {
     expect(screen.getByText(/WHOOP: 27-min walk/)).toBeInTheDocument();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Not right? Undo" })); });
     expect(screen.getByRole("group", { name: /Your answer/ })).toBeInTheDocument();
+  });
+  it("Done folds the block to one slim line for the day; Undo opens it again", async () => {
+    const t = sampleTakes();
+    const { container } = render(<Card page="home" adapter={t} compact />);
+    const fold = () => container.querySelector(".t-block") as HTMLElement;
+    expect(fold().dataset.folded).toBeUndefined();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+    expect(fold().dataset.folded).toBe("true");
+    expect(screen.queryByRole("group", { name: /Your answer/ })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 3 })).toBeNull();
+    const line = screen.getByRole("group", { name: /^Done today: / });
+    expect(line).toHaveTextContent("Done today");
+    expect(container.querySelector(".t-fold__in[inert]")).not.toBeNull();
+    await act(async () => { fireEvent.click(within(line).getByRole("button", { name: "Undo" })); });
+    expect(fold().dataset.folded).toBeUndefined();
+    expect(screen.getByRole("group", { name: /Your answer/ })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /^Done today: / })).toBeNull();
+  });
+  it("a Done answer from the store is folded on first render and stays folded across re-renders (reload, same day)", () => {
+    const t = sampleTakes({ answer: { neuro: "done" } });
+    const { container, rerender } = render(<Card page="neuro" adapter={t} />);
+    expect((container.querySelector(".t-block") as HTMLElement).dataset.folded).toBe("true");
+    expect(screen.getByRole("group", { name: /^Done today: / })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /Your answer/ })).toBeNull();
+    rerender(<Card page="neuro" adapter={t} />);
+    expect((container.querySelector(".t-block") as HTMLElement).dataset.folded).toBe("true");
+  });
+  it("follows the stored answer: a later Undo in the store opens the block, and Skipped never folds", () => {
+    const t = sampleTakes();
+    const v = t.today("neuro");
+    if (v.state === "unwired" || v.value.kind !== "suggestion") throw new Error("x");
+    const base = v.value.suggestion;
+    const noop = async () => ({ state: "sample" as const, value: { ok: true as const } });
+    const ui = (answer: typeof base.answer) => <SuggestionBlock s={{ ...base, answer }} detects onAnswer={noop} onUndo={noop} />;
+    const { container, rerender } = render(ui({ state: "done", source: "tap", at: "8:12 PM" }));
+    const folded = () => (container.querySelector(".t-block") as HTMLElement).dataset.folded;
+    expect(folded()).toBe("true");
+    rerender(ui({ state: "waiting" }));
+    expect(folded()).toBeUndefined();
+    rerender(ui({ state: "skipped", source: "tap", at: "8:40 PM", reason: null }));
+    expect(folded()).toBeUndefined();
+  });
+  it("reduced motion: folding is a state, not an animation; the line is there at once and nothing waits on a transition", async () => {
+    document.documentElement.dataset.reduceMotion = "true";
+    try {
+      const { container } = render(<Card page="home" adapter={sampleTakes()} compact />);
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+      expect(screen.getByRole("group", { name: /^Done today: / })).toBeVisible();
+      expect((container.querySelector(".t-block") as HTMLElement).dataset.folded).toBe("true");
+    } finally { delete document.documentElement.dataset.reduceMotion; }
   });
   it("unwired: the take still shows, today's one thing says Needs wiring, no sample data", () => {
     render(<Card page="neuro" adapter={unwiredTakes} />);

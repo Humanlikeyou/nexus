@@ -117,3 +117,16 @@
 .t-rules b { color: var(--label); }
 .t-tiles4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 13px; }
 .t-sheet button.pk-chip { font: inherit; font-size: 11px; background: transparent; cursor: pointer; }
+
+/* Done today: the block folds (slides up) into one slim line for the rest of the day. Height animates 1fr to 0fr; reduced motion zeroes --dur-state, so only the end state shows. Home never grows: the line is shorter than the block. */
+.t-fold { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows var(--dur-state) var(--ease-standard), opacity var(--dur-state) var(--ease-standard); }
+.t-fold[data-open="false"] { grid-template-rows: 0fr; opacity: 0; }
+.t-fold > .t-fold__in { min-height: 0; overflow: hidden; transition: visibility 0s linear var(--dur-state); }
+.t-fold[data-open="false"] > .t-fold__in { visibility: hidden; }
+.t-donerow { display: flex; gap: 8px; align-items: center; min-width: 0; padding: 8px 13px; border-radius: 13px; border: 1px solid color-mix(in srgb, var(--tone-accent-text) 35%, var(--separator)); background: color-mix(in srgb, var(--bg-content, #fff) 62%, transparent); }
+.t-donerow .t-status { flex: none; }
+.t-donerow__title { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--label-secondary); }
+.t-donerow .t-auto { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-donerow .t-small { flex: none; }
+.t-donerow .t-grow { min-width: 0; }
+.t-donerow__live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } /* announced, not drawn: the fold is the visible confirmation */
