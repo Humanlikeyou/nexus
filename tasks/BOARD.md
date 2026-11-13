@@ -88,7 +88,9 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 | Weekly review "Try it this week" → followups_add_item (approval) | done f45829a |
 | Personal refresh: one bad reply no longer blanks every store | done cc17766 |
 | Life › Dates Edit | waiting (Design: needs an edit form; tasks/design-questions.md) |
-| N1 chat/voice adds, N2 nightly backups + restore drill, N3 money routes/import picker, N4 Telegram relay | parked a6dfd7c (tasks/wip/2026-11-13-lanes; weekly agent limit until Nov 18 10:00 JST) |
+| N1 chat/voice adds | done 16b78d8 (security review fixed) |
+| N2 nightly backups + restore drill, N3 jp_bank import picker, N4 Telegram relay (approvals, no send yet) | done a783a5f (3 security reviews fixed; drill: Muse 34/34 byte-identical) |
+| Next: one Rust turn pipeline (decision 0016: router-direct, streaming, real Stop, Letta blocks in prompt) | active |
 | e2e on HEAD cc17766 | 753 passed / 12 skipped / 1 failed (takes-1111t:80 light, the real 4.28:1 contrast, Design) |
 
 ## Out of scope tonight (Taisun)
