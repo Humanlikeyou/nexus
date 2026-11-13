@@ -112,3 +112,10 @@ NOOP merge, live Telegram relay send path, standalone phases (bundling, signing,
 | 3 Daily table | done (this commit; HANDOFF §18). Take rating control: waiting on Design |
 | 4 Turn pipeline design note | superseded: `tasks/plans/turn-pipeline.md` (decision 0019) was already built as L0–L4 (cb6da06, 80d9c04, 048aaa1, 5e8ead7, bb7efff) |
 | 5 Screen-open counter | done eac9c0d (HANDOFF §17) |
+
+## 2026-11-14: follow-ups (decision 0021)
+| item | status |
+|---|---|
+| Timeouts on Telegram (15 s) and ARM worker (10 s) sends that had none | done (this commit) |
+| Menu-bar icon: one template tray (Amara mark), duplicate config tray removed | done (this commit) |
+| Install | see Installed |

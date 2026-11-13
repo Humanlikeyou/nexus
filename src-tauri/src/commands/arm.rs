@@ -1,4 +1,3 @@
-use reqwest::Client;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -472,7 +471,16 @@ pub fn arm_pause_strategy(id: String, reasoning: String) -> Result<ArmStrategy, 
         let url = pause_url.to_string();
         let key = get_worker_key(&existing.config);
         tokio::spawn(async move {
-            let client = Client::new();
+            let client = match super::shared::http::builder(super::shared::http::HttpSpec {
+                timeout: Some(std::time::Duration::from_secs(10)),
+                connect_timeout: Some(std::time::Duration::from_secs(3)),
+                ..Default::default()
+            })
+            .build()
+            {
+                Ok(c) => c,
+                Err(_) => return,
+            };
             let mut req = client.post(&url);
             if let Some(k) = key {
                 req = req.header("X-ARM-Key", k);
@@ -517,7 +525,16 @@ pub fn arm_kill_strategy(id: String, reasoning: String) -> Result<ArmStrategy, S
         let url = kill_url.to_string();
         let key = get_worker_key(&existing.config);
         tokio::spawn(async move {
-            let client = Client::new();
+            let client = match super::shared::http::builder(super::shared::http::HttpSpec {
+                timeout: Some(std::time::Duration::from_secs(10)),
+                connect_timeout: Some(std::time::Duration::from_secs(3)),
+                ..Default::default()
+            })
+            .build()
+            {
+                Ok(c) => c,
+                Err(_) => return,
+            };
             let mut req = client.post(&url);
             if let Some(k) = key {
                 req = req.header("X-ARM-Key", k);
@@ -558,7 +575,13 @@ pub async fn arm_poll_revenue(strategy_id: String) -> Result<f64, String> {
         .ok_or("Strategy has no revenue_endpoint configured")?
         .to_string();
 
-    let client = Client::new();
+    let client = super::shared::http::builder(super::shared::http::HttpSpec {
+        timeout: Some(std::time::Duration::from_secs(10)),
+        connect_timeout: Some(std::time::Duration::from_secs(3)),
+        ..Default::default()
+    })
+    .build()
+    .map_err(|e| format!("HTTP request failed: {}", e))?;
     let mut req = client.get(&revenue_url);
     if let Some(key) = get_worker_key(&strategy.config) {
         req = req.header("X-ARM-Key", key);
@@ -957,13 +980,23 @@ pub async fn arm_health_check(strategy_id: String) -> Result<WorkerHealthRespons
         .ok_or("Strategy has no health_endpoint configured")?
         .to_string();
 
-    let client = Client::new();
-    let mut req = client.get(&health_url);
-    if let Some(key) = get_worker_key(&strategy.config) {
-        req = req.header("X-ARM-Key", key);
-    }
-
-    let result = req.send().await;
+    // A build failure takes the same "down" path as a failed request below.
+    let result = match super::shared::http::builder(super::shared::http::HttpSpec {
+        timeout: Some(std::time::Duration::from_secs(10)),
+        connect_timeout: Some(std::time::Duration::from_secs(3)),
+        ..Default::default()
+    })
+    .build()
+    {
+        Ok(client) => {
+            let mut req = client.get(&health_url);
+            if let Some(key) = get_worker_key(&strategy.config) {
+                req = req.header("X-ARM-Key", key);
+            }
+            req.send().await
+        }
+        Err(e) => Err(e),
+    };
 
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -1112,5 +1145,19 @@ mod outbound_gate_tests {
                 "{name} must be gated first"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod client_timeout_tests {
+    /// Source pin: ARM worker calls build their client with timeouts, never a bare Client::new().
+    #[test]
+    fn arm_worker_clients_have_timeouts() {
+        let src = include_str!("arm.rs");
+        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
+        assert!(
+            !prod.contains("Client::new()"),
+            "ARM worker calls must use the shared builder with timeouts"
+        );
     }
 }

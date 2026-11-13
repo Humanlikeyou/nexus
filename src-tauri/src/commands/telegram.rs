@@ -146,7 +146,13 @@ pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMes
         token, limit, limit
     );
 
-    let client = reqwest::Client::new();
+    let client = super::shared::http::builder(super::shared::http::HttpSpec {
+        timeout: Some(std::time::Duration::from_secs(15)),
+        connect_timeout: Some(std::time::Duration::from_secs(5)),
+        ..Default::default()
+    })
+    .build()
+    .map_err(|_| "Network error contacting Telegram.".to_string())?;
     let resp = client
         .get(&url)
         .send()
@@ -353,7 +359,13 @@ async fn send_telegram_message_gated(
 
     let url = format!("https://api.telegram.org/bot{}/sendMessage", token);
 
-    let client = reqwest::Client::new();
+    let client = super::shared::http::builder(super::shared::http::HttpSpec {
+        timeout: Some(std::time::Duration::from_secs(15)),
+        connect_timeout: Some(std::time::Duration::from_secs(5)),
+        ..Default::default()
+    })
+    .build()
+    .map_err(|_| "Network error contacting Telegram.".to_string())?;
     let resp = client
         .post(&url)
         .json(&serde_json::json!({
@@ -402,7 +414,13 @@ pub async fn test_telegram_connection() -> Result<String, String> {
     }
 
     let url = format!("https://api.telegram.org/bot{}/getMe", token);
-    let client = reqwest::Client::new();
+    let client = super::shared::http::builder(super::shared::http::HttpSpec {
+        timeout: Some(std::time::Duration::from_secs(15)),
+        connect_timeout: Some(std::time::Duration::from_secs(5)),
+        ..Default::default()
+    })
+    .build()
+    .map_err(|_| "Network error contacting Telegram.".to_string())?;
     let resp = client
         .get(&url)
         .send()
@@ -790,6 +808,25 @@ mod tests {
             .collect();
         assert_eq!(names, vec![std::ffi::OsString::from("config.json")]);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Source pin: Telegram sends build their client through the shared builder with timeouts.
+    /// The one bare `Client::new()` left is send_to_terrance's local Ollama client (it has its own
+    /// per-request timeout), so it is the only allowed occurrence.
+    #[test]
+    fn telegram_clients_have_timeouts_and_only_ollama_keeps_bare_client_new() {
+        let src = include_str!("telegram.rs");
+        let prod = &src[..src.find("#[cfg(test)]\nmod tests {").unwrap()];
+        assert_eq!(
+            prod.matches("Client::new()").count(),
+            1,
+            "only send_to_terrance may keep a bare Client::new()"
+        );
+        assert!(
+            prod.find("Client::new()").unwrap()
+                > prod.find("pub async fn send_to_terrance").unwrap(),
+            "the remaining Client::new() must be the Ollama one in send_to_terrance"
+        );
     }
 }
 

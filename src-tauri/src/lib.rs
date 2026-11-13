@@ -150,8 +150,13 @@ pub fn run() {
             let open = MenuItem::with_id(app, "open", "Open Amara OS", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
 
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+            // One menu-bar icon: the Amara mark only, black on transparent, marked as a template so
+            // macOS tints it for light and dark menu bars (the full-colour app icon showed as a blob,
+            // and a second tray from tauri.conf.json showed as a solid square).
+            TrayIconBuilder::with_id("amara")
+                .icon(tauri::include_image!("icons/tray-template@2x.png"))
+                .icon_as_template(true)
+                .tooltip("Amara OS")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {

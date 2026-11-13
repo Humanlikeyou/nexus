@@ -19,3 +19,27 @@ describe("main window config", () => {
     expect(conf.app.macOSPrivateApi).toBe(true);
   });
 });
+
+// 2026-11-14 (Taisun: "fix the little icon at the top of my mac"): the menu bar showed the full-colour
+// app icon shrunk to a blob, plus a second tray from this config as a solid square. Now: one tray,
+// built in lib.rs from a black-on-transparent template of the Amara mark.
+describe("menu-bar (tray) icon", () => {
+  const lib = readFileSync(resolve(__dirname, "../../src-tauri/src/lib.rs"), "utf8");
+  const png = readFileSync(resolve(__dirname, "../../src-tauri/icons/tray-template@2x.png"));
+  it("is created once, in lib.rs, not also from tauri.conf.json", () => {
+    expect((conf.app as Record<string, unknown>).trayIcon).toBeUndefined();
+    expect(lib.match(/TrayIconBuilder::/g)?.length).toBe(1);
+  });
+  it("uses the template image, marked as a template, never the colour app icon", () => {
+    const tray = lib.slice(lib.indexOf("TrayIconBuilder::"), lib.indexOf(".build(app)", lib.indexOf("TrayIconBuilder::")));
+    expect(tray).toContain('include_image!("icons/tray-template@2x.png")');
+    expect(tray).toContain(".icon_as_template(true)");
+    expect(tray).not.toContain("default_window_icon");
+  });
+  it("the template is a 36x36 (18 pt @2x) RGBA PNG", () => {
+    expect(png.subarray(1, 4).toString("latin1")).toBe("PNG");
+    expect(png.readUInt32BE(16)).toBe(36);
+    expect(png.readUInt32BE(20)).toBe(36);
+    expect(png[25]).toBe(6); // colour type 6 = RGBA
+  });
+});
