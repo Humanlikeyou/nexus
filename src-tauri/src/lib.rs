@@ -8,7 +8,7 @@ use commands::{
     arm, assistant, ble_common, business_ledger, continuity, crew, crew_grants, events, followups,
     goal_roadmap, goals, ha, home_brief, home_hr_take, kb_status, kv, llm_router, muse, noop,
     noop_query, onboarding, openclaw, outbox, packager, recordings, replay, research,
-    restart_services, sessions, snapshots, system, take_events, take_log, telegram,
+    restart_services, screen_opens, sessions, snapshots, system, take_events, take_log, telegram,
     terrence_actions, terrence_automations, terrence_context, terrence_priorities,
     terrence_projects, terrence_runtime, terrence_runtime_bridge,
 };
@@ -394,6 +394,8 @@ pub fn run() {
             continuity::read_profile_file,
             kv::load_kv,
             kv::save_kv,
+            screen_opens::screen_open_record,
+            screen_opens::screen_open_counts,
             continuity::load_terrance_context,
             continuity::save_terrance_context,
             continuity::store_session_log,

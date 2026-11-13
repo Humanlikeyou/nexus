@@ -108,7 +108,7 @@ NOOP merge, live Telegram relay send path, standalone phases (bundling, signing,
 | package | status |
 |---|---|
 | 1 Backups / N2 (nightly 03:00, prune plan, restore preview, drill) | done earlier: a783a5f + de30ebe; `docs/release/restore-drill.md` shows 3,294 / 3,294 hashes matching. No new work needed |
-| 2 Shared Rust helpers (`commands/shared/`: http, sqlite, task, fsx, time) | done (this commit; see HANDOFF §16) |
-| 3 Daily table | todo. Source map: `tasks/proposed/daily-table-sources.md`. Needs Taisun answers first (HANDOFF §16) |
+| 2 Shared Rust helpers (`commands/shared/`: http, sqlite, task, fsx, time) | done f6fad35 (HANDOFF §16) |
+| 3 Daily table | todo, next. Taisun answered the questions: decision 0020. Source map: `tasks/proposed/daily-table-sources.md` |
 | 4 Turn pipeline design note | superseded: `tasks/plans/turn-pipeline.md` (decision 0019) was already built as L0–L4 (cb6da06, 80d9c04, 048aaa1, 5e8ead7, bb7efff) |
-| 5 Screen-open counter | todo |
+| 5 Screen-open counter | done (this commit; HANDOFF §17) |

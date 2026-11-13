@@ -43,6 +43,7 @@ pub mod replay;
 pub mod research;
 pub mod restart_services;
 pub mod router_stream;
+pub mod screen_opens;
 pub mod sessions;
 pub(crate) mod shared;
 pub mod snapshots;

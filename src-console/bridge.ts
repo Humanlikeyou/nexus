@@ -281,6 +281,13 @@ export const decideCrewApproval = (id: string, approve: boolean) => invoke<CrewA
 export const getCrewStatus = (id: string) => invoke<CrewInfo>("crew_status", { id });
 export const getCrewRunSteps = (id: string) => invoke<CrewRunSteps>("crew_run_steps", { id });
 export const stopCrew = (id: string) => invoke<string>("crew_stop", { id });
+export type ScreenWeekCount = { weekStart: string; screen: string; count: number };
+/** Local screen-open counter (screen id + time only). Recording is silent without a backend (browser/e2e). */
+export const recordScreenOpen = async (screen: string): Promise<void> => {
+  try { await invoke<void>("screen_open_record", { screen }); } catch { /* no backend: nothing to record */ }
+};
+/** Counts per screen per JST week. Errors reach the caller: an empty list must mean "no opens", never "store failed". */
+export const screenOpenCounts = (weeks?: number) => invoke<ScreenWeekCount[]>("screen_open_counts", { weeks });
 /** R13-F: read-only n8n probe; never errors (connected:false when it is down). */
 export const getN8nStatus = () => invoke<N8nStatusRow>("n8n_status");
 /** 1110i. Turning on opens the native dialog first and resolves only after crew-service confirms. */

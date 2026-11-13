@@ -265,3 +265,32 @@ The work was done by three file-disjoint subagent lanes (Haiku: blocking; Sonnet
 7. NOOP's `day` zone is not stated in code, and `noop.rs local_day` uses the Mac's zone, not JST. Re-derive NOOP workout days from `startTs` in JST?
 
 **Candidates for removal** (listed only; blocked until Taisun logs a decision): the `chat_history.db` commands in assistant.rs (only legacy `src/lib/api.ts` uses them), the events/outbox tables with no UI producer, and `terrence_core.sqlite` beside `terrence_core.db`. All of these come from the review and were not re-verified this run.
+
+## 17. Package 5: screen-open counter (2026-11-14)
+
+Taisun's answers to the §16 questions are in decision 0020 (`docs/decisions/0020-daily-table-answers-2026-11-14.md`), so package 3 can start next.
+
+**Built.**
+- `src-tauri/src/commands/screen_opens.rs`:
+  - `screen_opens.db` in the app data dir, opened through `shared::sqlite`.
+  - The table stores only `screen` and `at_ms`.
+  - `screen_open_record(screen)` accepts only the 7 top-level ids (`SYSTEMS` in app/routes.ts). Anything else gets `screen_unknown`, and nothing is written.
+  - `screen_open_counts(weeks?)` returns `{weekStart, screen, count}` per JST week (Monday start). The default is 12 weeks, clamped to 1–104. Rows after now are excluded, and zero rows are omitted.
+  - At 500,000 rows it refuses new rows with `store_full`; it never deletes. Pruning is Taisun's call.
+- Renderer:
+  - `useScreenOpens(active)` (`src-console/app/useScreenOpens.ts`) is one line in App.tsx. It records once on mount and once per top-level change; sub-views and re-renders don't count.
+  - The bridge has `recordScreenOpen`, which is silent without a backend, and `screenOpenCounts`, whose errors reach the caller so a failed read never looks like zero.
+- No UI. The new store is inside the full data-dir copy that backups take.
+
+**Gates** (on f6fad35 + this change):
+- src-tauri: 963 passed / 6 ignored / 0 failed (954 + 9 new).
+- router: 126.
+- vitest: 1886 passed / 9 skipped (1880 + 6 new).
+- neuro: 21.
+- fmt, clippy -D warnings, tsc, lint and check:secrets: clean.
+- **Full e2e (run alone): 777 passed / 12 skipped / 1 failed.** The failure is takes-1111t:80 [light], `color-contrast: div[role="alert"] > b`: the known Design contrast bug (4.28:1, `tasks/design-questions.md`). It's unrelated, and the total is unchanged at 778.
+- The e2e build was made before one last bridge edit (the counts read stops swallowing errors). No screen calls that read, so the e2e result still covers the App.tsx hook.
+
+**Lanes.** Sonnet did the Rust store and the renderer hook. The parent then made two fixes:
+1. It excluded future rows, with a new test.
+2. It moved the new bridge block so it no longer split getN8nStatus from its doc comment, and made the counts read surface errors.

@@ -7,6 +7,7 @@ import { useVoiceTurns } from "./hooks/useVoiceTurns";
 import { useRouteNavigation } from "./app/useRouteNavigation";
 import { SegmentedControl } from "./ui";
 import { useConversation } from "./app/useConversation";
+import { useScreenOpens } from "./app/useScreenOpens";
 import { useSnapshot } from "./app/useSnapshot";
 import { useMuseSession } from "./app/useMuseSession";
 import { runApproval } from "./lib/approval";
@@ -56,6 +57,7 @@ const INITIAL_ROUTE = { id: "terrance", view: "main" } as const;
 export default function App() {
   const { route, navigate } = useRouteNavigation(INITIAL_ROUTE);
   const active = route.id;
+  useScreenOpens(active);
   const screenId = screenFor(route);
   // §6: Trajectory folded into Home as the Goals card; the alias lands on Home and scrolls to it.
   // §9/§11: Devices and About live inside Settings; their aliases scroll to the anchor.
