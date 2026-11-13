@@ -1436,6 +1436,7 @@ mod tests {
         // Muse folders: restored vs original, read-only.
         let mut muse = serde_json::Map::new();
         let mut muse_bad = Vec::new();
+        let mut muse_skipped: Vec<String> = Vec::new();
         for d in ["replays", "sessions", "muse"] {
             let (mut same, mut total) = (0usize, 0usize);
             let mut st = vec![src.join(d)];
@@ -1449,10 +1450,19 @@ mod tests {
                         total += 1;
                         let rel = e.path().strip_prefix(&src).unwrap().to_path_buf();
                         let got = fs::read(pack.join("nexus-config").join(&rel));
-                        if got.ok().is_some_and(|g| g == fs::read(e.path()).unwrap()) {
-                            same += 1;
-                        } else {
-                            muse_bad.push(rel.to_string_lossy().into_owned());
+                        let relname = rel.to_string_lossy().into_owned();
+                        match got {
+                            Ok(g) if g == fs::read(e.path()).unwrap() => same += 1,
+                            // Left out on purpose and listed in the manifest: counted, not a failure.
+                            Err(_)
+                                if run
+                                    .skipped
+                                    .iter()
+                                    .any(|s| s.contains(&relname) && s.contains("left out")) =>
+                            {
+                                muse_skipped.push(relname)
+                            }
+                            _ => muse_bad.push(relname),
                         }
                     }
                 }
@@ -1483,6 +1493,7 @@ mod tests {
         out.insert("extra".into(), extra.clone().into());
         out.insert("muse".into(), Value::Object(muse));
         out.insert("muse_not_identical".into(), muse_bad.clone().into());
+        out.insert("muse_skipped_listed".into(), muse_skipped.clone().into());
         out.insert("secretish_names_inside".into(), secretish.clone().into());
         out.insert("skipped_at_backup_count".into(), run.skipped.len().into());
         out.insert(

@@ -113,11 +113,13 @@ fn is_secret_field(key: &str) -> bool {
             .any(|f| !f.starts_with('.') && k.contains(f) && !k.contains("threshold"))
 }
 
-/// Whether a field is removed. `is_secret_field` by name, minus two false positives:
-/// - a NUMBER under a plural `*_tokens` name is a count (`prompt_tokens`), not a secret;
-/// - a bare `key` is an identifier unless its parent is itself secret-looking
-///   (`worker_api_keys[].key` goes, `cited[].key` stays). With no parent it goes.
-fn is_secret_entry(k: &str, v: &Value, parent: Option<&str>) -> bool {
+/// Whether a field is removed: `is_secret_field` by name, minus two exceptions.
+/// - A NUMBER under a plural `*_tokens` name is a count (`prompt_tokens`), not a secret.
+/// - A bare `key` is removed by default, whatever its value looks like. It is kept only where
+///   `allow_key` is set: the one known identifier context, a `cited[]` entry of an Amara take
+///   (`take.cited[]` in `amara_take_*.json`, shape `{key,label,display,baseline}`, see
+///   `src-console/amaraTake/types.ts` `CitedPoint`).
+fn is_secret_entry(k: &str, v: &Value, allow_key: bool) -> bool {
     if !is_secret_field(k) {
         return false;
     }
@@ -125,43 +127,19 @@ fn is_secret_entry(k: &str, v: &Value, parent: Option<&str>) -> bool {
     if v.is_number() && (lower == "tokens" || lower.ends_with("_tokens")) {
         return false;
     }
-    if lower == "key" {
-        // A bare `key` is kept only as an identifier: a short lowercase word, not a token shape,
-        // under a parent that isn't itself secret-looking. Anything else (and no parent) goes.
-        let ident = v.as_str().is_some_and(|s| {
-            s.len() <= 40
-                && s.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
-                && s.bytes()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b"_.-".contains(&c))
-                && !["sk-", "xox", "ghp_", "eyj"]
-                    .iter()
-                    .any(|p| s.starts_with(p))
-        });
-        if !ident {
-            return true;
-        }
-        if let Some(p) = parent {
-            let p = p.to_ascii_lowercase();
-            let secretish = [
-                "header",
-                "key",
-                "token",
-                "secret",
-                "password",
-                "passphrase",
-                "auth",
-                "credential",
-                "bearer",
-                "cookie",
-            ]
-            .iter()
-            .any(|f| p.contains(f));
-            if !secretish {
-                return false;
-            }
-        }
-    }
-    true
+    !(lower == "key" && allow_key && v.is_string())
+}
+
+/// A `cited[]` item of an Amara take: an object in an array named `cited` that carries the other
+/// three `CitedPoint` fields (`label`, `display`, `baseline`) as well.
+fn is_cited_point(map: &serde_json::Map<String, Value>, parent: Option<&str>) -> bool {
+    parent == Some("cited")
+        && map.get("key").is_some_and(Value::is_string)
+        && map.get("label").is_some_and(Value::is_string)
+        && map.get("display").is_some_and(Value::is_string)
+        && map
+            .get("baseline")
+            .is_some_and(|b| b.is_string() || b.is_null())
 }
 
 fn redact(v: &mut Value, removed: &mut Vec<String>) {
@@ -172,10 +150,11 @@ fn redact_in(v: &mut Value, removed: &mut Vec<String>, parent: Option<&str>) {
     match v {
         Value::Object(map) => {
             let keys: Vec<String> = map.keys().cloned().collect();
+            let allow_key = is_cited_point(map, parent);
             for k in keys {
                 let secret = map
                     .get(&k)
-                    .is_some_and(|val| is_secret_entry(&k, val, parent));
+                    .is_some_and(|val| is_secret_entry(&k, val, allow_key));
                 if secret {
                     map.remove(&k);
                     removed.push(k);
@@ -1334,24 +1313,31 @@ mod tests {
     // ---- Muse folders are byte-for-byte; narrowed redaction ----
 
     #[test]
-    fn muse_folder_json_is_packed_byte_identical_and_hashes_match() {
+    fn muse_files_are_byte_identical_unless_a_json_has_a_secret_field_then_left_out_and_listed() {
         let (home, data) = fake_home("muse-bytes");
-        // Secret-looking FIELDS, odd spacing and a float that a parse/re-print would change.
-        let odd: &[u8] =
-            b"{ \"auth\" : \"MUSE-FIELD\",  \"key\":\"k\", \"x\": 13.935167180141983 }\n";
-        for (d, f) in [
-            ("sessions", "muse_1.json"),
-            ("replays", "eeg_1.ndjson.bands.json"),
-            ("muse", "m.json"),
-        ] {
+        // A clean JSON (odd spacing, a float a parse/re-print would change) and one with secret-looking fields.
+        let clean: &[u8] = b"{ \"eeg\" : [1,2],  \"x\": 13.935167180141983 }\n";
+        let secret: &[u8] = b"{ \"auth\" : \"MUSE-FIELD\",  \"x\": 1 }\n";
+        let bare_key: &[u8] = b"{\"meta\":{\"key\":\"abc\"}}";
+        let broken: &[u8] = b"{ not json 13.935167180141983";
+        // Recording formats are always copied as is, even with secret-looking content.
+        let ndjson: &[u8] = b"{\"auth\":\"MUSE-ND\"}\n{\"x\":1.50}\n";
+        let bands: &[u8] = b"{\"api_key\":\"MUSE-BANDS\",\"x\":13.935167180141983}";
+        let put = |d: &str, f: &str, b: &[u8]| {
             fs::create_dir_all(data.join(d)).unwrap();
-            fs::write(data.join(d).join(f), odd).unwrap();
-        }
-        // A file whose NAME looks secret still stays out, even in a Muse folder.
-        fs::write(data.join("sessions/my_token.json"), b"{}").unwrap();
+            fs::write(data.join(d).join(f), b).unwrap();
+        };
+        put("sessions", "clean.json", clean);
+        put("muse", "m_clean.json", clean);
+        put("sessions", "secret.json", secret);
+        put("muse", "m_secret.json", secret);
+        put("sessions", "bare_key.json", bare_key);
+        put("sessions", "broken.json", broken);
+        put("replays", "r.ndjson", ndjson);
+        put("replays", "r.ndjson.bands.json", bands);
+        put("sessions", "my_token.json", b"{}");
         // Outside the Muse folders the field is still redacted.
-        fs::create_dir_all(data.join("kv")).unwrap();
-        fs::write(data.join("kv/other.json"), odd).unwrap();
+        put("kv", "other.json", secret);
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1379,42 +1365,66 @@ mod tests {
             e.read_to_end(&mut buf).unwrap();
             got.insert(n, buf);
         }
-        let find = |suffix: &str| {
-            got.iter()
-                .find(|(k, _)| k.ends_with(suffix))
-                .map(|(_, v)| v.clone())
-        };
         let exact = |rel: &str| {
             got.iter()
                 .find(|(k, _)| k.split_once('/').is_some_and(|(_, r)| r == rel))
                 .map(|(_, v)| v.clone())
         };
         let manifest: Value = serde_json::from_slice(&exact("manifest.json").unwrap()).unwrap();
-        for (d, f) in [
-            ("sessions", "muse_1.json"),
-            ("replays", "eeg_1.ndjson.bands.json"),
-            ("muse", "m.json"),
+        // byte-identical, and the manifest hash is the original file's sha256
+        for (d, f, want) in [
+            ("sessions", "clean.json", clean),
+            ("muse", "m_clean.json", clean),
+            ("replays", "r.ndjson", ndjson),
+            ("replays", "r.ndjson.bands.json", bands),
+            ("sessions", "broken.json", broken),
         ] {
-            let want = fs::read(data.join(d).join(f)).unwrap();
             let mut keys = vec![format!("nexus-config/{d}/{f}")];
             if d == "sessions" {
-                keys.push(format!("{d}/{f}")); // the packager's second copy of sessions
+                keys.push(format!("{d}/{f}"));
             }
             for key in keys {
-                assert_eq!(
-                    exact(&key).unwrap_or_default(),
-                    want,
-                    "{key} not byte-identical"
-                );
+                assert_eq!(exact(&key).unwrap_or_default(), want, "{key}");
                 assert_eq!(
                     manifest["sha256"][&key].as_str().unwrap(),
-                    sha_hex(&want),
+                    sha_hex(want),
                     "{key}"
                 );
             }
         }
-        assert!(find("sessions/my_token.json").is_none());
-        let other = String::from_utf8(find("kv/other.json").unwrap()).unwrap();
+        // a Muse JSON with a secret-looking field (including a bare `key`) is left out, in both copies
+        for f in [
+            "secret.json",
+            "m_secret.json",
+            "bare_key.json",
+            "my_token.json",
+        ] {
+            assert!(
+                !got.keys().any(|k| k.ends_with(&format!("/{f}"))),
+                "{f} was packed"
+            );
+        }
+        for f in ["secret.json", "m_secret.json", "bare_key.json"] {
+            assert!(
+                r.skipped
+                    .iter()
+                    .any(|s| s.contains(f) && s.contains("left out")),
+                "{f} not listed: {:?}",
+                r.skipped
+            );
+        }
+        assert!(r
+            .skipped
+            .iter()
+            .any(|s| s.contains("broken.json") && s.contains("not valid JSON")));
+        // no value of a left-out file reached the archive, and the originals are untouched
+        let all: Vec<u8> = got.values().flatten().copied().collect();
+        let text = String::from_utf8_lossy(&all);
+        assert!(!text.contains("MUSE-FIELD"));
+        assert_eq!(fs::read(data.join("sessions/secret.json")).unwrap(), secret);
+        assert_eq!(fs::read(data.join("muse/m_secret.json")).unwrap(), secret);
+        // outside Muse folders: redacted as before
+        let other = String::from_utf8(exact("nexus-config/kv/other.json").unwrap()).unwrap();
         assert!(!other.contains("MUSE-FIELD") && other.contains("\"x\""));
     }
 
@@ -1468,7 +1478,7 @@ mod tests {
     #[test]
     fn redaction_keeps_token_counts_and_identifier_keys_but_not_real_secrets() {
         let input = br#"{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19,
-          "take":{"cited":[{"key":"hrv","label":"HRV"}]},
+          "take":{"cited":[{"key":"hrv","label":"HRV","display":"1","baseline":null}]},
           "worker_api_keys":[{"name":"w","key":"SENTINEL-ARM"}],
           "key":"SENTINEL-TOP","access_tokens":"SENTINEL-STR","telegram_bot_token":"SENTINEL-TG",
           "creds":{"key":"hrv2","password":"SENTINEL-PW"}}"#;
@@ -1490,20 +1500,27 @@ mod tests {
     }
 
     #[test]
-    fn bare_key_survives_only_as_an_identifier_and_camel_keys_are_secrets() {
+    fn bare_key_is_removed_except_in_a_cited_point_and_camel_keys_are_secrets() {
         let s = "SENTINEL-S";
         let cases = [
             format!(r#"{{"anthropic":{{"key":"{s}"}}}}"#),
             format!(r#"[{{"id":"a","key":"{s}"}}]"#),
             format!(r#"{{"headers":{{"key":"{s}"}}}}"#),
+            // identifier-looking and token-looking values are NOT kept by their look
             r#"{"headers":{"key":"abc"}}"#.to_string(),
+            r#"{"x":{"key":"hrv"}}"#.to_string(),
+            r#"[{"id":"a","key":"hrv"}]"#.to_string(),
             r#"{"x":{"key":"sk-abcdef"}}"#.to_string(),
             r#"{"x":{"key":"eyJhbGciOi"}}"#.to_string(),
-            r#"{"x":{"key":"ghp_abc"}}"#.to_string(),
-            r#"{"x":{"key":"xoxb-1"}}"#.to_string(),
-            format!(r#"{{"x":{{"key":"{}"}}}}"#, "a".repeat(41)),
             r#"{"x":{"key":12345}}"#.to_string(),
-            r#"{"x":{"key":"Hrv"}}"#.to_string(),
+            r#"{"key":"hrv"}"#.to_string(),
+            // `cited` by name alone, or with a partial shape, or under another name: removed
+            r#"{"cited":[{"key":"hrv"}]}"#.to_string(),
+            r#"{"cited":[{"key":"hrv","label":"HRV"}]}"#.to_string(),
+            r#"{"cited":[{"key":"hrv","label":"HRV","display":"1"}]}"#.to_string(),
+            r#"{"cited":[{"key":7,"label":"HRV","display":"1","baseline":null}]}"#.to_string(),
+            r#"{"cites":[{"key":"hrv","label":"HRV","display":"1","baseline":null}]}"#.to_string(),
+            r#"{"cited":{"key":"hrv"}}"#.to_string(),
         ];
         for c in &cases {
             let (out, removed) = redact_json_bytes(c.as_bytes()).unwrap();
@@ -1513,11 +1530,17 @@ mod tests {
                 String::from_utf8_lossy(&out)
             );
         }
-        // an identifier under a plain parent survives (amara_take_*.json)
-        let ok = br#"{"take":{"cited":[{"key":"hrv","label":"HRV"},{"key":"sleep_total.v2-b"}]}}"#;
+        // the one allowed context: take.cited[] with the full CitedPoint shape
+        let ok = br#"{"day":"d","take":{"cited":[{"key":"hrv","label":"HRV","display":"52 ms","baseline":"48 ms"},{"key":"sleep_total","label":"Sleep","display":"7h","baseline":null}]}}"#;
         let (out, removed) = redact_json_bytes(ok).unwrap();
         assert!(removed.is_empty(), "{removed:?}");
-        assert_eq!(out, ok.to_vec());
+        let parsed = |b: &[u8]| serde_json::from_slice::<Value>(b).unwrap();
+        assert_eq!(parsed(&out), parsed(ok));
+        // ...and a secret-looking value there is still just an identifier slot, a secret name next to it goes
+        let mixed = br#"{"cited":[{"key":"hrv","label":"HRV","display":"1","baseline":null,"api_key":"SENTINEL-X"}]}"#;
+        let (out, removed) = redact_json_bytes(mixed).unwrap();
+        assert_eq!(removed, vec!["api_key".to_string()]);
+        assert!(!String::from_utf8(out).unwrap().contains("SENTINEL"));
         // camelCase secrets, at any depth
         for k in [
             "privateKey",

@@ -117,7 +117,11 @@ pub(crate) async fn pack_to(
             &mut skipped,
             0,
             skip_secret,
-            opts.exclude_secrets,
+            if opts.exclude_secrets {
+                JsonMode::Redact
+            } else {
+                JsonMode::Copy
+            },
         )?;
         if opts.exclude_secrets {
             super::backups::write_redacted_config(&config_src, &dest, &mut skipped)?;
@@ -139,7 +143,7 @@ pub(crate) async fn pack_to(
             &mut skipped,
             1,
             skip_secret,
-            false,
+            JsonMode::Muse,
         )?;
         includes.push("BLE session recordings".to_string());
     }
@@ -917,7 +921,27 @@ fn copy_dir_recursive(
     max_file_bytes: Option<u64>,
     skipped: &mut Vec<String>,
 ) -> Result<(), String> {
-    copy_dir_filtered(src, dst, max_file_bytes, skipped, 0, &|_, _| false, false)
+    copy_dir_filtered(
+        src,
+        dst,
+        max_file_bytes,
+        skipped,
+        0,
+        &|_, _| false,
+        JsonMode::Copy,
+    )
+}
+
+/// What `copy_dir_filtered` does with `.json` files.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JsonMode {
+    /// Copy as is.
+    Copy,
+    /// Parse and write without secret fields (a backup that excludes secrets).
+    Redact,
+    /// A Muse recording folder: byte-for-byte copies only; a JSON with a secret-looking field is
+    /// left out and listed.
+    Muse,
 }
 
 /// The data-root folders that hold Muse recordings.
@@ -938,7 +962,7 @@ fn copy_dir_filtered(
     skipped: &mut Vec<String>,
     depth: usize,
     exclude: &dyn Fn(&str, usize) -> bool,
-    redact_json: bool,
+    mode: JsonMode,
 ) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("mkdir {}: {}", dst.display(), e))?;
 
@@ -961,9 +985,13 @@ fn copy_dir_filtered(
             continue;
         }
         if file_type.is_dir() {
-            // Muse recordings (`replays`, `sessions`, `muse` at the data root) are sacred: copied
-            // byte-for-byte, so the redaction pass is off for those subtrees.
-            let sub_redact = redact_json && !(depth == 0 && is_muse_dir(&name));
+            // Muse recordings (`replays`, `sessions`, `muse` at the data root) are sacred: never
+            // redacted or rewritten (see `JsonMode::Muse`).
+            let sub_mode = if mode == JsonMode::Redact && depth == 0 && is_muse_dir(&name) {
+                JsonMode::Muse
+            } else {
+                mode
+            };
             copy_dir_filtered(
                 &src_path,
                 &dst_path,
@@ -971,7 +999,7 @@ fn copy_dir_filtered(
                 skipped,
                 depth + 1,
                 exclude,
-                sub_redact,
+                sub_mode,
             )?;
             continue;
         }
@@ -985,7 +1013,30 @@ fn copy_dir_filtered(
             ));
             continue;
         }
-        if redact_json && name.to_ascii_lowercase().ends_with(".json") {
+        if mode == JsonMode::Muse && name.to_ascii_lowercase().ends_with(".json") {
+            // `.bands.json` sidecars and every non-JSON recording file fall through to the raw copy
+            // below. A session/muse JSON is copied byte-for-byte only when it holds no secret-looking
+            // field anywhere; one that does is left out (never redacted, never copied raw). JSON that
+            // doesn't parse is EEG data, not config: copied raw and noted.
+            if !name.to_ascii_lowercase().ends_with(".bands.json") {
+                let bytes = fs::read(&src_path).map_err(|e| format!("read {name}: {e}"))?;
+                match super::backups::redact_json_bytes(&bytes) {
+                    Some((_, removed)) if !removed.is_empty() => {
+                        skipped.push(format!(
+                            "{} (Muse JSON with a secret-looking field, left out of the backup; the original is untouched)",
+                            src_path.display()
+                        ));
+                        continue;
+                    }
+                    Some(_) => {}
+                    None => skipped.push(format!(
+                        "{} (Muse JSON that is not valid JSON, copied as is)",
+                        src_path.display()
+                    )),
+                }
+            }
+        }
+        if mode == JsonMode::Redact && name.to_ascii_lowercase().ends_with(".json") {
             let bytes = fs::read(&src_path).map_err(|e| format!("read {name}: {e}"))?;
             match super::backups::redact_json_bytes(&bytes) {
                 Some((clean, removed)) => {
