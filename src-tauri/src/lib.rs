@@ -13,6 +13,7 @@ use commands::{
     terrence_projects, terrence_runtime, terrence_runtime_bridge,
 };
 // design-1111v stores
+use commands::home_windows;
 use commands::{adds, checkin, decisions_log, life_dates, needs_you};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -249,6 +250,15 @@ pub fn run() {
             checkin::checkin_list,
             commands::patterns::patterns_read,
             commands::weekly_review::weekly_review_read,
+            home_windows::home_window_preflight,
+            home_windows::home_window_open,
+            home_windows::home_window_layout,
+            home_windows::home_window_focus,
+            home_windows::home_window_close,
+            home_windows::home_window_undo,
+            home_windows::home_window_pop_out,
+            home_windows::home_window_sites,
+            home_windows::home_window_sign_out,
             needs_you::needs_you_list,
             noop_query::noop_query,
             noop_query::get_noop_settings,

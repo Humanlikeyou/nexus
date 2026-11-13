@@ -3,7 +3,9 @@ import { useEffect, useRef } from "react";
 import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
 import { entryById, parseWindowPrompt, requestFromCatalog } from "./catalog";
 import { canComment, resolveVoiceTarget } from "./intents";
-import { homeWindowsAdapter } from "./adapters";
+import { homeWindowsAdapter, liveEmbedding, liveIO } from "./adapters";
+import { startLiveSync } from "./live";
+import { listenBackend } from "./liveIO";
 import { homeWindowsStore } from "./store";
 import { createTurnTracker, spokenText } from "../hooks/freshVoiceTurns";
 import type { VoiceTurn } from "../types";
@@ -125,6 +127,18 @@ export function applyPreview(p: Preview): void {
 }
 
 async function animateOpen(request: OpenRequest): Promise<void> {
+  const live = liveEmbedding();
+  if (live) {
+    // Local only / outbound-disabled: say so with fixed copy and open nothing.
+    const gate = await liveIO().preflight();
+    if (!gate.ok) {
+      dispatch({ type: "hear", query: request.query, openedBy: request.openedBy });
+      dispatch({ type: "understand", request: { ...request, chip: gate.copy } });
+      await tick(4500);
+      if (homeWindowsStore.get().phase === "understood") dispatch({ type: "reset" });
+      return;
+    }
+  }
   dispatch({ type: "hear", query: request.query, openedBy: request.openedBy });
   await tick(400);
   dispatch({ type: "understand", request });
@@ -133,10 +147,11 @@ async function animateOpen(request: OpenRequest): Promise<void> {
   await tick(reduced() ? 150 : 320);
   dispatch({ type: "beginEnter" });
   const sample = sampleAdaptersEnabled();
-  const contentState: ContentState = sample ? "loading" : "unwired";
+  const contentState: ContentState = sample || live ? "loading" : "unwired";
   dispatch({ type: "open", request, at: now(), contentState });
   const opened = homeWindowsStore.get().windows.find((w) => w.catalogId === request.catalogId);
   if (!opened) return;
+  if (live) { dispatch({ type: "commentOff", id: opened.id }); return; } // the live sync opens it; no comment is wired
   await tick(reduced() ? 150 : 320);
   if (!sample) return;
   dispatch({ type: "setContent", id: opened.id, contentState: "ready" });
@@ -172,7 +187,15 @@ export function applyIntent(intent: ReturnType<typeof resolveVoiceTarget>): void
 
 export function closeFocused(): void { dispatch({ type: "close", target: "focused", at: now() }); }
 export function closeAll(): void { dispatch({ type: "close", target: "all", at: now() }); }
-export function undoWindows(): void { dispatch({ type: "undo", at: now() }); }
+export function undoWindows(): void {
+  const pack = homeWindowsStore.get().undo;
+  if (liveEmbedding() && pack?.openedId) {
+    // A replace: the backend swaps the native windows back first, then the stage follows.
+    void liveIO().undo().then(() => dispatch({ type: "undo", at: now() }));
+    return;
+  }
+  dispatch({ type: "undo", at: now() });
+}
 export function focusWindow(id: string): void { dispatch({ type: "focus", id, at: now() }); }
 export function expandWindow(id: string): void { dispatch({ type: "expand", id, at: now() }); }
 export function popOutWindow(id: string): void {
@@ -191,6 +214,30 @@ export function useHomeWindowsClock(): void {
     const preview = readPreview();
     if (preview && sampleAdaptersEnabled()) applyPreview(preview);
     return () => { /* leave preview in place for the session */ };
+  }, []);
+  useEffect(() => {
+    if (!liveEmbedding()) return;
+    const stage = () => document.querySelector<HTMLElement>('[data-testid="home-windows-stage"]');
+    const sync = startLiveSync({
+      io: liveIO(),
+      get: homeWindowsStore.get,
+      subscribe: homeWindowsStore.subscribe,
+      dispatch,
+      measure: (id) => {
+        const el = document.querySelector<HTMLElement>(`.w-win[data-id="${CSS.escape(id)}"] .w-body`);
+        if (!el || !stage()) return null;
+        const r = el.getBoundingClientRect();
+        return { x: r.left, y: r.top, width: r.width, height: r.height };
+      },
+      settleMs: () => (reduced() ? 160 : 380),
+      now,
+    });
+    let off: (() => void) | undefined;
+    let gone = false;
+    void listenBackend({ state: sync.onBackendState, closed: sync.onBackendClosed }).then((u) => { if (gone) u(); else off = u; }).catch(() => undefined);
+    const onResize = () => sync.relayout();
+    window.addEventListener("resize", onResize);
+    return () => { gone = true; off?.(); window.removeEventListener("resize", onResize); sync.stop(); };
   }, []);
   useEffect(() => {
     let timer: number | undefined;

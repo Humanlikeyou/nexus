@@ -304,6 +304,9 @@ pub fn set_local_only(on: bool) -> bool {
         NAVY_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
     LOCAL_ONLY.store(on, std::sync::atomic::Ordering::SeqCst);
+    if on {
+        super::home_windows::close_all(); // no web window stays open under Local only
+    }
     // A Hermes turn that started before the switch may still be running its tools on Hermes's side
     // (dropping our request doesn't cancel it there), so don't confirm local-only while one is in
     // flight. The switch itself stays on (safe); the UI won't claim the guarantee and can retry.

@@ -35,6 +35,8 @@ pub(crate) const EXCLUDED_SECRET_FILES: &[&str] = &[
     super::crew::CREW_TOKEN_FILE,
     super::n8n_status::N8N_KEY_FILE,
     ".env",
+    // Home windows: per-site browser profile records (`home_windows.rs`); never backed up.
+    "webviews",
 ];
 /// Any file or folder whose lower-cased name contains one of these is left out too.
 pub(crate) const EXCLUDED_NAME_FRAGMENTS: &[&str] = &[
@@ -1687,6 +1689,45 @@ mod tests {
             "a secret reached the Desktop archive"
         );
         assert!(text.contains("keepme") && text.contains("poll_interval_secs"));
+    }
+
+    /// Home windows: per-site browser profile records never reach a backup or the Desktop archive.
+    /// Fail-before: with "webviews" removed from the exclude list the sentinel is in the archive.
+    #[tokio::test]
+    async fn webviews_profiles_never_reach_a_backup_archive() {
+        let (home, data) = fake_home("webviews");
+        fs::create_dir_all(home.join("Desktop")).unwrap();
+        seed_secrets(&data);
+        let site = data.join("webviews").join("instagram_com");
+        fs::create_dir_all(&site).unwrap();
+        fs::write(site.join("store.bin"), "WEBVIEWS-SENTINEL").unwrap();
+        let info = super::super::packager::pack_at(&home, &data).await.unwrap();
+        let text = all_contents(Path::new(&info.path));
+        assert!(
+            !text.contains("WEBVIEWS-SENTINEL"),
+            "a webview profile reached the archive"
+        );
+        assert!(text.contains("keepme"), "ordinary data is still packed");
+        let out = home.join("out");
+        fs::create_dir_all(&out).unwrap();
+        let opts = PackOpts {
+            exclude_secrets: true,
+            ..PackOpts::default()
+        };
+        let info = pack_to(&data, &out, "y.tar.gz", &opts).await.unwrap();
+        assert!(!all_contents(Path::new(&info.path)).contains("WEBVIEWS-SENTINEL"));
+        let info = pack_to(
+            &data,
+            &out,
+            "z.tar.gz",
+            &PackOpts {
+                exclude_secrets: false,
+                ..PackOpts::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(all_contents(Path::new(&info.path)).contains("WEBVIEWS-SENTINEL"));
     }
 
     #[test]

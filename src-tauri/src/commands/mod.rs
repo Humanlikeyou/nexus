@@ -64,6 +64,7 @@ pub mod voice_bridge;
 pub mod adds;
 pub mod checkin;
 pub mod decisions_log;
+pub mod home_windows;
 pub mod life_dates;
 pub mod local_store;
 pub mod needs_you;

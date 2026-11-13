@@ -13,6 +13,7 @@ export type WindowsAction =
   | { type: "open"; request: OpenRequest; at: number; contentState?: ContentState }
   | { type: "commentReading"; id: string }
   | { type: "commentReady"; id: string; text: string }
+  | { type: "commentOff"; id: string }
   | { type: "focus"; id: string; at: number }
   | { type: "close"; target: string | "focused" | "all"; at: number }
   | { type: "closeFinished" }
@@ -133,6 +134,8 @@ export function windowsReducer(state: HomeWindowsState, action: WindowsAction): 
     }
     case "commentReading":
       return { ...state, windows: state.windows.map((w) => w.id === action.id ? { ...w, comment: { phase: "reading" } } : w) };
+    case "commentOff":
+      return { ...state, windows: state.windows.map((w) => w.id === action.id ? { ...w, comment: { phase: "off" } } : w) };
     case "commentReady":
       return { ...state, windows: state.windows.map((w) => w.id === action.id ? { ...w, comment: { phase: "ready", text: action.text } } : w) };
     case "focus":

@@ -6,6 +6,7 @@
  * must stay green.
  */
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
+import { createLiveIO, liveAvailable } from "./liveIO";
 import type { Signed } from "./types";
 
 export type SignedSite = {
@@ -26,6 +27,8 @@ export type HomeWindowsAdapter = {
   comment(input: { siteId: string; title: string }): Promise<Wired<{ text: string }>>;
   /** Speak a comment. Live TTS is unwired. */
   speak(text: string): Promise<Wired<{ ok: true }>>;
+  /** Live adapter only: re-read the sites list from the backend. */
+  refreshSites?(): Promise<void>;
 };
 
 const INITIAL_SITES: SignedSite[] = [
@@ -60,7 +63,28 @@ const unwiredAdapter: HomeWindowsAdapter = {
   async speak() { return UNWIRED; },
 };
 
-export const homeWindowsAdapter = (): HomeWindowsAdapter => (sampleAdaptersEnabled() ? sampleAdapter : unwiredAdapter);
+/** In the app (not sample mode): webviews, profiles, sign out are real; comments and TTS stay unwired. */
+let liveSites: SignedSite[] = [];
+let liveIo: ReturnType<typeof createLiveIO> | null = null;
+export const liveIO = () => (liveIo ??= createLiveIO());
+export const resetLiveSites = (io?: ReturnType<typeof createLiveIO>): void => { liveSites = []; liveIo = io ?? null; };
+
+const liveAdapter: HomeWindowsAdapter = {
+  embedding: () => ({ state: "live", value: true }),
+  signedSites: () => ({ state: "live", value: liveSites.map((s) => ({ ...s })) }),
+  async refreshSites() { liveSites = await liveIO().sites(); },
+  async signOut(siteId) {
+    await liveIO().signOut(siteId); // throws if he declines the native dialog
+    liveSites = await liveIO().sites();
+    return { state: "live", value: { ok: true as const } };
+  },
+  async comment() { return UNWIRED; },
+  async speak() { return UNWIRED; },
+};
+
+export const homeWindowsAdapter = (): HomeWindowsAdapter =>
+  sampleAdaptersEnabled() ? sampleAdapter : liveAvailable() ? liveAdapter : unwiredAdapter;
+export const liveEmbedding = (): boolean => !sampleAdaptersEnabled() && liveAvailable();
 
 /** Secrets must never appear in this UI. Used by tests. */
 export const SECRET_PATTERN = /cookie\s*=|token\s*=|password\s*=|sessionid\s*=|authorization\s*:|xox[bap]-|sk_live|sk_test|ghp_|-----BEGIN/i;

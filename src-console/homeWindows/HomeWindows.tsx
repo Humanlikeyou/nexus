@@ -12,7 +12,7 @@ import { entryById } from "./catalog";
 import { canComment, shouldSpeakComment } from "./intents";
 import { layoutSlots, shortTitle, toastLabel } from "./reducer";
 import { SampleBody, StateBody } from "./SampleBodies";
-import { homeWindowsAdapter } from "./adapters";
+import { homeWindowsAdapter, liveEmbedding } from "./adapters";
 import { useHomeWindowsState } from "./store";
 import {
   closeAll, expandWindow, focusWindow, handleWindowPrompt, popOutWindow,
@@ -184,7 +184,7 @@ function WindowCard({ win, slot, focused, leaving, onSignIn, onRetry }: {
           onPopOut={() => popOutWindow(win.id)}
           onRetry={onRetry}
         />
-        {sampleAdaptersEnabled() ? <SampleBody win={win} /> : win.contentState === "ready" ? <div className="w-center"><h3>Needs wiring</h3><p>A live page needs a webview from Claude before it can open here.</p><DataTag kind="wire" /></div> : null}
+        {sampleAdaptersEnabled() ? <SampleBody win={win} /> : win.contentState === "ready" && !liveEmbedding() ? <div className="w-center"><h3>Needs wiring</h3><p>A live page needs a webview from Claude before it can open here.</p><DataTag kind="wire" /></div> : null}
       </div>
       <Caption win={win} compact={slot !== "primary"} />
     </section>
