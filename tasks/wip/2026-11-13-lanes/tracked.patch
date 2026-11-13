@@ -1,0 +1,787 @@
+diff --git a/src-console/App.tsx b/src-console/App.tsx
+index 5fb1ac1..5e62fcc 100644
+--- a/src-console/App.tsx
++++ b/src-console/App.tsx
+@@ -2,6 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+ import { HOST_VIEWS, SECTION_ANCHORS, SYSTEMS, TODAY_LABEL, TODAY_ROUTE, canonicalRoute, resolveRoute, screenFor, tabOf } from "./app/routes";
+ import { PageSection } from "./ui";
+ import { AgentsField } from "./screens/AgentsScreen";
++import { useChatAdds } from "./adds/useChatAdds";
+ import { useVoiceTurns } from "./hooks/useVoiceTurns";
+ import { useRouteNavigation } from "./app/useRouteNavigation";
+ import { SegmentedControl } from "./ui";
+@@ -91,7 +92,7 @@ export default function App() {
+   // Amara background scheduler: started once for the shell, stopped on unmount.
+   useSchedulerLifecycle();
+ 
+-  const { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending } = useConversation(refresh);
++  const { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending, postLocal } = useConversation(refresh);
+   // Session continuity: summarize the Amara chat after idle / on new chat / on close (bug 6).
+   const autoSave = useIdleAutoSave(messages, conversationId);
+   const [paletteOpen, setPaletteOpen] = useState(false);
+@@ -117,11 +118,13 @@ export default function App() {
+   const voiceTurns = useVoiceTurns(screenId === "landing");
+   useVoiceNavyPrompts(voiceTurns);
+   useVoiceWindowPrompts(voiceTurns);
++  const { handleTyped: handleChatAdd } = useChatAdds(postLocal, voiceTurns);
+   const sendHome = useCallback(async (message: string, options?: { deep?: boolean }) => {
++    if (await handleChatAdd(message)) return;
+     if (handleNavyPrompt(message, "chat")) return;
+     if (handleWindowPrompt(message, "chat")) return;
+     await sendToTerrence(message, options);
+-  }, [sendToTerrence]);
++  }, [sendToTerrence, handleChatAdd]);
+   useEffect(() => {
+     const palette = (event: KeyboardEvent) => {
+       if (!event.metaKey || event.ctrlKey || event.altKey || event.key.toLowerCase() !== "k") return;
+diff --git a/src-console/app/useConversation.ts b/src-console/app/useConversation.ts
+index cff3f8f..d1b8c0e 100644
+--- a/src-console/app/useConversation.ts
++++ b/src-console/app/useConversation.ts
+@@ -174,6 +174,8 @@ export function useConversation(refresh: () => Promise<void>) {
+     setSending(false);
+     setLoadingModel(false);
+   }, []);
++  /** Local-only lines (e.g. an add preview from chat or voice). Not sent to Hermes. */
++  const postLocal = useCallback((added: ConversationMessage[]) => { setMessages((current) => [...current, ...added]); }, []);
+   const startNewConversation = useCallback(() => {
+     generation.current++;
+     waitAbort.current?.abort();
+@@ -188,5 +190,5 @@ export function useConversation(refresh: () => Promise<void>) {
+     setMessages([]);
+     setConversationId(created);
+   }, []);
+-  return { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending };
++  return { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending, postLocal };
+ }
+diff --git a/src-console/money/ConnectSheet.tsx b/src-console/money/ConnectSheet.tsx
+index 7945298..29e2b2a 100644
+--- a/src-console/money/ConnectSheet.tsx
++++ b/src-console/money/ConnectSheet.tsx
+@@ -10,6 +10,7 @@ export function ConnectSheet({ open, onClose, adapter, initial = "ledger" }: { o
+   // Only ever holds text the guard did NOT flag as secret; a phrase or key is dropped before it reaches state.
+   const [value, setValue] = useState("");
+   const [nick, setNick] = useState("Ledger · Bitcoin");
++  const [balance, setBalance] = useState("");
+   const [refused, setRefused] = useState<null | "phrase" | "private_key">(null);
+   const [note, setNote] = useState<string | null>(null);
+   const check: GuardResult = guardWatchInput(value);
+@@ -22,12 +23,15 @@ export function ConnectSheet({ open, onClose, adapter, initial = "ledger" }: { o
+   const add = async () => {
+     if (pick === "ledger") {
+       if (check.kind !== "public") return;
+-      const r = await adapter.addWatchOnly(check.chain, value.trim(), nick.trim() || "Ledger");
+-      setNote(r.state === "unwired" ? "Watch-only needs wiring, so nothing was saved." : r.state === "sample" ? "Sample data: added in the preview only. Nothing was saved." : "Added. Amara can see balances at these addresses and nothing else.");
+-      if (r.state !== "unwired") setValue("");
++      const typed = balance.trim();
++      const amount = typed === "" ? null : Number(typed.replace(/,/g, ""));
++      const r = await adapter.addWatchOnly(check.chain, value.trim(), nick.trim() || "Ledger", amount);
++      const extra = r.state === "live" ? adapter.connectNote() : null;
++      setNote(r.state === "unwired" ? "Watch-only needs wiring, so nothing was saved." : r.state === "sample" ? "Sample data: added in the preview only. Nothing was saved." : `Added. Amara can see balances at these addresses and nothing else.${extra ? ` ${extra}` : ""}`);
++      if (r.state !== "unwired") { setValue(""); setBalance(""); }
+     } else if (pick === "jp_bank") {
+       const r = await adapter.importStatement();
+-      setNote(r.state === "unwired" ? "Statement import needs wiring, so no file was read." : r.state === "sample" ? "Sample data: no file is read in the preview." : "Statement imported.");
++      setNote(r.state === "sample" ? "Sample data: no file is read in the preview." : adapter.connectNote() ?? (r.state === "unwired" ? "Statement import needs wiring, so no file was read." : "Statement imported."));
+     }
+   };
+   const ready = route.ready.state !== "unwired";
+@@ -48,6 +52,7 @@ export function ConnectSheet({ open, onClose, adapter, initial = "ledger" }: { o
+               <span id="m-guard" className="m-guard" data-k={check.kind} role="status">{check.kind === "public" ? `✓ ${check.label}` : check.kind === "invalid" ? "Not a public address or xpub" : ""}</span></span>
+           </label>
+           <label className="m-field"><span>Nickname</span><span className="m-input"><input value={nick} maxLength={60} onChange={(e) => setNick(e.target.value)} /></span></label>
++          <label className="m-field"><span>Balance now, in {check.kind === "public" ? (check.chain === "btc" ? "BTC" : "ETH") : "coins"} (optional, you type it)</span><span className="m-input"><input value={balance} inputMode="decimal" autoComplete="off" onChange={(e) => setBalance(e.target.value)} /></span></label>
+           <div className="m-warn" role={refused ? "alert" : "note"}>
+             {refused ? <><b>That looked like a {refused === "phrase" ? "recovery phrase" : "private key"}. Amara cleared it and didn&apos;t save it anywhere.</b>Treat it as exposed: if it was your real one, move your coins to a new Ledger wallet. Only public addresses and xpubs are accepted.</>
+               : <><b>Seed phrases are refused.</b>If you paste 12 or 24 words here, Amara clears the field at once, doesn&apos;t save it anywhere, and tells you to treat that phrase as exposed. Only public addresses and xpubs are accepted.</>}
+diff --git a/src-console/money/MoneyView.tsx b/src-console/money/MoneyView.tsx
+index c7159fd..60fc227 100644
+--- a/src-console/money/MoneyView.tsx
++++ b/src-console/money/MoneyView.tsx
+@@ -35,7 +35,7 @@ function AccountRow({ a, adapter }: { a: MoneyAccount; adapter: MoneyAdapter })
+         <div className="m-acct__acts">
+           {a.status === "expired" ? <><Button size="small" variant="primary" onClick={() => { void adapter.reconnect(a.id).then((r) => setNote(r.state === "unwired" ? "Signing in again needs wiring." : "Sample data: opens Chime's own sign-in page in your browser.")); }}>Sign in again…</Button>
+             <Button size="small" onClick={() => { void adapter.disconnect(a.id).then((r) => setNote(r.state === "unwired" ? "Needs wiring, so nothing changed." : "Sample data: disconnected in the preview only.")); }}>Disconnect</Button></>
+-            : <Button size="small" onClick={() => { void adapter.importStatement().then((r) => setNote(r.state === "unwired" ? "Statement import needs wiring." : "Sample data: no file is read in the preview.")); }}>Import a statement…</Button>}
++            : <Button size="small" onClick={() => { void adapter.importStatement().then((r) => setNote(r.state === "sample" ? "Sample data: no file is read in the preview." : adapter.connectNote() ?? "Statement import needs wiring.")); }}>Import a statement…</Button>}
+           {note && <span className="pk-note" role="status">{note}</span>}
+         </div>
+       )}
+diff --git a/src-console/money/adapters.ts b/src-console/money/adapters.ts
+index e9836a9..af9fcf5 100644
+--- a/src-console/money/adapters.ts
++++ b/src-console/money/adapters.ts
+@@ -53,8 +53,11 @@ export interface MoneyAdapter {
+   followUps(): Wired<MoneyFollowUp[]>;
+   routes(): ConnectRoute[];
+   /** Adds a watch-only address or xpub. Only ever called with a value guardWatchInput() accepted as public. */
+-  addWatchOnly(chain: "btc" | "eth", publicValue: string, nickname: string): Promise<Action>;
++  addWatchOnly(chain: "btc" | "eth", publicValue: string, nickname: string, balance?: number | null): Promise<Action>;
++  /** Opens the native file dialog (the renderer never passes a path) and imports the statement. Live text comes from connectNote(). */
+   importStatement(): Promise<Action>;
++  /** The fixed sentence for the last connect action's result (counts or a fixed error text); null before any. */
++  connectNote(): string | null;
+   answer(id: string, state: AnswerState, reason?: SkipReason | null): Promise<Action>;
+   undo(id: string): Promise<Action>;
+   reconnect(id: string): Promise<Action>;
+@@ -78,6 +81,7 @@ const ROUTES_UNWIRED: ConnectRoute[] = [
+ export const unwiredMoney: MoneyAdapter = {
+   accounts: () => UNWIRED, fx: () => UNWIRED, overview: () => UNWIRED, take: () => UNWIRED, followUps: () => UNWIRED,
+   routes: () => ROUTES_UNWIRED,
++  connectNote: () => null,
+   addWatchOnly: async () => UNWIRED, importStatement: async () => UNWIRED, answer: async () => UNWIRED, undo: async () => UNWIRED, reconnect: async () => UNWIRED, disconnect: async () => UNWIRED,
+ };
+ 
+@@ -161,6 +165,7 @@ export function sampleMoney(opts: MoneyPreview = {}): MoneyAdapter {
+   const scenario = opts.scenario ?? "connected";
+   const ok = async (): Promise<Action> => sample({ ok: true });
+   return {
++    connectNote: () => null,
+     accounts: () => (scenario === "none" ? sample([]) : sample(scenario === "states" ? ACCOUNTS_STATES : ACCOUNTS)),
+     fx: () => sample(SAMPLE_FX),
+     overview: () => (scenario === "connected" ? sample(OVERVIEW) : UNWIRED),
+diff --git a/src-console/money/live.ts b/src-console/money/live.ts
+index 009489b..bd6adb8 100644
+--- a/src-console/money/live.ts
++++ b/src-console/money/live.ts
+@@ -52,7 +52,24 @@ export function mapFx(r: RawFx | null | undefined): Fx | null {
+   return { rate: r.rate, at: r.date, source: FX_SOURCE[r.source] ?? r.source };
+ }
+ 
+-export function makeLiveMoney(call: Invoke = realInvoke, notify: () => void = announceStores): MoneyAdapter {
++const IMPORT_NOTES: Record<string, string> = {
++  cancelled: "No file chosen. Nothing was changed.",
++  bad_file: "That file couldn't be opened. Nothing was changed.",
++  too_large: "That file is too large (5 MB at most). Nothing was changed.",
++  unrecognised_format: "Amara doesn't recognise this statement's layout. Nothing was changed.",
++  store_full: "The account list is full. Nothing was changed.",
++  store_error: "The money store couldn't be written. Nothing was changed.",
++  invalid_input: "That file can't be imported. Nothing was changed.",
++  failed: "The import didn't go through. Nothing was changed.",
++};
++/** Fixed text per money_import_pick error code. Nothing from the error itself is shown. */
++export function importNote(e: unknown): string {
++  return (typeof e === "string" && IMPORT_NOTES[e]) || IMPORT_NOTES.failed;
++}
++
++const localToday = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
++
++export function makeLiveMoney(call: Invoke = realInvoke, notify: () => void = announceStores, today: () => string = localToday): MoneyAdapter {
+   let accounts: MoneyAccount[] | null = null;
+   let fx: Fx | null = null;
+   let fxRead = false;
+@@ -81,18 +98,42 @@ export function makeLiveMoney(call: Invoke = realInvoke, notify: () => void = an
+   const start = () => { if (!started) { started = true; void refresh(); } };
+ 
+   const ledgerReady = { state: "live", value: { ok: true } } as const;
++  let note: string | null = null;
+   return {
+     ...unwiredMoney,
+-    // Ledger watch-only is wired. jp_bank stays unwired: money_import_statement needs an account id and a
+-    // file path, and importStatement() carries neither (no file picker is reachable from here).
+-    routes: (): ConnectRoute[] => unwiredMoney.routes().map((r) => (r.id === "ledger" ? { ...r, ready: ledgerReady } : r)),
+-    addWatchOnly: async (chain, publicValue, nickname) => {
++    // Ledger watch-only and the Japanese-bank statement import are wired. The import runs behind a native
++    // file dialog in Rust (money_import_pick): the renderer never holds a path. Chime and Fidelity stay unwired (Plaid, decision 0008).
++    routes: (): ConnectRoute[] => unwiredMoney.routes().map((r) => (r.id === "ledger" || r.id === "jp_bank" ? { ...r, ready: ledgerReady } : r)),
++    connectNote: () => note,
++    importStatement: async () => {
++      note = null;
++      try {
++        const r = await call<{ imported: number; skipped: number }>("money_import_pick");
++        if (!r || !Number.isFinite(r.imported) || !Number.isFinite(r.skipped)) { note = IMPORT_NOTES.failed; return UNWIRED; }
++        note = `Imported ${r.imported} transaction${r.imported === 1 ? "" : "s"}. ${r.skipped} skipped (already imported or not readable).`;
++        await refresh();
++        return live({ ok: true as const });
++      } catch (e) {
++        note = importNote(e);
++        return UNWIRED;
++      }
++    },
++    addWatchOnly: async (chain, publicValue, nickname, balance) => {
+       // The seed guard runs first, again, so a refused value never reaches invoke.
+       const g = guardWatchInput(publicValue);
+       if (g.kind !== "public" || g.chain !== chain) return UNWIRED;
+       try {
+         const acct = await call<{ id: string }>("money_account_add", { draft: { nickname: nickname.trim() || "Ledger", institution: "ledger", kind: chain, route: "watch_only", currency: chain === "btc" ? "BTC" : "ETH", scope: "personal" } });
+         await call("money_watch_add", { accountId: acct.id, value: publicValue.trim() });
++        note = null;
++        // Optional balance you type yourself: there is no price or chain lookup, so this is the only balance a watch-only account has.
++        if (balance != null) {
++          if (!Number.isFinite(balance) || balance < 0) note = "The balance wasn't saved: enter a number of zero or more.";
++          else {
++            try { await call("money_balance_set_manual", { accountId: acct.id, nativeAmount: balance, asOf: today() }); }
++            catch { note = "Added, but the balance wasn't saved. Nothing else changed."; }
++          }
++        }
+       } catch (e) { console.warn("[money] watch-only add refused:", typeof e === "string" ? e.slice(0, 40) : "failed"); return UNWIRED; }
+       await refresh();
+       return live({ ok: true as const });
+diff --git a/src-tauri/src/commands/adds.rs b/src-tauri/src/commands/adds.rs
+index 7b3601c..b908db6 100644
+--- a/src-tauri/src/commands/adds.rs
++++ b/src-tauri/src/commands/adds.rs
+@@ -1064,4 +1064,51 @@ mod tests {
+         assert!(preview_in("nope", "x", &d, today()).is_err());
+         assert!(!d.workspace.exists());
+     }
++    fn files_under(root: &Path, out: &mut Vec<PathBuf>) {
++        if let Ok(rd) = std::fs::read_dir(root) {
++            for e in rd.flatten() {
++                let p = e.path();
++                if p.is_dir() {
++                    files_under(&p, out);
++                } else {
++                    out.push(p);
++                }
++            }
++        }
++    }
++
++    /// Chat and voice are the same save path as typing (`via` is only a label); a voice add arrives as transcript text
++    /// and the app path writes no audio file: only the JSON/markdown stores exist afterwards.
++    #[test]
++    fn chat_and_voice_adds_use_the_one_save_path_and_write_no_audio() {
++        let d = dirs("addc");
++        let t = now_jst();
++        for (kind, text, via) in [
++            ("goal", "Meditate 10 minutes", "chat"),
++            ("task", "Order jars", "voice"),
++            ("idea", "Reel: label approval", "voice"),
++            ("date", "Residence card Sept 14 2027", "chat"),
++        ] {
++            let p = preview(kind, text, &d);
++            save_in(kind, &p, Some(via), &d, t).unwrap();
++            assert_eq!(history_in(kind, &d).unwrap()[0].via, via);
++        }
++        let mut files = Vec::new();
++        files_under(&d.data, &mut files);
++        files_under(&d.workspace, &mut files);
++        assert!(!files.is_empty());
++        for f in &files {
++            let ext = f.extension().and_then(|e| e.to_str()).unwrap_or("");
++            assert!(
++                ["json", "md", "tmp"].contains(&ext),
++                "unexpected file {f:?}"
++            );
++        }
++        // The production code (above the tests) has no audio capture or audio-file API.
++        let src = include_str!("adds.rs");
++        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
++        for needle in ["cpal", "hound", "wav", "ffmpeg", "AudioContext", "arecord"] {
++            assert!(!prod.contains(needle), "{needle}");
++        }
++    }
+ }
+diff --git a/src-tauri/src/commands/backups.rs b/src-tauri/src/commands/backups.rs
+index d2700d6..9ce09a5 100644
+--- a/src-tauri/src/commands/backups.rs
++++ b/src-tauri/src/commands/backups.rs
+@@ -18,7 +18,7 @@ use std::sync::Mutex;
+ use tauri::Emitter;
+ 
+ const SETTINGS_FILE: &str = "backup_settings.json";
+-const PROGRESS_EVENT: &str = "backup://progress";
++pub(crate) const PROGRESS_EVENT: &str = "backup://progress";
+ /// A backup needs this much free space on top of the size of the data it copies.
+ const FREE_SPACE_MARGIN: u64 = 5 * 1024 * 1024 * 1024;
+ const MAX_SETTINGS_BYTES: u64 = 16 * 1024;
+@@ -225,6 +225,15 @@ pub struct BackupSettings {
+     pub keep: u32,
+     pub before_update: bool,
+     pub skip_on_battery_below: u32,
++    /// Reserved. Nothing deletes a backup (hard rule 7): no code path reads this to delete, and
++    /// `BackupSettingsPatch` cannot set it. `backup_prune_plan` only lists what WOULD go.
++    pub auto_prune: bool,
++    /// When the last backup attempt (nightly or Back Up Now) finished, RFC 3339, and how it ended:
++    /// `ok`, `skipped_busy`, `skipped_battery`, or the error code.
++    pub last_run_at: Option<String>,
++    pub last_run_result: Option<String>,
++    /// When the last backup that succeeded finished (drives the missed-nightly catch-up).
++    pub last_ok_at: Option<String>,
+ }
+ 
+ impl Default for BackupSettings {
+@@ -237,6 +246,10 @@ impl Default for BackupSettings {
+             keep: 14,
+             before_update: true,
+             skip_on_battery_below: 20,
++            auto_prune: false,
++            last_run_at: None,
++            last_run_result: None,
++            last_ok_at: None,
+         }
+     }
+ }
+@@ -395,6 +408,19 @@ pub(crate) fn apply_patch(
+     Ok(s)
+ }
+ 
++/// Record how a backup attempt ended. Same lock and atomic write as `apply_patch`; changes only the
++/// `last_*` fields. `ok` also moves `last_ok_at`. A settings file that can't be read is left alone.
++pub(crate) fn record_run(data_dir: &Path, at: &str, result: &str, ok: bool) -> Result<(), String> {
++    let _g = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
++    let mut s = load_settings(data_dir)?;
++    s.last_run_at = Some(at.to_string());
++    s.last_run_result = Some(result.chars().take(40).collect());
++    if ok {
++        s.last_ok_at = Some(at.to_string());
++    }
++    save_settings(data_dir, &s)
++}
++
+ // ---- listing ----
+ 
+ #[derive(Serialize, Debug, Clone, PartialEq)]
+@@ -409,7 +435,7 @@ pub struct BackupEntry {
+ }
+ 
+ /// `amara-backup-YYYYMMDD-HHMMSS.tar.gz` or legacy `nexus-backup-YYYYMMDD_HHMMSS.tar.gz`.
+-fn parse_backup_name(name: &str) -> Option<NaiveDateTime> {
++pub(crate) fn parse_backup_name(name: &str) -> Option<NaiveDateTime> {
+     let (rest, sep) = if let Some(r) = name.strip_prefix(NEW_PREFIX) {
+         (r, '-')
+     } else if let Some(r) = name.strip_prefix(LEGACY_PREFIX) {
+@@ -480,12 +506,12 @@ pub struct BackupRunResult {
+     pub skipped: Vec<String>,
+ }
+ 
+-static BUSY: AtomicBool = AtomicBool::new(false);
++pub(crate) static BUSY: AtomicBool = AtomicBool::new(false);
+ 
+ /// Holds the single-backup flag; released on drop (also on early return or panic).
+-struct BusyGuard<'a>(&'a AtomicBool);
++pub(crate) struct BusyGuard<'a>(&'a AtomicBool);
+ impl<'a> BusyGuard<'a> {
+-    fn acquire(flag: &'a AtomicBool) -> Option<Self> {
++    pub(crate) fn acquire(flag: &'a AtomicBool) -> Option<Self> {
+         flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+             .ok()
+             .map(|_| Self(flag))
+@@ -574,7 +600,7 @@ pub(crate) async fn run_backup(
+     Ok(BackupRunResult { entry, skipped })
+ }
+ 
+-fn home_dir() -> Result<PathBuf, String> {
++pub(crate) fn home_dir() -> Result<PathBuf, String> {
+     dirs::home_dir().ok_or_else(|| "dir_invalid".to_string())
+ }
+ 
+@@ -609,14 +635,14 @@ pub async fn backup_list() -> Result<Vec<BackupEntry>, String> {
+ 
+ /// Caps so a huge or hostile archive can't tie the app up.
+ /// Dirs count too. The app data is ~2.2 GB today (checked read-only), so 16 GiB leaves ~7x headroom.
+-const VERIFY_MAX_ENTRIES: usize = 200_000;
++pub(crate) const VERIFY_MAX_ENTRIES: usize = 200_000;
+ const VERIFY_MAX_TOTAL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+ /// A per-file hash map is ~100 bytes per file, so 32 MiB covers the entry cap.
+-const VERIFY_MAX_MANIFEST_BYTES: u64 = 32 * 1024 * 1024;
++pub(crate) const VERIFY_MAX_MANIFEST_BYTES: u64 = 32 * 1024 * 1024;
+ const VERIFY_RATIO_FLOOR: u64 = 1024 * 1024 * 1024;
+ const VERIFY_MAX_RATIO: u64 = 200;
+ const VERIFY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(600);
+-static VERIFY_BUSY: AtomicBool = AtomicBool::new(false);
++pub(crate) static VERIFY_BUSY: AtomicBool = AtomicBool::new(false);
+ const VERIFY_MAX_MISMATCHES: usize = 50;
+ 
+ #[derive(Serialize, Debug, Clone, PartialEq)]
+@@ -638,7 +664,7 @@ pub struct VerifyReport {
+ }
+ 
+ /// Names go back to the UI: no control, zero-width or bidi characters, at most 200 chars.
+-fn clean_name(s: &str) -> String {
++pub(crate) fn clean_name(s: &str) -> String {
+     s.chars()
+         .filter(|c| {
+             !c.is_control()
+@@ -668,20 +694,20 @@ fn is_hex64(s: &str) -> bool {
+ 
+ /// The limits in force for one verification (tests pass small ones).
+ #[derive(Clone, Copy)]
+-struct VerifyCaps {
++pub(crate) struct VerifyCaps {
+     entries: usize,
+     total: u64,
+     ratio_floor: u64,
+     deadline: std::time::Duration,
+ }
+-const VERIFY_CAPS: VerifyCaps = VerifyCaps {
++pub(crate) const VERIFY_CAPS: VerifyCaps = VerifyCaps {
+     entries: VERIFY_MAX_ENTRIES,
+     total: VERIFY_MAX_TOTAL_BYTES,
+     ratio_floor: VERIFY_RATIO_FLOOR,
+     deadline: VERIFY_DEADLINE,
+ };
+ 
+-fn verify_archive(
++pub(crate) fn verify_archive(
+     path: &Path,
+     file: &str,
+     at: String,
+@@ -959,13 +985,15 @@ pub async fn backup_verify_last() -> Result<Option<VerifyReport>, String> {
+ }
+ 
+ #[derive(Serialize, Clone)]
+-struct ProgressEvent<'a> {
+-    phase: &'a str,
+-    pct: u8,
++pub(crate) struct ProgressEvent<'a> {
++    pub(crate) phase: &'a str,
++    pub(crate) pct: u8,
+ }
+ 
+-#[tauri::command]
+-pub async fn backup_now(app: tauri::AppHandle) -> Result<BackupRunResult, String> {
++/// One backup with progress events, then the outcome is written to the settings. Shared by
++/// `backup_now` and the nightly scheduler; the single-flight flag is `BUSY`, so they never overlap.
++/// A refused second run (`already_running`) records nothing: the run that holds the flag will.
++pub(crate) async fn run_and_record(app: &tauri::AppHandle) -> Result<BackupRunResult, String> {
+     let (home, data) = (home_dir()?, crate::app_paths::data_dir());
+     let d2 = data.clone();
+     let settings = tokio::task::spawn_blocking(move || load_settings(&d2))
+@@ -974,7 +1002,22 @@ pub async fn backup_now(app: tauri::AppHandle) -> Result<BackupRunResult, String
+     let emit = |phase: &str, pct: u8| {
+         let _ = app.emit(PROGRESS_EVENT, ProgressEvent { phase, pct });
+     };
+-    run_backup(&home, &data, &settings, &free_bytes, &emit, &BUSY).await
++    let out = run_backup(&home, &data, &settings, &free_bytes, &emit, &BUSY).await;
++    let code = match &out {
++        Ok(_) => "ok".to_string(),
++        Err(e) => e.clone(),
++    };
++    if code != "already_running" {
++        let ok = out.is_ok();
++        let at = Local::now().to_rfc3339();
++        let _ = tokio::task::spawn_blocking(move || record_run(&data, &at, &code, ok)).await;
++    }
++    out
++}
++
++#[tauri::command]
++pub async fn backup_now(app: tauri::AppHandle) -> Result<BackupRunResult, String> {
++    run_and_record(&app).await
+ }
+ 
+ #[cfg(test)]
+@@ -1035,7 +1078,7 @@ mod tests {
+         let s = load_settings(&data).unwrap();
+         assert_eq!(
+             serde_json::to_value(&s).unwrap(),
+-            serde_json::json!({"nightly":true,"at":"03:00","dir":"~/Amara Backups","keep":14,"beforeUpdate":true,"skipOnBatteryBelow":20})
++            serde_json::json!({"nightly":true,"at":"03:00","dir":"~/Amara Backups","keep":14,"beforeUpdate":true,"skipOnBatteryBelow":20,"autoPrune":false,"lastRunAt":null,"lastRunResult":null,"lastOkAt":null})
+         );
+         assert!(!settings_path(&data).exists(), "a read writes nothing");
+         let _ = home;
+diff --git a/src-tauri/src/commands/checkin.rs b/src-tauri/src/commands/checkin.rs
+index 33daccd..46999cf 100644
+--- a/src-tauri/src/commands/checkin.rs
++++ b/src-tauri/src/commands/checkin.rs
+@@ -174,4 +174,28 @@ mod tests {
+         assert!(list_in(&dir, 5).unwrap().is_empty());
+         let _ = std::fs::remove_dir_all(data);
+     }
++    /// A voice check-in is its transcript only: the store holds text, and nothing audio is ever written.
++    #[test]
++    fn a_transcribed_check_in_writes_text_only() {
++        let d = super::super::local_store::tests::temp_dir("cin-audio");
++        let draft = CheckInDraft {
++            mood: 4,
++            energy: 3,
++            tags: vec![],
++            text: "slept ok".into(),
++            transcribed: true,
++        };
++        let r = save_in(&d, &draft, now_jst()).unwrap();
++        assert!(r.transcribed);
++        let mut names: Vec<String> = Vec::new();
++        for e in std::fs::read_dir(dir_in(&d)).unwrap().flatten() {
++            names.push(e.file_name().to_string_lossy().into());
++        }
++        assert_eq!(names, vec!["checkins.json".to_string()]);
++        let src = include_str!("checkin.rs");
++        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
++        for needle in ["cpal", "hound", ".wav", "ffmpeg", "AudioContext"] {
++            assert!(!prod.contains(needle), "{needle}");
++        }
++    }
+ }
+diff --git a/src-tauri/src/commands/goal_roadmap.rs b/src-tauri/src/commands/goal_roadmap.rs
+index d58140f..a3c671c 100644
+--- a/src-tauri/src/commands/goal_roadmap.rs
++++ b/src-tauri/src/commands/goal_roadmap.rs
+@@ -614,7 +614,7 @@ pub fn crew_rows_busy(statuses: &[&str]) -> bool {
+ }
+ 
+ /// A Hermes chat turn or a crew run is active. A crew service that is down counts as not busy.
+-async fn system_busy() -> bool {
++pub(crate) async fn system_busy() -> bool {
+     if crate::commands::terrence_runtime_bridge::chat_in_flight() {
+         return true;
+     }
+diff --git a/src-tauri/src/commands/llm_router.rs b/src-tauri/src/commands/llm_router.rs
+index b76da4f..4cc3e4f 100644
+--- a/src-tauri/src/commands/llm_router.rs
++++ b/src-tauri/src/commands/llm_router.rs
+@@ -688,6 +688,33 @@ pub(crate) async fn deep_complete(system: &str, user: &str) -> Result<String, St
+     Ok(content)
+ }
+ 
++/// One background completion on the light tier, never the cloud: Claude is forced off, the route is
++/// fast, and a reply that still came from the Claude tier is refused. For text built from personal
++/// health data (the Telegram relay). `instruction` is appended to Amara's one system prompt.
++pub(crate) async fn local_complete(instruction: &str, user: &str) -> Result<String, String> {
++    let saved = crate::commands::telegram::load_config();
++    let base = router_base(None, saved.amara_router_url.as_deref());
++    if loopback_base(&base).as_deref() != Some(base.as_str()) {
++        return Err(ROUTER_FAILED.to_string());
++    }
++    let headers = vec![
++        ("X-Amara-Allow-Claude", "0".to_string()),
++        ("X-Amara-Mode", "local".to_string()),
++        ("X-Amara-Route", "fast".to_string()),
++    ];
++    let system = format!("{}\n\n{instruction}", system_prompt(&amara_persona()));
++    let body = router_body(&system, user);
++    let transport = HttpTransport {
++        client: no_redirect_client(),
++        body_cap: Some(DEEP_BODY_CAP),
++    };
++    let (content, tier, ..) = ask_router(&transport, &base, &headers, &body).await?;
++    if tier == Tier::Claude {
++        return Err(ROUTER_FAILED.to_string());
++    }
++    Ok(content)
++}
++
+ /// Asks the router's dry-run endpoint which tier it would use (may run its classifier).
+ #[tauri::command]
+ pub async fn get_cost_estimate(
+diff --git a/src-tauri/src/commands/mod.rs b/src-tauri/src/commands/mod.rs
+index 4b21435..ccf2937 100644
+--- a/src-tauri/src/commands/mod.rs
++++ b/src-tauri/src/commands/mod.rs
+@@ -1,6 +1,7 @@
+ pub mod approval_gate;
+ pub mod arm;
+ pub mod assistant;
++pub mod backup_schedule;
+ pub mod backups;
+ pub mod ble_common;
+ pub mod business_ledger;
+@@ -23,10 +24,12 @@ pub mod llm_router;
+ pub mod memory_read;
+ pub mod memory_write;
+ pub mod money;
++pub mod money_import_pick;
+ pub mod muse;
+ pub mod n8n_status;
+ pub mod noop;
+ pub mod noop_query;
++pub mod notify_relay;
+ pub mod onboarding;
+ pub mod openclaw;
+ pub mod outbox;
+diff --git a/src-tauri/src/commands/money.rs b/src-tauri/src/commands/money.rs
+index af9e82b..57806f1 100644
+--- a/src-tauri/src/commands/money.rs
++++ b/src-tauri/src/commands/money.rs
+@@ -989,6 +989,61 @@ pub(crate) fn import_statement_in(
+     })
+ }
+ 
++/// What the Connect sheet's "Import a statement" returns: counts only, never a path or a row.
++#[derive(Debug, Clone, Serialize, PartialEq)]
++pub struct ImportPicked {
++    pub imported: usize,
++    pub skipped: usize,
++}
++
++/// Fixed error codes for the file-picker import. Nothing from a path or an error text gets through.
++fn import_pick_code(e: &str) -> String {
++    match e {
++        "cancelled"
++        | "bad_file"
++        | "too_large"
++        | "unrecognised_format"
++        | "store_error"
++        | "store_full"
++        | "invalid_input" => e.to_string(),
++        _ => "failed".to_string(),
++    }
++}
++
++/// The import behind the native file picker. `path` is what the user picked (None: they cancelled).
++/// The statement is read and parsed first, so a refused file creates nothing. Parsing finds the
++/// bank's layout from the header row, so the one yen statement account (made on first use, nickname
++/// "Japanese bank") serves both banks. Never asks the renderer for a path.
++pub(crate) fn import_pick_in(data: &Path, path: Option<&Path>) -> Result<ImportPicked, String> {
++    let run = || -> Result<ImportPicked, String> {
++        let path = path.ok_or_else(|| "cancelled".to_string())?;
++        parse_statement(&read_import_file(path)?)?;
++        let existing = load_accounts(data)?
++            .into_iter()
++            .find(|a| a.route == "csv" && matches!(a.institution.as_str(), "smbc" | "japan_post"));
++        let account = match existing {
++            Some(a) => a,
++            None => account_add_in(
++                data,
++                &MoneyAccountDraft {
++                    nickname: "Japanese bank".into(),
++                    institution: "smbc".into(),
++                    kind: "checking".into(),
++                    route: "csv".into(),
++                    currency: "JPY".into(),
++                    scope: "personal".into(),
++                },
++            )?,
++        };
++        let s = import_statement_in(data, &account.id, path)?;
++        Ok(ImportPicked {
++            imported: s.added,
++            skipped: s.skipped_rows + s.duplicates,
++        })
++    };
++    run().map_err(|e| import_pick_code(&e))
++}
++
+ // ───────────────────────────── FX reference rate ─────────────────────────────
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+@@ -2495,6 +2550,82 @@ mod tests {
+         let _ = fs::remove_dir_all(d);
+     }
+ 
++    // ── native-picker import (money_import_pick) ──
++
++    #[test]
++    fn pick_import_creates_one_account_imports_and_reports_only_counts() {
++        let d = temp_dir("money-pick");
++        let f = write_file(
++            &d,
++            "s.csv",
++            format!(
++                "{SPLIT_HEADER}2026/11/02,1000,,coffee,9000\n2026/11/03,,5000,pay,14000\nbad,row\n"
++            )
++            .as_bytes(),
++        );
++        let r = import_pick_in(&d, Some(&f)).unwrap();
++        assert_eq!((r.imported, r.skipped), (2, 1));
++        assert_eq!(load_accounts(&d).unwrap().len(), 1);
++        // Same file again: all duplicates, still one account, nothing new imported.
++        let r2 = import_pick_in(&d, Some(&f)).unwrap();
++        assert_eq!((r2.imported, r2.skipped), (0, 3));
++        assert_eq!(load_accounts(&d).unwrap().len(), 1);
++        let _ = fs::remove_dir_all(d);
++    }
++
++    #[test]
++    fn pick_import_errors_are_fixed_codes_and_a_refused_file_creates_nothing() {
++        let d = temp_dir("money-pick-err");
++        assert_eq!(import_pick_in(&d, None).unwrap_err(), "cancelled");
++        let junk = write_file(&d, "j.csv", b"hello,world\n1,2\n");
++        assert_eq!(
++            import_pick_in(&d, Some(&junk)).unwrap_err(),
++            "unrecognised_format"
++        );
++        assert_eq!(
++            import_pick_in(&d, Some(&d.join("nope.csv"))).unwrap_err(),
++            "bad_file"
++        );
++        assert_eq!(
++            import_pick_in(&d, Some(Path::new("rel.csv"))).unwrap_err(),
++            "invalid_input"
++        );
++        assert!(load_accounts(&d).unwrap().is_empty());
++        assert_eq!(import_pick_code("anything with /Users/x path"), "failed");
++        let _ = fs::remove_dir_all(d);
++    }
++
++    #[test]
++    fn pick_import_reuses_an_existing_yucho_account() {
++        let d = temp_dir("money-pick-reuse");
++        let mut dr = draft("Yucho");
++        dr.institution = "japan_post".into();
++        let a = account_add_in(&d, &dr).unwrap();
++        let f = write_file(
++            &d,
++            "s.csv",
++            format!("{SPLIT_HEADER}2026/11/02,1,,x,2\n").as_bytes(),
++        );
++        assert_eq!(import_pick_in(&d, Some(&f)).unwrap().imported, 1);
++        assert_eq!(load_accounts(&d).unwrap().len(), 1);
++        assert!(tx_file(&d, &a.id).exists());
++        let _ = fs::remove_dir_all(d);
++    }
++
++    #[test]
++    fn pick_command_takes_no_path_from_the_renderer() {
++        let src = include_str!("money_import_pick.rs");
++        let sig = src
++            .split("pub async fn money_import_pick(")
++            .nth(1)
++            .unwrap()
++            .split(')')
++            .next()
++            .unwrap();
++        assert_eq!(sig.trim(), "app: tauri::AppHandle");
++        assert!(src.contains("blocking_pick_file"));
++    }
++
+     // ── source scans ──
+ 
+     fn production_source() -> String {
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index ae38958..eda463a 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -168,6 +168,8 @@ pub fn run() {
+ 
+             // Start outbox delivery worker
+             outbox::start_delivery_worker(app.handle().clone());
++            // Nightly backup scheduler (in-app only; nothing runs while the app is closed).
++            commands::backup_schedule::start(app.handle().clone());
+ 
+             if let Some(window) = app.get_webview_window("main") {
+                 dock_icon::sync(&window);
+@@ -291,6 +293,7 @@ pub fn run() {
+             commands::money::money_watch_add,
+             commands::money::money_balance_set_manual,
+             commands::money::money_import_statement,
++            commands::money_import_pick::money_import_pick,
+             commands::money::fx_rate_get,
+             commands::money::fx_rate_set_manual,
+             commands::money::fx_rate_refresh,
+@@ -303,6 +306,8 @@ pub fn run() {
+             commands::backups::backup_now,
+             commands::backups::backup_list,
+             commands::backups::backup_verify_last,
++            commands::backup_schedule::backup_prune_plan,
++            commands::backup_schedule::restore_preview,
+             // Hemi-Sync (decision 0010)
+             commands::hemisync::hemisync_import,
+             commands::hemisync::hemisync_library,
+@@ -314,6 +319,11 @@ pub fn run() {
+             // Keychain secrets + n8n key file (write-only; never return a value)
+             commands::keychain::secrets_status,
+             commands::keychain::secret_set,
++            commands::notify_relay::notify_settings_get,
++            commands::notify_relay::notify_settings_set,
++            commands::notify_relay::notify_preview,
++            commands::notify_relay::notify_send_test,
++            commands::notify_relay::notify_dispatch_due,
+             commands::key_file::key_file_status,
+             commands::key_file::key_file_make,
+             commands::key_file::key_file_unlock,
+diff --git a/test/commands.registered.test.ts b/test/commands.registered.test.ts
+index 008a09b..9161896 100644
+--- a/test/commands.registered.test.ts
++++ b/test/commands.registered.test.ts
+@@ -64,7 +64,7 @@ describe("Tauri command registry", () => {
+     const { readFileSync } = await import("node:fs");
+     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+     const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+-    const money = ["money_accounts_list", "money_account_add", "money_watch_add", "money_balance_set_manual", "money_import_statement", "fx_rate_get", "fx_rate_set_manual", "fx_rate_refresh"];
++    const money = ["money_accounts_list", "money_account_add", "money_watch_add", "money_balance_set_manual", "money_import_statement", "money_import_pick", "fx_rate_get", "fx_rate_set_manual", "fx_rate_refresh"];
+     for (const name of money) expect(names).toContain(name);
+     expect(names.filter((n: string) => /^(money|fx)_/.test(n) && /transfer|pay|trade|convert|withdraw|send|buy|sell/.test(n))).toEqual([]);
+   });
