@@ -80,3 +80,20 @@ describe("design-1111x navy look", () => {
     expect(navyStore.get().phase).toBe("off");
   });
 });
+
+describe("useVoiceNavyPrompts replays no history", () => {
+  it("an empty first poll followed by old history triggers nothing", async () => {
+    const { renderHook } = await import("@testing-library/react");
+    const { useVoiceNavyPrompts } = await import("./useNavyMode");
+    const store = await import("./store");
+    const spy = vi.spyOn(store, "handleNavyPrompt");
+    const old = new Date(Date.now() - 600_000).toISOString();
+    const { rerender } = renderHook(({ t }) => useVoiceNavyPrompts(t), { initialProps: { t: [] as { time?: string; text?: string; route?: string }[] } });
+    rerender({ t: [{ time: old, text: "navy mode on", route: "hermes" }] });
+    expect(spy).not.toHaveBeenCalled();
+    // positive control: a fresh acted-on turn does reach the handler, so the spy is live
+    rerender({ t: [{ time: old, text: "navy mode on", route: "hermes" }, { time: new Date().toISOString(), text: "navy mode on", route: "hermes" }] });
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+});

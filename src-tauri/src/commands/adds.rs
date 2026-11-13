@@ -28,6 +28,61 @@ const MAX_TEXT: usize = 500;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
+/// A preview's payload lives here, not in the client: `add_preview` hands back only a random single-use token and
+/// `add_save` redeems it, so the saved payload can't be swapped or replayed (2 minutes, one use).
+pub const TOKEN_TTL_MS: u64 = 2 * 60_000;
+const MAX_TOKENS: usize = 256;
+
+#[derive(Default)]
+pub(crate) struct Tokens(Vec<(String, String, Value, u64)>);
+
+impl Tokens {
+    pub(crate) fn issue(&mut self, kind: &str, payload: Value, now_ms: u64) -> String {
+        self.0
+            .retain(|t| now_ms.saturating_sub(t.3) <= TOKEN_TTL_MS);
+        if self.0.len() >= MAX_TOKENS {
+            self.0.remove(0);
+        }
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        self.0.push((token.clone(), kind.into(), payload, now_ms));
+        token
+    }
+    /// Single use: the token is gone after any redeem attempt that finds it.
+    pub(crate) fn redeem(
+        &mut self,
+        kind: &str,
+        preview: &AddPreview,
+        now_ms: u64,
+    ) -> Result<Value, String> {
+        let token = preview
+            .payload
+            .as_ref()
+            .and_then(|p| p.get("token"))
+            .and_then(Value::as_str)
+            .ok_or("invalid input")?;
+        let at = self
+            .0
+            .iter()
+            .position(|t| t.0 == token)
+            .ok_or("invalid input")?;
+        let (_, k, payload, issued) = self.0.remove(at);
+        if k != kind || now_ms.saturating_sub(issued) > TOKEN_TTL_MS {
+            return Err("This preview expired. Read it again.".into());
+        }
+        Ok(payload)
+    }
+}
+
+static TOKENS: Mutex<Tokens> = Mutex::new(Tokens(Vec::new()));
+
+fn mono_ms() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_millis() as u64
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Route {
     pub id: String,
@@ -571,7 +626,13 @@ fn apply(
             minutes,
         } => {
             let title = clean_title(title)?;
-            let unit_text = [unit.clone(), minutes.map(|m| format!("{m} min"))]
+            if per_week.is_some_and(|n| !(1..=50).contains(&n))
+                || minutes.is_some_and(|m| !(1..=1440).contains(&m))
+            {
+                return Err("invalid input".into());
+            }
+            let unit = unit.as_deref().map(|u| clean_text(u, 1, 40)).transpose()?;
+            let unit_text = [unit, minutes.map(|m| format!("{m} min"))]
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()
@@ -824,7 +885,21 @@ async fn blocking<T: Send + 'static>(
 
 #[tauri::command]
 pub async fn add_preview(kind: String, text: String) -> Result<ParseResult, String> {
-    blocking(move || preview_in(&kind, &text, &Dirs::real(), day_of(&now_jst()))).await
+    blocking(move || {
+        let mut r = preview_in(&kind, &text, &Dirs::real(), day_of(&now_jst()))?;
+        if let ParseResult::Preview { preview } = &mut r {
+            if let Some(payload) = preview.payload.take() {
+                let token = TOKENS.lock().unwrap_or_else(|p| p.into_inner()).issue(
+                    &kind,
+                    payload,
+                    mono_ms(),
+                );
+                preview.payload = Some(serde_json::json!({ "token": token }));
+            }
+        }
+        Ok(r)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -833,7 +908,19 @@ pub async fn add_save(
     preview: AddPreview,
     via: Option<String>,
 ) -> Result<Saved, String> {
-    blocking(move || save_in(&kind, &preview, via.as_deref(), &Dirs::real(), now_jst())).await
+    blocking(move || {
+        let payload =
+            TOKENS
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .redeem(&kind, &preview, mono_ms())?;
+        let trusted = AddPreview {
+            payload: Some(payload),
+            ..preview
+        };
+        save_in(&kind, &trusted, via.as_deref(), &Dirs::real(), now_jst())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1063,5 +1150,136 @@ mod tests {
         assert!(save_in("task", &p, None, &d, now_jst()).is_err());
         assert!(preview_in("nope", "x", &d, today()).is_err());
         assert!(!d.workspace.exists());
+    }
+    fn files_under(root: &Path, out: &mut Vec<PathBuf>) {
+        if let Ok(rd) = std::fs::read_dir(root) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    files_under(&p, out);
+                } else {
+                    out.push(p);
+                }
+            }
+        }
+    }
+
+    /// Chat and voice are the same save path as typing (`via` is only a label); a voice add arrives as transcript text
+    /// and the app path writes no audio file: only the JSON/markdown stores exist afterwards.
+    #[test]
+    fn chat_and_voice_adds_use_the_one_save_path_and_write_no_audio() {
+        let d = dirs("addc");
+        let t = now_jst();
+        for (kind, text, via) in [
+            ("goal", "Meditate 10 minutes", "chat"),
+            ("task", "Order jars", "voice"),
+            ("idea", "Reel: label approval", "voice"),
+            ("date", "Residence card Sept 14 2027", "chat"),
+        ] {
+            let p = preview(kind, text, &d);
+            save_in(kind, &p, Some(via), &d, t).unwrap();
+            assert_eq!(history_in(kind, &d).unwrap()[0].via, via);
+        }
+        let mut files = Vec::new();
+        files_under(&d.data, &mut files);
+        files_under(&d.workspace, &mut files);
+        assert!(!files.is_empty());
+        for f in &files {
+            let ext = f.extension().and_then(|e| e.to_str()).unwrap_or("");
+            assert!(
+                ["json", "md", "tmp"].contains(&ext),
+                "unexpected file {f:?}"
+            );
+        }
+        // The production code (above the tests) has no audio capture or audio-file API.
+        let src = include_str!("adds.rs");
+        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
+        for needle in ["cpal", "hound", "wav", "ffmpeg", "AudioContext", "arecord"] {
+            assert!(!prod.contains(needle), "{needle}");
+        }
+    }
+
+    fn pv(payload: Value) -> AddPreview {
+        AddPreview {
+            title: "t".into(),
+            fields: vec![],
+            note: None,
+            payload: Some(payload),
+        }
+    }
+
+    #[test]
+    fn tokens_refuse_unknown_expired_reused_and_swapped_payloads() {
+        let mut t = Tokens::default();
+        let real = serde_json::json!({"kind":"task","title":"x","venture":null,"due":null});
+        let tok = t.issue("task", real.clone(), 1_000);
+        // unknown token, or a raw payload with no token (the old swap attack), is refused
+        assert!(t
+            .redeem("task", &pv(serde_json::json!({"token":"nope"})), 1_001)
+            .is_err());
+        assert!(t
+            .redeem(
+                "task",
+                &pv(serde_json::json!({"kind":"task","title":"evil"})),
+                1_001
+            )
+            .is_err());
+        // a different kind can't redeem it (and it is spent by the attempt)
+        let tok2 = t.issue("task", real.clone(), 1_000);
+        assert!(t
+            .redeem("goal", &pv(serde_json::json!({ "token": tok2 })), 1_001)
+            .is_err());
+        assert!(t
+            .redeem("task", &pv(serde_json::json!({ "token": tok2 })), 1_001)
+            .is_err());
+        // the saved payload is the stored one, whatever else the client sent
+        let got = t
+            .redeem(
+                "task",
+                &pv(serde_json::json!({ "token": tok, "title": "evil" })),
+                1_001,
+            )
+            .unwrap();
+        assert_eq!(got, real);
+        // reuse is refused
+        assert!(t
+            .redeem("task", &pv(serde_json::json!({ "token": tok })), 1_002)
+            .is_err());
+        // expiry
+        let old = t.issue("task", real, 0);
+        assert!(t
+            .redeem(
+                "task",
+                &pv(serde_json::json!({ "token": old })),
+                TOKEN_TTL_MS + 1
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn goal_numbers_and_unit_are_bounded_and_cleaned() {
+        let d = dirs("addg");
+        let bad = |per: Option<u32>, min: Option<u32>, unit: &str| {
+            let mut p = preview("goal", "Read", &d);
+            p.payload = Some(
+                serde_json::json!({"kind":"goal","title":"Read","per_week":per,"unit":unit,"minutes":min}),
+            );
+            save_in("goal", &p, None, &d, now_jst())
+        };
+        assert!(bad(Some(0), None, "days a week").is_err());
+        assert!(bad(Some(9999), None, "days a week").is_err());
+        assert!(bad(None, Some(100000), "x").is_err());
+        assert!(bad(Some(3), Some(10), &"u".repeat(200)).is_err());
+        assert!(bad(Some(3), Some(10), "nights a week").is_ok());
+        let goals: Vec<Goal> =
+            serde_json::from_str(&std::fs::read_to_string(d.goals()).unwrap()).unwrap();
+        assert_eq!(goals.len(), 1, "only the valid goal was written");
+        assert!(bad(Some(3), None, "days\n#x a week").is_ok());
+        let goals: Vec<Goal> =
+            serde_json::from_str(&std::fs::read_to_string(d.goals()).unwrap()).unwrap();
+        assert_eq!(
+            goals[1].unit, "days #x a week",
+            "control characters are flattened"
+        );
     }
 }

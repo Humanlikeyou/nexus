@@ -15,6 +15,8 @@ export type ConversationMessage = {
   tier?: AmaraTierInfo;
   /** "home": answered by Home Assistant's conversation agent (chat pre-route), not a model. */
   source?: "home";
+  /** A local-only line (e.g. an add preview from chat or voice): shown in the thread, never sent to Hermes or summarized. */
+  local?: true;
 };
 
 export const CONVERSATION_KEY = "nexus.terrence.conversationId";

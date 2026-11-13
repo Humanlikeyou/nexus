@@ -2,6 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { HOST_VIEWS, SECTION_ANCHORS, SYSTEMS, TODAY_LABEL, TODAY_ROUTE, canonicalRoute, resolveRoute, screenFor, tabOf } from "./app/routes";
 import { PageSection } from "./ui";
 import { AgentsField } from "./screens/AgentsScreen";
+import { useChatAdds } from "./adds/useChatAdds";
 import { useVoiceTurns } from "./hooks/useVoiceTurns";
 import { useRouteNavigation } from "./app/useRouteNavigation";
 import { SegmentedControl } from "./ui";
@@ -91,7 +92,7 @@ export default function App() {
   // Amara background scheduler: started once for the shell, stopped on unmount.
   useSchedulerLifecycle();
 
-  const { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending } = useConversation(refresh);
+  const { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending, postLocal } = useConversation(refresh);
   // Session continuity: summarize the Amara chat after idle / on new chat / on close (bug 6).
   const autoSave = useIdleAutoSave(messages, conversationId);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -117,11 +118,13 @@ export default function App() {
   const voiceTurns = useVoiceTurns(screenId === "landing");
   useVoiceNavyPrompts(voiceTurns);
   useVoiceWindowPrompts(voiceTurns);
+  const { handleTyped: handleChatAdd } = useChatAdds(postLocal, voiceTurns);
   const sendHome = useCallback(async (message: string, options?: { deep?: boolean }) => {
+    if (await handleChatAdd(message)) return;
     if (handleNavyPrompt(message, "chat")) return;
     if (handleWindowPrompt(message, "chat")) return;
     await sendToTerrence(message, options);
-  }, [sendToTerrence]);
+  }, [sendToTerrence, handleChatAdd]);
   useEffect(() => {
     const palette = (event: KeyboardEvent) => {
       if (!event.metaKey || event.ctrlKey || event.altKey || event.key.toLowerCase() !== "k") return;

@@ -47,7 +47,7 @@ export function guardSections(sections: AmaraContextSection[]): { sections: Amar
  */
 export function historyTurns(messages: ConversationMessage[]): ChatTurn[] {
   return messages
-    .filter((m) => m.status !== "failed" && m.content.trim() !== "")
+    .filter((m) => m.status !== "failed" && !m.local && m.content.trim() !== "")
     .map((m) => ({ role: m.role, content: m.role === "assistant" ? guardExternal(m.content).text : m.content }));
 }
 

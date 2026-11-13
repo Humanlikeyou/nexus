@@ -174,6 +174,8 @@ export function useConversation(refresh: () => Promise<void>) {
     setSending(false);
     setLoadingModel(false);
   }, []);
+  /** Local-only lines (e.g. an add preview from chat or voice). Not sent to Hermes. */
+  const postLocal = useCallback((added: ConversationMessage[]) => { setMessages((current) => [...current, ...added]); }, []);
   const startNewConversation = useCallback(() => {
     generation.current++;
     waitAbort.current?.abort();
@@ -188,5 +190,5 @@ export function useConversation(refresh: () => Promise<void>) {
     setMessages([]);
     setConversationId(created);
   }, []);
-  return { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending };
+  return { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending, postLocal };
 }

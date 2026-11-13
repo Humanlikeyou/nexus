@@ -174,4 +174,28 @@ mod tests {
         assert!(list_in(&dir, 5).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(data);
     }
+    /// A voice check-in is its transcript only: the store holds text, and nothing audio is ever written.
+    #[test]
+    fn a_transcribed_check_in_writes_text_only() {
+        let d = super::super::local_store::tests::temp_dir("cin-audio");
+        let draft = CheckInDraft {
+            mood: 4,
+            energy: 3,
+            tags: vec![],
+            text: "slept ok".into(),
+            transcribed: true,
+        };
+        let r = save_in(&d, &draft, now_jst()).unwrap();
+        assert!(r.transcribed);
+        let mut names: Vec<String> = Vec::new();
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            names.push(e.file_name().to_string_lossy().into());
+        }
+        assert_eq!(names, vec!["checkins.json".to_string()]);
+        let src = include_str!("checkin.rs");
+        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
+        for needle in ["cpal", "hound", ".wav", "ffmpeg", "AudioContext"] {
+            assert!(!prod.contains(needle), "{needle}");
+        }
+    }
 }
