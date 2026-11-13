@@ -78,5 +78,16 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 | L4 money account rows + backup_verify_last / Backup "last" | done 1c93d5e (sha256 per file in new backups) |
 | takes-1111t:80 light contrast: REAL 4.28:1 on .m-warn b (not a flake) | waiting (Design, tasks/design-questions.md) |
 
+## 2026-11-13 later
+| item | status |
+|---|---|
+| Memory approval dialog: hidden format chars shown as ⟨U+XXXX⟩, refused in edits, cut count | done 420a179 + ba9d45e (automated review findings) |
+| Navy: not confirmed while a Hermes turn is in flight; biased select | done cf93fd0 |
+| Weekly review "Try it this week" → followups_add_item (approval) | done f45829a |
+| Personal refresh: one bad reply no longer blanks every store | done cc17766 |
+| Life › Dates Edit | waiting (Design: needs an edit form; tasks/design-questions.md) |
+| N1 chat/voice adds, N2 nightly backups + restore drill, N3 money routes/import picker, N4 Telegram relay | parked a6dfd7c (tasks/wip/2026-11-13-lanes; weekly agent limit until Nov 18 10:00 JST) |
+| e2e on HEAD cc17766 | 753 passed / 12 skipped / 1 failed (takes-1111t:80 light, the real 4.28:1 contrast, Design) |
+
 ## Out of scope tonight (Taisun)
 NOOP merge, live Telegram relay send path, standalone phases (bundling, signing, notarization, DMG, updater, WHOOP takeover), Letta upgrade apply.
