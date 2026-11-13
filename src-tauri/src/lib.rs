@@ -337,6 +337,7 @@ pub fn run() {
             goal_roadmap::roadmap_answer_step,
             goal_roadmap::roadmap_todays_question,
             goal_roadmap::roadmap_draft_pending,
+            goal_roadmap::roadmap_catchup_status,
             // Sessions
             sessions::save_session,
             sessions::list_sessions,

@@ -7,7 +7,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -29,6 +29,10 @@ pub const RUN_DEADLINE: Duration = Duration::from_secs(30 * 60);
 /// Fixed refusals of `roadmap_draft_pending`.
 pub const ERR_BUSY: &str = "busy";
 pub const ERR_ALREADY_RAN: &str = "already_ran";
+/// A catch-up run (decision 0018) refused: on battery, or something was active in the last 10 minutes.
+pub const ERR_NOT_IDLE: &str = "not_idle";
+/// A catch-up run needs this long with no chat turn, crew run or Muse session.
+pub const CATCH_UP_IDLE_SECS: i64 = 10 * 60;
 /// Largest gap between the renderer's date and Rust local time.
 const MAX_DAY_SKEW_DAYS: i64 = 1;
 
@@ -627,6 +631,109 @@ pub(crate) async fn system_busy() -> bool {
     }
 }
 
+/// Unix seconds of the last time a chat turn, crew run or Muse session was seen active (0 = never
+/// seen). Updated when a chat turn starts or ends and whenever a status poll or run finds activity.
+/// The renderer polls `roadmap_catchup_status` every scheduler tick while a draft is due, so a crew
+/// run or Muse session is observed within ~30s of ending.
+static LAST_ACTIVE: AtomicI64 = AtomicI64::new(0);
+
+fn unix_now() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
+/// Record "something was active just now".
+pub(crate) fn note_activity() {
+    LAST_ACTIVE.store(unix_now(), Ordering::SeqCst);
+}
+
+/// Seconds since the last activity. The first ask after launch starts the clock (just-launched
+/// means he is probably here), so a catch-up never fires in the first 10 minutes of a session.
+fn idle_secs_at(now: i64) -> i64 {
+    let _ = LAST_ACTIVE.compare_exchange(0, now, Ordering::SeqCst, Ordering::SeqCst);
+    (now - LAST_ACTIVE.load(Ordering::SeqCst)).max(0)
+}
+
+/// On AC power, or unreadable (not macOS, pmset missing): assume AC. Read-only, fixed args, no
+/// shell. The battery parse is `backup_schedule::parse_pmset`; only the 6-line `pmset` call is
+/// duplicated here because that module's `read_battery` is private and another lane owns the file.
+fn on_ac_power() -> bool {
+    let out = std::process::Command::new("/usr/bin/pmset")
+        .args(["-g", "batt"])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => ac_from_pmset(&String::from_utf8_lossy(&o.stdout)),
+        _ => true,
+    }
+}
+
+/// Pure: AC unless `pmset` clearly says Battery Power.
+pub fn ac_from_pmset(out: &str) -> bool {
+    !crate::commands::backup_schedule::parse_pmset(out).is_some_and(|b| b.on_battery)
+}
+
+/// Pure catch-up gate. `Some(reason)` when a run must wait.
+pub fn catch_up_blocker(on_ac: bool, busy_now: bool, idle_secs: i64) -> Option<&'static str> {
+    if !on_ac {
+        Some("battery")
+    } else if busy_now {
+        Some("busy")
+    } else if idle_secs < CATCH_UP_IDLE_SECS {
+        Some("recent_activity")
+    } else {
+        None
+    }
+}
+
+/// Chat turn, crew run or Muse session right now (the same set the backup job stands down for).
+async fn activity_now() -> bool {
+    let busy = system_busy().await
+        || crate::commands::replay::active_recording_name()
+            .await
+            .is_some();
+    if busy {
+        note_activity();
+    }
+    busy
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatchUpStatus {
+    /// A roadmap is waiting in "drafting", or a smaller-step request is pending.
+    pub due: bool,
+    /// Rust's own once-a-day record.
+    pub ran_today: bool,
+    pub on_ac: bool,
+    pub busy: bool,
+    pub idle_secs: i64,
+}
+
+/// Read-only: what the renderer needs to decide a catch-up (decision 0018). Cheap; never calls a model.
+#[tauri::command]
+pub async fn roadmap_catchup_status() -> Result<CatchUpStatus, String> {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let (due, ran_today) = {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let store = load(&crate::app_paths::data_dir())?;
+        let (d, s) = plan_run(&store);
+        (
+            !(d.is_empty() && s.is_empty()),
+            check_not_run_today(&store, &today).is_err(),
+        )
+    };
+    let busy = activity_now().await;
+    let on_ac = tokio::task::spawn_blocking(on_ac_power)
+        .await
+        .unwrap_or(true);
+    Ok(CatchUpStatus {
+        due,
+        ran_today,
+        on_ac,
+        busy,
+        idle_secs: idle_secs_at(unix_now()),
+    })
+}
+
 /// Refuses a second completed run on the same local day.
 pub fn check_not_run_today(store: &Store, today: &str) -> Result<(), String> {
     if store.last_run_on.as_deref() == Some(today) {
@@ -673,13 +780,25 @@ async fn deep_within(started: Instant, prompt: &str) -> Option<String> {
 /// Nightly job: draft every "drafting" roadmap (at most 5), then a smaller first move for steps
 /// with 2+ "not yet"s (at most 10), within ~30 minutes, once a day. Refuses with `busy` while a
 /// chat turn or crew run is active or another run is going, and `already_ran` after a completed
-/// run today. Returns how many things were written. A failed or junk deep reply leaves the work
+/// run today, and (catch-up runs only) `not_idle` on battery or within 10 minutes of activity.
+/// Returns how many things were written. A failed or junk deep reply leaves the work
 /// queued for the next night; nothing is invented.
 #[tauri::command]
-pub async fn roadmap_draft_pending() -> Result<u32, String> {
+pub async fn roadmap_draft_pending(catch_up: Option<bool>) -> Result<u32, String> {
     let _run = RunGuard::claim(&DRAFT_RUNNING)?;
     if system_busy().await {
+        note_activity();
         return Err(ERR_BUSY.to_string());
+    }
+    if catch_up == Some(true) {
+        // Out-of-window run (decision 0018): Rust re-checks AC, Muse and the 10 idle minutes itself.
+        let busy = activity_now().await;
+        let on_ac = tokio::task::spawn_blocking(on_ac_power)
+            .await
+            .unwrap_or(true);
+        if catch_up_blocker(on_ac, busy, idle_secs_at(unix_now())).is_some() {
+            return Err(ERR_NOT_IDLE.to_string());
+        }
     }
     let started = Instant::now();
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -1041,6 +1160,36 @@ mod tests {
             "already_ran"
         );
         assert!(check_not_run_today(&s, "2026-11-13").is_ok());
+    }
+
+    #[test]
+    fn catch_up_gate_blocks_on_battery_busy_and_recent_activity() {
+        assert_eq!(catch_up_blocker(true, false, 601), None);
+        assert_eq!(catch_up_blocker(true, false, CATCH_UP_IDLE_SECS), None);
+        assert_eq!(catch_up_blocker(false, false, 9999), Some("battery"));
+        assert_eq!(catch_up_blocker(true, true, 9999), Some("busy"));
+        assert_eq!(catch_up_blocker(true, false, 599), Some("recent_activity"));
+    }
+
+    #[test]
+    fn pmset_battery_means_not_ac_and_unreadable_means_ac() {
+        let batt = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t80%; discharging; 3:00 remaining";
+        let ac = "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t80%; charging";
+        assert!(!ac_from_pmset(batt));
+        assert!(ac_from_pmset(ac));
+        assert!(ac_from_pmset(""));
+        assert!(ac_from_pmset("pmset: command not understood"));
+    }
+
+    #[test]
+    fn idle_clock_starts_at_first_ask_and_resets_on_activity() {
+        LAST_ACTIVE.store(0, Ordering::SeqCst);
+        assert_eq!(idle_secs_at(1_000), 0); // first ask starts the clock
+        assert_eq!(idle_secs_at(1_700), 700);
+        LAST_ACTIVE.store(1_650, Ordering::SeqCst);
+        assert_eq!(idle_secs_at(1_700), 50);
+        assert_eq!(idle_secs_at(1_000), 0); // clock skew never goes negative
+        LAST_ACTIVE.store(0, Ordering::SeqCst);
     }
 
     #[test]

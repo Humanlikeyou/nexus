@@ -32,7 +32,7 @@ import { evolveSkills } from "./skillsEvolution";
 import { activityBus } from "./activityBus";
 import { Backoff } from "./backoff";
 import { tickSubagents } from "./subagents";
-import { tickRoadmapNight } from "./roadmapNight";
+import { roadmapTurn, tickRoadmapNight } from "./roadmapNight";
 import { startTelegramBridge, stopTelegramBridge } from "./telegramBridge";
 
 const CONSOLIDATION_INTERVAL_MS = 6 * 60 * 60 * 1000;  // 6 hours
@@ -57,6 +57,7 @@ const MIDDAY_WINDOW_MS = (DEFAULT_EVENING_HOUR * 60 - DAILY_CATCHUP_UNTIL_MIN) *
 /** Evening catch-up runs until 03:00 the next day. */
 const EVENING_CATCHUP_UNTIL_HOUR = 3;
 const EVENING_WINDOW_MS = (24 - DEFAULT_EVENING_HOUR + EVENING_CATCHUP_UNTIL_HOUR) * HOUR_MS;
+let roadmapSkippedTicks = 0;                                // ticks the roadmap turn lost to heavy jobs
 const MAX_HEAVY_JOBS_PER_TICK = 1;                         // LLM / Telegram jobs per tick
 
 /** Timestamps whose absence means "first observation": seed to now instead of firing. */
@@ -540,13 +541,18 @@ async function tick() {
       }
     }
 
-    // Goal roadmaps: one deep-tier drafting pass a night (02:00-05:00, only when nothing else runs).
-    if (heavyBudget > 0) {
+    // Goal roadmaps: one deep-tier drafting pass a day (02:00-05:00 first, else a catch-up when idle;
+    // decision 0018). Heavy jobs that always win the one-per-tick budget must not starve it: if it
+    // was skipped last tick it gets this one (it self-gates on idle, and Rust single-flights it).
+    if (roadmapTurn(heavyBudget, roadmapSkippedTicks)) {
+      roadmapSkippedTicks = 0;
       try {
         await withTimeout(tickRoadmapNight(now), TASK_TIMEOUTS_MS.reasoning, "goal roadmaps");
       } catch (e) {
         console.error("[scheduler] Goal roadmaps error:", e);
       }
+    } else {
+      roadmapSkippedTicks++;
     }
 
     // Jobs above may have advanced their timestamps: refresh the cache so Home doesn't keep

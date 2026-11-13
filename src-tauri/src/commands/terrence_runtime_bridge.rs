@@ -759,6 +759,7 @@ impl ChatGuard {
 
     fn on(counter: &'static AtomicUsize) -> Self {
         counter.fetch_add(1, Ordering::SeqCst);
+        crate::commands::goal_roadmap::note_activity(); // decision 0018: a turn started
         ChatGuard(counter)
     }
 }
@@ -766,6 +767,7 @@ impl ChatGuard {
 impl Drop for ChatGuard {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
+        crate::commands::goal_roadmap::note_activity(); // decision 0018: the turn ended just now
     }
 }
 
