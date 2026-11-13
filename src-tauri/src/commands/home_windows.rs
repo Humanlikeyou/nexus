@@ -284,6 +284,72 @@ pub fn judge_page(url: &Url, has_password_field: Option<bool>) -> PageVerdict {
     }
 }
 
+/// Fixed copy when a public-looking name resolves to this Mac or a private network.
+pub const PRIVATE_ADDR_COPY: &str =
+    "That address points to this Mac or a private network, so it was not opened.";
+const RESOLVE_FAIL_COPY: &str = "That address could not be checked, so it was not opened.";
+
+/// Loopback, private, link-local, CGNAT, unspecified, multicast, ULA, and IPv4-mapped (or
+/// NAT64-embedded) forms of those.
+pub fn ip_is_blocked(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_multicast()
+                || v4.is_broadcast()
+                || o[0] == 0
+                || (o[0] == 100 && (64..=127).contains(&o[1]))
+        }
+        IpAddr::V6(v6) => {
+            if v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() {
+                return true;
+            }
+            let seg = v6.segments();
+            if (seg[0] & 0xffc0) == 0xfe80 || (seg[0] & 0xfe00) == 0xfc00 {
+                return true; // link-local fe80::/10, unique local fc00::/7
+            }
+            // ::ffff:a.b.c.d, ::a.b.c.d and the NAT64 prefix 64:ff9b::/96 carry an IPv4 address.
+            let embedded = v6.to_ipv4_mapped().or_else(|| v6.to_ipv4()).or_else(|| {
+                (seg[0] == 0x64 && seg[1] == 0xff9b && seg[2..6] == [0, 0, 0, 0]).then(|| {
+                    std::net::Ipv4Addr::new(
+                        (seg[6] >> 8) as u8,
+                        seg[6] as u8,
+                        (seg[7] >> 8) as u8,
+                        seg[7] as u8,
+                    )
+                })
+            });
+            embedded.is_some_and(|v4| ip_is_blocked(IpAddr::V4(v4)))
+        }
+    }
+}
+
+/// Resolve `host` off the async thread (2 s cap) and refuse if ANY address is blocked, or if it
+/// cannot be resolved. Names are also checked in `check_url` (that is all `on_navigation`, which is
+/// synchronous, can do; `on_load` re-checks after each navigation starts).
+/// KNOWN RESIDUAL: DNS rebinding after this check (the page can resolve differently later). There
+/// are no WebKit content rules offline to pin it.
+pub async fn resolve_public(host: &str) -> Result<(), String> {
+    let target = format!("{host}:443");
+    let lookup = tauri::async_runtime::spawn_blocking(move || {
+        use std::net::ToSocketAddrs;
+        target.to_socket_addrs().map(|a| a.collect::<Vec<_>>())
+    });
+    let addrs = match tokio::time::timeout(std::time::Duration::from_secs(2), lookup).await {
+        Ok(Ok(Ok(a))) if !a.is_empty() => a,
+        _ => return Err(format!("refused: {RESOLVE_FAIL_COPY}")),
+    };
+    if addrs.iter().any(|a| ip_is_blocked(a.ip())) {
+        return Err(format!("refused: {PRIVATE_ADDR_COPY}"));
+    }
+    Ok(())
+}
+
 /// Fixed copy when the Mac is too old for per-site WebKit data stores.
 pub const MACOS_COPY: &str = "Home windows need macOS 14 or later. Nothing was opened.";
 
@@ -689,6 +755,8 @@ struct StatePayload {
     state: &'static str,
     host: String,
     signed_in: Option<bool>,
+    /// Fixed copy when a window was closed for a reason (never a URL).
+    note: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -752,6 +820,8 @@ pub async fn home_window_open(
     let url = parse_target(&kind, &target)?;
     let site = site_key(&url)?;
     let host = site_host(&url);
+    // Before anything is built (and before a dialog): a public name must not point at a private address.
+    resolve_public(url.host_str().unwrap_or("")).await?;
     if needs_first_open_approval(&crate::app_paths::data_dir(), &site) {
         let text = super::approval_gate::approval_text(
             &format!("Open {host} inside Amara OS"),
@@ -862,6 +932,33 @@ fn on_load(
 ) {
     if payload.event() != PageLoadEvent::Finished {
         clear_readable(id);
+        if payload.event() == PageLoadEvent::Started {
+            // Off-thread: resolve the new host; a private address closes the window.
+            let (app, id, host) = (
+                app.clone(),
+                id.to_string(),
+                payload.url().host_str().unwrap_or("").to_string(),
+            );
+            tauri::async_runtime::spawn(async move {
+                if resolve_public(&host).await.is_err() {
+                    log_line("closed a window whose address resolves to a private network");
+                    if let Ok(mut set) = SET.lock() {
+                        set.close(&id);
+                    }
+                    close_native(&app, &id);
+                    let _ = app.emit(
+                        STATE_EVENT,
+                        StatePayload {
+                            id,
+                            state: "blocked",
+                            host: String::new(),
+                            signed_in: None,
+                            note: Some(PRIVATE_ADDR_COPY),
+                        },
+                    );
+                }
+            });
+        }
         return;
     }
     let (app, wid, site_s, host_s, url) = (
@@ -918,6 +1015,7 @@ fn finish_load(
             state: verdict.state,
             host: host.to_string(),
             signed_in: Some(rec.signed_in),
+            note: None,
         },
     );
 }
@@ -1036,6 +1134,12 @@ pub async fn home_window_undo(app: AppHandle) -> Result<String, String> {
         .get_window("main")
         .ok_or("The main window is not available.")?;
     let (restored, closed, until) = lock_set()?.undo(now_ms())?;
+    if let Err(e) = resolve_public(&restored.host).await {
+        if let Ok(mut set) = lock_set() {
+            set.undo_failed(&restored, closed, until);
+        }
+        return Err(e);
+    }
     close_native(&app, &closed.id);
     let url = Url::parse(&restored.url).map_err(|e| e.to_string())?;
     if let Err(e) = build_child(
@@ -1074,6 +1178,7 @@ pub async fn home_window_pop_out(app: AppHandle, id: String) -> Result<(), Strin
         Some(u) => u,
         None => Url::parse(&entry.url).map_err(|e| e.to_string())?,
     };
+    resolve_public(url.host_str().unwrap_or("")).await?;
     let (nav_id, load_app, load_id, load_site, load_host) = (
         id.clone(),
         app.clone(),
@@ -1541,6 +1646,107 @@ mod tests {
         let prod = src.split("#[cfg(test)]\nmod tests").next().unwrap();
         assert!(prod.contains("\"failed: could not open a pop-out window\""));
         assert!(!prod.contains("could not open a pop-out window ({e})"));
+    }
+
+    #[test]
+    fn ip_classifier_blocks_every_private_range_and_passes_public_addresses() {
+        let ip = |s: &str| ip_is_blocked(s.parse().unwrap());
+        for bad in [
+            "127.0.0.1",
+            "127.8.9.10",
+            "10.0.0.1",
+            "10.255.255.255",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "100.127.255.255",
+            "0.0.0.0",
+            "0.1.2.3",
+            "224.0.0.1",
+            "255.255.255.255",
+            "::1",
+            "::",
+            "ff02::1",
+            "fe80::1",
+            "febf::1",
+            "fc00::1",
+            "fd12:3456::1",
+            "::ffff:127.0.0.1",
+            "::ffff:10.1.2.3",
+            "::ffff:192.168.0.9",
+            "::ffff:169.254.1.1",
+            "::127.0.0.1",
+            "64:ff9b::7f00:1",
+            "64:ff9b::a00:1",
+        ] {
+            assert!(ip(bad), "{bad} should be blocked");
+        }
+        for good in [
+            "8.8.8.8",
+            "1.1.1.1",
+            "172.15.255.255",
+            "172.32.0.1",
+            "100.63.255.255",
+            "100.128.0.1",
+            "192.169.0.1",
+            "169.253.0.1",
+            "93.184.216.34",
+            "2606:4700:4700::1111",
+            "2001:4860:4860::8888",
+            "::ffff:8.8.8.8",
+            "fec0::1",
+            "64:ff9b::808:808",
+        ] {
+            assert!(!ip(good), "{good} should pass");
+        }
+    }
+
+    #[tokio::test]
+    async fn resolution_refuses_private_literals_and_passes_public_ones() {
+        // IP literals resolve without any DNS.
+        for bad in [
+            "127.0.0.1",
+            "10.0.0.5",
+            "192.168.1.9",
+            "169.254.169.254",
+            "100.64.1.1",
+        ] {
+            let e = resolve_public(bad).await.unwrap_err();
+            assert!(
+                e.starts_with("refused:") && e.contains("private network"),
+                "{bad}: {e}"
+            );
+        }
+        assert!(resolve_public("8.8.8.8").await.is_ok());
+        // a name that cannot be resolved is refused too (reserved .invalid TLD never resolves)
+        let e = resolve_public("host.invalid").await.unwrap_err();
+        assert!(e.contains("could not be checked"), "{e}");
+    }
+
+    #[test]
+    fn resolution_runs_before_anything_is_built_and_navigation_rechecks_off_thread() {
+        let src = include_str!("home_windows.rs");
+        let prod = src.split("#[cfg(test)]\nmod tests").next().unwrap();
+        let open = fn_body(prod, "home_window_open");
+        assert!(open.find("resolve_public(").unwrap() < open.find("set.open(").unwrap());
+        assert!(open.find("resolve_public(").unwrap() < open.find("build_child(").unwrap());
+        let undo = fn_body(prod, "home_window_undo");
+        assert!(undo.find("resolve_public(").unwrap() < undo.find("build_child(").unwrap());
+        let pop = fn_body(prod, "home_window_pop_out");
+        assert!(
+            pop.find("resolve_public(").unwrap() < pop.find("WebviewWindowBuilder::new").unwrap()
+        );
+        // the lookup is off the async thread and capped at 2 s
+        assert!(prod.contains("spawn_blocking") && prod.contains("from_secs(2)"));
+        // page-load Started re-resolves in a spawned task, not in the synchronous callback
+        let on_load = &prod[prod.find("fn on_load").unwrap()..];
+        let started = &on_load[..on_load.find("let _ = wv.eval_with_callback").unwrap()];
+        assert!(
+            started.contains("PageLoadEvent::Started") && started.contains("async_runtime::spawn")
+        );
+        assert!(prod.contains("DNS rebinding") && prod.contains("KNOWN RESIDUAL"));
     }
 
     #[test]
