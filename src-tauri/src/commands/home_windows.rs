@@ -1134,14 +1134,27 @@ pub async fn home_window_undo(app: AppHandle) -> Result<String, String> {
         .get_window("main")
         .ok_or("The main window is not available.")?;
     let (restored, closed, until) = lock_set()?.undo(now_ms())?;
-    if let Err(e) = resolve_public(&restored.host).await {
-        if let Ok(mut set) = lock_set() {
-            set.undo_failed(&restored, closed, until);
+    // Check the URL that will actually load (it may have navigated since `host` was recorded).
+    let checked = match Url::parse(&restored.url) {
+        Ok(u) => match check_url(&u) {
+            Ok(()) => match resolve_public(u.host_str().unwrap_or("")).await {
+                Ok(()) => Ok(u),
+                Err(e) => Err(e),
+            },
+            Err(e) => Err(e),
+        },
+        Err(_) => Err("refused: that address can't be opened".to_string()),
+    };
+    let url = match checked {
+        Ok(u) => u,
+        Err(e) => {
+            if let Ok(mut set) = lock_set() {
+                set.undo_failed(&restored, closed, until);
+            }
+            return Err(e);
         }
-        return Err(e);
-    }
+    };
     close_native(&app, &closed.id);
-    let url = Url::parse(&restored.url).map_err(|e| e.to_string())?;
     if let Err(e) = build_child(
         &app,
         &main,
@@ -1734,6 +1747,10 @@ mod tests {
         assert!(open.find("resolve_public(").unwrap() < open.find("build_child(").unwrap());
         let undo = fn_body(prod, "home_window_undo");
         assert!(undo.find("resolve_public(").unwrap() < undo.find("build_child(").unwrap());
+        // Undo checks the URL it will load, not the recorded host.
+        assert!(!undo.contains("resolve_public(&restored.host)"));
+        assert!(undo.find("check_url(&u)").unwrap() < undo.find("build_child(").unwrap());
+        assert!(undo.find("u.host_str()").unwrap() < undo.find("build_child(").unwrap());
         let pop = fn_body(prod, "home_window_pop_out");
         assert!(
             pop.find("resolve_public(").unwrap() < pop.find("WebviewWindowBuilder::new").unwrap()
