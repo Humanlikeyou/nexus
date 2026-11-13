@@ -142,7 +142,7 @@ fn load_usage_records() -> Vec<LlmUsageRecord> {
         .unwrap_or_default()
 }
 
-fn append_usage_record(record: LlmUsageRecord) {
+pub(crate) fn append_usage_record(record: LlmUsageRecord) {
     let mut records = load_usage_records();
     records.push(record);
     if records.len() > 1000 {
@@ -358,7 +358,7 @@ const FALLBACK_PERSONA: &str =
 
 /// The Amara persona from the same source as Hermes (`~/.hermes/SOUL.md`), capped at 64 KiB,
 /// with a short inline fallback.
-fn amara_persona() -> String {
+pub(crate) fn amara_persona() -> String {
     dirs::home_dir()
         .map(|h| h.join(".hermes").join("SOUL.md"))
         .and_then(|p| {
@@ -465,8 +465,8 @@ pub(crate) async fn ask_router(
             ROUTER_DOWN.to_string()
         })?;
     if !(200..300).contains(&status) {
-        let detail = log_detail(v["error"]["message"].as_str().unwrap_or(""));
-        eprintln!("[llm_router] router HTTP {status}: {detail}");
+        // Status only: the router's error text is upstream text and is never logged.
+        eprintln!("[llm_router] router HTTP {status}");
         return Err(if status == 503 {
             OLLAMA_DOWN
         } else {
@@ -474,8 +474,8 @@ pub(crate) async fn ask_router(
         }
         .to_string());
     }
-    parse_router_ok(&v).map_err(|e| {
-        eprintln!("[llm_router] {}", log_detail(&e));
+    parse_router_ok(&v).map_err(|_| {
+        eprintln!("[llm_router] router reply not understood");
         ROUTER_FAILED.to_string()
     })
 }

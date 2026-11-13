@@ -33,6 +33,14 @@ describe("Tauri command registry", () => {
     expect(names.filter((n: string) => /^memory_/.test(n)).sort()).toEqual(["memory_delete", "memory_edit", "memory_list", "memory_restore_last"]);
   });
 
+  it("the turn pipeline commands are registered and the registry is managed", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    for (const name of ["amara_turn", "amara_turn_cancel"]) expect(names).toContain(name);
+    expect(lib).toContain(".manage(commands::amara_turn::TurnRegistry::default())");
+  });
+
   it("the Muse recording readers are registered and no recording or session delete command exists", async () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");

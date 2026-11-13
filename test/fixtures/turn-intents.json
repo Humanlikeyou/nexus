@@ -1,0 +1,20 @@
+[
+  { "text": "go dark", "kind": "navy_on" },
+  { "text": "Amara, go dark.", "kind": "navy_on" },
+  { "text": "back to normal", "kind": "navy_off" },
+  { "text": "amara back to normal!", "kind": "navy_off" },
+  { "text": "please go dark now", "kind": "none" },
+  { "text": "open the instagram feed", "kind": "window", "catalogId": "instagram" },
+  { "text": "pull up the btcusd chart", "kind": "window", "catalogId": "tradingview" },
+  { "text": "show me the lease pdf", "kind": "window", "catalogId": "lease" },
+  { "text": "bring up that akiya article", "kind": "window", "catalogId": "akiya" },
+  { "text": "what is on instagram", "kind": "none" },
+  { "text": "turn off the desk lamp", "kind": "home" },
+  { "text": "please set the thermostat to 21", "kind": "home" },
+  { "text": "is the desk lamp on", "kind": "home" },
+  { "text": "is the garage door open", "kind": "none" },
+  { "text": "unlock the front door", "kind": "none" },
+  { "text": "turn the volume up to 5 + 5", "kind": "none" },
+  { "text": "what is 2 + 2", "kind": "none" },
+  { "text": "how was your day", "kind": "none" }
+]

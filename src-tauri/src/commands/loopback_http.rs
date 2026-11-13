@@ -126,6 +126,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn odd_host_spellings_are_normalised_or_refused() {
+        // Decimal, hex and short IPv4 forms are normalised by the URL parser to 127.0.0.1, and the
+        // base is rebuilt from the parsed host, so the request goes to the canonical address.
+        for ok in [
+            "http://2130706433:8787",
+            "http://0x7f000001:8787",
+            "http://0x7f.0.0.1:8787",
+            "http://127.1:8787",
+            "http://017700000001:8787",
+        ] {
+            assert_eq!(
+                loopback_base(ok).as_deref(),
+                Some("http://127.0.0.1:8787"),
+                "{ok}"
+            );
+        }
+        // Not loopback (or not provably so): refused.
+        for bad in [
+            "http://localhost.:8787",
+            "http://0.0.0.0:8787",
+            "http://[::ffff:127.0.0.1]:8787",
+            "http://[::]:8787",
+            "http://localhost.evil.example:8787",
+            "http://127.0.0.1.evil.example:8787",
+        ] {
+            assert_eq!(loopback_base(bad), None, "{bad}");
+        }
+    }
+
     /// Serve `head` then `chunks` forever-ish; returns the base URL. `declare` sets Content-Length.
     async fn serve(chunks: usize, chunk_len: usize, declare: bool) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -127,6 +127,7 @@ pub fn run() {
     app_paths::migrate_legacy_data_dir();
     tauri::Builder::default()
         .manage(terrence_runtime_bridge::NexusRuntimeBridge::default())
+        .manage(commands::amara_turn::TurnRegistry::default())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -433,6 +434,8 @@ pub fn run() {
             terrence_runtime::list_terrence_interactions,
             terrence_runtime::prepare_amara_turn,
             terrence_runtime::record_amara_interaction,
+            commands::amara_turn::amara_turn,
+            commands::amara_turn::amara_turn_cancel,
             // Assistant chat history
             assistant::create_chat_session,
             assistant::list_chat_sessions,

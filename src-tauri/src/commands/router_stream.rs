@@ -4,8 +4,7 @@
 //! reply with `Response::chunk()` (no new crates). Typed chat never reaches Claude: the request
 //! always carries `X-Amara-Allow-Claude: 0` and `X-Amara-Mode: local`, and a reply that reports the
 //! Claude tier is refused. Only the tier (`fast`|`deep`) is ever returned, never a model or provider.
-//! Nothing calls this yet; the pipeline lane (L2) does.
-#![allow(dead_code)] // consumed by the pipeline lane (L2)
+//! The pipeline (`amara_turn.rs`, lane L2) is the caller.
 
 use std::time::Duration;
 
@@ -27,6 +26,12 @@ pub(crate) const ROUTER_TURN_CEILING: Duration = Duration::from_secs(15 * 60);
 pub(crate) const MAX_STREAM_BYTES: usize = 8 * 1024 * 1024;
 /// Longest single SSE line.
 pub(crate) const MAX_SSE_LINE_BYTES: usize = 64 * 1024;
+/// Most visible reply characters (64 Ki).
+pub(crate) const MAX_VISIBLE_CHARS: usize = 64 * 1024;
+/// Most delta pieces in one reply.
+pub(crate) const MAX_DELTAS: usize = 20_000;
+/// An error reply body must drain within this.
+pub(crate) const ERROR_BODY_TIMEOUT: Duration = Duration::from_secs(5);
 /// An error reply body is read only to this size, then dropped.
 const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
 /// Malformed `data:` lines tolerated before the stream is refused.
@@ -39,6 +44,12 @@ pub(crate) struct StreamLimits {
     pub ceiling: Duration,
     pub max_bytes: usize,
     pub max_line: usize,
+    /// Most visible characters of reply text.
+    pub max_visible: usize,
+    /// Most delta pieces.
+    pub max_deltas: usize,
+    /// Longest wait for an error reply body to drain.
+    pub error_body: Duration,
 }
 
 impl Default for StreamLimits {
@@ -49,6 +60,9 @@ impl Default for StreamLimits {
             ceiling: ROUTER_TURN_CEILING,
             max_bytes: MAX_STREAM_BYTES,
             max_line: MAX_SSE_LINE_BYTES,
+            max_visible: MAX_VISIBLE_CHARS,
+            max_deltas: MAX_DELTAS,
+            error_body: ERROR_BODY_TIMEOUT,
         }
     }
 }
@@ -61,6 +75,8 @@ pub(crate) enum StreamError {
     Blocked,
     NotLoopback,
     ClaudeTier,
+    /// The router named a tier that is not fast, light or deep.
+    BadTier,
     TooLarge,
     LineTooLong,
     Malformed,
@@ -81,6 +97,7 @@ impl StreamError {
             Self::Blocked => "local_only",
             Self::NotLoopback => "not_loopback",
             Self::ClaudeTier => "claude_refused",
+            Self::BadTier => "bad_tier",
             Self::TooLarge => "too_large",
             Self::LineTooLong => "line_too_long",
             Self::Malformed => "malformed",
@@ -97,7 +114,9 @@ impl StreamError {
         match self {
             Self::Cancelled => "Stopped.",
             Self::Blocked => "Amara is in local-only mode, so this was not sent.",
-            Self::ClaudeTier | Self::NotLoopback => "Amara couldn't answer that locally.",
+            Self::ClaudeTier | Self::BadTier | Self::NotLoopback => {
+                "Amara couldn't answer that locally."
+            }
             Self::Timeout | Self::Stalled => "Amara took too long to answer.",
             Self::Unreachable => {
                 "Amara isn't responding right now. Check that the Amara router is running."
@@ -122,8 +141,8 @@ pub(crate) struct StreamOutcome {
     pub usage: Option<StreamUsage>,
 }
 
-/// Router tier word to the only values we return. `None` for the Claude tier is signalled by
-/// `Err(ClaudeTier)`; an unknown word is dropped rather than echoed.
+/// Router tier word to the only values we return (`fast`, `deep`). The Claude tier is
+/// `Err(ClaudeTier)`; any other word is refused (`Err(BadTier)`), never echoed.
 fn normalize_tier(word: &str) -> Result<Option<&'static str>, StreamError> {
     let w = word.trim().to_ascii_lowercase();
     if w.contains("claude") || w.contains("anthropic") {
@@ -132,7 +151,7 @@ fn normalize_tier(word: &str) -> Result<Option<&'static str>, StreamError> {
     Ok(match w.as_str() {
         "fast" | "light" => Some("fast"),
         "deep" => Some("deep"),
-        _ => None,
+        _ => return Err(StreamError::BadTier),
     })
 }
 
@@ -148,6 +167,7 @@ pub(crate) enum SseEvent {
     Ignore,
     Malformed,
     ClaudeTier,
+    BadTier,
 }
 
 /// Parse one complete SSE line (no trailing newline). Never panics on bad input.
@@ -172,7 +192,8 @@ pub(crate) fn parse_sse_line(line: &[u8]) -> Vec<SseEvent> {
     let mut out = Vec::new();
     if let Some(t) = v.pointer("/amara/tier").and_then(Value::as_str) {
         match normalize_tier(t) {
-            Err(_) => return vec![SseEvent::ClaudeTier],
+            Err(StreamError::ClaudeTier) => return vec![SseEvent::ClaudeTier],
+            Err(_) => return vec![SseEvent::BadTier],
             Ok(tier) => out.push(SseEvent::Tier(tier)),
         }
     }
@@ -215,7 +236,7 @@ pub(crate) async fn stream_chat(
     base: &str,
     messages: &[Value],
     deep: bool,
-    blocked: &dyn Fn() -> bool,
+    blocked: &(dyn Fn() -> bool + Sync),
     cancel: &Notify,
     limits: StreamLimits,
     mut on_delta: impl FnMut(&str),
@@ -244,7 +265,7 @@ pub(crate) async fn stream_chat(
     let sent = tokio::select! {
         biased;
         _ = cancel.notified() => return Err(StreamError::Cancelled),
-        r = tokio::time::timeout(limits.first_byte, req.send()) => r,
+        r = tokio::time::timeout(limits.first_byte.min(limits.ceiling), req.send()) => r,
     };
     let mut resp = match sent {
         Err(_) => return Err(StreamError::Timeout),
@@ -259,7 +280,12 @@ pub(crate) async fn stream_chat(
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.trim().parse::<u64>().ok());
         // Read (and drop) a bounded error body; its text is never surfaced.
-        let _ = read_capped_limited(resp).await;
+        // Raced against cancel and a short timeout so a slow error body cannot hold the turn.
+        tokio::select! {
+            biased;
+            _ = cancel.notified() => return Err(StreamError::Cancelled),
+            _ = tokio::time::timeout(limits.error_body, read_capped_limited(resp)) => {}
+        }
         return Err(StreamError::Http(status.as_u16(), retry_after));
     }
     let mut out = StreamOutcome::default();
@@ -274,15 +300,22 @@ pub(crate) async fn stream_chat(
     let mut buf: Vec<u8> = Vec::new();
     let mut total = 0usize;
     let mut malformed = 0usize;
+    let mut deltas = 0usize;
+    let mut visible = 0usize;
     let mut done = false;
+    let deadline = started + limits.ceiling;
     while !done {
-        if started.elapsed() > limits.ceiling {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
             return Err(StreamError::Timeout);
         }
+        // The wait for each chunk never runs past the turn ceiling.
+        let wait = limits.idle.min(deadline - now);
         let chunk = tokio::select! {
             biased;
             _ = cancel.notified() => return Err(StreamError::Cancelled),
-            r = tokio::time::timeout(limits.idle, resp.chunk()) => match r {
+            r = tokio::time::timeout(wait, resp.chunk()) => match r {
+                Err(_) if tokio::time::Instant::now() >= deadline => return Err(StreamError::Timeout),
                 Err(_) => return Err(StreamError::Stalled),
                 Ok(Err(_)) => return Err(StreamError::Truncated),
                 Ok(Ok(c)) => c,
@@ -294,15 +327,22 @@ pub(crate) async fn stream_chat(
             return Err(StreamError::TooLarge);
         }
         buf.extend_from_slice(&chunk);
-        while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
-            let line: Vec<u8> = buf.drain(..=pos).collect();
-            if line.len() > limits.max_line + 1 {
+        // One cursor over the buffer and a single drain per chunk.
+        let mut cursor = 0usize;
+        while let Some(rel) = buf[cursor..].iter().position(|b| *b == b'\n') {
+            let line = &buf[cursor..cursor + rel];
+            cursor += rel + 1;
+            if line.len() > limits.max_line {
                 return Err(StreamError::LineTooLong);
             }
-            let line = &line[..line.len() - 1];
             for ev in parse_sse_line(line) {
                 match ev {
                     SseEvent::Delta(t) => {
+                        deltas += 1;
+                        visible += t.chars().count();
+                        if deltas > limits.max_deltas || visible > limits.max_visible {
+                            return Err(StreamError::TooLarge);
+                        }
                         out.text.push_str(&t);
                         on_delta(&t);
                     }
@@ -315,6 +355,7 @@ pub(crate) async fn stream_chat(
                     SseEvent::Done => done = true,
                     SseEvent::RouterError => return Err(StreamError::Router),
                     SseEvent::ClaudeTier => return Err(StreamError::ClaudeTier),
+                    SseEvent::BadTier => return Err(StreamError::BadTier),
                     SseEvent::Malformed => {
                         malformed += 1;
                         if malformed > MAX_MALFORMED_LINES {
@@ -324,7 +365,12 @@ pub(crate) async fn stream_chat(
                     SseEvent::Ignore => {}
                 }
             }
+            // Nothing after [DONE] is processed.
+            if done {
+                break;
+            }
         }
+        buf.drain(..cursor);
         if buf.len() > limits.max_line {
             return Err(StreamError::LineTooLong);
         }
@@ -364,12 +410,14 @@ impl TagHoldback {
             };
             out.push_str(&self.held[..i]);
             self.held.drain(..i);
-            if self.held.starts_with(ACTION_TAG) {
+            // Case-insensitive like the final scrub; ASCII lowercasing keeps byte offsets intact.
+            let lower = self.held.to_ascii_lowercase();
+            if lower.starts_with(ACTION_TAG) {
                 self.in_tag = true;
                 self.held.clear();
                 return out;
             }
-            if ACTION_TAG.starts_with(self.held.as_str()) {
+            if ACTION_TAG.starts_with(lower.as_str()) {
                 return out; // could still become the tag: keep holding
             }
             out.push('<');
@@ -405,6 +453,9 @@ mod tests {
         sse(
             json!({"choices":[{"delta":{"role":"assistant","content":""}}],"amara":{"tier":tier,"reason":"x","routing_ms":1}}),
         )
+    }
+    fn done() -> String {
+        "data: [DONE]\n\n".to_string()
     }
     fn usage() -> String {
         sse(json!({"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3}}))
@@ -708,7 +759,8 @@ mod tests {
         assert_eq!(normalize_tier("light"), Ok(Some("fast")));
         assert_eq!(normalize_tier("fast"), Ok(Some("fast")));
         assert_eq!(normalize_tier("deep"), Ok(Some("deep")));
-        assert_eq!(normalize_tier("gemma4:latest"), Ok(None));
+        assert_eq!(normalize_tier("gemma4:latest"), Err(StreamError::BadTier));
+        assert_eq!(normalize_tier(""), Err(StreamError::BadTier));
         assert_eq!(normalize_tier("claude"), Err(StreamError::ClaudeTier));
     }
 
@@ -730,6 +782,25 @@ mod tests {
     }
 
     #[test]
+    fn tag_holdback_catches_the_tag_in_any_case_even_split() {
+        for tag in ["<NEXUS_ACTION>", "<Nexus_Action>", "<nexus_ACTION>"] {
+            let mut h = TagHoldback::default();
+            let (a, b) = tag.split_at(5);
+            let mut out = h.push("Sure. ");
+            out.push_str(&h.push(a));
+            out.push_str(&h.push(b));
+            out.push_str(&h.push("{\"tool\":\"x\"}</NEXUS_ACTION> after"));
+            out.push_str(&h.finish());
+            assert_eq!(out, "Sure. ", "{tag}");
+        }
+        // Non-ASCII text right before a '<' stays intact (byte offsets unchanged).
+        let mut h = TagHoldback::default();
+        let mut out = h.push("K\u{130} <b>");
+        out.push_str(&h.finish());
+        assert_eq!(out, "K\u{130} <b>");
+    }
+
+    #[test]
     fn tag_holdback_releases_lone_angle_bracket() {
         let mut h = TagHoldback::default();
         let mut shown = h.push("1 <");
@@ -737,5 +808,141 @@ mod tests {
         shown.push_str(&h.push(" 2 and <b> ok <"));
         shown.push_str(&h.finish());
         assert_eq!(shown, "1 < 2 and <b> ok <");
+    }
+
+    #[tokio::test]
+    async fn a_slow_error_body_cannot_hold_the_turn_and_cancel_wins() {
+        // 500 with a promised body that never arrives.
+        async fn stuck() -> String {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            tokio::spawn(async move {
+                let (mut s, _) = listener.accept().await.unwrap();
+                let mut b = vec![0u8; 8192];
+                let _ = s.read(&mut b).await;
+                let _ = s
+                    .write_all(b"HTTP/1.1 500 X\r\ncontent-length: 100\r\n\r\npartial")
+                    .await;
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            });
+            base
+        }
+        let limits = StreamLimits {
+            error_body: Duration::from_millis(100),
+            ..Default::default()
+        };
+        let t = std::time::Instant::now();
+        let (r, _) = run(&stuck().await, limits).await;
+        assert_eq!(r, Err(StreamError::Http(500, None)));
+        assert!(t.elapsed() < Duration::from_secs(3));
+        // Cancel during the drain.
+        let base = stuck().await;
+        let cancel = std::sync::Arc::new(Notify::new());
+        let c2 = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            c2.notify_one();
+        });
+        let r = stream_chat(
+            &base,
+            &msgs(),
+            false,
+            &|| false,
+            &cancel,
+            StreamLimits::default(),
+            |_| {},
+        )
+        .await;
+        assert_eq!(r, Err(StreamError::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn the_turn_ceiling_bounds_each_wait() {
+        // Keep-alives keep resetting the idle timer; only the ceiling can end this.
+        let (base, _) = serve(vec![first("fast")], true).await;
+        let limits = StreamLimits {
+            ceiling: Duration::from_millis(300),
+            ..Default::default()
+        };
+        let t = std::time::Instant::now();
+        let (r, _) = run(&base, limits).await;
+        assert_eq!(r, Err(StreamError::Timeout));
+        assert!(
+            t.elapsed() < Duration::from_millis(1500),
+            "{:?}",
+            t.elapsed()
+        );
+        // One quiet stream with a long idle limit: the wait is cut at the ceiling, not 120 s.
+        let (base, _) = serve(vec![], true).await;
+        let limits = StreamLimits {
+            ceiling: Duration::from_millis(300),
+            idle: Duration::from_secs(120),
+            ..Default::default()
+        };
+        let t = std::time::Instant::now();
+        let (r, _) = run(&base, limits).await;
+        assert!(matches!(r, Err(StreamError::Timeout)));
+        assert!(t.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn visible_text_and_delta_counts_are_capped() {
+        let big = "x".repeat(50);
+        let mut parts = vec![first("fast")];
+        parts.extend((0..10).map(|_| delta(&big)));
+        parts.push(done());
+        let (base, _) = serve(parts.clone(), false).await;
+        let limits = StreamLimits {
+            max_visible: 200,
+            ..Default::default()
+        };
+        let (r, _) = run(&base, limits).await;
+        assert_eq!(r, Err(StreamError::TooLarge));
+        let (base, _) = serve(parts, false).await;
+        let limits = StreamLimits {
+            max_deltas: 3,
+            ..Default::default()
+        };
+        let (r, _) = run(&base, limits).await;
+        assert_eq!(r, Err(StreamError::TooLarge));
+    }
+
+    #[tokio::test]
+    async fn nothing_after_done_is_processed() {
+        let (base, _) = serve(
+            vec![
+                first("fast"),
+                delta("a"),
+                done(),
+                delta("AFTER"),
+                "data: {bad\n\n".into(),
+            ],
+            false,
+        )
+        .await;
+        let (r, got) = run(&base, StreamLimits::default()).await;
+        assert_eq!(r.unwrap().text, "a");
+        assert_eq!(got, vec!["a"]);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_tier_word_is_refused() {
+        let (base, _) = serve(vec![first("gemma4:latest"), delta("a"), done()], false).await;
+        let (r, got) = run(&base, StreamLimits::default()).await;
+        assert_eq!(r, Err(StreamError::BadTier));
+        assert!(got.is_empty());
+        assert_eq!(
+            StreamError::BadTier.message(),
+            StreamError::ClaudeTier.message()
+        );
+    }
+
+    #[tokio::test]
+    async fn many_lines_in_one_chunk_are_all_parsed() {
+        let many: String = (0..500).map(|i| delta(&format!("{i},"))).collect();
+        let (base, _) = serve(vec![first("fast"), many, done()], false).await;
+        let (r, got) = run(&base, StreamLimits::default()).await;
+        assert!(r.is_ok());
+        assert_eq!(got.len(), 500);
     }
 }
