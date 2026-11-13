@@ -43,8 +43,7 @@
 .landing .take__title { color: #e0a878; }
 .landing .take__ask { color: #5fd3ad; border-color: rgba(95, 211, 173, .5); }
 .landing .take-slot { margin-top: 13px; max-width: 340px; }
-/* Short windows: the lens keeps its room; the take stays on Fitness, Neuro, Mind–Body and Business. */
-@media (max-height: 760px) { .landing .take-slot { display: none; } }
+/* Short windows: LandingScreen.css condenses the take (fewer lines, secondary bits hidden); it is never removed from Home. */
 /* Ask more: the context strip above the Home composer. */
 .take-ctx { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--label-secondary); padding: 5px 8px; margin: 0 0 5px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--copper-text) 35%, var(--separator)); background: color-mix(in srgb, var(--copper-text) 8%, transparent); }
 .take-ctx b { color: var(--copper-text); font-weight: 600; }

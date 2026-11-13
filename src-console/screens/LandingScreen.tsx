@@ -91,7 +91,7 @@ export function LandingField({ onSelect, onToday, chat, chatExpanded = false, on
       <div className="landing__drag" data-tauri-drag-region />
       <h1 className="ui-visually-hidden">Command Center</h1>
       <Wordmark size="landing" className="landing__wordmark" />
-      <div inert={hide || undefined} aria-hidden={hide || undefined}>
+      <div className="landing__side" inert={hide || undefined} aria-hidden={hide || undefined}>
       <Welcome onSelect={onSelect} />
       </div>
       <div className="landing__stage" inert={hide || undefined} aria-hidden={hide || undefined}>
