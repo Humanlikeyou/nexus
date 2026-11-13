@@ -47,11 +47,13 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 - `scripts/sync-crew-env.sh` must carry `CREW_TRIGGER_SECRET` before the trigger is enabled (today it is dropped: fails closed).
 
 ## Next
+- Review 2026-11-13: `tasks/REVIEW-2026-11-13.md` (fix list, data use, Amara interface; §7 recommendations waiting on Taisun, §8 build order for shared pieces). Not committed.
 - done 779b590 / a972a7e: Neuro redesign + Hemi-Sync (decision 0010)
 - done 47b89cb / 79d76da: system map in Settings › Services (decision 0011)
 - Taisun: rebuild + install, then: Import the Hemi-Sync collection, try one track with the Muse, check the map live
 
 ## Installed
+- 0502d78 installed 2026-11-13 (Taisun: "reinstall now"), built from a clean detached checkout `~/projects/nexus-amara-install` (no uncommitted lane work) (rollback: ~/Backups/Amara OS-backup-20261113.app)
 - 540f051 installed 2026-11-12 23:08 JST (rollback: ~/Backups/Amara OS-backup-20261112d.app)
 - 73f53a5 installed 2026-11-12 22:21 JST (rollback: ~/Backups/Amara OS-backup-20261112c.app)
 
