@@ -22,7 +22,6 @@ pub(crate) fn loopback_client(connect_timeout: Duration) -> reqwest::Client {
 
 /// True when the parsed URL's host is `localhost` or a loopback IP. Parsing (not string splitting)
 /// closes userinfo tricks like `http://127.0.0.1@evil.example`.
-#[allow(dead_code)] // used by the router streaming lane (L1)
 pub(crate) fn is_loopback_url(raw: &str) -> bool {
     reqwest::Url::parse(raw.trim())
         .ok()
@@ -63,7 +62,6 @@ pub(crate) fn loopback_base(raw: &str) -> Option<String> {
 }
 
 /// The body exceeded the cap (by `Content-Length` or while streaming).
-#[allow(dead_code)] // used by the router streaming lane (L1)
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum BodyError {
     TooLarge,
@@ -72,7 +70,6 @@ pub(crate) enum BodyError {
 
 /// Read a response body, refusing as soon as more than `cap` bytes have arrived: the cap is
 /// enforced chunk by chunk, so an oversized or endless body is never held in memory.
-#[allow(dead_code)] // used by the router streaming lane (L1)
 pub(crate) async fn read_capped(
     mut resp: reqwest::Response,
     cap: usize,
