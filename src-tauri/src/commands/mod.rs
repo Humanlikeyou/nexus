@@ -41,6 +41,7 @@ pub mod recordings_dsp;
 pub mod replay;
 pub mod research;
 pub mod restart_services;
+pub mod router_stream;
 pub mod sessions;
 pub mod snapshots;
 pub mod system;
@@ -55,6 +56,7 @@ pub mod terrence_priorities;
 pub mod terrence_projects;
 pub mod terrence_runtime;
 pub mod terrence_runtime_bridge;
+pub mod turn_memory;
 pub mod voice;
 pub mod voice_bridge;
 // design-1111v stores (decisions, life dates, adds, check-in, Needs you today)
