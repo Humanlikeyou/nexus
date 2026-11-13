@@ -96,7 +96,7 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 | Backups redaction follow-ups | done de30ebe |
 | NOOP/Lucid inventory (0017) + Fitness Workouts/Sleep detail/Trends | done 7e9895c, e265648 |
 | Home never scrolls | done 582b073 |
-| Home windows backend (Phase 2, 0014 #5) | active (uncommitted: Cargo.toml unstable feature?, home_windows.rs, backups.rs exclude, mod.rs, lib.rs); needs security review + e2e |
+| Home windows backend (Phase 2, 0014 #5) | done c024eeb (security review 3 HIGH fixed; residual: no WK content rule list; Letta/n8n don't check Host/Origin). Taisun live check: open Instagram, sign in, close, reopen, sign out |
 | Installed | 048aaa1 (rollback ~/Backups/Amara OS-backup-20261113b.app); later commits not installed |
 | e2e on HEAD cc17766 | 753 passed / 12 skipped / 1 failed (takes-1111t:80 light, the real 4.28:1 contrast, Design) |
 
