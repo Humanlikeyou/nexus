@@ -176,3 +176,8 @@ The first e2e run (44 min, 23 failures) was the Mac under load. The second (10 f
 - Should the weekly review get an LLM-written summary (local router)?
 - Undo button for memory edits (Design).
 - The seed-alert contrast is 4.28:1 in light (Design).
+
+**Disk cleanup (Taisun: "clean it", 2026-11-13).** Free space went from 14 GiB (97%) to 53 GiB (88%).
+- `cargo clean` on `nexus-amara/src-tauri` (75.3 GiB) and `nexus/src-tauri` (1.3 GiB). The offline crate cache (~/.cargo) is untouched, and deps still resolve `--offline`. The first build after this is a full rebuild.
+- Removed the app rollback copies `Amara OS-backup-20261105`, `-20261106`, `-20261106b`, `-20261112` and `-20261112b`. Kept `-20261112c` and `-20261112d` (the current rollback).
+- `~/Applications-backup` (OpenClaw) was left alone.
