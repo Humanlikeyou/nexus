@@ -181,3 +181,10 @@ The first e2e run (44 min, 23 failures) was the Mac under load. The second (10 f
 - `cargo clean` on `nexus-amara/src-tauri` (75.3 GiB) and `nexus/src-tauri` (1.3 GiB). The offline crate cache (~/.cargo) is untouched, and deps still resolve `--offline`. The first build after this is a full rebuild.
 - Removed the app rollback copies `Amara OS-backup-20261105`, `-20261106`, `-20261106b`, `-20261112` and `-20261112b`. Kept `-20261112c` and `-20261112d` (the current rollback).
 - `~/Applications-backup` (OpenClaw) was left alone.
+
+**Off-disk copy (decision 0016 #1, 2026-11-13 12:22 JST).** The Drive folder "Amara OS code backups" is private, with inherited sharing off.
+- `nexus-20261113.bundle`: `git bundle --all` at `a4a3eb5`, 4,006,372 bytes, verified "okay".
+- `nexus-amara-uncommitted-20261113.tgz`: Taisun's 7 docs, `docs/architecture/`, `tasks/claude-goal-prompt-1111.md`, `tasks/REVIEW-2026-11-13.md`; 71,013 bytes.
+- Secret-pattern scan of the docs and all git history: 0 hits.
+- Restore: `git clone nexus-20261113.bundle nexus`, then `tar -xzf` the docs into it.
+- **Not nightly yet.** That needs a scheduler that isn't a LaunchAgent (hard rule 5): the in-app nightly job from lane N2, or a Claude routine. Re-run by hand until then.
