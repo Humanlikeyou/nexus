@@ -15,6 +15,10 @@ import { EffortCard, RecoveryCard } from "./FitnessRings";
 import { effortModel, recoveryModel } from "./fitnessRingsModel";
 import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
 import { sleepCardModel } from "./sleepModel";
+import { WorkoutsPanel } from "../fitness/WorkoutsPanel";
+import { SleepDetailPanel } from "../fitness/SleepDetailPanel";
+import { TrendsExplorer } from "../fitness/TrendsExplorer";
+import "../fitness/fitness.css";
 import "./HealthScreen.css";
 
 const NOOP_COMMAND = "get_noop_health_snapshot";
@@ -209,7 +213,12 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
   return <FitnessReady health={health} header={header} />;
 }
 
+/** 0017: NOOP's pages live here as tabs. "Summary" is the screen as it was; the rest are new. */
+const FITNESS_TABS = [{ value: "summary", label: "Summary" }, { value: "workouts", label: "Workouts" }, { value: "sleep", label: "Sleep detail" }, { value: "trends", label: "Trends" }] as const;
+type FitnessTab = (typeof FITNESS_TABS)[number]["value"];
+
 function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: ReactNode }) {
+  const [tab, setTab] = useState<FitnessTab>("summary");
   const [metric, setMetric] = useState<TrendKey>("strain");
   const today = health.today;
   const nightly = health.status === "waiting_for_nightly_data";
@@ -260,6 +269,11 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
   return (
     <div className="fitness" data-state={health.status}>
       {header}
+      <SegmentedControl label="Fitness section" size="small" value={tab} options={FITNESS_TABS} onChange={setTab} />
+      {tab === "workouts" && <WorkoutsPanel />}
+      {tab === "sleep" && <SleepDetailPanel days={fitnessDays(health)} />}
+      {tab === "trends" && <TrendsExplorer />}
+      {tab === "summary" && <>
       <AmaraTake page="fitness" className="fitness__take" />
       {health.status === "stale" && (
         <p className="fitness__callout" role="note">
@@ -329,8 +343,16 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
       )}
       {insights.length === 0 && <p className="fitness__pending">Insights appear after tonight&apos;s health sync.</p>}
       </More>
+      </>}
     </div>
   );
+}
+
+/** recentDays plus today, ascending and deduped: what the Sleep detail tab lists nights from. */
+function fitnessDays(health: NoopHealthSnapshot): NoopDailyMetric[] {
+  const byDay = new Map(health.recentDays.map((d) => [d.day, d]));
+  if (health.today) byDay.set(health.today.day, health.today);
+  return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
 }
 
 function FitnessSkeleton() {

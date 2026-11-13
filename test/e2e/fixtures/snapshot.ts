@@ -60,6 +60,23 @@ const NOOP_SERIES = {
   points: noopDays.map((d) => ({ day: d.day, key: "hrv", value: d.avgHrv, source: "my-whoop", sourceKey: "hrv" })),
 };
 
+/* 0017 Fitness tabs: noop_recent_workouts, noop_hypnogram and a metric_series per key (fake values, real shapes). */
+export const NOOP_WORKOUTS = [
+  { day: "2026-10-27", startedAt: "2026-10-27T07:10:00+09:00", endedAt: "2026-10-27T07:55:00+09:00", sport: "running", durationMin: 45, energyKcal: 410, avgHr: 148, maxHr: 176, strain: 12, distanceM: 7200, steps: 8100, zoneMinutes: [4, 12, 16, 10, 3] },
+  { day: "2026-10-25", startedAt: "2026-10-25T18:00:00+09:00", endedAt: "2026-10-25T18:50:00+09:00", sport: "functional_strength", durationMin: 50, energyKcal: 320, avgHr: 124, maxHr: 158, strain: 9, distanceM: null, steps: null, zoneMinutes: null },
+];
+const NIGHT_START = Date.parse("2026-10-27T23:41:00+09:00") / 1000;
+export const NOOP_HYPNOGRAM = {
+  day: "2026-10-28", startedAt: "2026-10-27T23:41:00+09:00", endedAt: "2026-10-28T07:13:00+09:00",
+  segments: ([["light", 40], ["deep", 70], ["light", 50], ["rem", 30], ["awake", 8], ["light", 90], ["deep", 40], ["rem", 60], ["light", 64]] as const).reduce<{ t: number; out: Array<{ start: number; end: number; stage: string }> }>((acc, [stage, min]) => { acc.out.push({ start: acc.t, end: acc.t + min * 60, stage }); acc.t += min * 60; return acc; }, { t: NIGHT_START, out: [] }).out,
+};
+const SERIES_KEYS = ["recovery", "hrv", "rhr", "resp_rate", "spo2", "strain", "sleep_total_min", "steps", "active_kcal"] as const;
+const SERIES_BASE: Record<(typeof SERIES_KEYS)[number], number> = { recovery: 65, hrv: 60, rhr: 52, resp_rate: 14.6, spo2: 97, strain: 40, sleep_total_min: 440, steps: 8200, active_kcal: 480 };
+export const NOOP_SERIES_BY_KEY = Object.fromEntries(SERIES_KEYS.map((key) => [key, {
+  key, requestedSource: "my-whoop", range: { from: "2026-09-30", to: "2026-10-28" }, returned: 29,
+  points: noopDays.map((d, i) => ({ day: d.day, key, value: Math.round(SERIES_BASE[key] * (1 + (((i * 7) % 11) - 5) / 60) * 10) / 10, source: "my-whoop", sourceKey: key })),
+}]));
+
 /* Home Assistant (ha.rs shapes, camelCase; no token field anywhere). */
 export const HA_ENTITIES = [
   { entityId: "light.desk_lamp", state: "on", friendlyName: "Desk lamp", domain: "light", lastChanged: "2026-10-28T04:00:00Z", attributes: { friendly_name: "Desk lamp" } },
