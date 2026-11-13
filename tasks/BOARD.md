@@ -91,7 +91,13 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 | Life › Dates Edit | waiting (Design: needs an edit form; tasks/design-questions.md) |
 | N1 chat/voice adds | done 16b78d8 (security review fixed) |
 | N2 nightly backups + restore drill, N3 jp_bank import picker, N4 Telegram relay (approvals, no send yet) | done a783a5f (3 security reviews fixed; drill: Muse 34/34 byte-identical) |
-| Next: one Rust turn pipeline (decision 0016: router-direct, streaming, real Stop, Letta blocks in prompt) | active |
+| Turn pipeline (0016/0019): L0 cb6da06, L1 80d9c04, L3 048aaa1, L2 5e8ead7, L4 bb7efff | done (flag nexus.turnPipeline OFF by default; 4 security reviews fixed). Rust adds port still a stub (renderer adds run first). Design asks: streaming text, tier line, Used: chips, Stop state |
+| Roadmap catch-up when idle (0018) | done 29d112f |
+| Backups redaction follow-ups | done de30ebe |
+| NOOP/Lucid inventory (0017) + Fitness Workouts/Sleep detail/Trends | done 7e9895c, e265648 |
+| Home never scrolls | done 582b073 |
+| Home windows backend (Phase 2, 0014 #5) | active (uncommitted: Cargo.toml unstable feature?, home_windows.rs, backups.rs exclude, mod.rs, lib.rs); needs security review + e2e |
+| Installed | 048aaa1 (rollback ~/Backups/Amara OS-backup-20261113b.app); later commits not installed |
 | e2e on HEAD cc17766 | 753 passed / 12 skipped / 1 failed (takes-1111t:80 light, the real 4.28:1 contrast, Design) |
 
 ## Out of scope tonight (Taisun)
