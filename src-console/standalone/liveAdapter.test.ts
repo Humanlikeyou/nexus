@@ -228,3 +228,49 @@ describe("backup_verify_last is heavy: startup only, one at a time", () => {
     }
   });
 });
+
+describe("live standalone adapter (Telegram relay)", () => {
+  beforeEach(() => { vi.resetModules(); invoke.mockReset(); });
+  const kinds = { sleep: true, recovery: true, effort: true, battery: true, sync: true, lucid: false, illness: true };
+
+  it("relay reads notify_settings_get, lists the not-connected kinds, and ignores a malformed row", async () => {
+    invoke.mockImplementation(async (cmd: string) => cmd === "notify_settings_get" ? { enabled: true, kinds, lastSent: "7:12 AM", connected: ["sleep", "recovery"], notConnected: ["effort", "bogus"] } : cmd === "secrets_status" ? [] : { made: false, where: "w" });
+    const { unwiredStandalone } = await import("./adapters");
+    const { makeLiveStandalone, refreshLive, toRelay } = await import("./liveAdapter");
+    const a = makeLiveStandalone(unwiredStandalone);
+    expect(a.relay().state).toBe("unwired");
+    await refreshLive();
+    const r = a.relay();
+    expect(r.state).toBe("live");
+    if (r.state === "live") { expect(r.value.notConnected).toEqual(["effort"]); expect(r.value.lastSent).toBe("7:12 AM"); }
+    expect(toRelay({ enabled: true, kinds: { sleep: true } })).toBeNull();
+  });
+
+  it("setRelay sends only enabled/kinds; a refused or declined switch is unwired and logs no detail", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    invoke.mockImplementation(async (cmd: string) => { if (cmd === "notify_settings_set") throw "declined: Denied in the native approval dialog."; return cmd === "secrets_status" ? [] : { made: false, where: "w" }; });
+    const { unwiredStandalone } = await import("./adapters");
+    const { makeLiveStandalone } = await import("./liveAdapter");
+    const a = makeLiveStandalone(unwiredStandalone);
+    const r = await a.setRelay({ enabled: true });
+    expect(r.state).toBe("unwired");
+    expect(invoke).toHaveBeenCalledWith("notify_settings_set", { patch: { enabled: true, kinds: undefined } });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("kinds");
+    warn.mockRestore();
+  });
+
+  it("the preview is the backend text, asked once; Send Test calls notify_send_test", async () => {
+    invoke.mockImplementation(async (cmd: string) => cmd === "notify_preview" ? { text: "Recovery is 74%.", at: "7:12 AM", from: "From your latest recovery reading.", usedPlainLine: false } : cmd === "secrets_status" ? [] : { made: false, where: "w" });
+    const { unwiredStandalone } = await import("./adapters");
+    const { makeLiveStandalone, resetRelayForTests } = await import("./liveAdapter");
+    resetRelayForTests();
+    const a = makeLiveStandalone(unwiredStandalone);
+    expect(a.relayPreview().state).toBe("unwired");
+    await new Promise((r) => setTimeout(r, 10));
+    const p = a.relayPreview();
+    expect(p.state).toBe("live");
+    expect(invoke.mock.calls.filter((c) => c[0] === "notify_preview")).toHaveLength(1);
+    await a.relaySendTest();
+    expect(invoke).toHaveBeenCalledWith("notify_send_test");
+  });
+});

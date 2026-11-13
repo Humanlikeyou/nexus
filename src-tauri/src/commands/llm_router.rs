@@ -490,11 +490,11 @@ pub(crate) async fn ask_router(
         .post(&url, headers, body, 600)
         .await
         .map_err(|e| {
-            eprintln!("[llm_router] {e}");
+            eprintln!("[llm_router] {}", log_detail(&e));
             ROUTER_DOWN.to_string()
         })?;
     if !(200..300).contains(&status) {
-        let detail = v["error"]["message"].as_str().unwrap_or("");
+        let detail = log_detail(v["error"]["message"].as_str().unwrap_or(""));
         eprintln!("[llm_router] router HTTP {status}: {detail}");
         return Err(if status == 503 {
             OLLAMA_DOWN
@@ -504,7 +504,7 @@ pub(crate) async fn ask_router(
         .to_string());
     }
     parse_router_ok(&v).map_err(|e| {
-        eprintln!("[llm_router] {e}");
+        eprintln!("[llm_router] {}", log_detail(&e));
         ROUTER_FAILED.to_string()
     })
 }
@@ -685,6 +685,43 @@ pub(crate) async fn deep_complete(system: &str, user: &str) -> Result<String, St
         body_cap: Some(DEEP_BODY_CAP),
     };
     let (content, ..) = ask_router(&transport, &base, &headers, &body).await?;
+    Ok(content)
+}
+
+/// The three headers every health-data call sends: no Claude, local mode, fast route.
+pub(crate) fn local_tier_headers() -> Vec<(&'static str, String)> {
+    vec![
+        ("X-Amara-Allow-Claude", "0".to_string()),
+        ("X-Amara-Mode", "local".to_string()),
+        ("X-Amara-Route", "fast".to_string()),
+    ]
+}
+
+/// Router detail for a log line: short, so an odd reply can't fill the log.
+fn log_detail(s: &str) -> String {
+    s.chars().take(80).collect()
+}
+
+/// One background completion on the light tier, never the cloud: Claude is forced off, the route is
+/// fast, and a reply that still came from the Claude tier is refused. For text built from personal
+/// health data (the Telegram relay). `instruction` is appended to Amara's one system prompt.
+pub(crate) async fn local_complete(instruction: &str, user: &str) -> Result<String, String> {
+    let saved = crate::commands::telegram::load_config();
+    let base = router_base(None, saved.amara_router_url.as_deref());
+    if loopback_base(&base).as_deref() != Some(base.as_str()) {
+        return Err(ROUTER_FAILED.to_string());
+    }
+    let headers = local_tier_headers();
+    let system = format!("{}\n\n{instruction}", system_prompt(&amara_persona()));
+    let body = router_body(&system, user);
+    let transport = HttpTransport {
+        client: no_redirect_client(),
+        body_cap: Some(DEEP_BODY_CAP),
+    };
+    let (content, tier, ..) = ask_router(&transport, &base, &headers, &body).await?;
+    if tier == Tier::Claude {
+        return Err(ROUTER_FAILED.to_string());
+    }
     Ok(content)
 }
 
@@ -1221,5 +1258,24 @@ mod tests {
         .await;
         let (st, v) = t.post(&url, &[], &json!({}), 5).await.unwrap();
         assert_eq!((st, v["a"].as_i64()), (200, Some(1)));
+    }
+
+    #[test]
+    fn local_complete_pins_the_three_local_headers_and_logs_short_detail() {
+        let h = local_tier_headers();
+        assert_eq!(
+            h,
+            vec![
+                ("X-Amara-Allow-Claude", "0".to_string()),
+                ("X-Amara-Mode", "local".to_string()),
+                ("X-Amara-Route", "fast".to_string()),
+            ]
+        );
+        let src = include_str!("llm_router.rs");
+        let body = &src[src.find("pub(crate) async fn local_complete").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        assert!(body.contains("local_tier_headers()"));
+        assert!(body.contains("tier == Tier::Claude"));
+        assert_eq!(log_detail(&"x".repeat(500)).chars().count(), 80);
     }
 }

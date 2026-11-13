@@ -155,3 +155,20 @@ Counting standing gaps only (rows classed A, B, C). `(cond.)` rows are transient
 8. Habit day marks (Goals) from check-ins and NOOP data (not a wire tag, but the "No data source linked yet" note).
 
 Biggest class B wins after that: `memory_list` (Settings > Memory), `weekly_review_read` and `patterns_read` (two whole Life/Mind-Body pages), then `service_logs`/`service_restart`, `whoop_status`, `backup_verify_last`.
+
+## Status 2026-11-13 (class A sweep, lane N3)
+
+| Class A row | Status 2026-11-13 |
+|---|---|
+| Tag-bug sweep (Connected accounts, Services footer, Crews runs table, Lease-notice, Recordings retention, Life take) | Landed earlier (9812b70, 4e5ad29). The Life take empty block (`takes/suggestions.ts` has no "life" page) is still open: it needs catalog copy, a Design call |
+| Settings > Backup "Last backup" | Live (lane N2; checksum via the verify command, 1c93d5e) |
+| Crews > Schedules "Next run" | Live (1af2316) |
+| Settings > Services summary (sidebar footer) | Live (1af2316) |
+| Personal money: account USD from stored rate, overview totals | Live (9b95d68, b438574, 1c93d5e) |
+| Personal money > Connect sheet, Ledger (watch-only) | Live (1af2316). NEW today: optional "Balance now" you type, saved with `money_balance_set_manual` (today's date, JST). No price or chain lookup |
+| Personal money > Connect sheet, Japanese bank | NEW, live: "Import a statement..." calls the Rust command `money_import_pick`. It opens the native open-file dialog (tauri-plugin-dialog), the renderer passes nothing and never sees a path. It returns only `{imported, skipped}` or a fixed code (`cancelled`, `bad_file`, `too_large`, `unrecognised_format`, `store_full`, `store_error`, `invalid_input`, `failed`). It parses first, then uses the one yen CSV account (made on first use, "Japanese bank"), then `money_import_statement` logic |
+| Life > Weekly review > "Try it this week" | Live (f45829a, parent) |
+| Life > Dates > Edit | Still blocked on Design (needs an edit form); `life_date_upsert` is ready |
+| Home > Crew approvals prefetch | Open (unsure, touches the Home inbox fallback) |
+| Habit day marks from check-ins/NOOP | Open: what counts as a "met" day is a decision for Taisun |
+| Chime / Fidelity, disconnect / reconnect, all class C | Untouched by design (decision 0008 Plaid, no-delete rule) |

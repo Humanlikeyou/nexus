@@ -53,6 +53,15 @@ describe("Tauri command registry", () => {
     for (const name of ["noop_recent_workouts", "noop_hypnogram", "voice_stop_speaking"]) expect(names).toContain(name);
   });
 
+  it("the backup prune plan and restore preview are registered, and no restore apply or prune delete command exists", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    for (const name of ["backup_prune_plan", "restore_preview"]) expect(names).toContain(name);
+    // Taisun's gates: restore() is not built and nothing deletes a backup (hard rule 7).
+    for (const name of ["restore", "backup_restore", "backup_prune", "backup_delete"]) expect(names).not.toContain(name);
+  });
+
   it("the Hemi-Sync commands are registered", async () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
@@ -64,8 +73,10 @@ describe("Tauri command registry", () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
     const names = registeredCommands(lib).map((c: { name: string }) => c.name);
-    const money = ["money_accounts_list", "money_account_add", "money_watch_add", "money_balance_set_manual", "money_import_statement", "fx_rate_get", "fx_rate_set_manual", "fx_rate_refresh"];
+    const money = ["money_accounts_list", "money_account_add", "money_watch_add", "money_balance_set_manual", "money_import_pick", "fx_rate_get", "fx_rate_set_manual", "fx_rate_refresh"];
     for (const name of money) expect(names).toContain(name);
+    // The renderer-supplied-path import is gone: the only import command opens its own native dialog.
+    expect(names).not.toContain("money_import_statement");
     expect(names.filter((n: string) => /^(money|fx)_/.test(n) && /transfer|pay|trade|convert|withdraw|send|buy|sell/.test(n))).toEqual([]);
   });
 

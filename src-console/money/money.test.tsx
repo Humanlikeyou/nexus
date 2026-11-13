@@ -42,7 +42,21 @@ describe("design-1111t money: seed guard", () => {
     fireEvent.change(input, { target: { value: XPUB } });
     expect(screen.getByText("✓ Looks like a public key")).toBeInTheDocument();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Add watch-only" })); });
-    expect(add).toHaveBeenCalledWith("btc", XPUB, "Ledger · Bitcoin");
+    expect(add).toHaveBeenCalledWith("btc", XPUB, "Ledger · Bitcoin", null);
+  });
+  it("the sheet has no balance field yet (Design's), passes null, and the import button shows the live note", async () => {
+    const add = vi.fn(async () => ({ state: "live" as const, value: { ok: true as const } }));
+    const imp = vi.fn(async () => ({ state: "live" as const, value: { ok: true as const } }));
+    const adapter: MoneyAdapter = { ...sampleMoney(), addWatchOnly: add, importStatement: imp, connectNote: () => "Imported 3 transactions. 0 skipped (already imported or not readable)." };
+    render(<ConnectSheet open onClose={() => {}} adapter={adapter} />);
+    fireEvent.change(screen.getByRole("textbox", { name: /xpub or address/ }), { target: { value: XPUB } });
+    expect(screen.queryByRole("textbox", { name: /Balance now/ })).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Add watch-only" })); });
+    expect(add).toHaveBeenCalledWith("btc", XPUB, "Ledger · Bitcoin", null);
+    fireEvent.click(screen.getByRole("radio", { name: /Japanese bank/ }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Import a statement…" })); });
+    expect(imp).toHaveBeenCalledWith();
+    expect(screen.getByText(/Imported 3 transactions/)).toBeInTheDocument();
   });
 });
 

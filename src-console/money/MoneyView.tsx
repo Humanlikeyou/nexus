@@ -35,7 +35,7 @@ function AccountRow({ a, adapter }: { a: MoneyAccount; adapter: MoneyAdapter }) 
         <div className="m-acct__acts">
           {a.status === "expired" ? <><Button size="small" variant="primary" onClick={() => { void adapter.reconnect(a.id).then((r) => setNote(r.state === "unwired" ? "Signing in again needs wiring." : "Sample data: opens Chime's own sign-in page in your browser.")); }}>Sign in again…</Button>
             <Button size="small" onClick={() => { void adapter.disconnect(a.id).then((r) => setNote(r.state === "unwired" ? "Needs wiring, so nothing changed." : "Sample data: disconnected in the preview only.")); }}>Disconnect</Button></>
-            : <Button size="small" onClick={() => { void adapter.importStatement().then((r) => setNote(r.state === "unwired" ? "Statement import needs wiring." : "Sample data: no file is read in the preview.")); }}>Import a statement…</Button>}
+            : <Button size="small" onClick={() => { void adapter.importStatement().then((r) => setNote(r.state === "sample" ? "Sample data: no file is read in the preview." : adapter.connectNote() ?? "Statement import needs wiring.")); }}>Import a statement…</Button>}
           {note && <span className="pk-note" role="status">{note}</span>}
         </div>
       )}

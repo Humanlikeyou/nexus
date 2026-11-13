@@ -22,12 +22,14 @@ export function ConnectSheet({ open, onClose, adapter, initial = "ledger" }: { o
   const add = async () => {
     if (pick === "ledger") {
       if (check.kind !== "public") return;
-      const r = await adapter.addWatchOnly(check.chain, value.trim(), nick.trim() || "Ledger");
-      setNote(r.state === "unwired" ? "Watch-only needs wiring, so nothing was saved." : r.state === "sample" ? "Sample data: added in the preview only. Nothing was saved." : "Added. Amara can see balances at these addresses and nothing else.");
+      // Typed balance: the adapter accepts one (money_balance_set_manual), but the field is Design's to place (design-questions 2026-11-13).
+      const r = await adapter.addWatchOnly(check.chain, value.trim(), nick.trim() || "Ledger", null);
+      const extra = r.state === "live" ? adapter.connectNote() : null;
+      setNote(r.state === "unwired" ? "Watch-only needs wiring, so nothing was saved." : r.state === "sample" ? "Sample data: added in the preview only. Nothing was saved." : `Added. Amara can see balances at these addresses and nothing else.${extra ? ` ${extra}` : ""}`);
       if (r.state !== "unwired") setValue("");
     } else if (pick === "jp_bank") {
       const r = await adapter.importStatement();
-      setNote(r.state === "unwired" ? "Statement import needs wiring, so no file was read." : r.state === "sample" ? "Sample data: no file is read in the preview." : "Statement imported.");
+      setNote(r.state === "sample" ? "Sample data: no file is read in the preview." : adapter.connectNote() ?? (r.state === "unwired" ? "Statement import needs wiring, so no file was read." : "Statement imported."));
     }
   };
   const ready = route.ready.state !== "unwired";

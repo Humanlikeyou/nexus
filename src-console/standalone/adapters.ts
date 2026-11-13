@@ -70,7 +70,9 @@ export const ALERT_KINDS: Array<{ id: AlertKind; label: string }> = [
   { id: "battery", label: "Strap battery" }, { id: "sync", label: "Sync problems" }, { id: "lucid", label: "Lucid cues" }, { id: "illness", label: "Illness signs" },
 ];
 /** No quiet hours and no rate limit (Taisun, 14:59 JST Nov 11): only on/off, the keys, the kinds and the preview. */
-export type RelaySettings = { enabled: boolean; kinds: Record<AlertKind, boolean>; lastSent: string | null };
+export type RelaySettings = { enabled: boolean; kinds: Record<AlertKind, boolean>; lastSent: string | null;
+  /** Kinds the app can't see yet (shown as "not connected yet"). Absent in sample data. */
+  notConnected?: AlertKind[] };
 export type RelayPreview = { text: string; at: string; from: string };
 
 // ---- WHOOP 4 (Settings › Devices) ----
@@ -117,6 +119,8 @@ export interface StandaloneAdapter {
   relay(): Wired<RelaySettings>;
   setRelay(p: Partial<RelaySettings>): Action;
   relayPreview(): Wired<RelayPreview>;
+  /** Asks in a native dialog first; never sends under the outbound switch or navy. */
+  relaySendTest(): Action;
   whoop(): Wired<WhoopStatus>;
   whoopAction(a: "sync" | "buzz" | "forget" | "take_over" | "lucid_on" | "lucid_off"): Action;
   pairSteps(): Wired<PairStep[]>;
@@ -133,7 +137,7 @@ export const unwiredStandalone: StandaloneAdapter = {
   services: () => UNWIRED, serviceLogs: () => UNWIRED, serviceAction: never, summary: () => UNWIRED,
   secrets: () => UNWIRED, setSecret: never, backup: () => UNWIRED, backupNow: never, setBackupSettings: never, restore: never,
   keyFile: () => UNWIRED, makeKeyFile: never, updates: () => UNWIRED, setUpdatePrefs: never,
-  relay: () => UNWIRED, setRelay: never, relayPreview: () => UNWIRED,
+  relay: () => UNWIRED, setRelay: never, relayPreview: () => UNWIRED, relaySendTest: never,
   whoop: () => UNWIRED, whoopAction: never, pairSteps: () => UNWIRED,
   profile: () => UNWIRED, tiers: () => UNWIRED, setupDownload: () => UNWIRED, restorePreview: () => UNWIRED, setupDone: () => UNWIRED,
 };
@@ -210,6 +214,7 @@ export function sampleStandalone(opts: { whoopOwner?: WhoopStatus["owner"]; rela
     setUpdatePrefs: async () => OK,
     relay: () => sample(relay),
     setRelay: async (p) => { relay = { ...relay, ...p, kinds: { ...relay.kinds, ...(p.kinds ?? {}) } }; return OK; },
+    relaySendTest: async () => OK,
     relayPreview: () => sample({ from: "From this morning\u2019s \u201cRecovery ready\u201d alert. Amara writes a new one each time, never a template.", at: "7:12 AM", text: "Morning, Taisun. You slept 7h 32m, about 20 minutes more than usual, and recovery is 74%. HRV is up to 66 ms, so today can take a hard session. Strap is at 18%: charge it before bed so tonight\u2019s sleep is recorded." }),
     whoop: () => sample({
       owner, connected: !legacy,

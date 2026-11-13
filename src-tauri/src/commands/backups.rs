@@ -18,7 +18,7 @@ use std::sync::Mutex;
 use tauri::Emitter;
 
 const SETTINGS_FILE: &str = "backup_settings.json";
-const PROGRESS_EVENT: &str = "backup://progress";
+pub(crate) const PROGRESS_EVENT: &str = "backup://progress";
 /// A backup needs this much free space on top of the size of the data it copies.
 const FREE_SPACE_MARGIN: u64 = 5 * 1024 * 1024 * 1024;
 const MAX_SETTINGS_BYTES: u64 = 16 * 1024;
@@ -94,29 +94,97 @@ const SECRET_FIELD_NAMES: &[&str] = &[
     "mnemonic",
 ];
 
+/// camelCase `...Key` after a lowercase letter or digit: `privateKey`, `accessKey`, `secretKey`,
+/// `signingKey`, `sessionKey`, `encryptionKey`, `clientKey`, `apiKey`.
+fn camel_key(key: &str) -> bool {
+    let b = key.as_bytes();
+    b.len() > 3
+        && key.ends_with("Key")
+        && (b[b.len() - 4].is_ascii_lowercase() || b[b.len() - 4].is_ascii_digit())
+}
+
 fn is_secret_field(key: &str) -> bool {
     let k = key.to_ascii_lowercase();
-    SECRET_FIELD_NAMES.contains(&k.as_str())
+    camel_key(key)
+        || SECRET_FIELD_NAMES.contains(&k.as_str())
         || SECRET_FIELD_SUFFIXES.iter().any(|s| k.ends_with(s))
         || EXCLUDED_NAME_FRAGMENTS
             .iter()
             .any(|f| !f.starts_with('.') && k.contains(f) && !k.contains("threshold"))
 }
 
+/// Whether a field is removed. `is_secret_field` by name, minus two false positives:
+/// - a NUMBER under a plural `*_tokens` name is a count (`prompt_tokens`), not a secret;
+/// - a bare `key` is an identifier unless its parent is itself secret-looking
+///   (`worker_api_keys[].key` goes, `cited[].key` stays). With no parent it goes.
+fn is_secret_entry(k: &str, v: &Value, parent: Option<&str>) -> bool {
+    if !is_secret_field(k) {
+        return false;
+    }
+    let lower = k.to_ascii_lowercase();
+    if v.is_number() && (lower == "tokens" || lower.ends_with("_tokens")) {
+        return false;
+    }
+    if lower == "key" {
+        // A bare `key` is kept only as an identifier: a short lowercase word, not a token shape,
+        // under a parent that isn't itself secret-looking. Anything else (and no parent) goes.
+        let ident = v.as_str().is_some_and(|s| {
+            s.len() <= 40
+                && s.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+                && s.bytes()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b"_.-".contains(&c))
+                && !["sk-", "xox", "ghp_", "eyj"]
+                    .iter()
+                    .any(|p| s.starts_with(p))
+        });
+        if !ident {
+            return true;
+        }
+        if let Some(p) = parent {
+            let p = p.to_ascii_lowercase();
+            let secretish = [
+                "header",
+                "key",
+                "token",
+                "secret",
+                "password",
+                "passphrase",
+                "auth",
+                "credential",
+                "bearer",
+                "cookie",
+            ]
+            .iter()
+            .any(|f| p.contains(f));
+            if !secretish {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn redact(v: &mut Value, removed: &mut Vec<String>) {
+    redact_in(v, removed, None)
+}
+
+fn redact_in(v: &mut Value, removed: &mut Vec<String>, parent: Option<&str>) {
     match v {
         Value::Object(map) => {
             let keys: Vec<String> = map.keys().cloned().collect();
             for k in keys {
-                if is_secret_field(&k) {
+                let secret = map
+                    .get(&k)
+                    .is_some_and(|val| is_secret_entry(&k, val, parent));
+                if secret {
                     map.remove(&k);
                     removed.push(k);
                 } else if let Some(child) = map.get_mut(&k) {
-                    redact(child, removed);
+                    redact_in(child, removed, Some(&k));
                 }
             }
         }
-        Value::Array(items) => items.iter_mut().for_each(|i| redact(i, removed)),
+        Value::Array(items) => items.iter_mut().for_each(|i| redact_in(i, removed, parent)),
         _ => {}
     }
 }
@@ -225,6 +293,22 @@ pub struct BackupSettings {
     pub keep: u32,
     pub before_update: bool,
     pub skip_on_battery_below: u32,
+    /// Reserved. Nothing deletes a backup (hard rule 7): no code path reads this to delete, and
+    /// `BackupSettingsPatch` cannot set it. `backup_prune_plan` only lists what WOULD go.
+    pub auto_prune: bool,
+    /// When the last backup attempt (nightly or Back Up Now) finished, RFC 3339, and how it ended:
+    /// `ok`, `skipped_busy`, `skipped_battery`, or the error code.
+    pub last_run_at: Option<String>,
+    pub last_run_result: Option<String>,
+    /// When the last backup that succeeded finished (drives the missed-nightly catch-up).
+    pub last_ok_at: Option<String>,
+    /// Optional nightly `git bundle` of the repo into the backup dir (decision 0016). Off by default,
+    /// a setting only (no UI, no upload). `last_bundle_result` is `ok` or a short code.
+    pub git_bundle: bool,
+    pub last_bundle_result: Option<String>,
+    /// Scheduler retry state: how many runs of the slot `failed_slot` (RFC 3339) ended in an error.
+    pub failed_attempts: u32,
+    pub failed_slot: Option<String>,
 }
 
 impl Default for BackupSettings {
@@ -237,6 +321,14 @@ impl Default for BackupSettings {
             keep: 14,
             before_update: true,
             skip_on_battery_below: 20,
+            auto_prune: false,
+            last_run_at: None,
+            last_run_result: None,
+            last_ok_at: None,
+            git_bundle: false,
+            last_bundle_result: None,
+            failed_attempts: 0,
+            failed_slot: None,
         }
     }
 }
@@ -250,6 +342,7 @@ pub struct BackupSettingsPatch {
     pub keep: Option<i64>,
     pub before_update: Option<bool>,
     pub skip_on_battery_below: Option<i64>,
+    pub git_bundle: Option<bool>,
 }
 
 fn valid_time(s: &str) -> bool {
@@ -388,11 +481,54 @@ pub(crate) fn apply_patch(
     if let Some(v) = patch.nightly {
         s.nightly = v;
     }
+    if let Some(v) = patch.git_bundle {
+        s.git_bundle = v;
+    }
     if let Some(v) = patch.before_update {
         s.before_update = v;
     }
     save_settings(data_dir, &s)?;
     Ok(s)
+}
+
+/// Record how a backup attempt ended. Same lock and atomic write as `apply_patch`; changes only the
+/// `last_*` fields. `ok` also moves `last_ok_at`. A settings file that can't be read is left alone.
+pub(crate) fn record_run(data_dir: &Path, at: &str, result: &str, ok: bool) -> Result<(), String> {
+    let _g = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut s = load_settings(data_dir)?;
+    s.last_run_at = Some(at.to_string());
+    s.last_run_result = Some(result.chars().take(40).collect());
+    if ok {
+        s.last_ok_at = Some(at.to_string());
+    }
+    save_settings(data_dir, &s)
+}
+
+/// The scheduler's retry counter: a failed run of `slot` adds one (a new slot starts at 1); a
+/// success clears it.
+pub(crate) fn record_attempt(data_dir: &Path, slot: &str, failed: bool) -> Result<(), String> {
+    let _g = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut s = load_settings(data_dir)?;
+    if failed {
+        s.failed_attempts = if s.failed_slot.as_deref() == Some(slot) {
+            s.failed_attempts.saturating_add(1)
+        } else {
+            1
+        };
+        s.failed_slot = Some(slot.to_string());
+    } else {
+        s.failed_attempts = 0;
+        s.failed_slot = None;
+    }
+    save_settings(data_dir, &s)
+}
+
+/// Record how the optional git bundle step ended.
+pub(crate) fn record_bundle(data_dir: &Path, result: &str) -> Result<(), String> {
+    let _g = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut s = load_settings(data_dir)?;
+    s.last_bundle_result = Some(result.chars().take(40).collect());
+    save_settings(data_dir, &s)
 }
 
 // ---- listing ----
@@ -409,7 +545,7 @@ pub struct BackupEntry {
 }
 
 /// `amara-backup-YYYYMMDD-HHMMSS.tar.gz` or legacy `nexus-backup-YYYYMMDD_HHMMSS.tar.gz`.
-fn parse_backup_name(name: &str) -> Option<NaiveDateTime> {
+pub(crate) fn parse_backup_name(name: &str) -> Option<NaiveDateTime> {
     let (rest, sep) = if let Some(r) = name.strip_prefix(NEW_PREFIX) {
         (r, '-')
     } else if let Some(r) = name.strip_prefix(LEGACY_PREFIX) {
@@ -480,12 +616,12 @@ pub struct BackupRunResult {
     pub skipped: Vec<String>,
 }
 
-static BUSY: AtomicBool = AtomicBool::new(false);
+pub(crate) static BUSY: AtomicBool = AtomicBool::new(false);
 
 /// Holds the single-backup flag; released on drop (also on early return or panic).
-struct BusyGuard<'a>(&'a AtomicBool);
+pub(crate) struct BusyGuard<'a>(&'a AtomicBool);
 impl<'a> BusyGuard<'a> {
-    fn acquire(flag: &'a AtomicBool) -> Option<Self> {
+    pub(crate) fn acquire(flag: &'a AtomicBool) -> Option<Self> {
         flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .ok()
             .map(|_| Self(flag))
@@ -564,6 +700,7 @@ pub(crate) async fn run_backup(
     let opts = PackOpts {
         exclude_secrets: true,
         progress: Some(progress),
+        ..Default::default()
     };
     let PackageInfo { skipped, .. } = pack_to(data_dir, &dir, &name, &opts).await?;
     progress("Done", 100);
@@ -574,7 +711,7 @@ pub(crate) async fn run_backup(
     Ok(BackupRunResult { entry, skipped })
 }
 
-fn home_dir() -> Result<PathBuf, String> {
+pub(crate) fn home_dir() -> Result<PathBuf, String> {
     dirs::home_dir().ok_or_else(|| "dir_invalid".to_string())
 }
 
@@ -609,14 +746,14 @@ pub async fn backup_list() -> Result<Vec<BackupEntry>, String> {
 
 /// Caps so a huge or hostile archive can't tie the app up.
 /// Dirs count too. The app data is ~2.2 GB today (checked read-only), so 16 GiB leaves ~7x headroom.
-const VERIFY_MAX_ENTRIES: usize = 200_000;
+pub(crate) const VERIFY_MAX_ENTRIES: usize = 200_000;
 const VERIFY_MAX_TOTAL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 /// A per-file hash map is ~100 bytes per file, so 32 MiB covers the entry cap.
-const VERIFY_MAX_MANIFEST_BYTES: u64 = 32 * 1024 * 1024;
+pub(crate) const VERIFY_MAX_MANIFEST_BYTES: u64 = 32 * 1024 * 1024;
 const VERIFY_RATIO_FLOOR: u64 = 1024 * 1024 * 1024;
 const VERIFY_MAX_RATIO: u64 = 200;
 const VERIFY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(600);
-static VERIFY_BUSY: AtomicBool = AtomicBool::new(false);
+pub(crate) static VERIFY_BUSY: AtomicBool = AtomicBool::new(false);
 const VERIFY_MAX_MISMATCHES: usize = 50;
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -638,7 +775,7 @@ pub struct VerifyReport {
 }
 
 /// Names go back to the UI: no control, zero-width or bidi characters, at most 200 chars.
-fn clean_name(s: &str) -> String {
+pub(crate) fn clean_name(s: &str) -> String {
     s.chars()
         .filter(|c| {
             !c.is_control()
@@ -668,20 +805,20 @@ fn is_hex64(s: &str) -> bool {
 
 /// The limits in force for one verification (tests pass small ones).
 #[derive(Clone, Copy)]
-struct VerifyCaps {
+pub(crate) struct VerifyCaps {
     entries: usize,
     total: u64,
     ratio_floor: u64,
     deadline: std::time::Duration,
 }
-const VERIFY_CAPS: VerifyCaps = VerifyCaps {
+pub(crate) const VERIFY_CAPS: VerifyCaps = VerifyCaps {
     entries: VERIFY_MAX_ENTRIES,
     total: VERIFY_MAX_TOTAL_BYTES,
     ratio_floor: VERIFY_RATIO_FLOOR,
     deadline: VERIFY_DEADLINE,
 };
 
-fn verify_archive(
+pub(crate) fn verify_archive(
     path: &Path,
     file: &str,
     at: String,
@@ -959,13 +1096,15 @@ pub async fn backup_verify_last() -> Result<Option<VerifyReport>, String> {
 }
 
 #[derive(Serialize, Clone)]
-struct ProgressEvent<'a> {
-    phase: &'a str,
-    pct: u8,
+pub(crate) struct ProgressEvent<'a> {
+    pub(crate) phase: &'a str,
+    pub(crate) pct: u8,
 }
 
-#[tauri::command]
-pub async fn backup_now(app: tauri::AppHandle) -> Result<BackupRunResult, String> {
+/// One backup with progress events, then the outcome is written to the settings. Shared by
+/// `backup_now` and the nightly scheduler; the single-flight flag is `BUSY`, so they never overlap.
+/// A refused second run (`already_running`) records nothing: the run that holds the flag will.
+pub(crate) async fn run_and_record(app: &tauri::AppHandle) -> Result<BackupRunResult, String> {
     let (home, data) = (home_dir()?, crate::app_paths::data_dir());
     let d2 = data.clone();
     let settings = tokio::task::spawn_blocking(move || load_settings(&d2))
@@ -974,7 +1113,22 @@ pub async fn backup_now(app: tauri::AppHandle) -> Result<BackupRunResult, String
     let emit = |phase: &str, pct: u8| {
         let _ = app.emit(PROGRESS_EVENT, ProgressEvent { phase, pct });
     };
-    run_backup(&home, &data, &settings, &free_bytes, &emit, &BUSY).await
+    let out = run_backup(&home, &data, &settings, &free_bytes, &emit, &BUSY).await;
+    let code = match &out {
+        Ok(_) => "ok".to_string(),
+        Err(e) => e.clone(),
+    };
+    if code != "already_running" {
+        let ok = out.is_ok();
+        let at = Local::now().to_rfc3339();
+        let _ = tokio::task::spawn_blocking(move || record_run(&data, &at, &code, ok)).await;
+    }
+    out
+}
+
+#[tauri::command]
+pub async fn backup_now(app: tauri::AppHandle) -> Result<BackupRunResult, String> {
+    run_and_record(&app).await
 }
 
 #[cfg(test)]
@@ -1035,7 +1189,7 @@ mod tests {
         let s = load_settings(&data).unwrap();
         assert_eq!(
             serde_json::to_value(&s).unwrap(),
-            serde_json::json!({"nightly":true,"at":"03:00","dir":"~/Amara Backups","keep":14,"beforeUpdate":true,"skipOnBatteryBelow":20})
+            serde_json::json!({"nightly":true,"at":"03:00","dir":"~/Amara Backups","keep":14,"beforeUpdate":true,"skipOnBatteryBelow":20,"autoPrune":false,"lastRunAt":null,"lastRunResult":null,"lastOkAt":null,"gitBundle":false,"lastBundleResult":null,"failedAttempts":0,"failedSlot":null})
         );
         assert!(!settings_path(&data).exists(), "a read writes nothing");
         let _ = home;
@@ -1177,6 +1331,219 @@ mod tests {
         );
     }
 
+    // ---- Muse folders are byte-for-byte; narrowed redaction ----
+
+    #[test]
+    fn muse_folder_json_is_packed_byte_identical_and_hashes_match() {
+        let (home, data) = fake_home("muse-bytes");
+        // Secret-looking FIELDS, odd spacing and a float that a parse/re-print would change.
+        let odd: &[u8] =
+            b"{ \"auth\" : \"MUSE-FIELD\",  \"key\":\"k\", \"x\": 13.935167180141983 }\n";
+        for (d, f) in [
+            ("sessions", "muse_1.json"),
+            ("replays", "eeg_1.ndjson.bands.json"),
+            ("muse", "m.json"),
+        ] {
+            fs::create_dir_all(data.join(d)).unwrap();
+            fs::write(data.join(d).join(f), odd).unwrap();
+        }
+        // A file whose NAME looks secret still stays out, even in a Muse folder.
+        fs::write(data.join("sessions/my_token.json"), b"{}").unwrap();
+        // Outside the Muse folders the field is still redacted.
+        fs::create_dir_all(data.join("kv")).unwrap();
+        fs::write(data.join("kv/other.json"), odd).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let busy = AtomicBool::new(false);
+        let r = rt
+            .block_on(run_backup(
+                &home,
+                &data,
+                &BackupSettings::default(),
+                PLENTY,
+                &(|_: &str, _: u8| {}),
+                &busy,
+            ))
+            .unwrap();
+        let arch = home.join("Amara Backups").join(&r.entry.id);
+        let f = fs::File::open(&arch).unwrap();
+        let mut a = tar::Archive::new(flate2::read::GzDecoder::new(f));
+        let mut got: std::collections::HashMap<String, Vec<u8>> = Default::default();
+        for e in a.entries().unwrap() {
+            use std::io::Read;
+            let mut e = e.unwrap();
+            let n = e.path().unwrap().to_string_lossy().into_owned();
+            let mut buf = Vec::new();
+            e.read_to_end(&mut buf).unwrap();
+            got.insert(n, buf);
+        }
+        let find = |suffix: &str| {
+            got.iter()
+                .find(|(k, _)| k.ends_with(suffix))
+                .map(|(_, v)| v.clone())
+        };
+        let exact = |rel: &str| {
+            got.iter()
+                .find(|(k, _)| k.split_once('/').is_some_and(|(_, r)| r == rel))
+                .map(|(_, v)| v.clone())
+        };
+        let manifest: Value = serde_json::from_slice(&exact("manifest.json").unwrap()).unwrap();
+        for (d, f) in [
+            ("sessions", "muse_1.json"),
+            ("replays", "eeg_1.ndjson.bands.json"),
+            ("muse", "m.json"),
+        ] {
+            let want = fs::read(data.join(d).join(f)).unwrap();
+            let mut keys = vec![format!("nexus-config/{d}/{f}")];
+            if d == "sessions" {
+                keys.push(format!("{d}/{f}")); // the packager's second copy of sessions
+            }
+            for key in keys {
+                assert_eq!(
+                    exact(&key).unwrap_or_default(),
+                    want,
+                    "{key} not byte-identical"
+                );
+                assert_eq!(
+                    manifest["sha256"][&key].as_str().unwrap(),
+                    sha_hex(&want),
+                    "{key}"
+                );
+            }
+        }
+        assert!(find("sessions/my_token.json").is_none());
+        let other = String::from_utf8(find("kv/other.json").unwrap()).unwrap();
+        assert!(!other.contains("MUSE-FIELD") && other.contains("\"x\""));
+    }
+
+    #[test]
+    fn the_open_recording_and_its_sidecar_are_left_out_and_listed() {
+        let (home, data) = fake_home("active-rec");
+        fs::create_dir_all(data.join("replays")).unwrap();
+        for f in [
+            "eeg_live.ndjson",
+            "eeg_live.ndjson.bands.json",
+            "eeg_done.ndjson",
+            "eeg_done.ndjson.bands.json",
+        ] {
+            fs::write(data.join("replays").join(f), b"x").unwrap();
+        }
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let out = home.join("out");
+        fs::create_dir_all(&out).unwrap();
+        let info = rt
+            .block_on(pack_to(
+                &data,
+                &out,
+                "t.tar.gz",
+                &PackOpts {
+                    exclude_secrets: true,
+                    progress: None,
+                    active_recording: Some("eeg_live.ndjson".into()),
+                },
+            ))
+            .unwrap();
+        let names = entries(&out.join("t.tar.gz"));
+        assert!(!names.iter().any(|n| n.contains("eeg_live")), "{names:?}");
+        assert!(names.iter().any(|n| n.ends_with("replays/eeg_done.ndjson")));
+        assert!(names
+            .iter()
+            .any(|n| n.ends_with("replays/eeg_done.ndjson.bands.json")));
+        let skipped = info.skipped.join("|");
+        assert!(
+            skipped.contains("eeg_live.ndjson ") && skipped.contains("eeg_live.ndjson.bands.json")
+        );
+        // the originals are untouched
+        assert_eq!(
+            fs::read(data.join("replays/eeg_live.ndjson")).unwrap(),
+            b"x"
+        );
+    }
+
+    #[test]
+    fn redaction_keeps_token_counts_and_identifier_keys_but_not_real_secrets() {
+        let input = br#"{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19,
+          "take":{"cited":[{"key":"hrv","label":"HRV"}]},
+          "worker_api_keys":[{"name":"w","key":"SENTINEL-ARM"}],
+          "key":"SENTINEL-TOP","access_tokens":"SENTINEL-STR","telegram_bot_token":"SENTINEL-TG",
+          "creds":{"key":"hrv2","password":"SENTINEL-PW"}}"#;
+        let (out, removed) = redact_json_bytes(input).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("\"prompt_tokens\":12")
+                && text.contains("\"completion_tokens\":7")
+                && text.contains("\"total_tokens\":19")
+        );
+        assert!(text.contains("\"key\":\"hrv\""));
+        assert!(!text.contains("SENTINEL"), "{text}");
+        assert!(
+            removed.contains(&"telegram_bot_token".to_string())
+                && removed.contains(&"password".to_string())
+        );
+        // a string under a *_tokens name is still a secret
+        assert!(removed.contains(&"access_tokens".to_string()));
+    }
+
+    #[test]
+    fn bare_key_survives_only_as_an_identifier_and_camel_keys_are_secrets() {
+        let s = "SENTINEL-S";
+        let cases = [
+            format!(r#"{{"anthropic":{{"key":"{s}"}}}}"#),
+            format!(r#"[{{"id":"a","key":"{s}"}}]"#),
+            format!(r#"{{"headers":{{"key":"{s}"}}}}"#),
+            r#"{"headers":{"key":"abc"}}"#.to_string(),
+            r#"{"x":{"key":"sk-abcdef"}}"#.to_string(),
+            r#"{"x":{"key":"eyJhbGciOi"}}"#.to_string(),
+            r#"{"x":{"key":"ghp_abc"}}"#.to_string(),
+            r#"{"x":{"key":"xoxb-1"}}"#.to_string(),
+            format!(r#"{{"x":{{"key":"{}"}}}}"#, "a".repeat(41)),
+            r#"{"x":{"key":12345}}"#.to_string(),
+            r#"{"x":{"key":"Hrv"}}"#.to_string(),
+        ];
+        for c in &cases {
+            let (out, removed) = redact_json_bytes(c.as_bytes()).unwrap();
+            assert!(
+                removed.contains(&"key".to_string()),
+                "{c} -> {}",
+                String::from_utf8_lossy(&out)
+            );
+        }
+        // an identifier under a plain parent survives (amara_take_*.json)
+        let ok = br#"{"take":{"cited":[{"key":"hrv","label":"HRV"},{"key":"sleep_total.v2-b"}]}}"#;
+        let (out, removed) = redact_json_bytes(ok).unwrap();
+        assert!(removed.is_empty(), "{removed:?}");
+        assert_eq!(out, ok.to_vec());
+        // camelCase secrets, at any depth
+        for k in [
+            "privateKey",
+            "accessKey",
+            "secretKey",
+            "signingKey",
+            "sessionKey",
+            "encryptionKey",
+            "clientKey",
+            "apiKey",
+        ] {
+            let c = format!(r#"{{"a":{{"{k}":"SENTINEL-CAMEL","fine":1}}}}"#);
+            let (out, removed) = redact_json_bytes(c.as_bytes()).unwrap();
+            let text = String::from_utf8(out).unwrap();
+            assert!(
+                !text.contains("SENTINEL") && text.contains("\"fine\""),
+                "{k}"
+            );
+            assert_eq!(removed, vec![k.to_string()]);
+        }
+        // ordinary camelCase fields stay
+        let (_, removed) =
+            redact_json_bytes(br#"{"keyboard":1,"monkey":2,"keyCount":3,"turkey":4}"#).unwrap();
+        assert!(removed.is_empty(), "{removed:?}");
+    }
+
     // ---- backup_now ----
 
     fn seed_secrets(data: &Path) {
@@ -1197,8 +1564,9 @@ mod tests {
             r#"{"poll_interval_secs":5,"worker_api_keys":[{"name":"w1","key":"SENTINEL-ARM"}]}"#,
         )
         .unwrap();
+        fs::create_dir_all(data.join("kv")).unwrap();
         fs::write(
-            data.join("sessions/s1.json"),
+            data.join("kv/s1.json"),
             r#"{"auth":"SENTINEL-AUTH","eeg":[1,2]}"#,
         )
         .unwrap();

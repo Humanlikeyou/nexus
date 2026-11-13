@@ -53,8 +53,11 @@ export interface MoneyAdapter {
   followUps(): Wired<MoneyFollowUp[]>;
   routes(): ConnectRoute[];
   /** Adds a watch-only address or xpub. Only ever called with a value guardWatchInput() accepted as public. */
-  addWatchOnly(chain: "btc" | "eth", publicValue: string, nickname: string): Promise<Action>;
+  addWatchOnly(chain: "btc" | "eth", publicValue: string, nickname: string, balance?: number | null): Promise<Action>;
+  /** Opens the native file dialog (the renderer never passes a path) and imports the statement. Live text comes from connectNote(). */
   importStatement(): Promise<Action>;
+  /** The fixed sentence for the last connect action's result (counts or a fixed error text); null before any. */
+  connectNote(): string | null;
   answer(id: string, state: AnswerState, reason?: SkipReason | null): Promise<Action>;
   undo(id: string): Promise<Action>;
   reconnect(id: string): Promise<Action>;
@@ -78,6 +81,7 @@ const ROUTES_UNWIRED: ConnectRoute[] = [
 export const unwiredMoney: MoneyAdapter = {
   accounts: () => UNWIRED, fx: () => UNWIRED, overview: () => UNWIRED, take: () => UNWIRED, followUps: () => UNWIRED,
   routes: () => ROUTES_UNWIRED,
+  connectNote: () => null,
   addWatchOnly: async () => UNWIRED, importStatement: async () => UNWIRED, answer: async () => UNWIRED, undo: async () => UNWIRED, reconnect: async () => UNWIRED, disconnect: async () => UNWIRED,
 };
 
@@ -161,6 +165,7 @@ export function sampleMoney(opts: MoneyPreview = {}): MoneyAdapter {
   const scenario = opts.scenario ?? "connected";
   const ok = async (): Promise<Action> => sample({ ok: true });
   return {
+    connectNote: () => null,
     accounts: () => (scenario === "none" ? sample([]) : sample(scenario === "states" ? ACCOUNTS_STATES : ACCOUNTS)),
     fx: () => sample(SAMPLE_FX),
     overview: () => (scenario === "connected" ? sample(OVERVIEW) : UNWIRED),

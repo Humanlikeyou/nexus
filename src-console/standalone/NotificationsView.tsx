@@ -24,6 +24,7 @@ export function NotificationsView({ adapter }: { adapter: StandaloneAdapter }) {
   const on = !!relay?.enabled && ready;
   const set = async (p: Parameters<StandaloneAdapter["setRelay"]>[0]) => { const r = await adapter.setRelay(p); if (r.state === "unwired") setNote("Saving needs wiring."); bump((n) => n + 1); };
   const kind = (k: AlertKind) => relay?.kinds[k] ?? false;
+  const notYet = (k: AlertKind) => !!relay?.notConnected?.includes(k);
   return (
     <div className="pk-host sa-page">
       <PageHero title="Notifications" statement={!relay ? "Telegram relay" : on ? "Telegram relay is on" : "Telegram relay is off"}
@@ -36,12 +37,12 @@ export function NotificationsView({ adapter }: { adapter: StandaloneAdapter }) {
             <ListRow title="Bot token" subtitle="From @BotFather · kept in the Keychain"
               accessory={<span className="settings__row-actions">{keys ? <KeyState set={token} /> : <DataTag kind="wire" />}<Button size="small" variant={token ? "secondary" : "primary"} onClick={() => setSheet("telegram_bot_token")}>{token ? "Change…" : "Add…"}</Button></span>} />
             <ListRow title="Your chat" subtitle="Only this chat receives messages"
-              accessory={<span className="settings__row-actions">{keys ? <KeyState set={chat} /> : <DataTag kind="wire" />}{chat ? <Button size="small" variant="secondary" disabled={!on} onClick={() => setNote("Send Test asks first, and needs wiring.")}>Send Test…</Button> : <Button size="small" variant="secondary" onClick={() => setSheet("telegram_chat_id")}>Add…</Button>}</span>} />
+              accessory={<span className="settings__row-actions">{keys ? <KeyState set={chat} /> : <DataTag kind="wire" />}{chat ? <Button size="small" variant="secondary" disabled={!on} onClick={() => { void (async () => { const r = await adapter.relaySendTest(); setNote(r.state === "unwired" ? "Nothing was sent. Test messages are off while outbound is disabled, or it was declined." : "Test message sent."); bump((n) => n + 1); })(); }}>Send Test…</Button> : <Button size="small" variant="secondary" onClick={() => setSheet("telegram_chat_id")}>Add…</Button>}</span>} />
           </InsetGroup>
           <SaCard title="What gets sent" w={rw}>
             {relay ? (
               <div className="pk-chips" role="group" aria-label="Alerts to send">
-                {ALERT_KINDS.map((k) => <button key={k.id} type="button" className="pk-chip sa-chip" data-on={kind(k.id) || undefined} aria-pressed={kind(k.id)} onClick={() => { void set({ kinds: { [k.id]: !kind(k.id) } as Record<AlertKind, boolean> }); }}>{k.label}</button>)}
+                {ALERT_KINDS.map((k) => <button key={k.id} type="button" className="pk-chip sa-chip" data-on={kind(k.id) || undefined} aria-pressed={kind(k.id)} disabled={notYet(k.id)} onClick={() => { void set({ kinds: { [k.id]: !kind(k.id) } as Record<AlertKind, boolean> }); }}>{k.label}{notYet(k.id) ? " (not connected yet)" : ""}</button>)}
               </div>
             ) : <WireNote>Needs wiring: pick sleep, recovery, effort, strap battery, sync problems, Lucid cues and illness signs once the relay is built (HANDOFF-1111s §5).</WireNote>}
             {relay && <p className="pk-note">Each alert goes out as it happens. Lucid cues are off to start.</p>}

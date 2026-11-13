@@ -724,7 +724,7 @@ fn header_cols(row: &[String]) -> Option<Cols> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct ParsedTx {
+pub(crate) struct ParsedTx {
     date: String,
     amount: i64,
     balance: Option<i64>,
@@ -930,6 +930,8 @@ fn parse_tx_records(text: &str) -> Result<Vec<TxRecord>, String> {
         .collect()
 }
 
+/// Kept for the tests (path in, rows out); no command passes a renderer path any more.
+#[cfg(test)]
 pub(crate) fn import_statement_in(
     data: &Path,
     account_id: &str,
@@ -942,6 +944,17 @@ pub(crate) fn import_statement_in(
     let bytes = read_import_file(path)?;
     // Everything is parsed before anything is written, so a refused file leaves nothing behind.
     let (txs, skipped_rows) = parse_statement(&bytes)?;
+    import_parsed_in(data, &account, txs, skipped_rows)
+}
+
+/// Writes already-parsed rows into an account's transaction file (dedupes against what is there).
+/// The caller read and parsed the file once; nothing here touches a path.
+pub(crate) fn import_parsed_in(
+    data: &Path,
+    account: &MoneyAccount,
+    txs: Vec<ParsedTx>,
+    skipped_rows: usize,
+) -> Result<ImportSummary, String> {
     let _g = lock();
     let file = money_dir(data)
         .join("tx")
@@ -987,6 +1000,88 @@ pub(crate) fn import_statement_in(
         duplicates,
         skipped_rows,
     })
+}
+
+/// What the Connect sheet's "Import a statement" returns: counts only, never a path or a row.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ImportPicked {
+    pub imported: usize,
+    pub skipped: usize,
+}
+
+/// Fixed error codes for the file-picker import. Nothing from a path or an error text gets through.
+fn import_pick_code(e: &str) -> String {
+    match e {
+        "cancelled"
+        | "bad_file"
+        | "too_large"
+        | "unrecognised_format"
+        | "store_error"
+        | "store_full"
+        | "invalid_input" => e.to_string(),
+        _ => "failed".to_string(),
+    }
+}
+
+/// The import behind the native file picker. `path` is what the user picked (None: they cancelled).
+/// The statement is read and parsed first, so a refused file creates nothing. Parsing finds the
+/// bank's layout from the header row, so the one yen statement account (made on first use, nickname
+/// "Japanese bank") serves both banks. Never asks the renderer for a path.
+pub(crate) fn import_pick_in(data: &Path, path: Option<&Path>) -> Result<ImportPicked, String> {
+    let run = || -> Result<ImportPicked, String> {
+        let path = path.ok_or_else(|| "cancelled".to_string())?;
+        // One read, one parse: the rows imported below are the rows parsed here.
+        let (txs, skipped_rows) = parse_statement(&read_import_file(path)?)?;
+        let existing = load_accounts(data)?
+            .into_iter()
+            .find(|a| a.route == "csv" && matches!(a.institution.as_str(), "smbc" | "japan_post"));
+        let (account, created) = match existing {
+            Some(a) => (a, false),
+            None => (
+                account_add_in(
+                    data,
+                    &MoneyAccountDraft {
+                        nickname: "Japanese bank".into(),
+                        institution: "smbc".into(),
+                        kind: "checking".into(),
+                        route: "csv".into(),
+                        currency: "JPY".into(),
+                        scope: "personal".into(),
+                    },
+                )?,
+                true,
+            ),
+        };
+        match import_parsed_in(data, &account, txs, skipped_rows) {
+            Ok(s) => Ok(ImportPicked {
+                imported: s.added,
+                skipped: s.skipped_rows + s.duplicates,
+            }),
+            Err(e) => {
+                // An account this call made, with nothing imported into it, is taken back out.
+                if created {
+                    rollback_new_account(data, &account.id);
+                }
+                Err(e)
+            }
+        }
+    };
+    run().map_err(|e| import_pick_code(&e))
+}
+
+/// Removes an account this import just created (never one that existed before) and any tx file it
+/// started. Best effort: the failure being reported is the import's, not this one's.
+fn rollback_new_account(data: &Path, id: &str) {
+    let _g = lock();
+    if let Ok(mut all) = load_accounts(data) {
+        all.retain(|a| a.id != id);
+        let _ = write_json_atomic(
+            &money_dir(data).join("accounts.json"),
+            &all,
+            MAX_STORE_BYTES,
+        );
+    }
+    let _ = fs::remove_file(money_dir(data).join("tx").join(format!("{id}.jsonl")));
 }
 
 // ───────────────────────────── FX reference rate ─────────────────────────────
@@ -1341,14 +1436,6 @@ pub async fn money_balance_set_manual(
     as_of: String,
 ) -> Result<(), String> {
     blocking(move || balance_set_manual_in(&data_dir(), &account_id, native_amount, &as_of)).await
-}
-
-#[tauri::command]
-pub async fn money_import_statement(
-    account_id: String,
-    path: String,
-) -> Result<ImportSummary, String> {
-    blocking(move || import_statement_in(&data_dir(), &account_id, Path::new(&path))).await
 }
 
 #[tauri::command]
@@ -2495,6 +2582,126 @@ mod tests {
         let _ = fs::remove_dir_all(d);
     }
 
+    // ── native-picker import (money_import_pick) ──
+
+    #[test]
+    fn pick_import_creates_one_account_imports_and_reports_only_counts() {
+        let d = temp_dir("money-pick");
+        let f = write_file(
+            &d,
+            "s.csv",
+            format!(
+                "{SPLIT_HEADER}2026/11/02,1000,,coffee,9000\n2026/11/03,,5000,pay,14000\nbad,row\n"
+            )
+            .as_bytes(),
+        );
+        let r = import_pick_in(&d, Some(&f)).unwrap();
+        assert_eq!((r.imported, r.skipped), (2, 1));
+        assert_eq!(load_accounts(&d).unwrap().len(), 1);
+        // Same file again: all duplicates, still one account, nothing new imported.
+        let r2 = import_pick_in(&d, Some(&f)).unwrap();
+        assert_eq!((r2.imported, r2.skipped), (0, 3));
+        assert_eq!(load_accounts(&d).unwrap().len(), 1);
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn pick_import_errors_are_fixed_codes_and_a_refused_file_creates_nothing() {
+        let d = temp_dir("money-pick-err");
+        assert_eq!(import_pick_in(&d, None).unwrap_err(), "cancelled");
+        let junk = write_file(&d, "j.csv", b"hello,world\n1,2\n");
+        assert_eq!(
+            import_pick_in(&d, Some(&junk)).unwrap_err(),
+            "unrecognised_format"
+        );
+        assert_eq!(
+            import_pick_in(&d, Some(&d.join("nope.csv"))).unwrap_err(),
+            "bad_file"
+        );
+        assert_eq!(
+            import_pick_in(&d, Some(Path::new("rel.csv"))).unwrap_err(),
+            "invalid_input"
+        );
+        assert!(load_accounts(&d).unwrap().is_empty());
+        assert_eq!(import_pick_code("anything with /Users/x path"), "failed");
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn pick_import_reuses_an_existing_yucho_account() {
+        let d = temp_dir("money-pick-reuse");
+        let mut dr = draft("Yucho");
+        dr.institution = "japan_post".into();
+        let a = account_add_in(&d, &dr).unwrap();
+        let f = write_file(
+            &d,
+            "s.csv",
+            format!("{SPLIT_HEADER}2026/11/02,1,,x,2\n").as_bytes(),
+        );
+        assert_eq!(import_pick_in(&d, Some(&f)).unwrap().imported, 1);
+        assert_eq!(load_accounts(&d).unwrap().len(), 1);
+        assert!(tx_file(&d, &a.id).exists());
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn pick_command_takes_no_path_from_the_renderer() {
+        let src = include_str!("money_import_pick.rs");
+        let sig = src
+            .split("pub async fn money_import_pick(")
+            .nth(1)
+            .unwrap()
+            .split(')')
+            .next()
+            .unwrap();
+        assert_eq!(sig.trim(), "app: tauri::AppHandle");
+        assert!(src.contains("blocking_pick_file"));
+    }
+
+    #[test]
+    fn the_renderer_path_import_is_not_a_command_any_more() {
+        let src = production_source();
+        assert!(!src.contains("pub async fn money_import_statement"));
+        assert!(src.contains("pub(crate) fn import_statement_in"));
+    }
+
+    #[test]
+    fn a_failed_import_takes_back_the_account_the_pick_created_but_never_an_old_one() {
+        // Fail the write by making the tx directory path a plain file.
+        let d = temp_dir("money-pick-rollback");
+        let f = write_file(
+            &d,
+            "s.csv",
+            format!("{SPLIT_HEADER}2026/11/02,1,,x,2\n").as_bytes(),
+        );
+        fs::create_dir_all(d.join("money")).unwrap();
+        fs::write(d.join("money/tx"), b"not a directory").unwrap();
+        assert_eq!(import_pick_in(&d, Some(&f)).unwrap_err(), "store_error");
+        assert!(
+            load_accounts(&d).unwrap().is_empty(),
+            "the new account is rolled back"
+        );
+        // An account that already existed stays when the import fails.
+        let a = csv_account(&d);
+        assert_eq!(import_pick_in(&d, Some(&f)).unwrap_err(), "store_error");
+        assert_eq!(load_accounts(&d).unwrap().len(), 1);
+        assert_eq!(load_accounts(&d).unwrap()[0].id, a.id);
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn import_parsed_in_writes_the_rows_it_is_given_without_reading_a_path() {
+        let d = temp_dir("money-parsed");
+        let a = csv_account(&d);
+        let (txs, skipped) =
+            parse_statement(format!("{SPLIT_HEADER}2026/11/02,1,,x,2\nbad\n").as_bytes()).unwrap();
+        let s = import_parsed_in(&d, &a, txs.clone(), skipped).unwrap();
+        assert_eq!((s.added, s.duplicates, s.skipped_rows), (1, 0, 1));
+        let s2 = import_parsed_in(&d, &a, txs, skipped).unwrap();
+        assert_eq!((s2.added, s2.duplicates), (0, 1));
+        let _ = fs::remove_dir_all(d);
+    }
+
     // ── source scans ──
 
     fn production_source() -> String {
@@ -2521,7 +2728,7 @@ mod tests {
                 names.push(name);
             }
         }
-        assert_eq!(names.len(), 9, "{names:?}");
+        assert_eq!(names.len(), 8, "{names:?}");
         for n in &names {
             for banned in [
                 "transfer",

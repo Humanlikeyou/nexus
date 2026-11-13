@@ -168,6 +168,8 @@ pub fn run() {
 
             // Start outbox delivery worker
             outbox::start_delivery_worker(app.handle().clone());
+            // Nightly backup scheduler (in-app only; nothing runs while the app is closed).
+            commands::backup_schedule::start(app.handle().clone());
 
             if let Some(window) = app.get_webview_window("main") {
                 dock_icon::sync(&window);
@@ -290,7 +292,7 @@ pub fn run() {
             commands::money::money_account_add,
             commands::money::money_watch_add,
             commands::money::money_balance_set_manual,
-            commands::money::money_import_statement,
+            commands::money_import_pick::money_import_pick,
             commands::money::fx_rate_get,
             commands::money::fx_rate_set_manual,
             commands::money::fx_rate_refresh,
@@ -303,6 +305,8 @@ pub fn run() {
             commands::backups::backup_now,
             commands::backups::backup_list,
             commands::backups::backup_verify_last,
+            commands::backup_schedule::backup_prune_plan,
+            commands::backup_schedule::restore_preview,
             // Hemi-Sync (decision 0010)
             commands::hemisync::hemisync_import,
             commands::hemisync::hemisync_library,
@@ -314,6 +318,11 @@ pub fn run() {
             // Keychain secrets + n8n key file (write-only; never return a value)
             commands::keychain::secrets_status,
             commands::keychain::secret_set,
+            commands::notify_relay::notify_settings_get,
+            commands::notify_relay::notify_settings_set,
+            commands::notify_relay::notify_preview,
+            commands::notify_relay::notify_send_test,
+            commands::notify_relay::notify_dispatch_due,
             commands::key_file::key_file_status,
             commands::key_file::key_file_make,
             commands::key_file::key_file_unlock,

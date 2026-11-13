@@ -42,3 +42,7 @@ Earlier sessions called this a flake because it sometimes passed. Today's probe 
 ## 2026-11-13: Life › Dates "Edit" needs an edit form (wiring blocked on Design)
 
 `life/DatesView.tsx:108` renders Edit as an `OffButton` ("Needs wiring · life_date_upsert"). The backend `life_date_upsert(draft)` is ready (no delete). Wiring needs an edit sheet or inline form (title, lane, date, reminder), which is new markup. Design's call. Once a form exists, its submit maps 1:1 to `life_date_upsert`.
+
+## 2026-11-13: Ledger watch-only "balance now" field (wiring ready, field is Design's)
+
+`addWatchOnly(chain, value, nickname, balance)` saves an optional typed balance via `money_balance_set_manual`. Lane N3 added an input for it to `ConnectSheet.tsx`; the parent removed it because new markup is Design's. If wanted, a field like "Balance now, in BTC/ETH (optional, you type it)" under Nickname passes a number (or null) as the 4th argument.

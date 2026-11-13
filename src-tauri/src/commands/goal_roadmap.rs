@@ -614,7 +614,7 @@ pub fn crew_rows_busy(statuses: &[&str]) -> bool {
 }
 
 /// A Hermes chat turn or a crew run is active. A crew service that is down counts as not busy.
-async fn system_busy() -> bool {
+pub(crate) async fn system_busy() -> bool {
     if crate::commands::terrence_runtime_bridge::chat_in_flight() {
         return true;
     }

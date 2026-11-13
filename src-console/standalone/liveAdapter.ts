@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { BackupRun, BackupSettings, BackupStatus, KeyFileStatus, SecretName, SecretStatus, StandaloneAdapter } from "./adapters";
+import type { AlertKind, BackupRun, BackupSettings, BackupStatus, KeyFileStatus, RelayPreview, RelaySettings, SecretName, SecretStatus, StandaloneAdapter } from "./adapters";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 import { servicesFromMap } from "./servicesFromMap";
 import { summaryFromServices } from "./servicesSummary";
@@ -25,8 +25,10 @@ type Cache = {
   verify: VerifyRow | null;
   run: BackupRun | null;
   map: SystemMap | null;
+  relay: RelaySettings | null;
+  preview: RelayPreview | null;
 };
-const cache: Cache = { secrets: null, keyFile: null, backupSettings: null, backupList: null, verify: null, run: null, map: null };
+const cache: Cache = { secrets: null, keyFile: null, backupSettings: null, backupList: null, verify: null, run: null, map: null, relay: null, preview: null };
 let version = 0;
 const listeners = new Set<() => void>();
 const notify = () => { version += 1; listeners.forEach((l) => l()); };
@@ -94,19 +96,44 @@ export function verifyLast(call: typeof invoke = invoke): Promise<void> {
 }
 export const resetVerifyForTests = () => { verifyInflight = null; verifiedKey = null; cache.verify = null; };
 
+const ALERT_IDS: AlertKind[] = ["sleep", "recovery", "effort", "battery", "sync", "lucid", "illness"];
+/** `notify_settings_get` / `_set` row: all seven kinds as booleans, or null (never trust the shape). */
+export function toRelay(v: unknown): RelaySettings | null {
+  const o = v as Record<string, unknown> | null;
+  const kinds = o?.kinds as Record<string, unknown> | undefined;
+  if (!o || typeof o.enabled !== "boolean" || !kinds || !ALERT_IDS.every((k) => typeof kinds[k] === "boolean")) return null;
+  const nc = Array.isArray(o.notConnected) ? (o.notConnected.filter((k) => ALERT_IDS.includes(k as AlertKind)) as AlertKind[]) : [];
+  return { enabled: o.enabled, kinds: Object.fromEntries(ALERT_IDS.map((k) => [k, kinds[k] as boolean])) as Record<AlertKind, boolean>, lastSent: typeof o.lastSent === "string" ? o.lastSent : null, notConnected: nc };
+}
+/** `notify_preview` row. The text is shown as written; the backend already checked its numbers. */
+export function toPreview(v: unknown): RelayPreview | null {
+  const o = v as Record<string, unknown> | null;
+  return o && typeof o.text === "string" && typeof o.at === "string" && typeof o.from === "string" ? { text: o.text, at: o.at, from: o.from } : null;
+}
+/** The preview asks the local model, so it runs once on first use, never from refreshLive. */
+let previewAsked = false;
+function askPreview() {
+  if (previewAsked) return;
+  previewAsked = true;
+  void invoke("notify_preview", { kind: "recovery" }).then((p) => { cache.preview = toPreview(p); }, () => { cache.preview = null; }).finally(notify);
+}
+export const resetRelayForTests = () => { previewAsked = false; cache.preview = null; cache.relay = null; };
+
 export async function refreshLive(): Promise<void> {
-  const [s, k, bs, bl, sm] = await Promise.allSettled([
+  const [s, k, bs, bl, sm, rl] = await Promise.allSettled([
     invoke<SecretStatus[]>("secrets_status"),
     invoke<KeyFileStatus>("key_file_status"),
     invoke<BackupSettings>("backup_settings_get"),
     invoke<BackupRow[]>("backup_list"),
     invoke<SystemMap>("system_map_status"),
+    invoke<unknown>("notify_settings_get"),
   ]);
   cache.secrets = s.status === "fulfilled" ? s.value : null;
   cache.keyFile = k.status === "fulfilled" ? k.value : null;
   cache.backupSettings = bs.status === "fulfilled" && isSettings(bs.value) ? bs.value : null;
   cache.backupList = bl.status === "fulfilled" && Array.isArray(bl.value) && bl.value.every(isRow) ? bl.value : null;
   cache.map = sm.status === "fulfilled" && sm.value && Array.isArray(sm.value.nodes) && Array.isArray(sm.value.paths) ? sm.value : null;
+  cache.relay = rl.status === "fulfilled" ? toRelay(rl.value) : null;
   notify();
 }
 
@@ -165,6 +192,19 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
       const { nightly, at, dir, keep, beforeUpdate, skipOnBatteryBelow } = patch;
       const clean = Object.fromEntries(Object.entries({ nightly, at, dir, keep, beforeUpdate, skipOnBatteryBelow }).filter(([, v]) => v !== undefined));
       try { await invoke("backup_settings_set", { patch: clean }); } catch (e) { console.warn("[standalone] backup_settings_set refused:", code(e)); return UNWIRED; }
+      await refreshLive();
+      return OK;
+    },
+    relay: () => live(cache.relay),
+    setRelay: async (p: Partial<RelaySettings>) => {
+      const patch = { enabled: p.enabled, kinds: p.kinds };
+      try { cache.relay = toRelay(await invoke("notify_settings_set", { patch })) ?? cache.relay; } catch (e) { console.warn("[standalone] notify_settings_set refused:", code(e)); await refreshLive(); return UNWIRED; }
+      notify();
+      return OK;
+    },
+    relayPreview: () => { askPreview(); return live(cache.preview); },
+    relaySendTest: async () => {
+      try { await invoke("notify_send_test"); } catch (e) { console.warn("[standalone] notify_send_test refused:", code(e)); return UNWIRED; }
       await refreshLive();
       return OK;
     },

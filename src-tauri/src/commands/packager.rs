@@ -36,6 +36,7 @@ pub(crate) async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo,
         &PackOpts {
             exclude_secrets: true,
             progress: None,
+            ..Default::default()
         },
     )
     .await
@@ -51,6 +52,8 @@ pub(crate) struct PackOpts<'a> {
     /// (see `backups::EXCLUDED_*`). Both pack_it_up and Back Up Now set it (2026-11-12).
     pub exclude_secrets: bool,
     pub progress: Option<Progress<'a>>,
+    /// Tests only: pretend this recording file is open. `None` asks the live recorder.
+    pub active_recording: Option<String>,
 }
 
 /// Pack the app data into `<out_dir>/<file_name>` (a `.tar.gz` whose top folder is
@@ -67,11 +70,22 @@ pub(crate) async fn pack_to(
             p(phase, pct);
         }
     };
-    let skip_secret: &dyn Fn(&str, usize) -> bool = if opts.exclude_secrets {
-        &|name, depth| super::backups::is_excluded_name(name, depth)
-    } else {
-        &|_, _| false
+    // An open Muse recording is still being written: its file and its `.bands.json` sidecar are left
+    // out (and listed as skipped) rather than copied half-written.
+    let active = match &opts.active_recording {
+        Some(n) => Some(n.clone()),
+        None => super::replay::active_recording_name().await,
     };
+    let active_names: Vec<String> = active
+        .into_iter()
+        .flat_map(|n| [format!("{n}.bands.json"), n])
+        .collect();
+    let exclude_secrets = opts.exclude_secrets;
+    let skip_secret = move |name: &str, depth: usize| {
+        active_names.iter().any(|a| a == name)
+            || (exclude_secrets && super::backups::is_excluded_name(name, depth))
+    };
+    let skip_secret: &dyn Fn(&str, usize) -> bool = &skip_secret;
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let archive_path = out_dir.join(file_name);
     report("Preparing", 3);
@@ -116,6 +130,8 @@ pub(crate) async fn pack_to(
     if sessions_dir.exists() {
         let dest = staging.join("sessions");
         report("Copying recordings", 40);
+        // Muse recordings are copied byte-for-byte: no redaction or rewrite pass (a secret-looking
+        // NAME still keeps a file out).
         copy_dir_filtered(
             &sessions_dir,
             &dest,
@@ -123,7 +139,7 @@ pub(crate) async fn pack_to(
             &mut skipped,
             1,
             skip_secret,
-            opts.exclude_secrets,
+            false,
         )?;
         includes.push("BLE session recordings".to_string());
     }
@@ -447,9 +463,22 @@ pub(crate) struct RestorePlan {
     pub(crate) skipped: Vec<String>,
 }
 
+/// Live approval state a restore never overwrites: a crafted backup must not be able to switch the
+/// Telegram relay on without its approval dialog (`notify_relay.json`) or reset its once-a-day
+/// ledger (`notify_relay_sent.json`).
+pub(crate) const RESTORE_NEVER: &[&str] = &["notify_relay.json", "notify_relay_sent.json"];
+
+fn is_live_only(rel: &[String]) -> bool {
+    rel.last()
+        .is_some_and(|n| RESTORE_NEVER.contains(&n.to_ascii_lowercase().as_str()))
+}
+
 /// Map an archive file (path relative to the pack root) to where it may be restored.
 pub(crate) fn restore_target(rel: &[String]) -> Option<(RestoreRoot, PathBuf)> {
     let join = |parts: &[String]| parts.iter().collect::<PathBuf>();
+    if is_live_only(rel) {
+        return None;
+    }
     match rel {
         [top, rest @ ..]
             if (top == "nexus-config" || top == "electron-config")
@@ -489,6 +518,13 @@ pub(crate) fn plan_restore(pack_root: &Path) -> Result<RestorePlan, String> {
                 stack.push((entry.path(), rel));
             } else if ft.is_file() {
                 if rel == ["manifest.json"] || is_os_junk(&name) {
+                    continue;
+                }
+                if is_live_only(&rel) {
+                    plan.skipped.push(format!(
+                        "{} (live approval state, never restored)",
+                        rel.join("/")
+                    ));
                     continue;
                 }
                 match restore_target(&rel) {
@@ -617,9 +653,35 @@ fn apply_restore(
 ) -> Result<Vec<String>, String> {
     let mut counts = std::collections::BTreeMap::new();
     let mut backed_up = 0usize;
+    let mut config_skipped: Vec<String> = Vec::new();
     for item in &plan.items {
         let root = roots.get(item.root);
         let dest = safe_dest(root, &item.rel)?;
+        // A JSON file restored over a live one keeps the live secret fields the backup left out
+        // (backups are written without secrets), so a restore never wipes this Mac's tokens.
+        let merged = (item.rel.extension().is_some_and(|e| e == "json") && dest.is_file())
+            .then(|| {
+                let (r, c) = (fs::read(&item.src).ok()?, fs::read(&dest).ok()?);
+                super::backups::merge_kept_secrets(&r, &c)
+            })
+            .flatten();
+        // `config.json` is ALWAYS rewritten, never raw-copied: `allow_claude` (Settings > Assistant
+        // > Allow Claude) is a consent that sends data off the Mac, so a backup never turns it on.
+        // Only a valid live file with an exact true/false keeps its value; otherwise it is dropped.
+        // A backup config that isn't a JSON object is skipped and listed.
+        let config_bytes = if item.rel == Path::new("config.json") {
+            match sanitised_config(merged.clone(), &item.src, &dest) {
+                Some(b) => Some(b),
+                None => {
+                    config_skipped.push(
+                        "config.json (not a valid settings file, left as it was)".to_string(),
+                    );
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         if dest.is_file() {
             let backup_rel = Path::new(RESTORE_BACKUP_DIR).join(stamp).join(&item.rel);
             let backup = safe_dest(root, &backup_rel)?;
@@ -631,15 +693,7 @@ fn apply_restore(
             dest.file_name().unwrap_or_default().to_string_lossy(),
             uuid::Uuid::new_v4().simple()
         ));
-        // A JSON file restored over a live one keeps the live secret fields the backup left out
-        // (backups are written without secrets), so a restore never wipes this Mac's tokens.
-        let merged = (item.rel.extension().is_some_and(|e| e == "json") && dest.is_file())
-            .then(|| {
-                let (r, c) = (fs::read(&item.src).ok()?, fs::read(&dest).ok()?);
-                super::backups::merge_kept_secrets(&r, &c)
-            })
-            .flatten();
-        match merged {
+        match config_bytes.or(merged) {
             Some(bytes) => crate::app_paths::write_private(&tmp, bytes)
                 .map_err(|e| format!("restore {}: {}", item.rel.display(), e))?,
             None => {
@@ -654,6 +708,7 @@ fn apply_restore(
         *counts.entry(item.root).or_insert(0usize) += 1;
     }
     let mut out = Vec::new();
+    out.extend(config_skipped.into_iter().map(|s| format!("Skipped: {s}")));
     if let Some(n) = counts.get(&RestoreRoot::Data) {
         out.push(format!("Amara OS data: {n} files restored"));
     }
@@ -663,6 +718,29 @@ fn apply_restore(
         ));
     }
     Ok(out)
+}
+
+/// The `config.json` bytes a restore writes: the backup's settings (already merged with the live
+/// secrets when `restored` is `Some`) with `allow_claude` taken only from a valid live file and only
+/// when it is exactly `true` or `false`; otherwise the field is removed. `None` when the backup's
+/// config isn't a JSON object.
+fn sanitised_config(restored: Option<Vec<u8>>, src: &Path, live: &Path) -> Option<Vec<u8>> {
+    use serde_json::Value;
+    let bytes = match restored {
+        Some(b) => b,
+        None => fs::read(src).ok()?,
+    };
+    let mut r: Value = serde_json::from_slice(&bytes).ok()?;
+    let live_consent = fs::read(live)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v.get("allow_claude").and_then(Value::as_bool));
+    let map = r.as_object_mut()?;
+    match live_consent {
+        Some(v) => map.insert("allow_claude".into(), Value::Bool(v)),
+        None => map.remove("allow_claude"),
+    };
+    serde_json::to_vec_pretty(&r).ok()
 }
 
 /// New directory readable only by the user (0700 on Unix); fails if it exists.
@@ -842,6 +920,11 @@ fn copy_dir_recursive(
     copy_dir_filtered(src, dst, max_file_bytes, skipped, 0, &|_, _| false, false)
 }
 
+/// The data-root folders that hold Muse recordings.
+fn is_muse_dir(name: &str) -> bool {
+    matches!(name, "replays" | "sessions" | "muse")
+}
+
 /// `copy_dir_recursive` with an exclusion hook: `exclude(name, depth)` true leaves the
 /// entry (file or folder) out and records its name (never its contents) in `skipped`.
 /// `redact_json`: every `*.json` file is parsed and written without its secret fields
@@ -878,6 +961,9 @@ fn copy_dir_filtered(
             continue;
         }
         if file_type.is_dir() {
+            // Muse recordings (`replays`, `sessions`, `muse` at the data root) are sacred: copied
+            // byte-for-byte, so the redaction pass is off for those subtrees.
+            let sub_redact = redact_json && !(depth == 0 && is_muse_dir(&name));
             copy_dir_filtered(
                 &src_path,
                 &dst_path,
@@ -885,7 +971,7 @@ fn copy_dir_filtered(
                 skipped,
                 depth + 1,
                 exclude,
-                redact_json,
+                sub_redact,
             )?;
             continue;
         }
@@ -1225,6 +1311,141 @@ mod restore_tests {
 
     fn s(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|p| p.to_string()).collect()
+    }
+
+    fn restore_config(src: Option<&str>, live: Option<&str>) -> (Option<String>, Vec<String>) {
+        let pack = tmp("cfg-pack");
+        let data = tmp("cfg-data");
+        if let Some(c) = src {
+            put(&pack, "nexus-config/config.json", c);
+        }
+        put(&pack, "goals.json", "[]");
+        if let Some(l) = live {
+            put(&data, "config.json", l);
+        }
+        let plan = plan_restore(&pack).unwrap();
+        let out = apply_restore(&plan, &RestoreRoots { data: data.clone() }, "st").unwrap();
+        let got = fs::read_to_string(data.join("config.json")).ok();
+        let _ = (fs::remove_dir_all(&pack), fs::remove_dir_all(&data));
+        (got, out)
+    }
+
+    #[test]
+    fn config_json_is_always_sanitised_never_raw_copied() {
+        let on = r#"{"allow_claude":true,"theme":"light"}"#;
+        let allow = |g: &Option<String>| {
+            serde_json::from_str::<serde_json::Value>(g.as_deref().unwrap()).unwrap()
+                ["allow_claude"]
+                .clone()
+        };
+        // no live file: the consent is dropped, the rest restored
+        let (g, _) = restore_config(Some(on), None);
+        assert!(allow(&g).is_null());
+        assert!(g.unwrap().contains("light"));
+        // corrupt live file
+        let (g, _) = restore_config(Some(on), Some("{not json"));
+        assert!(allow(&g).is_null());
+        // live file is valid but its value isn't exactly true/false
+        let (g, _) = restore_config(Some(on), Some(r#"{"allow_claude":"true"}"#));
+        assert!(allow(&g).is_null());
+        let (g, _) = restore_config(Some(on), Some(r#"{"allow_claude":1}"#));
+        assert!(allow(&g).is_null());
+        // live file is an array
+        let (g, _) = restore_config(Some(on), Some("[true]"));
+        assert!(allow(&g).is_null());
+        // valid live file: its exact value wins, both ways
+        let (g, _) = restore_config(Some(on), Some(r#"{"allow_claude":false}"#));
+        assert_eq!(allow(&g), serde_json::json!(false));
+        let (g, _) = restore_config(
+            Some(r#"{"allow_claude":false}"#),
+            Some(r#"{"allow_claude":true}"#),
+        );
+        assert_eq!(allow(&g), serde_json::json!(true));
+        // non-object backup config: skipped and listed, the live file untouched
+        for bad in ["[1]", "\"x\"", "42", "{broken", "null"] {
+            let (g, out) = restore_config(Some(bad), Some(r#"{"allow_claude":true}"#));
+            assert_eq!(g.as_deref(), Some(r#"{"allow_claude":true}"#), "{bad}");
+            assert!(
+                out.iter().any(|l| l.starts_with("Skipped: config.json")),
+                "{bad}: {out:?}"
+            );
+        }
+        // ...and with no live file nothing is created from a bad config
+        let (g, out) = restore_config(Some("[1]"), None);
+        assert!(g.is_none() && out.iter().any(|l| l.contains("config.json")));
+    }
+
+    #[test]
+    fn restore_never_writes_the_relay_files_or_turns_on_allow_claude() {
+        let pack = tmp("never-pack");
+        let data = tmp("never-data");
+        for n in ["notify_relay.json", "notify_relay_sent.json"] {
+            put(
+                &pack,
+                &format!("nexus-config/{n}"),
+                "{\"enabled\":true,\"CRAFTED\":1}",
+            );
+            put(&data, n, &format!("live-{n}"));
+        }
+        put(
+            &pack,
+            "nexus-config/NOTIFY_RELAY.json",
+            "{\"enabled\":true}",
+        );
+        put(&pack, "nexus-config/other.json", "{\"v\":2}");
+        put(
+            &pack,
+            "nexus-config/config.json",
+            "{\"allow_claude\":true,\"theme\":\"light\"}",
+        );
+        put(&pack, "goals.json", "[2]");
+        put(&data, "other.json", "{\"v\":1}");
+        put(&data, "config.json", "{\"theme\":\"dark\"}");
+        put(&data, "goals.json", "[1]");
+        let plan = plan_restore(&pack).unwrap();
+        let skipped = plan.skipped.join("|");
+        assert!(skipped.contains("notify_relay.json (live approval state"));
+        assert!(skipped.contains("notify_relay_sent.json (live approval state"));
+        assert!(plan.items.iter().all(|i| !i
+            .rel
+            .to_string_lossy()
+            .to_lowercase()
+            .contains("notify_relay")));
+        let roots = RestoreRoots { data: data.clone() };
+        apply_restore(&plan, &roots, "stamp").unwrap();
+        for n in ["notify_relay.json", "notify_relay_sent.json"] {
+            assert_eq!(
+                fs::read_to_string(data.join(n)).unwrap(),
+                format!("live-{n}")
+            );
+        }
+        // everything else came back
+        assert_eq!(
+            fs::read_to_string(data.join("goals.json"))
+                .unwrap()
+                .split_whitespace()
+                .collect::<String>(),
+            "[2]"
+        );
+        assert!(fs::read_to_string(data.join("other.json"))
+            .unwrap()
+            .contains("2"));
+        let cfg: serde_json::Value =
+            serde_json::from_slice(&fs::read(data.join("config.json")).unwrap()).unwrap();
+        assert_eq!(cfg["theme"], "light");
+        assert!(
+            cfg.get("allow_claude").is_none(),
+            "a backup never turns Allow Claude on"
+        );
+        // a live "on" stays on
+        put(&data, "config.json", "{\"allow_claude\":true}");
+        let plan = plan_restore(&pack).unwrap();
+        apply_restore(&plan, &roots, "stamp2").unwrap();
+        let cfg: serde_json::Value =
+            serde_json::from_slice(&fs::read(data.join("config.json")).unwrap()).unwrap();
+        assert_eq!(cfg["allow_claude"], true);
+        assert_eq!(cfg["theme"], "light");
+        let _ = (fs::remove_dir_all(&pack), fs::remove_dir_all(&data));
     }
 
     #[test]

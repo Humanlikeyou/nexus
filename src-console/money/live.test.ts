@@ -104,10 +104,10 @@ describe("live money overview", () => {
 
 describe("live money watch-only", () => {
   const XPUB = "xpub" + "6".repeat(107);
-  it("ledger route is ready, jp_bank stays unwired", () => {
+  it("ledger and jp_bank routes are ready; Chime and Fidelity stay unwired", () => {
     const m = makeLiveMoney((async () => []) as never, vi.fn());
     const by = Object.fromEntries(m.routes().map((r) => [r.id, r.ready.state]));
-    expect(by).toMatchObject({ ledger: "live", jp_bank: "unwired", chime: "unwired", fidelity: "unwired" });
+    expect(by).toMatchObject({ ledger: "live", jp_bank: "live", chime: "unwired", fidelity: "unwired" });
   });
   it("creates the account then adds the public value; never sends a refused value", async () => {
     const call = vi.fn(async (cmd: string) => (cmd === "money_account_add" ? { id: "a1" } : []));
@@ -119,6 +119,22 @@ describe("live money watch-only", () => {
     expect((await m.addWatchOnly("btc", phrase, "x")).state).toBe("unwired");
     expect((await m.addWatchOnly("eth", XPUB, "x")).state).toBe("unwired"); // chain mismatch
     expect(call.mock.calls.filter((c) => c[0] === "money_account_add" || c[0] === "money_watch_add")).toHaveLength(0);
+  });
+  it("a typed balance goes to money_balance_set_manual with today's date; a bad one is never sent", async () => {
+    const call = vi.fn(async (cmd: string) => (cmd === "money_account_add" ? { id: "a1" } : []));
+    const m = makeLiveMoney(call as never, vi.fn(), () => "2026-11-13");
+    expect((await m.addWatchOnly("btc", XPUB, "Ledger", 0.25)).state).toBe("live");
+    expect(call).toHaveBeenCalledWith("money_balance_set_manual", { accountId: "a1", nativeAmount: 0.25, asOf: "2026-11-13" });
+    expect(m.connectNote()).toBeNull();
+    call.mockClear();
+    await m.addWatchOnly("btc", XPUB, "Ledger", Number.NaN);
+    await m.addWatchOnly("btc", XPUB, "Ledger", -1);
+    expect(call.mock.calls.filter((c) => c[0] === "money_balance_set_manual")).toHaveLength(0);
+    expect(m.connectNote()).toMatch(/wasn't saved/);
+    const failing = vi.fn(async (cmd: string) => { if (cmd === "money_balance_set_manual") throw "invalid_input"; return cmd === "money_account_add" ? { id: "a2" } : []; });
+    const f = makeLiveMoney(failing as never, vi.fn());
+    expect((await f.addWatchOnly("btc", XPUB, "x", 1)).state).toBe("live");
+    expect(f.connectNote()).toMatch(/balance wasn't saved/);
   });
   it("a backend refusal is unwired", async () => {
     const call = vi.fn(async (cmd: string) => { if (cmd === "money_account_add") throw "invalid_input"; return []; });
@@ -140,5 +156,27 @@ describe("live money account rows", () => {
     m.accounts(); await flush();
     const a = m.accounts();
     expect(a.state === "live" && a.value.map((x) => [x.native, x.usd])).toEqual([["300,000 JPY", 2000], ["0.5 BTC", null]]);
+  });
+});
+
+describe("live money statement import (native picker)", () => {
+  it("calls money_import_pick with no arguments and shows only the counts", async () => {
+    const call = vi.fn(async (cmd: string) => (cmd === "money_import_pick" ? { imported: 1, skipped: 2 } : []));
+    const m = makeLiveMoney(call as never, vi.fn());
+    expect((await m.importStatement()).state).toBe("live");
+    expect(call).toHaveBeenCalledWith("money_import_pick");
+    expect(call.mock.calls.find((c) => c[0] === "money_import_pick")).toHaveLength(1);
+    expect(m.connectNote()).toBe("Imported 1 transaction. 2 skipped (already imported or not readable).");
+  });
+  it("each fixed error code has its own sentence, and unknown text never leaks", async () => {
+    for (const [code, re] of [["cancelled", /No file chosen/], ["busy", /already open/], ["unrecognised_format", /layout/], ["too_large", /5 MB/], ["bad_file", /couldn't be opened/]] as const) {
+      const m = makeLiveMoney((async () => { throw code; }) as never, vi.fn());
+      expect((await m.importStatement()).state).toBe("unwired");
+      expect(m.connectNote()).toMatch(re);
+    }
+    const leak = makeLiveMoney((async () => { throw "/Users/someone/secret.csv exploded"; }) as never, vi.fn());
+    await leak.importStatement();
+    expect(leak.connectNote()).toBe("The import didn't go through. Nothing was changed.");
+    expect(leak.connectNote()).not.toContain("/Users");
   });
 });

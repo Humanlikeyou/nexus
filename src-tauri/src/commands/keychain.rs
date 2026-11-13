@@ -167,6 +167,27 @@ pub async fn secrets_status() -> Result<Vec<SecretStatus>, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// Replacing a set secret always asks; so does the first set of a `telegram_*` secret (it decides
+/// where health alerts are sent). Other first sets don't.
+pub(crate) fn needs_approval(name: &str, already_set: bool) -> bool {
+    already_set || name.starts_with("telegram_")
+}
+
+/// Last 4 characters, for a dialog. Never more.
+pub(crate) fn tail4(s: &str) -> String {
+    let t = s.trim();
+    let n = t.chars().count();
+    t.chars().skip(n.saturating_sub(4)).collect()
+}
+
+/// What the approval dialog says about the Telegram chat being saved.
+pub(crate) fn chat_dialog_detail(old_tail: Option<&str>, new_tail: &str) -> String {
+    match old_tail {
+        Some(o) => format!("Replaces the chat ending in {o} with the chat ending in {new_tail}. Health alerts will go to the new chat. Allow only if you just asked for this."),
+        None => format!("Health alerts will go to the chat ending in {new_tail}. Allow only if you just asked for this."),
+    }
+}
+
 /// Write-only. Returns nothing; the value is zeroized after the Keychain write.
 #[tauri::command]
 pub async fn secret_set(
@@ -186,11 +207,37 @@ pub async fn secret_set(
     .await
     .map_err(|e| e.to_string())?;
     let _held = match existing {
-        Ok(Some(s)) if s.set => {
-            let text = super::approval_gate::approval_text(
-                &format!("Replace the saved {}", s.label),
-                "The value stored in the Keychain is overwritten. Allow only if you just asked for this.",
-            );
+        Ok(Some(s)) if needs_approval(&name, s.set) => {
+            let (op, detail) = if s.set {
+                (
+                    format!("Replace the saved {}", s.label),
+                    "The value stored in the Keychain is overwritten. Allow only if you just asked for this.",
+                )
+            } else {
+                (
+                    format!("Save the {}", s.label),
+                    "It is stored in the Keychain and used only to send your health alerts to Telegram. Allow only if you just asked for this.",
+                )
+            };
+            let mut detail = detail.to_string();
+            if name == "telegram_chat_id" {
+                // Show which chat is being replaced and which is arriving: last 4 characters only.
+                let old = if s.set {
+                    tokio::task::spawn_blocking(|| {
+                        MacKeychain
+                            .get(&service_for("telegram_chat_id"))
+                            .ok()
+                            .map(|v| tail4(&String::from_utf8_lossy(&Zeroizing::new(v))))
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                } else {
+                    None
+                };
+                detail = chat_dialog_detail(old.as_deref(), &tail4(&value));
+            }
+            let text = super::approval_gate::approval_text(&op, &detail);
             let text = match text {
                 Ok(t) => t,
                 Err(e) => {
@@ -258,6 +305,29 @@ mod tests {
         assert!(set_with(&kc, "ha_token", "  ".into()).is_err());
         assert!(set_with(&kc, "ha_token", "x".repeat(MAX_SECRET_BYTES + 1)).is_err());
         assert!(status_with(&kc).unwrap().iter().all(|x| !x.set));
+    }
+
+    #[test]
+    fn telegram_first_set_needs_approval_others_do_not() {
+        assert!(needs_approval("telegram_bot_token", false));
+        assert!(needs_approval("telegram_chat_id", false));
+        assert!(needs_approval("ha_token", true));
+        assert!(!needs_approval("ha_token", false));
+        assert!(!needs_approval("n8n_encryption_key", false));
+        // every telegram_* name in the allowlist is covered
+        assert!(SECRETS
+            .iter()
+            .filter(|(n, _)| n.starts_with("telegram_"))
+            .all(|(n, _)| needs_approval(n, false)));
+    }
+
+    #[test]
+    fn chat_dialog_shows_last_four_of_old_and_new_only() {
+        assert_eq!(tail4("SENTINEL-chat-5521"), "5521");
+        assert_eq!(tail4("12"), "12");
+        let d = chat_dialog_detail(Some("5521"), "9908");
+        assert!(d.contains("5521") && d.contains("9908") && !d.contains("SENTINEL"));
+        assert!(chat_dialog_detail(None, "9908").contains("ending in 9908"));
     }
 
     #[test]
