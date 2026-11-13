@@ -11,28 +11,28 @@ Branch `amara-integration`, local commits only, nothing pushed (decision 0001). 
 Installed: 0daa808 (2026-11-14). `bda3c15` (Done folds Today's one thing) is not installed yet.
 
 ### Handover phases (0–17)
-The handover text itself is **not on disk**: it was pasted in a session and never saved. Phases 0 and 5 are not named in any file, so their status is unknown until Taisun re-pastes it (save it as `docs/handover-final.md`). Below, "evidence" means a commit or decision.
+Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2026-11-14; it is untracked and his file, so don't commit it without his OK. Evidence is a commit or a decision.
 
-| phase | what (from repo evidence) | status | evidence |
+| phase | handover scope | status | evidence / what's left |
 |---|---|---|---|
-| 0 | not named on disk | unknown | n/a |
-| 1 | Navy local-only (chat fail-closed, outbound commands gated) | partial: voice patch not applied (Taisun); local speak() unwired | 6215a12, 0dd3996, cf93fd0; `tasks/proposed/amara-voice-navy-gate.diff` |
-| 2 | Home windows (child webviews, per-site profiles) | done (live check by Taisun pending) | c024eeb, 710863c, 2c4a8a8; 0014 #5 |
-| 3 | Adds from chat and voice (preview → confirm → save) | done in the renderer; Rust adds port is a stub (Stage A1) | 16b78d8, 5e8ead7 |
-| 4 | Patterns + weekly review | partial (leftovers per handover; generic patterns = Stage A3) | 8af876a, f45829a |
-| 5 | not named on disk | unknown | n/a |
-| 6 | Backups: nightly, verify, restore preview, drill | done | 6507382, 1c93d5e, a783a5f, de30ebe; `docs/release/restore-drill.md` |
-| 7 | Harden in place (per-launch token on loopback calls) | todo (shared http module ready: f6fad35) | n/a |
-| 8 | Services supervisor | todo | n/a |
-| 9 | Bundled runtime, models, first run | todo | n/a |
-| 10 | NOOP merge (sidecars) + WHOOP takeover | todo; WHOOP takeover gated | 0017 (plan), 7e9895c (inventory) |
-| 11 | Telegram relay from the day's data | partial: relay settings, preview and approvals; no dispatch; daily_table ready | a783a5f, 5994114 |
-| 12 | NOOP/Lucid pages in Fitness + 14-day parity report | partial: Workouts/Sleep/Trends tabs; no parity report | e265648; 0017 |
-| 13 | Open at login | todo | n/a |
-| 14 | Signing + notarization | blocked: Apple Developer ID (Taisun) | n/a |
-| 15 | Auto-update | todo (needs 14 + updater key) | n/a |
-| 16 | Migration test | todo | n/a |
-| 17 | Readiness report | todo | n/a |
+| 0 | Resume, verify, land in-flight crew work, re-baseline | done | crew 7de5b4b 32f1d8c; re-baselined each run (header above) |
+| 1 | 1111x navy: localOnly incl. Hermes, local speak | partial | done: 6215a12 0dd3996 cf93fd0 (fail-closed; Q1 open). Left: local speak() (Stage C); voice patch applied by Taisun |
+| 2 | 1111w Jarvis windows backend | partial | done: c024eeb 710863c 2c4a8a8 (cap 3/LRU/Undo, pop-outs, per-site profiles, home_window_open). Left: Amara's comment on a window, blocked-embed/offline signals, verify sign-in pause and Life take facts; live sign-in (Taisun) |
+| 3 | 1111v leftovers: chat/voice adds, on-device transcription | partial | done: 16b78d8 (one add path). Left: Rust adds in amara_turn (Stage A1 running), on-device transcription |
+| 4 | 1111a personal-OS adapters | partial | done: check-ins/dates 97eddbb, goals and roadmaps 36d4378 bce7ebf, memory list b438574, Letta writes 8af876a (0015), patterns and weekly review 8af876a f45829a. Left: Stage A2–A6; habits data source; verify the 22:00 reminder |
+| 5 | 1111t step 6 Money (read-only) | partial | done: spike 3be01d3, backend 7b448bb, accounts/fx UI 9b95d68, balances b438574, rows 1c93d5e, bank CSV picker a783a5f. Gated: JPY→USD rule, ledger data, aggregators |
+| 6 | Backups: nightly, restore, drill on a copy | done | 6507382 1c93d5e a783a5f de30ebe; `docs/release/restore-drill.md` |
+| 7 | Harden in place | todo | shared http module ready f6fad35. Gated: chmod, Keychain moves, Weaviate switch-over |
+| 8 | Services supervisor | todo | gated: LaunchAgent retirement, crew rebuild |
+| 9 | Bundled runtime + first run | todo | gated: light-tier model name, router restart |
+| 10 | NOOP merge 0–3 + WHOOP ownership | todo | 0017 plan, 7e9895c inventory. Gated: takeover on hardware |
+| 11 | Telegram relay of NOOP notifications | partial | relay settings, preview and approvals a783a5f; daily_table 5994114 for the number check. Gated: bot token, first send |
+| 12 | NOOP 4–5: secrets, Lucid cues, attribution, 14-day parity report | todo | Fitness tabs e265648 (0017) are related but not this phase. Gated: retire NOOP.app, old-store delete |
+| 13 | Open at login | todo | gated: mechanism |
+| 14 | Signing, notarization, DMG | blocked | Apple Developer ID (Taisun) |
+| 15 | Auto-update | todo | gated: manifest host, updater key |
+| 16 | Migration test | todo | gated: fresh-account run (Taisun) |
+| 17 | Final e2e, parity matrix, readiness report | todo | n/a |
 
 Shared pieces (REVIEW §8):
 - shared helpers f6fad35
