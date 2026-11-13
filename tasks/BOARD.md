@@ -1,7 +1,45 @@
 # Board (read this first when resuming)
 
-Branch `amara-integration`, local commits only, nothing pushed. Decisions: `docs/decisions/0001–0007`.
-Full gates on HEAD (2026-11-13, after `8af876a`): src-tauri 769 / 5 ignored · router 126 · vitest 1710 / 9 skipped · neuro 21 · full e2e 754 passed / 12 skipped / 0 failed. Older: (2026-11-12, after `7de5b4b`): vitest 1523 / 9 skipped · neuro 21 · src-tauri 542 / 5 ignored · router 126 · crew-service 222 · tsc / lint / fmt / clippy / secrets clean · **full e2e 728 passed / 12 skipped / 0 failed**. Review gate reached: see `tasks/HANDOFF-FOR-REVIEW.md`.
+Branch `amara-integration`, local commits only, nothing pushed (decision 0001). Decisions: `docs/decisions/0001–0021`.
+**Gates on HEAD `bda3c15` (2026-11-14):**
+- src-tauri 982 passed / 6 ignored · amara-router 126 · vitest 1899 / 9 skipped · neuro 21.
+- fmt / clippy -D warnings / tsc / lint / check:secrets clean.
+- **Full e2e 784 passed / 12 skipped / 0 failed.**
+- Rust was last run at 0daa808, with no Rust change since.
+- takes-1111t:80 [light] is a real Design contrast bug (4.28:1). It fails in some full runs; never weaken it.
+
+Installed: 0daa808 (2026-11-14). `bda3c15` (Done folds Today's one thing) is not installed yet.
+
+### Handover phases (0–17)
+The handover text itself is **not on disk**: it was pasted in a session and never saved. Phases 0 and 5 are not named in any file, so their status is unknown until Taisun re-pastes it (save it as `docs/handover-final.md`). Below, "evidence" means a commit or decision.
+
+| phase | what (from repo evidence) | status | evidence |
+|---|---|---|---|
+| 0 | not named on disk | unknown | n/a |
+| 1 | Navy local-only (chat fail-closed, outbound commands gated) | partial: voice patch not applied (Taisun); local speak() unwired | 6215a12, 0dd3996, cf93fd0; `tasks/proposed/amara-voice-navy-gate.diff` |
+| 2 | Home windows (child webviews, per-site profiles) | done (live check by Taisun pending) | c024eeb, 710863c, 2c4a8a8; 0014 #5 |
+| 3 | Adds from chat and voice (preview → confirm → save) | done in the renderer; Rust adds port is a stub (Stage A1) | 16b78d8, 5e8ead7 |
+| 4 | Patterns + weekly review | partial (leftovers per handover; generic patterns = Stage A3) | 8af876a, f45829a |
+| 5 | not named on disk | unknown | n/a |
+| 6 | Backups: nightly, verify, restore preview, drill | done | 6507382, 1c93d5e, a783a5f, de30ebe; `docs/release/restore-drill.md` |
+| 7 | Harden in place (per-launch token on loopback calls) | todo (shared http module ready: f6fad35) | n/a |
+| 8 | Services supervisor | todo | n/a |
+| 9 | Bundled runtime, models, first run | todo | n/a |
+| 10 | NOOP merge (sidecars) + WHOOP takeover | todo; WHOOP takeover gated | 0017 (plan), 7e9895c (inventory) |
+| 11 | Telegram relay from the day's data | partial: relay settings, preview and approvals; no dispatch; daily_table ready | a783a5f, 5994114 |
+| 12 | NOOP/Lucid pages in Fitness + 14-day parity report | partial: Workouts/Sleep/Trends tabs; no parity report | e265648; 0017 |
+| 13 | Open at login | todo | n/a |
+| 14 | Signing + notarization | blocked: Apple Developer ID (Taisun) | n/a |
+| 15 | Auto-update | todo (needs 14 + updater key) | n/a |
+| 16 | Migration test | todo | n/a |
+| 17 | Readiness report | todo | n/a |
+
+Shared pieces (REVIEW §8):
+- shared helpers f6fad35
+- screen-open counter eac9c0d
+- daily table 5994114
+- turn pipeline L0–L4 (cb6da06…bb7efff, flag off)
+
 Status: `todo` · `active` (lane running) · `done <hash>` · `blocked` · `waiting` (Taisun).
 
 ## Dev system
