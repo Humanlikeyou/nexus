@@ -150,6 +150,8 @@ pub fn run() {
             commands::outbound::init_outbound_setting();
             // Per-launch token for Amara-owned loopback services (see commands/launch_token.rs).
             commands::launch_token::mint();
+            // Services supervisor: observe-only probes and a cached snapshot (commands/supervisor).
+            commands::supervisor::start();
 
             // System tray
             let quit = MenuItem::with_id(app, "quit", "Quit Amara OS", true, None::<&str>)?;
@@ -340,6 +342,12 @@ pub fn run() {
             commands::backup_schedule::restore_preview,
             commands::service_control::service_restart,
             commands::service_logs::service_logs,
+            commands::supervisor::services_status,
+            commands::supervisor::service_events,
+            commands::supervisor::services_summary,
+            commands::supervisor::supervisor_get,
+            commands::supervisor::supervisor_set_enabled,
+            commands::service_logs::service_log_tail,
             commands::data_harden::data_dir_harden_status,
             commands::data_harden::data_dir_harden,
             commands::whoop_status::whoop_status,
@@ -543,10 +551,19 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building Amara OS")
-        .run(|_app, event| {
-            if let tauri::RunEvent::Exit = event {
+        .run(|app, event| match event {
+            // Held only when the supervisor's act is on AND this launch started a docker service;
+            // otherwise a no-op, so quitting is exactly what it was (commands/supervisor/lifecycle.rs).
+            tauri::RunEvent::ExitRequested { code, api, .. } => {
+                let handle = app.clone();
+                commands::supervisor::lifecycle::on_exit_requested(&api, move || {
+                    handle.exit(code.unwrap_or(0))
+                });
+            }
+            tauri::RunEvent::Exit => {
                 commands::voice_heartbeat::stop();
                 commands::launch_token::remove();
             }
+            _ => {}
         });
 }

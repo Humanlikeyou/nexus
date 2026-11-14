@@ -150,3 +150,52 @@ describe("W2 live adapter: services, whoop, profile, restore preview", () => {
     expect(invoke.mock.calls.some((c) => /restore$|unpack/.test(String(c[0])) && c[0] !== "restore_preview")).toBe(false);
   });
 });
+
+describe("Phase 8 supervisor wiring", () => {
+  beforeEach(() => { invoke.mockReset(); });
+  const ST = (id: string, state: string, over: Record<string, unknown> = {}) => ({ id, state, reasonCode: "ok", sinceMs: 1, checkedMs: 1_700_000_000_000, attempt: 0, maxAttempts: 3, owner: "supervisor", adopted: false, can: { restart: true, start: false, stop: false }, ...over });
+  const MAP = { checkedAt: "2026-11-12T10:00:00+09:00", nodes: [{ id: "router", label: "Amara Router", kind: "backend" }], paths: [{ id: "p", from: "app", to: "router", carries: "x", status: "ok", lastOkAt: null, reason: null, fix: null }] };
+
+  it("services and summary come from the supervisor when it answers", async () => {
+    mock({ services_status: [ST("amara-router", "healthy"), ST("crew-service", "needs_you", { reasonCode: "restart_failed", attempt: 3 })], services_summary: { total: 2, attention: 1 }, system_map_status: MAP });
+    const { a, live } = await load();
+    await live.refreshLive();
+    const s = a.services();
+    if (s.state !== "live") throw new Error("expected live");
+    expect(s.value.services.map((r) => [r.id, r.state])).toEqual([["amara-router", "healthy"], ["crew-service", "failed"]]);
+    expect(a.summary()).toEqual({ state: "live", value: { attention: 1, updateReady: false } });
+  });
+  it("falls back to the system map when the supervisor command errors (older backend)", async () => {
+    mock({ services_status: new Error("x"), services_summary: new Error("x"), system_map_status: MAP });
+    const { a, live } = await load();
+    await live.refreshLive();
+    const s = a.services();
+    if (s.state !== "live") throw new Error("expected live");
+    expect(s.value.services.map((r) => r.id)).toEqual(["router"]);
+    expect(a.summary()).toEqual({ state: "live", value: { attention: 0, updateReady: false } });
+  });
+  it("with neither source, services stay unwired (nothing invented)", async () => {
+    mock({ services_status: new Error("x"), services_summary: new Error("x") });
+    const { a, live } = await load();
+    await live.refreshLive();
+    expect(a.services().state).toBe("unwired");
+    expect(a.summary().state).toBe("unwired");
+  });
+  it("serviceLogs adds the supervisor events (fixed text) next to the tail; events alone are enough", async () => {
+    const E = [{ seq: 1, tsMs: 1_700_000_000_000, id: "n8n", kind: "state_changed", state: "degraded", reasonCode: "slow", text: "Slow to answer." }];
+    mock({ service_logs: { id: "n8n", lines: ["a"] }, service_events: (args: unknown) => (JSON.stringify(args) === JSON.stringify({ since: null, id: "n8n" }) ? E : []) });
+    const { a } = await load();
+    a.serviceLogs("n8n"); await flush(); await flush();
+    const w = a.serviceLogs("n8n");
+    if (w.state !== "live") throw new Error("expected live");
+    expect(w.value.tail).toEqual(["a"]);
+    expect(w.value.events.map((e) => [e.level, e.text])).toEqual([["warn", "Slow to answer."]]);
+    mock({ service_logs: new Error("no_log"), service_events: E });
+    const b = await load();
+    b.a.serviceLogs("docker"); await flush(); await flush();
+    const w2 = b.a.serviceLogs("docker");
+    if (w2.state !== "live") throw new Error("expected live");
+    expect(w2.value).toMatchObject({ tail: [] });
+    expect(w2.value.events).toHaveLength(1);
+  });
+});

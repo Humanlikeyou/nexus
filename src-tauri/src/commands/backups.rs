@@ -37,6 +37,8 @@ pub(crate) const EXCLUDED_SECRET_FILES: &[&str] = &[
     ".env",
     // Outbound opt-in: device-bound, never travels in a backup (`outbound.rs`).
     super::outbound::FILE_NAME,
+    // Supervisor act opt-in: device-bound like the outbound one (`supervisor/act.rs`).
+    super::supervisor::act::FILE_NAME,
     // Home windows: per-site browser profile records (`home_windows.rs`); never backed up.
     "webviews",
 ];

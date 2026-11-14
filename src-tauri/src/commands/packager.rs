@@ -476,6 +476,7 @@ pub(crate) const RESTORE_NEVER: &[&str] = &[
     "notify_relay.json",
     "notify_relay_sent.json",
     super::outbound::FILE_NAME,
+    super::supervisor::act::FILE_NAME,
 ];
 
 fn is_live_only(rel: &[String]) -> bool {

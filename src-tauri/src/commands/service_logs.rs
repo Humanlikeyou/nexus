@@ -11,9 +11,16 @@
 //!   strings, home-folder user names, control characters, and any line that mentions health values.
 //! - Read-only: the file is opened for reading (never a symlink).
 //!
+//! Phase 8: `service_log_tail(id)` is the supervisor-facing name of the same read. Extra sources:
+//! the router's log under its supervisor id `amara-router`, and the app's own unified log (`app`, the
+//! supervisor's one-line events live there). Hermes stays `no_log`: its gateway log is conversational
+//! (prompts and replies), which `redact_line` cannot recognise, and this code never opens `~/.hermes`.
+//! The container ids stay `no_log` too.
+//!
 //! Errors (fixed text): `unknown_service`, `no_log`, `not_found`, `read_failed`.
 
 use super::service_control::KNOWN_IDS;
+use super::supervisor::registry::ServiceId;
 use serde::Serialize;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -37,12 +44,30 @@ pub struct ServiceLogTail {
     pub truncated: bool,
 }
 
+/// The pseudo id for the app's own unified log.
+pub const APP_LOG_ID: &str = "app";
+
+fn router_log(home: &Path) -> PathBuf {
+    home.join("Library/Logs/amara-router/router.log")
+}
+
 fn source_for(id: &str, home: &Path) -> Result<PathBuf, String> {
+    if id == APP_LOG_ID {
+        return Ok(home
+            .join("Library/Logs")
+            .join(super::unified_log::LOG_DIR_NAME)
+            .join(super::unified_log::LOG_FILE));
+    }
     if !KNOWN_IDS.contains(&id) {
-        return Err(super::service_control::UNKNOWN_SERVICE.to_string());
+        // A supervisor id: only the router has a log source; the others have none.
+        return match ServiceId::parse(id) {
+            Some(ServiceId::AmaraRouter) => Ok(router_log(home)),
+            Some(_) => Err(NO_LOG.to_string()),
+            None => Err(super::service_control::UNKNOWN_SERVICE.to_string()),
+        };
     }
     if id == "router" {
-        return Ok(home.join("Library/Logs/amara-router/router.log"));
+        return Ok(router_log(home));
     }
     Err(NO_LOG.to_string())
 }
@@ -326,13 +351,25 @@ pub(crate) fn tail_from_bytes(bytes: &[u8], cut_front: bool) -> (Vec<String>, bo
     )
 }
 
-/// Read the end of a regular file (not a symlink), at most `MAX_BYTES`.
+/// Read the end of a regular file, at most `MAX_BYTES`. One open (no symlink followed, no blocking on
+/// a FIFO), then every check is on the open handle, so nothing can be swapped in between.
 pub(crate) fn read_file_tail(path: &Path) -> Result<(Vec<String>, bool), String> {
-    let meta = std::fs::symlink_metadata(path).map_err(|_| NOT_FOUND.to_string())?;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(libc::ELOOP) {
+                NOT_FOUND.to_string()
+            } else {
+                READ_FAILED.to_string()
+            }
+        })?;
+    let meta = f.metadata().map_err(|_| READ_FAILED.to_string())?;
     if !meta.file_type().is_file() {
         return Err(NOT_FOUND.to_string());
     }
-    let mut f = std::fs::File::open(path).map_err(|_| READ_FAILED.to_string())?;
     let len = meta.len();
     let start = len.saturating_sub(MAX_BYTES);
     f.seek(SeekFrom::Start(start))
@@ -359,6 +396,14 @@ async fn tail_for(id: &str, home: PathBuf) -> Result<ServiceLogTail, String> {
 #[tauri::command]
 #[specta::specta]
 pub async fn service_logs(id: String) -> Result<ServiceLogTail, String> {
+    let home = dirs::home_dir().ok_or_else(|| READ_FAILED.to_string())?;
+    tail_for(&id, home).await
+}
+
+/// Supervisor-facing name for the same redacted, capped, read-only tail as `service_logs`.
+#[tauri::command]
+#[specta::specta]
+pub async fn service_log_tail(id: String) -> Result<ServiceLogTail, String> {
     let home = dirs::home_dir().ok_or_else(|| READ_FAILED.to_string())?;
     tail_for(&id, home).await
 }
@@ -583,5 +628,88 @@ mod tests {
         ] {
             assert!(!code.contains(banned), "{banned}");
         }
+    }
+
+    #[tokio::test]
+    async fn supervisor_ids_read_the_router_log_and_the_app_log_only() {
+        let home = tmp("sup");
+        let rl = home.join("Library/Logs/amara-router");
+        std::fs::create_dir_all(&rl).unwrap();
+        std::fs::write(rl.join("router.log"), "up 1\nGET /x?token=abc\n").unwrap();
+        let al = home.join("Library/Logs/com.taisun.nexus");
+        std::fs::create_dir_all(&al).unwrap();
+        std::fs::write(al.join("app.log"), "INFO supervisor N8n Healthy\n").unwrap();
+        let t = tail_for("amara-router", home.clone()).await.unwrap();
+        assert_eq!(
+            t.lines,
+            vec!["up 1".to_string(), "GET /x?[redacted]".to_string()]
+        );
+        let a = tail_for(APP_LOG_ID, home.clone()).await.unwrap();
+        assert_eq!(a.lines, vec!["INFO supervisor N8n Healthy".to_string()]);
+        // Every other supervisor id has no log; Hermes and the containers stay no_log.
+        for id in [
+            "hermes-gateway",
+            "amara-voice",
+            "docker",
+            "model-runtime",
+            "n8n",
+            "crew-service",
+            "postgres",
+            "letta",
+            "weaviate",
+            "homeassistant",
+            "freqtrade",
+            "open-webui",
+            "health-reader",
+            "health-sync",
+        ] {
+            assert_eq!(
+                tail_for(id, home.clone()).await.unwrap_err(),
+                NO_LOG,
+                "{id}"
+            );
+        }
+        for id in ["", "App", "../app", "amara-router/../x", "hermes"] {
+            let want = if id == "hermes" {
+                NO_LOG
+            } else {
+                "unknown_service"
+            };
+            assert_eq!(
+                tail_for(id, home.clone()).await.unwrap_err(),
+                want,
+                "{id:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_symlinked_app_log_is_refused_and_the_new_command_is_registered() {
+        let d = tmp("applink");
+        let real = d.join("real.log");
+        std::fs::write(&real, "x\n").unwrap();
+        let link = d.join("app.log");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(read_file_tail(&link).unwrap_err(), NOT_FOUND);
+        let src = include_str!("service_logs.rs");
+        assert!(src.contains("pub async fn service_log_tail(id: String)"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_tail_opens_once_without_following_links_and_never_blocks_on_a_fifo() {
+        let code = include_str!("service_logs.rs");
+        let code = code.split("#[cfg(test)]").next().unwrap();
+        assert!(code.contains("libc::O_NOFOLLOW | libc::O_NONBLOCK"));
+        assert!(!code.contains("symlink_metadata"));
+        // A FIFO is refused as not a regular file, without hanging.
+        let d = tmp("fifo");
+        let fifo = d.join("f.log");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: mkfifo with a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        assert_eq!(read_file_tail(&fifo).unwrap_err(), NOT_FOUND);
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

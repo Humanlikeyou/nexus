@@ -29,7 +29,7 @@ pub(crate) const FILE_NAME: &str = "outbound_setting.json";
 const DEVICE_KEY_NAME: &str = "outbound_device_key";
 const TAG_MESSAGE: &[u8] = b"amara-outbound-setting:v1:allowed=true";
 
-fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+pub(crate) fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
     let mut k = [0u8; 64];
     if key.len() > 64 {
         k[..32].copy_from_slice(&Sha256::digest(key));
@@ -45,7 +45,7 @@ fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
     outer.finalize().into()
 }
 
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
@@ -54,7 +54,7 @@ fn device_tag(key: &[u8]) -> String {
 }
 
 /// The device key; created (32 random bytes) only when `create` and none exists.
-fn device_key(kc: &dyn Keychain, create: bool) -> Option<Vec<u8>> {
+pub(crate) fn device_key(kc: &dyn Keychain, create: bool) -> Option<Vec<u8>> {
     let svc = keychain::service_for(DEVICE_KEY_NAME);
     match kc.get(&svc) {
         Ok(k) if k.len() >= 16 => Some(k),

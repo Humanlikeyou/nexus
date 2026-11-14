@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { commands as bound } from "./bindings.gen";
+import type { ServiceEvent, ServiceId, ServiceLogTail, ServiceStatus, ServicesSummary, SupervisorInfo } from "./bindings.gen";
 import { BOUND_TABLE } from "./boundTable";
 import { EMPTY_DEVICE_ID } from "./lib/devices";
 import type {
@@ -299,6 +300,15 @@ export const recordScreenOpen = async (screen: string): Promise<void> => {
 };
 /** Counts per screen per JST week. Errors reach the caller: an empty list must mean "no opens", never "store failed". */
 export const screenOpenCounts = (weeks?: number): Promise<ScreenWeekCount[]> => bound.screenOpenCounts(weeks ?? null);
+/** Phase 8 supervisor (observe-only): cached snapshot, event ring, attention counts, switches. Never probes on call. */
+export const getServicesStatus = (): Promise<ServiceStatus[]> => bound.servicesStatus();
+export const getServiceEvents = (since: number | null = null, id: ServiceId | null = null): Promise<ServiceEvent[]> => bound.serviceEvents(since, id);
+export const getServicesSummary = (): Promise<ServicesSummary> => bound.servicesSummary();
+export const getSupervisor = (): Promise<SupervisorInfo> => bound.supervisorGet();
+/** Same redacted, capped, read-only tail as serviceLogs; ids: amara-router and app have a source, the rest reject with no_log. */
+export const getServiceLogTail = (id: string): Promise<ServiceLogTail> => bound.serviceLogTail(id);
+/** Persist the act setting (native approval to enable; never asks to disable). Effective only in a build where act is switched on. */
+export const setSupervisorEnabled = (on: boolean): Promise<SupervisorInfo> => bound.supervisorSetEnabled(on);
 /** R13-F: read-only n8n probe; never errors (connected:false when it is down). */
 export const getN8nStatus = (): Promise<N8nStatusRow> => bound.n8nStatus();
 /** 1110i. Turning on opens the native dialog first and resolves only after crew-service confirms. */

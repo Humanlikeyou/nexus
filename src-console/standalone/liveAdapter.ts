@@ -1,9 +1,11 @@
-import { invokeBound } from "../bridge";
+import { getServiceEvents, getServicesStatus, getServicesSummary, invokeBound } from "../bridge";
 import { listen } from "@tauri-apps/api/event";
-import type { AlertKind, BackupRun, BackupSettings, BackupStatus, KeyFileStatus, RelayPreview, RelaySettings, RestorePreview, SecretName, SecretStatus, ServiceLogs, StandaloneAdapter, SystemProfile, WhoopStatus } from "./adapters";
+import type { AlertKind, BackupRun, BackupSettings, BackupStatus, KeyFileStatus, RelayPreview, RelaySettings, RestorePreview, SecretName, SecretStatus, ServiceEvent, ServiceLogs, ServicesSummary, StandaloneAdapter, SystemProfile, WhoopStatus } from "./adapters";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 import { servicesFromMap } from "./servicesFromMap";
-import { summaryFromServices } from "./servicesSummary";
+import { eventsFromSupervisor, isSupStatus, servicesFromSupervisor } from "./servicesFromSupervisor";
+import { summaryFromServices, summaryFromSupervisor } from "./servicesSummary";
+import type { ServiceId, ServiceStatus } from "../bindings.gen";
 import type { SystemMap } from "./systemMap";
 
 /**
@@ -33,8 +35,11 @@ type Cache = {
   preview: RelayPreview | null;
   whoop: WhoopRow | null;
   profile: ProfileRow | null;
+  /** Phase 8 supervisor snapshot; null when the command is missing or answers badly (older backend). */
+  sup: ServiceStatus[] | null;
+  supSummary: ServicesSummary | null;
 };
-const cache: Cache = { secrets: null, keyFile: null, backupSettings: null, backupList: null, verify: null, run: null, map: null, relay: null, preview: null, whoop: null, profile: null };
+const cache: Cache = { secrets: null, keyFile: null, backupSettings: null, backupList: null, verify: null, run: null, map: null, relay: null, preview: null, whoop: null, profile: null, sup: null, supSummary: null };
 let version = 0;
 const listeners = new Set<() => void>();
 const notify = () => { version += 1; listeners.forEach((l) => l()); };
@@ -137,9 +142,10 @@ export function toWhoop(w: WhoopRow | null, now: number = Date.now()): Wired<Who
 export function toProfile(p: ProfileRow | null): Wired<SystemProfile> {
   return !p || p.fileVault === null ? UNWIRED : { state: "live", value: { ramGb: p.ramGb, chip: p.chip, fileVault: p.fileVault } };
 }
-/** `service_logs` tail: the backend redacted it; plain-words events are not available, so none are made up. */
-export function toLogs(lines: unknown): Wired<ServiceLogs> {
-  return Array.isArray(lines) && lines.every((l) => typeof l === "string") ? { state: "live", value: { events: [], tail: lines as string[] } } : UNWIRED;
+/** `service_logs` tail (redacted by the backend) plus the supervisor's fixed-text events. Neither is made up; both missing is unwired. */
+export function toLogs(lines: unknown, events: ServiceEvent[] | null = null): Wired<ServiceLogs> {
+  const tail = Array.isArray(lines) && lines.every((l) => typeof l === "string") ? (lines as string[]) : null;
+  return tail === null && (events === null || events.length === 0) ? UNWIRED : { state: "live", value: { events: events ?? [], tail: tail ?? [] } };
 }
 /** `restore_preview` row to the First-run preview. Contents are the archive's folders with file counts and sizes. */
 export function toRestorePreview(v: unknown, row: BackupRow, keyFileMade: boolean): Wired<RestorePreview> {
@@ -167,7 +173,10 @@ export function askLogs(id: string, call: typeof invokeBound = invokeBound): Wir
   if (!hit || Date.now() - hit.at > LOGS_FRESH_MS) {
     if (!logsInflight.has(id)) {
       logsInflight.add(id);
-      void call<{ lines?: unknown }>("service_logs", { id }).then((r) => toLogs(r?.lines), () => UNWIRED).then((value) => { logsCache.set(id, { at: Date.now(), value }); }).finally(() => { logsInflight.delete(id); notify(); });
+      const tail = call<{ lines?: unknown }>("service_logs", { id }).then((r) => r?.lines, () => null);
+      const events = (call === invokeBound ? getServiceEvents(null, id as ServiceId) : call<unknown>("service_events", { since: null, id }))
+        .then((r) => (Array.isArray(r) ? eventsFromSupervisor(r) : null), () => null);
+      void Promise.all([tail, events]).then(([t, e]) => toLogs(t, e)).then((value) => { logsCache.set(id, { at: Date.now(), value }); }).finally(() => { logsInflight.delete(id); notify(); });
     }
   }
   return hit?.value ?? UNWIRED;
@@ -211,7 +220,7 @@ function askPreview() {
 export const resetRelayForTests = () => { previewAsked = false; cache.preview = null; cache.relay = null; };
 
 export async function refreshLive(): Promise<void> {
-  const [s, k, bs, bl, sm, rl, wh, pr] = await Promise.allSettled([
+  const [s, k, bs, bl, sm, rl, wh, pr, sv, ss] = await Promise.allSettled([
     invokeBound<SecretStatus[]>("secrets_status"),
     invokeBound<KeyFileStatus>("key_file_status"),
     invokeBound<BackupSettings>("backup_settings_get"),
@@ -221,6 +230,8 @@ export async function refreshLive(): Promise<void> {
     invokeBound<unknown>("whoop_status"),
     // The profile never changes within a launch: asked once, kept once it answered.
     cache.profile ? Promise.resolve(cache.profile) : invokeBound<unknown>("system_profile"),
+    getServicesStatus(),
+    getServicesSummary(),
   ]);
   cache.secrets = s.status === "fulfilled" ? s.value : null;
   cache.keyFile = k.status === "fulfilled" ? k.value : null;
@@ -230,6 +241,9 @@ export async function refreshLive(): Promise<void> {
   cache.relay = rl.status === "fulfilled" ? toRelay(rl.value) : null;
   cache.whoop = wh.status === "fulfilled" && isWhoop(wh.value) ? wh.value : null;
   cache.profile = pr.status === "fulfilled" && isProfile(pr.value) ? pr.value : null;
+  // An older backend has no supervisor commands: both stay null and the system-map derivation is used.
+  cache.sup = sv.status === "fulfilled" && Array.isArray(sv.value) && sv.value.length > 0 && sv.value.every(isSupStatus) ? sv.value : null;
+  cache.supSummary = ss.status === "fulfilled" ? summaryFromSupervisor(ss.value) : null;
   notify();
 }
 
@@ -251,8 +265,9 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
   if (!started) { started = true; void refreshLive().then(() => verifyLast()); listenBackupProgress(); }
   return {
     ...base,
-    services: () => live(cache.map ? servicesFromMap(cache.map) : null),
-    summary: () => live(cache.map ? summaryFromServices(servicesFromMap(cache.map).services) : null),
+    // The supervisor is the source when it answers; otherwise the system-map derivation (older ids). Never a guessed state.
+    services: () => live(cache.sup ? servicesFromSupervisor(cache.sup) : cache.map ? servicesFromMap(cache.map) : null),
+    summary: () => live(cache.sup ? (cache.supSummary ?? summaryFromServices(servicesFromSupervisor(cache.sup).services)) : cache.map ? summaryFromServices(servicesFromMap(cache.map).services) : null),
     serviceLogs: (id: string) => askLogs(id),
     // Restart only (the supervisor's "start" has no backend). Every restart asks in the native approval dialog; a
     // decline, `unsupported`, `needs_you:` or failure comes back unwired and only a fixed code is logged.

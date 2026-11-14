@@ -56,6 +56,7 @@ pub mod service_logs;
 pub mod sessions;
 pub(crate) mod shared;
 pub mod snapshots;
+pub mod supervisor;
 pub mod system;
 pub mod system_map;
 pub mod system_profile;

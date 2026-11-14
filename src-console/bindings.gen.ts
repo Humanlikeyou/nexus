@@ -209,6 +209,20 @@ export const commands = {
 	restorePreview: (file: string, options?: InvokeOptions) => __TAURI_INVOKE<RestorePreview>("restore_preview", { file }, options),
 	serviceRestart: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<ServiceRestartDone>("service_restart", { id }, options),
 	serviceLogs: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<ServiceLogTail>("service_logs", { id }, options),
+	/**  The cached snapshot; never probes, never blocks on one. */
+	servicesStatus: (options?: InvokeOptions) => __TAURI_INVOKE<ServiceStatus[]>("services_status", undefined, options),
+	/**  Events with `seq > since` (oldest first), optionally for one service. Fixed texts only. */
+	serviceEvents: (since: number | null, id: ServiceId | null, options?: InvokeOptions) => __TAURI_INVOKE<ServiceEvent[]>("service_events", { since, id }, options),
+	servicesSummary: (options?: InvokeOptions) => __TAURI_INVOKE<ServicesSummary>("services_summary", undefined, options),
+	supervisorGet: (options?: InvokeOptions) => __TAURI_INVOKE<SupervisorInfo_Serialize>("supervisor_get", undefined, options),
+	/**
+	 *  Turn the act setting on or off. Enabling asks the native approval; disabling never asks. It only
+	 *  takes effect in a build where `SUPERVISOR_ACT_ENABLED` is true, and start-on-launch only runs at the
+	 *  next launch.
+	 */
+	supervisorSetEnabled: (on: boolean, options?: InvokeOptions) => __TAURI_INVOKE<SupervisorInfo_Serialize>("supervisor_set_enabled", { on }, options),
+	/**  Supervisor-facing name for the same redacted, capped, read-only tail as `service_logs`. */
+	serviceLogTail: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<ServiceLogTail>("service_log_tail", { id }, options),
 	dataDirHardenStatus: (options?: InvokeOptions) => __TAURI_INVOKE<HardenPlan>("data_dir_harden_status", undefined, options),
 	dataDirHarden: (options?: InvokeOptions) => __TAURI_INVOKE<HardenPlan>("data_dir_harden", undefined, options),
 	whoopStatus: (options?: InvokeOptions) => __TAURI_INVOKE<WhoopStatus_Serialize>("whoop_status", undefined, options),
@@ -968,6 +982,12 @@ export type BusinessLedger_Serialize = {
 	revenueTargetJpy: number | null,
 };
 
+export type Can = {
+	restart: boolean,
+	start: boolean,
+	stop: boolean,
+};
+
 export type CatchUpStatus = {
 	/**  A roadmap is waiting in "drafting", or a smaller-step request is pending. */
 	due: boolean,
@@ -1652,6 +1672,12 @@ export type DecisionRecord_Serialize = {
 };
 
 export type Event = Event_Serialize | Event_Deserialize;
+
+export type EventKind = "state_changed" | "adopted" | "restart_requested" | "restart_failed" | "gave_up" | 
+/**  The app started it on launch (act on). */
+"started" | 
+/**  The app stopped it on quit (act on). */
+"stopped";
 
 export type EventQuery = EventQuery_Serialize | EventQuery_Deserialize;
 
@@ -3141,6 +3167,8 @@ export type OutboxStatus_Serialize = {
 	expired: number,
 };
 
+export type Owner = "user" | "supervisor" | "transition";
+
 export type PackageInfo = {
 	path: string,
 	size_mb: number | null,
@@ -3241,6 +3269,9 @@ export type RankedTrack = {
 	/**  Hemi-Sync session ids behind `mean` (each is also a Muse session id). */
 	sessionIds: string[],
 };
+
+/**  Fixed reason codes. These (and the fixed event texts) are the only reasons that leave the module. */
+export type ReasonCode = "not_checked" | "ok" | "slow" | "unreachable" | "timeout" | "bad_status" | "container_down" | "container_stopped" | "container_starting" | "unhealthy" | "missing_container" | "bad_bind" | "docker_unavailable" | "not_running" | "no_store" | "restarting" | "restart_failed";
 
 export type RecordedSession = RecordedSession_Serialize | RecordedSession_Deserialize;
 
@@ -3588,6 +3619,20 @@ export type SecretStatus = {
 	set: boolean,
 };
 
+export type ServiceEvent = {
+	/**  Monotonic, starts at 1. Pass the last one you saw as `since`. */
+	seq: number,
+	tsMs: number,
+	id: ServiceId,
+	kind: EventKind,
+	state: ServiceState,
+	reasonCode: ReasonCode,
+	text: string,
+};
+
+/**  The ids the Services screen uses (`src-console/standalone/adapters.ts`). */
+export type ServiceId = "docker" | "model-runtime" | "amara-router" | "hermes-gateway" | "amara-voice" | "n8n" | "crew-service" | "postgres" | "letta" | "weaviate" | "health-reader" | "health-sync" | "homeassistant" | "freqtrade" | "open-webui";
+
 export type ServiceLogTail = {
 	id: string,
 	/**  Oldest first, already redacted. */
@@ -3614,6 +3659,35 @@ export type ServiceRestartResult_Serialize = {
 	service: string,
 	ok: boolean,
 	error: string | null,
+};
+
+export type ServiceState = "unknown" | "starting" | "healthy" | "degraded" | "restarting" | "needs_you" | "stopped" | "separate";
+
+export type ServiceStatus = {
+	id: ServiceId,
+	state: ServiceState,
+	reasonCode: ReasonCode,
+	sinceMs: number,
+	checkedMs: number,
+	attempt: number,
+	maxAttempts: number,
+	owner: Owner,
+	adopted: boolean,
+	can: Can,
+};
+
+export type ServicesSummary = {
+	total: number,
+	healthy: number,
+	/**  needs_you + degraded + restarting: what should catch the user's eye. */
+	attention: number,
+	needsYou: number,
+	degraded: number,
+	restarting: number,
+	stopped: number,
+	separate: number,
+	unknown: number,
+	checkedMs: number,
 };
 
 export type SessionLogEntry = {
@@ -3888,6 +3962,38 @@ export type Suggestion_Serialize = {
 	sourceIds: string[],
 	/**  The whole published finding the suggestion quotes, so a stored review can be re-checked on load. */
 	finding: Finding_Serialize,
+};
+
+export type SupervisorInfo = SupervisorInfo_Serialize | SupervisorInfo_Deserialize;
+
+export type SupervisorInfo_Deserialize = {
+	/**  Probes, adoption and events: always on. */
+	observing: boolean,
+	/**  Whether the supervisor may act right now: the build switch AND the saved setting. */
+	actEnabled: boolean,
+	/**  The compile-time switch (false in the first ship). */
+	actBuild: boolean,
+	/**  The saved, device-tagged setting (`supervisor_set_enabled`). */
+	actSetting: boolean,
+	services: number,
+	events: number,
+	ticks: number,
+	lastTickMs?: number | null,
+};
+
+export type SupervisorInfo_Serialize = {
+	/**  Probes, adoption and events: always on. */
+	observing: boolean,
+	/**  Whether the supervisor may act right now: the build switch AND the saved setting. */
+	actEnabled: boolean,
+	/**  The compile-time switch (false in the first ship). */
+	actBuild: boolean,
+	/**  The saved, device-tagged setting (`supervisor_set_enabled`). */
+	actSetting: boolean,
+	services: number,
+	events: number,
+	ticks: number,
+	lastTickMs: number | null,
 };
 
 export type SystemInfo = {

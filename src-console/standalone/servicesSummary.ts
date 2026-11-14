@@ -1,4 +1,5 @@
 import { valueOf } from "../lib/sampleAdapters";
+import type { ServicesSummary as SupSummary } from "../bindings.gen";
 import type { Service, ServicesSummary, StandaloneAdapter } from "./adapters";
 
 /**
@@ -8,6 +9,12 @@ import type { Service, ServicesSummary, StandaloneAdapter } from "./adapters";
  */
 export function summaryFromServices(services: Service[]): ServicesSummary {
   return { attention: services.filter((s) => s.state === "failed" || s.state === "degraded" || s.state === "restarting").length, updateReady: false };
+}
+
+/** `services_summary` to the sidebar shape: the backend's attention count (needs you + degraded + restarting). Null when the answer is malformed. */
+export function summaryFromSupervisor(v: unknown): ServicesSummary | null {
+  const o = v as Partial<SupSummary> | null;
+  return o && typeof o.attention === "number" && Number.isFinite(o.attention) && o.attention >= 0 ? { attention: o.attention, updateReady: false } : null;
 }
 
 /** Sidebar footer line (design-1111s): "1 service needs attention ›" in preview, otherwise null (keep "Amara ready"). */
