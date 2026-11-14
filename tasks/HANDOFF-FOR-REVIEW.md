@@ -606,3 +606,12 @@ Open: L2 Keychain reads run on async workers (move to spawn_blocking / cache); L
 - Crew compose mount: applied, then reverted before any `docker compose up` after the commit security review (shared token inside a prompt-exposed container; live crew code doesn't read it). Follow-up: per-service derived tokens (0027 amendment).
 - Logged: 0028 Keychain moves (in-app click only, after the Design button), 0029 Weaviate order (n8n credential first; not run).
 - Not checked live: a chat turn's Fast/Deep badge through the app (the dry run now carries the token); watch the router log for 401s from the app.
+
+## 24. Stage E: Phase 8 services supervisor (2026-11-14, IN PROGRESS, code uncommitted)
+
+The plan is `tasks/proposed/phase8-supervisor.md`; Taisun steps are in `tasks/proposed/phase8-live-steps.md`. The supervisor code is in the working tree, not committed: `src-tauri/src/commands/supervisor/*`, plus `service_control.rs`, `service_logs.rs`, `lib.rs`, `bindings*`, `bridge.ts`, `boundTable.ts`, `src-console/standalone/{servicesFromSupervisor.ts,liveAdapter.ts,servicesSummary.ts}` and their tests.
+- It only observes. 15 services are probed every 10 s; `docker` runs read-only (1 batched inspect plus info). Every automatic action sits behind `SUPERVISOR_ACT_ENABLED = false`.
+- The router and Hermes get a manual Restart button (native approval, `launchctl kickstart -k` of the loaded job only).
+- Gates before the fix round: src-tauri 1251/0/6, vitest 2306/9, neuro 21, clean. e2e 783/12/1 (known takes-1111t:80).
+- Security review: PASS, 0 HIGH. The 2 MEDIUMs are latent and only apply with act on: auto-restart during the quit drain, and a drain panic holding the quit. LOWs: log tail O_NOFOLLOW, router config read every tick, 5 s tick stuck, a lazy Full runner, env_clear. A fix round is running.
+- **Resume:** check the fix round finished (`cargo test`, all gates), re-run e2e alone, commit by explicit paths (`git status` shows the list), then update BOARD and this section.
