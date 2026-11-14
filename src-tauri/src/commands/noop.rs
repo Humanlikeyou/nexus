@@ -22,7 +22,7 @@ const BATTERY_MAX_AGE_SECONDS: i64 = 48 * 60 * 60;
 const BATTERY_MAX_FUTURE_SKEW_SECONDS: i64 = 5 * 60;
 const BATTERY_MAX_LOCAL_CONFIRMATION_AGE_SECONDS: i64 = 48 * 60 * 60;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NoopDailyMetric {
     pub day: String,
@@ -41,7 +41,7 @@ pub struct NoopDailyMetric {
     pub resp_rate_bpm: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NoopSleepSession {
     pub day: String,
@@ -127,7 +127,7 @@ fn decode_sleep_stage_minutes(json: Option<&str>) -> Option<SleepStageMinutes> {
     (minutes.in_bed() > 0.0).then_some(minutes)
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NoopBatteryState {
     pub percentage: f64,
@@ -135,7 +135,7 @@ pub struct NoopBatteryState {
     pub observed_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NoopHealthInsight {
     pub metric: String,
@@ -143,7 +143,7 @@ pub struct NoopHealthInsight {
     pub context: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NoopHealthSnapshot {
     pub source: String,
@@ -1139,6 +1139,7 @@ pub fn runtime_health_brief(limit: usize) -> String {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_noop_health_snapshot() -> NoopHealthSnapshot {
     health_snapshot()
 }
@@ -1158,7 +1159,7 @@ const LIVE_HR_TRACE_WINDOW_SECS: i64 = 144;
 const LIVE_HR_TRACE_ROWS: i64 = 144;
 
 /// One heart rate sample. Never log these values.
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HeartSample {
     pub bpm: u16,
@@ -1166,7 +1167,7 @@ pub struct HeartSample {
 }
 
 /// The live heart rate for the Home screen, oldest sample first. Never log this.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LiveHeartRate {
     pub bpm: u16,
@@ -1274,6 +1275,7 @@ pub(crate) fn current_store() -> Option<(String, PathBuf)> {
 
 /// Runs off the main thread: the screen polls this, and NOOP may be holding the store for a moment.
 #[tauri::command]
+#[specta::specta]
 pub async fn live_heart_rate() -> Option<LiveHeartRate> {
     tauri::async_runtime::spawn_blocking(|| {
         let device_id = device_id_from_environment();
@@ -1294,7 +1296,7 @@ const WORKOUT_MAX_ROWS: i64 = 200;
 const HYPNOGRAM_ROWS: i64 = 48;
 
 /// One workout for the Effort screen. `notes` is deliberately not read. Never log these values.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NoopWorkout {
     pub day: String,
@@ -1410,6 +1412,7 @@ pub(crate) fn recent_workouts_live(days: u32) -> Result<Vec<NoopWorkout>, String
 
 /// Recent workouts, newest first. `days` defaults to 14 and is capped at 90.
 #[tauri::command]
+#[specta::specta]
 pub async fn noop_recent_workouts(days: Option<u32>) -> Result<Vec<NoopWorkout>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         recent_workouts_live(days.unwrap_or(WORKOUT_DEFAULT_DAYS))
@@ -1418,7 +1421,7 @@ pub async fn noop_recent_workouts(days: Option<u32>) -> Result<Vec<NoopWorkout>,
     .map_err(|e| format!("NOOP workouts task failed: {e}"))?
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HypnogramSegment {
     /// Unix seconds, clipped to the night window.
@@ -1428,7 +1431,7 @@ pub struct HypnogramSegment {
     pub stage: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Hypnogram {
     /// Local day the night ended on (same as `NoopSleepSession.day`).
@@ -1578,6 +1581,7 @@ fn hypnogram_in(
 /// One night's stage segments. `day` is "YYYY-MM-DD" (the local day the night ended); None means
 /// the latest night. None when the night has no segments.
 #[tauri::command]
+#[specta::specta]
 pub async fn noop_hypnogram(day: Option<String>) -> Result<Option<Hypnogram>, String> {
     if let Some(d) = day.as_deref() {
         NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| "day must be YYYY-MM-DD")?;

@@ -70,7 +70,7 @@ struct PendingHeader {
 }
 
 /// The back-of-head electrode verdict that goes in the trailer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct AuxInfo {
     pub detected: bool,
     pub placement: String,
@@ -316,6 +316,7 @@ pub async fn active_recording_name() -> Option<String> {
 /// Records the back-of-head electrode verdict for the open recording; it lands in the trailer.
 /// Only touches the open file's state: never another file.
 #[tauri::command]
+#[specta::specta]
 pub async fn mark_recording_aux(aux: AuxInfo) -> Result<(), String> {
     if aux.placement != "occipital" {
         return Err("Invalid aux placement".to_string());
@@ -337,6 +338,7 @@ pub async fn mark_recording_aux(aux: AuxInfo) -> Result<(), String> {
 // ── Tauri commands ──────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub async fn start_eeg_recording() -> Result<String, String> {
     let dir = replays_dir();
     crate::app_paths::create_private_dir_all(&dir)
@@ -390,6 +392,7 @@ fn finish_recording<W: Write>(slot: &mut Option<BufWriter<W>>) -> std::io::Resul
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stop_eeg_recording() -> Result<String, String> {
     *RECORDING_ENABLED.lock().await = false;
 

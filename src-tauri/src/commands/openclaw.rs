@@ -46,7 +46,7 @@ pub struct Skill {
     pub content: String,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, specta::Type)]
 pub struct TaskItem {
     pub title: String,
     pub status: String,
@@ -57,7 +57,7 @@ pub struct TaskItem {
     pub venture: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, specta::Type)]
 pub struct ContentPipelineItem {
     pub title: String,
     pub stage: String,
@@ -235,6 +235,7 @@ fn delete_skill_in(dir: &std::path::Path, name: &str) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn read_tasks(workspace_path: Option<String>) -> Result<Vec<TaskItem>, String> {
     let path = read_path(
         &app_workspace(),
@@ -359,6 +360,7 @@ pub(crate) fn parse_tasks_md(content: &str) -> Vec<TaskItem> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn read_content_pipeline(
     workspace_path: Option<String>,
 ) -> Result<Vec<ContentPipelineItem>, String> {

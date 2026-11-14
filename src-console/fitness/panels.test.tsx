@@ -34,7 +34,7 @@ describe("WorkoutsPanel", () => {
     render(<WorkoutsPanel />);
     await screen.findByRole("list", { name: "Workouts" });
     fireEvent.click(screen.getByRole("radio", { name: "3 months" }));
-    await waitFor(() => expect(invoke).toHaveBeenLastCalledWith("noop_recent_workouts", { days: 90 }));
+    await waitFor(() => expect(invoke).toHaveBeenLastCalledWith("noop_recent_workouts", { days: 90 }, undefined));
   });
   it("empty: honest sentence, no numbers", async () => {
     invoke.mockResolvedValue([]);
@@ -80,14 +80,14 @@ describe("SleepDetailPanel", () => {
     expect(screen.getByRole("img", { name: /Time in each sleep stage: Deep 1h 0m/ })).toBeInTheDocument();
     expect(screen.getByText("Stage timeline as text")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /^Time asleep, last 14 nights/ })).toBeInTheDocument();
-    expect(invoke).toHaveBeenCalledWith("noop_hypnogram", { day: null });
+    expect(invoke).toHaveBeenCalledWith("noop_hypnogram", { day: null }, undefined);
   });
   it("picking a night asks for that day", async () => {
     invoke.mockResolvedValue(hypno);
     render(<SleepDetailPanel days={days} />);
     await screen.findByRole("img", { name: /^Sleep stages/ });
     fireEvent.change(screen.getByRole("combobox", { name: "Night to show" }), { target: { value: "2026-11-08" } });
-    await waitFor(() => expect(invoke).toHaveBeenLastCalledWith("noop_hypnogram", { day: "2026-11-08" }));
+    await waitFor(() => expect(invoke).toHaveBeenLastCalledWith("noop_hypnogram", { day: "2026-11-08" }, undefined));
   });
   it("empty: no segments means no chart and an honest line; 14-night card still works from the snapshot", async () => {
     invoke.mockResolvedValue(null);

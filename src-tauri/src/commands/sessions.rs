@@ -15,7 +15,7 @@ static PENDING_BODY_CONTEXT: Mutex<Option<BodyContext>> = Mutex::new(None);
 /// Minimised NOOP context stored on a session. Explicit whitelist: everything else in the
 /// health_snapshot (sources, freshness, appleDaily, battery, recentDays, spo2, skin temp,
 /// steps, ...) is dropped.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct BodyContext {
     #[serde(default)]
     pub today: Option<BodyToday>,
@@ -23,7 +23,7 @@ pub struct BodyContext {
     pub latest_night: Option<BodyNight>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct BodyToday {
     /// The day these values belong to. Absent in older session files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,7 +40,7 @@ pub struct BodyToday {
     pub sleep_total_min: Option<f64>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct BodyNight {
     #[serde(default)]
     pub day: Option<String>,
@@ -205,7 +205,7 @@ pub(crate) fn sessions_dir() -> PathBuf {
     nexus_data_dir().join("sessions")
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SessionSummary {
     pub avg_focus: Option<f64>,
     pub avg_relaxation: Option<f64>,
@@ -249,7 +249,7 @@ impl SessionSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct RecordedSession {
     pub id: String,
     pub device_type: String,
@@ -323,6 +323,7 @@ pub(crate) fn list_sessions_in(dir: &Path, replays: &Path) -> Vec<RecordedSessio
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_session(session: RecordedSession, data: serde_json::Value) -> Result<String, String> {
     save_session_in(&sessions_dir(), session, data)
 }
@@ -374,6 +375,7 @@ pub(crate) fn save_session_in(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_sessions() -> Result<Vec<RecordedSession>, String> {
     let dir = sessions_dir();
     if !dir.exists() {

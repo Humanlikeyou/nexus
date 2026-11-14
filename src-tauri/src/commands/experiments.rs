@@ -43,7 +43,7 @@ const MAX_FILE_BYTES: u64 = 512 * 1024;
 const SIGNIFICANT_P: f64 = 0.05;
 static LOCK: Mutex<()> = Mutex::new(());
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Experiment {
     pub followup_id: i64,
@@ -350,6 +350,7 @@ pub(crate) fn mark_listed(dir: &Path, week_end: &str, ids: &[i64]) -> Result<(),
 /// Called by "Try it this week" right after `followups_add_item` succeeded. `pair` is the
 /// weekly-review finding pair behind the suggestion (None when unknown).
 #[tauri::command]
+#[specta::specta]
 pub async fn experiments_record_start(
     followup_id: i64,
     pair: Option<String>,
@@ -367,6 +368,7 @@ pub async fn experiments_record_start(
 
 /// Stored experiments (read-only).
 #[tauri::command]
+#[specta::specta]
 pub async fn experiments_list() -> Result<Vec<Experiment>, String> {
     blocking(JoinErr::Code("io_error"), move || {
         load(&crate::app_paths::data_dir()).map(|s| s.experiments)

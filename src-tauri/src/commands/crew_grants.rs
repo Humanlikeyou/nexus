@@ -12,7 +12,7 @@ const DURATIONS: [&str; 3] = ["run", "1h", "24h"];
 const DEFAULT_DURATION: &str = "run";
 const CONFIRM_TIMEOUT_S: u64 = 15;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default, specta::Type)]
 pub struct CrewToolGrant {
     #[serde(default)]
     pub enabled: bool,
@@ -35,7 +35,7 @@ pub struct CrewToolGrant {
     pub pending_request: Option<Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, specta::Type)]
 pub struct CrewAuditRow {
     pub id: i64,
     pub at: f64,
@@ -290,6 +290,7 @@ async fn set_gated(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_tool_grant_get(crew_id: String) -> Result<CrewToolGrant, String> {
     if !valid_crew(&crew_id) {
         return Err("Invalid crew name.".into());
@@ -299,6 +300,7 @@ pub async fn crew_tool_grant_get(crew_id: String) -> Result<CrewToolGrant, Strin
 
 /// Taisun's switch. `duration` is "run" (default), "1h" or "24h".
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_tool_grant_set(
     app: tauri::AppHandle,
     crew_id: String,
@@ -310,6 +312,7 @@ pub async fn crew_tool_grant_set(
 
 /// Turning it off needs no dialog (it only removes access).
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_tool_grant_revoke(crew_id: String) -> Result<CrewToolGrant, String> {
     if !valid_crew(&crew_id) {
         return Err("Invalid crew name.".into());
@@ -318,6 +321,7 @@ pub async fn crew_tool_grant_revoke(crew_id: String) -> Result<CrewToolGrant, St
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_tool_audit(
     crew_id: String,
     limit: Option<u32>,

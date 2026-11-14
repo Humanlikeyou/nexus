@@ -36,7 +36,7 @@ const MIN_TESTABLE_BEFORE_DAYS: usize = 3;
 /// How many days before a finished step are looked at (lags 1 to MAX_BEFORE_LAG).
 pub(crate) const MAX_BEFORE_LAG: i64 = 3;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct GoalWeek {
     pub goal_id: String,
@@ -48,7 +48,7 @@ pub struct GoalWeek {
     pub refs: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct StalledGoal {
     pub goal_id: String,
@@ -60,7 +60,7 @@ pub struct StalledGoal {
     pub refs: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CommonCause {
     pub cause: String,
@@ -87,7 +87,7 @@ pub struct CommonCause {
     pub refs: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CommonGoal {
     pub goal_id: String,
@@ -98,7 +98,7 @@ pub struct CommonGoal {
     pub causes: Vec<CommonCause>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct InCommon {
     /// "found" | "nothing_stands_out_yet"
@@ -111,7 +111,7 @@ pub struct InCommon {
     pub skipped_causes: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct GoalProgress {
     pub week_start: String,
@@ -378,6 +378,7 @@ pub(crate) fn goal_progress_in(dir: &Path, week_end: NaiveDate) -> Result<GoalPr
 
 /// `week_end`: a JST day `YYYY-MM-DD` (default today). The week is the 7 days ending then.
 #[tauri::command]
+#[specta::specta]
 pub async fn goal_progress_week(week_end: Option<String>) -> Result<GoalProgress, String> {
     let end = match week_end {
         Some(s) => parse(&s).ok_or_else(|| "bad_week_end".to_string())?,

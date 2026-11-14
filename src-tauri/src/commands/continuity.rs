@@ -411,7 +411,7 @@ pub(crate) fn activity_log_dir() -> PathBuf {
     data_dir().join("activity_log")
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityEntry {
     pub id: String,
@@ -488,6 +488,7 @@ pub fn store_activity_entry(entry: ActivityEntry) -> Result<(), String> {
 /// List recent activity entries. Returns entries from the last 24 hours
 /// or up to `limit` entries, whichever yields more results.
 #[tauri::command]
+#[specta::specta]
 pub fn list_activity_entries(limit: Option<u32>) -> Result<Vec<ActivityEntry>, String> {
     list_activity_entries_in(&activity_log_dir(), limit)
 }

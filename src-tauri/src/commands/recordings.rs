@@ -42,7 +42,7 @@ const INDEX_CACHE_SIZE: usize = 4;
 
 // ── IPC types ───────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordingListItem {
     /// Replay file stem (what the window readers take), or the session id when there is no replay.
@@ -69,7 +69,7 @@ pub struct RecordingListItem {
 
 type Series = Vec<Option<f64>>;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct Bands {
     pub delta: Series,
     pub theta: Series,
@@ -79,7 +79,7 @@ pub struct Bands {
 }
 
 /// Per-step series of a recording (5 s steps). Missing steps are `null`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSamples {
     pub step_secs: u32,
@@ -93,7 +93,7 @@ pub struct SessionSamples {
     pub contact: Option<BTreeMap<String, f64>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSeries {
     pub step_secs: u32,
@@ -102,7 +102,7 @@ pub struct SessionSeries {
     pub calm: Series,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Lane {
     pub channel: String,
@@ -111,7 +111,7 @@ pub struct Lane {
     pub values: Series,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SignalWindow {
     pub start_secs: f64,
@@ -120,7 +120,7 @@ pub struct SignalWindow {
     pub lanes: Vec<Lane>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HeartWindow {
     pub ppg_rate: u32,
@@ -129,14 +129,14 @@ pub struct HeartWindow {
     pub estimate: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MotionEvent {
     pub at_secs: f64,
     pub label: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MotionWindow {
     pub rate: u32,
@@ -144,7 +144,7 @@ pub struct MotionWindow {
     pub events: Vec<MotionEvent>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BodyWindow {
     pub start_secs: f64,
@@ -1264,6 +1264,7 @@ fn to_series_view(s: SessionSamples) -> SessionSeries {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn list_recordings() -> Result<Vec<RecordingListItem>, String> {
     let active = super::replay::active_recording_name().await;
     blocking(JoinErr::Prefix("Task failed: "), move || {
@@ -1280,6 +1281,7 @@ pub async fn list_recordings() -> Result<Vec<RecordingListItem>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn read_recording_window(
     id: String,
     start_secs: f64,
@@ -1299,6 +1301,7 @@ pub async fn read_recording_window(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn read_body_window(
     id: String,
     start_secs: f64,
@@ -1311,6 +1314,7 @@ pub async fn read_body_window(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn recording_series(id: String) -> Result<SessionSeries, String> {
     let active = super::replay::active_recording_name().await;
     blocking(JoinErr::Prefix("Task failed: "), move || {
@@ -1328,6 +1332,7 @@ pub async fn recording_series(id: String) -> Result<SessionSeries, String> {
 
 /// The per-step samples of a saved session's recording, or `None` when it has no replay.
 #[tauri::command]
+#[specta::specta]
 pub async fn get_session_samples(session_id: String) -> Result<Option<SessionSamples>, String> {
     validate_name(&session_id)?;
     let active = super::replay::active_recording_name().await;

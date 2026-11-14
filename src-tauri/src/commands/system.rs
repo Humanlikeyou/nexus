@@ -27,6 +27,7 @@ fn note_reduce_transparency(last: &AtomicU8, now: bool) -> bool {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_reduce_transparency() -> bool {
     let now = read_reduce_transparency();
     note_reduce_transparency(&REDUCE_TRANSPARENCY, now);

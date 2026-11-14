@@ -66,14 +66,14 @@ pub struct NexusRuntimeBridge {
     system_prompts: std::sync::Mutex<HashMap<String, String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 pub struct ChatTurn {
     pub role: String,
     pub content: String,
 }
 
 /// Where the shown tier came from. Never guessed: unknown means no badge.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AmaraTier {
     /// "fast" | "deep" | "claude" (router names).
@@ -84,7 +84,7 @@ pub struct AmaraTier {
 }
 
 /// Where the router says this reply was served, from its response headers (sanitized).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteInfo {
     /// "fast" | "deep" | "claude": the tier that actually answered (`X-Amara-Route`).

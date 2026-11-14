@@ -928,7 +928,7 @@ pub(crate) const MIN_SESSIONS_PER_TRACK: usize = 3;
 /// the sessions folder with no cap; the ranking opens only linked sessions and caps each file).
 const MAX_RANK_SESSION_BYTES: u64 = 32 * 1024 * 1024;
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RankedTrack {
     /// 1-based; equal means share a rank.
@@ -941,7 +941,7 @@ pub struct RankedTrack {
     pub session_ids: Vec<String>,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct UnrankedTrack {
     pub track_id: String,
@@ -951,7 +951,7 @@ pub struct UnrankedTrack {
     pub reason: String,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq, Default)]
+#[derive(Serialize, Clone, Debug, PartialEq, Default, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MeasureRanking {
     /// Best first.
@@ -959,7 +959,7 @@ pub struct MeasureRanking {
     pub not_enough_sessions: Vec<UnrankedTrack>,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackRanking {
     pub min_sessions: usize,
@@ -1549,6 +1549,7 @@ pub async fn hemisync_stats() -> Result<Vec<TrackStats>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn hemisync_ranking() -> Result<TrackRanking, String> {
     let data = crate::app_paths::data_dir();
     blocking(JoinErr::Code("io_error"), move || {

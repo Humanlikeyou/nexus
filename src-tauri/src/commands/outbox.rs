@@ -20,7 +20,7 @@ struct GatewayAck {
     received: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct OutboxStatus {
     pub gateway_online: bool,
     pub queue_depth: u64,
@@ -554,6 +554,7 @@ fn rand_simple() -> f64 {
 // ── Tauri Commands ──────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_outbox_status() -> Result<OutboxStatus, String> {
     tokio::task::spawn_blocking(|| -> Result<OutboxStatus, String> {
         let conn = get_events_db()?;

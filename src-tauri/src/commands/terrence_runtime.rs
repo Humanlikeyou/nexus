@@ -19,7 +19,7 @@ const NEXUS_ACTION_CLOSE: &str = "</nexus_action>";
 const MAX_NEXUS_ACTION_PROTOCOL_CHARS: usize = 4_000;
 const MAX_NEXUS_CONTEXT_PROTOCOL_CHARS: usize = 16_000;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceRuntimeHealth {
     pub runtime: String,
@@ -37,7 +37,7 @@ pub struct TerrenceRuntimeHealth {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceCapability {
     pub name: String,
@@ -45,7 +45,7 @@ pub struct TerrenceCapability {
     pub description: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceInteractionRequest {
     pub message: String,
@@ -66,21 +66,21 @@ pub struct TerrenceInteractionRequest {
 }
 
 /// One background section of a turn (`<tag>text</tag>` in the system message).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AmaraContextSection {
     pub tag: String,
     pub text: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AmaraTurnContext {
     pub sections: Vec<AmaraContextSection>,
     pub item_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceInteraction {
     pub id: String,
@@ -1383,6 +1383,7 @@ fn interaction_failure(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_terrence_runtime_health() -> Result<TerrenceRuntimeHealth, String> {
     let home = hermes_home()?;
     let config = config_text(&home);
@@ -1422,6 +1423,7 @@ pub async fn get_terrence_runtime_health() -> Result<TerrenceRuntimeHealth, Stri
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_terrence_capabilities() -> Result<Vec<TerrenceCapability>, String> {
     let home = hermes_home()?;
     let config = config_text(&home);
@@ -1448,6 +1450,7 @@ fn hermes_router_link(config: &str) -> (bool, String) {
 
 /// Background sections for a turn, for the renderer's injection guard before they reach Hermes.
 #[tauri::command]
+#[specta::specta]
 pub fn prepare_amara_turn(message: String) -> Result<AmaraTurnContext, String> {
     let runtime_context = terrence_context::runtime_context_brief(3_200).unwrap_or_else(|_| {
         terrence_context::RuntimeContextBrief {
@@ -1542,6 +1545,7 @@ pub(crate) async fn navy_local_interaction(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn interact_with_terrence(
     bridge: State<'_, terrence_runtime_bridge::NexusRuntimeBridge>,
     request: TerrenceInteractionRequest,
@@ -1893,7 +1897,7 @@ pub async fn interact_with_terrence(
     Ok(interaction)
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AmaraNoteInput {
     pub conversation_id: String,
@@ -1929,6 +1933,7 @@ fn validate_interaction_source(source: Option<String>) -> Result<Option<String>,
 /// Store an exchange Amara produced outside Hermes (/deliberate through the router), so it stays
 /// in the transcript and in the history the next Hermes turn receives.
 #[tauri::command]
+#[specta::specta]
 pub fn record_amara_interaction(input: AmaraNoteInput) -> Result<TerrenceInteraction, String> {
     let interaction = build_amara_interaction(input)?;
     persist_interaction(&interaction)?;
@@ -1978,6 +1983,7 @@ fn build_amara_interaction(input: AmaraNoteInput) -> Result<TerrenceInteraction,
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_terrence_interactions(
     conversation_id: String,
     limit: Option<u32>,

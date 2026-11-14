@@ -742,6 +742,7 @@ pub async fn get_cost_estimate(
 /// Settings › "Allow Claude". Only this flag crosses the bridge; keys and the rest of the
 /// saved config never do.
 #[tauri::command]
+#[specta::specta]
 pub fn get_allow_claude() -> bool {
     crate::commands::telegram::load_config()
         .allow_claude
@@ -749,6 +750,7 @@ pub fn get_allow_claude() -> bool {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn set_allow_claude(enabled: bool) -> Result<bool, String> {
     crate::commands::telegram::update_config(|c| c.allow_claude = Some(enabled))?;
     Ok(enabled)

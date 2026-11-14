@@ -13,7 +13,7 @@ const MAX_TEXT: usize = 80;
 const MAX_WEATHER_AGE_HOURS: i64 = 3;
 const MAX_GREETING_AGE_HOURS: i64 = 3;
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct HomeWeather {
     pub place: Option<String>,
@@ -32,7 +32,7 @@ struct StoredBrief {
     updated_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HomeBrief {
     pub greeting: Option<String>,
@@ -85,6 +85,7 @@ fn brief_path() -> Option<PathBuf> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn home_brief() -> HomeBrief {
     let read = || {
         // O_NOFOLLOW and limits on the open handle, so the file can't change between check and read.

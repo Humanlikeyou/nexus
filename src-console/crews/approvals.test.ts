@@ -85,7 +85,8 @@ describe("bridge wrappers", () => {
     await decideCrewApproval("a1", true);
     await startCrew("n", "t");
     await startCrew("n", "t", "r1");
-    expect(invoke.mock.calls).toEqual([
+    // Generated bindings pass a trailing `options` (undefined); only name + payload matter.
+    expect(invoke.mock.calls.map((c) => c.slice(0, 2))).toEqual([
       ["crew_list_approvals", { state: "pending" }],
       ["crew_decide_approval", { id: "a1", approve: true }],
       ["crew_start", { name: "n", task: "t", agents: null, retryOf: null }],

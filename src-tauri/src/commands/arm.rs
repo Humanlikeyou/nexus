@@ -82,7 +82,7 @@ fn arm_config_path() -> PathBuf {
 
 // ─── Types ───────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ArmStrategy {
     pub id: String,
     pub name: String,
@@ -144,7 +144,7 @@ pub struct WorkerApiKey {
     pub key: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ArmRiskStatus {
     pub global_capital_deployed: f64,
     pub global_capital_limit: f64,
@@ -156,7 +156,7 @@ pub struct ArmRiskStatus {
     pub risk_index: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct RevenueSummary {
     pub total_revenue: f64,
     pub total_expenses: f64,
@@ -168,7 +168,7 @@ pub struct RevenueSummary {
     pub by_strategy: Vec<StrategyRevenue>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct StrategyRevenue {
     pub strategy_id: String,
     pub strategy_name: String,
@@ -315,6 +315,7 @@ fn save_arm_config_to_disk(config: &ArmConfig) -> Result<(), String> {
 // ─── Strategy CRUD ───────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_list_strategies() -> Result<Vec<ArmStrategy>, String> {
     println!("[arm] list_strategies: status=querying");
     let conn = get_db()?;
@@ -652,6 +653,7 @@ pub async fn arm_poll_revenue(strategy_id: String) -> Result<f64, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_get_revenue_summary(
     from: Option<String>,
     to: Option<String>,
@@ -822,6 +824,7 @@ pub fn arm_update_decision_outcome(
 // ─── Risk Controls ───────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_get_risk_status() -> Result<ArmRiskStatus, String> {
     println!("[arm] get_risk_status: status=computing");
     let conn = get_db()?;

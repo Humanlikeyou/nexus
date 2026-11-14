@@ -17,9 +17,1269 @@ export const commands = {
 	n8nStatus: (options?: InvokeOptions) => __TAURI_INVOKE<N8nStatus_Serialize>("n8n_status", undefined, options),
 	/**  Ends a running turn. True when the turn was found (it then ends with `error{cancelled}`). */
 	amaraTurnCancel: (turnId: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("amara_turn_cancel", { turnId }, options),
+	getReduceTransparency: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("get_reduce_transparency", undefined, options),
+	readGoals: (options?: InvokeOptions) => __TAURI_INVOKE<Goal_Serialize[]>("read_goals", undefined, options),
+	/**  `week_end`: a JST day `YYYY-MM-DD` (default today). The week is the 7 days ending then. */
+	goalProgressWeek: (weekEnd: string | null, options?: InvokeOptions) => __TAURI_INVOKE<GoalProgress_Serialize>("goal_progress_week", { weekEnd }, options),
+	homeBrief: (options?: InvokeOptions) => __TAURI_INVOKE<HomeBrief_Serialize>("home_brief", undefined, options),
+	/**
+	 *  Settings › "Allow Claude". Only this flag crosses the bridge; keys and the rest of the
+	 *  saved config never do.
+	 */
+	getAllowClaude: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("get_allow_claude", undefined, options),
+	setAllowClaude: (enabled: boolean, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("set_allow_claude", { enabled }, options),
+	getOutboxStatus: (options?: InvokeOptions) => __TAURI_INVOKE<OutboxStatus_Serialize>("get_outbox_status", undefined, options),
+	crewTools: (options?: InvokeOptions) => __TAURI_INVOKE<CrewToolInfo[]>("crew_tools", undefined, options),
+	kbStatus: (options?: InvokeOptions) => __TAURI_INVOKE<KbStatus_Serialize>("kb_status", undefined, options),
+	readBusinessLedger: (options?: InvokeOptions) => __TAURI_INVOKE<BusinessLedger_Serialize | null>("read_business_ledger", undefined, options),
+	hemisyncRanking: (options?: InvokeOptions) => __TAURI_INVOKE<TrackRanking>("hemisync_ranking", undefined, options),
+	dailyRange: (from: string, to: string, options?: InvokeOptions) => __TAURI_INVOKE<DailyRange_Serialize>("daily_range", { from, to }, options),
+	dailyRebuild: (options?: InvokeOptions) => __TAURI_INVOKE<DailyBuild>("daily_rebuild", undefined, options),
+	/**  Stored experiments (read-only). */
+	experimentsList: (options?: InvokeOptions) => __TAURI_INVOKE<Experiment_Serialize[]>("experiments_list", undefined, options),
+	/**
+	 *  Called by "Try it this week" right after `followups_add_item` succeeded. `pair` is the
+	 *  weekly-review finding pair behind the suggestion (None when unknown).
+	 */
+	experimentsRecordStart: (followupId: number, pair: string | null, options?: InvokeOptions) => __TAURI_INVOKE<Experiment_Serialize>("experiments_record_start", { followupId, pair }, options),
+	/**
+	 *  List recent activity entries. Returns entries from the last 24 hours
+	 *  or up to `limit` entries, whichever yields more results.
+	 */
+	listActivityEntries: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ActivityEntry_Serialize[]>("list_activity_entries", { limit }, options),
+	readContentPipeline: (workspacePath: string | null, options?: InvokeOptions) => __TAURI_INVOKE<ContentPipelineItem_Serialize[]>("read_content_pipeline", { workspacePath }, options),
+	readTasks: (workspacePath: string | null, options?: InvokeOptions) => __TAURI_INVOKE<TaskItem_Serialize[]>("read_tasks", { workspacePath }, options),
+	armGetRevenueSummary: (from: string | null, to: string | null, options?: InvokeOptions) => __TAURI_INVOKE<RevenueSummary>("arm_get_revenue_summary", { from, to }, options),
+	armGetRiskStatus: (options?: InvokeOptions) => __TAURI_INVOKE<ArmRiskStatus>("arm_get_risk_status", undefined, options),
+	armListStrategies: (options?: InvokeOptions) => __TAURI_INVOKE<ArmStrategy_Serialize[]>("arm_list_strategies", undefined, options),
+	crewDecideApproval: (id: string, approve: boolean, options?: InvokeOptions) => __TAURI_INVOKE<CrewApprovalRow_Serialize>("crew_decide_approval", { id, approve }, options),
+	/**
+	 *  One of "not_configured" (no token), "offline" (unreachable), "degraded"
+	 *  (reachable but unhealthy) or "operational". Never an error: every state is
+	 *  something the UI shows.
+	 */
+	crewHealth: (options?: InvokeOptions) => __TAURI_INVOKE<string>("crew_health", undefined, options),
+	crewList: (options?: InvokeOptions) => __TAURI_INVOKE<CrewInfo_Serialize[]>("crew_list", undefined, options),
+	/**  `state` is "pending" or "decided". */
+	crewListApprovals: (state: string, options?: InvokeOptions) => __TAURI_INVOKE<CrewApprovalRow_Serialize[]>("crew_list_approvals", { state }, options),
+	crewRunSteps: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<CrewRunSteps_Serialize>("crew_run_steps", { id }, options),
+	crewStart: (name: string, task: string, agents: string[] | null, retryOf: string | null, options?: InvokeOptions) => __TAURI_INVOKE<CrewInfo_Serialize>("crew_start", { name, task, agents, retryOf }, options),
+	crewStatus: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<CrewInfo_Serialize>("crew_status", { id }, options),
+	crewStop: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<string>("crew_stop", { id }, options),
+	crewToolAudit: (crewId: string, limit: number | null, before: number | null, options?: InvokeOptions) => __TAURI_INVOKE<CrewAuditRow_Serialize[]>("crew_tool_audit", { crewId, limit, before }, options),
+	crewToolGrantGet: (crewId: string, options?: InvokeOptions) => __TAURI_INVOKE<CrewToolGrant_Serialize>("crew_tool_grant_get", { crewId }, options),
+	/**  Turning it off needs no dialog (it only removes access). */
+	crewToolGrantRevoke: (crewId: string, options?: InvokeOptions) => __TAURI_INVOKE<CrewToolGrant_Serialize>("crew_tool_grant_revoke", { crewId }, options),
+	/**  Taisun's switch. `duration` is "run" (default), "1h" or "24h". */
+	crewToolGrantSet: (crewId: string, tools: string[], duration: string | null, options?: InvokeOptions) => __TAURI_INVOKE<CrewToolGrant_Serialize>("crew_tool_grant_set", { crewId, tools, duration }, options),
+	followupsAddItem: (text: string, due: string | null, next: string | null, options?: InvokeOptions) => __TAURI_INVOKE<FollowupItem_Serialize>("followups_add_item", { text, due, next }, options),
+	followupsAddMutedTopic: (topic: string, until: string | null, options?: InvokeOptions) => __TAURI_INVOKE<MutedTopic_Serialize>("followups_add_muted_topic", { topic, until }, options),
+	followupsDeleteItem: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<null>("followups_delete_item", { id }, options),
+	followupsDeleteMutedTopic: (topic: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("followups_delete_muted_topic", { topic }, options),
+	followupsList: (options?: InvokeOptions) => __TAURI_INVOKE<FollowupLists_Serialize>("followups_list", undefined, options),
+	followupsMarkDone: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<FollowupItem_Serialize>("followups_mark_done", { id }, options),
+	followupsReopenItem: (id: number, options?: InvokeOptions) => __TAURI_INVOKE<FollowupItem_Serialize>("followups_reopen_item", { id }, options),
+	followupsUpdateItem: (id: number, patch: FollowupItemPatch_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<FollowupItem_Serialize>("followups_update_item", { id, patch }, options),
+	connectMuse: (address: string, options?: InvokeOptions) => __TAURI_INVOKE<MuseConnectionState_Serialize>("connect_muse", { address }, options),
+	disconnectMuse: (options?: InvokeOptions) => __TAURI_INVOKE<null>("disconnect_muse", undefined, options),
+	getMuseState: (options?: InvokeOptions) => __TAURI_INVOKE<MuseConnectionState_Serialize>("get_muse_state", undefined, options),
+	scanMuse: (options?: InvokeOptions) => __TAURI_INVOKE<MuseDevice_Serialize[]>("scan_muse", undefined, options),
+	startEegStream: (options?: InvokeOptions) => __TAURI_INVOKE<null>("start_eeg_stream", undefined, options),
+	stopEegStream: (options?: InvokeOptions) => __TAURI_INVOKE<null>("stop_eeg_stream", undefined, options),
+	getNoopHealthSnapshot: (options?: InvokeOptions) => __TAURI_INVOKE<NoopHealthSnapshot_Serialize>("get_noop_health_snapshot", undefined, options),
+	/**  Runs off the main thread: the screen polls this, and NOOP may be holding the store for a moment. */
+	liveHeartRate: (options?: InvokeOptions) => __TAURI_INVOKE<LiveHeartRate | null>("live_heart_rate", undefined, options),
+	/**
+	 *  One night's stage segments. `day` is "YYYY-MM-DD" (the local day the night ended); None means
+	 *  the latest night. None when the night has no segments.
+	 */
+	noopHypnogram: (day: string | null, options?: InvokeOptions) => __TAURI_INVOKE<Hypnogram | null>("noop_hypnogram", { day }, options),
+	/**  Recent workouts, newest first. `days` defaults to 14 and is capped at 90. */
+	noopRecentWorkouts: (days: number | null, options?: InvokeOptions) => __TAURI_INVOKE<NoopWorkout_Serialize[]>("noop_recent_workouts", { days }, options),
+	/**  The per-step samples of a saved session's recording, or `None` when it has no replay. */
+	getSessionSamples: (sessionId: string, options?: InvokeOptions) => __TAURI_INVOKE<SessionSamples_Serialize | null>("get_session_samples", { sessionId }, options),
+	listRecordings: (options?: InvokeOptions) => __TAURI_INVOKE<RecordingListItem_Serialize[]>("list_recordings", undefined, options),
+	readBodyWindow: (id: string, startSecs: number | null, spanSecs: number | null, options?: InvokeOptions) => __TAURI_INVOKE<BodyWindow_Serialize>("read_body_window", { id, startSecs, spanSecs }, options),
+	readRecordingWindow: (id: string, startSecs: number | null, spanSecs: number | null, points: number | null, options?: InvokeOptions) => __TAURI_INVOKE<SignalWindow>("read_recording_window", { id, startSecs, spanSecs, points }, options),
+	recordingSeries: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<SessionSeries>("recording_series", { id }, options),
+	/**
+	 *  Records the back-of-head electrode verdict for the open recording; it lands in the trailer.
+	 *  Only touches the open file's state: never another file.
+	 */
+	markRecordingAux: (aux: AuxInfo_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<null>("mark_recording_aux", { aux }, options),
+	startEegRecording: (options?: InvokeOptions) => __TAURI_INVOKE<string>("start_eeg_recording", undefined, options),
+	stopEegRecording: (options?: InvokeOptions) => __TAURI_INVOKE<string>("stop_eeg_recording", undefined, options),
+	listSessions: (options?: InvokeOptions) => __TAURI_INVOKE<RecordedSession_Serialize[]>("list_sessions", undefined, options),
+	saveSession: (session: RecordedSession_Deserialize, data: Value, options?: InvokeOptions) => __TAURI_INVOKE<string>("save_session", { session, data }, options),
+	approveTerrenceAction: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<TerrenceAction_Serialize>("approve_terrence_action", { id }, options),
+	cancelTerrenceAction: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<TerrenceAction_Serialize>("cancel_terrence_action", { id }, options),
+	listTerrenceActions: (query: TerrenceActionQuery_Deserialize | null, options?: InvokeOptions) => __TAURI_INVOKE<TerrenceAction_Serialize[]>("list_terrence_actions", { query }, options),
+	retryTerrenceAction: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<TerrenceAction_Serialize>("retry_terrence_action", { id }, options),
+	listTerrenceAutomationRuns: (automationId: string | null, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TerrenceAutomationRun_Serialize[]>("list_terrence_automation_runs", { automationId, limit }, options),
+	listTerrenceAutomations: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TerrenceAutomation_Serialize[]>("list_terrence_automations", { limit }, options),
+	correctContextItem: (input: CorrectContextItemInput_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<ContextItem_Serialize>("correct_context_item", { input }, options),
+	deleteContextItem: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("delete_context_item", { id }, options),
+	getTerrenceContextSnapshot: (options?: InvokeOptions) => __TAURI_INVOKE<TerrenceContextSnapshot_Serialize>("get_terrence_context_snapshot", undefined, options),
+	listContextItems: (query: ContextItemQuery_Deserialize | null, options?: InvokeOptions) => __TAURI_INVOKE<ContextItem_Serialize[]>("list_context_items", { query }, options),
+	migrateLegacyTerrenceContext: (options?: InvokeOptions) => __TAURI_INVOKE<LegacyContextMigrationReport>("migrate_legacy_terrence_context", undefined, options),
+	getCurrentTerrencePrioritySnapshot: (options?: InvokeOptions) => __TAURI_INVOKE<TerrencePrioritySnapshot_Serialize>("get_current_terrence_priority_snapshot", undefined, options),
+	listTerrenceDecisions: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TerrenceDecision_Serialize[]>("list_terrence_decisions", { limit }, options),
+	listTerrenceProjects: (query: TerrenceProjectQuery_Deserialize | null, options?: InvokeOptions) => __TAURI_INVOKE<TerrenceProject_Serialize[]>("list_terrence_projects", { query }, options),
+	getTerrenceRuntimeHealth: (options?: InvokeOptions) => __TAURI_INVOKE<TerrenceRuntimeHealth_Serialize>("get_terrence_runtime_health", undefined, options),
+	interactWithTerrence: (request: TerrenceInteractionRequest_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<TerrenceInteraction_Serialize>("interact_with_terrence", { request }, options),
+	listTerrenceCapabilities: (options?: InvokeOptions) => __TAURI_INVOKE<TerrenceCapability[]>("list_terrence_capabilities", undefined, options),
+	listTerrenceInteractions: (conversationId: string, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TerrenceInteraction_Serialize[]>("list_terrence_interactions", { conversationId, limit }, options),
+	/**  Background sections for a turn, for the renderer's injection guard before they reach Hermes. */
+	prepareAmaraTurn: (message: string, options?: InvokeOptions) => __TAURI_INVOKE<AmaraTurnContext>("prepare_amara_turn", { message }, options),
+	/**
+	 *  Store an exchange Amara produced outside Hermes (/deliberate through the router), so it stays
+	 *  in the transcript and in the history the next Hermes turn receives.
+	 */
+	recordAmaraInteraction: (input: AmaraNoteInput_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<TerrenceInteraction_Serialize>("record_amara_interaction", { input }, options),
+	voiceListVoices: (options?: InvokeOptions) => __TAURI_INVOKE<VoiceList>("voice_list_voices", undefined, options),
+	voiceRecentTurns: (n: number | null, options?: InvokeOptions) => __TAURI_INVOKE<Value[]>("voice_recent_turns", { n }, options),
+	/**  Saves the voice for the next start; the panel offers a restart when the loop is running. */
+	voiceSetVoice: (name: string, options?: InvokeOptions) => __TAURI_INVOKE<VoiceList>("voice_set_voice", { name }, options),
+	voiceStart: (options?: InvokeOptions) => __TAURI_INVOKE<VoiceStatus_Serialize>("voice_start", undefined, options),
+	voiceStatus: (options?: InvokeOptions) => __TAURI_INVOKE<VoiceStatus_Serialize>("voice_status", undefined, options),
+	voiceStop: (options?: InvokeOptions) => __TAURI_INVOKE<VoiceStatus_Serialize>("voice_stop", undefined, options),
+	/**  Interrupt what Amara Voice is saying right now; the loop keeps running. Ok(false) = nothing sent. */
+	voiceStopSpeaking: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("voice_stop_speaking", undefined, options),
 };
 
 /* Types */
+export type ActivityEntry = ActivityEntry_Serialize | ActivityEntry_Deserialize;
+
+export type ActivityEntry_Deserialize = {
+	id: string,
+	type: string,
+	name: string,
+	status: string,
+	startedAt: number,
+	completedAt: number,
+	durationMs: number,
+	detail?: string | null,
+	outcome?: string | null,
+};
+
+export type ActivityEntry_Serialize = {
+	id: string,
+	type: string,
+	name: string,
+	status: string,
+	startedAt: number,
+	completedAt: number,
+	durationMs: number,
+	detail: string | null,
+	outcome: string | null,
+};
+
+/**  One background section of a turn (`<tag>text</tag>` in the system message). */
+export type AmaraContextSection = {
+	tag: string,
+	text: string,
+};
+
+export type AmaraNoteInput = AmaraNoteInput_Serialize | AmaraNoteInput_Deserialize;
+
+export type AmaraNoteInput_Deserialize = {
+	conversationId: string,
+	userMessage: string,
+	assistantMessage: string,
+	tier?: AmaraTier | null,
+	durationMs?: number,
+	source?: string | null,
+};
+
+export type AmaraNoteInput_Serialize = {
+	conversationId: string,
+	userMessage: string,
+	assistantMessage: string,
+	tier: AmaraTier | null,
+	durationMs: number,
+	source: string | null,
+};
+
+/**  Where the shown tier came from. Never guessed: unknown means no badge. */
+export type AmaraTier = {
+	/**  "fast" | "deep" | "claude" (router names). */
+	tier: string,
+	reason: string,
+	/**  "hermes_metadata" | "router_log" | "router_dry_run" | "router_reply" */
+	source: string,
+};
+
+export type AmaraTurnContext = {
+	sections: AmaraContextSection[],
+	itemIds: string[],
+};
+
+export type ArmRiskStatus = {
+	global_capital_deployed: number | null,
+	global_capital_limit: number | null,
+	global_daily_pnl: number | null,
+	global_daily_loss_cap: number | null,
+	kill_switch_active: boolean,
+	active_strategies: number,
+	strategies_at_risk: string[],
+	risk_index: number | null,
+};
+
+export type ArmStrategy = ArmStrategy_Serialize | ArmStrategy_Deserialize;
+
+export type ArmStrategy_Deserialize = {
+	id: string,
+	name: string,
+	type: string,
+	status: string,
+	config: Value,
+	capital_limit: number | null,
+	daily_loss_cap: number | null,
+	total_revenue: number | null,
+	total_expenses: number | null,
+	last_health?: string | null,
+	health_status: string,
+	created_at: string,
+	updated_at: string,
+};
+
+export type ArmStrategy_Serialize = {
+	id: string,
+	name: string,
+	type: string,
+	status: string,
+	config: Value,
+	capital_limit: number | null,
+	daily_loss_cap: number | null,
+	total_revenue: number | null,
+	total_expenses: number | null,
+	last_health: string | null,
+	health_status: string,
+	created_at: string,
+	updated_at: string,
+};
+
+/**  The back-of-head electrode verdict that goes in the trailer. */
+export type AuxInfo = AuxInfo_Serialize | AuxInfo_Deserialize;
+
+/**  The back-of-head electrode verdict that goes in the trailer. */
+export type AuxInfo_Deserialize = {
+	detected: boolean,
+	placement: string,
+	detectedBy: string,
+	detectedAt?: string | null,
+};
+
+/**  The back-of-head electrode verdict that goes in the trailer. */
+export type AuxInfo_Serialize = {
+	detected: boolean,
+	placement: string,
+	detectedBy: string,
+	detectedAt?: string,
+};
+
+export type Bands = {
+	delta: (number | null)[],
+	theta: (number | null)[],
+	alpha: (number | null)[],
+	beta: (number | null)[],
+	gamma: (number | null)[],
+};
+
+/**
+ *  Minimised NOOP context stored on a session. Explicit whitelist: everything else in the
+ *  health_snapshot (sources, freshness, appleDaily, battery, recentDays, spo2, skin temp,
+ *  steps, ...) is dropped.
+ */
+export type BodyContext = BodyContext_Serialize | BodyContext_Deserialize;
+
+/**
+ *  Minimised NOOP context stored on a session. Explicit whitelist: everything else in the
+ *  health_snapshot (sources, freshness, appleDaily, battery, recentDays, spo2, skin temp,
+ *  steps, ...) is dropped.
+ */
+export type BodyContext_Deserialize = {
+	today?: BodyToday_Deserialize | null,
+	latest_night?: BodyNight_Deserialize | null,
+};
+
+/**
+ *  Minimised NOOP context stored on a session. Explicit whitelist: everything else in the
+ *  health_snapshot (sources, freshness, appleDaily, battery, recentDays, spo2, skin temp,
+ *  steps, ...) is dropped.
+ */
+export type BodyContext_Serialize = {
+	today: BodyToday_Serialize | null,
+	latest_night: BodyNight_Serialize | null,
+};
+
+export type BodyNight = BodyNight_Serialize | BodyNight_Deserialize;
+
+export type BodyNight_Deserialize = {
+	day?: string | null,
+	total_sleep_min?: number | null,
+	efficiency?: number | null,
+	deep_min?: number | null,
+	rem_min?: number | null,
+	light_min?: number | null,
+};
+
+export type BodyNight_Serialize = {
+	day: string | null,
+	total_sleep_min: number | null,
+	efficiency: number | null,
+	deep_min: number | null,
+	rem_min: number | null,
+	light_min: number | null,
+};
+
+export type BodyToday = BodyToday_Serialize | BodyToday_Deserialize;
+
+export type BodyToday_Deserialize = {
+	/**  The day these values belong to. Absent in older session files. */
+	day?: string | null,
+	recovery?: number | null,
+	hrv?: number | null,
+	rhr?: number | null,
+	strain?: number | null,
+	sleep_total_min?: number | null,
+};
+
+export type BodyToday_Serialize = {
+	/**  The day these values belong to. Absent in older session files. */
+	day?: string,
+	recovery: number | null,
+	hrv: number | null,
+	rhr: number | null,
+	strain: number | null,
+	sleep_total_min: number | null,
+};
+
+export type BodyWindow = BodyWindow_Serialize | BodyWindow_Deserialize;
+
+export type BodyWindow_Deserialize = {
+	startSecs: number | null,
+	endSecs: number | null,
+	heart?: HeartWindow_Deserialize | null,
+	motion?: MotionWindow | null,
+};
+
+export type BodyWindow_Serialize = {
+	startSecs: number | null,
+	endSecs: number | null,
+	heart: HeartWindow_Serialize | null,
+	motion: MotionWindow | null,
+};
+
+export type BusinessLedger = BusinessLedger_Serialize | BusinessLedger_Deserialize;
+
+export type BusinessLedger_Deserialize = {
+	version: number,
+	fx?: FxRate | null,
+	funds?: LedgerFund[],
+	ventures?: LedgerVenture_Deserialize[],
+	fundingRequests?: FundingRequest_Deserialize[],
+	taxFlags?: TaxFlag[],
+	voteRules?: VoteRules | null,
+	revenueTargetJpy?: number | null,
+};
+
+export type BusinessLedger_Serialize = {
+	version: number,
+	fx: FxRate | null,
+	funds: LedgerFund[],
+	ventures: LedgerVenture_Serialize[],
+	fundingRequests: FundingRequest_Serialize[],
+	taxFlags: TaxFlag[],
+	voteRules: VoteRules | null,
+	revenueTargetJpy: number | null,
+};
+
+export type ChatTurn = {
+	role: string,
+	content: string,
+};
+
+export type ChecklistItem = {
+	label: string,
+	done: boolean,
+};
+
+export type CommonCause = {
+	cause: string,
+	/**  The published finding this comes from: its effect and lag, with its adjusted p and confidence. */
+	effect: string,
+	lagDays: number,
+	/**  How many days before each finished-step day this cause was looked at (1 to 3). */
+	beforeLagDays: number,
+	/**  The published finding's own adjusted p (A3), for reference. */
+	findingPAdj: number | null,
+	confidence: number,
+	/**  Before-days (at `before_lag_days`) that have a value for the cause / of those, cause-high. */
+	beforeDaysTested: number,
+	beforeDaysCauseHigh: number,
+	share: number | null,
+	/**  Share of all the finding's cause days that are cause-high. */
+	baseRate: number | null,
+	/**  Exact one-sided binomial P(at least this many cause-high before-days | base rate). */
+	pRaw: number | null,
+	/**  `p_raw` after Benjamini-Hochberg over every goal x finding x lag tested in this run; reported only at 0.05 or less. */
+	pAdj: number | null,
+	causeHighBeforeDays: string[],
+	/**  `daily:<day>` for each cause-high before-day, then the `daily_goal` rows of the finished days. */
+	refs: string[],
+};
+
+export type CommonGoal = CommonGoal_Serialize | CommonGoal_Deserialize;
+
+export type CommonGoal_Deserialize = {
+	goalId: string,
+	title?: string | null,
+	finishedDays: number,
+	/**  The day before each finished-step day (lag 1), ascending. Each cause names its own lag in `before_lag_days`. */
+	beforeDays: string[],
+	causes: CommonCause[],
+};
+
+export type CommonGoal_Serialize = {
+	goalId: string,
+	title: string | null,
+	finishedDays: number,
+	/**  The day before each finished-step day (lag 1), ascending. Each cause names its own lag in `before_lag_days`. */
+	beforeDays: string[],
+	causes: CommonCause[],
+};
+
+export type ContentPipelineItem = ContentPipelineItem_Serialize | ContentPipelineItem_Deserialize;
+
+export type ContentPipelineItem_Deserialize = {
+	title: string,
+	stage: string,
+	content_type: string,
+	notes?: string | null,
+	/**  From a `#venture:<id>` tag (written by the add flow, commands/adds.rs). */
+	venture?: string | null,
+};
+
+export type ContentPipelineItem_Serialize = {
+	title: string,
+	stage: string,
+	content_type: string,
+	notes: string | null,
+	/**  From a `#venture:<id>` tag (written by the add flow, commands/adds.rs). */
+	venture: string | null,
+};
+
+export type ContextItem = ContextItem_Serialize | ContextItem_Deserialize;
+
+export type ContextItemQuery = ContextItemQuery_Serialize | ContextItemQuery_Deserialize;
+
+export type ContextItemQuery_Deserialize = {
+	kinds?: string[] | null,
+	statuses?: string[] | null,
+	includeDeleted?: boolean | null,
+	limit?: number | null,
+};
+
+export type ContextItemQuery_Serialize = {
+	kinds: string[] | null,
+	statuses: string[] | null,
+	includeDeleted: boolean | null,
+	limit: number | null,
+};
+
+export type ContextItem_Deserialize = {
+	id: string,
+	kind: string,
+	title: string,
+	content?: string | null,
+	status: string,
+	confidence: number | null,
+	provenanceSource: string,
+	provenanceRef?: string | null,
+	createdAt: string,
+	updatedAt: string,
+	occurredAt?: string | null,
+	supersedesId?: string | null,
+	deletedAt?: string | null,
+	metadata: Value,
+};
+
+export type ContextItem_Serialize = {
+	id: string,
+	kind: string,
+	title: string,
+	content: string | null,
+	status: string,
+	confidence: number | null,
+	provenanceSource: string,
+	provenanceRef: string | null,
+	createdAt: string,
+	updatedAt: string,
+	occurredAt: string | null,
+	supersedesId: string | null,
+	deletedAt: string | null,
+	metadata: Value,
+};
+
+export type CorrectContextItemInput = CorrectContextItemInput_Serialize | CorrectContextItemInput_Deserialize;
+
+export type CorrectContextItemInput_Deserialize = {
+	originalId: string,
+	replacement: CreateContextItemInput_Deserialize,
+};
+
+export type CorrectContextItemInput_Serialize = {
+	originalId: string,
+	replacement: CreateContextItemInput_Serialize,
+};
+
+export type CreateContextItemInput = CreateContextItemInput_Serialize | CreateContextItemInput_Deserialize;
+
+export type CreateContextItemInput_Deserialize = {
+	kind: string,
+	title: string,
+	content?: string | null,
+	status?: string | null,
+	confidence?: number | null,
+	provenanceSource: string,
+	provenanceRef?: string | null,
+	occurredAt?: string | null,
+	metadata?: Value | null,
+};
+
+export type CreateContextItemInput_Serialize = {
+	kind: string,
+	title: string,
+	content: string | null,
+	status: string | null,
+	confidence: number | null,
+	provenanceSource: string,
+	provenanceRef: string | null,
+	occurredAt: string | null,
+	metadata: Value | null,
+};
+
+/**
+ *  One crew approval request (crew-service `crew_approvals`). Separate from Terrance's action
+ *  ledger (`list_terrence_actions` / `approve_terrence_action`): crew rows never go through those.
+ */
+export type CrewApprovalRow = CrewApprovalRow_Serialize | CrewApprovalRow_Deserialize;
+
+/**
+ *  One crew approval request (crew-service `crew_approvals`). Separate from Terrance's action
+ *  ledger (`list_terrence_actions` / `approve_terrence_action`): crew rows never go through those.
+ */
+export type CrewApprovalRow_Deserialize = {
+	id: string,
+	run_id: string,
+	crew: string,
+	agents?: string[],
+	kind: string,
+	title: string,
+	/**  What this one approval covers (a run asks once, listing every write action it may take). */
+	items?: string[],
+	reason: string,
+	risk: string,
+	requested_at: string,
+	decided_at?: string | null,
+	approved?: boolean | null,
+	decided_by?: string | null,
+};
+
+/**
+ *  One crew approval request (crew-service `crew_approvals`). Separate from Terrance's action
+ *  ledger (`list_terrence_actions` / `approve_terrence_action`): crew rows never go through those.
+ */
+export type CrewApprovalRow_Serialize = {
+	id: string,
+	run_id: string,
+	crew: string,
+	agents: string[],
+	kind: string,
+	title: string,
+	/**  What this one approval covers (a run asks once, listing every write action it may take). */
+	items: string[],
+	reason: string,
+	risk: string,
+	requested_at: string,
+	decided_at: string | null,
+	approved: boolean | null,
+	decided_by: string | null,
+};
+
+export type CrewAuditRow = CrewAuditRow_Serialize | CrewAuditRow_Deserialize;
+
+export type CrewAuditRow_Deserialize = {
+	id: number,
+	at: number | null,
+	actor: string,
+	kind: string,
+	text: string,
+	target?: string | null,
+	exit_code?: number | null,
+	duration_ms?: number | null,
+	checkpoint?: string | null,
+	run_id?: string | null,
+};
+
+export type CrewAuditRow_Serialize = {
+	id: number,
+	at: number | null,
+	actor: string,
+	kind: string,
+	text: string,
+	target: string | null,
+	exit_code: number | null,
+	duration_ms: number | null,
+	checkpoint: string | null,
+	run_id: string | null,
+};
+
+export type CrewHandoffRow = {
+	from: string,
+	to: string,
+	status: string,
+};
+
+export type CrewInfo = CrewInfo_Serialize | CrewInfo_Deserialize;
+
+export type CrewInfo_Deserialize = {
+	id: string,
+	name: string,
+	status: string,
+	agents?: string[],
+	started_at?: string | null,
+	task?: string | null,
+	result?: string | null,
+	finished_at?: string | null,
+	tokens?: number | null,
+	requests?: number | null,
+	cost_usd?: number | null,
+	retry_of?: string | null,
+};
+
+export type CrewInfo_Serialize = {
+	id: string,
+	name: string,
+	status: string,
+	agents: string[],
+	started_at: string | null,
+	task: string | null,
+	result: string | null,
+	finished_at: string | null,
+	tokens: number | null,
+	requests: number | null,
+	cost_usd: number | null,
+	retry_of: string | null,
+};
+
+export type CrewRunSteps = CrewRunSteps_Serialize | CrewRunSteps_Deserialize;
+
+export type CrewRunSteps_Deserialize = {
+	steps?: CrewStepRow_Deserialize[],
+	handoffs?: CrewHandoffRow[],
+};
+
+export type CrewRunSteps_Serialize = {
+	steps: CrewStepRow_Serialize[],
+	handoffs: CrewHandoffRow[],
+};
+
+/**
+ *  One timeline step of a run (crew-service `crew_steps`). Labels are short role/tool names,
+ *  never prompt text.
+ */
+export type CrewStepRow = CrewStepRow_Serialize | CrewStepRow_Deserialize;
+
+/**
+ *  One timeline step of a run (crew-service `crew_steps`). Labels are short role/tool names,
+ *  never prompt text.
+ */
+export type CrewStepRow_Deserialize = {
+	id: number,
+	agent: string,
+	kind: string,
+	label: string,
+	start_ms: number,
+	end_ms: number,
+	status: string,
+	error?: string | null,
+};
+
+/**
+ *  One timeline step of a run (crew-service `crew_steps`). Labels are short role/tool names,
+ *  never prompt text.
+ */
+export type CrewStepRow_Serialize = {
+	id: number,
+	agent: string,
+	kind: string,
+	label: string,
+	start_ms: number,
+	end_ms: number,
+	status: string,
+	error: string | null,
+};
+
+export type CrewToolGrant = CrewToolGrant_Serialize | CrewToolGrant_Deserialize;
+
+export type CrewToolGrant_Deserialize = {
+	enabled?: boolean,
+	tools?: string[],
+	scope_path?: string | null,
+	duration?: string | null,
+	granted_at?: number | null,
+	expires_at?: number | null,
+	granted_by?: string | null,
+	/**  From crew-service: what it is enforcing right now. The UI shows "On" from this only. */
+	enforced_allowlist?: string[],
+	pending_request?: Value | null,
+};
+
+export type CrewToolGrant_Serialize = {
+	enabled: boolean,
+	tools: string[],
+	scope_path: string | null,
+	duration: string | null,
+	granted_at: number | null,
+	expires_at: number | null,
+	granted_by: string | null,
+	/**  From crew-service: what it is enforcing right now. The UI shows "On" from this only. */
+	enforced_allowlist: string[],
+	pending_request: Value | null,
+};
+
+export type CrewToolInfo = {
+	name: string,
+	allowed: boolean,
+};
+
+export type DailyBuild = {
+	days: number,
+	builtAtMs: number,
+	partial: string[],
+};
+
+export type DailyGoalRow = DailyGoalRow_Serialize | DailyGoalRow_Deserialize;
+
+export type DailyGoalRow_Deserialize = {
+	day: string,
+	goalId: string,
+	roadmapStepsDone?: number | null,
+	/**  Always NULL: follow-ups carry no goal id. */
+	followupsClosed?: number | null,
+	sources: { [key in string]: string[] },
+};
+
+export type DailyGoalRow_Serialize = {
+	day: string,
+	goalId: string,
+	roadmapStepsDone: number | null,
+	/**  Always NULL: follow-ups carry no goal id. */
+	followupsClosed: number | null,
+	sources: { [key in string]: string[] },
+};
+
+export type DailyRange = DailyRange_Serialize | DailyRange_Deserialize;
+
+export type DailyRange_Deserialize = {
+	rows: DailyRow_Deserialize[],
+	goals: DailyGoalRow_Deserialize[],
+	builtAtMs: number,
+};
+
+export type DailyRange_Serialize = {
+	rows: DailyRow_Serialize[],
+	goals: DailyGoalRow_Serialize[],
+	builtAtMs: number,
+};
+
+export type DailyRow = DailyRow_Serialize | DailyRow_Deserialize;
+
+export type DailyRow_Deserialize = {
+	day: string,
+	sleepTotalMin?: number | null,
+	hrvMs?: number | null,
+	recovery?: number | null,
+	strain?: number | null,
+	workoutMin?: number | null,
+	museMin?: number | null,
+	focusMean?: number | null,
+	calmMean?: number | null,
+	hemisyncMin?: number | null,
+	hemisyncRatingMean?: number | null,
+	moodMean?: number | null,
+	energyMean?: number | null,
+	checkinTags?: string[] | null,
+	takesShown?: number | null,
+	takesRated?: number | null,
+	takesHelpful?: number | null,
+	followupsClosed?: number | null,
+	/**  Column name (snake_case, as in the table) to the source refs behind its cell. */
+	sources: { [key in string]: string[] },
+};
+
+export type DailyRow_Serialize = {
+	day: string,
+	sleepTotalMin: number | null,
+	hrvMs: number | null,
+	recovery: number | null,
+	strain: number | null,
+	workoutMin: number | null,
+	museMin: number | null,
+	focusMean: number | null,
+	calmMean: number | null,
+	hemisyncMin: number | null,
+	hemisyncRatingMean: number | null,
+	moodMean: number | null,
+	energyMean: number | null,
+	checkinTags: string[] | null,
+	takesShown: number | null,
+	takesRated: number | null,
+	takesHelpful: number | null,
+	followupsClosed: number | null,
+	/**  Column name (snake_case, as in the table) to the source refs behind its cell. */
+	sources: { [key in string]: string[] },
+};
+
+export type DecisionAlternative = DecisionAlternative_Serialize | DecisionAlternative_Deserialize;
+
+export type DecisionAlternative_Deserialize = {
+	label: string,
+	tradeoffs?: string | null,
+};
+
+export type DecisionAlternative_Serialize = {
+	label: string,
+	tradeoffs: string | null,
+};
+
+export type DecisionEvidence = DecisionEvidence_Serialize | DecisionEvidence_Deserialize;
+
+export type DecisionEvidence_Deserialize = {
+	detail: string,
+	source?: string | null,
+	confidence?: number | null,
+};
+
+export type DecisionEvidence_Serialize = {
+	detail: string,
+	source: string | null,
+	confidence: number | null,
+};
+
+export type Experiment = Experiment_Serialize | Experiment_Deserialize;
+
+export type Experiment_Deserialize = {
+	followupId: number,
+	/**  JST day the follow-up was created. */
+	startDay: string,
+	/**  A daily_table column from [`MEASURES`], or None when the source finding had no clear measure. */
+	measure?: string | null,
+	/**  The weekly-review finding pair that produced the suggestion (for traceability). */
+	pair?: string | null,
+};
+
+export type Experiment_Serialize = {
+	followupId: number,
+	/**  JST day the follow-up was created. */
+	startDay: string,
+	/**  A daily_table column from [`MEASURES`], or None when the source finding had no clear measure. */
+	measure: string | null,
+	/**  The weekly-review finding pair that produced the suggestion (for traceability). */
+	pair: string | null,
+};
+
+export type FollowupItem = FollowupItem_Serialize | FollowupItem_Deserialize;
+
+/**  Fields to change. Absent stays as it is; `null` or `""` clears `due` and `next`. */
+export type FollowupItemPatch = FollowupItemPatch_Serialize | FollowupItemPatch_Deserialize;
+
+/**  Fields to change. Absent stays as it is; `null` or `""` clears `due` and `next`. */
+export type FollowupItemPatch_Deserialize = {
+	text?: string | null,
+	due?: string | null,
+	next?: string | null,
+};
+
+/**  Fields to change. Absent stays as it is; `null` or `""` clears `due` and `next`. */
+export type FollowupItemPatch_Serialize = {
+	text: string | null,
+	due: string | null,
+	next: string | null,
+};
+
+export type FollowupItem_Deserialize = {
+	id: number,
+	text: string,
+	added?: string | null,
+	due?: string | null,
+	next?: string | null,
+	notes: string[],
+	lastNudged?: string | null,
+	done?: string | null,
+};
+
+export type FollowupItem_Serialize = {
+	id: number,
+	text: string,
+	added: string | null,
+	due: string | null,
+	next: string | null,
+	notes: string[],
+	lastNudged: string | null,
+	done: string | null,
+};
+
+export type FollowupLists = FollowupLists_Serialize | FollowupLists_Deserialize;
+
+export type FollowupLists_Deserialize = {
+	open: FollowupItem_Deserialize[],
+	/**  Newest first. */
+	recentlyDone: FollowupItem_Deserialize[],
+	muted: MutedTopic_Deserialize[],
+};
+
+export type FollowupLists_Serialize = {
+	open: FollowupItem_Serialize[],
+	/**  Newest first. */
+	recentlyDone: FollowupItem_Serialize[],
+	muted: MutedTopic_Serialize[],
+};
+
+export type FundingRequest = FundingRequest_Serialize | FundingRequest_Deserialize;
+
+export type FundingRequest_Deserialize = {
+	id: string,
+	requester: string,
+	purpose: string,
+	amountJpy?: number | null,
+	status: RequestStatus,
+};
+
+export type FundingRequest_Serialize = {
+	id: string,
+	requester: string,
+	purpose: string,
+	amountJpy: number | null,
+	status: RequestStatus,
+};
+
+export type FxRate = {
+	/**  US dollars per 1 yen, entered by hand. */
+	usdPerJpy: number | null,
+	/**  `YYYY-MM-DD`. */
+	asOf: string,
+};
+
+export type Goal = Goal_Serialize | Goal_Deserialize;
+
+export type GoalProgress = GoalProgress_Serialize | GoalProgress_Deserialize;
+
+export type GoalProgress_Deserialize = {
+	weekStart: string,
+	weekEnd: string,
+	prevWeekStart: string,
+	goals: GoalWeek_Deserialize[],
+	stalled: StalledGoal_Deserialize[],
+	inCommon: InCommon_Deserialize,
+};
+
+export type GoalProgress_Serialize = {
+	weekStart: string,
+	weekEnd: string,
+	prevWeekStart: string,
+	goals: GoalWeek_Serialize[],
+	stalled: StalledGoal_Serialize[],
+	inCommon: InCommon_Serialize,
+};
+
+export type GoalWeek = GoalWeek_Serialize | GoalWeek_Deserialize;
+
+export type GoalWeek_Deserialize = {
+	goalId: string,
+	/**  None when the goal is no longer in the goals store. */
+	title?: string | null,
+	thisWeek: number,
+	prevWeek: number,
+	/**  `daily_goal:<day>:<goal id>` rows behind both counts, ascending. */
+	refs: string[],
+};
+
+export type GoalWeek_Serialize = {
+	goalId: string,
+	/**  None when the goal is no longer in the goals store. */
+	title: string | null,
+	thisWeek: number,
+	prevWeek: number,
+	/**  `daily_goal:<day>:<goal id>` rows behind both counts, ascending. */
+	refs: string[],
+};
+
+export type Goal_Deserialize = {
+	id: string,
+	title: string,
+	category: string,
+	target: number | null,
+	current: number | null,
+	unit: string,
+	deadline?: string | null,
+	created_at: string,
+	updated_at: string,
+};
+
+export type Goal_Serialize = {
+	id: string,
+	title: string,
+	category: string,
+	target: number | null,
+	current: number | null,
+	unit: string,
+	deadline: string | null,
+	created_at: string,
+	updated_at: string,
+};
+
+export type Health = "on_track" | "at_risk" | "off_track" | "done" | "waiting" | "searching";
+
+/**  One heart rate sample. Never log these values. */
+export type HeartSample = {
+	bpm: number,
+	at: number,
+};
+
+export type HeartWindow = HeartWindow_Serialize | HeartWindow_Deserialize;
+
+export type HeartWindow_Deserialize = {
+	ppgRate: number,
+	values: (number | null)[],
+	bpm?: number | null,
+	estimate: boolean,
+};
+
+export type HeartWindow_Serialize = {
+	ppgRate: number,
+	values: (number | null)[],
+	bpm: number | null,
+	estimate: boolean,
+};
+
+export type HomeBrief = HomeBrief_Serialize | HomeBrief_Deserialize;
+
+export type HomeBrief_Deserialize = {
+	greeting?: string | null,
+	weather?: HomeWeather_Deserialize | null,
+	updatedAt?: string | null,
+};
+
+export type HomeBrief_Serialize = {
+	greeting: string | null,
+	weather: HomeWeather_Serialize | null,
+	updatedAt: string | null,
+};
+
+export type HomeWeather = HomeWeather_Serialize | HomeWeather_Deserialize;
+
+export type HomeWeather_Deserialize = {
+	place?: string | null,
+	tempC?: number | null,
+	summary?: string | null,
+	highC?: number | null,
+	lowC?: number | null,
+};
+
+export type HomeWeather_Serialize = {
+	place: string | null,
+	tempC: number | null,
+	summary: string | null,
+	highC: number | null,
+	lowC: number | null,
+};
+
+export type Hypnogram = {
+	/**  Local day the night ended on (same as `NoopSleepSession.day`). */
+	day: string,
+	startedAt: string,
+	endedAt: string,
+	segments: HypnogramSegment[],
+};
+
+export type HypnogramSegment = {
+	/**  Unix seconds, clipped to the night window. */
+	start: number,
+	end: number,
+	/**  "awake" | "light" | "deep" | "rem". */
+	stage: string,
+};
+
+export type InCommon = InCommon_Serialize | InCommon_Deserialize;
+
+export type InCommon_Deserialize = {
+	/**  "found" | "nothing_stands_out_yet" */
+	state: string,
+	/**  Goals with at least 3 finished-step days that were looked at. */
+	goalsConsidered: number,
+	/**  Only goals that have at least one qualifying cause. */
+	goals: CommonGoal_Deserialize[],
+	/**  Presence causes the generic patterns left out because their source failed to load. */
+	skippedCauses: string[],
+};
+
+export type InCommon_Serialize = {
+	/**  "found" | "nothing_stands_out_yet" */
+	state: string,
+	/**  Goals with at least 3 finished-step days that were looked at. */
+	goalsConsidered: number,
+	/**  Only goals that have at least one qualifying cause. */
+	goals: CommonGoal_Serialize[],
+	/**  Presence causes the generic patterns left out because their source failed to load. */
+	skippedCauses: string[],
+};
+
+export type KbState = "running" | "empty" | "not_running" | "error";
+
+export type KbStatus = KbStatus_Serialize | KbStatus_Deserialize;
+
+export type KbStatus_Deserialize = {
+	state: KbState,
+	/**  Embedding model, from the Weaviate collection name (e.g. "nomic-embed-text"). */
+	model?: string | null,
+	docs?: number | null,
+	/**  Fixed, sanitized text only; never raw Verba/gRPC/HTTP output. */
+	detail?: string | null,
+};
+
+export type KbStatus_Serialize = {
+	state: KbState,
+	/**  Embedding model, from the Weaviate collection name (e.g. "nomic-embed-text"). */
+	model: string | null,
+	docs: number | null,
+	/**  Fixed, sanitized text only; never raw Verba/gRPC/HTTP output. */
+	detail: string | null,
+};
+
+export type Lane = {
+	channel: string,
+	/**  `good`, `fair`, `poor` or `none` (too little data). */
+	contact: string,
+	values: (number | null)[],
+};
+
+export type LedgerFund = {
+	name: string,
+	balanceJpy: number,
+};
+
+export type LedgerVenture = LedgerVenture_Serialize | LedgerVenture_Deserialize;
+
+export type LedgerVenture_Deserialize = {
+	id: string,
+	name: string,
+	stage?: string,
+	health: Health,
+	progress?: Progress | null,
+	nextStep?: string | null,
+	note?: string,
+	targetJpy?: number | null,
+	detail?: VentureDetail_Deserialize | null,
+};
+
+export type LedgerVenture_Serialize = {
+	id: string,
+	name: string,
+	stage: string,
+	health: Health,
+	progress: Progress | null,
+	nextStep: string | null,
+	note: string,
+	targetJpy: number | null,
+	detail: VentureDetail_Serialize | null,
+};
+
+export type LegacyContextMigrationReport = {
+	inserted: number,
+	existing: number,
+	skipped: number,
+	migratedAt: string,
+};
+
+/**  The live heart rate for the Home screen, oldest sample first. Never log this. */
+export type LiveHeartRate = {
+	bpm: number,
+	at: number,
+	trace: HeartSample[],
+};
+
+export type MeasureRanking = {
+	/**  Best first. */
+	ranked: RankedTrack[],
+	notEnoughSessions: UnrankedTrack[],
+};
+
+export type Milestone = {
+	label: string,
+	due: string,
+	health: Health,
+};
+
+export type MotionEvent = {
+	atSecs: number | null,
+	label: string,
+};
+
+export type MotionWindow = {
+	rate: number,
+	values: (number | null)[],
+	events: MotionEvent[],
+};
+
+export type MuseConnectionState = MuseConnectionState_Serialize | MuseConnectionState_Deserialize;
+
+export type MuseConnectionState_Deserialize = {
+	connected: boolean,
+	device_name?: string | null,
+	streaming: boolean,
+};
+
+export type MuseConnectionState_Serialize = {
+	connected: boolean,
+	device_name: string | null,
+	streaming: boolean,
+};
+
+export type MuseDevice = MuseDevice_Serialize | MuseDevice_Deserialize;
+
+export type MuseDevice_Deserialize = {
+	name: string,
+	address: string,
+	rssi?: number | null,
+};
+
+export type MuseDevice_Serialize = {
+	name: string,
+	address: string,
+	rssi: number | null,
+};
+
+export type MutedTopic = MutedTopic_Serialize | MutedTopic_Deserialize;
+
+export type MutedTopic_Deserialize = {
+	topic: string,
+	added?: string | null,
+	until?: string | null,
+	/**  False once `until` has passed: Amara no longer treats it as muted. */
+	active: boolean,
+};
+
+export type MutedTopic_Serialize = {
+	topic: string,
+	added: string | null,
+	until: string | null,
+	/**  False once `until` has passed: Amara no longer treats it as muted. */
+	active: boolean,
+};
+
 export type N8nStatus = N8nStatus_Serialize | N8nStatus_Deserialize;
 
 export type N8nStatus_Deserialize = {
@@ -38,9 +1298,966 @@ export type N8nStatus_Serialize = {
 	failures7d: number | null,
 };
 
+export type NextAction = NextAction_Serialize | NextAction_Deserialize;
+
+export type NextAction_Deserialize = {
+	label: string,
+	detail?: string,
+	action?: string,
+};
+
+export type NextAction_Serialize = {
+	label: string,
+	detail: string,
+	action: string,
+};
+
+export type NoopBatteryState = NoopBatteryState_Serialize | NoopBatteryState_Deserialize;
+
+export type NoopBatteryState_Deserialize = {
+	percentage: number | null,
+	charging?: boolean | null,
+	observedAt: string,
+};
+
+export type NoopBatteryState_Serialize = {
+	percentage: number | null,
+	charging: boolean | null,
+	observedAt: string,
+};
+
+export type NoopDailyMetric = NoopDailyMetric_Serialize | NoopDailyMetric_Deserialize;
+
+export type NoopDailyMetric_Deserialize = {
+	day: string,
+	source: string,
+	totalSleepMin?: number | null,
+	efficiency?: number | null,
+	deepMin?: number | null,
+	remMin?: number | null,
+	lightMin?: number | null,
+	restingHr?: number | null,
+	avgHrv?: number | null,
+	recovery?: number | null,
+	strain?: number | null,
+	spo2Pct?: number | null,
+	skinTempDevC?: number | null,
+	respRateBpm?: number | null,
+};
+
+export type NoopDailyMetric_Serialize = {
+	day: string,
+	source: string,
+	totalSleepMin: number | null,
+	efficiency: number | null,
+	deepMin: number | null,
+	remMin: number | null,
+	lightMin: number | null,
+	restingHr: number | null,
+	avgHrv: number | null,
+	recovery: number | null,
+	strain: number | null,
+	spo2Pct: number | null,
+	skinTempDevC: number | null,
+	respRateBpm: number | null,
+};
+
+export type NoopHealthInsight = NoopHealthInsight_Serialize | NoopHealthInsight_Deserialize;
+
+export type NoopHealthInsight_Deserialize = {
+	metric: string,
+	fact: string,
+	context?: string | null,
+};
+
+export type NoopHealthInsight_Serialize = {
+	metric: string,
+	fact: string,
+	context: string | null,
+};
+
+export type NoopHealthSnapshot = NoopHealthSnapshot_Serialize | NoopHealthSnapshot_Deserialize;
+
+export type NoopHealthSnapshot_Deserialize = {
+	source: string,
+	status: string,
+	generatedAt: string,
+	deviceId: string,
+	latestDay?: string | null,
+	/**  Newest day that holds a reading; see [`reading_day`]. `today` may be an empty row. */
+	readingDay?: string | null,
+	dataAgeDays?: number | null,
+	today?: NoopDailyMetric_Deserialize | null,
+	recentDays: NoopDailyMetric_Deserialize[],
+	latestSleep?: NoopSleepSession_Deserialize | null,
+	latestNight?: NoopSleepSession_Deserialize | null,
+	battery?: NoopBatteryState_Deserialize | null,
+	insights: NoopHealthInsight_Deserialize[],
+	message?: string | null,
+};
+
+export type NoopHealthSnapshot_Serialize = {
+	source: string,
+	status: string,
+	generatedAt: string,
+	deviceId: string,
+	latestDay: string | null,
+	/**  Newest day that holds a reading; see [`reading_day`]. `today` may be an empty row. */
+	readingDay: string | null,
+	dataAgeDays: number | null,
+	today: NoopDailyMetric_Serialize | null,
+	recentDays: NoopDailyMetric_Serialize[],
+	latestSleep: NoopSleepSession_Serialize | null,
+	latestNight: NoopSleepSession_Serialize | null,
+	battery: NoopBatteryState_Serialize | null,
+	insights: NoopHealthInsight_Serialize[],
+	message: string | null,
+};
+
+export type NoopSleepSession = NoopSleepSession_Serialize | NoopSleepSession_Deserialize;
+
+export type NoopSleepSession_Deserialize = {
+	day: string,
+	startedAt: string,
+	endedAt: string,
+	durationMin: number | null,
+	efficiency?: number | null,
+	deepMin?: number | null,
+	remMin?: number | null,
+	lightMin?: number | null,
+	awakeMin?: number | null,
+	sessionCount: number,
+	restingHr?: number | null,
+	avgHrv?: number | null,
+};
+
+export type NoopSleepSession_Serialize = {
+	day: string,
+	startedAt: string,
+	endedAt: string,
+	durationMin: number | null,
+	efficiency: number | null,
+	deepMin: number | null,
+	remMin: number | null,
+	lightMin: number | null,
+	awakeMin: number | null,
+	sessionCount: number,
+	restingHr: number | null,
+	avgHrv: number | null,
+};
+
+/**  One workout for the Effort screen. `notes` is deliberately not read. Never log these values. */
+export type NoopWorkout = NoopWorkout_Serialize | NoopWorkout_Deserialize;
+
+/**  One workout for the Effort screen. `notes` is deliberately not read. Never log these values. */
+export type NoopWorkout_Deserialize = {
+	day: string,
+	startedAt: string,
+	endedAt: string,
+	sport: string,
+	durationMin?: number | null,
+	energyKcal?: number | null,
+	avgHr?: number | null,
+	maxHr?: number | null,
+	strain?: number | null,
+	distanceM?: number | null,
+	steps?: number | null,
+	/**  Minutes in zones 1..5 (always five entries), or None when NOOP holds no zone data. */
+	zoneMinutes?: (number | null)[] | null,
+};
+
+/**  One workout for the Effort screen. `notes` is deliberately not read. Never log these values. */
+export type NoopWorkout_Serialize = {
+	day: string,
+	startedAt: string,
+	endedAt: string,
+	sport: string,
+	durationMin: number | null,
+	energyKcal: number | null,
+	avgHr: number | null,
+	maxHr: number | null,
+	strain: number | null,
+	distanceM: number | null,
+	steps: number | null,
+	/**  Minutes in zones 1..5 (always five entries), or None when NOOP holds no zone data. */
+	zoneMinutes: (number | null)[] | null,
+};
+
+export type OutboxStatus = OutboxStatus_Serialize | OutboxStatus_Deserialize;
+
+export type OutboxStatus_Deserialize = {
+	gateway_online: boolean,
+	queue_depth: number,
+	last_delivered_at?: string | null,
+	last_error?: string | null,
+	total_delivered: number,
+	/**  Items older than OUTBOX_EXPIRY_HOURS: kept on disk, never sent. */
+	expired: number,
+};
+
+export type OutboxStatus_Serialize = {
+	gateway_online: boolean,
+	queue_depth: number,
+	last_delivered_at: string | null,
+	last_error: string | null,
+	total_delivered: number,
+	/**  Items older than OUTBOX_EXPIRY_HOURS: kept on disk, never sent. */
+	expired: number,
+};
+
+export type Progress = {
+	done: number,
+	total: number,
+	label: string,
+};
+
+export type RankedTrack = {
+	/**  1-based; equal means share a rank. */
+	rank: number,
+	trackId: string,
+	/**  Sessions that had a value for this measure. */
+	n: number,
+	mean: number | null,
+	/**  Hemi-Sync session ids behind `mean` (each is also a Muse session id). */
+	sessionIds: string[],
+};
+
+export type RecordedSession = RecordedSession_Serialize | RecordedSession_Deserialize;
+
+export type RecordedSession_Deserialize = {
+	id: string,
+	device_type: string,
+	start: string,
+	end: string,
+	duration_secs: number,
+	data_points: number,
+	file_path: string,
+	summary: SessionSummary_Deserialize,
+	/**  NOOP health_snapshot taken at Muse session start. Absent in older session files. */
+	body_context?: BodyContext_Deserialize | null,
+	/**
+	 *  Per-step series from the recording's `.bands.json` sidecar, attached by `list_sessions`
+	 *  when that sidecar already exists. Never saved.
+	 */
+	samples?: SessionSamples_Deserialize | null,
+};
+
+export type RecordedSession_Serialize = {
+	id: string,
+	device_type: string,
+	start: string,
+	end: string,
+	duration_secs: number,
+	data_points: number,
+	file_path: string,
+	summary: SessionSummary_Serialize,
+	/**  NOOP health_snapshot taken at Muse session start. Absent in older session files. */
+	body_context?: BodyContext_Serialize,
+	/**
+	 *  Per-step series from the recording's `.bands.json` sidecar, attached by `list_sessions`
+	 *  when that sidecar already exists. Never saved.
+	 */
+	samples?: SessionSamples_Serialize,
+};
+
+export type RecordingListItem = RecordingListItem_Serialize | RecordingListItem_Deserialize;
+
+export type RecordingListItem_Deserialize = {
+	/**  Replay file stem (what the window readers take), or the session id when there is no replay. */
+	id: string,
+	sessionId?: string | null,
+	replayFile?: string | null,
+	startedAt: string,
+	durationSecs: number,
+	protocol?: string | null,
+	channels: string[],
+	aux?: AuxInfo_Deserialize | null,
+	hasHeart: boolean,
+	hasMotion: boolean,
+	avgFocus?: number | null,
+	avgCalm?: number | null,
+	timeInTarget?: number | null,
+	calmPct?: number | null,
+	/**  `available`, `recording`, `summary-only` or `missing`. */
+	raw: string,
+	sizeBytes?: number | null,
+	/**  `kept` or `expiring` (older than 90 days). Computed only; nothing acts on it. */
+	retention: string,
+};
+
+export type RecordingListItem_Serialize = {
+	/**  Replay file stem (what the window readers take), or the session id when there is no replay. */
+	id: string,
+	sessionId: string | null,
+	replayFile: string | null,
+	startedAt: string,
+	durationSecs: number,
+	protocol: string | null,
+	channels: string[],
+	aux: AuxInfo_Serialize | null,
+	hasHeart: boolean,
+	hasMotion: boolean,
+	avgFocus: number | null,
+	avgCalm: number | null,
+	timeInTarget: number | null,
+	calmPct: number | null,
+	/**  `available`, `recording`, `summary-only` or `missing`. */
+	raw: string,
+	sizeBytes: number | null,
+	/**  `kept` or `expiring` (older than 90 days). Computed only; nothing acts on it. */
+	retention: string,
+};
+
+export type RequestStatus = "open" | "approved" | "denied";
+
+export type RevenueSummary = {
+	total_revenue: number | null,
+	total_expenses: number | null,
+	net_income: number | null,
+	today_revenue: number | null,
+	today_expenses: number | null,
+	week_revenue: number | null,
+	month_revenue: number | null,
+	by_strategy: StrategyRevenue[],
+};
+
+/**  Where the router says this reply was served, from its response headers (sanitized). */
+export type RouteInfo = RouteInfo_Serialize | RouteInfo_Deserialize;
+
+/**  Where the router says this reply was served, from its response headers (sanitized). */
+export type RouteInfo_Deserialize = {
+	/**  "fast" | "deep" | "claude": the tier that actually answered (`X-Amara-Route`). */
+	tier: string,
+	/**  `X-Amara-Model`, else the JSON `model` field. */
+	model?: string | null,
+	/**  `X-Amara-Route-Reason`. */
+	reason?: string | null,
+};
+
+/**  Where the router says this reply was served, from its response headers (sanitized). */
+export type RouteInfo_Serialize = {
+	/**  "fast" | "deep" | "claude": the tier that actually answered (`X-Amara-Route`). */
+	tier: string,
+	/**  `X-Amara-Model`, else the JSON `model` field. */
+	model?: string,
+	/**  `X-Amara-Route-Reason`. */
+	reason?: string,
+};
+
 export type ScreenWeekCount = {
 	/**  "YYYY-MM-DD", the Monday of the JST week. */
 	weekStart: string,
 	screen: string,
 	count: number,
+};
+
+/**  Per-step series of a recording (5 s steps). Missing steps are `null`. */
+export type SessionSamples = SessionSamples_Serialize | SessionSamples_Deserialize;
+
+/**  Per-step series of a recording (5 s steps). Missing steps are `null`. */
+export type SessionSamples_Deserialize = {
+	stepSecs: number,
+	bands: Bands,
+	focus: (number | null)[],
+	calm: (number | null)[],
+	sensors?: { [key in string]: { [key in string]: (number | null)[] } } | null,
+	/**  Contact quality per sensor over the recording, 0-100. */
+	contact?: { [key in string]: number | null } | null,
+};
+
+/**  Per-step series of a recording (5 s steps). Missing steps are `null`. */
+export type SessionSamples_Serialize = {
+	stepSecs: number,
+	bands: Bands,
+	focus: (number | null)[],
+	calm: (number | null)[],
+	sensors?: { [key in string]: { [key in string]: (number | null)[] } },
+	/**  Contact quality per sensor over the recording, 0-100. */
+	contact?: { [key in string]: number | null },
+};
+
+export type SessionSeries = {
+	stepSecs: number,
+	bands: Bands,
+	focus: (number | null)[],
+	calm: (number | null)[],
+};
+
+export type SessionSummary = SessionSummary_Serialize | SessionSummary_Deserialize;
+
+export type SessionSummary_Deserialize = {
+	avg_focus?: number | null,
+	avg_relaxation?: number | null,
+	avg_hr?: number | null,
+	max_hr?: number | null,
+	avg_hrv?: number | null,
+	calm_pct?: number | null,
+	time_in_target_pct?: number | null,
+	/**
+	 *  Scale of `avg_focus` / `avg_relaxation`. New files say 100 (0-100). Absent in older files,
+	 *  which may hold 0-1 scores; those are scaled on read (nothing is rewritten on disk).
+	 */
+	score_scale?: number | null,
+};
+
+export type SessionSummary_Serialize = {
+	avg_focus: number | null,
+	avg_relaxation: number | null,
+	avg_hr: number | null,
+	max_hr: number | null,
+	avg_hrv: number | null,
+	calm_pct: number | null,
+	time_in_target_pct: number | null,
+	/**
+	 *  Scale of `avg_focus` / `avg_relaxation`. New files say 100 (0-100). Absent in older files,
+	 *  which may hold 0-1 scores; those are scaled on read (nothing is rewritten on disk).
+	 */
+	score_scale?: number,
+};
+
+export type SignalWindow = {
+	startSecs: number | null,
+	endSecs: number | null,
+	sampleRate: number,
+	lanes: Lane[],
+};
+
+export type StalledGoal = StalledGoal_Serialize | StalledGoal_Deserialize;
+
+export type StalledGoal_Deserialize = {
+	goalId: string,
+	title: string,
+	/**  None = never (no finished step in the stored history). */
+	lastFinishedDay?: string | null,
+	daysSince?: number | null,
+	/**  The `daily_goal` row of the last finished day (empty for "never"). */
+	refs: string[],
+};
+
+export type StalledGoal_Serialize = {
+	goalId: string,
+	title: string,
+	/**  None = never (no finished step in the stored history). */
+	lastFinishedDay: string | null,
+	daysSince: number | null,
+	/**  The `daily_goal` row of the last finished day (empty for "never"). */
+	refs: string[],
+};
+
+export type StrategyRevenue = {
+	strategy_id: string,
+	strategy_name: string,
+	revenue: number | null,
+	expenses: number | null,
+	net: number | null,
+};
+
+export type TaskItem = TaskItem_Serialize | TaskItem_Deserialize;
+
+export type TaskItem_Deserialize = {
+	title: string,
+	status: string,
+	priority?: string | null,
+	tags: string[],
+	/**  From a `#venture:<id>` tag (written by the add flow, commands/adds.rs). */
+	venture?: string | null,
+};
+
+export type TaskItem_Serialize = {
+	title: string,
+	status: string,
+	priority: string | null,
+	tags: string[],
+	/**  From a `#venture:<id>` tag (written by the add flow, commands/adds.rs). */
+	venture: string | null,
+};
+
+export type TaxFlag = {
+	id: string,
+	label: string,
+	area: string,
+	date: string,
+};
+
+export type TerrenceAction = TerrenceAction_Serialize | TerrenceAction_Deserialize;
+
+export type TerrenceActionQuery = TerrenceActionQuery_Serialize | TerrenceActionQuery_Deserialize;
+
+export type TerrenceActionQuery_Deserialize = {
+	statuses?: string[] | null,
+	limit?: number | null,
+};
+
+export type TerrenceActionQuery_Serialize = {
+	statuses: string[] | null,
+	limit: number | null,
+};
+
+export type TerrenceAction_Deserialize = {
+	id: string,
+	toolId: string,
+	title: string,
+	status: string,
+	requiresApproval: boolean,
+	parameters: Value,
+	conversationId?: string | null,
+	contextItemIds: string[],
+	requestedAt: string,
+	updatedAt: string,
+	approvedAt?: string | null,
+	startedAt?: string | null,
+	completedAt?: string | null,
+	result?: string | null,
+	error?: string | null,
+	retryOfActionId?: string | null,
+	retryAllowed: boolean,
+	summary: string,
+};
+
+export type TerrenceAction_Serialize = {
+	id: string,
+	toolId: string,
+	title: string,
+	status: string,
+	requiresApproval: boolean,
+	parameters: Value,
+	conversationId: string | null,
+	contextItemIds: string[],
+	requestedAt: string,
+	updatedAt: string,
+	approvedAt: string | null,
+	startedAt: string | null,
+	completedAt: string | null,
+	result: string | null,
+	error: string | null,
+	retryOfActionId: string | null,
+	retryAllowed: boolean,
+	summary: string,
+};
+
+export type TerrenceAutomation = TerrenceAutomation_Serialize | TerrenceAutomation_Deserialize;
+
+export type TerrenceAutomationRun = TerrenceAutomationRun_Serialize | TerrenceAutomationRun_Deserialize;
+
+export type TerrenceAutomationRun_Deserialize = {
+	id: string,
+	automationId: string,
+	status: string,
+	triggeredAt: string,
+	completedAt: string,
+	result?: string | null,
+	error?: string | null,
+	deliveryStatus: string,
+	deliveryTarget?: string | null,
+	provenanceSource: string,
+};
+
+export type TerrenceAutomationRun_Serialize = {
+	id: string,
+	automationId: string,
+	status: string,
+	triggeredAt: string,
+	completedAt: string,
+	result: string | null,
+	error: string | null,
+	deliveryStatus: string,
+	deliveryTarget: string | null,
+	provenanceSource: string,
+};
+
+export type TerrenceAutomation_Deserialize = {
+	id: string,
+	source: string,
+	sourceId: string,
+	name: string,
+	trigger: string,
+	enabled: boolean,
+	status: string,
+	nextRunAt?: string | null,
+	lastRunAt?: string | null,
+	lastStatus?: string | null,
+	lastError?: string | null,
+	updatedAt: string,
+};
+
+export type TerrenceAutomation_Serialize = {
+	id: string,
+	source: string,
+	sourceId: string,
+	name: string,
+	trigger: string,
+	enabled: boolean,
+	status: string,
+	nextRunAt: string | null,
+	lastRunAt: string | null,
+	lastStatus: string | null,
+	lastError: string | null,
+	updatedAt: string,
+};
+
+export type TerrenceCapability = {
+	name: string,
+	status: string,
+	description: string,
+};
+
+export type TerrenceContextSnapshot = TerrenceContextSnapshot_Serialize | TerrenceContextSnapshot_Deserialize;
+
+export type TerrenceContextSnapshot_Deserialize = {
+	generatedAt: string,
+	priorities: ContextItem_Deserialize[],
+	activeProjects: ContextItem_Deserialize[],
+	commitments: ContextItem_Deserialize[],
+	recentObservations: ContextItem_Deserialize[],
+};
+
+export type TerrenceContextSnapshot_Serialize = {
+	generatedAt: string,
+	priorities: ContextItem_Serialize[],
+	activeProjects: ContextItem_Serialize[],
+	commitments: ContextItem_Serialize[],
+	recentObservations: ContextItem_Serialize[],
+};
+
+export type TerrenceDecision = TerrenceDecision_Serialize | TerrenceDecision_Deserialize;
+
+export type TerrenceDecision_Deserialize = {
+	id: string,
+	question: string,
+	status: string,
+	constraints: string[],
+	evidence: DecisionEvidence_Deserialize[],
+	alternatives: DecisionAlternative_Deserialize[],
+	recommendation: string,
+	uncertainty?: string | null,
+	decision?: string | null,
+	outcome?: string | null,
+	conversationId?: string | null,
+	contextItemIds: string[],
+	provenanceSource: string,
+	createdAt: string,
+	updatedAt: string,
+	decidedAt?: string | null,
+	outcomeRecordedAt?: string | null,
+};
+
+export type TerrenceDecision_Serialize = {
+	id: string,
+	question: string,
+	status: string,
+	constraints: string[],
+	evidence: DecisionEvidence_Serialize[],
+	alternatives: DecisionAlternative_Serialize[],
+	recommendation: string,
+	uncertainty: string | null,
+	decision: string | null,
+	outcome: string | null,
+	conversationId: string | null,
+	contextItemIds: string[],
+	provenanceSource: string,
+	createdAt: string,
+	updatedAt: string,
+	decidedAt: string | null,
+	outcomeRecordedAt: string | null,
+};
+
+export type TerrenceInteraction = TerrenceInteraction_Serialize | TerrenceInteraction_Deserialize;
+
+export type TerrenceInteractionRequest = TerrenceInteractionRequest_Serialize | TerrenceInteractionRequest_Deserialize;
+
+export type TerrenceInteractionRequest_Deserialize = {
+	message: string,
+	conversationId: string,
+	hermesSessionId?: string | null,
+	/**  The visible conversation so far (already guarded/compressed by the renderer). */
+	history?: ChatTurn[],
+	/**  Composer Deep toggle: sends `/deep` to the router through Hermes. */
+	deep?: boolean,
+	/**  Context sections from `prepare_amara_turn`, after the renderer's injection guard. */
+	context?: AmaraContextSection[],
+	/**  `item_ids` from `prepare_amara_turn` (recorded on the interaction). */
+	contextItemIds?: string[],
+};
+
+export type TerrenceInteractionRequest_Serialize = {
+	message: string,
+	conversationId: string,
+	hermesSessionId: string | null,
+	/**  The visible conversation so far (already guarded/compressed by the renderer). */
+	history: ChatTurn[],
+	/**  Composer Deep toggle: sends `/deep` to the router through Hermes. */
+	deep: boolean,
+	/**  Context sections from `prepare_amara_turn`, after the renderer's injection guard. */
+	context: AmaraContextSection[],
+	/**  `item_ids` from `prepare_amara_turn` (recorded on the interaction). */
+	contextItemIds: string[],
+};
+
+export type TerrenceInteraction_Deserialize = {
+	id: string,
+	conversationId: string,
+	hermesSessionId?: string | null,
+	runtime: string,
+	model: string,
+	provider: string,
+	status: string,
+	userMessage: string,
+	assistantMessage?: string | null,
+	error?: string | null,
+	startedAt: string,
+	completedAt: string,
+	durationMs: number,
+	contextItemIds?: string[],
+	actionId?: string | null,
+	runtimeProfile?: string,
+	/**  Fast/Deep as the Amara Router decided it; None = unknown (no badge). */
+	tier?: AmaraTier | null,
+	/**  Where the interaction came from (e.g. "home"); None for old rows and Hermes turns. */
+	source?: string | null,
+	/**  Router-reported route (headers), also on failed turns; None when the router sent none. */
+	route?: RouteInfo_Deserialize | null,
+};
+
+export type TerrenceInteraction_Serialize = {
+	id: string,
+	conversationId: string,
+	hermesSessionId: string | null,
+	runtime: string,
+	model: string,
+	provider: string,
+	status: string,
+	userMessage: string,
+	assistantMessage: string | null,
+	error: string | null,
+	startedAt: string,
+	completedAt: string,
+	durationMs: number,
+	contextItemIds: string[],
+	actionId: string | null,
+	runtimeProfile: string,
+	/**  Fast/Deep as the Amara Router decided it; None = unknown (no badge). */
+	tier: AmaraTier | null,
+	/**  Where the interaction came from (e.g. "home"); None for old rows and Hermes turns. */
+	source?: string,
+	/**  Router-reported route (headers), also on failed turns; None when the router sent none. */
+	route?: RouteInfo_Serialize,
+};
+
+export type TerrencePriority = TerrencePriority_Serialize | TerrencePriority_Deserialize;
+
+export type TerrencePrioritySnapshot = TerrencePrioritySnapshot_Serialize | TerrencePrioritySnapshot_Deserialize;
+
+export type TerrencePrioritySnapshot_Deserialize = {
+	id: string,
+	generatedAt: string,
+	items: TerrencePriority_Deserialize[],
+};
+
+export type TerrencePrioritySnapshot_Serialize = {
+	id: string,
+	generatedAt: string,
+	items: TerrencePriority_Serialize[],
+};
+
+export type TerrencePriority_Deserialize = {
+	rank: number,
+	sourceKind: string,
+	sourceId: string,
+	title: string,
+	sourceStatus: string,
+	score: number,
+	confidence: number | null,
+	reasons: string[],
+	contextItemIds: string[],
+	actionId?: string | null,
+};
+
+export type TerrencePriority_Serialize = {
+	rank: number,
+	sourceKind: string,
+	sourceId: string,
+	title: string,
+	sourceStatus: string,
+	score: number,
+	confidence: number | null,
+	reasons: string[],
+	contextItemIds: string[],
+	actionId: string | null,
+};
+
+export type TerrenceProject = TerrenceProject_Serialize | TerrenceProject_Deserialize;
+
+export type TerrenceProjectMilestone = TerrenceProjectMilestone_Serialize | TerrenceProjectMilestone_Deserialize;
+
+export type TerrenceProjectMilestone_Deserialize = {
+	title: string,
+	status: string,
+	dueAt?: string | null,
+};
+
+export type TerrenceProjectMilestone_Serialize = {
+	title: string,
+	status: string,
+	dueAt: string | null,
+};
+
+export type TerrenceProjectQuery = TerrenceProjectQuery_Serialize | TerrenceProjectQuery_Deserialize;
+
+export type TerrenceProjectQuery_Deserialize = {
+	statuses?: string[] | null,
+	limit?: number | null,
+};
+
+export type TerrenceProjectQuery_Serialize = {
+	statuses: string[] | null,
+	limit: number | null,
+};
+
+export type TerrenceProject_Deserialize = {
+	id: string,
+	title: string,
+	objective: string,
+	currentState: string,
+	status: string,
+	milestones: TerrenceProjectMilestone_Deserialize[],
+	nextAction?: string | null,
+	blockers: string[],
+	dependencies: string[],
+	contextItemIds: string[],
+	provenanceSource: string,
+	createdAt: string,
+	updatedAt: string,
+	completedAt?: string | null,
+};
+
+export type TerrenceProject_Serialize = {
+	id: string,
+	title: string,
+	objective: string,
+	currentState: string,
+	status: string,
+	milestones: TerrenceProjectMilestone_Serialize[],
+	nextAction: string | null,
+	blockers: string[],
+	dependencies: string[],
+	contextItemIds: string[],
+	provenanceSource: string,
+	createdAt: string,
+	updatedAt: string,
+	completedAt: string | null,
+};
+
+export type TerrenceRuntimeHealth = TerrenceRuntimeHealth_Serialize | TerrenceRuntimeHealth_Deserialize;
+
+export type TerrenceRuntimeHealth_Deserialize = {
+	runtime: string,
+	/**  Hermes's `model.base_url` is the Amara Router, so Fast/Deep tiers can be known. */
+	routedViaRouter?: boolean,
+	status: string,
+	model: string,
+	provider: string,
+	gatewayRunning: boolean,
+	telegramStatus: string,
+	activeSchedules: number,
+	configuredToolsets: string[],
+	checkedAt: string,
+	detail?: string | null,
+};
+
+export type TerrenceRuntimeHealth_Serialize = {
+	runtime: string,
+	/**  Hermes's `model.base_url` is the Amara Router, so Fast/Deep tiers can be known. */
+	routedViaRouter: boolean,
+	status: string,
+	model: string,
+	provider: string,
+	gatewayRunning: boolean,
+	telegramStatus: string,
+	activeSchedules: number,
+	configuredToolsets: string[],
+	checkedAt: string,
+	detail: string | null,
+};
+
+export type TrackRanking = {
+	minSessions: number,
+	/**  Which Muse summary field "focus" and "calm" use (decision 0020). */
+	focusField: string,
+	calmField: string,
+	focus: MeasureRanking,
+	calm: MeasureRanking,
+	rating: MeasureRanking,
+};
+
+export type UnrankedTrack = {
+	trackId: string,
+	n: number,
+	sessionIds: string[],
+	/**  Always "not enough sessions". */
+	reason: string,
+};
+
+export type Value = null | boolean | number | string | Value[] | { [key in string]: Value };
+
+export type VentureDetail = VentureDetail_Serialize | VentureDetail_Deserialize;
+
+export type VentureDetail_Deserialize = {
+	headline?: string,
+	checklist?: ChecklistItem[],
+	milestones?: Milestone[],
+	nextActions?: NextAction_Deserialize[],
+	budgetUsedJpy?: number | null,
+	fundJpy?: number | null,
+	openVotes?: number,
+};
+
+export type VentureDetail_Serialize = {
+	headline: string,
+	checklist: ChecklistItem[],
+	milestones: Milestone[],
+	nextActions: NextAction_Serialize[],
+	budgetUsedJpy: number | null,
+	fundJpy: number | null,
+	openVotes: number,
+};
+
+export type VoiceList = {
+	voices: string[],
+	current: string,
+};
+
+export type VoiceStatus = VoiceStatus_Serialize | VoiceStatus_Deserialize;
+
+export type VoiceStatus_Deserialize = {
+	installed: boolean,
+	running: boolean,
+	pid?: number | null,
+	/**  loading | idle | listening | heard | thinking | speaking | error | stopped | not_installed */
+	state: string,
+	/**  Seconds since logs/state last changed */
+	state_age_s?: number | null,
+	voice: string,
+	rss_mb?: number | null,
+	/**  Installed as a LaunchAgent (`amara install`); start/stop then go through launchd */
+	launchd: boolean,
+	dir: string,
+};
+
+export type VoiceStatus_Serialize = {
+	installed: boolean,
+	running: boolean,
+	pid: number | null,
+	/**  loading | idle | listening | heard | thinking | speaking | error | stopped | not_installed */
+	state: string,
+	/**  Seconds since logs/state last changed */
+	state_age_s: number | null,
+	voice: string,
+	rss_mb: number | null,
+	/**  Installed as a LaunchAgent (`amara install`); start/stop then go through launchd */
+	launchd: boolean,
+	dir: string,
+};
+
+export type VoteRules = {
+	needed: number,
 };

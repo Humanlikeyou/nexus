@@ -18,7 +18,7 @@ const TIMEOUT: Duration = Duration::from_secs(3);
 pub const KNOWN_CREW_TOOLS: [&str; 2] = ["kb_query", "memory_query"];
 const ALLOWLIST_KEY: &str = "CREW_ALLOWED_TOOLS";
 
-#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum KbState {
     Running,
@@ -27,7 +27,7 @@ pub enum KbState {
     Error,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, specta::Type)]
 pub struct KbStatus {
     pub state: KbState,
     /// Embedding model, from the Weaviate collection name (e.g. "nomic-embed-text").
@@ -48,7 +48,7 @@ impl KbStatus {
     }
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, specta::Type)]
 pub struct CrewToolInfo {
     pub name: String,
     pub allowed: bool,
@@ -59,6 +59,7 @@ fn loopback_url(port: u16) -> String {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn kb_status() -> Result<KbStatus, String> {
     let client =
         super::shared::http::builder(super::shared::http::HttpSpec::loopback().timeout(TIMEOUT))
@@ -195,6 +196,7 @@ fn stack_dir() -> Option<PathBuf> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn crew_tools() -> Result<Vec<CrewToolInfo>, String> {
     let stack = stack_dir().ok_or_else(|| CREW_TOOLS_UNAVAILABLE.to_string())?;
     crew_tools_at(&stack, &stack.join(CREW_TOOLS_FILE), current_uid())

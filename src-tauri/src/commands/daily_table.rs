@@ -124,7 +124,7 @@ pub(crate) struct Inputs {
 
 type Sources = BTreeMap<String, Vec<String>>;
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DailyRow {
     pub day: String,
@@ -149,7 +149,7 @@ pub struct DailyRow {
     pub sources: Sources,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DailyGoalRow {
     pub day: String,
@@ -160,7 +160,7 @@ pub struct DailyGoalRow {
     pub sources: Sources,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DailyBuild {
     pub days: u32,
@@ -168,7 +168,7 @@ pub struct DailyBuild {
     pub partial: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DailyRange {
     pub rows: Vec<DailyRow>,
@@ -889,6 +889,7 @@ fn check_rebuild_gap(stored_ms: Option<i64>, now: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn daily_rebuild() -> Result<DailyBuild, String> {
     blocking(JoinErr::Plain, || {
         let dir = crate::app_paths::data_dir();
@@ -899,6 +900,7 @@ pub async fn daily_rebuild() -> Result<DailyBuild, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn daily_range(from: String, to: String) -> Result<DailyRange, String> {
     validate_range(&from, &to)?;
     blocking(JoinErr::Plain, move || {

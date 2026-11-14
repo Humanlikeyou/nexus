@@ -11,7 +11,7 @@ fn goals_path() -> PathBuf {
     nexus_data_dir().join("goals.json")
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Goal {
     pub id: String,
     pub title: String,
@@ -25,6 +25,7 @@ pub struct Goal {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn read_goals() -> Result<Vec<Goal>, String> {
     let path = goals_path();
     if !path.exists() {

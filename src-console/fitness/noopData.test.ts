@@ -21,7 +21,7 @@ describe("loadWorkouts", () => {
   it("live rows, asks for the chosen days", async () => {
     invoke.mockResolvedValue([{ day: "2026-11-10" }]);
     expect((await loadWorkouts(30)).state).toBe("live");
-    expect(invoke).toHaveBeenCalledWith("noop_recent_workouts", { days: 30 });
+    expect(invoke).toHaveBeenCalledWith("noop_recent_workouts", { days: 30 }, undefined);
   });
   it("no rows is empty", async () => { invoke.mockResolvedValue([]); expect(await loadWorkouts(7)).toEqual({ state: "empty" }); });
   it("no store is unwired, a failed read is an error, a bad payload is an error", async () => {
@@ -44,9 +44,9 @@ describe("loadHypnogram", () => {
   it("live, with the day passed through (null for the latest night)", async () => {
     invoke.mockResolvedValue({ day: "2026-11-10", startedAt: "", endedAt: "", segments: [{ start: 1, end: 2, stage: "deep" }] });
     expect((await loadHypnogram("2026-11-10")).state).toBe("live");
-    expect(invoke).toHaveBeenCalledWith("noop_hypnogram", { day: "2026-11-10" });
+    expect(invoke).toHaveBeenCalledWith("noop_hypnogram", { day: "2026-11-10" }, undefined);
     await loadHypnogram();
-    expect(invoke).toHaveBeenLastCalledWith("noop_hypnogram", { day: null });
+    expect(invoke).toHaveBeenLastCalledWith("noop_hypnogram", { day: null }, undefined);
   });
   it("null or no segments is empty; failures map like workouts", async () => {
     invoke.mockResolvedValueOnce(null);

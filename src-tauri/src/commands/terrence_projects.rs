@@ -13,7 +13,7 @@ const MAX_LIST_ITEMS: usize = 12;
 const PROJECT_STATUSES: &[&str] = &["active", "blocked", "paused", "completed", "archived"];
 const MILESTONE_STATUSES: &[&str] = &["pending", "active", "blocked", "completed"];
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceProjectMilestone {
     pub title: String,
@@ -21,7 +21,7 @@ pub struct TerrenceProjectMilestone {
     pub due_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceProject {
     pub id: String,
@@ -56,7 +56,7 @@ pub struct UpsertTerrenceProjectInput {
     pub provenance_source: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceProjectQuery {
     pub statuses: Option<Vec<String>>,
@@ -394,6 +394,7 @@ pub fn upsert_terrence_project(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_terrence_projects(
     query: Option<TerrenceProjectQuery>,
 ) -> Result<Vec<TerrenceProject>, String> {

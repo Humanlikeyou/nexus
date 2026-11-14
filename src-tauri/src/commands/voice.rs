@@ -248,7 +248,7 @@ pub(crate) fn tail_turns(path: &Path, n: usize) -> Vec<serde_json::Value> {
 
 // ---------- commands ----------
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 pub struct VoiceStatus {
     pub installed: bool,
     pub running: bool,
@@ -292,6 +292,7 @@ fn status_for(p: &VoicePaths) -> VoiceStatus {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn voice_status() -> Result<VoiceStatus, String> {
     blocking(JoinErr::Prefix("voice task failed: "), || {
         Ok(status_for(&voice_paths()))
@@ -488,6 +489,7 @@ pub(crate) fn stop_speaking_with(
 
 /// Interrupt what Amara Voice is saying right now; the loop keeps running. Ok(false) = nothing sent.
 #[tauri::command]
+#[specta::specta]
 pub async fn voice_stop_speaking() -> Result<bool, String> {
     blocking(JoinErr::Prefix("voice task failed: "), || {
         let p = voice_paths();
@@ -501,6 +503,7 @@ pub async fn voice_stop_speaking() -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn voice_start() -> Result<VoiceStatus, String> {
     blocking(JoinErr::Prefix("voice task failed: "), || {
         let p = voice_paths();
@@ -512,6 +515,7 @@ pub async fn voice_start() -> Result<VoiceStatus, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn voice_stop() -> Result<VoiceStatus, String> {
     blocking(JoinErr::Prefix("voice task failed: "), || {
         let p = voice_paths();
@@ -522,6 +526,7 @@ pub async fn voice_stop() -> Result<VoiceStatus, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn voice_recent_turns(n: Option<usize>) -> Result<Vec<serde_json::Value>, String> {
     blocking(JoinErr::Prefix("voice task failed: "), move || {
         Ok(tail_turns(&voice_paths().turns_file(), n.unwrap_or(20)))
@@ -529,13 +534,14 @@ pub async fn voice_recent_turns(n: Option<usize>) -> Result<Vec<serde_json::Valu
     .await
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, specta::Type)]
 pub struct VoiceList {
     pub voices: Vec<String>,
     pub current: String,
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn voice_list_voices() -> Result<VoiceList, String> {
     blocking(JoinErr::Prefix("voice task failed: "), || {
         let p = voice_paths();
@@ -549,6 +555,7 @@ pub async fn voice_list_voices() -> Result<VoiceList, String> {
 
 /// Saves the voice for the next start; the panel offers a restart when the loop is running.
 #[tauri::command]
+#[specta::specta]
 pub async fn voice_set_voice(name: String) -> Result<VoiceList, String> {
     blocking(JoinErr::Prefix("voice task failed: "), move || {
         let p = voice_paths();

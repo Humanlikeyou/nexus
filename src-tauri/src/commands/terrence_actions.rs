@@ -60,7 +60,7 @@ pub struct TerrenceTool {
     pub parameters: Vec<TerrenceToolParameter>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceAction {
     pub id: String,
@@ -93,7 +93,7 @@ pub struct CreateTerrenceActionInput {
     pub context_item_ids: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceActionQuery {
     pub statuses: Option<Vec<String>>,
@@ -1641,6 +1641,7 @@ pub fn request_terrence_action(input: CreateTerrenceActionInput) -> Result<Terre
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_terrence_actions(
     query: Option<TerrenceActionQuery>,
 ) -> Result<Vec<TerrenceAction>, String> {
@@ -2001,6 +2002,7 @@ fn verify_unchanged(conn: &Connection, id: &str, shown_fingerprint: &str) -> Res
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn approve_terrence_action(
     app: tauri::AppHandle,
     id: String,
@@ -2096,12 +2098,14 @@ fn retry_action_in(conn: &Connection, id: &str) -> Result<TerrenceAction, String
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn retry_terrence_action(id: String) -> Result<TerrenceAction, String> {
     let id = clean_required(&id, "Amara action ID", 120)?;
     retry_action_in(&action_db()?, &id)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn cancel_terrence_action(id: String) -> Result<TerrenceAction, String> {
     let id = clean_required(&id, "Amara action ID", 120)?;
     update_action_status(

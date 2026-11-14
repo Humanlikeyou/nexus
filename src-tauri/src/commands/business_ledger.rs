@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 const MAX_LEDGER_BYTES: u64 = 1024 * 1024;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FxRate {
     /// US dollars per 1 yen, entered by hand.
@@ -18,14 +18,14 @@ pub struct FxRate {
     pub as_of: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LedgerFund {
     pub name: String,
     pub balance_jpy: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
     pub done: u32,
@@ -33,14 +33,14 @@ pub struct Progress {
     pub label: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ChecklistItem {
     pub label: String,
     pub done: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Milestone {
     pub label: String,
@@ -48,7 +48,7 @@ pub struct Milestone {
     pub health: Health,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NextAction {
     pub label: String,
@@ -58,7 +58,7 @@ pub struct NextAction {
     pub action: String,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum Health {
     OnTrack,
@@ -69,7 +69,7 @@ pub enum Health {
     Searching,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VentureDetail {
     #[serde(default)]
@@ -86,7 +86,7 @@ pub struct VentureDetail {
     pub open_votes: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LedgerVenture {
     pub id: String,
@@ -102,7 +102,7 @@ pub struct LedgerVenture {
     pub detail: Option<VentureDetail>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum RequestStatus {
     Open,
@@ -110,7 +110,7 @@ pub enum RequestStatus {
     Denied,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FundingRequest {
     pub id: String,
@@ -120,7 +120,7 @@ pub struct FundingRequest {
     pub status: RequestStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxFlag {
     pub id: String,
@@ -129,13 +129,13 @@ pub struct TaxFlag {
     pub date: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VoteRules {
     pub needed: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BusinessLedger {
     pub version: u32,
@@ -248,6 +248,7 @@ pub(crate) fn read_ledger_in(data_dir: &Path) -> Result<Option<BusinessLedger>, 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn read_business_ledger() -> Result<Option<BusinessLedger>, String> {
     let dir = crate::app_paths::data_dir();
     tokio::task::spawn_blocking(move || read_ledger_in(&dir))

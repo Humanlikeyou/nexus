@@ -244,7 +244,7 @@ async fn get_or_init_adapter() -> Result<btleplug::platform::Adapter, String> {
     Ok(adapter)
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct MuseDevice {
     pub name: String,
     pub address: String,
@@ -287,7 +287,7 @@ pub enum OptionalEvent {
     Ppg(PpgSample),
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct MuseConnectionState {
     pub connected: bool,
     pub device_name: Option<String>,
@@ -295,6 +295,7 @@ pub struct MuseConnectionState {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn scan_muse(app: AppHandle) -> Result<Vec<MuseDevice>, String> {
     println!("[muse] scan: status=starting");
     emit_muse_state(&app, BleState::Scanning).await;
@@ -392,6 +393,7 @@ pub async fn scan_muse(app: AppHandle) -> Result<Vec<MuseDevice>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn connect_muse(app: AppHandle, address: String) -> Result<MuseConnectionState, String> {
     println!("[muse] connect: target_id={address}");
     // Supersede any disconnect that began earlier, then wait out a detached teardown
@@ -676,6 +678,7 @@ async fn bounded<F: std::future::Future<Output = Result<(), String>>>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn disconnect_muse(app: AppHandle) -> Result<(), String> {
     println!("[muse] disconnect: status=starting");
     let started_under = bump_conn_gen();
@@ -785,6 +788,7 @@ where
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
     println!("[muse] eeg_stream: status=starting");
     super::sessions::begin_body_context_capture();
@@ -1057,6 +1061,7 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stop_eeg_stream(app: AppHandle) -> Result<(), String> {
     println!("[muse] eeg_stream: status=stopping");
     let mut streaming = MUSE_STREAMING.lock().await;
@@ -1083,6 +1088,7 @@ pub async fn stop_eeg_stream(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_muse_state() -> Result<MuseConnectionState, String> {
     let (streaming, stored) = lock_streaming_then_stored(&MUSE_STREAMING, &MUSE_PERIPHERAL).await;
 

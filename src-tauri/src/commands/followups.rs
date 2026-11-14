@@ -40,7 +40,7 @@ const ERR_STORAGE: &str = "storage_error";
 /// One read-change-rename at a time within the app.
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FollowupItem {
     pub id: i64,
@@ -53,7 +53,7 @@ pub struct FollowupItem {
     pub done: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MutedTopic {
     pub topic: String,
@@ -63,7 +63,7 @@ pub struct MutedTopic {
     pub active: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FollowupLists {
     pub open: Vec<FollowupItem>,
@@ -73,14 +73,16 @@ pub struct FollowupLists {
 }
 
 /// Fields to change. Absent stays as it is; `null` or `""` clears `due` and `next`.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FollowupItemPatch {
     #[serde(default)]
     pub text: Option<String>,
     #[serde(default, deserialize_with = "present")]
+    #[specta(type = Option<String>)]
     pub due: Option<Option<String>>,
     #[serde(default, deserialize_with = "present")]
+    #[specta(type = Option<String>)]
     pub next: Option<Option<String>>,
 }
 
@@ -833,12 +835,14 @@ async fn delete_muted_gated(gate: &impl Gate, store: Store, topic: String) -> Re
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn followups_list() -> Result<FollowupLists, String> {
     let store = Store::home()?;
     off_thread(move || store.list(today())).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn followups_add_item(
     app: tauri::AppHandle,
     text: String,
@@ -849,6 +853,7 @@ pub async fn followups_add_item(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn followups_update_item(
     app: tauri::AppHandle,
     id: i64,
@@ -858,21 +863,25 @@ pub async fn followups_update_item(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn followups_mark_done(app: tauri::AppHandle, id: i64) -> Result<FollowupItem, String> {
     mark_done_gated(&NativeGate(app), Store::home()?, id, today()).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn followups_reopen_item(app: tauri::AppHandle, id: i64) -> Result<FollowupItem, String> {
     reopen_gated(&NativeGate(app), Store::home()?, id).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn followups_delete_item(app: tauri::AppHandle, id: i64) -> Result<(), String> {
     delete_item_gated(&NativeGate(app), Store::home()?, id).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn followups_add_muted_topic(
     app: tauri::AppHandle,
     topic: String,
@@ -882,6 +891,7 @@ pub async fn followups_add_muted_topic(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn followups_delete_muted_topic(
     app: tauri::AppHandle,
     topic: String,

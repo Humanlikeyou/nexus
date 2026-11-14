@@ -68,7 +68,7 @@ struct CrewStopResponse {
     stopped: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]
 pub struct CrewInfo {
     pub id: String,
     pub name: String,
@@ -94,7 +94,7 @@ pub struct CrewInfo {
 
 /// One timeline step of a run (crew-service `crew_steps`). Labels are short role/tool names,
 /// never prompt text.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, specta::Type)]
 pub struct CrewStepRow {
     pub id: i64,
     pub agent: String,
@@ -107,14 +107,14 @@ pub struct CrewStepRow {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, specta::Type)]
 pub struct CrewHandoffRow {
     pub from: String,
     pub to: String,
     pub status: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, specta::Type)]
 pub struct CrewRunSteps {
     #[serde(default)]
     pub steps: Vec<CrewStepRow>,
@@ -139,7 +139,7 @@ pub struct CrewStartRequest {
 
 /// One crew approval request (crew-service `crew_approvals`). Separate from Terrance's action
 /// ledger (`list_terrence_actions` / `approve_terrence_action`): crew rows never go through those.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, specta::Type)]
 pub struct CrewApprovalRow {
     pub id: String,
     pub run_id: String,
@@ -163,6 +163,7 @@ pub struct CrewApprovalRow {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_list() -> Result<Vec<CrewInfo>, String> {
     let client = reqwest::Client::new();
     let resp = client
@@ -188,6 +189,7 @@ const CREW_OUTBOUND_BLOCKED: &str =
     "Local only right now. Crews can reach the internet, so I haven't started one.";
 
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_start(
     name: String,
     task: String,
@@ -227,6 +229,7 @@ pub async fn crew_start(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_status(id: String) -> Result<CrewInfo, String> {
     let client = reqwest::Client::new();
     let resp = client
@@ -249,6 +252,7 @@ pub async fn crew_status(id: String) -> Result<CrewInfo, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_run_steps(id: String) -> Result<CrewRunSteps, String> {
     if !valid_run_id(&id) {
         return Err("Invalid crew run id.".to_string());
@@ -273,6 +277,7 @@ pub async fn crew_run_steps(id: String) -> Result<CrewRunSteps, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_stop(id: String) -> Result<String, String> {
     let client = reqwest::Client::new();
     let resp = client
@@ -445,6 +450,7 @@ async fn decide_gated(
 
 /// `state` is "pending" or "decided".
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_list_approvals(state: String) -> Result<Vec<CrewApprovalRow>, String> {
     if state != "pending" && state != "decided" {
         return Err("Invalid approval state.".to_string());
@@ -453,6 +459,7 @@ pub async fn crew_list_approvals(state: String) -> Result<Vec<CrewApprovalRow>, 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_decide_approval(
     app: tauri::AppHandle,
     id: String,
@@ -465,6 +472,7 @@ pub async fn crew_decide_approval(
 /// (reachable but unhealthy) or "operational". Never an error: every state is
 /// something the UI shows.
 #[tauri::command]
+#[specta::specta]
 pub async fn crew_health() -> Result<String, String> {
     if crew_token().is_err() {
         return Ok("not_configured".to_string());
