@@ -205,9 +205,6 @@ services:
       CREW_SERVICE_HOST: "0.0.0.0"
       CREW_SERVICE_PORT: "8400"
       CREW_SERVICE_TOKEN: ${CREW_SERVICE_TOKEN:?set CREW_SERVICE_TOKEN in .env}
-      # Per-launch token as a second accepted credential (static X-Crew-Token stays valid).
-      CREW_ACCEPT_LAUNCH_TOKEN: "1"
-      CREW_LAUNCH_TOKEN_FILE: /run/amara/launch_token
       CREW_MAX_TASK_CHARS: ${CREW_MAX_TASK_CHARS:-4000}
       CREW_MAX_CONCURRENT: ${CREW_MAX_CONCURRENT:-1}
       CREW_RUN_TIMEOUT_SECONDS: ${CREW_RUN_TIMEOUT_SECONDS:-900}
@@ -237,9 +234,6 @@ services:
       # Telemetry off
       CREWAI_DISABLE_TELEMETRY: "true"
       OTEL_SDK_DISABLED: "true"
-    # The app's run dir (launch_token), read-only. Mount the directory so the per-launch rename is seen.
-    volumes:
-      - ${HOME}/Library/Application Support/com.taisun.nexus/run:/run/amara:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8400/health"]
       interval: 15s
