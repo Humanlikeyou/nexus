@@ -412,6 +412,11 @@ export const setAllowClaude = (enabled: boolean): Promise<boolean> => bound.setA
 export const getOutboundAllowed = (): Promise<boolean> => bound.outboundGet();
 export const setOutboundAllowed = (enabled: boolean): Promise<boolean> => bound.outboundSet(enabled);
 
+/** Keys: which file-backed keys are in a file, the Keychain, both or neither (names and flags only, never values).
+ *  `migrateKeyToKeychain` is gated off (`disabled:`), asks in a native dialog, copies and verifies, and never deletes the file. */
+export const keychainImportReview = (): Promise<import("./bindings.gen").ImportRow[]> => bound.keychainImportReview();
+export const migrateKeyToKeychain = (name: string): Promise<import("./bindings.gen").MigrateResult> => bound.keychainMigrateOne(name);
+
 /** Amara Voice (commands/voice.rs). */
 export const getVoiceStatus = (): Promise<VoiceStatus> => bound.voiceStatus() as Promise<VoiceStatus>;
 export const startVoice = (): Promise<VoiceStatus> => bound.voiceStart() as Promise<VoiceStatus>;

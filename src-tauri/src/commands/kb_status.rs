@@ -6,6 +6,7 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use zeroize::Zeroizing;
 
 /// Fixed loopback endpoints; deliberately not configurable (no env/URL override).
 const KB_HOST: &str = "127.0.0.1";
@@ -17,6 +18,11 @@ const TIMEOUT: Duration = Duration::from_secs(3);
 /// Tools the crew service implements (stack/crew-service/main.py).
 pub const KNOWN_CREW_TOOLS: [&str; 2] = ["kb_query", "memory_query"];
 const ALLOWLIST_KEY: &str = "CREW_ALLOWED_TOOLS";
+/// Optional Keychain item (`com.taisun.nexus.weaviate_api_key`). Absent = anonymous Weaviate,
+/// exactly as before. Present = `Authorization: Bearer` on Weaviate calls only (never Verba:
+/// Verba's own API takes no key; it authenticates to Weaviate with WEAVIATE_API_KEY_VERBA).
+const WEAVIATE_KEY_NAME: &str = "weaviate_api_key";
+const WEAVIATE_KEY_MAX_BYTES: usize = 512;
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -65,12 +71,53 @@ pub async fn kb_status() -> Result<KbStatus, String> {
         super::shared::http::builder(super::shared::http::HttpSpec::loopback().timeout(TIMEOUT))
             .build()
             .map_err(|_| "kb status client failed".to_string())?;
-    Ok(kb_status_at(
+    let key = read_weaviate_key(&super::keychain::MacKeychain);
+    Ok(kb_status_with_key(
         &client,
         &loopback_url(VERBA_PORT),
         &loopback_url(WEAVIATE_PORT),
+        key.as_deref().map(String::as_str),
     )
     .await)
+}
+
+/// The Weaviate key from the Keychain, or None (not set, unreadable, empty, oversize, non-UTF-8).
+/// Never logs the value; an unreadable Keychain is reported as fixed text only.
+fn read_weaviate_key(kc: &dyn super::keychain::Keychain) -> Option<Zeroizing<String>> {
+    match kc.get(&super::keychain::service_for(WEAVIATE_KEY_NAME)) {
+        Ok(v) if v.len() <= WEAVIATE_KEY_MAX_BYTES => String::from_utf8(v)
+            .ok()
+            .map(|s| Zeroizing::new(s.trim().to_string()))
+            .filter(|s| !s.is_empty()),
+        Ok(_) => None,
+        Err(super::keychain::KeychainError::NotFound) => None,
+        Err(_) => {
+            eprintln!("[kb_status] keychain unavailable for the vector store key");
+            None
+        }
+    }
+}
+
+/// `Authorization: Bearer <key>` (marked sensitive) when `key` is set AND `base` is a loopback
+/// URL; otherwise None. The key is never sent off this Mac.
+fn weaviate_auth(base: &str, key: Option<&str>) -> Option<reqwest::header::HeaderValue> {
+    let key = key.filter(|k| !k.is_empty())?;
+    if !super::loopback_http::is_loopback_url(base) {
+        return None;
+    }
+    let mut v = reqwest::header::HeaderValue::from_str(&format!("Bearer {key}")).ok()?;
+    v.set_sensitive(true);
+    Some(v)
+}
+
+fn with_auth(
+    rb: reqwest::RequestBuilder,
+    auth: &Option<reqwest::header::HeaderValue>,
+) -> reqwest::RequestBuilder {
+    match auth {
+        Some(h) => rb.header(reqwest::header::AUTHORIZATION, h.clone()),
+        None => rb,
+    }
 }
 
 /// "VERBA_Embedding_nomic_embed_text" → "nomic-embed-text".
@@ -82,7 +129,18 @@ fn embedding_model(classes: &[String]) -> Option<String> {
         .map(|m| m.replace('_', "-"))
 }
 
+#[cfg(test)]
 async fn kb_status_at(client: &reqwest::Client, verba: &str, weaviate: &str) -> KbStatus {
+    kb_status_with_key(client, verba, weaviate, None).await
+}
+
+async fn kb_status_with_key(
+    client: &reqwest::Client,
+    verba: &str,
+    weaviate: &str,
+    key: Option<&str>,
+) -> KbStatus {
+    let auth = weaviate_auth(weaviate, key);
     // 1. Verba health.
     let resp = match client.get(format!("{verba}/api/health")).send().await {
         Ok(r) => r,
@@ -107,7 +165,10 @@ async fn kb_status_at(client: &reqwest::Client, verba: &str, weaviate: &str) -> 
     }
 
     // 2. Weaviate (read-only): collections, then the document count if any.
-    let classes: Vec<String> = match client.get(format!("{weaviate}/v1/schema")).send().await {
+    let classes: Vec<String> = match with_auth(client.get(format!("{weaviate}/v1/schema")), &auth)
+        .send()
+        .await
+    {
         Ok(r) if r.status().is_success() => r
             .json::<serde_json::Value>()
             .await
@@ -128,7 +189,7 @@ async fn kb_status_at(client: &reqwest::Client, verba: &str, weaviate: &str) -> 
     };
     let model = embedding_model(&classes);
     let docs = if classes.iter().any(|c| c == "VERBA_DOCUMENTS") {
-        match document_count(client, weaviate).await {
+        match document_count(client, weaviate, &auth).await {
             Some(n) => n,
             None => {
                 return KbStatus {
@@ -156,11 +217,14 @@ async fn kb_status_at(client: &reqwest::Client, verba: &str, weaviate: &str) -> 
     }
 }
 
-async fn document_count(client: &reqwest::Client, weaviate: &str) -> Option<u64> {
+async fn document_count(
+    client: &reqwest::Client,
+    weaviate: &str,
+    auth: &Option<reqwest::header::HeaderValue>,
+) -> Option<u64> {
     let body =
         serde_json::json!({ "query": "{ Aggregate { VERBA_DOCUMENTS { meta { count } } } }" });
-    let v: serde_json::Value = client
-        .post(format!("{weaviate}/v1/graphql"))
+    let v: serde_json::Value = with_auth(client.post(format!("{weaviate}/v1/graphql")), auth)
         .json(&body)
         .send()
         .await
@@ -581,6 +645,165 @@ mod tests {
             assert_eq!(crew_tools_at(&d, &p, me()).unwrap(), vec![], "{body:?}");
         }
         let _ = std::fs::remove_dir_all(d);
+    }
+
+    // ── Weaviate API key ────────────────────────────────────────────────────
+
+    const KEY_SENTINEL: &str = "SENTINEL-weaviate-key-9d2e-do-not-leak";
+
+    /// Mock that records the raw request head (lower-cased) per request.
+    async fn recording_mock(
+        routes: Vec<(&'static str, u16, &'static str)>,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let log = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let routes = routes.clone();
+                let log = log.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]).to_lowercase();
+                    let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+                    log.lock().unwrap().push(req);
+                    let (status, body) = routes
+                        .iter()
+                        .find(|(p, _, _)| *p == path)
+                        .map(|(_, s, b)| (*s, *b))
+                        .unwrap_or((404, "{}"));
+                    let resp = format!(
+                        "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        (format!("http://{addr}"), seen)
+    }
+
+    fn kb_routes() -> Vec<(&'static str, u16, &'static str)> {
+        vec![
+            ("/api/health", 200, ALIVE),
+            (
+                "/v1/schema",
+                200,
+                r#"{"classes":[{"class":"VERBA_DOCUMENTS"}]}"#,
+            ),
+            (
+                "/v1/graphql",
+                200,
+                r#"{"data":{"Aggregate":{"VERBA_DOCUMENTS":[{"meta":{"count":3}}]}}}"#,
+            ),
+        ]
+    }
+
+    fn has_bearer(req: &str) -> bool {
+        req.contains(&format!(
+            "authorization: bearer {}",
+            KEY_SENTINEL.to_lowercase()
+        ))
+    }
+
+    #[tokio::test]
+    async fn key_present_sends_bearer_to_weaviate_only() {
+        let (verba, verba_seen) = recording_mock(kb_routes()).await;
+        let (wv, wv_seen) = recording_mock(kb_routes()).await;
+        let s = kb_status_with_key(&client(), &verba, &wv, Some(KEY_SENTINEL)).await;
+        assert_eq!((s.state, s.docs), (KbState::Running, Some(3)));
+        let wv_reqs = wv_seen.lock().unwrap().clone();
+        // schema + graphql both authenticated
+        assert_eq!(wv_reqs.len(), 2);
+        assert!(wv_reqs.iter().all(|r| has_bearer(r)), "{}", wv_reqs.len());
+        // Verba never sees the key
+        let verba_reqs = verba_seen.lock().unwrap().clone();
+        assert_eq!(verba_reqs.len(), 1);
+        assert!(verba_reqs.iter().all(|r| !r.contains("authorization")));
+        assert!(!serde_json::to_string(&s).unwrap().contains("SENTINEL"));
+    }
+
+    #[tokio::test]
+    async fn key_absent_sends_no_authorization_header() {
+        let (verba, verba_seen) = recording_mock(kb_routes()).await;
+        let (wv, wv_seen) = recording_mock(kb_routes()).await;
+        let s = kb_status_with_key(&client(), &verba, &wv, None).await;
+        assert_eq!((s.state, s.docs), (KbState::Running, Some(3)));
+        for seen in [verba_seen, wv_seen] {
+            assert!(seen
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|r| !r.contains("authorization")));
+        }
+        // empty key counts as absent
+        let (wv2, seen2) = recording_mock(kb_routes()).await;
+        let _ = kb_status_with_key(&client(), &verba, &wv2, Some("")).await;
+        assert!(seen2
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|r| !r.contains("authorization")));
+    }
+
+    #[test]
+    fn non_loopback_base_gets_no_header() {
+        for base in [
+            "http://example.com:8080",
+            "http://127.0.0.1@evil.example:8080",
+            "http://weaviate:8080",
+            "not a url",
+        ] {
+            assert!(weaviate_auth(base, Some(KEY_SENTINEL)).is_none(), "{base}");
+        }
+        for base in ["http://127.0.0.1:8080", "http://localhost:8080"] {
+            let h = weaviate_auth(base, Some(KEY_SENTINEL)).unwrap();
+            assert!(h.is_sensitive());
+            // Debug output of a sensitive header hides the value.
+            assert!(!format!("{h:?}").contains("SENTINEL"));
+        }
+    }
+
+    #[test]
+    fn keychain_reader_handles_missing_blank_and_set() {
+        use crate::commands::keychain::{service_for, FakeKeychain, Keychain};
+        let kc = FakeKeychain::default();
+        assert!(read_weaviate_key(&kc).is_none());
+        kc.set(&service_for(WEAVIATE_KEY_NAME), b"  \n").unwrap();
+        assert!(read_weaviate_key(&kc).is_none());
+        kc.set(
+            &service_for(WEAVIATE_KEY_NAME),
+            format!("{KEY_SENTINEL}\n").as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(read_weaviate_key(&kc).unwrap().as_str(), KEY_SENTINEL);
+        kc.set(&service_for(WEAVIATE_KEY_NAME), &[b'x'; 600])
+            .unwrap();
+        assert!(read_weaviate_key(&kc).is_none());
+        kc.set(&service_for(WEAVIATE_KEY_NAME), &[0xff, 0xfe])
+            .unwrap();
+        assert!(read_weaviate_key(&kc).is_none());
+    }
+
+    #[tokio::test]
+    async fn rejected_key_returns_fixed_text_without_the_sentinel() {
+        // Weaviate answers 401 and echoes the credential back in the body.
+        let (verba, _) = recording_mock(vec![("/api/health", 200, ALIVE)]).await;
+        let (wv, _) = recording_mock(vec![(
+            "/v1/schema",
+            401,
+            r#"{"error":"bad key SENTINEL-weaviate-key-9d2e-do-not-leak"}"#,
+        )])
+        .await;
+        let s = kb_status_with_key(&client(), &verba, &wv, Some(KEY_SENTINEL)).await;
+        assert_eq!(s.state, KbState::Error);
+        assert_eq!(s.detail.as_deref(), Some("vector store query failed"));
+        assert!(!serde_json::to_string(&s).unwrap().contains("SENTINEL"));
     }
 
     #[test]

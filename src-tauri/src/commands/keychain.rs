@@ -24,6 +24,9 @@ pub(crate) const SECRETS: &[(&str, &str)] = &[
     ("freqtrade_api", "Freqtrade API login"),
     ("coach_keys", "Oura, Hevy, AI coach"),
     ("letta_server_password", "Letta memory password"),
+    ("weaviate_api_key", "Knowledge base (Weaviate) key"),
+    ("n8n_api_key", "n8n API key"),
+    ("crew_service_token", "Crew service token"),
 ];
 
 pub(crate) const N8N_KEY: &str = "n8n_encryption_key";
@@ -171,7 +174,30 @@ pub async fn secrets_status() -> Result<Vec<SecretStatus>, String> {
 /// Replacing a set secret always asks; so does the first set of a `telegram_*` secret (it decides
 /// where health alerts are sent). Other first sets don't.
 pub(crate) fn needs_approval(name: &str, already_set: bool) -> bool {
-    already_set || name.starts_with("telegram_")
+    already_set
+        || name.starts_with("telegram_")
+        || super::keychain_migrate::FILE_BACKED
+            .iter()
+            .any(|(n, _)| *n == name)
+        || name == "weaviate_api_key"
+}
+
+/// Per-name format check for `secret_set`. File-backed credentials are Keychain-first now, so a
+/// malformed value must never be stored: `ha_token` uses the `.env` writer's strict format, the
+/// other service credentials must be printable ASCII with no whitespace (header-safe).
+pub(crate) fn validate_for(name: &str, value: &str) -> Result<(), String> {
+    let ok = match name {
+        "ha_token" => super::ha::valid_new_token(value),
+        "n8n_api_key" | "crew_service_token" | "weaviate_api_key" => {
+            !value.is_empty() && value.bytes().all(|b| b.is_ascii_graphic())
+        }
+        _ => true,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err("value has an invalid format".to_string())
+    }
 }
 
 /// Last 4 characters, for a dialog. Never more.
@@ -202,6 +228,10 @@ pub async fn secret_set(
         return Err("unknown secret".to_string());
     }
     // Replacing a secret that is already set asks Taisun first (native dialog); a first set doesn't.
+    if let Err(e) = validate_for(&name, &value) {
+        value.zeroize();
+        return Err(e);
+    }
     let n = name.clone();
     let existing = tokio::task::spawn_blocking(move || {
         status_with(&MacKeychain).map(|all| all.into_iter().find(|s| s.name == n))
@@ -214,6 +244,11 @@ pub async fn secret_set(
                 (
                     format!("Replace the saved {}", s.label),
                     "The value stored in the Keychain is overwritten. Allow only if you just asked for this.",
+                )
+            } else if !name.starts_with("telegram_") {
+                (
+                    format!("Save the {}", s.label),
+                    "It will be used instead of any copy in a file. Allow only if you just asked for this.",
                 )
             } else {
                 (
@@ -314,7 +349,15 @@ mod tests {
         assert!(needs_approval("telegram_bot_token", false));
         assert!(needs_approval("telegram_chat_id", false));
         assert!(needs_approval("ha_token", true));
-        assert!(!needs_approval("ha_token", false));
+        // First sets of the Keychain-first service credentials ask too (they shadow the file copy).
+        for n in [
+            "ha_token",
+            "n8n_api_key",
+            "crew_service_token",
+            "weaviate_api_key",
+        ] {
+            assert!(needs_approval(n, false), "{n}");
+        }
         assert!(!needs_approval("n8n_encryption_key", false));
         // every telegram_* name in the allowlist is covered
         assert!(SECRETS

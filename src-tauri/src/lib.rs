@@ -359,6 +359,8 @@ pub fn run() {
             // Keychain secrets + n8n key file (write-only; never return a value)
             commands::keychain::secrets_status,
             commands::keychain::secret_set,
+            commands::keychain_migrate::keychain_import_review,
+            commands::keychain_migrate::keychain_migrate_one,
             commands::notify_relay::notify_settings_get,
             commands::notify_relay::notify_settings_set,
             commands::notify_relay::notify_preview,

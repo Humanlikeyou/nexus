@@ -1642,7 +1642,7 @@ pub async fn interact_with_terrence(
 
     // Tier: the router decides. Predict with its dry run on the exact body Hermes will get.
     let body = terrence_runtime_bridge::chat_body(&system, &context, &history, &outgoing);
-    let transport = terrence_runtime_bridge::HttpTransport::default();
+    let transport = terrence_runtime_bridge::HttpTransport::for_router(&router_base);
     let predicted = if routed {
         terrence_runtime_bridge::dry_run_tier(&transport, &router_base, &body).await
     } else {

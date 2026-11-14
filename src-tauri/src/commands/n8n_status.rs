@@ -76,18 +76,37 @@ pub(crate) async fn n8n_healthz(client: &reqwest::Client, timeout: std::time::Du
         .unwrap_or(false)
 }
 
+/// Keychain `n8n_api_key` first, then the file (env ignored; the file must be 0600, regular,
+/// non-empty: the crew token reader's checks).
+fn n8n_api_key() -> Option<String> {
+    super::keychain_migrate::with_live_keychain(|kc| {
+        n8n_api_key_with(kc, &crate::app_paths::data_dir().join(N8N_KEY_FILE))
+    })
+}
+
+pub(crate) fn n8n_api_key_with(
+    kc: &dyn super::keychain::Keychain,
+    file: &std::path::Path,
+) -> Option<String> {
+    super::keychain_migrate::secret_prefer_keychain(
+        kc,
+        "n8n_api_key",
+        |v| Some(v.to_string()),
+        || super::crew::crew_token_from(None, file).ok(),
+    )
+}
+
 /// Never an error: every state is something the UI shows.
 #[tauri::command]
 #[specta::specta]
 pub async fn n8n_status() -> Result<N8nStatus, String> {
-    let client = reqwest::Client::new();
+    let client =
+        super::loopback_http::loopback_client(super::loopback_http::LOOPBACK_CONNECT_TIMEOUT);
     let up = n8n_healthz(&client, std::time::Duration::from_secs(3)).await;
     if !up {
         return Ok(N8nStatus::default());
     }
-    // Reuse the crew token reader: env ignored, file must be 0600, regular, non-empty.
-    let key =
-        super::crew::crew_token_from(None, &crate::app_paths::data_dir().join(N8N_KEY_FILE)).ok();
+    let key = n8n_api_key();
     let (mut workflows, mut failures7d) = (None, None);
     if let Some(key) = key {
         workflows = get_json(&client, &format!("/api/v1/workflows?limit={PAGE}"), &key)

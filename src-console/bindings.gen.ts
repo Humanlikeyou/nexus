@@ -190,6 +190,12 @@ export const commands = {
 	notifySettingsGet: (options?: InvokeOptions) => __TAURI_INVOKE<RelayView_Serialize>("notify_settings_get", undefined, options),
 	/**  Write-only. Returns nothing; the value is zeroized after the Keychain write. */
 	secretSet: (name: string, value: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("secret_set", { name, value }, options),
+	keychainImportReview: (options?: InvokeOptions) => __TAURI_INVOKE<ImportRow[]>("keychain_import_review", undefined, options),
+	/**
+	 *  Click-only. Refuses while the gate is closed, then asks in the native dialog; the dialog names
+	 *  the key (never a value) and says the file stays as it is.
+	 */
+	keychainMigrateOne: (name: string, options?: InvokeOptions) => __TAURI_INVOKE<MigrateResult>("keychain_migrate_one", { name }, options),
 	backupNow: (options?: InvokeOptions) => __TAURI_INVOKE<BackupRunResult>("backup_now", undefined, options),
 	backupSettingsSet: (patch: BackupSettingsPatch_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<BackupSettings_Serialize>("backup_settings_set", { patch }, options),
 	notifySettingsSet: (patch: RelayPatch_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<RelayView_Serialize>("notify_settings_set", { patch }, options),
@@ -2224,6 +2230,15 @@ export type ImportResult = {
 	skipped: number,
 };
 
+export type ImportRow = {
+	name: string,
+	source: ImportSource,
+	/**  False only when a file exists but is unsafe (wrong mode, symlink, not ours, unreadable). */
+	fileModeOk: boolean,
+};
+
+export type ImportSource = "file" | "keychain" | "both" | "none";
+
 export type InCommon = InCommon_Serialize | InCommon_Deserialize;
 
 export type InCommon_Deserialize = {
@@ -2514,6 +2529,11 @@ export type Metrics_Serialize = {
 	calmAvg: number | null,
 	/**  The session summary holds no band powers, so this is always null (never computed here). */
 	bands: Value | null,
+};
+
+export type MigrateResult = {
+	ok: boolean,
+	name: string,
 };
 
 export type Milestone = {

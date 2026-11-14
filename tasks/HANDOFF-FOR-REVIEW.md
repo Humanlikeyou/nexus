@@ -574,3 +574,28 @@ The plan is `tasks/proposed/phase7-hardening.md`. Decisions: 0024 (voice only wh
 - Hermes key rotation (final batch, gated)
 
 **Note for anyone who had outbound on:** the old untagged setting now reads as off. Re-enable it once in Settings and approve.
+
+## 23. Stage D wave 2: Phase 7 harden in place (2026-11-14)
+
+The plan is `tasks/proposed/phase7-hardening.md` (some line refs there are now stale: bare-client list, SECRETS count, and n8n also calls Weaviate directly).
+
+**Built:**
+- D1: n8n_status, outbox (both clients) and the telegram Ollama client use the shared builder. Zero bare `Client::new()` remain in those modules, pinned by source tests. A loopback outbox gateway gets no-proxy/no-redirect; a non-loopback one keeps today's defaults.
+- Router-only client: `terrence_runtime_bridge::HttpTransport` sends `X-Amara-Launch-Token` only when the parsed URL matches the router base and the path is `/amara/*` or `/api/*`. Hermes and `/v1` never get it. `terrence_runtime.rs` builds it with `for_router(&router_base)`, so a saved non-default router URL works. Prerequisite 1 in §22 is done.
+- D4: Keychain-first readers for HA (`ha_token`), n8n (`n8n_api_key`) and crew (`crew_service_token`; env still first), falling back to the file. New commands `keychain_import_review` (names/source/mode flag only) and `keychain_migrate_one` (const `KEYCHAIN_MIGRATE_ENABLED = false`, native approval, copy + verify, never deletes the file, refuses unless the Keychain slot is truly empty). No UI yet (design-questions entry).
+- D8: `kb_status` sends `Authorization: Bearer` to Weaviate only when `weaviate_api_key` is in the Keychain and the base is loopback; no key = unchanged. Proposals: `tasks/proposed/weaviate-apikey-compose.diff`, `weaviate-switchover.md`, `kb-parity.mjs`.
+- D9: voice level feed sends the token as a `Sec-WebSocket-Protocol` subprotocol, behind const `LEVEL_SEND_LAUNCH_TOKEN = false` (tungstenite fails the handshake if the server doesn't echo it). Patch: `tasks/proposed/amara-voice-token.diff` + `.md` (server switch default off).
+
+**Security review:** conditional PASS, 0 HIGH. Fixed with tests: M1 (bad Keychain ha_token now falls to .env), M2 (first set of ha/n8n/crew/weaviate keys now needs approval + per-name format check; one existing assertion that pinned the old no-approval behaviour was replaced), M3 (migrate proceeds only on NotFound), L1 (one-open O_NOFOLLOW secret-file reader, uid + 0600 + 8 KiB cap), L3 (no fail-open default client).
+Open: L2 Keychain reads run on async workers (move to spawn_blocking / cache); L4 non-loopback outbox gateway: Bearer over default redirects/proxy and the /health probe runs while outbound is disabled (pre-existing); L5 voice patch: optional O_NOFOLLOW/uid/mode check on the token file and extra level-feed tests.
+
+**Gates:** src-tauri 1163/0/6, router 131, vitest 2290/9, neuro 21, fmt/clippy/tsc/lint/check:secrets clean. Full e2e alone: 783/12/1 (known takes-1111t:80 [light]).
+
+**Taisun steps / gates (nothing here is switched on):**
+1. Token enforcement: launch the new app once, set router `require_launch_token = true` and restart (decision 0004 steps), then the crew compose diff + `docker compose up -d crew`.
+2. Voice token: apply `amara-voice-token.diff`, restart amara-voice, then a follow-up flips `LEVEL_SEND_LAUNCH_TOKEN`, then set `AMARA_VOICE_REQUIRE_LAUNCH_TOKEN=1`.
+3. Weaviate: needs a decision entry; step 0 is an n8n Header Auth credential + Code-node edits in workflow `eYdwlwZKTMV89z2J` (kb.ingest/kb.query call Weaviate directly), before anonymous access goes off.
+4. Keychain moves: log each move in docs/decisions/; a follow-up flips the const and adds the SecretSheet button after Design answers.
+5. Hermes `API_SERVER_KEY` rotation: final rotation batch only.
+
+**Remaining Stage D:** only the gated items above plus L2/L4/L5. Next stage: E (Phase 8 supervisor).

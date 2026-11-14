@@ -162,6 +162,24 @@ async fn delivery_tick(app: &AppHandle) -> Result<(), String> {
     delivery_tick_with(deps).await
 }
 
+/// The spec for talking to the gateway (OpenClaw, third party: never the launch token).
+/// A loopback gateway (the default) gets no proxy and no redirects, so a call that must stay on the
+/// Mac cannot leave it. A user-configured non-loopback gateway keeps the client defaults it always
+/// had (environment proxy, default redirect policy): the choice is parsed, never a string prefix.
+fn gateway_spec(url: &str) -> super::shared::http::HttpSpec {
+    if super::loopback_http::is_loopback_url(url) {
+        super::shared::http::HttpSpec::loopback()
+    } else {
+        super::shared::http::HttpSpec::default()
+    }
+}
+
+fn gateway_client(url: &str) -> reqwest::Client {
+    super::shared::http::builder(gateway_spec(url))
+        .build()
+        .unwrap_or_else(|_| super::loopback_http::safe_fallback_client())
+}
+
 pub(crate) async fn delivery_tick_with<S: FnMut(&OutboxStatus)>(
     mut deps: DeliveryDeps<S>,
 ) -> Result<(), String> {
@@ -178,7 +196,7 @@ pub(crate) async fn delivery_tick_with<S: FnMut(&OutboxStatus)>(
     let online = if sim_down {
         false
     } else {
-        match reqwest::Client::new()
+        match gateway_client(&gateway_url)
             .get(format!("{}/health", gateway_url))
             .timeout(std::time::Duration::from_secs(3))
             .send()
@@ -309,7 +327,7 @@ pub(crate) async fn delivery_tick_with<S: FnMut(&OutboxStatus)>(
     .map_err(|e| e.to_string())?;
 
     // POST to gateway
-    let mut request = reqwest::Client::new()
+    let mut request = gateway_client(&gateway_url_clone)
         .post(format!("{}/events", gateway_url_clone))
         .json(&events_payload)
         .timeout(std::time::Duration::from_secs(10));
@@ -746,6 +764,60 @@ mod expiry_tests {
 #[cfg(test)]
 mod delivery_tests {
     use super::*;
+
+    #[test]
+    fn gateway_spec_is_loopback_only_for_loopback_urls() {
+        for u in [
+            "http://127.0.0.1:18789",
+            "http://localhost:18789",
+            "http://[::1]:18789",
+        ] {
+            let s = gateway_spec(u);
+            assert!(s.no_proxy && s.no_redirects && !s.launch_token, "{u}");
+        }
+        for u in [
+            "https://gateway.example.com",
+            "http://10.0.0.5:18789",
+            "http://127.0.0.1@evil.example",
+            "not a url",
+        ] {
+            let s = gateway_spec(u);
+            assert!(!s.no_proxy && !s.no_redirects && !s.https_only, "{u}");
+            assert!(!s.launch_token, "{u}");
+        }
+    }
+
+    #[tokio::test]
+    async fn loopback_gateway_client_does_not_follow_redirects() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut s, _) = l.accept().await.unwrap();
+            let mut b = [0u8; 1024];
+            let _ = s.read(&mut b).await;
+            let _ = s
+                .write_all(b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/x\r\nContent-Length: 0\r\n\r\n")
+                .await;
+        });
+        let url = format!("http://{addr}");
+        let r = gateway_client(&url).get(&url).send().await.unwrap();
+        assert_eq!(r.status().as_u16(), 302);
+    }
+
+    #[test]
+    fn outbox_prod_code_has_no_bare_client_new() {
+        let src = include_str!("outbox.rs");
+        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
+        assert!(!prod.contains("Client::new()"));
+    }
+
+    #[test]
+    fn n8n_status_prod_code_has_no_bare_client_new() {
+        let src = include_str!("n8n_status.rs");
+        let prod = &src[..src.find("#[cfg(test)]").unwrap_or(src.len())];
+        assert!(!prod.contains("Client::new()"));
+    }
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};

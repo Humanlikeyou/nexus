@@ -16,6 +16,8 @@ use serde_json::Value;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::handshake::client::Request;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -41,6 +43,14 @@ const LEVEL_MIN_GAP: Duration = Duration::from_millis(33);
 const BACKOFF_START: Duration = Duration::from_millis(500);
 const BACKOFF_CAP: Duration = Duration::from_secs(30);
 const MAX_UTTERANCE_ID: usize = 64;
+/// Subprotocol prefix carrying the per-launch token (`amara-launch.<64 hex>`).
+const LEVEL_TOKEN_SUBPROTOCOL: &str = "amara-launch.";
+/// DEFAULT OFF. tungstenite fails the client handshake (`NoSubProtocol`) when the server does not
+/// echo an offered `Sec-WebSocket-Protocol`, and today's unpatched amara-voice does not. Flip to
+/// true only after Taisun applies `tasks/proposed/amara-voice-token.diff` (server echoes it).
+/// Retrying without the header on failure is deliberately NOT done: it would hand the token to
+/// whatever process squats on the port.
+const LEVEL_SEND_LAUNCH_TOKEN: bool = false;
 
 // ─── payloads (camelCase) ───────────────────────────────────────────────────
 
@@ -236,6 +246,31 @@ fn level_url(port: u16) -> String {
     format!("ws://127.0.0.1:{port}/level")
 }
 
+/// The handshake request for the level feed. The token (when given and the URL is loopback) rides
+/// in `Sec-WebSocket-Protocol`: unlike a `?t=` query it never lands in URLs, access logs, error
+/// strings or `Debug` output of the URL, and browsers cannot set it without the server echoing it.
+/// The value is never logged.
+fn level_request(
+    url: &str,
+    token: Option<&str>,
+) -> Result<Request, tokio_tungstenite::tungstenite::Error> {
+    let mut req = url.into_client_request()?;
+    if let Some(t) = token.filter(|_| super::loopback_http::is_loopback_url(url)) {
+        let v = format!("{LEVEL_TOKEN_SUBPROTOCOL}{t}");
+        if let Ok(hv) = v.parse() {
+            req.headers_mut().insert("Sec-WebSocket-Protocol", hv);
+        }
+    }
+    Ok(req)
+}
+
+/// The token to offer, or None (gate off, or no/invalid token file).
+fn level_token() -> Option<String> {
+    LEVEL_SEND_LAUNCH_TOKEN
+        .then(super::launch_token::current)
+        .flatten()
+}
+
 fn level_ws_config() -> WebSocketConfig {
     WebSocketConfig::default()
         .max_message_size(Some(LEVEL_MAX_MESSAGE))
@@ -301,12 +336,21 @@ async fn level_loop(port: u16, t: LevelTimings, mut emit: impl FnMut(VoiceLevelE
     let url = level_url(port);
     let mut backoff = t.backoff_start;
     loop {
-        let conn = tokio::time::timeout(
-            t.connect,
-            tokio_tungstenite::connect_async_with_config(&url, Some(level_ws_config()), false),
-        )
-        .await;
-        if let Ok(Ok((ws, _))) = conn {
+        let conn = match level_request(&url, level_token().as_deref()) {
+            Ok(req) => Some(
+                tokio::time::timeout(
+                    t.connect,
+                    tokio_tungstenite::connect_async_with_config(
+                        req,
+                        Some(level_ws_config()),
+                        false,
+                    ),
+                )
+                .await,
+            ),
+            Err(_) => None,
+        };
+        if let Some(Ok(Ok((ws, _)))) = conn {
             if level_session(ws, t, &mut emit).await {
                 backoff = t.backoff_start;
             }
@@ -629,5 +673,83 @@ mod tests {
         let t0 = std::time::Instant::now();
         assert!(!level_session(ws, fast(), &mut emit).await);
         assert!(t0.elapsed() < Duration::from_secs(3));
+    }
+
+    const FIXTURE: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn proto(r: &Request) -> Option<String> {
+        r.headers()
+            .get("Sec-WebSocket-Protocol")
+            .map(|v| v.to_str().unwrap().to_string())
+    }
+
+    #[test]
+    fn request_carries_token_as_subprotocol_not_in_url() {
+        let url = level_url(8791);
+        let r = level_request(&url, Some(FIXTURE)).unwrap();
+        assert_eq!(proto(&r), Some(format!("amara-launch.{FIXTURE}")));
+        assert!(!r.uri().to_string().contains(FIXTURE));
+    }
+
+    #[test]
+    fn request_without_token_or_off_loopback_has_no_header() {
+        assert_eq!(proto(&level_request(&level_url(8791), None).unwrap()), None);
+        let remote = level_request("ws://example.com:8791/level", Some(FIXTURE)).unwrap();
+        assert_eq!(proto(&remote), None);
+        let lan = level_request("ws://192.168.1.5:8791/level", Some(FIXTURE)).unwrap();
+        assert_eq!(proto(&lan), None);
+    }
+
+    #[test]
+    fn missing_token_file_yields_no_token() {
+        let d = std::env::temp_dir().join(format!("vb-tok-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(super::super::launch_token::read_in(&d), None);
+        let t = super::super::launch_token::mint_in(&d).unwrap();
+        assert_eq!(super::super::launch_token::read_in(&d), Some(t));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn token_gate_is_off_by_default() {
+        assert!(!std::hint::black_box(LEVEL_SEND_LAUNCH_TOKEN));
+        assert_eq!(level_token(), None);
+    }
+
+    /// Why the gate exists: an unpatched server that ignores the subprotocol fails the handshake.
+    #[tokio::test]
+    async fn server_not_echoing_subprotocol_fails_handshake_so_gate_stays_off() {
+        let (port, _) = publisher(vec![], 1, Duration::from_millis(1)).await;
+        let req = level_request(&level_url(port), Some(FIXTURE)).unwrap();
+        assert!(tokio_tungstenite::connect_async(req).await.is_err());
+    }
+
+    /// A patched server echoes the offered subprotocol and the feed works with it.
+    #[tokio::test]
+    async fn server_echoing_subprotocol_connects() {
+        use tokio_tungstenite::tungstenite::handshake::server::{Request as SReq, Response};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(None::<String>));
+        let s2 = seen.clone();
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let cb = |req: &SReq, mut resp: Response| {
+                let v = req.headers().get("Sec-WebSocket-Protocol").cloned();
+                *s2.lock().unwrap() = v.as_ref().map(|h| h.to_str().unwrap().to_string());
+                if let Some(v) = v {
+                    resp.headers_mut().insert("Sec-WebSocket-Protocol", v);
+                }
+                Ok(resp)
+            };
+            let _ws = tokio_tungstenite::accept_hdr_async(sock, cb).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        });
+        let req = level_request(&level_url(port), Some(FIXTURE)).unwrap();
+        assert!(tokio_tungstenite::connect_async(req).await.is_ok());
+        assert_eq!(
+            seen.lock().unwrap().clone(),
+            Some(format!("amara-launch.{FIXTURE}"))
+        );
     }
 }

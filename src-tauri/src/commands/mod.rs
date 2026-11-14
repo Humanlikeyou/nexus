@@ -23,6 +23,7 @@ pub mod home_hr_take;
 pub mod kb_status;
 pub mod key_file;
 pub mod keychain;
+pub mod keychain_migrate;
 pub mod kv;
 pub(crate) mod launch_token;
 pub mod llm_router;

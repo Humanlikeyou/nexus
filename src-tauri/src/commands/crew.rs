@@ -24,15 +24,37 @@ const CREW_TOKEN_ENV: &str = "CREW_SERVICE_TOKEN";
 /// File under the app data dir holding the token for Finder-launched apps
 /// (written by scripts/sync-crew-token.sh). Must be mode 0600.
 pub(crate) const CREW_TOKEN_FILE: &str = "crew_service_token";
+/// Largest token file we read; over this is refused.
+const TOKEN_FILE_MAX: u64 = 8192;
 const NOT_CONFIGURED: &str =
     "Crew service token is not configured. Run scripts/sync-crew-token.sh, then reopen Amara OS.";
 
 /// Shared secret (must match stack/.env): env `CREW_SERVICE_TOKEN` first,
 /// then `<app data dir>/crew_service_token`.
 pub(crate) fn crew_token() -> Result<String, String> {
-    crew_token_from(
-        std::env::var(CREW_TOKEN_ENV).ok(),
-        &crate::app_paths::data_dir().join(CREW_TOKEN_FILE),
+    super::keychain_migrate::with_live_keychain(|kc| {
+        crew_token_with(
+            kc,
+            std::env::var(CREW_TOKEN_ENV).ok(),
+            &crate::app_paths::data_dir().join(CREW_TOKEN_FILE),
+        )
+    })
+}
+
+/// Env first (as always), then the Keychain item `crew_service_token`, then the 0600 file.
+pub(crate) fn crew_token_with(
+    kc: &dyn super::keychain::Keychain,
+    env_value: Option<String>,
+    file: &std::path::Path,
+) -> Result<String, String> {
+    if env_value.as_deref().is_some_and(|v| !v.trim().is_empty()) {
+        return crew_token_from(env_value, file);
+    }
+    super::keychain_migrate::secret_prefer_keychain(
+        kc,
+        "crew_service_token",
+        |v| Ok(v.to_string()),
+        || crew_token_from(None, file),
     )
 }
 
@@ -46,25 +68,48 @@ pub(crate) fn crew_token_from(
     {
         return Ok(v);
     }
-    let meta = match std::fs::symlink_metadata(file) {
-        Ok(m) => m,
-        Err(_) => return Err(NOT_CONFIGURED.to_string()),
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    // One open (no symlink, no blocking on a FIFO), then every check is on the open handle.
+    let mut f = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(file)
+    {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(NOT_CONFIGURED.to_string())
+        }
+        Err(_) => {
+            return Err("Crew token file is not a regular file; refusing to read it.".to_string())
+        }
     };
+    let meta = f
+        .metadata()
+        .map_err(|_| "Crew token file could not be read.".to_string())?;
     if !meta.is_file() {
         return Err("Crew token file is not a regular file; refusing to read it.".to_string());
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if meta.permissions().mode() & 0o777 != 0o600 {
-            return Err(
-                "Crew token file must be mode 0600 (chmod 600 it or rerun scripts/sync-crew-token.sh)."
-                    .to_string(),
-            );
-        }
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    if meta.uid() != unsafe { libc::geteuid() } {
+        return Err("Crew token file must be owned by you; refusing to read it.".to_string());
     }
-    let value = std::fs::read_to_string(file)
+    if meta.mode() & 0o777 != 0o600 {
+        return Err(
+            "Crew token file must be mode 0600 (chmod 600 it or rerun scripts/sync-crew-token.sh)."
+                .to_string(),
+        );
+    }
+    let mut buf = zeroize::Zeroizing::new(Vec::new());
+    f.by_ref()
+        .take(TOKEN_FILE_MAX + 1)
+        .read_to_end(&mut buf)
         .map_err(|_| "Crew token file could not be read.".to_string())?;
+    if buf.len() as u64 > TOKEN_FILE_MAX {
+        return Err("Crew token file is too large; refusing to read it.".to_string());
+    }
+    let value =
+        std::str::from_utf8(&buf).map_err(|_| "Crew token file could not be read.".to_string())?;
     let value = value.trim();
     if value.is_empty() {
         return Err(NOT_CONFIGURED.to_string());

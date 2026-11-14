@@ -37,6 +37,13 @@ describe("Tauri command registry", () => {
     for (const n of gen) expect(lib).toContain(n);
   });
 
+  it("the Keychain migrate commands are registered", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    for (const name of ["keychain_import_review", "keychain_migrate_one"]) expect(names).toContain(name);
+  });
+
   it("parses generate_handler! without comments", () => {
     const names = registeredCommands(`tauri::generate_handler![\n // x::gone,\n a::one, b::two,\n]`).map((c: { name: string }) => c.name);
     expect(names).toEqual(["one", "two"]);

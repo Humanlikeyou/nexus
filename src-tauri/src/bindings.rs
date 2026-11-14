@@ -179,6 +179,8 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::backups::backup_list,
             crate::commands::notify_relay::notify_settings_get,
             crate::commands::keychain::secret_set,
+            crate::commands::keychain_migrate::keychain_import_review,
+            crate::commands::keychain_migrate::keychain_migrate_one,
             crate::commands::backups::backup_now,
             crate::commands::backups::backup_settings_set,
             crate::commands::notify_relay::notify_settings_set,

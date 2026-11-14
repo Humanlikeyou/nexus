@@ -621,7 +621,9 @@ async fn pick_ollama_model(client: &reqwest::Client) -> Result<String, String> {
 #[tauri::command]
 #[specta::specta]
 pub async fn send_to_terrance(text: String) -> Result<String, String> {
-    let client = reqwest::Client::new();
+    // Local Ollama: loopback client, no token (not an Amara service).
+    let client =
+        super::loopback_http::loopback_client(super::loopback_http::LOOPBACK_CONNECT_TIMEOUT);
     let model = pick_ollama_model(&client).await.inspect_err(|reason| {
         eprintln!("[telegram] send_to_terrance: {reason}");
     })?;
@@ -821,22 +823,22 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Source pin: Telegram sends build their client through the shared builder with timeouts.
-    /// The one bare `Client::new()` left is send_to_terrance's local Ollama client (it has its own
-    /// per-request timeout), so it is the only allowed occurrence.
+    /// Source pin: no bare `Client::new()` anywhere in prod code. Telegram sends use the shared
+    /// builder with timeouts; send_to_terrance's local Ollama client is a loopback client.
     #[test]
-    fn telegram_clients_have_timeouts_and_only_ollama_keeps_bare_client_new() {
+    fn telegram_prod_code_has_no_bare_client_new() {
         let src = include_str!("telegram.rs");
         let prod = &src[..src.find("#[cfg(test)]\nmod tests {").unwrap()];
         assert_eq!(
             prod.matches("Client::new()").count(),
-            1,
-            "only send_to_terrance may keep a bare Client::new()"
+            0,
+            "telegram.rs must not build a bare Client::new()"
         );
+        let f = &prod[prod.find("pub async fn send_to_terrance").unwrap()..];
+        let f = &f[..f.find("\n}\n").unwrap()];
         assert!(
-            prod.find("Client::new()").unwrap()
-                > prod.find("pub async fn send_to_terrance").unwrap(),
-            "the remaining Client::new() must be the Ollama one in send_to_terrance"
+            f.contains("loopback_client("),
+            "Ollama client must be a loopback client"
         );
     }
 }

@@ -1,0 +1,158 @@
+--- a/level_feed.py
++++ b/level_feed.py
+@@ -15,6 +15,7 @@
+ 
+ import base64
+ import hashlib
++import hmac
+ import json
+ import os
+ import socket
+@@ -34,6 +35,14 @@
+ 
+ PORT = _parse_port(os.getenv("AMARA_LEVEL_PORT", "8791"))
+ ENABLED = os.getenv("AMARA_LEVEL_FEED", "1") != "0"
++# Per-launch token (Amara OS writes it at app start). OFF by default: set AMARA_VOICE_REQUIRE_LAUNCH_TOKEN=1
++# to reject any client that does not offer it as WebSocket subprotocol "amara-launch.<64 hex>".
++REQUIRE_TOKEN = os.getenv("AMARA_VOICE_REQUIRE_LAUNCH_TOKEN", "0") == "1"
++TOKEN_PATH = os.path.join(
++    os.environ.get("NEXUS_DATA_DIR") or os.path.expanduser("~/Library/Application Support/com.taisun.nexus"),
++    "run", "launch_token")
++TOKEN_PREFIX = "amara-launch."
++_token_cache = (None, None)  # (mtime_ns, token)
+ HZ = 30
+ MAX_CLIENTS = 4
+ _GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+@@ -101,6 +110,39 @@
+     return head + payload
+ 
+ 
++def _read_token():
++    """The current launch token (64 lowercase hex) or None. Re-read when the file's mtime changes."""
++    global _token_cache
++    try:
++        m = os.stat(TOKEN_PATH).st_mtime_ns
++        if _token_cache[0] == m:
++            return _token_cache[1]
++        with open(TOKEN_PATH, "r", encoding="ascii") as f:
++            t = f.read(256).strip()
++        ok = len(t) == 64 and all(c in "0123456789abcdef" for c in t)
++        _token_cache = (m, t if ok else None)
++        return _token_cache[1]
++    except Exception:
++        _token_cache = (None, None)
++        return None
++
++
++def _offered_protocol(h):
++    """The first offered subprotocol that starts with the token prefix, else None."""
++    for p in h.get("sec-websocket-protocol", "").split(","):
++        p = p.strip()
++        if p.startswith(TOKEN_PREFIX):
++            return p
++    return None
++
++
++def _token_ok(offered):
++    want = _read_token()  # missing/malformed file: fail closed
++    if want is None or offered is None:
++        return False
++    return hmac.compare_digest(offered[len(TOKEN_PREFIX):].encode("latin-1", "replace"), want.encode())
++
++
+ _FORBIDDEN = b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+ _BAD = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+ 
+@@ -167,13 +209,18 @@
+     except Exception:
+         _reject(conn, _FORBIDDEN)
+         return False
++    offered = _offered_protocol(h)
++    if REQUIRE_TOKEN and not _token_ok(offered):  # never logged, never echoed on failure
++        _reject(conn, _FORBIDDEN)
++        return False
++    proto = f"Sec-WebSocket-Protocol: {offered}\r\n" if offered else ""  # clients require the echo
+     accept = base64.b64encode(hashlib.sha1(key.encode() + _GUID).digest()).decode()
+     left = deadline - time.monotonic()
+     if left <= 0:
+         return False
+     conn.settimeout(left)
+     conn.sendall(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+-                  f"Sec-WebSocket-Accept: {accept}\r\n\r\n").encode())
++                  f"Sec-WebSocket-Accept: {accept}\r\n{proto}\r\n").encode())
+     conn.settimeout(0.2)
+     return True
+ 
+--- a/tests/test_level_feed.py
++++ b/tests/test_level_feed.py
+@@ -192,6 +192,70 @@
+         self.assertEqual(out.stdout.strip(), "8791")
+ 
+ 
++class TokenGateTest(unittest.TestCase):
++    """AMARA_VOICE_REQUIRE_LAUNCH_TOKEN: missing/wrong token or any Origin is refused."""
++    GOOD = "0123456789abcdef" * 4
++
++    @classmethod
++    def setUpClass(cls):
++        cls.port = level_feed.start(port=0) or level_feed._port
++
++    def setUp(self):
++        import tempfile
++        self.dir = tempfile.mkdtemp()
++        self.path = os.path.join(self.dir, "launch_token")
++        self.saved = (level_feed.REQUIRE_TOKEN, level_feed.TOKEN_PATH)
++        level_feed.REQUIRE_TOKEN, level_feed.TOKEN_PATH = True, self.path
++        level_feed._token_cache = (None, None)
++
++    def tearDown(self):
++        level_feed.REQUIRE_TOKEN, level_feed.TOKEN_PATH = self.saved
++        level_feed._token_cache = (None, None)
++
++    def write(self, t):
++        with open(self.path, "w") as f:
++            f.write(t + "\n")
++
++    def status(self, **over):
++        s, data = connect(self.port, req(self.port, **over))
++        s.close()
++        return data.split(b"\r\n", 1)[0], data
++
++    def test_default_is_off(self):
++        self.assertFalse(self.saved[0])
++
++    def test_good_token_connects_and_is_echoed(self):
++        self.write(self.GOOD)
++        line, data = self.status(**{"Sec-WebSocket-Protocol": "amara-launch." + self.GOOD})
++        self.assertIn(b"101", line)
++        self.assertIn(("Sec-WebSocket-Protocol: amara-launch." + self.GOOD).encode(), data)
++
++    def test_missing_wrong_or_no_file_refused(self):
++        self.write(self.GOOD)
++        self.assertIn(b"403", self.status()[0])
++        self.assertIn(b"403", self.status(**{"Sec-WebSocket-Protocol": "amara-launch." + "f" * 64})[0])
++        self.assertIn(b"403", self.status(**{"Sec-WebSocket-Protocol": "other"})[0])
++        os.remove(self.path)
++        level_feed._token_cache = (None, None)
++        self.assertIn(b"403", self.status(**{"Sec-WebSocket-Protocol": "amara-launch." + self.GOOD})[0])
++
++    def test_origin_refused_even_with_good_token(self):
++        self.write(self.GOOD)
++        line, _ = self.status(Origin="http://evil.example",
++                              **{"Sec-WebSocket-Protocol": "amara-launch." + self.GOOD})
++        self.assertIn(b"403", line)
++
++    def test_rotation_is_picked_up(self):
++        self.write(self.GOOD)
++        self.assertIn(b"101", self.status(**{"Sec-WebSocket-Protocol": "amara-launch." + self.GOOD})[0])
++        new = "f" * 64
++        time.sleep(0.01)
++        self.write(new)
++        os.utime(self.path, ns=(time.time_ns(), time.time_ns() + 5_000_000))
++        self.assertIn(b"403", self.status(**{"Sec-WebSocket-Protocol": "amara-launch." + self.GOOD})[0])
++        self.assertIn(b"101", self.status(**{"Sec-WebSocket-Protocol": "amara-launch." + new})[0])
++
++
+ class FeedDisabledTest(unittest.TestCase):
+     def test_feed_0_opens_no_socket(self):
+         code = ("import socket\n"

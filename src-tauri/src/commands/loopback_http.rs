@@ -9,6 +9,23 @@ use std::time::Duration;
 /// Connect timeout for loopback services. A loopback connect is instant or refused, so 3 s is generous.
 pub(crate) const LOOPBACK_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// What a failed builder falls back to: never `Client::default()` (that one follows redirects and
+/// honours the environment proxy). If even this cannot be built, the client can only fail: it is
+/// pointed at a closed loopback proxy, so no request leaves the Mac.
+pub(crate) fn safe_fallback_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_else(|_| {
+            reqwest::Client::builder()
+                .proxy(reqwest::Proxy::all("http://127.0.0.1:9").expect("static proxy url"))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("a client with a static closed proxy builds")
+        })
+}
+
 /// A loopback client: no redirects (one off the Mac is never legitimate) and no environment proxy
 /// (a proxy must never carry a loopback call off the Mac). Per-request timeouts stay with the caller.
 pub(crate) fn loopback_client(connect_timeout: Duration) -> reqwest::Client {
@@ -16,7 +33,7 @@ pub(crate) fn loopback_client(connect_timeout: Duration) -> reqwest::Client {
         super::shared::http::HttpSpec::loopback().connect_timeout(connect_timeout),
     )
     .build()
-    .unwrap_or_default()
+    .unwrap_or_else(|_| safe_fallback_client())
 }
 
 /// A loopback client for an Amara-owned service (router): as `loopback_client`, plus the per-launch
@@ -29,7 +46,7 @@ pub(crate) fn amara_service_client(connect_timeout: Duration, base: &str) -> req
         base,
     )
     .build()
-    .unwrap_or_default()
+    .unwrap_or_else(|_| safe_fallback_client())
 }
 
 /// True when the parsed URL's host is `localhost` or a loopback IP. Parsing (not string splitting)
@@ -101,6 +118,38 @@ pub(crate) async fn read_capped(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn fallback_client_does_not_follow_redirects() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((mut s, _)) = l.accept().await {
+                let mut b = [0u8; 512];
+                let _ = s.read(&mut b).await;
+                let _ = s
+                    .write_all(b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:9/x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .await;
+            }
+        });
+        let r = safe_fallback_client()
+            .get(format!("http://127.0.0.1:{port}/"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status().as_u16(), 302);
+    }
+
+    #[test]
+    fn builders_never_fall_back_to_the_default_client() {
+        let src = include_str!("loopback_http.rs");
+        let body = src.split("mod tests {").next().unwrap();
+        assert!(!body.contains("unwrap_or_default"));
+        let outbox = include_str!("outbox.rs");
+        let gw = &outbox[outbox.find("fn gateway_client").unwrap()..];
+        assert!(!gw[..gw.find("}\n").unwrap()].contains("unwrap_or_default"));
+    }
+
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;

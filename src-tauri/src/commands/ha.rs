@@ -1014,7 +1014,7 @@ fn token_ok_for_use(t: &str) -> bool {
 
 /// Strict format for a token we store: `[A-Za-z0-9._-]{32,512}`. This excludes CR, LF, NUL,
 /// '=', '#', quotes and spaces, so a stored value can never add or split an env line.
-fn valid_new_token(t: &str) -> bool {
+pub(crate) fn valid_new_token(t: &str) -> bool {
     (TOKEN_MIN..=TOKEN_MAX).contains(&t.len())
         && t.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
@@ -1080,6 +1080,14 @@ fn app_env_token(dir: &Path, uid: u32) -> Result<Option<HaToken>, String> {
     )
 }
 
+/// The `HA_TOKEN` in the app-data `.env` only (no Keychain, no env), for the migrate tool.
+/// `Err` = the file exists but is unsafe.
+pub(crate) fn app_env_token_value(
+    dir: &Path,
+) -> Result<Option<zeroize::Zeroizing<String>>, String> {
+    Ok(app_env_token(dir, current_uid())?.map(|t| zeroize::Zeroizing::new(t.0.clone())))
+}
+
 /// `(HA_URL, HA_TOKEN)` from the legacy amara-voice `.env`, via the same checked reader as
 /// before (`read_config_at`). Absent, unsafe or invalid (bad URL / no token) = none.
 fn legacy_values(src: &Sources) -> (Option<String>, Option<HaToken>) {
@@ -1118,10 +1126,22 @@ fn resolve_token_with_source(
     src: &Sources,
     legacy: Option<HaToken>,
 ) -> Result<(HaToken, TokenSource), String> {
-    if let Some(dir) = src.app_dir.as_deref() {
-        if let Some(t) = app_env_token(dir, src.uid)? {
-            return Ok((t, TokenSource::App));
-        }
+    // Keychain first (`ha_token`), then the app `.env`. Both are "the app's own store", so the
+    // reported source stays `App` and the IPC type is unchanged.
+    let from_app = super::keychain_migrate::with_live_keychain(|kc| {
+        super::keychain_migrate::secret_prefer_keychain_if(
+            kc,
+            "ha_token",
+            token_ok_for_use,
+            |v| Ok(Some(HaToken(v.to_string()))),
+            || match src.app_dir.as_deref() {
+                Some(dir) => app_env_token(dir, src.uid),
+                None => Ok(None),
+            },
+        )
+    })?;
+    if let Some(t) = from_app.filter(|t| token_ok_for_use(&t.0)) {
+        return Ok((t, TokenSource::App));
     }
     if let Some(t) = src.env_token.as_ref().filter(|t| token_ok_for_use(&t.0)) {
         return Ok((t.clone(), TokenSource::Env));
@@ -1130,6 +1150,20 @@ fn resolve_token_with_source(
         .filter(|t| token_ok_for_use(&t.0))
         .map(|t| (t, TokenSource::Legacy))
         .ok_or_else(|| ERR_CONFIG.to_string())
+}
+
+/// Test hook for the Keychain precedence tests (keychain_migrate.rs): token for an app dir.
+#[cfg(test)]
+pub(crate) fn test_token_for(app: &Path) -> Result<String, String> {
+    let src = Sources {
+        app_dir: Some(app.to_path_buf()),
+        legacy_dir: None,
+        uid: current_uid(),
+        cfg_url: None,
+        env_url: None,
+        env_token: None,
+    };
+    resolve_token_with_source(&src, None).map(|(t, _)| t.0.clone())
 }
 
 fn resolve_token(src: &Sources, legacy: Option<HaToken>) -> Result<HaToken, String> {
