@@ -4,6 +4,17 @@ use serde::{Deserialize, Serialize};
 const CREW_SERVICE_URL: &str = "http://127.0.0.1:8400";
 pub(crate) const CREW_TOKEN_HEADER: &str = "X-Crew-Token";
 
+/// Crew-service client: the static `X-Crew-Token` stays, and the per-launch token header rides along
+/// (loopback base, opted in); the service ignores it until `CREW_ACCEPT_LAUNCH_TOKEN` is on.
+pub(crate) fn crew_client() -> reqwest::Client {
+    super::shared::http::builder_for_base(
+        super::shared::http::HttpSpec::loopback().with_launch_token(),
+        CREW_SERVICE_URL,
+    )
+    .build()
+    .unwrap_or_default()
+}
+
 /// Base URL of the local crew-service. Always loopback.
 pub(crate) fn crew_service_url() -> String {
     CREW_SERVICE_URL.to_string()
@@ -165,7 +176,7 @@ pub struct CrewApprovalRow {
 #[tauri::command]
 #[specta::specta]
 pub async fn crew_list() -> Result<Vec<CrewInfo>, String> {
-    let client = reqwest::Client::new();
+    let client = crew_client();
     let resp = client
         .get(format!("{}/crews/list", crew_service_url()))
         .header(CREW_TOKEN_HEADER, crew_token()?)
@@ -202,7 +213,7 @@ pub async fn crew_start(
     if super::telegram::outbound_disabled() {
         return Err(CREW_OUTBOUND_BLOCKED.to_string());
     }
-    let client = reqwest::Client::new();
+    let client = crew_client();
     let body = CrewStartRequest {
         name,
         task,
@@ -231,7 +242,7 @@ pub async fn crew_start(
 #[tauri::command]
 #[specta::specta]
 pub async fn crew_status(id: String) -> Result<CrewInfo, String> {
-    let client = reqwest::Client::new();
+    let client = crew_client();
     let resp = client
         .get(format!("{}/crews/status", crew_service_url()))
         .header(CREW_TOKEN_HEADER, crew_token()?)
@@ -257,7 +268,7 @@ pub async fn crew_run_steps(id: String) -> Result<CrewRunSteps, String> {
     if !valid_run_id(&id) {
         return Err("Invalid crew run id.".to_string());
     }
-    let client = reqwest::Client::new();
+    let client = crew_client();
     let resp = client
         .get(format!("{}/crews/runs/{}/steps", crew_service_url(), id))
         .header(CREW_TOKEN_HEADER, crew_token()?)
@@ -279,7 +290,7 @@ pub async fn crew_run_steps(id: String) -> Result<CrewRunSteps, String> {
 #[tauri::command]
 #[specta::specta]
 pub async fn crew_stop(id: String) -> Result<String, String> {
-    let client = reqwest::Client::new();
+    let client = crew_client();
     let resp = client
         .post(format!("{}/crews/stop", crew_service_url()))
         .header(CREW_TOKEN_HEADER, crew_token()?)
@@ -325,7 +336,7 @@ struct HttpBackend;
 
 impl Backend for HttpBackend {
     async fn list(&self, state: &str) -> Result<Vec<CrewApprovalRow>, String> {
-        let resp = reqwest::Client::new()
+        let resp = crew_client()
             .get(format!("{}/crews/approvals", crew_service_url()))
             .header(CREW_TOKEN_HEADER, crew_token()?)
             .query(&[("state", state)])
@@ -342,7 +353,7 @@ impl Backend for HttpBackend {
     }
 
     async fn decide(&self, id: &str, approve: bool) -> Result<CrewApprovalRow, String> {
-        let resp = reqwest::Client::new()
+        let resp = crew_client()
             .post(format!(
                 "{}/crews/approvals/{}/decide",
                 crew_service_url(),
@@ -477,7 +488,7 @@ pub async fn crew_health() -> Result<String, String> {
     if crew_token().is_err() {
         return Ok("not_configured".to_string());
     }
-    let client = reqwest::Client::new();
+    let client = crew_client();
     let resp = match client
         .get(format!("{}/health", crew_service_url()))
         .timeout(std::time::Duration::from_secs(3))
@@ -507,7 +518,7 @@ mod tests {
         let src = include_str!("crew.rs");
         let f = &src[src.find("pub async fn crew_start").unwrap()..];
         let gate = f.find("super::telegram::outbound_disabled()").unwrap();
-        assert!(gate < f.find("reqwest::Client::new()").unwrap());
+        assert!(gate < f.find("crew_client()").unwrap());
         assert!(f[gate..].contains("CREW_OUTBOUND_BLOCKED"));
     }
 

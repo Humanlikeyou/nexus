@@ -781,7 +781,7 @@ pub fn close_all() {
 }
 
 fn log_line(msg: &str) {
-    eprintln!("[home-windows] {msg}");
+    super::unified_log::log_line("home-windows", super::unified_log::Level::Info, msg);
 }
 
 fn close_native(app: &AppHandle, id: &str) {

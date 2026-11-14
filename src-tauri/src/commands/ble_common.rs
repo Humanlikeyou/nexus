@@ -61,7 +61,11 @@ pub async fn set_proof_mode(enabled: bool) -> Result<(), String> {
     if !enabled {
         PROOF_LOG.lock().await.clear();
     }
-    println!("[ble_common] proof_mode={enabled}");
+    super::unified_log::log_line(
+        "ble_common",
+        super::unified_log::Level::Info,
+        &format!("proof_mode={enabled}"),
+    );
     Ok(())
 }
 

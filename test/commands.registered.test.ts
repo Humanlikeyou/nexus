@@ -97,6 +97,13 @@ describe("Tauri command registry", () => {
     for (const name of ["whoop_take_over", "whoop_sync_now", "whoop_buzz", "whoop_pair_start", "whoop_forget", "service_start", "service_stop"]) expect(names).not.toContain(name);
   });
 
+  it("the outbound Settings default commands are registered", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    for (const name of ["outbound_get", "outbound_set"]) expect(names).toContain(name);
+  });
+
   it("the Hemi-Sync commands are registered", async () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");

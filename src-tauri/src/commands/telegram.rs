@@ -227,12 +227,15 @@ pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMes
 
 /// Session kill switch for every outbound send (Telegram messages and outbox
 /// delivery to the gateway): set `NEXUS_OUTBOUND_DISABLED=1` (or `true`/`yes`/`on`)
-/// when launching for QA. Reads (getUpdates, getMe, health checks) still work. A launch from
-/// Finder, the Dock or `open` inherits no shell env, so `Info.plist` sets it via `LSEnvironment`.
+/// when launching for QA. Reads (getUpdates, getMe, health checks) still work. Outbound is also
+/// off by default: Settings must enable it (`outbound.rs`, approval-gated), and this env var still
+/// forces it off when set. `Info.plist` no longer bakes the variable.
 pub const OUTBOUND_DISABLED_ENV: &str = "NEXUS_OUTBOUND_DISABLED";
 
 pub fn outbound_disabled() -> bool {
-    local_only_on() || parse_outbound_disabled(std::env::var(OUTBOUND_DISABLED_ENV).ok().as_deref())
+    let env = std::env::var(OUTBOUND_DISABLED_ENV).ok();
+    let allowed = super::outbound::outbound_allowed();
+    local_only_on() || parse_outbound_disabled(env.as_deref()) || !allowed
 }
 
 /// Session-only "nothing leaves this Mac" switch (navy mode, design-1111x). In memory only: it
@@ -842,15 +845,18 @@ mod tests {
 mod outbound_tests {
     use super::*;
 
-    /// A Finder launch has no shell env; the bundle must switch outbound off by itself.
+    /// "Cloud off by default" no longer rides on a baked env var: the bundle must not set
+    /// NEXUS_OUTBOUND_DISABLED (a baked value could never be enabled from Settings), and the
+    /// default with no env and no saved setting is disabled.
     #[test]
-    fn finder_launches_have_the_kill_switch_on() {
+    fn finder_launches_default_to_outbound_disabled_without_a_baked_env() {
         let plist: String = include_str!("../../Info.plist")
             .split_whitespace()
             .collect();
-        assert!(plist.contains(
-            "<key>LSEnvironment</key><dict><key>NEXUS_OUTBOUND_DISABLED</key><string>1</string></dict>"
-        ));
+        assert!(!plist.contains("LSEnvironment"));
+        assert!(!plist.contains("NEXUS_OUTBOUND_DISABLED"));
+        // A Finder launch: no env, nothing saved, not navy.
+        assert!(outbound_disabled());
     }
 
     /// Pinned semantics (no env access: the pure parser only). "on" counts as on (lead decision 2026-10-29).

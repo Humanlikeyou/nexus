@@ -241,6 +241,8 @@ const CALLER_COMMANDS: Array<[string, Record<string, unknown> | undefined]> = [
   ["hemisync_stats", undefined],
   ["hemisync_import", {folder: "folder-v"}],
   ["set_local_only", {on: "on-v"}],
+  ["outbound_get", undefined],
+  ["outbound_set", {enabled: "enabled-v"}],
   ["voice_speak_ready", undefined],
   ["voice_speak_local", {text: "text-v"}],
   ["voice_dictate_ready", undefined],

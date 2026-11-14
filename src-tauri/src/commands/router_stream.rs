@@ -12,8 +12,7 @@ use serde_json::{json, Value};
 use tokio::sync::Notify;
 
 use super::loopback_http::{
-    is_loopback_url, loopback_base, loopback_client, read_capped, BodyError,
-    LOOPBACK_CONNECT_TIMEOUT,
+    is_loopback_url, loopback_base, read_capped, BodyError, LOOPBACK_CONNECT_TIMEOUT,
 };
 
 /// Wait for the first byte: covers a cold deep-model load (same as `ask_router`).
@@ -246,7 +245,7 @@ pub(crate) async fn stream_chat(
     if !is_loopback_url(&url) {
         return Err(StreamError::NotLoopback);
     }
-    let client = loopback_client(LOOPBACK_CONNECT_TIMEOUT);
+    let client = super::loopback_http::amara_service_client(LOOPBACK_CONNECT_TIMEOUT, &base);
     let mut req = client
         .post(&url)
         .header("Accept", "text/event-stream")
@@ -751,7 +750,7 @@ mod tests {
         assert!(chk < f.find("req.send()").unwrap());
         // Built only from the loopback base; no http literal other than the format string.
         assert!(f.contains("loopback_base(base)"));
-        assert!(f.contains("loopback_client("));
+        assert!(f.contains("amara_service_client("));
     }
 
     #[test]

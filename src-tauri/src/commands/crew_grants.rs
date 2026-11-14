@@ -3,7 +3,7 @@
 //! the page alone can never grant), then crew-service must confirm within 15 s or nothing is on.
 //! Loopback only; no secrets or command output pass through here.
 
-use super::crew::{crew_service_url, crew_token, http_error, CREW_TOKEN_HEADER};
+use super::crew::{crew_client, crew_service_url, crew_token, http_error, CREW_TOKEN_HEADER};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -192,7 +192,7 @@ async fn read_grant(resp: reqwest::Response, op: &str) -> Result<CrewToolGrant, 
 
 impl Backend for HttpBackend {
     async fn get(&self, crew: &str) -> Result<CrewToolGrant, String> {
-        let resp = reqwest::Client::new()
+        let resp = crew_client()
             .get(url(crew, "grant"))
             .header(CREW_TOKEN_HEADER, crew_token()?)
             .timeout(std::time::Duration::from_secs(5))
@@ -209,7 +209,7 @@ impl Backend for HttpBackend {
         duration: &str,
     ) -> Result<CrewToolGrant, String> {
         // crew-service must confirm the enforced allowlist; a timeout is an error and stays off.
-        let resp = reqwest::Client::new()
+        let resp = crew_client()
             .post(url(crew, "grant"))
             .header(CREW_TOKEN_HEADER, crew_token()?)
             .json(&serde_json::json!({ "tools": tools, "duration": duration, "granted_by": "taisun" }))
@@ -227,7 +227,7 @@ impl Backend for HttpBackend {
     }
 
     async fn revoke(&self, crew: &str) -> Result<CrewToolGrant, String> {
-        let resp = reqwest::Client::new()
+        let resp = crew_client()
             .post(url(crew, "revoke"))
             .header(CREW_TOKEN_HEADER, crew_token()?)
             .timeout(std::time::Duration::from_secs(10))
@@ -247,7 +247,7 @@ impl Backend for HttpBackend {
         if let Some(b) = before {
             q.push(("before", b.to_string()));
         }
-        let resp = reqwest::Client::new()
+        let resp = crew_client()
             .get(url(crew, "audit"))
             .header(CREW_TOKEN_HEADER, crew_token()?)
             .query(&q)

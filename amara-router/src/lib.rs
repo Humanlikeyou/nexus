@@ -4,6 +4,7 @@
 pub mod config;
 pub mod engine;
 pub mod gemma_tools;
+pub mod launch_token;
 pub mod route;
 pub mod server;
 pub mod think;

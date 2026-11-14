@@ -53,6 +53,8 @@ pub struct Config {
     #[serde(default)]
     pub cloud: Cloud,
     #[serde(default)]
+    pub security: Security,
+    #[serde(default)]
     pub log: LogConfig,
 }
 
@@ -244,6 +246,18 @@ impl Default for Filler {
             text: "Give me a moment to think this through.".into(),
         }
     }
+}
+
+/// Per-launch token for the loopback listener (`/amara/*` and `/api/*` only; `/v1/*` and `/health`
+/// are never covered, Hermes cannot send the header).
+#[derive(Deserialize, Clone, Debug, Default)]
+#[serde(deny_unknown_fields, default)]
+pub struct Security {
+    /// Require `X-Amara-Launch-Token` on `/amara/*` and `/api/*`. OFF by default: turn on only
+    /// after the app that mints the token has run once and the router has been restarted.
+    pub require_launch_token: bool,
+    /// Token file. Default `$NEXUS_DATA_DIR/run/launch_token`, else the app-support path.
+    pub launch_token_file: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug)]

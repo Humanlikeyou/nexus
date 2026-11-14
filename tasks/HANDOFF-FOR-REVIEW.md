@@ -537,3 +537,40 @@ Open:
 3. Should letta/verba/crew get verified container names so they become restartable?
 4. A second speak request while one is waiting is refused, not queued. OK?
 5. Money take copy and the habit source field go to Design.
+
+## 22. Stage D wave 1: Phase 7 harden in place (2026-11-14)
+
+The plan is `tasks/proposed/phase7-hardening.md`. Decisions: 0024 (voice only while the app is open, committed 8bd95d0), 0025, 0026 (router token on /amara and /api only).
+
+**Built:**
+- D0 per-launch token: `<data>/run/launch_token`, 0600 in a 0700 dir, 64 hex, rotated each launch, removed first and on exit. It's sent as `X-Amara-Launch-Token` only to opted-in loopback Amara services: the router clients and `crew_client()`.
+- D2 router: `[security] require_launch_token = false` by default. When on, it covers `/amara/*` and `/api/*`; `/v1` and `/health` stay open. The token is re-read on every request, compared in constant time, and the check fails closed.
+- D3 crew: `CREW_ACCEPT_LAUNCH_TOKEN` defaults off, and the static `X-Crew-Token` still works. The compose mount is a proposal: `tasks/proposed/crew-launch-token-compose.diff`.
+- D5 outbound: `LSEnvironment` is removed from Info.plist. Outbound is disabled by default.
+  - Enabling always shows the native approval. The setting is HMAC-tagged with a per-device Keychain key, never backed up and never restored.
+  - The env var and navy still force it off.
+  - There's no Settings toggle yet (Design).
+- D6 unified logs: `~/Library/Logs/com.taisun.nexus/app.log`, rotated, every line redacted, opened with O_NOFOLLOW. Old router logs are copied, never moved.
+- D7 `data_dir_harden`: off behind a constant and approval-gated. It skips the Muse dirs and never follows symlinks.
+
+**Security review:** PASS with 1 MEDIUM (a restore could flip the outbound file) and 4 LOW. All fixed with tests.
+
+**Gates:**
+- src-tauri 1126 / 6 / 0, router 131, vitest 2285 / 9, neuro 21.
+- fmt, clippy, tsc, lint, check:secrets (after staging) clean.
+- Full e2e alone: 783 / 12 / 1, the known takes-1111t:80 [light] contrast bug.
+
+**Before turning token enforcement on (Taisun):**
+1. `terrence_runtime_bridge` HttpTransport needs a router-only client, because it calls `/amara/route`. That's lane work, not done yet.
+2. Launch the new app once so it mints the token.
+3. Router: set `require_launch_token = true` and restart it (decision 0004 steps).
+4. Crew: apply the compose diff, then `docker compose up -d crew`.
+
+**Remaining Stage D:**
+- D1 (convert the remaining bare clients)
+- D4 Keychain-first readers plus click-only migration (each move gated)
+- D8 Weaviate switch-over (gated)
+- D9 voice token patch
+- Hermes key rotation (final batch, gated)
+
+**Note for anyone who had outbound on:** the old untagged setting now reads as off. Re-enable it once in Settings and approve.

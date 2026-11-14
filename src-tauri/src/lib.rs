@@ -146,6 +146,10 @@ pub fn run() {
             let _ = terrence_actions::reconcile_interrupted_conversations();
             // Navy local-only is session-only: off at every start, and the voice loop's flag file says so.
             commands::telegram::init_navy_flag();
+            // Outbound is off unless Settings enabled it (and the env var does not force it off).
+            commands::outbound::init_outbound_setting();
+            // Per-launch token for Amara-owned loopback services (see commands/launch_token.rs).
+            commands::launch_token::mint();
 
             // System tray
             let quit = MenuItem::with_id(app, "quit", "Quit Amara OS", true, None::<&str>)?;
@@ -306,6 +310,8 @@ pub fn run() {
             telegram::get_telegram_messages,
             telegram::send_telegram_message,
             telegram::set_local_only,
+            commands::outbound::outbound_get,
+            commands::outbound::outbound_set,
             telegram::test_telegram_connection,
             telegram::send_to_terrance,
             telegram::poll_telegram_updates,
@@ -334,6 +340,8 @@ pub fn run() {
             commands::backup_schedule::restore_preview,
             commands::service_control::service_restart,
             commands::service_logs::service_logs,
+            commands::data_harden::data_dir_harden_status,
+            commands::data_harden::data_dir_harden,
             commands::whoop_status::whoop_status,
             commands::system_profile::system_profile,
             commands::daily_table::daily_rebuild,
@@ -536,6 +544,7 @@ pub fn run() {
         .run(|_app, event| {
             if let tauri::RunEvent::Exit = event {
                 commands::voice_heartbeat::stop();
+                commands::launch_token::remove();
             }
         });
 }

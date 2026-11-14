@@ -2240,3 +2240,92 @@ async fn loopback_requires_bearer_when_the_cloud_tier_is_on() {
         assert_eq!(bad.status(), anon_status);
     }
 }
+
+// ---- per-launch token (opt-in; /amara/* and /api/* only) ----
+
+const LTOK_A: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const LTOK_B: &str = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+
+async fn token_rig(file: std::path::PathBuf, require: bool) -> Rig {
+    rig_cfg(mock("EASY", &["hi"]), "", None, false, move |cfg| {
+        cfg.security.require_launch_token = require;
+        cfg.security.launch_token_file = Some(file.to_string_lossy().into_owned());
+    })
+    .await
+}
+
+async fn status(url: &str, path: &str, tok: Option<&str>, post_req: bool) -> u16 {
+    let c = reqwest::Client::new();
+    let mut r = if post_req {
+        c.post(format!("{url}{path}")).json(&oa("hi", false))
+    } else {
+        c.get(format!("{url}{path}"))
+    };
+    if let Some(t) = tok {
+        r = r.header("X-Amara-Launch-Token", t);
+    }
+    r.send().await.unwrap().status().as_u16()
+}
+
+#[tokio::test]
+async fn launch_token_enforced_on_amara_and_api_only() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("launch_token");
+    std::fs::write(&f, format!("{LTOK_A}\n")).unwrap();
+    let r = token_rig(f.clone(), true).await;
+    // no header / wrong header: 401
+    assert_eq!(status(&r.url, "/api/tags", None, false).await, 401);
+    assert_eq!(status(&r.url, "/api/tags", Some(LTOK_B), false).await, 401);
+    assert_eq!(status(&r.url, "/amara/route", None, true).await, 401);
+    // right header: through
+    assert_eq!(status(&r.url, "/api/tags", Some(LTOK_A), false).await, 200);
+    assert_ne!(
+        status(&r.url, "/amara/route", Some(LTOK_A), true).await,
+        401
+    );
+    // /health open, /v1 unaffected (Hermes sends no header)
+    assert_eq!(status(&r.url, "/health", None, false).await, 200);
+    assert_eq!(status(&r.url, "/v1/models", None, false).await, 200);
+    // Host/Origin checks stay in force with a right token
+    let c = reqwest::Client::new();
+    let o = c
+        .get(format!("{}/api/tags", r.url))
+        .header("X-Amara-Launch-Token", LTOK_A)
+        .header("Origin", "http://evil.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(o.status(), 403);
+    // rotation: new token accepted, old rejected, no restart
+    std::fs::write(&f, format!("{LTOK_B}\n")).unwrap();
+    assert_eq!(status(&r.url, "/api/tags", Some(LTOK_B), false).await, 200);
+    assert_eq!(status(&r.url, "/api/tags", Some(LTOK_A), false).await, 401);
+}
+
+#[tokio::test]
+async fn launch_token_absent_or_malformed_file_fails_closed() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("launch_token");
+    let r = token_rig(f.clone(), true).await;
+    assert_eq!(status(&r.url, "/api/tags", Some(LTOK_A), false).await, 401);
+    assert_eq!(status(&r.url, "/api/tags", Some(""), false).await, 401);
+    std::fs::write(&f, "short\n").unwrap();
+    assert_eq!(status(&r.url, "/api/tags", Some("short"), false).await, 401);
+    std::fs::write(&f, LTOK_A.to_uppercase()).unwrap();
+    assert_eq!(
+        status(&r.url, "/api/tags", Some(&LTOK_A.to_uppercase()), false).await,
+        401
+    );
+    assert_eq!(status(&r.url, "/health", None, false).await, 200);
+    assert_eq!(status(&r.url, "/v1/models", None, false).await, 200);
+}
+
+#[tokio::test]
+async fn launch_token_switch_off_by_default_ignores_the_file() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("launch_token");
+    std::fs::write(&f, format!("{LTOK_A}\n")).unwrap();
+    let r = token_rig(f, false).await;
+    assert_eq!(status(&r.url, "/api/tags", None, false).await, 200);
+    assert!(!amara_router::config::Security::default().require_launch_token);
+}

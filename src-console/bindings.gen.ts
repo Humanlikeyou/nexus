@@ -203,6 +203,8 @@ export const commands = {
 	restorePreview: (file: string, options?: InvokeOptions) => __TAURI_INVOKE<RestorePreview>("restore_preview", { file }, options),
 	serviceRestart: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<ServiceRestartDone>("service_restart", { id }, options),
 	serviceLogs: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<ServiceLogTail>("service_logs", { id }, options),
+	dataDirHardenStatus: (options?: InvokeOptions) => __TAURI_INVOKE<HardenPlan>("data_dir_harden_status", undefined, options),
+	dataDirHarden: (options?: InvokeOptions) => __TAURI_INVOKE<HardenPlan>("data_dir_harden", undefined, options),
 	whoopStatus: (options?: InvokeOptions) => __TAURI_INVOKE<WhoopStatus_Serialize>("whoop_status", undefined, options),
 	systemProfile: (options?: InvokeOptions) => __TAURI_INVOKE<SystemProfile_Serialize>("system_profile", undefined, options),
 	takeEventsList: (options?: InvokeOptions) => __TAURI_INVOKE<TakeEvent_Serialize[]>("take_events_list", undefined, options),
@@ -273,6 +275,16 @@ export const commands = {
 	 *  in-memory switch stays on (safe) but this returns false so the look doesn't claim a guarantee.
 	 */
 	setLocalOnly: (on: boolean, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("set_local_only", { on }, options),
+	/**
+	 *  Whether Settings has outbound enabled. (This is the saved choice only: the env var and navy
+	 *  mode can still force outbound off; `telegram::outbound_disabled()` is the effective answer.)
+	 */
+	outboundGet: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("outbound_get", undefined, options),
+	/**
+	 *  Settings toggle. Enabling asks through the native approval dialog because it lets data leave
+	 *  this Mac; disabling is immediate. Returns the saved value.
+	 */
+	outboundSet: (enabled: boolean, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("outbound_set", { enabled }, options),
 	lifeDateList: (options?: InvokeOptions) => __TAURI_INVOKE<LifeDateView_Serialize[]>("life_date_list", undefined, options),
 	checkinList: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<CheckInRecord_Serialize[]>("checkin_list", { limit }, options),
 	patternsRead: (options?: InvokeOptions) => __TAURI_INVOKE<PatternsResult_Serialize>("patterns_read", undefined, options),
@@ -2031,6 +2043,16 @@ export type HaTestResult_Serialize = {
 	ok: boolean,
 	kind?: string,
 	version?: string,
+};
+
+export type HardenPlan = {
+	dirsToChange: number,
+	filesToChange: number,
+	alreadyPrivate: number,
+	skippedProtectedDirs: number,
+	skippedSymlinks: number,
+	skippedNotOwned: number,
+	errors: number,
 };
 
 export type Health = "on_track" | "at_risk" | "off_track" | "done" | "waiting" | "searching";

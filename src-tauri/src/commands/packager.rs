@@ -471,8 +471,12 @@ pub(crate) struct RestorePlan {
 
 /// Live approval state a restore never overwrites: a crafted backup must not be able to switch the
 /// Telegram relay on without its approval dialog (`notify_relay.json`) or reset its once-a-day
-/// ledger (`notify_relay_sent.json`).
-pub(crate) const RESTORE_NEVER: &[&str] = &["notify_relay.json", "notify_relay_sent.json"];
+/// ledger (`notify_relay_sent.json`), or turn outbound on (`outbound_setting.json`).
+pub(crate) const RESTORE_NEVER: &[&str] = &[
+    "notify_relay.json",
+    "notify_relay_sent.json",
+    super::outbound::FILE_NAME,
+];
 
 fn is_live_only(rel: &[String]) -> bool {
     rel.last()

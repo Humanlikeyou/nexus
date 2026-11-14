@@ -35,6 +35,8 @@ pub(crate) const EXCLUDED_SECRET_FILES: &[&str] = &[
     super::crew::CREW_TOKEN_FILE,
     super::n8n_status::N8N_KEY_FILE,
     ".env",
+    // Outbound opt-in: device-bound, never travels in a backup (`outbound.rs`).
+    super::outbound::FILE_NAME,
     // Home windows: per-site browser profile records (`home_windows.rs`); never backed up.
     "webviews",
 ];

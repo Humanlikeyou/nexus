@@ -74,8 +74,23 @@ pub fn local_router(state: St) -> Router {
         .anthropic_enabled
         .then(|| state.secrets.api_key.clone().map(Arc::new))
         .flatten();
+    // Launch-token enforcement (default off): required on `/amara/*` and `/api/*` only, after the
+    // bearer and Host/Origin checks, which stay as they are.
+    let token_file: Option<Arc<std::path::PathBuf>> =
+        state.cfg.security.require_launch_token.then(|| {
+            Arc::new(
+                state
+                    .cfg
+                    .security
+                    .launch_token_file
+                    .as_deref()
+                    .map(crate::config::expand_home)
+                    .unwrap_or_else(crate::launch_token::default_path),
+            )
+        });
     router(state).layer(middleware::from_fn(move |req: Request, next: Next| {
         let key = key.clone();
+        let token_file = token_file.clone();
         async move {
             let headers = req.headers();
             // /health carries no secrets or content (model names, Ollama URL, load state) and
@@ -102,6 +117,21 @@ pub fn local_router(state: St) -> Router {
                 "amara-router only accepts local, non-browser requests on this port"}})),
                 )
                     .into_response();
+            }
+            if let Some(file) = token_file
+                .as_ref()
+                .filter(|_| crate::launch_token::path_needs_token(req.uri().path()))
+            {
+                let given = headers
+                    .get(crate::launch_token::HEADER_NAME)
+                    .and_then(|v| v.to_str().ok());
+                if !crate::launch_token::verify(file, given).await {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        axum::Json(json!({"error": "unauthorized"})),
+                    )
+                        .into_response();
+                }
             }
             next.run(req).await
         }
@@ -147,7 +177,7 @@ pub fn lan_router(state: St, key: String) -> Router {
     }))
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

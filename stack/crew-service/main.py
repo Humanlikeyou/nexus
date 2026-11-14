@@ -1585,10 +1585,38 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Terrance Crew Service", lifespan=lifespan)
 
 
-def require_token(x_crew_token: str = Header(default="")) -> None:
-    if not x_crew_token or not hmac.compare_digest(
+# Per-launch token (second accepted credential, next to the static X-Crew-Token). OFF by default:
+# set CREW_ACCEPT_LAUNCH_TOKEN=1 once the token directory is bind-mounted (see
+# tasks/proposed/crew-launch-token-compose.diff). The file is re-read on every request, so the
+# app's rotation at each start needs no restart. Absent or malformed file = the launch token is
+# never accepted (the static token still works). /health stays open.
+CREW_ACCEPT_LAUNCH_TOKEN = os.environ.get("CREW_ACCEPT_LAUNCH_TOKEN", "").strip().lower() in (
+    "1", "true", "yes", "on")
+LAUNCH_TOKEN_FILE = os.environ.get("CREW_LAUNCH_TOKEN_FILE", "/run/amara/launch_token")
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def launch_token_ok(given: object) -> bool:
+    if not CREW_ACCEPT_LAUNCH_TOKEN or not isinstance(given, str) or not given:
+        return False
+    try:
+        with open(LAUNCH_TOKEN_FILE, "r", encoding="ascii") as f:
+            expected = f.read(256).strip()
+    except (OSError, ValueError):
+        return False
+    if not _HEX64.fullmatch(expected):
+        return False
+    return hmac.compare_digest(given.strip().encode("utf-8"), expected.encode("ascii"))
+
+
+def require_token(x_crew_token: str = Header(default=""),
+                  x_amara_launch_token: str = Header(default="")) -> None:
+    if x_crew_token and hmac.compare_digest(
             x_crew_token.encode("utf-8"), CREW_SERVICE_TOKEN.encode("utf-8")):
-        raise HTTPException(status_code=401, detail="invalid or missing X-Crew-Token")
+        return
+    if launch_token_ok(x_amara_launch_token):
+        return
+    raise HTTPException(status_code=401, detail="invalid or missing X-Crew-Token")
 
 
 @app.get("/health")

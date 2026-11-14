@@ -906,6 +906,49 @@ class StepPersistenceTests(unittest.TestCase):
             self.assertEqual(cm.exception.status_code, 401)
             self.assertIsNone(main.require_token("good-token"))
 
+    def test_launch_token_is_a_second_credential_only_when_switched_on(self):
+        import tempfile
+        from fastapi import HTTPException
+        tok = "0123456789abcdef" * 4
+        other = "fedcba9876543210" * 4
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "launch_token")
+            with open(path, "w") as f:
+                f.write(tok + "\n")
+            with mock.patch.object(main, "CREW_SERVICE_TOKEN", "good-token"), \
+                    mock.patch.object(main, "LAUNCH_TOKEN_FILE", path):
+                def code(static, launch):
+                    try:
+                        main.require_token(static, launch)
+                        return 200
+                    except HTTPException as e:
+                        return e.status_code
+                # switch off (default): launch token never accepted, static still works
+                with mock.patch.object(main, "CREW_ACCEPT_LAUNCH_TOKEN", False):
+                    self.assertEqual(code("", tok), 401)
+                    self.assertEqual(code("good-token", ""), 200)
+                with mock.patch.object(main, "CREW_ACCEPT_LAUNCH_TOKEN", True):
+                    self.assertEqual(code("", tok), 200)
+                    self.assertEqual(code("", other), 401)
+                    self.assertEqual(code("", ""), 401)
+                    self.assertEqual(code("good-token", ""), 200)
+                    # rotation without restart
+                    with open(path, "w") as f:
+                        f.write(other + "\n")
+                    self.assertEqual(code("", tok), 401)
+                    self.assertEqual(code("", other), 200)
+                    # malformed file fails closed (even for a matching string)
+                    with open(path, "w") as f:
+                        f.write("SHORT\n")
+                    self.assertEqual(code("", "SHORT"), 401)
+                    # absent file fails closed
+                    os.remove(path)
+                    self.assertEqual(code("", other), 401)
+
+    def test_health_stays_open_and_routes_still_depend_on_require_token(self):
+        health = next(r for r in main.app.routes if getattr(r, "path", "") == "/health")
+        self.assertFalse(any(d.call is main.require_token for d in health.dependant.dependencies))
+
     def test_steps_route_requires_the_token(self):
         route = next(r for r in main.app.routes if getattr(r, "path", "") == "/crews/runs/{run_id}/steps")
         self.assertTrue(any(d.call is main.require_token for d in route.dependant.dependencies))

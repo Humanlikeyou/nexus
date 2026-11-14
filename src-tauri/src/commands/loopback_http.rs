@@ -19,6 +19,19 @@ pub(crate) fn loopback_client(connect_timeout: Duration) -> reqwest::Client {
     .unwrap_or_default()
 }
 
+/// A loopback client for an Amara-owned service (router): as `loopback_client`, plus the per-launch
+/// token header. Servers that do not enforce the token ignore it.
+pub(crate) fn amara_service_client(connect_timeout: Duration, base: &str) -> reqwest::Client {
+    super::shared::http::builder_for_base(
+        super::shared::http::HttpSpec::loopback()
+            .connect_timeout(connect_timeout)
+            .with_launch_token(),
+        base,
+    )
+    .build()
+    .unwrap_or_default()
+}
+
 /// True when the parsed URL's host is `localhost` or a loopback IP. Parsing (not string splitting)
 /// closes userinfo tricks like `http://127.0.0.1@evil.example`.
 pub(crate) fn is_loopback_url(raw: &str) -> bool {

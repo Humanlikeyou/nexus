@@ -27,7 +27,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use super::loopback_http::{loopback_base, loopback_client, LOOPBACK_CONNECT_TIMEOUT};
+use super::loopback_http::{loopback_base, LOOPBACK_CONNECT_TIMEOUT};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -271,7 +271,7 @@ pub fn router_base(passed: Option<&str>, saved: Option<&str>) -> String {
 
 /// The router is loopback-only, so a redirect from it is never legitimate: don't follow one off the Mac.
 fn no_redirect_client() -> reqwest::Client {
-    loopback_client(LOOPBACK_CONNECT_TIMEOUT)
+    super::loopback_http::amara_service_client(LOOPBACK_CONNECT_TIMEOUT, DEFAULT_ROUTER_URL)
 }
 
 /// Routing hints for the router as header pairs. The router decides; these only ask.
@@ -978,7 +978,7 @@ mod tests {
         let src = include_str!("llm_router.rs");
         // The no-proxy / no-redirect builder now lives in loopback_http.rs (its own source pin).
         let f = &src[src.find("fn no_redirect_client").unwrap()..];
-        assert!(f[..f.find("\n}\n").unwrap()].contains("loopback_client("));
+        assert!(f[..f.find("\n}\n").unwrap()].contains("amara_service_client("));
         let lh = include_str!("loopback_http.rs");
         let lf = &lh[lh.find("pub(crate) fn loopback_client").unwrap()..];
         assert!(lf[..lf.find(".build()").unwrap()].contains("HttpSpec::loopback()"));

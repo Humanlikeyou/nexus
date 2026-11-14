@@ -407,6 +407,11 @@ export const saveMuseSession = (session: RecordedSession & { file_path: string }
 export const getAllowClaude = (): Promise<boolean> => bound.getAllowClaude();
 export const setAllowClaude = (enabled: boolean): Promise<boolean> => bound.setAllowClaude(enabled);
 
+/** Settings default for outbound (commands/outbound.rs). Saved choice only; env var and Local only can still force it off.
+ *  Enabling goes through the native approval dialog and rejects with "declined:" on Deny. No Settings toggle is wired yet (tasks/design-questions.md). */
+export const getOutboundAllowed = (): Promise<boolean> => bound.outboundGet();
+export const setOutboundAllowed = (enabled: boolean): Promise<boolean> => bound.outboundSet(enabled);
+
 /** Amara Voice (commands/voice.rs). */
 export const getVoiceStatus = (): Promise<VoiceStatus> => bound.voiceStatus() as Promise<VoiceStatus>;
 export const startVoice = (): Promise<VoiceStatus> => bound.voiceStart() as Promise<VoiceStatus>;

@@ -128,9 +128,13 @@ fn clean_text(text: &str, min: usize, max: usize) -> Result<String, String> {
         .collect();
     let guarded = injection_guard::scan(&visible);
     if !guarded.threats.is_empty() {
-        eprintln!(
-            "[followups] injection guard: text flagged: {}",
-            guarded.threats.join(", ")
+        super::unified_log::log_line(
+            "followups",
+            super::unified_log::Level::Warn,
+            &format!(
+                "injection guard: text flagged: {}",
+                guarded.threats.join(", ")
+            ),
         );
     }
     let text = guarded.sanitized.trim();
