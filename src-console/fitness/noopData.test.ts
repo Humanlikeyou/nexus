@@ -66,7 +66,7 @@ describe("loadTrends", () => {
     const r = await loadTrends();
     expect(r.state).toBe("live");
     expect(invoke).toHaveBeenCalledTimes(9);
-    expect(invoke).toHaveBeenCalledWith("noop_query", { tool: "metric_series", args: { key: "active_kcal", days: 365 } });
+    expect(invoke).toHaveBeenCalledWith("noop_query", { tool: "metric_series", args: { key: "active_kcal", days: 365 } }, undefined);
   });
   it("one key failing or empty doesn't hide the rest", async () => {
     invoke.mockImplementation(async (_c: string, a: { args: { key: string } }) => {

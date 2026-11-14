@@ -152,7 +152,7 @@ const ERR_DECLINED: &str = "declined: The Home Assistant action was not approved
 
 // ─── types (camelCase for the frontend) ──────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HaEntity {
     pub entity_id: String,
@@ -164,14 +164,14 @@ pub struct HaEntity {
     pub attributes: Value,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum HaConversationResult {
     Match { speech: String },
     NoMatch,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HaContainerStatus {
     /// false when the container doesn't exist or isn't running.
@@ -197,7 +197,7 @@ pub struct HaLiveStatus {
 }
 
 /// Optional typed data for `climate.set_temperature` / `climate.set_hvac_mode` only.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HaServiceData {
     pub temperature: Option<f64>,
@@ -597,6 +597,7 @@ fn conversation_result(v: &Value) -> Result<HaConversationResult, String> {
 // ─── commands ────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ha_states() -> Result<Vec<HaEntity>, String> {
     states_with(&load_config()?).await
 }
@@ -613,6 +614,7 @@ fn approval_error(e: &str) -> String {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ha_call_service(
     app: AppHandle,
     domain: String,
@@ -641,6 +643,7 @@ pub async fn ha_call_service(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ha_conversation(text: String) -> Result<HaConversationResult, String> {
     conversation_with(&load_config()?, &text).await
 }
@@ -708,6 +711,7 @@ async fn container_status() -> Result<HaContainerStatus, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ha_container_status() -> Result<HaContainerStatus, String> {
     container_status().await
 }
@@ -725,12 +729,14 @@ async fn compose(action: &[&str]) -> Result<HaContainerStatus, String> {
 /// `docker compose -f ~/projects/amara-voice/homeassistant/docker-compose.yml up -d`.
 /// No approval dialog (per the brief); see the report for routing it through approval_gate.
 #[tauri::command]
+#[specta::specta]
 pub async fn ha_container_start() -> Result<HaContainerStatus, String> {
     compose(&["up", "-d"]).await
 }
 
 /// `docker compose -f … stop`.
 #[tauri::command]
+#[specta::specta]
 pub async fn ha_container_stop() -> Result<HaContainerStatus, String> {
     compose(&["stop"]).await
 }
@@ -934,6 +940,7 @@ async fn live_loop(app: AppHandle) {
 
 /// Starts the live `ha://state_changed` stream (async so it runs inside the Tokio runtime). Idempotent: returns false if already running.
 #[tauri::command]
+#[specta::specta]
 pub async fn ha_live_start(app: AppHandle) -> bool {
     let mut slot = LIVE_TASK.lock().unwrap_or_else(|p| p.into_inner());
     if slot.as_ref().is_some_and(|h| !h.is_finished()) {
@@ -945,6 +952,7 @@ pub async fn ha_live_start(app: AppHandle) -> bool {
 
 /// Stops the live stream. Returns false if it wasn't running.
 #[tauri::command]
+#[specta::specta]
 pub async fn ha_live_stop(app: AppHandle) -> bool {
     let task = LIVE_TASK.lock().unwrap_or_else(|p| p.into_inner()).take();
     match task {
@@ -1098,7 +1106,7 @@ fn configured_url(src: &Sources, legacy_url: &Option<String>) -> Option<String> 
         .or_else(|| non_empty(legacy_url))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum TokenSource {
     App,
@@ -1257,7 +1265,7 @@ fn write_env_key(dir: &Path, uid: u32, key: &str, value: Option<&str>) -> Result
     })
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HaSettingsView {
     url: Option<String>,
@@ -1322,7 +1330,7 @@ fn live_app_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, specta::Type)]
 pub struct HaTestResult {
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1394,6 +1402,7 @@ fn gap_ok(last: Option<std::time::Instant>, now: std::time::Instant) -> bool {
 
 /// `{url, tokenSet}`; `url` is the effective configured loopback URL (null = default).
 #[tauri::command]
+#[specta::specta]
 pub fn ha_get_config() -> HaSettingsView {
     get_config_with(&Sources::live())
 }
@@ -1402,6 +1411,7 @@ pub fn ha_get_config() -> HaSettingsView {
 /// URL. Rejects with `bad_url`, `invalid_input`, `not_allowed` (unsafe file) or
 /// `upstream_error` (write failed).
 #[tauri::command]
+#[specta::specta]
 pub fn ha_set_config(url: Option<String>, token: Option<String>) -> Result<(), String> {
     let token = token.map(HaToken);
     let dir = live_app_dir()?;
@@ -1410,7 +1420,7 @@ pub fn ha_set_config(url: Option<String>, token: Option<String>) -> Result<(), S
     })
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HaClearResult {
     /// True when a token is still usable after the clear (env var or legacy file).
@@ -1429,6 +1439,7 @@ fn clear_token_with(src: &Sources) -> Result<HaClearResult, String> {
 /// Removes only the `HA_TOKEN` line from the app-data `.env` (same atomic write) and reports
 /// whether an env-var or legacy token still applies.
 #[tauri::command]
+#[specta::specta]
 pub fn ha_clear_token() -> Result<HaClearResult, String> {
     live_app_dir()?;
     clear_token_with(&Sources::live())
@@ -1436,6 +1447,7 @@ pub fn ha_clear_token() -> Result<HaClearResult, String> {
 
 /// GET `/api/config` with the resolved settings. Never rejects; failures are `{ok:false, kind}`.
 #[tauri::command]
+#[specta::specta]
 pub async fn ha_test_connection(url: Option<String>, token: Option<String>) -> HaTestResult {
     // Wrap at once so the typed token is zeroized on every path.
     let token = token.map(HaToken);

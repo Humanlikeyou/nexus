@@ -1,12 +1,12 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { useEffect, useState, type FormEvent } from "react";
 import { NOOP_PATH_CHANGE_CANCELLED } from "../../src/lib/types";
 import type { NoopSettings, WhoopSource } from "../types";
 import { Button, InsetGroup, ListRow, SegmentedControl, TextField } from "../ui";
 
-export const getNoopSettings = () => invoke<NoopSettings>("get_noop_settings");
+export const getNoopSettings = () => invokeBound<NoopSettings>("get_noop_settings");
 /** Rust shows its own native Confirm/Cancel dialog for path changes; cancelling rejects. */
-export const setNoopSettings = (settings: NoopSettings) => invoke<void>("set_noop_settings", { settings });
+export const setNoopSettings = (settings: NoopSettings) => invokeBound<void>("set_noop_settings", { settings });
 
 const DEFAULTS: NoopSettings = { whoop_source: "noop", binary_path: null, db_path: null };
 const SOURCES = [{ value: "noop", label: "Health sync (recommended)" }, { value: "ble", label: "Direct Bluetooth" }] as const;

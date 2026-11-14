@@ -30,7 +30,7 @@ const METRIC_KEYS: [&str; 9] = [
 ];
 const SETTINGS_KEY: &str = "noop_settings";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, specta::Type)]
 pub enum WhoopSource {
     /// "NOOP (recommended)": NOOP owns strap sync; the direct BLE path must not start.
     #[default]
@@ -41,7 +41,7 @@ pub enum WhoopSource {
     Ble,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct NoopSettings {
     #[serde(default)]
     pub whoop_source: WhoopSource,
@@ -59,7 +59,7 @@ impl NoopSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(tag = "kind", content = "detail", rename_all = "snake_case")]
 pub enum NoopQueryError {
     ToolNotAllowed(String),
@@ -133,6 +133,7 @@ pub fn with_resolved_db(mut s: NoopSettings) -> NoopSettings {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_noop_settings() -> NoopSettings {
     load_settings()
 }
@@ -174,6 +175,7 @@ impl ConfirmPrompter for DialogPrompter {
 /// (cancel rejects with exactly [`PATH_CHANGE_CANCELLED`]). Async + spawn_blocking so the
 /// blocking dialog never runs on the main thread.
 #[tauri::command]
+#[specta::specta]
 pub async fn set_noop_settings(
     app: tauri::AppHandle,
     settings: NoopSettings,
@@ -589,6 +591,7 @@ pub fn parse_response(out: &[u8]) -> Result<Value, NoopQueryError> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn noop_query(tool: String, args: Option<Value>) -> Result<Value, NoopQueryError> {
     let s = with_resolved_db(load_settings());
     let roots = Roots::current().map_err(NoopQueryError::InvalidPath)?;

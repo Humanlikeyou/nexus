@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { commands as bound } from "./bindings.gen";
+import { BOUND_TABLE } from "./boundTable";
 import { EMPTY_DEVICE_ID } from "./lib/devices";
 import type {
   CrewApprovalRow,
@@ -314,7 +315,8 @@ export const amaraTurn = (
 ) => {
   const channel = new Channel<TurnEvent>();
   channel.onmessage = onEvent;
-  return invoke<string>("amara_turn", { input, surface, channel });
+  // The generated channel type is the looser wire shape (optionals may be null); the hand-written TurnEvent is what callers get.
+  return bound.amaraTurn(input, surface, channel as unknown as Parameters<typeof bound.amaraTurn>[2]);
 };
 export const amaraTurnCancel = (turnId: string): Promise<boolean> => bound.amaraTurnCancel(turnId);
 
@@ -488,3 +490,19 @@ export interface GoalProgressWire {
   inCommon: { state: "found" | "nothing_stands_out_yet"; goalsConsidered: number; goals: CommonGoalWire[]; skippedCauses: string[] };
 }
 export const goalProgressWeek = (weekEnd?: string): Promise<GoalProgressWire> => bound.goalProgressWeek(weekEnd ?? null) as Promise<GoalProgressWire>;
+
+/**
+ * Run a bound command by name. For callers that inject a `(command, args)` function or pick the command at run
+ * time. Same wire payload and the same rejection as the old `invoke(command, args)`; an unknown name rejects.
+ */
+export function invokeBound<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T> {
+  const row = Object.prototype.hasOwnProperty.call(BOUND_TABLE, command) ? BOUND_TABLE[command] : undefined;
+  if (!row) return Promise.reject(`Command ${command} not found`);
+  // The generated call always carries a `data` key (undefined, dropped on the wire). Callers and tests that
+  // check the in-process payload expect the key absent when there is no data, so that one case keeps the plain call.
+  if (command === "ha_call_service" && args && args.data === undefined) {
+    const { domain, service, entityId } = args;
+    return invoke<T>(command, { domain, service, entityId });
+  }
+  return row(args ?? {}) as Promise<T>;
+}

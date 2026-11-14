@@ -72,7 +72,7 @@ struct Listed {
     week_end: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Side {
     pub from: String,
@@ -85,7 +85,7 @@ pub struct Side {
     pub days: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ExperimentResult {
     pub followup_id: i64,

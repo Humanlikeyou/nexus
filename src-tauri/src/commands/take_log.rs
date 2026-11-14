@@ -24,7 +24,7 @@ static LOG_LOCK: Mutex<()> = Mutex::new(());
 
 /// Mirrors `TakeLogEntry` in HANDOFF-1111t §2. `hr` is an optional extra for Home heart-rate takes
 /// (window summary, memory line and question); History ignores it.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TakeLogEntry {
     pub id: String,
@@ -193,6 +193,7 @@ pub(crate) fn migrate_in(dir: &Path, kv_dir: &Path) -> Result<usize, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn take_log_append(entry: TakeLogEntry) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || append_in(&log_dir(), &entry))
         .await
@@ -200,6 +201,7 @@ pub async fn take_log_append(entry: TakeLogEntry) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn take_log_list() -> Result<Vec<TakeLogEntry>, String> {
     tauri::async_runtime::spawn_blocking(|| list_in(&log_dir()))
         .await
@@ -207,6 +209,7 @@ pub async fn take_log_list() -> Result<Vec<TakeLogEntry>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn take_log_forget(id: String) -> Result<bool, String> {
     let now = chrono::Utc::now().timestamp_millis();
     tauri::async_runtime::spawn_blocking(move || forget_in(&log_dir(), &id, now))
@@ -215,6 +218,7 @@ pub async fn take_log_forget(id: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn take_log_migrate() -> Result<usize, String> {
     tauri::async_runtime::spawn_blocking(|| migrate_in(&log_dir(), &super::kv::kv_root()))
         .await

@@ -38,7 +38,7 @@ const MAX_DAY_SKEW_DAYS: i64 = 1;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum StepSize {
     Small,
@@ -64,7 +64,7 @@ impl StepSize {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Step {
     pub id: String,
@@ -81,7 +81,7 @@ pub struct Step {
     pub last_asked: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Roadmap {
     pub goal_id: String,
@@ -100,7 +100,7 @@ pub struct DayQuestion {
     pub answered: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct StepQuestion {
     pub goal_id: String,
@@ -547,6 +547,7 @@ fn now_iso() -> String {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn roadmap_get(goal_id: String) -> Result<Option<Roadmap>, String> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let store = load(&crate::app_paths::data_dir())?;
@@ -554,6 +555,7 @@ pub fn roadmap_get(goal_id: String) -> Result<Option<Roadmap>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn roadmap_request(goal_id: String) -> Result<bool, String> {
     goal_exists(&goal_id)?;
     with_store(|s| request(s, &goal_id).map(|_| true))
@@ -584,6 +586,7 @@ pub fn roadmap_answer_step(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn roadmap_todays_question(today: String) -> Result<Option<StepQuestion>, String> {
     check_day_skew(&today, chrono::Local::now().date_naive())?;
     let goals = crate::commands::goals::read_goals()?;

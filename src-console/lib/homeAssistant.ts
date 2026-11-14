@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /**
@@ -85,18 +85,18 @@ export const HA_STATE_CHANGED_EVENT = "ha://state_changed";
 export const HA_LIVE_STATUS_EVENT = "ha://live_status";
 
 export const tauriHaBackend: HaBackend = {
-  states: () => invoke<HaEntity[]>("ha_states"),
+  states: () => invokeBound<HaEntity[]>("ha_states"),
   callService: (domain, service, entityId, data) => {
     if (!validServiceCall(domain, service, entityId)) return Promise.reject(HA_INVALID);
     if (!validServiceData(domain, service, data)) return Promise.reject(HA_BAD_DATA);
-    return invoke<void>("ha_call_service", data ? { domain, service, entityId, data } : { domain, service, entityId });
+    return invokeBound<void>("ha_call_service", data ? { domain, service, entityId, data } : { domain, service, entityId });
   },
-  conversation: (text) => invoke<HaConversationResult>("ha_conversation", { text }),
-  containerStatus: () => invoke<HaContainerStatus>("ha_container_status"),
-  containerStart: () => invoke<HaContainerStatus>("ha_container_start"),
-  containerStop: () => invoke<HaContainerStatus>("ha_container_stop"),
-  liveStart: () => invoke<boolean>("ha_live_start"),
-  liveStop: () => invoke<boolean>("ha_live_stop"),
+  conversation: (text) => invokeBound<HaConversationResult>("ha_conversation", { text }),
+  containerStatus: () => invokeBound<HaContainerStatus>("ha_container_status"),
+  containerStart: () => invokeBound<HaContainerStatus>("ha_container_start"),
+  containerStop: () => invokeBound<HaContainerStatus>("ha_container_stop"),
+  liveStart: () => invokeBound<boolean>("ha_live_start"),
+  liveStop: () => invokeBound<boolean>("ha_live_stop"),
   onStateChanged: (handler) => listen<HaStateChanged>(HA_STATE_CHANGED_EVENT, (e) => handler(e.payload)),
   onLiveStatus: (handler) => listen<{ state: HaLiveState }>(HA_LIVE_STATUS_EVENT, (e) => handler(e.payload.state)),
 };

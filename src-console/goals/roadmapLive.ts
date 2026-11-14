@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 import { announceStores, live } from "../lib/localStores";
 import type { Roadmap, RoadmapAdapter, RoadmapStep, StepQuestion, StepSize } from "./roadmap";
@@ -20,7 +20,7 @@ export const localDay = (d: Date = new Date()): string => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
-const defaultDeps: RoadmapDeps = { call: (c, a) => invoke(c, a), today: () => localDay(), notify: announceStores };
+const defaultDeps: RoadmapDeps = { call: (c, a) => invokeBound(c, a), today: () => localDay(), notify: announceStores };
 
 const SIZES: ReadonlySet<string> = new Set(["small", "medium", "big"]);
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);

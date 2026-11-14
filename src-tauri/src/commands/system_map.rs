@@ -41,7 +41,7 @@ const COMMAND_FIXES: [&str; 3] = [VOICE_RESTART_FIX, VOICE_START_FIX, ROUTER_RES
 
 // ---- contract types (src-console/standalone/systemMap.ts) ----
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum NodeKind {
     App,
@@ -52,14 +52,14 @@ pub enum NodeKind {
     External,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, specta::Type)]
 pub struct MapNode {
     pub id: String,
     pub label: String,
     pub kind: NodeKind,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum PathStatus {
     Ok,
@@ -68,7 +68,7 @@ pub enum PathStatus {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MapPath {
     pub id: String,
@@ -81,7 +81,7 @@ pub struct MapPath {
     pub fix: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemMap {
     pub nodes: Vec<MapNode>,
@@ -843,6 +843,7 @@ async fn collect_probes() -> Probes {
 
 /// Read-only status of every path on the system map. Never an error: every state is a status.
 #[tauri::command]
+#[specta::specta]
 pub async fn system_map_status() -> Result<SystemMap, String> {
     let probes = collect_probes().await;
     let now = Utc::now();

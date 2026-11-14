@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../../bridge";
 import { listen } from "@tauri-apps/api/event";
 import { UNWIRED, sampleAdaptersEnabled, type Wired } from "../../lib/sampleAdapters";
 import { announceStores, inTauri, live } from "../../lib/localStores";
@@ -28,7 +28,7 @@ export type HemisyncDeps = {
 };
 
 const defaultDeps: HemisyncDeps = {
-  call: (command, args) => invoke(command, args),
+  call: (command, args) => invokeBound(command, args),
   toSrc: (id) => hemisyncSrc(id),
   listenImport: (cb) => { void listen<ImportProgress>("hemisync://import", (e) => cb(e.payload)).catch(() => undefined); },
   notify: announceStores,

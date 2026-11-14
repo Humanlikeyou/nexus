@@ -17,13 +17,13 @@ use std::collections::HashSet;
 
 pub const CHECKIN_REMINDER: &str = "22:00 JST";
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 pub struct Badge {
     pub tone: String,
     pub label: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Pointer {
     pub source: String,
@@ -38,7 +38,7 @@ pub struct Pointer {
     pub quiet: bool,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 pub struct SourceReport {
     pub source: String,
     /// "ok", "failed" (didn't load) or "unwired" (nothing to read yet).
@@ -300,6 +300,7 @@ async fn gather() -> Inputs {
 
 /// One report per source. A failed source never hides the others.
 #[tauri::command]
+#[specta::specta]
 pub async fn needs_you_list() -> Result<Vec<SourceReport>, String> {
     Ok(build(gather().await))
 }

@@ -8,10 +8,10 @@ describe("suggestion layer is read-only", () => {
     for (const src of files) expect(src).not.toMatch(/ha_call_service|ha_conversation|ha_container/);
   });
   it("reads Home Assistant only through ha_states", () => {
-    expect(files.join("\n").match(/invoke<[^>]*>\("ha_[a-z_]+"/g)).toEqual(['invoke<HaState[]>("ha_states"']);
+    expect(files.join("\n").match(/invokeBound<[^>]*>\("ha_[a-z_]+"/g)).toEqual(['invokeBound<HaState[]>("ha_states"']);
   });
   it("invokes no action-like command at all (call_service, turn_on/off, toggle, set_*)", () => {
-    const names = [...files.join("\n").matchAll(/invoke<[^>]*>\("([a-z_]+)"/g)].map((m) => m[1]);
+    const names = [...files.join("\n").matchAll(/invokeBound<[^>]*>\("([a-z_]+)"/g)].map((m) => m[1]);
     expect(names.length).toBeGreaterThan(0);
     for (const n of names) expect(n).not.toMatch(/call_service|turn_on|turn_off|toggle|^set_|conversation|container_(start|stop)|transfer|pay|trade|withdraw/);
   });

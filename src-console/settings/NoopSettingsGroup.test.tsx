@@ -4,7 +4,7 @@ import { NOOP_PATH_CHANGE_CANCELLED } from "../../src/lib/types";
 import { NoopSettingsGroup, isUserCancel, pathError } from "./NoopSettingsGroup";
 
 const invokeMock = vi.hoisted(() => vi.fn());
-vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => { while (a.length && a[a.length - 1] === undefined) a.pop(); return (invokeMock as (...x: unknown[]) => unknown)(...a); } }));
 
 const ready = async () => { render(<NoopSettingsGroup />); await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()); };
 

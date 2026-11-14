@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /**
@@ -140,7 +140,7 @@ export function useAmaraVoice() {
 
 let bridgeUsers = 0;
 /** amara-voice down (error/unavailable) arrives as a state event; a missing command just stays idle. */
-const bridgeCall = (cmd: string) => { invoke<boolean>(cmd).catch(() => { /* older Nexus build or bridge down */ }); };
+const bridgeCall = (cmd: string) => { invokeBound<boolean>(cmd).catch(() => { /* older Nexus build or bridge down */ }); };
 
 /**
  * Ref-counted voice bridge: voice_bridge_start when the first live lens or Voice panel mounts,

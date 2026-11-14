@@ -84,13 +84,13 @@ fn mono_ms() -> u64 {
         .as_millis() as u64
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct Route {
     pub id: String,
     pub view: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct AddPreview {
     pub title: String,
     pub fields: Vec<(String, String)>,
@@ -101,7 +101,7 @@ pub struct AddPreview {
     pub payload: Option<Value>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum ParseResult {
     Preview {
@@ -121,7 +121,7 @@ pub enum ParseResult {
     },
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 pub struct Saved {
     pub id: String,
     pub title: String,
@@ -129,13 +129,13 @@ pub struct Saved {
     pub also: Option<Also>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 pub struct Also {
     pub label: String,
     pub link: Route,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 pub struct HistoryItem {
     pub id: String,
     pub when: String,
@@ -913,11 +913,13 @@ pub(crate) fn redeem_and_save(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn add_preview(kind: String, text: String) -> Result<ParseResult, String> {
     blocking(JoinErr::Plain, move || issue_preview(&kind, &text)).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn add_save(
     kind: String,
     preview: AddPreview,
@@ -930,6 +932,7 @@ pub async fn add_save(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn add_undo(kind: String, id: String) -> Result<bool, String> {
     blocking(JoinErr::Plain, move || {
         undo_in(&kind, &id, &Dirs::real(), now_jst())
@@ -938,6 +941,7 @@ pub async fn add_undo(kind: String, id: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn add_history(kind: String) -> Result<Vec<HistoryItem>, String> {
     blocking(JoinErr::Plain, move || history_in(&kind, &Dirs::real())).await
 }

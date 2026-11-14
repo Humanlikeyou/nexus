@@ -179,7 +179,7 @@ pub(crate) fn apply_patch(
     Ok(s.normalized())
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RelayView {
     pub enabled: bool,
@@ -729,7 +729,7 @@ pub(crate) async fn preview_core<W: LocalWriter>(
     })
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Preview {
     pub text: String,
@@ -766,19 +766,21 @@ fn view_now() -> RelayView {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn notify_settings_get() -> Result<RelayView, String> {
     tokio::task::spawn_blocking(view_now)
         .await
         .map_err(|e| e.to_string())
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, specta::Type)]
 pub struct RelayPatch {
     pub enabled: Option<bool>,
     pub kinds: Option<BTreeMap<String, bool>>,
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn notify_settings_set(
     app: tauri::AppHandle,
     patch: RelayPatch,
@@ -814,6 +816,7 @@ pub async fn notify_settings_set(
 
 /// Sends nothing. Returns the text that would be sent for `kind`, written by the local tier.
 #[tauri::command]
+#[specta::specta]
 pub async fn notify_preview(kind: String) -> Result<Preview, String> {
     let snap = tokio::task::spawn_blocking(super::noop::health_snapshot)
         .await
@@ -823,6 +826,7 @@ pub async fn notify_preview(kind: String) -> Result<Preview, String> {
 
 /// Native approval first, then one test message. Refused under the outbound switch or navy.
 #[tauri::command]
+#[specta::specta]
 pub async fn notify_send_test(app: tauri::AppHandle) -> Result<(), String> {
     let key = super::approval_gate::service_key("notify-test");
     send_test_core(&live_off, &MacKeychain, &HttpTelegram, |tail| {

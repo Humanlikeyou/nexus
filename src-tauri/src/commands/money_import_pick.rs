@@ -26,6 +26,7 @@ impl Drop for Slot {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn money_import_pick(app: tauri::AppHandle) -> Result<ImportPicked, String> {
     use tauri::Manager;
     use tauri_plugin_dialog::DialogExt;

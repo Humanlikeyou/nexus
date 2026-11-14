@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 import type { CrewsAdapter } from "./adapters";
 
@@ -26,7 +26,7 @@ export function nextScheduleFrom(rows: unknown): Wired<string> {
 }
 
 export async function refreshNextSchedule(): Promise<void> {
-  try { cached = nextScheduleFrom(await invoke("list_terrence_automations", { limit: null })); } catch { cached = UNWIRED; }
+  try { cached = nextScheduleFrom(await invokeBound("list_terrence_automations", { limit: null })); } catch { cached = UNWIRED; }
 }
 
 export function makeLiveCrewsSchedule(base: CrewsAdapter): CrewsAdapter {

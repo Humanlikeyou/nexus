@@ -36,7 +36,7 @@ const DAY_MS: i64 = 86_400_000;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TakeEvent {
     pub id: String,
@@ -177,6 +177,7 @@ pub(crate) fn list_in(dir: &Path) -> Vec<TakeEvent> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn take_events_append(event: TakeEvent) -> Result<bool, String> {
     let now = chrono::Utc::now().timestamp_millis();
     tauri::async_runtime::spawn_blocking(move || append_in(&dir(), &event, now))
@@ -185,6 +186,7 @@ pub async fn take_events_append(event: TakeEvent) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn take_events_list() -> Result<Vec<TakeEvent>, String> {
     tauri::async_runtime::spawn_blocking(|| list_in(&dir()))
         .await

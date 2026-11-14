@@ -37,7 +37,7 @@ const HEADER_LEN: usize = 39;
 const MIN_PASSPHRASE_CHARS: usize = 8;
 const MAX_FILE_BYTES: u64 = 4096;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, specta::Type)]
 pub struct KeyFileStatus {
     pub made: bool,
     #[serde(rename = "madeAt", skip_serializing_if = "Option::is_none")]
@@ -252,11 +252,13 @@ pub(crate) fn unlock_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn key_file_status() -> Result<KeyFileStatus, String> {
     Ok(status_in(&default_dir()))
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn key_file_make(
     app: tauri::AppHandle,
     passphrase: String,

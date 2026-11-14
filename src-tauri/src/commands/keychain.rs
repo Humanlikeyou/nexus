@@ -110,7 +110,7 @@ impl Keychain for FakeKeychain {
     }
 }
 
-#[derive(Serialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Debug, PartialEq, Eq, specta::Type)]
 pub struct SecretStatus {
     pub name: String,
     pub label: String,
@@ -161,6 +161,7 @@ pub(crate) fn set_with(kc: &dyn Keychain, name: &str, mut value: String) -> Resu
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn secrets_status() -> Result<Vec<SecretStatus>, String> {
     tokio::task::spawn_blocking(|| status_with(&MacKeychain))
         .await
@@ -190,6 +191,7 @@ pub(crate) fn chat_dialog_detail(old_tail: Option<&str>, new_tail: &str) -> Stri
 
 /// Write-only. Returns nothing; the value is zeroized after the Keychain write.
 #[tauri::command]
+#[specta::specta]
 pub async fn secret_set(
     app: tauri::AppHandle,
     name: String,

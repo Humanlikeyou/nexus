@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import type { TakePage } from "../amaraTake/types";
 import type { Answer, AnswerState, SkipReason } from "./adapters";
 import { tokyoDay } from "../lib/mindBody";
@@ -18,14 +18,14 @@ export const setTakeEvents = (e: TakeEvent[] | null) => { cache = e; notifyTakeL
 export const resetTakeEventsForTest = () => { cache = null; attempted = false; };
 
 export async function refreshTakeEvents(): Promise<void> {
-  try { const list = await invoke<TakeEvent[]>("take_events_list"); if (Array.isArray(list)) cache = list; } catch { /* stays unloaded: reads stay unwired */ }
+  try { const list = await invokeBound<TakeEvent[]>("take_events_list"); if (Array.isArray(list)) cache = list; } catch { /* stays unloaded: reads stay unwired */ }
   notifyTakeLog();
 }
 export function ensureTakeEvents(): void { if (cache === null && !attempted) { attempted = true; void refreshTakeEvents(); } }
 
 /** Appends one event; false when the store refused it (the caller then reports unwired, never success). */
 export async function appendTakeEvent(e: TakeEvent): Promise<boolean> {
-  try { await invoke<boolean>("take_events_append", { event: e }); } catch { return false; }
+  try { await invokeBound<boolean>("take_events_append", { event: e }); } catch { return false; }
   if (cache && !cache.some((x) => x.id === e.id)) cache = [...cache, e];
   notifyTakeLog();
   return true;

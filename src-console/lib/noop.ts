@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import type { BodyState, NoopDayRow, NoopMetricKey, NoopMetricPoint, NoopMetricSeries, NoopQueryArgs, NoopQueryError, NoopQueryTool, NoopSeriesPayload, NoopSnapshotPayload } from "../types";
 
 export type NoopRead<T> = { ok: true; value: T } | { ok: false; error: NoopQueryError };
@@ -15,7 +15,7 @@ function asError(e: unknown): NoopQueryError {
  */
 export async function noopQuery(tool: NoopQueryTool, args: NoopQueryArgs | null = null): Promise<NoopRead<unknown>> {
   try {
-    return { ok: true, value: await invoke<unknown>("noop_query", { tool, args }) };
+    return { ok: true, value: await invokeBound<unknown>("noop_query", { tool, args }) };
   } catch (e) {
     const error = asError(e);
     console.warn(`[console] noop_query ${tool} failed: ${error.kind}`);

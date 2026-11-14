@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { UNWIRED, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
 import { makeSampleSystemMap, unwiredSystemMap, type SystemMap, type SystemMapAdapter } from "./systemMap";
 
@@ -10,7 +10,7 @@ let sampleSingleton: SystemMapAdapter | null = null;
 let liveSingleton: SystemMapAdapter | null = null;
 
 /** Live adapter: `map()` reads a cache filled by `refresh()`. One refresh in flight at a time. */
-export function makeLiveSystemMap(fetchMap: () => Promise<SystemMap> = () => invoke<SystemMap>("system_map_status")): SystemMapAdapter {
+export function makeLiveSystemMap(fetchMap: () => Promise<SystemMap> = () => invokeBound<SystemMap>("system_map_status")): SystemMapAdapter {
   let cache: SystemMap | null = null;
   let inFlight: Promise<void> | null = null;
   return {

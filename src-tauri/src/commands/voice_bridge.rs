@@ -323,6 +323,7 @@ static TASKS: StdMutex<Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHan
 
 /// Start the state + level bridge. Idempotent: false if already running.
 #[tauri::command]
+#[specta::specta]
 pub async fn voice_bridge_start(app: AppHandle) -> bool {
     let mut slot = TASKS.lock().unwrap_or_else(|p| p.into_inner());
     if slot
@@ -345,6 +346,7 @@ pub async fn voice_bridge_start(app: AppHandle) -> bool {
 
 /// Stop the bridge. False if it wasn't running.
 #[tauri::command]
+#[specta::specta]
 pub async fn voice_bridge_stop() -> bool {
     match TASKS.lock().unwrap_or_else(|p| p.into_inner()).take() {
         Some((a, b)) => {

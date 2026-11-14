@@ -13,7 +13,7 @@ const MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckInRecord {
     pub id: String,
@@ -28,7 +28,7 @@ pub struct CheckInRecord {
     pub transcribed: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CheckInDraft {
     pub mood: u8,
@@ -110,6 +110,7 @@ fn dir() -> PathBuf {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn checkin_save(draft: CheckInDraft) -> Result<CheckInRecord, String> {
     tauri::async_runtime::spawn_blocking(move || save_in(&dir(), &draft, now_jst()))
         .await
@@ -117,6 +118,7 @@ pub async fn checkin_save(draft: CheckInDraft) -> Result<CheckInRecord, String> 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn checkin_list(limit: Option<usize>) -> Result<Vec<CheckInRecord>, String> {
     let n = limit.unwrap_or(30).clamp(1, 365);
     tauri::async_runtime::spawn_blocking(move || list_in(&dir(), n))

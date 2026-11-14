@@ -1,12 +1,14 @@
 // Bridge functions backed by generated bindings (src-console/bindings.gen.ts): same command name,
-// same payload keys, same resolve/reject behaviour as the old hand-written invoke. Not covered here:
-// amara_turn (Channel, stays on invoke until step 3).
+// same payload keys, same resolve/reject behaviour as the old hand-written invoke (amara_turn included, at the bottom).
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const invoke = vi.fn();
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a), Channel: class {} }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a), Channel: class { onmessage: ((e: unknown) => void) | null = null } }));
 
 import * as bridge from "../../src-console/bridge";
+import { invokeBound } from "../../src-console/bridge";
+import { BOUND_TABLE } from "../../src-console/boundTable";
 import { amaraTurnCancel, getN8nStatus, loadKv, loadSystemSnapshot, recordScreenOpen, saveKv, screenOpenCounts } from "../../src-console/bridge";
 
 beforeEach(() => { invoke.mockReset(); });
@@ -176,5 +178,156 @@ describe("table: every bound bridge function sends the expected command and payl
     await loadSystemSnapshot();
     warn.mockRestore();
     expect(sentWire()).toEqual(SNAPSHOT_READS.map(([c, p]) => [c, wire(p)]));
+  });
+});
+
+// Every command bound in step 4 (the callers outside bridge.ts): name, args object, and that the same payload reaches invoke.
+const CALLER_COMMANDS: Array<[string, Record<string, unknown> | undefined]> = [
+  ["get_noop_settings", undefined],
+  ["set_noop_settings", {settings: "settings-v"}],
+  ["sync_dock_icon", undefined],
+  ["chat_with_router", {text: "text-v", config: "config-v", tags: "tags-v", forceProvider: "forceProvider-v", anthropicApiKey: "anthropicApiKey-v", deep: "deep-v", localOnly: "localOnly-v"}],
+  ["roadmap_get", {goalId: "goalId-v"}],
+  ["roadmap_todays_question", {today: "today-v"}],
+  ["roadmap_request", {goalId: "goalId-v"}],
+  ["system_map_status", undefined],
+  ["notify_preview", {kind: "kind-v"}],
+  ["secrets_status", undefined],
+  ["key_file_status", undefined],
+  ["backup_settings_get", undefined],
+  ["backup_list", undefined],
+  ["notify_settings_get", undefined],
+  ["secret_set", {name: "name-v", value: "value-v"}],
+  ["backup_now", undefined],
+  ["backup_settings_set", {patch: "patch-v"}],
+  ["notify_settings_set", {patch: "patch-v"}],
+  ["notify_send_test", undefined],
+  ["key_file_make", {passphrase: "passphrase-v", replace: "replace-v"}],
+  ["backup_verify_last", undefined],
+  ["take_events_list", undefined],
+  ["take_events_append", {event: "event-v"}],
+  ["take_log_migrate", undefined],
+  ["take_log_list", undefined],
+  ["take_log_forget", {id: "id-v"}],
+  ["take_log_append", {entry: "entry-v"}],
+  ["noop_recent_workouts", {days: "days-v"}],
+  ["ha_states", undefined],
+  ["home_hr_take_status", undefined],
+  ["home_hr_take_maybe_refresh", {trigger: "trigger-v"}],
+  ["home_window_open", {id: "id-v", kind: "kind-v", target: "target-v"}],
+  ["home_window_close", {id: "id-v"}],
+  ["home_window_focus", {id: "id-v", grab: "grab-v"}],
+  ["home_window_pop_out", {id: "id-v"}],
+  ["home_window_layout", {rects: "rects-v"}],
+  ["home_window_preflight", undefined],
+  ["home_window_sites", undefined],
+  ["home_window_sign_out", {site: "site-v"}],
+  ["home_window_undo", undefined],
+  ["ha_get_config", undefined],
+  ["ha_set_config", {url: "url-v", token: "token-v"}],
+  ["ha_clear_token", undefined],
+  ["ha_test_connection", {url: "url-v", token: "token-v"}],
+  ["noop_query", {tool: "tool-v", args: "args-v"}],
+  ["ha_call_service", {domain: "domain-v", service: "service-v", entityId: "entityId-v", data: "data-v"}],
+  ["ha_conversation", {text: "text-v"}],
+  ["ha_container_status", undefined],
+  ["ha_container_start", undefined],
+  ["ha_container_stop", undefined],
+  ["ha_live_start", undefined],
+  ["ha_live_stop", undefined],
+  ["needs_you_list", undefined],
+  ["hemisync_library", undefined],
+  ["hemisync_sessions", undefined],
+  ["hemisync_stats", undefined],
+  ["hemisync_import", {folder: "folder-v"}],
+  ["set_local_only", {on: "on-v"}],
+  ["life_date_list", undefined],
+  ["checkin_list", {limit: "limit-v"}],
+  ["patterns_read", undefined],
+  ["weekly_review_read", undefined],
+  ["memory_list", undefined],
+  ["checkin_save", {draft: "draft-v"}],
+  ["decisions_list", undefined],
+  ["decisions_append", {draft: "draft-v"}],
+  ["decisions_undo", {id: "id-v"}],
+  ["decisions_add_outcome", {id: "id-v", outcome: "outcome-v"}],
+  ["money_accounts_list", undefined],
+  ["fx_rate_get", undefined],
+  ["money_balances_list", undefined],
+  ["money_import_pick", undefined],
+  ["money_account_add", {draft: "draft-v"}],
+  ["money_watch_add", {accountId: "accountId-v", value: "value-v"}],
+  ["money_balance_set_manual", {accountId: "accountId-v", nativeAmount: "nativeAmount-v", asOf: "asOf-v"}],
+  ["add_history", {kind: "kind-v"}],
+  ["add_preview", {kind: "kind-v", text: "text-v"}],
+  ["add_save", {kind: "kind-v", preview: "preview-v", via: "via-v"}],
+  ["add_undo", {kind: "kind-v", id: "id-v"}],
+  ["voice_bridge_start", undefined],
+  ["voice_bridge_stop", undefined],
+];
+
+describe("invokeBound: each caller command sends its name and payload, and rejections pass through", () => {
+  it.each(CALLER_COMMANDS)("%s", async (command, args) => {
+    invoke.mockResolvedValue(null);
+    await invokeBound(command, args);
+    expect(sentWire()).toEqual([[command, wire(args)]]);
+    invoke.mockRejectedValue("boom");
+    await expect(invokeBound(command, args)).rejects.toBe("boom");
+  });
+
+  it("an absent optional stays absent on the wire (not null)", async () => {
+    invoke.mockResolvedValue(null);
+    await invokeBound("home_window_focus", { id: "w1" });
+    await invokeBound("hemisync_import");
+    await invokeBound("chat_with_router", { text: "t", config: {}, tags: [], forceProvider: "light", localOnly: true });
+    expect(sentWire()).toEqual([
+      ["home_window_focus", { id: "w1" }],
+      ["hemisync_import", {}],
+      ["chat_with_router", { text: "t", config: {}, tags: [], forceProvider: "light", localOnly: true }],
+    ]);
+  });
+
+  it("an explicit null is kept", async () => {
+    invoke.mockResolvedValue(null);
+    await invokeBound("list_terrence_automations", { limit: null });
+    expect(sentWire()).toEqual([["list_terrence_automations", { limit: null }]]);
+  });
+
+  it("ha_call_service without data omits the key even in process", async () => {
+    invoke.mockResolvedValue(null);
+    await invokeBound("ha_call_service", { domain: "light", service: "turn_on", entityId: "light.x" });
+    expect(invoke.mock.calls[0][1]).not.toHaveProperty("data");
+  });
+
+  it("an unknown command rejects without calling invoke", async () => {
+    await expect(invokeBound("not_a_command")).rejects.toMatch(/not found/);
+    await expect(invokeBound("toString")).rejects.toMatch(/not found/);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("the table has one row per command in bindings.gen.ts except amara_turn", async () => {
+    const src = readFileSync("src-console/bindings.gen.ts", "utf8");
+    const gen = [...src.matchAll(/__TAURI_INVOKE<[^>]*(?:<[^>]*>)?[^>]*>\("([a-z_0-9]+)"/g)].map((m) => m[1]).filter((c) => c !== "amara_turn").sort();
+    expect(Object.keys(BOUND_TABLE).sort()).toEqual(gen);
+  });
+});
+
+describe("amaraTurn (Channel) goes through the bindings", () => {
+  it("sends input, surface and a channel whose messages reach the callback", async () => {
+    invoke.mockResolvedValue("turn-1");
+    const events: unknown[] = [];
+    await expect(bridge.amaraTurn({ conversationId: "c", text: "hi", deep: true }, "typed", (e) => events.push(e))).resolves.toBe("turn-1");
+    expect(invoke.mock.calls).toHaveLength(1);
+    const [command, payload] = invoke.mock.calls[0];
+    expect(command).toBe("amara_turn");
+    expect(Object.keys(payload).sort()).toEqual(["channel", "input", "surface"]);
+    expect(payload.input).toEqual({ conversationId: "c", text: "hi", deep: true });
+    expect(payload.surface).toBe("typed");
+    payload.channel.onmessage({ type: "delta", text: "a" });
+    expect(events).toEqual([{ type: "delta", text: "a" }]);
+  });
+  it("a rejection reaches the caller", async () => {
+    invoke.mockRejectedValue("busy");
+    await expect(bridge.amaraTurn({ conversationId: "c", text: "x" }, "voice", () => {})).rejects.toBe("busy");
   });
 });

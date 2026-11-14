@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const invoke = vi.fn();
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => { while (a.length && a[a.length - 1] === undefined) a.pop(); return (invoke as (...x: unknown[]) => unknown)(...a); } }));
 
 let progressHandler: ((e: { payload: unknown }) => void) | null = null;
 vi.mock("@tauri-apps/api/event", () => ({ listen: async (_n: string, h: (e: { payload: unknown }) => void) => { progressHandler = h; return () => {}; } }));

@@ -7,7 +7,7 @@ const events = vi.hoisted(() => ({
   unlisten: vi.fn(),
 }));
 const core = vi.hoisted(() => ({ invoke: vi.fn(async () => true) }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: core.invoke }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => { while (a.length && a[a.length - 1] === undefined) a.pop(); return (core.invoke as (...x: unknown[]) => unknown)(...a); } }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async (name: string, h: (e: { payload: unknown }) => void) => {
     events.handlers.set(name, h);

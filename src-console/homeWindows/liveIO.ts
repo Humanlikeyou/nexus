@@ -1,5 +1,5 @@
 /** Tauri side of live Home windows: the home_window_* commands and their events. No page content, no URLs in logs. */
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { listen } from "@tauri-apps/api/event";
 import { inTauri } from "../lib/localStores";
 import type { LiveIO, LiveOpenResult } from "./live";
@@ -8,7 +8,7 @@ import type { SignedSite } from "./adapters";
 export const REFUSED_FALLBACK = "Web windows are off while Local only or outbound-disabled is on. Nothing was opened.";
 
 type Call = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
-const tauriCall: Call = (cmd, args) => invoke(cmd, args);
+const tauriCall: Call = (cmd, args) => invokeBound(cmd, args);
 
 const errText = (e: unknown): string => (typeof e === "string" ? e : e instanceof Error ? e.message : "");
 

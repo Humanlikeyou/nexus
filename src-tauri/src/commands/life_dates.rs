@@ -18,7 +18,7 @@ const MAX_BYTES: u64 = 512 * 1024;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LifeDateRecord {
     pub id: String,
@@ -43,7 +43,7 @@ pub struct LifeDateDraft {
     pub sub: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Reminder {
     pub days: i64,
@@ -51,7 +51,7 @@ pub struct Reminder {
     pub passed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LifeDateView {
     #[serde(flatten)]
@@ -395,6 +395,7 @@ fn data_dir() -> PathBuf {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn life_date_list() -> Result<Vec<LifeDateView>, String> {
     blocking(JoinErr::Plain, || list_in(&data_dir(), day_of(&now_jst()))).await
 }

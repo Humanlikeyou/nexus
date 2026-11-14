@@ -39,7 +39,7 @@ pub(crate) const MAX_BODY_BYTES: usize = 512 * 1024;
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 pub(crate) const CALL_TIMEOUT: Duration = Duration::from_secs(8);
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryItem {
     pub id: String,
@@ -225,6 +225,7 @@ pub(crate) async fn list_from(base: &str, key: &str) -> Result<Vec<MemoryItem>, 
 
 /// Read-only. The error is one of the fixed `letta_*` codes.
 #[tauri::command]
+#[specta::specta]
 pub async fn memory_list() -> Result<Vec<MemoryItem>, String> {
     let key = tokio::task::spawn_blocking(|| read_key(&MacKeychain))
         .await

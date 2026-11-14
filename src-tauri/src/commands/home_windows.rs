@@ -51,7 +51,7 @@ pub fn refusal(outbound_disabled: bool) -> Option<&'static str> {
     outbound_disabled.then_some(REFUSED_COPY)
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Target {
     pub url: Option<String>,
@@ -660,7 +660,7 @@ fn write_profile(base: &Path, rec: &ProfileRecord) -> Result<(), String> {
     crate::app_paths::write_private(&dir.join(PROFILE_FILE), bytes).map_err(|e| e.to_string())
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, specta::Type)]
 pub struct SiteRow {
     pub id: String,
     pub host: String,
@@ -732,7 +732,7 @@ pub fn delete_profile_dir(base: &Path, key: &str) -> Result<bool, String> {
 
 // ----------------------------------------------------------- tauri commands
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenResult {
     pub id: String,
@@ -797,11 +797,13 @@ fn close_native(app: &AppHandle, id: &str) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn home_window_preflight() -> Result<(), String> {
     gate()
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn home_window_open(
     app: AppHandle,
     id: String,
@@ -1014,7 +1016,7 @@ fn finish_load(
     );
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SlotRect {
     pub id: String,
@@ -1031,6 +1033,7 @@ fn sane(v: f64) -> bool {
 
 /// The UI sends the stage slot rects (CSS px in the main webview) on layout and resize.
 #[tauri::command]
+#[specta::specta]
 pub async fn home_window_layout(app: AppHandle, rects: Vec<SlotRect>) -> Result<(), String> {
     if rects.len() > MAX_WINDOWS {
         return Err("Too many slots.".into());
@@ -1084,6 +1087,7 @@ pub async fn home_window_layout(app: AppHandle, rects: Vec<SlotRect>) -> Result<
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn home_window_focus(
     app: AppHandle,
     id: String,
@@ -1105,6 +1109,7 @@ pub async fn home_window_focus(
 
 /// `id` is a window id, or `"all"`. Idempotent: closing something already gone is fine.
 #[tauri::command]
+#[specta::specta]
 pub async fn home_window_close(app: AppHandle, id: String) -> Result<(), String> {
     let ids = if id == "all" {
         lock_set()?.ids()
@@ -1121,6 +1126,7 @@ pub async fn home_window_close(app: AppHandle, id: String) -> Result<(), String>
 
 /// Undo the last replace (8 s): the replaced window comes back, the new one closes.
 #[tauri::command]
+#[specta::specta]
 pub async fn home_window_undo(app: AppHandle) -> Result<String, String> {
     gate()?;
     remember(&app);
@@ -1169,6 +1175,7 @@ pub async fn home_window_undo(app: AppHandle) -> Result<String, String> {
 
 /// Move a window into its own native window (counts toward the 3). Closing that window tells the UI.
 #[tauri::command]
+#[specta::specta]
 pub async fn home_window_pop_out(app: AppHandle, id: String) -> Result<(), String> {
     gate()?;
     remember(&app);
@@ -1239,6 +1246,7 @@ pub async fn home_window_pop_out(app: AppHandle, id: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn home_window_sites() -> Result<Vec<SiteRow>, String> {
     Ok(list_sites(&crate::app_paths::data_dir()))
 }
@@ -1246,6 +1254,7 @@ pub async fn home_window_sites() -> Result<Vec<SiteRow>, String> {
 /// Sign out of one site: native approval, close its windows, remove its WebKit store, delete only
 /// that site's folder. Other sites are untouched.
 #[tauri::command]
+#[specta::specta]
 pub async fn home_window_sign_out(app: AppHandle, site: String) -> Result<(), String> {
     remember(&app);
     valid_site_key(&site)?;

@@ -301,6 +301,7 @@ pub fn init_navy_flag() {
 /// in force. Turning on also writes the voice loop's flag file; if that can't be written the
 /// in-memory switch stays on (safe) but this returns false so the look doesn't claim a guarantee.
 #[tauri::command]
+#[specta::specta]
 pub fn set_local_only(on: bool) -> bool {
     #[cfg(not(test))]
     let flag_ok = write_navy_flag_in(&crate::app_paths::data_dir(), on).is_ok();

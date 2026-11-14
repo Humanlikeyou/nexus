@@ -19,13 +19,13 @@ const MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct SourceLink {
     pub id: String,
     pub view: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionRecord {
     pub id: String,
@@ -45,7 +45,7 @@ pub struct DecisionRecord {
     pub outcome_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DecisionDraft {
     pub item_id: String,
@@ -190,11 +190,13 @@ fn data_dir() -> PathBuf {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn decisions_list() -> Result<Vec<DecisionRecord>, String> {
     blocking(JoinErr::Plain, || list_in(&data_dir())).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn decisions_append(draft: DecisionDraft) -> Result<DecisionRecord, String> {
     blocking(JoinErr::Plain, move || {
         append_in(&data_dir(), &draft, now_jst())
@@ -203,11 +205,13 @@ pub async fn decisions_append(draft: DecisionDraft) -> Result<DecisionRecord, St
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn decisions_undo(id: String) -> Result<bool, String> {
     blocking(JoinErr::Plain, move || undo_in(&data_dir(), &id, now_jst())).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn decisions_add_outcome(id: String, outcome: String) -> Result<DecisionRecord, String> {
     blocking(JoinErr::Plain, move || {
         outcome_in(&data_dir(), &id, &outcome, now_jst())

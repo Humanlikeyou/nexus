@@ -265,7 +265,7 @@ pub(crate) fn write_redacted_config(
 
 // ---- settings ----
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct BackupSettings {
     pub nightly: bool,
@@ -314,7 +314,7 @@ impl Default for BackupSettings {
     }
 }
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Default, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BackupSettingsPatch {
     pub nightly: Option<bool>,
@@ -514,7 +514,7 @@ pub(crate) fn record_bundle(data_dir: &Path, result: &str) -> Result<(), String>
 
 // ---- listing ----
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Debug, Clone, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupEntry {
     /// The file name (also the id `restore` will take later).
@@ -589,7 +589,7 @@ pub(crate) fn list_in(
 
 // ---- run ----
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupRunResult {
     pub entry: BackupEntry,
@@ -697,6 +697,7 @@ pub(crate) fn home_dir() -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn backup_settings_get() -> Result<BackupSettings, String> {
     let data = crate::app_paths::data_dir();
     tokio::task::spawn_blocking(move || load_settings(&data))
@@ -705,6 +706,7 @@ pub async fn backup_settings_get() -> Result<BackupSettings, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn backup_settings_set(patch: BackupSettingsPatch) -> Result<BackupSettings, String> {
     let (home, data) = (home_dir()?, crate::app_paths::data_dir());
     tokio::task::spawn_blocking(move || apply_patch(&home, &data, patch))
@@ -713,6 +715,7 @@ pub async fn backup_settings_set(patch: BackupSettingsPatch) -> Result<BackupSet
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn backup_list() -> Result<Vec<BackupEntry>, String> {
     let (home, data) = (home_dir()?, crate::app_paths::data_dir());
     tokio::task::spawn_blocking(move || {
@@ -737,7 +740,7 @@ const VERIFY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(600)
 pub(crate) static VERIFY_BUSY: AtomicBool = AtomicBool::new(false);
 const VERIFY_MAX_MISMATCHES: usize = 50;
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Debug, Clone, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyReport {
     /// Archive file name.
@@ -1066,6 +1069,7 @@ pub(crate) fn verify_last_in(
 
 /// Read-only: checks the newest backup and reports. Writes and deletes nothing.
 #[tauri::command]
+#[specta::specta]
 pub async fn backup_verify_last() -> Result<Option<VerifyReport>, String> {
     let (home, data) = (home_dir()?, crate::app_paths::data_dir());
     tokio::task::spawn_blocking(move || {
@@ -1108,6 +1112,7 @@ pub(crate) async fn run_and_record(app: &tauri::AppHandle) -> Result<BackupRunRe
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn backup_now(app: tauri::AppHandle) -> Result<BackupRunResult, String> {
     run_and_record(&app).await
 }

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { liveDeps } from "../amaraTake/live";
 import { TAKE_PAGE_LABEL } from "../amaraTake/takeView";
 import type { TakePage } from "../amaraTake/types";
@@ -17,7 +17,7 @@ import type { Sources } from "./typeOutcomes";
 async function loadSources(): Promise<Sources | null> {
   const read = await noopQuery("health_snapshot", { days: 120 });
   if (!read.ok || !isSnapshot(read.value)) return null;
-  const sessions = await invoke<RecordedSession[]>("list_sessions").catch(() => [] as RecordedSession[]);
+  const sessions = await invokeBound<RecordedSession[]>("list_sessions").catch(() => [] as RecordedSession[]);
   const by = new Map<string, number[]>();
   for (const s of sessions) { const d = tokyoSafe(s.start); const v = s.summary?.avg_relaxation; if (d && typeof v === "number" && Number.isFinite(v)) by.set(d, [...(by.get(d) ?? []), v]); }
   return { rows: snapshotDays(read.value), museRelax: new Map([...by].map(([d, xs]) => [d, xs.reduce((a, b) => a + b, 0) / xs.length])) };
@@ -30,13 +30,13 @@ export const liveSuggestDeps: SuggestDeps = {
   facts: liveDeps.facts,
   ask: liveDeps.ask,
   sources: loadSources,
-  workouts: async () => (await invoke<Workout[]>("noop_recent_workouts", { days: 3 }).catch(() => null)),
+  workouts: async () => (await invokeBound<Workout[]>("noop_recent_workouts", { days: 3 }).catch(() => null)),
   ledger: async () => {
-    const l = await invoke<{ fundingRequests?: LedgerRequest[] } | null>("read_business_ledger").catch(() => null);
+    const l = await invokeBound<{ fundingRequests?: LedgerRequest[] } | null>("read_business_ledger").catch(() => null);
     return l ? l.fundingRequests ?? [] : null;
   },
   // Read only: `ha_states` is the only Home Assistant command this feature ever calls.
-  haStates: async () => (await invoke<HaState[]>("ha_states").catch(() => null)),
+  haStates: async () => (await invokeBound<HaState[]>("ha_states").catch(() => null)),
 };
 
 type View = { day: string; at: number; today: Map<TakePage, TodayBase>; outcomes: TypeOutcome[] | null; week: WeekSuggestions | null; goals: GoalsFromTakes | null };

@@ -31,7 +31,7 @@ use super::loopback_http::{loopback_base, loopback_client, LOOPBACK_CONNECT_TIME
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, specta::Type)]
 pub struct RouterConfig {
     pub mode: String, // "amara" | "local" | "hybrid" | "api"
     pub ollama_model: String,
@@ -73,7 +73,7 @@ impl Default for RouterConfig {
 }
 
 /// Amara's tier as the app reports it. The router's `fast` is shown as `light`.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum Tier {
     #[default]
@@ -93,7 +93,7 @@ impl Tier {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, specta::Type)]
 pub struct RouterResponse {
     pub content: String,
     pub tier: Tier,
@@ -569,6 +569,7 @@ pub(crate) async fn navy_chat(text: &str) -> Result<NavyTurn, String> {
 // ─── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub async fn chat_with_router(
     text: String,
     config: RouterConfig,

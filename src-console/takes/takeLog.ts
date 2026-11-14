@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { tokyoDay } from "../lib/mindBody";
 import type { AmaraTake, CitedPoint, TakePage } from "../amaraTake/types";
 import type { HistoryEntry, HistoryFilter, MemoryLine } from "./adapters";
@@ -84,8 +84,8 @@ export const takeLogEntries = (): TakeLogEntry[] | null => cache;
 export function refreshTakeLog(): Promise<void> {
   const run = (async () => {
     try {
-      if (!migrated) { migrated = true; await invoke<number>("take_log_migrate").catch(() => 0); }
-      cache = await invoke<TakeLogEntry[]>("take_log_list");
+      if (!migrated) { migrated = true; await invokeBound<number>("take_log_migrate").catch(() => 0); }
+      cache = await invokeBound<TakeLogEntry[]>("take_log_list");
     } catch { /* stays as it was: unwired until a read works */ }
     notify();
   })();
@@ -98,7 +98,7 @@ export const resetTakeLogForTest = () => { cache = null; attempted = false; migr
 
 export async function forgetTake(id: string): Promise<boolean> {
   try {
-    const ok = await invoke<boolean>("take_log_forget", { id });
+    const ok = await invokeBound<boolean>("take_log_forget", { id });
     await refreshTakeLog();
     return ok;
   } catch { return false; }
@@ -106,7 +106,7 @@ export async function forgetTake(id: string): Promise<boolean> {
 
 /** Appends one accepted take. A failure never blocks the take itself. */
 export async function appendTake(entry: TakeLogEntry): Promise<void> {
-  try { await invoke<boolean>("take_log_append", { entry }); if (cache !== null) await refreshTakeLog(); } catch { /* the daily kv cache still holds it */ }
+  try { await invokeBound<boolean>("take_log_append", { entry }); if (cache !== null) await refreshTakeLog(); } catch { /* the daily kv cache still holds it */ }
 }
 
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };

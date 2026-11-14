@@ -48,7 +48,7 @@ static STORE_LOCK: Mutex<()> = Mutex::new(());
 
 // ---------------------------------------------------------------- types
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LibTrack {
     pub id: String,
@@ -62,7 +62,7 @@ pub struct LibTrack {
     pub rel_path: String,
 }
 
-#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Clone, Debug, Default, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Library {
     pub tracks: Vec<LibTrack>,
@@ -79,7 +79,7 @@ struct ImportMeta {
     source_folder: Option<String>,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
 pub struct ImportResult {
     pub added: u64,
     pub skipped: u64,
@@ -114,7 +114,7 @@ struct Store {
     sessions: Vec<LinkRow>,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Metrics {
     pub focus_avg: Option<f64>,
@@ -123,7 +123,7 @@ pub struct Metrics {
     pub bands: Option<serde_json::Value>,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRow {
     pub id: String,
@@ -136,7 +136,7 @@ pub struct SessionRow {
     pub metrics: Metrics,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackStats {
     pub track_id: String,
@@ -1457,6 +1457,7 @@ fn home_dir() -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn hemisync_import(
     app: tauri::AppHandle,
     folder: Option<String>,
@@ -1486,6 +1487,7 @@ pub async fn hemisync_import(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn hemisync_library() -> Result<Library, String> {
     let data = crate::app_paths::data_dir();
     blocking(JoinErr::Code("io_error"), move || Ok(scan_library(&data))).await
@@ -1531,6 +1533,7 @@ pub async fn hemisync_session_rate(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn hemisync_sessions() -> Result<Vec<SessionRow>, String> {
     let data = crate::app_paths::data_dir();
     blocking(JoinErr::Code("io_error"), move || {
@@ -1540,6 +1543,7 @@ pub async fn hemisync_sessions() -> Result<Vec<SessionRow>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn hemisync_stats() -> Result<Vec<TrackStats>, String> {
     let data = crate::app_paths::data_dir();
     blocking(JoinErr::Code("io_error"), move || {

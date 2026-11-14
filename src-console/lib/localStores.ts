@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { useEffect, useState } from "react";
 import type { Wired } from "./sampleAdapters";
 
@@ -9,7 +9,7 @@ import type { Wired } from "./sampleAdapters";
  * older build) keeps showing "Needs wiring" and never a made-up list.
  */
 export type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
-export const realInvoke: Invoke = (command, args) => invoke(command, args);
+export const realInvoke: Invoke = (command, args) => invokeBound(command, args);
 
 /** True inside the Tauri webview. Tests and plain browsers have no IPC, so every adapter stays unwired there. */
 export const inTauri = (): boolean => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;

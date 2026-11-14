@@ -21,8 +21,9 @@ const MAX_BYTES: u64 = 256 * 1024;
 const MIN_NIGHTS_FOR_DELTA: usize = 3;
 const SUGGESTION_MIN_CONFIDENCE: u8 = 3;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
+#[serde(rename = "WeeklyReviewHealth")]
 pub struct Health {
     /// "data" | "none"
     pub state: String,
@@ -37,7 +38,7 @@ pub struct Health {
     pub note: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Work {
     pub state: String,
@@ -47,7 +48,7 @@ pub struct Work {
     pub note: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Note {
     pub text: String,
@@ -55,7 +56,7 @@ pub struct Note {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Checkins {
     pub state: String,
@@ -67,8 +68,9 @@ pub struct Checkins {
     pub note: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
+#[serde(rename = "WeeklyReviewMilestone")]
 pub struct Milestone {
     pub id: String,
     pub title: String,
@@ -78,7 +80,7 @@ pub struct Milestone {
     pub pct: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct GoalsSection {
     pub state: String,
@@ -87,7 +89,7 @@ pub struct GoalsSection {
     pub note: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MoneyAccountWeek {
     pub account_id: String,
@@ -102,7 +104,7 @@ pub struct MoneyAccountWeek {
     pub change_to: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MoneySection {
     pub state: String,
@@ -112,7 +114,7 @@ pub struct MoneySection {
     pub note: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Suggestion {
     pub title: String,
@@ -124,7 +126,7 @@ pub struct Suggestion {
     pub finding: patterns::Finding,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Review {
     /// "ready" (at least one section has data) | "not_enough_data"
@@ -649,6 +651,7 @@ fn gather_live(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn weekly_review_read() -> Result<Review, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let dir = crate::app_paths::data_dir();

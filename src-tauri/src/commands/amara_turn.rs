@@ -58,7 +58,7 @@ const MAX_HA_NAME_CHARS: usize = 64;
 
 // ── Command types ───────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AmaraTurnInput {
     pub conversation_id: String,
@@ -95,7 +95,7 @@ impl Surface {
 }
 
 /// One event on the channel. Fixed shapes: nothing here can carry a model, provider or secret.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnEvent {
     Status {
@@ -1747,6 +1747,7 @@ impl Deps {
 /// Starts a turn and returns its id at once; the turn runs on a spawned task and reports over
 /// `channel`. A new turn in the same conversation cancels the previous one.
 #[tauri::command]
+#[specta::specta]
 pub async fn amara_turn(
     app: AppHandle,
     registry: State<'_, TurnRegistry>,

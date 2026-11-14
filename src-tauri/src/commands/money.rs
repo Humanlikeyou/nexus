@@ -272,7 +272,7 @@ const ROUTES: [&str; 3] = ["csv", "watch_only", "manual"];
 const CURRENCIES: [&str; 4] = ["JPY", "USD", "BTC", "ETH"];
 const SCOPES: [&str; 2] = ["personal", "venture"];
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct MoneyAccount {
     pub id: String,
     pub nickname: String,
@@ -286,7 +286,7 @@ pub struct MoneyAccount {
 
 /// What the UI sends. Enum-like fields are plain strings so a bad value gets a fixed error, not a
 /// serde message that quotes it.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MoneyAccountDraft {
     pub nickname: String,
     pub institution: String,
@@ -386,7 +386,7 @@ struct WatchEntry {
     added_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 pub struct WatchAdded {
     pub chain: String,
     pub form: String,
@@ -1004,7 +1004,7 @@ pub(crate) fn import_parsed_in(
 }
 
 /// What the Connect sheet's "Import a statement" returns: counts only, never a path or a row.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 pub struct ImportPicked {
     pub imported: usize,
     pub skipped: usize,
@@ -1087,7 +1087,8 @@ fn rollback_new_account(data: &Path, id: &str) {
 
 // ───────────────────────────── FX reference rate ─────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
+#[serde(rename = "MoneyFxRate")]
 pub struct FxRate {
     /// JPY per 1 USD.
     pub rate: f64,
@@ -1261,14 +1262,14 @@ async fn fetch_ecb() -> Result<String, String> {
 /// How far back `history` reaches, in days.
 const HISTORY_DAYS: i64 = 30;
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 pub struct BalancePoint {
     pub date: String,
     pub amount: f64,
 }
 
 /// One account's current balance. Only accounts with a real stored value appear; nothing is estimated.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 pub struct AccountBalance {
     pub account_id: String,
     pub currency: String,
@@ -1282,7 +1283,7 @@ pub struct AccountBalance {
     pub history: Vec<BalancePoint>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 pub struct MoneyBalances {
     pub balances: Vec<AccountBalance>,
     /// The stored JPY-per-USD reference rate, or `None`. Never invented.
@@ -1403,6 +1404,7 @@ fn data_dir() -> PathBuf {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn money_accounts_list() -> Result<Vec<MoneyAccount>, String> {
     blocking(JoinErr::Code("store_error"), || {
         accounts_list_in(&data_dir())
@@ -1411,6 +1413,7 @@ pub async fn money_accounts_list() -> Result<Vec<MoneyAccount>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn money_balances_list() -> Result<MoneyBalances, String> {
     blocking(JoinErr::Code("store_error"), || {
         balances_list_in(&data_dir(), now_jst().date_naive())
@@ -1419,6 +1422,7 @@ pub async fn money_balances_list() -> Result<MoneyBalances, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn money_account_add(draft: MoneyAccountDraft) -> Result<MoneyAccount, String> {
     blocking(JoinErr::Code("store_error"), move || {
         account_add_in(&data_dir(), &draft)
@@ -1427,6 +1431,7 @@ pub async fn money_account_add(draft: MoneyAccountDraft) -> Result<MoneyAccount,
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn money_watch_add(account_id: String, value: String) -> Result<WatchAdded, String> {
     blocking(JoinErr::Code("store_error"), move || {
         watch_add_in(&data_dir(), &account_id, &value)
@@ -1435,6 +1440,7 @@ pub async fn money_watch_add(account_id: String, value: String) -> Result<WatchA
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn money_balance_set_manual(
     account_id: String,
     native_amount: f64,
@@ -1447,6 +1453,7 @@ pub async fn money_balance_set_manual(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fx_rate_get() -> Result<Option<FxRate>, String> {
     blocking(JoinErr::Code("store_error"), || fx_get_in(&data_dir())).await
 }
@@ -2728,7 +2735,8 @@ mod tests {
         let mut lines = src.lines();
         while let Some(l) = lines.next() {
             if l.trim() == "#[tauri::command]" {
-                let f = lines.next().unwrap();
+                // `#[specta::specta]` sits between the attribute and the fn line.
+                let f = lines.find(|l| !l.trim_start().starts_with("#[")).unwrap();
                 let name = f
                     .split("fn ")
                     .nth(1)

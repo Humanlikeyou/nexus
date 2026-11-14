@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { sample, sampleAdaptersEnabled, UNWIRED, type Wired } from "../lib/sampleAdapters";
 
 /** Voice intent + local-only spoken line (light tier, cloud off). UI toggles the look itself. */
@@ -33,7 +33,7 @@ let localOnlyConfirmed = false;
 export async function setNavyLocalOnly(on: boolean): Promise<boolean> {
   if (sampleAdaptersEnabled()) return on;
   try {
-    const now = await invoke<boolean>("set_local_only", { on });
+    const now = await invokeBound<boolean>("set_local_only", { on });
     localOnlyConfirmed = on && now === true;
     return now === true;
   } catch {

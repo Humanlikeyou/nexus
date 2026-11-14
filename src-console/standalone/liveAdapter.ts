@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { listen } from "@tauri-apps/api/event";
 import type { AlertKind, BackupRun, BackupSettings, BackupStatus, KeyFileStatus, RelayPreview, RelaySettings, SecretName, SecretStatus, StandaloneAdapter } from "./adapters";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
@@ -81,7 +81,7 @@ export function mapLast(list: BackupRow[], verify: VerifyRow | null): BackupStat
  */
 let verifyInflight: Promise<void> | null = null;
 let verifiedKey: string | null = null;
-export function verifyLast(call: typeof invoke = invoke): Promise<void> {
+export function verifyLast(call: typeof invokeBound = invokeBound): Promise<void> {
   const row = cache.backupList?.[0];
   const key = row ? `${row.id}:${row.sizeBytes}` : null;
   if (key && key === verifiedKey) return Promise.resolve();
@@ -115,18 +115,18 @@ let previewAsked = false;
 function askPreview() {
   if (previewAsked) return;
   previewAsked = true;
-  void invoke("notify_preview", { kind: "recovery" }).then((p) => { cache.preview = toPreview(p); }, () => { cache.preview = null; }).finally(notify);
+  void invokeBound("notify_preview", { kind: "recovery" }).then((p) => { cache.preview = toPreview(p); }, () => { cache.preview = null; }).finally(notify);
 }
 export const resetRelayForTests = () => { previewAsked = false; cache.preview = null; cache.relay = null; };
 
 export async function refreshLive(): Promise<void> {
   const [s, k, bs, bl, sm, rl] = await Promise.allSettled([
-    invoke<SecretStatus[]>("secrets_status"),
-    invoke<KeyFileStatus>("key_file_status"),
-    invoke<BackupSettings>("backup_settings_get"),
-    invoke<BackupRow[]>("backup_list"),
-    invoke<SystemMap>("system_map_status"),
-    invoke<unknown>("notify_settings_get"),
+    invokeBound<SecretStatus[]>("secrets_status"),
+    invokeBound<KeyFileStatus>("key_file_status"),
+    invokeBound<BackupSettings>("backup_settings_get"),
+    invokeBound<BackupRow[]>("backup_list"),
+    invokeBound<SystemMap>("system_map_status"),
+    invokeBound<unknown>("notify_settings_get"),
   ]);
   cache.secrets = s.status === "fulfilled" ? s.value : null;
   cache.keyFile = k.status === "fulfilled" ? k.value : null;
@@ -159,7 +159,7 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
     summary: () => live(cache.map ? summaryFromServices(servicesFromMap(cache.map).services) : null),
     secrets: () => live(cache.secrets),
     setSecret: async (name: SecretName, value: string) => {
-      try { await invoke("secret_set", { name, value }); } catch (e) { console.warn("[standalone] secret_set refused:", code(e)); return UNWIRED; }
+      try { await invokeBound("secret_set", { name, value }); } catch (e) { console.warn("[standalone] secret_set refused:", code(e)); return UNWIRED; }
       await refreshLive();
       return OK;
     },
@@ -178,7 +178,7 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
     backupNow: async () => {
       cache.run = { pct: 0, phase: "Starting", done: "", total: "", left: "" };
       notify();
-      try { await invoke("backup_now"); } catch (e) {
+      try { await invokeBound("backup_now"); } catch (e) {
         console.warn("[standalone] backup_now refused:", code(e));
         cache.run = null;
         await refreshLive();
@@ -191,26 +191,26 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
     setBackupSettings: async (patch: Partial<BackupSettings>) => {
       const { nightly, at, dir, keep, beforeUpdate, skipOnBatteryBelow } = patch;
       const clean = Object.fromEntries(Object.entries({ nightly, at, dir, keep, beforeUpdate, skipOnBatteryBelow }).filter(([, v]) => v !== undefined));
-      try { await invoke("backup_settings_set", { patch: clean }); } catch (e) { console.warn("[standalone] backup_settings_set refused:", code(e)); return UNWIRED; }
+      try { await invokeBound("backup_settings_set", { patch: clean }); } catch (e) { console.warn("[standalone] backup_settings_set refused:", code(e)); return UNWIRED; }
       await refreshLive();
       return OK;
     },
     relay: () => live(cache.relay),
     setRelay: async (p: Partial<RelaySettings>) => {
       const patch = { enabled: p.enabled, kinds: p.kinds };
-      try { cache.relay = toRelay(await invoke("notify_settings_set", { patch })) ?? cache.relay; } catch (e) { console.warn("[standalone] notify_settings_set refused:", code(e)); await refreshLive(); return UNWIRED; }
+      try { cache.relay = toRelay(await invokeBound("notify_settings_set", { patch })) ?? cache.relay; } catch (e) { console.warn("[standalone] notify_settings_set refused:", code(e)); await refreshLive(); return UNWIRED; }
       notify();
       return OK;
     },
     relayPreview: () => { askPreview(); return live(cache.preview); },
     relaySendTest: async () => {
-      try { await invoke("notify_send_test"); } catch (e) { console.warn("[standalone] notify_send_test refused:", code(e)); return UNWIRED; }
+      try { await invokeBound("notify_send_test"); } catch (e) { console.warn("[standalone] notify_send_test refused:", code(e)); return UNWIRED; }
       await refreshLive();
       return OK;
     },
     keyFile: () => live(cache.keyFile),
     makeKeyFile: async (passphrase: string) => {
-      try { await invoke("key_file_make", { passphrase }); } catch (e) { console.warn("[standalone] key_file_make refused:", code(e)); return UNWIRED; }
+      try { await invokeBound("key_file_make", { passphrase }); } catch (e) { console.warn("[standalone] key_file_make refused:", code(e)); return UNWIRED; }
       await refreshLive();
       return OK;
     },

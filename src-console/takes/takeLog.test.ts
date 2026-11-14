@@ -128,6 +128,6 @@ describe("live hr take adapter", () => {
     expect((await liveHrTake.refresh("focus")).state).toBe("unwired");
     mocked.mockResolvedValueOnce({ kind: "none_yet", due: true });
     await liveHrTake.refresh("navigate");
-    expect(mocked.mock.calls[mocked.mock.calls.length - 1]).toEqual(["home_hr_take_maybe_refresh", { trigger: "navigate" }]);
+    expect(mocked.mock.calls[mocked.mock.calls.length - 1].slice(0, 2)).toEqual(["home_hr_take_maybe_refresh", { trigger: "navigate" }]);
   });
 });

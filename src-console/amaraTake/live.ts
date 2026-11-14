@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { buildRouterConfig } from "@/lib/llm-router";
 import { getConfig } from "@/lib/api";
 import type { RouterResponse } from "@/lib/types";
@@ -26,7 +26,7 @@ export const liveDeps: TakeDeps = {
   // route, and SOUL.md + the identity guard are applied in llm_router.rs. No other provider path is added.
   ask: async (prompt) => {
     const routerConfig = buildRouterConfig(await getConfig());
-    const resp = await invoke<RouterResponse>("chat_with_router", { text: prompt, config: routerConfig, tags: [], forceProvider: "light", anthropicApiKey: undefined, localOnly: true });
+    const resp = await invokeBound<RouterResponse>("chat_with_router", { text: prompt, config: routerConfig, tags: [], forceProvider: "light", anthropicApiKey: undefined, localOnly: true });
     return { content: resp.content, tier: resp.tier };
   },
   facts: async (page, today) => {
@@ -34,8 +34,8 @@ export const liveDeps: TakeDeps = {
       case "mindBody": return mindBodyFacts(await snapshot(), today);
       case "fitness": return fitnessFacts(await snapshot(), today);
       case "home": return homeFacts(await snapshot(), await getHomeBrief().catch(() => null), today, Date.now());
-      case "neuro": return neuroFacts(await invoke<RecordedSession[]>("list_sessions").catch(() => []), today);
-      case "business": return businessFacts(await invoke<RevenueSummary>("arm_get_revenue_summary", { from: null, to: null }).catch(() => null), today);
+      case "neuro": return neuroFacts(await invokeBound<RecordedSession[]>("list_sessions").catch(() => []), today);
+      case "business": return businessFacts(await invokeBound<RevenueSummary>("arm_get_revenue_summary", { from: null, to: null }).catch(() => null), today);
       case "life": {
         const g = personalAdapter().goals();
         if (g.state !== "live") return null; // sample or unwired goals are never facts

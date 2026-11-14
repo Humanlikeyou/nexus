@@ -30,13 +30,13 @@ const ASK_TIMEOUT_SECS: u64 = 45;
 /// wrote and returns it unchanged, so two calls make one take.
 static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct HrMinute {
     pub t: i64,
     pub bpm: Option<i64>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct HrStats {
     pub avg: i64,
     pub min: i64,
@@ -45,14 +45,14 @@ pub struct HrStats {
     pub last: i64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct HrUsual {
     pub lo: i64,
     pub hi: i64,
     pub days: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HrWindow {
     pub from: i64,
@@ -65,7 +65,7 @@ pub struct HrWindow {
     pub usual: Option<HrUsual>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HrTake {
     pub id: String,
@@ -77,7 +77,7 @@ pub struct HrTake {
 }
 
 /// Exactly the `HrTakeStatus` union in `src-console/hrTake/adapters.ts`.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HrTakeStatus {
     Take {
@@ -596,6 +596,7 @@ fn dir() -> PathBuf {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn home_hr_take_status() -> HrTakeStatus {
     let now = Utc::now().timestamp_millis();
     tauri::async_runtime::spawn_blocking(move || status_in(&dir(), now))
@@ -604,6 +605,7 @@ pub async fn home_hr_take_status() -> HrTakeStatus {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn home_hr_take_maybe_refresh(trigger: String) -> Result<HrTakeStatus, String> {
     if !matches!(trigger.as_str(), "open" | "focus" | "navigate") {
         return Err("unknown trigger".into());

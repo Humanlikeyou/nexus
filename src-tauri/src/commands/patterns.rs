@@ -74,7 +74,7 @@ pub struct Inputs {
 
 // ───────────────────────────── output ─────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Chart {
     pub kind: String,
@@ -97,7 +97,7 @@ pub struct Chart {
     pub legend: Option<[String; 2]>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Finding {
     pub id: String,
@@ -127,7 +127,7 @@ pub struct Finding {
     pub tag: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Counts {
     pub sleep_days: usize,
@@ -137,7 +137,7 @@ pub struct Counts {
     pub checkins: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PatternsResult {
     /// "ready" (at least one published finding) | "not_enough_data"
@@ -1232,6 +1232,7 @@ pub(crate) fn gather_source(window_days: i64) -> Source {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn patterns_read() -> Result<PatternsResult, String> {
     tauri::async_runtime::spawn_blocking(|| {
         read_in_src(&crate::app_paths::data_dir(), now_jst(), || {
