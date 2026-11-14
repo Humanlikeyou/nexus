@@ -1,7 +1,7 @@
 import { Volume2, VolumeX } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { deriveElectrodeMode, isOutputAllowed } from "../../src/lib/electrode/electrodePolicy";
-import { useAudioFeedback } from "../../src/hooks/useAudioFeedback";
+import { deriveElectrodeMode, isOutputAllowed } from "../legacy-core/lib/electrode/electrodePolicy";
+import { useAudioFeedback } from "../legacy-core/hooks/useAudioFeedback";
 import { loadKv, saveKv } from "../bridge";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
 import { GOALS, NOTES_KEY, SENSORS, goalOf, parseNotes, recommendedGoal, suggestedStrategy, type NfNote } from "../neuro/goals";

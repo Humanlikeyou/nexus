@@ -7,12 +7,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("../../src/terrance/system/activityBus", () => ({
+vi.mock("../../src-console/legacy-core/terrance/system/activityBus", () => ({
   activityBus: { register: vi.fn(() => "t"), complete: vi.fn(), fail: vi.fn(), skip: vi.fn(), update: vi.fn(), prune: vi.fn() },
 }));
 
-let rituals: typeof import("../../src/terrance/system/rituals");
-let backoff: typeof import("../../src/terrance/system/backoff");
+let rituals: typeof import("../../src-console/legacy-core/terrance/system/rituals");
+let backoff: typeof import("../../src-console/legacy-core/terrance/system/backoff");
 const TICK = 5 * 60_000;
 
 describe("ritual send backoff", () => {
@@ -21,8 +21,8 @@ describe("ritual send backoff", () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    rituals = await import("../../src/terrance/system/rituals");
-    backoff = await import("../../src/terrance/system/backoff");
+    rituals = await import("../../src-console/legacy-core/terrance/system/rituals");
+    backoff = await import("../../src-console/legacy-core/terrance/system/backoff");
     vi.useFakeTimers();
     sends = [];
     telegramOk = false;

@@ -277,6 +277,155 @@ export const commands = {
 	voiceBridgeStart: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("voice_bridge_start", undefined, options),
 	/**  Stop the bridge. False if it wasn't running. */
 	voiceBridgeStop: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("voice_bridge_stop", undefined, options),
+	getSystemInfo: (options?: InvokeOptions) => __TAURI_INVOKE<SystemInfo>("get_system_info", undefined, options),
+	healthCheck: (options?: InvokeOptions) => __TAURI_INVOKE<string>("health_check", undefined, options),
+	readSkills: (options?: InvokeOptions) => __TAURI_INVOKE<Skill_Serialize[]>("read_skills", undefined, options),
+	getConfig: (options?: InvokeOptions) => __TAURI_INVOKE<NexusConfig_Serialize>("get_config", undefined, options),
+	saveSettings: (config: NexusConfig_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<null>("save_settings", { config }, options),
+	getTelegramMessages: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TelegramMessage[]>("get_telegram_messages", { limit }, options),
+	sendTelegramMessage: (text: string, options?: InvokeOptions) => __TAURI_INVOKE<TelegramMessage>("send_telegram_message", { text }, options),
+	testTelegramConnection: (options?: InvokeOptions) => __TAURI_INVOKE<string>("test_telegram_connection", undefined, options),
+	sendToTerrance: (text: string, options?: InvokeOptions) => __TAURI_INVOKE<string>("send_to_terrance", { text }, options),
+	/**
+	 *  Poll Telegram for new updates using offset-based sequential polling.
+	 *  Pass the last processed update_id (or 0 for first poll).
+	 *  Returns new updates with update_id > last_update_id.
+	 */
+	pollTelegramUpdates: (lastUpdateId: number, options?: InvokeOptions) => __TAURI_INVOKE<TelegramUpdate[]>("poll_telegram_updates", { lastUpdateId }, options),
+	packItUp: (options?: InvokeOptions) => __TAURI_INVOKE<PackageInfo>("pack_it_up", undefined, options),
+	unpackBackup: (archivePath: string, options?: InvokeOptions) => __TAURI_INVOKE<string[]>("unpack_backup", { archivePath }, options),
+	getAppPaths: (options?: InvokeOptions) => __TAURI_INVOKE<Value>("get_app_paths", undefined, options),
+	saveGoals: (goals: Goal_Deserialize[], options?: InvokeOptions) => __TAURI_INVOKE<null>("save_goals", { goals }, options),
+	deleteGoal: (goalId: string, options?: InvokeOptions) => __TAURI_INVOKE<Goal_Serialize[]>("delete_goal", { goalId }, options),
+	saveSnapshot: (snapshot: BrainSnapshot, options?: InvokeOptions) => __TAURI_INVOKE<string>("save_snapshot", { snapshot }, options),
+	listSnapshots: (options?: InvokeOptions) => __TAURI_INVOKE<BrainSnapshot[]>("list_snapshots", undefined, options),
+	/**
+	 *  Insert events + outbox row in a single IMMEDIATE transaction.
+	 *  If ANY step fails, the entire transaction is rolled back (via Transaction::drop).
+	 *  Guarantees: events and their outbox entry are atomic — you never get orphan events
+	 *  without an outbox row, or an outbox row referencing non-existent events.
+	 */
+	insertEvents: (events: Event_Deserialize[], options?: InvokeOptions) => __TAURI_INVOKE<number>("insert_events", { events }, options),
+	queryEvents: (query: EventQuery_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<Event_Serialize[]>("query_events", { query }, options),
+	migrateExistingData: (options?: InvokeOptions) => __TAURI_INVOKE<string>("migrate_existing_data", undefined, options),
+	createChatSession: (title: string, options?: InvokeOptions) => __TAURI_INVOKE<ChatSession>("create_chat_session", { title }, options),
+	listChatSessions: (options?: InvokeOptions) => __TAURI_INVOKE<ChatSession[]>("list_chat_sessions", undefined, options),
+	saveChatMessage: (message: ChatMessage_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<number>("save_chat_message", { message }, options),
+	loadChatHistory: (sessionId: string, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ChatMessage_Serialize[]>("load_chat_history", { sessionId, limit }, options),
+	deleteChatSession: (sessionId: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("delete_chat_session", { sessionId }, options),
+	checkOnboarding: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("check_onboarding", undefined, options),
+	completeOnboarding: (options?: InvokeOptions) => __TAURI_INVOKE<null>("complete_onboarding", undefined, options),
+	armCreateStrategy: (name: string, strategyType: string, config: Value, capitalLimit: number | null, dailyLossCap: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ArmStrategy_Serialize>("arm_create_strategy", { name, strategyType, config, capitalLimit, dailyLossCap }, options),
+	armUpdateStrategy: (id: string, name: string | null, config: Value | null, capitalLimit: number | null, dailyLossCap: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ArmStrategy_Serialize>("arm_update_strategy", { id, name, config, capitalLimit, dailyLossCap }, options),
+	armDeleteStrategy: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("arm_delete_strategy", { id }, options),
+	armActivateStrategy: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<ArmStrategy_Serialize>("arm_activate_strategy", { id }, options),
+	armPauseStrategy: (id: string, reasoning: string, options?: InvokeOptions) => __TAURI_INVOKE<ArmStrategy_Serialize>("arm_pause_strategy", { id, reasoning }, options),
+	armKillStrategy: (id: string, reasoning: string, options?: InvokeOptions) => __TAURI_INVOKE<ArmStrategy_Serialize>("arm_kill_strategy", { id, reasoning }, options),
+	armPollRevenue: (strategyId: string, options?: InvokeOptions) => __TAURI_INVOKE<number | null>("arm_poll_revenue", { strategyId }, options),
+	armLogDecision: (strategyId: string, action: string, reasoning: string, context: Value | null, options?: InvokeOptions) => __TAURI_INVOKE<ArmDecision_Serialize>("arm_log_decision", { strategyId, action, reasoning, context }, options),
+	armListDecisions: (strategyId: string | null, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ArmDecision_Serialize[]>("arm_list_decisions", { strategyId, limit }, options),
+	armUpdateDecisionOutcome: (id: string, outcome: string, notes: string | null, options?: InvokeOptions) => __TAURI_INVOKE<ArmDecision_Serialize>("arm_update_decision_outcome", { id, outcome, notes }, options),
+	armSetGlobalLimits: (capitalLimit: number | null, dailyLossCap: number | null, options?: InvokeOptions) => __TAURI_INVOKE<null>("arm_set_global_limits", { capitalLimit, dailyLossCap }, options),
+	armKillSwitch: (active: boolean, reasoning: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("arm_kill_switch", { active, reasoning }, options),
+	armHealthCheck: (strategyId: string, options?: InvokeOptions) => __TAURI_INVOKE<WorkerHealthResponse_Serialize>("arm_health_check", { strategyId }, options),
+	armPollAll: (options?: InvokeOptions) => __TAURI_INVOKE<ArmStrategy_Serialize[]>("arm_poll_all", undefined, options),
+	armGetConfig: (options?: InvokeOptions) => __TAURI_INVOKE<ArmConfig_Serialize>("arm_get_config", undefined, options),
+	armSaveConfig: (config: ArmConfig_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<null>("arm_save_config", { config }, options),
+	setProofMode: (enabled: boolean, options?: InvokeOptions) => __TAURI_INVOKE<null>("set_proof_mode", { enabled }, options),
+	getProofLog: (options?: InvokeOptions) => __TAURI_INVOKE<BleProofEvent[]>("get_proof_log", undefined, options),
+	simulateGatewayDown: (options?: InvokeOptions) => __TAURI_INVOKE<null>("simulate_gateway_down", undefined, options),
+	simulateGatewayUp: (options?: InvokeOptions) => __TAURI_INVOKE<null>("simulate_gateway_up", undefined, options),
+	listReplays: (options?: InvokeOptions) => __TAURI_INVOKE<ReplayFileInfo_Serialize[]>("list_replays", undefined, options),
+	startReplay: (filename: string, speed: number | null, options?: InvokeOptions) => __TAURI_INVOKE<null>("start_replay", { filename, speed }, options),
+	stopReplay: (options?: InvokeOptions) => __TAURI_INVOKE<null>("stop_replay", undefined, options),
+	startDemoEeg: (mode: string, speed: number | null, options?: InvokeOptions) => __TAURI_INVOKE<null>("start_demo_eeg", { mode, speed }, options),
+	stopDemoEeg: (options?: InvokeOptions) => __TAURI_INVOKE<null>("stop_demo_eeg", undefined, options),
+	/**  Asks the router's dry-run endpoint which tier it would use (may run its classifier). */
+	getCostEstimate: (text: string, config: RouterConfig_Deserialize, tags: string[], deep: boolean | null, options?: InvokeOptions) => __TAURI_INVOKE<CostEstimate>("get_cost_estimate", { text, config, tags, deep }, options),
+	getLlmUsage: (options?: InvokeOptions) => __TAURI_INVOKE<LlmUsageRecord_Serialize[]>("get_llm_usage", undefined, options),
+	clearLlmUsage: (options?: InvokeOptions) => __TAURI_INVOKE<null>("clear_llm_usage", undefined, options),
+	/**
+	 *  Read the canonical Amara identity file from config/terrance.identity.md.
+	 *  Walks up from the binary to find the project root.
+	 */
+	readIdentityFile: (options?: InvokeOptions) => __TAURI_INVOKE<string>("read_identity_file", undefined, options),
+	loadTerranceContext: (options?: InvokeOptions) => __TAURI_INVOKE<TerranceContext_Serialize>("load_terrance_context", undefined, options),
+	saveTerranceContext: (context: TerranceContext_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<null>("save_terrance_context", { context }, options),
+	storeSessionLog: (entry: SessionLogEntry, options?: InvokeOptions) => __TAURI_INVOKE<null>("store_session_log", { entry }, options),
+	listSessionLogs: (options?: InvokeOptions) => __TAURI_INVOKE<SessionLogEntry[]>("list_session_logs", undefined, options),
+	/**
+	 *  Move session logs older than `days_threshold` days to memory/archive/.
+	 *  Returns the number of files moved.
+	 */
+	archiveOldSessionLogs: (daysThreshold: number, options?: InvokeOptions) => __TAURI_INVOKE<number>("archive_old_session_logs", { daysThreshold }, options),
+	/**  Trim the relevantMemory array in terrance_context.json to at most `max_items` entries. */
+	pruneContextMemory: (maxItems: number, options?: InvokeOptions) => __TAURI_INVOKE<number>("prune_context_memory", { maxItems }, options),
+	/**  Get aggregated session insights: total sessions, tokens, providers, daily breakdown. */
+	getSessionInsights: (options?: InvokeOptions) => __TAURI_INVOKE<string>("get_session_insights", undefined, options),
+	/**  Load custom cron jobs from disk. Returns JSON string. */
+	loadCustomJobs: (options?: InvokeOptions) => __TAURI_INVOKE<string>("load_custom_jobs", undefined, options),
+	/**  Save custom cron jobs to disk. Accepts raw JSON string. */
+	saveCustomJobs: (data: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("save_custom_jobs", { data }, options),
+	/**
+	 *  Write or update a skill file in `<data dir>/workspace/skills/` (never ~/.openclaw).
+	 *  Used by the skills self-improvement loop to create/update learned skills.
+	 */
+	saveSkill: (name: string, content: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("save_skill", { name, content }, options),
+	/**  Delete a skill file from `<data dir>/workspace/skills/`. A legacy skill is read-only: it reports false. */
+	deleteSkill: (name: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("delete_skill", { name }, options),
+	/**
+	 *  Check the status of a Docker container by name.
+	 *  Returns "running", "exited", "paused", "not_found", or the raw status string.
+	 */
+	checkDockerService: (name: string, options?: InvokeOptions) => __TAURI_INVOKE<string>("check_docker_service", { name }, options),
+	/**  Restart a Docker container by name (requires native approval). */
+	restartDockerService: (name: string, options?: InvokeOptions) => __TAURI_INVOKE<string>("restart_docker_service", { name }, options),
+	/**
+	 *  Check if a TCP port is open on a given host.
+	 *  Returns "open" or "closed".
+	 */
+	checkServicePort: (host: string, port: number, options?: InvokeOptions) => __TAURI_INVOKE<string>("check_service_port", { host, port }, options),
+	/**
+	 *  Search the web using Brave Search API.
+	 *  Falls back to a simple DuckDuckGo scrape if no API key configured.
+	 */
+	webSearch: (query: string, maxResults: number | null, options?: InvokeOptions) => __TAURI_INVOKE<SearchResult[]>("web_search", { query, maxResults }, options),
+	/**
+	 *  Fetch the text content of a URL (strips HTML tags for readability).
+	 *  Returns at most `max_chars` characters (default 10000).
+	 */
+	fetchUrl: (url: string, maxChars: number | null, options?: InvokeOptions) => __TAURI_INVOKE<string>("fetch_url", { url, maxChars }, options),
+	/**  Store an activity entry to disk as a JSON file. */
+	storeActivityEntry: (entry: ActivityEntry_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<null>("store_activity_entry", { entry }, options),
+	/**
+	 *  Retire activity log entries older than `days` days (and beyond the 5000-file cap)
+	 *  into monthly archives; nothing is deleted without a verified archive copy.
+	 *  Returns the number of files archived.
+	 */
+	pruneActivityLog: (days: number, options?: InvokeOptions) => __TAURI_INVOKE<number>("prune_activity_log", { days }, options),
+	/**  Archive old activity entries (see `archive_activity_log_in`). Defaults: 30 days, 5000 files. */
+	archiveActivityLog: (keepDays: number | null, maxFiles: number | null, dryRun: boolean | null, options?: InvokeOptions) => __TAURI_INVOKE<ActivityArchiveReport>("archive_activity_log", { keepDays, maxFiles, dryRun }, options),
+	/**  Load subagents from disk. Returns JSON string. */
+	loadSubagents: (options?: InvokeOptions) => __TAURI_INVOKE<string>("load_subagents", undefined, options),
+	/**  Save subagents to disk. Accepts raw JSON string. */
+	saveSubagents: (data: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("save_subagents", { data }, options),
+	/**
+	 *  Read the operational profile from config/terrance.profile.md.
+	 *  Same lookup strategy as read_identity_file.
+	 */
+	readProfileFile: (options?: InvokeOptions) => __TAURI_INVOKE<string>("read_profile_file", undefined, options),
+	/**  Read-only: what the renderer needs to decide a catch-up (decision 0018). Cheap; never calls a model. */
+	roadmapCatchupStatus: (options?: InvokeOptions) => __TAURI_INVOKE<CatchUpStatus>("roadmap_catchup_status", undefined, options),
+	/**
+	 *  Nightly job: draft every "drafting" roadmap (at most 5), then a smaller first move for steps
+	 *  with 2+ "not yet"s (at most 10), within ~30 minutes, once a day. Refuses with `busy` while a
+	 *  chat turn or crew run is active or another run is going, and `already_ran` after a completed
+	 *  run today, and (catch-up runs only) `not_idle` on battery or within 10 minutes of activity.
+	 *  Returns how many things were written. A failed or junk deep reply leaves the work
+	 *  queued for the next night; nothing is invented.
+	 */
+	roadmapDraftPending: (catchUp: boolean | null, options?: InvokeOptions) => __TAURI_INVOKE<number>("roadmap_draft_pending", { catchUp }, options),
+	restartServices: (services: string[], deadlineMs: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ServiceRestartResult_Serialize[]>("restart_services", { services, deadlineMs }, options),
 };
 
 /* Types */
@@ -294,6 +443,21 @@ export type AccountBalance = {
 	 *  store holds the latest value only), so they have at most their own point.
 	 */
 	history: BalancePoint[],
+};
+
+export type ActivityArchiveReport = {
+	dryRun: boolean,
+	scanned: number,
+	/**  Files selected for the archive (older than keep_days, or beyond the file cap). */
+	selected: number,
+	/**  Files actually moved into an archive and removed (0 on a dry run). */
+	archived: number,
+	/**  Files left in place because they could not be parsed. */
+	skipped: number,
+	/**  Files left as JSON after the run (or that would be, on a dry run). */
+	kept: number,
+	/**  (YYYY-MM, entries) per month archive. */
+	months: ([string, number])[],
 };
 
 export type ActivityEntry = ActivityEntry_Serialize | ActivityEntry_Deserialize;
@@ -403,6 +567,52 @@ export type AmaraTurnInput_Serialize = {
 	deep: boolean,
 	/**  Friendly Home Assistant device names the renderer knows (at most 200, each at most 64 chars). */
 	haNames: string[],
+};
+
+export type ArmConfig = ArmConfig_Serialize | ArmConfig_Deserialize;
+
+export type ArmConfig_Deserialize = {
+	wallet_address?: string | null,
+	global_capital_limit: number | null,
+	global_daily_loss_cap: number | null,
+	poll_interval_secs: number,
+	kill_switch_active: boolean,
+	worker_api_keys: WorkerApiKey[],
+	worker_base_url?: string | null,
+};
+
+export type ArmConfig_Serialize = {
+	wallet_address: string | null,
+	global_capital_limit: number | null,
+	global_daily_loss_cap: number | null,
+	poll_interval_secs: number,
+	kill_switch_active: boolean,
+	worker_api_keys: WorkerApiKey[],
+	worker_base_url: string | null,
+};
+
+export type ArmDecision = ArmDecision_Serialize | ArmDecision_Deserialize;
+
+export type ArmDecision_Deserialize = {
+	id: string,
+	strategy_id: string,
+	action: string,
+	reasoning: string,
+	context: Value,
+	outcome?: string | null,
+	outcome_notes?: string | null,
+	timestamp: string,
+};
+
+export type ArmDecision_Serialize = {
+	id: string,
+	strategy_id: string,
+	action: string,
+	reasoning: string,
+	context: Value,
+	outcome: string | null,
+	outcome_notes: string | null,
+	timestamp: string,
 };
 
 export type ArmRiskStatus = {
@@ -588,6 +798,14 @@ export type Bands = {
 	gamma: (number | null)[],
 };
 
+/**  A timestamped proof event for the debug/proof log. */
+export type BleProofEvent = {
+	timestamp: number | null,
+	device: string,
+	event_type: string,
+	detail: string,
+};
+
 /**
  *  Minimised NOOP context stored on a session. Explicit whitelist: everything else in the
  *  health_snapshot (sources, freshness, appleDaily, battery, recentDays, spo2, skin temp,
@@ -673,6 +891,17 @@ export type BodyWindow_Serialize = {
 	motion: MotionWindow | null,
 };
 
+export type BrainSnapshot = {
+	id: string,
+	timestamp: string,
+	fatigue: number | null,
+	engagement: number | null,
+	alphaPeak: number | null,
+	betaBalance: number | null,
+	focusScore: number | null,
+	relaxationScore: number | null,
+};
+
 export type BusinessLedger = BusinessLedger_Serialize | BusinessLedger_Deserialize;
 
 export type BusinessLedger_Deserialize = {
@@ -695,6 +924,16 @@ export type BusinessLedger_Serialize = {
 	taxFlags: TaxFlag[],
 	voteRules: VoteRules | null,
 	revenueTargetJpy: number | null,
+};
+
+export type CatchUpStatus = {
+	/**  A roadmap is waiting in "drafting", or a smaller-step request is pending. */
+	due: boolean,
+	/**  Rust's own once-a-day record. */
+	ranToday: boolean,
+	onAc: boolean,
+	busy: boolean,
+	idleSecs: number,
 };
 
 export type Chart = Chart_Serialize | Chart_Deserialize;
@@ -723,6 +962,40 @@ export type Chart_Serialize = {
 	/**  `[label, with, without]` */
 	rows?: ([string, number | null, number | null])[],
 	legend?: [string, string],
+};
+
+export type ChatMessage = ChatMessage_Serialize | ChatMessage_Deserialize;
+
+export type ChatMessage_Deserialize = {
+	id: number,
+	session_id: string,
+	role: string,
+	text: string,
+	ts: number,
+	provider?: string | null,
+	model?: string | null,
+	latency_ms?: number | null,
+	cost_usd?: number | null,
+};
+
+export type ChatMessage_Serialize = {
+	id: number,
+	session_id: string,
+	role: string,
+	text: string,
+	ts: number,
+	provider: string | null,
+	model: string | null,
+	latency_ms: number | null,
+	cost_usd: number | null,
+};
+
+export type ChatSession = {
+	id: string,
+	title: string,
+	created_at: number,
+	updated_at: number,
+	message_count: number,
 };
 
 export type ChatTurn = {
@@ -928,6 +1201,13 @@ export type CorrectContextItemInput_Deserialize = {
 export type CorrectContextItemInput_Serialize = {
 	originalId: string,
 	replacement: CreateContextItemInput_Serialize,
+};
+
+export type CostEstimate = {
+	tier: Tier,
+	estimated_input_tokens: number,
+	estimated_cost_usd: number | null,
+	routing_reason: string,
 };
 
 export type Counts = {
@@ -1327,6 +1607,58 @@ export type DecisionRecord_Serialize = {
 	sourceLabel: string,
 	outcome?: string,
 	outcomeAt?: string,
+};
+
+export type Event = Event_Serialize | Event_Deserialize;
+
+export type EventQuery = EventQuery_Serialize | EventQuery_Deserialize;
+
+export type EventQuery_Deserialize = {
+	source?: string | null,
+	metric?: string | null,
+	session_id?: string | null,
+	from?: string | null,
+	to?: string | null,
+	limit?: number | null,
+};
+
+export type EventQuery_Serialize = {
+	source: string | null,
+	metric: string | null,
+	session_id: string | null,
+	from: string | null,
+	to: string | null,
+	limit: number | null,
+};
+
+export type Event_Deserialize = {
+	id?: string | null,
+	session_id?: string | null,
+	timestamp: string,
+	source: string,
+	metric: string,
+	value: number | null,
+	unit?: string | null,
+	confidence?: number | null,
+	tags?: string[] | null,
+	raw_ref?: string | null,
+	created_at?: string | null,
+	schema_version?: number | null,
+};
+
+export type Event_Serialize = {
+	id: string | null,
+	session_id: string | null,
+	timestamp: string,
+	source: string,
+	metric: string,
+	value: number | null,
+	unit: string | null,
+	confidence: number | null,
+	tags: string[] | null,
+	raw_ref: string | null,
+	created_at: string | null,
+	schema_version: number | null,
 };
 
 export type Experiment = Experiment_Serialize | Experiment_Deserialize;
@@ -2032,6 +2364,38 @@ export type LiveHeartRate = {
 	trace: HeartSample[],
 };
 
+export type LlmUsageRecord = LlmUsageRecord_Serialize | LlmUsageRecord_Deserialize;
+
+export type LlmUsageRecord_Deserialize = {
+	id: string,
+	timestamp: number,
+	/**
+	 *  Older records carried provider/model instead; they read back as light (serde ignores
+	 *  the unknown fields).
+	 */
+	tier?: Tier,
+	prompt_tokens: number,
+	completion_tokens: number,
+	estimated_cost_usd: number | null,
+	latency_ms: number,
+	routing_reason: string,
+};
+
+export type LlmUsageRecord_Serialize = {
+	id: string,
+	timestamp: number,
+	/**
+	 *  Older records carried provider/model instead; they read back as light (serde ignores
+	 *  the unknown fields).
+	 */
+	tier: Tier,
+	prompt_tokens: number,
+	completion_tokens: number,
+	estimated_cost_usd: number | null,
+	latency_ms: number,
+	routing_reason: string,
+};
+
 export type MapNode = {
 	id: string,
 	label: string,
@@ -2295,6 +2659,66 @@ export type NextAction_Serialize = {
 	action: string,
 };
 
+export type NexusConfig = NexusConfig_Serialize | NexusConfig_Deserialize;
+
+export type NexusConfig_Deserialize = {
+	telegram_bot_token?: string | null,
+	telegram_chat_id?: string | null,
+	openclaw_path?: string | null,
+	tasks_path?: string | null,
+	pipeline_path?: string | null,
+	gateway_url?: string | null,
+	gateway_auth_token?: string | null,
+	gateway_batch_size?: number | null,
+	gateway_retry_base_secs?: number | null,
+	gateway_retry_max_secs?: number | null,
+	n8n_webhook_secret?: string | null,
+	preferred_muse_address?: string | null,
+	compute_mode?: string | null,
+	llm_ollama_model?: string | null,
+	llm_anthropic_model?: string | null,
+	llm_token_threshold?: number | null,
+	llm_daily_cap_usd?: number | null,
+	llm_per_task_cap_usd?: number | null,
+	llm_show_cost_estimate?: boolean | null,
+	anthropic_api_key?: string | null,
+	/**  Settings › "Allow Claude" (llm_router claude tier). Off unless set. */
+	allow_claude?: boolean | null,
+	/**  Amara Router base URL (compute mode "amara"). None = http://127.0.0.1:8787. */
+	amara_router_url?: string | null,
+	/**  Home Assistant base URL (loopback only). None = HA_URL env var, then the default. */
+	ha_url?: string | null,
+};
+
+export type NexusConfig_Serialize = {
+	telegram_bot_token: string | null,
+	telegram_chat_id: string | null,
+	openclaw_path: string | null,
+	tasks_path: string | null,
+	pipeline_path: string | null,
+	gateway_url: string | null,
+	gateway_auth_token: string | null,
+	gateway_batch_size: number | null,
+	gateway_retry_base_secs: number | null,
+	gateway_retry_max_secs: number | null,
+	n8n_webhook_secret: string | null,
+	preferred_muse_address: string | null,
+	compute_mode: string | null,
+	llm_ollama_model: string | null,
+	llm_anthropic_model: string | null,
+	llm_token_threshold: number | null,
+	llm_daily_cap_usd: number | null,
+	llm_per_task_cap_usd: number | null,
+	llm_show_cost_estimate: boolean | null,
+	anthropic_api_key: string | null,
+	/**  Settings › "Allow Claude" (llm_router claude tier). Off unless set. */
+	allow_claude: boolean | null,
+	/**  Amara Router base URL (compute mode "amara"). None = http://127.0.0.1:8787. */
+	amara_router_url: string | null,
+	/**  Home Assistant base URL (loopback only). None = HA_URL env var, then the default. */
+	ha_url: string | null,
+};
+
 export type NodeKind = "app" | "backend" | "service" | "device" | "store" | "external";
 
 export type NoopBatteryState = NoopBatteryState_Serialize | NoopBatteryState_Deserialize;
@@ -2530,6 +2954,14 @@ export type OutboxStatus_Serialize = {
 	expired: number,
 };
 
+export type PackageInfo = {
+	path: string,
+	size_mb: number | null,
+	includes: string[],
+	/**  Files left out of the backup (too large or symlinks), never silent. */
+	skipped: string[],
+};
+
 export type ParseResult = ParseResult_Serialize | ParseResult_Deserialize;
 
 export type ParseResult_Deserialize = { kind: "preview"; preview: AddPreview_Deserialize } | { kind: "ask"; question: string; options: string[]; note?: string | null } | { kind: "elsewhere"; message: string; link: Route; linkLabel: string };
@@ -2738,6 +3170,22 @@ export type Reminder = {
 	passed: boolean,
 };
 
+export type ReplayFileInfo = ReplayFileInfo_Serialize | ReplayFileInfo_Deserialize;
+
+export type ReplayFileInfo_Deserialize = {
+	filename: string,
+	size_bytes: number,
+	modified: string,
+	duration_secs?: number | null,
+};
+
+export type ReplayFileInfo_Serialize = {
+	filename: string,
+	size_bytes: number,
+	modified: string,
+	duration_secs: number | null,
+};
+
 export type RequestStatus = "open" | "approved" | "denied";
 
 export type RevenueSummary = {
@@ -2906,10 +3354,39 @@ export type ScreenWeekCount = {
 	count: number,
 };
 
+export type SearchResult = {
+	title: string,
+	url: string,
+	snippet: string,
+};
+
 export type SecretStatus = {
 	name: string,
 	label: string,
 	set: boolean,
+};
+
+export type ServiceRestartResult = ServiceRestartResult_Serialize | ServiceRestartResult_Deserialize;
+
+export type ServiceRestartResult_Deserialize = {
+	service: string,
+	ok: boolean,
+	error?: string | null,
+};
+
+export type ServiceRestartResult_Serialize = {
+	service: string,
+	ok: boolean,
+	error: string | null,
+};
+
+export type SessionLogEntry = {
+	id: string,
+	timestamp: number,
+	messageCount: number,
+	summary: string,
+	provider: string,
+	model: string,
 };
 
 export type SessionRow = SessionRow_Serialize | SessionRow_Deserialize;
@@ -3039,6 +3516,22 @@ export type SiteRow = {
 	signed: string,
 };
 
+export type Skill = Skill_Serialize | Skill_Deserialize;
+
+export type Skill_Deserialize = {
+	name: string,
+	status: string,
+	description: string,
+	content?: string,
+};
+
+export type Skill_Serialize = {
+	name: string,
+	status: string,
+	description: string,
+	content: string,
+};
+
 export type SlotRect = {
 	id: string,
 	x: number | null,
@@ -3159,6 +3652,14 @@ export type Suggestion_Serialize = {
 	sourceIds: string[],
 	/**  The whole published finding the suggestion quotes, so a stored review can be re-checked on load. */
 	finding: Finding_Serialize,
+};
+
+export type SystemInfo = {
+	os: string,
+	arch: string,
+	hostname: string,
+	uptime_secs: number,
+	timestamp: number,
 };
 
 export type SystemMap = SystemMap_Serialize | SystemMap_Deserialize;
@@ -3282,6 +3783,62 @@ export type TaxFlag = {
 	label: string,
 	area: string,
 	date: string,
+};
+
+export type TelegramMessage = {
+	id: number,
+	from_name: string,
+	text: string,
+	date: number,
+	is_outgoing: boolean,
+};
+
+/**  A single Telegram update from getUpdates. */
+export type TelegramUpdate = {
+	update_id: number,
+	message_id: number,
+	from_name: string,
+	text: string,
+	date: number,
+	is_bot: boolean,
+};
+
+export type TerranceContext = TerranceContext_Serialize | TerranceContext_Deserialize;
+
+export type TerranceContext_Deserialize = {
+	activeGoals: string[],
+	lastSessionSummary?: string | null,
+	lastSessionTimestamp?: number | null,
+	relevantMemory: string[],
+	lastConsolidationTimestamp?: number | null,
+	lastReasoningTimestamp?: number | null,
+	lastDailySummaryTimestamp?: number | null,
+	dailySummaryHour?: number | null,
+	lastHealthCheckTimestamp?: number | null,
+	lastPruneTimestamp?: number | null,
+	lastTelegramUpdateId?: number | null,
+	lastMiddayTimestamp?: number | null,
+	lastEveningTimestamp?: number | null,
+	/**  Daily Summary slot (ms) recorded as "Skipped (missed window)" so the skip isn't re-logged every tick. */
+	dailySummarySkippedSlot?: number | null,
+};
+
+export type TerranceContext_Serialize = {
+	activeGoals: string[],
+	lastSessionSummary: string | null,
+	lastSessionTimestamp: number | null,
+	relevantMemory: string[],
+	lastConsolidationTimestamp: number | null,
+	lastReasoningTimestamp: number | null,
+	lastDailySummaryTimestamp: number | null,
+	dailySummaryHour: number | null,
+	lastHealthCheckTimestamp: number | null,
+	lastPruneTimestamp: number | null,
+	lastTelegramUpdateId: number | null,
+	lastMiddayTimestamp: number | null,
+	lastEveningTimestamp: number | null,
+	/**  Daily Summary slot (ms) recorded as "Skipped (missed window)" so the skip isn't re-logged every tick. */
+	dailySummarySkippedSlot: number | null,
 };
 
 export type TerrenceAction = TerrenceAction_Serialize | TerrenceAction_Deserialize;
@@ -3885,4 +4442,25 @@ export type Work_Serialize = {
 	avgFocus: number | null,
 	sourceIds: string[],
 	note: string,
+};
+
+export type WorkerApiKey = {
+	name: string,
+	key: string,
+};
+
+export type WorkerHealthResponse = WorkerHealthResponse_Serialize | WorkerHealthResponse_Deserialize;
+
+export type WorkerHealthResponse_Deserialize = {
+	status: string,
+	uptime_secs?: number | null,
+	requests_24h?: number | null,
+	error_rate?: number | null,
+};
+
+export type WorkerHealthResponse_Serialize = {
+	status: string,
+	uptime_secs: number | null,
+	requests_24h: number | null,
+	error_rate: number | null,
 };

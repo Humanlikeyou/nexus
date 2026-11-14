@@ -42,7 +42,7 @@ pub fn sync_reduce_transparency(app: &tauri::AppHandle) {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct SystemInfo {
     pub os: String,
     pub arch: String,
@@ -52,6 +52,7 @@ pub struct SystemInfo {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_system_info() -> Result<SystemInfo, String> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -72,6 +73,7 @@ pub fn get_system_info() -> Result<SystemInfo, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn health_check() -> Result<String, String> {
     Ok("ok".to_string())
 }
@@ -100,6 +102,7 @@ fn docker() -> Result<&'static str, String> {
 /// Check the status of a Docker container by name.
 /// Returns "running", "exited", "paused", "not_found", or the raw status string.
 #[tauri::command]
+#[specta::specta]
 pub async fn check_docker_service(name: String) -> Result<String, String> {
     validate_container_name(&name)?;
     let output = tokio::process::Command::new(docker()?)
@@ -130,6 +133,7 @@ pub(super) fn docker_restart_prompt(name: &str) -> (String, String) {
 
 /// Restart a Docker container by name (requires native approval).
 #[tauri::command]
+#[specta::specta]
 pub async fn restart_docker_service(app: tauri::AppHandle, name: String) -> Result<String, String> {
     validate_container_name(&name)?;
     let (operation, detail) = docker_restart_prompt(&name);
@@ -160,6 +164,7 @@ pub(super) async fn docker_restart(name: &str) -> Result<String, String> {
 /// Check if a TCP port is open on a given host.
 /// Returns "open" or "closed".
 #[tauri::command]
+#[specta::specta]
 pub async fn check_service_port(host: String, port: u16) -> Result<String, String> {
     let addr = format!("{}:{}", host, port);
     match tokio::time::timeout(

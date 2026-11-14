@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { interactWithTerrence, listTerrenceInteractions, prepareAmaraTurn, recordAmaraInteraction } from "../bridge";
-import { deliberate } from "@/terrance/system/deliberation";
-import { resetCompressor } from "@/terrance/system/contextCompressor";
+import { deliberate } from "../legacy-core/terrance/system/deliberation";
+import { resetCompressor } from "../legacy-core/terrance/system/contextCompressor";
 import { type ConversationMessage, CONVERSATION_KEY, HERMES_SESSION_KEY, HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE, createConversationId, messagesFromInteractions } from "./conversation";
 import { HOME_SOURCE, dropLegacyHomeReplyIds, homeEntityNamesForTurn, preRouteHome } from "../lib/homeAssistant";
 import { MODEL_LOADING_FAILED, MODEL_LOADING_RETRIES, modelLoadingDelay, waitUnlessAborted } from "./modelLoading";

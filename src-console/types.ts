@@ -1,5 +1,5 @@
-import type { CrewToolInfo, KbStatus } from "../src/lib/types";
-export type { CrewToolInfo, KbState, KbStatus } from "../src/lib/types";
+import type { CrewToolInfo, KbStatus } from "./legacy-core/lib/types";
+export type { CrewToolInfo, KbState, KbStatus } from "./legacy-core/lib/types";
 
 export type ModuleId = "landing" | "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings" | "voice" | "lists" | "mindbody" | "smarthome" | "life" | "enterprise";
 
@@ -325,7 +325,7 @@ export interface RecordedSession {
     time_in_target_pct?: number | null;
   };
   /** Minimised NOOP context captured at Muse session start; absent on older sessions. Parse with parseBodyContext. */
-  body_context?: import("../src/lib/types").BodyContext | null;
+  body_context?: import("./legacy-core/lib/types").BodyContext | null;
 }
 
 export interface NoopDailyMetric {
@@ -591,10 +591,10 @@ export interface VoiceList {
 }
 
 /* ── NOOP query: contract types live in src/lib/types.ts (Integrations); re-exported, not duplicated. ── */
-export type { NoopMetricKey, NoopQueryArgs, NoopQueryError, NoopQueryTool, NoopSettings, WhoopSource } from "../src/lib/types";
-export { NOOP_QUERY_TOOLS } from "../src/lib/types";
+export type { NoopMetricKey, NoopQueryArgs, NoopQueryError, NoopQueryTool, NoopSettings, WhoopSource } from "./legacy-core/lib/types";
+export { NOOP_QUERY_TOOLS } from "./legacy-core/lib/types";
 
-export type { BodyContext } from "../src/lib/types";
+export type { BodyContext } from "./legacy-core/lib/types";
 
 /** UI-side body state, parsed from a session's body_context (see lib/noop.ts). */
 export interface BodyState {
@@ -631,7 +631,7 @@ export interface NoopSnapshotPayload {
   battery?: unknown | null;
 }
 export interface NoopSeriesPayload {
-  key: import("../src/lib/types").NoopMetricKey;
+  key: import("./legacy-core/lib/types").NoopMetricKey;
   requestedSource: string;
   range: { from: string; to: string };
   resolution: { candidates: Array<{ source: string; key: string }>; usedSources: string[] };
@@ -641,7 +641,7 @@ export interface NoopSeriesPayload {
 
 /** UI-side metric point. */
 export interface NoopMetricPoint { day: string; value: number | null }
-export interface NoopMetricSeries { key: import("../src/lib/types").NoopMetricKey; points: NoopMetricPoint[] }
+export interface NoopMetricSeries { key: import("./legacy-core/lib/types").NoopMetricKey; points: NoopMetricPoint[] }
 
 /** Amara's follow-up lists (commands/followups.rs). Dates are "YYYY-MM-DD" when the app wrote them. */
 export interface FollowupItem {

@@ -104,7 +104,7 @@ pub struct RouterResponse {
     pub routing_reason: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, specta::Type)]
 pub struct LlmUsageRecord {
     pub id: String,
     pub timestamp: u64,
@@ -119,7 +119,7 @@ pub struct LlmUsageRecord {
     pub routing_reason: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, specta::Type)]
 pub struct CostEstimate {
     pub tier: Tier,
     pub estimated_input_tokens: u32,
@@ -699,6 +699,7 @@ pub(crate) async fn local_complete(instruction: &str, user: &str) -> Result<Stri
 
 /// Asks the router's dry-run endpoint which tier it would use (may run its classifier).
 #[tauri::command]
+#[specta::specta]
 pub async fn get_cost_estimate(
     text: String,
     config: RouterConfig,
@@ -758,11 +759,13 @@ pub fn set_allow_claude(enabled: bool) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_llm_usage() -> Result<Vec<LlmUsageRecord>, String> {
     Ok(load_usage_records())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn clear_llm_usage() -> Result<(), String> {
     let path = usage_log_path();
     if let Some(parent) = path.parent() {

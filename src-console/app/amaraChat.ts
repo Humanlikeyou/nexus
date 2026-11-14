@@ -5,10 +5,10 @@
  * - injectionGuard.ts on ingested/external content before it reaches a prompt
  * - contextCompressor.ts on long histories before they are sent
  */
-import { scanForInjection } from "@/terrance/system/injectionGuard";
-import { compressIfNeeded, type CompressibleMessage } from "@/terrance/system/contextCompressor";
-import type { DeliberationResult } from "@/terrance/system/deliberation";
-import type { RouterResponse } from "@/lib/types";
+import { scanForInjection } from "../legacy-core/terrance/system/injectionGuard";
+import { compressIfNeeded, type CompressibleMessage } from "../legacy-core/terrance/system/contextCompressor";
+import type { DeliberationResult } from "../legacy-core/terrance/system/deliberation";
+import type { RouterResponse } from "../legacy-core/lib/types";
 import type { AmaraContextSection, AmaraTierInfo, ChatTurn } from "../types";
 import type { ConversationMessage } from "./conversation";
 

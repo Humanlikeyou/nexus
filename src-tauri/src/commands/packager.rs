@@ -8,7 +8,7 @@ pub(crate) fn nexus_data_dir() -> PathBuf {
     crate::app_paths::data_dir()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct PackageInfo {
     pub path: String,
     pub size_mb: f64,
@@ -18,6 +18,7 @@ pub struct PackageInfo {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn pack_it_up() -> Result<PackageInfo, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     pack_at(&home, &nexus_data_dir()).await
@@ -306,6 +307,7 @@ const RESTORE_LOCK_KEY: &str = "restore:backup";
 const RESTORE_BACKUP_DIR: &str = "restore-backups";
 
 #[tauri::command]
+#[specta::specta]
 pub async fn unpack_backup(
     app: tauri::AppHandle,
     archive_path: String,
@@ -892,6 +894,7 @@ pub(crate) fn unpack_archive_checked(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_app_paths() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "data_dir": nexus_data_dir().to_string_lossy(),

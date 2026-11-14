@@ -608,6 +608,7 @@ pub async fn get_outbox_status() -> Result<OutboxStatus, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn simulate_gateway_down() -> Result<(), String> {
     let mut sim = GATEWAY_SIM_DOWN.lock().await;
     *sim = true;
@@ -616,6 +617,7 @@ pub async fn simulate_gateway_down() -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn simulate_gateway_up() -> Result<(), String> {
     let mut sim = GATEWAY_SIM_DOWN.lock().await;
     *sim = false;

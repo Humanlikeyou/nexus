@@ -38,6 +38,7 @@ pub fn read_goals() -> Result<Vec<Goal>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_goals(goals: Vec<Goal>) -> Result<(), String> {
     let path = goals_path();
     let dir = path.parent().unwrap();
@@ -51,6 +52,7 @@ pub fn save_goals(goals: Vec<Goal>) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn delete_goal(goal_id: String) -> Result<Vec<Goal>, String> {
     let mut goals = read_goals()?;
     goals.retain(|g| g.id != goal_id);

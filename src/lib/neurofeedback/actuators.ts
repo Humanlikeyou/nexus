@@ -1,5 +1,5 @@
-import type { FeedbackSignal, BrainState } from "@/lib/types";
-import type { useAudioFeedback } from "@/hooks/useAudioFeedback";
+import type { FeedbackSignal, BrainState } from "../../../src-console/legacy-core/lib/types";
+import type { useAudioFeedback } from "../../../src-console/legacy-core/hooks/useAudioFeedback";
 
 // ============================================================
 // Actuator Interface

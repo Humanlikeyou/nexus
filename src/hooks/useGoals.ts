@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
-import { readGoals, saveGoals, deleteGoal as deleteGoalApi, insertEvents } from "@/lib/api";
+import { readGoals, saveGoals, deleteGoal as deleteGoalApi, insertEvents } from "../../src-console/legacy-core/lib/api";
 import { goalToEvents } from "@/lib/events";
-import { loadContext, saveContext } from "@/terrance/system/continuity";
-import type { Goal } from "@/lib/types";
+import { loadContext, saveContext } from "../../src-console/legacy-core/terrance/system/continuity";
+import type { Goal } from "../../src-console/legacy-core/lib/types";
 
 /** Sync goal titles into TerranceContext so Amara is goal-aware in every prompt */
 async function syncGoalsToTerrance(goals: Goal[]): Promise<void> {

@@ -6,7 +6,7 @@ import type { MuseTelemetry } from "../../src-console/neuro/telemetryStore";
 
 vi.mock("../../src-console/bridge", () => ({ loadKv: vi.fn().mockResolvedValue(null), saveKv: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../../src-console/components/AmaraLens/AmaraLens", () => ({ AmaraLens: () => <i data-testid="lens" /> }));
-vi.mock("../../src/hooks/useAudioFeedback", () => ({
+vi.mock("../../src-console/legacy-core/hooks/useAudioFeedback", () => ({
   useAudioFeedback: () => ({ init: vi.fn(), setMode: vi.fn(), cleanup: vi.fn(), setMuted: vi.fn(), playBell: vi.fn(), updateState: vi.fn() }),
 }));
 

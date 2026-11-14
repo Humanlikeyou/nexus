@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-vi.mock("@/lib/api", () => ({ packItUp: vi.fn(), unpackBackup: vi.fn(), pickBackupArchive: vi.fn() }));
+vi.mock("../legacy-core/lib/api", () => ({ packItUp: vi.fn(), unpackBackup: vi.fn(), pickBackupArchive: vi.fn() }));
 import { BACKUP_COPY, BackupSection, backupError, RESTORE_SAFETY_NOTE, RESTORE_WARNING, SkippedFilesList, middleTruncate, restorePathError, skippedFiles } from "./BackupSection";
 
 const base = { path: "/tmp/nexus.tar.gz", size_mb: 1.5, includes: ["config"] };

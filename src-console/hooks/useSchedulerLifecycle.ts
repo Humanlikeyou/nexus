@@ -4,7 +4,7 @@
  * mounts and HMR re-evaluation from starting a second instance.
  */
 import { useEffect } from "react";
-import { startScheduler, stopScheduler } from "@/terrance/system/scheduler";
+import { startScheduler, stopScheduler } from "../legacy-core/terrance/system/scheduler";
 
 declare global {
   interface Window {

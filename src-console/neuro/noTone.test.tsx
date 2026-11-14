@@ -5,7 +5,7 @@ import type { MuseTelemetry } from "./telemetryStore";
 import type { useTraining } from "./useTraining";
 
 const audio = vi.hoisted(() => ({ init: vi.fn(), setMode: vi.fn(), cleanup: vi.fn(), setMuted: vi.fn(), playBell: vi.fn(), updateState: vi.fn() }));
-vi.mock("../../src/hooks/useAudioFeedback", () => ({ useAudioFeedback: () => audio }));
+vi.mock("../legacy-core/hooks/useAudioFeedback", () => ({ useAudioFeedback: () => audio }));
 vi.mock("../bridge", () => ({ loadKv: async () => null, saveKv: async () => undefined }));
 import { NeuroFlow } from "../screens/NeuroFlow";
 

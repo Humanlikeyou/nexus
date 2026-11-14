@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNexus } from "@/context/NexusContext";
-import type { PageId } from "@/lib/types";
+import type { PageId } from "../../src-console/legacy-core/lib/types";
 
 // Mirrors the Amara OS 6-item nav (src-console/app/routes.ts SYSTEMS): Home, Chat & Agents,
 // Fitness, Neuro, Business, Settings. The legacy app has no "chat" page, so ⌘2 opens its

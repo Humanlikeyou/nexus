@@ -8,8 +8,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { relativeChannelBandPowers } from "../../src-console/neuro/fft";
-import { computeBands } from "../../src/hooks/useFFT";
-import { assessChannel } from "../../src/hooks/useSignalQuality";
+import { computeBands } from "../../src-console/legacy-core/hooks/useFFT";
+import { assessChannel } from "../../src-console/legacy-core/hooks/useSignalQuality";
 
 const dir = new URL("../fixtures/muse/", import.meta.url);
 const inputs = JSON.parse(readFileSync(new URL("parity_inputs.json", dir), "utf8")) as Record<string, number[]>;

@@ -48,6 +48,7 @@ fn session_logs_dir() -> PathBuf {
 /// Read the canonical Amara identity file from config/terrance.identity.md.
 /// Walks up from the binary to find the project root.
 #[tauri::command]
+#[specta::specta]
 pub fn read_identity_file() -> Result<String, String> {
     // Try to find the identity file relative to project root
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -82,6 +83,7 @@ pub fn read_identity_file() -> Result<String, String> {
 /// Read the operational profile from config/terrance.profile.md.
 /// Same lookup strategy as read_identity_file.
 #[tauri::command]
+#[specta::specta]
 pub fn read_profile_file() -> Result<String, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut dir = exe.parent().unwrap_or(&exe).to_path_buf();
@@ -110,7 +112,7 @@ pub fn read_profile_file() -> Result<String, String> {
 
 // ─── Context Store ─────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerranceContext {
     pub active_goals: Vec<String>,
@@ -124,6 +126,7 @@ pub struct TerranceContext {
     #[serde(default)]
     pub last_daily_summary_timestamp: Option<u64>,
     #[serde(default, deserialize_with = "lenient_hour")]
+    #[specta(type = Option<u8>)]
     pub daily_summary_hour: Option<u8>,
     #[serde(default)]
     pub last_health_check_timestamp: Option<u64>,
@@ -160,11 +163,13 @@ where
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn load_terrance_context() -> Result<TerranceContext, String> {
     load_context_from(&data_dir())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_terrance_context(context: TerranceContext) -> Result<(), String> {
     save_context_to(&data_dir(), &context)
 }
@@ -198,7 +203,7 @@ use super::shared::fsx::atomic_write_with_mode;
 
 // ─── Session Log ───────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionLogEntry {
     pub id: String,
@@ -210,6 +215,7 @@ pub struct SessionLogEntry {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn store_session_log(entry: SessionLogEntry) -> Result<(), String> {
     let dir = session_logs_dir();
     crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -220,6 +226,7 @@ pub fn store_session_log(entry: SessionLogEntry) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_session_logs() -> Result<Vec<SessionLogEntry>, String> {
     let dir = session_logs_dir();
     if !dir.exists() {
@@ -251,6 +258,7 @@ fn archive_dir() -> PathBuf {
 /// Move session logs older than `days_threshold` days to memory/archive/.
 /// Returns the number of files moved.
 #[tauri::command]
+#[specta::specta]
 pub async fn archive_old_session_logs(days_threshold: u32) -> Result<u32, String> {
     run_blocking(move || archive_old_session_logs_sync(days_threshold)).await
 }
@@ -290,6 +298,7 @@ fn archive_old_session_logs_sync(days_threshold: u32) -> Result<u32, String> {
 
 /// Trim the relevantMemory array in terrance_context.json to at most `max_items` entries.
 #[tauri::command]
+#[specta::specta]
 pub async fn prune_context_memory(max_items: u32) -> Result<u32, String> {
     run_blocking(move || prune_context_memory_sync(max_items)).await
 }
@@ -320,6 +329,7 @@ fn custom_jobs_path() -> PathBuf {
 
 /// Load custom cron jobs from disk. Returns JSON string.
 #[tauri::command]
+#[specta::specta]
 pub fn load_custom_jobs() -> Result<String, String> {
     let path = custom_jobs_path();
     if !path.exists() {
@@ -330,6 +340,7 @@ pub fn load_custom_jobs() -> Result<String, String> {
 
 /// Save custom cron jobs to disk. Accepts raw JSON string.
 #[tauri::command]
+#[specta::specta]
 pub fn save_custom_jobs(data: String) -> Result<(), String> {
     let dir = data_dir();
     crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -340,6 +351,7 @@ pub fn save_custom_jobs(data: String) -> Result<(), String> {
 
 /// Get aggregated session insights: total sessions, tokens, providers, daily breakdown.
 #[tauri::command]
+#[specta::specta]
 pub fn get_session_insights() -> Result<String, String> {
     let dir = session_logs_dir();
     if !dir.exists() {
@@ -475,6 +487,7 @@ fn redact_activity_entry(mut entry: ActivityEntry) -> ActivityEntry {
 
 /// Store an activity entry to disk as a JSON file.
 #[tauri::command]
+#[specta::specta]
 pub fn store_activity_entry(entry: ActivityEntry) -> Result<(), String> {
     let dir = activity_log_dir();
     crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -1307,6 +1320,7 @@ mod tests {
 /// into monthly archives; nothing is deleted without a verified archive copy.
 /// Returns the number of files archived.
 #[tauri::command]
+#[specta::specta]
 pub async fn prune_activity_log(days: u32) -> Result<u32, String> {
     run_blocking(move || {
         archive_activity_log_sync(Some(days), None, Some(false)).map(|r| r.archived as u32)
@@ -1369,7 +1383,7 @@ fn activity_files_newest_first(dir: &std::path::Path) -> Vec<(u64, PathBuf)> {
     files
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityArchiveReport {
     pub dry_run: bool,
@@ -1538,6 +1552,7 @@ pub(crate) fn archive_activity_log_in(
 
 /// Archive old activity entries (see `archive_activity_log_in`). Defaults: 30 days, 5000 files.
 #[tauri::command]
+#[specta::specta]
 pub async fn archive_activity_log(
     keep_days: Option<u32>,
     max_files: Option<u32>,
@@ -1587,6 +1602,7 @@ fn subagents_path() -> PathBuf {
 
 /// Load subagents from disk. Returns JSON string.
 #[tauri::command]
+#[specta::specta]
 pub fn load_subagents() -> Result<String, String> {
     let path = subagents_path();
     if !path.exists() {
@@ -1597,6 +1613,7 @@ pub fn load_subagents() -> Result<String, String> {
 
 /// Save subagents to disk. Accepts raw JSON string.
 #[tauri::command]
+#[specta::specta]
 pub fn save_subagents(data: String) -> Result<(), String> {
     let dir = data_dir();
     crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;

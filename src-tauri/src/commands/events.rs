@@ -84,7 +84,7 @@ fn make_event_id(source: &str, metric: &str, timestamp: &str, session_id: &str) 
     hex::encode(&result[..8]) // 16 hex chars
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Event {
     pub id: Option<String>,
     pub session_id: Option<String>,
@@ -100,7 +100,7 @@ pub struct Event {
     pub schema_version: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct EventQuery {
     pub source: Option<String>,
     pub metric: Option<String>,
@@ -115,6 +115,7 @@ pub struct EventQuery {
 /// Guarantees: events and their outbox entry are atomic — you never get orphan events
 /// without an outbox row, or an outbox row referencing non-existent events.
 #[tauri::command]
+#[specta::specta]
 pub fn insert_events(events: Vec<Event>) -> Result<u64, String> {
     let mut conn = get_db()?;
     let now = chrono::Utc::now().to_rfc3339();
@@ -190,6 +191,7 @@ pub fn insert_events(events: Vec<Event>) -> Result<u64, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn query_events(query: EventQuery) -> Result<Vec<Event>, String> {
     let conn = get_db()?;
 
@@ -270,6 +272,7 @@ pub fn query_events(query: EventQuery) -> Result<Vec<Event>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn migrate_existing_data() -> Result<String, String> {
     let conn = get_db()?;
     let now = chrono::Utc::now().to_rfc3339();

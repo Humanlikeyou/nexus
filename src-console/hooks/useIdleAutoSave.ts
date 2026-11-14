@@ -11,7 +11,7 @@
  * context cannot be loaded (bug 1); the session log is still stored.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { summarizeAndStoreSessionSilent, type SessionEntry } from "@/terrance/system/continuity";
+import { summarizeAndStoreSessionSilent, type SessionEntry } from "../legacy-core/terrance/system/continuity";
 
 export const IDLE_AUTOSAVE_MS = 10 * 60_000;
 export const AUTOSAVE_SIGNATURE_KEY = "nexus.terrence.autosave.lastSavedSignature";

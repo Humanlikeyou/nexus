@@ -1,7 +1,7 @@
 import { invokeBound } from "../bridge";
-import { buildRouterConfig } from "@/lib/llm-router";
-import { getConfig } from "@/lib/api";
-import type { RouterResponse } from "@/lib/types";
+import { buildRouterConfig } from "../legacy-core/lib/llm-router";
+import { getConfig } from "../legacy-core/lib/api";
+import type { RouterResponse } from "../legacy-core/lib/types";
 import { getHomeBrief, loadKv, saveKv } from "../bridge";
 import { isSnapshot, noopQuery } from "../lib/noop";
 import type { NoopSnapshotPayload, RecordedSession, RevenueSummary } from "../types";

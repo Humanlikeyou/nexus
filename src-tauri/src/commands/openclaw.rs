@@ -37,7 +37,7 @@ fn read_path(
     }
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, specta::Type)]
 pub struct Skill {
     pub name: String,
     pub status: String,
@@ -122,6 +122,7 @@ fn workspace_file(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn read_skills() -> Result<Vec<Skill>, String> {
     let mut skills = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -197,6 +198,7 @@ pub fn read_skills() -> Result<Vec<Skill>, String> {
 /// Write or update a skill file in `<data dir>/workspace/skills/` (never ~/.openclaw).
 /// Used by the skills self-improvement loop to create/update learned skills.
 #[tauri::command]
+#[specta::specta]
 pub fn save_skill(name: String, content: String) -> Result<(), String> {
     save_skill_in(&app_workspace().join("skills"), &name, content)
 }
@@ -220,6 +222,7 @@ fn skill_path(dir: &std::path::Path, name: &str) -> Result<PathBuf, String> {
 
 /// Delete a skill file from `<data dir>/workspace/skills/`. A legacy skill is read-only: it reports false.
 #[tauri::command]
+#[specta::specta]
 pub fn delete_skill(name: String) -> Result<bool, String> {
     delete_skill_in(&app_workspace().join("skills"), &name)
 }

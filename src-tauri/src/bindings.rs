@@ -1,7 +1,7 @@
 //! Typed bridge (decision 0023, plan tasks/proposed/typed-bridge.md).
 //!
-//! `builder()` lists the commands that have a generated TypeScript binding (step 2: every command
-//! src-console/bridge.ts calls except `amara_turn`, which takes a `Channel` and is step 3). `generate_handler!`
+//! `builder()` lists the commands that have a generated TypeScript binding (every command src-console calls, including the
+//! ones in src-console/legacy-core moved from the old src/ tree in step 5; `amara_turn` takes a `Channel`, step 3). `generate_handler!`
 //! in lib.rs stays the source of truth for registration in this stage; this list only drives
 //! `src-console/bindings.gen.ts`. Two tests: one rewrites the file (set `UPDATE_BINDINGS=1`), the
 //! other fails when the committed file differs from a fresh export (staleness gate).
@@ -33,6 +33,12 @@
 //! | LegacyContextMigrationReport.inserted/existing/skipped (terrence_context.rs) | u64 | c: number (counters) |
 //! | TerrenceRuntimeHealth.active_schedules; TerrenceInteraction.duration_ms; AmaraNoteInput.duration_ms (terrence_runtime.rs) | u64 | c: number |
 //! | VoiceStatus.state_age_s; voice_recent_turns arg `n` (voice.rs) | Option<u64> / Option<usize> | c: number |
+//! | Step 5 additions (81 commands moved off raw invoke): Event.schema_version; ChatMessage.id/ts/latency_ms; ChatSession.created_at/updated_at (events.rs, assistant.rs) | i64 / Option<i64> | c: number (row ids, epoch s/ms, ms) |
+//! | ArmConfig.poll_interval_secs; WorkerHealthResponse.uptime_secs/requests_24h (arm.rs) | u64 / Option<u64> | c: number (seconds, counters) |
+//! | TerranceContext.last_*_timestamp / daily_summary_skipped_slot / last_telegram_update_id; SessionLogEntry.timestamp (continuity.rs) | u64 / Option<u64> / Option<i64> | c: number (epoch s/ms, Telegram update id < 2^53) |
+//! | ActivityArchiveReport.scanned/selected/archived/skipped/kept/months (continuity.rs) | usize | c: number (file counts) |
+//! | SystemInfo.uptime_secs/timestamp (system.rs); LlmUsageRecord.timestamp/latency_ms (llm_router.rs); ReplayFileInfo.size_bytes (replay.rs); CatchUpStatus.idle_secs (goal_roadmap.rs); restart_services arg `deadline_ms` (restart_services.rs) | u64 / i64 / Option<u64> | c: number (epoch, ms, bytes, seconds) |
+//! | TelegramMessage.id/date; TelegramUpdate.update_id/message_id/date (telegram.rs) | i64 | c: number (Telegram ids and epoch s, far below 2^53) |
 //! | serde_json::Value payloads (ArmStrategy.config, CrewToolGrant.pending_request, TerrenceAction.parameters, ContextItem.metadata, RecordedSession data, voice turns) | Value | exported as the recursive JSON `Value` type (specta feature `serde_json`); its numbers are `number` under the same rule |
 //!
 //! Other notes: `f64` is exported by specta as `number | null` (NaN serialises as JSON null); the hand-written
@@ -234,6 +240,87 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::adds::add_undo,
             crate::commands::voice_bridge::voice_bridge_start,
             crate::commands::voice_bridge::voice_bridge_stop,
+            crate::commands::system::get_system_info,
+            crate::commands::system::health_check,
+            crate::commands::openclaw::read_skills,
+            crate::commands::telegram::get_config,
+            crate::commands::telegram::save_settings,
+            crate::commands::telegram::get_telegram_messages,
+            crate::commands::telegram::send_telegram_message,
+            crate::commands::telegram::test_telegram_connection,
+            crate::commands::telegram::send_to_terrance,
+            crate::commands::telegram::poll_telegram_updates,
+            crate::commands::packager::pack_it_up,
+            crate::commands::packager::unpack_backup,
+            crate::commands::packager::get_app_paths,
+            crate::commands::goals::save_goals,
+            crate::commands::goals::delete_goal,
+            crate::commands::snapshots::save_snapshot,
+            crate::commands::snapshots::list_snapshots,
+            crate::commands::events::insert_events,
+            crate::commands::events::query_events,
+            crate::commands::events::migrate_existing_data,
+            crate::commands::assistant::create_chat_session,
+            crate::commands::assistant::list_chat_sessions,
+            crate::commands::assistant::save_chat_message,
+            crate::commands::assistant::load_chat_history,
+            crate::commands::assistant::delete_chat_session,
+            crate::commands::onboarding::check_onboarding,
+            crate::commands::onboarding::complete_onboarding,
+            crate::commands::arm::arm_create_strategy,
+            crate::commands::arm::arm_update_strategy,
+            crate::commands::arm::arm_delete_strategy,
+            crate::commands::arm::arm_activate_strategy,
+            crate::commands::arm::arm_pause_strategy,
+            crate::commands::arm::arm_kill_strategy,
+            crate::commands::arm::arm_poll_revenue,
+            crate::commands::arm::arm_log_decision,
+            crate::commands::arm::arm_list_decisions,
+            crate::commands::arm::arm_update_decision_outcome,
+            crate::commands::arm::arm_set_global_limits,
+            crate::commands::arm::arm_kill_switch,
+            crate::commands::arm::arm_health_check,
+            crate::commands::arm::arm_poll_all,
+            crate::commands::arm::arm_get_config,
+            crate::commands::arm::arm_save_config,
+            crate::commands::ble_common::set_proof_mode,
+            crate::commands::ble_common::get_proof_log,
+            crate::commands::outbox::simulate_gateway_down,
+            crate::commands::outbox::simulate_gateway_up,
+            crate::commands::replay::list_replays,
+            crate::commands::replay::start_replay,
+            crate::commands::replay::stop_replay,
+            crate::commands::replay::start_demo_eeg,
+            crate::commands::replay::stop_demo_eeg,
+            crate::commands::llm_router::get_cost_estimate,
+            crate::commands::llm_router::get_llm_usage,
+            crate::commands::llm_router::clear_llm_usage,
+            crate::commands::continuity::read_identity_file,
+            crate::commands::continuity::load_terrance_context,
+            crate::commands::continuity::save_terrance_context,
+            crate::commands::continuity::store_session_log,
+            crate::commands::continuity::list_session_logs,
+            crate::commands::continuity::archive_old_session_logs,
+            crate::commands::continuity::prune_context_memory,
+            crate::commands::continuity::get_session_insights,
+            crate::commands::continuity::load_custom_jobs,
+            crate::commands::continuity::save_custom_jobs,
+            crate::commands::openclaw::save_skill,
+            crate::commands::openclaw::delete_skill,
+            crate::commands::system::check_docker_service,
+            crate::commands::system::restart_docker_service,
+            crate::commands::system::check_service_port,
+            crate::commands::research::web_search,
+            crate::commands::research::fetch_url,
+            crate::commands::continuity::store_activity_entry,
+            crate::commands::continuity::prune_activity_log,
+            crate::commands::continuity::archive_activity_log,
+            crate::commands::continuity::load_subagents,
+            crate::commands::continuity::save_subagents,
+            crate::commands::continuity::read_profile_file,
+            crate::commands::goal_roadmap::roadmap_catchup_status,
+            crate::commands::goal_roadmap::roadmap_draft_pending,
+            crate::commands::restart_services::restart_services,
         ])
 }
 

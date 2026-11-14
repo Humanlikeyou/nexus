@@ -1,7 +1,7 @@
 import { Bot, Brain, ChevronRight, Library, RefreshCw } from "lucide-react";
 import { HermesSubtitle } from "./agentLabels";
 import { useEffect, useState, type ReactNode } from "react";
-import { getSchedulerStatus, type SchedulerStatus } from "@/terrance/system/scheduler";
+import { getSchedulerStatus, type SchedulerStatus } from "../legacy-core/terrance/system/scheduler";
 import type { ConversationMessage } from "../app/conversation";
 import { kbView } from "../app/statusViews";
 import { INITIAL_SNAPSHOT } from "../bridge";

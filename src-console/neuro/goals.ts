@@ -1,4 +1,4 @@
-import type { NfProtocol } from "../../src/lib/types";
+import type { NfProtocol } from "../legacy-core/lib/types";
 
 /** The eight protocols, grouped by what he wants from a session. */
 export type Goal = { id: string; title: string; line: string; protocolIds: string[]; alpha: boolean };

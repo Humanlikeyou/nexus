@@ -1,6 +1,6 @@
 import { invokeBound } from "../bridge";
 import { useEffect, useState, type FormEvent } from "react";
-import { NOOP_PATH_CHANGE_CANCELLED } from "../../src/lib/types";
+import { NOOP_PATH_CHANGE_CANCELLED } from "../legacy-core/lib/types";
 import type { NoopSettings, WhoopSource } from "../types";
 import { Button, InsetGroup, ListRow, SegmentedControl, TextField } from "../ui";
 

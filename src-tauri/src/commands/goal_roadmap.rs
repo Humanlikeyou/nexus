@@ -699,7 +699,7 @@ async fn activity_now() -> bool {
     busy
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CatchUpStatus {
     /// A roadmap is waiting in "drafting", or a smaller-step request is pending.
@@ -713,6 +713,7 @@ pub struct CatchUpStatus {
 
 /// Read-only: what the renderer needs to decide a catch-up (decision 0018). Cheap; never calls a model.
 #[tauri::command]
+#[specta::specta]
 pub async fn roadmap_catchup_status() -> Result<CatchUpStatus, String> {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let (due, ran_today) = {
@@ -787,6 +788,7 @@ async fn deep_within(started: Instant, prompt: &str) -> Option<String> {
 /// Returns how many things were written. A failed or junk deep reply leaves the work
 /// queued for the next night; nothing is invented.
 #[tauri::command]
+#[specta::specta]
 pub async fn roadmap_draft_pending(catch_up: Option<bool>) -> Result<u32, String> {
     let _run = RunGuard::claim(&DRAFT_RUNNING)?;
     if system_busy().await {

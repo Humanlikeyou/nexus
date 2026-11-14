@@ -8,11 +8,11 @@ import type {
   NfSession,
   FeedbackSignal,
   OverallQuality,
-} from "@/lib/types";
-import { classifyState, checkInZone, type InZoneThresholds } from "@/lib/neurofeedback/brainState";
+} from "../../src-console/legacy-core/lib/types";
+import { classifyState, checkInZone, type InZoneThresholds } from "../../src-console/legacy-core/lib/neurofeedback/brainState";
 import { computeTickScore, computeTimeInZonePct, computeTotalScore } from "@/lib/neurofeedback/scoring";
-import { computeFeedbackSignal, resetOutputEngine } from "@/lib/neurofeedback/outputEngine";
-import { resetPolicyState } from "@/lib/neurofeedback/policyEngine";
+import { computeFeedbackSignal, resetOutputEngine } from "../../src-console/legacy-core/lib/neurofeedback/outputEngine";
+import { resetPolicyState } from "../../src-console/legacy-core/lib/neurofeedback/policyEngine";
 import {
   MockActuator,
   AudioActuator,
@@ -20,7 +20,7 @@ import {
   type FeedbackActuator,
   type VisualFeedbackState,
 } from "@/lib/neurofeedback/actuators";
-import type { useAudioFeedback } from "./useAudioFeedback";
+import type { useAudioFeedback } from "../../src-console/legacy-core/hooks/useAudioFeedback";
 
 const TICK_MS = 500;
 const CALIBRATION_MS = 5000;

@@ -20,6 +20,19 @@ export default tseslint.config(
     },
   },
   {
+    // Moved verbatim from the old src/ tree (never linted there). Behaviour-identical, so these style/compat rules are
+    // switched off for this folder only instead of editing code; every other rule (hooks deps, a11y, recommended) still applies.
+    files: ["src-console/legacy-core/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-unused-vars": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "no-empty": "off",
+      "no-misleading-character-class": "off",
+      "prefer-const": "off",
+      "react-hooks/set-state-in-effect": "off",
+    },
+  },
+  {
     files: ["src-console/**/*.mjs"],
     extends: [js.configs.recommended],
     languageOptions: { globals: { ...globals.node, ...globals.browser }, sourceType: "module" },

@@ -492,6 +492,15 @@ export interface GoalProgressWire {
 export const goalProgressWeek = (weekEnd?: string): Promise<GoalProgressWire> => bound.goalProgressWeek(weekEnd ?? null) as Promise<GoalProgressWire>;
 
 /**
+ * Raw plugin call, the second (and only other) documented use of the core `invoke`: tauri-plugin-dialog's `open` is a
+ * plugin command, not an app command, so it has no entry in bindings.gen.ts. Payload and rejection are unchanged from the
+ * old call in the backup picker. test/unit/invokeGuard.test.ts allow-lists exactly this and the ha_call_service case.
+ */
+export function pluginDialogOpen<T = unknown>(options: Record<string, unknown>): Promise<T> {
+  return invoke<T>("plugin:dialog|open", { options });
+}
+
+/**
  * Run a bound command by name. For callers that inject a `(command, args)` function or pick the command at run
  * time. Same wire payload and the same rejection as the old `invoke(command, args)`; an unknown name rejects.
  */

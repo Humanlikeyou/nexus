@@ -15,7 +15,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => h.invoke(...a) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}), emit: vi.fn() }));
-vi.mock("@/terrance/system/scheduler", () => ({ startScheduler: vi.fn(), stopScheduler: vi.fn() }));
+vi.mock("../../src-console/legacy-core/terrance/system/scheduler", () => ({ startScheduler: vi.fn(), stopScheduler: vi.fn() }));
 // Count App renders: App calls useSnapshot exactly once per render.
 vi.mock("../../src-console/app/useSnapshot", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../src-console/app/useSnapshot")>();

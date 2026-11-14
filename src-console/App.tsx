@@ -12,7 +12,7 @@ import { useSnapshot } from "./app/useSnapshot";
 import { useMuseSession } from "./app/useMuseSession";
 import { runApproval } from "./lib/approval";
 import type { TerrenceAction } from "./types";
-import { NEXUS_NOTICE_EVENT } from "@/terrance/system/selfDiagnosis";
+import { NEXUS_NOTICE_EVENT } from "./legacy-core/terrance/system/selfDiagnosis";
 import { ActivityField, BusinessField, CrewsField, LifeField, ListsField, HealthField, MindBodyField, NeuroField, SmartHomeField, RevenueField, SessionsField, SettingsField, VoiceField, retryLazyScreens } from "./app/lazyScreens";
 import { ScreenErrorBoundary } from "./shell/ScreenErrorBoundary";
 import { INITIAL_SNAPSHOT, approveTerrenceAction, cancelTerrenceAction, retryTerrenceAction } from "./bridge";

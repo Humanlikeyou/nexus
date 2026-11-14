@@ -11,7 +11,7 @@ pub(crate) fn config_path() -> PathBuf {
     nexus_data_dir().join("config.json")
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, specta::Type)]
 pub struct NexusConfig {
     pub telegram_bot_token: Option<String>,
     pub telegram_chat_id: Option<String>,
@@ -75,7 +75,7 @@ fn default_gateway_retry_max() -> Option<u32> {
     Some(300)
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 pub struct TelegramMessage {
     pub id: i64,
     pub from_name: String,
@@ -121,16 +121,19 @@ pub(crate) fn update_config(change: impl FnOnce(&mut NexusConfig)) -> Result<(),
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_config() -> Result<NexusConfig, String> {
     Ok(load_config())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_settings(config: NexusConfig) -> Result<(), String> {
     save_config(&config)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMessage>, String> {
     let config = load_config();
     let token = config.telegram_bot_token.as_deref().unwrap_or("");
@@ -331,6 +334,7 @@ pub(crate) fn parse_outbound_disabled(value: Option<&str>) -> bool {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn send_telegram_message(text: String) -> Result<TelegramMessage, String> {
     send_telegram_message_gated(text, outbound_disabled()).await
 }
@@ -406,6 +410,7 @@ async fn send_telegram_message_gated(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn test_telegram_connection() -> Result<String, String> {
     let config = load_config();
     let token = config.telegram_bot_token.as_deref().unwrap_or("");
@@ -449,7 +454,7 @@ pub async fn test_telegram_connection() -> Result<String, String> {
 }
 
 /// A single Telegram update from getUpdates.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 pub struct TelegramUpdate {
     pub update_id: i64,
     pub message_id: i64,
@@ -463,6 +468,7 @@ pub struct TelegramUpdate {
 /// Pass the last processed update_id (or 0 for first poll).
 /// Returns new updates with update_id > last_update_id.
 #[tauri::command]
+#[specta::specta]
 pub async fn poll_telegram_updates(last_update_id: i64) -> Result<Vec<TelegramUpdate>, String> {
     let config = load_config();
     let token = config.telegram_bot_token.as_deref().unwrap_or("");
@@ -610,6 +616,7 @@ async fn pick_ollama_model(client: &reqwest::Client) -> Result<String, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn send_to_terrance(text: String) -> Result<String, String> {
     let client = reqwest::Client::new();
     let model = pick_ollama_model(&client).await.inspect_err(|reason| {

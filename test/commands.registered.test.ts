@@ -19,6 +19,10 @@ describe("Tauri command registry", () => {
     expect(commandCalls(src).sort()).toEqual(["a_one", "b_two", "c_three"]);
   });
 
+  it("sees invokeBound(\"name\") calls (the bridge dispatcher used by the moved legacy-core modules)", () => {
+    expect(commandCalls(`await invokeBound<void>("send_telegram_message", { text });\n invokeBound("get_config")`).sort()).toEqual(["get_config", "send_telegram_message"]);
+  });
+
   it("sees generated-binding calls (__TAURI_INVOKE) so bound commands stay checked", async () => {
     const src = `load: (key: string, options?: InvokeOptions) => __TAURI_INVOKE<string | null>("load_kv", { key }, options),\n n: (o?: X) => __TAURI_INVOKE<N>("n8n_status", undefined, o)`;
     expect(commandCalls(src).sort()).toEqual(["load_kv", "n8n_status"]);

@@ -176,3 +176,4 @@ NOOP merge, live Telegram relay send path, standalone phases (bundling, signing,
 | Stage B batch 2+: bind the rest of bridge.ts by module, then the outside callers, then src/ moves | next |
 | Stage B batch 2: all bridge.ts commands bound (94 total; amara_turn left for step 3); BigInt cast to number (table in bindings.rs); specta serde_json feature | done (this commit) |
 | Stage B steps 3–4: amara_turn Channel bound; every src-console invoke() moved onto bridge (181 bound; invokeBound dispatcher + boundTable.ts) | done (this commit) |
+| Stage B steps 5–6: 33 reachable src/ modules moved to src-console/legacy-core (git mv); their calls bound (255 total); invoke guard test; retire list in tasks/proposed/src-retire-list.md | done (this commit). **Stage B done** |

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PROTOCOLS } from "../../src/lib/neurofeedback/protocols";
+import { PROTOCOLS } from "../legacy-core/lib/neurofeedback/protocols";
 import { INACTIVE_TRAINING, TrainingSession } from "./training";
 import type { MuseTelemetry } from "./telemetryStore";
 

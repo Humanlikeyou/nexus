@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NOOP_PATH_CHANGE_CANCELLED } from "../../src/lib/types";
+import { NOOP_PATH_CHANGE_CANCELLED } from "../legacy-core/lib/types";
 import { NoopSettingsGroup, isUserCancel, pathError } from "./NoopSettingsGroup";
 
 const invokeMock = vi.hoisted(() => vi.fn());

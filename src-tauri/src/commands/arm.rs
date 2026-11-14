@@ -100,7 +100,7 @@ pub struct ArmStrategy {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ArmDecision {
     pub id: String,
     pub strategy_id: String,
@@ -112,7 +112,7 @@ pub struct ArmDecision {
     pub timestamp: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ArmConfig {
     pub wallet_address: Option<String>,
     pub global_capital_limit: f64,
@@ -138,7 +138,7 @@ impl Default for ArmConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct WorkerApiKey {
     pub name: String,
     pub key: String,
@@ -177,7 +177,7 @@ pub struct StrategyRevenue {
     pub net: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct WorkerHealthResponse {
     pub status: String,
     pub uptime_secs: Option<u64>,
@@ -337,6 +337,7 @@ pub fn arm_list_strategies() -> Result<Vec<ArmStrategy>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_create_strategy(
     name: String,
     strategy_type: String,
@@ -369,6 +370,7 @@ pub fn arm_create_strategy(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_update_strategy(
     id: String,
     name: Option<String>,
@@ -399,6 +401,7 @@ pub fn arm_update_strategy(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_delete_strategy(id: String) -> Result<(), String> {
     println!("[arm] delete_strategy: id={id}");
     let conn = get_db()?;
@@ -411,6 +414,7 @@ pub fn arm_delete_strategy(id: String) -> Result<(), String> {
 // ─── Strategy Status Management ──────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_activate_strategy(id: String) -> Result<ArmStrategy, String> {
     println!("[arm] activate_strategy: id={id}");
     let conn = get_db()?;
@@ -440,6 +444,7 @@ pub fn arm_activate_strategy(id: String) -> Result<ArmStrategy, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_pause_strategy(id: String, reasoning: String) -> Result<ArmStrategy, String> {
     println!("[arm] pause_strategy: id={id}");
     let conn = get_db()?;
@@ -495,6 +500,7 @@ pub fn arm_pause_strategy(id: String, reasoning: String) -> Result<ArmStrategy, 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_kill_strategy(id: String, reasoning: String) -> Result<ArmStrategy, String> {
     println!("[arm] kill_strategy: id={id}");
     let conn = get_db()?;
@@ -561,6 +567,7 @@ fn get_worker_key(config: &serde_json::Value) -> Option<String> {
 const ARM_OUTBOUND_BLOCKED: &str = "Local only right now. I can't reach the revenue workers.";
 
 #[tauri::command]
+#[specta::specta]
 pub async fn arm_poll_revenue(strategy_id: String) -> Result<f64, String> {
     if super::telegram::outbound_disabled() {
         return Err(ARM_OUTBOUND_BLOCKED.to_string());
@@ -743,6 +750,7 @@ pub fn arm_get_revenue_summary(
 // ─── Decision Journal ────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_log_decision(
     strategy_id: String,
     action: String,
@@ -756,6 +764,7 @@ pub fn arm_log_decision(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_list_decisions(
     strategy_id: Option<String>,
     limit: Option<u32>,
@@ -799,6 +808,7 @@ pub fn arm_list_decisions(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_update_decision_outcome(
     id: String,
     outcome: String,
@@ -911,6 +921,7 @@ pub fn arm_get_risk_status() -> Result<ArmRiskStatus, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_set_global_limits(capital_limit: f64, daily_loss_cap: f64) -> Result<(), String> {
     println!("[arm] set_global_limits: capital={capital_limit} daily_loss={daily_loss_cap}");
     let mut config = load_arm_config();
@@ -920,6 +931,7 @@ pub fn arm_set_global_limits(capital_limit: f64, daily_loss_cap: f64) -> Result<
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_kill_switch(active: bool, reasoning: String) -> Result<(), String> {
     println!("[arm] kill_switch: active={active}");
     let conn = get_db()?;
@@ -968,6 +980,7 @@ pub fn arm_kill_switch(active: bool, reasoning: String) -> Result<(), String> {
 // ─── Health Monitoring ───────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub async fn arm_health_check(strategy_id: String) -> Result<WorkerHealthResponse, String> {
     if super::telegram::outbound_disabled() {
         return Err(ARM_OUTBOUND_BLOCKED.to_string());
@@ -1041,6 +1054,7 @@ pub async fn arm_health_check(strategy_id: String) -> Result<WorkerHealthRespons
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn arm_poll_all() -> Result<Vec<ArmStrategy>, String> {
     if super::telegram::outbound_disabled() {
         return Err(ARM_OUTBOUND_BLOCKED.to_string());
@@ -1120,12 +1134,14 @@ pub async fn arm_poll_all() -> Result<Vec<ArmStrategy>, String> {
 // ─── Config ──────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_get_config() -> Result<ArmConfig, String> {
     println!("[arm] get_config: status=loading");
     Ok(load_arm_config())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_save_config(config: ArmConfig) -> Result<(), String> {
     println!("[arm] save_config: status=saving");
     save_arm_config_to_disk(&config)?;

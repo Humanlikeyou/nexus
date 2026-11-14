@@ -11,7 +11,7 @@ fn snapshots_dir_in(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("snapshots")
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct BrainSnapshot {
     pub id: String,
     pub timestamp: String,
@@ -28,6 +28,7 @@ pub struct BrainSnapshot {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_snapshot(snapshot: BrainSnapshot) -> Result<String, String> {
     save_snapshot_at(&nexus_data_dir(), snapshot)
 }
@@ -123,6 +124,7 @@ mod tests {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_snapshots() -> Result<Vec<BrainSnapshot>, String> {
     list_snapshots_in(&nexus_data_dir())
 }

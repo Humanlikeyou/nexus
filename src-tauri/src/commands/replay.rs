@@ -197,7 +197,7 @@ struct ReplaySampleLine {
     samples: Vec<f64>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct ReplayFileInfo {
     pub filename: String,
     pub size_bytes: u64,
@@ -592,6 +592,7 @@ mod recording_tests {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn list_replays() -> Result<Vec<ReplayFileInfo>, String> {
     let dir = replays_dir();
     if !dir.exists() {
@@ -654,6 +655,7 @@ fn estimate_duration(path: &PathBuf) -> Option<f64> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn start_replay(app: AppHandle, filename: String, speed: f64) -> Result<(), String> {
     super::path_safety::validate_file_name(&filename, &["ndjson"])?;
     let path = super::path_safety::safe_join(&replays_dir(), &filename)?;
@@ -776,6 +778,7 @@ fn emit_idle(app: &AppHandle) {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stop_replay(app: AppHandle) -> Result<(), String> {
     println!("[replay] stop requested");
     *REPLAY_ACTIVE.lock().await = false;
@@ -788,6 +791,7 @@ pub async fn stop_replay(app: AppHandle) -> Result<(), String> {
 // ── Synthetic Demo Generator ────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub async fn start_demo_eeg(app: AppHandle, mode: String, speed: f64) -> Result<(), String> {
     // Stop any existing replay/demo
     *REPLAY_ACTIVE.lock().await = false;
@@ -806,6 +810,7 @@ pub async fn start_demo_eeg(app: AppHandle, mode: String, speed: f64) -> Result<
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stop_demo_eeg(app: AppHandle) -> Result<(), String> {
     // Same as stop_replay — same flag
     stop_replay(app).await

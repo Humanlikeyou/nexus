@@ -58,7 +58,7 @@ fn init_db(conn: &Connection) -> Result<(), String> {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ChatSession {
     pub id: String,
     pub title: String,
@@ -67,7 +67,7 @@ pub struct ChatSession {
     pub message_count: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ChatMessage {
     pub id: i64,
     pub session_id: String,
@@ -83,6 +83,7 @@ pub struct ChatMessage {
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn create_chat_session(title: String) -> Result<ChatSession, String> {
     let conn = get_db()?;
     let id = uuid::Uuid::new_v4().to_string();
@@ -104,6 +105,7 @@ pub fn create_chat_session(title: String) -> Result<ChatSession, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_chat_sessions() -> Result<Vec<ChatSession>, String> {
     let conn = get_db()?;
     let mut stmt = conn
@@ -133,6 +135,7 @@ pub fn list_chat_sessions() -> Result<Vec<ChatSession>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_chat_message(message: ChatMessage) -> Result<i64, String> {
     let conn = get_db()?;
 
@@ -165,6 +168,7 @@ pub fn save_chat_message(message: ChatMessage) -> Result<i64, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn load_chat_history(
     session_id: String,
     limit: Option<u32>,
@@ -204,6 +208,7 @@ pub fn load_chat_history(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn delete_chat_session(session_id: String) -> Result<(), String> {
     let conn = get_db()?;
 

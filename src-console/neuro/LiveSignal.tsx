@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { assessChannel } from "../../src/hooks/useSignalQuality";
+import { assessChannel } from "../legacy-core/hooks/useSignalQuality";
 import type { Wired } from "../lib/sampleAdapters";
 import { Card, DataTag, SegmentedControl, wiredTag } from "../ui";
 import { EEG_CHANNELS, PLACEMENT, bucket, type AuxInfo, type Contact, type EegChannel } from "./recordings";

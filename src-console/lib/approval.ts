@@ -1,4 +1,4 @@
-import { isDeclined } from "@/terrance/system/approvalErrors";
+import { isDeclined } from "../legacy-core/terrance/system/approvalErrors";
 
 /**
  * terrence_actions approve returns Ok(action) with status "cancelled" and an

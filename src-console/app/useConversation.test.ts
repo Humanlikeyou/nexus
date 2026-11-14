@@ -13,8 +13,8 @@ const bridge = vi.hoisted(() => ({
 const deliberation = vi.hoisted(() => ({ deliberate: vi.fn() }));
 const compressor = vi.hoisted(() => ({ compressIfNeeded: vi.fn(), resetCompressor: vi.fn() }));
 vi.mock("../bridge", () => bridge);
-vi.mock("@/terrance/system/deliberation", () => deliberation);
-vi.mock("@/terrance/system/contextCompressor", () => compressor);
+vi.mock("../legacy-core/terrance/system/deliberation", () => deliberation);
+vi.mock("../legacy-core/terrance/system/contextCompressor", () => compressor);
 
 import { useConversation } from "./useConversation";
 import { createMockHaBackend, setHaBackend } from "../lib/homeAssistant";

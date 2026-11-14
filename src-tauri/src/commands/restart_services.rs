@@ -36,7 +36,7 @@ impl Service {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceRestartResult {
     pub service: String,
@@ -170,6 +170,7 @@ where
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn restart_services(
     app: tauri::AppHandle,
     services: Vec<String>,
