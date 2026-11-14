@@ -6,7 +6,7 @@
  *  - Live code: every module in src-console/main.tsx's import graph (esbuild
  *    metafile, with the vite @ / @console aliases), including the src/ modules
  *    it pulls in (scheduler, continuity, rituals, …).
- *  - Callers: `invoke("name"` / `read("name"` calls (generic args and line
+ *  - Callers: `invoke("name"` / `read("name"` / `__TAURI_INVOKE("name"` (generated src-console/bindings.gen.ts) calls (generic args and line
  *    breaks allowed) in src-console/, src/ and src-next/ (tests excluded).
  *
  * Usage:
@@ -45,7 +45,7 @@ export function registeredCommands(libRs = fs.readFileSync(LIB_RS, "utf8")) {
 export function commandCalls(source) {
   const names = new Set();
   // Generic args may nest one level and contain parens: invoke<import("./types").X[]>("name").
-  const re = /\b(?:invoke|read)\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\s*\(\s*["'`]([a-z][a-z0-9_]*)["'`]/g;
+  const re = /\b(?:invoke|read|__TAURI_INVOKE)\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\s*\(\s*["'`]([a-z][a-z0-9_]*)["'`]/g;
   for (const m of source.matchAll(re)) names.add(m[1]);
   return [...names];
 }

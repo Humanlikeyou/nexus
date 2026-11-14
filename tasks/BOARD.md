@@ -172,3 +172,5 @@ NOOP merge, live Telegram relay send path, standalone phases (bundling, signing,
 | Stage B typed bridge | next: write tasks/proposed/typed-bridge.md, stop for OK on dependencies |
 | Decision 0022: check-in notes in chat context, experiment carry-over (28 days), "in common" at lags 1–3 | done (this commit) |
 | Stage B plan `tasks/proposed/typed-bridge.md` | done (this commit). **Waiting on Taisun:** OK for new dependencies (tauri-specta =2.0.0-rc.29, specta =2.0.0-rc.28, specta-typescript =0.0.15, tauri `specta` feature, one online `cargo fetch`) or the no-dependency fallback |
+| Stage B commit 1: specta deps (decision 0023) + 6 commands bound + staleness test + drift guard reads bindings.gen.ts | done (this commit) |
+| Stage B batch 2+: bind the rest of bridge.ts by module, then the outside callers, then src/ moves | next |

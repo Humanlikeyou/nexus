@@ -14,7 +14,7 @@ pub const N8N_KEY_FILE: &str = "n8n_api_key";
 const KEY_HEADER: &str = "X-N8N-API-KEY";
 const PAGE: u32 = 250;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default, specta::Type)]
 pub struct N8nStatus {
     pub connected: bool,
     /// Workflows in n8n; `None` when not obtainable read-only without a key.
@@ -78,6 +78,7 @@ pub(crate) async fn n8n_healthz(client: &reqwest::Client, timeout: std::time::Du
 
 /// Never an error: every state is something the UI shows.
 #[tauri::command]
+#[specta::specta]
 pub async fn n8n_status() -> Result<N8nStatus, String> {
     let client = reqwest::Client::new();
     let up = n8n_healthz(&client, std::time::Duration::from_secs(3)).await;

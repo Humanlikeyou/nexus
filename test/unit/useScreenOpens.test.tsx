@@ -9,7 +9,8 @@ import { recordScreenOpen, screenOpenCounts } from "../../src-console/bridge";
 import type { ModuleId } from "../../src-console/types";
 
 beforeEach(() => { invoke.mockReset(); invoke.mockResolvedValue(undefined); });
-const calls = () => invoke.mock.calls.filter((c) => c[0] === "screen_open_record");
+// Generated bindings pass a trailing `options` (undefined); only name + payload matter.
+const calls = () => invoke.mock.calls.filter((c) => c[0] === "screen_open_record").map((c) => c.slice(0, 2));
 
 describe("useScreenOpens", () => {
   it("records the initial screen once on mount", () => {
@@ -46,6 +47,6 @@ describe("useScreenOpens", () => {
     await expect(screenOpenCounts(4)).rejects.toThrow("store_error");
     invoke.mockResolvedValue([{ weekStart: "2026-11-09", screen: "chat", count: 2 }]);
     await expect(screenOpenCounts(4)).resolves.toEqual([{ weekStart: "2026-11-09", screen: "chat", count: 2 }]);
-    expect(invoke).toHaveBeenLastCalledWith("screen_open_counts", { weeks: 4 });
+    expect(invoke).toHaveBeenLastCalledWith("screen_open_counts", { weeks: 4 }, undefined);
   });
 });

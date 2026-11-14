@@ -1,4 +1,6 @@
 mod app_paths;
+#[cfg(test)]
+mod bindings;
 mod commands;
 mod dock_icon;
 

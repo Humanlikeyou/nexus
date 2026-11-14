@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { commands as bound } from "./bindings.gen";
 import { EMPTY_DEVICE_ID } from "./lib/devices";
 import type {
   CrewApprovalRow,
@@ -284,12 +285,12 @@ export const stopCrew = (id: string) => invoke<string>("crew_stop", { id });
 export type ScreenWeekCount = { weekStart: string; screen: string; count: number };
 /** Local screen-open counter (screen id + time only). Recording is silent without a backend (browser/e2e). */
 export const recordScreenOpen = async (screen: string): Promise<void> => {
-  try { await invoke<void>("screen_open_record", { screen }); } catch { /* no backend: nothing to record */ }
+  try { await bound.screenOpenRecord(screen); } catch { /* no backend: nothing to record */ }
 };
 /** Counts per screen per JST week. Errors reach the caller: an empty list must mean "no opens", never "store failed". */
-export const screenOpenCounts = (weeks?: number) => invoke<ScreenWeekCount[]>("screen_open_counts", { weeks });
+export const screenOpenCounts = (weeks?: number): Promise<ScreenWeekCount[]> => bound.screenOpenCounts(weeks ?? null);
 /** R13-F: read-only n8n probe; never errors (connected:false when it is down). */
-export const getN8nStatus = () => invoke<N8nStatusRow>("n8n_status");
+export const getN8nStatus = (): Promise<N8nStatusRow> => bound.n8nStatus();
 /** 1110i. Turning on opens the native dialog first and resolves only after crew-service confirms. */
 export const getCrewToolGrant = (crewId: string) => invoke<CrewToolGrantRow>("crew_tool_grant_get", { crewId });
 export const setCrewToolGrant = (crewId: string, tools: string[], duration: "run" | "1h" | "24h") => invoke<CrewToolGrantRow>("crew_tool_grant_set", { crewId, tools, duration });
@@ -306,7 +307,7 @@ export const amaraTurn = (
   channel.onmessage = onEvent;
   return invoke<string>("amara_turn", { input, surface, channel });
 };
-export const amaraTurnCancel = (turnId: string) => invoke<boolean>("amara_turn_cancel", { turnId });
+export const amaraTurnCancel = (turnId: string): Promise<boolean> => bound.amaraTurnCancel(turnId);
 
 export const interactWithTerrence = (request: {
   message: string;
@@ -426,8 +427,9 @@ export const addMutedTopic = (topic: string, until?: string) => invoke<MutedTopi
 export const deleteMutedTopic = (topic: string) => invoke<void>("followups_delete_muted_topic", { topic });
 
 /** Small app state on this Mac (commands/kv.rs). */
-export const loadKv = (key: string) => invoke<string | null>("load_kv", { key });
-export const saveKv = (key: string, value: string) => invoke<void>("save_kv", { key, value });
+export const loadKv = (key: string): Promise<string | null> => bound.loadKv(key);
+/** Generated bindings type Rust `()` as `null`; the runtime value is unchanged, so callers keep `Promise<void>`. */
+export const saveKv = (key: string, value: string): Promise<void> => bound.saveKv(key, value) as Promise<unknown> as Promise<void>;
 
 /** Home's brief (commands/home.rs). Null fields mean "not available": the page simply shows less. */
 export interface HomeWeather { place: string | null; tempC: number | null; summary: string | null; highC: number | null; lowC: number | null }

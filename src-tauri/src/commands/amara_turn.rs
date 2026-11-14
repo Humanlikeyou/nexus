@@ -1780,6 +1780,7 @@ pub async fn amara_turn(
 
 /// Ends a running turn. True when the turn was found (it then ends with `error{cancelled}`).
 #[tauri::command]
+#[specta::specta]
 pub fn amara_turn_cancel(registry: State<'_, TurnRegistry>, turn_id: String) -> bool {
     registry.cancel(&turn_id)
 }

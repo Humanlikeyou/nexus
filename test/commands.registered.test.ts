@@ -19,6 +19,20 @@ describe("Tauri command registry", () => {
     expect(commandCalls(src).sort()).toEqual(["a_one", "b_two", "c_three"]);
   });
 
+  it("sees generated-binding calls (__TAURI_INVOKE) so bound commands stay checked", async () => {
+    const src = `load: (key: string, options?: InvokeOptions) => __TAURI_INVOKE<string | null>("load_kv", { key }, options),\n n: (o?: X) => __TAURI_INVOKE<N>("n8n_status", undefined, o)`;
+    expect(commandCalls(src).sort()).toEqual(["load_kv", "n8n_status"]);
+    // Fail-before proof: a bound name missing from generate_handler! is reported as unregistered.
+    const registered = new Set(registeredCommands(`generate_handler![a::load_kv,]`).map((c: { name: string }) => c.name));
+    expect(commandCalls(src).filter((n: string) => !registered.has(n))).toEqual(["n8n_status"]);
+    // The real generated file is scanned and its commands are all registered.
+    const { readFileSync } = await import("node:fs");
+    const gen = commandCalls(readFileSync(new URL("../src-console/bindings.gen.ts", import.meta.url), "utf8"));
+    expect(gen.length).toBeGreaterThanOrEqual(6);
+    const lib = registeredCommands(readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8")).map((c: { name: string }) => c.name);
+    for (const n of gen) expect(lib).toContain(n);
+  });
+
   it("parses generate_handler! without comments", () => {
     const names = registeredCommands(`tauri::generate_handler![\n // x::gone,\n a::one, b::two,\n]`).map((c: { name: string }) => c.name);
     expect(names).toEqual(["one", "two"]);

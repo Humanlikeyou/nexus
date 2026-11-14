@@ -28,7 +28,7 @@ const DB_FILE: &str = "screen_opens.db";
 const CREATE_SQL: &str = "CREATE TABLE IF NOT EXISTS screen_opens (id INTEGER PRIMARY KEY, screen TEXT NOT NULL, at_ms INTEGER NOT NULL)";
 const INDEX_SQL: &str = "CREATE INDEX IF NOT EXISTS idx_screen_opens_at ON screen_opens(at_ms)";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ScreenWeekCount {
     /// "YYYY-MM-DD", the Monday of the JST week.
@@ -112,6 +112,7 @@ fn counts_in(dir: &Path, weeks: Option<u32>, now: u64) -> Result<Vec<ScreenWeekC
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn screen_open_record(screen: String) -> Result<(), String> {
     if !SCREENS.contains(&screen.as_str()) {
         return Err("screen_unknown".to_string());
@@ -123,6 +124,7 @@ pub async fn screen_open_record(screen: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn screen_open_counts(weeks: Option<u32>) -> Result<Vec<ScreenWeekCount>, String> {
     blocking(JoinErr::Code("store_error"), move || {
         counts_in(&crate::app_paths::data_dir(), weeks, now_ms())
