@@ -8,7 +8,7 @@ Branch `amara-integration`, local commits only, nothing pushed (decision 0001). 
 - Rust was last run at 0daa808, with no Rust change since.
 - takes-1111t:80 [light] is a real Design contrast bug (4.28:1). It fails in some full runs; never weaken it.
 
-Installed: 11c7883 (2026-11-15): Stages A–F (supervisor observe-only, first-run backend gated). Router enforcing the launch token on /amara + /api (decision 0027).
+Installed: bcd1385 (2026-11-15): Stages A–F + bundled ollama runtime (not started; act off). Router enforcing the launch token.
 
 ### Handover phases (0–17)
 Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2026-11-14; it is untracked and his file, so don't commit it without his OK. Evidence is a commit or a decision.
@@ -91,6 +91,7 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 - Taisun: rebuild + install, then: Import the Hemi-Sync collection, try one track with the Muse, check the map live
 
 ## Installed
+- bcd1385 installed 2026-11-15 (Taisun: "After g is done install, commit and save session"; G not built, usage limit), sidecars:prepare then clean build; ollama-runtime in Contents/Resources (rollback: ~/Backups/Amara OS-backup-20261115b.app)
 - 11c7883 installed 2026-11-15 (Taisun: "Start next then install"), clean checkout build, launched with NEXUS_OUTBOUND_DISABLED=1; router and Hermes /health 200 after launch (rollback: ~/Backups/Amara OS-backup-20261115.app)
 - 2642629 installed 2026-11-14 late (Taisun: "Install if you can"), clean checkout build, launched with NEXUS_OUTBOUND_DISABLED=1 (rollback: ~/Backups/Amara OS-backup-20261114g.app)
 - a33e623 installed 2026-11-14 (Taisun: "Approved. You do these yourself ... Installl and next", decision 0027), clean checkout build; token minted (run/ 0700, launch_token 0600, 65 bytes). Router rebuilt from a33e623 and installed (backup ~/Backups/amara-router-backup-20261114, config backup ~/Backups/amara-router-config-20261114.toml), `require_launch_token = true`: /amara/route no/bad token 401, good token 200, /api/tags 401, /v1/models 200, /health 200. First kickstart was killed with OS_REASON_CODESIGNING mid-swap (signature verified fine), second kickstart came up. Voice patch applied to amara-voice (backups in ~/projects/_archive, 17/17 tests); amara-voice LaunchAgent is not loaded, so nothing was restarted. Crew mount reverted before compose up (2104461). (rollback app: ~/Backups/Amara OS-backup-20261114f.app)
