@@ -144,8 +144,8 @@ pub struct Review {
     pub suggestion_note: String,
     /// LLM-written prose is not wired. Always null.
     pub summary: Option<String>,
-    /// Results of "try it this week" experiments whose 7-day window ended inside this week
-    /// (`experiments::results_due_for_review`); empty when none. Filled by `read_in`, not `build`.
+    /// Results of "try it this week" experiments that fell due on or before this week's end
+    /// (`experiments::results_for_review`: also carries results from earlier weeks that no stored review listed yet); empty when none. Filled by `read_in`, not `build`.
     #[serde(default)]
     pub experiments: Vec<super::experiments::ExperimentResult>,
 }
@@ -611,12 +611,19 @@ pub(crate) fn read_in(
         if r.week_end == ymd(end) {
             return Ok(r);
         }
+        // About to replace an older stored review: its experiment results count as listed (covers
+        // reviews stored before the ledger existed). A failed ledger write is not worth losing the review.
+        let ids: Vec<i64> = r.experiments.iter().map(|e| e.followup_id).collect();
+        let _ = super::experiments::mark_listed(dir, &r.week_end, &ids);
     }
     let g = gather(start, end);
     let mut review = build(&g.inputs, &g.patterns, &g.goals, g.money, due, now);
-    review.experiments = super::experiments::results_due_for_review(dir, &ymd(end));
+    review.experiments = super::experiments::results_for_review(dir, &ymd(end));
     if !g.inputs.partial && review.state == "ready" {
         write_json_atomic(&file(dir), &Stored(Some(review.clone())), MAX_BYTES)?;
+        // Only a stored review counts as having listed a result.
+        let ids: Vec<i64> = review.experiments.iter().map(|e| e.followup_id).collect();
+        let _ = super::experiments::mark_listed(dir, &ymd(end), &ids);
     }
     Ok(review)
 }
@@ -1199,16 +1206,97 @@ mod tests {
         write_in(&dir, &rows, &[], &[], 0, (d("2026-10-25"), d("2026-11-07"))).unwrap();
         let r = read_in(&dir, now, g).unwrap();
         assert_eq!(r.week_end, "2026-11-08");
-        assert_eq!(r.experiments.len(), 2);
+        // Changed by decision 0022 item 2: C (due 11-01, the week before) was never listed by an
+        // earlier stored review, so this first stored review carries it (was: only A and B).
+        assert_eq!(r.experiments.len(), 3);
         let a = r.experiments.iter().find(|e| e.followup_id == 1).unwrap();
         assert_eq!((a.outcome.as_str(), a.label.as_str()), ("better", "better"));
         assert!(a.after.mean > a.before.mean);
         let b = r.experiments.iter().find(|e| e.followup_id == 2).unwrap();
         assert_eq!(b.label, "no clear difference");
-        assert!(r.experiments.iter().all(|e| e.followup_id != 3));
+        assert!(r.experiments.iter().any(|e| e.followup_id == 3));
         // Stored with the review: a re-read in the same week returns the same list.
         let again = read_in(&dir, at(2026, 11, 13, 9), |_, _| panic!("stored")).unwrap();
-        assert_eq!(again.experiments.len(), 2);
+        assert_eq!(again.experiments.len(), 3);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Decision 0022 item 2: carry-over across stored reviews.
+    #[test]
+    fn experiment_results_carry_over_once_and_expire_after_28_days() {
+        use super::super::daily_table::{write_in, DailyRow};
+        use super::super::experiments::record_start_in;
+        let dir = temp_dir("wrcarry");
+        let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let ids = |r: &Review| {
+            let mut v: Vec<i64> = r.experiments.iter().map(|e| e.followup_id).collect();
+            v.sort();
+            v
+        };
+        let rows: Vec<DailyRow> = (0..80)
+            .map(|i| DailyRow {
+                day: (d("2026-09-20") + Duration::days(i)).to_string(),
+                focus_mean: Some(60.0 + (i % 3) as f64),
+                ..Default::default()
+            })
+            .collect();
+        write_in(&dir, &rows, &[], &[], 0, (d("2026-09-20"), d("2026-12-08"))).unwrap();
+        // Weeks end Sundays: 11-01, 11-08, 11-15, 11-22, 11-29, 12-06.
+        // 1: start 10-25, due 11-01 (this week of the first review).
+        // 2: start 11-04, due 11-11: falls in week ending 11-15, but 11-08 review is skipped (never opened).
+        // 3: start 10-01, due 10-08: more than 28 days before the first review week end 11-01.
+        record_start_in(&dir, 1, Some("sleep_focus"), d("2026-10-25")).unwrap();
+        record_start_in(&dir, 2, Some("sleep_focus"), d("2026-11-04")).unwrap();
+        record_start_in(&dir, 3, Some("sleep_focus"), d("2026-10-01")).unwrap();
+        let read = |now: DateTime<FixedOffset>| {
+            read_in(&dir, now, |_, _| gathered(enough(), at(2026, 11, 12, 10))).unwrap()
+        };
+        // Review for week ending 11-01: 1 is due this week; 3 is 24 days past due -> still listed.
+        let r1 = read(at(2026, 11, 2, 10));
+        assert_eq!((r1.week_end.as_str(), ids(&r1)), ("2026-11-01", vec![1, 3]));
+        // Week ending 11-08 never opened. Next stored review (11-15) lists 2 (due in the skipped
+        // week) and not 1 or 3 again.
+        let r3 = read(at(2026, 11, 16, 10));
+        assert_eq!((r3.week_end.as_str(), ids(&r3)), ("2026-11-15", vec![2]));
+        // Same week re-read comes from the stored review, unchanged.
+        let again = read_in(&dir, at(2026, 11, 17, 9), |_, _| panic!("stored")).unwrap();
+        assert_eq!(ids(&again), vec![2]);
+        // Listed once: the following stored review does not list 1, 2 or 3 again.
+        let r4 = read(at(2026, 11, 23, 10));
+        assert!(r4.experiments.is_empty(), "{:?}", ids(&r4));
+        let _ = std::fs::remove_dir_all(dir);
+
+        // More than 28 days past due: dropped.
+        let dir = temp_dir("wrcarry2");
+        write_in(&dir, &rows, &[], &[], 0, (d("2026-09-20"), d("2026-12-08"))).unwrap();
+        record_start_in(&dir, 9, Some("sleep_focus"), d("2026-10-01")).unwrap(); // due 10-08
+        let now = at(2026, 11, 16, 10); // week end 11-15: 38 days past due
+        let r = read_in(&dir, now, |_, _| gathered(enough(), at(2026, 11, 12, 10))).unwrap();
+        assert!(r.experiments.is_empty());
+        // A review that was not stored (partial) does not use up a result.
+        let dir2 = temp_dir("wrcarry3");
+        write_in(
+            &dir2,
+            &rows,
+            &[],
+            &[],
+            0,
+            (d("2026-09-20"), d("2026-12-08")),
+        )
+        .unwrap();
+        record_start_in(&dir2, 5, Some("sleep_focus"), d("2026-11-01")).unwrap(); // due 11-08
+        let now = at(2026, 11, 9, 10);
+        let mut partial = enough();
+        partial.partial = true;
+        let p = read_in(&dir2, now, |_, _| {
+            gathered(partial.clone(), at(2026, 11, 12, 10))
+        })
+        .unwrap();
+        assert_eq!(ids(&p), vec![5]);
+        assert!(!file(&dir2).exists());
+        let q = read_in(&dir2, now, |_, _| gathered(enough(), at(2026, 11, 12, 10))).unwrap();
+        assert_eq!(ids(&q), vec![5]);
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir2);
     }
 }

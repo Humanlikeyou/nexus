@@ -170,3 +170,5 @@ NOOP merge, live Telegram relay send path, standalone phases (bundling, signing,
 | A5 experiment loop (sidecar, 7-day before/after, in the weekly review) | done (this commit). UI: Design |
 | A6 Hemi-Sync ranking (`hemisync_ranking`) + Hemi-Sync day as an A3 cause | done (this commit). UI: Design |
 | Stage B typed bridge | next: write tasks/proposed/typed-bridge.md, stop for OK on dependencies |
+| Decision 0022: check-in notes in chat context, experiment carry-over (28 days), "in common" at lags 1–3 | done (this commit) |
+| Stage B plan `tasks/proposed/typed-bridge.md` | done (this commit). **Waiting on Taisun:** OK for new dependencies (tauri-specta =2.0.0-rc.29, specta =2.0.0-rc.28, specta-typescript =0.0.15, tauri `specta` feature, one online `cargo fetch`) or the no-dependency fallback |

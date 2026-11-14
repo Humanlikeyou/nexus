@@ -59,6 +59,17 @@ pub struct Experiment {
 struct Store {
     #[serde(default)]
     experiments: Vec<Experiment>,
+    /// Which stored weekly review (its `weekEnd`) already listed an experiment's result. Not part of
+    /// [`Experiment`], so the IPC shape is unchanged.
+    #[serde(default)]
+    listed: Vec<Listed>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct Listed {
+    followup_id: i64,
+    week_end: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -140,6 +151,14 @@ fn parse_day(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
 }
 
+fn save(dir: &Path, store: &Store) -> Result<(), String> {
+    let p = file(dir);
+    crate::app_paths::create_private_dir_all(p.parent().ok_or("storage_error")?)
+        .map_err(|_| "storage_error".to_string())?;
+    let bytes = serde_json::to_vec_pretty(store).map_err(|_| "storage_error".to_string())?;
+    atomic_write_with_mode(&p, &bytes, Some(0o600)).map_err(|_| "storage_error".to_string())
+}
+
 /// Stores one experiment for a follow-up (idempotent per follow-up id). `pair` is the weekly-review
 /// finding pair; anything not in the mapping stores `measure: None`. Keeps the newest
 /// [`MAX_EXPERIMENTS`].
@@ -174,11 +193,7 @@ pub(crate) fn record_start_in(
         let drop = store.experiments.len() - MAX_EXPERIMENTS;
         store.experiments.drain(..drop);
     }
-    let p = file(dir);
-    crate::app_paths::create_private_dir_all(p.parent().ok_or("storage_error")?)
-        .map_err(|_| "storage_error".to_string())?;
-    let bytes = serde_json::to_vec_pretty(&store).map_err(|_| "storage_error".to_string())?;
-    atomic_write_with_mode(&p, &bytes, Some(0o600)).map_err(|_| "storage_error".to_string())?;
+    save(dir, &store)?;
     Ok(exp)
 }
 
@@ -266,11 +281,16 @@ pub(crate) fn evaluate(exp: &Experiment, rows: &[DailyRow]) -> Option<Experiment
     })
 }
 
-/// Results of experiments whose 7-day window finished inside the review week: the day after the
-/// window ends (`start + 7`) lies in `review_end_day - 6 ..= review_end_day`. Each experiment
-/// therefore appears in exactly one weekly review. A daily-table read failure counts as no rows
-/// ("not_enough_data"), never a guess. Read-only.
-pub(crate) fn results_due_for_review(dir: &Path, review_end_day: &str) -> Vec<ExperimentResult> {
+/// A result is dropped once its review week ends more than this many days after its due day.
+pub(crate) const CARRY_OVER_DAYS: i64 = 28;
+
+/// Results to list in the stored weekly review that ends on `review_end_day` (decision 0022, item 2).
+/// An experiment is due on `start + 7`. It is listed in the first stored review whose week end is on
+/// or after its due day, unless an earlier stored review already listed it (the `listed` ledger,
+/// written by [`mark_listed`] only when a review was stored), and is dropped when that week end is
+/// more than [`CARRY_OVER_DAYS`] past due. A review recomputed for the same week keeps its own
+/// results. A daily-table read failure counts as no rows ("not_enough_data"), never a guess.
+pub(crate) fn results_for_review(dir: &Path, review_end_day: &str) -> Vec<ExperimentResult> {
     let Some(end) = parse_day(review_end_day) else {
         return Vec::new();
     };
@@ -283,7 +303,14 @@ pub(crate) fn results_due_for_review(dir: &Path, review_end_day: &str) -> Vec<Ex
             continue;
         };
         let due = start + Duration::days(AFTER_DAYS);
-        if due > end || due < end - Duration::days(6) {
+        if due > end || end - due > Duration::days(CARRY_OVER_DAYS) {
+            continue;
+        }
+        if store
+            .listed
+            .iter()
+            .any(|l| l.followup_id == exp.followup_id && l.week_end != review_end_day)
+        {
             continue;
         }
         let from = (start - Duration::days(BASELINE_DAYS)).to_string();
@@ -296,6 +323,26 @@ pub(crate) fn results_due_for_review(dir: &Path, review_end_day: &str) -> Vec<Ex
         }
     }
     out
+}
+
+/// Records that the stored review for `week_end` listed these follow-ups (first listing wins).
+pub(crate) fn mark_listed(dir: &Path, week_end: &str, ids: &[i64]) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let _l = LOCK.lock().map_err(|_| "storage_error".to_string())?;
+    let mut store = load(dir)?;
+    for id in ids {
+        if !store.listed.iter().any(|l| l.followup_id == *id) {
+            store.listed.push(Listed {
+                followup_id: *id,
+                week_end: week_end.to_string(),
+            });
+        }
+    }
+    let known: Vec<i64> = store.experiments.iter().map(|e| e.followup_id).collect();
+    store.listed.retain(|l| known.contains(&l.followup_id));
+    save(dir, &store)
 }
 
 // ---------------------------------------------------------------- commands
@@ -480,17 +527,21 @@ mod tests {
     }
 
     #[test]
-    fn due_only_inside_the_review_week_and_unreadable_table_is_not_enough_data() {
+    fn due_from_its_due_day_until_28_days_after_and_unreadable_table_is_not_enough_data() {
         let d = tmp();
         record_start_in(&d, 1, Some("sleep_focus"), day("2026-11-02")).unwrap();
         // start+7 = 2026-11-09
-        assert_eq!(results_due_for_review(&d, "2026-11-08").len(), 0);
-        let r = results_due_for_review(&d, "2026-11-09");
+        assert_eq!(results_for_review(&d, "2026-11-08").len(), 0);
+        let r = results_for_review(&d, "2026-11-09");
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].reason.as_deref(), Some("not_enough_data")); // no daily.db at all
-        assert_eq!(results_due_for_review(&d, "2026-11-15").len(), 1);
-        assert_eq!(results_due_for_review(&d, "2026-11-16").len(), 0);
-        assert_eq!(results_due_for_review(&d, "garbage").len(), 0);
+        assert_eq!(results_for_review(&d, "2026-11-15").len(), 1);
+        // Changed by decision 0022 item 2: a result is carried into later reviews (was 0 here),
+        // until its week end is more than 28 days past due (start+7 = 11-09).
+        assert_eq!(results_for_review(&d, "2026-11-16").len(), 1);
+        assert_eq!(results_for_review(&d, "2026-12-07").len(), 1);
+        assert_eq!(results_for_review(&d, "2026-12-08").len(), 0);
+        assert_eq!(results_for_review(&d, "garbage").len(), 0);
         let _ = fs::remove_dir_all(&d);
     }
 

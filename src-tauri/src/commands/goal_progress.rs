@@ -9,11 +9,12 @@
 //! - Per goal: roadmap steps finished in the 7 days ending `week_end` and in the 7 days before.
 //! - Stalled goals: a goal in the goals store (personal, not a habit) with no finished step in the
 //!   21 days ending `week_end` (inclusive), with its last finished day or `null` ("never").
-//! - In common: for each goal with at least 3 finished-step days in the stored history, the day
-//!   before each finished-step day is looked at. A published generic finding's cause is reported
+//! - In common: for each goal with at least 3 finished-step days in the stored history, the 1, 2 and
+//!   3 days before each finished-step day are looked at (decision 0022; lag 1, 2 and 3 are separate
+//!   candidates, each tested on its own set of before-days). A published generic finding's cause is reported
 //!   only when its cause-high days cover those before-days more often than that cause's own base
 //!   rate (its share of cause days) and an exact one-sided binomial test agrees after Benjamini-Hochberg
-//!   correction over every goal x finding tested in the run (adjusted p at most 0.05). Before-days with no value for the cause count as not high, never as high.
+//!   correction over every goal x finding x lag tested in the run (adjusted p at most 0.05). Before-days with no value for the cause count as not high, never as high.
 //!   When nothing qualifies the readout is `state: "nothing_stands_out_yet"` with no entries.
 
 use super::daily_table::{read_range_in, DailyGoalRow, WINDOW_DAYS};
@@ -32,6 +33,8 @@ pub(crate) const STALLED_DAYS: i64 = 21;
 pub(crate) const MIN_FINISHED_DAYS: usize = 3;
 /// Before-days that can be compared with a cause (they must have a value for it) needed to report.
 const MIN_TESTABLE_BEFORE_DAYS: usize = 3;
+/// How many days before a finished step are looked at (lags 1 to MAX_BEFORE_LAG).
+pub(crate) const MAX_BEFORE_LAG: i64 = 3;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,10 +67,12 @@ pub struct CommonCause {
     /// The published finding this comes from: its effect and lag, with its adjusted p and confidence.
     pub effect: String,
     pub lag_days: u8,
+    /// How many days before each finished-step day this cause was looked at (1 to 3).
+    pub before_lag_days: u8,
     /// The published finding's own adjusted p (A3), for reference.
     pub finding_p_adj: f64,
     pub confidence: u8,
-    /// Before-days that have a value for the cause / of those, cause-high.
+    /// Before-days (at `before_lag_days`) that have a value for the cause / of those, cause-high.
     pub before_days_tested: usize,
     pub before_days_cause_high: usize,
     pub share: f64,
@@ -75,7 +80,7 @@ pub struct CommonCause {
     pub base_rate: f64,
     /// Exact one-sided binomial P(at least this many cause-high before-days | base rate).
     pub p_raw: f64,
-    /// `p_raw` after Benjamini-Hochberg over every goal x finding tested in this run; reported only at 0.05 or less.
+    /// `p_raw` after Benjamini-Hochberg over every goal x finding x lag tested in this run; reported only at 0.05 or less.
     pub p_adj: f64,
     pub cause_high_before_days: Vec<String>,
     /// `daily:<day>` for each cause-high before-day, then the `daily_goal` rows of the finished days.
@@ -88,7 +93,7 @@ pub struct CommonGoal {
     pub goal_id: String,
     pub title: Option<String>,
     pub finished_days: usize,
-    /// The day before each finished-step day, ascending.
+    /// The day before each finished-step day (lag 1), ascending. Each cause names its own lag in `before_lag_days`.
     pub before_days: Vec<String>,
     pub causes: Vec<CommonCause>,
 }
@@ -244,7 +249,7 @@ pub(crate) fn compute(
         });
     }
 
-    // In common: the day before finished-step days vs published generic findings.
+    // In common: the 1-3 days before finished-step days vs published generic findings.
     let mut first_by_cause: BTreeMap<&str, &super::patterns_generic::GenericFinding> =
         BTreeMap::new();
     for f in &generic.findings {
@@ -252,8 +257,8 @@ pub(crate) fn compute(
         first_by_cause.entry(f.cause.as_str()).or_insert(f);
     }
     let mut considered = 0;
-    // Every goal x published finding with enough testable before-days is one test in a single family
-    // (Benjamini-Hochberg over all of them), so looking at many goals and causes cannot inflate claims.
+    // Every goal x published finding x lag with enough testable before-days is one test in a single family
+    // (Benjamini-Hochberg over all of them), so looking at many goals, causes and lags cannot inflate claims.
     struct Cand<'a> {
         goal: &'a str,
         days: usize,
@@ -266,54 +271,59 @@ pub(crate) fn compute(
             continue;
         }
         considered += 1;
-        let before: BTreeSet<NaiveDate> = days.keys().map(|d| *d - Duration::days(1)).collect();
+        let goal_before: Vec<String> = days.keys().map(|d| fmt(*d - Duration::days(1))).collect();
         for (cause, f) in &first_by_cause {
-            let cause_days: BTreeSet<&str> = f.cause_days.iter().map(String::as_str).collect();
-            let high: BTreeSet<&str> = f.cause_high_days.iter().map(String::as_str).collect();
-            if cause_days.is_empty() {
-                continue;
+            for lag in 1..=MAX_BEFORE_LAG {
+                let before: BTreeSet<NaiveDate> =
+                    days.keys().map(|d| *d - Duration::days(lag)).collect();
+                let cause_days: BTreeSet<&str> = f.cause_days.iter().map(String::as_str).collect();
+                let high: BTreeSet<&str> = f.cause_high_days.iter().map(String::as_str).collect();
+                if cause_days.is_empty() {
+                    continue;
+                }
+                let tested: Vec<String> = before
+                    .iter()
+                    .map(|d| fmt(*d))
+                    .filter(|d| cause_days.contains(d.as_str()))
+                    .collect();
+                let hits: Vec<String> = tested
+                    .iter()
+                    .filter(|d| high.contains(d.as_str()))
+                    .cloned()
+                    .collect();
+                if tested.len() < MIN_TESTABLE_BEFORE_DAYS {
+                    continue;
+                }
+                let share = hits.len() as f64 / tested.len() as f64;
+                let base_rate = high.len() as f64 / cause_days.len() as f64;
+                if !(base_rate > 0.0 && base_rate < 1.0) {
+                    continue;
+                }
+                let p_raw = binom_tail(tested.len(), hits.len(), base_rate);
+                let mut refs: Vec<String> = hits.iter().map(|d| format!("daily:{d}")).collect();
+                refs.extend(days.values().map(|r| ref_of(r)));
+                cands.push(Cand {
+                    goal: id,
+                    days: days.len(),
+                    before: goal_before.clone(),
+                    cause: CommonCause {
+                        cause: cause.to_string(),
+                        effect: f.effect.clone(),
+                        lag_days: f.lag_days,
+                        before_lag_days: lag as u8,
+                        finding_p_adj: f.p_adj,
+                        confidence: f.confidence,
+                        before_days_tested: tested.len(),
+                        before_days_cause_high: hits.len(),
+                        share,
+                        base_rate,
+                        p_raw,
+                        p_adj: p_raw,
+                        cause_high_before_days: hits,
+                        refs,
+                    },
+                });
             }
-            let tested: Vec<String> = before
-                .iter()
-                .map(|d| fmt(*d))
-                .filter(|d| cause_days.contains(d.as_str()))
-                .collect();
-            let hits: Vec<String> = tested
-                .iter()
-                .filter(|d| high.contains(d.as_str()))
-                .cloned()
-                .collect();
-            if tested.len() < MIN_TESTABLE_BEFORE_DAYS {
-                continue;
-            }
-            let share = hits.len() as f64 / tested.len() as f64;
-            let base_rate = high.len() as f64 / cause_days.len() as f64;
-            if !(base_rate > 0.0 && base_rate < 1.0) {
-                continue;
-            }
-            let p_raw = binom_tail(tested.len(), hits.len(), base_rate);
-            let mut refs: Vec<String> = hits.iter().map(|d| format!("daily:{d}")).collect();
-            refs.extend(days.values().map(|r| ref_of(r)));
-            cands.push(Cand {
-                goal: id,
-                days: days.len(),
-                before: before.iter().map(|d| fmt(*d)).collect(),
-                cause: CommonCause {
-                    cause: cause.to_string(),
-                    effect: f.effect.clone(),
-                    lag_days: f.lag_days,
-                    finding_p_adj: f.p_adj,
-                    confidence: f.confidence,
-                    before_days_tested: tested.len(),
-                    before_days_cause_high: hits.len(),
-                    share,
-                    base_rate,
-                    p_raw,
-                    p_adj: p_raw,
-                    cause_high_before_days: hits,
-                    refs,
-                },
-            });
         }
     }
     let adj = bh_adjust(&cands.iter().map(|c| c.cause.p_raw).collect::<Vec<_>>());
@@ -532,6 +542,7 @@ mod tests {
         let c = &p.in_common.goals[0].causes;
         assert_eq!(c.len(), 1, "{c:?}");
         assert_eq!(c[0].cause, "sleep_total_min");
+        assert_eq!(c[0].before_lag_days, 1);
         assert_eq!(
             (c[0].before_days_tested, c[0].before_days_cause_high),
             (12, 12)
@@ -660,10 +671,11 @@ mod tests {
             p.in_common
         );
         // The same g0 alone (a family of one) is reported: the correction is what removed it.
+        // (Adapted for 0022 item 4: the family now also holds g0's lag-2 and lag-3 candidates, so
+        // g0 alone no longer passes either; the uncorrected tail is still below 0.05.)
+        assert!((binom_tail(5, 5, 0.5) - 0.03125).abs() < 1e-9);
         let alone = compute(end, &goals[..1], &rows[..5], &g);
-        assert_eq!(alone.in_common.state, "found");
-        let c = &alone.in_common.goals[0].causes[0];
-        assert!((c.p_raw - 0.03125).abs() < 1e-9 && c.p_adj == c.p_raw);
+        assert_eq!(alone.in_common.state, "nothing_stands_out_yet");
 
         // Add a strong one: 12 of 12 (raw 0.5^12) among the same 20.
         goals.push(goal("strong", "Strong", "career"));
@@ -674,5 +686,48 @@ mod tests {
         assert_eq!(c.goal_id, "strong");
         let cc = &c.causes[0];
         assert!(cc.p_raw < 3e-4 && cc.p_adj > cc.p_raw && cc.p_adj <= Q);
+    }
+
+    /// A cause that is high exactly two days before each finished step is found at lag 2, and at no
+    /// other lag; a cause with no tie to the steps reports nothing at any lag.
+    #[test]
+    fn a_planted_lag_2_cause_is_found_at_lag_2_and_chance_across_lags_reports_nothing() {
+        let start = d("2026-10-01");
+        let day = |i: i64| fmt(start + Duration::days(i));
+        let all: Vec<String> = (0..60).map(day).collect();
+        // Steps on days 2, 7, 12, ... (every 5th). Lag-2 days are 0, 5, 10, ...: all high.
+        // High days are 0,5,10,... plus none else: base rate 12/60 = 0.2; lag 1 and 3 hit none.
+        let high: Vec<String> = (0..60).step_by(5).map(day).collect();
+        let rows: Vec<DailyGoalRow> = (0..10).map(|k| gr(&day(2 + 5 * k), "g1", 1)).collect();
+        let goals = [goal("g1", "Ship", "career")];
+        let mut g = empty();
+        g.findings = vec![finding("sleep_total_min", &all, &high)];
+        let p = compute(d("2026-12-01"), &goals, &rows, &g);
+        assert_eq!(p.in_common.state, "found", "{:?}", p.in_common);
+        let causes = &p.in_common.goals[0].causes;
+        assert_eq!(causes.len(), 1, "{causes:?}");
+        assert_eq!(causes[0].before_lag_days, 2);
+        assert_eq!(
+            (
+                causes[0].before_days_tested,
+                causes[0].before_days_cause_high
+            ),
+            (10, 10)
+        );
+        assert!(causes[0].cause_high_before_days.contains(&day(0)));
+        // Chance: a cause high on every other day hits half the before-days at every lag.
+        let alt: Vec<String> = (0..60).step_by(2).map(day).collect();
+        let mut g = empty();
+        g.findings = vec![finding("strain", &all, &alt)];
+        let rows: Vec<DailyGoalRow> = [3, 6, 11, 14, 19, 22, 27, 30]
+            .iter()
+            .map(|i| gr(&day(*i), "g1", 1))
+            .collect();
+        let p = compute(d("2026-12-01"), &goals, &rows, &g);
+        assert_eq!(
+            p.in_common.state, "nothing_stands_out_yet",
+            "{:?}",
+            p.in_common
+        );
     }
 }

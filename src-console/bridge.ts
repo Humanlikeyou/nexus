@@ -468,7 +468,7 @@ export const dailyRange = (from: string, to: string) => invoke<DailyRange>("dail
 export interface GoalWeekWire { goalId: string; title: string | null; thisWeek: number; prevWeek: number; refs: string[] }
 export interface StalledGoalWire { goalId: string; title: string; lastFinishedDay: string | null; daysSince: number | null; refs: string[] }
 export interface CommonCauseWire {
-  cause: string; effect: string; lagDays: number; findingPAdj: number; confidence: number; beforeDaysTested: number; beforeDaysCauseHigh: number;
+  cause: string; effect: string; lagDays: number; beforeLagDays: number; findingPAdj: number; confidence: number; beforeDaysTested: number; beforeDaysCauseHigh: number;
   share: number; baseRate: number; pRaw: number; pAdj: number; causeHighBeforeDays: string[]; refs: string[];
 }
 export interface CommonGoalWire { goalId: string; title: string | null; finishedDays: number; beforeDays: string[]; causes: CommonCauseWire[] }
