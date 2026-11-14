@@ -223,6 +223,18 @@ export const commands = {
 	supervisorSetEnabled: (on: boolean, options?: InvokeOptions) => __TAURI_INVOKE<SupervisorInfo_Serialize>("supervisor_set_enabled", { on }, options),
 	/**  Supervisor-facing name for the same redacted, capped, read-only tail as `service_logs`. */
 	serviceLogTail: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<ServiceLogTail>("service_log_tail", { id }, options),
+	modelTiers: (options?: InvokeOptions) => __TAURI_INVOKE<ModelTier_Serialize[]>("model_tiers", undefined, options),
+	/**  Click-only. The only error strings are the fixed codes above. */
+	modelDownload: (tier: string, options?: InvokeOptions) => __TAURI_INVOKE<DownloadSummary>("model_download", { tier }, options),
+	/**  Existing installs without setup.json report false (first run shows once). */
+	setupDone: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("setup_done", undefined, options),
+	setupComplete: (tier: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("setup_complete", { tier }, options),
+	setupReset: (options?: InvokeOptions) => __TAURI_INVOKE<null>("setup_reset", undefined, options),
+	/**
+	 *  Start (or adopt) the bundled services. Act off: looks only, spawns nothing. Act on: one native
+	 *  approval, then the runtime and the router. Docker rows and LaunchAgents are never touched.
+	 */
+	servicesStartAll: (options?: InvokeOptions) => __TAURI_INVOKE<StartAllRow[]>("services_start_all", undefined, options),
 	dataDirHardenStatus: (options?: InvokeOptions) => __TAURI_INVOKE<HardenPlan>("data_dir_harden_status", undefined, options),
 	dataDirHarden: (options?: InvokeOptions) => __TAURI_INVOKE<HardenPlan>("data_dir_harden", undefined, options),
 	whoopStatus: (options?: InvokeOptions) => __TAURI_INVOKE<WhoopStatus_Serialize>("whoop_status", undefined, options),
@@ -1671,6 +1683,11 @@ export type DecisionRecord_Serialize = {
 	outcomeAt?: string,
 };
 
+export type DownloadSummary = {
+	tier: string,
+	completed: number,
+};
+
 export type Event = Event_Serialize | Event_Deserialize;
 
 export type EventKind = "state_changed" | "adopted" | "restart_requested" | "restart_failed" | "gave_up" | 
@@ -2566,6 +2583,30 @@ export type Milestone = {
 	label: string,
 	due: string,
 	health: Health,
+};
+
+export type ModelTier = ModelTier_Serialize | ModelTier_Deserialize;
+
+export type ModelTier_Deserialize = {
+	id: string,
+	name: string,
+	minRamGb: number,
+	models: string[],
+	download: string,
+	note?: string | null,
+	recommended: boolean,
+	available: boolean,
+};
+
+export type ModelTier_Serialize = {
+	id: string,
+	name: string,
+	minRamGb: number,
+	models: string[],
+	download: string,
+	note: string | null,
+	recommended: boolean,
+	available: boolean,
 };
 
 export type MoneyAccount = {
@@ -3892,6 +3933,24 @@ export type StalledGoal_Serialize = {
 	daysSince: number | null,
 	/**  The `daily_goal` row of the last finished day (empty for "never"). */
 	refs: string[],
+};
+
+/**  Fixed outcome codes (serialised snake_case). */
+export type StartAllOutcome = 
+/**  Already answering: nothing started. */
+"adopted" | "started" | 
+/**  Act is not effective, so nothing was started. */
+"skipped_act_off" | 
+/**  Not ours to start here (Docker rows, LaunchAgents, voice) and not healthy. */
+"skipped" | 
+/**  The port is held by something unhealthy: the user has to look. */
+"needs_you" | 
+/**  No usable bundled binary yet. */
+"binary_missing" | "failed";
+
+export type StartAllRow = {
+	id: ServiceId,
+	outcome: StartAllOutcome,
 };
 
 export type Step = Step_Serialize | Step_Deserialize;

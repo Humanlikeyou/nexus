@@ -97,3 +97,13 @@ Readers for the Home Assistant token, the n8n API key and the crew token now loo
 ## 2026-11-14 (S5): a "separate" pill for Services (supervisor state, no markup)
 
 The Phase 8 supervisor reports `separate` for apps Amara only watches and never acts on (today Open WebUI). The Services screen has no such pill, so the adapter shows it as the healthy pill with the fixed meta "Separate app · watched only" (`src-console/standalone/servicesFromSupervisor.ts`). Ask Design: a distinct "Separate" pill (or a neutral treatment) so a separate app that is down is not read as healthy. Note the backend still reports `separate` whatever the probe says, so the pill should not claim it is answering. Also: `needs_you` maps to the existing Failed pill; the 2026-11-14 (W2) wording request for "Needs you" still applies. The logs dialog now lists real supervisor events (fixed text) in its plain-words list, so its static "Sample data" tag is more wrong than before.
+
+## 2026-11-15 (F5): First run, setup errors and start-all outcomes (logic wired, no markup)
+
+`FirstRun` is wired through the adapter (Download and Continue, Open Amara); nothing visual changed. Things the screen cannot show yet, all needing Design:
+1. Download errors have no place on step 4. The backend returns fixed codes: `outbound_blocked` (outbound switch or navy), `host_not_allowed`, `not_published` (the manifest has no size/digest yet), `manifest_invalid`, `approval_declined`, `checksum_mismatch`, `storage_error`. Today the adapter returns "unwired" and the screen stays as it is. Needs a message area and copy per code (and a Retry).
+2. A failed model has no state in `SetupDownload` (waiting/downloading/done). The adapter shows it as "Waiting" with the detail text "Download failed". Needs a Failed pill.
+3. Services: `services_start_all` outcomes `skipped_act_off`, `skipped`, `needs_you`, `binary_missing`, `failed` all show as "Waiting" (only running/starting/waiting exist). `skipped_act_off` is the normal result today (act is off), so the screen would sit at "Waiting" for the two sidecars. Needs copy such as "Not started: Amara is not allowed to start services yet" and a Needs-you pill.
+4. "Pause Download" stays disabled: there is no pause backend. Decide whether to drop it or ask for a cancel/pause command.
+5. Keychain "Review…" is still disabled (the review sheet needs markup).
+6. Size text: tiers say "Size not published yet" until the signed manifest carries sizes; Step 3 detail shows real bytes only (no time left).

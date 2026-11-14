@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "issued": "2026-11-15",
+  "tiers": [
+    {
+      "id": "compact",
+      "name": "Compact",
+      "minRamGb": 8,
+      "models": [
+        { "role": "fast", "name": "gemma4:latest", "bytes": null, "sha256": null, "url": "" },
+        { "role": "embed", "name": "nomic-embed-text:latest", "bytes": null, "sha256": null, "url": "" }
+      ]
+    },
+    {
+      "id": "standard",
+      "name": "Standard",
+      "minRamGb": 32,
+      "models": [
+        { "role": "fast", "name": "gemma4:latest", "bytes": null, "sha256": null, "url": "" },
+        { "role": "deep", "name": "qwen3.8-uncensored:latest", "bytes": null, "sha256": null, "url": "" },
+        { "role": "embed", "name": "nomic-embed-text:latest", "bytes": null, "sha256": null, "url": "" }
+      ]
+    },
+    {
+      "id": "large",
+      "name": "Large",
+      "minRamGb": 64,
+      "models": [
+        { "role": "fast", "name": "gemma4:latest", "bytes": null, "sha256": null, "url": "" },
+        { "role": "deep", "name": "qwen3.8-uncensored:latest", "bytes": null, "sha256": null, "url": "" },
+        { "role": "embed", "name": "nomic-embed-text:latest", "bytes": null, "sha256": null, "url": "" }
+      ]
+    }
+  ]
+}

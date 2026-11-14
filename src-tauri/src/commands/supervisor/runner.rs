@@ -14,7 +14,8 @@ use std::time::Duration;
 use futures::future::BoxFuture;
 
 use super::registry::{
-    Registry, Runtime, ServiceDef, ServiceId, CONTAINER_FREQTRADE, LABEL_HERMES, LABEL_ROUTER,
+    resolve_sidecar, sidecar_runtime, ProbeKind, Registry, Runtime, ServiceDef, ServiceId,
+    CONTAINER_FREQTRADE, LABEL_HERMES, LABEL_ROUTER, SIDECAR_OLLAMA, SIDECAR_ROUTER,
 };
 
 /// Gates auto-restart, start-on-launch and stop-on-quit. Flipping it needs a decision entry.
@@ -48,6 +49,9 @@ pub enum Verb {
     VoiceScript {
         start: bool,
     },
+    /// Start the bundled sidecar of a row (`ollama`, `amara-router`): allowlisted for exactly those
+    /// two ids, handled only by `SidecarRunner` (the docker/launchctl `RealRunner` refuses it).
+    SidecarStart(ServiceId),
 }
 
 impl Verb {
@@ -471,6 +475,8 @@ impl<E: Exec> RealRunner<E> {
             }
             // TODO(open question): voice stays observe-only, see `Verb::VoiceScript`.
             Verb::VoiceScript { .. } => Err(RunError::NotAllowed),
+            // This runner only shells out to docker/launchctl/open; sidecars have their own runner.
+            Verb::SidecarStart(_) => Err(RunError::NotAllowed),
         }
     }
 }
@@ -478,6 +484,391 @@ impl<E: Exec> RealRunner<E> {
 impl<E: Exec> Runner for RealRunner<E> {
     fn run<'a>(&'a self, verb: Verb) -> BoxFuture<'a, Result<(), RunError>> {
         Box::pin(self.run_inner(verb))
+    }
+}
+
+// ---- sidecar layer: start a bundled binary (never docker/launchctl) ----
+
+/// What owns a service's port right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortState {
+    /// Answers its health check: adopt, start nothing.
+    Healthy,
+    /// Something holds the port (or the connect hung) and it is not healthy: the user's call.
+    HeldUnhealthy,
+    /// Connection refused: nobody is listening, so a spawn cannot collide.
+    Free,
+}
+
+pub trait PortProbe: Send + Sync {
+    fn state<'a>(&'a self, def: &'a ServiceDef) -> BoxFuture<'a, PortState>;
+}
+
+/// The port a row's probe talks to (always 127.0.0.1).
+pub(crate) fn probe_port(def: &ServiceDef) -> Option<u16> {
+    match def.probe {
+        ProbeKind::Tcp { port } => Some(port),
+        ProbeKind::Http { base, .. } => reqwest::Url::parse(base).ok()?.port_or_known_default(),
+        _ => None,
+    }
+}
+
+/// Real port probe: a loopback connect decides free vs held, then the row's own read-only probe
+/// decides healthy vs not. Only `ConnectionRefused` counts as free.
+pub struct RealPortProbe(super::probe::RealProbe);
+
+impl RealPortProbe {
+    pub fn new() -> Self {
+        Self(super::probe::RealProbe::new())
+    }
+}
+
+impl Default for RealPortProbe {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PortProbe for RealPortProbe {
+    fn state<'a>(&'a self, def: &'a ServiceDef) -> BoxFuture<'a, PortState> {
+        use super::probe::Probe;
+        Box::pin(async move {
+            let Some(port) = probe_port(def) else {
+                return PortState::HeldUnhealthy;
+            };
+            let conn = tokio::time::timeout(
+                super::probe::PROBE_TIMEOUT,
+                tokio::net::TcpStream::connect(("127.0.0.1", port)),
+            )
+            .await;
+            match conn {
+                Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+                    return PortState::Free
+                }
+                Ok(Ok(_)) => {}
+                _ => return PortState::HeldUnhealthy,
+            }
+            match self.0.check(def).await {
+                super::machine::Observation::Up | super::machine::Observation::Slow => {
+                    PortState::Healthy
+                }
+                _ => PortState::HeldUnhealthy,
+            }
+        })
+    }
+}
+
+/// Exactly what a sidecar is started with: no shell, program + argv + the only environment it sees.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnSpec {
+    pub program: std::path::PathBuf,
+    pub args: Vec<String>,
+    /// Applied after `env_clear`.
+    pub env: Vec<(&'static str, String)>,
+}
+
+/// [GATE] for the act flip (L9): `OLLAMA_HOST` only fixes where `ollama serve` LISTENS. Ollama can
+/// still make outbound requests (model pulls, its own update checks); containing that egress is not
+/// built and must be decided before `SUPERVISOR_ACT_ENABLED` is flipped.
+/// The loopback address `ollama serve` binds. Model storage is left at the runtime's default.
+pub(crate) const OLLAMA_HOST_LOOPBACK: &str = "127.0.0.1:11434";
+
+/// Pure: the spawn spec for one allowlisted row. None for any other id or a non-UTF-8 path.
+pub(crate) fn spawn_spec(
+    id: ServiceId,
+    bin: &std::path::Path,
+    data_dir: &std::path::Path,
+    home: Option<&str>,
+) -> Option<SpawnSpec> {
+    let bin_s = bin.to_str()?;
+    let mut env = clean_env(bin_s, home);
+    let args = match id {
+        ServiceId::ModelRuntime => {
+            env.push(("OLLAMA_HOST", OLLAMA_HOST_LOOPBACK.to_string()));
+            vec!["serve".to_string()]
+        }
+        ServiceId::AmaraRouter => {
+            let cfg = data_dir.join("router").join("config.toml");
+            vec!["--config".to_string(), cfg.to_str()?.to_string()]
+        }
+        _ => return None,
+    };
+    Some(SpawnSpec {
+        program: bin.to_path_buf(),
+        args,
+        env,
+    })
+}
+
+/// The example config, embedded so the bundled router never reads the user's own router config folder.
+const ROUTER_CONFIG_EXAMPLE: &str = include_str!("../../../../amara-router/config.example.toml");
+
+/// The router config text the app writes: the embedded example with the launch-token requirement
+/// switched on and the token file pointed at this data dir (the app mints it there). Nothing
+/// outside this copy changes: the example file and the user's own router config stay as they are.
+pub(crate) fn router_config_text(data_dir: &std::path::Path) -> Option<String> {
+    const OFF: &str = "require_launch_token = false";
+    const TOKEN_LINE_PREFIX: &str = "# launch_token_file = ";
+    if ROUTER_CONFIG_EXAMPLE.matches(OFF).count() != 1 {
+        return None;
+    }
+    let token = super::super::launch_token::token_path_in(data_dir);
+    let quoted = serde_json::to_string(token.to_str()?).ok()?;
+    let mut out = String::with_capacity(ROUTER_CONFIG_EXAMPLE.len() + 64);
+    let mut replaced_file = false;
+    for line in ROUTER_CONFIG_EXAMPLE.split_inclusive('\n') {
+        if line.trim_end() == OFF {
+            out.push_str("require_launch_token = true\n");
+        } else if !replaced_file && line.starts_with(TOKEN_LINE_PREFIX) {
+            out.push_str(&format!("launch_token_file = {quoted}\n"));
+            replaced_file = true;
+        } else {
+            out.push_str(line);
+        }
+    }
+    replaced_file.then_some(out)
+}
+
+fn fixed_err(msg: &'static str) -> std::io::Error {
+    std::io::Error::other(msg)
+}
+
+/// Make `<data_dir>/router/config.toml` (dir 0700, file 0600, exclusive create, no symlink
+/// followed) from `router_config_text` when it is missing. An existing dir or file must be a real
+/// dir / regular file owned by `uid` with no group/other access (an owned dir is tightened to 0700);
+/// anything else is a fixed error and nothing is written. Only the act-on start path calls this.
+pub(crate) fn ensure_router_config_as(
+    data_dir: &std::path::Path,
+    uid: u32,
+) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+    let dir = data_dir.join("router");
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)?;
+    let dm = std::fs::symlink_metadata(&dir)?;
+    if !dm.file_type().is_dir() || dm.uid() != uid {
+        return Err(fixed_err("router folder is not ours"));
+    }
+    if dm.mode() & 0o077 != 0 {
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    let path = dir.join("config.toml");
+    match std::fs::symlink_metadata(&path) {
+        Ok(m) if m.file_type().is_file() => {
+            if m.uid() != uid || m.mode() & 0o077 != 0 {
+                return Err(fixed_err("router config is not private"));
+            }
+            return Ok(path);
+        }
+        Ok(_) => return Err(fixed_err("router config is not a regular file")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let text = router_config_text(data_dir).ok_or_else(|| fixed_err("router config template"))?;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)?;
+    f.write_all(text.as_bytes())?;
+    f.sync_all()?;
+    Ok(path)
+}
+
+pub(crate) fn ensure_router_config(
+    data_dir: &std::path::Path,
+) -> std::io::Result<std::path::PathBuf> {
+    // SAFETY: getuid has no preconditions and cannot fail.
+    ensure_router_config_as(data_dir, unsafe { libc::getuid() })
+}
+
+pub trait Spawner: Send + Sync {
+    fn spawn(&self, id: ServiceId, spec: &SpawnSpec) -> Result<(), RunError>;
+}
+
+/// The real spawner: a detached, long-running child (own process group, stdio null, not killed on
+/// drop). Handles are kept so `stop_started` can end exactly what the app started, on quit.
+#[derive(Default)]
+pub struct ProcSpawner {
+    children: std::sync::Mutex<Vec<(ServiceId, tokio::process::Child)>>,
+}
+
+impl ProcSpawner {
+    fn guard(&self) -> std::sync::MutexGuard<'_, Vec<(ServiceId, tokio::process::Child)>> {
+        self.children.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Whether the app started `id` and it is still alive.
+    #[allow(dead_code)] // used by tests and diagnostics
+    pub fn started_by_app(&self, id: ServiceId) -> bool {
+        self.guard()
+            .iter_mut()
+            .any(|(i, c)| *i == id && matches!(c.try_wait(), Ok(None)))
+    }
+
+    /// Whether any child the app started is still alive (decides if a quit must wait to stop).
+    pub fn any_started(&self) -> bool {
+        self.guard()
+            .iter_mut()
+            .any(|(_, c)| matches!(c.try_wait(), Ok(None)))
+    }
+
+    /// End every child the app started, newest first (router before runtime). Anything that
+    /// was adopted was never recorded here, so it is never touched.
+    pub fn stop_started(&self) -> Vec<ServiceId> {
+        let mut stopped = Vec::new();
+        let mut g = self.guard();
+        while let Some((id, mut c)) = g.pop() {
+            if let Ok(None) = c.try_wait() {
+                // Ends the child the app spawned (tokio's `start_kill`); nothing adopted is here.
+                if c.start_kill().is_ok() {
+                    stopped.push(id);
+                }
+            }
+        }
+        stopped
+    }
+}
+
+impl Spawner for ProcSpawner {
+    fn spawn(&self, id: ServiceId, spec: &SpawnSpec) -> Result<(), RunError> {
+        let mut cmd = tokio::process::Command::new(&spec.program);
+        cmd.args(&spec.args)
+            .env_clear()
+            .envs(spec.env.iter().map(|(k, v)| (*k, v.as_str())))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(false)
+            .process_group(0);
+        // Held across the spawn so two callers can never both start the same id.
+        let mut g = self.guard();
+        if g.iter_mut()
+            .any(|(i, c)| *i == id && matches!(c.try_wait(), Ok(None)))
+        {
+            return Err(RunError::NotAllowed);
+        }
+        let child = cmd.spawn().map_err(|_| RunError::Failed)?;
+        g.retain(|(i, _)| *i != id); // drop a dead handle of the same id
+        g.push((id, child));
+        Ok(())
+    }
+}
+
+/// How one `SidecarStart` ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidecarOutcome {
+    /// Already answering: nothing was started.
+    Adopted,
+    Started,
+    /// The port is held by something unhealthy: nothing was started.
+    NeedsYou,
+    /// No usable bundled binary next to the app.
+    BinaryMissing,
+}
+
+/// Finds a bundled binary by name.
+pub type Resolver = Box<dyn Fn(&str) -> Option<std::path::PathBuf> + Send + Sync>;
+
+pub struct SidecarRunner<S: Spawner, P: PortProbe> {
+    pub(crate) spawner: S,
+    ports: P,
+    registry: Registry,
+    policy: RunPolicy,
+    resolve: Resolver,
+    data_dir: std::path::PathBuf,
+    home: Option<String>,
+}
+
+impl SidecarRunner<ProcSpawner, RealPortProbe> {
+    /// The runner `services_start_all` uses when act is effective.
+    pub fn real(data_dir: std::path::PathBuf) -> Self {
+        Self::with(
+            ProcSpawner::default(),
+            RealPortProbe::new(),
+            Registry::builtin(),
+            RunPolicy::Full,
+            Box::new(resolve_sidecar),
+            data_dir,
+            dirs::home_dir().and_then(|h| h.to_str().map(str::to_string)),
+        )
+    }
+}
+
+impl<S: Spawner, P: PortProbe> SidecarRunner<S, P> {
+    pub fn with(
+        spawner: S,
+        ports: P,
+        registry: Registry,
+        policy: RunPolicy,
+        resolve: Resolver,
+        data_dir: std::path::PathBuf,
+        home: Option<String>,
+    ) -> Self {
+        Self {
+            spawner,
+            ports,
+            registry,
+            policy,
+            resolve,
+            data_dir,
+            home,
+        }
+    }
+
+    /// Port state of an allowlisted sidecar row, read-only.
+    pub async fn port_state(&self, id: ServiceId) -> Option<PortState> {
+        sidecar_runtime(id)?;
+        Some(self.ports.state(self.registry.get(id)?).await)
+    }
+
+    /// Probe first (adopt / needs_you), only then resolve the binary and spawn.
+    pub async fn start(&self, id: ServiceId) -> Result<SidecarOutcome, RunError> {
+        if !self.policy.allows(&Verb::SidecarStart(id)) {
+            return Err(RunError::ActDisabled);
+        }
+        let Some(Runtime::Sidecar { name }) = sidecar_runtime(id) else {
+            return Err(RunError::NotAllowed);
+        };
+        if name != SIDECAR_OLLAMA && name != SIDECAR_ROUTER {
+            return Err(RunError::NotAllowed);
+        }
+        let def = self.registry.get(id).ok_or(RunError::NotAllowed)?;
+        match self.ports.state(def).await {
+            PortState::Healthy => return Ok(SidecarOutcome::Adopted),
+            PortState::HeldUnhealthy => return Ok(SidecarOutcome::NeedsYou),
+            PortState::Free => {}
+        }
+        let Some(bin) = (self.resolve)(name) else {
+            return Ok(SidecarOutcome::BinaryMissing);
+        };
+        if id == ServiceId::AmaraRouter {
+            ensure_router_config(&self.data_dir).map_err(|_| RunError::Failed)?;
+        }
+        let spec = spawn_spec(id, &bin, &self.data_dir, self.home.as_deref())
+            .ok_or(RunError::NotAllowed)?;
+        self.spawner.spawn(id, &spec)?;
+        Ok(SidecarOutcome::Started)
+    }
+}
+
+impl<S: Spawner, P: PortProbe> Runner for SidecarRunner<S, P> {
+    fn run<'a>(&'a self, verb: Verb) -> BoxFuture<'a, Result<(), RunError>> {
+        Box::pin(async move {
+            match verb {
+                Verb::SidecarStart(id) => match self.start(id).await? {
+                    SidecarOutcome::Adopted | SidecarOutcome::Started => Ok(()),
+                    SidecarOutcome::NeedsYou | SidecarOutcome::BinaryMissing => {
+                        Err(RunError::Failed)
+                    }
+                },
+                _ => Err(RunError::NotAllowed),
+            }
+        })
     }
 }
 
@@ -781,5 +1172,337 @@ mod tests {
             Err(RunError::Failed)
         );
         assert_eq!(argv(&r.exec), vec!["Docker start stack-weaviate-1"]);
+    }
+}
+
+#[cfg(test)]
+mod sidecar_tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default, Clone)]
+    struct FakeSpawner(Arc<Mutex<Vec<(ServiceId, SpawnSpec)>>>);
+    impl Spawner for FakeSpawner {
+        fn spawn(&self, id: ServiceId, spec: &SpawnSpec) -> Result<(), RunError> {
+            self.0.lock().unwrap().push((id, spec.clone()));
+            Ok(())
+        }
+    }
+
+    struct FakePorts(Mutex<std::collections::HashMap<ServiceId, PortState>>);
+    impl FakePorts {
+        fn all(s: PortState) -> Self {
+            Self(Mutex::new(ServiceId::ALL.iter().map(|i| (*i, s)).collect()))
+        }
+    }
+    impl PortProbe for FakePorts {
+        fn state<'a>(&'a self, def: &'a ServiceDef) -> BoxFuture<'a, PortState> {
+            let s = self.0.lock().unwrap()[&def.id];
+            Box::pin(async move { s })
+        }
+    }
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("sup-sc-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn runner(
+        policy: RunPolicy,
+        port: PortState,
+        bin: bool,
+        data: &std::path::Path,
+    ) -> (SidecarRunner<FakeSpawner, FakePorts>, FakeSpawner) {
+        let sp = FakeSpawner::default();
+        let r = SidecarRunner::with(
+            sp.clone(),
+            FakePorts::all(port),
+            Registry::builtin(),
+            policy,
+            Box::new(move |n| bin.then(|| PathBuf::from(format!("/fake/MacOS/{n}")))),
+            data.to_path_buf(),
+            Some("/home/x".to_string()),
+        );
+        (r, sp)
+    }
+
+    #[test]
+    fn sidecar_start_is_mutating_and_refused_by_the_non_full_policies() {
+        let v = Verb::SidecarStart(ServiceId::ModelRuntime);
+        assert!(v.is_mutating());
+        assert!(!RunPolicy::ReadOnly.allows(&v));
+        assert!(!RunPolicy::ManualRestart.allows(&v));
+        assert!(RunPolicy::Full.allows(&v));
+    }
+
+    #[tokio::test]
+    async fn the_act_off_runner_and_manual_policy_refuse_it_and_spawn_nothing() {
+        for id in [ServiceId::ModelRuntime, ServiceId::AmaraRouter] {
+            assert_eq!(
+                ActOffRunner.run(Verb::SidecarStart(id)).await,
+                Err(RunError::ActDisabled)
+            );
+        }
+        let d = tmp("pol");
+        for policy in [RunPolicy::ReadOnly, RunPolicy::ManualRestart] {
+            let (r, sp) = runner(policy, PortState::Free, true, &d);
+            assert_eq!(
+                r.run(Verb::SidecarStart(ServiceId::ModelRuntime)).await,
+                Err(RunError::ActDisabled)
+            );
+            assert!(sp.0.lock().unwrap().is_empty());
+        }
+        // The docker/launchctl runner never handles it, even at Full.
+        let real = RealRunner::with(
+            fakes::FakeExec::default(),
+            Registry::builtin(),
+            RunPolicy::Full,
+            501,
+        );
+        assert_eq!(
+            real.run(Verb::SidecarStart(ServiceId::AmaraRouter)).await,
+            Err(RunError::NotAllowed)
+        );
+        assert!(real.exec.calls.lock().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[tokio::test]
+    async fn only_the_runtime_and_router_ids_are_allowlisted() {
+        let d = tmp("ids");
+        let (r, sp) = runner(RunPolicy::Full, PortState::Free, true, &d);
+        for id in ServiceId::ALL {
+            if matches!(id, ServiceId::ModelRuntime | ServiceId::AmaraRouter) {
+                continue;
+            }
+            assert_eq!(
+                r.run(Verb::SidecarStart(id)).await,
+                Err(RunError::NotAllowed),
+                "{id:?}"
+            );
+        }
+        assert!(sp.0.lock().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[tokio::test]
+    async fn a_healthy_port_is_adopted_and_nothing_is_spawned() {
+        let d = tmp("adopt");
+        let (r, sp) = runner(RunPolicy::Full, PortState::Healthy, true, &d);
+        for id in [ServiceId::ModelRuntime, ServiceId::AmaraRouter] {
+            assert_eq!(r.start(id).await, Ok(SidecarOutcome::Adopted));
+        }
+        assert!(sp.0.lock().unwrap().is_empty());
+        // Adopting never creates the router config either.
+        assert!(!d.join("router").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[tokio::test]
+    async fn a_held_but_unhealthy_port_is_needs_you_and_nothing_is_spawned() {
+        let d = tmp("held");
+        let (r, sp) = runner(RunPolicy::Full, PortState::HeldUnhealthy, true, &d);
+        for id in [ServiceId::ModelRuntime, ServiceId::AmaraRouter] {
+            assert_eq!(r.start(id).await, Ok(SidecarOutcome::NeedsYou));
+        }
+        assert!(sp.0.lock().unwrap().is_empty());
+        assert!(!d.join("router").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[tokio::test]
+    async fn a_free_port_spawns_with_exact_args_and_a_cleared_env() {
+        let d = tmp("spawn");
+        let (r, sp) = runner(RunPolicy::Full, PortState::Free, true, &d);
+        assert_eq!(
+            r.start(ServiceId::ModelRuntime).await,
+            Ok(SidecarOutcome::Started)
+        );
+        assert_eq!(
+            r.start(ServiceId::AmaraRouter).await,
+            Ok(SidecarOutcome::Started)
+        );
+        let calls = sp.0.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        let path = "/usr/bin:/bin:/usr/sbin:/sbin:/fake/MacOS".to_string();
+        assert_eq!(
+            calls[0],
+            (
+                ServiceId::ModelRuntime,
+                SpawnSpec {
+                    program: PathBuf::from("/fake/MacOS/ollama"),
+                    args: vec!["serve".to_string()],
+                    env: vec![
+                        ("PATH", path.clone()),
+                        ("HOME", "/home/x".to_string()),
+                        ("OLLAMA_HOST", "127.0.0.1:11434".to_string()),
+                    ],
+                }
+            )
+        );
+        let cfg = d.join("router").join("config.toml");
+        assert_eq!(
+            calls[1],
+            (
+                ServiceId::AmaraRouter,
+                SpawnSpec {
+                    program: PathBuf::from("/fake/MacOS/amara-router"),
+                    args: vec!["--config".to_string(), cfg.to_str().unwrap().to_string()],
+                    env: vec![("PATH", path), ("HOME", "/home/x".to_string())],
+                }
+            )
+        );
+        // No model-storage variable, no wide bind.
+        for (_, spec) in calls.iter() {
+            assert!(spec.env.iter().all(|(k, _)| *k != "OLLAMA_MODELS"));
+            assert!(spec.env.iter().all(|(_, v)| !v.contains("0.0.0.0")));
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[tokio::test]
+    async fn a_missing_binary_spawns_nothing() {
+        let d = tmp("nobin");
+        let (r, sp) = runner(RunPolicy::Full, PortState::Free, false, &d);
+        assert_eq!(
+            r.start(ServiceId::ModelRuntime).await,
+            Ok(SidecarOutcome::BinaryMissing)
+        );
+        assert!(sp.0.lock().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_router_config_is_copied_once_with_private_modes() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmp("cfg");
+        let p = ensure_router_config(&d).unwrap();
+        assert_eq!(p, d.join("router").join("config.toml"));
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            router_config_text(&d).unwrap()
+        );
+        let mode = |q: &std::path::Path| std::fs::metadata(q).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&p), 0o600);
+        assert_eq!(mode(&d.join("router")), 0o700);
+        // An existing file (the user's edits) is never overwritten.
+        std::fs::write(&p, "edited").unwrap();
+        ensure_router_config(&d).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "edited");
+        // A symlink at that path is refused.
+        std::fs::remove_file(&p).unwrap();
+        std::os::unix::fs::symlink("/dev/null", &p).unwrap();
+        assert!(ensure_router_config(&d).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn sidecar_source_pins() {
+        let src = include_str!("runner.rs");
+        let prod = src
+            .split("#[cfg(test)]\npub(crate) mod fakes")
+            .next()
+            .unwrap();
+        // No shell plugin or shell spawn, no compiled home path, no launchd load/bootstrap.
+        for bad in [
+            "tauri_plugin_shell",
+            "plugin:shell",
+            "\"/bin/sh\"",
+            "/Users/",
+            "launchctl load",
+            "\"bootstrap\"",
+            "\"load\"",
+            ".config/amara-router",
+            "libc::kill",
+        ] {
+            assert!(!prod.contains(bad), "{bad}");
+        }
+        let side = prod.split("// ---- sidecar layer").nth(1).unwrap();
+        assert!(side.contains(".env_clear()"));
+        assert!(!side.contains("Prog::Launchctl"));
+        assert!(!side.contains("Prog::Docker"));
+        let reg = include_str!("registry.rs");
+        let reg_prod = reg.split("#[cfg(test)]").next().unwrap();
+        assert!(!reg_prod.contains("/Users/"));
+    }
+
+    #[test]
+    fn the_copied_router_config_requires_the_launch_token() {
+        let d = tmp("tok");
+        let text = router_config_text(&d).unwrap();
+        // Only the [security] switch and the token file change; the rest is the example verbatim.
+        assert!(text.contains("require_launch_token = true\n"));
+        assert!(!text.contains("require_launch_token = false"));
+        let tok = crate::commands::launch_token::token_path_in(&d);
+        assert!(text.contains(&format!(
+            "launch_token_file = {}",
+            serde_json::to_string(tok.to_str().unwrap()).unwrap()
+        )));
+        let changed: Vec<_> = text
+            .lines()
+            .zip(ROUTER_CONFIG_EXAMPLE.lines())
+            .filter(|(a, b)| a != b)
+            .collect();
+        assert_eq!(changed.len(), 2, "{changed:?}");
+        assert_eq!(text.lines().count(), ROUTER_CONFIG_EXAMPLE.lines().count());
+        // The shipped example keeps its default.
+        assert!(ROUTER_CONFIG_EXAMPLE.contains("require_launch_token = false"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn existing_router_dir_and_file_must_be_ours_and_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let uid = unsafe { libc::getuid() };
+        let mode = |q: &std::path::Path| std::fs::metadata(q).unwrap().permissions().mode() & 0o777;
+        // A loose dir that is ours is tightened to 0700.
+        let d = tmp("own1");
+        std::fs::create_dir(d.join("router")).unwrap();
+        std::fs::set_permissions(d.join("router"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        ensure_router_config_as(&d, uid).unwrap();
+        assert_eq!(mode(&d.join("router")), 0o700);
+        // A dir owned by someone else: refused, nothing written.
+        let d2 = tmp("own2");
+        assert!(ensure_router_config_as(&d2, uid + 1).is_err());
+        assert!(!d2.join("router").join("config.toml").exists());
+        // A group/world-readable existing file is refused, not rewritten.
+        let cfg = d.join("router").join("config.toml");
+        std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(ensure_router_config_as(&d, uid).is_err());
+        assert_eq!(mode(&cfg), 0o644);
+        // A file owned by someone else is refused.
+        std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(ensure_router_config_as(&d, uid + 1).is_err());
+        assert!(ensure_router_config_as(&d, uid).is_ok());
+        // A symlinked router dir is refused.
+        let d3 = tmp("own3");
+        std::os::unix::fs::symlink(&d, d3.join("router")).unwrap();
+        assert!(ensure_router_config_as(&d3, uid).is_err());
+        for x in [d, d2, d3] {
+            let _ = std::fs::remove_dir_all(&x);
+        }
+    }
+
+    #[tokio::test]
+    async fn the_real_spawner_refuses_a_second_live_spawn_of_the_same_id() {
+        // A harmless local program stands in for the sidecar.
+        let sp = ProcSpawner::default();
+        let spec = SpawnSpec {
+            program: PathBuf::from("/bin/sleep"),
+            args: vec!["30".to_string()],
+            env: vec![("PATH", "/usr/bin:/bin".to_string())],
+        };
+        assert!(!sp.any_started());
+        sp.spawn(ServiceId::ModelRuntime, &spec).unwrap();
+        assert!(sp.started_by_app(ServiceId::ModelRuntime));
+        assert_eq!(
+            sp.spawn(ServiceId::ModelRuntime, &spec),
+            Err(RunError::NotAllowed)
+        );
+        assert_eq!(sp.guard().len(), 1);
+        assert_eq!(sp.stop_started(), vec![ServiceId::ModelRuntime]);
     }
 }

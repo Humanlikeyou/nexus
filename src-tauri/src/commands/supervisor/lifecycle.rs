@@ -375,9 +375,11 @@ fn quit_state() -> QuitState {
 pub fn on_exit_requested(api: &tauri::ExitRequestApi, finish: impl FnOnce() + Send + 'static) {
     let started = super::started_snapshot();
     let registry = Registry::builtin();
-    let has = started
-        .iter()
-        .any(|id| registry.get(*id).is_some_and(stoppable));
+    let has = has_quit_work(
+        &started,
+        &registry,
+        crate::commands::services_start_all::any_started_sidecars(),
+    );
     match quit_decision(super::act::effective(), has, quit_state(), draining_ms()) {
         QuitDecision::Allow => {}
         QuitDecision::Prevent { begin_drain } => {
@@ -399,6 +401,15 @@ pub fn on_exit_requested(api: &tauri::ExitRequestApi, finish: impl FnOnce() + Se
             }
         }
     }
+}
+
+/// Something to hold the exit for: a docker row this launch started, or a sidecar the app spawned
+/// (adopted ones never count: they are not recorded). `quit_decision` still needs act on.
+fn has_quit_work(started: &[ServiceId], registry: &Registry, sidecars_alive: bool) -> bool {
+    sidecars_alive
+        || started
+            .iter()
+            .any(|id| registry.get(*id).is_some_and(stoppable))
 }
 
 async fn run_quit_drain(started: &[ServiceId]) {
@@ -426,6 +437,8 @@ async fn run_quit_drain(started: &[ServiceId]) {
             sup.record_stopped(id, now);
         }
     }
+    // Sidecars the app started itself, last; a no-op with act off or when it started none.
+    let _ = crate::commands::services_start_all::stop_started_sidecars(super::act::effective());
 }
 
 #[cfg(test)]
@@ -877,6 +890,25 @@ mod tests {
         // crew (16 s), n8n (32 s), then 32 s >= 30 s: postgres is skipped.
         assert_eq!(s.stopped, vec![ServiceId::CrewService, ServiceId::N8n]);
         assert_eq!(s.skipped_deadline, vec![ServiceId::Postgres]);
+    }
+
+    #[test]
+    fn quit_holds_for_an_app_started_sidecar_only_and_never_with_act_off() {
+        let reg = Registry::builtin();
+        // No docker rows started, no sidecar alive (adopted rows are not recorded): nothing to do.
+        assert!(!has_quit_work(&[], &reg, false));
+        assert!(!has_quit_work(&[ServiceId::AmaraRouter], &reg, false));
+        // An app-started sidecar alive: work.
+        assert!(has_quit_work(&[], &reg, true));
+        // With act off the exit is allowed whatever is alive (quit behaviour unchanged).
+        assert_eq!(
+            quit_decision(false, has_quit_work(&[], &reg, true), QuitState::Idle, 0),
+            QuitDecision::Allow
+        );
+        assert_eq!(
+            quit_decision(true, has_quit_work(&[], &reg, true), QuitState::Idle, 0),
+            QuitDecision::Prevent { begin_drain: true }
+        );
     }
 
     #[test]

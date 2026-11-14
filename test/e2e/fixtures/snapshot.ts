@@ -118,6 +118,7 @@ export function responses(): Responses {
     list_terrence_projects: [{ id: "p1", title: "Sample project", status: "active", nextAction: "Write the next step" }],
     get_noop_health_snapshot: NOOP_READY,
     get_reduce_transparency: false,
+    setup_done: true,
     get_muse_state: { connected: false, device_name: null, streaming: false },
     list_sessions: [{ id: "s1", device_type: "muse", start: "2026-10-27T21:00:00+09:00", end: "2026-10-27T21:20:00+09:00", duration_secs: 1200, data_points: 76800, summary: { avg_focus: 0.62, avg_relaxation: 0.71 }, body_context: { today: { recovery: 74, hrv: 64, rhr: 52, strain: 11, sleep_total_min: 452 }, latest_night: { day: "2026-10-27", total_sleep_min: 452, efficiency: 91, deep_min: 92, rem_min: 104, light_min: 230 } } }],
     read_tasks: [{ title: "Write release notes", status: "active", priority: "high", tags: ["docs"] }, { title: "Plan next quarter", status: "waiting", priority: null, tags: ["planning"] }, { title: "Restock samples", status: "backlog", priority: "medium", tags: [] }],

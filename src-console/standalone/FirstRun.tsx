@@ -89,7 +89,7 @@ export function FirstRun({ adapter, onClose, again = false }: { adapter: Standal
         : <SaCard title="Model sizes" w={tw}><WireNote>Needs wiring: Compact (16 GB+), Standard (32 GB+) and Large (64 GB+) come from the signed model manifest.</WireNote></SaCard>}
       <div className="pk-info">Model names and sizes {tiers ? <>are placeholders <DataTag kind="sample" /></> : "come from the signed manifest"}. Your current light model&apos;s name still needs your confirmation before setup ships. Cloud AI isn&apos;t part of this choice; it stays off.</div>
     </>;
-    foot = <><span className="pk-note">You can change this later in Settings › General.</span><Button size="small" variant="secondary" onClick={back}>Back</Button><Button size="small" variant="primary" onClick={next}>Download and Continue</Button></>;
+    foot = <><span className="pk-note">You can change this later in Settings › General.</span><Button size="small" variant="secondary" onClick={back}>Back</Button><Button size="small" variant="primary" onClick={() => { if (picked) void adapter.startDownload(picked).then((r) => (r.state === "unwired" ? r : adapter.startServices())); next(); }}>Download and Continue</Button></>;
   } else if (step === 3) {
     body = <>
       <h1 ref={head} tabIndex={-1}>Getting Amara ready</h1><p>Downloading the models and starting services. You can leave this open; it carries on if the Mac sleeps.</p>
@@ -124,7 +124,7 @@ export function FirstRun({ adapter, onClose, again = false }: { adapter: Standal
         </div>
       </div>
     </>;
-    foot = <><span className="pk-note">macOS asks for each permission itself; Amara only explains why.</span><Button size="small" variant="secondary" onClick={back}>Back</Button><Button size="small" variant="primary" onClick={onClose}>Open Amara</Button></>;
+    foot = <><span className="pk-note">macOS asks for each permission itself; Amara only explains why.</span><Button size="small" variant="secondary" onClick={back}>Back</Button><Button size="small" variant="primary" onClick={() => { if (picked) void adapter.finishSetup(picked); onClose(); }}>Open Amara</Button></>;
   }
   return (
     <div className="pk-fr" data-first-run="">

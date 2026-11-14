@@ -1,11 +1,11 @@
 import { getServiceEvents, getServicesStatus, getServicesSummary, invokeBound } from "../bridge";
 import { listen } from "@tauri-apps/api/event";
-import type { AlertKind, BackupRun, BackupSettings, BackupStatus, KeyFileStatus, RelayPreview, RelaySettings, RestorePreview, SecretName, SecretStatus, ServiceEvent, ServiceLogs, ServicesSummary, StandaloneAdapter, SystemProfile, WhoopStatus } from "./adapters";
+import type { AlertKind, BackupRun, ModelTier, SetupDownload, BackupSettings, BackupStatus, KeyFileStatus, RelayPreview, RelaySettings, RestorePreview, SecretName, SecretStatus, ServiceEvent, ServiceLogs, ServicesSummary, StandaloneAdapter, SystemProfile, WhoopStatus } from "./adapters";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 import { servicesFromMap } from "./servicesFromMap";
-import { eventsFromSupervisor, isSupStatus, servicesFromSupervisor } from "./servicesFromSupervisor";
+import { eventsFromSupervisor, isSupStatus, serviceFromSupervisor, servicesFromSupervisor } from "./servicesFromSupervisor";
 import { summaryFromServices, summaryFromSupervisor } from "./servicesSummary";
-import type { ServiceId, ServiceStatus } from "../bindings.gen";
+import type { ModelTier_Serialize, ServiceId, ServiceStatus, StartAllRow } from "../bindings.gen";
 import type { SystemMap } from "./systemMap";
 
 /**
@@ -38,8 +38,13 @@ type Cache = {
   /** Phase 8 supervisor snapshot; null when the command is missing or answers badly (older backend). */
   sup: ServiceStatus[] | null;
   supSummary: ServicesSummary | null;
+  tiers: ModelTier[] | null;
+  setupDone: boolean | null;
+  /** Latest `model://progress` per role (monotonic within a run). */
+  models: Record<string, ModelProg>;
+  startRows: StartAllRow[] | null;
 };
-const cache: Cache = { secrets: null, keyFile: null, backupSettings: null, backupList: null, verify: null, run: null, map: null, relay: null, preview: null, whoop: null, profile: null, sup: null, supSummary: null };
+const cache: Cache = { secrets: null, keyFile: null, backupSettings: null, backupList: null, verify: null, run: null, map: null, relay: null, preview: null, whoop: null, profile: null, sup: null, supSummary: null, tiers: null, setupDone: null, models: {}, startRows: null };
 let version = 0;
 const listeners = new Set<() => void>();
 const notify = () => { version += 1; listeners.forEach((l) => l()); };
@@ -47,6 +52,9 @@ const notify = () => { version += 1; listeners.forEach((l) => l()); };
 export const subscribeLive = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 export const liveVersion = () => version;
 
+/** `model://progress` payload (src-tauri model_download.rs): no URL, bytes only. */
+export type ModelProg = { state: "waiting" | "downloading" | "verifying" | "done" | "failed"; pct: number; bytesDone: number; bytesTotal: number };
+const MODEL_STATES = ["waiting", "downloading", "verifying", "done", "failed"];
 const live = <T,>(v: T | null): Wired<T> => (v === null ? UNWIRED : { state: "live", value: v });
 const OK: Wired<{ ok: true }> = { state: "live", value: { ok: true } };
 const code = (e: unknown) => (typeof e === "string" ? e.slice(0, 40) : "failed");
@@ -219,8 +227,78 @@ function askPreview() {
 }
 export const resetRelayForTests = () => { previewAsked = false; cache.preview = null; cache.relay = null; };
 
+/**
+ * `model_tiers` rows to the picker. `note` null becomes undefined; a malformed row makes the whole list
+ * unwired (never a partial or invented list). An empty list is unwired too.
+ */
+export function toTiers(v: unknown): ModelTier[] | null {
+  if (!Array.isArray(v) || v.length === 0) return null;
+  const out: ModelTier[] = [];
+  for (const r of v as Array<Partial<ModelTier_Serialize> | null>) {
+    if (!r || typeof r.id !== "string" || typeof r.name !== "string" || typeof r.minRamGb !== "number" || !Array.isArray(r.models) || !r.models.every((m) => typeof m === "string")
+      || typeof r.download !== "string" || typeof r.recommended !== "boolean" || typeof r.available !== "boolean" || (r.note != null && typeof r.note !== "string")) return null;
+    out.push({ id: r.id, name: r.name, minRamGb: r.minRamGb, models: r.models, download: r.download, note: r.note ?? undefined, recommended: r.recommended, available: r.available });
+  }
+  return out;
+}
+
+/**
+ * Merge one progress event into the per-role map. Within a run pct and bytes never go back and a finished
+ * role stays done; "waiting" starts a new run for that role. Malformed events are ignored.
+ */
+export function mergeProgress(prev: Record<string, ModelProg>, payload: unknown): Record<string, ModelProg> {
+  const o = payload as Record<string, unknown> | null;
+  if (!o || typeof o.role !== "string" || typeof o.state !== "string" || !MODEL_STATES.includes(o.state)
+    || typeof o.pct !== "number" || typeof o.bytesDone !== "number" || typeof o.bytesTotal !== "number") return prev;
+  const next: ModelProg = { state: o.state as ModelProg["state"], pct: Math.max(0, Math.min(100, Math.round(o.pct))), bytesDone: Math.max(0, o.bytesDone), bytesTotal: Math.max(0, o.bytesTotal) };
+  const old = prev[o.role];
+  if (old && next.state !== "waiting") {
+    if (old.state === "done") return prev;
+    if (next.state === "failed") return { ...prev, [o.role]: { ...old, state: "failed" } };
+    next.pct = Math.max(old.pct, next.pct);
+    next.bytesDone = Math.max(old.bytesDone, next.bytesDone);
+  }
+  return { ...prev, [o.role]: next };
+}
+
+const ROLE_NAME: Record<string, string> = { fast: "Fast model", deep: "Deep model", embed: "Embedding model" };
+/**
+ * Setup download view from real events and the supervisor only. Models: the roles seen in `model://progress`
+ * (a failed role shows as waiting with the detail "Download failed": the type has no failed state, see
+ * design-questions). Services: only the rows `services_start_all` reported once it has run, else every
+ * supervisor row; a row `adopted`/`started` by start-all stands in for a supervisor state that has not
+ * caught up yet. Nothing here is estimated: no time left, no counts beyond the bytes the backend sent.
+ */
+export function toSetupDownload(models: Record<string, ModelProg>, sup: ServiceStatus[] | null, rows: StartAllRow[] | null): Wired<SetupDownload> {
+  const roles = Object.keys(models);
+  if (roles.length === 0 && !sup) return UNWIRED;
+  const detail = (m: ModelProg) => (m.state === "failed" ? "Download failed" : m.bytesTotal > 0 ? `${fmtSize(m.bytesDone)} of ${fmtSize(m.bytesTotal)}` : "");
+  const modelRows = roles.map((r) => {
+    const m = models[r];
+    return { name: ROLE_NAME[r] ?? r, state: m.state === "done" ? "done" as const : m.state === "downloading" || m.state === "verifying" ? "downloading" as const : "waiting" as const, detail: detail(m), pct: m.state === "done" ? 100 : m.pct };
+  });
+  const byId = new Map((rows ?? []).map((r) => [r.id, r.outcome]));
+  const services = (sup ?? []).filter((s) => !rows || byId.has(s.id)).map((s) => {
+    const o = byId.get(s.id);
+    const caughtUp = s.state === "healthy" || s.state === "degraded" || s.state === "separate";
+    const state = caughtUp || ((o === "adopted" || o === "started") && (s.state === "unknown" || s.state === "starting")) ? "running" as const
+      : s.state === "starting" || s.state === "restarting" ? "starting" as const : "waiting" as const;
+    return { name: serviceFromSupervisor(s).name, state };
+  });
+  return { state: "live", value: { models: modelRows, services } };
+}
+
+/** Fixed codes the Rust setup commands return; anything else is logged as "failed". */
+const SETUP_CODES = new Set(["declined", "busy", "approval_failed", "outbound_blocked", "host_not_allowed", "not_published", "manifest_invalid", "tier_not_found", "profile_unavailable", "storage_error", "checksum_mismatch", "upstream_error", "timed_out", "too_large", "unsafe_path", "no_space", "io_error", "invalid_tier", "setup_not_ready"]);
+/** Setup may be marked done only after a live download of this tier resolved and start-all reported no failed, needs_you or binary_missing row. */
+export function setupReady(downloadedTier: string | null, tier: string, rows: StartAllRow[] | null): boolean {
+  return downloadedTier !== null && downloadedTier === tier && !!rows && rows.length > 0 && !rows.some((r) => r.outcome === "failed" || r.outcome === "needs_you" || r.outcome === "binary_missing");
+}
+let downloadedTier: string | null = null;
+const setupCode = (e: unknown) => (typeof e === "string" && SETUP_CODES.has(e) ? e : "failed");
+
 export async function refreshLive(): Promise<void> {
-  const [s, k, bs, bl, sm, rl, wh, pr, sv, ss] = await Promise.allSettled([
+  const [s, k, bs, bl, sm, rl, wh, pr, sv, ss, td, st] = await Promise.allSettled([
     invokeBound<SecretStatus[]>("secrets_status"),
     invokeBound<KeyFileStatus>("key_file_status"),
     invokeBound<BackupSettings>("backup_settings_get"),
@@ -232,6 +310,8 @@ export async function refreshLive(): Promise<void> {
     cache.profile ? Promise.resolve(cache.profile) : invokeBound<unknown>("system_profile"),
     getServicesStatus(),
     getServicesSummary(),
+    invokeBound<unknown>("model_tiers"),
+    invokeBound<unknown>("setup_done"),
   ]);
   cache.secrets = s.status === "fulfilled" ? s.value : null;
   cache.keyFile = k.status === "fulfilled" ? k.value : null;
@@ -244,6 +324,8 @@ export async function refreshLive(): Promise<void> {
   // An older backend has no supervisor commands: both stay null and the system-map derivation is used.
   cache.sup = sv.status === "fulfilled" && Array.isArray(sv.value) && sv.value.length > 0 && sv.value.every(isSupStatus) ? sv.value : null;
   cache.supSummary = ss.status === "fulfilled" ? summaryFromSupervisor(ss.value) : null;
+  cache.tiers = td.status === "fulfilled" ? toTiers(td.value) : null;
+  cache.setupDone = st.status === "fulfilled" && typeof st.value === "boolean" ? st.value : null;
   notify();
 }
 
@@ -260,9 +342,19 @@ function listenBackupProgress() {
   } catch { /* no Tauri event bridge (tests, browser preview) */ }
 }
 
+/** `model://progress` `{ role, state, pct, bytesDone, bytesTotal }`. */
+function listenModelProgress() {
+  try {
+    void listen<unknown>("model://progress", (e) => {
+      const next = mergeProgress(cache.models, e.payload);
+      if (next !== cache.models) { cache.models = next; notify(); }
+    }).catch(() => {});
+  } catch { /* no Tauri event bridge (tests, browser preview) */ }
+}
+
 let started = false;
 export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
-  if (!started) { started = true; void refreshLive().then(() => verifyLast()); listenBackupProgress(); }
+  if (!started) { started = true; void refreshLive().then(() => verifyLast()); listenModelProgress(); listenBackupProgress(); }
   return {
     ...base,
     // The supervisor is the source when it answers; otherwise the system-map derivation (older ids). Never a guessed state.
@@ -274,6 +366,32 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
     serviceAction: async (id: string, action: "restart" | "start") => {
       if (action !== "restart") return UNWIRED;
       try { await invokeBound("service_restart", { id }); } catch (e) { console.warn("[standalone] service_restart refused:", code(e)); return UNWIRED; }
+      await refreshLive();
+      return OK;
+    },
+    tiers: () => live(cache.tiers),
+    setupDone: () => live(cache.setupDone),
+    setupDownload: () => toSetupDownload(cache.models, cache.sup, cache.startRows),
+    // Local only: records nothing on disk; refuses an id the manifest did not offer.
+    pickTier: async (tier: string) => (cache.tiers?.some((t) => t.id === tier && t.available) ? OK : UNWIRED),
+    startDownload: async (tier: string) => {
+      cache.models = {}; downloadedTier = null; cache.startRows = null;
+      try { await invokeBound("model_download", { tier }); downloadedTier = tier; } catch (e) { console.warn("[standalone] model_download refused:", setupCode(e)); return UNWIRED; }
+      return OK;
+    },
+    finishSetup: async (tier: string) => {
+      if (!setupReady(downloadedTier, tier, cache.startRows)) { console.warn("[standalone] setup_complete not called:", "setup_not_ready"); return UNWIRED; }
+      try { await invokeBound("setup_complete", { tier }); } catch (e) { console.warn("[standalone] setup_complete refused:", setupCode(e)); return UNWIRED; }
+      await refreshLive();
+      return OK;
+    },
+    startServices: async () => {
+      try { cache.startRows = await invokeBound<StartAllRow[]>("services_start_all"); } catch (e) { console.warn("[standalone] services_start_all refused:", setupCode(e)); return UNWIRED; }
+      await refreshLive();
+      return OK;
+    },
+    resetSetup: async () => {
+      try { await invokeBound("setup_reset"); } catch (e) { console.warn("[standalone] setup_reset refused:", setupCode(e)); return UNWIRED; }
       await refreshLive();
       return OK;
     },

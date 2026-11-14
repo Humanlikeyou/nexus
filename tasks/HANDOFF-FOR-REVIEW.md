@@ -617,3 +617,25 @@ The plan is `tasks/proposed/phase8-supervisor.md`; Taisun steps are in `tasks/pr
 - Fix round done: both MEDIUMs and LOW-1 through LOW-6 are fixed with tests. LOW-7 is a documented limit: a 401 or 403 counts as up, and quit can stop an app-started dependency of an adopted service.
 - Final gates: src-tauri 1263/0/6, vitest 2306/9, tsc, lint, fmt and clippy clean. e2e 783/12/1 ran before the Rust-only fix round; the frontend is unchanged since.
 - Not run live: the supervisor in the installed app (not installed), the restart buttons. Next: Stage F (Phase 9).
+
+## 25. Stage F: Phase 9 bundled runtime, models and first run (2026-11-15)
+
+The plan is `tasks/proposed/phase9-runtime-firstrun.md`. Decision 0030 covers the models: they are unchanged. Fast is `gemma4:latest` (Gemma 4 8B, the stock build) and deep is `qwen3.8-uncensored:latest` (Qwen ~27B). The fast switch in 0004 is withdrawn.
+
+**Built (nothing outbound and nothing spawned today):**
+- `model_tiers`: reads a manifest that ships inside the app, pinned by SHA-256 (an Ed25519 verifier is ready but not used). It offers three tiers by RAM, with live model names only. Sizes, digests and URLs are left blank (Taisun fills them), so the UI says "Size not published yet".
+- `model_download(tier)`: works only on a click. It checks in order: manifest, tier, outbound or navy, a `host:port` allow-list (**empty in production**), URL, size cap and free space, then the native approval. Downloads resume, are SHA-256 verified, go into `<data>/models` 0600/0700 with O_NOFOLLOW, and report progress on `model://progress` with no URL.
+- `setup_done`, `setup_complete` and `setup_reset`: use `<data>/setup.json` only. The old `onboarding.json` is not touched.
+- `services_start_all` plus sidecar verbs for the bundled router and `ollama`. They adopt first, never start a second copy, and are serialised (`busy`). They need act on plus one approval, so with `SUPERVISOR_ACT_ENABLED = false` they spawn nothing (`skipped_act_off`). The router config the app writes requires the launch token. Quit stops only the sidecars the app started.
+- First-run screen wiring, logic only: setup is marked done only after a real download and a clean start-all, so today it never is. `App.tsx` still reads `setupDone` once before the live data loads, so first run doesn't auto-open (deliberate until downloads exist).
+
+**Security review:** PASS, 0 HIGH. Fixed: MEDIUM-1 (a double start), L1 (stop on quit), L2 (URL parsing), L3 (size and space), L4 (file handling), L5 (host:port), L6 and L7 (sidecar and config ownership), L8 (router token on), L10 (setup gating). Open [GATE] for the act flip: L9, `ollama` has no egress containment. Note: sidecars are refused if `Contents/MacOS` is not owned by the user (today's installs are user-owned).
+
+**Gates:** src-tauri 1318/0/6, router 131, vitest 2314/9, neuro 21, clean. e2e 783/12/1 (known takes-1111t:80 [light]).
+
+**Taisun steps / gates:**
+1. The `ollama` binary: copy it from `/Applications/Ollama.app/Contents/Resources/ollama`, record its version and SHA-256 in a decision, then add the `externalBin` entries.
+2. Download host(s) as `host:port` in a decision. Then fill `bytes`, `sha256` and `url` in `src-tauri/resources/model-manifest.json` and update `MANIFEST_SHA256`.
+3. Confirm the tier RAM thresholds (8 / 32 / 64 GB) and the names.
+4. Q1 store layout (`/api/pull` vs blobs), Q2 Ed25519 key, Q3 voice sidecar, Q5 Intel.
+5. The parity check with Ollama.app quit (plan §6), and the act flip after egress containment.

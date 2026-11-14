@@ -304,6 +304,13 @@ export const screenOpenCounts = (weeks?: number): Promise<ScreenWeekCount[]> => 
 export const getServicesStatus = (): Promise<ServiceStatus[]> => bound.servicesStatus();
 export const getServiceEvents = (since: number | null = null, id: ServiceId | null = null): Promise<ServiceEvent[]> => bound.serviceEvents(since, id);
 export const getServicesSummary = (): Promise<ServicesSummary> => bound.servicesSummary();
+/** Phase 9 first run: manifest tiers by RAM, click-only download (event model://progress), setup flag, start-all. Fixed error codes only. */
+export const getModelTiers = () => bound.modelTiers();
+export const downloadModels = (tier: string) => bound.modelDownload(tier);
+export const getSetupDone = () => bound.setupDone();
+export const completeSetup = (tier: string) => bound.setupComplete(tier);
+export const resetSetup = () => bound.setupReset();
+export const startAllServices = () => bound.servicesStartAll();
 export const getSupervisor = (): Promise<SupervisorInfo> => bound.supervisorGet();
 /** Same redacted, capped, read-only tail as serviceLogs; ids: amara-router and app have a source, the rest reject with no_log. */
 export const getServiceLogTail = (id: string): Promise<ServiceLogTail> => bound.serviceLogTail(id);

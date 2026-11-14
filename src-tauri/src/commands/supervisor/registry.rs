@@ -64,6 +64,67 @@ pub enum Runtime {
     DockerDesktop,
     App,
     BuiltIn,
+    /// A binary bundled next to the app executable (`Contents/MacOS/<name>`), started by the app
+    /// itself. Only a SECOND way to run a row: the row keeps its own runtime (LaunchAgent / adopt),
+    /// see `sidecar_runtime`.
+    Sidecar {
+        name: &'static str,
+    },
+}
+
+/// Bundled binary names (Tauri `externalBin` strips the target triple at bundle time).
+pub(crate) const SIDECAR_OLLAMA: &str = "ollama";
+pub(crate) const SIDECAR_ROUTER: &str = "amara-router";
+
+/// The sidecar way to run a row. Only the model runtime and the router have one.
+pub(crate) fn sidecar_runtime(id: ServiceId) -> Option<Runtime> {
+    match id {
+        ServiceId::ModelRuntime => Some(Runtime::Sidecar {
+            name: SIDECAR_OLLAMA,
+        }),
+        ServiceId::AmaraRouter => Some(Runtime::Sidecar {
+            name: SIDECAR_ROUTER,
+        }),
+        _ => None,
+    }
+}
+
+/// Pure core of `resolve_sidecar`: `<dir>/<name>` only if it is a regular file (not a symlink,
+/// checked with `symlink_metadata`), owned by `uid`, with an execute bit. `name` must be one of the
+/// two known sidecars, so no free text ever reaches the path. Group/other-writable files and a
+/// folder that is not ours or is group/other-writable are refused.
+pub(crate) fn resolve_sidecar_in(
+    dir: &std::path::Path,
+    name: &str,
+    uid: u32,
+) -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    if name != SIDECAR_OLLAMA && name != SIDECAR_ROUTER {
+        return None;
+    }
+    // The folder must be ours and closed to group/other writes, or anyone could swap the file.
+    let dm = std::fs::metadata(dir).ok()?;
+    if !dm.is_dir() || dm.uid() != uid || dm.mode() & 0o022 != 0 {
+        return None;
+    }
+    let path = dir.join(name);
+    let meta = std::fs::symlink_metadata(&path).ok()?;
+    if !meta.file_type().is_file()
+        || meta.uid() != uid
+        || meta.mode() & 0o100 == 0
+        || meta.mode() & 0o022 != 0
+    {
+        return None;
+    }
+    Some(path)
+}
+
+/// The bundled binary: `current_exe().parent()` (Contents/MacOS) only. No PATH search, no home path.
+pub(crate) fn resolve_sidecar(name: &str) -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    // SAFETY: getuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    resolve_sidecar_in(exe.parent()?, name, uid)
 }
 
 /// How health is read. Always read-only.
@@ -493,6 +554,76 @@ mod tests {
             Registry::new(&[flag]).unwrap_err(),
             RegistryError::BadContainer(S::N8n)
         );
+    }
+
+    fn tmpdir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("sup-reg-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn uid() -> u32 {
+        unsafe { libc::getuid() }
+    }
+
+    #[test]
+    fn resolve_sidecar_accepts_only_an_owned_executable_regular_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmpdir("ok");
+        assert_eq!(resolve_sidecar_in(&d, "ollama", uid()), None, "missing");
+        let f = d.join("ollama");
+        std::fs::write(&f, b"x").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(resolve_sidecar_in(&d, "ollama", uid()), None, "not exec");
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(resolve_sidecar_in(&d, "ollama", uid()), Some(f.clone()));
+        assert_eq!(resolve_sidecar_in(&d, "ollama", uid() + 1), None, "owner");
+        // Only the two known names.
+        for bad in ["sh", "../ollama", "ollama/x", ""] {
+            assert_eq!(resolve_sidecar_in(&d, bad, uid()), None, "{bad}");
+        }
+        // Group- or world-writable binary refused.
+        for bad_mode in [0o775, 0o757] {
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(bad_mode)).unwrap();
+            assert_eq!(
+                resolve_sidecar_in(&d, "ollama", uid()),
+                None,
+                "{bad_mode:o}"
+            );
+        }
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A group/world-writable folder is refused, as is one owned by someone else.
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o775)).unwrap();
+        assert_eq!(resolve_sidecar_in(&d, "ollama", uid()), None, "dir mode");
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(resolve_sidecar_in(&d, "ollama", uid()), Some(f.clone()));
+        // A symlink is refused even when it points at an executable.
+        let real = d.join("real");
+        std::fs::write(&real, b"x").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(&real, d.join("amara-router")).unwrap();
+        assert_eq!(resolve_sidecar_in(&d, "amara-router", uid()), None);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn only_the_runtime_and_router_have_a_sidecar_runtime() {
+        for id in ServiceId::ALL {
+            let want = matches!(id, S::ModelRuntime | S::AmaraRouter);
+            assert_eq!(sidecar_runtime(id).is_some(), want, "{id:?}");
+        }
+        assert_eq!(
+            sidecar_runtime(S::ModelRuntime),
+            Some(Runtime::Sidecar { name: "ollama" })
+        );
+        // The LaunchAgent / adopt path stays the row's runtime.
+        let r = Registry::builtin();
+        assert_eq!(
+            r.get(S::AmaraRouter).unwrap().runtime,
+            Runtime::Launchd(LABEL_ROUTER)
+        );
+        assert_eq!(r.get(S::ModelRuntime).unwrap().runtime, Runtime::App);
     }
 
     #[test]

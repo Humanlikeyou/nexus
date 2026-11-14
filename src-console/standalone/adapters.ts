@@ -93,7 +93,7 @@ export type PairStep = { id: "bluetooth" | "free" | "wake" | "found" | "backfill
 
 // ---- First-run setup ----
 export type SystemProfile = { ramGb: number; chip: string; fileVault: boolean };
-export type ModelTier = { id: "compact" | "standard" | "large"; name: string; minRamGb: number; models: string[]; download: string; note?: string; recommended: boolean; available: boolean };
+export type ModelTier = { id: string; name: string; minRamGb: number; models: string[]; download: string; note?: string; recommended: boolean; available: boolean };
 export type SetupDownload = { models: Array<{ name: string; state: "done" | "downloading" | "waiting"; detail: string; pct: number }>; services: Array<{ name: string; sub?: string; state: "running" | "starting" | "waiting" }> };
 export type RestorePreview = { file: string; madeOn: string; version: string; size: string; checksumOk: boolean; contents: Array<{ title: string; sub: string }>; keyFileFound: boolean };
 
@@ -130,6 +130,12 @@ export interface StandaloneAdapter {
   restorePreview(): Wired<RestorePreview>;
   /** Setup state: live and incomplete opens the first-run window on launch. */
   setupDone(): Wired<boolean>;
+  /** Logic-only setup actions (no UI of their own). Unwired in the base and in the sample adapter. */
+  pickTier(tier: string): Action;
+  startDownload(tier: string): Action;
+  finishSetup(tier: string): Action;
+  startServices(): Action;
+  resetSetup(): Action;
 }
 
 const never = async () => UNWIRED;
@@ -140,6 +146,7 @@ export const unwiredStandalone: StandaloneAdapter = {
   relay: () => UNWIRED, setRelay: never, relayPreview: () => UNWIRED, relaySendTest: never,
   whoop: () => UNWIRED, whoopAction: never, pairSteps: () => UNWIRED,
   profile: () => UNWIRED, tiers: () => UNWIRED, setupDownload: () => UNWIRED, restorePreview: () => UNWIRED, setupDone: () => UNWIRED,
+  pickTier: never, startDownload: never, finishSetup: never, startServices: never, resetSetup: never,
 };
 
 const OK = { state: "sample", value: { ok: true } } as const;
@@ -249,6 +256,7 @@ export function sampleStandalone(opts: { whoopOwner?: WhoopStatus["owner"]; rela
       contents: [{ title: "Chats and Today", sub: "1,284 messages · goals, lists, check-ins" }, { title: "Memory and knowledge", sub: "Letta, Postgres, Weaviate · 47 memories · 312 documents" }, { title: "Crews and automations", sub: "4 crews · 23 n8n workflows" }, { title: "Muse sessions and replays", sub: "10 replays · 41 sessions" }, { title: "Health store", sub: "WHOOP 4 history since Feb 17" }, { title: "Settings", sub: "Theme, voice, model size" }],
     }),
     setupDone: () => sample(true),
+    pickTier: async () => OK, startDownload: async () => OK, finishSetup: async () => OK, startServices: async () => OK, resetSetup: async () => OK,
   };
 }
 

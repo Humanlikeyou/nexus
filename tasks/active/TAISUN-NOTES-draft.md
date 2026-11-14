@@ -1,5 +1,5 @@
 # Draft items for the TAISUN-STEPS append (orchestrator scratch, folded into §9 at handoff)
-- Router fast tier: live config.toml has fast = "gemma4:latest" (8B, 9.6 GB); the goal says gemma4-12b-uncensored (installed, 11.9B, 7.6 GB). Change `[models] fast` + restart router — Taisun's call.
+- (Superseded by decision 0030: models unchanged.) Router fast tier: live config.toml has fast = "gemma4:latest" (8B, 9.6 GB); the goal says gemma4-12b-uncensored (installed, 11.9B, 7.6 GB). Change `[models] fast` + restart router — Taisun's call.
 - B14: confirm the GitHub secret is named APPLE_API_KEY_P8 (633cbb9 renamed it from APPLE_API_PRIVATE_KEY); the release now fails if APPLE_API_KEY is set without it.
 - B06: Hermes API_SERVER_KEY is 24 bytes → final rotation batch (≥32 bytes), with his OK, after everything else.
 - B18: verified 2026-11-11: amara-voice LaunchAgent loaded (exit 0), amara_voice.py running, 8791 listening. Docs that say "running" are correct today; no load step needed.

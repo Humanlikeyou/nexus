@@ -44,6 +44,17 @@ describe("Tauri command registry", () => {
     for (const name of ["keychain_import_review", "keychain_migrate_one"]) expect(names).toContain(name);
   });
 
+  it("the Phase 9 first-run commands are registered and bound", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    const table = readFileSync(new URL("../src-console/boundTable.ts", import.meta.url), "utf8");
+    for (const name of ["model_tiers", "model_download", "setup_done", "setup_complete", "setup_reset", "services_start_all"]) {
+      expect(names).toContain(name);
+      expect(table).toContain(`${name}:`);
+    }
+  });
+
   it("parses generate_handler! without comments", () => {
     const names = registeredCommands(`tauri::generate_handler![\n // x::gone,\n a::one, b::two,\n]`).map((c: { name: string }) => c.name);
     expect(names).toEqual(["one", "two"]);
