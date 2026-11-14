@@ -425,3 +425,47 @@ The plan of record is `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on dis
 3. A goal with no roadmap shows as stalled "never". Hide those?
 4. "In common" looks 1 day before each finished step. Should it look 2–3 days back?
 5. Patterns use a table up to 36 h old (built nightly), so today's sessions count from tomorrow. OK?
+
+## 20. Stage B: typed bridge (2026-11-14), plus decision 0022
+
+**Decision 0022** (Taisun's Stage A answers), applied in 9205e95:
+- Check-in notes reach the chat context (capped at 160 chars, guarded).
+- Experiment results carry over once, at most 28 days past due. The `listed` ledger lives inside experiments.json.
+- "In common" looks 1–3 days back, under one BH correction.
+- No-roadmap goals still show.
+- The nightly table is kept.
+
+**Stage B** (decision 0023, "approve specta"):
+- c640d1c: tauri-specta =2.0.0-rc.29 / specta =2.0.0-rc.28 / specta-typescript =0.0.15. 6 commands bound, a staleness test, and the drift guard reads bindings.gen.ts.
+- 38ce7c3: every bridge.ts command bound (94).
+  - All 64-bit ints are cast to number (table in the bindings.rs header).
+  - specta gets its serde_json feature (no new crate).
+  - `opt()` keeps absent optionals omitted. The full e2e caught `next: null` on followups_add_item; the fix is in bridge.ts and the test is unchanged.
+- 371e0d2: amara_turn's Channel is bound, and every src-console `invoke()` goes through `invokeBound` / boundTable.ts (181). In the sensitive Rust files the diff is attributes/derives only (verified line by line).
+- 7e01b5a: 33 reachable src/ modules moved to `src-console/legacy-core/` (git mv). 255 commands are bound.
+  - `test/unit/invokeGuard.test.ts` allows a raw invoke only in bindings.gen.ts plus two documented bridge cases: `ha_call_service` without data, and the `plugin:dialog|open` plugin call.
+  - `tasks/proposed/src-retire-list.md` lists 11 unreachable src/ files and 9 registered-but-uncalled commands. Removal is BLOCKED until Taisun logs it.
+
+**Real TS/Rust mismatch found:** `RecordingListItem.sizeBytes` can be null in Rust but is typed `number | undefined` in TS. Nothing reads it, so it's listed, not changed.
+
+**Gates at 7e01b5a:**
+- src-tauri 1036 / 6 / 0, router 126.
+- vitest **2240 / 9 skipped**, neuro 21.
+- fmt, clippy, tsc, lint, check:secrets clean.
+- **Full e2e alone: 783 passed / 12 skipped / 1 failed.** The failure is takes-1111t:80 [light], the known Design contrast bug.
+- One lane saw goals-1112g:50 [dark] fail once. The parent ran it 6/6 at 371e0d2 and 6/6 on the new tree, then a full re-run was green, so it's flaky. Watch it.
+
+**Installed:** 7e01b5a (rollback `~/Backups/Amara OS-backup-20261114c.app`). The dev Rust target was cargo-cleaned earlier today: 54.7 GiB freed, disk now 86%.
+
+**Wrong or stale:**
+- Taisun's CLAUDE.md says `src/` is unused. That's now true of what remains, but it was false before this stage.
+- `tasks/plans/turn-pipeline.md` still lists the adds port as to do.
+
+**Not run:**
+- live checks of the new bridge on real data (the app was launched after install, but no screen was driven)
+- WebKit e2e
+
+**Next:** Stage C. Its first items:
+- Phase 1 local speak()
+- Phase 4/5 leftovers
+- wiring classes A/B, re-checked against the code
