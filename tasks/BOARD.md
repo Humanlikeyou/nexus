@@ -8,7 +8,7 @@ Branch `amara-integration`, local commits only, nothing pushed (decision 0001). 
 - Rust was last run at 0daa808, with no Rust change since.
 - takes-1111t:80 [light] is a real Design contrast bug (4.28:1). It fails in some full runs; never weaken it.
 
-Installed: cdc98cb (2026-11-14): Stages A, B and C.
+Installed: 8bd95d0 (2026-11-14): Stages A–C + voice heartbeat.
 
 ### Handover phases (0–17)
 Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2026-11-14; it is untracked and his file, so don't commit it without his OK. Evidence is a commit or a decision.
@@ -91,6 +91,7 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 - Taisun: rebuild + install, then: Import the Hemi-Sync collection, try one track with the Muse, check the map live
 
 ## Installed
+- 8bd95d0 installed 2026-11-14 (voice heartbeat + 0025), clean checkout build; app_alive heartbeat confirmed after launch (rollback: ~/Backups/Amara OS-backup-20261114e.app)
 - cdc98cb installed 2026-11-14 (Taisun: "install when stage C is done"), clean checkout build (rollback: ~/Backups/Amara OS-backup-20261114d.app)
 - 7e01b5a installed 2026-11-14 (Taisun: "install when stage B is done"): Stage B typed bridge + decision 0022, clean checkout build (rollback: ~/Backups/Amara OS-backup-20261114c.app)
 - d6c44c0 installed 2026-11-14 (Taisun: "install then next"): Done-fold bda3c15 + Stage A, clean checkout build (rollback: ~/Backups/Amara OS-backup-20261114b.app). Dev target cargo-cleaned first (disk 98% → 92%; 54.7 GiB freed)
