@@ -599,3 +599,10 @@ Open: L2 Keychain reads run on async workers (move to spawn_blocking / cache); L
 5. Hermes `API_SERVER_KEY` rotation: final rotation batch only.
 
 **Remaining Stage D:** only the gated items above plus L2/L4/L5. Next stage: E (Phase 8 supervisor).
+
+### 23a. Live steps (decision 0027, 2026-11-14)
+- Installed a33e623; the app minted its token. Router binary rebuilt from a33e623 and installed with `require_launch_token = true`; probes: /amara/route 401 without or with a wrong token, 200 with the right one; /api/tags 401; /v1 and /health open. Router rollback: `~/Backups/amara-router-backup-20261114` + config line to false, then kickstart.
+- Voice patch applied to `~/projects/amara-voice` (17/17 tests); the app offers the token. `AMARA_VOICE_REQUIRE_LAUNCH_TOKEN` is still off. The amara-voice LaunchAgent was not loaded, so it wasn't restarted; the patched server runs whenever voice starts.
+- Crew compose mount: applied, then reverted before any `docker compose up` after the commit security review (shared token inside a prompt-exposed container; live crew code doesn't read it). Follow-up: per-service derived tokens (0027 amendment).
+- Logged: 0028 Keychain moves (in-app click only, after the Design button), 0029 Weaviate order (n8n credential first; not run).
+- Not checked live: a chat turn's Fast/Deep badge through the app (the dry run now carries the token); watch the router log for 401s from the app.
