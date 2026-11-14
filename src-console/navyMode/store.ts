@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
-import { navyAdapter, setNavyLocalOnly } from "./adapters";
+import { confirmNavySpeak, navyAdapter, onNavySpeakFailed, setNavyLocalOnly } from "./adapters";
 import { nextOffLine, nextOnLine, resetLines } from "./lines";
 import { parseNavyPrompt } from "./parse";
 import { initialNavyState, NAVY_PREVIEW_KEY, type NavyPreview, type NavySource, type NavyState } from "./types";
@@ -28,6 +28,11 @@ export const navyStore = {
   },
 };
 
+// A line we said was being spoken could not be handed to Amara Voice: stop claiming it.
+onNavySpeakFailed(() => {
+  if (state.caption?.spoken) set({ caption: { ...state.caption, spoken: false } });
+});
+
 function set(patch: Partial<NavyState>): void {
   state = { ...state, ...patch };
   emit();
@@ -42,7 +47,7 @@ export function reducedNavyMotion(): boolean {
 function captionFor(kind: "on" | "off", openedBy: NavySource): NavyState["caption"] {
   const text = kind === "on" ? nextOnLine() : nextOffLine();
   const spoken = openedBy === "voice";
-  const spokenResult = spoken ? navyAdapter().speak(text) : null;
+  const spokenResult = spoken ? navyAdapter().speak(text, { openedBy }) : null;
   const sample = sampleAdaptersEnabled() || spokenResult?.state === "sample";
   return { text, sample, spoken: spoken && spokenResult?.state !== "unwired" };
 }
@@ -63,6 +68,7 @@ export function enterNavy(openedBy: NavySource): void {
   if (sampleAdaptersEnabled()) { beginEnter(openedBy); return; }
   enterPending = true;
   void setNavyLocalOnly(true).then(async (confirmed) => {
+    if (confirmed && openedBy === "voice") await confirmNavySpeak(); // typed looks never touch the speak path
     enterPending = false;
     if (confirmed) { beginEnter(openedBy); return; }
     await setNavyLocalOnly(false); // don't leave a half-set switch behind

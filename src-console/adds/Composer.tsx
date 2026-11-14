@@ -4,6 +4,7 @@ import type { Route } from "../app/routes";
 import { useStoresTick } from "../lib/localStores";
 import { valueOf } from "../lib/sampleAdapters";
 import { Button, Card, DataTag, Dialog } from "../ui";
+import { dictateOnce, dictationReady } from "./dictation";
 import { IDLE, UNDO_MS, busy, flow, type AddAdapter, type AddPreview, type Saved } from "./flow";
 import "../takes/takes.css";
 import "./v1111.css";
@@ -98,6 +99,18 @@ export function Composer({ title, kind, placeholder, hint, addLabel = "Add", sav
   const input = useRef<HTMLInputElement>(null);
   const id = useId();
   const sample = adapter.history().state === "sample";
+  const [micReady, setMicReady] = useState(false);
+  const [listening, setListening] = useState(false);
+  useEffect(() => { let on = true; void dictationReady().then((r) => { if (on) setMicReady(r); }); return () => { on = false; }; }, []);
+  // Mic: one on-device dictation, then the SAME submit path as typing (parse, preview, confirm). Never saves.
+  const dictate = async () => {
+    setListening(true);
+    const text = await dictateOnce("add");
+    setListening(false);
+    if (!text) return;
+    send({ type: "type", text });
+    send({ type: "submit" });
+  };
 
   const read = useCallback(async (text: string) => {
     try { send({ type: "parsed", result: await adapter.parse(text) }); }
@@ -136,7 +149,7 @@ export function Composer({ title, kind, placeholder, hint, addLabel = "Add", sav
         <div className="v-composer__row">
           <input ref={input} id={id} className="v-composer__input" placeholder={placeholder} value={state.phase === "saved" || state.phase === "undone" ? "" : state.text} maxLength={500} disabled={isBusy}
             onChange={(e) => send({ type: "type", text: e.target.value })} />
-          <button type="button" className="v-mic" disabled aria-label="Dictate on this Mac (needs wiring: on-device transcription)" title="Needs wiring · voice is transcribed on this Mac only"><Mic aria-hidden="true" /></button>
+          <button type="button" className="v-mic" disabled={!micReady || listening || busy(state)} onClick={() => { void dictate(); }} aria-label="Dictate on this Mac (needs wiring: on-device transcription)" title="Needs wiring · voice is transcribed on this Mac only"><Mic aria-hidden="true" /></button>
           {adapter.wired
             ? <Button type="submit" size="small" variant="primary" disabled={isBusy || !state.text.trim()}>{addLabel}</Button>
             : <OffButton variant="primary" reason={`Needs wiring · ${adapter.command}`}>{addLabel}</OffButton>}

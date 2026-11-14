@@ -2,7 +2,8 @@ import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 import { announceStores, live, realInvoke, type Invoke } from "../lib/localStores";
 import { guardWatchInput } from "./seedGuard";
 import { unwiredMoney, type ConnectRoute, type Fx, type Institution, type MoneyAccount, type MoneyAdapter, type MoneyOverview, type Region, type Route } from "./adapters";
-import { buildOverview, formatNative, type RawBalance } from "./overview";
+import { buildOverview, formatNative, type RawBalance, type RawSummary } from "./overview";
+import { mapFacts, type MoneyFacts, type MoneyFactsWire } from "./facts";
 
 /**
  * Live money adapter over the READ-ONLY Rust commands `money_accounts_list` and `fx_rate_get`
@@ -70,13 +71,19 @@ export function importNote(e: unknown): string {
 
 const localToday = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
 
-export function makeLiveMoney(call: Invoke = realInvoke, notify: () => void = announceStores, today: () => string = localToday): MoneyAdapter {
+/** The live adapter plus the sourced facts a money take would cite. The take and its follow-ups stay unwired: the
+ *  catalog has no money copy yet (design-questions 2026-11-14), so nothing is generated. */
+export type LiveMoney = MoneyAdapter & { facts(): MoneyFacts | null };
+
+export function makeLiveMoney(call: Invoke = realInvoke, notify: () => void = announceStores, today: () => string = localToday): LiveMoney {
   let accounts: MoneyAccount[] | null = null;
   let fx: Fx | null = null;
   let fxRead = false;
   let rawAccounts: RawAccount[] = [];
   let overview: MoneyOverview | null = null;
   let overviewRead = false;
+  let summary: RawSummary | null = null;
+  let facts: MoneyFacts | null = null;
   let started = false;
   let inflight: Promise<void> | null = null;
 
@@ -85,13 +92,16 @@ export function makeLiveMoney(call: Invoke = realInvoke, notify: () => void = an
   // Read-only: balances come from money_balances_list (manual balances + statement running balances).
   let balances: RawBalances | null = null;
   const readBalances = async () => { balances = await call<RawBalances>("money_balances_list"); };
+  // Read-only. A failed or malformed read clears only that store.
+  const readSummary = async () => { const r = await call<RawSummary | null>("money_summary_read"); summary = r && typeof r === "object" && Array.isArray(r.recurring) ? r : null; };
+  const readFacts = async () => { facts = mapFacts(await call<MoneyFactsWire>("money_facts_read")); };
   function refresh(): Promise<void> {
-    inflight ??= Promise.allSettled([readAccounts(), readFx(), readBalances()]).then(() => {
+    inflight ??= Promise.allSettled([readAccounts(), readFx(), readBalances(), readSummary().catch(() => { summary = null; }), readFacts().catch(() => { facts = null; })]).then(() => {
       if (accounts && balances && Array.isArray(balances.balances)) {
         const rate = mapFx(balances.fx) ?? fx;
         accounts = rawAccounts.map((r) => mapAccount(r, balances!.balances, rate)).filter((a): a is MoneyAccount => a !== null);
       }
-      overview = accounts && balances && Array.isArray(balances.balances) ? buildOverview(rawAccounts.filter((r) => mapAccount(r) !== null), balances.balances, mapFx(balances.fx)) : null;
+      overview = accounts && balances && Array.isArray(balances.balances) ? buildOverview(rawAccounts.filter((r) => mapAccount(r) !== null), balances.balances, mapFx(balances.fx), summary) : null;
       overviewRead = true;
     }).finally(() => { inflight = null; notify(); });
     return inflight;
@@ -106,6 +116,7 @@ export function makeLiveMoney(call: Invoke = realInvoke, notify: () => void = an
     // file dialog in Rust (money_import_pick): the renderer never holds a path. Chime and Fidelity stay unwired (Plaid, decision 0008).
     routes: (): ConnectRoute[] => unwiredMoney.routes().map((r) => (r.id === "ledger" || r.id === "jp_bank" ? { ...r, ready: ledgerReady } : r)),
     connectNote: () => note,
+    facts: () => facts,
     importStatement: async () => {
       note = null;
       try {

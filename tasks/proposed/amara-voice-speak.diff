@@ -1,0 +1,102 @@
+README (patch ignores everything above the first "---" line)
+=====================================================================
+amara-voice-speak.diff: a local "say this line" entry for Amara Voice (Lane C1, 2026-11-14)
+
+Why: Amara Voice only speaks its own replies (and timer/alarm lines). There is no speak/TTS entry:
+the level feed (ws 8791) is send-only, logs/state and turns.jsonl are outputs, and the only inbound
+signal the app uses is SIGUSR1 (stop speaking, still not in the live loop). Navy mode needs to say one
+line, in Amara's own voice (Ming, neosoul_g), only when the look was opened by voice.
+
+What it adds (amara_voice.py only, ~40 lines, stdlib, no new package, no network):
+  - speak_watcher thread: polls <amara-voice>/speak/request.json every 0.4 s, reads and deletes it.
+  - Request: {"id": "...", "text": "...", "ts": <epoch ms>}. Spoken only if ts is within 15 s, text is
+    non-empty (capped at 240 chars, whitespace collapsed) AND the navy flag file
+    (<app data>/navy_local_only, written by Amara OS) says "1". Anything else is dropped (fail closed).
+  - Speaks through the existing say() under skills.audio_lock (never over a timer or her own reply).
+  - Writes its pid to logs/speak_ready at start and removes it at exit. Amara OS treats the speak path
+    as READY only when that pid is the running amara_voice.py; otherwise speak() stays unwired.
+
+What Taisun applies (live, non-git dir; the app side is already built and inert until this lands):
+  1. cd ~/projects/amara-voice && cp amara_voice.py amara_voice.py.bak-$(date +%F)
+  2. patch -p1 --dry-run < ~/projects/nexus-amara/tasks/proposed/amara-voice-speak.diff   (check it applies)
+  3. patch -p1 < ~/projects/nexus-amara/tasks/proposed/amara-voice-speak.diff
+  4. Restart Amara Voice (Voice panel: Stop, Start, or ./amara stop && ./amara start).
+  The navy-gate patch (amara-voice-navy-gate.diff) is separate; this one reads the flag file itself.
+
+How to test (all local, no sound needed until step 3):
+  1. ls ~/projects/amara-voice/logs/speak_ready  -> contains the loop's pid; ls -ld speak/ -> 0700.
+  2. Navy off: write {"text":"hello","ts":<now epoch ms>} to speak/request.json -> the file vanishes
+     within 1 s, nothing is said (flag is not "1").
+  3. In Amara OS, say "Amara, navy mode" (voice-opened). She says the caption line in her voice.
+     Type the same into chat instead: the look opens, nothing is spoken.
+  4. Stop Amara Voice: logs/speak_ready disappears and the app's speak() is unwired again.
+Option, not used: macOS /usr/bin/say is local but is NOT Amara's voice; nothing in the voice stack uses it.
+=====================================================================
+--- a/amara_voice.py	2026-11-14 15:04:23
++++ b/amara_voice.py	2026-11-14 15:04:23
+@@ -11,6 +11,7 @@
+ """
+ 
+ import argparse
++import atexit
+ import collections
+ import json
+ import os
+@@ -65,6 +66,11 @@
+ STRONG_SNR_DB = 15.0  # an unsure follow-up this loud and long is him, garbled: ask him to repeat instead of ignoring it
+ STRONG_VOICED_S = 0.9
+ ECHO_OVERLAP = 0.6  # share of a follow-up's words that were in her last reply -> it's her echo
++SPEAK_DIR = HERE / "speak"  # Amara OS drops request.json here (file only, no network); see speak_watcher()
++SPEAK_READY = HERE / "logs" / "speak_ready"  # holds this process's pid while the watcher runs
++SPEAK_MAX_CHARS = 240
++SPEAK_MAX_AGE_S = 15
++NAVY_FLAG = Path(os.environ.get("NEXUS_DATA_DIR") or Path.home() / "Library/Application Support/com.taisun.nexus") / "navy_local_only"
+ TURN_LOG = HERE / "logs" / "turns.jsonl"
+ TURN_LOG_MAX = 2_000_000  # bytes; then rotated to turns.1.jsonl
+ _ACK = (r"ok(?:ay)?|thanks?(?: you)?(?: so much)?|got it|cool|alright|all right|great|nice|perfect|sounds good|mm-?hm"
+@@ -267,6 +273,36 @@
+         print(f"  [ignored after chime: {voiced} s voiced]", flush=True)
+         left = deadline - time.time()
+     return None
++
++
++def speak_watcher(say, audio_lock, stop=None):
++    """Speak lines Amara OS asks for (navy mode, opened by voice). Local Ming voice only, no network.
++    Fails closed: speaks only while the navy flag file says "1", only a fresh request.json of <= SPEAK_MAX_CHARS
++    characters, then deletes it. Anything malformed is dropped silently."""
++    SPEAK_DIR.mkdir(mode=0o700, exist_ok=True)
++    SPEAK_READY.write_text(f"{os.getpid()}\n")
++    req = SPEAK_DIR / "request.json"
++    while not (stop and stop.is_set()):
++        time.sleep(0.4)
++        try:
++            raw = req.read_text()
++            req.unlink()
++        except OSError:
++            continue
++        try:
++            d = json.loads(raw)
++            text = " ".join(str(d["text"]).split())[:SPEAK_MAX_CHARS]
++            fresh = abs(time.time() * 1000 - float(d["ts"])) <= SPEAK_MAX_AGE_S * 1000
++            navy_on = NAVY_FLAG.read_text().strip() == "1"
++        except Exception:
++            continue
++        if not (text and fresh and navy_on):
++            continue
++        try:
++            with audio_lock:  # never over a timer, alarm or her own reply
++                say(text)
++        except Exception as e:
++            print(f"  [speak request failed: {type(e).__name__}]", flush=True)
+ 
+ 
+ def main():
+@@ -318,6 +354,8 @@
+     # A request made before this finishes just queues behind it in Hermes (the filler covers the wait)
+     threading.Thread(target=amara.warm, daemon=True).start()
+     threading.Thread(target=keep_warm, args=(amara, threading.Event()), daemon=True).start()
++    threading.Thread(target=speak_watcher, args=(say, skills.audio_lock), daemon=True).start()
++    atexit.register(lambda: SPEAK_READY.unlink(missing_ok=True))  # Amara OS sees "not ready" once she stops
+ 
+     with sd.InputStream(samplerate=RATE, channels=1, dtype="int16", device=mic, blocksize=FRAME) as stream:
+         ears = Ears(stream, webrtcvad.Vad(2))

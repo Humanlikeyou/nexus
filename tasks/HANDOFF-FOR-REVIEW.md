@@ -469,3 +469,71 @@ The plan of record is `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on dis
 - Phase 1 local speak()
 - Phase 4/5 leftovers
 - wiring classes A/B, re-checked against the code
+
+## 21. Stage C: finish the feature phases (2026-11-14)
+
+**C1 Phase 1 navy speak.** `voice_speak_ready` / `voice_speak_local` and `liveNavy.speak(text, {openedBy})`:
+- Speaks only when `openedBy === "voice"` with local-only on.
+- Fails closed.
+- Hands off to Amara Voice through a file (`speak/request.json`, atomic, one at a time, cleared if stale after 20 s; the dir must be a real dir owned by the user with no group/other write).
+- Amara Voice has no inbound speak entry, so it stays **inert until Taisun applies `tasks/proposed/amara-voice-speak.diff`** (README steps in its header).
+
+**C2 audit:** `tasks/wiring-audit-2026-11-14.md`.
+- Class A: 13 of 16 done.
+- Class B: 5 of 12 done; 6 were wireable and done in W1/W2/W4 below.
+- Class C: data gaps (ledger.json, n8n key file, per-day HR history, BTC/ETH price, pending memories) and gates are listed there.
+- About 93 "Needs wiring" strings remain in src-console, mostly gates and data gaps.
+
+**C3 Phase 4/5 check.** Nothing to build in those files:
+- Weekly patterns and the Sunday 19:00 review compute on read, so nothing fires while the app is closed.
+- The Rust seed guard and the money-mover bans exist with tests.
+
+Open:
+- The 22:00 check-in reminder is only an all-day Needs-you pointer (needs a decision).
+- Habits have no data source (Design: add-preview source field).
+- Money take copy (Design).
+- FX rule / ledger / aggregators (gated).
+
+**W1 money.** `money_summary_read` and `money_facts_read` (read-only; the money-mover count is still 8):
+- buffer months, savings rate, month spend, recurring debits
+- strict rules: one personal csv account, at least 2 complete months, balance at most 35 days old, no future rows
+- the overview fills `bufferMonths` / `savingsRate` when the rules hold
+- facts carry source refs; `moneyTakeGate` and `checkMoneyText` are ready for a future take
+- the take and followUps stay unwired: no copy exists (design-questions)
+
+**W2 Settings.**
+- `service_restart`: approval every call, only stack-n8n-1 / stack-postgres-1, LaunchAgent services `unsupported`, 3 tries then needs_you, docker restart limited to 60 s.
+- `service_logs`: router file log only, redacted and capped, health lines hidden. Docker logs for n8n/postgres were **removed** after the security review (HIGH: workflow/SQL content leaks).
+- `whoop_status`: read-only; owner legacy from store mtime, amara from a marker nobody writes yet.
+- `system_profile`: no identifiers.
+- `restore_preview` and `backup_prune_plan` are bound, and the restore preview is wired. Restore itself is gated.
+
+**W3:** the Sunday card no longer shows "Sample data" on a live review, and its change count comes from the review.
+
+**W4 Phase 3 dictation.**
+- `voice_dictate_ready` / `dictate_once("add"|"checkin")` use a file hand-off. Amara Voice records once, transcribes locally, returns text only, and never writes audio.
+- The Composer mic and the check-in mic are enabled by logic only when ready. Results go to the existing preview; nothing saves without Save.
+- No navy requirement (dictation is always on-device).
+- Inert **until Taisun applies `tasks/proposed/amara-voice-dictate.diff`**. The speak and dictate patches are independent.
+
+**Security review:** FIX NEEDED, all fixed:
+- HIGH: docker logs removed.
+- MEDIUM: router-log redaction tightened.
+- LOWs: docker restart timeout, stale speak/dictate requests, safe hand-off dir.
+
+**Gates (8a05492 + Stage C):**
+- src-tauri **1081 / 6 / 0**, router 126.
+- vitest **2282 / 9 skipped**, neuro 21.
+- fmt, clippy, tsc, lint, check:secrets clean.
+- **Full e2e alone: 783 passed / 12 skipped / 1 failed:** takes-1111t:80 [light], the known Design contrast bug.
+
+**Taisun steps:**
+1. Apply `tasks/proposed/amara-voice-speak.diff`, then `tasks/proposed/amara-voice-dictate.diff`, each with a backup and `patch -p1 --dry-run` first. Then restart Amara Voice and allow microphone access for its Python if macOS asks.
+2. The navy-gate diff (`amara-voice-navy-gate.diff`) is still unapplied.
+
+**Open questions:**
+1. Check-in reminder: should the Needs-you pointer show only from 22:00 JST?
+2. WHOOP "legacy" = the NOOP store was written in the last 10 min: OK?
+3. Should letta/verba/crew get verified container names so they become restartable?
+4. A second speak request while one is waiting is refused, not queued. OK?
+5. Money take copy and the habit source field go to Design.

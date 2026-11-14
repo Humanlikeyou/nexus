@@ -10,6 +10,18 @@ import type { Fx, MoneyOverview, MoneyRow } from "./adapters";
 export type RawAccountLite = { id: string; nickname: string; kind: string; currency: string; scope: string };
 export type RawBalance = { account_id?: string; accountId?: string; currency: string; amount: number; as_of?: string; asOf?: string; source: string; history?: Array<{ date: string; amount: number }> };
 
+/** The `money_summary_read` reply (src-tauri/src/commands/money_summary.rs), snake_case as sent. */
+export type RawSummary = {
+  currency: string; as_of: string; months_of_data: number; single_account: boolean; account_id: string | null;
+  current_month: string; current_spend: number | null; usual_monthly_spend: number | null; buffer_months: number | null;
+  savings_rate: { month: string; pct: number; prev_month: string | null; prev_pct: number | null } | null;
+  recurring: Array<{ label: string; amount: number; months: number; last_date: string }>;
+};
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+/** "2026-10" -> "October"; anything else is returned as is (never guessed). */
+export const monthName = (ym: string) => { const m = /^\d{4}-(\d{2})$/.exec(ym); const i = m ? Number(m[1]) - 1 : -1; return MONTHS[i] ?? ym; };
+
 const CASH_KINDS = new Set(["checking", "savings", "ordinary", "time_deposit"]);
 const INVEST_KINDS = new Set(["brokerage", "ira"]);
 
@@ -43,7 +55,7 @@ const nativeList = (items: Amt[]) => {
   return [...by].map(([c, a]) => formatNative(a, c)).join(" · ");
 };
 
-export function buildOverview(accounts: RawAccountLite[], balances: RawBalance[], fx: Fx | null): MoneyOverview | null {
+export function buildOverview(accounts: RawAccountLite[], balances: RawBalance[], fx: Fx | null, summary: RawSummary | null = null): MoneyOverview | null {
   const bal = new Map<string, RawBalance>();
   for (const b of balances) { const id = b.account_id ?? b.accountId; if (id && Number.isFinite(b.amount)) bal.set(id, b); }
   const personal = accounts.filter((a) => a.scope === "personal");
@@ -97,7 +109,23 @@ export function buildOverview(accounts: RawAccountLite[], balances: RawBalance[]
     cash: { usd: sumUsd(cash, fx), note: tileNote(cash, "No cash balance entered") + missing },
     investments: { usd: sumUsd(invest, fx), note: tileNote(invest, "No investment balance entered") },
     crypto: { usd: null, note: crypto.length ? `${nativeList(crypto.map(item))} · watch-only, no price source so no USD value` : "No crypto balance entered" },
-    bufferMonths: null, bufferNote: "Needs your usual monthly spend; no spending data yet",
-    allocation, rows, venture: ventureRows, savingsRate: null,
+    ...bufferFrom(summary),
+    allocation, rows, venture: ventureRows, savingsRate: savingsFrom(summary),
   };
+}
+
+/** Buffer months only when the summary computed them (one account, fresh balance, 2+ full months of spend). */
+function bufferFrom(s: RawSummary | null): Pick<MoneyOverview, "bufferMonths" | "bufferNote"> {
+  if (s && s.buffer_months != null && s.usual_monthly_spend != null && Number.isFinite(s.buffer_months)) {
+    return { bufferMonths: s.buffer_months, bufferNote: `Your latest balance ÷ usual spend ${formatNative(s.usual_monthly_spend, s.currency)} a month (median of your last full months)` };
+  }
+  return { bufferMonths: null, bufferNote: "Needs your usual monthly spend; no spending data yet" };
+}
+
+/** Savings rate only from a complete month of one account's statement. Credits are not split into pay and transfers, so the note says so. */
+function savingsFrom(s: RawSummary | null): MoneyOverview["savingsRate"] {
+  const r = s?.savings_rate;
+  if (!r || !Number.isFinite(r.pct)) return null;
+  const delta = r.prev_month && r.prev_pct != null ? `${r.prev_pct}% in ${monthName(r.prev_month)}` : "No earlier full month to compare";
+  return { pct: r.pct, delta, month: monthName(r.month), note: "Money in minus money out in your imported statement. Transfers and one-off credits are not separated, so treat it as a rough figure." };
 }

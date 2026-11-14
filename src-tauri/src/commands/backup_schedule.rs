@@ -399,7 +399,7 @@ pub(crate) fn amara_archive(name: &str) -> Option<(NaiveDateTime, bool)> {
     Some((at, pre))
 }
 
-#[derive(Serialize, Debug, PartialEq, Default)]
+#[derive(Serialize, Debug, PartialEq, Default, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PrunePlan {
     /// WOULD be deleted (oldest first). Nothing deletes them.
@@ -462,6 +462,7 @@ pub(crate) fn prune_plan(dir: &Path, keep: u32) -> Result<PrunePlan, String> {
 
 /// What a prune WOULD delete under the saved `keep`. Deletes nothing, and nothing calls it to.
 #[tauri::command]
+#[specta::specta]
 pub async fn backup_prune_plan() -> Result<PrunePlan, String> {
     let (home, data) = (home_dir()?, crate::app_paths::data_dir());
     tokio::task::spawn_blocking(move || {
@@ -475,7 +476,7 @@ pub async fn backup_prune_plan() -> Result<PrunePlan, String> {
 
 // ---- restore preview (read-only) ----
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Debug, Clone, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreGroup {
     pub name: String,
@@ -483,14 +484,14 @@ pub struct RestoreGroup {
     pub bytes: u64,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Debug, Clone, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Reenter {
     pub name: String,
     pub label: String,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Debug, Clone, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RestorePreview {
     pub file: String,
@@ -645,6 +646,7 @@ pub(crate) fn restore_preview_in(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn restore_preview(file: String) -> Result<RestorePreview, String> {
     let (home, data) = (home_dir()?, crate::app_paths::data_dir());
     tokio::task::spawn_blocking(move || {

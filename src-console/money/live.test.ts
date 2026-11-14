@@ -32,7 +32,7 @@ describe("live money adapter", () => {
     const a = m.accounts(); const f = m.fx();
     expect(a.state === "live" && a.value).toHaveLength(1);
     expect(f.state === "live" && f.value.source).toBe("entered by you");
-    expect(call.mock.calls.map((c) => c[0]).sort()).toEqual(["fx_rate_get", "money_accounts_list", "money_balances_list"]);
+    expect(call.mock.calls.map((c) => c[0]).sort()).toEqual(["fx_rate_get", "money_accounts_list", "money_balances_list", "money_facts_read", "money_summary_read"]);
     expect(notify).toHaveBeenCalled();
     expect(m.overview().state).toBe("unwired");
     expect(m.take().state).toBe("unwired");

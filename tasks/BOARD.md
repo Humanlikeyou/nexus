@@ -16,9 +16,9 @@ Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2
 | phase | handover scope | status | evidence / what's left |
 |---|---|---|---|
 | 0 | Resume, verify, land in-flight crew work, re-baseline | done | crew 7de5b4b 32f1d8c; re-baselined each run (header above) |
-| 1 | 1111x navy: localOnly incl. Hermes, local speak | partial | done: 6215a12 0dd3996 cf93fd0 (fail-closed; Q1 open). Left: local speak() (Stage C); voice patch applied by Taisun |
+| 1 | 1111x navy: localOnly incl. Hermes, local speak | partial | done: 6215a12 0dd3996 cf93fd0; speak() app side built (Stage C, inert). Left: Taisun applies tasks/proposed/amara-voice-speak.diff (+ navy-gate diff); Q1 open |
 | 2 | 1111w Jarvis windows backend | partial | done: c024eeb 710863c 2c4a8a8 (cap 3/LRU/Undo, pop-outs, per-site profiles, home_window_open). Left: Amara's comment on a window, blocked-embed/offline signals, verify sign-in pause and Life take facts; live sign-in (Taisun) |
-| 3 | 1111v leftovers: chat/voice adds, on-device transcription | partial | done: 16b78d8 (one add path), Rust adds inside amara_turn (Stage A, this commit). Left: on-device transcription |
+| 3 | 1111v leftovers: chat/voice adds, on-device transcription | partial | done: 16b78d8, Rust adds in amara_turn d6c44c0, dictate_once app side + Composer mic (Stage C, inert). Left: Taisun applies tasks/proposed/amara-voice-dictate.diff |
 | 4 | 1111a personal-OS adapters | partial | done: check-ins/dates 97eddbb, goals and roadmaps 36d4378 bce7ebf, memory list b438574, Letta writes 8af876a (0015), patterns and weekly review 8af876a f45829a. Stage A (this commit): patterns and the weekly review on daily_range, generic patterns (BH), goal progress, experiment loop, Hemi-Sync ranking. Left: habits data source; verify the 22:00 reminder; UI for the new readouts (Design) |
 | 5 | 1111t step 6 Money (read-only) | partial | done: spike 3be01d3, backend 7b448bb, accounts/fx UI 9b95d68, balances b438574, rows 1c93d5e, bank CSV picker a783a5f. Gated: JPY→USD rule, ledger data, aggregators |
 | 6 | Backups: nightly, restore, drill on a copy | done | 6507382 1c93d5e a783a5f de30ebe; `docs/release/restore-drill.md` |
@@ -178,3 +178,4 @@ NOOP merge, live Telegram relay send path, standalone phases (bundling, signing,
 | Stage B batch 2: all bridge.ts commands bound (94 total; amara_turn left for step 3); BigInt cast to number (table in bindings.rs); specta serde_json feature | done (this commit) |
 | Stage B steps 3–4: amara_turn Channel bound; every src-console invoke() moved onto bridge (181 bound; invokeBound dispatcher + boundTable.ts) | done (this commit) |
 | Stage B steps 5–6: 33 reachable src/ modules moved to src-console/legacy-core (git mv); their calls bound (255 total); invoke guard test; retire list in tasks/proposed/src-retire-list.md | done (this commit). **Stage B done** |
+| Stage C: navy speak (C1), wiring audit (C2, tasks/wiring-audit-2026-11-14.md), Phase 4/5 check (C3), money summary/facts (W1), Settings services/logs/whoop status/system profile/restore preview (W2), Sunday card tag (W3), dictation + mic (W4) | done (this commit). Security review fixes in. Voice parts wait on Taisun's two patches |

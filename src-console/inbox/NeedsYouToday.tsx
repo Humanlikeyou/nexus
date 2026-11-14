@@ -138,16 +138,20 @@ export function NeedsYouToday({ inbox, onOpen }: { inbox: NeedsYou; onOpen?: (ro
   );
 }
 
+/** weekly_review.rs gives at most one suggestion; weeklyReviewFrom maps none to this title (liveInsights.ts). */
+const NO_CHANGE_TITLE = "No change to suggest this week";
+
 /** Sundays: "Your weekly review is ready ›" under card C. Opens Life › Weekly review. */
 export function WeeklyReadyCard({ onOpen }: { onOpen?: (route: Route) => void }) {
   const wr = personalAdapter().weeklyReview();
   const v = valueOf(wr);
+  const changesToTry = v && v.change.title !== NO_CHANGE_TITLE ? 1 : 0;
   return (
     <button type="button" className="v-ready" disabled={!onOpen} onClick={() => onOpen?.({ id: "life", view: "weekly-review" })} aria-label="Your weekly review is ready. Open Life, Weekly review">
       <span style={{ flex: 1 }}>
         <span className="v-eyebrow">Sunday{v ? ` · ${v.week.split(" · ")[1] ?? ""}` : ""}</span>
         <span className="v-ready__t">Your weekly review is ready ›</span>
-        <span className="v-ready__s">{v ? <>{v.title} · 1 change to try <DataTag kind="sample" /></> : <>Health, work and money from your week <DataTag kind="wire" /></>}</span>
+        <span className="v-ready__s">{v ? <>{v.title}{changesToTry > 0 && <> · {changesToTry} change to try</>} {wr.state === "sample" && <DataTag kind="sample" />}</> : <>Health, work and money from your week <DataTag kind="wire" /></>}</span>
       </span>
     </button>
   );

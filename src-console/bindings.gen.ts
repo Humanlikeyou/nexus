@@ -150,6 +150,21 @@ export const commands = {
 	voiceStop: (options?: InvokeOptions) => __TAURI_INVOKE<VoiceStatus_Serialize>("voice_stop", undefined, options),
 	/**  Interrupt what Amara Voice is saying right now; the loop keeps running. Ok(false) = nothing sent. */
 	voiceStopSpeaking: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("voice_stop_speaking", undefined, options),
+	/**  True only when a patched Amara Voice loop is running and announced its local speak entry. */
+	voiceSpeakReady: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("voice_speak_ready", undefined, options),
+	/**
+	 *  Ask Amara Voice to say one line with her local voice. Needs the navy local-only switch to be on.
+	 *  Ok(false) = nothing sent. Callers only ask when the look was opened by voice.
+	 */
+	voiceSpeakLocal: (text: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("voice_speak_local", { text }, options),
+	/**  True only when a patched Amara Voice loop is running and announced its dictation entry. */
+	voiceDictateReady: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("voice_dictate_ready", undefined, options),
+	/**
+	 *  Record once on this Mac (Amara Voice's mic) and return the transcript as text. `purpose` is
+	 *  "add" or "checkin". Always on-device (no navy gate: nothing leaves the Mac). The caller shows the text in the
+	 *  existing preview; this never saves.
+	 */
+	dictateOnce: (purpose: string, maxSecs: number | null, options?: InvokeOptions) => __TAURI_INVOKE<string | null>("dictate_once", { purpose, maxSecs }, options),
 	getNoopSettings: (options?: InvokeOptions) => __TAURI_INVOKE<NoopSettings_Serialize>("get_noop_settings", undefined, options),
 	/**
 	 *  Persist settings. If `binary_path` or `db_path` changes, the new paths are validated and a
@@ -183,6 +198,13 @@ export const commands = {
 	keyFileMake: (passphrase: string, replace: boolean | null, options?: InvokeOptions) => __TAURI_INVOKE<null>("key_file_make", { passphrase, replace }, options),
 	/**  Read-only: checks the newest backup and reports. Writes and deletes nothing. */
 	backupVerifyLast: (options?: InvokeOptions) => __TAURI_INVOKE<VerifyReport | null>("backup_verify_last", undefined, options),
+	/**  What a prune WOULD delete under the saved `keep`. Deletes nothing, and nothing calls it to. */
+	backupPrunePlan: (options?: InvokeOptions) => __TAURI_INVOKE<PrunePlan>("backup_prune_plan", undefined, options),
+	restorePreview: (file: string, options?: InvokeOptions) => __TAURI_INVOKE<RestorePreview>("restore_preview", { file }, options),
+	serviceRestart: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<ServiceRestartDone>("service_restart", { id }, options),
+	serviceLogs: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<ServiceLogTail>("service_logs", { id }, options),
+	whoopStatus: (options?: InvokeOptions) => __TAURI_INVOKE<WhoopStatus_Serialize>("whoop_status", undefined, options),
+	systemProfile: (options?: InvokeOptions) => __TAURI_INVOKE<SystemProfile_Serialize>("system_profile", undefined, options),
 	takeEventsList: (options?: InvokeOptions) => __TAURI_INVOKE<TakeEvent_Serialize[]>("take_events_list", undefined, options),
 	takeEventsAppend: (event: TakeEvent_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("take_events_append", { event }, options),
 	takeLogMigrate: (options?: InvokeOptions) => __TAURI_INVOKE<number>("take_log_migrate", undefined, options),
@@ -269,6 +291,8 @@ export const commands = {
 	moneyAccountAdd: (draft: MoneyAccountDraft, options?: InvokeOptions) => __TAURI_INVOKE<MoneyAccount>("money_account_add", { draft }, options),
 	moneyWatchAdd: (accountId: string, value: string, options?: InvokeOptions) => __TAURI_INVOKE<WatchAdded>("money_watch_add", { accountId, value }, options),
 	moneyBalanceSetManual: (accountId: string, nativeAmount: number | null, asOf: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("money_balance_set_manual", { accountId, nativeAmount, asOf }, options),
+	moneySummaryRead: (options?: InvokeOptions) => __TAURI_INVOKE<MoneySummary_Serialize | null>("money_summary_read", undefined, options),
+	moneyFactsRead: (options?: InvokeOptions) => __TAURI_INVOKE<MoneyFacts_Serialize>("money_facts_read", undefined, options),
 	addHistory: (kind: string, options?: InvokeOptions) => __TAURI_INVOKE<HistoryItem[]>("add_history", { kind }, options),
 	addPreview: (kind: string, text: string, options?: InvokeOptions) => __TAURI_INVOKE<ParseResult_Serialize>("add_preview", { kind, text }, options),
 	addSave: (kind: string, preview: AddPreview_Deserialize, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<Saved_Serialize>("add_save", { kind, preview, via }, options),
@@ -2542,6 +2566,54 @@ export type MoneyBalances_Serialize = {
 	fx: MoneyFxRate | null,
 };
 
+export type MoneyFact = MoneyFact_Serialize | MoneyFact_Deserialize;
+
+export type MoneyFact_Deserialize = {
+	key: string,
+	label: string,
+	value: number | null,
+	/**  "JPY" | "USD" | "BTC" | "ETH" | "months" | "percent" | "JPY per USD" */
+	unit: string,
+	as_of?: string | null,
+	/**  Where the number came from: `balance:<account>:<statement|manual>`, `statement:<account>`, `fx:<source>`. */
+	source: string,
+	stale: boolean,
+};
+
+export type MoneyFact_Serialize = {
+	key: string,
+	label: string,
+	value: number | null,
+	/**  "JPY" | "USD" | "BTC" | "ETH" | "months" | "percent" | "JPY per USD" */
+	unit: string,
+	as_of: string | null,
+	/**  Where the number came from: `balance:<account>:<statement|manual>`, `statement:<account>`, `fx:<source>`. */
+	source: string,
+	stale: boolean,
+};
+
+export type MoneyFacts = MoneyFacts_Serialize | MoneyFacts_Deserialize;
+
+export type MoneyFacts_Deserialize = {
+	day: string,
+	facts: MoneyFact_Deserialize[],
+	/**  True when any personal account is stale or unknown (no balance, bad date) or there is none. */
+	partial: boolean,
+	/**  Fixed codes: `no_accounts`, `stale:<account>`, `unknown:<account>`. */
+	partial_reasons: string[],
+	personal_accounts: number,
+};
+
+export type MoneyFacts_Serialize = {
+	day: string,
+	facts: MoneyFact_Serialize[],
+	/**  True when any personal account is stale or unknown (no balance, bad date) or there is none. */
+	partial: boolean,
+	/**  Fixed codes: `no_accounts`, `stale:<account>`, `unknown:<account>`. */
+	partial_reasons: string[],
+	personal_accounts: number,
+};
+
 export type MoneyFxRate = {
 	/**  JPY per 1 USD. */
 	rate: number | null,
@@ -2550,6 +2622,39 @@ export type MoneyFxRate = {
 	/**  "ecb" | "manual" */
 	source: string,
 	fetched_at: string,
+};
+
+export type MoneyMonthFlow = {
+	/**  `YYYY-MM` */
+	month: string,
+	income: number | null,
+	spend: number | null,
+	rows: number,
+};
+
+export type MoneyRecurring = {
+	/**  The statement description, as stored on this Mac. */
+	label: string,
+	/**  A positive debit amount in the account's currency. */
+	amount: number | null,
+	months: number,
+	last_date: string,
+};
+
+export type MoneySavingsRate = MoneySavingsRate_Serialize | MoneySavingsRate_Deserialize;
+
+export type MoneySavingsRate_Deserialize = {
+	month: string,
+	pct: number | null,
+	prev_month?: string | null,
+	prev_pct?: number | null,
+};
+
+export type MoneySavingsRate_Serialize = {
+	month: string,
+	pct: number | null,
+	prev_month: string | null,
+	prev_pct: number | null,
 };
 
 export type MoneySection = MoneySection_Serialize | MoneySection_Deserialize;
@@ -2568,6 +2673,46 @@ export type MoneySection_Serialize = {
 	/**  Sum of `change_usd` over USD accounts that have a real change; None when none do. */
 	personalChangeUsd: number | null,
 	note: string,
+};
+
+export type MoneySummary = MoneySummary_Serialize | MoneySummary_Deserialize;
+
+export type MoneySummary_Deserialize = {
+	currency: string,
+	/**  Latest statement row date. */
+	as_of: string,
+	months_of_data: number,
+	/**  True when exactly one personal csv account supplied the rows. */
+	single_account: boolean,
+	account_id?: string | null,
+	/**  Empty unless `single_account`. */
+	months: MoneyMonthFlow[],
+	current_month: string,
+	/**  Debits so far this month. `None` unless `single_account` (and some row this month). */
+	current_spend?: number | null,
+	usual_monthly_spend?: number | null,
+	buffer_months?: number | null,
+	savings_rate?: MoneySavingsRate_Deserialize | null,
+	recurring: MoneyRecurring[],
+};
+
+export type MoneySummary_Serialize = {
+	currency: string,
+	/**  Latest statement row date. */
+	as_of: string,
+	months_of_data: number,
+	/**  True when exactly one personal csv account supplied the rows. */
+	single_account: boolean,
+	account_id: string | null,
+	/**  Empty unless `single_account`. */
+	months: MoneyMonthFlow[],
+	current_month: string,
+	/**  Debits so far this month. `None` unless `single_account` (and some row this month). */
+	current_spend: number | null,
+	usual_monthly_spend: number | null,
+	buffer_months: number | null,
+	savings_rate: MoneySavingsRate_Serialize | null,
+	recurring: MoneyRecurring[],
 };
 
 export type MotionEvent = {
@@ -3035,6 +3180,15 @@ export type Progress = {
 	label: string,
 };
 
+export type PrunePlan = {
+	/**  WOULD be deleted (oldest first). Nothing deletes them. */
+	wouldDelete: string[],
+	/**  The newest `keep` ordinary archives. */
+	keep: string[],
+	/**  Pre-update archives: always kept, and they don't count toward `keep`. */
+	preUpdateKept: string[],
+};
+
 export type RankedTrack = {
 	/**  1-based; equal means share a rank. */
 	rank: number,
@@ -3132,6 +3286,11 @@ export type RecordingListItem_Serialize = {
 	retention: string,
 };
 
+export type Reenter = {
+	name: string,
+	label: string,
+};
+
 export type RelayPatch = RelayPatch_Serialize | RelayPatch_Deserialize;
 
 export type RelayPatch_Deserialize = {
@@ -3187,6 +3346,27 @@ export type ReplayFileInfo_Serialize = {
 };
 
 export type RequestStatus = "open" | "approved" | "denied";
+
+export type RestoreGroup = {
+	name: string,
+	files: number,
+	bytes: number,
+};
+
+export type RestorePreview = {
+	file: string,
+	verify: VerifyReport,
+	/**  Regular files in the archive (the manifest included), and their unpacked size. */
+	files: number,
+	bytes: number,
+	groups: RestoreGroup[],
+	/**  Names the backup left out on purpose or couldn't take (from its manifest; names only). */
+	leftOut: string[],
+	/**  Keychain items a restore never brings back: type these in again. */
+	reenter: Reenter[],
+	/**  The n8n key file is never inside a backup either: restore it from its own passphrase file. */
+	keyFileNote: string,
+};
 
 export type RevenueSummary = {
 	total_revenue: number | null,
@@ -3364,6 +3544,20 @@ export type SecretStatus = {
 	name: string,
 	label: string,
 	set: boolean,
+};
+
+export type ServiceLogTail = {
+	id: string,
+	/**  Oldest first, already redacted. */
+	lines: string[],
+	/**  True when older lines were cut by a cap. */
+	truncated: boolean,
+};
+
+export type ServiceRestartDone = {
+	id: string,
+	/**  Failed tries so far for this service (0 after a success). */
+	failedTries: number,
 };
 
 export type ServiceRestartResult = ServiceRestartResult_Serialize | ServiceRestartResult_Deserialize;
@@ -3674,6 +3868,36 @@ export type SystemMap_Serialize = {
 	nodes: MapNode[],
 	paths: MapPath_Serialize[],
 	checkedAt: string,
+};
+
+export type SystemProfile = SystemProfile_Serialize | SystemProfile_Deserialize;
+
+export type SystemProfile_Deserialize = {
+	/**  Installed memory in GB (rounded). */
+	ramGb: number,
+	/**  CPU brand string, e.g. "Apple M3 Pro". */
+	chip: string,
+	/**  `std::env::consts::ARCH` (aarch64 / x86_64). */
+	arch: string,
+	cores: number,
+	/**  `kern.osproductversion`, e.g. "15.1". None when it can't be read. */
+	macos?: string | null,
+	/**  None when the state can't be read (never guessed). */
+	fileVault?: boolean | null,
+};
+
+export type SystemProfile_Serialize = {
+	/**  Installed memory in GB (rounded). */
+	ramGb: number,
+	/**  CPU brand string, e.g. "Apple M3 Pro". */
+	chip: string,
+	/**  `std::env::consts::ARCH` (aarch64 / x86_64). */
+	arch: string,
+	cores: number,
+	/**  `kern.osproductversion`, e.g. "15.1". None when it can't be read. */
+	macos: string | null,
+	/**  None when the state can't be read (never guessed). */
+	fileVault: boolean | null,
 };
 
 export type TakeEvent = TakeEvent_Serialize | TakeEvent_Deserialize;
@@ -4420,11 +4644,29 @@ export type WeeklyReviewMilestone = {
 	pct: number,
 };
 
+export type WhoopOwner = "amara" | "legacy" | "none";
+
 export type WhoopSource = 
 /**  "NOOP (recommended)": NOOP owns strap sync; the direct BLE path must not start. */
 "noop" | 
 /**  "Direct BLE". */
 "ble";
+
+export type WhoopStatus = WhoopStatus_Serialize | WhoopStatus_Deserialize;
+
+export type WhoopStatus_Deserialize = {
+	owner: WhoopOwner,
+	storeFound: boolean,
+	lastSampleAt?: number | null,
+	gaps14d?: number | null,
+};
+
+export type WhoopStatus_Serialize = {
+	owner: WhoopOwner,
+	storeFound: boolean,
+	lastSampleAt: number | null,
+	gaps14d: number | null,
+};
 
 export type Work = Work_Serialize | Work_Deserialize;
 

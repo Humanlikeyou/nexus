@@ -1397,6 +1397,59 @@ pub(crate) fn balances_list_scoped_in(
     Ok(MoneyBalances { balances, fx })
 }
 
+// ───────────────────────────── statement rows for the read-only summary ─────────────────────────────
+
+/// One imported statement row, trimmed to what the summary needs.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StmtRow {
+    pub date: String,
+    pub amount: i64,
+    pub description: String,
+}
+
+/// One personal CSV account's imported rows (`money_summary.rs` reads these; nothing here writes).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StmtAccount {
+    pub id: String,
+    pub kind: String,
+    pub currency: String,
+    pub rows: Vec<StmtRow>,
+}
+
+/// Imported rows of every PERSONAL csv account. Venture and non-csv accounts are skipped before any file is
+/// opened, so a venture statement is never read by a personal summary.
+pub(crate) fn personal_statements_in(data: &Path) -> Result<Vec<StmtAccount>, String> {
+    let _g = lock();
+    let mut out = Vec::new();
+    for a in load_accounts(data)? {
+        if a.scope != "personal" || a.route != "csv" {
+            continue;
+        }
+        if !safe_id(&a.id) {
+            return Err("store_error".to_string());
+        }
+        let file = money_dir(data).join("tx").join(format!("{}.jsonl", a.id));
+        let records = parse_tx_records(&read_tx_text(&file)?)?;
+        if records.len() > MAX_ROWS {
+            return Err("store_error".to_string());
+        }
+        out.push(StmtAccount {
+            id: a.id,
+            kind: a.kind,
+            currency: a.currency,
+            rows: records
+                .into_iter()
+                .map(|r| StmtRow {
+                    date: r.date,
+                    amount: r.amount,
+                    description: r.description,
+                })
+                .collect(),
+        });
+    }
+    Ok(out)
+}
+
 // ───────────────────────────── commands (all read-only) ─────────────────────────────
 
 fn data_dir() -> PathBuf {

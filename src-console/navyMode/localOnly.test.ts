@@ -58,19 +58,22 @@ describe("navy mode keeps everything on this Mac (design-1111x localOnly)", () =
     expect(navyStore.get().phase).toBe("entering");
   });
 
-  it("speak() stays unwired in live mode: no TTS call of any kind, voice or typed, and no cloud path", async () => {
+  it("speak() stays unwired when no local speak entry is confirmed: voice or typed, no TTS call, no cloud path", async () => {
+    invoke.mockImplementation(async (cmd: string, args?: { on: boolean }) => (cmd === "voice_speak_ready" ? false : args?.on));
     for (const by of ["voice", "chat"] as const) {
       invoke.mockClear();
-      expect(liveNavy.speak("Local line").state).toBe("unwired");
+      expect(liveNavy.speak("Local line", { openedBy: by }).state).toBe("unwired");
       enterNavy(by);
       await flush();
       expect(navyStore.get().caption).toBeTruthy(); // caption still shows
       expect(navyStore.get().caption?.spoken).toBe(false); // never claims it was spoken
-      expect(invoke.mock.calls.every(([cmd]) => cmd === "set_local_only")).toBe(true);
+      expect(invoke.mock.calls.every(([cmd]) => cmd === "set_local_only" || cmd === "voice_speak_ready")).toBe(true);
+      expect(invoke.mock.calls.some(([cmd]) => cmd === "voice_speak_local")).toBe(false);
       finishEnter();
       exitNavy(by);
       finishExit();
       await flush();
     }
   });
+
 });

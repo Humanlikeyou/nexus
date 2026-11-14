@@ -146,12 +146,26 @@ pub async fn restart_docker_service(app: tauri::AppHandle, name: String) -> Resu
     docker_restart(&name).await
 }
 
-/// The ungated restart. Only call with a validated name after approval.
-pub(super) async fn docker_restart(name: &str) -> Result<String, String> {
-    let output = tokio::process::Command::new(docker()?)
-        .args(["restart", name])
-        .output()
+/// Longest a `docker restart` may hold the approval lock before it is abandoned.
+pub(super) const DOCKER_RESTART_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Run `fut` for at most `limit`; a hung call is dropped (and, for a `kill_on_drop` child, ended).
+pub(super) async fn bounded<T>(
+    limit: std::time::Duration,
+    fut: impl std::future::Future<Output = T>,
+) -> Result<T, String> {
+    tokio::time::timeout(limit, fut)
         .await
+        .map_err(|_| "Docker did not answer in time.".to_string())
+}
+
+/// The ungated restart. Only call with a validated name after approval. Bounded by
+/// `DOCKER_RESTART_TIMEOUT` so a hung docker can't hold the approval guard forever.
+pub(super) async fn docker_restart(name: &str) -> Result<String, String> {
+    let mut cmd = tokio::process::Command::new(docker()?);
+    cmd.args(["restart", name]).kill_on_drop(true);
+    let output = bounded(DOCKER_RESTART_TIMEOUT, cmd.output())
+        .await?
         .map_err(|e| format!("Failed to run docker restart: {}", e))?;
 
     if output.status.success() {
@@ -200,6 +214,25 @@ mod tests {
         for bad in ["", "-rm", "--help", "a b", "a;b", "../x"] {
             assert!(validate_container_name(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_hung_call_is_abandoned_within_the_limit() {
+        let t = std::time::Instant::now();
+        let r = super::bounded(
+            std::time::Duration::from_millis(50),
+            std::future::pending::<()>(),
+        )
+        .await;
+        assert_eq!(r.unwrap_err(), "Docker did not answer in time.");
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
+        assert_eq!(
+            super::bounded(std::time::Duration::from_secs(5), async { 7 })
+                .await
+                .unwrap(),
+            7
+        );
+        assert_eq!(super::DOCKER_RESTART_TIMEOUT.as_secs(), 60);
     }
 
     #[test]

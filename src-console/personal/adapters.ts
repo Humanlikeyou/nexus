@@ -1,5 +1,9 @@
+import { personalMoneyFrom } from "../money/personalMoney";
+import { mapFx } from "../money/live";
+import type { RawSummary } from "../money/overview";
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
 import { patternsFrom, weeklyReviewFrom, type PatternsWire, type ReviewWire, type ExperimentResultWire } from "./liveInsights";
+import { dictateOnce } from "../adds/dictation";
 import { ADDS_EVENT, announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
 
 /**
@@ -353,6 +357,7 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
   let suggestionTitle: string | null = null;
   let suggestionPair: string | null = null; // from the finding id: "<pair>" or "tag_mood:<tag>"
   let memories: Memory[] | null = null;
+  let money: PersonalMoney | null = null;
   let memoriesNote: string | null = null;
   let writeNote: string | null = null;
   const refresh = async () => {
@@ -364,6 +369,8 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
       call<ReviewWire>("weekly_review_read")
         .then((r) => { review = r && r.health ? weeklyReviewFrom(r) : null; suggestionTitle = review && r.suggestion ? r.suggestion.title : null; suggestionPair = review && r.suggestion?.evidenceFindingId ? r.suggestion.evidenceFindingId.split(":")[0] : null; })
         .catch(() => { review = null; suggestionTitle = null; suggestionPair = null; }),
+      Promise.all([call<RawSummary | null>("money_summary_read"), call<{ rate: number; date: string; source: string } | null>("fx_rate_get")])
+        .then(([sm, f]) => { money = personalMoneyFrom(sm && Array.isArray(sm.recurring) ? sm : null, mapFx(f)); }).catch(() => { money = null; }),
       call<GoalWire[]>("read_goals").then((r) => { goals = Array.isArray(r) ? goalsFrom(r) : null; }).catch(() => { goals = null; }),
       call<MemoryWire[]>("memory_list").then(
         (r) => { memories = Array.isArray(r) ? memoriesFrom(r) : null; memoriesNote = memories ? null : memoryNote(null); },
@@ -389,6 +396,7 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
     ...unwiredPersonal,
     refresh,
     goals: () => (goals ? live(goals) : UNWIRED),
+    money: () => (money ? live(money) : UNWIRED),
     patterns: () => (patterns ? live(patterns) : UNWIRED),
     weeklyReview: () => (review ? live(review) : UNWIRED),
     memories: () => (memories ? live([...memories]) : UNWIRED),
@@ -403,6 +411,8 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
     // "Not this week" stores nothing. With no real suggestion from the weekly review there's nothing to try.
     tryChange: async (take) => tryChangeWith(call, take, suggestionTitle, new Date(), suggestionPair),
     checkins: () => (checkins ? live([...checkins]) : UNWIRED),
+    // On-device dictation via Amara Voice (voice.rs dictate_once): text only. Unwired until the patched loop is ready.
+    transcribe: async () => { const t = await dictateOnce("checkin", call); return t ? live(t) : UNWIRED; },
     saveCheckIn: async (d) => {
       if (d.mood == null || d.energy == null) return UNWIRED;
       try {
