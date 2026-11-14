@@ -45,12 +45,12 @@ const BACKOFF_CAP: Duration = Duration::from_secs(30);
 const MAX_UTTERANCE_ID: usize = 64;
 /// Subprotocol prefix carrying the per-launch token (`amara-launch.<64 hex>`).
 const LEVEL_TOKEN_SUBPROTOCOL: &str = "amara-launch.";
-/// DEFAULT OFF. tungstenite fails the client handshake (`NoSubProtocol`) when the server does not
-/// echo an offered `Sec-WebSocket-Protocol`, and today's unpatched amara-voice does not. Flip to
-/// true only after Taisun applies `tasks/proposed/amara-voice-token.diff` (server echoes it).
+/// ON since decision 0027: `tasks/proposed/amara-voice-token.diff` is applied to amara-voice, so the
+/// server echoes the offered `Sec-WebSocket-Protocol`. tungstenite fails the client handshake
+/// (`NoSubProtocol`) against an unpatched server, so roll this back to false if the patch is undone.
 /// Retrying without the header on failure is deliberately NOT done: it would hand the token to
 /// whatever process squats on the port.
-const LEVEL_SEND_LAUNCH_TOKEN: bool = false;
+const LEVEL_SEND_LAUNCH_TOKEN: bool = true;
 
 // ─── payloads (camelCase) ───────────────────────────────────────────────────
 
@@ -265,10 +265,17 @@ fn level_request(
 }
 
 /// The token to offer, or None (gate off, or no/invalid token file).
+#[cfg(not(test))]
 fn level_token() -> Option<String> {
     LEVEL_SEND_LAUNCH_TOKEN
         .then(super::launch_token::current)
         .flatten()
+}
+
+/// Tests never read the real data dir: the loop tests run tokenless against mock publishers.
+#[cfg(test)]
+fn level_token() -> Option<String> {
+    None
 }
 
 fn level_ws_config() -> WebSocketConfig {
@@ -711,14 +718,14 @@ mod tests {
     }
 
     #[test]
-    fn token_gate_is_off_by_default() {
-        assert!(!std::hint::black_box(LEVEL_SEND_LAUNCH_TOKEN));
-        assert_eq!(level_token(), None);
+    fn token_gate_is_on_after_decision_0027() {
+        // level_token() itself is not called here: with the gate on it reads the real data dir.
+        assert!(std::hint::black_box(LEVEL_SEND_LAUNCH_TOKEN));
     }
 
     /// Why the gate exists: an unpatched server that ignores the subprotocol fails the handshake.
     #[tokio::test]
-    async fn server_not_echoing_subprotocol_fails_handshake_so_gate_stays_off() {
+    async fn server_not_echoing_subprotocol_fails_handshake() {
         let (port, _) = publisher(vec![], 1, Duration::from_millis(1)).await;
         let req = level_request(&level_url(port), Some(FIXTURE)).unwrap();
         assert!(tokio_tungstenite::connect_async(req).await.is_err());
