@@ -407,6 +407,16 @@ export const stopVoiceSpeaking = () => invoke<boolean>("voice_stop_speaking");
 
 /** Amara's follow-up lists (commands/followups.rs). Errors are the bare kinds in lib/followups.ts. */
 export const listFollowups = () => invoke<FollowupLists>("followups_list");
+/** Experiment loop (commands/experiments.rs). Errors reach the caller. */
+export interface ExperimentRow { followupId: number; startDay: string; measure: string | null; pair: string | null }
+export const recordExperimentStart = (followupId: number, pair: string | null) => invoke<ExperimentRow>("experiments_record_start", { followupId, pair });
+export const listExperiments = () => invoke<ExperimentRow[]>("experiments_list");
+/** Hemi-Sync track ranking (read-only). Errors reach the caller. */
+export interface HemiRankedTrack { rank: number; trackId: string; n: number; mean: number; sessionIds: string[] }
+export interface HemiUnrankedTrack { trackId: string; n: number; sessionIds: string[]; reason: string }
+export interface HemiMeasureRanking { ranked: HemiRankedTrack[]; notEnoughSessions: HemiUnrankedTrack[] }
+export interface HemiTrackRanking { minSessions: number; focusField: string; calmField: string; focus: HemiMeasureRanking; calm: HemiMeasureRanking; rating: HemiMeasureRanking }
+export const hemisyncRanking = () => invoke<HemiTrackRanking>("hemisync_ranking");
 export const addFollowupItem = (input: FollowupItemInput) => invoke<FollowupItem>("followups_add_item", { ...input });
 export const updateFollowupItem = (id: number, patch: FollowupItemPatch) => invoke<FollowupItem>("followups_update_item", { id, patch });
 export const markFollowupDone = (id: number) => invoke<FollowupItem>("followups_mark_done", { id });
@@ -453,3 +463,17 @@ export interface DailyBuild { days: number; builtAtMs: number; partial: string[]
 export interface DailyRange { rows: DailyRow[]; goals: DailyGoalRow[]; builtAtMs: number }
 export const dailyRebuild = () => invoke<DailyBuild>("daily_rebuild");
 export const dailyRange = (from: string, to: string) => invoke<DailyRange>("daily_range", { from, to });
+
+/** Goal progress (commands/goal_progress.rs). Every count lists the `daily_goal:<day>:<goal id>` rows behind it; the "in common" readout quotes only published generic findings. Errors reach the caller. */
+export interface GoalWeekWire { goalId: string; title: string | null; thisWeek: number; prevWeek: number; refs: string[] }
+export interface StalledGoalWire { goalId: string; title: string; lastFinishedDay: string | null; daysSince: number | null; refs: string[] }
+export interface CommonCauseWire {
+  cause: string; effect: string; lagDays: number; findingPAdj: number; confidence: number; beforeDaysTested: number; beforeDaysCauseHigh: number;
+  share: number; baseRate: number; pRaw: number; pAdj: number; causeHighBeforeDays: string[]; refs: string[];
+}
+export interface CommonGoalWire { goalId: string; title: string | null; finishedDays: number; beforeDays: string[]; causes: CommonCauseWire[] }
+export interface GoalProgressWire {
+  weekStart: string; weekEnd: string; prevWeekStart: string; goals: GoalWeekWire[]; stalled: StalledGoalWire[];
+  inCommon: { state: "found" | "nothing_stands_out_yet"; goalsConsidered: number; goals: CommonGoalWire[]; skippedCauses: string[] };
+}
+export const goalProgressWeek = (weekEnd?: string) => invoke<GoalProgressWire>("goal_progress_week", { weekEnd: weekEnd ?? null });

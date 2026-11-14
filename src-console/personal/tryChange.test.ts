@@ -13,6 +13,26 @@ describe("Weekly review › Try it this week (live)", () => {
     expect(call.mock.calls.some(([cmd]) => /goal/.test(String(cmd)))).toBe(false);
   });
 
+  it("records an experiment with the follow-up id and the finding pair after the add", async () => {
+    const call = vi.fn(async (cmd: string) => (cmd === "followups_add_item" ? { id: 12 } : { followupId: 12 }));
+    const r = await tryChangeWith(call as never, true, "Walk", NOW, "sleep_focus");
+    expect(call).toHaveBeenNthCalledWith(2, "experiments_record_start", { followupId: 12, pair: "sleep_focus" });
+    expect(r).toEqual({ state: "live", value: { reminder: "Follow-up added for 2026-11-19: Walk" } });
+  });
+
+  it("no pair is passed on as null (Rust stores no measure, nothing guessed)", async () => {
+    const call = vi.fn(async (cmd: string) => (cmd === "followups_add_item" ? { id: 3 } : {}));
+    await tryChangeWith(call as never, true, "Walk", NOW);
+    expect(call).toHaveBeenNthCalledWith(2, "experiments_record_start", { followupId: 3, pair: null });
+  });
+
+  // Intended behaviour changed (Stage A wave 2): no new UI copy, so the failure is silent to the reminder text.
+  it("an experiment save failure keeps the follow-up and leaves the reminder text unchanged", async () => {
+    const call = vi.fn(async (cmd: string) => { if (cmd === "followups_add_item") return { id: 3 }; throw new Error("x"); });
+    const r = await tryChangeWith(call as never, true, "Walk", NOW, "hrv_calm");
+    expect(r).toEqual({ state: "live", value: { reminder: "Follow-up added for 2026-11-19: Walk" } });
+  });
+
   it("Not this week stores nothing", async () => {
     const call = vi.fn();
     expect(await tryChangeWith(call, false, "x", NOW)).toEqual({ state: "live", value: { reminder: null } });

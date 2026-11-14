@@ -74,7 +74,7 @@ describe("Tauri command registry", () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
     const names = registeredCommands(lib).map((c: { name: string }) => c.name);
-    for (const name of ["hemisync_import", "hemisync_library", "hemisync_session_link", "hemisync_session_finish", "hemisync_session_rate", "hemisync_sessions", "hemisync_stats"]) expect(names).toContain(name);
+    for (const name of ["hemisync_import", "hemisync_library", "hemisync_session_link", "hemisync_session_finish", "hemisync_session_rate", "hemisync_sessions", "hemisync_stats", "hemisync_ranking"]) expect(names).toContain(name);
   });
 
   it("the money commands are registered and none can move money", async () => {
@@ -94,6 +94,13 @@ describe("Tauri command registry", () => {
     const names = registeredCommands(lib).map((c: { name: string }) => c.name);
     expect(names).toContain("patterns_read");
     expect(names).toContain("weekly_review_read");
+  });
+
+  it("goal_progress_week is registered", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    expect(names).toContain("goal_progress_week");
   });
 
   it("system_map_status is registered", async () => {

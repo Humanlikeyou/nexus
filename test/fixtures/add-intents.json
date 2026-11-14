@@ -1,0 +1,440 @@
+{
+ "intents": [
+  {
+   "text": "add a goal meditate 10 minutes",
+   "intent": {
+    "kind": "goal",
+    "text": "meditate 10 minutes"
+   }
+  },
+  {
+   "text": "Amara, add a new habit: cold shower",
+   "intent": {
+    "kind": "goal",
+    "text": "cold shower"
+   }
+  },
+  {
+   "text": "remind me on Sept 14 2027 to renew the visa",
+   "intent": {
+    "kind": "date",
+    "text": "Sept 14 2027 to renew the visa"
+   }
+  },
+  {
+   "text": "add task order 50 jars for Taiyo Skin by Friday",
+   "intent": {
+    "kind": "task",
+    "text": "order 50 jars for Taiyo Skin by Friday"
+   }
+  },
+  {
+   "text": "content idea: how label approval works",
+   "intent": {
+    "kind": "idea",
+    "text": "how label approval works"
+   }
+  },
+  {
+   "text": "I should add a goal someday",
+   "intent": null
+  },
+  {
+   "text": "what is a good goal?",
+   "intent": null
+  },
+  {
+   "text": "remind me",
+   "intent": null
+  },
+  {
+   "text": "add task",
+   "intent": null
+  },
+  {
+   "text": "add a goal",
+   "intent": null
+  },
+  {
+   "text": "the content idea is fine",
+   "intent": null
+  },
+  {
+   "text": "could you maybe remind me on Friday",
+   "intent": null
+  },
+  {
+   "text": "task list please",
+   "intent": null
+  },
+  {
+   "text": "",
+   "intent": null
+  },
+  {
+   "text": "hey amara, please add the goal to read daily",
+   "intent": {
+    "kind": "goal",
+    "text": "read daily"
+   }
+  },
+  {
+   "text": "ok amara add a habit of stretching.",
+   "intent": {
+    "kind": "goal",
+    "text": "stretching"
+   }
+  },
+  {
+   "text": "okay Amara: add a new goal for sleep!!",
+   "intent": {
+    "kind": "goal",
+    "text": "sleep"
+   }
+  },
+  {
+   "text": "please add a date for the akiya inspection",
+   "intent": {
+    "kind": "date",
+    "text": "the akiya inspection"
+   }
+  },
+  {
+   "text": "add the deadline: lease renewal Friday",
+   "intent": {
+    "kind": "date",
+    "text": "lease renewal Friday"
+   }
+  },
+  {
+   "text": "Add an enterprise task to order labels",
+   "intent": null
+  },
+  {
+   "text": "add a the task x",
+   "intent": null
+  },
+  {
+   "text": "add task , , do the thing",
+   "intent": {
+    "kind": "task",
+    "text": "do the thing"
+   }
+  },
+  {
+   "text": "add task : ab",
+   "intent": {
+    "kind": "task",
+    "text": ": ab"
+   }
+  },
+  {
+   "text": "add task ab",
+   "intent": null
+  },
+  {
+   "text": "add task abc",
+   "intent": {
+    "kind": "task",
+    "text": "abc"
+   }
+  },
+  {
+   "text": "add task a:b",
+   "intent": {
+    "kind": "task",
+    "text": "a:b"
+   }
+  },
+  {
+   "text": "add a goal tomorrow I will run",
+   "intent": {
+    "kind": "goal",
+    "text": "tomorrow I will run"
+   }
+  },
+  {
+   "text": "add goal to  run   five  km ?",
+   "intent": {
+    "kind": "goal",
+    "text": "run five km"
+   }
+  },
+  {
+   "text": "  ADD A GOAL   Drink water  ",
+   "intent": {
+    "kind": "goal",
+    "text": "Drink water"
+   }
+  },
+  {
+   "text": "remind me by friday call mum",
+   "intent": {
+    "kind": "date",
+    "text": "friday call mum"
+   }
+  },
+  {
+   "text": "Amara add a content idea for reels about jars",
+   "intent": {
+    "kind": "idea",
+    "text": "reels about jars"
+   }
+  },
+  {
+   "text": "add a content idea: slow travel",
+   "intent": {
+    "kind": "idea",
+    "text": "slow travel"
+   }
+  },
+  {
+   "text": "add content idea for tea ritual",
+   "intent": {
+    "kind": "idea",
+    "text": "tea ritual"
+   }
+  },
+  {
+   "text": "amara,remind me on monday",
+   "intent": null
+  },
+  {
+   "text": "amara please add task file taxes",
+   "intent": {
+    "kind": "task",
+    "text": "file taxes"
+   }
+  },
+  {
+   "text": "add the enterprise task for labels ok",
+   "intent": {
+    "kind": "task",
+    "text": "labels ok"
+   }
+  },
+  {
+   "text": "add a goal that I stop doomscrolling...",
+   "intent": {
+    "kind": "goal",
+    "text": "I stop doomscrolling"
+   }
+  },
+  {
+   "text": "add a goal\tdrink\nwater",
+   "intent": {
+    "kind": "goal",
+    "text": "drink water"
+   }
+  },
+  {
+   "text": "add a goal éé",
+   "intent": null
+  },
+  {
+   "text": "add a goal é",
+   "intent": null
+  },
+  {
+   "text": "add a ĞOAL x yz",
+   "intent": null
+  },
+  {
+   "text": "hey add a goal run",
+   "intent": null
+  },
+  {
+   "text": "add a new new goal run",
+   "intent": null
+  },
+  {
+   "text": "add habit: yoga",
+   "intent": {
+    "kind": "goal",
+    "text": "yoga"
+   }
+  },
+  {
+   "text": "remind me on:",
+   "intent": null
+  },
+  {
+   "text": "add a date for",
+   "intent": {
+    "kind": "date",
+    "text": "for"
+   }
+  },
+  {
+   "text": "add a date for x",
+   "intent": {
+    "kind": "date",
+    "text": "for x"
+   }
+  },
+  {
+   "text": "add task to: ,,, abc",
+   "intent": {
+    "kind": "task",
+    "text": "abc"
+   }
+  },
+  {
+   "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "intent": null
+  },
+  {
+   "text": "add a goal yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+   "intent": {
+    "kind": "goal",
+    "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+   }
+  },
+  {
+   "text": "add a goal yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+   "intent": null
+  }
+ ],
+ "turns": [
+  {
+   "text": "confirm",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "Confirm.",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "yes, confirm",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "yes confirm save",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "save it",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "save",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "save it!",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "Amara, please save that",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "confirm save it",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "confirm save this.",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "no confirm",
+   "confirm": false,
+   "cancel": false
+  },
+  {
+   "text": "sure, do it",
+   "confirm": false,
+   "cancel": false
+  },
+  {
+   "text": "yes",
+   "confirm": false,
+   "cancel": false
+  },
+  {
+   "text": "yes,, save",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "cancel",
+   "confirm": false,
+   "cancel": true
+  },
+  {
+   "text": "Cancel!",
+   "confirm": false,
+   "cancel": true
+  },
+  {
+   "text": "never mind",
+   "confirm": false,
+   "cancel": true
+  },
+  {
+   "text": "nevermind.",
+   "confirm": false,
+   "cancel": true
+  },
+  {
+   "text": "discard",
+   "confirm": false,
+   "cancel": true
+  },
+  {
+   "text": "don't save it",
+   "confirm": false,
+   "cancel": true
+  },
+  {
+   "text": "dont save",
+   "confirm": false,
+   "cancel": true
+  },
+  {
+   "text": "Don't save",
+   "confirm": false,
+   "cancel": true
+  },
+  {
+   "text": "amara cancel",
+   "confirm": false,
+   "cancel": true
+  },
+  {
+   "text": "please cancel",
+   "confirm": false,
+   "cancel": true
+  },
+  {
+   "text": "cancel it",
+   "confirm": false,
+   "cancel": false
+  },
+  {
+   "text": "  confirm  ",
+   "confirm": true,
+   "cancel": false
+  },
+  {
+   "text": "confirm  it",
+   "confirm": false,
+   "cancel": false
+  },
+  {
+   "text": "hey amara, yes, confirm",
+   "confirm": true,
+   "cancel": false
+  }
+ ]
+}

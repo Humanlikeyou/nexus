@@ -5,11 +5,11 @@ mod dock_icon;
 use commands::n8n_status;
 use commands::voice;
 use commands::{
-    arm, assistant, ble_common, business_ledger, continuity, crew, crew_grants, events, followups,
-    goal_roadmap, goals, ha, home_brief, home_hr_take, kb_status, kv, llm_router, muse, noop,
-    noop_query, onboarding, openclaw, outbox, packager, recordings, replay, research,
-    restart_services, screen_opens, sessions, snapshots, system, take_events, take_log, telegram,
-    terrence_actions, terrence_automations, terrence_context, terrence_priorities,
+    arm, assistant, ble_common, business_ledger, continuity, crew, crew_grants, events,
+    experiments, followups, goal_roadmap, goals, ha, home_brief, home_hr_take, kb_status, kv,
+    llm_router, muse, noop, noop_query, onboarding, openclaw, outbox, packager, recordings, replay,
+    research, restart_services, screen_opens, sessions, snapshots, system, take_events, take_log,
+    telegram, terrence_actions, terrence_automations, terrence_context, terrence_priorities,
     terrence_projects, terrence_runtime, terrence_runtime_bridge,
 };
 // design-1111v stores
@@ -275,6 +275,8 @@ pub fn run() {
             followups::followups_list,
             followups::followups_session_edits,
             followups::followups_add_item,
+            experiments::experiments_record_start,
+            experiments::experiments_list,
             followups::followups_update_item,
             followups::followups_mark_done,
             followups::followups_reopen_item,
@@ -326,6 +328,7 @@ pub fn run() {
             commands::backup_schedule::restore_preview,
             commands::daily_table::daily_rebuild,
             commands::daily_table::daily_range,
+            commands::goal_progress::goal_progress_week,
             // Hemi-Sync (decision 0010)
             commands::hemisync::hemisync_import,
             commands::hemisync::hemisync_library,
@@ -334,6 +337,7 @@ pub fn run() {
             commands::hemisync::hemisync_session_rate,
             commands::hemisync::hemisync_sessions,
             commands::hemisync::hemisync_stats,
+            commands::hemisync::hemisync_ranking,
             // Keychain secrets + n8n key file (write-only; never return a value)
             commands::keychain::secrets_status,
             commands::keychain::secret_set,

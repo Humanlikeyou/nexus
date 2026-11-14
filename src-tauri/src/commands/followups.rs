@@ -537,6 +537,16 @@ fn today() -> NaiveDate {
     Local::now().date_naive()
 }
 
+/// Read-only snapshot of the lists for the turn context (`None` = the live `~/.hermes/amara` folder; tests pass a
+/// temp dir). Never writes.
+pub(crate) fn lists_in(dir: Option<&Path>, today: NaiveDate) -> Result<FollowupLists, String> {
+    let mut store = Store::home()?;
+    if let Some(d) = dir {
+        store.dir = d.to_path_buf();
+    }
+    store.list(today)
+}
+
 /// Hands back whatever must stay alive until the write is done (the in-flight lock).
 type Held = Box<dyn Send>;
 

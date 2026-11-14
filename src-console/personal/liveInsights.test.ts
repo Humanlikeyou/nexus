@@ -86,6 +86,17 @@ describe("weeklyReviewFrom", () => {
   });
 });
 
+describe("weeklyReviewFrom experiments", () => {
+  it("passes experiment results through untouched, and is empty with none (or an older stored review)", () => {
+    const side = { from: "2026-11-01", to: "2026-11-07", n: 7, mean: 80, days: ["2026-11-01"] };
+    const e = { followupId: 1, startDay: "2026-11-01", measure: "focus_mean", outcome: "no_clear_difference" as const, label: "no clear difference", reason: "not_significant" as const, p: 0.4, before: side, after: side };
+    const w = emptyReview();
+    expect(weeklyReviewFrom(w).experiments).toEqual([]);
+    w.experiments = [e];
+    expect(weeklyReviewFrom(w).experiments).toEqual([e]);
+  });
+});
+
 describe("live adapter", () => {
   it("is unwired until the first read, live after, and unwired again if the commands fail", async () => {
     const ok = makeLivePersonal(async (cmd: string) => {

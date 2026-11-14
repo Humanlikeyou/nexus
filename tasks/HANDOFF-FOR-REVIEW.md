@@ -348,3 +348,80 @@ Decision 0020 (Taisun's answers) was corrected from code facts before building:
 **Not run:** the table has never been built from real data. That's the first live check once installed. There's no UI yet, so wait for the build 10 min after launch (or 05:30), then read it with `daily_range`.
 
 **Lanes:** both Sonnet. T did take recording; D did the table, plus the four review fixes. The parent integrated and ran the security review and all gates.
+
+## 19. Stage A: put the built pieces to use (2026-11-14)
+
+The plan of record is `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk; it is untracked and his. The board header and phase table were refreshed from it (2a1c533, 194e2ef).
+
+**A1, turn pipeline.**
+- The Rust adds port (`adds::detect_add_intent`, `is_add_confirm`, `is_add_cancel`) is checked against a fixture generated from the real `intent.ts`: 51 intents and 28 confirm/cancel phrases, asserted in both Rust and vitest.
+- Adds run inside `amara_turn` through the same `issue_preview` → separate confirm turn → `redeem_and_save` path as the commands. Rules:
+  - The token never reaches the renderer.
+  - There is one pending add per conversation (2 min, at most 64 conversations).
+  - An empty conversation id does nothing.
+  - `via` is chat or voice.
+- New keyword-gated context sections `nexus_checkins`, `nexus_followups` and `nexus_patterns` go through the same `guarded_section` as the others: capped, injection-scanned, escaped. Check-in notes and follow-up notes/muted topics are left out.
+- `followups::lists_in` is a new read-only accessor.
+- [GATE] `nexus.turnPipeline` stays OFF.
+
+**A2.**
+- Patterns read `daily_range` through `prepare_daily`, sharing one `compute_prepared` with the old path, so the engine is the same code. If the table is unusable (no build, older than 36 h, or a partial noop/checkins/hemisync source), the old gatherers run.
+- The weekly review takes NOOP days from the table. It still reads sessions and check-ins directly, because it needs per-session counts, per-check-in means and free text, which a day row loses.
+- Proof: four equivalence tests (old Inputs vs a real `daily.db` round trip) are equal in full, and all existing tests are unchanged.
+
+**A3: `patterns_generic.rs`.**
+- 43 explicit (cause, effect) pairs with lags 0–3. Causes include `hemisync_min`, which covers A6's "Hemi-Sync day".
+- At least 3 days per side, Pearson r, t-test p, and the direction must agree. Then one Benjamini–Hochberg correction across every test run (Q 0.05). Confidence comes from the adjusted p, and nothing is published below `MIN_CONFIDENCE`.
+- Each finding has `daily:<day>` refs, `cause_days` and `cause_high_days`, and a descriptive last-28-days comparison.
+- A cause whose source is in the meta `partial` list is skipped (`skipped_causes`), not zero-filled.
+- On pure noise over 3 seeds it publishes nothing.
+
+**A4: `goal_progress_week`.** Per goal:
+- steps finished this week and last week (refs)
+- stalled goals: no finished step in 21 days (last day or "never")
+- "in common": published A3 findings whose cause-high days precede finished steps more than their base rate. This uses an exact binomial test with **BH across all goal × finding candidates** (security review fix), or "nothing stands out yet".
+
+**A5: `experiments.rs`.**
+- "Try it this week" now records `{followupId, startDay, measure, pair}` in `<data>/experiments/experiments.json`: 0600, 0700 folder, at most 200 entries, a malformed file is never overwritten, and nothing goes to ~/.hermes.
+- 7 days before vs 7 days from the start, using the patterns test. The result is better / worse / "no clear difference" (reason no_measure / not_enough_data / not_significant).
+- The weekly review carries the experiments that fell due that week (`Review.experiments`).
+- The reminder-copy suffix a lane had added was removed (no copy changes); a Design question was logged instead.
+
+**A6: `hemisync_ranking`.**
+- Tracks are ranked by focus, by calm_pct and by rating, with at least 3 sessions per measure; below that they're listed as "not enough sessions".
+- Sessions are matched by exact id, files are capped at 32 MB, and they are only read.
+
+**Security review:** PASS on approvals, chat context, files, Muse and the new commands. One stats FIX (uncorrected tests in goal progress) and four LOWs were all fixed with tests:
+- empty conversation id
+- `followup_id <= 0`
+- 0700 experiments folder
+- exact session-id match
+
+**Gates (194e2ef + Stage A):**
+- src-tauri **1032 passed / 6 ignored / 0 failed** (was 982)
+- router 126
+- vitest **1983 / 9 skipped** (was 1899; +79 from the add-intent parity fixture)
+- neuro 21
+- fmt, clippy -D warnings, tsc, lint, check:secrets clean
+- **Full e2e, run alone: 784 passed / 12 skipped / 0 failed.** It ran before the review fixes; those are Rust-only, except one bridge.ts type rename that tsc covers.
+
+**Design questions added (2026-11-14):**
+- "experiment can't be tracked"
+- where weekly-review experiment results go
+- where the goal-progress readout goes
+
+**Wrong or stale, found while working:**
+- `tasks/plans/turn-pipeline.md` still lists the adds port as to do.
+- `goals.json` uses snake_case.
+- A lane ran `npx vite-node` once to generate the fixture. That fetched a dev tool into the npx cache; no repo dependency was added.
+
+**Not run:**
+- any live check on real data: the turn with adds, generic findings on Taisun's history, experiments
+- WebKit e2e
+
+**Open questions for Taisun:**
+1. Should check-in notes ever reach the chat context? Today they're left out.
+2. An experiment result appears only in the review of the week it falls due. If that review is never opened, it's lost. Should results carry over?
+3. A goal with no roadmap shows as stalled "never". Hide those?
+4. "In common" looks 1 day before each finished step. Should it look 2–3 days back?
+5. Patterns use a table up to 36 h old (built nightly), so today's sessions count from tomorrow. OK?

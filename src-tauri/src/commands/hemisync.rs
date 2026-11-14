@@ -919,6 +919,185 @@ pub(crate) fn stats_from(rows: &[SessionRow]) -> Vec<TrackStats> {
     out
 }
 
+// ---------------------------------------------------------------- ranking (read-only)
+
+/// A track needs at least this many sessions WITH a value for a measure before it is ranked on
+/// that measure (same floor as patterns.rs `MIN_PER_SIDE`). Below it: "not enough sessions".
+pub(crate) const MIN_SESSIONS_PER_TRACK: usize = 3;
+/// Muse session files larger than this are skipped (the existing screen path reads every file in
+/// the sessions folder with no cap; the ranking opens only linked sessions and caps each file).
+const MAX_RANK_SESSION_BYTES: u64 = 32 * 1024 * 1024;
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RankedTrack {
+    /// 1-based; equal means share a rank.
+    pub rank: usize,
+    pub track_id: String,
+    /// Sessions that had a value for this measure.
+    pub n: usize,
+    pub mean: f64,
+    /// Hemi-Sync session ids behind `mean` (each is also a Muse session id).
+    pub session_ids: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UnrankedTrack {
+    pub track_id: String,
+    pub n: usize,
+    pub session_ids: Vec<String>,
+    /// Always "not enough sessions".
+    pub reason: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MeasureRanking {
+    /// Best first.
+    pub ranked: Vec<RankedTrack>,
+    pub not_enough_sessions: Vec<UnrankedTrack>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackRanking {
+    pub min_sessions: usize,
+    /// Which Muse summary field "focus" and "calm" use (decision 0020).
+    pub focus_field: String,
+    pub calm_field: String,
+    pub focus: MeasureRanking,
+    pub calm: MeasureRanking,
+    pub rating: MeasureRanking,
+}
+
+fn rank_measure(per_track: HashMap<String, Vec<(String, f64)>>) -> MeasureRanking {
+    let mut ranked = Vec::new();
+    let mut short = Vec::new();
+    for (track_id, mut vals) in per_track {
+        vals.sort_by(|a, b| a.0.cmp(&b.0));
+        let ids: Vec<String> = vals.iter().map(|v| v.0.clone()).collect();
+        if vals.len() < MIN_SESSIONS_PER_TRACK {
+            short.push(UnrankedTrack {
+                track_id,
+                n: vals.len(),
+                session_ids: ids,
+                reason: "not enough sessions".into(),
+            });
+        } else {
+            let m = vals.iter().map(|v| v.1).sum::<f64>() / vals.len() as f64;
+            ranked.push(RankedTrack {
+                rank: 0,
+                track_id,
+                n: vals.len(),
+                mean: m,
+                session_ids: ids,
+            });
+        }
+    }
+    ranked.sort_by(|a, b| {
+        b.mean
+            .total_cmp(&a.mean)
+            .then_with(|| a.track_id.cmp(&b.track_id))
+    });
+    let mut prev: Option<(f64, usize)> = None;
+    for (i, r) in ranked.iter_mut().enumerate() {
+        r.rank = match prev {
+            Some((m, rank)) if m == r.mean => rank,
+            _ => i + 1,
+        };
+        prev = Some((r.mean, r.rank));
+    }
+    short.sort_by(|a, b| a.track_id.cmp(&b.track_id));
+    MeasureRanking {
+        ranked,
+        not_enough_sessions: short,
+    }
+}
+
+/// Focus (`avg_focus`) and calm (`calm_pct`, decision 0020; never `avg_relaxation`) of ONLY the
+/// linked sessions: files are matched by the `_<id>.json` name suffix before anything is parsed.
+fn rank_metrics(
+    muse_sessions_dir: &Path,
+    wanted: &[&str],
+) -> HashMap<String, (Option<f64>, Option<f64>)> {
+    let mut out = HashMap::new();
+    let Ok(rd) = fs::read_dir(muse_sessions_dir) else {
+        return out;
+    };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(stem) = name.strip_suffix(".json") else {
+            continue;
+        };
+        // The id is exactly what follows the last "_" in the stem: "muse_a1" is a1, never "1".
+        let Some(file_id) = stem.rsplit_once('_').map(|(_, id)| id) else {
+            continue;
+        };
+        let Some(id) = wanted.iter().find(|id| **id == file_id).copied() else {
+            continue;
+        };
+        if entry.metadata().map(|m| m.len()).unwrap_or(u64::MAX) > MAX_RANK_SESSION_BYTES {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let Some(sv) = v.get("session").cloned() else {
+            continue;
+        };
+        if let Ok(mut s) = serde_json::from_value::<sessions::RecordedSession>(sv) {
+            s.summary.normalize_legacy_scores();
+            if s.id == id {
+                out.insert(
+                    id.to_string(),
+                    (finite(s.summary.avg_focus), finite(s.summary.calm_pct)),
+                );
+            }
+        }
+    }
+    out
+}
+
+/// Tracks ranked by measured EEG effect (mean focus, mean calm_pct of their linked Muse sessions)
+/// and, separately, by mean rating. These are plain means, not a controlled comparison.
+pub(crate) fn ranking_in(data: &Path, muse_sessions_dir: &Path) -> Result<TrackRanking, String> {
+    let store = load_store(data)?;
+    let ids: Vec<&str> = store.sessions.iter().map(|s| s.id.as_str()).collect();
+    let metrics = rank_metrics(muse_sessions_dir, &ids);
+    let (mut focus, mut calm, mut rating) = (HashMap::new(), HashMap::new(), HashMap::new());
+    for s in &store.sessions {
+        // Every track appears in every measure, so one with no values shows up as "not enough".
+        let f: &mut Vec<_> = focus.entry(s.track_id.clone()).or_default();
+        let c: &mut Vec<_> = calm.entry(s.track_id.clone()).or_default();
+        let r: &mut Vec<_> = rating.entry(s.track_id.clone()).or_default();
+        let (mf, mc) = metrics.get(&s.id).copied().unwrap_or((None, None));
+        if let Some(v) = mf {
+            f.push((s.id.clone(), v));
+        }
+        if let Some(v) = mc {
+            c.push((s.id.clone(), v));
+        }
+        if let Some(v) = s.rating {
+            r.push((s.id.clone(), f64::from(v)));
+        }
+    }
+    Ok(TrackRanking {
+        min_sessions: MIN_SESSIONS_PER_TRACK,
+        focus_field: "avg_focus".into(),
+        calm_field: "calm_pct".into(),
+        focus: rank_measure(focus),
+        calm: rank_measure(calm),
+        rating: rank_measure(rating),
+    })
+}
+
 // ---------------------------------------------------------------- Amara context
 
 /// Unicode format characters (zero-width, bidi marks and overrides, BOM, ...): dropped, so they
@@ -1365,6 +1544,15 @@ pub async fn hemisync_stats() -> Result<Vec<TrackStats>, String> {
     let data = crate::app_paths::data_dir();
     blocking(JoinErr::Code("io_error"), move || {
         sessions_in(&data, &sessions::sessions_dir()).map(|r| stats_from(&r))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn hemisync_ranking() -> Result<TrackRanking, String> {
+    let data = crate::app_paths::data_dir();
+    blocking(JoinErr::Code("io_error"), move || {
+        ranking_in(&data, &sessions::sessions_dir())
     })
     .await
 }
@@ -1899,6 +2087,82 @@ mod tests {
             json,
             serde_json::json!({ "focusAvg": null, "calmAvg": null, "bands": null })
         );
+    }
+
+    #[test]
+    fn ranking_uses_avg_focus_and_calm_pct_needs_min_sessions_and_traces_ids() {
+        let (_h, data, tracks) = imported("rank");
+        let muse = data.join("sessions");
+        fs::create_dir_all(&muse).unwrap();
+        let (t0, t1) = (&tracks[0].id, &tracks[1].id);
+        let write = |id: &str, focus: f64, calm: Option<f64>, relax: f64| {
+            let v = serde_json::json!({ "session": {
+                "id": id, "device_type": "muse", "start": "2026-11-12T10:00:00Z", "end": "2026-11-12T10:30:00Z",
+                "duration_secs": 1800, "data_points": 10, "file_path": "eeg_x.ndjson",
+                "summary": { "avg_focus": focus, "avg_relaxation": relax, "calm_pct": calm, "avg_hr": null, "max_hr": null, "avg_hrv": null, "score_scale": 100 }
+            }, "data": {} });
+            fs::write(muse.join(format!("muse_{id}.json")), v.to_string()).unwrap();
+        };
+        // t0: 3 sessions; t1: 2 sessions (below the floor). A decoy file for an unlinked id exists.
+        for (i, (f, c)) in [(60.0, 40.0), (70.0, 50.0), (80.0, 60.0)]
+            .iter()
+            .enumerate()
+        {
+            let id = format!("a{i}");
+            link_in(&data, &id, t0, "2026-11-10T21:00:00+09:00").unwrap();
+            write(&id, *f, Some(*c), 99.0);
+            rate_in(&data, &id, 4, None).unwrap();
+        }
+        for i in 0..2 {
+            let id = format!("b{i}");
+            link_in(&data, &id, t1, "2026-11-11T21:00:00+09:00").unwrap();
+            write(&id, 90.0, None, 99.0);
+        }
+        write("decoy", 1.0, Some(1.0), 1.0);
+        let r = ranking_in(&data, &muse).unwrap();
+        assert_eq!(r.min_sessions, 3);
+        assert_eq!(r.calm_field, "calm_pct");
+        assert_eq!(r.focus.ranked.len(), 1);
+        let top = &r.focus.ranked[0];
+        assert_eq!((top.rank, &top.track_id, top.n, top.mean), (1, t0, 3, 70.0));
+        assert_eq!(top.session_ids, vec!["a0", "a1", "a2"]);
+        // calm is calm_pct (50), never avg_relaxation (99)
+        assert_eq!(r.calm.ranked[0].mean, 50.0);
+        // t1: 2 focus values -> not ranked; no calm values -> not ranked
+        let short = &r.focus.not_enough_sessions;
+        assert_eq!((short.len(), &short[0].track_id, short[0].n), (1, t1, 2));
+        assert!(r
+            .calm
+            .not_enough_sessions
+            .iter()
+            .any(|u| &u.track_id == t1 && u.n == 0));
+        // rating ranks separately and only t0 has 3 ratings
+        assert_eq!(r.rating.ranked.len(), 1);
+        assert_eq!(r.rating.ranked[0].mean, 4.0);
+        assert!(r
+            .rating
+            .not_enough_sessions
+            .iter()
+            .any(|u| &u.track_id == t1));
+    }
+
+    #[test]
+    fn rank_metrics_matches_the_exact_id_after_the_last_underscore() {
+        let (_h, data, _t) = imported("rankid");
+        let muse = data.join("sessions");
+        fs::create_dir_all(&muse).unwrap();
+        for (id, focus) in [("1", 10.0), ("a1", 20.0)] {
+            let v = serde_json::json!({ "session": {
+                "id": id, "device_type": "muse", "start": "2026-11-12T10:00:00Z", "end": "2026-11-12T10:30:00Z",
+                "duration_secs": 1800, "data_points": 10, "file_path": "eeg_x.ndjson",
+                "summary": { "avg_focus": focus, "avg_relaxation": 1.0, "calm_pct": null, "avg_hr": null, "max_hr": null, "avg_hrv": null, "score_scale": 100 }
+            }, "data": {} });
+            fs::write(muse.join(format!("muse_{id}.json")), v.to_string()).unwrap();
+        }
+        // "1" is listed first and is a suffix of "a1": the old ends_with match gave a1's file to id "1".
+        let m = rank_metrics(&muse, &["1", "a1"]);
+        assert_eq!(m["1"].0, Some(10.0));
+        assert_eq!(m["a1"].0, Some(20.0));
     }
 
     #[test]
@@ -2442,7 +2706,8 @@ mod tests {
             assert!(!src.contains(banned), "{banned}");
         }
         // sessions/ is only read, through the one read-only helper
-        assert_eq!(src.matches("sessions::sessions_dir()").count(), 3);
+        // (hemisync_sessions, hemisync_stats, hemisync_ranking: all read-only)
+        assert_eq!(src.matches("sessions::sessions_dir()").count(), 4);
         assert_eq!(src.matches("sessions::read_stored_sessions_in").count(), 1);
         // the only removal is our own temp file
         assert_eq!(src.matches("remove_file(").count(), 2);

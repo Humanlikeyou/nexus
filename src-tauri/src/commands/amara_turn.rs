@@ -722,8 +722,9 @@ pub(crate) struct Deps {
     pub router_base: String,
     pub limits: StreamLimits,
     pub retry_floor: Duration,
-    /// Adds intent hook point (the adds port lands later). None means "not an add".
-    pub adds: Arc<dyn Fn(&str, &str) -> Option<AddHit> + Send + Sync>,
+    /// Adds pre-route: (conversation, text, via "chat" | "voice") -> the turn's reply. None means "not an add".
+    /// Blocking (file reads and writes), so the pipeline calls it on the blocking pool.
+    pub adds: Arc<dyn Fn(&str, &str, &str) -> Option<AddHit> + Send + Sync>,
     pub home: F1<String, Option<String>>,
     /// (conversation, text) -> navy reply: (interaction id, text, tier).
     pub navy: F1<(String, String), Result<(String, String, Option<&'static str>), String>>,
@@ -1004,7 +1005,18 @@ async fn pipeline(
             None,
         ));
     }
-    if let Some(hit) = (deps.adds)(&conv, &text) {
+    let via = if surface == Surface::Voice {
+        "voice"
+    } else {
+        "chat"
+    };
+    let adds = deps.adds.clone();
+    let (add_conv, add_text) = (conv.clone(), text.clone());
+    let add_hit = tauri::async_runtime::spawn_blocking(move || adds(&add_conv, &add_text, via))
+        .await
+        .ok()
+        .flatten();
+    if let Some(hit) = add_hit {
         em.send(TurnEvent::Action {
             kind: "add_preview",
             payload: hit.payload,
@@ -1340,6 +1352,193 @@ fn scrub_protocol(visible: &str, raw: &str, present: bool) -> (String, bool) {
     (v.trim().to_string(), seen)
 }
 
+// ── Adds (chat and voice) ───────────────────────────────────────────────────
+//
+// One add path: detect -> preview (nothing written, single-use token parked in adds.rs) -> a SEPARATE confirm turn ->
+// redeem the token and save. The pending preview lives here, per conversation, 2 minutes; the token never leaves Rust
+// (the action payload carries only the readable fields). Confirm/cancel only act on a live pending add of the same
+// conversation, so "confirm" with nothing pending falls through to chat and saves nothing.
+
+const ADD_PENDING_MS: u64 = 2 * 60_000;
+const MAX_PENDING_ADDS: usize = 64;
+
+struct PendingAdd {
+    kind: &'static str,
+    preview: super::adds::AddPreview,
+    via: String,
+    at: u64,
+}
+
+type AddPreviewFn =
+    Arc<dyn Fn(&str, &str) -> Result<super::adds::ParseResult, String> + Send + Sync>;
+type AddSaveFn = Arc<
+    dyn Fn(&str, &super::adds::AddPreview, &str) -> Result<super::adds::Saved, String>
+        + Send
+        + Sync,
+>;
+
+pub(crate) struct AddsFlow {
+    pending: Mutex<HashMap<String, PendingAdd>>,
+    preview: AddPreviewFn,
+    save: AddSaveFn,
+    now: Arc<dyn Fn() -> u64 + Send + Sync>,
+}
+
+fn add_label(kind: &str) -> &'static str {
+    match kind {
+        "goal" => "goal",
+        "date" => "date",
+        "task" => "task",
+        _ => "content idea",
+    }
+}
+
+impl AddsFlow {
+    fn production() -> AddsFlow {
+        AddsFlow {
+            pending: Mutex::new(HashMap::new()),
+            preview: Arc::new(super::adds::issue_preview),
+            save: Arc::new(|kind, preview, via| {
+                super::adds::redeem_and_save(kind, preview, Some(via))
+            }),
+            now: Arc::new(|| {
+                static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+                START.get_or_init(Instant::now).elapsed().as_millis() as u64
+            }),
+        }
+    }
+
+    fn hit(stage: &str, kind: &str, text: String, extra: Value) -> AddHit {
+        let mut payload = json!({ "stage": stage, "kind": kind });
+        if let (Some(o), Some(e)) = (payload.as_object_mut(), extra.as_object()) {
+            o.extend(e.clone());
+        }
+        AddHit { payload, text }
+    }
+
+    pub(crate) fn handle(&self, conv: &str, text: &str, via: &str) -> Option<AddHit> {
+        use super::adds::{detect_add_intent, is_add_cancel, is_add_confirm, ParseResult};
+        // No conversation id: one shared pending slot would let unrelated turns confirm each other's add.
+        if conv.trim().is_empty() {
+            return None;
+        }
+        let now = (self.now)();
+        let live = {
+            let mut map = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+            map.retain(|_, p| now.saturating_sub(p.at) <= ADD_PENDING_MS);
+            if is_add_confirm(text) || is_add_cancel(text) {
+                // Taken out under the lock: a pending add can be confirmed or cancelled once.
+                map.remove(conv).map(|p| (p, is_add_confirm(text)))
+            } else {
+                None
+            }
+        };
+        if let Some((p, confirm)) = live {
+            if !confirm {
+                return Some(Self::hit(
+                    "cancelled",
+                    p.kind,
+                    "Cancelled. Nothing was saved.".into(),
+                    json!({}),
+                ));
+            }
+            return Some(match (self.save)(p.kind, &p.preview, &p.via) {
+                Ok(saved) => Self::hit(
+                    "saved",
+                    p.kind,
+                    format!(
+                        "Saved: {}. You can undo it from the page for 8 seconds, and it is in History as from {}.",
+                        saved.title, p.via
+                    ),
+                    json!({ "id": saved.id, "title": saved.title, "via": p.via }),
+                ),
+                Err(_) => Self::hit(
+                    "failed",
+                    p.kind,
+                    "Couldn't save, so nothing was added. Say the add again to retry.".into(),
+                    json!({}),
+                ),
+            });
+        }
+        let intent = detect_add_intent(text)?;
+        // A new add replaces any older pending one for this conversation.
+        self.pending
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(conv);
+        let reply = match (self.preview)(intent.kind, &intent.text) {
+            Ok(r) => r,
+            Err(_) => {
+                return Some(Self::hit(
+                    "failed",
+                    intent.kind,
+                    "Couldn't read that, so nothing was saved.".into(),
+                    json!({}),
+                ))
+            }
+        };
+        Some(match reply {
+            ParseResult::Ask { question, note, .. } => Self::hit(
+                "ask",
+                intent.kind,
+                format!(
+                    "{question}{} Say the add again with the answer. Nothing was saved.",
+                    note.map(|n| format!(" {n}")).unwrap_or_default()
+                ),
+                json!({}),
+            ),
+            ParseResult::Elsewhere { message, .. } => Self::hit(
+                "elsewhere",
+                intent.kind,
+                format!("{message} Nothing was saved."),
+                json!({}),
+            ),
+            ParseResult::Preview { preview } => {
+                let fields = preview
+                    .fields
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v}"))
+                    .collect::<Vec<_>>()
+                    .join(". ");
+                let text = format!(
+                    "Check before saving ({}): {}. {}.{} Say \"confirm\" to save or \"cancel\".",
+                    add_label(intent.kind),
+                    preview.title,
+                    fields,
+                    preview
+                        .note
+                        .as_ref()
+                        .map(|n| format!(" {n}"))
+                        .unwrap_or_default()
+                );
+                let payload = json!({
+                    "title": preview.title,
+                    "fields": preview.fields,
+                    "note": preview.note,
+                });
+                let mut map = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+                if map.len() >= MAX_PENDING_ADDS {
+                    if let Some(oldest) =
+                        map.iter().min_by_key(|(_, p)| p.at).map(|(k, _)| k.clone())
+                    {
+                        map.remove(&oldest);
+                    }
+                }
+                map.insert(
+                    conv.to_string(),
+                    PendingAdd {
+                        kind: intent.kind,
+                        preview,
+                        via: via.to_string(),
+                        at: now,
+                    },
+                );
+                Self::hit("preview", intent.kind, text, payload)
+            }
+        })
+    }
+}
+
 // ── Production wiring ───────────────────────────────────────────────────────
 
 impl Deps {
@@ -1360,8 +1559,10 @@ impl Deps {
             router_base,
             limits: StreamLimits::default(),
             retry_floor: RETRY_FLOOR,
-            // Hook point: the adds intent port (adds/intent.ts) is not ported yet.
-            adds: Arc::new(|_conv, _text| None),
+            adds: {
+                let flow = AddsFlow::production();
+                Arc::new(move |conv, text, via| flow.handle(conv, text, via))
+            },
             home: Arc::new(|text| {
                 Box::pin(async move {
                     match super::ha::ha_conversation(text).await {
@@ -1786,7 +1987,7 @@ mod tests {
             router_base: base.to_string(),
             limits: StreamLimits::default(),
             retry_floor: Duration::from_millis(1),
-            adds: Arc::new(|_, _| None),
+            adds: Arc::new(|_, _, _| None),
             home: Arc::new(move |_| {
                 lg_home.lock().unwrap().push("home".into());
                 Box::pin(async { Some("Done.".to_string()) })
@@ -2033,7 +2234,7 @@ mod tests {
     async fn preroute_order_is_navy_adds_window_home() {
         // adds would take everything, but navy comes first.
         let mut r = rig("http://127.0.0.1:1");
-        r.deps.adds = Arc::new(|_, _| {
+        r.deps.adds = Arc::new(|_, _, _| {
             Some(AddHit {
                 payload: json!({"p":1}),
                 text: "added".into(),
@@ -2055,7 +2256,7 @@ mod tests {
         // adds beats window and home.
         let r2 = {
             let mut r = rig("http://127.0.0.1:1");
-            r.deps.adds = Arc::new(|_, _| {
+            r.deps.adds = Arc::new(|_, _, _| {
                 Some(AddHit {
                     payload: json!({}),
                     text: "added".into(),
@@ -2536,6 +2737,155 @@ mod tests {
     }
 
     // ── ports and fixtures ─────────────────────────────────────────────────
+
+    // ── adds flow (chat and voice) ─────────────────────────────────────────
+
+    use std::sync::atomic::AtomicU64;
+
+    /// The real preview/save code on temp dirs and a local token store, so the token path is the production one.
+    fn real_flow(tag: &str) -> (AddsFlow, std::path::PathBuf, Arc<AtomicU64>) {
+        use super::super::adds::{preview_in, save_in, Dirs, ParseResult, Tokens};
+        let root = super::super::local_store::tests::temp_dir(tag);
+        let dirs = Dirs {
+            data: root.join("data"),
+            workspace: root.join("ws"),
+            legacy: root.join("legacy"),
+        };
+        std::fs::create_dir_all(&dirs.data).unwrap();
+        std::fs::create_dir_all(&dirs.workspace).unwrap();
+        let tokens = Arc::new(Mutex::new(Tokens::default()));
+        let clock = Arc::new(AtomicU64::new(1_000));
+        let (d1, t1, c1) = (dirs.clone(), tokens.clone(), clock.clone());
+        let (d2, t2, c2) = (dirs, tokens, clock.clone());
+        let flow = AddsFlow {
+            pending: Mutex::new(HashMap::new()),
+            preview: Arc::new(move |kind, text| {
+                let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 14).unwrap();
+                let mut r = preview_in(kind, text, &d1, today)?;
+                if let ParseResult::Preview { preview } = &mut r {
+                    let payload = preview.payload.take().unwrap();
+                    let tok = t1
+                        .lock()
+                        .unwrap()
+                        .issue(kind, payload, c1.load(Ordering::SeqCst));
+                    preview.payload = Some(json!({ "token": tok }));
+                }
+                Ok(r)
+            }),
+            save: Arc::new(move |kind, preview, via| {
+                let payload =
+                    t2.lock()
+                        .unwrap()
+                        .redeem(kind, preview, c2.load(Ordering::SeqCst))?;
+                let trusted = super::super::adds::AddPreview {
+                    payload: Some(payload),
+                    ..preview.clone()
+                };
+                let now =
+                    chrono::DateTime::parse_from_rfc3339("2026-11-14T10:00:00+09:00").unwrap();
+                save_in(kind, &trusted, Some(via), &d2, now)
+            }),
+            now: {
+                let c = clock.clone();
+                Arc::new(move || c.load(Ordering::SeqCst))
+            },
+        };
+        (flow, root, clock)
+    }
+    fn goals_file(root: &std::path::Path) -> String {
+        std::fs::read_to_string(root.join("data").join("goals.json"))
+            .unwrap_or_default()
+            .to_lowercase()
+    }
+
+    #[test]
+    fn add_never_saves_without_a_confirm_turn() {
+        let (f, root, _) = real_flow("add-confirm");
+        // not an add: falls through to chat
+        assert!(f.handle("c1", "how was your day", "chat").is_none());
+        // confirm with nothing pending: falls through, nothing written
+        assert!(f.handle("c1", "confirm", "chat").is_none());
+        let h = f
+            .handle("c1", "add a goal meditate 10 minutes", "chat")
+            .unwrap();
+        assert_eq!(h.payload["stage"], "preview");
+        assert!(h.text.contains("Check before saving (goal)"), "{}", h.text);
+        assert!(h.text.contains("Say \"confirm\" to save"));
+        // the single-use token never reaches the renderer
+        assert!(!h.payload.to_string().contains("token"));
+        assert_eq!(goals_file(&root), "", "preview wrote nothing");
+        // an unrelated turn and a different conversation cannot confirm it
+        assert!(f.handle("c1", "sure, do it", "chat").is_none());
+        assert!(f.handle("c2", "confirm", "chat").is_none());
+        assert_eq!(goals_file(&root), "");
+        let s = f.handle("c1", "confirm", "chat").unwrap();
+        assert_eq!(s.payload["stage"], "saved");
+        assert_eq!(s.payload["via"], "chat");
+        assert!(
+            goals_file(&root).contains("meditate"),
+            "{}",
+            goals_file(&root)
+        );
+        // single use: a second confirm is not an add turn and saves nothing more
+        let before = goals_file(&root);
+        assert!(f.handle("c1", "confirm", "chat").is_none());
+        assert_eq!(goals_file(&root), before);
+    }
+
+    #[test]
+    fn add_cancel_and_expiry_save_nothing_and_voice_is_tagged() {
+        let (f, root, clock) = real_flow("add-cancel");
+        f.handle("c1", "add a goal read daily", "voice").unwrap();
+        let c = f.handle("c1", "cancel", "voice").unwrap();
+        assert_eq!(c.payload["stage"], "cancelled");
+        assert!(f.handle("c1", "confirm", "voice").is_none());
+        // expiry: confirm after 2 minutes finds nothing
+        f.handle("c1", "add a goal read daily", "voice").unwrap();
+        clock.fetch_add(ADD_PENDING_MS + 1, Ordering::SeqCst);
+        assert!(f.handle("c1", "confirm", "voice").is_none());
+        assert_eq!(goals_file(&root), "");
+        // voice via is carried through to the save
+        f.handle("c1", "add a goal read daily", "voice").unwrap();
+        let s = f.handle("c1", "yes, confirm", "voice").unwrap();
+        assert_eq!(s.payload["via"], "voice");
+        assert!(s.text.contains("as from voice"));
+    }
+
+    #[test]
+    fn an_empty_conversation_id_never_runs_the_adds_flow() {
+        let (f, root, _) = real_flow("add-noconv");
+        for c in ["", "   "] {
+            assert!(f.handle(c, "add a goal first goal here", "chat").is_none());
+            assert!(f.handle(c, "confirm", "chat").is_none());
+        }
+        assert!(f.pending.lock().unwrap().is_empty());
+        assert!(!goals_file(&root).contains("first"));
+    }
+
+    #[test]
+    fn a_new_add_replaces_the_pending_one() {
+        let (f, root, _) = real_flow("add-replace");
+        f.handle("c1", "add a goal first goal here", "chat")
+            .unwrap();
+        f.handle("c1", "add a goal second goal here", "chat")
+            .unwrap();
+        f.handle("c1", "confirm", "chat").unwrap();
+        let g = goals_file(&root);
+        assert!(g.contains("second") && !g.contains("first"), "{g}");
+    }
+
+    #[tokio::test]
+    async fn adds_run_inside_the_turn_with_the_action_and_add_path() {
+        let flow = Arc::new(real_flow("add-turn").0);
+        let mut r = rig("http://127.0.0.1:1");
+        r.deps.adds = Arc::new(move |c, t, v| flow.handle(c, t, v));
+        run(&r, "add a goal drink water daily", Surface::Typed).await;
+        let TurnEvent::Done { path, text, .. } = terminal(&r) else {
+            panic!()
+        };
+        assert_eq!(path, "add");
+        assert!(text.starts_with("Check before saving"), "{text}");
+    }
 
     #[test]
     fn intents_match_the_shared_fixture() {

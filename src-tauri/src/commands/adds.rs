@@ -876,23 +876,45 @@ pub(crate) fn history_in(kind: &str, dirs: &Dirs) -> Result<Vec<HistoryItem>, St
         .collect())
 }
 
+/// Reads the line and, for a preview, parks its payload behind a single-use token (the caller sees the token only).
+/// Shared by the `add_preview` command and the Rust turn pipeline: one issuing path.
+pub(crate) fn issue_preview(kind: &str, text: &str) -> Result<ParseResult, String> {
+    let mut r = preview_in(kind, text, &Dirs::real(), day_of(&now_jst()))?;
+    if let ParseResult::Preview { preview } = &mut r {
+        if let Some(payload) = preview.payload.take() {
+            let token =
+                TOKENS
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .issue(kind, payload, mono_ms());
+            preview.payload = Some(serde_json::json!({ "token": token }));
+        }
+    }
+    Ok(r)
+}
+
+/// Redeems the preview's token (single use, 2 minutes, kind-bound) and writes. Shared by `add_save` and the turn
+/// pipeline's confirm turn: no other path reaches `save_in` with a client-supplied preview.
+pub(crate) fn redeem_and_save(
+    kind: &str,
+    preview: &AddPreview,
+    via: Option<&str>,
+) -> Result<Saved, String> {
+    let payload =
+        TOKENS
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .redeem(kind, preview, mono_ms())?;
+    let trusted = AddPreview {
+        payload: Some(payload),
+        ..preview.clone()
+    };
+    save_in(kind, &trusted, via, &Dirs::real(), now_jst())
+}
+
 #[tauri::command]
 pub async fn add_preview(kind: String, text: String) -> Result<ParseResult, String> {
-    blocking(JoinErr::Plain, move || {
-        let mut r = preview_in(&kind, &text, &Dirs::real(), day_of(&now_jst()))?;
-        if let ParseResult::Preview { preview } = &mut r {
-            if let Some(payload) = preview.payload.take() {
-                let token = TOKENS.lock().unwrap_or_else(|p| p.into_inner()).issue(
-                    &kind,
-                    payload,
-                    mono_ms(),
-                );
-                preview.payload = Some(serde_json::json!({ "token": token }));
-            }
-        }
-        Ok(r)
-    })
-    .await
+    blocking(JoinErr::Plain, move || issue_preview(&kind, &text)).await
 }
 
 #[tauri::command]
@@ -902,16 +924,7 @@ pub async fn add_save(
     via: Option<String>,
 ) -> Result<Saved, String> {
     blocking(JoinErr::Plain, move || {
-        let payload =
-            TOKENS
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .redeem(&kind, &preview, mono_ms())?;
-        let trusted = AddPreview {
-            payload: Some(payload),
-            ..preview
-        };
-        save_in(&kind, &trusted, via.as_deref(), &Dirs::real(), now_jst())
+        redeem_and_save(&kind, &preview, via.as_deref())
     })
     .await
 }
@@ -927,6 +940,293 @@ pub async fn add_undo(kind: String, id: String) -> Result<bool, String> {
 #[tauri::command]
 pub async fn add_history(kind: String) -> Result<Vec<HistoryItem>, String> {
     blocking(JoinErr::Plain, move || history_in(&kind, &Dirs::real())).await
+}
+
+// ---- chat / voice intent (hand port of src-console/adds/intent.ts; there is no regex crate) ----
+
+/// JS `\s` (and `String.prototype.trim`): not Rust's `char::is_whitespace` (U+0085 differs, U+FEFF is missing).
+fn js_space(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202f}'
+                | '\u{205f}'
+                | '\u{3000}'
+                | '\u{feff}'
+    )
+}
+
+fn js_trim(s: &str) -> &str {
+    s.trim_matches(js_space)
+}
+
+/// One element of an intent pattern. Matching is case-insensitive (ASCII) and backtracks like the TS regexes.
+#[derive(Clone, Copy)]
+enum St {
+    /// `(?:(?:hey |ok |okay )?amara[,:]?\s+)?`
+    Lead,
+    /// `(?:please\s+)?`
+    Please,
+    /// `(?:yes[, ]+)?`
+    Yes,
+    /// One of the literals, required.
+    Lit(&'static [&'static str]),
+    /// One of the literals, or nothing.
+    Opt(&'static [&'static str]),
+    /// `[\s,:]+(\S.{2,})$` and capture the group.
+    Body,
+    /// `$`
+    End,
+}
+
+fn space_run(s: &str, pos: usize) -> Option<usize> {
+    let n: usize = s[pos..]
+        .chars()
+        .take_while(|c| js_space(*c))
+        .map(char::len_utf8)
+        .sum();
+    (n > 0).then_some(pos + n)
+}
+
+/// Returns the capture range (Body) or (0, 0); None when the steps cannot all match.
+fn run(steps: &[St], orig: &str, low: &str, pos: usize) -> Option<(usize, usize)> {
+    let Some((step, rest)) = steps.split_first() else {
+        return Some((0, 0));
+    };
+    let tail = &low[pos..];
+    let mut next: Vec<usize> = Vec::new();
+    match step {
+        St::Lead => {
+            let mut starts = Vec::new();
+            for p in ["hey ", "ok ", "okay "] {
+                if tail.starts_with(p) {
+                    starts.push(pos + p.len());
+                }
+            }
+            starts.push(pos);
+            for a in starts {
+                if low[a..].starts_with("amara") {
+                    let q = a + 5;
+                    let mut ends = Vec::new();
+                    if low[q..].starts_with([',', ':']) {
+                        ends.push(q + 1);
+                    }
+                    ends.push(q);
+                    for e in ends {
+                        if let Some(r) = space_run(low, e) {
+                            next.push(r);
+                        }
+                    }
+                }
+            }
+            next.push(pos);
+        }
+        St::Please => {
+            if tail.starts_with("please") {
+                if let Some(r) = space_run(low, pos + 6) {
+                    next.push(r);
+                }
+            }
+            next.push(pos);
+        }
+        St::Yes => {
+            if tail.starts_with("yes") {
+                let n: usize = low[pos + 3..]
+                    .chars()
+                    .take_while(|c| *c == ',' || *c == ' ')
+                    .count();
+                if n > 0 {
+                    // ASCII only, one byte each
+                    next.push(pos + 3 + n);
+                }
+            }
+            next.push(pos);
+        }
+        St::Lit(alts) => {
+            for a in alts.iter() {
+                if tail.starts_with(a) {
+                    next.push(pos + a.len());
+                }
+            }
+        }
+        St::Opt(alts) => {
+            for a in alts.iter() {
+                if tail.starts_with(a) {
+                    next.push(pos + a.len());
+                }
+            }
+            next.push(pos);
+        }
+        St::End => return (pos == low.len()).then_some((0, 0)),
+        St::Body => {
+            // Greedy separator run, backing off one char at a time like the regex does.
+            let mut cuts = Vec::new();
+            let mut at = pos;
+            for c in orig[pos..].chars() {
+                if !(js_space(c) || c == ',' || c == ':') {
+                    break;
+                }
+                at += c.len_utf8();
+                cuts.push(at);
+            }
+            for &p in cuts.iter().rev() {
+                let mut it = orig[p..].chars();
+                let Some(first) = it.next() else { continue };
+                if js_space(first) || it.count() < 2 {
+                    continue;
+                }
+                return Some((p, orig.len()));
+            }
+            return None;
+        }
+    }
+    for p in next {
+        if let Some(r) = run(rest, orig, low, p) {
+            return Some(r);
+        }
+    }
+    None
+}
+
+fn matches_steps(steps: &[St], s: &str) -> Option<(usize, usize)> {
+    let low = s.to_ascii_lowercase(); // same byte offsets as `s`
+    run(steps, s, &low, 0)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AddIntent {
+    pub kind: &'static str,
+    pub text: String,
+}
+
+const RULES: &[(&str, &[St])] = &[
+    (
+        "goal",
+        &[
+            St::Lead,
+            St::Please,
+            St::Lit(&["add "]),
+            St::Opt(&["a ", "the "]),
+            St::Opt(&["new "]),
+            St::Lit(&["goal", "habit"]),
+            St::Opt(&[" to", " that", " of", " for"]),
+            St::Body,
+        ],
+    ),
+    (
+        "date",
+        &[
+            St::Lead,
+            St::Please,
+            St::Lit(&["remind me on", "remind me by"]),
+            St::Body,
+        ],
+    ),
+    (
+        "date",
+        &[
+            St::Lead,
+            St::Please,
+            St::Lit(&["add "]),
+            St::Opt(&["a ", "the "]),
+            St::Lit(&["date", "deadline"]),
+            St::Opt(&[" for"]),
+            St::Body,
+        ],
+    ),
+    (
+        "task",
+        &[
+            St::Lead,
+            St::Please,
+            St::Lit(&["add "]),
+            St::Opt(&["a ", "the "]),
+            St::Opt(&["enterprise "]),
+            St::Lit(&["task"]),
+            St::Opt(&[" to", " for"]),
+            St::Body,
+        ],
+    ),
+    (
+        "idea",
+        &[
+            St::Lead,
+            St::Please,
+            St::Lit(&["add "]),
+            St::Opt(&["a ", "the "]),
+            St::Lit(&["content idea"]),
+            St::Opt(&[" for"]),
+            St::Body,
+        ],
+    ),
+    (
+        "idea",
+        &[
+            St::Lead,
+            St::Please,
+            St::Lit(&["content idea"]),
+            St::Opt(&[" for"]),
+            St::Body,
+        ],
+    ),
+];
+
+/// Explicit phrasings only (same as `detectAddIntent`): anything else is None and nothing happens.
+pub(crate) fn detect_add_intent(input: &str) -> Option<AddIntent> {
+    let t = js_trim(input)
+        .split(js_space)
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if t.encode_utf16().count() > 500 {
+        return None;
+    }
+    for (kind, steps) in RULES {
+        if let Some((a, b)) = matches_steps(steps, &t) {
+            let body = t[a..b].trim_end_matches(['.', '!', '?']);
+            return Some(AddIntent {
+                kind,
+                text: js_trim(body).to_string(),
+            });
+        }
+    }
+    None
+}
+
+const CONFIRM: &[St] = &[
+    St::Lead,
+    St::Please,
+    St::Yes,
+    St::Lit(&["confirm", "save it", "confirm save", "save"]),
+    St::Opt(&[" it", " that", " this"]),
+    St::Opt(&[".", "!"]),
+    St::End,
+];
+const CANCEL: &[St] = &[
+    St::Lead,
+    St::Please,
+    St::Lit(&[
+        "cancel",
+        "nevermind",
+        "never mind",
+        "discard",
+        "don't save it",
+        "don't save",
+        "dont save it",
+        "dont save",
+    ]),
+    St::Opt(&[".", "!"]),
+    St::End,
+];
+
+pub(crate) fn is_add_confirm(s: &str) -> bool {
+    matches_steps(CONFIRM, js_trim(s)).is_some()
+}
+pub(crate) fn is_add_cancel(s: &str) -> bool {
+    matches_steps(CANCEL, js_trim(s)).is_some()
 }
 
 #[cfg(test)]
@@ -1277,5 +1577,38 @@ mod tests {
             goals[1].unit, "days #x a week",
             "control characters are flattened"
         );
+    }
+
+    #[test]
+    fn intents_match_the_shared_ts_fixture() {
+        let f: Value =
+            serde_json::from_str(include_str!("../../../test/fixtures/add-intents.json")).unwrap();
+        let intents = f["intents"].as_array().unwrap();
+        assert!(intents.len() >= 50);
+        for c in intents {
+            let text = c["text"].as_str().unwrap();
+            let got = detect_add_intent(text);
+            match c["intent"].as_object() {
+                None => assert_eq!(got, None, "{text:?}"),
+                Some(o) => {
+                    let got = got.unwrap_or_else(|| panic!("expected an intent: {text:?}"));
+                    assert_eq!(got.kind, o["kind"].as_str().unwrap(), "{text:?}");
+                    assert_eq!(got.text, o["text"].as_str().unwrap(), "{text:?}");
+                }
+            }
+        }
+        for c in f["turns"].as_array().unwrap() {
+            let text = c["text"].as_str().unwrap();
+            assert_eq!(
+                is_add_confirm(text),
+                c["confirm"].as_bool().unwrap(),
+                "{text:?}"
+            );
+            assert_eq!(
+                is_add_cancel(text),
+                c["cancel"].as_bool().unwrap(),
+                "{text:?}"
+            );
+        }
     }
 }

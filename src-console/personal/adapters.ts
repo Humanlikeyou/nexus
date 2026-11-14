@@ -1,5 +1,5 @@
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
-import { patternsFrom, weeklyReviewFrom, type PatternsWire, type ReviewWire } from "./liveInsights";
+import { patternsFrom, weeklyReviewFrom, type PatternsWire, type ReviewWire, type ExperimentResultWire } from "./liveInsights";
 import { ADDS_EVENT, announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
 
 /**
@@ -62,6 +62,8 @@ export type WeeklyReview = {
   change: { title: string; body: string };
   highlights: Array<{ ok: boolean; title: string; sub: string }>;
   notes: Array<{ text: string; day: string }>;
+  /** "Try it this week" results due this week (weekly_review.rs `experiments`), passed through as the backend sent them; no screen shows them yet. */
+  experiments?: ExperimentResultWire[];
 };
 
 export interface PersonalAdapter {
@@ -301,13 +303,20 @@ export function localDatePlus(now: Date, days: number): string {
 
 /** Weekly review › "Try it this week" / "Not this week". Only a real suggestion can be tried; the follow-up add asks
  *  first (native dialog), and a cancel or error says nothing was set. Goals are never touched. */
-export async function tryChangeWith(call: Invoke, take: boolean, suggestion: string | null, now = new Date()): Promise<Wired<{ reminder: string | null }>> {
+export async function tryChangeWith(call: Invoke, take: boolean, suggestion: string | null, now = new Date(), pair: string | null = null): Promise<Wired<{ reminder: string | null }>> {
   if (!suggestion) return UNWIRED;
   if (!take) return live({ reminder: null });
   const due = localDatePlus(now, 6);
   try {
-    await call("followups_add_item", { text: `Try this week: ${suggestion}`, due, next: null });
-    return live({ reminder: `Follow-up added for ${due}: ${suggestion}` });
+    const added = await call<{ id?: unknown }>("followups_add_item", { text: `Try this week: ${suggestion}`, due, next: null });
+    const reminder = `Follow-up added for ${due}: ${suggestion}`;
+    // Track the try-it as an experiment (sidecar in Rust; the follow-up itself gets no new fields). `pair` is the finding behind
+    // the suggestion; with none, Rust stores no measure and the result says so. A failure here never undoes the follow-up.
+    if (typeof added?.id === "number") {
+      try { await call("experiments_record_start", { followupId: added.id, pair }); }
+      catch { /* silent to the text: copy changes need Design (tasks/design-questions.md, 2026-11-14) */ }
+    }
+    return live({ reminder });
   } catch {
     return live({ reminder: "Nothing was set (cancelled or couldn't save)" });
   }
@@ -342,6 +351,7 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
   let patterns: Patterns | null = null;
   let review: WeeklyReview | null = null;
   let suggestionTitle: string | null = null;
+  let suggestionPair: string | null = null; // from the finding id: "<pair>" or "tag_mood:<tag>"
   let memories: Memory[] | null = null;
   let memoriesNote: string | null = null;
   let writeNote: string | null = null;
@@ -352,8 +362,8 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
       call<CheckInWire[]>("checkin_list", { limit: 30 }).then((r) => { checkins = r.map(checkInFrom); }).catch(() => { checkins = null; }),
       call<PatternsWire>("patterns_read").then((r) => { patterns = r && Array.isArray(r.findings) ? patternsFrom(r) : null; }).catch(() => { patterns = null; }),
       call<ReviewWire>("weekly_review_read")
-        .then((r) => { review = r && r.health ? weeklyReviewFrom(r) : null; suggestionTitle = review && r.suggestion ? r.suggestion.title : null; })
-        .catch(() => { review = null; suggestionTitle = null; }),
+        .then((r) => { review = r && r.health ? weeklyReviewFrom(r) : null; suggestionTitle = review && r.suggestion ? r.suggestion.title : null; suggestionPair = review && r.suggestion?.evidenceFindingId ? r.suggestion.evidenceFindingId.split(":")[0] : null; })
+        .catch(() => { review = null; suggestionTitle = null; suggestionPair = null; }),
       call<GoalWire[]>("read_goals").then((r) => { goals = Array.isArray(r) ? goalsFrom(r) : null; }).catch(() => { goals = null; }),
       call<MemoryWire[]>("memory_list").then(
         (r) => { memories = Array.isArray(r) ? memoriesFrom(r) : null; memoriesNote = memories ? null : memoryNote(null); },
@@ -391,7 +401,7 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
     lifeAdmin: () => (admin ? live(admin) : UNWIRED),
     // "Try it this week" adds one follow-up (native approval dialog in Rust), due in 6 days; it never changes a goal.
     // "Not this week" stores nothing. With no real suggestion from the weekly review there's nothing to try.
-    tryChange: async (take) => tryChangeWith(call, take, suggestionTitle),
+    tryChange: async (take) => tryChangeWith(call, take, suggestionTitle, new Date(), suggestionPair),
     checkins: () => (checkins ? live([...checkins]) : UNWIRED),
     saveCheckIn: async (d) => {
       if (d.mood == null || d.energy == null) return UNWIRED;

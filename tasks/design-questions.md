@@ -50,3 +50,15 @@ Earlier sessions called this a flake because it sometimes passed. Today's probe 
 ## 2026-11-14: Take rating control (backend ready, no control calls it)
 
 Decision 0020 asks to record whether a take was helpful. The backend and `recordTakeRating(page, takeId, helpful)` exist; no control calls it. Design: add a helpful / not helpful control on the take card (or say where).
+
+## 2026-11-14: "This experiment can't be tracked" (Try it this week)
+
+When "Try it this week" adds the follow-up but `experiments_record_start` fails, the experiment is not tracked and no result will appear in the weekly review. The reminder text no longer says so (a copy change is Design's call; the earlier suffix "(the result won't be tracked: couldn't save the experiment)" was removed). Design: whether to tell the person, and if so where and in what words (reminder line, a quiet note, or nothing).
+
+## 2026-11-14: Weekly review "Tried this week" results (backend and adapter ready, no markup)
+
+`weekly_review_read` now returns `experiments` (results of "Try it this week" experiments whose 7 days ended this week: label "better" / "worse" / "no clear difference", before and after means, the days behind each). `weeklyReviewFrom` passes it through as `WeeklyReview.experiments`; no screen shows it. Design: where in the weekly review a result goes, and how "no clear difference" and its reasons (not enough days, no measure named, not significant) read.
+
+## 2026-11-14: Goal progress readout (backend and bridge ready, no adapter method, no markup)
+
+`goal_progress_week(weekEnd?)` (bridge: `goalProgressWeek`) returns, from the daily table and published patterns only: roadmap steps finished per goal this week and the week before; goals with no step finished in the last 21 days (last finished day, or null for never); and "what the days before finished steps had in common" (only causes with a published generic finding that beat chance; otherwise `nothing_stands_out_yet`). Every item lists its `daily_goal:` / `daily:` refs. No adapter method exists for it, so nothing is wired. Design: where it shows (Goals screen, weekly review, or both), and how the three parts and the empty "nothing stands out yet" state read.

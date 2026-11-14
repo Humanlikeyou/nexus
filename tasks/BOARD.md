@@ -18,8 +18,8 @@ Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2
 | 0 | Resume, verify, land in-flight crew work, re-baseline | done | crew 7de5b4b 32f1d8c; re-baselined each run (header above) |
 | 1 | 1111x navy: localOnly incl. Hermes, local speak | partial | done: 6215a12 0dd3996 cf93fd0 (fail-closed; Q1 open). Left: local speak() (Stage C); voice patch applied by Taisun |
 | 2 | 1111w Jarvis windows backend | partial | done: c024eeb 710863c 2c4a8a8 (cap 3/LRU/Undo, pop-outs, per-site profiles, home_window_open). Left: Amara's comment on a window, blocked-embed/offline signals, verify sign-in pause and Life take facts; live sign-in (Taisun) |
-| 3 | 1111v leftovers: chat/voice adds, on-device transcription | partial | done: 16b78d8 (one add path). Left: Rust adds in amara_turn (Stage A1 running), on-device transcription |
-| 4 | 1111a personal-OS adapters | partial | done: check-ins/dates 97eddbb, goals and roadmaps 36d4378 bce7ebf, memory list b438574, Letta writes 8af876a (0015), patterns and weekly review 8af876a f45829a. Left: Stage A2–A6; habits data source; verify the 22:00 reminder |
+| 3 | 1111v leftovers: chat/voice adds, on-device transcription | partial | done: 16b78d8 (one add path), Rust adds inside amara_turn (Stage A, this commit). Left: on-device transcription |
+| 4 | 1111a personal-OS adapters | partial | done: check-ins/dates 97eddbb, goals and roadmaps 36d4378 bce7ebf, memory list b438574, Letta writes 8af876a (0015), patterns and weekly review 8af876a f45829a. Stage A (this commit): patterns and the weekly review on daily_range, generic patterns (BH), goal progress, experiment loop, Hemi-Sync ranking. Left: habits data source; verify the 22:00 reminder; UI for the new readouts (Design) |
 | 5 | 1111t step 6 Money (read-only) | partial | done: spike 3be01d3, backend 7b448bb, accounts/fx UI 9b95d68, balances b438574, rows 1c93d5e, bank CSV picker a783a5f. Gated: JPY→USD rule, ledger data, aggregators |
 | 6 | Backups: nightly, restore, drill on a copy | done | 6507382 1c93d5e a783a5f de30ebe; `docs/release/restore-drill.md` |
 | 7 | Harden in place | todo | shared http module ready f6fad35. Gated: chmod, Keychain moves, Weaviate switch-over |
@@ -158,3 +158,14 @@ NOOP merge, live Telegram relay send path, standalone phases (bundling, signing,
 | Timeouts on Telegram (15 s) and ARM worker (10 s) sends that had none | done (this commit) |
 | Menu-bar icon: one template tray (Amara mark), duplicate config tray removed | done (this commit) |
 | Install | done 0daa808 (see Installed) |
+
+## 2026-11-14: goal prompt "take the app to the handover's definition of done", Stage A
+| item | status |
+|---|---|
+| A1 Rust adds port inside amara_turn + check-in / follow-up / pattern context sections | done (this commit). [GATE] nexus.turnPipeline default stays OFF until Taisun tries it |
+| A2 patterns + weekly review read daily_range (results proven identical on fixtures) | done (this commit) |
+| A3 generic patterns: 43 pairs, lags 0–3, one BH correction, recent-window comparison | done (this commit) |
+| A4 goal progress weekly readout (`goal_progress_week`) | done (this commit). UI: Design |
+| A5 experiment loop (sidecar, 7-day before/after, in the weekly review) | done (this commit). UI: Design |
+| A6 Hemi-Sync ranking (`hemisync_ranking`) + Hemi-Sync day as an A3 cause | done (this commit). UI: Design |
+| Stage B typed bridge | next: write tasks/proposed/typed-bridge.md, stop for OK on dependencies |

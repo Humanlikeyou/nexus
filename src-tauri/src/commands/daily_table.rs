@@ -603,17 +603,22 @@ fn parse_sources(s: String) -> Sources {
     serde_json::from_str(&s).unwrap_or_default()
 }
 
-pub(crate) fn built_at_ms_in(dir: &Path) -> Option<i64> {
+fn meta_in(dir: &Path, key: &str) -> Option<String> {
     if !db_path(dir).exists() {
         return None;
     }
     let c = open_private_wal(&db_path(dir)).ok()?;
-    c.query_row("SELECT value FROM meta WHERE key='built_at_ms'", [], |r| {
-        r.get::<_, String>(0)
-    })
-    .ok()?
-    .parse()
-    .ok()
+    c.query_row("SELECT value FROM meta WHERE key=?1", [key], |r| r.get(0))
+        .ok()
+}
+
+pub(crate) fn built_at_ms_in(dir: &Path) -> Option<i64> {
+    meta_in(dir, "built_at_ms")?.parse().ok()
+}
+
+/// The sources the stored build could not read (meta `partial`); `None` when there is no table.
+pub(crate) fn partial_in(dir: &Path) -> Option<Vec<String>> {
+    serde_json::from_str(&meta_in(dir, "partial")?).ok()
 }
 
 pub(crate) fn read_range_in(dir: &Path, from: &str, to: &str) -> Result<DailyRange, String> {

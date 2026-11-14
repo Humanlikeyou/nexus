@@ -38,6 +38,13 @@ export function patternsFrom(w: PatternsWire): Patterns {
   };
 }
 
+/** Row as src-tauri experiments.rs `ExperimentResult` (camelCase). `label` is the backend's words: better | worse | no clear difference. */
+export type ExperimentSideWire = { from: string; to: string; n: number; mean: number | null; days: string[] };
+export type ExperimentResultWire = {
+  followupId: number; startDay: string; measure: string | null; outcome: "better" | "worse" | "no_clear_difference"; label: string;
+  reason: "no_measure" | "not_enough_data" | "not_significant" | null; p: number | null; before: ExperimentSideWire; after: ExperimentSideWire;
+};
+
 export type ReviewWire = {
   state: "ready" | "not_enough_data"; weekStart: string; weekEnd: string; dueAt: string; computedAt: string;
   health: { state: "data" | "none"; nights: number; avgSleepH: number | null; sleepDeltaH: number | null; avgHrv: number | null; avgRecovery: number | null; note: string };
@@ -48,6 +55,8 @@ export type ReviewWire = {
   suggestion: { title: string; reason: string; evidenceFindingId: string; confidence: number } | null;
   suggestionNote: string;
   summary: string | null;
+  /** Absent in a review stored before experiments existed. */
+  experiments?: ExperimentResultWire[];
 };
 
 const MONTH_DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -86,5 +95,6 @@ export function weeklyReviewFrom(w: ReviewWire): WeeklyReview {
     week: `Week of ${range} · health, work and money`,
     tiles, change, highlights,
     notes: c.notes.map((n) => ({ text: n.text, day: WEEKDAY.format(utc(n.day)) })),
+    experiments: w.experiments ?? [],
   };
 }

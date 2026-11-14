@@ -144,6 +144,10 @@ pub struct Review {
     pub suggestion_note: String,
     /// LLM-written prose is not wired. Always null.
     pub summary: Option<String>,
+    /// Results of "try it this week" experiments whose 7-day window ended inside this week
+    /// (`experiments::results_due_for_review`); empty when none. Filled by `read_in`, not `build`.
+    #[serde(default)]
+    pub experiments: Vec<super::experiments::ExperimentResult>,
 }
 
 // ───────────────────────────── schedule ─────────────────────────────
@@ -402,12 +406,13 @@ pub fn build(
         suggestion,
         suggestion_note,
         summary: None,
+        experiments: Vec::new(),
     }
 }
 
 // ───────────────────────────── money (personal only) ─────────────────────────────
 
-fn is_business_goal(g: &super::goals::Goal) -> bool {
+pub(crate) fn is_business_goal(g: &super::goals::Goal) -> bool {
     matches!(
         g.category.trim().to_lowercase().as_str(),
         "business" | "venture" | "ventures" | "enterprise"
@@ -555,6 +560,7 @@ pub(crate) fn valid_review(r: &Review) -> bool {
         && notes_ok
         && r.money.accounts.len() <= 50
         && r.goals.milestones.len() <= 200
+        && r.experiments.len() <= super::experiments::MAX_EXPERIMENTS
         && suggestion_ok
         && r.summary.is_none()
         && [
@@ -607,7 +613,8 @@ pub(crate) fn read_in(
         }
     }
     let g = gather(start, end);
-    let review = build(&g.inputs, &g.patterns, &g.goals, g.money, due, now);
+    let mut review = build(&g.inputs, &g.patterns, &g.goals, g.money, due, now);
+    review.experiments = super::experiments::results_due_for_review(dir, &ymd(end));
     if !g.inputs.partial && review.state == "ready" {
         write_json_atomic(&file(dir), &Stored(Some(review.clone())), MAX_BYTES)?;
     }
@@ -683,6 +690,41 @@ mod tests {
             goals: vec![],
             money: no_money(),
         }
+    }
+
+    /// A2: the review's health section reads days from the daily table; everything else stays per-row
+    /// (per-session count, per-check-in means, check-in text are not in a per-day row).
+    #[test]
+    fn review_is_identical_with_days_taken_from_the_daily_table() {
+        use super::super::patterns::tests::{stored_rows, world};
+        let now = at(2026, 11, 12, 10);
+        let (src, mut old) = world();
+        // The live NOOP gatherer yields days ascending (a BTreeMap); the table reads ascending too. The
+        // review's id order and sum order follow input order, so compare like with like.
+        old.days.sort_by(|a, b| a.day.cmp(&b.day));
+        let (dir, rows) = stored_rows(&src, now, "wrdaily");
+        let mut via_table = old.clone();
+        via_table.days = patterns::day_rows(rows.iter());
+        let due = last_due(now);
+        let a = build(
+            &old,
+            &patterns::compute(&old, now),
+            &[],
+            no_money(),
+            due,
+            now,
+        );
+        let b = build(
+            &via_table,
+            &patterns::compute_daily(&rows, now),
+            &[],
+            no_money(),
+            due,
+            now,
+        );
+        assert_eq!(a, b);
+        assert_eq!(a.health.state, "data");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1119,6 +1161,54 @@ mod tests {
         write_json_atomic(&file(&dir), &Stored(Some(good.clone())), MAX_BYTES).unwrap();
         let again = read_in(&dir, now, |_, _| panic!("valid cache must be reused")).unwrap();
         assert_eq!(again.week_end, good.week_end);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A5 wiring: experiments whose window ended inside the review week ride on the review.
+    #[test]
+    fn review_carries_experiments_due_this_week_and_is_empty_otherwise() {
+        use super::super::daily_table::{write_in, DailyRow};
+        use super::super::experiments::record_start_in;
+        let dir = temp_dir("wrexp");
+        let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let now = at(2026, 11, 12, 10); // review week 2026-11-02..2026-11-08
+        let g = |_s: NaiveDate, _e: NaiveDate| gathered(enough(), now);
+        // None recorded: empty list.
+        let none = read_in(&dir, now, g).unwrap();
+        assert!(none.experiments.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let dir = temp_dir("wrexp2");
+        // Experiment A starts 2026-11-01 (due 11-08, this week): clear rise in focus.
+        // Experiment B starts 2026-11-01 with no measure: "no clear difference".
+        // Experiment C starts 2026-10-25 (due 11-01, last week): not in this review.
+        record_start_in(&dir, 1, Some("sleep_focus"), d("2026-11-01")).unwrap();
+        record_start_in(&dir, 2, None, d("2026-11-01")).unwrap();
+        record_start_in(&dir, 3, Some("sleep_focus"), d("2026-10-25")).unwrap();
+        let rows: Vec<DailyRow> = (0..14)
+            .map(|i| {
+                let day = d("2026-10-25") + Duration::days(i);
+                let wobble = (i % 3) as f64;
+                DailyRow {
+                    day: day.format("%Y-%m-%d").to_string(),
+                    focus_mean: Some(if day < d("2026-11-01") { 50.0 } else { 80.0 } + wobble),
+                    ..Default::default()
+                }
+            })
+            .collect();
+        write_in(&dir, &rows, &[], &[], 0, (d("2026-10-25"), d("2026-11-07"))).unwrap();
+        let r = read_in(&dir, now, g).unwrap();
+        assert_eq!(r.week_end, "2026-11-08");
+        assert_eq!(r.experiments.len(), 2);
+        let a = r.experiments.iter().find(|e| e.followup_id == 1).unwrap();
+        assert_eq!((a.outcome.as_str(), a.label.as_str()), ("better", "better"));
+        assert!(a.after.mean > a.before.mean);
+        let b = r.experiments.iter().find(|e| e.followup_id == 2).unwrap();
+        assert_eq!(b.label, "no clear difference");
+        assert!(r.experiments.iter().all(|e| e.followup_id != 3));
+        // Stored with the review: a re-read in the same week returns the same list.
+        let again = read_in(&dir, at(2026, 11, 13, 9), |_, _| panic!("stored")).unwrap();
+        assert_eq!(again.experiments.len(), 2);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

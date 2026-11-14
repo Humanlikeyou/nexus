@@ -155,11 +155,11 @@ pub struct PatternsResult {
 
 // ───────────────────────────── statistics ─────────────────────────────
 
-fn mean(v: &[f64]) -> f64 {
+pub(crate) fn mean(v: &[f64]) -> f64 {
     v.iter().sum::<f64>() / v.len() as f64
 }
 
-fn pearson(xs: &[f64], ys: &[f64]) -> Option<f64> {
+pub(crate) fn pearson(xs: &[f64], ys: &[f64]) -> Option<f64> {
     if xs.len() < 3 || xs.len() != ys.len() {
         return None;
     }
@@ -256,7 +256,7 @@ fn inc_beta(a: f64, b: f64, x: f64) -> f64 {
 }
 
 /// Two-sided p for Pearson r over n pairs (t test, n - 2 degrees of freedom).
-fn p_value(r: f64, n: usize) -> f64 {
+pub(crate) fn p_value(r: f64, n: usize) -> f64 {
     if n < 3 {
         return 1.0;
     }
@@ -270,7 +270,7 @@ fn p_value(r: f64, n: usize) -> f64 {
 }
 
 /// 1 to 5 from n and p. Needs p under 0.05 to reach 2; n >= 10 on both sides adds one.
-fn confidence(p: f64, n_with: usize, n_without: usize) -> u8 {
+pub(crate) fn confidence(p: f64, n_with: usize, n_without: usize) -> u8 {
     let base: u8 = if p < 0.001 {
         4
     } else if p < 0.01 {
@@ -284,7 +284,7 @@ fn confidence(p: f64, n_with: usize, n_without: usize) -> u8 {
     (base + bonus).min(5)
 }
 
-fn strength(r: f64) -> &'static str {
+pub(crate) fn strength(r: f64) -> &'static str {
     let a = r.abs();
     if a >= 0.7 {
         "Strong"
@@ -454,14 +454,25 @@ fn bars(label: &str, s: &Stat, legend: [&str; 2]) -> Chart {
     }
 }
 
-/// Computes every finding the data supports. Pure: no clock, no disk.
-pub fn compute(inputs: &Inputs, now: DateTime<FixedOffset>) -> PatternsResult {
-    let today = day_of(&now);
-    let computed_at = iso(&now);
-    let days: Vec<&DayRow> = inputs
+/// Everything `compute` needs, per day. Built either from per-row `Inputs` ([`prepare`]) or from daily-table
+/// rows ([`prepare_daily`]); the engine after this point is the same code for both.
+struct Prepared {
+    days: Vec<DayRow>,
+    focus: BTreeMap<String, YPoint>,
+    calm: BTreeMap<String, YPoint>,
+    /// Mean mood per day that has a check-in.
+    mood_y: BTreeMap<String, YPoint>,
+    /// Lower-cased tags per day that has a check-in.
+    tag_days: BTreeMap<String, BTreeSet<String>>,
+    counts: Counts,
+}
+
+fn prepare(inputs: &Inputs, today: NaiveDate) -> Prepared {
+    let days: Vec<DayRow> = inputs
         .days
         .iter()
         .filter(|d| in_window(&d.day, today, WINDOW_DAYS))
+        .cloned()
         .collect();
     let sessions: Vec<&SessionRow> = inputs
         .sessions
@@ -498,6 +509,132 @@ pub fn compute(inputs: &Inputs, now: DateTime<FixedOffset>) -> PatternsResult {
     };
     let focus = session_series(|s| s.focus);
     let calm = session_series(|s| s.calm);
+
+    let mut mood_y: BTreeMap<String, YPoint> = BTreeMap::new();
+    let mut tag_days: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    {
+        let mut acc: BTreeMap<String, (Vec<f64>, Vec<String>)> = BTreeMap::new();
+        for m in &moods {
+            let e = acc.entry(m.day.clone()).or_default();
+            e.0.push(m.mood);
+            e.1.push(format!("checkin:{}", m.id));
+            tag_days
+                .entry(m.day.clone())
+                .or_default()
+                .extend(m.tags.iter().map(|t| t.to_lowercase()));
+        }
+        for (d, (v, srcs)) in acc {
+            mood_y.insert(d, YPoint { y: mean(&v), srcs });
+        }
+    }
+    Prepared {
+        days,
+        focus,
+        calm,
+        mood_y,
+        tag_days,
+        counts,
+    }
+}
+
+/// The same inputs from daily-table rows. A day's focus/calm/mood is the row's own mean (the table averages
+/// the same per-session / per-check-in values `prepare` averages) and its refs are the row's `sources`.
+/// A cell with no refs is skipped: a number that cannot be traced is not used.
+fn prepare_daily(rows: &[super::daily_table::DailyRow], today: NaiveDate) -> Prepared {
+    let rows: Vec<&super::daily_table::DailyRow> = rows
+        .iter()
+        .filter(|r| in_window(&r.day, today, WINDOW_DAYS))
+        .collect();
+    let days = day_rows(rows.iter().copied());
+    let refs = |r: &super::daily_table::DailyRow, col: &str| -> Vec<String> {
+        r.sources.get(col).cloned().unwrap_or_default()
+    };
+    let series = |col: &str, pick: fn(&super::daily_table::DailyRow) -> Option<f64>| {
+        rows.iter()
+            .filter_map(|r| {
+                let y = pick(r)?;
+                let srcs = refs(r, col);
+                (!srcs.is_empty()).then(|| (r.day.clone(), YPoint { y, srcs }))
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let focus = series("focus_mean", |r| r.focus_mean);
+    let calm = series("calm_mean", |r| r.calm_mean);
+    let mood_y = series("mood_mean", |r| r.mood_mean);
+    let tag_days: BTreeMap<String, BTreeSet<String>> = rows
+        .iter()
+        .filter(|r| mood_y.contains_key(&r.day))
+        .map(|r| {
+            (
+                r.day.clone(),
+                r.checkin_tags
+                    .iter()
+                    .flatten()
+                    .map(|t| t.to_lowercase())
+                    .collect(),
+            )
+        })
+        .collect();
+    let counts = Counts {
+        sleep_days: days.iter().filter(|d| d.sleep_h.is_some()).count(),
+        hrv_days: days.iter().filter(|d| d.hrv.is_some()).count(),
+        strain_days: days.iter().filter(|d| d.strain.is_some()).count(),
+        sessions: rows.iter().map(|r| refs(r, "muse_min").len()).sum(),
+        checkins: rows.iter().map(|r| refs(r, "mood_mean").len()).sum(),
+    };
+    Prepared {
+        days,
+        focus,
+        calm,
+        mood_y,
+        tag_days,
+        counts,
+    }
+}
+
+/// Daily-table rows to the NOOP-day shape (minutes to hours for sleep). Lossless for these four columns.
+pub(crate) fn day_rows<'a>(
+    rows: impl Iterator<Item = &'a super::daily_table::DailyRow>,
+) -> Vec<DayRow> {
+    rows.filter(|r| {
+        r.sleep_total_min.is_some()
+            || r.hrv_ms.is_some()
+            || r.strain.is_some()
+            || r.recovery.is_some()
+    })
+    .map(|r| DayRow {
+        day: r.day.clone(),
+        sleep_h: r.sleep_total_min.map(|m| m / 60.0),
+        hrv: r.hrv_ms,
+        strain: r.strain,
+        recovery: r.recovery,
+    })
+    .collect()
+}
+
+/// Computes every finding the data supports. Pure: no clock, no disk.
+pub fn compute(inputs: &Inputs, now: DateTime<FixedOffset>) -> PatternsResult {
+    compute_prepared(prepare(inputs, day_of(&now)), now)
+}
+
+/// The same, from daily-table rows (see [`prepare_daily`]).
+pub(crate) fn compute_daily(
+    rows: &[super::daily_table::DailyRow],
+    now: DateTime<FixedOffset>,
+) -> PatternsResult {
+    compute_prepared(prepare_daily(rows, day_of(&now)), now)
+}
+
+fn compute_prepared(p: Prepared, now: DateTime<FixedOffset>) -> PatternsResult {
+    let computed_at = iso(&now);
+    let Prepared {
+        days,
+        focus,
+        calm,
+        mood_y,
+        tag_days,
+        counts,
+    } = p;
     let day_x = |pick: fn(&DayRow) -> Option<f64>, metric: &str| {
         days.iter()
             .filter_map(|d| {
@@ -606,31 +743,13 @@ pub fn compute(inputs: &Inputs, now: DateTime<FixedOffset>) -> PatternsResult {
     }
 
     // 4. Check-in tags -> mood that day. At most the two strongest tags.
-    let mut mood_y: BTreeMap<String, YPoint> = BTreeMap::new();
-    {
-        let mut acc: BTreeMap<String, (Vec<f64>, Vec<String>)> = BTreeMap::new();
-        for m in &moods {
-            let e = acc.entry(m.day.clone()).or_default();
-            e.0.push(m.mood);
-            e.1.push(format!("checkin:{}", m.id));
-        }
-        for (d, (v, srcs)) in acc {
-            mood_y.insert(d, YPoint { y: mean(&v), srcs });
-        }
-    }
-    let all_tags: BTreeSet<String> = moods
-        .iter()
-        .flat_map(|m| m.tags.iter().map(|t| t.to_lowercase()))
-        .collect();
+    let all_tags: BTreeSet<String> = tag_days.values().flatten().cloned().collect();
     let mut tag_found: Vec<Finding> = Vec::new();
     let mut tag_stats: Vec<(String, Stat)> = Vec::new();
     for tag in all_tags {
         let mut xs: BTreeMap<String, XPoint> = BTreeMap::new();
         for d in mood_y.keys() {
-            let has = moods
-                .iter()
-                .filter(|m| &m.day == d)
-                .any(|m| m.tags.iter().any(|t| t.to_lowercase() == tag));
+            let has = tag_days.get(d).is_some_and(|t| t.contains(&tag));
             let srcs = mood_y.get(d).map(|y| y.srcs.clone()).unwrap_or_default();
             xs.insert(
                 d.clone(),
@@ -836,11 +955,25 @@ fn is_fresh(r: &PatternsResult, now: DateTime<FixedOffset>) -> bool {
 
 static READ_LOCK: Mutex<()> = Mutex::new(());
 
+/// What a recompute reads: per-row inputs (live gatherers) or daily-table rows.
+pub(crate) enum Source {
+    Live(Inputs),
+    Daily(Vec<super::daily_table::DailyRow>),
+}
+
 /// Stored result when fresh; otherwise gather, compute and (unless a source was missing) store.
 pub(crate) fn read_in(
     dir: &Path,
     now: DateTime<FixedOffset>,
     gather: impl FnOnce() -> Inputs,
+) -> Result<PatternsResult, String> {
+    read_in_src(dir, now, || Source::Live(gather()))
+}
+
+pub(crate) fn read_in_src(
+    dir: &Path,
+    now: DateTime<FixedOffset>,
+    gather: impl FnOnce() -> Source,
 ) -> Result<PatternsResult, String> {
     // Single flight: concurrent reads wait here, so one stale file triggers one gather, not several.
     let _g = READ_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -849,9 +982,12 @@ pub(crate) fn read_in(
             return Ok(r);
         }
     }
-    let inputs = gather();
-    let result = compute(&inputs, now);
-    if !inputs.partial {
+    let (result, partial) = match gather() {
+        Source::Live(inputs) => (compute(&inputs, now), inputs.partial),
+        // A table is only used when it is complete (see `table_usable`), so it is never partial.
+        Source::Daily(rows) => (compute_daily(&rows, now), false),
+    };
+    if !partial {
         write_json_atomic(&file(dir), &StoredWrap(Some(result.clone())), MAX_BYTES)?;
     }
     Ok(result)
@@ -1025,14 +1161,54 @@ pub(crate) fn read_sessions_capped(
         .collect()
 }
 
+/// A stored daily table is used only when it was built under this long ago (the nightly slot rebuilds it
+/// every day, so a healthy table is under 26 h old; 36 h allows one missed night).
+const TABLE_MAX_AGE_MS: i64 = 36 * 3600 * 1000;
+
+/// Pure: whether a stored build may stand in for the live gatherers. Needs a build, a recent one, and no
+/// failed source that patterns reads (NOOP, check-ins); otherwise the live gatherers run, as before.
+pub(crate) fn table_usable(built_at_ms: Option<i64>, partial: &[String], now_ms: i64) -> bool {
+    built_at_ms.is_some_and(|t| t > 0 && now_ms - t >= 0 && now_ms - t < TABLE_MAX_AGE_MS)
+        && !partial
+            .iter()
+            .any(|p| p == "noop" || p == "checkins" || p == "hemisync")
+}
+
+/// Daily-table rows for the window ending today, or None when the table cannot stand in for the live read.
+pub(crate) fn daily_rows_in(
+    dir: &Path,
+    now: DateTime<FixedOffset>,
+    window_days: i64,
+) -> Option<Vec<super::daily_table::DailyRow>> {
+    let built = super::daily_table::built_at_ms_in(dir);
+    let partial = super::daily_table::partial_in(dir)?;
+    if !table_usable(built, &partial, now.timestamp_millis()) {
+        return None;
+    }
+    let to = day_of(&now);
+    let from = to - Duration::days(window_days + 1);
+    let fmt = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
+    let r = super::daily_table::read_range_in(dir, &fmt(from), &fmt(to)).ok()?;
+    // The table is built from the day the build ran; a build older than the window's newest day can
+    // still be right (36 h rule above), so no extra freshness test here.
+    Some(r.rows)
+}
+
 /// Reads sessions and check-ins from app data and NOOP from the sandboxed path. Never fails: a missing
 /// source marks the inputs partial.
+///
+/// NOOP days come from the daily table when it is usable ([`daily_rows_in`]); sessions and check-ins are
+/// always read directly because the weekly review needs per-session counts, per-check-in means and the
+/// check-in text, none of which a per-day row keeps.
 pub(crate) fn gather_live(window_days: i64) -> Inputs {
     let data = crate::app_paths::data_dir();
     let mut inputs = Inputs::default();
-    match fetch_noop_days(window_days + 2) {
-        Ok(d) => inputs.days = d,
-        Err(_) => inputs.partial = true,
+    match daily_rows_in(&data, now_jst(), window_days) {
+        Some(rows) => inputs.days = day_rows(rows.iter()),
+        None => match fetch_noop_days(window_days + 2) {
+            Ok(d) => inputs.days = d,
+            Err(_) => inputs.partial = true,
+        },
     }
     inputs.sessions = session_rows(&read_sessions_capped(
         &super::sessions::sessions_dir(),
@@ -1046,11 +1222,20 @@ pub(crate) fn gather_live(window_days: i64) -> Inputs {
     inputs
 }
 
+/// For `patterns_read`: the daily table when usable, else the live gatherers.
+pub(crate) fn gather_source(window_days: i64) -> Source {
+    let data = crate::app_paths::data_dir();
+    match daily_rows_in(&data, now_jst(), window_days) {
+        Some(rows) => Source::Daily(rows),
+        None => Source::Live(gather_live(window_days)),
+    }
+}
+
 #[tauri::command]
 pub async fn patterns_read() -> Result<PatternsResult, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        read_in(&crate::app_paths::data_dir(), now_jst(), || {
-            gather_live(WINDOW_DAYS)
+        read_in_src(&crate::app_paths::data_dir(), now_jst(), || {
+            gather_source(WINDOW_DAYS)
         })
     })
     .await
@@ -1590,5 +1775,247 @@ pub(crate) mod tests {
         }
         assert!(read_sessions_capped(&dir.join("missing"), 3, 4000).is_empty());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // ───────── A2: daily-table path equals the per-row path ─────────
+
+    use super::super::daily_table as dt;
+
+    /// The same synthetic world as both source rows (`dt::Inputs`, which `dt::build` turns into table rows)
+    /// and patterns `Inputs` (what the old gatherers produced). 21 days, 1 to 3 Muse sessions and 1 to 2
+    /// check-ins a day, some sessions with no focus or no calm, tags in mixed case.
+    pub(crate) fn world() -> (dt::Inputs, Inputs) {
+        let mut src = dt::Inputs::default();
+        let mut old = Inputs::default();
+        for n in 0..21i64 {
+            let d = day(n);
+            let long = n % 2 == 0;
+            let sleep_min = if long { 440.0 } else { 365.0 } + (n % 3) as f64 * 12.0;
+            let hrv = 52.0 + (n % 5) as f64 * 1.5;
+            let strain = if n % 4 == 0 { 78.0 } else { 45.0 } + (n % 3) as f64;
+            let recovery = 55.0 + (n % 7) as f64;
+            src.noop.push(dt::NoopDay {
+                day: d.clone(),
+                sleep_min: Some(sleep_min),
+                hrv: Some(hrv),
+                recovery: Some(recovery),
+                strain: Some(strain),
+            });
+            old.days.push(DayRow {
+                day: d.clone(),
+                sleep_h: Some(sleep_min / 60.0),
+                hrv: Some(hrv),
+                strain: Some(strain),
+                recovery: Some(recovery),
+            });
+            for k in 0..(1 + n % 3) {
+                let focus = (k != 1 || n % 5 != 0)
+                    .then_some(if long { 63.0 } else { 54.0 } + (n % 3) as f64 + k as f64 * 0.7);
+                let calm = (k != 2).then(|| 58.0 + ((n + k) % 6) as f64 * 1.3);
+                let id = format!("s{n}k{k}");
+                src.muse.push(dt::MuseIn {
+                    id: id.clone(),
+                    start: format!("{d}T{:02}:30:00+09:00", 8 + k),
+                    duration_secs: 600,
+                    avg_focus: focus,
+                    calm_pct: calm,
+                });
+                old.sessions.push(SessionRow {
+                    id,
+                    day: d.clone(),
+                    focus,
+                    calm,
+                });
+            }
+            for k in 0..(1 + n % 2) {
+                let walk = n % 2 == 0 && k == 0;
+                let tags: Vec<String> = if walk {
+                    vec![if n % 4 == 0 { "Walk" } else { "walk" }.to_string()]
+                } else {
+                    vec!["desk".to_string()]
+                };
+                let mood = if walk { 4.0 } else { 2.0 } + (n % 3) as f64 * 0.5 + k as f64;
+                let id = format!("c{n}k{k}");
+                src.checkins.push(dt::CheckinIn {
+                    id: id.clone(),
+                    day: d.clone(),
+                    mood,
+                    energy: 3.0,
+                    tags: tags.clone(),
+                });
+                old.moods.push(MoodRow {
+                    id,
+                    day: d.clone(),
+                    mood,
+                    energy: 3.0,
+                    tags,
+                    text: String::new(),
+                });
+            }
+        }
+        (src, old)
+    }
+
+    pub(crate) fn stored_rows(
+        src: &dt::Inputs,
+        now: DateTime<FixedOffset>,
+        tag: &str,
+    ) -> (PathBuf, Vec<dt::DailyRow>) {
+        let to = now.date_naive();
+        let from = to - Duration::days(60);
+        let (rows, goals) = dt::build(src, from, to);
+        // Through the real store, so the proof covers what a reader sees (REAL columns, JSON sources).
+        let dir = temp_dir(tag);
+        dt::write_in(&dir, &rows, &goals, &[], now.timestamp_millis(), (from, to)).unwrap();
+        let back = dt::read_range_in(
+            &dir,
+            &from.format("%Y-%m-%d").to_string(),
+            &to.format("%Y-%m-%d").to_string(),
+        )
+        .unwrap();
+        assert_eq!(back.rows, rows);
+        (dir, back.rows)
+    }
+
+    /// PROOF for A2. Same sources, two paths, `compute` outputs identical in full (findings, numbers,
+    /// p-values, charts, counts, withheld, source ids). No ref normalisation is needed: `compute` writes
+    /// its own `noop:<metric>:<day>` refs from the day rows, and the table's `session:<id>` and
+    /// `checkin:<id>` refs are the same ids.
+    #[test]
+    fn daily_table_path_is_identical_to_the_per_row_path() {
+        let (src, old) = world();
+        let now = at(2026, 11, 12, 10);
+        let (dir, rows) = stored_rows(&src, now, "pateq");
+        let via_inputs = compute(&old, now);
+        let via_table = compute_daily(&rows, now);
+        assert_eq!(via_inputs, via_table);
+        // The fixture must exercise the engine, not compare two empties.
+        assert_eq!(via_inputs.state, "ready");
+        for pair in ["sleep_focus", "tag_mood"] {
+            assert!(via_inputs.findings.iter().any(|f| f.pair == pair), "{pair}");
+        }
+        assert!(via_inputs.counts.sessions > 21 && via_inputs.counts.checkins > 21);
+        // The adapted day rows equal the old ones exactly.
+        let adapted = day_rows(rows.iter());
+        assert_eq!(adapted.len(), old.days.len());
+        for o in &old.days {
+            let a = adapted.iter().find(|a| a.day == o.day).unwrap();
+            assert_eq!(
+                (a.sleep_h, a.hrv, a.strain, a.recovery),
+                (o.sleep_h, o.hrv, o.strain, o.recovery)
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Also when the window cuts the history: older rows and a future-dated one are ignored the same way.
+    #[test]
+    fn equivalence_holds_with_rows_outside_the_window_and_gaps() {
+        let (mut src, mut old) = world();
+        // A NOOP day with sleep only, another with nothing but HRV; a day 40 days back; a missing night.
+        src.noop.retain(|n| n.day != day(3));
+        old.days.retain(|d| d.day != day(3));
+        for (n, hrv_only) in [(40i64, false), (6, true)] {
+            let d = day(n);
+            src.noop.retain(|x| x.day != d);
+            old.days.retain(|x| x.day != d);
+            let (sleep_min, hrv) = if hrv_only {
+                (None, Some(60.0))
+            } else {
+                (Some(450.0), Some(50.0))
+            };
+            src.noop.push(dt::NoopDay {
+                day: d.clone(),
+                sleep_min,
+                hrv,
+                ..Default::default()
+            });
+            old.days.push(DayRow {
+                day: d,
+                sleep_h: sleep_min.map(|m| m / 60.0),
+                hrv,
+                ..Default::default()
+            });
+        }
+        let now = at(2026, 11, 12, 10);
+        let (dir, rows) = stored_rows(&src, now, "pateq2");
+        assert_eq!(compute(&old, now), compute_daily(&rows, now));
+        // And a different "now" (the window moves; the 40-day-old row enters then leaves).
+        let later = at(2026, 11, 30, 10);
+        let (dir2, rows2) = stored_rows(&src, later, "pateq3");
+        assert_eq!(compute(&old, later), compute_daily(&rows2, later));
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir2);
+    }
+
+    #[test]
+    fn tag_findings_survive_the_daily_table_because_tags_are_kept_per_day() {
+        // The per-day union of tags is enough for "any check-in that day has the tag" (what compute tests);
+        // mood is the day's mean in both paths. Pin the tag finding's numbers, not just equality.
+        let (src, old) = world();
+        let now = at(2026, 11, 12, 10);
+        let (dir, rows) = stored_rows(&src, now, "pateq4");
+        let a = compute(&old, now);
+        let b = compute_daily(&rows, now);
+        let ta = a.findings.iter().find(|f| f.pair == "tag_mood").unwrap();
+        let tb = b.findings.iter().find(|f| f.pair == "tag_mood").unwrap();
+        assert_eq!(
+            (ta.id.as_str(), ta.n_with, ta.n_without, ta.mean_with, ta.p),
+            (tb.id.as_str(), tb.n_with, tb.n_without, tb.mean_with, tb.p)
+        );
+        assert_eq!(ta.source_ids, tb.source_ids);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn table_usable_needs_a_recent_complete_build() {
+        let now = 1_800_000_000_000_i64;
+        let h = 3600 * 1000;
+        assert!(table_usable(Some(now - h), &[], now));
+        assert!(table_usable(Some(now - 35 * h), &["roadmaps".into()], now));
+        assert!(!table_usable(None, &[], now));
+        assert!(!table_usable(Some(0), &[], now));
+        assert!(!table_usable(Some(now - 37 * h), &[], now));
+        assert!(!table_usable(Some(now + h), &[], now));
+        for p in ["noop", "checkins", "hemisync"] {
+            assert!(!table_usable(Some(now - h), &[p.to_string()], now), "{p}");
+        }
+    }
+
+    #[test]
+    fn daily_rows_in_falls_back_when_there_is_no_usable_table() {
+        let (src, _) = world();
+        let now = at(2026, 11, 12, 10);
+        // No table at all.
+        let empty = temp_dir("patnone");
+        assert!(daily_rows_in(&empty, now, WINDOW_DAYS).is_none());
+        // A usable one.
+        let (dir, _) = stored_rows(&src, now, "patuse");
+        let rows = daily_rows_in(&dir, now, WINDOW_DAYS).unwrap();
+        assert!(!rows.is_empty());
+        // Two days later the 36 h build age has passed: live gatherers take over.
+        assert!(daily_rows_in(&dir, at(2026, 11, 14, 10), WINDOW_DAYS).is_none());
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(empty);
+    }
+
+    #[test]
+    fn daily_source_is_cached_and_a_read_through_the_table_matches_a_live_read() {
+        let (src, old) = world();
+        let now = at(2026, 11, 12, 10);
+        let (dir, rows) = stored_rows(&src, now, "patsrc");
+        let cache = temp_dir("patcache");
+        let via_table = read_in_src(&cache, now, || Source::Daily(rows)).unwrap();
+        // Stored (a JSON round trip may differ from memory in the last float digit, as for any cache).
+        assert_eq!(
+            load_stored(&cache).map(|r| r.findings.len()),
+            Some(via_table.findings.len())
+        );
+        let cache2 = temp_dir("patcache2");
+        let live = read_in(&cache2, now, || old).unwrap();
+        assert_eq!(live, via_table);
+        for d in [dir, cache, cache2] {
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 }
