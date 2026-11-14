@@ -9,13 +9,16 @@ use super::adds::Route;
 use super::business_ledger::{read_ledger_in, BusinessLedger, RequestStatus};
 use super::followups::FollowupItem;
 use super::life_dates::LifeDateView;
-use super::local_store::{day_of, now_jst};
+use super::local_store::day_of;
 use super::{checkin, crew, decisions_log, followups, life_dates};
-use chrono::NaiveDate;
+use crate::commands::shared::time::now_jst;
+use chrono::{DateTime, FixedOffset, NaiveDate, Timelike};
 use serde::Serialize;
 use std::collections::HashSet;
 
 pub const CHECKIN_REMINDER: &str = "22:00 JST";
+/// The check-in pointer appears from this hour JST (decision 0025 §1: "from afternoon"), never before.
+pub const CHECKIN_SHOW_FROM_HOUR: u32 = 12;
 
 #[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 pub struct Badge {
@@ -55,6 +58,8 @@ pub(crate) struct CrewIn {
 /// What each source returned. `Ok(None)` is "not set up" (unwired); `Err` is "didn't load".
 pub(crate) struct Inputs {
     pub today: NaiveDate,
+    /// The clock, in JST. Injected so tests can pick the hour.
+    pub now: DateTime<FixedOffset>,
     pub todos: Result<Vec<FollowupItem>, String>,
     pub dates: Result<Vec<LifeDateView>, String>,
     pub checkin_done: Result<bool, String>,
@@ -172,7 +177,7 @@ pub(crate) fn build(i: Inputs) -> Vec<SourceReport> {
     let checkin = report(
         "checkin",
         i.checkin_done.map(|done| {
-            if done {
+            if done || i.now.hour() < CHECKIN_SHOW_FROM_HOUR {
                 return vec![];
             }
             let mut p = pointer(
@@ -249,7 +254,8 @@ pub(crate) fn build(i: Inputs) -> Vec<SourceReport> {
 }
 
 async fn gather() -> Inputs {
-    let today = day_of(&now_jst());
+    let now = now_jst();
+    let today = day_of(&now);
     let data = crate::app_paths::data_dir();
     let todos = followups::followups_list().await.map(|l| l.open);
     let d = data.clone();
@@ -289,6 +295,7 @@ async fn gather() -> Inputs {
     };
     Inputs {
         today,
+        now,
         todos,
         dates,
         checkin_done,
@@ -309,9 +316,15 @@ pub async fn needs_you_list() -> Result<Vec<SourceReport>, String> {
 mod tests {
     use super::*;
     use crate::commands::life_dates::{LifeDateRecord, Reminder};
+    use crate::commands::shared::time::jst;
+    use chrono::TimeZone;
 
     fn today() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
+    }
+    /// A JST instant on 2026-11-`day`.
+    fn at(day: u32, h: u32, m: u32) -> DateTime<FixedOffset> {
+        jst().with_ymd_and_hms(2026, 11, day, h, m, 0).unwrap()
     }
     fn todo(id: i64, due: Option<&str>) -> FollowupItem {
         FollowupItem {
@@ -347,6 +360,7 @@ mod tests {
     fn inputs() -> Inputs {
         Inputs {
             today: today(),
+            now: at(11, 15, 0),
             todos: Ok(vec![
                 todo(1, Some("2026-11-09")),
                 todo(2, Some("2026-11-11")),
@@ -412,6 +426,41 @@ mod tests {
         assert!(by(&r, "decisions").rows.is_empty());
         assert!(by(&r, "checkin").rows.is_empty());
         assert_eq!(by(&r, "checkin").state, "ok");
+    }
+
+    #[test]
+    fn checkin_reminder_is_hidden_before_noon_jst() {
+        let mut i = inputs();
+        i.now = at(11, 11, 59);
+        assert!(by(&build(i), "checkin").rows.is_empty());
+        let mut i = inputs();
+        i.now = at(11, 12, 0);
+        let r = build(i);
+        assert_eq!(by(&r, "checkin").rows.len(), 1);
+        assert_eq!(by(&r, "checkin").rows[0].id, "checkin-today");
+    }
+
+    #[test]
+    fn checkin_reminder_is_gone_at_three_pm_once_checked_in_today() {
+        let mut i = inputs();
+        i.now = at(11, 15, 0);
+        i.checkin_done = Ok(true);
+        let r = build(i);
+        assert!(by(&r, "checkin").rows.is_empty());
+        assert_eq!(by(&r, "checkin").state, "ok");
+    }
+
+    #[test]
+    fn checkin_reminder_is_per_day_next_morning_hidden_then_back_at_noon() {
+        let next = NaiveDate::from_ymd_opt(2026, 11, 12).unwrap();
+        let mut i = inputs();
+        i.today = next;
+        i.now = at(12, 9, 0);
+        assert!(by(&build(i), "checkin").rows.is_empty());
+        let mut i = inputs();
+        i.today = next;
+        i.now = at(12, 12, 0);
+        assert_eq!(by(&build(i), "checkin").rows.len(), 1);
     }
 
     #[test]

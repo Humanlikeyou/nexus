@@ -68,6 +68,7 @@ pub mod terrence_runtime_bridge;
 pub mod turn_memory;
 pub mod voice;
 pub mod voice_bridge;
+pub mod voice_heartbeat;
 pub mod whoop_status;
 // design-1111v stores (decisions, life dates, adds, check-in, Needs you today)
 pub mod adds;

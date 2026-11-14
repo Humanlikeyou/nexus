@@ -180,6 +180,8 @@ pub fn run() {
             // Nightly backup scheduler (in-app only; nothing runs while the app is closed).
             commands::backup_schedule::start(app.handle().clone());
             commands::daily_table::start(app.handle().clone());
+            // Voice only while the app is open (decision 0024): app_alive heartbeat every 5 s.
+            commands::voice_heartbeat::start();
 
             if let Some(window) = app.get_webview_window("main") {
                 dock_icon::sync(&window);
@@ -529,6 +531,11 @@ pub fn run() {
             // Appearance
             dock_icon::sync_dock_icon,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Amara OS");
+        .build(tauri::generate_context!())
+        .expect("error while building Amara OS")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                commands::voice_heartbeat::stop();
+            }
+        });
 }

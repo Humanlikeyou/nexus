@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn a_secret_never_survives_in_any_position() {
-        let secret = "sk-ant-api03-ZZZZZZZZZZZZZZZZZZZZ";
+        let secret = "sk-ant-api03-FAKE_ZZZZZZZZZZZZZZZZ_NOT_REAL";
         for line in [
             format!("token={secret}"),
             format!("Bearer {secret}"),

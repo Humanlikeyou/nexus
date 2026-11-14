@@ -2,8 +2,9 @@
 //! through the native approval dialog (`approval_gate`), exactly like `restart_services`.
 //!
 //! Scope, deliberately small:
-//! - Only the Docker containers `restart_services.rs` / `system.rs` already restart (`docker restart`,
-//!   the same `system::docker_restart`). Ids are the system-map node ids the Services rows use.
+//! - Only Docker containers (`docker restart`, the same `system::docker_restart` that `restart_services.rs`
+//!   uses): n8n, postgres, letta, verba, crew. Each name is verified in `stack/docker-compose.yml`, see
+//!   `container_for`. Ids are the system-map node ids the Services rows use.
 //! - Everything else the map knows (router, voice, hermes: LaunchAgent-managed; models, crews, memory,
 //!   health, home, backups) returns `unsupported`: `restart_services.rs` has no method for them today and
 //!   hard rule 5 forbids touching LaunchAgents. Unknown ids return `unknown_service`.
@@ -35,13 +36,18 @@ pub(crate) const KNOWN_IDS: &[&str] = &[
     "ha", "voice", "backups",
 ];
 
-/// Restartable ids and their Docker containers. Names are the compose project `stack` defaults
-/// already used in this repo (`docker:stack-n8n-1` in the self-diagnosis auto-heal, CLAUDE.md).
-/// Other compose services (letta, verba, crew) have no verified container name, so they are not here.
+/// Restartable ids and their Docker containers. `stack/docker-compose.yml` sets no `container_name`
+/// for any service, so Compose names each container `<project>-<service>-1`, where the project is the
+/// directory name `stack` (the same rule behind `stack-n8n-1` and `stack-postgres-1`). Verified against
+/// the compose services (`letta` line 91, `verba` line 154, `crew` line 184) and `docker ps` on this Mac.
+/// Anything not listed here stays `unsupported`.
 pub(crate) fn container_for(id: &str) -> Option<&'static str> {
     match id {
         "n8n" => Some("stack-n8n-1"),
         "postgres" => Some("stack-postgres-1"),
+        "letta" => Some("stack-letta-1"),
+        "verba" => Some("stack-verba-1"),
+        "crew" => Some("stack-crew-1"),
         _ => None,
     }
 }
@@ -150,13 +156,56 @@ mod tests {
         }
         // Only docker containers are restartable; LaunchAgent-managed services are not.
         for id in [
-            "router", "voice", "hermes", "ollama", "crew", "letta", "verba", "ha", "noop", "muse",
-            "backups",
+            "router", "voice", "hermes", "ollama", "ha", "noop", "muse", "backups",
         ] {
             assert_eq!(container_for(id), None, "{id}");
         }
         assert_eq!(container_for("n8n"), Some("stack-n8n-1"));
         assert_eq!(container_for("postgres"), Some("stack-postgres-1"));
+    }
+
+    #[test]
+    fn letta_verba_crew_map_to_their_verified_compose_container_names() {
+        assert_eq!(container_for("letta"), Some("stack-letta-1"));
+        assert_eq!(container_for("verba"), Some("stack-verba-1"));
+        assert_eq!(container_for("crew"), Some("stack-crew-1"));
+    }
+
+    #[tokio::test]
+    async fn letta_verba_crew_still_need_an_approval_every_call() {
+        for (id, container) in [
+            ("letta", "stack-letta-1"),
+            ("verba", "stack-verba-1"),
+            ("crew", "stack-crew-1"),
+        ] {
+            let t = fresh();
+            let asked: RefCell<Vec<(Vec<String>, String)>> = Default::default();
+            let done = restart_core(
+                id,
+                &t,
+                |k, text| {
+                    asked.borrow_mut().push((k, text));
+                    async { Ok(()) }
+                },
+                |c| async move { Ok(format!("Container {c} restarted")) },
+            )
+            .await
+            .unwrap();
+            assert_eq!(done.id, id);
+            assert_eq!(asked.borrow()[0].0, vec![format!("svc:docker:{container}")]);
+            assert!(asked.borrow()[0]
+                .1
+                .starts_with(&format!("Run: docker restart {container}")));
+            let err = restart_core(
+                id,
+                &t,
+                |_, _| async move { Err::<(), _>("declined: no".to_string()) },
+                |_| async { panic!("not approved") },
+            )
+            .await
+            .unwrap_err();
+            assert!(err.starts_with("declined:"), "{err}");
+        }
     }
 
     #[tokio::test]
