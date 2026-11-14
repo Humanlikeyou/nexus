@@ -23,7 +23,7 @@ pub const PROGRESS_EVENT: &str = "model://progress";
 pub(crate) const PROD_ALLOWED_HOSTS: &[&str] = &[];
 
 const CHUNK_TIMEOUT: Duration = Duration::from_secs(60);
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -168,7 +168,7 @@ async fn sha_of(p: &Path) -> Result<(String, u64, u64), &'static str> {
     Ok((hex::encode(h.finalize()), md.dev(), md.ino()))
 }
 
-fn pct(done: u64, total: u64) -> u8 {
+pub(crate) fn pct(done: u64, total: u64) -> u8 {
     if total == 0 {
         return 0;
     }
@@ -295,7 +295,7 @@ async fn fetch_one(
     Ok(())
 }
 
-fn approval_error(e: &str) -> &'static str {
+pub(crate) fn approval_error(e: &str) -> &'static str {
     if e.starts_with(super::approval_gate::DECLINED_PREFIX) {
         "declined"
     } else if e.starts_with(super::approval_gate::BUSY_PREFIX) {
@@ -305,7 +305,7 @@ fn approval_error(e: &str) -> &'static str {
     }
 }
 
-fn fmt_size(bytes: u64) -> String {
+pub(crate) fn fmt_size(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / 1e9)
 }
 
@@ -411,6 +411,11 @@ pub async fn model_download(
     app: tauri::AppHandle,
     tier: String,
 ) -> Result<DownloadSummary, String> {
+    // Ollama-registry (and local-only) tiers go through the runtime's own /api/pull.
+    let manifest = model_manifest::load().map_err(str::to_string)?;
+    if super::model_pull::tier_uses_pull(&manifest, &tier) {
+        return super::model_pull::pull_command(app, tier).await;
+    }
     let base: PathBuf = crate::app_paths::data_dir();
     let env = Env {
         allowed_hosts: PROD_ALLOWED_HOSTS,

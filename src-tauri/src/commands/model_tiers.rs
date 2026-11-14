@@ -6,6 +6,8 @@ use super::model_manifest::{self, Manifest};
 use serde::Serialize;
 
 pub(crate) const SIZE_UNKNOWN: &str = "Size not published yet";
+/// A tier holding a model made on this Mac (`source: local`) has nowhere to download it from.
+pub(crate) const NOT_DOWNLOADABLE: &str = "Not available to download yet";
 
 #[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +23,12 @@ pub struct ModelTier {
 }
 
 fn download_text(models: &[model_manifest::ManifestModel]) -> String {
+    if models
+        .iter()
+        .any(|m| m.source.as_deref() == Some(model_manifest::SOURCE_LOCAL))
+    {
+        return NOT_DOWNLOADABLE.to_string();
+    }
     let mut total: u64 = 0;
     for m in models {
         match m.bytes {
@@ -101,14 +109,25 @@ mod tests {
     }
 
     #[test]
-    fn live_names_only_and_download_unknown_not_invented() {
+    fn live_names_only_and_local_tiers_are_not_downloadable() {
         let t = tiers_for(&shipped(), 36);
         let all: Vec<&String> = t.iter().flat_map(|x| &x.models).collect();
         assert!(all.iter().any(|n| *n == "gemma4:latest"));
         assert!(all.iter().any(|n| *n == "qwen3.8-uncensored:latest"));
         assert!(all.iter().any(|n| *n == "nomic-embed-text:latest"));
         assert!(!all.iter().any(|n| n.contains("gemma4-12b")));
-        assert!(t.iter().all(|x| x.download == SIZE_UNKNOWN));
+        // compact = gemma4 + nomic (both on the Ollama registry): real total, 9.6 + 0.27 GB.
+        assert_eq!(t[0].id, "compact");
+        assert_eq!(t[0].download, "9.9 GB");
+        // standard and large hold the locally created deep model: said plainly, no number.
+        assert!(t[1..].iter().all(|x| x.download == NOT_DOWNLOADABLE));
+    }
+
+    #[test]
+    fn unknown_size_is_still_reported_as_unknown() {
+        let mut m = shipped();
+        m.tiers[0].models[0].bytes = None;
+        assert_eq!(tiers_for(&m, 8)[0].download, SIZE_UNKNOWN);
     }
 
     #[test]

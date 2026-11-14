@@ -89,7 +89,35 @@ pub(crate) fn sidecar_runtime(id: ServiceId) -> Option<Runtime> {
     }
 }
 
-/// Pure core of `resolve_sidecar`: `<dir>/<name>` only if it is a regular file (not a symlink,
+/// Folder of the bundled `ollama` runtime inside `Contents/Resources` (llama-server and the licence
+/// files sit next to the binary, so ollama's sibling lookup works).
+pub(crate) const OLLAMA_RUNTIME_DIR: &str = "ollama-runtime";
+/// The helper the ollama binary launches from its own folder; it must pass the same checks.
+pub(crate) const OLLAMA_HELPER: &str = "llama-server";
+
+fn folder_ok(dir: &std::path::Path, uid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    // `symlink_metadata`: a symlinked folder is refused, not followed.
+    match std::fs::symlink_metadata(dir) {
+        Ok(dm) => dm.file_type().is_dir() && dm.uid() == uid && dm.mode() & 0o022 == 0,
+        Err(_) => false,
+    }
+}
+
+fn exec_file_ok(path: &std::path::Path, uid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match std::fs::symlink_metadata(path) {
+        Ok(m) => {
+            m.file_type().is_file()
+                && m.uid() == uid
+                && m.mode() & 0o100 != 0
+                && m.mode() & 0o022 == 0
+        }
+        Err(_) => false,
+    }
+}
+
+/// Pure core of the file check: `<dir>/<name>` only if it is a regular file (not a symlink,
 /// checked with `symlink_metadata`), owned by `uid`, with an execute bit. `name` must be one of the
 /// two known sidecars, so no free text ever reaches the path. Group/other-writable files and a
 /// folder that is not ours or is group/other-writable are refused.
@@ -98,33 +126,48 @@ pub(crate) fn resolve_sidecar_in(
     name: &str,
     uid: u32,
 ) -> Option<std::path::PathBuf> {
-    use std::os::unix::fs::MetadataExt;
     if name != SIDECAR_OLLAMA && name != SIDECAR_ROUTER {
         return None;
     }
     // The folder must be ours and closed to group/other writes, or anyone could swap the file.
-    let dm = std::fs::metadata(dir).ok()?;
-    if !dm.is_dir() || dm.uid() != uid || dm.mode() & 0o022 != 0 {
+    if !folder_ok(dir, uid) {
         return None;
     }
     let path = dir.join(name);
-    let meta = std::fs::symlink_metadata(&path).ok()?;
-    if !meta.file_type().is_file()
-        || meta.uid() != uid
-        || meta.mode() & 0o100 == 0
-        || meta.mode() & 0o022 != 0
-    {
-        return None;
-    }
-    Some(path)
+    exec_file_ok(&path, uid).then_some(path)
 }
 
-/// The bundled binary: `current_exe().parent()` (Contents/MacOS) only. No PATH search, no home path.
+/// The real bundle layout, relative to `Contents`: `MacOS/amara-router` (one executable) and
+/// `Resources/ollama-runtime/{ollama,llama-server}` (a folder, so ollama finds its helper). Every
+/// folder on the way (`Contents/Resources` and the runtime folder, or `Contents/MacOS`) and every
+/// file must be ours, not group/other-writable, and not a symlink.
+pub(crate) fn resolve_sidecar_in_contents(
+    contents: &std::path::Path,
+    name: &str,
+    uid: u32,
+) -> Option<std::path::PathBuf> {
+    match name {
+        SIDECAR_ROUTER => resolve_sidecar_in(&contents.join("MacOS"), name, uid),
+        SIDECAR_OLLAMA => {
+            let resources = contents.join("Resources");
+            if !folder_ok(&resources, uid) {
+                return None;
+            }
+            let dir = resources.join(OLLAMA_RUNTIME_DIR);
+            let bin = resolve_sidecar_in(&dir, name, uid)?;
+            exec_file_ok(&dir.join(OLLAMA_HELPER), uid).then_some(bin)
+        }
+        _ => None,
+    }
+}
+
+/// The bundled binary: `current_exe()` is `Contents/MacOS/<app>`, so `Contents` is two levels up.
+/// No PATH search, no home path.
 pub(crate) fn resolve_sidecar(name: &str) -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
     // SAFETY: getuid has no preconditions and cannot fail.
     let uid = unsafe { libc::getuid() };
-    resolve_sidecar_in(exe.parent()?, name, uid)
+    resolve_sidecar_in_contents(exe.parent()?.parent()?, name, uid)
 }
 
 /// How health is read. Always read-only.
@@ -605,6 +648,132 @@ mod tests {
         std::os::unix::fs::symlink(&real, d.join("amara-router")).unwrap();
         assert_eq!(resolve_sidecar_in(&d, "amara-router", uid()), None);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn resolve_sidecar_uses_the_real_bundle_layout() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &std::path::Path, m: u32| {
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap()
+        };
+        let contents = tmpdir("layout");
+        let macos = contents.join("MacOS");
+        let res = contents.join("Resources");
+        let rt = res.join("ollama-runtime");
+        for d in [&macos, &rt] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        for d in [&macos, &res, &rt] {
+            mode(d, 0o755);
+        }
+        let write_exec = |p: &std::path::Path| {
+            std::fs::write(p, b"x").unwrap();
+            mode(p, 0o755);
+        };
+        let router = macos.join("amara-router");
+        let ollama = rt.join("ollama");
+        let helper = rt.join("llama-server");
+        assert_eq!(
+            resolve_sidecar_in_contents(&contents, "ollama", uid()),
+            None
+        );
+        write_exec(&router);
+        assert_eq!(
+            resolve_sidecar_in_contents(&contents, "amara-router", uid()),
+            Some(router.clone())
+        );
+        // ollama needs its helper next to it.
+        write_exec(&ollama);
+        assert_eq!(
+            resolve_sidecar_in_contents(&contents, "ollama", uid()),
+            None,
+            "no helper"
+        );
+        write_exec(&helper);
+        assert_eq!(
+            resolve_sidecar_in_contents(&contents, "ollama", uid()),
+            Some(ollama.clone())
+        );
+        // Not the old flat layout, and no other names.
+        assert_eq!(resolve_sidecar_in(&macos, "ollama", uid()), None);
+        assert_eq!(resolve_sidecar_in_contents(&contents, "sh", uid()), None);
+        assert_eq!(resolve_sidecar_in_contents(&contents, "../x", uid()), None);
+        // Wrong owner.
+        assert_eq!(
+            resolve_sidecar_in_contents(&contents, "ollama", uid() + 1),
+            None
+        );
+        // Every link in the chain is checked: Resources, the runtime folder, the helper, the binary.
+        mode(&res, 0o775);
+        assert_eq!(
+            resolve_sidecar_in_contents(&contents, "ollama", uid()),
+            None,
+            "Resources mode"
+        );
+        mode(&res, 0o755);
+        mode(&rt, 0o777);
+        assert_eq!(
+            resolve_sidecar_in_contents(&contents, "ollama", uid()),
+            None,
+            "runtime dir mode"
+        );
+        mode(&rt, 0o755);
+        mode(&helper, 0o666);
+        assert_eq!(
+            resolve_sidecar_in_contents(&contents, "ollama", uid()),
+            None,
+            "helper mode"
+        );
+        mode(&helper, 0o755);
+        mode(&ollama, 0o757);
+        assert_eq!(
+            resolve_sidecar_in_contents(&contents, "ollama", uid()),
+            None,
+            "binary mode"
+        );
+        mode(&ollama, 0o755);
+        // A symlinked helper, binary or runtime folder is refused.
+        std::fs::remove_file(&helper).unwrap();
+        std::os::unix::fs::symlink(&ollama, &helper).unwrap();
+        assert_eq!(
+            resolve_sidecar_in_contents(&contents, "ollama", uid()),
+            None,
+            "helper symlink"
+        );
+        std::fs::remove_file(&helper).unwrap();
+        write_exec(&helper);
+        let real_rt = contents.join("real-rt");
+        std::fs::rename(&rt, &real_rt).unwrap();
+        std::os::unix::fs::symlink(&real_rt, &rt).unwrap();
+        // A symlinked runtime folder is refused (symlink_metadata, not followed).
+        assert_eq!(
+            resolve_sidecar_in_contents(&contents, "ollama", uid()),
+            None,
+            "runtime symlink"
+        );
+        let _ = std::fs::remove_dir_all(&contents);
+    }
+
+    #[test]
+    fn sidecar_layout_matches_the_tauri_conf() {
+        // The bundle map in tauri.conf.json and the resolver must agree.
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tauri.conf.json")).unwrap();
+        let files = &conf["bundle"]["macOS"]["files"];
+        assert_eq!(
+            files["MacOS/amara-router"],
+            "binaries/amara-router-aarch64-apple-darwin"
+        );
+        assert_eq!(
+            files[format!("Resources/{OLLAMA_RUNTIME_DIR}")],
+            "binaries/ollama-runtime"
+        );
+        // No externalBin (tauri-build would then fail every cargo build without the binaries).
+        assert!(conf["bundle"].get("externalBin").is_none());
+        assert!(conf["build"]["beforeBuildCommand"]
+            .as_str()
+            .unwrap()
+            .contains("sidecars:check"));
     }
 
     #[test]

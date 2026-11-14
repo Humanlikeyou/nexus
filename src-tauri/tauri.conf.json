@@ -5,7 +5,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run sidecars:check && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -52,6 +52,10 @@
       "entitlements": null,
       "exceptionDomain": "",
       "frameworks": [],
+      "files": {
+        "MacOS/amara-router": "binaries/amara-router-aarch64-apple-darwin",
+        "Resources/ollama-runtime": "binaries/ollama-runtime"
+      },
       "providerShortName": null,
       "signingIdentity": null,
       "minimumSystemVersion": "13.0"

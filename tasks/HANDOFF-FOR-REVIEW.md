@@ -639,3 +639,9 @@ The plan is `tasks/proposed/phase9-runtime-firstrun.md`. Decision 0030 covers th
 3. Confirm the tier RAM thresholds (8 / 32 / 64 GB) and the names.
 4. Q1 store layout (`/api/pull` vs blobs), Q2 Ed25519 key, Q3 voice sidecar, Q5 Intel.
 5. The parity check with Ollama.app quit (plan §6), and the act flip after egress containment.
+
+### 25a. Stage F follow-ups (decision 0031, 2026-11-15)
+- F6 bundling: `scripts/prepare-sidecars.sh` (`npm run sidecars:prepare` / `sidecars:check`) stages ollama 0.40.14 (SHA pinned) + `llama-server` (arm64 Metal, system libs only), the licences, and the router binary into git-ignored `src-tauri/binaries/`. `bundle.macOS.files` maps them to `Contents/MacOS/amara-router` and `Contents/Resources/ollama-runtime/`. `beforeBuildCommand` fails clearly if nothing is staged. No externalBin, so dev/cargo/vitest are unaffected. MLX (+439 MB) is off (`NEXUS_WITH_MLX=1`). CI release.yml needs `sidecars:prepare` (not changed).
+- F8 containment: bundled `ollama serve` runs under a `sandbox-exec` profile (outbound loopback only; writes limited to the model dir and temp; ~/.ssh, ~/.aws, ~/.gnupg, ~/.hermes, Keychains and the app data dir unreadable). Checked with harmless commands: TEST-NET connects get EPERM, loopback is allowed. The pull window is a separate unsandboxed serve on :11435, a spec only, not wired.
+- F7 pull: the manifest is now schema 2 with real digests and sizes from this Mac. `PROD_PULL_HOSTS = registry.ollama.ai:443`. Only the compact tier (gemma4 + nomic, 9.9 GB) can be pulled. The deep `qwen3.8-uncensored` is a local GGUF import, so standard and large are `not_published`. Pull returns `runtime_unavailable` until the :11435 window is wired.
+- **Security review NOT run for F6–F8** (usage limit). Run it before wiring the pull window or flipping act. Not run: a live `serve` under the sandbox (Metal), the parity check.

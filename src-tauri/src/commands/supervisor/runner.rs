@@ -567,13 +567,80 @@ pub struct SpawnSpec {
     pub env: Vec<(&'static str, String)>,
 }
 
-/// [GATE] for the act flip (L9): `OLLAMA_HOST` only fixes where `ollama serve` LISTENS. Ollama can
-/// still make outbound requests (model pulls, its own update checks); containing that egress is not
-/// built and must be decided before `SUPERVISOR_ACT_ENABLED` is flipped.
-/// The loopback address `ollama serve` binds. Model storage is left at the runtime's default.
+/// The loopback address the long-running, sandboxed `ollama serve` binds.
 pub(crate) const OLLAMA_HOST_LOOPBACK: &str = "127.0.0.1:11434";
+/// The loopback address of the short-lived, UNSANDBOXED model-download window (decision 0031 section 4).
+pub(crate) const OLLAMA_PULL_HOST_LOOPBACK: &str = "127.0.0.1:11435";
+/// macOS sandbox launcher (deprecated by Apple but present on every supported macOS).
+pub(crate) const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+
+/// SBPL string literal for a path: refuses anything that could end the literal or smuggle a rule
+/// (quote, backslash, control characters, empty, non-absolute).
+fn sbpl_path(p: &std::path::Path) -> Option<String> {
+    let s = p.to_str()?;
+    if !s.starts_with('/') || s.chars().any(|c| c == '"' || c == '\\' || c.is_control()) {
+        return None;
+    }
+    Some(format!("\"{s}\""))
+}
+
+/// Pure: the sandbox profile for the long-running `ollama serve` (decision 0031 section 4, L9).
+/// Starts from `(allow default)` so Metal, the Go runtime and the llama-server helper keep working,
+/// then closes what ollama must not do (SBPL: the last matching rule wins):
+///  - network: outbound only to loopback (and unix sockets); bind/inbound only on loopback. A model download
+///    can therefore not reach `registry.ollama.ai` from this process; downloads run in the separate
+///    download window.
+///  - file writes: only the model folder, the per-user temp/cache area, /private/tmp and /dev.
+///    The bundled runtime folder is readable (default) but NOT writable.
+///  - file reads: no keys, cloud credentials, Hermes data or the app's own data folder.
+///
+/// Validated for syntax and for the network/file denials with `sandbox-exec` against harmless
+/// commands; NOT validated with a running `serve` (Metal under the sandbox is "not run").
+pub(crate) fn ollama_sandbox_profile(
+    model_dir: Option<&std::path::Path>,
+    data_dir: &std::path::Path,
+    home: Option<&std::path::Path>,
+) -> Option<String> {
+    let mut out = String::from("(version 1)\n(allow default)\n");
+    out.push_str("(deny network-outbound)\n");
+    out.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
+    out.push_str("(allow network-outbound (remote unix-socket))\n");
+    out.push_str("(deny network-inbound)\n(deny network-bind)\n");
+    out.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
+    out.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
+    out.push_str("(deny file-write*)\n");
+    if let Some(m) = model_dir {
+        out.push_str(&format!(
+            "(allow file-write* (subpath {}))\n",
+            sbpl_path(m)?
+        ));
+    }
+    for fixed in ["/private/var/folders", "/private/tmp", "/dev"] {
+        out.push_str(&format!("(allow file-write* (subpath \"{fixed}\"))\n"));
+    }
+    for rel in [".ssh", ".aws", ".gnupg", ".hermes", "Library/Keychains"] {
+        if let Some(h) = home {
+            out.push_str(&format!(
+                "(deny file-read* (subpath {}))\n",
+                sbpl_path(&h.join(rel))?
+            ));
+        }
+    }
+    out.push_str(&format!(
+        "(deny file-read* (subpath {}))\n",
+        sbpl_path(data_dir)?
+    ));
+    Some(out)
+}
+
+/// The model folder `ollama` uses by default (`~/.ollama/models` lives under it; the folder also
+/// holds ollama's own key). Storage stays at the runtime's default.
+pub(crate) fn ollama_model_dir(home: &str) -> std::path::PathBuf {
+    std::path::Path::new(home).join(".ollama")
+}
 
 /// Pure: the spawn spec for one allowlisted row. None for any other id or a non-UTF-8 path.
+/// `ollama serve` runs as `/usr/bin/sandbox-exec -p <profile> <ollama> serve`.
 pub(crate) fn spawn_spec(
     id: ServiceId,
     bin: &std::path::Path,
@@ -582,20 +649,55 @@ pub(crate) fn spawn_spec(
 ) -> Option<SpawnSpec> {
     let bin_s = bin.to_str()?;
     let mut env = clean_env(bin_s, home);
-    let args = match id {
+    match id {
         ServiceId::ModelRuntime => {
+            // No home (never in the real app): the profile has no model-folder write rule, so ollama
+            // is contained but cannot store models; it is still never started unsandboxed.
+            let model_dir = home.map(ollama_model_dir);
+            let profile = ollama_sandbox_profile(
+                model_dir.as_deref(),
+                data_dir,
+                home.map(std::path::Path::new),
+            )?;
             env.push(("OLLAMA_HOST", OLLAMA_HOST_LOOPBACK.to_string()));
-            vec!["serve".to_string()]
+            Some(SpawnSpec {
+                program: std::path::PathBuf::from(SANDBOX_EXEC),
+                args: vec![
+                    "-p".to_string(),
+                    profile,
+                    bin_s.to_string(),
+                    "serve".to_string(),
+                ],
+                env,
+            })
         }
         ServiceId::AmaraRouter => {
             let cfg = data_dir.join("router").join("config.toml");
-            vec!["--config".to_string(), cfg.to_str()?.to_string()]
+            Some(SpawnSpec {
+                program: bin.to_path_buf(),
+                args: vec!["--config".to_string(), cfg.to_str()?.to_string()],
+                env,
+            })
         }
-        _ => return None,
-    };
+        _ => None,
+    }
+}
+
+/// Pure: the spawn spec of the short-lived model-download window: the same bundled `ollama serve`, UNSANDBOXED
+/// (it must reach `registry.ollama.ai:443`), on its own loopback port, with the same model folder
+/// (no `OLLAMA_MODELS`, so the default store is shared). Used only by the download lane's approved,
+/// click-started download; nothing calls it yet, and it is never started from here.
+#[allow(dead_code)]
+pub(crate) fn ollama_pull_window_spec(
+    bin: &std::path::Path,
+    home: Option<&str>,
+) -> Option<SpawnSpec> {
+    let bin_s = bin.to_str()?;
+    let mut env = clean_env(bin_s, home);
+    env.push(("OLLAMA_HOST", OLLAMA_PULL_HOST_LOOPBACK.to_string()));
     Some(SpawnSpec {
         program: bin.to_path_buf(),
-        args,
+        args: vec!["serve".to_string()],
         env,
     })
 }
@@ -1333,8 +1435,18 @@ mod sidecar_tests {
             (
                 ServiceId::ModelRuntime,
                 SpawnSpec {
-                    program: PathBuf::from("/fake/MacOS/ollama"),
-                    args: vec!["serve".to_string()],
+                    program: PathBuf::from("/usr/bin/sandbox-exec"),
+                    args: vec![
+                        "-p".to_string(),
+                        ollama_sandbox_profile(
+                            Some(std::path::Path::new("/home/x/.ollama")),
+                            &d,
+                            Some(std::path::Path::new("/home/x"))
+                        )
+                        .unwrap(),
+                        "/fake/MacOS/ollama".to_string(),
+                        "serve".to_string()
+                    ],
                     env: vec![
                         ("PATH", path.clone()),
                         ("HOME", "/home/x".to_string()),
@@ -1361,6 +1473,186 @@ mod sidecar_tests {
             assert!(spec.env.iter().all(|(_, v)| !v.contains("0.0.0.0")));
         }
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    fn test_profile() -> String {
+        ollama_sandbox_profile(
+            Some(std::path::Path::new("/home/x/.ollama")),
+            std::path::Path::new("/home/x/Library/Application Support/com.taisun.nexus"),
+            Some(std::path::Path::new("/home/x")),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn the_sandbox_profile_denies_outbound_and_allows_only_loopback() {
+        let p = test_profile();
+        assert!(p.starts_with("(version 1)\n(allow default)\n"));
+        assert!(p.contains("(deny network-outbound)\n"));
+        assert!(p.contains("(allow network-outbound (remote ip \"localhost:*\"))"));
+        // Deny comes before the loopback allow (the last matching rule wins).
+        assert!(
+            p.find("(deny network-outbound)").unwrap()
+                < p.find("(allow network-outbound (remote ip").unwrap()
+        );
+        assert!(p.contains("(deny network-bind)") && p.contains("(deny network-inbound)"));
+        assert!(p.contains("(allow network-bind (local ip \"localhost:*\"))"));
+        // No wide allow of any network rule.
+        for line in p.lines().filter(|l| l.starts_with("(allow network")) {
+            assert!(
+                line.contains("localhost:*") || line.contains("unix-socket"),
+                "{line}"
+            );
+        }
+        // Writes: denied, then only the model folder, per-user temp, /private/tmp, /dev.
+        assert!(p.contains("(deny file-write*)\n"));
+        let writes: Vec<&str> = p
+            .lines()
+            .filter(|l| l.starts_with("(allow file-write*"))
+            .collect();
+        assert_eq!(
+            writes,
+            vec![
+                "(allow file-write* (subpath \"/home/x/.ollama\"))",
+                "(allow file-write* (subpath \"/private/var/folders\"))",
+                "(allow file-write* (subpath \"/private/tmp\"))",
+                "(allow file-write* (subpath \"/dev\"))",
+            ]
+        );
+        // Reads: keys, cloud credentials, Hermes, Keychains and the app data folder are closed.
+        for d in [
+            "/home/x/.ssh",
+            "/home/x/.aws",
+            "/home/x/.gnupg",
+            "/home/x/.hermes",
+            "/home/x/Library/Keychains",
+            "/home/x/Library/Application Support/com.taisun.nexus",
+        ] {
+            assert!(
+                p.contains(&format!("(deny file-read* (subpath \"{d}\"))")),
+                "{d}"
+            );
+        }
+        assert!(!p.contains("0.0.0.0"));
+    }
+
+    #[test]
+    fn sandbox_profile_paths_cannot_inject_rules() {
+        let home = std::path::Path::new("/home/x");
+        let data = std::path::Path::new("/home/x/d");
+        for bad in ["/h\")(allow network*)(\"", "/h\\x", "rel/path", "", "/h\nx"] {
+            assert_eq!(
+                ollama_sandbox_profile(Some(std::path::Path::new(bad)), data, Some(home)),
+                None,
+                "{bad:?}"
+            );
+            assert_eq!(
+                ollama_sandbox_profile(
+                    Some(std::path::Path::new("/ok")),
+                    std::path::Path::new(bad),
+                    Some(home)
+                ),
+                None,
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_sandbox_profile_is_valid_sbpl() {
+        // Syntax check only: sandbox-exec runs /usr/bin/true, never ollama.
+        let home = std::env::temp_dir();
+        let p = ollama_sandbox_profile(Some(&home.join(".ollama")), &home.join("d"), Some(&home))
+            .unwrap();
+        let out = std::process::Command::new(SANDBOX_EXEC)
+            .args(["-p", &p, "/usr/bin/true"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    fn spawn_specs_for_ollama_are_exact() {
+        let bin = std::path::Path::new("/App/Contents/Resources/ollama-runtime/ollama");
+        let data = std::path::Path::new("/data");
+        let path =
+            "/usr/bin:/bin:/usr/sbin:/sbin:/App/Contents/Resources/ollama-runtime".to_string();
+        // Long-running: sandbox-exec wraps the binary, env is cleared plus OLLAMA_HOST only.
+        let serve = spawn_spec(ServiceId::ModelRuntime, bin, data, Some("/home/x")).unwrap();
+        assert_eq!(serve.program, PathBuf::from("/usr/bin/sandbox-exec"));
+        assert_eq!(serve.args.len(), 4);
+        assert_eq!(serve.args[0], "-p");
+        assert_eq!(
+            serve.args[1],
+            ollama_sandbox_profile(
+                Some(std::path::Path::new("/home/x/.ollama")),
+                data,
+                Some(std::path::Path::new("/home/x"))
+            )
+            .unwrap()
+        );
+        assert_eq!(serve.args[2], bin.to_str().unwrap());
+        assert_eq!(serve.args[3], "serve");
+        assert_eq!(
+            serve.env,
+            vec![
+                ("PATH", path.clone()),
+                ("HOME", "/home/x".to_string()),
+                ("OLLAMA_HOST", "127.0.0.1:11434".to_string()),
+            ]
+        );
+        // Without a home it is still sandboxed, with no model-folder write rule and no HOME.
+        let nohome = spawn_spec(ServiceId::ModelRuntime, bin, data, None).unwrap();
+        assert_eq!(nohome.program, PathBuf::from("/usr/bin/sandbox-exec"));
+        assert!(!nohome.args[1].contains(".ollama"));
+        assert!(nohome.env.iter().all(|(k, _)| *k != "HOME"));
+        // Pull window: unsandboxed, own port, same model folder (no OLLAMA_MODELS).
+        let pull = ollama_pull_window_spec(bin, Some("/home/x")).unwrap();
+        assert_eq!(
+            pull,
+            SpawnSpec {
+                program: bin.to_path_buf(),
+                args: vec!["serve".to_string()],
+                env: vec![
+                    ("PATH", path),
+                    ("HOME", "/home/x".to_string()),
+                    ("OLLAMA_HOST", "127.0.0.1:11435".to_string()),
+                ],
+            }
+        );
+        assert_ne!(OLLAMA_HOST_LOOPBACK, OLLAMA_PULL_HOST_LOOPBACK);
+        for spec in [&serve, &pull] {
+            assert!(spec.env.iter().all(|(k, _)| *k != "OLLAMA_MODELS"));
+            assert!(spec.env.iter().all(|(_, v)| !v.contains("0.0.0.0")));
+        }
+    }
+
+    #[test]
+    fn the_runtime_is_only_ever_spawned_through_the_sandbox_in_the_runner() {
+        // The runner builds its ollama spec only through `spawn_spec` (sandboxed); the unsandboxed
+        // pull window spec is not referenced by any production code in this file.
+        let src = include_str!("runner.rs");
+        let prod = src
+            .split("#[cfg(test)]\npub(crate) mod fakes")
+            .next()
+            .unwrap();
+        assert_eq!(
+            prod.matches("ollama_pull_window_spec(").count(),
+            1,
+            "only its definition"
+        );
+        assert!(prod.contains("SANDBOX_EXEC"));
+        // Tests never start `serve`.
+        let tests = src
+            .split("#[cfg(test)]\npub(crate) mod fakes")
+            .nth(1)
+            .unwrap();
+        assert!(!tests.contains("Command::new(\"ollama\")"));
+        assert!(!tests.contains("\"pull\""));
     }
 
     #[tokio::test]

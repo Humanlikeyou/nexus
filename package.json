@@ -9,6 +9,8 @@
     "test:neuro": "node --experimental-strip-types --test src-console/neuro/*.test.mjs",
     "bundle:local": "APPLE_SIGNING_IDENTITY=- tauri build",
     "preview": "vite preview",
+    "sidecars:prepare": "bash scripts/prepare-sidecars.sh",
+    "sidecars:check": "bash scripts/prepare-sidecars.sh --check",
     "tauri": "tauri",
     "mock-gateway": "node scripts/mock-gateway.mjs",
     "mock-gateway:partial": "node scripts/mock-gateway.mjs --partial",

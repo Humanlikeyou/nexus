@@ -11,7 +11,7 @@ pub const MANIFEST_INVALID: &str = "manifest_invalid";
 const MANIFEST_BYTES: &[u8] = include_bytes!("../../resources/model-manifest.json");
 /// SHA-256 (hex) of `resources/model-manifest.json`. Update together with the file.
 pub(crate) const MANIFEST_SHA256: &str =
-    "35ca870d30a41301a745987f3ea97d080330797cb738044f047f739bdfe9778d";
+    "5308e3a2c00a6f7d0eddfeafb5386dc4ea5bbc5d5f2b424e67ac5e26c9716973";
 
 const TIER_IDS: [&str; 3] = ["compact", "standard", "large"];
 const ROLES: [&str; 3] = ["fast", "deep", "embed"];
@@ -48,9 +48,18 @@ pub(crate) struct ManifestModel {
     /// Lowercase hex SHA-256 of the file; None until known.
     #[serde(default)]
     pub sha256: Option<String>,
-    /// Empty until Taisun logs a host.
+    /// Empty until Taisun logs a host; always empty for `ollama` and `local` models.
     pub url: String,
+    /// Schema 2 only. `ollama`: pulled by the bundled runtime's own `/api/pull` (the manifest
+    /// `sha256` is the Ollama manifest digest, `bytes` the total of config + layers). `local`: a
+    /// model created on this Mac, not published anywhere, so it is not downloadable. Absent
+    /// (schema 1): a raw file at `url`.
+    #[serde(default)]
+    pub source: Option<String>,
 }
+
+pub(crate) const SOURCE_OLLAMA: &str = "ollama";
+pub(crate) const SOURCE_LOCAL: &str = "local";
 
 /// Decides whether manifest bytes are trusted. Swap `PinnedSha256` for `Ed25519Verifier` later.
 pub(crate) trait ManifestVerifier: Sync {
@@ -115,7 +124,7 @@ fn url_ok(u: &str) -> bool {
 }
 
 fn validate(m: &Manifest) -> bool {
-    if m.schema != 1 || m.tiers.is_empty() || m.tiers.len() > TIER_IDS.len() {
+    if !matches!(m.schema, 1 | 2) || m.tiers.is_empty() || m.tiers.len() > TIER_IDS.len() {
         return false;
     }
     let mut seen = Vec::new();
@@ -135,10 +144,19 @@ fn validate(m: &Manifest) -> bool {
         for md in &t.models {
             let url_ok = url_ok(&md.url);
             let sha_ok = md.sha256.as_deref().is_none_or(is_hex64);
+            let source_ok = match (m.schema, md.source.as_deref()) {
+                (1, None) => true,
+                (2, Some(SOURCE_OLLAMA)) => {
+                    md.url.is_empty() && md.bytes.is_some() && md.sha256.is_some()
+                }
+                (2, Some(SOURCE_LOCAL)) => md.url.is_empty(),
+                _ => false,
+            };
             if !ROLES.contains(&md.role.as_str())
                 || !valid_name(&md.name)
                 || !url_ok
                 || !sha_ok
+                || !source_ok
                 || md.bytes == Some(0)
                 || md.bytes.is_some_and(|b| b > MAX_MODEL_BYTES)
             {
@@ -203,12 +221,20 @@ mod tests {
             assert!(names.contains(&live), "{live}");
         }
         assert!(!String::from_utf8_lossy(MANIFEST_BYTES).contains("gemma4-12b-uncensored"));
-        // No invented sizes, digests or hosts.
-        assert!(m
-            .tiers
-            .iter()
-            .flat_map(|t| &t.models)
-            .all(|x| x.bytes.is_none() && x.sha256.is_none() && x.url.is_empty()));
+        // Real digests, no hosts; local models are marked and never get a url.
+        let all: Vec<&ManifestModel> = m.tiers.iter().flat_map(|t| &t.models).collect();
+        assert!(all.iter().all(|x| x.url.is_empty()
+            && x.bytes.is_some()
+            && x.sha256.is_some()
+            && x.source.is_some()));
+        for x in &all {
+            let want = if x.name.starts_with("qwen3.8") {
+                SOURCE_LOCAL
+            } else {
+                SOURCE_OLLAMA
+            };
+            assert_eq!(x.source.as_deref(), Some(want), "{}", x.name);
+        }
     }
 
     #[test]
@@ -233,23 +259,49 @@ mod tests {
         assert_eq!(load_with(b"", &AcceptAll).unwrap_err(), MANIFEST_INVALID);
     }
 
+    /// A schema-1 manifest (raw url downloads) with one model, for url/size/digest cases.
+    fn raw_v1(bytes: &str, sha: &str, url: &str) -> String {
+        format!(
+            "{{\"schema\":1,\"issued\":\"t\",\"tiers\":[{{\"id\":\"compact\",\"name\":\"Compact\",\"minRamGb\":8,\"models\":[{{\"role\":\"fast\",\"name\":\"gemma4:latest\",\"bytes\":{bytes},\"sha256\":{sha},\"url\":\"{url}\"}}]}}]}}"
+        )
+    }
+
     #[test]
     fn bad_schema_is_invalid_even_if_verifier_accepts() {
         let text = String::from_utf8(MANIFEST_BYTES.to_vec()).unwrap();
-        let cases = [
-            text.replace("\"schema\": 1", "\"schema\": 2"),
+        let ok_sha = format!("\"{}\"", "a".repeat(64));
+        let mut cases = vec![
+            text.replace("\"schema\": 2", "\"schema\": 3"),
+            text.replace("\"schema\": 2", "\"schema\": 1"),
             text.replace("\"compact\"", "\"tiny\""),
             text.replace("gemma4:latest", "gemma4-12b-uncensored:latest"),
-            text.replace("\"url\": \"\"", "\"url\": \"http://example.invalid/x\""),
-            text.replace("\"url\": \"\"", "\"url\": \"http://127.0.0.1.evil.com/x\""),
-            text.replace("\"url\": \"\"", "\"url\": \"http://127.0.0.1@evil.com/x\""),
-            text.replace("\"url\": \"\"", "\"url\": \"https://1.2.3.4/x\""),
-            text.replace("\"url\": \"\"", "\"url\": \"https://u:p@example.com/x\""),
-            text.replace("\"bytes\": null", "\"bytes\": 80000000001"),
-            text.replace("\"sha256\": null", "\"sha256\": \"../../etc/passwd\""),
             text.replacen("\"role\": \"fast\"", "\"role\": \"boss\"", 1),
             text.replacen("{\n  \"schema\"", "{\n  \"extra\": 1,\n  \"schema\"", 1),
+            // schema 2: source must be known, urls stay empty, ollama needs bytes + digest.
+            text.replacen("\"ollama\"", "\"s3\"", 1),
+            text.replacen("\"url\": \"\"", "\"url\": \"https://example.com/x\"", 1),
+            text.replacen("\"source\": \"local\"", "\"source\": \"oops\"", 1),
+            text.replacen(", \"source\": \"ollama\"", "", 1),
+            text.replacen("\"bytes\": 9608350718", "\"bytes\": null", 1),
+            text.replacen(
+                "c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb",
+                "../../etc/passwd",
+                1,
+            ),
+            // schema 1 may not carry a source.
+            raw_v1("1", &ok_sha, "").replace("\"url\"", "\"source\":\"ollama\",\"url\""),
         ];
+        for u in [
+            "http://example.invalid/x",
+            "http://127.0.0.1.evil.com/x",
+            "http://127.0.0.1@evil.com/x",
+            "https://1.2.3.4/x",
+            "https://u:p@example.com/x",
+        ] {
+            cases.push(raw_v1("1", &ok_sha, u));
+        }
+        cases.push(raw_v1("80000000001", &ok_sha, ""));
+        cases.push(raw_v1("1", "\"../../etc/passwd\"", ""));
         for c in cases {
             assert_eq!(
                 load_with(c.as_bytes(), &AcceptAll).unwrap_err(),
@@ -261,16 +313,15 @@ mod tests {
 
     #[test]
     fn good_urls_are_accepted() {
-        let text = String::from_utf8(MANIFEST_BYTES.to_vec()).unwrap();
+        let ok_sha = format!("\"{}\"", "a".repeat(64));
         for u in [
             "https://models.example.com/a.bin",
             "http://127.0.0.1:8080/a",
         ] {
-            let t = text.replace("\"url\": \"\"", &format!("\"url\": \"{u}\""));
+            let t = raw_v1("1", &ok_sha, u);
             assert!(load_with(t.as_bytes(), &AcceptAll).is_ok(), "{u}");
         }
-        let t = text.replace("\"bytes\": null", "\"bytes\": 80000000000");
-        assert!(load_with(t.as_bytes(), &AcceptAll).is_ok());
+        assert!(load_with(raw_v1("80000000000", "null", "").as_bytes(), &AcceptAll).is_ok());
     }
 
     #[test]

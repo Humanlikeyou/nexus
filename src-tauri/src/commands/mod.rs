@@ -32,6 +32,7 @@ pub mod memory_read;
 pub mod memory_write;
 pub mod model_download;
 pub mod model_manifest;
+pub mod model_pull;
 pub mod model_tiers;
 pub mod money;
 pub mod money_import_pick;
