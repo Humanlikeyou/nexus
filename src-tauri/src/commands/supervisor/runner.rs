@@ -619,7 +619,10 @@ pub(crate) fn ollama_sandbox_profile(
     data_dir: &std::path::Path,
     home: Option<&std::path::Path>,
 ) -> Option<String> {
-    let exec_dir = bin.parent()?;
+    // Resolve symlinks when the path exists, so the checks below see the real folder.
+    let parent = bin.parent()?;
+    let exec_buf = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+    let exec_dir = exec_buf.as_path();
     // The exec allowlist is the runtime folder: never a system folder or a near-root path, which
     // would let the sandbox run any tool (shells, `open`, `osascript`).
     let exact = ["/Library", "/private", "/Applications", "/opt", "/Users"];
@@ -628,6 +631,21 @@ pub(crate) fn ollama_sandbox_profile(
         || ["/bin", "/sbin", "/usr", "/System"]
             .iter()
             .any(|d| exec_dir.starts_with(d))
+    {
+        return None;
+    }
+    // Never inside (or containing) a folder the profile lets it write: a planted binary could run.
+    let writable = [
+        "/private/var/folders",
+        "/private/tmp",
+        "/var/folders",
+        "/tmp",
+        "/dev",
+    ];
+    if writable
+        .iter()
+        .any(|w| exec_dir.starts_with(w) || std::path::Path::new(w).starts_with(exec_dir))
+        || model_dir.is_some_and(|m| exec_dir.starts_with(m) || m.starts_with(exec_dir))
     {
         return None;
     }
@@ -668,6 +686,8 @@ fn sandbox_profile_with(
     for fixed in ["/private/var/folders", "/private/tmp", "/dev"] {
         out.push_str(&format!("(allow file-write* (subpath \"{fixed}\"))\n"));
     }
+    // The runtime folder is never writable, even if a write allow above overlapped it.
+    out.push_str(&format!("(deny file-write* (subpath {runtime_dir}))\n"));
     for rel in [".ssh", ".aws", ".gnupg", ".hermes", "Library/Keychains"] {
         if let Some(h) = home {
             out.push_str(&format!(
@@ -1669,6 +1689,9 @@ mod sidecar_tests {
             "/System/x/ollama",
             "/Applications/ollama",
             "/opt/ollama",
+            "/private/tmp/rt/ollama",
+            "/tmp/rt/ollama",
+            "/private/var/folders/ab/cd/rt/ollama",
         ] {
             assert_eq!(
                 ollama_sandbox_profile(std::path::Path::new(bin), None, d, None),
