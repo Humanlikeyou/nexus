@@ -649,3 +649,18 @@ The plan is `tasks/proposed/phase9-runtime-firstrun.md`. Decision 0030 covers th
   - M1: the sandbox allows loopback `localhost:*` out and bind, so a sandboxed serve could reach the unsandboxed pull window (:11435) or other app ports. Fix: allow only the ports the runtime and llama-server need, deny 11435 explicitly, bind a specific port, and never run the pull window while the sandboxed serve can reach it (or authenticate it).
   - M2: `(allow default)` leaves mach-lookup, process-exec, appleevent-send and lsopen open. Fix: deny them, with small allowlists (Metal compiler service and the bundled llama-server path), then test with a live serve.
   - Both must be fixed before the pull window is wired or act is flipped.
+- **M1/M2 follow-up (2026-11-15, runner.rs):**
+  - **Fixed, verified live.** The bundled ollama 0.40.14 serve ran with the emitted profile on a spare port. A nomic-embed-text embed returned, with `library=Metal` and 13/13 layers offloaded.
+    - process-exec is allowed only from the runtime folder. The folder may never be a system or near-root path.
+    - lsopen and appleevent-send are denied.
+    - mach-lookup is denied except `com.apple.bsd.dirhelper`, the one service Metal needs. It was found by experiment: with all lookups denied, llama-server aborts and ollama falls back to the CPU.
+    - All unix sockets are denied. The security review found the old blanket allow let a sandboxed serve reach the Docker socket, which is root-equivalent. Closing them also stops DNS (mDNSResponder).
+  - Under the old profile, all three of these worked: reaching :11435, running /bin/sh, and resolving DNS.
+  - Tests: exec deny with a positive control, a guard that refuses a system exec folder, a unix-socket deny with a control, and the mach allowlist. src-tauri 1345/0/6.
+  - **M1 still OPEN.** A port-specific deny (`localhost:PORT`) does NOT override the `localhost:*` allow, in either order and with `require-not` (tested live). The runner's random port can't be pinned, so a sandboxed serve can still reach any loopback port, including :11435 and other app services.
+    - The port denylist was removed rather than shipped as a false fix.
+    - Before the download window is wired, never run it while the sandboxed serve is up (stop serve, pull, restart), or authenticate it.
+  - Not run:
+    - a live chat generate (only an embed)
+    - a LAN bind/inbound test (no en0 address here)
+    - e2e (no UI change)

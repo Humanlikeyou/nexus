@@ -234,7 +234,7 @@ mod tests {
             Ports(port),
             Registry::builtin(),
             RunPolicy::Full,
-            Box::new(|n| Some(PathBuf::from(format!("/fake/{n}")))),
+            Box::new(|n| Some(PathBuf::from(format!("/fake/MacOS/{n}")))),
             d.clone(),
             None,
         );
@@ -483,7 +483,7 @@ mod tests {
             Ports(PortState::Free),
             Registry::builtin(),
             RunPolicy::Full,
-            Box::new(|n| Some(PathBuf::from(format!("/fake/{n}")))),
+            Box::new(|n| Some(PathBuf::from(format!("/fake/MacOS/{n}")))),
             d.clone(),
             None,
         );

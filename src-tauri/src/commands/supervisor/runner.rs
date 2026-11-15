@@ -584,30 +584,80 @@ fn sbpl_path(p: &std::path::Path) -> Option<String> {
     Some(format!("\"{s}\""))
 }
 
-/// Pure: the sandbox profile for the long-running `ollama serve` (decision 0031 section 4, L9).
-/// Starts from `(allow default)` so Metal, the Go runtime and the llama-server helper keep working,
+/// Mach services the sandboxed runtime may look up (handoff 25a, M2). Found by live runs of the
+/// bundled ollama 0.40.14 (2026-11-15): with every lookup denied, llama-server aborts with "failed to
+/// create library" and ollama falls back to the CPU. `com.apple.bsd.dirhelper` (it only hands out the
+/// per-user temp and cache folder paths) is the one service that restores Metal; this build uses its
+/// embedded Metal library, so `MTLCompilerService` is not needed. No DNS, keychain, TCC, pasteboard,
+/// Launch Services or Apple Events service is allowed.
+pub(crate) const OLLAMA_SANDBOX_MACH_SERVICES: &[&str] = &["com.apple.bsd.dirhelper"];
+
+/// Pure: the sandbox profile for the long-running `ollama serve` (decision 0031 section 4, L9;
+/// handoff 25a M1/M2). Starts from `(allow default)` so Metal and the Go runtime keep working,
 /// then closes what ollama must not do (SBPL: the last matching rule wins):
-///  - network: outbound only to loopback (and unix sockets); bind/inbound only on loopback. A model download
-///    can therefore not reach `registry.ollama.ai` from this process; downloads run in the separate
-///    download window.
+///  - network: outbound only to loopback TCP/UDP (no unix sockets, so no Docker socket, ssh-agent or
+///    DNS); bind/inbound only on loopback. A model download can therefore not reach
+///    `registry.ollama.ai` from this process; downloads run in the separate download window.
+///    OPEN (handoff 25a M1): any loopback port stays reachable. The runner's random port cannot be
+///    pinned, and live tests (2026-11-15) showed a port-specific deny does NOT override the
+///    `localhost:*` allow in either order, so the download window must never run while this serve
+///    can reach it, or must be authenticated.
+///  - process-exec: only binaries inside the bundled runtime folder (`ollama` itself, which
+///    `sandbox-exec` execs after applying the profile, and its `llama-server`). No shell, no
+///    `open`, no `osascript`.
+///  - lsopen and appleevent-send: denied (no opening apps or URLs, no scripting other apps).
+///  - mach-lookup: denied except [`OLLAMA_SANDBOX_MACH_SERVICES`].
 ///  - file writes: only the model folder, the per-user temp/cache area, /private/tmp and /dev.
 ///    The bundled runtime folder is readable (default) but NOT writable.
 ///  - file reads: no keys, cloud credentials, Hermes data or the app's own data folder.
 ///
-/// Validated for syntax and for the network/file denials with `sandbox-exec` against harmless
-/// commands; NOT validated with a running `serve` (Metal under the sandbox is "not run").
+/// Validated with `sandbox-exec` against harmless commands in the tests, and live (2026-11-15) with
+/// the bundled ollama 0.40.14 `serve` on a spare port: an embed ran with Metal (all layers on GPU).
 pub(crate) fn ollama_sandbox_profile(
+    bin: &std::path::Path,
     model_dir: Option<&std::path::Path>,
     data_dir: &std::path::Path,
     home: Option<&std::path::Path>,
 ) -> Option<String> {
+    let exec_dir = bin.parent()?;
+    // The exec allowlist is the runtime folder: never a system folder or a near-root path, which
+    // would let the sandbox run any tool (shells, `open`, `osascript`).
+    let exact = ["/Library", "/private", "/Applications", "/opt", "/Users"];
+    if exec_dir.components().count() < 3
+        || exact.iter().any(|d| exec_dir == std::path::Path::new(d))
+        || ["/bin", "/sbin", "/usr", "/System"]
+            .iter()
+            .any(|d| exec_dir.starts_with(d))
+    {
+        return None;
+    }
+    sandbox_profile_with(exec_dir, model_dir, data_dir, home)
+}
+
+/// The profile body: `exec_dir` is the only folder whose binaries may run. Tests call this
+/// directly with system folders; production goes through [`ollama_sandbox_profile`].
+fn sandbox_profile_with(
+    exec_dir: &std::path::Path,
+    model_dir: Option<&std::path::Path>,
+    data_dir: &std::path::Path,
+    home: Option<&std::path::Path>,
+) -> Option<String> {
+    let runtime_dir = sbpl_path(exec_dir)?;
     let mut out = String::from("(version 1)\n(allow default)\n");
     out.push_str("(deny network-outbound)\n");
     out.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
-    out.push_str("(allow network-outbound (remote unix-socket))\n");
+    // No unix sockets at all (ollama and llama-server talk TCP): this closes the Docker socket
+    // (root-equivalent), ssh-agent, other apps' sockets, and mDNSResponder (DNS-query exfiltration).
     out.push_str("(deny network-inbound)\n(deny network-bind)\n");
     out.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
     out.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
+    out.push_str("(deny process-exec*)\n");
+    out.push_str(&format!("(allow process-exec* (subpath {runtime_dir}))\n"));
+    out.push_str("(deny lsopen)\n(deny appleevent-send)\n");
+    out.push_str("(deny mach-lookup)\n");
+    for name in OLLAMA_SANDBOX_MACH_SERVICES {
+        out.push_str(&format!("(allow mach-lookup (global-name \"{name}\"))\n"));
+    }
     out.push_str("(deny file-write*)\n");
     if let Some(m) = model_dir {
         out.push_str(&format!(
@@ -655,6 +705,7 @@ pub(crate) fn spawn_spec(
             // is contained but cannot store models; it is still never started unsandboxed.
             let model_dir = home.map(ollama_model_dir);
             let profile = ollama_sandbox_profile(
+                bin,
                 model_dir.as_deref(),
                 data_dir,
                 home.map(std::path::Path::new),
@@ -1439,6 +1490,7 @@ mod sidecar_tests {
                     args: vec![
                         "-p".to_string(),
                         ollama_sandbox_profile(
+                            std::path::Path::new("/fake/MacOS/ollama"),
                             Some(std::path::Path::new("/home/x/.ollama")),
                             &d,
                             Some(std::path::Path::new("/home/x"))
@@ -1477,6 +1529,7 @@ mod sidecar_tests {
 
     fn test_profile() -> String {
         ollama_sandbox_profile(
+            std::path::Path::new("/home/x/rt/ollama"),
             Some(std::path::Path::new("/home/x/.ollama")),
             std::path::Path::new("/home/x/Library/Application Support/com.taisun.nexus"),
             Some(std::path::Path::new("/home/x")),
@@ -1499,11 +1552,15 @@ mod sidecar_tests {
         assert!(p.contains("(allow network-bind (local ip \"localhost:*\"))"));
         // No wide allow of any network rule.
         for line in p.lines().filter(|l| l.starts_with("(allow network")) {
-            assert!(
-                line.contains("localhost:*") || line.contains("unix-socket"),
-                "{line}"
-            );
+            assert!(line.contains("localhost:*"), "{line}");
         }
+        // M2: exec only from the runtime folder, after the deny.
+        assert!(
+            p.find("(deny process-exec*)\n").unwrap()
+                < p.find("(allow process-exec* (subpath \"/home/x/rt\"))\n")
+                    .unwrap()
+        );
+        assert_eq!(p.matches("(allow process-exec*").count(), 1);
         // Writes: denied, then only the model folder, per-user temp, /private/tmp, /dev.
         assert!(p.contains("(deny file-write*)\n"));
         let writes: Vec<&str> = p
@@ -1542,12 +1599,18 @@ mod sidecar_tests {
         let data = std::path::Path::new("/home/x/d");
         for bad in ["/h\")(allow network*)(\"", "/h\\x", "rel/path", "", "/h\nx"] {
             assert_eq!(
-                ollama_sandbox_profile(Some(std::path::Path::new(bad)), data, Some(home)),
+                ollama_sandbox_profile(
+                    std::path::Path::new("/opt/rt/ollama"),
+                    Some(std::path::Path::new(bad)),
+                    data,
+                    Some(home)
+                ),
                 None,
                 "{bad:?}"
             );
             assert_eq!(
                 ollama_sandbox_profile(
+                    std::path::Path::new("/opt/rt/ollama"),
                     Some(std::path::Path::new("/ok")),
                     std::path::Path::new(bad),
                     Some(home)
@@ -1558,21 +1621,170 @@ mod sidecar_tests {
         }
     }
 
+    /// The profile for tests: binaries in `exec_dir` may run.
+    fn profile_for(exec_dir: &str) -> String {
+        let home = std::env::temp_dir();
+        sandbox_profile_with(
+            std::path::Path::new(exec_dir),
+            Some(&home.join(".ollama")),
+            &home.join("d"),
+            Some(&home),
+        )
+        .unwrap()
+    }
+
+    fn sandboxed(profile: &str, program: &str, args: &[&str]) -> std::process::Command {
+        let mut c = std::process::Command::new(SANDBOX_EXEC);
+        c.arg("-p").arg(profile).arg(program).args(args);
+        c
+    }
+
+    fn run_sandboxed(exec_dir: &str, program: &str, args: &[&str]) -> std::process::Output {
+        sandboxed(&profile_for(exec_dir), program, args)
+            .output()
+            .unwrap()
+    }
+
     #[test]
     fn the_sandbox_profile_is_valid_sbpl() {
-        // Syntax check only: sandbox-exec runs /usr/bin/true, never ollama.
-        let home = std::env::temp_dir();
-        let p = ollama_sandbox_profile(Some(&home.join(".ollama")), &home.join("d"), Some(&home))
-            .unwrap();
-        let out = std::process::Command::new(SANDBOX_EXEC)
-            .args(["-p", &p, "/usr/bin/true"])
-            .output()
-            .unwrap();
+        // sandbox-exec runs /usr/bin/true (exec folder /usr/bin here), never ollama.
+        let out = run_sandboxed("/usr/bin", "/usr/bin/true", &[]);
         assert!(
             out.status.success(),
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+
+    #[test]
+    fn the_exec_folder_is_never_a_system_or_near_root_folder() {
+        // Handoff 25a review L4: `bin.parent()` of `/ollama` would be `/` (exec of everything).
+        let d = std::path::Path::new("/data");
+        for bin in [
+            "/ollama",
+            "/x/ollama",
+            "/usr/bin/ollama",
+            "/bin/ollama",
+            "/usr/local/bin/ollama",
+            "/System/x/ollama",
+            "/Applications/ollama",
+            "/opt/ollama",
+        ] {
+            assert_eq!(
+                ollama_sandbox_profile(std::path::Path::new(bin), None, d, None),
+                None,
+                "{bin}"
+            );
+        }
+        assert!(ollama_sandbox_profile(
+            std::path::Path::new(
+                "/Applications/Amara OS.app/Contents/Resources/ollama-runtime/ollama"
+            ),
+            None,
+            d,
+            None
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn the_sandbox_denies_exec_outside_the_runtime_folder() {
+        // Handoff 25a M2: with the exec folder /usr/bin, nothing in /bin (a shell) may run; with
+        // another exec folder, neither may `open` or `osascript`.
+        let sh = run_sandboxed("/usr/bin", "/bin/sh", &["-c", "exit 0"]);
+        assert!(!sh.status.success(), "a shell ran inside the sandbox");
+        for tool in ["/usr/bin/open", "/usr/bin/osascript"] {
+            let out = run_sandboxed("/opt/nexus-rt", tool, &["-h"]);
+            assert!(!out.status.success(), "{tool} ran inside the sandbox");
+        }
+        // A child exec from an allowed binary is also confined: /usr/bin/env may not start /bin/sh.
+        let child = run_sandboxed("/usr/bin", "/usr/bin/env", &["/bin/sh", "-c", "exit 0"]);
+        assert!(
+            !child.status.success(),
+            "a child shell ran inside the sandbox"
+        );
+        // Positive control: an allowed binary may start another allowed one.
+        assert!(
+            run_sandboxed("/usr/bin", "/usr/bin/env", &["/usr/bin/true"])
+                .status
+                .success()
+        );
+    }
+
+    #[test]
+    fn the_sandbox_cannot_open_unix_sockets() {
+        // Handoff 25a review H1: no unix-socket connects (Docker socket, ssh-agent, mDNSResponder).
+        let dir = std::env::temp_dir().join(format!("nexus-sbx-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let sock = dir.join("s");
+        let _ = std::fs::remove_file(&sock);
+        let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        // Accept and drop each connection so a successful nc exits at once (never hangs).
+        let acceptor = listener.try_clone().unwrap();
+        std::thread::spawn(move || {
+            for c in acceptor.incoming() {
+                drop(c);
+            }
+        });
+        let s = sock.to_str().unwrap();
+        // Positive control: the socket accepts outside the sandbox.
+        let outside = std::process::Command::new("/usr/bin/nc")
+            .args(["-U", s])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            outside.status.success(),
+            "control: unix socket not reachable"
+        );
+        let inside = sandboxed(&profile_for("/usr/bin"), "/usr/bin/nc", &["-U", s])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            !inside.status.success(),
+            "the sandbox connected to a unix socket"
+        );
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!test_profile().contains("unix-socket"));
+    }
+
+    #[test]
+    fn the_sandbox_denies_mach_lookups_outside_the_allowlist() {
+        // Handoff 25a M2: the profile denies mach-lookup and allows only the listed services.
+        let p = test_profile();
+        let deny = p.find("(deny mach-lookup)\n").unwrap();
+        let allows: Vec<&str> = p
+            .lines()
+            .filter(|l| l.starts_with("(allow mach-lookup"))
+            .collect();
+        assert_eq!(allows.len(), OLLAMA_SANDBOX_MACH_SERVICES.len());
+        for name in OLLAMA_SANDBOX_MACH_SERVICES {
+            let line = format!("(allow mach-lookup (global-name \"{name}\"))");
+            assert!(p.find(&line).unwrap() > deny, "{name}");
+        }
+        for forbidden in [
+            "mDNSResponder",
+            "SecurityServer",
+            "securityd",
+            "tccd",
+            "pasteboard",
+            "launchservicesd",
+            "lsd.",
+            "appleevents",
+            "windowserver",
+            "trustd",
+            "nsurlsessiond",
+        ] {
+            assert!(
+                OLLAMA_SANDBOX_MACH_SERVICES
+                    .iter()
+                    .all(|n| !n.contains(forbidden)),
+                "{forbidden}"
+            );
+        }
+        assert!(p.contains("(deny lsopen)\n") && p.contains("(deny appleevent-send)\n"));
     }
 
     #[test]
@@ -1589,6 +1801,7 @@ mod sidecar_tests {
         assert_eq!(
             serve.args[1],
             ollama_sandbox_profile(
+                bin,
                 Some(std::path::Path::new("/home/x/.ollama")),
                 data,
                 Some(std::path::Path::new("/home/x"))
