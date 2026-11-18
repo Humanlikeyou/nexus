@@ -231,6 +231,22 @@ pub(crate) fn pin_decision(
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests point private copies at their own folder so parallel tests never see each other's.
+    static PRIVATE_BASE: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Where private copies are made: the system temp folder (a per-test folder in tests).
+fn private_base() -> std::path::PathBuf {
+    #[cfg(test)]
+    if let Some(b) = PRIVATE_BASE.with(|b| b.borrow().clone()) {
+        return b;
+    }
+    std::env::temp_dir()
+}
+
 /// A private, hashed copy of the binary. The copy is what runs, so a swap of the original after
 /// validation cannot be executed. Removed (file and folder) when dropped.
 pub(crate) struct PrivateCopy {
@@ -263,7 +279,7 @@ impl PrivateCopy {
         if !meta.is_file() || meta.uid() != unsafe { libc::getuid() } {
             return Err(bad("binary is not a regular file owned by you"));
         }
-        let dir = std::env::temp_dir().join(format!("nexus-noop-{}", uuid::Uuid::new_v4()));
+        let dir = private_base().join(format!("nexus-noop-{}", uuid::Uuid::new_v4()));
         std::fs::DirBuilder::new()
             .mode(0o700)
             .create(&dir)
@@ -1375,23 +1391,16 @@ mod tests {
             !copy_path.exists() && !dir.exists(),
             "copy and folder are removed"
         );
-        // A refused pin also leaves nothing behind.
-        let before: Vec<_> = std::fs::read_dir(std::env::temp_dir())
-            .unwrap()
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with("nexus-noop-"))
-            .map(|e| e.path())
-            .collect();
+        // A refused pin also leaves nothing behind (checked in a folder only this test uses).
+        let base = h.0.join("private-base");
+        std::fs::create_dir_all(&base).unwrap();
+        PRIVATE_BASE.with(|b| *b.borrow_mut() = Some(base.clone()));
         let _ = PrivateCopy::prepare(&p, &["0".repeat(64)], true)
             .err()
             .unwrap();
-        let after = std::fs::read_dir(std::env::temp_dir())
-            .unwrap()
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with("nexus-noop-"))
-            .filter(|e| !before.contains(&e.path()))
-            .count();
-        assert_eq!(after, 0, "refusal leaves no private folder behind");
+        PRIVATE_BASE.with(|b| *b.borrow_mut() = None);
+        let left = std::fs::read_dir(&base).unwrap().count();
+        assert_eq!(left, 0, "refusal leaves no private folder behind");
     }
 
     #[test]
