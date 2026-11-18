@@ -48,6 +48,8 @@ pub mod outbound;
 pub mod outbox;
 pub mod packager;
 pub mod path_safety;
+pub mod proc_group;
+pub mod pull_window;
 pub mod recordings;
 pub mod recordings_dsp;
 pub mod replay;

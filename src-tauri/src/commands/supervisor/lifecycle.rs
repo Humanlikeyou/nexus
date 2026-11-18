@@ -373,6 +373,8 @@ fn quit_state() -> QuitState {
 /// Called from `RunEvent::ExitRequested`. Holds the exit only when act is on AND this launch started a
 /// stoppable service; then drains and stops in the background and calls `finish` (which exits again).
 pub fn on_exit_requested(api: &tauri::ExitRequestApi, finish: impl FnOnce() + Send + 'static) {
+    // A running download window must never outlive the app, with act on or off.
+    let _ = crate::commands::services_start_all::stop_window_blocking();
     let started = super::started_snapshot();
     let registry = Registry::builtin();
     let has = has_quit_work(

@@ -1,15 +1,15 @@
 //! The Ollama-registry path of `model_download(tier)` (Phase 9, decision 0031): models that are
 //! `source: ollama` in the manifest are pulled by the bundled runtime's own `/api/pull`, never by
 //! this app's file downloader. We only talk to the LOOPBACK "pull runtime" (a short-lived,
-//! unsandboxed `ollama serve` on its own loopback port, started and stopped by the supervisor lane;
-//! its base URL is a parameter here). The runtime, not this app, reaches `registry.ollama.ai:443`.
+//! unsandboxed `ollama serve` on its own loopback port, run by `pull_window` only while
+//! the sandboxed serve is stopped; its base URL is a parameter here). The runtime, not this app, reaches `registry.ollama.ai:443`.
 //!
 //! Gate order (no connection of any kind before the approval):
 //! 1 manifest verifies, 2 tier exists and every model in it is pullable (a `local` model, made on
 //! this Mac, is `not_published`), 3 outbound not disabled (env + navy), 4 `registry.ollama.ai:443`
 //! is on `PROD_PULL_HOSTS` and the pull base is loopback, 5 free space vs the manifest size,
-//! 6 native approval naming host + size. Then: probe the runtime (`runtime_unavailable` if it does
-//! not answer), POST `/api/pull`, map the streamed status lines to `model://progress`, and finally
+//! 6 native approval naming host + size. Then: open the window (see `pull_window`), probe the
+//! runtime (`runtime_unavailable` if it does not answer), POST `/api/pull`, map the streamed status lines to `model://progress`, and finally
 //! require `/api/tags` to list the model with exactly the manifest digest (`checksum_mismatch`).
 //! Progress events and every error are fixed text: no URL, no raw runtime text, no digest.
 
@@ -48,6 +48,8 @@ pub(crate) struct PullEnv<'a> {
     /// A path on the volume that holds the shared model folder (free-space check).
     pub store_dir: &'a Path,
     pub free_space: fn(&Path) -> Option<u64>,
+    /// The download-window lifecycle (stop serve, window up, window down, serve back).
+    pub window: &'a dyn super::pull_window::PullHost,
 }
 
 /// True when any model of this tier is `ollama`- or `local`-sourced, so the pull path owns it.
@@ -273,22 +275,44 @@ where
     let host = REGISTRY_HOST_PORT.split(':').next().unwrap_or_default();
     let text = super::approval_gate::approval_text(
         &format!("Download {} model(s) ({})", jobs.len(), fmt_size(total)),
-        &format!("From: {host}"),
+        &format!("From: {host}\nThe local model stops during the download and restarts after."),
     )
     .map_err(|_| "approval_failed")?;
     let _guard = approve(text).await.map_err(|e| approval_error(&e))?;
 
+    // Mutual exclusion (handoff 25a M1): the unsandboxed window runs only while the sandboxed serve
+    // is stopped. `begin` undoes everything it did on failure; `finish` ends the window on every
+    // path below, and the guard inside the session covers a cancel.
+    let session = super::pull_window::begin(env.window).await?;
+    let r = pull_models(env.window, &base, &jobs, tier, progress).await;
+    session.finish().await;
+    r
+}
+
+/// The pull proper, against the window on the loopback base. Verifies every pinned digest.
+async fn pull_models(
+    window: &dyn super::pull_window::PullHost,
+    base: &str,
+    jobs: &[(&ManifestModel, u64, String)],
+    tier: &str,
+    progress: &mut (dyn FnMut(&Progress) + Send),
+) -> Result<DownloadSummary, &'static str> {
     let client = super::shared::http::builder(
         super::shared::http::HttpSpec::loopback().connect_timeout(CONNECT_TIMEOUT),
     )
     .build()
     .map_err(|_| "storage_error")?;
+    // The window process must still be ours and alive before anything is read from or sent to
+    // its port (a child that lost the bind race to another listener has exited).
+    if !window.window_alive() {
+        return Err(RUNTIME_UNAVAILABLE);
+    }
     // The runtime must answer before anything is announced; this is the first connection.
     let mut installed: HashMap<&str, Option<String>> = HashMap::new();
-    for (x, _, _) in &jobs {
-        installed.insert(&x.name, tag_digest(&client, &base, &x.name).await?);
+    for (x, _, _) in jobs {
+        installed.insert(&x.name, tag_digest(&client, base, &x.name).await?);
     }
-    for (x, bytes, _) in &jobs {
+    for (x, bytes, _) in jobs {
         progress(&Progress {
             role: x.role.clone(),
             state: "waiting",
@@ -298,11 +322,14 @@ where
         });
     }
     let mut completed = 0u32;
-    for (x, bytes, want) in &jobs {
+    for (x, bytes, want) in jobs {
         let r = async {
             // Already installed with the pinned digest: nothing to pull.
             if installed.get(x.name.as_str()).and_then(|d| d.as_deref()) != Some(want.as_str()) {
-                pull_one(&client, &base, x, *bytes, progress).await?;
+                if !window.window_alive() {
+                    return Err(RUNTIME_UNAVAILABLE);
+                }
+                pull_one(&client, base, x, *bytes, progress).await?;
                 progress(&Progress {
                     role: x.role.clone(),
                     state: "verifying",
@@ -310,7 +337,11 @@ where
                     bytes_done: *bytes,
                     bytes_total: *bytes,
                 });
-                let got = tag_digest(&client, &base, &x.name).await?;
+                // Never trust a digest read from a port whose window has died.
+                if !window.window_alive() {
+                    return Err(RUNTIME_UNAVAILABLE);
+                }
+                let got = tag_digest(&client, base, &x.name).await?;
                 if got.as_deref() != Some(want.as_str()) {
                     return Err("checksum_mismatch");
                 }
@@ -345,20 +376,27 @@ fn store_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// The pull path of the click-only `model_download` command. The pull runtime itself is started
-/// and stopped by the supervisor lane; until it answers on `DEFAULT_PULL_BASE` this returns the
-/// fixed `runtime_unavailable`.
+/// The pull path of the click-only `model_download` command. After the gates and the approval, the
+/// window lifecycle (`pull_window`) stops the sandboxed serve if the app started it,
+/// runs the unsandboxed window on `DEFAULT_PULL_BASE`, stops it again and restores the serve. A
+/// runtime the app did not start (Ollama.app) is `runtime_busy`, a pull or start-all in flight is
+/// `pull_in_progress` / `busy`; a window that never answers is `runtime_unavailable`.
 pub(crate) async fn pull_command(
     app: tauri::AppHandle,
     tier: String,
 ) -> Result<DownloadSummary, String> {
     let store = store_dir();
+    let host = super::pull_window::RunnerHost {
+        runner: super::services_start_all::shared_runner(),
+        window: super::services_start_all::shared_window(),
+    };
     let env = PullEnv {
         pull_hosts: PROD_PULL_HOSTS,
         outbound_disabled: super::telegram::outbound_disabled(),
         pull_base: DEFAULT_PULL_BASE,
         store_dir: &store,
         free_space: super::model_download::statvfs_free,
+        window: &host,
     };
     let handle = app.clone();
     let mut emit = move |p: &Progress| {
@@ -381,6 +419,8 @@ pub(crate) async fn pull_command(
 
 #[cfg(test)]
 mod tests {
+    use super::super::pull_window::fakes::FakeHost;
+    use super::super::pull_window::ServeState;
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -551,7 +591,19 @@ mod tests {
     }
 
     fn env<'a>(hosts: &'a [&'a str], base: &'a str, store: &'a Path) -> PullEnv<'a> {
+        // A fresh Absent host per call, leaked (test-only) so the env can borrow it.
+        let host: &'static FakeHost = Box::leak(Box::new(FakeHost::new(ServeState::Absent)));
+        env_with(hosts, base, store, host)
+    }
+
+    fn env_with<'a>(
+        hosts: &'a [&'a str],
+        base: &'a str,
+        store: &'a Path,
+        host: &'a FakeHost,
+    ) -> PullEnv<'a> {
         PullEnv {
+            window: host,
             pull_hosts: hosts,
             outbound_disabled: false,
             pull_base: base,
@@ -861,6 +913,161 @@ mod tests {
         );
         assert_eq!(approved.load(Ordering::SeqCst), 1);
         assert!(ev.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_pull_runs_inside_the_window_and_restores_the_serve_never_overlapping() {
+        let f = good_fixture().await;
+        let store = tmp();
+        let host = FakeHost::new(ServeState::Ours);
+        let e = env_with(HOSTS, &f.base, &store, &host);
+        let mut ev = Vec::new();
+        let r = go(&e, "compact", &AtomicUsize::new(0), &mut ev).await;
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(
+            host.log(),
+            [
+                "stop_serve",
+                "spawn_window",
+                "window_ready",
+                "kill_window",
+                "window_gone",
+                "start_serve"
+            ]
+        );
+        // The pull itself happened between window_ready and kill_window.
+        assert!(!f.state.lock().unwrap().pulls.is_empty());
+        assert!(!host.overlap.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn the_window_is_stopped_and_the_serve_restored_on_every_error_path() {
+        // Runtime never answers, a bad stream, a digest mismatch.
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead = format!("http://127.0.0.1:{}", l.local_addr().unwrap().port());
+        drop(l);
+        let d = compact_digests();
+        let bad_digest = serve(State {
+            installs: d.keys().map(|n| (n.clone(), "0".repeat(64))).collect(),
+            lines: stream_lines(d["gemma4:latest"].0),
+            ..State::default()
+        })
+        .await;
+        let bad_stream = serve(State {
+            lines: vec!["not json".into()],
+            ..State::default()
+        })
+        .await;
+        for (base, want) in [
+            (dead, RUNTIME_UNAVAILABLE),
+            (bad_digest.base.clone(), "checksum_mismatch"),
+            (bad_stream.base.clone(), "upstream_error"),
+        ] {
+            let store = tmp();
+            let host = FakeHost::new(ServeState::Ours);
+            let e = env_with(HOSTS, &base, &store, &host);
+            let mut ev = Vec::new();
+            let err = go(&e, "compact", &AtomicUsize::new(0), &mut ev)
+                .await
+                .unwrap_err();
+            assert_eq!(err, want);
+            assert!(host
+                .log()
+                .ends_with(&["kill_window", "window_gone", "start_serve"]));
+            assert!(!host.overlap.load(Ordering::SeqCst));
+            assert!(host.slot.held_by().is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_window_that_died_after_ready_is_runtime_unavailable_and_never_pulled_from() {
+        // A squatter took :11435, our child lost the bind race and exited: nothing may be read from
+        // or sent to that port.
+        let f = good_fixture().await;
+        let store = tmp();
+        let mut host = FakeHost::new(ServeState::Ours);
+        host.window_dies = true;
+        let e = env_with(HOSTS, &f.base, &store, &host);
+        let mut ev = Vec::new();
+        assert_eq!(
+            go(&e, "compact", &AtomicUsize::new(0), &mut ev)
+                .await
+                .unwrap_err(),
+            RUNTIME_UNAVAILABLE
+        );
+        assert_eq!(f.conns.load(Ordering::SeqCst), 0);
+        assert!(f.state.lock().unwrap().pulls.is_empty());
+        assert!(host
+            .log()
+            .ends_with(&["kill_window", "window_gone", "start_serve"]));
+    }
+
+    #[test]
+    fn the_approval_text_says_the_local_model_stops_during_the_download() {
+        let src = include_str!("model_pull.rs");
+        let prod = src.split("#[cfg(test)]").next().unwrap();
+        assert!(prod.contains("The local model stops during the download and restarts after."));
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_pull_kills_the_window_and_frees_the_slot() {
+        let f = good_fixture().await;
+        let store = tmp();
+        let host = FakeHost::new(ServeState::Ours);
+        let e = env_with(HOSTS, &f.base, &store, &host);
+        let mut ev = Vec::new();
+        let n = AtomicUsize::new(0);
+        // Dropped right after the window opens (the first await inside the pull).
+        let fut = go(&e, "compact", &n, &mut ev);
+        let _ = tokio::time::timeout(Duration::from_millis(0), fut).await;
+        assert!(!host.window_up.load(Ordering::SeqCst));
+        assert!(host.slot.held_by().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_foreign_runtime_is_runtime_busy_after_approval_with_nothing_touched() {
+        let f = good_fixture().await;
+        let store = tmp();
+        let host = FakeHost::new(ServeState::Foreign);
+        let e = env_with(HOSTS, &f.base, &store, &host);
+        let approved = AtomicUsize::new(0);
+        let mut ev = Vec::new();
+        assert_eq!(
+            go(&e, "compact", &approved, &mut ev).await.unwrap_err(),
+            "runtime_busy"
+        );
+        assert_eq!(approved.load(Ordering::SeqCst), 1);
+        assert!(host.log().is_empty());
+        assert_eq!(f.conns.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_concurrent_pull_is_pull_in_progress_and_gates_run_before_the_lifecycle() {
+        let f = good_fixture().await;
+        let store = tmp();
+        let host = FakeHost::new(ServeState::Absent);
+        let _held = host
+            .slot
+            .try_acquire(super::super::pull_window::Holder::Download)
+            .unwrap();
+        let e = env_with(HOSTS, &f.base, &store, &host);
+        let approved = AtomicUsize::new(0);
+        let mut ev = Vec::new();
+        assert_eq!(
+            go(&e, "compact", &approved, &mut ev).await.unwrap_err(),
+            "pull_in_progress"
+        );
+        assert!(host.log().is_empty());
+        assert_eq!(f.conns.load(Ordering::SeqCst), 0);
+        // Outbound off still refuses first, without touching the slot or the host.
+        let mut e2 = env_with(HOSTS, &f.base, &store, &host);
+        e2.outbound_disabled = true;
+        let n = AtomicUsize::new(0);
+        assert_eq!(
+            go(&e2, "compact", &n, &mut ev).await.unwrap_err(),
+            "outbound_blocked"
+        );
+        assert_eq!(n.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

@@ -9,13 +9,14 @@ use futures::future::BoxFuture;
 use serde::Serialize;
 
 use super::approval_gate;
+use super::pull_window;
 use super::supervisor::act;
 use super::supervisor::machine::Observation;
 use super::supervisor::probe::Probe;
 use super::supervisor::registry::{sidecar_runtime, Registry, ServiceId};
 use super::supervisor::runner::{
-    PortProbe, PortState, ProcSpawner, RealPortProbe, RunError, SidecarOutcome, SidecarRunner,
-    Spawner,
+    PortProbe, PortState, ProcSpawner, ProcWindow, RealPortProbe, RunError, SidecarOutcome,
+    SidecarRunner, Spawner, WindowProc,
 };
 
 /// The fixed error a second concurrent call gets.
@@ -89,6 +90,11 @@ where
     let Ok(_serial) = lock.try_lock() else {
         return Err(BUSY.to_string());
     };
+    // Never overlaps a model download window (handoff 25a M1): held for the whole call.
+    let _slot = runner
+        .slot()
+        .try_acquire(pull_window::Holder::StartAll)
+        .map_err(|h| pull_window::start_all_refusal(h).to_string())?;
     // Read-only pass first.
     let mut rows: Vec<StartAllRow> = Vec::new();
     let mut free: Vec<ServiceId> = Vec::new();
@@ -139,15 +145,48 @@ where
 static RUNNER: std::sync::OnceLock<SidecarRunner<ProcSpawner, RealPortProbe>> =
     std::sync::OnceLock::new();
 
-/// Whether the app itself started a sidecar that is still alive. False (and nothing is built) when
-/// start-all never ran.
+/// The one process-wide runner (also used by the pull lifecycle to stop and restore the serve).
+pub(crate) fn shared_runner() -> &'static SidecarRunner<ProcSpawner, RealPortProbe> {
+    RUNNER.get_or_init(|| SidecarRunner::real(crate::app_paths::data_dir()))
+}
+
+static WINDOW: std::sync::OnceLock<ProcWindow> = std::sync::OnceLock::new();
+
+/// The one process-wide download window handle, so a quit can end it wherever the pull stands.
+pub(crate) fn shared_window() -> &'static ProcWindow {
+    WINDOW.get_or_init(ProcWindow::new)
+}
+
+/// Quit hook: ends the download window (whole process group) and waits until it is gone. Independent
+/// of `act` (the window is the download lane's own, never the supervisor's). True if none is left.
+pub(crate) fn stop_window_blocking() -> bool {
+    let Some(w) = WINDOW.get() else {
+        return true;
+    };
+    w.stop();
+    let live = w.liveness();
+    let start = std::time::Instant::now();
+    while live() {
+        if start.elapsed() >= std::time::Duration::from_secs(5) {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    true
+}
+
+/// Whether the app itself started a sidecar (or the download window) that is still alive. False
+/// (and nothing is built) when neither ever ran.
 pub(crate) fn any_started_sidecars() -> bool {
     RUNNER.get().is_some_and(|r| r.spawner.any_started())
+        || WINDOW.get().is_some_and(|w| (w.liveness())())
 }
 
 /// Stop-on-quit hook for the sidecars the app itself started (adopted ones are never recorded, so
 /// never touched). Runs only when `act` is true.
 pub(crate) fn stop_started_sidecars(act: bool) -> Vec<ServiceId> {
+    // The download window ends on every quit, act or not.
+    stop_window_blocking();
     if !act {
         return Vec::new();
     }
@@ -178,7 +217,7 @@ pub async fn services_start_all(app: tauri::AppHandle) -> Result<Vec<StartAllRow
         )
         .await
     };
-    let runner = RUNNER.get_or_init(|| SidecarRunner::real(crate::app_paths::data_dir()));
+    let runner = shared_runner();
     start_all_with(
         &START_ALL_LOCK,
         act::effective(),
@@ -197,6 +236,9 @@ mod tests {
     use crate::commands::supervisor::runner::{RunPolicy, SpawnSpec};
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
+
+    /// The shared window is process-wide: tests that touch it run one at a time.
+    static WINDOW_TEST: Mutex<()> = Mutex::new(());
 
     #[derive(Default, Clone)]
     struct FakeSpawner(Arc<Mutex<Vec<ServiceId>>>);
@@ -277,6 +319,70 @@ mod tests {
             !d.join("router").exists(),
             "no config written when act is off"
         );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[tokio::test]
+    async fn start_all_is_refused_while_a_pull_holds_the_slot_and_spawns_nothing() {
+        use crate::commands::pull_window::{Holder, PULL_IN_PROGRESS};
+        for act in [false, true] {
+            let (r, sp, d) = setup(PortState::Free, "pull");
+            let pull = r.slot().try_acquire(Holder::Download).unwrap();
+            let e = start_all_with(
+                &tokio::sync::Mutex::new(()),
+                act,
+                &Registry::builtin(),
+                &r,
+                &Health(false),
+                no_approval,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(e, PULL_IN_PROGRESS);
+            assert!(sp.0.lock().unwrap().is_empty());
+            // The runner itself refuses the sandboxed serve too.
+            assert_eq!(
+                r.start(ServiceId::ModelRuntime).await.err(),
+                Some(RunError::PullInProgress)
+            );
+            drop(pull);
+            assert!(start_all_with(
+                &tokio::sync::Mutex::new(()),
+                false,
+                &Registry::builtin(),
+                &r,
+                &Health(false),
+                no_approval,
+            )
+            .await
+            .is_ok());
+            let _ = std::fs::remove_dir_all(&d);
+        }
+    }
+
+    #[tokio::test]
+    async fn quit_stops_a_running_window_and_waits_until_it_is_gone() {
+        use crate::commands::supervisor::runner::WindowProc;
+        let _g = WINDOW_TEST.lock().unwrap_or_else(|p| p.into_inner());
+        let w = shared_window();
+        w.spawn(&SpawnSpec {
+            program: PathBuf::from("/bin/sleep"),
+            args: vec!["30".to_string()],
+            env: vec![("PATH", "/usr/bin:/bin".to_string())],
+        })
+        .unwrap();
+        assert!(any_started_sidecars(), "a live window counts");
+        // Mid-pull: a slot registered for it refuses new holders until it is gone.
+        let (r, _sp, d) = setup(PortState::Free, "quit");
+        r.slot().set_window(w.liveness());
+        assert!(r.slot().window_may_be_alive());
+        // act off: the window is still ended.
+        assert!(stop_started_sidecars(false).is_empty());
+        assert!(!w.alive());
+        assert!(!(w.liveness())());
+        assert!(!any_started_sidecars());
+        assert!(!r.slot().window_may_be_alive());
+        assert!(stop_window_blocking());
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -507,6 +613,7 @@ mod tests {
 
     #[test]
     fn stop_on_quit_does_nothing_when_act_is_off() {
+        let _g = WINDOW_TEST.lock().unwrap_or_else(|p| p.into_inner());
         // Nothing was ever started in this process, and act off never reaches the runner at all.
         assert!(!any_started_sidecars());
         assert!(stop_started_sidecars(false).is_empty());

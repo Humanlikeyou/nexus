@@ -289,7 +289,7 @@ export function toSetupDownload(models: Record<string, ModelProg>, sup: ServiceS
 }
 
 /** Fixed codes the Rust setup commands return; anything else is logged as "failed". */
-const SETUP_CODES = new Set(["declined", "busy", "approval_failed", "outbound_blocked", "host_not_allowed", "not_published", "manifest_invalid", "tier_not_found", "profile_unavailable", "storage_error", "checksum_mismatch", "upstream_error", "timed_out", "too_large", "unsafe_path", "no_space", "io_error", "invalid_tier", "setup_not_ready"]);
+const SETUP_CODES = new Set(["declined", "busy", "approval_failed", "outbound_blocked", "host_not_allowed", "not_published", "manifest_invalid", "tier_not_found", "profile_unavailable", "storage_error", "checksum_mismatch", "upstream_error", "timed_out", "runtime_busy", "pull_in_progress", "too_large", "unsafe_path", "no_space", "io_error", "invalid_tier", "setup_not_ready"]);
 /** Setup may be marked done only after a live download of this tier resolved and start-all reported no failed, needs_you or binary_missing row. */
 export function setupReady(downloadedTier: string | null, tier: string, rows: StartAllRow[] | null): boolean {
   return downloadedTier !== null && downloadedTier === tier && !!rows && rows.length > 0 && !rows.some((r) => r.outcome === "failed" || r.outcome === "needs_you" || r.outcome === "binary_missing");

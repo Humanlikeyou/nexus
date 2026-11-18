@@ -103,6 +103,8 @@ pub enum RunError {
     DockerDown,
     TimedOut,
     Failed,
+    /// A model download window is open (or being opened): the sandboxed serve may not start.
+    PullInProgress,
 }
 
 pub trait Runner: Send + Sync {
@@ -756,9 +758,9 @@ pub(crate) fn spawn_spec(
 
 /// Pure: the spawn spec of the short-lived model-download window: the same bundled `ollama serve`, UNSANDBOXED
 /// (it must reach `registry.ollama.ai:443`), on its own loopback port, with the same model folder
-/// (no `OLLAMA_MODELS`, so the default store is shared). Used only by the download lane's approved,
-/// click-started download; nothing calls it yet, and it is never started from here.
-#[allow(dead_code)]
+/// (no `OLLAMA_MODELS`, so the default store is shared). Its one production caller is
+/// `SidecarRunner::pull_window_spec`, used only by the download lifecycle (`pull_window.rs`), which runs
+/// the window only while the sandboxed serve is stopped (handoff 25a M1).
 pub(crate) fn ollama_pull_window_spec(
     bin: &std::path::Path,
     home: Option<&str>,
@@ -861,6 +863,15 @@ pub(crate) fn ensure_router_config(
 
 pub trait Spawner: Send + Sync {
     fn spawn(&self, id: ServiceId, spec: &SpawnSpec) -> Result<(), RunError>;
+    /// Whether the app started `id` and it is still alive. Adopted processes are never ours.
+    fn is_alive(&self, _id: ServiceId) -> bool {
+        false
+    }
+    /// Ends the child the app started for `id` (nothing adopted is ever recorded). True if one was
+    /// signalled.
+    fn stop(&self, _id: ServiceId) -> bool {
+        false
+    }
 }
 
 /// The real spawner: a detached, long-running child (own process group, stdio null, not killed on
@@ -876,7 +887,6 @@ impl ProcSpawner {
     }
 
     /// Whether the app started `id` and it is still alive.
-    #[allow(dead_code)] // used by tests and diagnostics
     pub fn started_by_app(&self, id: ServiceId) -> bool {
         self.guard()
             .iter_mut()
@@ -897,8 +907,7 @@ impl ProcSpawner {
         let mut g = self.guard();
         while let Some((id, mut c)) = g.pop() {
             if let Ok(None) = c.try_wait() {
-                // Ends the child the app spawned (tokio's `start_kill`); nothing adopted is here.
-                if c.start_kill().is_ok() {
+                if signal_child_group(&c) {
                     stopped.push(id);
                 }
             }
@@ -907,7 +916,38 @@ impl ProcSpawner {
     }
 }
 
+/// Ends the child's whole process group (SIGTERM, then a forced end after a delay). True if the
+/// child was still running. Only ever called with a child the app spawned with `process_group(0)`.
+fn signal_child_group(c: &tokio::process::Child) -> bool {
+    match c.id() {
+        Some(pid) => {
+            crate::commands::proc_group::terminate(pid);
+            true
+        }
+        None => false,
+    }
+}
+
 impl Spawner for ProcSpawner {
+    fn is_alive(&self, id: ServiceId) -> bool {
+        self.started_by_app(id)
+    }
+
+    fn stop(&self, id: ServiceId) -> bool {
+        let mut g = self.guard();
+        let mut stopped = false;
+        g.retain_mut(|(i, c)| {
+            if *i != id {
+                return true;
+            }
+            if let Ok(None) = c.try_wait() {
+                stopped |= signal_child_group(c);
+            }
+            false
+        });
+        stopped
+    }
+
     fn spawn(&self, id: ServiceId, spec: &SpawnSpec) -> Result<(), RunError> {
         let mut cmd = tokio::process::Command::new(&spec.program);
         cmd.args(&spec.args)
@@ -929,6 +969,178 @@ impl Spawner for ProcSpawner {
         g.retain(|(i, _)| *i != id); // drop a dead handle of the same id
         g.push((id, child));
         Ok(())
+    }
+}
+
+/// The process edge of the download window (and its loopback port), so tests use a fake.
+pub trait WindowProc: Send + Sync {
+    fn spawn(&self, spec: &SpawnSpec) -> Result<(), &'static str>;
+    /// Synchronous and idempotent: signals the whole process group (used by the drop guard too).
+    fn stop(&self);
+    /// True once the child has exited AND its process group is empty (bounded wait).
+    fn gone(&self) -> BoxFuture<'_, bool>;
+    /// True once OUR child (by pid) listens on the window port and is still alive after a short
+    /// settle (bounded wait). A listener that belongs to anything else never counts.
+    fn ready(&self) -> BoxFuture<'_, bool>;
+    fn port_free(&self) -> BoxFuture<'_, bool>;
+    /// Whether the child is running right now.
+    fn alive(&self) -> bool;
+    /// A live view of "some process of the window's group may still exist".
+    fn liveness(&self) -> std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
+}
+
+const WINDOW_READY_TIMEOUT: Duration = Duration::from_secs(30);
+const WINDOW_GONE_TIMEOUT: Duration = Duration::from_secs(10);
+/// After the port first answers, the child must still be alive this much later (a child that lost
+/// the bind race exits quickly).
+const WINDOW_SETTLE: Duration = Duration::from_millis(500);
+const LSOF: &str = "/usr/sbin/lsof";
+
+/// The real window: its own child (own process group, stdio null, cleared environment), ended when
+/// dropped. Only one at a time. The group id is the child's pid.
+pub struct ProcWindow {
+    child: std::sync::Mutex<Option<tokio::process::Child>>,
+    /// Group id of the last spawn; 0 when none. Kept after the leader is reaped until the group is empty.
+    pgid: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    addr: &'static str,
+    ready_timeout: Duration,
+}
+
+impl Default for ProcWindow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProcWindow {
+    pub fn new() -> Self {
+        Self::with(OLLAMA_PULL_HOST_LOOPBACK, WINDOW_READY_TIMEOUT)
+    }
+    pub(crate) fn with(addr: &'static str, ready_timeout: Duration) -> Self {
+        Self {
+            child: std::sync::Mutex::new(None),
+            pgid: Default::default(),
+            addr,
+            ready_timeout,
+        }
+    }
+    fn child(&self) -> std::sync::MutexGuard<'_, Option<tokio::process::Child>> {
+        self.child.lock().unwrap_or_else(|p| p.into_inner())
+    }
+    fn group(&self) -> u32 {
+        self.pgid.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn port(&self) -> &str {
+        self.addr.rsplit(':').next().unwrap_or_default()
+    }
+    async fn answers(&self) -> bool {
+        matches!(
+            tokio::time::timeout(
+                Duration::from_millis(500),
+                tokio::net::TcpStream::connect(self.addr),
+            )
+            .await,
+            Ok(Ok(_))
+        )
+    }
+    /// Whether the child (this pid) is the one listening on the port. Fails closed.
+    async fn child_listens(&self) -> bool {
+        let Some(pid) = self.child().as_ref().and_then(|c| c.id()) else {
+            return false;
+        };
+        let mut cmd = tokio::process::Command::new(LSOF);
+        cmd.args([
+            "-nP",
+            &format!("-iTCP:{}", self.port()),
+            "-sTCP:LISTEN",
+            "-a",
+            "-p",
+            &pid.to_string(),
+            "-t",
+        ])
+        .env_clear()
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true);
+        let Ok(Ok(out)) = tokio::time::timeout(Duration::from_secs(3), cmd.output()).await else {
+            return false;
+        };
+        out.status.success()
+            && String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .any(|l| l.trim() == pid.to_string())
+    }
+}
+
+impl WindowProc for ProcWindow {
+    fn spawn(&self, spec: &SpawnSpec) -> Result<(), &'static str> {
+        if self.alive() || !crate::commands::proc_group::group_empty(self.group()) {
+            return Err("runtime_busy");
+        }
+        let mut cmd = tokio::process::Command::new(&spec.program);
+        cmd.args(&spec.args)
+            .env_clear()
+            .envs(spec.env.iter().map(|(k, v)| (*k, v.as_str())))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .process_group(0);
+        let child = cmd.spawn().map_err(|_| "runtime_unavailable")?;
+        self.pgid
+            .store(child.id().unwrap_or(0), std::sync::atomic::Ordering::SeqCst);
+        *self.child() = Some(child);
+        Ok(())
+    }
+    fn stop(&self) {
+        crate::commands::proc_group::terminate(self.group());
+    }
+    fn gone(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + WINDOW_GONE_TIMEOUT;
+            loop {
+                // try_wait reaps the leader; the group must also be empty.
+                let leader_up = self.alive();
+                if !leader_up && crate::commands::proc_group::group_empty(self.group()) {
+                    *self.child() = None;
+                    self.pgid.store(0, std::sync::atomic::Ordering::SeqCst);
+                    return true;
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    return false;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+    }
+    fn ready(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + self.ready_timeout;
+            while self.alive() && tokio::time::Instant::now() < deadline {
+                if self.child_listens().await {
+                    // Settle, then confirm again: a child that lost the bind race has exited by now.
+                    tokio::time::sleep(WINDOW_SETTLE).await;
+                    return self.alive() && self.child_listens().await;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            false
+        })
+    }
+    fn port_free(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async move { !self.answers().await })
+    }
+    fn alive(&self) -> bool {
+        self.child()
+            .as_mut()
+            .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
+    }
+    fn liveness(&self) -> std::sync::Arc<dyn Fn() -> bool + Send + Sync> {
+        let g = self.pgid.clone();
+        std::sync::Arc::new(move || {
+            !crate::commands::proc_group::group_empty(g.load(std::sync::atomic::Ordering::SeqCst))
+        })
     }
 }
 
@@ -955,12 +1167,14 @@ pub struct SidecarRunner<S: Spawner, P: PortProbe> {
     resolve: Resolver,
     data_dir: std::path::PathBuf,
     home: Option<String>,
+    /// Shared with the download lifecycle: the sandboxed serve is never started while a download holds it.
+    slot: std::sync::Arc<crate::commands::pull_window::PullSlot>,
 }
 
 impl SidecarRunner<ProcSpawner, RealPortProbe> {
     /// The runner `services_start_all` uses when act is effective.
     pub fn real(data_dir: std::path::PathBuf) -> Self {
-        Self::with(
+        let mut r = Self::with(
             ProcSpawner::default(),
             RealPortProbe::new(),
             Registry::builtin(),
@@ -968,7 +1182,9 @@ impl SidecarRunner<ProcSpawner, RealPortProbe> {
             Box::new(resolve_sidecar),
             data_dir,
             dirs::home_dir().and_then(|h| h.to_str().map(str::to_string)),
-        )
+        );
+        r.slot = crate::commands::pull_window::global_slot();
+        r
     }
 }
 
@@ -990,7 +1206,19 @@ impl<S: Spawner, P: PortProbe> SidecarRunner<S, P> {
             resolve,
             data_dir,
             home,
+            slot: Default::default(),
         }
+    }
+
+    pub(crate) fn slot(&self) -> &std::sync::Arc<crate::commands::pull_window::PullSlot> {
+        &self.slot
+    }
+
+    /// The spec of the unsandboxed download window, from the bundled binary. Called only by the
+    /// download lifecycle.
+    pub(crate) fn pull_window_spec(&self) -> Option<SpawnSpec> {
+        let bin = (self.resolve)(SIDECAR_OLLAMA)?;
+        ollama_pull_window_spec(&bin, self.home.as_deref())
     }
 
     /// Port state of an allowlisted sidecar row, read-only.
@@ -1004,6 +1232,26 @@ impl<S: Spawner, P: PortProbe> SidecarRunner<S, P> {
         if !self.policy.allows(&Verb::SidecarStart(id)) {
             return Err(RunError::ActDisabled);
         }
+        // The sandboxed serve never starts while a download window holds the slot (25a M1).
+        if id == ServiceId::ModelRuntime
+            && (self.slot.held_by() == Some(crate::commands::pull_window::Holder::Download)
+                || self.slot.window_may_be_alive())
+        {
+            return Err(RunError::PullInProgress);
+        }
+        self.start_checked(id).await
+    }
+
+    /// The restart that ends a download: the download itself holds the slot, so the slot check is skipped;
+    /// policy and the allowlist still apply.
+    pub(crate) async fn start_after_pull(&self, id: ServiceId) -> Result<SidecarOutcome, RunError> {
+        if !self.policy.allows(&Verb::SidecarStart(id)) {
+            return Err(RunError::ActDisabled);
+        }
+        self.start_checked(id).await
+    }
+
+    async fn start_checked(&self, id: ServiceId) -> Result<SidecarOutcome, RunError> {
         let Some(Runtime::Sidecar { name }) = sidecar_runtime(id) else {
             return Err(RunError::NotAllowed);
         };
@@ -1869,8 +2117,9 @@ mod sidecar_tests {
 
     #[test]
     fn the_runtime_is_only_ever_spawned_through_the_sandbox_in_the_runner() {
-        // The runner builds its ollama spec only through `spawn_spec` (sandboxed); the unsandboxed
-        // pull window spec is not referenced by any production code in this file.
+        // The long-running serve is built only through `spawn_spec` (sandboxed). The unsandboxed
+        // pull window spec has exactly one production caller: `SidecarRunner::pull_window_spec`,
+        // which only the pull lifecycle (`pull_window.rs`, mutually exclusive with the serve) calls.
         let src = include_str!("runner.rs");
         let prod = src
             .split("#[cfg(test)]\npub(crate) mod fakes")
@@ -1878,9 +2127,18 @@ mod sidecar_tests {
             .unwrap();
         assert_eq!(
             prod.matches("ollama_pull_window_spec(").count(),
-            1,
-            "only its definition"
+            2,
+            "its definition and the one caller"
         );
+        assert_eq!(prod.matches("fn pull_window_spec(").count(), 1);
+        let caller = prod.split("fn pull_window_spec(").nth(1).unwrap();
+        assert!(caller
+            .split("\n    }\n")
+            .next()
+            .unwrap()
+            .contains("ollama_pull_window_spec("));
+        // `start` (the only serve starter besides the post-pull restart) refuses during a pull.
+        assert!(prod.contains("RunError::PullInProgress"));
         assert!(prod.contains("SANDBOX_EXEC"));
         // Tests never start `serve`.
         let tests = src
@@ -2032,5 +2290,75 @@ mod sidecar_tests {
         );
         assert_eq!(sp.guard().len(), 1);
         assert_eq!(sp.stop_started(), vec![ServiceId::ModelRuntime]);
+    }
+
+    fn sleep_spec() -> SpawnSpec {
+        SpawnSpec {
+            program: PathBuf::from("/bin/sleep"),
+            args: vec!["30".to_string()],
+            env: vec![("PATH", "/usr/bin:/bin".to_string())],
+        }
+    }
+
+    #[tokio::test]
+    async fn a_listener_that_is_not_our_child_never_makes_the_window_ready() {
+        // A squatter (this test) holds the port; the child is a harmless sleep that never listens.
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr: &'static str =
+            Box::leak(format!("127.0.0.1:{}", l.local_addr().unwrap().port()).into_boxed_str());
+        let w = ProcWindow::with(addr, Duration::from_millis(1500));
+        assert!(!w.port_free().await, "squatter is seen");
+        w.spawn(&sleep_spec()).unwrap();
+        assert!(w.alive());
+        assert!(!w.ready().await, "someone else's listener is never ours");
+        w.stop();
+        assert!(w.gone().await);
+        assert!(!w.alive());
+        drop(l);
+    }
+
+    #[tokio::test]
+    async fn the_window_stop_ends_the_whole_process_group() {
+        let w = ProcWindow::with("127.0.0.1:1", Duration::from_millis(100));
+        let spec = SpawnSpec {
+            program: PathBuf::from("/bin/sh"),
+            args: vec![
+                "-c".to_string(),
+                "/bin/sleep 30 & /bin/sleep 30; wait".to_string(),
+            ],
+            env: vec![("PATH", "/usr/bin:/bin".to_string())],
+        };
+        w.spawn(&spec).unwrap();
+        let live = w.liveness();
+        assert!(live());
+        // A second window is refused while one runs.
+        assert_eq!(w.spawn(&spec), Err("runtime_busy"));
+        w.stop();
+        assert!(w.gone().await, "leader and its children are all gone");
+        assert!(!live());
+    }
+
+    #[tokio::test]
+    async fn the_real_spawner_stops_the_serve_group_not_just_the_pid() {
+        let sp = ProcSpawner::default();
+        let spec = SpawnSpec {
+            program: PathBuf::from("/bin/sh"),
+            args: vec![
+                "-c".to_string(),
+                "/bin/sleep 30 & /bin/sleep 30; wait".to_string(),
+            ],
+            env: vec![("PATH", "/usr/bin:/bin".to_string())],
+        };
+        sp.spawn(ServiceId::ModelRuntime, &spec).unwrap();
+        let pgid = sp.guard()[0].1.id().unwrap();
+        assert!(sp.stop(ServiceId::ModelRuntime));
+        assert!(!sp.is_alive(ServiceId::ModelRuntime));
+        let start = std::time::Instant::now();
+        while !crate::commands::proc_group::group_empty(pgid)
+            && start.elapsed() < Duration::from_secs(5)
+        {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(crate::commands::proc_group::group_empty(pgid));
     }
 }
