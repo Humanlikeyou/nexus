@@ -36,6 +36,8 @@
   --copper: #8c6239; --copper-hairline: rgba(140, 98, 57, .35);
   /* Copper for text (page names): light #8c6239 on #f5f5f7 = 4.92:1 (design-1110 P0.2). */
   --copper-text: #8c6239;
+  /* Copper text on the 10% copper tint (money .m-warn b): #8c6239 is 4.23-4.33:1 there on #f2f2f7/#f5f5f7; this is >=4.78:1. Dark = --copper-text. */
+  --copper-text-on-tint: #835a33;
   --destructive: #c2412d; --destructive-hover: #ad3826; --destructive-pressed: #97301f; --on-destructive: #ffffff;
   --bg-window: #f5f5f7;
   --bg-content: #ffffff;
@@ -230,7 +232,7 @@
   --on-accent: var(--d-on-accent);
   --accent-hover: #4fd6a9;
   --tone-success: var(--d-tone-success); --tone-warning: var(--d-tone-warning); --tone-danger: var(--d-tone-danger);
-  --copper: var(--d-copper); --copper-hairline: var(--d-copper-hairline); --copper-text: var(--d-copper-text);
+  --copper: var(--d-copper); --copper-hairline: var(--d-copper-hairline); --copper-text: var(--d-copper-text); --copper-text-on-tint: var(--d-copper-text);
   --destructive: var(--d-destructive); --destructive-hover: var(--d-destructive-hover); --destructive-pressed: var(--d-destructive-pressed); --on-destructive: var(--d-on-destructive);
   --accent-pressed: #2aa982; --accent-highlight: rgba(255, 255, 255, .28);
 
@@ -279,7 +281,7 @@
     --on-accent: var(--d-on-accent);
     --accent-hover: #4fd6a9;
   --tone-success: var(--d-tone-success); --tone-warning: var(--d-tone-warning); --tone-danger: var(--d-tone-danger);
-  --copper: var(--d-copper); --copper-hairline: var(--d-copper-hairline); --copper-text: var(--d-copper-text);
+  --copper: var(--d-copper); --copper-hairline: var(--d-copper-hairline); --copper-text: var(--d-copper-text); --copper-text-on-tint: var(--d-copper-text);
   --destructive: var(--d-destructive); --destructive-hover: var(--d-destructive-hover); --destructive-pressed: var(--d-destructive-pressed); --on-destructive: var(--d-on-destructive);
   --accent-pressed: #2aa982; --accent-highlight: rgba(255, 255, 255, .28);
 

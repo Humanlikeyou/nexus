@@ -5,6 +5,7 @@ import type { ThemePreference } from "../design/useAppearance";
 import { APP_NAME, APP_VERSION } from "../app/version";
 import { dateTime, humanize } from "../lib/format";
 import { AllowClaudeGroup } from "../settings/AllowClaude";
+import { StartupGroup } from "../settings/OpenAtLogin";
 import { HomeAssistantSettingsGroup } from "../settings/HomeAssistantSettingsGroup";
 import { NoopSettingsGroup } from "../settings/NoopSettingsGroup";
 import type { MuseDevice, SystemSnapshot } from "../types";
@@ -101,9 +102,7 @@ function GeneralTab({ data, theme, setTheme, reduceMotion, setReduceMotion, onRe
 
       <UpdatesSection adapter={adapter} />
 
-      <InsetGroup title="Startup" footer="Run setup again after moving to a bigger Mac to pick a larger model.">
-        <ListRow title="Set up Amara again" subtitle="Restore, model size, downloads and preferences, step by step." accessory={<Button variant="secondary" size="small" onClick={onRunSetup} disabled={!onRunSetup}>Run Setup Again…</Button>} />
-      </InsetGroup>
+      <StartupGroup onRunSetup={onRunSetup} />
 
       <More label="Connections and diagnostics" id="settings-more">
       <InsetGroup title="General">

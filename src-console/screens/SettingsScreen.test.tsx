@@ -27,7 +27,7 @@ describe("Settings (§11) + Devices (§9)", () => {
     render(<SettingsField data={snap()} {...base} setReduceMotion={setReduceMotion} />);
     fireEvent.click(screen.getByRole("switch", { name: "Reduce motion" }));
     expect(setReduceMotion).toHaveBeenCalledWith(true);
-    expect(screen.getAllByRole("switch").map((s) => s.getAttribute("aria-label"))).toEqual(["Reduce motion", "Auto-update", "Check daily", "Allow Claude"]);
+    expect(screen.getAllByRole("switch").map((s) => s.getAttribute("aria-label"))).toEqual(["Reduce motion", "Auto-update", "Check daily", "Open at login", "Allow Claude"]);
     expect(screen.getByText("Every 15 seconds")).toBeInTheDocument();
   });
   it("Muse: Find Muse scans; nearby headsets show signal words; error offers Retry", () => {

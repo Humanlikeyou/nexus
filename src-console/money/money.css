@@ -25,7 +25,7 @@
 .m-yes { color: var(--tone-accent-text); font-size: 13px; }
 .m-no { color: var(--label-secondary); font-size: 13px; }
 .m-warn { display: grid; gap: 5px; padding: 13px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--copper-text) 55%, var(--separator)); background: color-mix(in srgb, var(--copper-text) 10%, transparent); font-size: 13px; line-height: 1.5; color: var(--label); }
-.m-warn b { color: var(--copper-text); font-weight: 600; }
+.m-warn b { color: var(--copper-text-on-tint); font-weight: 600; }
 .m-bar { display: flex; gap: 13px; align-items: center; flex-wrap: wrap; }
 .m-alloc { display: flex; gap: 3px; height: 8px; border-radius: 5px; overflow: hidden; margin: 0 0 8px; }
 .m-alloc i, .m-sw { display: block; background: var(--tone-accent-text); }
