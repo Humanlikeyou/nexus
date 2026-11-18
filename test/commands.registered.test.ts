@@ -140,6 +140,17 @@ describe("Tauri command registry", () => {
     for (const name of ["outbound_get", "outbound_set"]) expect(names).toContain(name);
   });
 
+  it("Stage H: login item and updater commands are registered; the LaunchAgent autostart plugin and its permission are gone", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    for (const name of ["login_item_status", "login_item_enable", "login_item_disable", "update_status", "update_check", "update_install_now", "update_set_prefs"]) expect(names).toContain(name);
+    expect(lib).not.toContain("tauri_plugin_autostart");
+    const cap = readFileSync(new URL("../src-tauri/capabilities/default.json", import.meta.url), "utf8");
+    expect(cap).not.toContain("autostart");
+    expect(cap).not.toContain("updater");
+  });
+
   it("the Hemi-Sync commands are registered", async () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");

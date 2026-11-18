@@ -132,10 +132,6 @@ pub fn run() {
         .manage(terrence_runtime_bridge::NexusRuntimeBridge::default())
         .manage(commands::amara_turn::TurnRegistry::default())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
-        ))
         .plugin(tauri_plugin_dialog::init())
         // Hemi-Sync audio: hemisync://localhost/<track id>, id-only, read-only (commands/hemisync.rs).
         .register_asynchronous_uri_scheme_protocol("hemisync", |_ctx, request, responder| {
@@ -148,6 +144,12 @@ pub fn run() {
             commands::telegram::init_navy_flag();
             // Outbound is off unless Settings enabled it (and the env var does not force it off).
             commands::outbound::init_outbound_setting();
+            // Updater: registered only when the switch, a real public key and https endpoints all
+            // exist (none do today, so this is a no-op). Open at login is never touched here.
+            if commands::updater::resolve_from_config(app.config()).is_ok() {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
             // Per-launch token for Amara-owned loopback services (see commands/launch_token.rs).
             commands::launch_token::mint();
             // Services supervisor: observe-only probes and a cached snapshot (commands/supervisor).
@@ -316,6 +318,13 @@ pub fn run() {
             telegram::set_local_only,
             commands::outbound::outbound_get,
             commands::outbound::outbound_set,
+            commands::login_item::login_item_status,
+            commands::login_item::login_item_enable,
+            commands::login_item::login_item_disable,
+            commands::updater::update_status,
+            commands::updater::update_check,
+            commands::updater::update_install_now,
+            commands::updater::update_set_prefs,
             telegram::test_telegram_connection,
             telegram::send_to_terrance,
             telegram::poll_telegram_updates,

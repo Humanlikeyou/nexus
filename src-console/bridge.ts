@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { commands as bound } from "./bindings.gen";
-import type { ServiceEvent, ServiceId, ServiceLogTail, ServiceStatus, ServicesSummary, SupervisorInfo } from "./bindings.gen";
+import type { LoginItemStatus, ServiceEvent, ServiceId, ServiceLogTail, ServiceStatus, ServicesSummary, SupervisorInfo, UpdatePrefs, UpdateStatus } from "./bindings.gen";
 import { BOUND_TABLE } from "./boundTable";
 import { EMPTY_DEVICE_ID } from "./lib/devices";
 import type {
@@ -428,6 +428,19 @@ export const setAllowClaude = (enabled: boolean): Promise<boolean> => bound.setA
  *  Enabling goes through the native approval dialog and rejects with "declined:" on Deny. No Settings toggle is wired yet (tasks/design-questions.md). */
 export const getOutboundAllowed = (): Promise<boolean> => bound.outboundGet();
 export const setOutboundAllowed = (enabled: boolean): Promise<boolean> => bound.outboundSet(enabled);
+
+/** Open at login (commands/login_item.rs, Phase 13). SMAppService.mainApp, no LaunchAgent. Off by default; `status` only reads,
+ *  `enable`/`disable` act only when the user's toggle calls them. No Settings toggle is wired yet (Design owns the Startup row). */
+export const getLoginItemStatus = (): Promise<LoginItemStatus> => bound.loginItemStatus();
+export const enableLoginItem = (): Promise<LoginItemStatus> => bound.loginItemEnable();
+export const disableLoginItem = (): Promise<LoginItemStatus> => bound.loginItemDisable();
+
+/** Auto-update (commands/updater.rs, Phase 15). Inert and fail-closed: `check`/`installNow` reject with "not_configured" until the
+ *  updater key, manifest host and switch exist (gated). Prefs are stored but do nothing while unconfigured. */
+export const getUpdateStatus = (): Promise<UpdateStatus> => bound.updateStatus();
+export const checkForUpdate = (): Promise<UpdateStatus> => bound.updateCheck();
+export const installUpdateNow = (): Promise<null> => bound.updateInstallNow();
+export const setUpdatePrefs = (patch: { auto_update?: boolean | null; check_daily?: boolean | null }): Promise<UpdatePrefs> => bound.updateSetPrefs(patch);
 
 /** Keys: which file-backed keys are in a file, the Keychain, both or neither (names and flags only, never values).
  *  `migrateKeyToKeychain` is gated off (`disabled:`), asks in a native dialog, copies and verifies, and never deletes the file. */

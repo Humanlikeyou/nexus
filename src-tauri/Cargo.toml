@@ -19,8 +19,17 @@ tauri-specta = { version = "=2.0.0-rc.29", features = ["derive", "typescript"] }
 specta = { version = "=2.0.0-rc.28", features = ["derive", "serde_json"] }
 specta-typescript = "=0.0.15"
 tauri-plugin-shell = "2"
-tauri-plugin-autostart = "2"
+# Phase 15 (decision pending): signed updater. Not registered as a plugin; commands/updater.rs uses its
+# builder only when configured. No updater permission is granted to the webview.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
 tauri-plugin-dialog = "2"
+# Minisign verification of an update artifact before the install sequence starts (same crate the updater uses).
+minisign-verify = "0.2"
+semver = "1"
+url = "2"
+# Same reqwest the updater plugin uses (already in the tree); named only to set the redirect policy via configure_client.
+reqwest-updater = { package = "reqwest", version = "0.13", default-features = false }
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -51,7 +60,9 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["c
 security-framework = "2.11"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSImage", "NSResponder", "NSWorkspace"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSError", "NSString"] }
+# Phase 13: SMAppService.mainApp login item (no LaunchAgent plist). Only called from the user-invoked commands.
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "SMErrors", "objc2", "objc2-foundation"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

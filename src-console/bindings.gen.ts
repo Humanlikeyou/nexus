@@ -319,6 +319,18 @@ export const commands = {
 	 *  this Mac; disabling is immediate. Returns the saved value.
 	 */
 	outboundSet: (enabled: boolean, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("outbound_set", { enabled }, options),
+	/**  Read-only. Safe to call at any time. */
+	loginItemStatus: (options?: InvokeOptions) => __TAURI_INVOKE<LoginItemStatus_Serialize>("login_item_status", undefined, options),
+	/**  Registers Amara OS as a login item. Called only by the user's toggle. */
+	loginItemEnable: (options?: InvokeOptions) => __TAURI_INVOKE<LoginItemStatus_Serialize>("login_item_enable", undefined, options),
+	/**  Removes the login item. Called only by the user's toggle. */
+	loginItemDisable: (options?: InvokeOptions) => __TAURI_INVOKE<LoginItemStatus_Serialize>("login_item_disable", undefined, options),
+	updateStatus: (options?: InvokeOptions) => __TAURI_INVOKE<UpdateStatus_Serialize>("update_status", undefined, options),
+	/**  Fails closed with `not_configured` until the key, host and switch exist. */
+	updateCheck: (options?: InvokeOptions) => __TAURI_INVOKE<UpdateStatus_Serialize>("update_check", undefined, options),
+	/**  Not wired to a real swap host: refuses. The install order is `update_install::run_install`. */
+	updateInstallNow: (options?: InvokeOptions) => __TAURI_INVOKE<null>("update_install_now", undefined, options),
+	updateSetPrefs: (patch: UpdatePrefsPatch_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<UpdatePrefs_Serialize>("update_set_prefs", { patch }, options),
 	lifeDateList: (options?: InvokeOptions) => __TAURI_INVOKE<LifeDateView_Serialize[]>("life_date_list", undefined, options),
 	checkinList: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<CheckInRecord_Serialize[]>("checkin_list", { limit }, options),
 	patternsRead: (options?: InvokeOptions) => __TAURI_INVOKE<PatternsResult_Serialize>("patterns_read", undefined, options),
@@ -759,6 +771,10 @@ export type AuxInfo_Serialize = {
 	detectedBy: string,
 	detectedAt?: string,
 };
+
+export type BackendStatus = "not_registered" | "enabled" | "requires_approval" | "not_found" | 
+/**  Not macOS, or macOS older than 13. */
+"unsupported";
 
 export type BackupEntry = {
 	/**  The file name (also the id `restore` will take later). */
@@ -2511,6 +2527,32 @@ export type LlmUsageRecord_Serialize = {
 	estimated_cost_usd: number | null,
 	latency_ms: number,
 	routing_reason: string,
+};
+
+export type LoginItemStatus = LoginItemStatus_Serialize | LoginItemStatus_Deserialize;
+
+export type LoginItemStatus_Deserialize = {
+	/**  The system says the login item is registered and allowed. */
+	enabled: boolean,
+	/**  The user's last explicit choice (default false). */
+	wanted: boolean,
+	backend: BackendStatus,
+	needs_approval: boolean,
+	/**  Always `smappservice`; never a LaunchAgent. */
+	mechanism: string,
+	error?: string | null,
+};
+
+export type LoginItemStatus_Serialize = {
+	/**  The system says the login item is registered and allowed. */
+	enabled: boolean,
+	/**  The user's last explicit choice (default false). */
+	wanted: boolean,
+	backend: BackendStatus,
+	needs_approval: boolean,
+	/**  Always `smappservice`; never a LaunchAgent. */
+	mechanism: string,
+	error: string | null,
 };
 
 export type MapNode = {
@@ -4942,6 +4984,64 @@ export type UnrankedTrack = {
 	sessionIds: string[],
 	/**  Always "not enough sessions". */
 	reason: string,
+};
+
+export type UpdatePrefs = UpdatePrefs_Serialize | UpdatePrefs_Deserialize;
+
+export type UpdatePrefsPatch = UpdatePrefsPatch_Serialize | UpdatePrefsPatch_Deserialize;
+
+export type UpdatePrefsPatch_Deserialize = {
+	auto_update?: boolean | null,
+	check_daily?: boolean | null,
+};
+
+export type UpdatePrefsPatch_Serialize = {
+	auto_update: boolean | null,
+	check_daily: boolean | null,
+};
+
+export type UpdatePrefs_Deserialize = {
+	auto_update?: boolean,
+	check_daily?: boolean,
+};
+
+export type UpdatePrefs_Serialize = {
+	auto_update: boolean,
+	check_daily: boolean,
+};
+
+export type UpdateStatus = UpdateStatus_Serialize | UpdateStatus_Deserialize;
+
+export type UpdateStatus_Deserialize = {
+	/**  `not_configured`, `outbound_disabled`, `idle` or `available`. */
+	state: string,
+	configured: boolean,
+	current_version: string,
+	auto_update: boolean,
+	check_daily: boolean,
+	/**
+	 *  The version the manifest ANNOUNCES. Not trusted: the manifest JSON is unsigned. It is
+	 *  authenticated only when the artifact's minisign signature is verified at download/install
+	 *  (the plugin and `update_install::run_install` both do that, and the signed trusted comment
+	 *  pins the version). Show it as "announced", never as proven.
+	 */
+	announced_version_unverified?: string | null,
+};
+
+export type UpdateStatus_Serialize = {
+	/**  `not_configured`, `outbound_disabled`, `idle` or `available`. */
+	state: string,
+	configured: boolean,
+	current_version: string,
+	auto_update: boolean,
+	check_daily: boolean,
+	/**
+	 *  The version the manifest ANNOUNCES. Not trusted: the manifest JSON is unsigned. It is
+	 *  authenticated only when the artifact's minisign signature is verified at download/install
+	 *  (the plugin and `update_install::run_install` both do that, and the signed trusted comment
+	 *  pins the version). Show it as "announced", never as proven.
+	 */
+	announced_version_unverified: string | null,
 };
 
 export type Value = null | boolean | number | string | Value[] | { [key in string]: Value };
