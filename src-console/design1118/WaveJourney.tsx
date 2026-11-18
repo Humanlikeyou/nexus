@@ -1,6 +1,5 @@
 import { Button } from "../ui";
 import type { HemisyncTrack, HemisyncWave } from "../neuro/hemisync/adapters";
-import { PHI, goldenSpiralPath, phiGrid } from "./golden";
 import { smoothPath } from "./pathModel";
 import "./design1118.css";
 
@@ -41,8 +40,6 @@ export function WaveJourney({ waves, doneIds, timesDone, connected, pickedId, on
         <div><p className="d18-eyebrow d18-eyebrow--quiet">Journey</p><h3 className="d18-h">{cur ? `Wave ${cur.wave} · ${cur.waveName}` : "All waves"}</h3>{cur && <p className="d18-note">{inWave} of {cur.tracks.length} in this wave</p>}</div>
       </div>
       <svg className="d18-wj__map" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Waves: ${waves.map((w) => w.waveName).join(", ")}. You are in ${cur?.waveName ?? "the last wave"}.`}>
-        <path className="d18-golden-art d18-golden-art--grid" d={phiGrid(W, H)} />
-        <path className="d18-golden-art" d={goldenSpiralPath(W / PHI, H / PHI, 1.1, 8, Math.PI)} />
         <path className="d18-path__track" d={line} />
         {curIdx > 0 && <path className="d18-path__fill" d={lit} />}
         {pts.map((p, i) => {

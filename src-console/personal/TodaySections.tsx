@@ -9,7 +9,6 @@ import { Rich } from "./parts";
 import { HabitRow } from "../goals/HabitTracker";
 import { HabitsUnderMap, MilestonesMap, type PathGoal } from "../design1118/GoalPath";
 import { PageTake } from "../design1118/PageTake";
-import { GoldenUnderlay } from "../design1118/GoldenUnderlay";
 import { AddChooser, GoalForm, GoalsHelperLine, HabitForm } from "../design1118/GoalEditors";
 import { goalStore, type GoalDraft, type HabitDraft } from "../design1118/goalStore";
 import { roadmapAdapter, type StepSize } from "../goals/roadmap";
@@ -54,8 +53,7 @@ export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, a
   const editHabit = editing?.kind === "habit" ? habits.find((h) => h.id === editing.id) : undefined;
   const n = pathGoals.length;
   return (
-    <div className="v-page d18-page d18-golden" id="goals">
-      <GoldenUnderlay />
+    <div className="v-page d18-page" id="goals">
       <PageHero title="Goals" statement={n ? `${n} path${n === 1 ? "" : "s"}${w?.nextMilestone ? ` · next: ${w.nextMilestone}` : ""}` : "Habits and milestones"}
         detail={w ? <>{w.habits.length} habit{w.habits.length === 1 ? "" : "s"} this week{ready ? ` · ${ready} suggestion ready to become a habit` : ""} {week.state === "sample" && <DataTag kind="sample" />}</> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
       <div className="d18-goalbar"><GoalsHelperLine /><span className="d18-grow" />

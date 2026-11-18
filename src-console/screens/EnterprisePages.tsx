@@ -11,7 +11,6 @@ import type { SystemSnapshot } from "../types";
 import { Badge, Button, Card, DataTag, InsetGroup, ListRow, PageHero, StatusText, wiredTag, type StatusKind } from "../ui";
 import { waitingDecisions } from "./BusinessPanels";
 import { PageTake } from "../design1118/PageTake";
-import { GoldenUnderlay } from "../design1118/GoldenUnderlay";
 import "./CommandCenter.css";
 import "../adds/v1111.css";
 
@@ -213,8 +212,7 @@ export function ContentView({ data, onRetry, onOpen }: { data: SystemSnapshot; o
       savedText={(s) => `Added “${s.title}” to Idea.`} />
   );
   return (
-    <div className="biz page-inset cc-page d18-page d18-golden">
-      <GoldenUnderlay />
+    <div className="biz page-inset cc-page d18-page">
       <PageHero title="Content" statement={statement} detail="Ideas travel this path. Amara drafts; she never posts for you." />
       <PageTake surface="content" className="biz__take" />
       {board && composer}

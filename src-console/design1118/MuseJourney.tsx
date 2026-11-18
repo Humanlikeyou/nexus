@@ -4,10 +4,8 @@ import { parseBodyContext } from "../lib/noop";
 import { score } from "../neuro/sessionSamples";
 import type { RecordedSession } from "../types";
 import { Button } from "../ui";
-import { PHI, goldenSpiralPath, phiWave } from "./golden";
+import { PHI, phiWave } from "./golden";
 import { smoothPath } from "./pathModel";
-
-const SWAVE_SPIRAL = goldenSpiralPath(640 / PHI, 40, 0.9, 7, Math.PI);
 import "./design1118.css";
 
 /**
@@ -39,7 +37,6 @@ function SessionWave({ focus, calm }: { focus: number | null; calm: number | nul
   const strand = (amp: number, k: number, seed: number) => smoothPath(Array.from({ length: 72 }, (_, i) => { const t = i / 71; return { x: 4 + t * 632, y: 40 + phiWave(t, k, amp, seed) }; }));
   return (
     <svg className="d18-swave" viewBox="0 0 640 80" aria-hidden="true">
-      <path className="d18-golden-art" d={SWAVE_SPIRAL} />
       <path className="d18-swave__calm" d={strand(8 + (calm ?? 30) / 6, 3.4, 1)} />
       <path className="d18-swave__focus" d={strand(8 + (focus ?? 30) / 6, 3.4 * PHI, 2)} />
     </svg>
@@ -66,7 +63,6 @@ export function MuseJourney({ session, recoveryNow, sessions, action, devices, o
               <small>Recovery that day</small>
               <small className="d18-mring__when"><b>{whenFmt.format(new Date(session.start))} · {minutes} min</b><br />{hhmm(session.start)}–{hhmm(session.end)}</small>
             </Ring>
-            <span className="d18-grow" />
             {now != null && (
               <Ring value={now} size={104} tone="copper" label={`Recovery now ${now}%`}>
                 <span className="d18-eyebrow">Now</span><b className="d18-mring__mid">{now}%</b><small>Recovery now</small>

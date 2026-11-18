@@ -98,13 +98,19 @@ export function fillFraction(stations: Station[]): number {
 
 /**
  * A tangled strand for the Milestones arrival view. Periodic every 680 units, so a strand twice as wide loops seamlessly.
- * Golden character (round 6): consecutive Fibonacci frequencies (their ratio tends to φ, and integers keep the loop
- * seamless), amplitudes in φ² steps, and golden-angle phase offsets between strands.
+ * One wave per goal, in code only (no visible geometry): each goal gets a distinct Fibonacci fundamental
+ * (2, 3, 5, 8 — integers so the loop stays seamless) plus quieter overtones at the next two Fibonacci numbers,
+ * amplitudes in φ² steps, and a golden-angle (137.5°) phase offset so neighbouring strands weave rather than pile.
+ * Period and amplitude breathing on T, Tφ, Tφ² live on the strand in CSS, not in this path.
  */
+export function strandTerms(i: number) {
+  const f = i % 4;
+  return { k1: FIB[f + 2], k2: FIB[f + 3], k3: FIB[f + 4], phase: i * GOLDEN_ANGLE };
+}
+
 export function strandPath(i: number, w = 680, h = 120, phase = 0, samples = 96): string {
-  const P = 680, f = i % 3, k1 = FIB[f + 1], k2 = FIB[f + 2], k3 = FIB[f + 3];
+  const P = 680, { k1, k2, k3, phase: ph } = strandTerms(i);
   const a1 = h * 0.22, a2 = a1 / (PHI * PHI), a3 = a2 / (PHI * PHI);
-  const ph = i * GOLDEN_ANGLE;
   const pts: Pt[] = Array.from({ length: samples }, (_, k) => {
     const x = (k / (samples - 1)) * w, u = (2 * Math.PI * x) / P;
     const y = h / 2 + a1 * Math.sin(k1 * u + ph + phase) + a2 * Math.sin(k2 * u + ph * PHI - phase / PHI) + a3 * Math.sin(k3 * u + ph * PHI * PHI + phase / (PHI * PHI));
