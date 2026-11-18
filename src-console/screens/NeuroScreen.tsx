@@ -10,9 +10,6 @@ import type { RecordedSession } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, Select, Sparkline, StatTile, type Tone } from "../ui";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { recoveryBand } from "./HealthScreen";
-import { parseBodyContext } from "../lib/noop";
-import { hoursMinutes } from "../lib/mindBodyDeep";
-import { score } from "../neuro/sessionSamples";
 import { NeuroFlow } from "./NeuroFlow";
 import { type MuseScreenProps, museSignalState } from "./muse";
 import { LiveSignal } from "../neuro/LiveSignal";
@@ -20,6 +17,7 @@ import { useRecordingsAdapter } from "../neuro/useRecordingsAdapter";
 import { HemisyncSection } from "./HemisyncSection";
 import { NeuroTrends } from "./NeuroTrends";
 import "./NeuroScreen.css";
+import { MuseJourney } from "../design1118/MuseJourney";
 
 const MUSE_COMMAND = "get_muse_state";
 const SESSIONS_COMMAND = "list_sessions";
@@ -105,7 +103,7 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
 
   const header = (
     <>
-      <PageHero title="Neuro" statement={failed ? "Out of reach" : deviceBadge.text} detail={failed ? <Badge tone="danger">Unavailable</Badge> : band ? <Badge tone={band.tone}>Recovery {Math.round(recovery as number)}%</Badge> : undefined} />
+      <PageHero title="Neuro" statement={failed ? "Out of reach" : deviceBadge.text} detail={failed ? <Badge tone="danger">Unavailable</Badge> : band ? <Badge tone={band.tone}>Recovery now {Math.round(recovery as number)}%</Badge> : undefined} />
       {secondary && <div className="neuro__actions">{secondary}</div>}
     </>
   );
@@ -153,20 +151,18 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
       {!connected
         ? (
           <>
-          <Card className="neuro__empty" title={operation === "scanning" ? "Searching for Muse" : "No Muse connected"} headingLevel={2}>
-            <div className="neuro__empty-lead">
-              <BrainCircuit className="neuro__empty-icon" aria-hidden="true" />
-              <p className="neuro__callout">{operation === "scanning" ? "Keep the headset nearby. Scanning takes about five seconds." : "Put your headset in pairing mode"}</p>
-              <div className="neuro__empty-action">{primary}</div>
-            </div>
-            <InsetGroup title="Nearby headsets" className="neuro__group" aria-live="polite" footer={devices.length ? undefined : operation === "scanning" ? "Looking for headsets…" : "Results appear here after a scan."}>
-              {devices.map((device) => (
-                <ListRow key={device.address} icon={BrainCircuit} title={device.name} subtitle={rssiText(device.rssi)}
-                  accessory={<Button size="small" onClick={() => onConnect(device)} disabled={busy} loading={operation === "connecting"}>{operation === "connecting" ? BUSY_LABEL.connecting : "Connect"}</Button>} />
-              ))}
-            </InsetGroup>
-          </Card>
-          {data.sessions[0] && <LastSessionCard session={data.sessions[0]} onOpenHistory={onOpenHistory} />}
+          {/* design-1118a: last session is the hero; recovery that day and recovery now stay separate. */}
+          <MuseJourney session={sessions[0] ?? data.sessions[0] ?? null} sessions={sessions.length ? sessions : data.sessions}
+            recoveryNow={typeof data.noop.today?.recovery === "number" ? data.noop.today.recovery : null} onOpenHistory={onOpenHistory}
+            action={<><span className="d18-chip" role="status">{operation === "scanning" ? "Searching for Muse" : "No Muse connected"}</span>{primary}</>}
+            devices={(devices.length > 0 || operation === "scanning") ? (
+              <InsetGroup title="Nearby headsets" className="neuro__group" aria-live="polite" footer={devices.length ? undefined : "Looking for headsets… Scanning takes about five seconds."}>
+                {devices.map((device) => (
+                  <ListRow key={device.address} icon={BrainCircuit} title={device.name} subtitle={rssiText(device.rssi)}
+                    accessory={<Button size="small" onClick={() => onConnect(device)} disabled={busy} loading={operation === "connecting"}>{operation === "connecting" ? BUSY_LABEL.connecting : "Connect"}</Button>} />
+                ))}
+              </InsetGroup>
+            ) : <p className="d18-note" aria-live="polite">Results appear here after a scan.</p>} />
           </>
         )
         : (
@@ -260,55 +256,6 @@ function SessionPanel({ session, onClose }: { session: RecordedSession; onClose:
   );
 }
 
-const whenFmt = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
-const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-
-/** C12: a thin 0–100 meter with its scale; the number is in the header, so this is never colour alone. */
-function ScoreMeter({ label, value }: { label: string; value: number | null }) {
-  return (
-    <div className="neuro__score">
-      <p className="neuro__score-head"><span>{label}</span><strong>{value == null ? DASH : Math.round(value)}<small> / 100</small></strong></p>
-      <div className="neuro__score-bar" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value == null ? undefined : Math.round(value)}>
-        <i style={{ width: `${Math.max(0, Math.min(100, value ?? 0))}%` }} />
-      </div>
-      <p className="neuro__score-scale" aria-hidden="true"><span>0</span><span>50</span><span>100</span></p>
-    </div>
-  );
-}
-
-/**
- * design-1110c C12: the latest saved session when no Muse is connected: focus and calm in the
- * header pattern with thin meters, the body context of that day, and a pointer to its saved recording
- * in Neuro history (design-1110e E10).
- */
-function LastSessionCard({ session, onOpenHistory }: { session: RecordedSession; onOpenHistory?: () => void }) {
-  const body = parseBodyContext(session.body_context);
-  const minutes = Math.max(1, Math.round(session.duration_secs / 60));
-  const figures: Array<[string, string | null, string]> = [
-    ["Recovery that day", body?.recovery == null ? null : String(Math.round(body.recovery)), "%"],
-    ["HRV", body?.hrv_ms == null ? null : String(Math.round(body.hrv_ms)), "ms"],
-    ["Resting HR", body?.resting_hr == null ? null : String(Math.round(body.resting_hr)), "bpm"],
-    ["Sleep before", body?.sleep_minutes == null ? null : hoursMinutes(body.sleep_minutes), ""],
-  ];
-  return (
-    <Card className="neuro__last" title="Last session" headingLevel={2}
-      accessory={<span className="neuro__last-when">{`${whenFmt.format(new Date(session.start))} · ${hhmm(session.start)}–${hhmm(session.end)} · ${minutes} min`}</span>}>
-      <div className="neuro__last-scores">
-        <ScoreMeter label="Average focus" value={score(session.summary.avg_focus)} />
-        <ScoreMeter label="Average calm" value={score(session.summary.avg_relaxation)} />
-      </div>
-      {body && (
-        <dl className="neuro__last-body">
-          {figures.map(([label, value, unit]) => <div key={label}><dd>{value ?? DASH}{value && unit ? <small> {unit}</small> : null}</dd><dt>{label}</dt></div>)}
-        </dl>
-      )}
-      <p className="neuro__last-foot">
-        <span>{session.file_path ? "The raw signal of this session is saved on this Mac. Open it in Neuro history." : "This session has its summary only."}</span>
-        {onOpenHistory && <Button variant="plain" size="small" onClick={onOpenHistory}>Session history ›</Button>}
-      </p>
-    </Card>
-  );
-}
 
 /** 60 s band history (Decision 7); one buffer per mounted Neuro screen. */
 function useBandHistory() {

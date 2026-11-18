@@ -7,6 +7,7 @@ import { Button, DataTag, Dialog, InsetGroup, ListRow, More, SegmentedControl, S
 import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
 import { deltaWords, usualRange } from "../ui/charts/chartMath";
 import { useHemisyncRun } from "./useHemisyncRun";
+import { WaveJourney } from "../design1118/WaveJourney";
 import "../ui/PanelKit.css";
 import "./NeuroSections.css";
 
@@ -203,6 +204,9 @@ export function HemisyncSection({ adapter: given, connected, recording, sessionI
 
         {tracks.length > 0 && (
           <>
+            <WaveJourney waves={waves} doneIds={new Set([...statsById.values()].filter((x) => x.sessions > 0).map((x) => x.trackId))} timesDone={(id) => statsById.get(id)?.sessions ?? 0}
+              connected={connected} pickedId={pickedId} onPick={(t) => { if (!playing) { setPickedId(t.id); setHint(null); } }} />
+            <More label="All tracks by wave">
             <div className="hs-waves">
               {waves.map((w, i) => (
                 <More key={w.wave} label={`Wave ${w.wave} · ${w.waveName} · ${w.tracks.length} track${w.tracks.length === 1 ? "" : "s"}`} open={(recentWave == null ? i === 0 : w.wave === recentWave) || w.tracks.some((t) => t.id === pickedId) || undefined}>
@@ -216,6 +220,7 @@ export function HemisyncSection({ adapter: given, connected, recording, sessionI
                 </More>
               ))}
             </div>
+            </More>
 
             <div className="hs-start">
               <p className="hs-start__track" aria-live="polite">{picked ? <><strong>{picked.title}</strong><span>Wave {picked.wave} · {picked.waveName}{minutes(picked.durationMs) ? ` · ${minutes(picked.durationMs)}` : ""}</span></> : <span>No track picked yet</span>}</p>

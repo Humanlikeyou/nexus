@@ -52,6 +52,9 @@ for (const [name, opts] of [
 
 test("(1112n) sample library: tracks grouped by wave; with no Muse, Start explains and plays nothing", async ({ page, theme }) => {
   const field = await openNeuro(page, theme, { sample: true, connected: false });
+  // design-1118a: the wave journey leads; the full list sits behind "All tracks by wave".
+  await expect(field.getByTestId("wave-journey")).toBeVisible();
+  await field.getByText("All tracks by wave").click();
   // His most recent session is in wave 5, so that wave is open and wave 1 is not.
   await expect(field.getByRole("button", { name: /Intro to Focus 15/ })).toBeVisible();
   await expect(field.getByRole("button", { name: /Orientation/ })).toBeHidden();

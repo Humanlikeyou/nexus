@@ -74,7 +74,7 @@ describe("Neuro screen", () => {
   it("connected but idle: Start session + Disconnect, hero tiles Ready, bands at 0 with —", () => {
     const h = renderNeuro({ data: snap({ muse: connected, noop: { ...INITIAL_SNAPSHOT.noop, today: { ...(INITIAL_SNAPSHOT.noop.today ?? {}), recovery: 74 } as SystemSnapshot["noop"]["today"] } }) });
     expect(screen.getByText("Muse S · Connected")).toBeInTheDocument();
-    expect(screen.getByText("Recovery 74%")).toBeInTheDocument();
+    expect(screen.getByText("Recovery now 74%")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start session" }));
     expect(h.onStart).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
