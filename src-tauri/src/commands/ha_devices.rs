@@ -573,6 +573,10 @@ pub(crate) fn restore_blocking(
         return Err(ha::ERR_INVALID.to_string());
     }
     let domain = entity_id.split('.').next().unwrap_or("");
+    // Covers need a native approval and never get an Undo (see set_with).
+    if domain == "cover" {
+        return Err(ERR_REFUSED.to_string());
+    }
     if services_for(domain).is_empty() {
         return Err(ha::ERR_NOT_ALLOWED.to_string());
     }
@@ -607,7 +611,7 @@ pub(super) async fn set_with<A, Fut>(
     via: Option<String>,
 ) -> Result<HaDeviceSetResult, String>
 where
-    A: Fn(String) -> Fut,
+    A: Fn(String, String) -> Fut,
     Fut: std::future::Future<Output = Result<Guard, String>>,
 {
     if !entity_id_ok(&entity_id) {
@@ -633,7 +637,13 @@ where
     }
     let min_max = dev.min_temperature.zip(dev.max_temperature);
     let call = plan(&domain, &service, value.as_ref(), min_max)?;
-    let restore = prior_call(&domain, &service, dev);
+    // Covers need a native approval (parity with ha_call_service's `ha:cover` rule), so they get no
+    // Undo: an Undo would move the cover again without asking.
+    let restore = if domain == "cover" {
+        None
+    } else {
+        prior_call(&domain, &service, dev)
+    };
     let text = format!("{}: {}", dev.name, action_text(&service, value.as_ref()));
     let undoable = restore.is_some();
     let body = body_for(&entity_id, &call);
@@ -642,9 +652,10 @@ where
         restore: restore.map(|(service, value)| json!({ "service": service, "value": value })),
     };
     let is_scene = domain == "scene";
-    // A scene can change many devices at once and can't be undone: a native dialog each time.
-    let _guard = if is_scene {
-        Some(approve(dev.name.clone()).await?)
+    // A scene can change many devices at once and can't be undone; a cover moves something physical
+    // (same rule as ha_call_service): a native dialog each time for both.
+    let _guard = if is_scene || domain == "cover" {
+        Some(approve(domain.clone(), dev.name.clone()).await?)
     } else {
         None
     };
@@ -702,15 +713,26 @@ pub async fn ha_device_set(
         return Err(ERR_SAMPLE.to_string());
     }
     let cfg = ha::load_config()?;
-    let approve = move |name: String| {
+    let approve = move |domain: String, name: String| {
         let app = app.clone();
         async move {
-            let text = super::approval_gate::approval_text(
-                "Home Assistant: activate a scene",
-                &format!("Scene: {name}\n\nA scene can change several devices at once and can't be undone."),
-            )
-            .map_err(|_| ha::ERR_NEEDS_APPROVAL.to_string())?;
-            let key = super::approval_gate::service_key("ha:scene");
+            let (title, body) = if domain == "cover" {
+                (
+                    "Home Assistant: move a blind or cover",
+                    format!(
+                        "Device: {name}\n\nThis moves something physical and can't be undone here."
+                    ),
+                )
+            } else {
+                (
+                    "Home Assistant: activate a scene",
+                    format!("Scene: {name}\n\nA scene can change several devices at once and can't be undone."),
+                )
+            };
+            let text = super::approval_gate::approval_text(title, &body)
+                .map_err(|_| ha::ERR_NEEDS_APPROVAL.to_string())?;
+            // Same keys as ha_call_service (`ha:<domain>`), so both paths share one rule.
+            let key = super::approval_gate::service_key(&format!("ha:{domain}"));
             let g = super::approval_gate::require_approval(&app, &[key], text)
                 .await
                 .map_err(|e| ha::approval_error(&e))?;
@@ -946,8 +968,8 @@ mod tests {
 
     fn ok_approver(
         asked: Arc<Mutex<Vec<String>>>,
-    ) -> impl Fn(String) -> std::future::Ready<Result<Guard, String>> {
-        move |name| {
+    ) -> impl Fn(String, String) -> std::future::Ready<Result<Guard, String>> {
+        move |_domain, name| {
             asked.lock().unwrap().push(name);
             std::future::ready(Ok(Box::new(()) as Guard))
         }
@@ -1364,6 +1386,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_cover_needs_a_native_approval_and_has_no_undo() {
+        // Parity with ha_call_service (`ha:cover` needs approval): every blind move asks, and a
+        // declined one sends nothing; an Undo can't move it again without asking.
+        let (base, seen) = mock(fixture(), Some(areas())).await;
+        let d = dirs("ha-cover-approve");
+        let asked: Arc<Mutex<Vec<(String, String)>>> = Default::default();
+        let run = |approve_ok: bool| {
+            let base = base.clone();
+            let d = d.clone();
+            let asked = asked.clone();
+            async move {
+                set_with(
+                    cfg(&base),
+                    d,
+                    move |domain: String, name: String| {
+                        asked.lock().unwrap().push((domain, name));
+                        std::future::ready(if approve_ok {
+                            Ok(Box::new(()) as Guard)
+                        } else {
+                            Err(ha::approval_error(
+                                &crate::commands::approval_gate::denied_message(),
+                            ))
+                        })
+                    },
+                    "cover.blind".into(),
+                    "open_cover".into(),
+                    None,
+                    None,
+                )
+                .await
+            }
+        };
+        assert!(run(false).await.unwrap_err().starts_with("declined:"));
+        assert!(calls(&seen).is_empty());
+        let r = run(true).await.unwrap();
+        assert!(!r.undoable && r.id.is_none());
+        assert_eq!(calls(&seen).len(), 1);
+        let a = asked.lock().unwrap();
+        assert_eq!(a.len(), 2);
+        assert!(a.iter().all(|(dom, _)| dom == "cover"));
+    }
+
+    #[tokio::test]
     async fn a_scene_needs_a_native_approval_every_time() {
         let (base, seen) = mock(fixture(), Some(areas())).await;
         let d = dirs("ha-scene-approve");
@@ -1375,7 +1440,7 @@ mod tests {
                 set_with(
                     cfg(&base),
                     d,
-                    move |name: String| {
+                    move |_domain: String, name: String| {
                         asked.lock().unwrap().push(name);
                         std::future::ready(if approve_ok {
                             Ok(Box::new(()) as Guard)
