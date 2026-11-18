@@ -885,11 +885,25 @@ pub trait Spawner: Send + Sync {
 #[derive(Default)]
 pub struct ProcSpawner {
     children: std::sync::Mutex<Vec<(ServiceId, tokio::process::Child)>>,
+    /// The process group of each child the app spawned, recorded at spawn and kept after the
+    /// leader exits, so a surviving group member (a runner) is still seen and stopped.
+    groups: std::sync::Mutex<Vec<(ServiceId, u32)>>,
 }
 
 impl ProcSpawner {
     fn guard(&self) -> std::sync::MutexGuard<'_, Vec<(ServiceId, tokio::process::Child)>> {
         self.children.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn groups(&self) -> std::sync::MutexGuard<'_, Vec<(ServiceId, u32)>> {
+        self.groups.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// The recorded group of `id` if any member of it is still running.
+    fn live_group(&self, id: ServiceId) -> Option<u32> {
+        let mut g = self.groups();
+        g.retain(|(_, pg)| !crate::commands::proc_group::group_empty(*pg));
+        g.iter().find(|(i, _)| *i == id).map(|(_, pg)| *pg)
     }
 
     /// Whether the app started `id` and it is still alive.
@@ -901,9 +915,15 @@ impl ProcSpawner {
 
     /// Whether any child the app started is still alive (decides if a quit must wait to stop).
     pub fn any_started(&self) -> bool {
-        self.guard()
+        let leader = self
+            .guard()
             .iter_mut()
-            .any(|(_, c)| matches!(c.try_wait(), Ok(None)))
+            .any(|(_, c)| matches!(c.try_wait(), Ok(None)));
+        leader || {
+            let mut gr = self.groups();
+            gr.retain(|(_, pg)| !crate::commands::proc_group::group_empty(*pg));
+            !gr.is_empty()
+        }
     }
 
     /// End every child the app started, newest first (router before runtime). Anything that
@@ -916,6 +936,19 @@ impl ProcSpawner {
                 if signal_child_group(&c) {
                     stopped.push(id);
                 }
+            }
+        }
+        drop(g);
+        // Groups whose leader already exited but whose members live on are ended too.
+        let left: Vec<(ServiceId, u32)> = {
+            let mut gr = self.groups();
+            gr.retain(|(_, pg)| !crate::commands::proc_group::group_empty(*pg));
+            std::mem::take(&mut *gr)
+        };
+        for (id, pg) in left {
+            crate::commands::proc_group::terminate(pg);
+            if !stopped.contains(&id) {
+                stopped.push(id);
             }
         }
         stopped
@@ -936,7 +969,8 @@ fn signal_child_group(c: &tokio::process::Child) -> bool {
 
 impl Spawner for ProcSpawner {
     fn is_alive(&self, id: ServiceId) -> bool {
-        self.started_by_app(id)
+        // A group member that outlived its leader still counts as ours and running.
+        self.started_by_app(id) || self.live_group(id).is_some()
     }
 
     fn stop(&self, id: ServiceId) -> bool {
@@ -958,6 +992,12 @@ impl Spawner for ProcSpawner {
             }
             false
         });
+        drop(g);
+        // The leader may already be gone while its group lives on: signal and report it anyway.
+        if let Some(pg) = self.live_group(id) {
+            crate::commands::proc_group::terminate(pg);
+            group = Some(pg);
+        }
         group
     }
 
@@ -978,8 +1018,17 @@ impl Spawner for ProcSpawner {
         {
             return Err(RunError::NotAllowed);
         }
+        // A leftover group member of the same id (leader gone) also blocks a second start.
+        if self.live_group(id).is_some() {
+            return Err(RunError::NotAllowed);
+        }
         let child = cmd.spawn().map_err(|_| RunError::Failed)?;
         g.retain(|(i, _)| *i != id); // drop a dead handle of the same id
+        if let Some(pid) = child.id() {
+            let mut gr = self.groups();
+            gr.retain(|(i, _)| *i != id);
+            gr.push((id, pid));
+        }
         g.push((id, child));
         Ok(())
     }
@@ -2327,6 +2376,47 @@ mod sidecar_tests {
         assert!(crate::commands::proc_group::group_empty(g));
         // Nothing of ours is left, so a second stop has no group.
         assert_eq!(sp.stop_group(ServiceId::ModelRuntime), None);
+    }
+
+    #[tokio::test]
+    async fn a_group_member_that_outlives_its_leader_is_still_ours_and_stopped() {
+        // The leader exits at once and leaves a background child in its group (a stand-in for a
+        // runner that survives its serve).
+        let sp = ProcSpawner::default();
+        let spec = SpawnSpec {
+            program: PathBuf::from("/bin/sh"),
+            args: vec!["-c".into(), "/bin/sleep 30 & exit 0".into()],
+            env: vec![("PATH", "/usr/bin:/bin".to_string())],
+        };
+        sp.spawn(ServiceId::ModelRuntime, &spec).unwrap();
+        let start = std::time::Instant::now();
+        while sp.started_by_app(ServiceId::ModelRuntime) && start.elapsed() < Duration::from_secs(3)
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !sp.started_by_app(ServiceId::ModelRuntime),
+            "leader should have exited"
+        );
+        assert!(
+            sp.is_alive(ServiceId::ModelRuntime),
+            "the surviving member must count"
+        );
+        assert_eq!(
+            sp.spawn(ServiceId::ModelRuntime, &spec),
+            Err(RunError::NotAllowed)
+        );
+        let g = sp
+            .stop_group(ServiceId::ModelRuntime)
+            .expect("the live group is reported");
+        let start = std::time::Instant::now();
+        while !crate::commands::proc_group::group_empty(g)
+            && start.elapsed() < Duration::from_secs(6)
+        {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(crate::commands::proc_group::group_empty(g));
+        assert!(!sp.is_alive(ServiceId::ModelRuntime));
     }
 
     fn sleep_spec() -> SpawnSpec {
