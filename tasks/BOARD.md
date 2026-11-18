@@ -10,7 +10,7 @@ Branch `amara-integration`, local commits only, nothing pushed (decision 0001). 
 - Rust was last run at 0daa808, with no Rust change since.
 - takes-1111t:80 [light] is a real Design contrast bug (4.28:1). It fails in some full runs; never weaken it.
 
-Installed: 4ce7a8d (2026-11-18): through Stage I (Treasury 2, M1 window, G1+G2, H to gates). Rollback: ~/Backups/Amara OS-backup-20261118b.app (bddb46f); pre-session copy ~/Backups/Amara OS-backup-20261118.app. Not relaunched.
+Installed: dd80bbf (2026-11-18): adds Treasury 3-5, Design contrast + Open at login toggle, heart-rate-only warning. The running window keeps the old build until Amara is reopened. Rollback: ~/Backups/Amara OS-backup-20261118c.app (4ce7a8d).
 
 ### Handover phases (0–17)
 Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2026-11-14; it is untracked and his file, so don't commit it without his OK. Evidence is a commit or a decision.

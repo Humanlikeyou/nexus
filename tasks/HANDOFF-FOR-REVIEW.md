@@ -859,3 +859,6 @@ Nothing committed, pushed or installed. Live app data, Muse files, the real NOOP
   - LOW-1: any store-path resolve error reads as unwired, not failed.
   - LOW-2: counts aren't filtered by deviceId. Only `my-whoop` is present in hrSample and gravitySample today (checked by counts). Add `deviceId IN (id, id-noop)` if a second device appears.
   - LOW-3: `has_column`'s raw error text is collapsed to "failed" by needs_you. Wrap it if `read_in`'s Err is ever surfaced.
+- **Installed dd80bbf (2026-11-18).**
+  - Amara was open, so it was not quit (hard rule 6). The bundle was swapped underneath it, and the old one moved to `~/Backups/Amara OS-backup-20261118c.app` (4ce7a8d, the rollback).
+  - The running window keeps the old build until Taisun reopens Amara.
