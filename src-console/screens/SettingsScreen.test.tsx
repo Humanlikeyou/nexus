@@ -13,7 +13,8 @@ describe("Settings (§11) + Devices (§9)", () => {
     render(<SettingsField data={snap()} {...base} />);
     const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
     // design-1111s: Devices, Home Assistant and WHOOP moved to the Devices tab, Backup to the Backup tab.
-    expect(titles).toEqual(["Appearance", "Update settings", "Startup", "General", "Assistant", "About & Diagnostics"]);
+    // design-1118b: the Home lens group (sand lens, Stage B steps) sits right after Appearance.
+    expect(titles).toEqual(["Appearance", "Home lens", "Update settings", "Startup", "General", "Assistant", "About & Diagnostics"]);
     expect(screen.getByRole("heading", { level: 2, name: "Updates" })).toBeInTheDocument();
     const mark = screen.getByRole("img", { name: "Amara OS" });
     expect(mark.tagName.toLowerCase()).toBe("svg");
@@ -27,7 +28,7 @@ describe("Settings (§11) + Devices (§9)", () => {
     render(<SettingsField data={snap()} {...base} setReduceMotion={setReduceMotion} />);
     fireEvent.click(screen.getByRole("switch", { name: "Reduce motion" }));
     expect(setReduceMotion).toHaveBeenCalledWith(true);
-    expect(screen.getAllByRole("switch").map((s) => s.getAttribute("aria-label"))).toEqual(["Reduce motion", "Auto-update", "Check daily", "Open at login", "Allow Claude"]);
+    expect(screen.getAllByRole("switch").map((s) => s.getAttribute("aria-label"))).toEqual(["Reduce motion", "Calm", "Light and depth", "Ambience from recovery", "Micro-moments", "Sound", "Auto-update", "Check daily", "Open at login", "Allow Claude"]);
     expect(screen.getByText("Every 15 seconds")).toBeInTheDocument();
   });
   it("Muse: Find Muse scans; nearby headsets show signal words; error offers Retry", () => {

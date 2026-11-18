@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { SandSettingsGroup } from "../sandLens/SandSettingsGroup";
 import { liveVersion, subscribeLive } from "../standalone/liveAdapter";
 import { Info, RefreshCw } from "lucide-react";
 import type { ThemePreference } from "../design/useAppearance";
@@ -99,6 +100,8 @@ function GeneralTab({ data, theme, setTheme, reduceMotion, setReduceMotion, onRe
         <ListRow title="Theme" accessory={<SegmentedControl label="Appearance" size="small" value={theme} onChange={setTheme} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} />} />
         <ListRow title="Reduce motion" subtitle="Minimizes transitions and live animation." accessory={<Toggle aria-label="Reduce motion" checked={reduceMotion} onCheckedChange={setReduceMotion} />} />
       </InsetGroup>
+
+      <SandSettingsGroup />
 
       <UpdatesSection adapter={adapter} />
 

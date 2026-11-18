@@ -9,7 +9,7 @@ import "./navy.css";
 const PREVIEW_BEAT: Record<string, number> = { tear: 1, flash: 2, cut: 3 };
 
 function pinOrb(): void {
-  const el = document.querySelector(".landing__lens .amara-lens, .w-orb .amara-lens, .amara-lens") as HTMLElement | null;
+  const el = document.querySelector(".landing__lens .amara-lens, .landing__lens .sand-lens__hit, .w-orb .amara-lens, .amara-lens") as HTMLElement | null;
   const r = el?.getBoundingClientRect();
   const root = document.documentElement;
   root.style.setProperty("--orb-x", r ? `${r.left + r.width / 2}px` : "70%");

@@ -71,12 +71,19 @@ export interface MockOptions {
   delays?: Record<string, number>;
   /** design-1111v: clock start (ISO); defaults to NOW (Wed Oct 28 14:00 JST). E.g. a Sunday for the weekly-review card. */
   now?: string;
+  /**
+   * design-1118b: Home lens. The box has software GL only, so e2e defaults to the classic lens unless a
+   * spec (or an earlier init script) chose one; sand-lens.spec / the 1118b captures opt in with "sand".
+   */
+  lens?: "sand" | "classic";
 }
 
-type InitArgs = { data: Responses; theme: Theme; reduceMotion: boolean; failing: string[]; delays: Record<string, number> };
+type InitArgs = { data: Responses; theme: Theme; reduceMotion: boolean; failing: string[]; delays: Record<string, number>; lens?: "sand" | "classic" };
 
-function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
+function initScript({ data, theme, reduceMotion, failing, delays, lens }: InitArgs) {
   localStorage.setItem("nexus.appearance.theme", theme);
+  if (lens) localStorage.setItem("nexus.sandLens", JSON.stringify({ ...JSON.parse(localStorage.getItem("nexus.sandLens") || "{}"), lens }));
+  else if (!localStorage.getItem("nexus.sandLens")) localStorage.setItem("nexus.sandLens", JSON.stringify({ lens: "classic" }));
   localStorage.setItem("nexus.appearance.reduceMotion", String(reduceMotion));
   localStorage.setItem("nexus.sidebarWidth", "220");
   const callbacks = new Map<number, unknown>();
@@ -143,6 +150,7 @@ export async function openApp(page: Page, options: MockOptions): Promise<void> {
     reduceMotion: options.reduceMotion ?? false,
     failing: options.failing ?? [],
     delays: options.delays ?? {},
+    lens: options.lens,
   });
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "Amara OS navigation" })).toBeVisible();
