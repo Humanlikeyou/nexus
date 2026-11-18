@@ -14,6 +14,9 @@ uvec3 pcg3d(uvec3 v){ v = v*1664525u + 1013904223u; v.x += v.y*v.z; v.y += v.z*v
 vec3 rnd3(uvec3 v){ return vec3(pcg3d(v)) * (1.0/4294967296.0); }
 vec4 shash(){ uvec2 c=uvec2(gl_FragCoord.xy); vec3 a=rnd3(uvec3(c,17u)); vec3 b=rnd3(uvec3(c,91u)); return vec4(a,b.x); }
 vec4 shash2(){ uvec2 c=uvec2(gl_FragCoord.xy); vec3 a=rnd3(uvec3(c,233u)); vec3 b=rnd3(uvec3(c,377u)); return vec4(a,b.y); }
+const float uSeedV=3.7;
+float vh(vec2 i){ return fract(sin(dot(i,vec2(127.1,311.7)))*43758.5453); }
+float vnoise(vec2 x){ vec2 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f); return mix(mix(vh(i),vh(i+vec2(1,0)),f.x), mix(vh(i+vec2(0,1)),vh(i+vec2(1,1)),f.x), f.y); }
 float radial(float row, float r){ float x=clamp(r,0.,1.)*${(LUT_W - 1).toFixed(1)}; int i=int(floor(x)); int j=min(i+1,${LUT_W - 1}); float f=x-float(i);
   int ro=int(row+0.5); return mix(texelFetch(uLut, ivec2(i,ro),0).r, texelFetch(uLut, ivec2(j,ro),0).r, f); }
 float field(vec2 p){ float r=length(p); float th=atan(p.y,p.x); float w=0.;
@@ -73,12 +76,17 @@ void main(){
       // down the |w| slope, so grains drain off the antinodes and rest on the nodal lines (|w| ≈ 0).
       const float e=0.004;
       // the clamped rim is a nodal line too; only a few grains rest there (the organic edge), the rest feel a free edge
-      bool rim=h.w<0.22;
+      bool rim=h.w<0.12;
       float w=fieldG(p.xy,rim); float aw=abs(w); float L=uLoud;
       vec2 g=vec2(fieldG(p.xy+vec2(e,0.),rim)-fieldG(p.xy-vec2(e,0.),rim), fieldG(p.xy+vec2(0.,e),rim)-fieldG(p.xy-vec2(0.,e),rim))/(2.0*e);
       vec2 down=-sign(w)*g; float gl=length(down); vec2 dir=gl>1e-4?down/gl:vec2(0.);
       float dn=aw/max(length(g),1e-3); // distance to the nearest nodal line: quiet regions of high-n modes still clear
-      float act=max(max(smoothstep(0.03,0.12,aw), smoothstep(0.004,0.014,dn)*smoothstep(0.002,0.01,aw)), smoothstep(0.012,0.05,aw)*uStir*0.8)*L; // on a nodal line the plate is still; right after a pitch change, stale lines loosen
+      // Heaped bands, not threads: each grain settles anywhere inside its own tolerance of the nodal line
+      // (most close to it, a few out at the shoulder), and the band width wanders along the line so it clumps.
+      float hb=rnd3(uvec3(uvec2(gl_FragCoord.xy),611u)).x;
+      float lump=0.55+0.9*vnoise(p.xy*9.0+vec2(uSeedV,1.7))*vnoise(p.xy*23.0+vec2(4.1,uSeedV));
+      float tol=0.012+0.095*pow(hb,1.25)*lump;
+      float act=smoothstep(tol,tol+0.012,dn)*smoothstep(0.002,0.01,aw)*L; // inside its band a grain is still
       if(uStir>0.6 && rn.x<0.85){ // pitch change: the plate's attack tosses the whole layer, so every line of the new figure fills
         float vz=(0.5+0.4*rn2.x); float fl=2.0*vz/40.0; // each toss lands about half-way back to the grain's place in an even layer
         vec2 tv=(homePos(h)-p.xy)*0.5/fl; float tl=length(tv); v=vec3(tl>1.6?tv*(1.6/tl):tv, vz); // capped: one frame never jumps the rim
@@ -146,12 +154,18 @@ void main(){
   gl_Position=projectionMatrix*vec4(s.x*uScale, (uViewH-s.y)*uScale, 0., 1.);
   float size; vec3 col; float a; vSpark=0.0;
   if(uMat<0.5){ // SAND: pale warm grains, cream / beige / warm grey with per-grain hue and brightness
-    size=1.9+2.1*h.x*h.x;
+    size=2.3+2.6*h.x*h.x;
     col=mix(vec3(0.94,0.89,0.79), vec3(0.71,0.65,0.56), h.y);
     col=mix(col, vec3(0.84,0.81,0.76), step(0.7,h.z)*0.6);          // a few cooler grey grains
     col*=0.86+0.26*h.z;
-    float dn=1.0-exp(-texture2D(tDens, vec2(s.x/uViewW, 1.0-s.y/uViewH)).r*0.3); // heap relief
-    col*=0.8+0.26*dn;
+    // heap relief: the density map is a height field; its slope gives lit tops and shadowed sides
+    vec2 du=vec2(s.x/uViewW, 1.0-s.y/uViewH), px=vec2(5.0/uViewW, 5.0/uViewH);
+    float H0=1.0-exp(-texture2D(tDens,du).r*0.3);
+    float Hx=(1.0-exp(-texture2D(tDens,du+vec2(px.x,0.)).r*0.3))-(1.0-exp(-texture2D(tDens,du-vec2(px.x,0.)).r*0.3));
+    float Hy=(1.0-exp(-texture2D(tDens,du+vec2(0.,px.y)).r*0.3))-(1.0-exp(-texture2D(tDens,du-vec2(0.,px.y)).r*0.3));
+    vec3 hn=normalize(vec3(-Hx*4.0, -Hy*4.0, 1.0));
+    float lit=dot(hn, normalize(vec3(-0.45,0.55,0.7)));
+    col*=(0.66+0.34*H0)*(0.62+0.58*clamp(lit,0.,1.));
     a=0.9+0.1*h.x;
     vSpark=step(h.w,0.025);                                         // a slight sparkle, still matte
     a*=1.0-0.35*step(0.9,length(p.xy))*rim*h.y;                     // edge thins out irregularly
@@ -192,7 +206,7 @@ export const SHADOWFRAG = /* glsl */ `
 uniform sampler2D tD; uniform vec2 uTexel, uOff; uniform float uK; uniform vec3 uShadow; varying vec2 vUv;
 void main(){ vec2 uv=vUv+uOff; float s=0.0, w=0.0;
   for(int y=-3;y<=3;y++) for(int x=-3;x<=3;x++){ float k=exp(-float(x*x+y*y)/6.0); s+=(1.0-exp(-texture2D(tD, uv+vec2(float(x),float(y))*uTexel*2.4).r*uK))*k; w+=k; }
-  float d=s/w; float a=0.3*d*(2.0-d); // soft falloff, never a hard plateau
+  float d=s/w; float a=0.4*d*(2.0-d); // soft falloff, never a hard plateau
   gl_FragColor=vec4(uShadow*a, a); }`;
 
 /** Canopy dapples + mist (time of day light), rendered at 1/4 resolution. Additive light only. */

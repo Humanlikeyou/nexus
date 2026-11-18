@@ -100,7 +100,7 @@ export class SandEngine {
     const R = L.R || 130;
     this.pointsMat.uniforms.uC.value.set(L.cx, L.cy); this.pointsMat.uniforms.uR.value = R;
     this.densMat.uniforms.uC.value.set(L.cx, L.cy); this.densMat.uniforms.uR.value = R;
-    if (L.card) { const c = L.card, s = R / 160; this.U.uCard.value.set((c.left + 20 * s - L.cx) / R, (c.right - 20 * s - L.cx) / R, (L.cy - c.top) / R + 0.004, (18 * s) / R); }
+    if (L.card) { const c = L.card, s = R / 160; this.U.uCard.value.set((c.left + 20 * s - L.cx) / R, (c.right - 20 * s - L.cx) / R, (L.cy - c.top) / R + 0.004, (24 * s) / R); }
     this.U.uBottom.value = (L.cy - window.innerHeight) / R;
   }
 
