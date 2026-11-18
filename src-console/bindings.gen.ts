@@ -332,6 +332,17 @@ export const commands = {
 	fxRateGet: (options?: InvokeOptions) => __TAURI_INVOKE<MoneyFxRate | null>("fx_rate_get", undefined, options),
 	moneyBalancesList: (options?: InvokeOptions) => __TAURI_INVOKE<MoneyBalances_Serialize>("money_balances_list", undefined, options),
 	moneyImportPick: (options?: InvokeOptions) => __TAURI_INVOKE<ImportPicked>("money_import_pick", undefined, options),
+	treasuryStreamAdd: (ventureId: string, name: string, streamType: string, setupDate: string | null, notes: string | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryStream_Serialize>("treasury_stream_add", { ventureId, name, streamType, setupDate, notes }, options),
+	treasuryStreamUpdate: (id: string, status: string | null, name: string | null, notes: string | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryStream_Serialize>("treasury_stream_update", { id, status, name, notes }, options),
+	treasuryStreamsList: (options?: InvokeOptions) => __TAURI_INVOKE<TreasuryStream_Serialize[]>("treasury_streams_list", undefined, options),
+	treasuryImportPick: (streamId: string, adapterId: string, mapping: TreasuryCsvMapping_Deserialize | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryImportResult>("treasury_import_pick", { streamId, adapterId, mapping }, options),
+	treasuryImportPreview: (streamId: string, adapterId: string, mapping: TreasuryCsvMapping_Deserialize | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryImportPreview>("treasury_import_preview", { streamId, adapterId, mapping }, options),
+	treasuryAttentionSet: (streamId: string, day: string, minutes: number, options?: InvokeOptions) => __TAURI_INVOKE<null>("treasury_attention_set", { streamId, day, minutes }, options),
+	treasuryAttentionList: (streamId: string | null, from: string, to: string, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryAttentionRow[]>("treasury_attention_list", { streamId, from, to }, options),
+	treasuryIncomeMonth: (fromMonth: string, toMonth: string, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryStreamMonth_Serialize[]>("treasury_income_month", { fromMonth, toMonth }, options),
+	treasuryIncomeTrend: (streamId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryTrendRow_Serialize[]>("treasury_income_trend", { streamId }, options),
+	treasuryPerHour: (from: string, to: string, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryPerHour_Serialize[]>("treasury_per_hour", { from, to }, options),
+	treasuryFxStatus: (options?: InvokeOptions) => __TAURI_INVOKE<TreasuryFxStatus_Serialize>("treasury_fx_status", undefined, options),
 	moneyAccountAdd: (draft: MoneyAccountDraft, options?: InvokeOptions) => __TAURI_INVOKE<MoneyAccount>("money_account_add", { draft }, options),
 	moneyWatchAdd: (accountId: string, value: string, options?: InvokeOptions) => __TAURI_INVOKE<WatchAdded>("money_watch_add", { accountId, value }, options),
 	moneyBalanceSetManual: (accountId: string, nativeAmount: number | null, asOf: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("money_balance_set_manual", { accountId, nativeAmount, asOf }, options),
@@ -4705,6 +4716,189 @@ export type TrackStats_Serialize = {
 	avgRating: number | null,
 	focusAvg: number | null,
 	calmAvg: number | null,
+};
+
+export type TreasuryAttentionRow = {
+	streamId: string,
+	day: string,
+	minutes: number,
+};
+
+/**
+ *  The user's column mapping for the generic adapter. Column names are matched against the header
+ *  (trimmed, case-insensitive).
+ */
+export type TreasuryCsvMapping = TreasuryCsvMapping_Serialize | TreasuryCsvMapping_Deserialize;
+
+/**
+ *  The user's column mapping for the generic adapter. Column names are matched against the header
+ *  (trimmed, case-insensitive).
+ */
+export type TreasuryCsvMapping_Deserialize = {
+	dateColumn: string,
+	amountColumn: string,
+	/**  A column holding `JPY` or `USD`. Wins over `default_currency`. */
+	currencyColumn?: string | null,
+	defaultCurrency?: string | null,
+	/**  An order or transaction id column. Only hashed into the dedupe key, never stored. */
+	refColumn?: string | null,
+	/**  `ymd` (default), `mdy` or `dmy`. Separators `-`, `/` or `.`. */
+	dateFormat?: string | null,
+};
+
+/**
+ *  The user's column mapping for the generic adapter. Column names are matched against the header
+ *  (trimmed, case-insensitive).
+ */
+export type TreasuryCsvMapping_Serialize = {
+	dateColumn: string,
+	amountColumn: string,
+	/**  A column holding `JPY` or `USD`. Wins over `default_currency`. */
+	currencyColumn: string | null,
+	defaultCurrency: string | null,
+	/**  An order or transaction id column. Only hashed into the dedupe key, never stored. */
+	refColumn: string | null,
+	/**  `ymd` (default), `mdy` or `dmy`. Separators `-`, `/` or `.`. */
+	dateFormat: string | null,
+};
+
+export type TreasuryFxStatus = TreasuryFxStatus_Serialize | TreasuryFxStatus_Deserialize;
+
+export type TreasuryFxStatus_Deserialize = {
+	rate?: FxRate | null,
+	stale: boolean,
+};
+
+export type TreasuryFxStatus_Serialize = {
+	rate: FxRate | null,
+	stale: boolean,
+};
+
+export type TreasuryImportPreview = {
+	rowsSeen: number,
+	wouldAdd: number,
+	wouldSkip: number,
+	failed: number,
+	/**  At most 50, in file order. */
+	errors: TreasuryRowError[],
+};
+
+export type TreasuryImportResult = {
+	added: number,
+	skipped: number,
+	failed: number,
+	importId: string,
+};
+
+export type TreasuryPerHour = TreasuryPerHour_Serialize | TreasuryPerHour_Deserialize;
+
+export type TreasuryPerHour_Deserialize = {
+	streamId: string,
+	/**  Sum of logged minutes in the range; `None` when nothing was logged. */
+	minutes?: number | null,
+	/**  In `currency`. `None` when there are no events, or when the two currencies need a rate that is missing. */
+	incomeMinor?: number | null,
+	/**  The currency of `income_minor`: the stream's own, or `JPY` when a ledger rate combined both. */
+	currency?: string | null,
+	/**  Set only when the ledger rate was used. */
+	fxAsOf?: string | null,
+	fxStale: boolean,
+	perHourMinor?: number | null,
+	/**  `no_hours | no_income | needs_rate | too_large` when `per_hour_minor` is `None`. */
+	reason?: string | null,
+};
+
+export type TreasuryPerHour_Serialize = {
+	streamId: string,
+	/**  Sum of logged minutes in the range; `None` when nothing was logged. */
+	minutes: number | null,
+	/**  In `currency`. `None` when there are no events, or when the two currencies need a rate that is missing. */
+	incomeMinor: number | null,
+	/**  The currency of `income_minor`: the stream's own, or `JPY` when a ledger rate combined both. */
+	currency: string | null,
+	/**  Set only when the ledger rate was used. */
+	fxAsOf: string | null,
+	fxStale: boolean,
+	perHourMinor: number | null,
+	/**  `no_hours | no_income | needs_rate | too_large` when `per_hour_minor` is `None`. */
+	reason: string | null,
+};
+
+/**  A row-level problem. Never carries the row's text. */
+export type TreasuryRowError = {
+	row: number,
+	/**  `bad_date | bad_amount | bad_currency | short_row | wide_row`. */
+	code: string,
+};
+
+export type TreasuryStream = TreasuryStream_Serialize | TreasuryStream_Deserialize;
+
+export type TreasuryStreamMonth = TreasuryStreamMonth_Serialize | TreasuryStreamMonth_Deserialize;
+
+export type TreasuryStreamMonth_Deserialize = {
+	streamId: string,
+	/**  `None` only for a stream with no events at all in the range. */
+	currency?: string | null,
+	/**  `YYYY-MM`. */
+	month: string,
+	/**  `None` when the stream has no events that month (never 0). Negative is possible (refunds). */
+	totalMinor?: number | null,
+};
+
+export type TreasuryStreamMonth_Serialize = {
+	streamId: string,
+	/**  `None` only for a stream with no events at all in the range. */
+	currency: string | null,
+	/**  `YYYY-MM`. */
+	month: string,
+	/**  `None` when the stream has no events that month (never 0). Negative is possible (refunds). */
+	totalMinor: number | null,
+};
+
+export type TreasuryStream_Deserialize = {
+	id: string,
+	ventureId: string,
+	name: string,
+	streamType: string,
+	status: string,
+	setupDate?: string | null,
+	notes?: string | null,
+	createdAt: string,
+	/**  True when the venture id is not in `ledger.json` (or there is no readable ledger). */
+	ventureMissing: boolean,
+};
+
+export type TreasuryStream_Serialize = {
+	id: string,
+	ventureId: string,
+	name: string,
+	streamType: string,
+	status: string,
+	setupDate: string | null,
+	notes: string | null,
+	createdAt: string,
+	/**  True when the venture id is not in `ledger.json` (or there is no readable ledger). */
+	ventureMissing: boolean,
+};
+
+export type TreasuryTrendRow = TreasuryTrendRow_Serialize | TreasuryTrendRow_Deserialize;
+
+export type TreasuryTrendRow_Deserialize = {
+	streamId: string,
+	currency?: string | null,
+	/**  The last three complete calendar months (JST), oldest first. `None` = no events that month. */
+	months: [(number | null), (number | null), (number | null)],
+	/**  Mean of the months that have events (rounded half away from zero); `None` when none do. */
+	avgMinor?: number | null,
+};
+
+export type TreasuryTrendRow_Serialize = {
+	streamId: string,
+	currency: string | null,
+	/**  The last three complete calendar months (JST), oldest first. `None` = no events that month. */
+	months: [(number | null), (number | null), (number | null)],
+	/**  Mean of the months that have events (rounded half away from zero); `None` when none do. */
+	avgMinor: number | null,
 };
 
 /**  One event on the channel. Fixed shapes: nothing here can carry a model, provider or secret. */

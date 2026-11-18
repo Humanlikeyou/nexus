@@ -664,3 +664,22 @@ The plan is `tasks/proposed/phase9-runtime-firstrun.md`. Decision 0030 covers th
     - a live chat generate (only an embed)
     - a LAN bind/inbound test (no en0 address here)
     - e2e (no UI change)
+
+### 26. Treasury Phase 2 (decision 0032, 2026-11-18)
+- `commands/treasury.rs` adds 11 `treasury_*` commands:
+  - storage: `<data>/business/treasury.db`, 0600 WAL
+  - streams tied to ledger venture ids
+  - CSV import with the generic column mapper only; idempotent dedupe key; raw_ref is row number plus file SHA-256; order ids are hashed, never stored
+  - manual attention minutes
+  - month, trend and per-hour reads (null, never 0)
+  - FX only from the ledger's dated rate
+- `src-console/business/treasury.ts` is the live adapter. No UI: the screen belongs to Design Lead.
+- Guard tests now cover `treasury_*` names.
+- Security review: 0 HIGH, 0 MED, 4 LOW.
+  - Fixed: LOW-1 (the stream update now runs in one transaction).
+  - Accepted: LOW-2 (hashed order ids could be guessed offline from a stolen db), LOW-3 (a preview creates the db), LOW-4 (a failed import's file hash is kept).
+  - Note: `business/` (so `treasury.db`) goes with the full data-dir backup, matching decision 0032 #8.
+- Gates: vitest 2331/9, src-tauri 1370/0/6, router 131.
+- One flaky run of `backup_schedule::git_bundle_failure_removes_only_its_own_part_file` (zero-duration timeout); it passes alone. Not fixed.
+- Not run: e2e (no UI); the native import dialog in the running app.
+- Taisun steps: create `business/ledger.json` with real venture ids; send a header row plus 2 scrubbed rows per export for real adapters.

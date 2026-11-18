@@ -145,7 +145,16 @@ describe("Tauri command registry", () => {
     for (const name of money) expect(names).toContain(name);
     // The renderer-supplied-path import is gone: the only import command opens its own native dialog.
     expect(names).not.toContain("money_import_statement");
-    expect(names.filter((n: string) => /^(money|fx)_/.test(n) && /transfer|pay|trade|convert|withdraw|send|buy|sell/.test(n))).toEqual([]);
+    expect(names.filter((n: string) => /^(money|fx|treasury)_/.test(n) && /transfer|pay|trade|convert|withdraw|send|buy|sell|move|wire|remit|swap|sign|broadcast|order|deposit|exchange/.test(n))).toEqual([]);
+  });
+
+  it("the treasury commands are registered, with no way to move money and no repeat of the personal money names", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    const treasury = ["treasury_stream_add", "treasury_stream_update", "treasury_streams_list", "treasury_import_pick", "treasury_import_preview", "treasury_attention_set", "treasury_attention_list", "treasury_income_month", "treasury_income_trend", "treasury_per_hour", "treasury_fx_status"];
+    for (const name of treasury) expect(names).toContain(name);
+    expect(names.filter((n: string) => n.startsWith("treasury_")).sort()).toEqual([...treasury].sort());
   });
 
   it("patterns_read and weekly_review_read are registered", async () => {
