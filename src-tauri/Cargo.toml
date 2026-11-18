@@ -66,3 +66,11 @@ objc2-service-management = { version = "0.3", default-features = false, features
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Keep dev/test builds small on disk (Taisun, 2026-11-18: the build cache was ~60 GB).
+# Dependencies carry no debug info; our own crate keeps line tables for backtraces.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
