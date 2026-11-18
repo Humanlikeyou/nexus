@@ -43,3 +43,9 @@ From 1118b (later):
 
 ## UI touches (Integrations, strap pointer, 2026-11-18)
 - No markup, class or token change. Logic only, so the "strap" Needs-you source can render: `src-console/inbox/needsYou.ts` (`InboxSource` + `SOURCE_LABEL`/`OPEN_LABEL`/`UNWIRED_REASON` entries, `ORDER`), `src-console/lib/localStores.ts` (`NeedsYouReport.source` union), `src-console/inbox/NeedsYouToday.tsx` (one line in the hook: reads the `strap` report when the backend gave one). Design: please review the labels "Strap" and "Open in Mind–Body ›".
+
+## UI touches (Fitness Recovery empty reason, 2026-11-18, decision 0035)
+- Logic and copy only; no new class or token. `src-console/screens/FitnessRings.tsx` (`RecoveryCard` takes `hrOnly` and `onOpenNote`; `Pending` takes an optional `action`; reuses `LinkButton` / `.v-link`, imports `adds/v1111.css`), `src-console/screens/HealthScreen.tsx` (`useStrapHrOnly` reads the existing `needsYouList` and looks for pointer `strap-hr-only`; `HealthField` gets optional `onOpen`), `src-console/App.tsx` (passes `navigate`).
+- Only when today's recovery is missing AND that pointer is present. Otherwise the normal pending copy. Never falls back to an older day.
+- Copy: "No score today. Last night came through as heart rate only, so recovery couldn't be scored." + link "See the note ›" (opens Home › Needs you).
+- Test: `src-console/screens/HealthScreen.hronly.test.tsx` (4, bridge mocked).

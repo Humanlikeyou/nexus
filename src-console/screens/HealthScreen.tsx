@@ -1,6 +1,6 @@
 import { Activity, BatteryCharging, BatteryLow, BatteryMedium, HeartPulse, Inbox, Moon, RefreshCw, Sparkles, Wind } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import { EMPTY_DEVICE_ID } from "../lib/devices";
 import { date, formatMinutes, number } from "../lib/format";
@@ -14,6 +14,8 @@ import { SleepCard } from "./SleepCard";
 import { EffortCard, RecoveryCard } from "./FitnessRings";
 import { effortModel, recoveryModel } from "./fitnessRingsModel";
 import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
+import { inTauri, needsYouList } from "../lib/localStores";
+import type { Route } from "../app/routes";
 import { sleepCardModel } from "./sleepModel";
 import { WorkoutsPanel } from "../fitness/WorkoutsPanel";
 import { SleepDetailPanel } from "../fitness/SleepDetailPanel";
@@ -158,9 +160,23 @@ export type HealthFieldProps = {
   onRetry?: () => void;
   /** Overrides the first-load detection (refreshedAt still equals INITIAL_SNAPSHOT's). */
   loading?: boolean;
+  /** Opens a route (App's navigate); the Recovery card's link to the Needs you note. */
+  onOpen?: (route: Route) => void;
 };
 
-export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
+/** 0035: true when Needs you holds the `strap-hr-only` pointer. Read-only; any failure means "no". */
+function useStrapHrOnly(enabled: boolean): boolean {
+  const [hrOnly, setHrOnly] = useState(false);
+  useEffect(() => {
+    if (!enabled || !inTauri() || sampleAdaptersEnabled()) return;
+    let live = true;
+    needsYouList().then((r) => { if (live) setHrOnly(r.some((x) => x.source === "strap" && x.state === "ok" && x.rows.some((p) => p.id === "strap-hr-only"))); }, () => { if (live) setHrOnly(false); });
+    return () => { live = false; };
+  }, [enabled]);
+  return enabled && hrOnly;
+}
+
+export function HealthField({ data, onRetry, loading, onOpen }: HealthFieldProps) {
   const health = data.noop;
   const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const failed = data.unavailableSources.some((s) => s.command === NOOP_COMMAND);
@@ -210,14 +226,14 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
     );
   }
 
-  return <FitnessReady health={health} header={header} />;
+  return <FitnessReady health={health} header={header} onOpen={onOpen} />;
 }
 
 /** 0017: NOOP's pages live here as tabs. "Summary" is the screen as it was; the rest are new. */
 const FITNESS_TABS = [{ value: "summary", label: "Summary" }, { value: "workouts", label: "Workouts" }, { value: "sleep", label: "Sleep detail" }, { value: "trends", label: "Trends" }] as const;
 type FitnessTab = (typeof FITNESS_TABS)[number]["value"];
 
-function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: ReactNode }) {
+function FitnessReady({ health, header, onOpen }: { health: NoopHealthSnapshot; header: ReactNode; onOpen?: (route: Route) => void }) {
   const [tab, setTab] = useState<FitnessTab>("summary");
   const [metric, setMetric] = useState<TrendKey>("strain");
   const today = health.today;
@@ -230,6 +246,7 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
   const todayDay = today?.day ?? health.latestDay ?? overnight?.day ?? "";
   // design-1111r B "Horizon": the Sleep tile is left out (the Sleep card is next to it).
   const recoveryCardModel = recoveryModel({ day: todayDay, recovery: today?.recovery ?? null, hrv, rhr, nightly }, days);
+  const hrOnly = useStrapHrOnly(recoveryCardModel.state === "pending");
   const effortCardModel = effortModel({ day: todayDay, effort: today?.strain ?? null, sampleZones: sampleAdaptersEnabled() }, days, clampEffort);
   const everNull = (pick: (d: NoopDailyMetric) => number | null) => days.every((d) => pick(d) == null) && (today == null || pick(today) == null);
   const pending = "Arrives after the sleep record closes";
@@ -282,7 +299,7 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
       )}
 
       <div className="fitness__row fitness__row--today">
-        <RecoveryCard m={recoveryCardModel} />
+        <RecoveryCard m={recoveryCardModel} hrOnly={hrOnly} onOpenNote={onOpen ? () => onOpen({ id: "terrance", view: "needs-you" }) : undefined} />
         <EffortCard m={effortCardModel} max={EFFORT_MAX} />
         <SleepCard model={nightly ? null : sleepModel} pending={nightly ? pending : undefined} />
       </div>
