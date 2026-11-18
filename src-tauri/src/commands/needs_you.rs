@@ -71,6 +71,8 @@ pub(crate) struct Inputs {
     /// The last night's heart-rate-only check (counts only). `Ok(None)` when NOOP has no store or
     /// lacks the sample tables (unwired); `Err` when the store could not be read.
     pub strap: Result<Option<super::strap_night::StrapNight>, String>,
+    /// 0038: true when the watchlist's "Want new picks?" question is due (14 days, feeds allowed).
+    pub watchlist: Result<bool, String>,
 }
 
 fn link(id: &str, view: &str) -> Route {
@@ -309,7 +311,27 @@ pub(crate) fn build(i: Inputs) -> Vec<SourceReport> {
         ),
     };
 
-    vec![todos, dates, checkin, decisions, crew, treasury, strap]
+    // One fixed-text pointer and nothing else: no tickers, prices or headlines.
+    let watchlist = report(
+        "watchlist",
+        i.watchlist.map(|due| {
+            if due {
+                vec![pointer(
+                    "watchlist",
+                    super::watchlist::POINTER_ID.into(),
+                    super::watchlist::POINTER_TITLE.into(),
+                    super::watchlist::POINTER_DETAIL.into(),
+                    link("enterprise", "ventures"),
+                )]
+            } else {
+                vec![]
+            }
+        }),
+    );
+
+    vec![
+        todos, dates, checkin, decisions, crew, treasury, strap, watchlist,
+    ]
 }
 
 fn treasury_title(kind: &str) -> &'static str {
@@ -355,6 +377,13 @@ async fn gather() -> Inputs {
     let strap = tauri::async_runtime::spawn_blocking(move || super::strap_night::read(now))
         .await
         .unwrap_or_else(|_| Err("failed".to_string()));
+    let blocked = super::telegram::outbound_disabled();
+    let d2 = data.clone();
+    let watchlist = tauri::async_runtime::spawn_blocking(move || {
+        super::watchlist::review_due_in(&d2, blocked, now)
+    })
+    .await
+    .unwrap_or_else(|_| Err("failed".to_string()));
     let crew = match crew::crew_health().await.as_deref() {
         Ok("not_configured") => Ok(None),
         Ok("operational") => crew::crew_list_approvals("pending".into())
@@ -383,6 +412,7 @@ async fn gather() -> Inputs {
         crew,
         treasury,
         strap,
+        watchlist,
     }
 }
 
@@ -466,6 +496,7 @@ mod tests {
                 hr_only: true,
                 recovery_missing: true,
             })),
+            watchlist: Ok(false),
         }
     }
     fn tflag(id: &str, kind: &str) -> super::super::treasury_monitor::Flag {
@@ -676,6 +707,23 @@ mod tests {
             (by(&r, "strap").state.as_str(), by(&r, "strap").rows.len()),
             ("ok", 0)
         );
+    }
+
+    #[test]
+    fn watchlist_pointer_is_fixed_text_and_only_when_due() {
+        let mut i = inputs();
+        i.watchlist = Ok(true);
+        let r = build(i);
+        let w = by(&r, "watchlist");
+        assert_eq!(w.state, "ok");
+        assert_eq!(w.rows.len(), 1);
+        assert_eq!(w.rows[0].title, "Want new picks?");
+        assert_eq!(w.rows[0].reason, crate::commands::watchlist::POINTER_DETAIL);
+        assert_eq!(w.rows[0].deep_link.id, "enterprise");
+        assert!(by(&build(inputs()), "watchlist").rows.is_empty());
+        let mut i = inputs();
+        i.watchlist = Err("x".into());
+        assert_eq!(by(&build(i), "watchlist").state, "failed");
     }
 
     #[test]

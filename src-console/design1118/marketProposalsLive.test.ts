@@ -40,4 +40,38 @@ describe("live watch-only proposals", () => {
     const a = makeLiveMarket({ call, notify: () => {} });
     expect((await a.recordChoice("wp-1", "approved")).state).toBe("unwired");
   });
+
+  it("the watchlist reads lazily, keeps null prices null, and drop/undo/research call only their commands", async () => {
+    const wlRaw = {
+      picks: [
+        { pick: { ticker: "NVDA", kind: "stock", reasonText: "r", sourceName: "s", sourceUrl: "https://a.example.com/1", pickedAt: "p", nextReviewAt: "n" }, quote: { price: null, currency: null, fetchedAt: null, status: "stale", error: null } },
+        { pick: { ticker: "BAD", kind: "option" }, quote: { status: "open" } },
+      ],
+      feed: { state: "connected", lastAttemptAt: null, lastOkAt: null, pollMinutes: 15 },
+      research: { running: false, lastOutcome: null, lastFinishedAt: null, lastProposed: 0, nextAllowedAt: null },
+      reviewDue: true, disclaimer: "Not financial advice",
+    };
+    const calls: string[] = [];
+    const call = vi.fn(async (c: string) => {
+      calls.push(c);
+      if (c === "watchlist_get") return wlRaw;
+      if (c === "watchlist_drop") return { id: "watch-3", ticker: "NVDA", toast: "x" };
+      if (c === "watchlist_research_now") return { state: "rate_limited", retryAfterMinutes: 12 };
+      if (c === "add_undo") return true;
+      return { proposals: [] };
+    }) as never;
+    const a = makeLiveMarket({ call, notify: () => {} });
+    expect(calls).toEqual([]);
+    expect(a.watchlist().state).toBe("unwired");
+    await vi.waitFor(() => expect(a.watchlist().state).toBe("live"));
+    const w = a.watchlist();
+    expect(w.state === "live" && w.value.picks.map((p) => [p.ticker, p.quote.price, p.quote.status])).toEqual([["NVDA", null, "stale"]]);
+    expect(w.state === "live" && w.value.reviewDue).toBe(true);
+    const r = await a.researchNow();
+    expect(r.state === "live" && r.value).toEqual({ state: "rate_limited", retryAfterMinutes: 12 });
+    const d = await a.dropPick("NVDA");
+    expect(d.state === "live" && d.value.historyId).toBe("watch-3");
+    expect(await a.undoWatch("watch-3")).toBe(true);
+    expect(new Set(calls)).toEqual(new Set(["watchlist_get", "watchlist_research_now", "watchlist_drop", "add_undo", "watch_proposals_list"]));
+  });
 });

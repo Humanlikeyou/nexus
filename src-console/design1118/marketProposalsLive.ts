@@ -34,9 +34,62 @@ export function mapProposal(raw: unknown): Row | null {
   };
 }
 
-export function makeLiveMarket(deps: WatchDeps = defaultDeps): MarketProposalAdapter {
+/** One price: `price` is null when none was ever fetched (never 0). status is open, closed or stale. */
+export type WatchQuote = { price: number | null; currency: string | null; fetchedAt: string | null; status: "open" | "closed" | "stale"; error: string | null };
+export type WatchPickRow = { ticker: string; kind: "crypto" | "stock"; reason: string; source: string; sourceUrl: string | null; pickedAt: string; nextReviewAt: string; quote: WatchQuote };
+export type WatchlistState = {
+  picks: WatchPickRow[];
+  feed: { state: "not_connected" | "blocked" | "connected" | "stale" | "error"; lastAttemptAt: string | null; lastOkAt: string | null; pollMinutes: number };
+  research: { running: boolean; lastOutcome: string | null; lastFinishedAt: string | null; lastProposed: number; nextAllowedAt: string | null };
+  /** True while "Want new picks?" is showing in Needs you. */
+  reviewDue: boolean;
+  disclaimer: string;
+};
+export type ResearchStartState = "started" | "rate_limited" | "blocked" | "already_running";
+/** Extras beyond MarketProposalAdapter (0038). Nothing here sends or places anything. */
+export type LiveMarket = MarketProposalAdapter & {
+  watchlist(): Wired<WatchlistState>;
+  /** Re-reads proposals and the watchlist (call after research, or on a timer while a panel is open). */
+  refresh(): Promise<void>;
+  /** Starts Amara's research (local tier). New picks arrive as proposals. */
+  researchNow(): Promise<Wired<{ state: ResearchStartState; retryAfterMinutes: number | null }>>;
+  /** Takes a pick off the list. The History id goes to `undoWatch` within 8 s. */
+  dropPick(ticker: string): Promise<Wired<{ historyId: string }>>;
+  undoWatch(historyId: string): Promise<boolean>;
+};
+
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const STATUS = new Set(["open", "closed", "stale"]);
+
+export function mapWatchlist(raw: unknown): WatchlistState | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const feed = r.feed as Record<string, unknown> | undefined, research = r.research as Record<string, unknown> | undefined;
+  if (!Array.isArray(r.picks) || !feed || !research) return null;
+  const picks: WatchPickRow[] = [];
+  for (const v of r.picks as { pick?: unknown; quote?: unknown }[]) {
+    const p = v?.pick as Record<string, unknown> | undefined, q = v?.quote as Record<string, unknown> | undefined;
+    if (!p || !q || !str(p.ticker) || !KINDS.has(String(p.kind)) || !STATUS.has(String(q.status))) continue;
+    picks.push({
+      ticker: p.ticker as string, kind: p.kind as WatchPickRow["kind"], reason: str(p.reasonText) ?? "", source: str(p.sourceName) ?? "", sourceUrl: str(p.sourceUrl),
+      pickedAt: str(p.pickedAt) ?? "", nextReviewAt: str(p.nextReviewAt) ?? "",
+      quote: { price: num(q.price), currency: str(q.currency), fetchedAt: str(q.fetchedAt), status: q.status as WatchQuote["status"], error: str(q.error) },
+    });
+  }
+  return {
+    picks,
+    feed: { state: feed.state as WatchlistState["feed"]["state"], lastAttemptAt: str(feed.lastAttemptAt), lastOkAt: str(feed.lastOkAt), pollMinutes: num(feed.pollMinutes) ?? 15 },
+    research: { running: research.running === true, lastOutcome: str(research.lastOutcome), lastFinishedAt: str(research.lastFinishedAt), lastProposed: num(research.lastProposed) ?? 0, nextAllowedAt: str(research.nextAllowedAt) },
+    reviewDue: r.reviewDue === true,
+    disclaimer: str(r.disclaimer) ?? "Not financial advice",
+  };
+}
+
+export function makeLiveMarket(deps: WatchDeps = defaultDeps): LiveMarket {
   let rows: Row[] | null = null;
   let loading = false;
+  let wl: WatchlistState | null = null;
+  let wlLoading = false;
   const lastWrite = new Map<string, string>(); // proposal id -> history id, for Undo (add_undo("watch", id))
 
   async function load(): Promise<void> {
@@ -45,6 +98,12 @@ export function makeLiveMarket(deps: WatchDeps = defaultDeps): MarketProposalAda
       rows = (l?.proposals ?? []).flatMap((p) => { const m = mapProposal(p); return m ? [m] : []; });
     } catch { /* stays as it was */ }
   }
+  async function loadWatchlist(): Promise<void> {
+    try { wl = mapWatchlist(await deps.call("watchlist_get")) ?? wl; } catch { /* stays as it was */ }
+  }
+  function ensureWatchlist(): void {
+    if (wl === null && !wlLoading) { wlLoading = true; void loadWatchlist().finally(() => { wlLoading = false; deps.notify(); }); }
+  }
   function ensure(): void {
     if (rows === null && !loading) { loading = true; void load().finally(() => { loading = false; deps.notify(); }); }
   }
@@ -52,6 +111,31 @@ export function makeLiveMarket(deps: WatchDeps = defaultDeps): MarketProposalAda
     proposals: () => { ensure(); return rows ? live(rows.filter((r) => r.status === "proposed").map((r) => r.proposal)) : UNWIRED; },
     market: () => UNWIRED,
     newsNote: () => UNWIRED,
+    watchlist: () => { ensureWatchlist(); return wl ? live(wl) : UNWIRED; },
+    async refresh() { await Promise.all([load(), loadWatchlist()]); deps.notify(); },
+    async researchNow() {
+      try {
+        const r = await deps.call<{ state?: string; retryAfterMinutes?: number | null }>("watchlist_research_now");
+        const state = r?.state as ResearchStartState;
+        if (!["started", "rate_limited", "blocked", "already_running"].includes(state)) return UNWIRED;
+        await loadWatchlist(); deps.notify();
+        return live({ state, retryAfterMinutes: num(r.retryAfterMinutes) });
+      } catch { return UNWIRED; }
+    },
+    async dropPick(ticker) {
+      try {
+        const d = await deps.call<{ id?: string }>("watchlist_drop", { ticker, via: "typed" });
+        if (typeof d?.id !== "string") return UNWIRED;
+        await loadWatchlist(); deps.notify();
+        return live({ historyId: d.id });
+      } catch { return UNWIRED; }
+    },
+    async undoWatch(historyId) {
+      let ok = false;
+      try { ok = (await deps.call<boolean>("add_undo", { kind: "watch", id: historyId })) === true; } catch { return false; }
+      await Promise.all([load(), loadWatchlist()]); deps.notify();
+      return ok;
+    },
     choices: (): Wired<ProposalChoice[]> => {
       ensure();
       return rows ? live(rows.filter((r) => r.status === "recorded" && r.decidedAt).map((r) => ({ proposalId: r.proposal.id, choice: "approved" as const, recordedAt: r.decidedAt as string }))) : UNWIRED;

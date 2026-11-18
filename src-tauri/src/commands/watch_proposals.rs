@@ -10,8 +10,8 @@
 //! - Record and dismiss go through `adds::logged_write`, the one History + 8 s Undo path
 //!   (`add_undo("watch", id)` puts the proposal back to `proposed`).
 //! - Creating a proposal is NOT a command (`create_in` is `pub(crate)`): page code cannot plant a proposal that
-//!   reads as Amara's. Only a `FeedSource` run by a service may call it. No live source exists: the market
-//!   price feed and the news feed are new outbound hosts and stay gated (decision 0036).
+//!   reads as Amara's. Only a `FeedSource` run by a service may call it. The one live source is Amara's
+//!   research in `watchlist.rs` (decision 0038); this file still has no network code.
 //! - `sample: true` proposals are never stored; `watch_proposals_list` adds fictional ones only when the page
 //!   asks (its sample flag). Record and dismiss refuse them.
 //! - All feed text is untrusted: flattened, capped, ticker `^[A-Z0-9.\-]{1,12}$`, `sourceUrl` https only and
@@ -90,6 +90,9 @@ pub struct WatchProposal {
     pub kind: WatchKind,
     pub side: WatchSide,
     pub ticker: String,
+    /// Crypto only: the price source's coin id (`^[a-z0-9-]{1,64}$`), used to look up the price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coin_id: Option<String>,
     pub reason_text: String,
     pub source_name: String,
     /// https only, display-only: never fetched.
@@ -130,18 +133,6 @@ pub struct WatchDecision {
     pub toast: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum FeedState {
-    NotConnected,
-}
-
-#[derive(Debug, Clone, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct MarketFeedStatus {
-    pub state: FeedState,
-}
-
 // ── Feed interface (no live implementation: gated) ───────────────────────────
 
 /// One candidate from a feed. Untrusted until `create_in` has cleaned it.
@@ -151,6 +142,7 @@ pub(crate) struct FeedItem {
     pub kind: WatchKind,
     pub side: WatchSide,
     pub ticker: String,
+    pub coin_id: Option<String>,
     pub reason_text: String,
     pub source_name: String,
     pub source_url: Option<String>,
@@ -159,8 +151,7 @@ pub(crate) struct FeedItem {
     pub size: Option<WatchSize>,
 }
 
-/// Where candidates come from. The only implementation is a test fixture: a live price or news source is a
-/// new outbound host and needs its own logged decision.
+/// Where candidates come from: Amara's research (`watchlist.rs`, decision 0038) and test fixtures.
 #[allow(dead_code)]
 pub(crate) trait FeedSource {
     fn name(&self) -> &str;
@@ -247,6 +238,12 @@ fn recheck(mut p: WatchProposal) -> Option<WatchProposal> {
     }
     p.source_url = p.source_url.as_deref().and_then(clean_url);
     p.size = p.size.as_ref().and_then(clean_size);
+    if p.coin_id
+        .as_deref()
+        .is_some_and(|c| !super::market_feed::valid_coin_id(c))
+    {
+        return None;
+    }
     Some(p)
 }
 
@@ -257,6 +254,7 @@ fn samples(now: &str) -> Vec<WatchProposal> {
         kind,
         side,
         ticker: ticker.into(),
+        coin_id: None,
         reason_text: reason.into(),
         source_name: "Sample news feed".into(),
         source_url: None,
@@ -333,12 +331,25 @@ pub(crate) fn create_in(
     if reason.is_empty() || risk.is_empty() || source.is_empty() {
         return Ok(None);
     }
+    if item.kind == WatchKind::Crypto
+        && item.coin_id.is_some()
+        && !item
+            .coin_id
+            .as_deref()
+            .is_some_and(super::market_feed::valid_coin_id)
+    {
+        return Ok(None);
+    }
     let p = WatchProposal {
         id: new_id("wp"),
         created_at: iso(&now),
         kind: item.kind,
         side: item.side,
         ticker: item.ticker.clone(),
+        coin_id: item
+            .coin_id
+            .clone()
+            .filter(|c| super::market_feed::valid_coin_id(c)),
         reason_text: reason,
         source_name: source,
         source_url: item.source_url.as_deref().and_then(clean_url),
@@ -411,6 +422,10 @@ fn decide(
             }
             p.status = to;
             p.decided_at = Some(now_s.clone());
+            // Accepting a watch pick puts it on the watchlist (0038). Same write, same Undo.
+            if to == WatchStatus::Recorded {
+                super::watchlist::add_pick_in(&dirs.data, p, now)?;
+            }
             Ok((p.clone(), UndoRef::Watch { id: id.to_string() }))
         })
     })?;
@@ -458,6 +473,7 @@ pub(crate) fn dismiss_in(
 
 /// Undo: the proposal is open again.
 pub(crate) fn reopen_in(data: &Path, id: &str) -> Result<(), String> {
+    super::watchlist::drop_for_proposal_in(data, id)?;
     with_store(data, true, |s| {
         if let Some(p) = s.proposals.iter_mut().find(|p| p.id == id) {
             if p.sample != Some(true) {
@@ -510,15 +526,6 @@ pub async fn watch_proposal_dismiss(
     .await
 }
 
-/// There is no live price feed (a new outbound host stays gated), so this is always `not_connected`.
-#[tauri::command]
-#[specta::specta]
-pub async fn market_feed_status() -> Result<MarketFeedStatus, String> {
-    Ok(MarketFeedStatus {
-        state: FeedState::NotConnected,
-    })
-}
-
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -544,6 +551,7 @@ mod tests {
             kind: WatchKind::Stock,
             side: WatchSide::Watch,
             ticker: ticker.into(),
+            coin_id: None,
             reason_text: "A fixture headline.".into(),
             source_name: "Fixture".into(),
             source_url: Some("https://example.com/a".into()),
@@ -790,19 +798,6 @@ mod tests {
     }
 
     #[test]
-    fn feed_status_is_not_connected() {
-        let s = MarketFeedStatus {
-            state: FeedState::NotConnected,
-        };
-        assert_eq!(
-            serde_json::to_string(&s).unwrap(),
-            r#"{"state":"not_connected"}"#
-        );
-        let r = tauri::async_runtime::block_on(market_feed_status()).unwrap();
-        assert_eq!(r.state, FeedState::NotConnected);
-    }
-
-    #[test]
     fn the_store_holds_no_keys_or_credentials() {
         let (d, _) = seeded();
         let text = std::fs::read_to_string(path(&d.data)).unwrap();
@@ -904,7 +899,6 @@ mod tests {
             "watch_proposals_list",
             "watch_proposal_record",
             "watch_proposal_dismiss",
-            "market_feed_status",
         ] {
             for b in banned {
                 assert!(!n.contains(b), "{n} contains {b}");

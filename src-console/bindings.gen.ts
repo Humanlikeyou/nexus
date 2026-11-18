@@ -576,8 +576,18 @@ export const commands = {
 	/**  Only after the page's second confirm. Records the choice; never sends anything. */
 	watchProposalRecord: (id: string, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<WatchDecision_Serialize>("watch_proposal_record", { id, via }, options),
 	watchProposalDismiss: (id: string, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<WatchDecision_Serialize>("watch_proposal_dismiss", { id, via }, options),
-	/**  There is no live price feed (a new outbound host stays gated), so this is always `not_connected`. */
-	marketFeedStatus: (options?: InvokeOptions) => __TAURI_INVOKE<MarketFeedStatus>("market_feed_status", undefined, options),
+	/**  The real feed state. Reads only; never makes a request. */
+	marketFeedStatus: (options?: InvokeOptions) => __TAURI_INVOKE<MarketFeedStatus_Serialize>("market_feed_status", undefined, options),
+	/**  Picks with their latest cached prices and statuses, the feed state and the research state. Reads only. */
+	watchlistGet: (options?: InvokeOptions) => __TAURI_INVOKE<WatchlistView_Serialize>("watchlist_get", undefined, options),
+	/**
+	 *  Starts Amara's research in the background (local tier only). One at a time, at most once an hour. The
+	 *  answer is the start state; the picks arrive as proposals (`watch_proposals_list`) and the outcome shows in
+	 *  `watchlist_get().research`.
+	 */
+	watchlistResearchNow: (options?: InvokeOptions) => __TAURI_INVOKE<ResearchStart_Serialize>("watchlist_research_now", undefined, options),
+	/**  Takes a pick off the watchlist. History + 8 s Undo: `add_undo("watch", id)`. */
+	watchlistDrop: (ticker: string, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<WatchlistRemoved>("watchlist_drop", { ticker, via }, options),
 	financesView: (options?: InvokeOptions) => __TAURI_INVOKE<FinancesView_Serialize>("finances_view", undefined, options),
 	ventureTrackingList: (options?: InvokeOptions) => __TAURI_INVOKE<VentureTracking_Serialize>("venture_tracking_list", undefined, options),
 	contentStageSet: (title: string, from: string, to: string, postedByMe: boolean, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<ContentStageSet>("content_stage_set", { title, from, to, postedByMe, via }, options),
@@ -1988,7 +1998,17 @@ export type Experiment_Serialize = {
 	pair: string | null,
 };
 
-export type FeedState = "not_connected";
+export type FeedState = 
+/**  No fetch has been tried yet. */
+"not_connected" | 
+/**  The outbound gate is closed: nothing is being fetched. */
+"blocked" | 
+/**  The last good fetch is within 2x the poll interval. */
+"connected" | 
+/**  The last good fetch is older than that. */
+"stale" | 
+/**  Tried, and nothing good has ever come back. */
+"error";
 
 export type FinancesFund = FinancesFund_Serialize | FinancesFund_Deserialize;
 
@@ -3059,8 +3079,20 @@ export type MapPath_Serialize = {
 	fix: string | null,
 };
 
-export type MarketFeedStatus = {
+export type MarketFeedStatus = MarketFeedStatus_Serialize | MarketFeedStatus_Deserialize;
+
+export type MarketFeedStatus_Deserialize = {
 	state: FeedState,
+	lastAttemptAt?: string | null,
+	lastOkAt?: string | null,
+	pollMinutes: number,
+};
+
+export type MarketFeedStatus_Serialize = {
+	state: FeedState,
+	lastAttemptAt: string | null,
+	lastOkAt: string | null,
+	pollMinutes: number,
 };
 
 export type MeasureRanking = {
@@ -3872,6 +3904,40 @@ export type PrunePlan = {
 	preUpdateKept: string[],
 };
 
+/**
+ *  The latest price for one pick. `price` is `null` when nothing good was ever fetched. `status` is
+ *  `stale` when the price is older than 2x the poll interval (or there is none).
+ */
+export type Quote = Quote_Serialize | Quote_Deserialize;
+
+export type QuoteStatus = "open" | "closed" | "stale";
+
+/**
+ *  The latest price for one pick. `price` is `null` when nothing good was ever fetched. `status` is
+ *  `stale` when the price is older than 2x the poll interval (or there is none).
+ */
+export type Quote_Deserialize = {
+	price?: number | null,
+	currency?: string | null,
+	fetchedAt?: string | null,
+	status: QuoteStatus,
+	/**  Why the last fetch gave nothing (fixed code), if it did. */
+	error?: string | null,
+};
+
+/**
+ *  The latest price for one pick. `price` is `null` when nothing good was ever fetched. `status` is
+ *  `stale` when the price is older than 2x the poll interval (or there is none).
+ */
+export type Quote_Serialize = {
+	price: number | null,
+	currency: string | null,
+	fetchedAt: string | null,
+	status: QuoteStatus,
+	/**  Why the last fetch gave nothing (fixed code), if it did. */
+	error: string | null,
+};
+
 export type RankedTrack = {
 	/**  1-based; equal means share a rank. */
 	rank: number,
@@ -4034,6 +4100,50 @@ export type ReplayFileInfo_Serialize = {
 };
 
 export type RequestStatus = "open" | "approved" | "denied";
+
+export type ResearchStart = ResearchStart_Serialize | ResearchStart_Deserialize;
+
+export type ResearchStart_Deserialize = {
+	state: StartState,
+	/**  For `rate_limited`: minutes until another run may start. */
+	retryAfterMinutes?: number | null,
+};
+
+export type ResearchStart_Serialize = {
+	state: StartState,
+	/**  For `rate_limited`: minutes until another run may start. */
+	retryAfterMinutes: number | null,
+};
+
+export type ResearchStatus = ResearchStatus_Serialize | ResearchStatus_Deserialize;
+
+export type ResearchStatus_Deserialize = {
+	running: boolean,
+	lastStartedAt?: string | null,
+	lastFinishedAt?: string | null,
+	/**
+	 *  Fixed code of the last run: `done`, `blocked`, `no_headlines`, `no_valid_picks`, `model_failed`,
+	 *  `fetch_failed`, `store_failed`.
+	 */
+	lastOutcome?: string | null,
+	lastProposed: number,
+	/**  Earliest time `watchlist_research_now` will start another run (rate limit), if any. */
+	nextAllowedAt?: string | null,
+};
+
+export type ResearchStatus_Serialize = {
+	running: boolean,
+	lastStartedAt: string | null,
+	lastFinishedAt: string | null,
+	/**
+	 *  Fixed code of the last run: `done`, `blocked`, `no_headlines`, `no_valid_picks`, `model_failed`,
+	 *  `fetch_failed`, `store_failed`.
+	 */
+	lastOutcome: string | null,
+	lastProposed: number,
+	/**  Earliest time `watchlist_research_now` will start another run (rate limit), if any. */
+	nextAllowedAt: string | null,
+};
 
 export type RestoreGroup = {
 	name: string,
@@ -4585,6 +4695,8 @@ export type StartAllRow = {
 	id: ServiceId,
 	outcome: StartAllOutcome,
 };
+
+export type StartState = "started" | "rate_limited" | "blocked" | "already_running";
 
 export type Step = Step_Serialize | Step_Deserialize;
 
@@ -6193,6 +6305,52 @@ export type WatchList_Serialize = {
 	disclaimer: string,
 };
 
+export type WatchPick = WatchPick_Serialize | WatchPick_Deserialize;
+
+export type WatchPickView = WatchPickView_Serialize | WatchPickView_Deserialize;
+
+export type WatchPickView_Deserialize = {
+	pick: WatchPick_Deserialize,
+	quote: Quote_Deserialize,
+};
+
+export type WatchPickView_Serialize = {
+	pick: WatchPick_Serialize,
+	quote: Quote_Serialize,
+};
+
+export type WatchPick_Deserialize = {
+	id: string,
+	proposalId: string,
+	kind: WatchKind,
+	ticker: string,
+	coinId?: string | null,
+	reasonText: string,
+	sourceName: string,
+	/**  https only, display-only: never fetched. */
+	sourceUrl?: string | null,
+	pickedAt: string,
+	/**  `picked_at` + 14 days. */
+	nextReviewAt: string,
+	removedAt?: string | null,
+};
+
+export type WatchPick_Serialize = {
+	id: string,
+	proposalId: string,
+	kind: WatchKind,
+	ticker: string,
+	coinId?: string,
+	reasonText: string,
+	sourceName: string,
+	/**  https only, display-only: never fetched. */
+	sourceUrl?: string,
+	pickedAt: string,
+	/**  `picked_at` + 14 days. */
+	nextReviewAt: string,
+	removedAt?: string,
+};
+
 export type WatchProposal = WatchProposal_Serialize | WatchProposal_Deserialize;
 
 export type WatchProposal_Deserialize = {
@@ -6201,6 +6359,8 @@ export type WatchProposal_Deserialize = {
 	kind: WatchKind,
 	side: WatchSide,
 	ticker: string,
+	/**  Crypto only: the price source's coin id (`^[a-z0-9-]{1,64}$`), used to look up the price. */
+	coinId?: string | null,
 	reasonText: string,
 	sourceName: string,
 	/**  https only, display-only: never fetched. */
@@ -6219,6 +6379,8 @@ export type WatchProposal_Serialize = {
 	kind: WatchKind,
 	side: WatchSide,
 	ticker: string,
+	/**  Crypto only: the price source's coin id (`^[a-z0-9-]{1,64}$`), used to look up the price. */
+	coinId?: string,
 	reasonText: string,
 	sourceName: string,
 	/**  https only, display-only: never fetched. */
@@ -6239,6 +6401,33 @@ export type WatchSize = {
 };
 
 export type WatchStatus = "proposed" | "recorded" | "dismissed";
+
+export type WatchlistRemoved = {
+	/**  History id: `add_undo("watch", id)` within 8 s puts it back. */
+	id: string,
+	ticker: string,
+	toast: string,
+};
+
+export type WatchlistView = WatchlistView_Serialize | WatchlistView_Deserialize;
+
+export type WatchlistView_Deserialize = {
+	picks: WatchPickView_Deserialize[],
+	feed: MarketFeedStatus_Deserialize,
+	research: ResearchStatus_Deserialize,
+	/**  True when the "Want new picks?" pointer is showing in Needs you. */
+	reviewDue: boolean,
+	disclaimer: string,
+};
+
+export type WatchlistView_Serialize = {
+	picks: WatchPickView_Serialize[],
+	feed: MarketFeedStatus_Serialize,
+	research: ResearchStatus_Serialize,
+	/**  True when the "Want new picks?" pointer is showing in Needs you. */
+	reviewDue: boolean,
+	disclaimer: string,
+};
 
 export type WeeklyReviewHealth = WeeklyReviewHealth_Serialize | WeeklyReviewHealth_Deserialize;
 

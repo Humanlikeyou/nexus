@@ -203,6 +203,17 @@ describe("Tauri command registry", () => {
     expect(names.filter((n: string) => (n.startsWith("watch_proposal") || n.startsWith("market_")) && banned.test(n))).toEqual([]);
   });
 
+  it("the watchlist commands (0038) are registered and no name can move money", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    const wl = ["watchlist_get", "watchlist_research_now", "watchlist_drop"];
+    for (const name of wl) expect(names).toContain(name);
+    expect(names.filter((n: string) => n.startsWith("watchlist_")).sort()).toEqual([...wl].sort());
+    const banned = /trade|order|transfer|pay|convert|withdraw|send|buy|sell|move|wire|remit|swap|sign|broadcast|deposit|exchange|broker|place|execute|submit|remove/;
+    expect(names.filter((n: string) => (n.startsWith("watchlist_") || n.startsWith("market_")) && banned.test(n))).toEqual([]);
+  });
+
   it("the Enterprise view commands (B4) are registered and no name can move money or post", async () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");

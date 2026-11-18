@@ -403,6 +403,9 @@ const CALLER_COMMANDS: Array<[string, Record<string, unknown> | undefined]> = [
   ["watch_proposal_record", {id: "id-v", via: "via-v"}],
   ["watch_proposal_dismiss", {id: "id-v", via: "via-v"}],
   ["market_feed_status", undefined],
+  ["watchlist_get", undefined],
+  ["watchlist_research_now", undefined],
+  ["watchlist_drop", {ticker: "ticker-v", via: "via-v"}],
   ["restart_services", {services: "services-v", deadlineMs: "deadlineMs-v"}],
 ];
 

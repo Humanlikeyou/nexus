@@ -197,6 +197,8 @@ pub fn run() {
             commands::treasury_monitor::start();
             // Route detector (1118a): proposes branches only, local tier, at most once a day.
             commands::goal_route::start();
+            // Watchlist prices (0038): one poll per 15 min, only when outbound is allowed; inert in tests.
+            commands::market_feed::start();
             // Voice only while the app is open (decision 0024): app_alive heartbeat every 5 s.
             commands::voice_heartbeat::start();
 
@@ -458,7 +460,10 @@ pub fn run() {
             commands::watch_proposals::watch_proposals_list,
             commands::watch_proposals::watch_proposal_record,
             commands::watch_proposals::watch_proposal_dismiss,
-            commands::watch_proposals::market_feed_status,
+            commands::market_feed::market_feed_status,
+            commands::watchlist::watchlist_get,
+            commands::watchlist::watchlist_research_now,
+            commands::watchlist::watchlist_drop,
             commands::enterprise_views::finances_view,
             commands::enterprise_views::venture_tracking_list,
             commands::content_pipeline::content_stage_set,

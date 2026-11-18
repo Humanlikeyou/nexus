@@ -200,6 +200,10 @@ pub(crate) enum UndoRef {
     Watch {
         id: String,
     },
+    /// 0038: a watchlist pick removed (soft). Undo puts it back.
+    WatchlistRemove {
+        pick_id: String,
+    },
     Date {
         id: String,
     },
@@ -862,6 +866,9 @@ fn revert(u: &UndoRef, dirs: &Dirs) -> Result<(), String> {
         } => super::content_drafts::revert(dirs, file, prev.as_deref(), *had_prev, after_hash),
         UndoRef::Branch { id } => super::goal_route::reopen_in(&dirs.data, id),
         UndoRef::Watch { id } => super::watch_proposals::reopen_in(&dirs.data, id),
+        UndoRef::WatchlistRemove { pick_id } => {
+            super::watchlist::restore_pick_in(&dirs.data, pick_id)
+        }
         UndoRef::Ha { entity_id, restore } => super::ha_devices::restore_blocking(
             entity_id,
             super::ha_devices::decode_restore(restore).as_ref(),
