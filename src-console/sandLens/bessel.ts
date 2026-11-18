@@ -104,15 +104,16 @@ export function pickPeaks(fd: Float32Array, binHz: number, max = 3): Peak[] {
  */
 export function fallbackPeaks(onsetIndex: number, modes = buildModes().modes): Peak[] {
   const band = modes.filter((m) => m.f >= 100 && m.f <= 1000 && m.n > 0);
-  // A figure holds for a short phrase (4 onsets) so the grains have time to gather on its nodal lines;
-  // within the phrase each syllable nudges a neighbouring mode in and out, like pitch moving in speech.
+  // A figure holds for a phrase (6 onsets ≈ 1.5 s of speech) so the grains settle into crisp nodal lines;
+  // early in the phrase, while the figure is still forming, two syllables nudge a neighbouring mode in and out.
+  // The dominant mode stays far stronger (≥ 94 %) and most syllables are pure, so the figure reads as one clean pattern.
   const step = 7; // co-prime walk: successive phrases land on clearly different figures
-  const phrase = Math.floor(onsetIndex / 4);
+  const phrase = Math.floor(onsetIndex / 6);
   const a = band[(phrase * step) % band.length];
   const b = band[(phrase * step + 1) % band.length];
   const c = band[(phrase * step + 3) % band.length];
-  const k = onsetIndex % 4;
-  return [{ f: a.f, amp: 1 }, { f: b.f, amp: k === 1 || k === 2 ? 0.4 : 0.2 }, { f: c.f, amp: k === 3 ? 0.25 : 0 }].filter((p) => p.amp > 0);
+  const k = onsetIndex % 6;
+  return [{ f: a.f, amp: 1 }, { f: b.f, amp: k === 1 ? 0.06 : 0 }, { f: c.f, amp: k === 2 ? 0.04 : 0 }].filter((p) => p.amp > 0);
 }
 
 /** Mode scheduler: hold ≥ 250 ms, ~400 ms crossfade, at most 4 modes (shader uniforms). */

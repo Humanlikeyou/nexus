@@ -52,9 +52,10 @@ describe("design-1118b Bessel / Chladni modes", () => {
     const a = fallbackPeaks(5), b = fallbackPeaks(5);
     expect(a).toEqual(b);
     for (let i = 0; i < 40; i++) for (const p of fallbackPeaks(i)) { expect(p.f).toBeGreaterThanOrEqual(100); expect(p.f).toBeLessThanOrEqual(1000); }
-    expect(fallbackPeaks(0)[0].f).toBe(fallbackPeaks(3)[0].f); // same phrase, same dominant figure
-    expect(fallbackPeaks(4)[0].f).not.toBe(fallbackPeaks(0)[0].f); // next phrase moves on
-    expect(fallbackPeaks(1).length).toBeGreaterThanOrEqual(2); // blends 2–3 modes
+    expect(fallbackPeaks(0)[0].f).toBe(fallbackPeaks(5)[0].f); // same phrase, same dominant figure
+    expect(fallbackPeaks(6)[0].f).not.toBe(fallbackPeaks(0)[0].f); // next phrase moves on
+    expect(fallbackPeaks(0).length).toBe(1); // most syllables hold one pure mode (a crisp figure)
+    expect(fallbackPeaks(1).length).toBeGreaterThanOrEqual(2); // an early syllable nudges a neighbour in
   });
 
   it("the scheduler crossfades (~400 ms), holds ≥ 250 ms and keeps at most 4 modes", () => {

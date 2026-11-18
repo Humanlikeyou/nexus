@@ -28,6 +28,7 @@ export class SandEngine {
   private cScene: any; private cRT: any; private canopy: any; private blit: any;
   private U: Record<string, { value: any }>;
   private sched = new ModeScheduler();
+  private pk: number[] = [];
   private modes: PlateMode[];
   private state: SandState = "off"; private wakeT = 0; private simTime = 0; private last = 0; private frame = 0;
   private raf = 0; private running = false; private disposed = false;
@@ -50,13 +51,15 @@ export class SandEngine {
     this.renderer.setPixelRatio(DPR); this.renderer.setSize(window.innerWidth, window.innerHeight, false); this.renderer.setClearColor(0x000000, 0);
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera(0, window.innerWidth, window.innerHeight, 0, -10, 10);
+    // last antinode radius per mode: grains outside it see a free edge (the clamped rim would otherwise hoard them)
+    this.pk = modes.map((md) => { let i = LUT_W - 1; const a = (j: number) => Math.abs(lut[md.row * LUT_W + j]); while (i > 1 && a(i - 1) >= a(i)) i--; return i / (LUT_W - 1); });
     const lt = new THREE.DataTexture(lut, LUT_W, modes.length, THREE.RedFormat, THREE.FloatType);
     lt.minFilter = lt.magFilter = THREE.NearestFilter; lt.needsUpdate = true;
     this.U = {
       uDt: { value: 0 }, uTime: { value: 0 }, uFrame: { value: 0 }, uState: { value: 0 }, uWakeT: { value: 0 }, uLoud: { value: 0 }, uMic: { value: 0 },
-      uBreathP: { value: 5 }, uCalm: { value: 0 }, uSnap: { value: 0 }, uKick: { value: 0 }, uWave: { value: -1 },
+      uBreathP: { value: 5 }, uCalm: { value: 0 }, uSnap: { value: 0 }, uKick: { value: 0 }, uWave: { value: -1 }, uStir: { value: 0 },
       uCard: { value: new THREE.Vector4(-2, 2, -1.7, 0.16) }, uBottom: { value: -4.5 },
-      uLut: { value: lt }, uRow: { value: new THREE.Vector4() }, uN: { value: new THREE.Vector4() }, uA: { value: new THREE.Vector4() },
+      uLut: { value: lt }, uRow: { value: new THREE.Vector4() }, uPk: { value: new THREE.Vector4(1, 1, 1, 1) }, uN: { value: new THREE.Vector4() }, uA: { value: new THREE.Vector4() },
     };
     const shared = { tPos: { value: null }, uC: { value: new THREE.Vector2() }, uR: { value: 130 }, uTilt: { value: 0 }, uPx: { value: DPR }, uViewH: { value: window.innerHeight }, uSeed: { value: seed }, uWarp: { value: 0 }, uScale: { value: 1 }, uMat: { value: 0 } };
     const premulNormal = { transparent: true, depthTest: false, depthWrite: false, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor };
@@ -163,6 +166,9 @@ export class SandEngine {
   /** Step the simulation without real time (tests / captures): n frames of dt seconds. */
   advance(n: number, dt = 1 / 60, renderLast = true) { for (let i = 0; i < n; i++) { if (i === n - 1) this.forceCanopy = true; this.step(dt, 16, renderLast && i === n - 1); } }
   private forceCanopy = false;
+  private clockMs = 0;
+  private ring = 0;
+  private stir = 0;
 
   private loop = (now: number) => {
     if (!this.running) return;
@@ -189,14 +195,18 @@ export class SandEngine {
     const breathP = 6 - (2 * (energy - 0.7)) / 0.5;
     this.simTime += dt * energy;
     if (this.state === "wake") { this.wakeT += dt / 2.0; if (this.wakeT >= 1.1) { this.state = "listen"; this.onWakeDone?.(); } }
-    const { active, changed } = this.sched.update(this.state === "speak" ? this.peaks : [], this.state === "speak" ? this.loud : 0, dt, performance.now());
-    if (changed) this.onModeChange?.(changed);
-    const row = [0, 0, 0, 0], nn = [0, 0, 0, 0], aa = [0, 0, 0, 0];
-    active.forEach((m, i) => { row[i] = m.row; nn[i] = m.n; aa[i] = m.a; });
+    this.clockMs += dt * 1000; // scheduler runs on simulation time, so stepped captures and tests behave like real time
+    const { active, changed } = this.sched.update(this.state === "speak" ? this.peaks : [], this.state === "speak" ? this.loud : 0, dt, this.clockMs);
+    if (changed) { this.onModeChange?.(changed); this.stir = 1; } // a new pitch moves the old lines too
+    this.U.uStir.value = this.state === "speak" ? this.stir : 0; this.stir = Math.max(0, this.stir - dt / 0.5);
+    const row = [0, 0, 0, 0], nn = [0, 0, 0, 0], aa = [0, 0, 0, 0], pk = [1, 1, 1, 1];
+    active.forEach((m, i) => { row[i] = m.row; nn[i] = m.n; aa[i] = m.a; pk[i] = this.pk[m.row]; });
     const U = this.U;
-    U.uRow.value.set(...row); U.uN.value.set(...nn); U.uA.value.set(...aa);
+    U.uRow.value.set(...row); U.uPk.value.set(...pk); U.uN.value.set(...nn); U.uA.value.set(...aa);
     U.uDt.value = dt * energy; U.uTime.value = this.simTime; U.uFrame.value = this.frame; U.uState.value = STATE_NUM[this.state]; U.uWakeT.value = this.wakeT;
-    U.uLoud.value = this.loud; U.uMic.value = this.state === "listen" ? 0.12 + 0.08 * Math.sin(this.simTime * 0.9) * Math.sin(this.simTime * 0.37) : 0;
+    // the plate rings down over ~0.3 s, so the short gaps between syllables don't stop the figure forming
+    this.ring = Math.max(this.loud, this.ring * Math.exp(-dt / 0.3));
+    U.uLoud.value = this.state === "speak" ? this.ring : this.loud; U.uMic.value = this.state === "listen" ? 0.12 + 0.08 * Math.sin(this.simTime * 0.9) * Math.sin(this.simTime * 0.37) : 0;
     U.uBreathP.value = breathP; U.uCalm.value = this.calm ? 1 : 0;
     U.uKick.value = this.kick; this.kick = Math.max(0, this.kick - dt * 3);
     U.uWave.value = this.wave; if (this.wave >= 0) { this.wave += dt * 1.1; if (this.wave > 1.6) this.wave = -1; }

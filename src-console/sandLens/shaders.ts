@@ -7,9 +7,9 @@ import { LUT_W } from "./bessel";
  * density map, and an organic uneven outer edge (per-session seed) that leaves the core physics untouched.
  */
 export const COMMON = /* glsl */ `
-uniform float uDt, uTime, uFrame, uState, uWakeT, uLoud, uMic, uBreathP, uCalm, uSnap, uKick, uWave;
+uniform float uDt, uTime, uFrame, uState, uWakeT, uLoud, uMic, uBreathP, uCalm, uSnap, uKick, uWave, uStir;
 uniform vec4 uCard; uniform float uBottom;
-uniform sampler2D uLut; uniform vec4 uRow, uN, uA;
+uniform sampler2D uLut; uniform vec4 uRow, uN, uA, uPk;
 uvec3 pcg3d(uvec3 v){ v = v*1664525u + 1013904223u; v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y; v ^= v>>16u; v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y; return v; }
 vec3 rnd3(uvec3 v){ return vec3(pcg3d(v)) * (1.0/4294967296.0); }
 vec4 shash(){ uvec2 c=uvec2(gl_FragCoord.xy); vec3 a=rnd3(uvec3(c,17u)); vec3 b=rnd3(uvec3(c,91u)); return vec4(a,b.x); }
@@ -18,14 +18,21 @@ float radial(float row, float r){ float x=clamp(r,0.,1.)*${(LUT_W - 1).toFixed(1
   int ro=int(row+0.5); return mix(texelFetch(uLut, ivec2(i,ro),0).r, texelFetch(uLut, ivec2(j,ro),0).r, f); }
 float field(vec2 p){ float r=length(p); float th=atan(p.y,p.x); float w=0.;
   for(int i=0;i<4;i++){ if(abs(uA[i])>1e-4) w+=uA[i]*radial(uRow[i],r)*cos(uN[i]*th); } return w; }
+// what a grain feels: the same field, but past each mode's last antinode the plate acts as a free edge (no rim node)
+float fieldFree(vec2 p){ float r=length(p); float th=atan(p.y,p.x); float w=0.;
+  for(int i=0;i<4;i++){ if(abs(uA[i])>1e-4) w+=uA[i]*radial(uRow[i],min(r,uPk[i]))*(1.0+1.5*max(r-uPk[i],0.))*cos(uN[i]*th); } return w; } // slope keeps drifting grains moving inwards
+float fieldG(vec2 p, bool rim){ return rim?field(p):fieldFree(p); }
 float homeAng(vec4 h){ return 6.2831853*h.y + (2.2+1.6*h.x)*2.4; }
 vec2 homePos(vec4 h){ float r=0.965*sqrt(h.x); float a=homeAng(h); return r*vec2(cos(a),sin(a)); }
 vec3 heapTarget(vec4 h, vec4 h2, out float lost){
-  lost = step(h2.x, 0.02);
+  lost = step(h2.x, 0.006);
   float tri=(h.x+h.y+h.z+h.w)*0.25; tri=clamp((tri-0.5)*1.7+0.5,0.,1.);
-  if(lost>0.5){ return vec3(mix(uCard.x-0.2,uCard.y+0.2,h.w), uBottom-0.5, 0.); }
+  if(lost>0.5){ // a few grains slip off the card's ends and keep drifting down past it
+    float side=h.z<0.5 ? uCard.x-0.02-0.05*h.w : uCard.y+0.02+0.05*h.w; return vec3(side, uBottom-0.5, 0.); }
   float x=mix(uCard.x+0.06,uCard.y-0.06,tri);
-  float prof=(0.35+0.65*pow(1.0-abs(2.0*tri-1.0),1.2))*(0.6+0.4*sin(tri*29.0+1.3)*sin(tri*11.0+0.4));
+  // low, uneven drift: a broad swell, a few dunes, and mossy clumps (cell hash) so the top reads tufted, not smooth
+  float cell=floor(tri*46.0+h2.z*0.6); float tuft=fract(sin(cell*12.9898+3.7)*43758.5453);
+  float prof=(0.3+0.7*pow(1.0-abs(2.0*tri-1.0),1.2))*(0.62+0.38*sin(tri*29.0+1.3)*sin(tri*11.0+0.4))*(0.55+0.6*tuft*tuft);
   return vec3(x, uCard.z + uCard.w*prof*pow(h2.y,0.9), 0.);
 }
 vec2 nodal(vec2 p){ const float e=0.002;
@@ -62,9 +69,24 @@ void main(){
     float r=length(p.xy);
     if(r>1.03 || p.z>0.35){ v+=((vec3(homePos(h),0.)-p)*8.0-v*4.0)*dt; }
     else if(p.z<=0.0008){
-      float aw=abs(field(p.xy)); float L=uLoud;
-      if(rn.x < clamp(aw*L*2.6,0.,1.)){ float an=rn.y*6.2831853; float s=aw*L*(0.25+0.75*rn.z)*1.8; v=vec3(cos(an)*s, sin(an)*s, aw*L*(0.8+0.8*rn2.x)*2.0); }
-      else { v=vec3(0.); }
+      // A vibrating plate tosses grains up where it moves (|w| large); each bounce lands a little further
+      // down the |w| slope, so grains drain off the antinodes and rest on the nodal lines (|w| ≈ 0).
+      const float e=0.004;
+      // the clamped rim is a nodal line too; only a few grains rest there (the organic edge), the rest feel a free edge
+      bool rim=h.w<0.22;
+      float w=fieldG(p.xy,rim); float aw=abs(w); float L=uLoud;
+      vec2 g=vec2(fieldG(p.xy+vec2(e,0.),rim)-fieldG(p.xy-vec2(e,0.),rim), fieldG(p.xy+vec2(0.,e),rim)-fieldG(p.xy-vec2(0.,e),rim))/(2.0*e);
+      vec2 down=-sign(w)*g; float gl=length(down); vec2 dir=gl>1e-4?down/gl:vec2(0.);
+      float dn=aw/max(length(g),1e-3); // distance to the nearest nodal line: quiet regions of high-n modes still clear
+      float act=max(max(smoothstep(0.03,0.12,aw), smoothstep(0.004,0.014,dn)*smoothstep(0.002,0.01,aw)), smoothstep(0.012,0.05,aw)*uStir*0.8)*L; // on a nodal line the plate is still; right after a pitch change, stale lines loosen
+      if(uStir>0.6 && rn.x<0.85){ // pitch change: the plate's attack tosses the whole layer, so every line of the new figure fills
+        float vz=(0.5+0.4*rn2.x); float fl=2.0*vz/40.0; // each toss lands about half-way back to the grain's place in an even layer
+        vec2 tv=(homePos(h)-p.xy)*0.5/fl; float tl=length(tv); v=vec3(tl>1.6?tv*(1.6/tl):tv, vz); // capped: one frame never jumps the rim
+      } else if(rn.x < clamp(act*2.5,0.,1.)){
+        float an=rn.y*6.2831853; float hs=(0.5+0.7*aw)*L*(1.0+2.0*smoothstep(0.02,0.1,dn)); // far from a line the grains travel faster, close to it they creep in
+        vec2 hv=dir*(0.55+0.35*rn.z)*hs + vec2(cos(an),sin(an))*0.4*hs*rn2.y; // mostly downhill, a little scatter
+        v=vec3(hv, (0.35+0.9*aw)*L*(0.7+0.6*rn2.x));
+      } else { v=vec3(0.); }
     } else { v.z-=40.0*dt; v.xy*=(1.0-1.2*dt); if(r>0.985 && dot(v.xy,p.xy)>0.) v.xy=reflect(v.xy,p.xy/r)*0.5; }
   }
   // micro-moments: a soft kick (task done) and a ripple ring (notification) make grains hop, then settle again
@@ -86,7 +108,9 @@ void main(){
   if(uCalm>0.5){ if(uSnap>0.5){ if(st==0){ float l; p=heapTarget(h,h2,l);} else { vec2 hp=homePos(h); bool fig=(abs(uA.x)+abs(uA.y)+abs(uA.z)+abs(uA.w))>0.01; p=vec3((st==3&&fig)?nodal(hp)+(h2.zw-0.5)*0.045:hp,0.);} } gl_FragColor=vec4(p,1.); return; }
   p+=v*uDt;
   if(st>=2 && st!=1){ float r=length(p.xy); if(r<1.03 && p.z<0.35){ if(p.z<0.) p.z=0.; if(r>0.995) p.xy*=0.995/r; } }
-  if(st==0){ float l; vec3 tg=heapTarget(h,h2,l); if(p.y<tg.y) p.y=tg.y; if(p.z<0.) p.z=0.; }
+  if(st==0){ float l; vec3 tg=heapTarget(h,h2,l);
+    if(l>0.5 && p.y<uBottom-0.1){ p=vec3(tg.x, uCard.z+0.01+0.03*h.y, 0.); } // the trickle loops: back to the card's end, falls again
+    else if(p.y<tg.y) p.y=tg.y; if(p.z<0.) p.z=0.; }
   gl_FragColor=vec4(p,1.);
 }`;
 
@@ -103,9 +127,9 @@ vec2 screenPos(vec3 p, vec4 h, out float persp, out float rim){
   persp=3.2/(3.2-clamp(zz,-1.5,1.5));
   vec2 q=vec2(p.x,yy);
   float r=length(q); float th=atan(q.y,q.x);
-  float k=smoothstep(0.6,1.0,r)*uWarp*step(r,1.08);          // core untouched: Chladni stays true there
-  q*=mix(1.0, edgeR(th), k);
-  float stray=step(h.w,0.08)*smoothstep(0.78,0.99,r)*uWarp*step(r,1.08); // stray grains spill over the rim
+  float k=smoothstep(0.86,1.0,r)*uWarp*step(r,1.08);         // outer rim only: the Chladni figure inside stays true
+  q*=1.0 + k*max(edgeR(th)-1.0, -0.035);                      // bulges out freely, pulls in only a little: lines crossing the rim never bunch up
+  float stray=step(h.w,0.08)*smoothstep(0.9,0.99,r)*uWarp*step(r,1.08); // stray grains spill over the rim
   q*=1.0 + stray*(0.03 + 0.26*h.y*h.y*h.y);
   rim=k;
   vec2 s=uC+vec2(q.x,-q.y)*uR*persp;

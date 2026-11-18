@@ -3,7 +3,7 @@ import { AmaraLens } from "../components/AmaraLens/AmaraLens";
 import type { AmaraVoiceState } from "../hooks/useAmaraVoice";
 import { amaraVoiceLevel, amaraVoiceLevelAge } from "../hooks/useAmaraVoice";
 import { ambienceVars, targetAmbience } from "./ambience";
-import { fallbackPeaks } from "./bessel";
+import { buildModes, fallbackPeaks } from "./bessel";
 import type { SandEngine, SandMoment, SandState } from "./engine";
 import { webgl2Available } from "./gl";
 import { calmActive, sessionSeed, useSandSettings } from "./settings";
@@ -26,7 +26,7 @@ export function sandStateFor(voice: AmaraVoiceState, line: string): SandState {
 const devTier = () => { try { const v = window.localStorage.getItem("nexus.sandTier"); return v == null ? undefined : Number(v); } catch { return undefined; } };
 const nowMinutes = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
 
-declare global { interface Window { __sand?: { engine: SandEngine | null; setTod: (m: number | null) => void; setRecovery: (r: number | null | undefined) => void; setState: (s: SandState | null) => void; moment: (k: SandMoment) => void; voice: (loud: number, onset?: number) => void } } }
+declare global { interface Window { __sand?: { engine: SandEngine | null; setTod: (m: number | null) => void; setRecovery: (r: number | null | undefined) => void; setState: (s: SandState | null) => void; moment: (k: SandMoment) => void; voice: (loud: number, onset?: number) => void; tone: (mode: string, loud?: number) => void } } }
 
 /**
  * design-1118b: the sand lens on Home. One shared canvas, pointer-events: none (never blocks a click).
@@ -145,6 +145,8 @@ export function SandLensLayer({ voice, line, recovery, active = true }: { voice:
       setState: (st) => { override.current.state = st; const e = engineRef.current; if (e) { e.setState(st ?? target); prev.current = st ?? target; } },
       moment: (k) => engineRef.current?.moment(k),
       voice: (loud, onset = 0) => engineRef.current?.setVoice(loud, fallbackPeaks(onset)),
+      // pure test tone at one plate mode's frequency (e.g. "n2m2")
+      tone: (mode, loud = 0.85) => { const m = buildModes().modes.find((x) => x.id === mode); if (m) engineRef.current?.setVoice(loud, [{ f: m.f, amp: 1 }]); },
     };
     return () => { delete window.__sand; };
   }, [target]);
