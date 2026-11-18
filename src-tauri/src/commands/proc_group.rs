@@ -30,6 +30,11 @@ fn signal(pgid: u32, sig: i32) -> bool {
     unsafe { libc::killpg(pgid as i32, sig) == 0 }
 }
 
+/// SIGKILL to the whole group now (used when a group outlives its stop deadline).
+pub fn force(pgid: u32) {
+    signal(pgid, libc::SIGKILL);
+}
+
 /// SIGTERM now; a detached thread sends SIGKILL after `FORCE_AFTER` if the group is still there.
 /// Safe to call from `Drop`. Idempotent.
 pub fn terminate(pgid: u32) {

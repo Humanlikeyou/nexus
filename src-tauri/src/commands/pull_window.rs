@@ -240,13 +240,23 @@ impl<S: Spawner, P: PortProbe, W: WindowProc> PullHost for RunnerHost<'_, S, P, 
     fn stop_serve(&self) -> BoxFuture<'_, Result<(), &'static str>> {
         Box::pin(async move {
             // Only a child the app started is ever stopped.
-            self.runner.spawner.stop(ServiceId::ModelRuntime);
+            // Wait for the port to be free AND the whole process group (the serve's llama-server
+            // runners too) to be gone: a surviving sandboxed runner could reach the window.
+            let group = self.runner.spawner.stop_group(ServiceId::ModelRuntime);
             let deadline = tokio::time::Instant::now() + SERVE_STOP_TIMEOUT;
             loop {
-                if self.runner.port_state(ServiceId::ModelRuntime).await == Some(PortState::Free) {
+                let group_gone = group.is_none_or(super::proc_group::group_empty);
+                if group_gone
+                    && self.runner.port_state(ServiceId::ModelRuntime).await
+                        == Some(PortState::Free)
+                {
                     return Ok(());
                 }
                 if tokio::time::Instant::now() >= deadline {
+                    // Fail closed: force the group down and refuse the pull either way.
+                    if let Some(g) = group {
+                        super::proc_group::force(g);
+                    }
                     return Err("timed_out");
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;

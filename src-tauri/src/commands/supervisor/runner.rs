@@ -872,6 +872,12 @@ pub trait Spawner: Send + Sync {
     fn stop(&self, _id: ServiceId) -> bool {
         false
     }
+    /// Like `stop`, and returns the stopped child's process-group id (its pid, since it was
+    /// spawned with `process_group(0)`) so a caller can wait until the whole group is gone.
+    fn stop_group(&self, id: ServiceId) -> Option<u32> {
+        self.stop(id);
+        None
+    }
 }
 
 /// The real spawner: a detached, long-running child (own process group, stdio null, not killed on
@@ -934,18 +940,25 @@ impl Spawner for ProcSpawner {
     }
 
     fn stop(&self, id: ServiceId) -> bool {
+        self.stop_group(id).is_some()
+    }
+
+    fn stop_group(&self, id: ServiceId) -> Option<u32> {
         let mut g = self.guard();
-        let mut stopped = false;
+        let mut group = None;
         g.retain_mut(|(i, c)| {
             if *i != id {
                 return true;
             }
             if let Ok(None) = c.try_wait() {
-                stopped |= signal_child_group(c);
+                let pid = c.id();
+                if signal_child_group(c) {
+                    group = pid.or(group);
+                }
             }
             false
         });
-        stopped
+        group
     }
 
     fn spawn(&self, id: ServiceId, spec: &SpawnSpec) -> Result<(), RunError> {
@@ -2290,6 +2303,30 @@ mod sidecar_tests {
         );
         assert_eq!(sp.guard().len(), 1);
         assert_eq!(sp.stop_started(), vec![ServiceId::ModelRuntime]);
+    }
+
+    #[tokio::test]
+    async fn stop_group_returns_the_group_so_callers_can_wait_for_every_member() {
+        // A shell in its own group with a background child stands in for serve + its runner.
+        let sp = ProcSpawner::default();
+        let spec = SpawnSpec {
+            program: PathBuf::from("/bin/sh"),
+            args: vec!["-c".into(), "/bin/sleep 30 & /bin/sleep 30; wait".into()],
+            env: vec![("PATH", "/usr/bin:/bin".to_string())],
+        };
+        sp.spawn(ServiceId::ModelRuntime, &spec).unwrap();
+        let g = sp
+            .stop_group(ServiceId::ModelRuntime)
+            .expect("our child is stopped");
+        let start = std::time::Instant::now();
+        while !crate::commands::proc_group::group_empty(g)
+            && start.elapsed() < Duration::from_secs(6)
+        {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(crate::commands::proc_group::group_empty(g));
+        // Nothing of ours is left, so a second stop has no group.
+        assert_eq!(sp.stop_group(ServiceId::ModelRuntime), None);
     }
 
     fn sleep_spec() -> SpawnSpec {
