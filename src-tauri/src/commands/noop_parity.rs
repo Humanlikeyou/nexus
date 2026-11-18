@@ -579,7 +579,10 @@ mod tests {
         assert_eq!(sum.daily_built_at_ms, 0);
         assert_eq!(sum.days_missing_legacy, 2);
         // the returned summary serialises counts only
-        let s = serde_json::to_string(&sum).unwrap();
+        // (the file name carries a millisecond timestamp, so it is left out of the value check)
+        let s = serde_json::to_string(&sum)
+            .unwrap()
+            .replace(&sum.report_file, "<file>");
         assert!(!s.contains("401") && !s.contains("77"));
         // a re-run into an existing dir keeps the modes
         let sum2 = report_in(&d, 3, nd("2026-11-14"), |_| Ok(BTreeMap::new())).unwrap();
