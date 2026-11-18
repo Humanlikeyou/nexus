@@ -62,3 +62,7 @@ From 1118b (later):
 - Logic only, no markup, class or token: new `src-console/design1118/marketProposalsLive.ts` (+ test); `marketAdapter()` in `marketProposals.ts` returns it inside Tauri (sample flag still wins). `boundTable.ts` / `bindings.gen.ts` gained `watch_proposals_list`, `watch_proposal_record`, `watch_proposal_dismiss`, `market_feed_status`.
 - Market line and news note stay "Needs wiring" (gated feeds). Toast text comes back from `watch_proposal_record` ("Recorded. Watch-only — no order was sent."). Undo: `add_undo("watch", id)`.
 - Flaky (for Design): `test/e2e/sand-lens.spec.ts:28` [dark] "voice off: the sand keeps floating" failed once in the full suite on 2026-11-18 (12.3 s, under load). It passed 40/40 run alone with `--repeat-each=4`. It probably needs a deterministic wait on the lens frame instead of timing. Not changed by Claude Code.
+
+## UI touches (B4 Finances, venture tracking, Content backend, 2026-11-18)
+- Logic only, no markup, class or token: new `src-console/design1118/enterpriseLive.ts` (+ test). No screen edited. `boundTable.ts` / `bindings.gen.ts` gained `finances_view`, `venture_tracking_list`, `content_stage_set`, `content_draft_propose`.
+- For Design/Frontend: `enterpriseAdapter()` gives `finances()`, `fx()` (with `asOf` and `stale`), `funds()`, `sources()`, `ventures()`, `draft(title)`, `setStage(...)`, `undoStage(id)`. Content "Draft with Amara" is still the `OffButton` in `EnterprisePages.tsx`; swap it for `draft()` when you build it. Path goals have no venture tag, so Ventures cannot show linked goals yet.

@@ -472,7 +472,7 @@ fn stream_update_in(
     Ok(s)
 }
 
-fn streams_list_in(data: &Path) -> Result<Vec<Stream>, String> {
+pub(super) fn streams_list_in(data: &Path) -> Result<Vec<Stream>, String> {
     let conn = open_db(data)?;
     let ids = ledger_venture_ids(data);
     let mut stmt = conn
@@ -1138,7 +1138,7 @@ fn date_range(from: &str, to: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn attention_list_in(
+pub(super) fn attention_list_in(
     data: &Path,
     stream_id: Option<&str>,
     from: &str,
@@ -1233,7 +1233,7 @@ fn currencies_in(
         .collect()
 }
 
-fn income_month_in(
+pub(super) fn income_month_in(
     data: &Path,
     from_month: &str,
     to_month: &str,
@@ -1334,13 +1334,13 @@ fn income_trend_in(
 }
 
 /// The ledger rate's age in whole days against `today` (negative when dated in the future).
-fn fx_stale(rate: &FxRate, today: NaiveDate) -> bool {
+pub(super) fn fx_stale(rate: &FxRate, today: NaiveDate) -> bool {
     NaiveDate::parse_from_str(&rate.as_of, "%Y-%m-%d")
         .map(|d| (today - d).num_days() > STALE_DAYS)
         .unwrap_or(true)
 }
 
-fn fx_status_in(data: &Path, today: NaiveDate) -> Result<FxStatus, String> {
+pub(super) fn fx_status_in(data: &Path, today: NaiveDate) -> Result<FxStatus, String> {
     match read_ledger_in(data) {
         Err(_) => Err("ledger_invalid".into()),
         Ok(None) => Ok(FxStatus {
@@ -1399,7 +1399,7 @@ fn combine_income(
     }
 }
 
-fn per_hour_in(
+pub(super) fn per_hour_in(
     data: &Path,
     from: &str,
     to: &str,

@@ -403,6 +403,10 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::watch_proposals::watch_proposal_record,
             crate::commands::watch_proposals::watch_proposal_dismiss,
             crate::commands::watch_proposals::market_feed_status,
+            crate::commands::enterprise_views::finances_view,
+            crate::commands::enterprise_views::venture_tracking_list,
+            crate::commands::content_pipeline::content_stage_set,
+            crate::commands::content_pipeline::content_draft_propose,
             crate::commands::restart_services::restart_services,
         ])
 }

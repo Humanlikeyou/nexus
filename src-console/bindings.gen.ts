@@ -578,6 +578,11 @@ export const commands = {
 	watchProposalDismiss: (id: string, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<WatchDecision_Serialize>("watch_proposal_dismiss", { id, via }, options),
 	/**  There is no live price feed (a new outbound host stays gated), so this is always `not_connected`. */
 	marketFeedStatus: (options?: InvokeOptions) => __TAURI_INVOKE<MarketFeedStatus>("market_feed_status", undefined, options),
+	financesView: (options?: InvokeOptions) => __TAURI_INVOKE<FinancesView_Serialize>("finances_view", undefined, options),
+	ventureTrackingList: (options?: InvokeOptions) => __TAURI_INVOKE<VentureTracking_Serialize>("venture_tracking_list", undefined, options),
+	contentStageSet: (title: string, from: string, to: string, postedByMe: boolean, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<ContentStageSet>("content_stage_set", { title, from, to, postedByMe, via }, options),
+	/**  Draft text for an idea that is really in the pipeline file (Idea or Drafting). Local tier only; writes nothing. */
+	contentDraftPropose: (title: string, options?: InvokeOptions) => __TAURI_INVOKE<ContentDraft>("content_draft_propose", { title }, options),
 	restartServices: (services: string[], deadlineMs: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ServiceRestartResult_Serialize[]>("restart_services", { services, deadlineMs }, options),
 };
 
@@ -1338,6 +1343,13 @@ export type CommonGoal_Serialize = {
 	causes: CommonCause[],
 };
 
+export type ContentDraft = {
+	title: string,
+	text: string,
+	/**  Always `local`: the loopback router with Claude forced off. */
+	tier: string,
+};
+
 export type ContentPipelineItem = ContentPipelineItem_Serialize | ContentPipelineItem_Deserialize;
 
 export type ContentPipelineItem_Deserialize = {
@@ -1356,6 +1368,15 @@ export type ContentPipelineItem_Serialize = {
 	notes: string | null,
 	/**  From a `#venture:<id>` tag (written by the add flow, commands/adds.rs). */
 	venture: string | null,
+};
+
+export type ContentStageSet = {
+	/**  The History id: what `add_undo("content", id)` takes. */
+	id: string,
+	title: string,
+	from: string,
+	to: string,
+	toast: string,
 };
 
 export type ContextItem = ContextItem_Serialize | ContextItem_Deserialize;
@@ -1946,6 +1967,102 @@ export type Experiment_Serialize = {
 };
 
 export type FeedState = "not_connected";
+
+export type FinancesFund = FinancesFund_Serialize | FinancesFund_Deserialize;
+
+export type FinancesFund_Deserialize = {
+	name: string,
+	balanceJpy: number,
+	/**  `None` without a ledger rate. */
+	balanceUsd?: number | null,
+};
+
+export type FinancesFund_Serialize = {
+	name: string,
+	balanceJpy: number,
+	/**  `None` without a ledger rate. */
+	balanceUsd: number | null,
+};
+
+export type FinancesFx = FinancesFx_Serialize | FinancesFx_Deserialize;
+
+export type FinancesFx_Deserialize = {
+	usdPerJpy: number | null,
+	/**  `YYYY-MM-DD`, the day the rate was typed in. */
+	asOf: string,
+	ageDays?: number | null,
+	stale: boolean,
+};
+
+export type FinancesFx_Serialize = {
+	usdPerJpy: number | null,
+	/**  `YYYY-MM-DD`, the day the rate was typed in. */
+	asOf: string,
+	ageDays: number | null,
+	stale: boolean,
+};
+
+export type FinancesSource = FinancesSource_Serialize | FinancesSource_Deserialize;
+
+export type FinancesSource_Deserialize = {
+	streamId: string,
+	ventureId: string,
+	name: string,
+	streamType: string,
+	/**  `active | paused | closed`. */
+	status: string,
+	/**  ISO time of the last import that worked; `None` when there has been none. */
+	lastImportAt?: string | null,
+	daysSinceImport?: number | null,
+	/**  Imports that worked (ok or partial); not rows, not amounts. */
+	imports: number,
+	/**  The Treasury monitor has an unacknowledged-or-not `stale_data` flag on this stream. */
+	stale: boolean,
+};
+
+export type FinancesSource_Serialize = {
+	streamId: string,
+	ventureId: string,
+	name: string,
+	streamType: string,
+	/**  `active | paused | closed`. */
+	status: string,
+	/**  ISO time of the last import that worked; `None` when there has been none. */
+	lastImportAt: string | null,
+	daysSinceImport: number | null,
+	/**  Imports that worked (ok or partial); not rows, not amounts. */
+	imports: number,
+	/**  The Treasury monitor has an unacknowledged-or-not `stale_data` flag on this stream. */
+	stale: boolean,
+};
+
+export type FinancesView = FinancesView_Serialize | FinancesView_Deserialize;
+
+export type FinancesView_Deserialize = {
+	/**  `ok | missing | invalid`. */
+	ledger: string,
+	/**  `ok | missing | error`: whether the Treasury store could be read. */
+	treasury: string,
+	fx?: FinancesFx_Deserialize | null,
+	funds: FinancesFund_Deserialize[],
+	sources: FinancesSource_Deserialize[],
+	/**  The monitor's `stale | flags | ok | no_data`; `None` when there is no store. */
+	monitorState?: string | null,
+	monitorAsOf?: string | null,
+};
+
+export type FinancesView_Serialize = {
+	/**  `ok | missing | invalid`. */
+	ledger: string,
+	/**  `ok | missing | error`: whether the Treasury store could be read. */
+	treasury: string,
+	fx: FinancesFx_Serialize | null,
+	funds: FinancesFund_Serialize[],
+	sources: FinancesSource_Serialize[],
+	/**  The monitor's `stale | flags | ok | no_data`; `None` when there is no store. */
+	monitorState: string | null,
+	monitorAsOf: string | null,
+};
 
 export type Finding = Finding_Serialize | Finding_Deserialize;
 
@@ -5835,6 +5952,62 @@ export type VentureDetail_Serialize = {
 	budgetUsedJpy: number | null,
 	fundJpy: number | null,
 	openVotes: number,
+};
+
+export type VentureTrack = VentureTrack_Serialize | VentureTrack_Deserialize;
+
+export type VentureTrack_Deserialize = {
+	id: string,
+	name: string,
+	stage: string,
+	health: Health,
+	progress?: Progress | null,
+	nextStep?: string | null,
+	targetJpy?: number | null,
+	/**  Only with a ledger rate. */
+	targetUsd?: number | null,
+	streamIds: string[],
+	/**  This month, per stream and currency. `total_minor` is `None` for a month with no events. */
+	incomeMonth: TreasuryStreamMonth_Deserialize[],
+	/**  Logged minutes over the last 30 days; `None` when nothing was logged. */
+	attentionMinutes30d?: number | null,
+	perHour30d: TreasuryPerHour_Deserialize[],
+};
+
+export type VentureTrack_Serialize = {
+	id: string,
+	name: string,
+	stage: string,
+	health: Health,
+	progress: Progress | null,
+	nextStep: string | null,
+	targetJpy: number | null,
+	/**  Only with a ledger rate. */
+	targetUsd: number | null,
+	streamIds: string[],
+	/**  This month, per stream and currency. `total_minor` is `None` for a month with no events. */
+	incomeMonth: TreasuryStreamMonth_Serialize[],
+	/**  Logged minutes over the last 30 days; `None` when nothing was logged. */
+	attentionMinutes30d: number | null,
+	perHour30d: TreasuryPerHour_Serialize[],
+};
+
+export type VentureTracking = VentureTracking_Serialize | VentureTracking_Deserialize;
+
+export type VentureTracking_Deserialize = {
+	/**  `ok | missing | invalid`. */
+	ledger: string,
+	treasury: string,
+	fx?: FinancesFx_Deserialize | null,
+	ventures: VentureTrack_Deserialize[],
+};
+
+export type VentureTracking_Serialize = {
+	/**  `ok | missing | invalid`. */
+	ledger: string,
+	treasury: string,
+	fx: FinancesFx_Serialize | null,
+	ventures: VentureTrack_Serialize[],
 };
 
 export type VerifyReport = {

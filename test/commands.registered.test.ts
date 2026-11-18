@@ -203,6 +203,19 @@ describe("Tauri command registry", () => {
     expect(names.filter((n: string) => (n.startsWith("watch_proposal") || n.startsWith("market_")) && banned.test(n))).toEqual([]);
   });
 
+  it("the Enterprise view commands (B4) are registered and no name can move money or post", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    const b4 = ["finances_view", "venture_tracking_list", "content_stage_set", "content_draft_propose"];
+    for (const name of b4) expect(names).toContain(name);
+    expect(names.filter((n: string) => /^(finances|venture|content)_/.test(n)).sort()).toEqual([...b4].sort());
+    const banned = /transfer|pay|trade|convert|withdraw|send|buy|sell|move|wire|remit|swap|sign|broadcast|order|deposit|exchange|post|publish|tweet|share|submit|schedule/;
+    expect(names.filter((n: string) => /^(finances|venture|content)_/.test(n) && banned.test(n))).toEqual([]);
+    // No money_* / fx_* / treasury_* name was added for these views.
+    expect(names.filter((n: string) => /^(finances|venture|content)_/.test(n) && /^(money|fx|treasury)_/.test(n))).toEqual([]);
+  });
+
   it("the treasury commands are registered, with no way to move money and no repeat of the personal money names", async () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");

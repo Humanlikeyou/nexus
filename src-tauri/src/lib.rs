@@ -457,6 +457,10 @@ pub fn run() {
             commands::watch_proposals::watch_proposal_record,
             commands::watch_proposals::watch_proposal_dismiss,
             commands::watch_proposals::market_feed_status,
+            commands::enterprise_views::finances_view,
+            commands::enterprise_views::venture_tracking_list,
+            commands::content_pipeline::content_stage_set,
+            commands::content_pipeline::content_draft_propose,
             // Sessions
             sessions::save_session,
             sessions::list_sessions,

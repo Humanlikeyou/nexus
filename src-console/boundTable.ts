@@ -344,5 +344,9 @@ export const BOUND_TABLE: Record<string, Row> = {
   watch_proposal_record: (a) => bound.watchProposalRecord(a.id as never, a.via as never),
   watch_proposal_dismiss: (a) => bound.watchProposalDismiss(a.id as never, a.via as never),
   market_feed_status: () => bound.marketFeedStatus(),
+  finances_view: () => bound.financesView(),
+  venture_tracking_list: () => bound.ventureTrackingList(),
+  content_stage_set: (a) => bound.contentStageSet(a.title as never, a.from as never, a.to as never, a.postedByMe as never, a.via as never),
+  content_draft_propose: (a) => bound.contentDraftPropose(a.title as never),
   restart_services: (a) => bound.restartServices(a.services as never, a.deadlineMs as never),
 };

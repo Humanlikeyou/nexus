@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 pub const UNDO_MS: i64 = 8_000;
-const MAX_MD_BYTES: u64 = 1024 * 1024;
+pub(crate) const MAX_MD_BYTES: u64 = 1024 * 1024;
 const MAX_GOALS: usize = 500;
 const MAX_HISTORY: usize = 200;
 const MAX_TEXT: usize = 500;
@@ -209,6 +209,15 @@ pub(crate) enum UndoRef {
     Idea {
         line: String,
     },
+    /// 1118a B4: a content item moved between pipeline stages. Undo takes the line out of `to` and puts it
+    /// back in `from`.
+    Content {
+        line: String,
+        from: String,
+        to: String,
+        /// SHA-256 (hex) of the file text the move wrote. Undo refuses if the file changed since.
+        after_hash: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,7 +259,7 @@ impl Dirs {
     }
     /// Current text of a workspace file. The first add seeds from the legacy file (a copy: the legacy file is
     /// only read) when the app-data copy doesn't exist yet.
-    fn md_source(&self, name: &str) -> Result<String, String> {
+    pub(crate) fn md_source(&self, name: &str) -> Result<String, String> {
         let own = self.workspace.join(name);
         if own.exists() {
             return read_md(&own);
@@ -280,7 +289,7 @@ fn kind_ok_generic(kind: &str) -> Result<(), String> {
 fn kind_ok(kind: &str) -> Result<(), String> {
     if matches!(
         kind,
-        "goal" | "date" | "task" | "idea" | "route" | "watch" | "ha"
+        "goal" | "date" | "task" | "idea" | "route" | "watch" | "ha" | "content"
     ) {
         Ok(())
     } else {
@@ -587,7 +596,12 @@ pub(crate) fn preview_in(
 
 /// Inserts `line` after the last line of the first section whose header contains one of `keys`; adds the
 /// section at the end when there is none.
-fn insert_in_section(content: &str, keys: &[&str], new_header: &str, line: &str) -> String {
+pub(crate) fn insert_in_section(
+    content: &str,
+    keys: &[&str],
+    new_header: &str,
+    line: &str,
+) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let is_header = |l: &str| l.trim_start().starts_with('#');
     let start = lines
@@ -618,7 +632,7 @@ fn insert_in_section(content: &str, keys: &[&str], new_header: &str, line: &str)
     out.join("\n") + "\n"
 }
 
-fn remove_line(content: &str, line: &str) -> Option<String> {
+pub(crate) fn remove_line(content: &str, line: &str) -> Option<String> {
     let lines: Vec<&str> = content.lines().collect();
     let at = lines.iter().rposition(|l| *l == line)?;
     let mut out: Vec<&str> = lines.clone();
@@ -626,7 +640,7 @@ fn remove_line(content: &str, line: &str) -> Option<String> {
     Some(out.join("\n") + "\n")
 }
 
-fn read_md(path: &Path) -> Result<String, String> {
+pub(crate) fn read_md(path: &Path) -> Result<String, String> {
     match std::fs::symlink_metadata(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(_) => Err("store: can't read the file".into()),
@@ -810,6 +824,12 @@ fn payload_kind(p: &Payload) -> &'static str {
 
 fn revert(u: &UndoRef, dirs: &Dirs) -> Result<(), String> {
     match u {
+        UndoRef::Content {
+            line,
+            from,
+            to,
+            after_hash,
+        } => super::content_pipeline::revert_move(dirs, line, from, to, after_hash),
         UndoRef::Branch { id } => super::goal_route::reopen_in(&dirs.data, id),
         UndoRef::Watch { id } => super::watch_proposals::reopen_in(&dirs.data, id),
         UndoRef::Ha { entity_id, restore } => super::ha_devices::restore_blocking(
