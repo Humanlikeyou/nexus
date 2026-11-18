@@ -82,6 +82,8 @@ pub mod terrence_runtime;
 pub mod terrence_runtime_bridge;
 pub mod treasury;
 pub mod treasury_counts;
+pub mod treasury_monitor;
+pub mod treasury_review;
 pub mod treasury_sequences;
 pub mod turn_memory;
 pub mod unified_log;

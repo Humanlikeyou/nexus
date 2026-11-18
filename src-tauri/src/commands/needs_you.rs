@@ -66,6 +66,8 @@ pub(crate) struct Inputs {
     pub ledger: Result<Option<BusinessLedger>, String>,
     pub decided: Result<HashSet<String>, String>,
     pub crew: Result<Option<Vec<CrewIn>>, String>,
+    /// Open Treasury flags, stale first. `Ok(None)` when Treasury has no database yet (unwired).
+    pub treasury: Result<Option<Vec<super::treasury_monitor::Flag>>, String>,
 }
 
 fn link(id: &str, view: &str) -> Route {
@@ -250,7 +252,52 @@ pub(crate) fn build(i: Inputs) -> Vec<SourceReport> {
         ),
     };
 
-    vec![todos, dates, checkin, decisions, crew]
+    let treasury = match i.treasury {
+        Err(_) => report("treasury", Err("failed".into())),
+        Ok(None) => unwired("treasury"),
+        Ok(Some(flags)) => report(
+            "treasury",
+            Ok(flags
+                .into_iter()
+                .map(|f| {
+                    let stale = f.kind == "stale_data";
+                    let mut p = pointer(
+                        "treasury",
+                        format!("treasury-{}", f.id),
+                        treasury_title(&f.kind).into(),
+                        f.detail,
+                        link("enterprise", "treasury"),
+                    );
+                    p.due = day_part_of(&f.since);
+                    if stale {
+                        p.badge = Some(Badge {
+                            tone: "warning".into(),
+                            label: "Stale".into(),
+                        });
+                    }
+                    p
+                })
+                .collect()),
+        ),
+    };
+
+    vec![todos, dates, checkin, decisions, crew, treasury]
+}
+
+fn treasury_title(kind: &str) -> &'static str {
+    match kind {
+        "stale_data" => "Treasury data is out of date",
+        "failed_import" => "A Treasury import failed",
+        "income_down" => "Treasury income is down",
+        "no_income" => "No Treasury income lately",
+        "results_spike" => "Email bounces or unsubscribes are up",
+        "no_conversions" => "An email sequence has no conversions",
+        _ => "Treasury needs a look",
+    }
+}
+
+fn day_part_of(iso: &str) -> Option<String> {
+    iso.get(..10).map(str::to_string)
 }
 
 async fn gather() -> Inputs {
@@ -269,12 +316,13 @@ async fn gather() -> Inputs {
                     .map(|x| x.item_id.to_lowercase())
                     .collect::<HashSet<_>>()
             }),
+            super::treasury_monitor::needs_you_rows_in(&d),
         )
     })
     .await;
-    let (dates, checkin_done, ledger, decided) = local.unwrap_or_else(|_| {
+    let (dates, checkin_done, ledger, decided, treasury) = local.unwrap_or_else(|_| {
         let e = || "failed".to_string();
-        (Err(e()), Err(e()), Err(e()), Err(e()))
+        (Err(e()), Err(e()), Err(e()), Err(e()), Err(e()))
     });
     let crew = match crew::crew_health().await.as_deref() {
         Ok("not_configured") => Ok(None),
@@ -302,6 +350,7 @@ async fn gather() -> Inputs {
         ledger,
         decided,
         crew,
+        treasury,
     }
 }
 
@@ -376,6 +425,21 @@ mod tests {
                 crew: "Taiyo Skin".into(),
                 title: "Launch post draft".into(),
             }])),
+            treasury: Ok(Some(vec![
+                tflag("stale_data:s1", "stale_data"),
+                tflag("no_income:s1", "no_income"),
+            ])),
+        }
+    }
+    fn tflag(id: &str, kind: &str) -> super::super::treasury_monitor::Flag {
+        super::super::treasury_monitor::Flag {
+            id: id.into(),
+            kind: kind.into(),
+            stream_id: Some("s1".into()),
+            sequence_id: None,
+            since: "2026-11-10T04:00:00.000+09:00".into(),
+            detail: "No import for 8 days (limit 7).".into(),
+            acked: false,
         }
     }
     fn by<'a>(r: &'a [SourceReport], s: &str) -> &'a SourceReport {
@@ -478,6 +542,25 @@ mod tests {
         assert_eq!(by(&r, "crew").state, "unwired");
         assert_eq!(by(&r, "dates").state, "ok");
         assert_eq!(by(&r, "dates").rows.len(), 1);
+    }
+
+    #[test]
+    fn treasury_flags_point_stale_first_and_a_failed_treasury_hides_nothing_else() {
+        let r = build(inputs());
+        let t = by(&r, "treasury");
+        assert_eq!(t.state, "ok");
+        assert_eq!(t.rows[0].id, "treasury-stale_data:s1");
+        assert_eq!(t.rows[0].badge.as_ref().unwrap().label, "Stale");
+        assert_eq!(t.rows[0].due.as_deref(), Some("2026-11-10"));
+        assert_eq!(t.rows[1].title, "No Treasury income lately");
+        let mut i = inputs();
+        i.treasury = Err("boom".into());
+        let r = build(i);
+        assert_eq!(by(&r, "treasury").state, "failed");
+        assert_eq!(by(&r, "todos").rows.len(), 2);
+        let mut i = inputs();
+        i.treasury = Ok(None);
+        assert_eq!(by(&build(i), "treasury").state, "unwired");
     }
 
     #[test]

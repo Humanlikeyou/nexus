@@ -98,7 +98,7 @@ pub(crate) fn parse_pmset(out: &str) -> Option<Battery> {
 }
 
 /// Fixed argument list, absolute path, no shell. Unreadable (not macOS, pmset missing) is `None`.
-fn read_battery() -> Option<Battery> {
+pub(crate) fn read_battery() -> Option<Battery> {
     let out = std::process::Command::new("/usr/bin/pmset")
         .args(["-g", "batt"])
         .output()
@@ -165,7 +165,7 @@ fn parse_rfc(s: &Option<String>) -> Option<DateTime<Utc>> {
 }
 
 /// A Hermes turn, a crew run, or a Muse recording that is still open.
-async fn busy_now() -> bool {
+pub(crate) async fn busy_now() -> bool {
     super::goal_roadmap::system_busy().await
         || super::replay::active_recording_name().await.is_some()
 }

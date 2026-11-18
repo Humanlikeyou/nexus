@@ -697,6 +697,38 @@ pub(crate) async fn local_complete(instruction: &str, user: &str) -> Result<Stri
     Ok(content)
 }
 
+/// The headers a local deep-tier call sends: no Claude, local mode, deep route.
+pub(crate) fn local_deep_headers() -> Vec<(&'static str, String)> {
+    vec![
+        ("X-Amara-Allow-Claude", "0".to_string()),
+        ("X-Amara-Mode", "local".to_string()),
+        ("X-Amara-Route", "deep".to_string()),
+    ]
+}
+
+/// One background completion on the deep tier, never the cloud (Treasury's monthly review). Same rules
+/// as `local_complete` (loopback base, Claude forced off, a Claude-tier reply refused) with the deep
+/// route. `instruction` is appended to Amara's one system prompt.
+pub(crate) async fn local_deep_complete(instruction: &str, user: &str) -> Result<String, String> {
+    let saved = crate::commands::telegram::load_config();
+    let base = router_base(None, saved.amara_router_url.as_deref());
+    if loopback_base(&base).as_deref() != Some(base.as_str()) {
+        return Err(ROUTER_FAILED.to_string());
+    }
+    let headers = local_deep_headers();
+    let system = format!("{}\n\n{instruction}", system_prompt(&amara_persona()));
+    let body = router_body(&system, user);
+    let transport = HttpTransport {
+        client: no_redirect_client(),
+        body_cap: Some(DEEP_BODY_CAP),
+    };
+    let (content, tier, ..) = ask_router(&transport, &base, &headers, &body).await?;
+    if tier == Tier::Claude {
+        return Err(ROUTER_FAILED.to_string());
+    }
+    Ok(content)
+}
+
 /// Asks the router's dry-run endpoint which tier it would use (may run its classifier).
 #[tauri::command]
 #[specta::specta]

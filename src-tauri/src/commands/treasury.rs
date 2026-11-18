@@ -178,7 +178,7 @@ pub struct CsvMapping {
 
 // ───────────────────────────── storage ─────────────────────────────
 
-fn db_path(data: &Path) -> PathBuf {
+pub(super) fn db_path(data: &Path) -> PathBuf {
     data.join("business").join("treasury.db")
 }
 
@@ -263,6 +263,26 @@ CREATE TABLE IF NOT EXISTS sequence_results(
   import_id TEXT REFERENCES results_imports(id),
   PRIMARY KEY(sequence_id, day)
 );
+CREATE TABLE IF NOT EXISTS flags(
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK(kind IN ('stale_data','failed_import','income_down','no_income','results_spike','no_conversions')),
+  stream_id TEXT,
+  sequence_id TEXT,
+  since TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  acked INTEGER NOT NULL DEFAULT 0,
+  alerted INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS monitor_state(
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS reviews(
+  month TEXT PRIMARY KEY,
+  built_at TEXT NOT NULL,
+  text TEXT NOT NULL,
+  hidden INTEGER NOT NULL DEFAULT 0
+);
 ";
 
 pub(super) fn store_err<E>(_: E) -> String {
@@ -291,7 +311,7 @@ pub(super) fn is_date(s: &str) -> bool {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok() && s.len() == 10
 }
 
-fn is_month(s: &str) -> bool {
+pub(super) fn is_month(s: &str) -> bool {
     s.len() == 7 && is_date(&format!("{s}-01"))
 }
 
@@ -343,7 +363,7 @@ fn ledger_venture_ids(data: &Path) -> Option<HashSet<String>> {
     }
 }
 
-fn stream_add_in(
+pub(super) fn stream_add_in(
     data: &Path,
     venture_id: &str,
     name: &str,
@@ -1153,7 +1173,7 @@ fn attention_list_in(
 // ───────────────────────────── reads ─────────────────────────────
 
 /// `(stream, currency, month) -> total` for months in `[from, to]` (`YYYY-MM`).
-fn monthly_totals(
+pub(super) fn monthly_totals(
     conn: &Connection,
     from: &str,
     to: &str,
@@ -1252,7 +1272,7 @@ fn income_month_in(
 }
 
 /// Mean of the known values, rounded half away from zero. `None` when there are none.
-fn mean_minor(vals: &[Option<i64>]) -> Option<i64> {
+pub(super) fn mean_minor(vals: &[Option<i64>]) -> Option<i64> {
     let known: Vec<i128> = vals.iter().flatten().map(|v| *v as i128).collect();
     if known.is_empty() {
         return None;

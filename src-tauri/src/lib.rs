@@ -190,6 +190,8 @@ pub fn run() {
             commands::daily_table::start(app.handle().clone());
             // Telegram relay timer: a no-op until the relay is on, approved and outbound is allowed.
             commands::notify_relay::start();
+            // Treasury exception monitor: nightly with catch-up; does nothing until treasury.db exists.
+            commands::treasury_monitor::start();
             // Voice only while the app is open (decision 0024): app_alive heartbeat every 5 s.
             commands::voice_heartbeat::start();
 
@@ -354,6 +356,13 @@ pub fn run() {
             commands::treasury_sequences::treasury_sequence_approve,
             commands::treasury_sequences::treasury_results_import_pick,
             commands::treasury_sequences::treasury_results_list,
+            commands::treasury_monitor::treasury_flags_list,
+            commands::treasury_monitor::treasury_flags_ack,
+            commands::treasury_monitor::treasury_monitor_run_now,
+            commands::treasury_monitor::treasury_monitor_settings_get,
+            commands::treasury_monitor::treasury_monitor_settings_set,
+            commands::treasury_review::treasury_review_read,
+            commands::treasury_review::treasury_review_build,
             commands::money::fx_rate_get,
             commands::money::fx_rate_set_manual,
             commands::money::fx_rate_refresh,

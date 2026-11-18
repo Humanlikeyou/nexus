@@ -39,11 +39,15 @@ const MAX_SENTENCES: usize = 3;
 const TEST_TEXT: &str =
     "Test from Amara OS. If you can read this, the Telegram relay is connected.";
 
-pub(crate) const KINDS: [&str; 7] = [
-    "sleep", "recovery", "effort", "battery", "sync", "lucid", "illness",
+pub(crate) const KINDS: [&str; 8] = [
+    "sleep", "recovery", "effort", "battery", "sync", "lucid", "illness", "treasury",
 ];
-/// Kinds the app can build an event for today.
-pub(crate) const CONNECTED: [&str; 2] = ["sleep", "recovery"];
+/// Kinds the app can build an event for today. `treasury` is a fixed plain line (no numbers, amounts or
+/// names) raised by the Treasury exception monitor (decision 0032 #9).
+pub(crate) const CONNECTED: [&str; 3] = ["sleep", "recovery", "treasury"];
+/// Connected kinds that start switched on. `treasury` starts off: turning it on grows the kinds past the
+/// approved list, so `grew_since_approval` forces a fresh native approval before anything is sent.
+const DEFAULT_ON: [&str; 2] = ["sleep", "recovery"];
 
 const OFF_MSG: &str =
     "Outbound sends are disabled for this session (NEXUS_OUTBOUND_DISABLED or local-only mode).";
@@ -81,7 +85,7 @@ impl Default for RelaySettings {
             // Kinds the app can't see yet default to off.
             kinds: KINDS
                 .iter()
-                .map(|k| ((*k).to_string(), CONNECTED.contains(k)))
+                .map(|k| ((*k).to_string(), DEFAULT_ON.contains(k)))
                 .collect(),
         }
     }
@@ -444,7 +448,7 @@ const NUM_ORDINALS: &[&str] = &[
 const STEM_FALSE_FRIENDS: &[&str] = &["weight", "height", "freight", "sleight"];
 
 /// True when a lowercase ASCII word is, or is built from, a number word.
-fn number_like(w: &str) -> bool {
+pub(crate) fn number_like(w: &str) -> bool {
     if NUMBER_WORDS.contains(&w) || NUM_ORDINALS.contains(&w) {
         return true;
     }
@@ -811,6 +815,88 @@ pub(crate) async fn dispatch_event<T: TgTransport, W: LocalWriter>(
             Err(e)
         }
     }
+}
+
+/// The one line the Treasury monitor ever sends: fixed text, no digits, no amounts, no names. Anything the
+/// monitor found stays in the app.
+pub(crate) const TREASURY_LINE: &str =
+    "Treasury has something that needs a look. Open Amara OS to see it.";
+
+/// True when `text` passes the same prose rules as model text (letters, spaces and light punctuation only,
+/// no number words, no links, at most three sentences). Checked right before every Treasury send.
+pub(crate) fn plain_line_ok(text: &str) -> bool {
+    let dummy = RelayEvent {
+        kind: "treasury",
+        day: String::new(),
+        vars: vec![("TREASURY", String::new(), "unused")],
+        required: "TREASURY",
+        plain: String::new(),
+        trace: super::relay_check::Trace {
+            row: Default::default(),
+            built_at_ms: 0,
+        },
+    };
+    validate_prose(&format!("{{TREASURY}}{text}"), &dummy).is_ok_and(|out| out == text)
+}
+
+/// Send the Treasury line. Same guard order as `dispatch_event`: kill switch, settings and approvals,
+/// the day claimed in the ledger before the send (one line per day), then the single post. There is no
+/// model call and no value in the text. `day` is the JST day of the run.
+pub(crate) async fn dispatch_treasury<T: TgTransport>(
+    off: Gate<'_>,
+    dir: &Path,
+    kc: &dyn Keychain,
+    t: &T,
+    day: &str,
+) -> Result<Dispatch, String> {
+    if off() {
+        return Err(OFF_MSG.to_string());
+    }
+    let _one_at_a_time = DISPATCH.lock().await;
+    let s = load_settings_in(dir);
+    if !s.enabled {
+        return Ok(Dispatch::Skipped("relay is off"));
+    }
+    if !s.kinds.get("treasury").copied().unwrap_or(false) {
+        return Ok(Dispatch::Skipped("kind is off"));
+    }
+    if !s.approved_kinds.iter().any(|k| k == "treasury") {
+        return Err(KINDS_CHANGED.to_string());
+    }
+    if !plain_line_ok(TREASURY_LINE) {
+        return Ok(Dispatch::Skipped("no verified text"));
+    }
+    let Ok(mut ledger) = load_ledger_strict(dir) else {
+        return Ok(Dispatch::Skipped("ledger unavailable"));
+    };
+    if ledger
+        .days
+        .get("treasury")
+        .is_some_and(|d| d.as_str() >= day)
+    {
+        return Ok(Dispatch::Skipped("already sent for that day"));
+    }
+    let before = ledger.clone();
+    ledger.days.insert("treasury".to_string(), day.to_string());
+    if write_ledger(dir, &ledger).is_err() {
+        return Ok(Dispatch::Skipped("ledger unavailable"));
+    }
+    match send_text(t, kc, TREASURY_LINE, off, s.chat_pin.as_deref()).await {
+        Ok(()) => {
+            ledger.last_sent_ms = Some(chrono::Utc::now().timestamp_millis());
+            let _ = write_ledger(dir, &ledger);
+            Ok(Dispatch::Sent)
+        }
+        Err(e) => {
+            let _ = write_ledger(dir, &before);
+            Err(e)
+        }
+    }
+}
+
+/// The live path for the monitor: the real Keychain, transport and kill switch.
+pub(crate) async fn dispatch_treasury_live(day: &str) -> Result<Dispatch, String> {
+    dispatch_treasury(&live_off, &dir(), &MacKeychain, &HttpTelegram, day).await
 }
 
 /// Send Test: kill switch first (no dialog when blocked), then the approval (which shows the last 4 of the
@@ -2250,5 +2336,88 @@ mod tests {
         assert!(send_url("123:ABC")
             .unwrap()
             .starts_with("https://api.telegram.org/bot"));
+    }
+
+    // ---- Treasury kind (decision 0032 #9) ----
+
+    #[test]
+    fn the_treasury_kind_is_known_connected_and_starts_off() {
+        assert!(KINDS.contains(&"treasury") && CONNECTED.contains(&"treasury"));
+        let d = RelaySettings::default();
+        assert_eq!(d.kinds.get("treasury"), Some(&false));
+        assert_eq!(d.kinds.get("sleep"), Some(&true));
+    }
+
+    #[test]
+    fn turning_the_treasury_kind_on_forces_a_fresh_approval() {
+        let mut s = RelaySettings {
+            enabled: true,
+            chat_pin: Some(chat_hash(CHAT)),
+            approved_kinds: vec!["sleep".into(), "recovery".into()],
+            ..Default::default()
+        };
+        assert!(
+            !s.grew_since_approval(),
+            "default settings need no new approval"
+        );
+        s.kinds.insert("treasury".into(), true);
+        assert!(
+            s.grew_since_approval(),
+            "a kind outside the approved list forces approval"
+        );
+        s.approved_kinds.push("treasury".into());
+        assert!(!s.grew_since_approval());
+    }
+
+    #[tokio::test]
+    async fn treasury_is_not_sent_without_its_approval_or_under_the_kill_switch() {
+        let d = tmp();
+        let kc = keys();
+        let t = MockTg::new();
+        // Kind on but never approved: refused, nothing posted.
+        on(&d, &[("treasury", true)]);
+        let r = dispatch_treasury(&never, &d, &kc, &t, "2026-11-18").await;
+        assert_eq!(r.unwrap_err(), KINDS_CHANGED);
+        assert_eq!(t.count(), 0);
+        // Kind off: skipped.
+        on(&d, &[]);
+        assert_eq!(
+            dispatch_treasury(&never, &d, &kc, &t, "2026-11-18").await,
+            Ok(Dispatch::Skipped("kind is off"))
+        );
+        // Approved and on: exactly the fixed line, once per day.
+        let mut s = load_settings_in(&d);
+        s.kinds.insert("treasury".into(), true);
+        s.approved_kinds.push("treasury".into());
+        save_settings_in(&d, &s).unwrap();
+        assert_eq!(
+            dispatch_treasury(&never, &d, &kc, &t, "2026-11-18").await,
+            Ok(Dispatch::Sent)
+        );
+        assert_eq!(t.sent.borrow()[0].2, TREASURY_LINE);
+        assert_eq!(
+            dispatch_treasury(&never, &d, &kc, &t, "2026-11-18").await,
+            Ok(Dispatch::Skipped("already sent for that day"))
+        );
+        assert_eq!(t.count(), 1);
+        // The kill switch wins over everything, before any read.
+        let r = dispatch_treasury(&always, &d, &kc, &t, "2026-11-19").await;
+        assert!(r.unwrap_err().contains("disabled"));
+        assert_eq!(t.count(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_treasury_line_is_fixed_plain_and_has_no_digit_amount_or_name() {
+        assert!(plain_line_ok(TREASURY_LINE));
+        assert!(!TREASURY_LINE.chars().any(|c| c.is_numeric()));
+        assert!(!plain_line_ok("Treasury income is 123 today."));
+        assert!(!plain_line_ok("Visit http://example.com"));
+        // The send function builds no text of its own.
+        let src = include_str!("notify_relay.rs");
+        let f = &src[src.find("pub(crate) async fn dispatch_treasury<").unwrap()..];
+        let f = &f[..f.find("/// The live path for the monitor").unwrap()];
+        assert!(f.contains("send_text(t, kc, TREASURY_LINE"));
+        assert!(!f.contains("format!") && !f.contains("compose("));
     }
 }

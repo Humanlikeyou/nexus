@@ -3,6 +3,7 @@ import type {
   TreasuryCountsSnapshot_Serialize, TreasurySequenceDraft_Serialize, TreasurySequenceResultRow_Serialize,
   FxRate, TreasuryAttentionRow, TreasuryPerHour_Serialize, TreasuryStreamMonth_Serialize,
   TreasuryStream_Serialize, TreasuryTrendRow_Serialize,
+  TreasuryFlag_Serialize, TreasuryMonitorView_Serialize, TreasuryMonitorStatus_Serialize, TreasuryReview_Serialize,
 } from "../bindings.gen";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 
@@ -151,5 +152,86 @@ export function liveTreasuryContacts(counts: unknown, sequences: unknown): Treas
     counts: () => liveTreasuryCounts(counts),
     sequences: () => (drafts.length > 0 ? live(drafts) : UNWIRED),
     results: () => (results.some(hasFigure) ? live(results) : UNWIRED),
+  };
+}
+
+/**
+ * Phase 5: the exception monitor and the monthly review. The backend keeps the flags (six kinds, stale
+ * data first) and the status; this adapter only reads them. Two rules hold here as well as in Rust:
+ * stale data is never reported as healthy, and "ok" always carries its "as of" date. A review whose
+ * numbers did not match the ledger rows (`hidden`) or that has no data exposes no text. No markup.
+ */
+export type TreasuryFlag = TreasuryFlag_Serialize;
+export type TreasuryMonitorView = TreasuryMonitorView_Serialize;
+export type TreasuryMonitorStatus = TreasuryMonitorStatus_Serialize;
+export type TreasuryReview = TreasuryReview_Serialize;
+
+export interface TreasuryMonitorSnapshot {
+  flags: TreasuryFlag[];
+  monitor: TreasuryMonitorView | null;
+  review: TreasuryReview | null;
+}
+
+export type TreasuryMonitorCalls = Pick<typeof commands, "treasuryFlagsList" | "treasuryMonitorSettingsGet" | "treasuryReviewRead">;
+
+/** `month` is the complete month (YYYY-MM) whose stored review to read; null skips the read. */
+export async function loadTreasuryMonitor(month: string | null, calls: TreasuryMonitorCalls = commands): Promise<TreasuryMonitorSnapshot> {
+  const [flags, monitor, review] = await Promise.all([
+    part(() => calls.treasuryFlagsList() as Promise<TreasuryFlag[]>, []),
+    part(() => calls.treasuryMonitorSettingsGet() as Promise<TreasuryMonitorView | null>, null),
+    month ? part(() => calls.treasuryReviewRead(month) as Promise<TreasuryReview | null>, null) : Promise.resolve(null),
+  ]);
+  return { flags, monitor, review };
+}
+
+export interface TreasuryMonitorAdapter {
+  /** Open flags, stale data first. An empty list is real (live) only when the monitor has reported. */
+  flags(): Wired<TreasuryFlag[]>;
+  /** `stale | flags | ok | no_data`. Derived from the flags too, so stale can never read as ok. */
+  status(): Wired<TreasuryMonitorStatus>;
+  /** The review page, only when it passed the number check. */
+  review(): Wired<TreasuryReview>;
+}
+
+export const unwiredTreasuryMonitor: TreasuryMonitorAdapter = {
+  flags: () => UNWIRED, status: () => UNWIRED, review: () => UNWIRED,
+};
+
+const KIND_RANK = ["stale_data", "failed_import", "income_down", "no_income", "results_spike", "no_conversions"];
+const rank = (k: string) => { const i = KIND_RANK.indexOf(k); return i < 0 ? KIND_RANK.length : i; };
+
+const isFlag = (x: unknown): x is TreasuryFlag => {
+  if (!x || typeof x !== "object") return false;
+  const f = x as Record<string, unknown>;
+  return typeof f.id === "string" && typeof f.kind === "string" && typeof f.since === "string" && typeof f.detail === "string" && typeof f.acked === "boolean";
+};
+
+const isMonitor = (x: unknown): x is TreasuryMonitorView => {
+  if (!x || typeof x !== "object") return false;
+  const st = (x as Record<string, unknown>).status as Record<string, unknown> | undefined;
+  return !!st && typeof st.state === "string";
+};
+
+/** Live adapter over a loaded monitor snapshot. Without a monitor reply every part is unwired. */
+export function liveTreasuryMonitor(snapshot: unknown): TreasuryMonitorAdapter {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return unwiredTreasuryMonitor;
+  const s = snapshot as Record<string, unknown>;
+  if (!isMonitor(s.monitor)) return unwiredTreasuryMonitor;
+  const monitor = s.monitor;
+  const flags = (isArr(s.flags) ? s.flags.filter(isFlag) : []).slice().sort((a, b) => rank(a.kind) - rank(b.kind) || a.since.localeCompare(b.since));
+  const review = s.review as TreasuryReview | null | undefined;
+  return {
+    flags: () => live(flags),
+    status: () => {
+      const state = flags.some((f) => f.kind === "stale_data") ? "stale" : flags.length > 0 ? "flags" : monitor.status.state;
+      if (state === "no_data") return UNWIRED;
+      if (state === "ok") {
+        const asOf = monitor.status.asOf;
+        // "ok" is never shown without the date it is as of.
+        return typeof asOf === "string" && asOf.length === 10 ? live({ state: "ok", asOf }) : UNWIRED;
+      }
+      return live({ state, asOf: null });
+    },
+    review: () => (review && review.state === "ok" && typeof review.text === "string" && review.text.length > 0 ? live(review) : UNWIRED),
   };
 }

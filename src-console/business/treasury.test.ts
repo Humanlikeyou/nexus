@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { UNWIRED } from "../lib/sampleAdapters";
 import {
   isTreasurySnapshot, liveTreasury, liveTreasuryContacts, liveTreasuryCounts, loadTreasury, loadTreasuryCounts, loadTreasurySequences,
+  liveTreasuryMonitor, loadTreasuryMonitor, unwiredTreasuryMonitor, type TreasuryMonitorCalls,
   unwiredTreasury, type TreasuryCalls, type TreasuryCountsCalls, type TreasurySequenceCalls, type TreasurySnapshot,
 } from "./treasury";
 
@@ -107,5 +108,66 @@ describe("Treasury counts and sequences (phases 3 and 4)", () => {
     const sc = { treasurySequenceList: vi.fn().mockResolvedValue([draft]), treasuryResultsList: vi.fn().mockRejectedValue("store_error") } as unknown as TreasurySequenceCalls;
     expect(await loadTreasurySequences(sc)).toEqual({ drafts: [draft], results: [] });
     expect(sc.treasuryResultsList).toHaveBeenCalledWith(null);
+  });
+});
+
+const flag = (kind: string, id = kind + ":s1", since = "2026-11-10T04:00:00.000+09:00") => ({ id, kind, streamId: "s1", sequenceId: null, since, detail: "d", acked: false });
+const monitor = (state: string, asOf: string | null) => ({
+  settings: { nightly: true, staleDays: 7, staleDaysByStream: {}, incomeDropPct: 30, noIncomeDays: 14, noConversionDays: 30, spikePct: 5 },
+  status: { state, asOf }, lastRunAt: null, lastRunResult: null,
+});
+const review = (state: string, text: string | null) => ({ month: "2026-10", state, text, reason: null, builtAt: null, rows: [] });
+
+describe("live Treasury monitor adapter (phase 5)", () => {
+  it("no monitor reply or junk: exactly the unwired adapter", () => {
+    for (const junk of [null, [], "x", {}, { monitor: {}, flags: [] }, { monitor: { status: {} }, flags: [] }]) expect(liveTreasuryMonitor(junk)).toBe(unwiredTreasuryMonitor);
+  });
+
+  it("flags are live and sorted with stale data first", () => {
+    const a = liveTreasuryMonitor({ monitor: monitor("stale", null), flags: [flag("no_income"), flag("stale_data"), flag("failed_import"), { id: 1 }], review: null });
+    const f = a.flags();
+    expect(f.state).toBe("live");
+    if (f.state === "live") expect(f.value.map((x) => x.kind)).toEqual(["stale_data", "failed_import", "no_income"]);
+  });
+
+  it("an empty flag list is real once the monitor has reported", () => {
+    expect(liveTreasuryMonitor({ monitor: monitor("ok", "2026-11-17"), flags: [], review: null }).flags()).toEqual({ state: "live", value: [] });
+  });
+
+  it("ok always carries its as-of date; without one it is unwired, never a bare all-clear", () => {
+    expect(liveTreasuryMonitor({ monitor: monitor("ok", "2026-11-17"), flags: [] }).status()).toEqual({ state: "live", value: { state: "ok", asOf: "2026-11-17" } });
+    expect(liveTreasuryMonitor({ monitor: monitor("ok", null), flags: [] }).status()).toBe(UNWIRED);
+    expect(liveTreasuryMonitor({ monitor: monitor("no_data", null), flags: [] }).status()).toBe(UNWIRED);
+  });
+
+  it("stale data is never reported as healthy, even if the backend status says ok", () => {
+    const s = liveTreasuryMonitor({ monitor: monitor("ok", "2026-11-17"), flags: [flag("stale_data")] }).status();
+    expect(s).toEqual({ state: "live", value: { state: "stale", asOf: null } });
+    const other = liveTreasuryMonitor({ monitor: monitor("ok", "2026-11-17"), flags: [flag("no_income")] }).status();
+    expect(other).toEqual({ state: "live", value: { state: "flags", asOf: null } });
+  });
+
+  it("a review is live only when it passed the number check and has text", () => {
+    const ok = review("ok", "Page.");
+    expect(liveTreasuryMonitor({ monitor: monitor("ok", "2026-11-17"), flags: [], review: ok }).review()).toEqual({ state: "live", value: ok });
+    for (const r of [review("hidden", null), review("no_data", null), review("ok", ""), review("hidden", "leaked text"), null]) {
+      expect(liveTreasuryMonitor({ monitor: monitor("ok", "2026-11-17"), flags: [], review: r }).review()).toBe(UNWIRED);
+    }
+  });
+
+  it("the loader calls the typed bridge; a failed read leaves that part empty", async () => {
+    const calls = {
+      treasuryFlagsList: vi.fn().mockResolvedValue([flag("stale_data")]),
+      treasuryMonitorSettingsGet: vi.fn().mockRejectedValue("store_error"),
+      treasuryReviewRead: vi.fn().mockResolvedValue(review("ok", "Page.")),
+    } as unknown as TreasuryMonitorCalls;
+    const snap = await loadTreasuryMonitor("2026-10", calls);
+    expect(snap.flags).toHaveLength(1);
+    expect(snap.monitor).toBeNull();
+    expect(snap.review?.text).toBe("Page.");
+    expect(calls.treasuryReviewRead).toHaveBeenCalledWith("2026-10");
+    expect(liveTreasuryMonitor(snap)).toBe(unwiredTreasuryMonitor);
+    const none = await loadTreasuryMonitor(null, calls);
+    expect(none.review).toBeNull();
   });
 });

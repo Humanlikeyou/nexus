@@ -365,6 +365,18 @@ export const commands = {
 	treasurySequenceApprove: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<TreasurySequenceDraft_Serialize>("treasury_sequence_approve", { id }, options),
 	treasuryResultsImportPick: (sequenceId: string, mapping: TreasuryResultsMapping_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryResultsImportResult>("treasury_results_import_pick", { sequenceId, mapping }, options),
 	treasuryResultsList: (sequenceId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasurySequenceResultRow_Serialize[]>("treasury_results_list", { sequenceId }, options),
+	treasuryFlagsList: (options?: InvokeOptions) => __TAURI_INVOKE<TreasuryFlag_Serialize[]>("treasury_flags_list", undefined, options),
+	treasuryFlagsAck: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("treasury_flags_ack", { id }, options),
+	/**  The same code path as the nightly job, including the relay line for new flags. */
+	treasuryMonitorRunNow: (options?: InvokeOptions) => __TAURI_INVOKE<TreasuryRunResult_Serialize>("treasury_monitor_run_now", undefined, options),
+	treasuryMonitorSettingsGet: (options?: InvokeOptions) => __TAURI_INVOKE<TreasuryMonitorView_Serialize>("treasury_monitor_settings_get", undefined, options),
+	treasuryMonitorSettingsSet: (patch: TreasuryMonitorSettingsPatch_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryMonitorView_Serialize>("treasury_monitor_settings_set", { patch }, options),
+	treasuryReviewRead: (month: string, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryReview_Serialize | null>("treasury_review_read", { month }, options),
+	/**
+	 *  Builds (and stores) the review with the local deep tier. A page that fails the number check is
+	 *  returned hidden and not stored.
+	 */
+	treasuryReviewBuild: (month: string, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryReview_Serialize>("treasury_review_build", { month }, options),
 	moneyAccountAdd: (draft: MoneyAccountDraft, options?: InvokeOptions) => __TAURI_INVOKE<MoneyAccount>("money_account_add", { draft }, options),
 	moneyWatchAdd: (accountId: string, value: string, options?: InvokeOptions) => __TAURI_INVOKE<WatchAdded>("money_watch_add", { accountId, value }, options),
 	moneyBalanceSetManual: (accountId: string, nativeAmount: number | null, asOf: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("money_balance_set_manual", { accountId, nativeAmount, asOf }, options),
@@ -4902,6 +4914,36 @@ export type TreasuryCsvMapping_Serialize = {
 	dateFormat: string | null,
 };
 
+export type TreasuryFlag = TreasuryFlag_Serialize | TreasuryFlag_Deserialize;
+
+export type TreasuryFlag_Deserialize = {
+	/**  Stable while the condition holds: `kind:subject`. */
+	id: string,
+	/**  One of `stale_data | failed_import | income_down | no_income | results_spike | no_conversions`. */
+	kind: string,
+	streamId?: string | null,
+	sequenceId?: string | null,
+	/**  When the flag was first raised (ISO, JST). */
+	since: string,
+	/**  A short fixed sentence with day counts or percentages only. Never an amount or a name. */
+	detail: string,
+	acked: boolean,
+};
+
+export type TreasuryFlag_Serialize = {
+	/**  Stable while the condition holds: `kind:subject`. */
+	id: string,
+	/**  One of `stale_data | failed_import | income_down | no_income | results_spike | no_conversions`. */
+	kind: string,
+	streamId: string | null,
+	sequenceId: string | null,
+	/**  When the flag was first raised (ISO, JST). */
+	since: string,
+	/**  A short fixed sentence with day counts or percentages only. Never an amount or a name. */
+	detail: string,
+	acked: boolean,
+};
+
 export type TreasuryFxStatus = TreasuryFxStatus_Serialize | TreasuryFxStatus_Deserialize;
 
 export type TreasuryFxStatus_Deserialize = {
@@ -4928,6 +4970,94 @@ export type TreasuryImportResult = {
 	skipped: number,
 	failed: number,
 	importId: string,
+};
+
+export type TreasuryMonitorSettings = TreasuryMonitorSettings_Serialize | TreasuryMonitorSettings_Deserialize;
+
+export type TreasuryMonitorSettingsPatch = TreasuryMonitorSettingsPatch_Serialize | TreasuryMonitorSettingsPatch_Deserialize;
+
+export type TreasuryMonitorSettingsPatch_Deserialize = {
+	nightly?: boolean | null,
+	staleDays?: number | null,
+	/**  Replaces the whole override map. */
+	staleDaysByStream?: { [key in string]: number } | null,
+	incomeDropPct?: number | null,
+	noIncomeDays?: number | null,
+	noConversionDays?: number | null,
+	spikePct?: number | null,
+};
+
+export type TreasuryMonitorSettingsPatch_Serialize = {
+	nightly: boolean | null,
+	staleDays: number | null,
+	/**  Replaces the whole override map. */
+	staleDaysByStream: { [key in string]: number } | null,
+	incomeDropPct: number | null,
+	noIncomeDays: number | null,
+	noConversionDays: number | null,
+	spikePct: number | null,
+};
+
+export type TreasuryMonitorSettings_Deserialize = {
+	nightly?: boolean,
+	/**  Days without a successful import before a stream is stale (decision 0032 #7: 7). */
+	staleDays?: number,
+	/**  Per-stream override of `stale_days`, by stream id. */
+	staleDaysByStream?: { [key in string]: number },
+	/**  Income down by MORE than this percent against the trailing average. */
+	incomeDropPct?: number,
+	noIncomeDays?: number,
+	noConversionDays?: number,
+	/**  Bounces plus unsubscribes above this percent of sends. */
+	spikePct?: number,
+};
+
+export type TreasuryMonitorSettings_Serialize = {
+	nightly: boolean,
+	/**  Days without a successful import before a stream is stale (decision 0032 #7: 7). */
+	staleDays: number,
+	/**  Per-stream override of `stale_days`, by stream id. */
+	staleDaysByStream: { [key in string]: number },
+	/**  Income down by MORE than this percent against the trailing average. */
+	incomeDropPct: number,
+	noIncomeDays: number,
+	noConversionDays: number,
+	/**  Bounces plus unsubscribes above this percent of sends. */
+	spikePct: number,
+};
+
+export type TreasuryMonitorStatus = TreasuryMonitorStatus_Serialize | TreasuryMonitorStatus_Deserialize;
+
+export type TreasuryMonitorStatus_Deserialize = {
+	/**  `stale | flags | ok | no_data`. Stale wins over everything; `ok` only ever comes with `as_of`. */
+	state: string,
+	/**  The oldest last-import date (YYYY-MM-DD) across active streams. Set only for `ok`. */
+	asOf?: string | null,
+};
+
+export type TreasuryMonitorStatus_Serialize = {
+	/**  `stale | flags | ok | no_data`. Stale wins over everything; `ok` only ever comes with `as_of`. */
+	state: string,
+	/**  The oldest last-import date (YYYY-MM-DD) across active streams. Set only for `ok`. */
+	asOf: string | null,
+};
+
+export type TreasuryMonitorView = TreasuryMonitorView_Serialize | TreasuryMonitorView_Deserialize;
+
+export type TreasuryMonitorView_Deserialize = {
+	settings: TreasuryMonitorSettings_Deserialize,
+	status: TreasuryMonitorStatus_Deserialize,
+	lastRunAt?: string | null,
+	/**  `ok`, `skipped_busy`, `skipped_battery` or an error code. */
+	lastRunResult?: string | null,
+};
+
+export type TreasuryMonitorView_Serialize = {
+	settings: TreasuryMonitorSettings_Serialize,
+	status: TreasuryMonitorStatus_Serialize,
+	lastRunAt: string | null,
+	/**  `ok`, `skipped_busy`, `skipped_battery` or an error code. */
+	lastRunResult: string | null,
 };
 
 export type TreasuryPerHour = TreasuryPerHour_Serialize | TreasuryPerHour_Deserialize;
@@ -4997,11 +5127,91 @@ export type TreasuryResultsMapping_Serialize = {
 	dateFormat: string | null,
 };
 
+export type TreasuryReview = TreasuryReview_Serialize | TreasuryReview_Deserialize;
+
+export type TreasuryReviewRow = TreasuryReviewRow_Serialize | TreasuryReviewRow_Deserialize;
+
+export type TreasuryReviewRow_Deserialize = {
+	streamId: string,
+	streamName: string,
+	currency: string,
+	/**  `None` = no events that month (never 0). Same for the two below. */
+	monthTotalMinor?: number | null,
+	prevTotalMinor?: number | null,
+	/**  Mean of the earlier three months that have events. */
+	avgMinor?: number | null,
+	events: number,
+};
+
+export type TreasuryReviewRow_Serialize = {
+	streamId: string,
+	streamName: string,
+	currency: string,
+	/**  `None` = no events that month (never 0). Same for the two below. */
+	monthTotalMinor: number | null,
+	prevTotalMinor: number | null,
+	/**  Mean of the earlier three months that have events. */
+	avgMinor: number | null,
+	events: number,
+};
+
+export type TreasuryReview_Deserialize = {
+	month: string,
+	/**  `ok` (text present) | `hidden` (the page failed the number check; no text) | `no_data`. */
+	state: string,
+	text?: string | null,
+	/**  Why a review is hidden: `mismatch | unavailable | too_many_streams | ledger_changed`. */
+	reason?: string | null,
+	builtAt?: string | null,
+	/**  The figures of record, from the ledger rows. Present for every state. */
+	rows: TreasuryReviewRow_Deserialize[],
+};
+
+export type TreasuryReview_Serialize = {
+	month: string,
+	/**  `ok` (text present) | `hidden` (the page failed the number check; no text) | `no_data`. */
+	state: string,
+	text: string | null,
+	/**  Why a review is hidden: `mismatch | unavailable | too_many_streams | ledger_changed`. */
+	reason: string | null,
+	builtAt: string | null,
+	/**  The figures of record, from the ledger rows. Present for every state. */
+	rows: TreasuryReviewRow_Serialize[],
+};
+
 /**  A row-level problem. Never carries the row's text. */
 export type TreasuryRowError = {
 	row: number,
 	/**  `bad_date | bad_amount | bad_currency | short_row | wide_row`. */
 	code: string,
+};
+
+export type TreasuryRunResult = TreasuryRunResult_Serialize | TreasuryRunResult_Deserialize;
+
+export type TreasuryRunResult_Deserialize = {
+	ranAt: string,
+	flags: number,
+	newFlags: number,
+	cleared: number,
+	status: TreasuryMonitorStatus_Deserialize,
+	/**
+	 *  `none` (nothing new to say) | `sent` | `skipped` (relay off, kind off or already sent today) |
+	 *  `off` (outbound disabled) | `failed`.
+	 */
+	relay: string,
+};
+
+export type TreasuryRunResult_Serialize = {
+	ranAt: string,
+	flags: number,
+	newFlags: number,
+	cleared: number,
+	status: TreasuryMonitorStatus_Serialize,
+	/**
+	 *  `none` (nothing new to say) | `sent` | `skipped` (relay off, kind off or already sent today) |
+	 *  `off` (outbound disabled) | `failed`.
+	 */
+	relay: string,
 };
 
 export type TreasurySequenceDraft = TreasurySequenceDraft_Serialize | TreasurySequenceDraft_Deserialize;
