@@ -115,6 +115,16 @@ describe("Tauri command registry", () => {
     for (const name of ["whoop_take_over", "whoop_sync_now", "whoop_buzz", "whoop_pair_start", "whoop_forget", "service_start", "service_stop"]) expect(names).not.toContain(name);
   });
 
+  it("the Stage G parity report is registered (read-only); no takeover or relay-send command rides with it", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    expect(names).toContain("noop_parity_report");
+    for (const name of ["noop_parity_write", "noop_parity_fix", "relay_check", "notify_send"]) expect(names).not.toContain(name);
+    // the relay timer is started from setup, not exposed as a command
+    expect(lib).toContain("commands::notify_relay::start();");
+  });
+
   it("the supervisor commands are registered (observe, log tail, act setting); start/stop commands are not built", async () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");

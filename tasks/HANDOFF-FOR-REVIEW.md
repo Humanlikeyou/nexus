@@ -692,3 +692,32 @@ The plan is `tasks/proposed/phase9-runtime-firstrun.md`. Decision 0030 covers th
 - One flaky run of `backup_schedule::git_bundle_failure_removes_only_its_own_part_file` (zero-duration timeout); it passes alone. Not fixed.
 - Not run: e2e (no UI); the native import dialog in the running app.
 - Taisun steps: create `business/ledger.json` with real venture ids; send a header row plus 2 scrubbed rows per export for real adapters.
+
+### 27. Stage G lanes G1 + G2: parity report and relay number check (2026-11-18, not committed)
+Plan: `tasks/proposed/phase10-12-stage-g.md`. Q3 (no real reports in the repo) and Q5 (DEEP/REM/RHR dropped) use the plan defaults. G3-G6 are not built (they need Taisun or hardware).
+- **G1 `commands/noop_parity.rs`, command `noop_parity_report(days?)`** (read-only, no write to NOOP):
+  - Compares `daily_range` with the legacy NOOP store, read through the same sandboxed path as everything else (`patterns::fetch_noop_series` -> `noop_query::run_query`). No new process path; a test pins that the module has no spawn or network code.
+  - `days` 1..=31, default 14. Over 31 or 0 is an error, not a clamp.
+  - Per day and per measure (sleep_total_min, hrv_ms, recovery, strain): `match`, `mismatch`, `only_daily`, `only_legacy`, `both_null`. A day missing on one side is marked (`missing_daily`, `missing_legacy`, `missing_both`), never filled. NULL is never 0; a non-finite value counts as NULL.
+  - **Tolerances (inclusive, +1e-9 float slack):** sleep_total_min 1.0 min, hrv_ms 0.5 ms, recovery 0.5 point, strain 0.1. A test pins the four numbers.
+  - The full report (it holds values) goes to `<data>/parity/parity-<from>_<to>-<ms>.json`: dir 0700, file 0600, atomic write. The command returns counts only plus the file name. Nothing logs a value. If the legacy read fails, nothing is written.
+  - Repo sample: `test/fixtures/noop-parity-sample.json` (invented numbers; a test keeps it in sync, `UPDATE_PARITY_FIXTURE=1` rewrites it).
+- **G2 `commands/relay_check.rs` + `notify_relay.rs`:**
+  - Events now come from `daily_range` rows (`events_from_range`), not the NOOP snapshot. Values are rendered by one function from the row the event carries. The check re-derives each value from that row, strips the traced values from the text, and any numeral left (any script) blocks it.
+  - Stale = table built more than 36 h ago, never built, or the row's day is not today or yesterday (JST). A NULL value gives no event. A stale or NULL row blocks BOTH the prose and the plain line (the plain line would carry the same untrusted numbers).
+  - Fallback: prose (validated, then number-checked) -> plain line (number-checked) -> nothing (`Skipped("no verified text")`, ledger not claimed).
+  - DEEP, REM and RHR placeholders are gone. HRV stays (the table has `hrv_ms`).
+  - Guards unchanged and still first: kill switch, relay on, kind on, approved kinds, ledger read and already-sent check, then compose, then the ledger claim, then send (host pin and last switch check inside `send_text`). A source-order test pins this.
+  - Timer: `notify_relay::start()` (called from lib.rs setup, same pattern as `backup_schedule::start`): 60 s tick, 5 min startup delay, at most one dispatch per 30 min. `decide` is `Wait` unless the relay is on, a chat is pinned, an approved kind is on, and outbound is allowed. When `Wait` it reads only the small settings file (no Keychain, no NOOP, no model). `notify_dispatch_due` uses the same path.
+  - Tests use fake sender, writer and Keychain only. No test calls `start()`.
+- Registered: mod.rs, lib.rs (`noop_parity_report`, `notify_relay::start`), bindings.rs, `bindings.gen.ts` (regenerated with `UPDATE_BINDINGS=1`), boundTable.ts, bridge.bound.test.ts, commands.registered.test.ts. No TS live adapter and no UI.
+- Existing relay tests changed (reason: the event source moved from the NOOP snapshot to `daily_range`): `snap()` became `range()`, `compose` returns `Option`, the DEEP/REM prose example was replaced, and a hard-coded day became today (JST).
+- **Security review fixes (2026-11-18, 0 HIGH, 1 MED, 4 LOW):**
+  - MED: `validate_prose` now rejects any word that splits wholly into number words ("seventyfour", "twentyone", "onetwo"), any word containing a stem of 5+ letters (seven, three, eight, eleven..nineteen, twenty..ninety, hundred, thousand, million), the ordinals ("first" to "millionth") and "percent". "weight", "height" and "freight" are exempt from the "eight" stem. Tests cover the bad words and "someone", "often", "eventually", "tonight", "weight", "tennis", "none".
+  - LOW: `<data>/parity/` is created with mode 0700, refused if it is a symlink or not a directory, tightened if it has group or world bits, and re-checked.
+  - LOW: the newest 10 parity reports are kept; older ones are removed on each write, matching our file-name pattern only (test with a foreign file and a look-alike).
+  - LOW: `dispatch_due_in` tries every kind; one kind's error no longer stops the others (each still fails closed) and the first error is returned at the end.
+  - LOW: an event whose day is earlier than the ledger's day for that kind is skipped (`older than the last sent day`).
+- **Q4 OPEN:** what parity means after the takeover. After it, `daily_range` and the store Amara reads are the same data, so a daily_range-vs-legacy comparison is trivially equal. Built here: the pre-takeover meaning only. Taisun decides what side-by-side compares after the takeover.
+- **Not run:** a live parity report against the real NOOP store; a live Telegram send or the timer in the running app; the security-reviewer agent; e2e (no UI change).
+- **Taisun steps:** (1) when ready, run `noop_parity_report` with NOOP.app data present and look at `<data>/parity/` (0600; values stay local). (2) Decide Q4. (3) The first real Telegram send still needs the bot, the Keychain token and chat, and the Send Test approval; the timer stays inert until then.

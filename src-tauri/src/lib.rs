@@ -186,6 +186,8 @@ pub fn run() {
             // Nightly backup scheduler (in-app only; nothing runs while the app is closed).
             commands::backup_schedule::start(app.handle().clone());
             commands::daily_table::start(app.handle().clone());
+            // Telegram relay timer: a no-op until the relay is on, approved and outbound is allowed.
+            commands::notify_relay::start();
             // Voice only while the app is open (decision 0024): app_alive heartbeat every 5 s.
             commands::voice_heartbeat::start();
 
@@ -368,6 +370,7 @@ pub fn run() {
             commands::data_harden::data_dir_harden_status,
             commands::data_harden::data_dir_harden,
             commands::whoop_status::whoop_status,
+            commands::noop_parity::noop_parity_report,
             commands::system_profile::system_profile,
             commands::daily_table::daily_rebuild,
             commands::daily_table::daily_range,

@@ -238,6 +238,8 @@ export const commands = {
 	dataDirHardenStatus: (options?: InvokeOptions) => __TAURI_INVOKE<HardenPlan>("data_dir_harden_status", undefined, options),
 	dataDirHarden: (options?: InvokeOptions) => __TAURI_INVOKE<HardenPlan>("data_dir_harden", undefined, options),
 	whoopStatus: (options?: InvokeOptions) => __TAURI_INVOKE<WhoopStatus_Serialize>("whoop_status", undefined, options),
+	/**  `days` 1..=31 (default 14; more is an error, not a clamp). Counts out; the report stays on disk. */
+	noopParityReport: (days: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ParitySummary>("noop_parity_report", { days }, options),
 	systemProfile: (options?: InvokeOptions) => __TAURI_INVOKE<SystemProfile_Serialize>("system_profile", undefined, options),
 	takeEventsList: (options?: InvokeOptions) => __TAURI_INVOKE<TakeEvent_Serialize[]>("take_events_list", undefined, options),
 	takeEventsAppend: (event: TakeEvent_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("take_events_append", { event }, options),
@@ -2547,6 +2549,16 @@ export type MeasureRanking = {
 	notEnoughSessions: UnrankedTrack[],
 };
 
+export type MeasureSummary = {
+	measure: string,
+	tolerance: number | null,
+	matched: number,
+	mismatched: number,
+	onlyDaily: number,
+	onlyLegacy: number,
+	bothNull: number,
+};
+
 export type MemoryItem = MemoryItem_Serialize | MemoryItem_Deserialize;
 
 export type MemoryItem_Deserialize = {
@@ -3227,6 +3239,20 @@ export type PackageInfo = {
 	includes: string[],
 	/**  Files left out of the backup (too large or symlinks), never silent. */
 	skipped: string[],
+};
+
+export type ParitySummary = {
+	from: string,
+	to: string,
+	days: number,
+	/**  Days with no daily_range row / no legacy point at all (marked, never filled). */
+	daysMissingDaily: number,
+	daysMissingLegacy: number,
+	/**  `built_at_ms` of the daily table (0 = it has never been built). */
+	dailyBuiltAtMs: number,
+	measures: MeasureSummary[],
+	/**  File name inside `<data>/parity/` (never a full path). */
+	reportFile: string,
 };
 
 export type ParseResult = ParseResult_Serialize | ParseResult_Deserialize;

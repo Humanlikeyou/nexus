@@ -197,6 +197,7 @@ const CALLER_COMMANDS: Array<[string, Record<string, unknown> | undefined]> = [
   ["backup_settings_get", undefined],
   ["backup_list", undefined],
   ["notify_settings_get", undefined],
+  ["noop_parity_report", {days: "days-v"}],
   ["secret_set", {name: "name-v", value: "value-v"}],
   ["backup_now", undefined],
   ["backup_settings_set", {patch: "patch-v"}],

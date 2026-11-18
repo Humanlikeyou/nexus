@@ -206,6 +206,7 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::data_harden::data_dir_harden_status,
             crate::commands::data_harden::data_dir_harden,
             crate::commands::whoop_status::whoop_status,
+            crate::commands::noop_parity::noop_parity_report,
             crate::commands::system_profile::system_profile,
             crate::take_events::take_events_list,
             crate::take_events::take_events_append,

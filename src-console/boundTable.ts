@@ -147,6 +147,7 @@ export const BOUND_TABLE: Record<string, Row> = {
   data_dir_harden_status: () => bound.dataDirHardenStatus(),
   data_dir_harden: () => bound.dataDirHarden(),
   whoop_status: () => bound.whoopStatus(),
+  noop_parity_report: (a) => bound.noopParityReport(a.days as never),
   system_profile: () => bound.systemProfile(),
   take_events_list: () => bound.takeEventsList(),
   take_events_append: (a) => bound.takeEventsAppend(a.event as never),

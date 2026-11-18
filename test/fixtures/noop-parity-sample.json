@@ -1,0 +1,136 @@
+{
+  "dailyBuiltAtMs": 1,
+  "from": "2026-01-01",
+  "generatedAtMs": 2,
+  "kind": "noop-parity",
+  "meaning": "pre-takeover: daily_range vs the legacy NOOP store",
+  "rows": [
+    {
+      "day": "2026-01-01",
+      "measures": {
+        "hrv_ms": {
+          "daily": 50.0,
+          "delta": -0.3999999999999986,
+          "legacy": 50.4,
+          "state": "match"
+        },
+        "recovery": {
+          "daily": 60.0,
+          "delta": -0.5,
+          "legacy": 60.5,
+          "state": "match"
+        },
+        "sleep_total_min": {
+          "daily": 420.0,
+          "delta": -0.5,
+          "legacy": 420.5,
+          "state": "match"
+        },
+        "strain": {
+          "daily": 10.0,
+          "delta": -0.09999999999999964,
+          "legacy": 10.1,
+          "state": "match"
+        }
+      },
+      "status": "both"
+    },
+    {
+      "day": "2026-01-02",
+      "measures": {
+        "hrv_ms": {
+          "daily": 52.0,
+          "delta": 0.0,
+          "legacy": 52.0,
+          "state": "match"
+        },
+        "recovery": {
+          "daily": 65.0,
+          "delta": 0.0,
+          "legacy": 65.0,
+          "state": "match"
+        },
+        "sleep_total_min": {
+          "daily": 430.0,
+          "delta": -3.0,
+          "legacy": 433.0,
+          "state": "mismatch"
+        },
+        "strain": {
+          "daily": null,
+          "delta": null,
+          "legacy": 9.0,
+          "state": "only_legacy"
+        }
+      },
+      "status": "both"
+    },
+    {
+      "day": "2026-01-03",
+      "measures": {
+        "hrv_ms": {
+          "daily": 40.0,
+          "delta": null,
+          "legacy": null,
+          "state": "only_daily"
+        },
+        "recovery": {
+          "daily": 30.0,
+          "delta": null,
+          "legacy": null,
+          "state": "only_daily"
+        },
+        "sleep_total_min": {
+          "daily": 300.0,
+          "delta": null,
+          "legacy": null,
+          "state": "only_daily"
+        },
+        "strain": {
+          "daily": 12.0,
+          "delta": null,
+          "legacy": null,
+          "state": "only_daily"
+        }
+      },
+      "status": "missing_legacy"
+    },
+    {
+      "day": "2026-01-04",
+      "measures": {
+        "hrv_ms": {
+          "daily": null,
+          "delta": null,
+          "legacy": null,
+          "state": "both_null"
+        },
+        "recovery": {
+          "daily": null,
+          "delta": null,
+          "legacy": null,
+          "state": "both_null"
+        },
+        "sleep_total_min": {
+          "daily": null,
+          "delta": null,
+          "legacy": 380.0,
+          "state": "only_legacy"
+        },
+        "strain": {
+          "daily": null,
+          "delta": null,
+          "legacy": null,
+          "state": "both_null"
+        }
+      },
+      "status": "missing_daily"
+    }
+  ],
+  "to": "2026-01-04",
+  "tolerances": {
+    "hrv_ms": 0.5,
+    "recovery": 0.5,
+    "sleep_total_min": 1.0,
+    "strain": 0.1
+  }
+}

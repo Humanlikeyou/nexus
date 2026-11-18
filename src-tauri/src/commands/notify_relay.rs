@@ -12,7 +12,12 @@
 //! Message text: the LOCAL light tier writes prose around placeholders like {RECOVERY}; Rust validates it and
 //! substitutes the pre-formatted values. Anything unexpected falls back to a plain line built by Rust.
 //!
-//! Event intake: only what the app can see today. The NOOP snapshot gives sleep and recovery. The other
+//! Number check (Stage G2, `relay_check.rs`): events come from the `daily_range` row for the day; every
+//! number in the final prose and in the plain line must trace to that row; a stale (>36 h) or NULL row
+//! sends nothing. Order: prose -> plain line -> nothing. An in-app timer (`start`) runs the dispatch only
+//! when the relay is on and approved and outbound is allowed.
+//!
+//! Event intake: only what the app can see today. `daily_range` gives sleep and recovery. The other
 //! kinds NOOP.app raises itself (effort, strap battery, sync problems, Lucid cues, illness signs) are
 //! listed as "not connected yet" until Phase 10 lands; nothing is faked for them.
 
@@ -248,6 +253,8 @@ pub(crate) struct RelayEvent {
     pub required: &'static str,
     /// The plain factual line, built entirely by Rust.
     pub plain: String,
+    /// The `daily_range` row (and table build time) every number above came from.
+    pub trace: super::relay_check::Trace,
 }
 
 impl RelayEvent {
@@ -265,68 +272,37 @@ impl RelayEvent {
     }
 }
 
-fn hm(min: f64) -> String {
-    let t = min.round() as i64;
-    format!("{}h {}m", t / 60, t % 60)
-}
-
-fn row_for(snap: &super::noop::NoopHealthSnapshot) -> Option<&super::noop::NoopDailyMetric> {
-    let day = snap.reading_day.as_deref()?;
-    snap.today
-        .iter()
-        .chain(snap.recent_days.iter())
-        .find(|r| r.day == day)
-}
-
-/// Sleep and recovery events from the NOOP snapshot's reading-day row. Values missing from the row
-/// produce no event (never a guess).
-pub(crate) fn events_from_snapshot(snap: &super::noop::NoopHealthSnapshot) -> Vec<RelayEvent> {
-    let Some(row) = row_for(snap) else {
-        return vec![];
-    };
+/// Sleep and recovery events from the `daily_range` rows (Stage G2). The value of every variable is
+/// rendered by `relay_check::render` from the row the event carries, so every number traces to it.
+/// A value that is NULL in the table produces no event (never a guess). There is no DEEP, REM or RHR
+/// placeholder: the table has no column for them.
+pub(crate) fn events_from_range(range: &super::daily_table::DailyRange) -> Vec<RelayEvent> {
+    use super::relay_check::{pick_row, render};
     let mut out = vec![];
-    if let Some(min) = row.total_sleep_min.filter(|m| m.is_finite() && *m > 0.0) {
-        let mut vars = vec![("SLEEP_TOTAL", hm(min), "total sleep last night")];
-        if let Some(v) = row.deep_min.filter(|v| v.is_finite() && *v >= 0.0) {
-            vars.push((
-                "DEEP",
-                format!("{} minutes", v.round() as i64),
-                "deep sleep",
-            ));
-        }
-        if let Some(v) = row.rem_min.filter(|v| v.is_finite() && *v >= 0.0) {
-            vars.push(("REM", format!("{} minutes", v.round() as i64), "REM sleep"));
-        }
+    if let Some(t) = pick_row(range, "SLEEP_TOTAL") {
+        let v = render("SLEEP_TOTAL", &t.row).unwrap_or_default();
         out.push(RelayEvent {
             kind: "sleep",
-            day: row.day.clone(),
-            vars,
+            day: t.row.day.clone(),
+            vars: vec![("SLEEP_TOTAL", v.clone(), "total sleep last night")],
             required: "SLEEP_TOTAL",
-            plain: format!("Sleep: {} last night.", hm(min)),
+            plain: format!("Sleep: {v} last night."),
+            trace: t,
         });
     }
-    if let Some(rec) = row.recovery.filter(|r| r.is_finite() && *r >= 0.0) {
-        let mut vars = vec![(
-            "RECOVERY",
-            format!("{}%", rec.round() as i64),
-            "recovery score",
-        )];
-        if let Some(h) = row.avg_hrv.filter(|v| v.is_finite() && *v > 0.0) {
-            vars.push((
-                "HRV",
-                format!("{} ms", h.round() as i64),
-                "heart rate variability",
-            ));
-        }
-        if let Some(h) = row.resting_hr.filter(|v| *v > 0) {
-            vars.push(("RHR", format!("{h} bpm"), "resting heart rate"));
+    if let Some(t) = pick_row(range, "RECOVERY") {
+        let v = render("RECOVERY", &t.row).unwrap_or_default();
+        let mut vars = vec![("RECOVERY", v.clone(), "recovery score")];
+        if let Some(h) = render("HRV", &t.row) {
+            vars.push(("HRV", h, "heart rate variability"));
         }
         out.push(RelayEvent {
             kind: "recovery",
-            day: row.day.clone(),
+            day: t.row.day.clone(),
             vars,
             required: "RECOVERY",
-            plain: format!("Recovery: {}%.", rec.round() as i64),
+            plain: format!("Recovery: {v}."),
+            trace: t,
         });
     }
     out
@@ -372,6 +348,125 @@ const NUMBER_WORDS: &[&str] = &[
     "double",
     "triple",
 ];
+/// Pieces a spelled-out number is built from (no hyphen needed: "seventyfour" splits to two).
+const NUM_PARTS: &[&str] = &[
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+    "seventy",
+    "eighty",
+    "ninety",
+    "hundred",
+    "thousand",
+    "million",
+];
+/// Stems of 5+ letters: any word containing one is rejected ("sevenfold", "twentyish").
+const NUM_STEMS: &[&str] = &[
+    "seven",
+    "three",
+    "eight",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+    "eighty",
+    "ninety",
+    "hundred",
+    "thousand",
+    "million",
+];
+/// Ordinals, plus "percent" (a spoken value must come from a placeholder).
+const NUM_ORDINALS: &[&str] = &[
+    "percent",
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+    "ninth",
+    "tenth",
+    "eleventh",
+    "twelfth",
+    "thirteenth",
+    "fourteenth",
+    "fifteenth",
+    "sixteenth",
+    "seventeenth",
+    "eighteenth",
+    "nineteenth",
+    "twentieth",
+    "thirtieth",
+    "fortieth",
+    "fiftieth",
+    "sixtieth",
+    "seventieth",
+    "eightieth",
+    "ninetieth",
+    "hundredth",
+    "thousandth",
+    "millionth",
+];
+/// Ordinary words that contain a stem ("eight") but are not numbers.
+const STEM_FALSE_FRIENDS: &[&str] = &["weight", "height", "freight", "sleight"];
+
+/// True when a lowercase ASCII word is, or is built from, a number word.
+fn number_like(w: &str) -> bool {
+    if NUMBER_WORDS.contains(&w) || NUM_ORDINALS.contains(&w) {
+        return true;
+    }
+    let mut clean = w.to_string();
+    for f in STEM_FALSE_FRIENDS {
+        clean = clean.replace(f, "_");
+    }
+    if NUM_STEMS.iter().any(|s| clean.contains(s)) {
+        return true;
+    }
+    // Does the whole word split into number parts? (ok[i]: w[..i] splits)
+    let b = w.as_bytes();
+    let mut ok = vec![false; b.len() + 1];
+    ok[0] = true;
+    for i in 1..=b.len() {
+        ok[i] = NUM_PARTS
+            .iter()
+            .any(|p| i >= p.len() && ok[i - p.len()] && &w[i - p.len()..i] == *p);
+    }
+    !w.is_empty() && ok[b.len()]
+}
+
 const LINK_BITS: &[&str] = &["http", "www", "t.me", "://", "@", "/", "#"];
 
 /// Accept the model's prose or say why not. On success the placeholders are replaced by Rust's values.
@@ -422,7 +517,7 @@ pub(crate) fn validate_prose(text: &str, ev: &RelayEvent) -> Result<String, &'st
     let words = prose.split(|c: char| !c.is_ascii_alphabetic());
     if words
         .filter(|w| !w.is_empty())
-        .any(|w| NUMBER_WORDS.contains(&w.to_ascii_lowercase().as_str()))
+        .any(|w| number_like(&w.to_ascii_lowercase()))
     {
         return Err("number word");
     }
@@ -497,29 +592,56 @@ pub(crate) struct Composed {
     pub fell_back: bool,
 }
 
-/// Amara's words from the local tier, or the plain line when the writer fails or the prose is rejected.
-/// The log line carries the kind and a reason code only.
-pub(crate) async fn compose<W: LocalWriter>(w: &W, ev: &RelayEvent, log: Log<'_>) -> Composed {
-    let fall = |reason: &str| {
+/// Number-check `text` against the event's `daily_range` row.
+fn traced(text: &str, ev: &RelayEvent, now_ms: i64) -> Result<(), super::relay_check::Block> {
+    let today = chrono::DateTime::from_timestamp_millis(now_ms)
+        .map(|t| super::shared::time::day_key(&t))
+        .unwrap_or_default();
+    let vars: Vec<(&str, &str)> = ev.vars.iter().map(|(n, v, _)| (*n, v.as_str())).collect();
+    super::relay_check::check_text(text, &vars, &ev.trace, now_ms, today)
+}
+
+/// Fallback order: Amara's words (validated, then number-checked) -> the plain line (number-checked
+/// too) -> `None`, and nothing is sent. The log line carries the kind and a reason code only.
+pub(crate) async fn compose<W: LocalWriter>(
+    w: &W,
+    ev: &RelayEvent,
+    now_ms: i64,
+    log: Log<'_>,
+) -> Option<Composed> {
+    let plain = |reason: &str| {
         log(&format!(
             "[notify] {}: {reason}; using the plain line",
             ev.kind
         ));
-        Composed {
-            text: ev.plain.clone(),
-            fell_back: true,
+        match traced(&ev.plain, ev, now_ms) {
+            Ok(()) => Some(Composed {
+                text: ev.plain.clone(),
+                fell_back: true,
+            }),
+            Err(b) => {
+                log(&format!(
+                    "[notify] {}: plain line blocked ({}); nothing sent",
+                    ev.kind,
+                    b.code()
+                ));
+                None
+            }
         }
     };
     let raw = match w.write(INSTRUCTION, &ev.prompt()).await {
         Ok(t) => t,
-        Err(_) => return fall("local writer unavailable"),
+        Err(_) => return plain("local writer unavailable"),
     };
     match validate_prose(&raw, ev) {
-        Ok(text) => Composed {
-            text,
-            fell_back: false,
+        Ok(text) => match traced(&text, ev, now_ms) {
+            Ok(()) => Some(Composed {
+                text,
+                fell_back: false,
+            }),
+            Err(b) => plain(&format!("prose blocked ({})", b.code())),
         },
-        Err(why) => fall(&format!("prose rejected ({why})")),
+        Err(why) => plain(&format!("prose rejected ({why})")),
     }
 }
 
@@ -662,7 +784,17 @@ pub(crate) async fn dispatch_event<T: TgTransport, W: LocalWriter>(
     if ledger.days.get(ev.kind) == Some(&ev.day) {
         return Ok(Dispatch::Skipped("already sent for that day"));
     }
-    let msg = compose(w, ev, log).await;
+    // Never go back in time: an older row (yesterday's, after today's value turned NULL) is not re-sent.
+    if ledger
+        .days
+        .get(ev.kind)
+        .is_some_and(|d| ev.day.as_str() < d.as_str())
+    {
+        return Ok(Dispatch::Skipped("older than the last sent day"));
+    }
+    let Some(msg) = compose(w, ev, chrono::Utc::now().timestamp_millis(), log).await else {
+        return Ok(Dispatch::Skipped("no verified text"));
+    };
     let before = ledger.clone();
     ledger.days.insert(ev.kind.to_string(), ev.day.clone());
     if write_ledger(dir, &ledger).is_err() {
@@ -703,10 +835,11 @@ where
     send_text(t, kc, TEST_TEXT, off, Some(&shown)).await
 }
 
-/// Preview: the text that would be sent for `kind` from the given snapshot. Sends nothing.
+/// Preview: the text that would be sent for `kind` from the `daily_range` rows. Sends nothing.
 pub(crate) async fn preview_core<W: LocalWriter>(
     kind: &str,
-    snap: &super::noop::NoopHealthSnapshot,
+    range: &super::daily_table::DailyRange,
+    now_ms: i64,
     w: &W,
     log: Log<'_>,
 ) -> Result<Preview, String> {
@@ -716,11 +849,13 @@ pub(crate) async fn preview_core<W: LocalWriter>(
     if !CONNECTED.contains(&kind) {
         return Err("This alert isn't connected yet.".to_string());
     }
-    let ev = events_from_snapshot(snap)
+    let ev = events_from_range(range)
         .into_iter()
         .find(|e| e.kind == kind)
         .ok_or_else(|| "No reading for this alert yet.".to_string())?;
-    let c = compose(w, &ev, log).await;
+    let c = compose(w, &ev, now_ms, log)
+        .await
+        .ok_or_else(|| "No reading for this alert yet.".to_string())?;
     Ok(Preview {
         text: c.text,
         at: chrono::Local::now().format("%-I:%M %p").to_string(),
@@ -818,10 +953,8 @@ pub async fn notify_settings_set(
 #[tauri::command]
 #[specta::specta]
 pub async fn notify_preview(kind: String) -> Result<Preview, String> {
-    let snap = tokio::task::spawn_blocking(super::noop::health_snapshot)
-        .await
-        .map_err(|e| e.to_string())?;
-    preview_core(&kind, &snap, &RouterWriter, &log_line).await
+    let range = read_recent_range().await?;
+    preview_core(&kind, &range, now_ms_i64(), &RouterWriter, &log_line).await
 }
 
 /// Native approval first, then one test message. Refused under the outbound switch or navy.
@@ -839,42 +972,169 @@ pub async fn notify_send_test(app: tauri::AppHandle) -> Result<(), String> {
     .await
 }
 
-/// Send the due sleep and recovery alerts (once per day per kind), if the relay is on. Returns how
-/// many went out. Not called by any timer yet.
-#[tauri::command]
-pub async fn notify_dispatch_due() -> Result<u32, String> {
+fn now_ms_i64() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+/// The last three days of `daily_range` (today, yesterday and a spare), read-only.
+async fn read_recent_range() -> Result<super::daily_table::DailyRange, String> {
+    super::shared::task::blocking(super::shared::task::JoinErr::Plain, || {
+        let today = super::shared::time::day_key(&super::shared::time::now_jst());
+        let f = (today - chrono::Duration::days(2))
+            .format("%Y-%m-%d")
+            .to_string();
+        let t = today.format("%Y-%m-%d").to_string();
+        super::daily_table::read_range_in(&dir(), &f, &t)
+    })
+    .await
+}
+
+/// Dispatch every due event from `range`. Each goes through `dispatch_event`, whose guards (kill
+/// switch, settings, approvals, host pin, prose validation, number check, ledger) all run first.
+pub(crate) async fn dispatch_due_in<T: TgTransport, W: LocalWriter>(
+    off: Gate<'_>,
+    dir: &Path,
+    kc: &dyn Keychain,
+    t: &T,
+    w: &W,
+    range: &super::daily_table::DailyRange,
+    log: Log<'_>,
+) -> Result<u32, String> {
+    if off() {
+        return Err(OFF_MSG.to_string());
+    }
+    // One kind's error (each kind still fails closed on its own) does not stop the others.
+    let mut sent = 0;
+    let mut first_err: Option<String> = None;
+    for ev in events_from_range(range) {
+        match dispatch_event(off, dir, kc, t, w, &ev, log).await {
+            Ok(Dispatch::Sent) => sent += 1,
+            Ok(Dispatch::Skipped(_)) => {}
+            Err(e) => {
+                first_err.get_or_insert(e);
+            }
+        }
+    }
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(sent),
+    }
+}
+
+async fn dispatch_due_live() -> Result<u32, String> {
     if live_off() {
         return Err(OFF_MSG.to_string());
     }
-    let snap = tokio::task::spawn_blocking(super::noop::health_snapshot)
-        .await
-        .map_err(|e| e.to_string())?;
-    let d = dir();
-    let mut sent = 0;
-    for ev in events_from_snapshot(&snap) {
-        let r = dispatch_event(
-            &live_off,
-            &d,
-            &MacKeychain,
-            &HttpTelegram,
-            &RouterWriter,
-            &ev,
-            &log_line,
-        )
-        .await?;
-        if r == Dispatch::Sent {
-            sent += 1;
-        }
+    let range = read_recent_range().await?;
+    dispatch_due_in(
+        &live_off,
+        &dir(),
+        &MacKeychain,
+        &HttpTelegram,
+        &RouterWriter,
+        &range,
+        &log_line,
+    )
+    .await
+}
+
+/// Send the due sleep and recovery alerts (once per day per kind), if the relay is on. Returns how
+/// many went out. The in-app timer (`start`) calls the same path.
+#[tauri::command]
+pub async fn notify_dispatch_due() -> Result<u32, String> {
+    dispatch_due_live().await
+}
+
+// ---------------------------------------------------------------- timer (in-app, default off)
+
+const TICK: std::time::Duration = std::time::Duration::from_secs(60);
+const STARTUP_DELAY: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+const RUN_EVERY: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// The relay is configured and approved: on, a chat pinned, and an approved kind that is still on.
+pub(crate) fn configured(s: &RelaySettings) -> bool {
+    s.enabled
+        && s.chat_pin.is_some()
+        && s.enabled_connected()
+            .iter()
+            .any(|k| s.approved_kinds.contains(k))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Tick {
+    Wait,
+    Run,
+}
+
+/// Pure. Anything not configured, outbound disabled, or too soon is `Wait`.
+pub(crate) fn decide(
+    outbound_off: bool,
+    s: &RelaySettings,
+    since_launch: std::time::Duration,
+    since_last: Option<std::time::Duration>,
+) -> Tick {
+    if outbound_off
+        || !configured(s)
+        || since_launch < STARTUP_DELAY
+        || since_last.is_some_and(|d| d < RUN_EVERY)
+    {
+        return Tick::Wait;
     }
-    Ok(sent)
+    Tick::Run
+}
+
+/// One timer tick. `run` is the dispatch (the real one in `start`, a fake in tests). When the
+/// decision is `Wait` nothing is read except the small settings file: no Keychain, no NOOP, no model.
+pub(crate) async fn tick<F, Fut>(
+    off: Gate<'_>,
+    dir: &Path,
+    since_launch: std::time::Duration,
+    last_run: &mut Option<std::time::Instant>,
+    run: F,
+) -> Option<Result<u32, String>>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<u32, String>>,
+{
+    let s = load_settings_in(dir);
+    let since_last = last_run.map(|t| t.elapsed());
+    if decide(off(), &s, since_launch, since_last) == Tick::Wait {
+        return None;
+    }
+    *last_run = Some(std::time::Instant::now());
+    Some(run().await)
+}
+
+/// Started with the app, like the backup scheduler. Does nothing until the relay is configured and
+/// approved and outbound is allowed. Failures only log a reason code.
+pub fn start() {
+    tauri::async_runtime::spawn(async move {
+        let started = std::time::Instant::now();
+        let mut last: Option<std::time::Instant> = None;
+        loop {
+            tokio::time::sleep(TICK).await;
+            let d = dir();
+            if let Some(Err(_)) = tick(
+                &live_off,
+                &d,
+                started.elapsed(),
+                &mut last,
+                dispatch_due_live,
+            )
+            .await
+            {
+                log_line("[notify] timer: dispatch did not complete");
+            }
+        }
+    });
 }
 
 // ---------------------------------------------------------------- tests
 
 #[cfg(test)]
 mod tests {
+    use super::super::daily_table::{DailyRange, DailyRow};
     use super::super::keychain::{set_with, FakeKeychain};
-    use super::super::noop::{NoopDailyMetric, NoopHealthSnapshot};
     use super::*;
     use std::cell::RefCell;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -957,42 +1217,31 @@ mod tests {
         }
         save_settings_in(d, &s).unwrap();
     }
-    fn snap() -> NoopHealthSnapshot {
-        let row = NoopDailyMetric {
-            day: "2026-11-13".into(),
-            source: "t".into(),
-            total_sleep_min: Some(452.0),
-            efficiency: None,
-            deep_min: Some(80.0),
-            rem_min: Some(100.0),
-            light_min: None,
-            resting_hr: Some(52),
-            avg_hrv: Some(66.4),
-            recovery: Some(74.0),
-            strain: Some(9.1),
-            spo2_pct: None,
-            skin_temp_dev_c: None,
-            resp_rate_bpm: None,
-        };
-        NoopHealthSnapshot {
-            source: "noop".into(),
-            status: "ok".into(),
-            generated_at: "x".into(),
-            device_id: "d".into(),
-            latest_day: Some(row.day.clone()),
-            reading_day: Some(row.day.clone()),
-            data_age_days: Some(0),
-            today: Some(row),
-            recent_days: vec![],
-            latest_sleep: None,
-            latest_night: None,
-            battery: None,
-            insights: vec![],
-            message: None,
+    fn now() -> i64 {
+        chrono::Utc::now().timestamp_millis()
+    }
+    /// Today (JST) as the table's day, so the row is fresh whenever the tests run.
+    fn today_s() -> String {
+        crate::commands::shared::time::day_key(&crate::commands::shared::time::now_jst())
+            .format("%Y-%m-%d")
+            .to_string()
+    }
+    fn range() -> DailyRange {
+        DailyRange {
+            rows: vec![DailyRow {
+                day: today_s(),
+                sleep_total_min: Some(452.0),
+                hrv_ms: Some(66.4),
+                recovery: Some(74.0),
+                strain: Some(9.1),
+                ..Default::default()
+            }],
+            goals: vec![],
+            built_at_ms: now(),
         }
     }
     fn ev(kind: &str) -> RelayEvent {
-        events_from_snapshot(&snap())
+        events_from_range(&range())
             .into_iter()
             .find(|e| e.kind == kind)
             .unwrap()
@@ -1124,8 +1373,8 @@ mod tests {
             "Recovery is 74% today, a solid base."
         );
         assert_eq!(
-            validate_prose("Slept {SLEEP_TOTAL}; deep was {DEEP} and REM {REM}.", &s).unwrap(),
-            "Slept 7h 32m; deep was 80 minutes and REM 100 minutes."
+            validate_prose("Slept {SLEEP_TOTAL}; that was a good night.", &s).unwrap(),
+            "Slept 7h 32m; that was a good night."
         );
         // rejected
         let bad: Vec<(&str, &RelayEvent, &str)> = vec![
@@ -1178,20 +1427,401 @@ mod tests {
         let c = compose(
             &MockW(Ok("Recovery is 99% today!".into())),
             &ev("recovery"),
+            now(),
             &log,
         )
-        .await;
+        .await
+        .unwrap();
         assert!(c.fell_back);
         assert_eq!(c.text, "Recovery: 74%.");
-        let c = compose(&ok_msg("sleep"), &ev("recovery"), &log).await;
+        let c = compose(&ok_msg("sleep"), &ev("recovery"), now(), &log)
+            .await
+            .unwrap();
         assert!(c.fell_back, "a sleep placeholder in a recovery message");
-        let c = compose(&ok_msg("recovery"), &ev("recovery"), &log).await;
+        let c = compose(&ok_msg("recovery"), &ev("recovery"), now(), &log)
+            .await
+            .unwrap();
         assert!(!c.fell_back);
-        let c = compose(&MockW(Err("router down".into())), &ev("recovery"), &log).await;
+        let c = compose(
+            &MockW(Err("router down".into())),
+            &ev("recovery"),
+            now(),
+            &log,
+        )
+        .await
+        .unwrap();
         assert!(c.fell_back);
         let all = logs.lock().unwrap().join("\n");
         assert!(all.contains("prose rejected"));
         assert!(!all.contains("99") && !all.contains("74"));
+    }
+
+    // ---- Stage G2: number check, freshness, fallback order, timer
+
+    #[tokio::test]
+    async fn a_number_not_in_the_row_blocks_the_prose_and_the_plain_line_goes() {
+        // validate_prose lets nothing numeric through, so tamper the event: its HRV value no longer
+        // matches the row. The prose is blocked; the plain line is checked too.
+        let mut e = ev("recovery");
+        e.vars[1].1 = "99 ms".into();
+        let w = MockW(Ok("Recovery is {RECOVERY}, HRV {HRV}.".into()));
+        let logs = Mutex::new(vec![]);
+        let log = |m: &str| logs.lock().unwrap().push(m.to_string());
+        let c = compose(&w, &e, now(), &log).await;
+        // the tampered value fails for the plain line as well (it checks all event values): nothing.
+        assert!(c.is_none());
+        let all = logs.lock().unwrap().join("\n");
+        assert!(all.contains("prose blocked") && all.contains("nothing sent"));
+        assert!(!all.contains("99") && !all.contains("74"));
+        // an untampered event passes prose with both values
+        let c = compose(&w, &ev("recovery"), now(), &nolog).await.unwrap();
+        assert_eq!(c.text, "Recovery is 74%, HRV 66 ms.");
+        assert!(!c.fell_back);
+    }
+
+    #[tokio::test]
+    async fn a_plain_line_with_a_foreign_number_is_blocked_and_the_prose_alone_cannot_save_it() {
+        let mut e = ev("recovery");
+        e.plain = "Recovery: 74% (up 12 points).".into();
+        // prose rejected (writer down) -> the plain line is number-checked and fails -> nothing
+        assert!(compose(&MockW(Err("down".into())), &e, now(), &nolog)
+            .await
+            .is_none());
+        // prose fine -> prose is sent, the bad plain line is never used
+        let c = compose(&ok_msg("recovery"), &e, now(), &nolog)
+            .await
+            .unwrap();
+        assert!(!c.fell_back && c.text == "Recovery is 74% today, a solid base.");
+    }
+
+    #[tokio::test]
+    async fn stale_or_null_rows_send_nothing_and_leave_the_ledger_alone() {
+        let d = tmp();
+        on(&d, &[]);
+        let kc = keys();
+        let t = MockTg::new();
+        // stale: table built 36 h + 1 ms ago
+        let mut r = range();
+        r.built_at_ms = now() - crate::commands::relay_check::STALE_MS - 1_000;
+        let e = events_from_range(&r)
+            .into_iter()
+            .find(|e| e.kind == "recovery")
+            .unwrap();
+        let out = dispatch_event(&never, &d, &kc, &t, &ok_msg("recovery"), &e, &nolog).await;
+        assert_eq!(out, Ok(Dispatch::Skipped("no verified text")));
+        assert_eq!(t.count(), 0);
+        assert!(!ledger_path(&d).exists() || load_ledger_strict(&d).unwrap().days.is_empty());
+        // NULL: no event at all
+        let mut n = range();
+        n.rows[0].recovery = None;
+        n.rows[0].sleep_total_min = None;
+        assert!(events_from_range(&n).is_empty());
+        // never built
+        let mut z = range();
+        z.built_at_ms = 0;
+        let e = events_from_range(&z)
+            .into_iter()
+            .find(|e| e.kind == "sleep")
+            .unwrap();
+        assert_eq!(
+            dispatch_event(&never, &d, &kc, &t, &ok_msg("sleep"), &e, &nolog).await,
+            Ok(Dispatch::Skipped("no verified text"))
+        );
+        assert_eq!(t.count(), 0);
+        // a fresh row sends once (control)
+        assert_eq!(
+            dispatch_event(
+                &never,
+                &d,
+                &kc,
+                &t,
+                &ok_msg("recovery"),
+                &ev("recovery"),
+                &nolog
+            )
+            .await,
+            Ok(Dispatch::Sent)
+        );
+        assert_eq!(t.count(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn events_carry_no_deep_rem_or_rhr_and_every_var_comes_from_the_row() {
+        for e in events_from_range(&range()) {
+            for (n, v, _) in &e.vars {
+                assert!(!["DEEP", "REM", "RHR"].contains(n));
+                assert_eq!(
+                    crate::commands::relay_check::render(n, &e.trace.row).as_deref(),
+                    Some(v.as_str())
+                );
+            }
+            assert_eq!(e.day, e.trace.row.day);
+        }
+        let src = include_str!("notify_relay.rs");
+        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
+        assert!(!prod.contains("\"DEEP\"") && !prod.contains("\"RHR\""));
+        assert!(
+            !prod.contains("health_snapshot"),
+            "no NOOP snapshot path any more"
+        );
+    }
+
+    #[tokio::test]
+    async fn guards_still_run_before_any_check_or_send() {
+        let d = tmp();
+        on(&d, &[]);
+        let kc = keys();
+        let t = MockTg::new();
+        // kill switch first: error, writer not consulted, nothing sent
+        let r = dispatch_event(
+            &always,
+            &d,
+            &kc,
+            &t,
+            &ok_msg("recovery"),
+            &ev("recovery"),
+            &nolog,
+        )
+        .await;
+        assert!(r.is_err());
+        // relay off: skipped before compose
+        save_settings_in(&d, &RelaySettings::default()).unwrap();
+        let r = dispatch_event(
+            &never,
+            &d,
+            &kc,
+            &t,
+            &ok_msg("recovery"),
+            &ev("recovery"),
+            &nolog,
+        )
+        .await;
+        assert_eq!(r, Ok(Dispatch::Skipped("relay is off")));
+        assert_eq!(t.count(), 0);
+        // source order: compose (the number check) sits after the guards and before the ledger claim
+        let src = include_str!("notify_relay.rs");
+        let f = &src[src.find("pub(crate) async fn dispatch_event").unwrap()..];
+        let f = &f[..f.find("/// Send Test:").unwrap()];
+        let at = |n: &str| f.find(n).unwrap();
+        assert!(at("if off()") < at("if !s.enabled"));
+        assert!(at("KINDS_CHANGED") < at("compose(w"));
+        assert!(at("already sent for that day") < at("compose(w"));
+        assert!(at("compose(w") < at("write_ledger(dir, &ledger).is_err()"));
+        assert!(at("write_ledger(dir, &ledger).is_err()") < at("send_text("));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[tokio::test]
+    async fn dispatch_due_in_sends_fresh_events_once_with_a_fake_sender() {
+        let d = tmp();
+        on(&d, &[("sleep", true)]);
+        let kc = keys();
+        let t = MockTg::new();
+        let w = MockW(Ok(REC.into()));
+        let r = range();
+        let n = dispatch_due_in(&never, &d, &kc, &t, &w, &r, &nolog)
+            .await
+            .unwrap();
+        // recovery goes as prose; sleep's prose lacks its placeholder, so its checked plain line goes
+        assert_eq!(n, 2);
+        let texts: Vec<String> = t.sent.borrow().iter().map(|s| s.2.clone()).collect();
+        assert!(texts.contains(&"Recovery is 74% today, a solid base.".to_string()));
+        assert!(texts.contains(&"Sleep: 7h 32m last night.".to_string()));
+        // a second pass sends nothing (ledger); the kill switch errors before any send
+        assert_eq!(
+            dispatch_due_in(&never, &d, &kc, &t, &w, &r, &nolog)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(dispatch_due_in(&always, &d, &kc, &t, &w, &r, &nolog)
+            .await
+            .is_err());
+        assert_eq!(t.count(), 2);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn number_words_glued_spelled_or_ordinal_are_rejected_and_ordinary_words_pass() {
+        let r = ev("recovery");
+        for bad in [
+            "seventyfour",
+            "twentyone",
+            "ninety-nine",
+            "tenth",
+            "first",
+            "percent",
+            "sevenfold",
+            "twentyish",
+            "hundredth",
+            "onetwo",
+            "Thirtyfive",
+        ] {
+            let t = format!("Recovery is {{RECOVERY}}, {bad} today.");
+            assert_eq!(validate_prose(&t, &r).unwrap_err(), "number word", "{bad}");
+        }
+        for good in [
+            "someone",
+            "often",
+            "eventually",
+            "tonight",
+            "weight",
+            "height",
+            "tennis",
+            "none",
+            "stone",
+            "wonder",
+            "bone",
+            "nineteenth_no",
+            "freight",
+        ] {
+            if good.contains('_') {
+                continue;
+            }
+            let t = format!("Recovery is {{RECOVERY}}, {good} today.");
+            assert!(validate_prose(&t, &r).is_ok(), "{good}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_older_row_is_not_resent_after_a_newer_day_went_out() {
+        let d = tmp();
+        on(&d, &[]);
+        let kc = keys();
+        let t = MockTg::new();
+        assert_eq!(
+            dispatch_event(
+                &never,
+                &d,
+                &kc,
+                &t,
+                &ok_msg("recovery"),
+                &ev("recovery"),
+                &nolog
+            )
+            .await,
+            Ok(Dispatch::Sent)
+        );
+        let yesterday = (chrono::NaiveDate::parse_from_str(&today_s(), "%Y-%m-%d").unwrap()
+            - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+        let mut r = range();
+        r.rows[0].day = yesterday;
+        let old = events_from_range(&r)
+            .into_iter()
+            .find(|e| e.kind == "recovery")
+            .unwrap();
+        assert_eq!(
+            dispatch_event(&never, &d, &kc, &t, &ok_msg("recovery"), &old, &nolog).await,
+            Ok(Dispatch::Skipped("older than the last sent day"))
+        );
+        assert_eq!(t.count(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Fails the first send only (the sleep event), succeeds after.
+    struct FailFirstTg(std::cell::Cell<u32>, RefCell<Vec<String>>);
+    impl TgTransport for FailFirstTg {
+        async fn post(&self, _: &str, _: &str, text: &str) -> Result<(), String> {
+            let n = self.0.get();
+            self.0.set(n + 1);
+            if n == 0 {
+                return Err(SEND_FAILED.to_string());
+            }
+            self.1.borrow_mut().push(text.to_string());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn one_kinds_error_does_not_stop_the_others() {
+        let d = tmp();
+        on(&d, &[("sleep", true)]);
+        let kc = keys();
+        let t = FailFirstTg(std::cell::Cell::new(0), RefCell::new(vec![]));
+        let w = MockW(Ok(REC.into()));
+        let r = dispatch_due_in(&never, &d, &kc, &t, &w, &range(), &nolog).await;
+        assert_eq!(r, Err(SEND_FAILED.to_string()), "first error is returned");
+        assert_eq!(
+            t.1.borrow().len(),
+            1,
+            "the other kind was still attempted and sent"
+        );
+        // the failed kind released its claim: it is retried next time
+        let l = load_ledger_strict(&d).unwrap();
+        assert!(!l.days.contains_key("sleep") && l.days.contains_key("recovery"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    fn secs(n: u64) -> std::time::Duration {
+        std::time::Duration::from_secs(n)
+    }
+    fn configured_settings() -> RelaySettings {
+        let mut s = RelaySettings {
+            enabled: true,
+            chat_pin: Some(chat_hash(CHAT)),
+            ..Default::default()
+        };
+        s.approved_kinds = vec!["sleep".into(), "recovery".into()];
+        s
+    }
+
+    #[test]
+    fn timer_decision_is_a_no_op_unless_configured_approved_and_outbound_allowed() {
+        let ok = configured_settings();
+        let late = secs(3600);
+        assert_eq!(decide(false, &ok, late, None), Tick::Run);
+        // default settings, off, no pin, no approved kinds, all kinds off
+        assert_eq!(
+            decide(false, &RelaySettings::default(), late, None),
+            Tick::Wait
+        );
+        let mut off = ok.clone();
+        off.enabled = false;
+        assert_eq!(decide(false, &off, late, None), Tick::Wait);
+        let mut nopin = ok.clone();
+        nopin.chat_pin = None;
+        assert_eq!(decide(false, &nopin, late, None), Tick::Wait);
+        let mut unapproved = ok.clone();
+        unapproved.approved_kinds.clear();
+        assert_eq!(decide(false, &unapproved, late, None), Tick::Wait);
+        // outbound disabled (kill switch / navy)
+        assert_eq!(decide(true, &ok, late, None), Tick::Wait);
+        // too soon after launch, and too soon after the last run
+        assert_eq!(decide(false, &ok, secs(10), None), Tick::Wait);
+        assert_eq!(decide(false, &ok, late, Some(secs(60))), Tick::Wait);
+        assert_eq!(decide(false, &ok, late, Some(RUN_EVERY)), Tick::Run);
+    }
+
+    #[tokio::test]
+    async fn timer_tick_never_calls_the_sender_when_unconfigured_or_outbound_off() {
+        use std::sync::atomic::AtomicU32;
+        let calls = AtomicU32::new(0);
+        let run = || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok::<u32, String>(0)
+        };
+        let d = tmp();
+        let mut last = None;
+        // nothing saved at all: default settings
+        assert!(tick(&never, &d, secs(3600), &mut last, run).await.is_none());
+        // configured but outbound off
+        save_settings_in(&d, &configured_settings()).unwrap();
+        assert!(tick(&always, &d, secs(3600), &mut last, run)
+            .await
+            .is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(last.is_none());
+        // configured and allowed: runs once, then waits for RUN_EVERY
+        assert!(tick(&never, &d, secs(3600), &mut last, run).await.is_some());
+        assert!(tick(&never, &d, secs(3700), &mut last, run).await.is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // start() is wired in lib.rs setup only, never called by a test
+        let lib = include_str!("../lib.rs");
+        assert!(lib.contains("commands::notify_relay::start();"));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[tokio::test]
@@ -1226,7 +1856,7 @@ mod tests {
         assert!(!e2.contains("SENTINEL"));
         let v = serde_json::to_string(&view_of(load_settings_in(&d), None)).unwrap();
         let p = serde_json::to_string(
-            &preview_core("recovery", &snap(), &ok_msg("recovery"), &log)
+            &preview_core("recovery", &range(), now(), &ok_msg("recovery"), &log)
                 .await
                 .unwrap(),
         )
@@ -1337,9 +1967,11 @@ mod tests {
             v.not_connected,
             ["effort", "battery", "sync", "lucid", "illness"]
         );
-        assert!(preview_core("lucid", &snap(), &ok_msg("sleep"), &nolog)
-            .await
-            .is_err());
+        assert!(
+            preview_core("lucid", &range(), now(), &ok_msg("sleep"), &nolog)
+                .await
+                .is_err()
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -1523,17 +2155,14 @@ mod tests {
             .unwrap(),
             Dispatch::Sent
         );
-        assert_eq!(
-            load_ledger_strict(&d).unwrap().days["recovery"],
-            "2026-11-13"
-        );
+        assert_eq!(load_ledger_strict(&d).unwrap().days["recovery"], today_s());
         let _ = std::fs::remove_dir_all(&d);
     }
 
     #[tokio::test]
     async fn preview_sends_nothing_and_settings_file_is_private() {
         let t = MockTg::new();
-        let p = preview_core("sleep", &snap(), &ok_msg("sleep"), &nolog)
+        let p = preview_core("sleep", &range(), now(), &ok_msg("sleep"), &nolog)
             .await
             .unwrap();
         assert!(!p.used_plain_line && p.text == "You got 7h 32m of sleep.");
