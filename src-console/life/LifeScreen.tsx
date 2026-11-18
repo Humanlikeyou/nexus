@@ -23,5 +23,5 @@ export function LifeField({ data, view = "goals", onOpen, onRetry }: { data: Sys
       onSaved={(s) => setAdded((a) => [{ id: s.id, title: s.title }, ...a])} onUndone={(id) => setAdded((a) => a.filter((x) => x.id !== id))}
       savedText={(s) => `Added “${s.title}” to This week's habits.`} />
   );
-  return <div className="page-inset"><GoalsSection adapter={personal} goals={data.goals} goalsFailed={data.unavailableSources.some((s) => s.command === "read_goals")} onRetry={onRetry} composer={composer} added={added} /></div>;
+  return <div className="page-inset"><GoalsSection adapter={personal} goals={data.goals} goalsFailed={data.unavailableSources.some((s) => s.command === "read_goals")} onRetry={onRetry} composer={composer} added={added} onLinkSource={onOpen ? () => onOpen({ id: "settings", view: "devices" }) : undefined} /></div>;
 }

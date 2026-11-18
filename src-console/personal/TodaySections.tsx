@@ -1,14 +1,14 @@
 import { Mic } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Button, Card, DataTag, PageHero, PageSection, StatusText, wiredTag } from "../ui";
+import { Button, Card, DataTag, More, PageHero, PageSection, StatusText, wiredTag } from "../ui";
 import { valueOf } from "../lib/sampleAdapters";
-import { GoalsCard } from "../screens/GoalsCard";
 import type { Goal } from "../types";
 import { useStoresTick } from "../lib/localStores";
-import { CHECKIN_EVENT, ENERGY_STEPS, MOOD_STEPS, PERSONAL_DEFAULTS, type CheckIn, type PersonalAdapter } from "./adapters";
-import { Bar, Rich } from "./parts";
-import { GoalRoadmap } from "../goals/GoalRoadmap";
-import { HabitRow, TodayStrip } from "../goals/HabitTracker";
+import { CHECKIN_EVENT, ENERGY_STEPS, MOOD_STEPS, PERSONAL_DEFAULTS, type CheckIn, type Habit, type PersonalAdapter } from "./adapters";
+import { Rich } from "./parts";
+import { HabitRow } from "../goals/HabitTracker";
+import { HabitsUnderMap, MilestonesMap, type PathGoal } from "../design1118/GoalPath";
+import { PageTake } from "../design1118/PageTake";
 import { ReadyToKeepCard, SuggestedLatelyCard, TakeChange, TakesThisWeekCard, WeekSuggestionsCard, WeekSuggestionsTile } from "../takes/WeekTakes";
 import { takesAdapter } from "../takes/adapters";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
@@ -18,55 +18,37 @@ import "../adds/v1111.css";
 
 const WIRE_NOTE = "Needs wiring: this appears once Claude builds its store (HANDOFF-1111a). Nothing here is made up.";
 
-/** Life › Goals (1111a #1, design-1111v): the add composer, habits counted from their sources, and milestones.
- *  "Shows on" is gone and "Suggested lately" moved to Weekly review. */
-export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, added = [] }: { adapter: PersonalAdapter; goals: Goal[]; goalsFailed?: boolean; onRetry?: () => void; composer?: ReactNode; added?: Array<{ id: string; title: string }> }) {
+/** Life › Goals (design-1118a, Direction A "the Path"): hero, Amara's take under it, the Milestones map
+ *  (arrival tangle → a goal in focus → the four-path grid), habits under the map with one shared
+ *  "Link a source", then the add composer. One progress meaning: roadmap percent + steps done. */
+export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, added = [], onLinkSource }: { adapter: PersonalAdapter; goals: Goal[]; goalsFailed?: boolean; onRetry?: () => void; composer?: ReactNode; added?: Array<{ id: string; title: string }>; onLinkSource?: () => void }) {
   const week = adapter.goals();
   const w = valueOf(week);
-  const onTrack = w ? w.habits.filter((h) => h.target - h.done <= 1).length : 0;
   const ready = valueOf(takesAdapter().goals())?.ready.length ?? 0;
+  const pathGoals: PathGoal[] = w ? w.milestones.map((m) => ({ id: m.id, title: m.title, tag: m.detail.split(" · ")[0] || undefined }))
+    : goals.map((g) => ({ id: g.id, title: g.title, tag: g.category ? g.category.charAt(0).toUpperCase() + g.category.slice(1) : undefined }));
+  const habits: Habit[] = [
+    ...added.map((h) => ({ id: h.id, title: h.title, source: "You", rule: "added just now · starts Monday", days: Array.from({ length: 7 }, () => "none" as const), done: 0, target: 7, note: "new" })),
+    ...(w?.habits ?? []),
+  ];
+  const n = pathGoals.length;
   return (
-    <div className="v-page" id="goals">
-      <PageHero title="Goals" statement={w ? `${onTrack} of ${w.habits.length} habits on track this week` : "Habits and milestones"}
-        detail={w ? <>{w.milestones.length} milestones{w.nextMilestone ? ` · next: ${w.nextMilestone}` : ""}{ready ? ` · ${ready} suggestion ready to become a habit` : ""} {week.state === "sample" && <DataTag kind="sample" />}</> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
-      <AmaraTake page="life" className="life__take" />
-      {composer}
+    <div className="v-page d18-page" id="goals">
+      <PageHero title="Goals" statement={n ? `${n} path${n === 1 ? "" : "s"}${w?.nextMilestone ? ` · next: ${w.nextMilestone}` : ""}` : "Habits and milestones"}
+        detail={w ? <>{w.habits.length} habit{w.habits.length === 1 ? "" : "s"} this week{ready ? ` · ${ready} suggestion ready to become a habit` : ""} {week.state === "sample" && <DataTag kind="sample" />}</> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
+      <PageTake surface="goals" className="life__take" />
+      {goalsFailed && pathGoals.length === 0 ? (
+        <Card title="Milestones"><p className="pk-note">Goals couldn&apos;t be read.</p>{onRetry && <Button variant="secondary" size="small" onClick={onRetry}>Retry</Button>}</Card>
+      ) : <MilestonesMap goals={pathGoals} sampleTag={week.state === "sample"} />}
+      {w ? <HabitsUnderMap habits={habits} sample={week.state === "sample"} onLinkSource={onLinkSource} /> : <Card title="Habits this week" accessory={<span className="pk-acc">{wiredTag(week)}</span>}><p className="pk-note">{WIRE_NOTE}</p></Card>}
       {w && w.habits.length > 0 && (
-        <Card title="Today" accessory={<span className="pk-acc">{wiredTag(week)}</span>}>
-          <TodayStrip habits={w.habits} />
-        </Card>
+        <More label="The full habit grid">
+          {w.habits.map((h) => <HabitRow h={h} key={h.id} />)}
+          <p className="pk-note">Each square is a day, newest on the right. Half squares: nearly (within 15 min). Amara counts from the source data; you can&apos;t tick these by hand unless a source is missing.</p>
+        </More>
       )}
-      <div className="pk-g2">
-        <Card title="This week's habits" accessory={<span className="pk-acc">{wiredTag(week)}</span>}>
-          {!w ? <p className="pk-note">{WIRE_NOTE}</p> : (
-            <>
-              {added.map((h) => <div className="pk-habit v-new" key={h.id}><div>{h.title}<small>You · added just now · starts Monday</small></div><span /><div className="pk-streak"><b>0</b> / –<small>new</small></div></div>)}
-              {w.habits.map((h) => <HabitRow h={h} key={h.id} />)}
-              <p className="pk-note">Each square is a day, newest on the right. Half squares: nearly (within 15 min). Amara counts from the source data; you can&apos;t tick these by hand unless a source is missing.</p>
-            </>
-          )}
-        </Card>
-        <div className="pk-stack">
-          <ReadyToKeepCard title="Ready to become a habit" />
-        </div>
-      </div>
-      {w ? (
-        <Card title="Milestones" accessory={<span className="pk-acc">{week.state === "sample" && <DataTag kind="sample" />}</span>}>
-          {w.milestones.map((m, i) => (
-            <div className="pk-ms" key={m.id}>
-              <div className="pk-ms__top"><span>{m.title}</span><span>{m.right}</span></div>
-              <Bar pct={m.pct} copper={m.tone === "copper"} />
-              <small className="pk-sub">{m.detail}</small>
-              <GoalRoadmap goalId={m.id} defaultOpen={i === 0} />
-            </div>
-          ))}
-        </Card>
-      ) : (
-        <>
-          <GoalsCard goals={goals} failed={goalsFailed} onRetry={onRetry} id="" title="Milestones" />
-          <GoalRoadmap goalId={goals[0]?.id ?? "none"} />
-        </>
-      )}
+      {composer}
+      <ReadyToKeepCard title="Ready to become a habit" />
     </div>
   );
 }

@@ -102,10 +102,15 @@ export function AmaraTakeCard({ page, view, compact = false, onRetry, slots = {}
 }
 
 /** Amara's take on a page (design-1110f). Live: useAmaraTake. Preview (sample adapters on): the mockup note, tagged Sample data. */
-export function AmaraTake({ page, compact = false, className }: { page: TakePage; compact?: boolean; className?: string }) {
+/** design-1118a: a redesigned page keeps the take under its hero, hidden only while no take has been written yet. */
+export const takeWritten = (view: TakeView) => view.state === "fresh" || view.state === "generating";
+
+export function AmaraTake({ page, compact = false, className, hideUntilWritten = false, previewNote }: { page: TakePage; compact?: boolean; className?: string; hideUntilWritten?: boolean; previewNote?: TakeNote }) {
   const preview = previewMode();
   const status = useAmaraTakeStatus(page, preview ? PREVIEW_DEPS : undefined);
-  const view = preview ? sampleTakeView(page) : takeView(page, status.value, status.checking);
+  const base = preview ? sampleTakeView(page) : takeView(page, status.value, status.checking);
+  const view: TakeView = preview && previewNote && base.state === "fresh" ? { ...base, note: previewNote } : base;
   const slots = useTakeSlots(page, compact);
+  if (hideUntilWritten && !takeWritten(view)) return null;
   return <div className={className ? `take-slot ${className}` : "take-slot"}><AmaraTakeCard page={page} view={view} compact={compact} slots={slots} /><TakeStepQuestion /></div>;
 }

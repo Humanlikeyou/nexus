@@ -63,7 +63,8 @@ export function makeSampleRoadmaps(): RoadmapAdapter {
   const rm: Roadmap = { goalId: "sample-goal", status: "suggested", draftedAt: "2026-11-12T03:10:00+09:00", steps, pct: Math.round((done / total) * 100) };
   const ok = sample({ ok: true as const });
   return {
-    roadmap: () => sample(rm), request: async () => sample({ queued: true as const }), accept: async () => ok,
+    // design-1118a: one sample goal is still being planned (a quiet seed, no path) so previews show both states.
+    roadmap: (goalId: string) => sample(goalId === "ms3" ? { ...rm, goalId, status: "drafting" as const, steps: [], pct: 0 } : rm), request: async () => sample({ queued: true as const }), accept: async () => ok,
     editStep: async () => ok, answerStep: async () => ok,
     todaysQuestion: () => sample({ goalId: "sample-goal", goalTitle: "Launch TaiyoSkin's first product", stepId: "s2", stepTitle: steps[1].title, askedOn: "2026-11-12" }),
   };
