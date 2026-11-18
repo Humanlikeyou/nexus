@@ -2,19 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
 import type { AmaraVoiceState } from "../hooks/useAmaraVoice";
 import { amaraVoiceLevel, amaraVoiceLevelAge } from "../hooks/useAmaraVoice";
-import { ambienceVars, targetAmbience } from "./ambience";
+import { useLiveHeartRate } from "../hooks/useLiveHeartRate";
+import { pulsePeriod } from "./pulse";
 import { buildModes, fallbackPeaks } from "./bessel";
-import type { SandEngine, SandMoment, SandState } from "./engine";
+import type { SandEngine, SandState } from "./engine";
 import { webgl2Available } from "./gl";
 import { calmActive, sessionSeed, useSandSettings } from "./settings";
 import { rustle, soundOut, water, wood } from "./sound";
 import "./sandLens.css";
 
-export const SAND_MOMENT_EVENT = "nexus:sand-moment";
-/** Fire a micro-moment from anywhere: arrive | complete | notify. */
-export function sandMoment(kind: SandMoment) { window.dispatchEvent(new CustomEvent(SAND_MOMENT_EVENT, { detail: kind })); }
-
-/** Lens voice state → sand state. Voice off (or out of reach) = the sand rests on the chat card. */
+/** Lens voice state → sand state. Voice off (or out of reach) = a calm floating layer, gently breathing. */
 export function sandStateFor(voice: AmaraVoiceState, line: string): SandState {
   if (voice === "speaking") return "speak";
   if (voice === "listening" || voice === "thinking") return "listen";
@@ -24,9 +21,8 @@ export function sandStateFor(voice: AmaraVoiceState, line: string): SandState {
 
 /** Capture/dev only: pin a particle tier (0 = densest). Users get the auto-scaler. */
 const devTier = () => { try { const v = window.localStorage.getItem("nexus.sandTier"); return v == null ? undefined : Number(v); } catch { return undefined; } };
-const nowMinutes = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
 
-declare global { interface Window { __sand?: { engine: SandEngine | null; setTod: (m: number | null) => void; setRecovery: (r: number | null | undefined) => void; setState: (s: SandState | null) => void; moment: (k: SandMoment) => void; voice: (loud: number, onset?: number) => void; tone: (mode: string, loud?: number) => void } } }
+declare global { interface Window { __sand?: { engine: SandEngine | null; setState: (s: SandState | null) => void; voice: (loud: number, onset?: number) => void; tone: (mode: string, loud?: number) => void } } }
 
 /**
  * design-1118b: the sand lens on Home. One shared canvas, pointer-events: none (never blocks a click).
@@ -34,7 +30,7 @@ declare global { interface Window { __sand?: { engine: SandEngine | null; setTod
  * the lens was, so the navy long-press exit and any orb click keep working. Classic lens = Settings;
  * no WebGL2 = the old static lens.
  */
-export function SandLensLayer({ voice, line, recovery, active = true }: { voice: AmaraVoiceState; line: string; recovery: number | null | undefined; active?: boolean }) {
+export function SandLensLayer({ voice, line, active = true }: { voice: AmaraVoiceState; line: string; active?: boolean }) {
   const s = useSandSettings();
   const [gl] = useState(() => typeof window !== "undefined" && webgl2Available());
   const sand = s.lens === "sand" && gl;
@@ -42,10 +38,13 @@ export function SandLensLayer({ voice, line, recovery, active = true }: { voice:
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<SandEngine | null>(null);
   const [failed, setFailed] = useState(false);
-  const override = useRef<{ tod: number | null; rec: number | null | undefined; state: SandState | null }>({ tod: null, rec: undefined, state: null });
+  const override = useRef<{ state: SandState | null }>({ state: null });
   const target = sandStateFor(voice, line);
   const prev = useRef<SandState>("off");
   const calm = calmActive(s);
+  // heartbeat: the same live heart-rate feed as the Home heart card; no data or a stale reading = no pulse
+  const heart = useLiveHeartRate();
+  const period = pulsePeriod(heart?.bpm, heart?.at);
 
   // engine lifetime: `three` + the engine load on demand (a separate chunk), so the app shell stays light
   const [ready, setReady] = useState(0);
@@ -57,8 +56,7 @@ export function SandLensLayer({ voice, line, recovery, active = true }: { voice:
       if (gone) return;
       engine = new Engine(canvas, () => {
         const r = hitRef.current?.getBoundingClientRect();
-        const card = document.querySelector(".landing .hchat")?.getBoundingClientRect() ?? null;
-        return r ? { cx: r.left + r.width / 2, cy: r.top + r.height / 2, R: r.width / 2, card } : { cx: window.innerWidth / 2, cy: window.innerHeight / 3, R: 130, card };
+        return r ? { cx: r.left + r.width / 2, cy: r.top + r.height / 2, R: r.width / 2 } : { cx: window.innerWidth / 2, cy: window.innerHeight / 3, R: 130 };
       }, sessionSeed(), { tier: devTier() });
       engineRef.current = engine;
       engine.start();
@@ -79,26 +77,7 @@ export function SandLensLayer({ voice, line, recovery, active = true }: { voice:
 
   useEffect(() => { engineRef.current?.setMaterial(s.material); }, [s.material, sand, ready]);
   useEffect(() => { engineRef.current?.setCalm(calm); }, [calm, sand, ready]);
-
-  // ambience (step c) + light tokens (step b): CSS variables on the landing root, eased by the engine loop.
-  useEffect(() => {
-    const root = document.documentElement;
-    let raf = 0;
-    const apply = () => {
-      const rec = override.current.rec !== undefined ? override.current.rec : recovery ?? null;
-      const a = targetAmbience(override.current.tod ?? nowMinutes(), s.ambience ? rec : null, calm);
-      const vars = s.tokens || s.ambience ? ambienceVars(a, s.ambience) : {};
-      for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
-      root.setAttribute("data-sand-tokens", s.tokens ? "on" : "off");
-      root.setAttribute("data-sand-ambience", s.ambience ? (a.source === "recovery" ? "recovery" : "neutral") : "off");
-      engineRef.current?.setAmbience(s.ambience || s.tokens ? a : null, s.ambience);
-    };
-    apply();
-    const id = window.setInterval(apply, 30_000);
-    const onKick = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(apply); };
-    window.addEventListener("nexus:sand-ambience", onKick);
-    return () => { window.clearInterval(id); window.removeEventListener("nexus:sand-ambience", onKick); cancelAnimationFrame(raf); for (const k of ["--light-x", "--light-y", "--light-angle", "--shx", "--shy", "--edge", "--bg-a", "--bg-b", "--bg-c"]) root.style.removeProperty(k); root.removeAttribute("data-sand-tokens"); root.removeAttribute("data-sand-ambience"); };
-  }, [s.tokens, s.ambience, calm, recovery, sand, ready]);
+  useEffect(() => { engineRef.current?.setPulse(period); }, [period, sand, ready]);
 
   // voice level → Chladni amplitude; loudness onsets advance the speech-band modes (no spectrum in the UI)
   useEffect(() => {
@@ -127,23 +106,11 @@ export function SandLensLayer({ voice, line, recovery, active = true }: { voice:
     e.onModeChange = (m) => { if (!s.sound || calm) return; const now = performance.now(); if (now - last < 300) return; last = now; const g = soundOut(s.volume, s.mute); if (g) (Math.random() < 0.6 ? wood : water)(m.f, g); };
   }, [s.sound, s.volume, s.mute, calm, sand, ready]);
 
-  // micro-moments (step e)
-  useEffect(() => {
-    if (!s.moments) return;
-    const on = (ev: Event) => { const k = (ev as CustomEvent<SandMoment>).detail; engineRef.current?.moment(k); };
-    window.addEventListener(SAND_MOMENT_EVENT, on);
-    return () => window.removeEventListener(SAND_MOMENT_EVENT, on);
-  }, [s.moments, sand]);
-  useEffect(() => { if (sand && s.moments && ready === 1) { const t = window.setTimeout(() => engineRef.current?.moment("arrive"), 50); return () => window.clearTimeout(t); } }, [sand, s.moments, ready]);
-
   // capture / test hooks (no-ops for users)
   useEffect(() => {
     window.__sand = {
       get engine() { return engineRef.current; },
-      setTod: (m) => { override.current.tod = m; window.dispatchEvent(new Event("nexus:sand-ambience")); },
-      setRecovery: (r) => { override.current.rec = r; window.dispatchEvent(new Event("nexus:sand-ambience")); },
       setState: (st) => { override.current.state = st; const e = engineRef.current; if (e) { e.setState(st ?? target); prev.current = st ?? target; } },
-      moment: (k) => engineRef.current?.moment(k),
       voice: (loud, onset = 0) => engineRef.current?.setVoice(loud, fallbackPeaks(onset)),
       // pure test tone at one plate mode's frequency (e.g. "n2m2")
       tone: (mode, loud = 0.85) => { const m = buildModes().modes.find((x) => x.id === mode); if (m) engineRef.current?.setVoice(loud, [{ f: m.f, amp: 1 }]); },

@@ -1,9 +1,8 @@
 import { Heart } from "lucide-react";
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { LANDING_ENTRIES } from "../app/routes";
 import { AmaraVoiceAnnouncer } from "../components/AmaraLens/AmaraLens";
-import { SandLensLayer, sandMoment } from "../sandLens/SandLens";
-import { NEXUS_NOTICE_EVENT } from "../legacy-core/terrance/system/selfDiagnosis";
+import { SandLensLayer } from "../sandLens/SandLens";
 import { freshBrief, usableWeather, useHomeBrief } from "../hooks/useHomeBrief";
 import { useLandingVoice } from "../hooks/useLandingVoice";
 import { beatSeconds, useLiveHeartRate } from "../hooks/useLiveHeartRate";
@@ -84,31 +83,12 @@ function Welcome({ onSelect }: { onSelect: (id: ModuleId) => void }) {
  * it stand in for the sidebar. Always dark in both themes: the lens is an object and its glow only
  * reads against the emerald field (LandingScreen.css).
  */
-export function LandingField({ onSelect, onToday, chat, chatExpanded = false, onAsk, recovery }: { onSelect: (id: ModuleId) => void; onToday: () => void; chat?: ReactNode; chatExpanded?: boolean; onAsk?: (text: string) => void; recovery?: number | null }) {
+export function LandingField({ onSelect, onToday, chat, chatExpanded = false, onAsk }: { onSelect: (id: ModuleId) => void; onToday: () => void; chat?: ReactNode; chatExpanded?: boolean; onAsk?: (text: string) => void }) {
   const voice = useLandingVoice();
   const windows = useHomeWindowsState();
   const hide = landingInert(windows.phase);
-  const [focus, setFocus] = useState(false);
-  // design-1118b: F toggles focus mode, Escape leaves it; micro-moments for a finished task and a notice.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (e.metaKey || e.ctrlKey || e.altKey || t?.closest?.("input, textarea, select, [contenteditable='true']")) return;
-      if (e.key === "f" || e.key === "F") setFocus((f) => !f);
-      else if (e.key === "Escape") setFocus(false);
-    };
-    const onClick = (e: MouseEvent) => {
-      const b = (e.target as HTMLElement | null)?.closest?.(".landing button");
-      if (b && /^(done|yes, it's done|mark done)$/i.test((b.textContent ?? "").trim())) sandMoment("complete");
-    };
-    const onNotice = () => sandMoment("notify");
-    window.addEventListener("keydown", onKey);
-    document.addEventListener("click", onClick, true);
-    window.addEventListener(NEXUS_NOTICE_EVENT, onNotice);
-    return () => { window.removeEventListener("keydown", onKey); document.removeEventListener("click", onClick, true); window.removeEventListener(NEXUS_NOTICE_EVENT, onNotice); };
-  }, []);
   return (
-    <div className="landing" data-voice={voice.state} data-wphase={windows.phase} data-focus={focus ? "on" : undefined} data-chat={chat ? (chatExpanded ? "expanded" : "collapsed") : undefined}>
+    <div className="landing" data-voice={voice.state} data-wphase={windows.phase} data-chat={chat ? (chatExpanded ? "expanded" : "collapsed") : undefined}>
       <div className="landing__drag" data-tauri-drag-region />
       <h1 className="ui-visually-hidden">Command Center</h1>
       <Wordmark size="landing" className="landing__wordmark" />
@@ -116,7 +96,7 @@ export function LandingField({ onSelect, onToday, chat, chatExpanded = false, on
       <Welcome onSelect={onSelect} />
       </div>
       <div className="landing__stage" inert={hide || undefined} aria-hidden={hide || undefined}>
-      <div className="landing__lens"><SandLensLayer voice={voice.state} line={voice.line} recovery={recovery} active={!hide} /></div>
+      <div className="landing__lens"><SandLensLayer voice={voice.state} line={voice.line} active={!hide} /></div>
       <p className="landing__line">{voice.line}</p>
       <AmaraVoiceAnnouncer message={voice.line} />
       {/* design-1110b A: the chat lives here, directly under the lens. */}

@@ -3,22 +3,3 @@
 .sand-lens__hit { width: min(320px, 100cqmin); aspect-ratio: 1; border-radius: 50%; background: transparent; pointer-events: auto; touch-action: none; }
 html[data-navy="on"] .sand-lens__canvas { filter: saturate(.25) brightness(.9); }
 @media (forced-colors: active) { .sand-lens__canvas { display: none; } }
-
-/* step b: light / depth / motion tokens. Cards get a lit edge facing the canopy light and a shadow falling away from it. */
-html[data-sand-tokens="on"] { --t-fast: 120ms; --t-std: 240ms; --t-slow: 600ms; --ease-sand: cubic-bezier(.2, .7, .2, 1); }
-html[data-sand-tokens="on"] .landing .hchat,
-html[data-sand-tokens="on"] .landing .take,
-html[data-sand-tokens="on"] .landing__button {
-  /* shadow falls away from the light; a 1px lit edge on the side facing it */
-  box-shadow: var(--shx, 0) var(--shy, 6px) 24px -10px rgba(0, 0, 0, .45), inset calc(var(--shx, 0px) * -.12) calc(var(--shy, 6px) * -.12) 0 0 var(--edge, rgba(255, 245, 220, .22));
-  transition: box-shadow var(--t-slow) var(--ease-sand);
-}
-/* step c: ambience colours (only while bio-reactive ambience is on) */
-html[data-sand-ambience="recovery"] .landing,
-html[data-sand-ambience="neutral"] .landing {
-  background: radial-gradient(120% 90% at var(--light-x, 30%) var(--light-y, 20%), var(--bg-a, #21402f) 0%, var(--bg-b, #12302a) 45%, var(--bg-c, #0a1f16) 100%);
-}
-/* Focus mode (F): everything except the take, chat and lens dissolves; Escape returns. */
-.landing[data-focus="on"] .landing__side > :not(.take-slot), .landing[data-focus="on"] .landing__nav, .landing[data-focus="on"] .landing__wordmark { opacity: .08; transition: opacity var(--t-std, 240ms) var(--ease-sand, ease); }
-@media (prefers-reduced-motion: reduce) { .landing[data-focus="on"] * { transition: none !important; } }
-html[data-reduce-motion="true"] .landing[data-focus="on"] * { transition: none !important; }

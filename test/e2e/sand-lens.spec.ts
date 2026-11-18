@@ -25,11 +25,12 @@ test.describe("sand lens", () => {
     expect(top).toBe("lens-hit");
   });
 
-  test("voice off: the sand rests on the chat card", async ({ page, theme }) => {
+  test("voice off: the sand keeps floating where the lens is (nothing falls onto the chat card)", async ({ page, theme }) => {
     await openApp(page, { theme, lens: "sand" });
     await setMock(page, "voice_status", { installed: true, running: false, state: "idle", pid: 1, state_age_s: 2, voice: "neosoul_g", rss_mb: 1, launchd: false, dir: "/Users/taisun/projects/amara-voice" });
     await expect(page.locator(".landing__line")).toContainText("off", { timeout: 8000 });
     await expect(page.getByTestId("lens-hit")).toHaveAttribute("data-sand-state", "off");
+    await expect(page.getByTestId("sand-canvas")).toBeAttached();
   });
 
   test("classic lens stays selectable in Settings", async ({ page, theme }) => {
