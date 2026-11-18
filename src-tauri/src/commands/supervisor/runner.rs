@@ -2479,7 +2479,7 @@ mod sidecar_tests {
         sp.spawn(ServiceId::ModelRuntime, &spec).unwrap();
         let pgid = sp.guard()[0].1.id().unwrap();
         assert!(sp.stop(ServiceId::ModelRuntime));
-        assert!(!sp.is_alive(ServiceId::ModelRuntime));
+        // While the group is still dying it counts as alive (fail safe); once empty, it is not.
         let start = std::time::Instant::now();
         while !crate::commands::proc_group::group_empty(pgid)
             && start.elapsed() < Duration::from_secs(5)
@@ -2487,5 +2487,6 @@ mod sidecar_tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         assert!(crate::commands::proc_group::group_empty(pgid));
+        assert!(!sp.is_alive(ServiceId::ModelRuntime));
     }
 }
