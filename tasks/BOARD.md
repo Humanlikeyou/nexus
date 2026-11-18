@@ -10,7 +10,7 @@ Branch `amara-integration`, local commits only, nothing pushed (decision 0001). 
 - Rust was last run at 0daa808, with no Rust change since.
 - takes-1111t:80 [light] is a real Design contrast bug (4.28:1). It fails in some full runs; never weaken it.
 
-Installed: 46674a5 (2026-11-18): adds merged design-1118 (Grok), Fitness recovery reason, Stage G3+G6. Running window keeps the old build until Amara is reopened. Rollback: ~/Backups/Amara OS-backup-20261118d.app (dd80bbf); pre-session copy ~/Backups/Amara OS-backup-20261118.app.
+Installed: dd62dab (2026-11-19): adds 1118a backend B1-B4, venture links, saved drafts, cover approval, flaky-test fixes. Running window keeps the old build until Amara is reopened. Rollback: ~/Backups/Amara OS-backup-20261119.app (46674a5).
 
 ### Handover phases (0–17)
 Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2026-11-14; it is untracked and his file, so don't commit it without his OK. Evidence is a commit or a decision.
