@@ -7,6 +7,8 @@ import { Button, Card, DataTag, Meter, PageHero, StatusText, wiredTag, type Stat
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { LinkButton, OffButton } from "../adds/Composer";
 import { decisionsLog, jst } from "../decisions/log";
+import { PageTake } from "../design1118/PageTake";
+import { MarketNewsCards, ProposalsCard, TradingCard } from "../design1118/Trading";
 import "./CommandCenter.css";
 import "../adds/v1111.css";
 
@@ -165,12 +167,26 @@ export function VenturesView({ data, adapter = businessAdapter(data), ventureId,
     );
   }
   const atRisk = list.filter((x) => x.health === "at_risk").length;
+  const riskDown = data.unavailableSources.some((s) => s.command === "arm_get_risk_status");
   return (
-    <div className="biz page-inset cc-page">
+    <div className="biz page-inset cc-page d18-page">
       <PageHero title="Ventures" statement={ventures.state === "unwired" ? "Trading" : `${list.length + 1} ventures${atRisk ? `, ${atRisk} at risk` : ""}`}
-        detail={<>Trading from the revenue engine&apos;s live data{list.length ? <>; {list.map((x) => x.name).join(" and ")} <span className="cc-hero-tag">{wiredTag(ventures)}</span></> : null}</>} />
-      <VenturesCard data={data} adapter={adapter} onOpen={(id) => onOpen(id)} />
-      <p className="cc-note">Akiya is a personal item now: its dates are in Life › Dates &amp; deadlines.</p>
+        detail={<>Trading from the revenue engine&apos;s live data. Proposals are watch-only until you approve a record of your choice — never an order.{list.length ? <> {list.map((x) => x.name).join(" and ")} <span className="cc-hero-tag">{wiredTag(ventures)}</span></> : null}</>} />
+      <PageTake surface="ventures" className="biz__take" />
+      <TradingCard data={data} />
+      <MarketNewsCards />
+      <ProposalsCard capUsd={riskDown ? undefined : data.risk.global_daily_loss_cap} />
+      <div className="d18-grid2 d18-grid2--end">
+        {ventures.state === "unwired" ? (
+          <section className="d18-card" aria-labelledby="d18-taiyo">
+            <h2 id="d18-taiyo" className="d18-h">Taiyo Skin</h2>
+            <div className="d18-route"><svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true"><g className="d18-seed"><circle className="d18-seed__halo" cx="28" cy="28" r="24" /><circle cx="28" cy="28" r="6" /></g></svg><div><p className="d18-eyebrow d18-eyebrow--quiet">Route</p><p className="d18-route__t">Not connected</p><p className="d18-note">The path appears once venture tracking is connected. <DataTag kind="wire" /></p></div></div>
+          </section>
+        ) : (
+          <Card title="Ventures" accessory={acc(wiredTag(ventures))}>{list.map((x) => <VentureCell key={x.id} v={x} w={ventures} onOpen={(id) => onOpen(id)} />)}</Card>
+        )}
+        <p className="cc-note">Akiya is a personal item now. Its dates are in {onView ? <LinkButton small onClick={() => onView("life")}>Life › Dates &amp; deadlines</LinkButton> : "Life › Dates & deadlines"}.</p>
+      </div>
     </div>
   );
 }

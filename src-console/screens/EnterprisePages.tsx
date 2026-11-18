@@ -10,6 +10,7 @@ import { valueOf } from "../lib/sampleAdapters";
 import type { SystemSnapshot } from "../types";
 import { Badge, Button, Card, DataTag, InsetGroup, ListRow, PageHero, StatusText, wiredTag, type StatusKind } from "../ui";
 import { waitingDecisions } from "./BusinessPanels";
+import { PageTake } from "../design1118/PageTake";
 import "./CommandCenter.css";
 import "../adds/v1111.css";
 
@@ -189,44 +190,80 @@ export function TasksView({ data, onRetry, onOpen }: { data: SystemSnapshot; onR
 
 const STAGES = [["ideation", "Idea"], ["drafting", "Drafting"], ["review", "Review"], ["scheduled", "Scheduled"], ["published", "Published"]] as const;
 
-/** Enterprise › Content: New idea, then the pipeline Idea → Drafting → Review → Scheduled → Published. Amara never posts. */
+/** design-1118a: Content stays a list (one pipeline rail + a next step) until there are this many items; then the board. */
+export const BOARD_AT = 3;
+
+/** Enterprise › Content: the pipeline Idea → Drafting → Review → Scheduled → Published. Amara drafts; she never posts. */
 export function ContentView({ data, onRetry, onOpen }: { data: SystemSnapshot; onRetry?: () => void; onOpen?: (route: Route) => void }) {
   const [added, setAdded] = useState<Saved[]>([]);
   const pipeline = data.pipeline;
   const down = data.unavailableSources.some((s) => s.command === "read_content_pipeline") && pipeline.length === 0;
-  const count = (stage: string) => pipeline.filter((p) => p.stage === stage).length;
-  const statement = down ? "The pipeline is out of reach" : pipeline.length === 0 ? "Pipeline is clear" : [count("drafting") ? `${count("drafting")} drafting` : null, count("review") ? `${count("review")} in review` : null, count("ideation") ? `${count("ideation")} idea${count("ideation") === 1 ? "" : "s"}` : null].filter(Boolean).join(", ") || `${pipeline.length} items`;
+  const count = (stage: string) => pipeline.filter((p) => p.stage === stage).length + (stage === "ideation" ? added.length : 0);
+  const total = pipeline.length + added.length;
+  const board = total >= BOARD_AT;
+  const statement = down ? "The pipeline is out of reach" : total === 0 ? "Pipeline is clear" : [count("drafting") ? `${count("drafting")} drafting` : null, count("review") ? `${count("review")} in review` : null, count("ideation") ? `${count("ideation")} idea${count("ideation") === 1 ? "" : "s"}` : null].filter(Boolean).join(", ") || `${total} items`;
+  const items = [...added.map((s) => ({ key: s.id, title: s.title, stage: "ideation" as string, type: "Just added · sample data" })), ...pipeline.map((p, i) => ({ key: `${p.title}-${i}`, title: plainText(p.title), stage: p.stage as string, type: humanize(p.content_type) }))];
+  const hereIdx = Math.max(0, STAGES.findIndex(([st]) => count(st) > 0));
+  const first = items[0];
+  const composer = (
+    <Composer title="New idea" kind="Idea" adapter={addAdapter("idea")} placeholder="e.g. Reel: how the label approval works, for Taiyo Skin" addLabel="Add idea" saveLabel="Add idea"
+      hint="Shows as a preview first, then lands in Idea." working="Reading your idea…" onOpen={onOpen}
+      onSaved={(s) => setAdded((a) => [s, ...a])} onUndone={(id) => setAdded((a) => a.filter((x) => x.id !== id))}
+      savedText={(s) => `Added “${s.title}” to Idea.`} />
+  );
   return (
-    <div className="biz page-inset cc-page">
-      <PageHero title="Content" statement={statement} detail="Ideas to published posts for your ventures. Amara drafts; she never posts for you." />
-      <Composer title="New idea" kind="Idea" adapter={addAdapter("idea")} placeholder="e.g. Reel: how the label approval works, for Taiyo Skin" addLabel="Add idea" saveLabel="Add idea"
-        hint="Shows as a preview first, then lands in Idea." working="Reading your idea…" onOpen={onOpen}
-        onSaved={(s) => setAdded((a) => [s, ...a])} onUndone={(id) => setAdded((a) => a.filter((x) => x.id !== id))}
-        savedText={(s) => `Added “${s.title}” to Idea.`} />
-      <Card title="Pipeline">
-        {down ? <div className="biz__unavailable"><p>Content pipeline unavailable</p>{onRetry && <Button variant="secondary" size="small" onClick={onRetry}>Retry</Button>}</div> : (
-          <div className="v-kanban">
+    <div className="biz page-inset cc-page d18-page">
+      <PageHero title="Content" statement={statement} detail="Ideas travel this path. Amara drafts; she never posts for you." />
+      <PageTake surface="content" className="biz__take" />
+      {board && composer}
+      <Card title="Pipeline" accessory={<span className="cc-card__acc">{board ? "Board · 3 or more items" : `List until there are ${BOARD_AT} or more items`}</span>}>
+        {down ? <div className="biz__unavailable"><p>Content pipeline unavailable</p>{onRetry && <Button variant="secondary" size="small" onClick={onRetry}>Retry</Button>}</div> : board ? (
+          <div className="v-kanban" data-testid="content-board">
             {STAGES.map(([stage, label]) => {
-              const items = pipeline.filter((p) => p.stage === stage);
-              const fresh = stage === "ideation" ? added : [];
+              const its = items.filter((p) => p.stage === stage);
               return (
-                <section key={stage} className="v-col" aria-label={`${label} · ${items.length + fresh.length}`}>
-                  <h3>{label} · {items.length + fresh.length}</h3>
-                  {fresh.map((s) => <div className="v-kc v-new" key={s.id}><span>{s.title}</span><small>Just added · sample data</small></div>)}
-                  {items.map((p, i) => (
-                    <div className="v-kc" key={`${p.title}-${i}`}>
-                      <span>{plainText(p.title)}</span><small>{humanize(p.content_type)}</small>
+                <section key={stage} className="v-col" aria-label={`${label} · ${its.length}`}>
+                  <h3>{label} · {its.length}</h3>
+                  {its.map((p) => (
+                    <div className="v-kc" key={p.key}>
+                      <span>{p.title}</span><small>{p.type}</small>
                       {stage === "review" && <div className="v-actions"><OffButton reason="Amara doesn't post for you">Publish</OffButton></div>}
                     </div>
                   ))}
-                  {items.length + fresh.length === 0 && <p className="v-note">{stage === "scheduled" ? "Nothing scheduled. You schedule posts in the platform itself." : "Nothing here."}</p>}
+                  {its.length === 0 && <p className="v-note">{stage === "scheduled" ? "Nothing scheduled. You schedule posts in the platform itself." : "Nothing here."}</p>}
                 </section>
               );
             })}
           </div>
+        ) : (
+          <div data-testid="content-list">
+            <ol className="d18-rail" aria-label="Pipeline stages">
+              {STAGES.map(([stage, label], i) => (
+                <li key={stage} data-here={total > 0 && i === hereIdx ? "" : undefined} data-filled={count(stage) > 0 ? "" : undefined}>
+                  {total > 0 && i === hereIdx && <span className="d18-rail__here">You are here</span>}
+                  <i aria-hidden="true" /><span>{label} · {count(stage)}</span>
+                </li>
+              ))}
+            </ol>
+            {count("scheduled") === 0 && <p className="d18-note">Nothing scheduled. You schedule posts in the platform itself.</p>}
+            {items.length === 0 ? <p className="d18-note">No ideas yet. Add one below; it starts in Idea.</p> : (
+              <ul className="d18-clist">
+                {items.map((p) => <li key={p.key}><span className="d18-eyebrow">{STAGES.find(([st]) => st === p.stage)?.[1] ?? humanize(p.stage)}</span><div><b>{p.title}</b><small>{p.type}</small></div></li>)}
+              </ul>
+            )}
+            {first && (
+              <section className="d18-next" aria-label="Next step">
+                <p className="d18-eyebrow">Next step</p>
+                <h3 className="d18-next__t">{first.stage === "ideation" ? "Draft this idea with Amara" : first.stage === "review" ? "Review the draft" : "Keep it moving"}</h3>
+                <p className="d18-next__why">Amara writes a draft. She never posts it. The board comes back once there are {BOARD_AT} or more items.</p>
+                <div className="d18-actions"><OffButton variant="primary" reason="Needs wiring · Amara drafts from an idea">Draft with Amara</OffButton></div>
+              </section>
+            )}
+          </div>
         )}
-        <p className="cc-note">Moving a card between stages needs wiring. Venture links for content need wiring.</p>
+        {board && <p className="cc-note">Moving a card between stages needs wiring. Venture links for content need wiring.</p>}
       </Card>
+      {!board && composer}
     </div>
   );
 }

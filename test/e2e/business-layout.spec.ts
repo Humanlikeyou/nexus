@@ -6,9 +6,10 @@ test("(l) Content: one pipeline from Idea to Published with per-stage counts", a
   await openApp(page, { theme, reduceMotion: true });
   const field = await openView(page, "Content");
   await expect(field.getByRole("heading", { level: 1 })).toHaveText("Content");
-  const cols = await field.locator(".v-col").evaluateAll((els) => els.map((e) => { const b = e.getBoundingClientRect(); return { y: Math.round(b.y), text: e.getAttribute("aria-label") }; }));
-  expect(cols.map((c) => c.text)).toEqual(["Idea · 1", "Drafting · 1", "Review · 0", "Scheduled · 0", "Published · 0"]);
-  expect(new Set(cols.map((c) => c.y)).size).toBe(1);
+  // design-1118a: under 3 items Content is a list with one stage rail (the board comes back at 3+).
+  await expect(field.getByTestId("content-list")).toBeVisible();
+  const stages = field.getByRole("list", { name: "Pipeline stages" }).getByRole("listitem");
+  await expect(stages).toHaveText([/Idea · 1/, /Drafting · 1/, /Review · 0/, /Scheduled · 0/, /Published · 0/]);
   await expect(field.getByText("Nothing scheduled. You schedule posts in the platform itself.")).toBeVisible();
 });
 

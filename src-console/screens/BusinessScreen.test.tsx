@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { INITIAL_SNAPSHOT } from "../bridge";
+import { NEEDS_CONVERSION } from "../lib/sampleAdapters";
 import type { Strategy, SystemSnapshot } from "../types";
 import { BusinessField } from "./BusinessScreen";
 import { RevenueField } from "./RevenueScreen";
@@ -38,10 +39,20 @@ describe("Enterprise › Tasks (was Business › Work)", () => {
 });
 
 describe("Enterprise › Content", () => {
-  it("is a pipeline from Idea to Published, and Publish is disabled: Amara doesn't post for you", () => {
+  it("design-1118a: under 3 items it is a list with one pipeline rail and a next step; nothing posts", () => {
     render(<BusinessField view="content" data={snap({ pipeline: [{ title: "Post", stage: "review", content_type: "blog_post", notes: null }, { title: "Idea", stage: "ideation", content_type: "reel", notes: null }] })} />);
     expect(screen.getByRole("heading", { level: 1, name: "Content" })).toBeInTheDocument();
-    for (const col of ["Idea · 1", "Drafting · 0", "Review · 1", "Scheduled · 0", "Published · 0"]) expect(screen.getByRole("region", { name: col })).toBeInTheDocument();
+    expect(screen.getByTestId("content-list")).toBeInTheDocument();
+    expect(screen.queryByTestId("content-board")).toBeNull();
+    const rail = screen.getByRole("list", { name: "Pipeline stages" });
+    for (const st of ["Idea · 1", "Drafting · 0", "Review · 1", "Scheduled · 0", "Published · 0"]) expect(within(rail).getByText(st)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Draft with Amara" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /publish|post/i })).toBeNull();
+  });
+  it("is a board from Idea to Published at 3 or more items, and Publish is disabled: Amara doesn't post for you", () => {
+    render(<BusinessField view="content" data={snap({ pipeline: [{ title: "Post", stage: "review", content_type: "blog_post", notes: null }, { title: "Idea", stage: "ideation", content_type: "reel", notes: null }, { title: "Draft", stage: "drafting", content_type: "reel", notes: null }] })} />);
+    expect(screen.getByTestId("content-board")).toBeInTheDocument();
+    for (const col of ["Idea · 1", "Drafting · 1", "Review · 1", "Scheduled · 0", "Published · 0"]) expect(screen.getByRole("region", { name: col })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
     expect(screen.getByText("Amara doesn't post for you")).toBeInTheDocument();
   });
@@ -87,8 +98,13 @@ describe("Business › Ventures: Trading (design-1110d D-B5, answer 2)", () => {
   it("shows capital against the limit, P&L against the loss cap, and the kill switch as display-only", () => {
     render(<BusinessField view="ventures" adapter={unwiredBusiness} data={snap({ revenue, strategies: [strategy], risk })} />);
     expect(screen.getByText("Within limits")).toBeInTheDocument();
-    expect(screen.getByText(/daily P&L -\$40 of \$500 loss cap · kill switch off/)).toBeInTheDocument();
-    expect(screen.getByText("Capital $2,500 of $10,000 deployed · risk index 0.2")).toBeInTheDocument();
+    // design-1118a: the trading ring + limit tiles (live risk status), display-only.
+    const limits = screen.getByRole("list", { name: "Trading limits" });
+    expect(within(limits).getByText("-$40 of $500 cap")).toBeInTheDocument();
+    expect(within(limits).getByText("$2,500 of $10,000")).toBeInTheDocument();
+    expect(within(limits).getByText("0.2")).toBeInTheDocument();
+    expect(within(limits).getByText("Off")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "25% of capital deployed" })).toBeInTheDocument();
     expect(screen.getByText(/TaiyoSkin shop/)).toBeInTheDocument();
     expect(screen.queryByText("Sample data")).toBeNull();
     expect(screen.queryByRole("button", { name: /kill/i })).toBeNull();
@@ -134,8 +150,9 @@ describe("Enterprise › Finances (was Money; design-1110d D-B9–B11, USD only)
     expect(screen.getByRole("heading", { level: 1, name: "Finances" })).toBeInTheDocument();
     expect(screen.getByText(/Read-only, from the business ledger/)).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "In Decisions" })).toBeInTheDocument();
-    const funds = screen.getByRole("table", { name: "Fund balances" });
-    expect(within(funds).getAllByText("\u2014")).toHaveLength(5);
+    // design-1118a: no rows of dashes; fund rows stay hidden until a fund has a balance.
+    expect(screen.queryByRole("list", { name: "Fund balances" })).toBeNull();
+    expect(screen.getByText(/Fund balances appear here once the ledger reports one/)).toBeInTheDocument();
     expect(screen.getByText("Needs wiring · currency conversion")).toBeInTheDocument();
     expect(screen.queryByText("Sample data")).toBeNull();
     expect(screen.queryByText(/Kill switch|Within limits/)).toBeNull();
@@ -143,7 +160,17 @@ describe("Enterprise › Finances (was Money; design-1110d D-B9–B11, USD only)
   });
   it("awaiting state", () => {
     render(<RevenueField adapter={unwiredBusiness} data={snap({ strategies: [strategy] })} />);
-    expect(screen.getByText("No revenue yet")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "No revenue yet" })).toBeInTheDocument();
     expect(screen.getByText(/Tracking starts when a real source reports in\./)).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "0% revenue" })).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Fund balances" })).toBeNull();
+  });
+  it("fund vessels appear once a fund has a balance; Akiya never shows here", () => {
+    const a = { ...unwiredBusiness, funds: () => ({ state: "live" as const, value: [{ name: "Unallocated", balanceUsd: { state: "live" as const, value: 160 } }, { name: "Akiya", balanceUsd: { state: "live" as const, value: 50 } }, { name: "Taiyo Skin", balanceUsd: NEEDS_CONVERSION }] }) };
+    render(<RevenueField adapter={a} data={snap({ strategies: [strategy] })} />);
+    const list = screen.getByRole("list", { name: "Fund balances" });
+    expect(within(list).getByText("Unallocated")).toBeInTheDocument();
+    expect(within(list).queryByText("Akiya")).toBeNull();
+    expect(within(list).queryByText("Taiyo Skin")).toBeNull();
   });
 });
