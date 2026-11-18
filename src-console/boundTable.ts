@@ -330,5 +330,13 @@ export const BOUND_TABLE: Record<string, Row> = {
   read_profile_file: () => bound.readProfileFile(),
   roadmap_catchup_status: () => bound.roadmapCatchupStatus(),
   roadmap_draft_pending: (a) => bound.roadmapDraftPending(a.catchUp as never),
+  goal_route_get: (a) => bound.goalRouteGet(a.goalId as never),
+  goal_step_edit: (a) => bound.goalStepEdit(a.goalId as never, a.stepId as never, a.title as never, a.size as never, a.via as never),
+  goal_step_complete: (a) => bound.goalStepComplete(a.goalId as never, a.stepId as never, a.via as never),
+  goal_branch_open: (a) => bound.goalBranchOpen(a.goalId as never),
+  goal_branch_accept: (a) => bound.goalBranchAccept(a.suggestionId as never, a.via as never),
+  goal_branch_decline: (a) => bound.goalBranchDecline(a.suggestionId as never, a.via as never),
+  goal_route_settings_get: () => bound.goalRouteSettingsGet(),
+  goal_route_settings_set: (a) => bound.goalRouteSettingsSet(a.stagnationDays as never),
   restart_services: (a) => bound.restartServices(a.services as never, a.deadlineMs as never),
 };

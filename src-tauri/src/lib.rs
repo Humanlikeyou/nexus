@@ -8,11 +8,12 @@ use commands::n8n_status;
 use commands::voice;
 use commands::{
     arm, assistant, ble_common, business_ledger, continuity, crew, crew_grants, events,
-    experiments, followups, goal_roadmap, goals, ha, home_brief, home_hr_take, kb_status, kv,
-    llm_router, muse, noop, noop_freeze, noop_query, onboarding, openclaw, outbox, packager,
-    recordings, replay, research, restart_services, screen_opens, sessions, snapshots, system,
-    take_events, take_log, telegram, terrence_actions, terrence_automations, terrence_context,
-    terrence_priorities, terrence_projects, terrence_runtime, terrence_runtime_bridge,
+    experiments, followups, goal_roadmap, goal_route, goals, ha, home_brief, home_hr_take,
+    kb_status, kv, llm_router, muse, noop, noop_freeze, noop_query, onboarding, openclaw, outbox,
+    packager, recordings, replay, research, restart_services, screen_opens, sessions, snapshots,
+    system, take_events, take_log, telegram, terrence_actions, terrence_automations,
+    terrence_context, terrence_priorities, terrence_projects, terrence_runtime,
+    terrence_runtime_bridge,
 };
 // design-1111v stores
 use commands::home_windows;
@@ -192,6 +193,8 @@ pub fn run() {
             commands::notify_relay::start();
             // Treasury exception monitor: nightly with catch-up; does nothing until treasury.db exists.
             commands::treasury_monitor::start();
+            // Route detector (1118a): proposes branches only, local tier, at most once a day.
+            commands::goal_route::start();
             // Voice only while the app is open (decision 0024): app_alive heartbeat every 5 s.
             commands::voice_heartbeat::start();
 
@@ -440,6 +443,14 @@ pub fn run() {
             goal_roadmap::roadmap_todays_question,
             goal_roadmap::roadmap_draft_pending,
             goal_roadmap::roadmap_catchup_status,
+            goal_route::goal_route_get,
+            goal_route::goal_step_edit,
+            goal_route::goal_step_complete,
+            goal_route::goal_branch_open,
+            goal_route::goal_branch_accept,
+            goal_route::goal_branch_decline,
+            goal_route::goal_route_settings_get,
+            goal_route::goal_route_settings_set,
             // Sessions
             sessions::save_session,
             sessions::list_sessions,

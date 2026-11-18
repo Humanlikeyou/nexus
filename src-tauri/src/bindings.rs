@@ -389,6 +389,14 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::continuity::read_profile_file,
             crate::commands::goal_roadmap::roadmap_catchup_status,
             crate::commands::goal_roadmap::roadmap_draft_pending,
+            crate::commands::goal_route::goal_route_get,
+            crate::commands::goal_route::goal_step_edit,
+            crate::commands::goal_route::goal_step_complete,
+            crate::commands::goal_route::goal_branch_open,
+            crate::commands::goal_route::goal_branch_accept,
+            crate::commands::goal_route::goal_branch_decline,
+            crate::commands::goal_route::goal_route_settings_get,
+            crate::commands::goal_route::goal_route_settings_set,
             crate::commands::restart_services::restart_services,
         ])
 }

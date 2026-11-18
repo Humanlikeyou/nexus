@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 pub const MAX_ROADMAPS: usize = 50;
 pub const MAX_STEPS: usize = 30;
 pub const MAX_TITLE: usize = 140;
-const MAX_WHY: usize = 200;
+pub(crate) const MAX_WHY: usize = 200;
 const MIN_DRAFT: usize = 4;
 const MAX_DRAFT: usize = 10;
 /// A step he answered "not yet" is not asked again for this many days.
@@ -54,7 +54,7 @@ impl StepSize {
             StepSize::Big => 3,
         }
     }
-    fn parse(s: &str) -> Option<Self> {
+    pub(crate) fn parse(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "small" => Some(StepSize::Small),
             "medium" => Some(StepSize::Medium),
@@ -79,6 +79,10 @@ pub struct Step {
     /// YYYY-MM-DD the step was last asked about (internal; extra field for the UI to ignore).
     #[serde(default)]
     pub last_asked: Option<String>,
+    /// 1118a: set when an accepted branch replaced this step's segment. A deferred step is a ghost: it
+    /// never counts toward the percent, is never "current" and is never asked about.
+    #[serde(default)]
+    pub deferred: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -89,6 +93,16 @@ pub struct Roadmap {
     pub drafted_at: Option<String>,
     pub steps: Vec<Step>,
     pub pct: u32,
+    /// 1118a route version: 1 when the plan is written, +1 on every logged route write (edit, complete,
+    /// accepted branch). Undo restores the previous snapshot, version included. 0 = legacy / planning.
+    #[serde(default)]
+    pub version: u32,
+    /// When the route last moved (a step done, a branch accepted, the plan decided). Stagnation baseline.
+    #[serde(default)]
+    pub moved_at: Option<String>,
+    /// Short fixed reason the planner has not produced a plan yet (never model text).
+    #[serde(default)]
+    pub plan_note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -196,13 +210,17 @@ fn save(data: &Path, store: &Store) -> Result<(), String> {
 // ── Pure logic ───────────────────────────────────────────────────────────────
 
 pub fn recompute_pct(steps: &[Step]) -> u32 {
-    let total: u32 = steps.iter().map(|s| s.size.weight()).sum();
+    let total: u32 = steps
+        .iter()
+        .filter(|s| !s.deferred)
+        .map(|s| s.size.weight())
+        .sum();
     if total == 0 {
         return 0;
     }
     let done: u32 = steps
         .iter()
-        .filter(|s| s.done)
+        .filter(|s| s.done && !s.deferred)
         .map(|s| s.size.weight())
         .sum();
     (done * 100 + total / 2) / total
@@ -221,7 +239,7 @@ fn is_format_char(c: char) -> bool {
     matches!(c as u32, 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x2069 | 0xFEFF)
 }
 
-fn clean_text(s: &str, cap: usize) -> String {
+pub(crate) fn clean_text(s: &str, cap: usize) -> String {
     let flat: String = s
         .chars()
         .filter(|c| !is_format_char(*c))
@@ -247,6 +265,9 @@ pub fn request(store: &mut Store, goal_id: &str) -> Result<(), String> {
         drafted_at: None,
         steps: Vec::new(),
         pct: 0,
+        version: 0,
+        moved_at: None,
+        plan_note: None,
     });
     Ok(())
 }
@@ -370,7 +391,7 @@ pub fn todays_question(
         if title_of(&r.goal_id).is_none() {
             continue;
         }
-        let mut open: Vec<&Step> = r.steps.iter().filter(|s| !s.done).collect();
+        let mut open: Vec<&Step> = r.steps.iter().filter(|s| !s.done && !s.deferred).collect();
         open.sort_by_key(|s| s.order);
         for s in open {
             let asked = s.last_asked.as_deref().and_then(parse_day);
@@ -438,7 +459,7 @@ pub fn smaller_prompt(goal_title: &str, step_title: &str) -> String {
     )
 }
 
-fn json_slice(text: &str, open: char, close: char) -> Option<&str> {
+pub(crate) fn json_slice(text: &str, open: char, close: char) -> Option<&str> {
     let a = text.find(open)?;
     let b = text.rfind(close)?;
     (b > a).then(|| &text[a..=b])
@@ -514,10 +535,14 @@ pub fn apply_draft(store: &mut Store, goal_id: &str, steps: Vec<DraftStep>, now_
             not_yet_count: 0,
             smaller_suggestion: None,
             last_asked: None,
+            deferred: false,
         })
         .collect();
     r.status = "suggested".to_string();
     r.drafted_at = Some(now_iso.to_string());
+    r.moved_at = Some(now_iso.to_string());
+    r.version = 1;
+    r.plan_note = None;
     r.pct = 0;
     true
 }
@@ -534,11 +559,40 @@ fn goal_exists(goal_id: &str) -> Result<(), String> {
 }
 
 fn with_store<T>(f: impl FnOnce(&mut Store) -> Result<T, String>) -> Result<T, String> {
+    with_store_at(&crate::app_paths::data_dir(), f)
+}
+
+/// Run `f` under the store's lock without loading or saving the roadmap store (for the files that share its lock).
+pub(crate) fn with_lock<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let data = crate::app_paths::data_dir();
-    let mut store = load(&data)?;
+    f()
+}
+
+/// Run `f` on a read-only load of the store under its lock; the roadmap store is never rewritten.
+pub(crate) fn with_store_read<T>(
+    data: &Path,
+    f: impl FnOnce(&Store) -> Result<T, String>,
+) -> Result<T, String> {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    f(&load(data)?)
+}
+
+/// Read-only view of the store under its lock (no write).
+pub(crate) fn read_store_at(data: &Path) -> Result<Store, String> {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    load(data)
+}
+
+/// Load, change and save the roadmap store under its one lock. `goal_route` runs its route and branch
+/// writes inside this (lock order: adds history, then this).
+pub(crate) fn with_store_at<T>(
+    data: &Path,
+    f: impl FnOnce(&mut Store) -> Result<T, String>,
+) -> Result<T, String> {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut store = load(data)?;
     let out = f(&mut store)?;
-    save(&data, &store)?;
+    save(data, &store)?;
     Ok(out)
 }
 
@@ -551,7 +605,18 @@ fn now_iso() -> String {
 pub fn roadmap_get(goal_id: String) -> Result<Option<Roadmap>, String> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let store = load(&crate::app_paths::data_dir())?;
-    Ok(store.roadmaps.into_iter().find(|r| r.goal_id == goal_id))
+    // Deferred (ghost) steps belong to `goal_route_get`; this legacy view shows the live path only.
+    Ok(store
+        .roadmaps
+        .into_iter()
+        .find(|r| r.goal_id == goal_id)
+        .map(legacy_view))
+}
+
+/// The roadmap as the pre-1118 UI reads it: ghosts (deferred steps) left out.
+pub(crate) fn legacy_view(mut r: Roadmap) -> Roadmap {
+    r.steps.retain(|s| !s.deferred);
+    r
 }
 
 #[tauri::command]
@@ -761,7 +826,9 @@ pub fn plan_run(store: &Store) -> (Vec<String>, Vec<(String, String, String)>) {
         .flat_map(|r| {
             r.steps
                 .iter()
-                .filter(|s| !s.done && s.not_yet_count >= 2 && s.smaller_suggestion.is_none())
+                .filter(|s| {
+                    !s.done && !s.deferred && s.not_yet_count >= 2 && s.smaller_suggestion.is_none()
+                })
                 .map(|s| (r.goal_id.clone(), s.id.clone(), s.title.clone()))
         })
         .take(MAX_SMALLER_PER_RUN)
@@ -772,13 +839,30 @@ pub fn plan_run(store: &Store) -> (Vec<String>, Vec<(String, String, String)>) {
 /// One deep call inside what is left of the run budget; None on error or when time is up.
 async fn deep_within(started: Instant, prompt: &str) -> Option<String> {
     let left = RUN_DEADLINE.checked_sub(started.elapsed())?;
+    // Local deep tier only: the planner reads his goals, so the Claude tier is never an option.
     tokio::time::timeout(
         left,
-        crate::commands::llm_router::deep_complete(DRAFT_SYSTEM, prompt),
+        crate::commands::llm_router::local_deep_complete(DRAFT_SYSTEM, prompt),
     )
     .await
     .ok()?
     .ok()
+}
+
+/// Fixed reason shown while a route is not planned yet. Never model text.
+pub const PLAN_NOTE: &str = "Amara couldn't write the route this time. She'll try again tonight.";
+
+fn note_plan_failure(goal_id: &str) {
+    let _ = with_store(|s| {
+        if let Some(r) = s
+            .roadmaps
+            .iter_mut()
+            .find(|r| r.goal_id == goal_id && r.steps.is_empty())
+        {
+            r.plan_note = Some(PLAN_NOTE.to_string());
+        }
+        Ok(())
+    });
 }
 
 /// Nightly job: draft every "drafting" roadmap (at most 5), then a smaller first move for steps
@@ -825,9 +909,11 @@ pub async fn roadmap_draft_pending(catch_up: Option<bool>) -> Result<u32, String
             deadline: g.deadline.as_deref(),
         });
         let Some(reply) = deep_within(started, &prompt).await else {
+            note_plan_failure(&goal_id);
             continue;
         };
         let Some(steps) = parse_draft(&reply) else {
+            note_plan_failure(&goal_id);
             continue;
         };
         let ok = with_store(|s| Ok(apply_draft(s, &goal_id, steps, &now_iso())))?;

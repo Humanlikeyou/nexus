@@ -645,6 +645,7 @@ pub async fn chat_with_router(
 /// One background completion on the deep tier (nightly jobs). Same router client, loopback base
 /// and Claude gate as chat; the gate stays closed unless the existing Allow Claude path opens it.
 /// Errors are fixed text; nothing is logged beyond what `ask_router` already logs.
+#[allow(dead_code)] // 1118a: the goal planner moved to local_deep_complete.
 pub(crate) async fn deep_complete(system: &str, user: &str) -> Result<String, String> {
     let config = RouterConfig::default();
     let saved = crate::commands::telegram::load_config();

@@ -1,5 +1,7 @@
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
 import type { StepSize } from "../goals/roadmap";
+import { inTauri } from "../lib/localStores";
+import { makeLiveBranches } from "./branchesLive";
 
 /**
  * design-1118a §4.2–4.3: Amara's alternative branches. A service proposes; the UI grows the branch
@@ -64,8 +66,10 @@ export function makeSampleBranches(): BranchAdapter {
 }
 
 let sampleSingleton: BranchAdapter | null = null;
+let liveSingleton: BranchAdapter | null = null;
 export function branchAdapter(): BranchAdapter {
   if (sampleAdaptersEnabled()) return (sampleSingleton ??= makeSampleBranches());
+  if (inTauri()) return (liveSingleton ??= makeLiveBranches());
   return unwiredBranches;
 }
 export function __resetBranchesForTests() { sampleSingleton = null; }

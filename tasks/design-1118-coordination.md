@@ -53,3 +53,7 @@ From 1118b (later):
 ## UI touches (Stage G3/G6, 2026-11-18)
 - Type only, no markup: `src-console/legacy-core/lib/types.ts` (`NoopQueryError` gains `{ kind: "pin_mismatch" }` and `{ kind: "pin_missing" }`, the new fixed refusal codes); `src-console/bindings.gen.ts` and `boundTable.ts` (generated/bound for the new commands). `MindBodyScreen.tsx` already shows its generic error state for any unknown kind, so no screen change. Design: if you want fixed copy for a pinned-binary refusal, ask in `tasks/design-questions.md`. About-screen copy for NOOP attribution is yours; the files ship in the bundle under `Resources/third-party/noop/`.
 - `get_config` now always returns `telegram_bot_token: null` to the webview (no screen reads or writes that field; checked by grep). The Telegram token is set only through Settings > Notifications (`secret_set`) and shown as set/not set (`secrets_status`). Nothing for Design to change.
+
+## UI touches (B1 Path backend, 2026-11-18)
+- Logic only, no markup, class or token: new `src-console/design1118/branchesLive.ts` (+ `branchesLive.test.ts`), and `branchAdapter()` in `src-console/design1118/branches.ts` returns it inside Tauri (sample flag still wins). `boundTable.ts` / `bindings.gen.ts` gained the 8 `goal_route_*` / `goal_step_*` / `goal_branch_*` commands.
+- For Design/Frontend: call `goal_route_get` for the Path (it returns ghosts and a server `percent`; `roadmap_get` hides ghosts). Complete and edit a step with `goal_step_complete` / `goal_step_edit` and Undo with `add_undo("route", id)`.

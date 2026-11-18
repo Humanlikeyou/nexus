@@ -172,11 +172,33 @@ enum Payload {
 /// How to take a saved add back out.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
-enum UndoRef {
-    Goal { id: String },
-    Date { id: String },
-    Task { line: String },
-    Idea { line: String },
+pub(crate) enum UndoRef {
+    Goal {
+        id: String,
+    },
+    /// 1118a: a route write (step edit / complete / accepted branch). Undo puts back the roadmap exactly as it
+    /// was (`prev`, None = there was none) and, for an accepted branch, re-opens that suggestion.
+    /// 1118a: a declined branch; Undo re-opens it.
+    Branch {
+        id: String,
+    },
+    Route {
+        goal_id: String,
+        prev: Option<Value>,
+        branch: Option<String>,
+        /// Hash of the roadmap the write produced (all of it: steps, plan note, moved_at, version...). Undo
+        /// refuses if anything, including a legacy roadmap write or the planner, changed it since.
+        after_hash: String,
+    },
+    Date {
+        id: String,
+    },
+    Task {
+        line: String,
+    },
+    Idea {
+        line: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,7 +227,7 @@ pub(crate) struct Dirs {
 }
 
 impl Dirs {
-    fn real() -> Dirs {
+    pub(crate) fn real() -> Dirs {
         Dirs {
             data: crate::app_paths::data_dir(),
             // The app-data copy openclaw.rs reads first (read_tasks / read_content_pipeline).
@@ -237,7 +259,7 @@ impl Dirs {
 }
 
 fn kind_ok(kind: &str) -> Result<(), String> {
-    if matches!(kind, "goal" | "date" | "task" | "idea") {
+    if matches!(kind, "goal" | "date" | "task" | "idea" | "route") {
         Ok(())
     } else {
         Err("invalid input".into())
@@ -766,6 +788,19 @@ fn payload_kind(p: &Payload) -> &'static str {
 
 fn revert(u: &UndoRef, dirs: &Dirs) -> Result<(), String> {
     match u {
+        UndoRef::Branch { id } => super::goal_route::reopen_in(&dirs.data, id),
+        UndoRef::Route {
+            goal_id,
+            prev,
+            branch,
+            after_hash,
+        } => super::goal_route::restore_in(
+            &dirs.data,
+            goal_id,
+            prev.clone(),
+            branch.as_deref(),
+            after_hash,
+        ),
         UndoRef::Goal { id } => {
             let path = dirs.goals();
             let mut goals: Vec<Goal> = read_json(&path, MAX_MD_BYTES)?;
@@ -788,6 +823,69 @@ fn revert(u: &UndoRef, dirs: &Dirs) -> Result<(), String> {
     }
 }
 
+/// Route entries carry a whole-roadmap snapshot for Undo. Only the newest few within the Undo window keep it,
+/// so route writes can't fill the file shared with every other kind. The History line stays.
+pub(crate) const MAX_SNAPSHOTS: usize = 10;
+
+fn strip_old_snapshots(hist: &mut HistFile, now: DateTime<FixedOffset>) {
+    let mut kept = 0;
+    for e in hist.entries.iter_mut() {
+        if let UndoRef::Route { prev, .. } = &mut e.undo {
+            if prev.is_none() {
+                continue;
+            }
+            let age = DateTime::parse_from_rfc3339(&e.at)
+                .map(|t| now.signed_duration_since(t).num_milliseconds())
+                .unwrap_or(i64::MAX);
+            kept += 1;
+            if !(0..=UNDO_MS).contains(&age) || kept > MAX_SNAPSHOTS {
+                *prev = None;
+            }
+        }
+    }
+}
+
+/// The route writes' way onto the one write path: runs `f` (which changes the store and returns the undo
+/// handle) under the history lock, then records the History entry. If History cannot be written the change is
+/// reverted, exactly like `save_in`. Returns the history id (what `add_undo("route", id)` takes).
+pub(crate) fn logged_write<T>(
+    kind: &str,
+    text: String,
+    via: Option<&str>,
+    dirs: &Dirs,
+    now: DateTime<FixedOffset>,
+    f: impl FnOnce() -> Result<(T, UndoRef), String>,
+) -> Result<(String, T), String> {
+    kind_ok(kind)?;
+    let via = match via.unwrap_or("typed") {
+        v @ ("typed" | "voice" | "chat") => v,
+        _ => return Err("invalid input".into()),
+    };
+    let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    // A history file that can't be read is an error, never an empty History that gets written back over it.
+    let mut hist: HistFile = read_json(&dirs.history(), MAX_MD_BYTES)?;
+    let (out, undo) = f()?;
+    let id = new_id(kind);
+    hist.entries.insert(
+        0,
+        HistEntry {
+            id: id.clone(),
+            kind: kind.into(),
+            text,
+            via: via.into(),
+            at: iso(&now),
+            undo: undo.clone(),
+        },
+    );
+    hist.entries.truncate(MAX_HISTORY);
+    strip_old_snapshots(&mut hist, now);
+    if let Err(e) = write_json_atomic(&dirs.history(), &hist, MAX_MD_BYTES) {
+        let _ = revert(&undo, dirs);
+        return Err(e);
+    }
+    Ok((id, out))
+}
+
 pub(crate) fn save_in(
     kind: &str,
     preview: &AddPreview,
@@ -806,8 +904,9 @@ pub(crate) fn save_in(
         return Err("invalid input".into());
     }
     let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    // Read first: an unreadable History is an error before anything is written, never an empty one.
+    let mut hist: HistFile = read_json(&dirs.history(), MAX_MD_BYTES)?;
     let (saved, undo, text) = apply(&payload, dirs, now)?;
-    let mut hist: HistFile = read_json(&dirs.history(), MAX_MD_BYTES).unwrap_or_default();
     hist.entries.insert(
         0,
         HistEntry {
@@ -820,6 +919,7 @@ pub(crate) fn save_in(
         },
     );
     hist.entries.truncate(MAX_HISTORY);
+    strip_old_snapshots(&mut hist, now);
     if let Err(e) = write_json_atomic(&dirs.history(), &hist, MAX_MD_BYTES) {
         let _ = revert(&undo, dirs);
         return Err(e);

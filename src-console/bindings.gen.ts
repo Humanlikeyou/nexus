@@ -560,6 +560,15 @@ export const commands = {
 	 *  queued for the next night; nothing is invented.
 	 */
 	roadmapDraftPending: (catchUp: boolean | null, options?: InvokeOptions) => __TAURI_INVOKE<number>("roadmap_draft_pending", { catchUp }, options),
+	goalRouteGet: (goalId: string, options?: InvokeOptions) => __TAURI_INVOKE<GoalRoute_Serialize>("goal_route_get", { goalId }, options),
+	goalStepEdit: (goalId: string, stepId: string, title: string | null, size: StepSize | null, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<RouteWrite_Serialize>("goal_step_edit", { goalId, stepId, title, size, via }, options),
+	goalStepComplete: (goalId: string, stepId: string, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<RouteWrite_Serialize>("goal_step_complete", { goalId, stepId, via }, options),
+	/**  The open branch for a goal, or null. Read only. */
+	goalBranchOpen: (goalId: string, options?: InvokeOptions) => __TAURI_INVOKE<BranchSuggestion_Serialize | null>("goal_branch_open", { goalId }, options),
+	goalBranchAccept: (suggestionId: string, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<RouteWrite_Serialize>("goal_branch_accept", { suggestionId, via }, options),
+	goalBranchDecline: (suggestionId: string, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<RouteWrite_Serialize>("goal_branch_decline", { suggestionId, via }, options),
+	goalRouteSettingsGet: (options?: InvokeOptions) => __TAURI_INVOKE<RouteSettings>("goal_route_settings_get", undefined, options),
+	goalRouteSettingsSet: (stagnationDays: number, options?: InvokeOptions) => __TAURI_INVOKE<RouteSettings>("goal_route_settings_set", { stagnationDays }, options),
 	restartServices: (services: string[], deadlineMs: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ServiceRestartResult_Serialize[]>("restart_services", { services, deadlineMs }, options),
 };
 
@@ -1063,6 +1072,38 @@ export type BrainSnapshot = {
 	betaBalance: number | null,
 	focusScore: number | null,
 	relaxationScore: number | null,
+};
+
+export type BranchStatus = "proposed" | "accepted" | "declined" | "retracted";
+
+export type BranchSuggestion = BranchSuggestion_Serialize | BranchSuggestion_Deserialize;
+
+export type BranchSuggestion_Deserialize = {
+	id: string,
+	goalId: string,
+	fromStepId: string,
+	reasonKind: ReasonKind,
+	reasonText: string,
+	alternateSteps: RouteStep_Deserialize[],
+	rejoinStepId?: string | null,
+	status: BranchStatus,
+	createdAt: string,
+	sample?: boolean | null,
+	decidedAt?: string | null,
+};
+
+export type BranchSuggestion_Serialize = {
+	id: string,
+	goalId: string,
+	fromStepId: string,
+	reasonKind: ReasonKind,
+	reasonText: string,
+	alternateSteps: RouteStep_Serialize[],
+	rejoinStepId: string | null,
+	status: BranchStatus,
+	createdAt: string,
+	sample?: boolean,
+	decidedAt?: string,
 };
 
 export type BusinessLedger = BusinessLedger_Serialize | BusinessLedger_Deserialize;
@@ -2121,6 +2162,38 @@ export type GoalProgress_Serialize = {
 	goals: GoalWeek_Serialize[],
 	stalled: StalledGoal_Serialize[],
 	inCommon: InCommon_Serialize,
+};
+
+export type GoalRoute = GoalRoute_Serialize | GoalRoute_Deserialize;
+
+export type GoalRoute_Deserialize = {
+	goalId: string,
+	/**  `planning | ready`. (`failed` exists in the contract; a planner failure stays `planning` with a note.) */
+	status: string,
+	version: number,
+	decidedAt?: string | null,
+	decidedBy: string,
+	/**  Only when ready. */
+	steps: RouteStep_Deserialize[],
+	/**  Server-computed from size weights; None until ready. The client never invents this. */
+	percent?: number | null,
+	/**  Short fixed reason while planning has not produced a route. Never model text. */
+	note?: string | null,
+};
+
+export type GoalRoute_Serialize = {
+	goalId: string,
+	/**  `planning | ready`. (`failed` exists in the contract; a planner failure stays `planning` with a note.) */
+	status: string,
+	version: number,
+	decidedAt: string | null,
+	decidedBy: string,
+	/**  Only when ready. */
+	steps: RouteStep_Serialize[],
+	/**  Server-computed from size weights; None until ready. The client never invents this. */
+	percent: number | null,
+	/**  Short fixed reason while planning has not produced a route. Never model text. */
+	note: string | null,
 };
 
 export type GoalWeek = GoalWeek_Serialize | GoalWeek_Deserialize;
@@ -3547,6 +3620,8 @@ export type RankedTrack = {
 /**  Fixed reason codes. These (and the fixed event texts) are the only reasons that leave the module. */
 export type ReasonCode = "not_checked" | "ok" | "slow" | "unreachable" | "timeout" | "bad_status" | "container_down" | "container_stopped" | "container_starting" | "unhealthy" | "missing_container" | "bad_bind" | "docker_unavailable" | "not_running" | "no_store" | "restarting" | "restart_failed";
 
+export type ReasonKind = "stagnation" | "not_working" | "better_route";
+
 export type RecordedSession = RecordedSession_Serialize | RecordedSession_Deserialize;
 
 export type RecordedSession_Deserialize = {
@@ -3786,6 +3861,15 @@ export type Roadmap_Deserialize = {
 	draftedAt?: string | null,
 	steps: Step_Deserialize[],
 	pct: number,
+	/**
+	 *  1118a route version: 1 when the plan is written, +1 on every logged route write (edit, complete,
+	 *  accepted branch). Undo restores the previous snapshot, version included. 0 = legacy / planning.
+	 */
+	version?: number,
+	/**  When the route last moved (a step done, a branch accepted, the plan decided). Stagnation baseline. */
+	movedAt?: string | null,
+	/**  Short fixed reason the planner has not produced a plan yet (never model text). */
+	planNote?: string | null,
 };
 
 export type Roadmap_Serialize = {
@@ -3794,6 +3878,15 @@ export type Roadmap_Serialize = {
 	draftedAt: string | null,
 	steps: Step_Serialize[],
 	pct: number,
+	/**
+	 *  1118a route version: 1 when the plan is written, +1 on every logged route write (edit, complete,
+	 *  accepted branch). Undo restores the previous snapshot, version included. 0 = legacy / planning.
+	 */
+	version: number,
+	/**  When the route last moved (a step done, a branch accepted, the plan decided). Stagnation baseline. */
+	movedAt: string | null,
+	/**  Short fixed reason the planner has not produced a plan yet (never model text). */
+	planNote: string | null,
 };
 
 export type Route = {
@@ -3822,6 +3915,47 @@ export type RouteInfo_Serialize = {
 	model?: string,
 	/**  `X-Amara-Route-Reason`. */
 	reason?: string,
+};
+
+export type RouteSettings = {
+	/**  Days without movement on the current step before Amara may suggest another route. */
+	stagnationDays: number,
+};
+
+export type RouteStep = RouteStep_Serialize | RouteStep_Deserialize;
+
+export type RouteStep_Deserialize = {
+	id: string,
+	title: string,
+	summary?: string | null,
+	size: StepSize,
+	order: number,
+	state: StepState,
+	doneAt?: string | null,
+};
+
+export type RouteStep_Serialize = {
+	id: string,
+	title: string,
+	summary: string | null,
+	size: StepSize,
+	order: number,
+	state: StepState,
+	doneAt: string | null,
+};
+
+export type RouteWrite = RouteWrite_Serialize | RouteWrite_Deserialize;
+
+export type RouteWrite_Deserialize = {
+	/**  History id: `add_undo("route", id)` within 8 s takes it back. */
+	id: string,
+	route: GoalRoute_Deserialize,
+};
+
+export type RouteWrite_Serialize = {
+	/**  History id: `add_undo("route", id)` within 8 s takes it back. */
+	id: string,
+	route: GoalRoute_Serialize,
 };
 
 export type RouterConfig = RouterConfig_Serialize | RouterConfig_Deserialize;
@@ -4198,6 +4332,8 @@ export type StepQuestion = {
 
 export type StepSize = "small" | "medium" | "big";
 
+export type StepState = "done" | "current" | "upcoming" | "deferred";
+
 export type Step_Deserialize = {
 	id: string,
 	title: string,
@@ -4210,6 +4346,11 @@ export type Step_Deserialize = {
 	smallerSuggestion?: string | null,
 	/**  YYYY-MM-DD the step was last asked about (internal; extra field for the UI to ignore). */
 	lastAsked?: string | null,
+	/**
+	 *  1118a: set when an accepted branch replaced this step's segment. A deferred step is a ghost: it
+	 *  never counts toward the percent, is never "current" and is never asked about.
+	 */
+	deferred?: boolean,
 };
 
 export type Step_Serialize = {
@@ -4224,6 +4365,11 @@ export type Step_Serialize = {
 	smallerSuggestion: string | null,
 	/**  YYYY-MM-DD the step was last asked about (internal; extra field for the UI to ignore). */
 	lastAsked: string | null,
+	/**
+	 *  1118a: set when an accepted branch replaced this step's segment. A deferred step is a ghost: it
+	 *  never counts toward the percent, is never "current" and is never asked about.
+	 */
+	deferred: boolean,
 };
 
 export type StrategyRevenue = {

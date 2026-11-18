@@ -382,6 +382,14 @@ const CALLER_COMMANDS: Array<[string, Record<string, unknown> | undefined]> = [
   ["read_profile_file", undefined],
   ["roadmap_catchup_status", undefined],
   ["roadmap_draft_pending", {catchUp: "catchUp-v"}],
+  ["goal_route_get", {goalId: "goalId-v"}],
+  ["goal_step_edit", {goalId: "goalId-v", stepId: "stepId-v", title: "title-v", size: "size-v", via: "via-v"}],
+  ["goal_step_complete", {goalId: "goalId-v", stepId: "stepId-v", via: "via-v"}],
+  ["goal_branch_open", {goalId: "goalId-v"}],
+  ["goal_branch_accept", {suggestionId: "suggestionId-v", via: "via-v"}],
+  ["goal_branch_decline", {suggestionId: "suggestionId-v", via: "via-v"}],
+  ["goal_route_settings_get", undefined],
+  ["goal_route_settings_set", {stagnationDays: "stagnationDays-v"}],
   ["restart_services", {services: "services-v", deadlineMs: "deadlineMs-v"}],
 ];
 
