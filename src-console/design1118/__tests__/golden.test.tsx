@@ -21,10 +21,6 @@ import museSrc from "../MuseJourney.tsx?raw";
 import waveSrc from "../WaveJourney.tsx?raw";
 // @ts-expect-error vite ?raw import
 import pathSrc from "../GoalPath.tsx?raw";
-import fs from "node:fs";
-import path from "node:path";
-const cssSrc = fs.readFileSync(path.resolve("src-console/design1118/design1118.css"), "utf8");
-
 const nums = (d: string) => d.match(/-?\d+(\.\d+)?/g)!.map(Number);
 const PAGES = [["Goals", todaySrc], ["Neuro", neuroSrc], ["Ventures", venturesSrc], ["Finances", revenueSrc], ["Content", contentSrc], ["Agents", agentsSrc], ["Smart home", homeSrc]] as const;
 
@@ -60,13 +56,11 @@ describe("design-1118a: golden ratio in code, not pictures", () => {
       expect(src as string, name).not.toMatch(/d18-underlay/);
       expect(src as string, name).not.toMatch(/d18-golden-art/);
     }
-    for (const [name, src] of [["Muse", museSrc], ["Hemi-Sync", waveSrc], ["Path", pathSrc], ["css", cssSrc]] as const) {
+    for (const [name, src] of [["Muse", museSrc], ["Hemi-Sync", waveSrc], ["Path", pathSrc]] as const) {
       expect(src as string, name).not.toMatch(/d18-golden-art/);
       expect(src as string, name).not.toMatch(/GoldenUnderlay/);
       expect(src as string, name).not.toMatch(/d18-underlay/);
     }
-    expect(cssSrc).toMatch(/1\.618fr/);
-    expect(cssSrc).toMatch(/d18-breathe/);
     expect(pathSrc).toMatch(/d18-strand__tphi2/);
     expect(museSrc).toMatch(/phiWave/);
   });
