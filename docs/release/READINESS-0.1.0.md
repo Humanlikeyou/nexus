@@ -1,22 +1,29 @@
-# Release readiness 0.1.0 (Phase 17, 2026-11-18)
+# Release readiness 0.1.0 (first written Phase 17, 2026-11-18; refreshed 2026-11-19)
 
-Base: HEAD `71d8d7e` plus this run's uncommitted Phase 16/17 files (nothing committed, pushed, merged or
-opened as a PR). **Verdict: not releasable yet.** Code and tests are green; signing, notarization, the
-updater, the login item, the live parity/relay runs and the fresh-account migration are all waiting on
-Taisun. Capability-by-capability status: `docs/release/parity-0.1.0.md`.
+Base: HEAD `07453c2`, plus this run's uncommitted roadmap-adapter change (HANDOFF section 40). Nothing pushed,
+merged or opened as a PR. **Verdict: not releasable yet.** Code and tests are green; signing, notarization, the
+updater, the login item, the live parity/relay runs, the fresh-account migration and the WHOOP takeover are
+waiting on Taisun. Capability-by-capability status: `docs/release/parity-0.1.0.md`.
 
-## Gates this run
+## What changed since `4ce7a8d`
+- Treasury 3-5: `22523f0`, `2ae105a`. Heart-rate-only warning `dd80bbf`; Fitness reason `ed4551c`. NOOP strap clock fix lives in the NOOP repo (out of bounds here).
+- Stage G1-G3, G6: `bddb46f` (parity report, relay number check), `46674a5` (pinned read path, freeze tool, Keychain moves, NOOP attribution files). G4/G5 not built.
+- Stage H built to its gates: `71d8d7e` (login item, signing script, updater inert). Gate answers still missing.
+- 1118a backend B1-B4: `21ef607`, `2ac4d64`, `16b04d0` + `1d44a2b`, `fa5198f`; 0037 gaps `dd62dab`; 1118b hooks `c313b11`. Design commits by the Grok bot are not ours.
+- Installs: `46674a5` and `dd62dab` (see `tasks/BOARD.md`). The running window keeps the old build until Amara is reopened.
+
+## Gates this run (2026-11-19)
 
 | Gate | Result |
 |---|---|
-| `.claude/skills/run-gates/gates.sh` | tsc PASS; lint PASS; vitest 2351 passed / 9 skipped; neuro 21 pass / 0 fail; check:secrets ok (1062 tracked files); src-tauri fmt + clippy PASS, 1455 passed / 0 failed / 6 ignored; amara-router fmt + clippy PASS, 131 passed / 0 failed / 0 ignored |
-| Full e2e `NEXUS_OUTBOUND_DISABLED=1 npm run test:e2e` (alone, both themes) | **784 passed, 12 skipped, 0 failed** (3.9 min), axe serious/critical tests all passed, including `a11y.spec.ts` and the per-screen axe tests in both themes |
-| crew-service (Docker was running; `docker run --rm --network none crew-test`) | **230 passed** (images `crew-base`, `crew-test` rebuilt; no container touched) |
-| swift test for NOOP packages | **not run** (NOOP repo out of bounds this run) |
-| `scripts/migration-probe.sh` | PASS, 9 probe lines (synthetic data) |
+| `.claude/skills/run-gates/gates.sh` | tsc PASS; lint PASS; vitest 2497 passed / 9 skipped; neuro 21 pass / 0 fail; check:secrets ok (1143 tracked files); src-tauri fmt + clippy PASS, 1686 passed / 0 failed / 6 ignored; amara-router fmt + clippy PASS, 131 passed / 0 failed / 0 ignored |
+| Path/Goals e2e (`npm run build`, then `npx playwright test goals-1112g`) | 6 passed (light and dark), 7.7 s |
+| Full e2e `npm run test:e2e` | **not run this refresh.** Last full run (2026-11-18, before 1118b and the design commits): 784 passed, 12 skipped, 0 failed |
+| crew-service Docker tests | not run this refresh (last: 230 passed, 2026-11-18) |
+| swift test for NOOP packages | not run (NOOP repo out of bounds) |
+| `scripts/migration-probe.sh` | not run this refresh (last: PASS, 2026-11-18) |
 
-Counts did not drop (baseline cd5e4cc: vitest 1140, src-tauri 418, router 112). Added this run: 1 Rust test
-(`migration_probe_tests`), 2 vitest tests (`noAbsolutePaths.test.ts`).
+Counts did not drop (baseline cd5e4cc: vitest 1140, src-tauri 418, router 112).
 
 ### The 12 skipped e2e tests
 All are opt-in screenshot generators, skipped by `test.skip(() => !process.env.X, ...)`:
@@ -61,17 +68,17 @@ Key: PASS = evidence in repo; WAIT = waiting on Taisun; NOT BUILT.
 - [x] Muse recordings untouched, zero deletions, checked by a test. PASS: no delete path (`a34a224`, `e182d9f`), byte-identical backups. Count check below.
 
 **NOOP fully absorbed**
-- [ ] Sidecars bundled and signed; WHOOP 4 single-writer. NOT BUILT / WAIT (Phase 10 takeover on hardware).
+- [ ] Sidecars bundled and signed; WHOOP 4 single-writer. WAIT: freeze report and gated copy built (`46674a5`); takeover G4/G5 not built.
 - [ ] Store copied into app-data; old store read-only 30 days. NOT BUILT.
-- [ ] Lucid cues from the Mac; Oura/Hevy/coach secrets in Keychain; NOOP.app retired. NOT BUILT (Phase 12, 2-week parity).
-- [ ] NOOP attribution in About and NOTICE. NOT DONE: no `NOTICE` file, no PolyForm text in code or UI.
+- [ ] Lucid cues from the Mac; NOOP.app retired. NOT BUILT. Oura/coach/Telegram Keychain moves built, waiting on his approvals.
+- [~] NOOP attribution. PARTIAL: NOTICE, ATTRIBUTION.md and LICENSE ship in the bundle (`46674a5`, `test/config/attribution.test.ts`); About copy is Design's.
 - [ ] Telegram relay in Amara's words with checked numbers. PARTIAL: built and tested (`a783a5f`, `bddb46f`); timer inert; live send needs token, chat, Send Test.
 
 **Designs wired**
 - [x] 1110e-1110i, 1111a, 1111s, 1111t, 1111u, 1111v, 1111w, 1111x. Built with the gaps listed in `tasks/BOARD.md` (habits source, Jarvis comment/blocked-embed signals, voice patches, Life Dates edit form, take rating control, Money gated parts). Known data gaps documented, not faked: nutrition, ledger file.
 
 **Verification**
-- [x] Full gates and full e2e green, axe serious/critical = 0 both themes. PASS this run (one intermittent Design contrast test, above).
+- [~] Full gates green (2026-11-19); full e2e and axe last run 2026-11-18 (784 passed, 0 failed), not re-run this refresh.
 - [x] Parity matrix written. PASS (`parity-0.1.0.md`, with the missing-source caveat).
 - [x] This report. PASS.
 - [x] Nothing pushed. PASS.
@@ -87,26 +94,33 @@ Restore-drill baseline on 2026-11-13 was 18 / 11 / 5. Counts are higher, which f
 then; counts cannot prove no file was altered. This run made no write to those folders (the probe uses temp dirs only).
 
 ## Residual risks
-- M1: loopback reach remains for other ports while the sandboxed `ollama serve` runs (handoff 25a M1); only the download window is mutually exclusive.
+- M1: loopback reach remains for other ports while the sandboxed `ollama serve` runs (handoff 25a M1).
 - Signing/notarization not done; no Developer ID. Hardened runtime is false in config and applied only by the signed script path: the first signed build must be live-tested with Muse BLE, Ollama and the router.
-- Updater inert (switch false, placeholder key, no host, no real swap host).
-- Login item untested live (never registered on this Mac).
-- NOOP parity report and Telegram relay not run live; Q4 (what parity means after takeover) open.
-- Treasury phases 3-5 not built.
-- WHOOP takeover, Lucid cues, NOOP.app retirement and NOOP attribution not built.
+- Updater inert (switch false, placeholder key, no host). Login item never registered live.
+- NOOP read path: the SHA-256 pin file lists a dev build in `~/projects/noop-lucid-current`; the bundled sidecar is not staged yet (`prepare-sidecars.sh` does not build it), so a release build resolves no NOOP binary until that is done and its digest logged. Release builds fail closed (`pin_missing`).
+- Parity report, relay and Treasury never run against real data; Q4 (parity meaning after takeover) open.
+- WHOOP takeover (G4/G5), Lucid cues and NOOP.app retirement not built. NOOP strap clock fix is unverified from here.
+- Secrets: Keychain moves are built but need his approval per item and no screen calls them; plaintext Telegram token remains in old backups until he rotates it (last, rule 7). Oura refresh tokens may be single-use: let one app refresh.
 - Letta and n8n do not check Host/Origin; Letta stays 0.16.8 (CVE upgrade not applied).
-- Light-theme contrast on `.m-warn b` (4.28:1) is intermittent in e2e; Design's fix.
-- Hemi-Sync audio of 50 MB or more is left out of backups (open question in restore-drill.md).
+- Design wiring pending for B2, B3, B4, 0037 and 1118b (new backend commands and hooks that no screen calls). Roadmap step "Not yet" is still an unlogged legacy command; the Path page has no Undo control for step edits or Yes.
+- Flaky `test/e2e/sand-lens.spec.ts:28` [dark] (failed once under load; Design's deterministic wait).
+- `takes-1111t.spec.ts:80` [light] contrast on `.m-warn b`: `be64e9b` added a light token for it; not re-measured in a full run since. Treat as unverified until the next full e2e.
+- Hemi-Sync audio of 50 MB or more is left out of backups (restore-drill.md).
 - `standalone-app-plan.md` section 4 not available; parity rows may miss capabilities.
-- Some runtime fallbacks are home-relative `~/projects/...` paths; they work only where those folders exist.
-- Not run: swift test (NOOP repo), live relaunch, signed build, notarization, quarantine test.
+- Some runtime fallbacks are home-relative `~/projects/...` paths.
+- Not run: swift test, live relaunch, signed build, notarization, quarantine test, anything against real NOOP/Keychain/Telegram/HA.
 
-## Open gates
-- Stage H: `tasks/proposed/stage-h-gates.md` (Q13.1-Q15.5: login mechanism, Developer ID, notary profile, B14, version bump, entitlements, arch, manifest host, updater key, switch, defaults, swap host).
-- Decision 0032 item 7: "77 vs 7". He said "77" by voice; read as 7 days stale. Confirm.
-- Stage G Q1-Q8 (`tasks/proposed/phase10-12-stage-g.md`): noop-syncd source, takeover flag, real reports committed, parity meaning, drop DEEP/REM/RHR, secrets location, legacy Telegram token migration, haptic vs audio.
-- Treasury phases 3-5.
-- Others: Q1 navy vs Hermes web tools; apply the Amara Voice diffs (`tasks/proposed/`); Keychain moves; chmod; Weaviate switch-over; Hermes key rotation and backup prune (last, with his OK).
+## Open gates (all waiting on Taisun)
+- Stage H inputs: `tasks/proposed/stage-h-gates.md` (login mechanism, Developer ID, notary profile, version bump, entitlements, manifest host, updater key, switch, swap host).
+- Feeds: market and news feeds for the watch-only proposals (new outbound hosts, gated by 0036).
+- Treasury inputs: provider exports, customer data, results files, and "77 vs 7" (0032 item 7).
+- Keychain approvals (Oura, coach, Telegram) and the Telegram token rotation (last).
+- Relay bot: bot, token, chat, Send Test.
+- Migration test: fresh account, `docs/release/migration-test.md` Part B.
+- WHOOP takeover G4/G5: quit NOOP.app, `noop_freeze_report`, flip `FREEZE_COPY_ENABLED` with a logged decision; Stage G Q4.
+- Lucid cues; Muse live hardware replay check.
+- Design wiring list: Smart home to `ha_devices_list` / `ha_device_set`, Finances/Ventures/Content (`enterpriseAdapter`), `SandLens` to the 1118b hooks, Undo for roadmap step writes, About copy for NOOP attribution, Startup toggle.
+- Others: Q1 navy vs Hermes web tools; Amara Voice diffs in `tasks/proposed/`; chmod; Weaviate switch-over; Hermes key rotation and backup prune.
 
 ## Taisun's remaining steps
 1. Answer the open gates above (log in `docs/decisions/`).

@@ -1,6 +1,9 @@
 # Board (read this first when resuming)
 
 Branch `amara-integration`, local commits only, nothing pushed (decision 0001). Decisions: `docs/decisions/0001–0021`.
+**Refresh 2026-11-19 (HEAD 07453c2 + uncommitted roadmap adapter change):** gates all PASS (vitest 2497/9 skipped, src-tauri 1686/6 ignored, router 131, neuro 21); Path/Goals e2e 6 passed; full e2e not re-run. `docs/release/parity-0.1.0.md` (rows 10, 11, 18, 20, 23, 27, 34, 38, 39 updated; rows 43-50 added) and `READINESS-0.1.0.md` refreshed for everything since 4ce7a8d (Treasury 3-5 22523f0/2ae105a, HR-only dd80bbf, Fitness reason ed4551c, G3/G6 46674a5, Stage H 71d8d7e, B1-B4 21ef607/2ac4d64/16b04d0/1d44a2b/fa5198f, 0037 dd62dab, 1118b c313b11). Roadmap step edit and Yes now use the logged `goal_step_edit` / `goal_step_complete`.
+**Open gates (waiting on Taisun):** Stage H inputs; market/news feeds; Treasury inputs and "77 vs 7"; Keychain approvals and Telegram rotation; relay bot; fresh-account migration test; WHOOP takeover G4/G5; Lucid; Muse hardware replay. **Waiting on Design:** wiring list (Smart home, Finances/Ventures/Content, SandLens hooks, roadmap Undo, About attribution, Startup toggle) and the flaky `sand-lens.spec.ts:28`.
+
 **Phase 17 run (HEAD 71d8d7e + uncommitted Phase 16/17 files, 2026-11-18):** vitest 2351 / 9 skipped, neuro 21, src-tauri 1455 / 6 ignored, amara-router 131, crew-service 230, full e2e 784 passed / 12 skipped (env-gated shot tools) / 0 failed. takes-1111t:80 [light] is intermittent (5 of 6 alone), Design's contrast fix. Readiness: `docs/release/READINESS-0.1.0.md`.
 
 **Older gates on HEAD `bda3c15` (2026-11-14):**

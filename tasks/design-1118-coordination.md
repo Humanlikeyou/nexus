@@ -69,3 +69,7 @@ From 1118b (later):
 
 ## UI touches (B4 gaps: goal-venture link, saved drafts, 2026-11-19, decision 0037)
 - Logic only, no markup, class or token: `src-console/design1118/enterpriseLive.ts` (+ test) gained `saveDraft`, `savedDraft`, `undoDraft`, `linkGoal`, `undoGoalLink`; `ventures()[i].goals` now carries each venture's goals (server percent, N of M steps). `boundTable.ts` / `bindings.gen.ts` gained `content_draft_save`, `content_draft_get`, `goal_venture_set`; the `Goal` type gained optional `venture_id`. No screen edited. Design: wire "Draft with Amara" save and the Ventures goal list / goal venture picker when you build them.
+
+## UI touches (Roadmap writes logged, 2026-11-19)
+- Logic only, no markup, class or token: `src-console/goals/roadmapLive.ts` (+ `test/unit/roadmapLive.test.ts`). `editStep` now calls `goal_step_edit` and `answerStep("yes")` calls `goal_step_complete` (both write History, via "typed"). "Not yet" stays on the legacy `roadmap_answer_step` (no new equivalent; it only bumps notYetCount, unlogged). `RoadmapAdapter` interface unchanged; the live adapter also exposes `undoStepWrite(goalId, stepId)` (calls `add_undo("route", id)`).
+- Design: there is no Undo affordance on Path/Goals step edit or Yes. If you want one (8 s toast), call `undoStepWrite` on the live adapter. A Yes on an already-done step is now refused by the backend (shows as unwired) instead of being a no-op.

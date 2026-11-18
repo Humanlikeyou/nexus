@@ -1011,3 +1011,13 @@ TypeScript only. No Rust, no new command, no capability change, no markup/CSS/We
 - **Installed dd62dab (2026-11-19).** Taisun: "go ahead and reinstall".
   - Amara was open, so the bundle was swapped underneath it; the new build runs on the next launch. Rollback: `~/Backups/Amara OS-backup-20261119.app` (46674a5).
   - c313b11 (1118b hooks) came after this build. It is TS-only and no screen uses the hooks yet.
+
+
+## 40. Roadmap writes move to the logged Path commands; release docs refreshed (2026-11-19, not committed)
+- **Adapter (`src-console/goals/roadmapLive.ts`, logic only).** `editStep` now calls `goal_step_edit {goalId, stepId, title, size, via:"typed"}`; `answerStep("yes")` calls `goal_step_complete {goalId, stepId, via:"typed"}`. Both return `{id, route}`; the History id is kept per goal/step. The `RoadmapAdapter` interface and screens are unchanged. The live adapter also exposes `undoStepWrite(goalId, stepId)` which calls `add_undo("route", id)` (one Undo per write, false when nothing logged). No screen calls it: the page has no Undo control, so **Design** must add one if wanted (not added here).
+- **Kept on the old command:** `answerStep("not_yet")` stays on `roadmap_answer_step`. It only bumps `notYetCount` (and marks the day's question answered); `goal_route.rs` has no equivalent, so it is not in History and has no Undo. A Yes on an already-done or deferred step is now refused by the backend (`route: that step can't be completed`) and shows as unwired, where the legacy command was a no-op.
+- **Tests:** `test/unit/roadmapLive.test.ts` 8 (bridge mocked): edit uses `goal_step_edit` and not the legacy one; Yes uses `goal_step_complete` and Undo calls `add_undo("route", "h-42")` once; a refused write keeps no Undo id.
+- **Gates (2026-11-19, `gates.sh`, all PASS):** tsc; lint; vitest 2497 passed / 9 skipped; neuro 21; secrets ok (1143 files); src-tauri 1686 passed / 6 ignored, fmt + clippy clean; amara-router 131, fmt + clippy clean. **e2e:** `npm run build`, then `npx playwright test goals-1112g`: 6 passed (light + dark). Full e2e: not run.
+- **Docs:** `docs/release/parity-0.1.0.md` and `READINESS-0.1.0.md` refreshed with real hashes and test files; open gates and residual risks updated; `tasks/BOARD.md` header updated. The NOOP-side strap clock fix is in the NOOP repo and is marked unverified.
+- **UI touch noted** in `tasks/design-1118-coordination.md` ("Roadmap writes logged").
+- **Not run:** the app, a real step edit or Undo, full e2e, crew-service tests, migration probe, swift tests.

@@ -54,7 +54,14 @@ export function mapQuestion(raw: unknown): StepQuestion | null {
   return goalId && goalTitle !== null && stepId && stepTitle !== null && askedOn ? { goalId, goalTitle, stepId, stepTitle, askedOn } : null;
 }
 
-export function makeLiveRoadmaps(deps: RoadmapDeps = defaultDeps): RoadmapAdapter {
+/** The live adapter, plus an Undo seam the RoadmapAdapter interface does not have (no screen calls it yet). */
+export type LiveRoadmapAdapter = RoadmapAdapter & {
+  /** Undo the last logged step write (edit or Yes) for this step: `add_undo("route", historyId)`. True if undone. */
+  undoStepWrite(goalId: string, stepId: string): Promise<boolean>;
+};
+
+export function makeLiveRoadmaps(deps: RoadmapDeps = defaultDeps): LiveRoadmapAdapter {
+  const lastWrite = new Map<string, string>(); // `${goalId}/${stepId}` -> History id, for Undo
   const cache = new Map<string, Roadmap | null>();
   const loading = new Set<string>();
   let question: StepQuestion | null | undefined; // undefined = not read yet
@@ -77,7 +84,28 @@ export function makeLiveRoadmaps(deps: RoadmapDeps = defaultDeps): RoadmapAdapte
     return live({ ok: true as const });
   }
 
+  /** A logged step write (goal_step_edit / goal_step_complete): remember the History id it returns. */
+  async function writeLogged(command: string, args: Record<string, unknown>, goalId: string, stepId: string): Promise<Wired<{ ok: true }>> {
+    try {
+      const w = await deps.call<{ id?: unknown }>(command, { ...args, via: "typed" });
+      if (typeof w?.id === "string") lastWrite.set(`${goalId}/${stepId}`, w.id);
+    } catch { return UNWIRED; }
+    await Promise.all([loadRoadmap(goalId), loadQuestion()]);
+    deps.notify();
+    return live({ ok: true as const });
+  }
+
   return {
+    async undoStepWrite(goalId, stepId) {
+      const key = `${goalId}/${stepId}`, id = lastWrite.get(key);
+      if (!id) return false;
+      lastWrite.delete(key);
+      let ok = false;
+      try { ok = (await deps.call<boolean>("add_undo", { kind: "route", id })) === true; } catch { return false; }
+      await Promise.all([loadRoadmap(goalId), loadQuestion()]);
+      deps.notify();
+      return ok;
+    },
     roadmap(goalId) {
       if (!cache.has(goalId) && !loading.has(goalId)) { loading.add(goalId); touch(loadRoadmap(goalId), () => loading.delete(goalId)); }
       return cache.has(goalId) ? live(cache.get(goalId) ?? null) : UNWIRED;
@@ -89,8 +117,12 @@ export function makeLiveRoadmaps(deps: RoadmapDeps = defaultDeps): RoadmapAdapte
       return live({ queued: true as const });
     },
     accept: (goalId) => write("roadmap_accept", { goalId }, goalId),
-    editStep: (goalId, stepId, patch) => write("roadmap_edit_step", { goalId, stepId, title: patch.title ?? null, size: patch.size ?? null }, goalId),
-    answerStep: (goalId, stepId, answer) => write("roadmap_answer_step", { goalId, stepId, answer }, goalId),
+    editStep: (goalId, stepId, patch) => writeLogged("goal_step_edit", { goalId, stepId, title: patch.title ?? null, size: patch.size ?? null }, goalId, stepId),
+    // Yes -> goal_step_complete (logged, Undo). "Not yet" has no new-command equivalent: it only bumps
+    // notYetCount, which goal_route.rs does not log or expose, so it stays on the legacy roadmap_answer_step.
+    answerStep: (goalId, stepId, answer) => answer === "yes"
+      ? writeLogged("goal_step_complete", { goalId, stepId }, goalId, stepId)
+      : write("roadmap_answer_step", { goalId, stepId, answer }, goalId),
     todaysQuestion() {
       if (question !== undefined && questionDay !== deps.today()) question = undefined; // new day: ask again
       if (question === undefined && !questionLoading) { questionLoading = true; touch(loadQuestion(), () => { questionLoading = false; }); }
