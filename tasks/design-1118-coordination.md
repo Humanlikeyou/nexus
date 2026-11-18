@@ -12,9 +12,9 @@ Design is in mockup-only mode. Taisun: "don't build yet" until the full design p
 - Theme and motion tokens, plus global styles.
 - The Amara lens component, and a new shared WebGL canvas for Home (1118b).
 
-## Backend and wiring: Grok bot, not Claude Code
-Taisun, 2026-11-18: "grok bot will be doing all of this. I m just letting you know in case you notice a change".
-Claude Code does NOT build the 1118a or 1118b backend below. If those files or commands change in the tree, it's the Grok bot's work: don't revert or rewrite it, rebase onto it, and run the gates as usual.
+## Backend and wiring: Claude Code, waiting for Taisun's go
+Taisun, 2026-11-18 (correcting an earlier line): "no sorry you will do the back in. sorry i will let you know when to start on that back end."
+Claude Code builds the 1118a and 1118b backend below, but only after Taisun says start. Grok bot changes to the design files may still appear; don't revert them.
 
 ## The 1118a/1118b backend list (for reference)
 Specs are in `HANDOFF-1118a.md` §8–10 on Design's box (`/workspace/nexus/design-1118a/`). **That file is not on this Mac yet**, so it must be copied into the repo before this work starts.
