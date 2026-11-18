@@ -785,3 +785,7 @@ Nothing committed, pushed or installed. Live app data, Muse files, the real NOOP
 **TAISUN steps / open gates:** see READINESS-0.1.0.md (Stage H gates, 0032 #7 "77 vs 7", Stage G Q1-Q8, Treasury 3-5, fresh-account migration).
 
 **Not run:** swift test, signed build, notarization, any live relaunch, fresh-account migration, live NOOP parity report, live Telegram send.
+- **Installed 4ce7a8d (2026-11-18).**
+  - Clean build in `~/projects/nexus-amara-install` (sidecars:prepare, then tauri build, ad-hoc signed; hardened runtime off).
+  - Rollback: `~/Backups/Amara OS-backup-20261118b.app` (bddb46f). The copy from before this session is `~/Backups/Amara OS-backup-20261118.app`.
+  - Not relaunched. The autostart plugin is gone: open-at-login now uses SMAppService, off until Taisun turns it on.
