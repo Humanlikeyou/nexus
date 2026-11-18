@@ -17,3 +17,5 @@
   - declined confirm: no message, stays off
   - anything else: "Couldn't change this setting. Try again." Raw text is never shown.
 - Tests: `src-console/settings/OpenAtLogin.test.tsx` (9, bridge mocked); `SettingsScreen.test.tsx` switch order now includes "Open at login".
+
+- Fitness › Recovery empty state (0035, Taisun chose option 2): when today has no score and Needs you holds `strap-hr-only`, the card reads "No score today. Last night came through as heart rate only, so recovery couldn't be scored." with a "See the note ›" link to Home › Needs you. Otherwise "Arrives after the sleep record closes" is unchanged. No older-day fallback. Design: please review the link label.

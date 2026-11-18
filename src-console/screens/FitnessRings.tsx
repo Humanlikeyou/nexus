@@ -1,11 +1,15 @@
 import type { CSSProperties, ReactNode } from "react";
+import { LinkButton } from "../adds/Composer";
 import { Card } from "../ui";
 import { DataTag } from "../ui/StatusText";
 import { USUAL_MIN, type Driver, type EffortModel, type RecoveryModel, type RingModel, type WeekPoint, type Zone } from "./fitnessRingsModel";
+import "../adds/v1111.css";
 import "./FitnessRings.css";
 
 /** design-1111r option B "Horizon" (Taisun, 13:47 JST), without the Sleep tile: the Sleep card sits next to it. */
 const PENDING = "Arrives after the sleep record closes";
+/** 0035: when the Needs-you list says last night was heart rate only, say so instead of "arrives later". Never an older day's score. */
+export const HR_ONLY_REASON = "No score today. Last night came through as heart rate only, so recovery couldn't be scored.";
 const BAND_COLOR = { High: "var(--data-recovery-high)", Medium: "var(--data-recovery-mid)", Low: "var(--data-recovery-low)" } as const;
 const ZONE_COLOR: Record<Zone["key"], string> = { Z1: "var(--data-sleep-light)", Z2: "var(--data-recovery-high)", Z3: "var(--data-recovery-mid)", Z4: "var(--copper)", Z5: "var(--data-recovery-low)" };
 const r0 = (v: number) => Math.round(v);
@@ -100,21 +104,25 @@ function Unwired({ title, src }: { title: string; src: string }) {
   );
 }
 
-function Pending({ title, m, unit, text, ring }: { title: string; m: RingModel; unit: string; text: string; ring?: ReactNode }) {
+function Pending({ title, m, unit, text, ring, action }: { title: string; m: RingModel; unit: string; text: string; ring?: ReactNode; action?: ReactNode }) {
   return (
     <Card title={title} className="fitness__ring-card rx" data-state="pending">
       <div className="rx__body">
         <div className="rxB__top"><div className="rxB__lead"><p className="rx__num" data-empty aria-hidden="true">…</p>{m.usual != null && <span className="rx__k">usual {r0(m.usual)}{unit}</span>}</div>{ring}</div>
         <p className="fitness__pending">{text}</p>
+        {action}
         <Week week={m.week} usual={m.usual} label={title} unit={unit} />
       </div>
     </Card>
   );
 }
 
-export function RecoveryCard({ m }: { m: RecoveryModel }) {
+export function RecoveryCard({ m, hrOnly = false, onOpenNote }: { m: RecoveryModel; hrOnly?: boolean; onOpenNote?: () => void }) {
   if (m.state === "unwired") return <Unwired title="Recovery" src="Appears once your WHOOP sends a nightly score." />;
-  if (m.state === "pending" || m.value == null) return <Pending title="Recovery" m={m} unit="%" text={PENDING} />;
+  if (m.state === "pending" || m.value == null) {
+    if (hrOnly) return <Pending title="Recovery" m={m} unit="%" text={HR_ONLY_REASON} action={<LinkButton onClick={onOpenNote} label="Open the Needs you note about last night">See the note ›</LinkButton>} />;
+    return <Pending title="Recovery" m={m} unit="%" text={PENDING} />;
+  }
   const color = m.band ? BAND_COLOR[m.band] : "var(--data-recovery-high)";
   return (
     <Card title="Recovery" className="fitness__ring-card rx" data-state={m.state}>

@@ -12,11 +12,11 @@ import type { FollowupLists, TerrenceAction } from "../types";
 /** ListsScreen announces every fresh read so the inbox follows To-dos without a second poll. */
 export const TODOS_EVENT = "amara:todos";
 
-export type InboxSource = "todos" | "dates" | "checkin" | "decisions" | "approvals" | "crew";
-export const SOURCE_LABEL: Record<InboxSource, string> = { todos: "To-dos", dates: "Dates & deadlines", checkin: "Check-in", decisions: "Decisions", approvals: "Amara approvals", crew: "Crew approvals" };
-export const OPEN_LABEL: Record<InboxSource, string> = { todos: "Open in To-dos ›", dates: "Open in Dates & deadlines ›", checkin: "Go to Check-in ↓", decisions: "Open in Decisions ›", approvals: "Open on Home ›", crew: "Open in Agents › Crews ›" };
+export type InboxSource = "todos" | "dates" | "checkin" | "decisions" | "approvals" | "crew" | "strap";
+export const SOURCE_LABEL: Record<InboxSource, string> = { todos: "To-dos", dates: "Dates & deadlines", checkin: "Check-in", decisions: "Decisions", approvals: "Amara approvals", crew: "Crew approvals", strap: "Strap" };
+export const OPEN_LABEL: Record<InboxSource, string> = { todos: "Open in To-dos ›", dates: "Open in Dates & deadlines ›", checkin: "Go to Check-in ↓", decisions: "Open in Decisions ›", approvals: "Open on Home ›", crew: "Open in Agents › Crews ›", strap: "Open in Mind–Body ›" };
 /** What each source needs before it can list (HANDOFF-1111v §7). */
-export const UNWIRED_REASON: Record<InboxSource, string> = { todos: "Needs wiring · follow-ups", dates: "Needs wiring · life dates store", checkin: "Needs wiring · check-in store", decisions: "Needs wiring · business ledger and decisions log", approvals: "Needs wiring", crew: "Needs wiring · crew approvals (R13-D)" };
+export const UNWIRED_REASON: Record<InboxSource, string> = { todos: "Needs wiring · follow-ups", dates: "Needs wiring · life dates store", checkin: "Needs wiring · check-in store", decisions: "Needs wiring · business ledger and decisions log", approvals: "Needs wiring", crew: "Needs wiring · crew approvals (R13-D)", strap: "Needs wiring · NOOP store" };
 
 export type InboxPointer = {
   source: InboxSource;
@@ -32,7 +32,7 @@ export type InboxPointer = {
 };
 export type SourceState = { source: InboxSource; state: "loading" | "ok" | "failed" | "unwired"; rows: InboxPointer[]; sample?: boolean };
 
-const ORDER: InboxSource[] = ["todos", "decisions", "approvals", "crew", "dates", "checkin"];
+const ORDER: InboxSource[] = ["todos", "decisions", "approvals", "crew", "strap", "dates", "checkin"];
 const urgency = (p: InboxPointer) => (p.quiet ? 3 : p.badge?.tone === "warning" ? 0 : p.badge?.tone === "accent" ? 1 : 2);
 
 export type Inbox = { rows: InboxPointer[]; count: number; loading: boolean; failed: InboxSource[]; unwired: InboxSource[]; sample: boolean; sources: number };
