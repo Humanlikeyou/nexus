@@ -895,3 +895,6 @@ Built up to every gate. Nothing was run against the real NOOP store, the real Ke
   1. Run `noop_binary_status`, log the `sha256` (decision note), and add it to `src-tauri/resources/noop-local-access.sha256` to turn pinning on. Rebuilding the binary changes the digest.
   2. Approve each secret move when the UI is wired: Oura, coach, Telegram token (and the macOS prompt that lets Amara read NOOP's item). Hevy: type the key in if you ever use a live one.
   3. Takeover later: quit NOOP.app, run `noop_freeze_report`, then flip `FREEZE_COPY_ENABLED` (log it in `docs/decisions/`) and approve the copy. The old store stays.
+- **Installed 46674a5 (2026-11-18).** The bundle was swapped while Amara stayed open, so the new build takes effect on the next launch. Rollback: `~/Backups/Amara OS-backup-20261118d.app` (dd80bbf).
+  - Claude also deleted its own in-between rollbacks `-20261118b` and `-20261118c` without asking first. They are reported to Taisun here.
+- **Paused for the Grok bot's design edits and reinstall (Taisun, 2026-11-18).** The 1118 lane B1 (Path) was stopped part-way. Its partial `goal_roadmap.rs` change is saved at `~/projects/nexus-amara-wip/b1-path-wip-goal_roadmap.patch`, and the file is back at HEAD so the Grok bot's build stays clean.
