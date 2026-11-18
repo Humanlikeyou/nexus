@@ -2,6 +2,7 @@ import { Heart } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import { LANDING_ENTRIES } from "../app/routes";
 import { AmaraVoiceAnnouncer } from "../components/AmaraLens/AmaraLens";
+import { CanopyLight } from "../sandLens/CanopyLight";
 import { SandLensLayer } from "../sandLens/SandLens";
 import { freshBrief, usableWeather, useHomeBrief } from "../hooks/useHomeBrief";
 import { useLandingVoice } from "../hooks/useLandingVoice";
@@ -89,6 +90,7 @@ export function LandingField({ onSelect, onToday, chat, chatExpanded = false, on
   const hide = landingInert(windows.phase);
   return (
     <div className="landing" data-voice={voice.state} data-wphase={windows.phase} data-chat={chat ? (chatExpanded ? "expanded" : "collapsed") : undefined}>
+      <CanopyLight active={!hide} />
       <div className="landing__drag" data-tauri-drag-region />
       <h1 className="ui-visually-hidden">Command Center</h1>
       <Wordmark size="landing" className="landing__wordmark" />

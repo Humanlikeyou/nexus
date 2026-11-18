@@ -45,4 +45,14 @@ test.describe("sand lens", () => {
     const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
     expect(r.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => v.id)).toEqual([]);
   });
+
+  test("canopy sunlight is a click-through layer on Home and is still with reduced motion", async ({ page, theme }) => {
+    await openApp(page, { theme, lens: "sand", reduceMotion: true });
+    const light = page.getByTestId("canopy-light");
+    await expect(light).toBeAttached();
+    await expect(light).toHaveAttribute("aria-hidden", "true");
+    expect(await light.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe("none");
+    // reduced motion → static (data-calm)
+    await expect(light).toHaveAttribute("data-calm", "true");
+  });
 });

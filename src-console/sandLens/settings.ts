@@ -3,16 +3,17 @@ import { useSyncExternalStore } from "react";
 /**
  * design-1118b Stage B: every step behind its own Settings toggle. Persisted in localStorage.
  * - lens: the sand lens; "classic" keeps the old static lens selectable.
- * - calm: grains settle without motion (also follows Reduce motion). - sound: OFF by default.
- * Home itself is unchanged: the light/depth tokens, ambience and micro-moments were removed (Taisun 19:51).
+ * - tokens: canopy sunlight on Home (the original "Light and depth" toggle, sunlight only).
+ * - calm: grains settle without motion (also follows Reduce motion). Lighting becomes static. - sound: OFF by default.
  */
 export type SandMaterial = "sand" | "fireflies";
 export type SandSettings = {
   lens: "sand" | "classic";
+  tokens: boolean;
   sound: boolean;
   material: SandMaterial; calm: boolean; volume: number; mute: boolean;
 };
-export const SAND_DEFAULTS: SandSettings = { lens: "sand", sound: false, material: "sand", calm: false, volume: 0.6, mute: false };
+export const SAND_DEFAULTS: SandSettings = { lens: "sand", tokens: true, sound: false, material: "sand", calm: false, volume: 0.6, mute: false };
 export const SAND_KEY = "nexus.sandLens";
 export const SAND_EVENT = "nexus:sand-settings";
 
@@ -22,7 +23,7 @@ function read(): SandSettings {
     const raw = window.localStorage.getItem(SAND_KEY);
     const v = raw ? (JSON.parse(raw) as Partial<SandSettings>) : {};
     const m = v.material === "fireflies" ? "fireflies" : "sand"; // "spores" (Stage A) is dropped → sand
-    return { ...SAND_DEFAULTS, calm: v.calm === true, sound: v.sound === true, mute: v.mute === true, material: m, lens: v.lens === "classic" ? "classic" : "sand", volume: typeof v.volume === "number" ? Math.min(1, Math.max(0, v.volume)) : SAND_DEFAULTS.volume };
+    return { ...SAND_DEFAULTS, tokens: v.tokens !== false, calm: v.calm === true, sound: v.sound === true, mute: v.mute === true, material: m, lens: v.lens === "classic" ? "classic" : "sand", volume: typeof v.volume === "number" ? Math.min(1, Math.max(0, v.volume)) : SAND_DEFAULTS.volume };
   } catch { return { ...SAND_DEFAULTS }; }
 }
 export function sandSettings(): SandSettings { return (cached ??= read()); }

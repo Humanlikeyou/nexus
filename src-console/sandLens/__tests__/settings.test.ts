@@ -4,17 +4,18 @@ import { SAND_DEFAULTS, SAND_KEY, __resetSandSettings, calmActive, sandSettings,
 describe("design-1118b sand settings", () => {
   afterEach(() => { localStorage.removeItem(SAND_KEY); __resetSandSettings(); document.documentElement.removeAttribute("data-reduce-motion"); sessionStorage.removeItem("nexus.sandSeed"); });
 
-  it("defaults: sand lens, sand material, sound OFF, calm off; Home's own look has no sand toggles any more", () => {
-    expect(SAND_DEFAULTS).toMatchObject({ lens: "sand", material: "sand", sound: false, calm: false });
-    for (const k of ["tokens", "ambience", "moments"]) expect(k in SAND_DEFAULTS).toBe(false);
+  it("defaults: sand lens, sand material, canopy light on, sound OFF, calm off; ambience and micro-moments stay gone", () => {
+    expect(SAND_DEFAULTS).toMatchObject({ lens: "sand", material: "sand", tokens: true, sound: false, calm: false });
+    for (const k of ["ambience", "moments"]) expect(k in SAND_DEFAULTS).toBe(false);
   });
 
-  it("old saved Stage B toggles are dropped on read", () => {
-    localStorage.setItem(SAND_KEY, JSON.stringify({ tokens: true, ambience: true, moments: true, calm: true }));
+  it("a saved canopy-light off is honoured; ambience and micro-moments stay dropped", () => {
+    localStorage.setItem(SAND_KEY, JSON.stringify({ tokens: false, ambience: true, moments: true, calm: true }));
     __resetSandSettings();
     const s = sandSettings() as Record<string, unknown>;
     expect(s.calm).toBe(true);
-    for (const k of ["tokens", "ambience", "moments"]) expect(k in s).toBe(false);
+    expect(s.tokens).toBe(false);
+    for (const k of ["ambience", "moments"]) expect(k in s).toBe(false);
   });
 
   it("the Stage A 'spores' skin is gone: a saved spores choice becomes sand", () => {

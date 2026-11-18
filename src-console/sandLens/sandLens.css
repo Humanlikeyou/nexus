@@ -3,3 +3,9 @@
 .sand-lens__hit { width: min(320px, 100cqmin); aspect-ratio: 1; border-radius: 50%; background: transparent; pointer-events: auto; touch-action: none; }
 html[data-navy="on"] .sand-lens__canvas { filter: saturate(.25) brightness(.9); }
 @media (forced-colors: active) { .sand-lens__canvas { display: none; } }
+
+/* design-1118b: canopy sunlight — a very gentle dappled layer over Home's own colours. Never takes a click. */
+.canopy-light { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none !important; z-index: 3; mix-blend-mode: plus-lighter; }
+.canopy-light--css { }
+html[data-navy="on"] .canopy-light { filter: saturate(.25) brightness(.9); }
+@media (forced-colors: active), print { .canopy-light { display: none; } }
