@@ -8,7 +8,7 @@ Branch `amara-integration`, local commits only, nothing pushed (decision 0001). 
 - Rust was last run at 0daa808, with no Rust change since.
 - takes-1111t:80 [light] is a real Design contrast bug (4.28:1). It fails in some full runs; never weaken it.
 
-Installed: bcd1385 (2026-11-15): Stages A–F + bundled ollama runtime (not started; act off). Router enforcing the launch token.
+Installed: bddb46f (2026-11-18): Treasury Phase 2, download window wired (M1 mutual exclusion), Stage G1 parity + G2 relay check. Rollback: ~/Backups/Amara OS-backup-20261118.app. Not relaunched.
 
 ### Handover phases (0–17)
 Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2026-11-14; it is untracked and his file, so don't commit it without his OK. Evidence is a commit or a decision.

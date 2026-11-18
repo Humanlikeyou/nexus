@@ -721,3 +721,7 @@ Plan: `tasks/proposed/phase10-12-stage-g.md`. Q3 (no real reports in the repo) a
 - **Q4 OPEN:** what parity means after the takeover. After it, `daily_range` and the store Amara reads are the same data, so a daily_range-vs-legacy comparison is trivially equal. Built here: the pre-takeover meaning only. Taisun decides what side-by-side compares after the takeover.
 - **Not run:** a live parity report against the real NOOP store; a live Telegram send or the timer in the running app; the security-reviewer agent; e2e (no UI change).
 - **Taisun steps:** (1) when ready, run `noop_parity_report` with NOOP.app data present and look at `<data>/parity/` (0600; values stay local). (2) Decide Q4. (3) The first real Telegram send still needs the bot, the Keychain token and chat, and the Send Test approval; the timer stays inert until then.
+- **Installed bddb46f (2026-11-18).** Taisun asked for it: "Once finished commit and reinstall".
+  - Built in `~/projects/nexus-amara-install` with `sidecars:prepare` then `tauri build --bundles app`, ad-hoc signed.
+  - The old app was moved to `~/Backups/Amara OS-backup-20261118.app` (rollback), then the new one installed with `ditto`. Not relaunched.
+  - Note: the earlier `~/Backups/Amara OS-backup-*.app` copies were no longer in `~/Backups` (the folder was changed on Nov 17). Not investigated, nothing touched.
