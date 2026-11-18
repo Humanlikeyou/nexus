@@ -1,4 +1,5 @@
 import type { Roadmap, RoadmapStep, StepSize } from "../goals/roadmap";
+import { FIB, GOLDEN_ANGLE, PHI } from "./golden";
 
 /**
  * design-1118a, the Path (Direction A). Pure model: which station is done, current (You are here),
@@ -95,12 +96,18 @@ export function fillFraction(stations: Station[]): number {
   return here < 0 ? 1 : here / (live.length - 1);
 }
 
-/** A tangled strand for the Milestones arrival view. Periodic every 680 units, so a strand twice as wide loops seamlessly. */
+/**
+ * A tangled strand for the Milestones arrival view. Periodic every 680 units, so a strand twice as wide loops seamlessly.
+ * Golden character (round 6): consecutive Fibonacci frequencies (their ratio tends to φ, and integers keep the loop
+ * seamless), amplitudes in φ² steps, and golden-angle phase offsets between strands.
+ */
 export function strandPath(i: number, w = 680, h = 120, phase = 0, samples = 96): string {
-  const P = 680, k1 = 1 + (i % 2), k2 = 2 + (i % 3);
+  const P = 680, f = i % 3, k1 = FIB[f + 1], k2 = FIB[f + 2], k3 = FIB[f + 3];
+  const a1 = h * 0.22, a2 = a1 / (PHI * PHI), a3 = a2 / (PHI * PHI);
+  const ph = i * GOLDEN_ANGLE;
   const pts: Pt[] = Array.from({ length: samples }, (_, k) => {
-    const x = (k / (samples - 1)) * w;
-    const y = h / 2 + h * 0.22 * Math.sin((2 * Math.PI * k1 * x) / P + i * 1.7 + phase) + h * 0.1 * Math.sin((2 * Math.PI * k2 * x) / P + i * 0.9 - phase * 0.6);
+    const x = (k / (samples - 1)) * w, u = (2 * Math.PI * x) / P;
+    const y = h / 2 + a1 * Math.sin(k1 * u + ph + phase) + a2 * Math.sin(k2 * u + ph * PHI - phase / PHI) + a3 * Math.sin(k3 * u + ph * PHI * PHI + phase / (PHI * PHI));
     return { x, y };
   });
   return smoothPath(pts);

@@ -7,6 +7,7 @@ import {
 import { Badge, Button, InsetGroup, ListRow, More, PageHero, Select, Toggle } from "../ui";
 import { displayName, groupDevices } from "../design1118/homeGroups";
 import { PageTake } from "../design1118/PageTake";
+import { GoldenUnderlay } from "../design1118/GoldenUnderlay";
 import { SampleHomeControls } from "../design1118/SampleHomeControls";
 import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
 import "./SmartHomeScreen.css";
@@ -276,7 +277,8 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
   );
 
   return (
-    <div className="smart-home page-inset d18-page">
+    <div className="smart-home page-inset d18-page d18-golden">
+      <GoldenUnderlay />
       <PageHero title="Smart home" statement={state.status === "ready" && devices.length ? `${householdCount} household device${householdCount === 1 ? "" : "s"}` : "Home Assistant"}
         detail={live ? <Badge className="smart-home__live" tone={LIVE_TONE[live]} role="status" aria-label={`Live updates: ${LIVE_COPY[live]}`}>{LIVE_COPY[live]}</Badge> : undefined} />
       <PageTake surface="smarthome" />

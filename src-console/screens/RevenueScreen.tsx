@@ -7,6 +7,7 @@ import type { Route } from "../app/routes";
 import { LinkCard, PERSONAL_ITEMS, waitingDecisions } from "./BusinessPanels";
 import { valueOf } from "../lib/sampleAdapters";
 import { PageTake } from "../design1118/PageTake";
+import { GoldenUnderlay } from "../design1118/GoldenUnderlay";
 import "../design1118/design1118.css";
 import "./BusinessScreen.css";
 import "./CommandCenter.css";
@@ -41,7 +42,8 @@ export function RevenueField({ data, onRetry, onOpen, adapter = businessAdapter(
   const empty = isAwaitingRevenue && withBalance.length === 0 && !summaryDown;
 
   return (
-    <div className="biz page-inset cc-page d18-page">
+    <div className="biz page-inset cc-page d18-page d18-golden">
+      <GoldenUnderlay />
       <PageHero title="Finances" statement={summaryDown ? "Revenue is out of reach" : isAwaitingRevenue ? "No revenue yet" : `${money(revenue.net_income)} net in 30 days`}
         detail={<>{isAwaitingRevenue ? "Tracking starts when a real source reports in." : `On ${money(revenue.total_revenue)} revenue and ${money(revenue.total_expenses)} costs. Amounts in USD; ledger values in yen wait for currency conversion.`} Read-only, from the business ledger. Personal money is in {onOpen ? <button type="button" className="v-link" onClick={() => onOpen({ id: "life", view: "money" })}>Life › Personal money ›</button> : "Life › Personal money"}.</>} />
       <PageTake surface="finances" className="biz__take" />

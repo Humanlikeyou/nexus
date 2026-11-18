@@ -4,7 +4,10 @@ import { parseBodyContext } from "../lib/noop";
 import { score } from "../neuro/sessionSamples";
 import type { RecordedSession } from "../types";
 import { Button } from "../ui";
+import { PHI, goldenSpiralPath, phiWave } from "./golden";
 import { smoothPath } from "./pathModel";
+
+const SWAVE_SPIRAL = goldenSpiralPath(640 / PHI, 40, 0.9, 7, Math.PI);
 import "./design1118.css";
 
 /**
@@ -32,11 +35,13 @@ function Ring({ value, size, tone, children, label }: { value: number | null; si
 
 /** Decorative session visualizer: calm in mint, focus in copper, shaped by the session averages. Not the raw trace. */
 function SessionWave({ focus, calm }: { focus: number | null; calm: number | null }) {
-  const strand = (amp: number, k: number, ph: number) => smoothPath(Array.from({ length: 60 }, (_, i) => { const t = i / 59; return { x: 4 + t * 632, y: 40 + amp * Math.sin(t * Math.PI * k + ph) }; }));
+  // golden character: focus runs φ faster than calm, each wave carries a φ² smaller overtone, phases a golden angle apart
+  const strand = (amp: number, k: number, seed: number) => smoothPath(Array.from({ length: 72 }, (_, i) => { const t = i / 71; return { x: 4 + t * 632, y: 40 + phiWave(t, k, amp, seed) }; }));
   return (
     <svg className="d18-swave" viewBox="0 0 640 80" aria-hidden="true">
-      <path className="d18-swave__calm" d={strand(8 + (calm ?? 30) / 6, 4.2, 0.4)} />
-      <path className="d18-swave__focus" d={strand(8 + (focus ?? 30) / 6, 5.6, 1.9)} />
+      <path className="d18-golden-art" d={SWAVE_SPIRAL} />
+      <path className="d18-swave__calm" d={strand(8 + (calm ?? 30) / 6, 3.4, 1)} />
+      <path className="d18-swave__focus" d={strand(8 + (focus ?? 30) / 6, 3.4 * PHI, 2)} />
     </svg>
   );
 }

@@ -8,6 +8,7 @@ import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { LinkButton, OffButton } from "../adds/Composer";
 import { decisionsLog, jst } from "../decisions/log";
 import { PageTake } from "../design1118/PageTake";
+import { GoldenUnderlay } from "../design1118/GoldenUnderlay";
 import { MarketNewsCards, ProposalsCard, TradingCard } from "../design1118/Trading";
 import "./CommandCenter.css";
 import "../adds/v1111.css";
@@ -169,7 +170,8 @@ export function VenturesView({ data, adapter = businessAdapter(data), ventureId,
   const atRisk = list.filter((x) => x.health === "at_risk").length;
   const riskDown = data.unavailableSources.some((s) => s.command === "arm_get_risk_status");
   return (
-    <div className="biz page-inset cc-page d18-page">
+    <div className="biz page-inset cc-page d18-page d18-golden">
+      <GoldenUnderlay />
       <PageHero title="Ventures" statement={ventures.state === "unwired" ? "Trading" : `${list.length + 1} ventures${atRisk ? `, ${atRisk} at risk` : ""}`}
         detail={<>Trading from the revenue engine&apos;s live data. Proposals are watch-only until you approve a record of your choice — never an order.{list.length ? <> {list.map((x) => x.name).join(" and ")} <span className="cc-hero-tag">{wiredTag(ventures)}</span></> : null}</>} />
       <PageTake surface="ventures" className="biz__take" />

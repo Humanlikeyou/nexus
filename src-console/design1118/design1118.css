@@ -88,10 +88,10 @@ html[data-navy="on"] .d18-st__here { fill: var(--nv-red-text); }
 .d18-tangle { display: grid; gap: var(--space-2); }
 .d18-tangle__svg { width: 100%; height: auto; overflow: hidden; }
 .d18-strand__line { fill: none; stroke-width: 3; stroke-linecap: round; }
-.d18-strand { animation: d18-wave 14s linear infinite; }
-.d18-strand[data-k="1"] { animation-duration: 18s; }
-.d18-strand[data-k="2"] { animation-duration: 11s; animation-direction: reverse; }
-.d18-strand[data-k="3"] { animation-duration: 21s; }
+.d18-strand { animation: d18-wave 13s linear infinite; }
+.d18-strand[data-k="1"] { animation-duration: 21s; }
+.d18-strand[data-k="2"] { animation-duration: 13s; animation-direction: reverse; }
+.d18-strand[data-k="3"] { animation-duration: 34s; }
 @keyframes d18-wave { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .d18-strand[data-k="0"] .d18-strand__line, .d18-legend__b[data-k="0"] i { stroke: var(--copper); background: var(--copper); }
 .d18-strand[data-k="1"] .d18-strand__line, .d18-legend__b[data-k="1"] i { stroke: #7fc8c0; background: #7fc8c0; }
@@ -289,3 +289,15 @@ html[data-navy="on"] .d18-scene[aria-pressed="true"] { border-color: var(--nv-re
 .d18-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--text-callout); color: var(--label); }
 .d18-danger.ui-button, .d18-danger { color: var(--tone-danger-text); }
 .d18-confirm .d18-danger[data-variant="primary"] { color: #fff; background: var(--tone-danger); border-color: var(--tone-danger); }
+
+/* ---- golden underlay (1118a round 6, from the 1110g φ system): faint spiral + φ grid behind each new page ---- */
+.d18-golden { position: relative; isolation: isolate; }
+.d18-underlay { position: absolute; z-index: -1; inset: 0 0 auto 0; width: 100%; height: auto; max-height: 100%; pointer-events: none; opacity: .18; }
+.d18-underlay path { fill: none; vector-effect: non-scaling-stroke; }
+.d18-underlay__grid { stroke: var(--label-secondary); stroke-width: 1; stroke-dasharray: 3 8; }
+.d18-underlay__spiral { stroke: var(--copper); stroke-width: 1.5; }
+html[data-navy="on"] .d18-underlay__spiral { stroke: var(--label-secondary); }
+@media (forced-colors: active), print { .d18-underlay { display: none; } }
+/* golden overlays inside the art (Milestones tangle, Muse and Hemi-Sync waves) */
+.d18-golden-art { fill: none; stroke: color-mix(in srgb, var(--copper) 55%, transparent); stroke-width: 1; vector-effect: non-scaling-stroke; opacity: .35; pointer-events: none; }
+.d18-golden-art--grid { stroke: var(--label-secondary); stroke-dasharray: 2 6; opacity: .25; }

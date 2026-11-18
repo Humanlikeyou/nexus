@@ -12,6 +12,7 @@ import {
   type Glance, type PathPhase, type Station,
 } from "./pathModel";
 import { EditPencil } from "./GoalEditors";
+import { goldenSpiralPath, phiGrid } from "./golden";
 import "./design1118.css";
 
 /** One goal on the map: its title, tag and the roadmap that draws its path. */
@@ -128,11 +129,16 @@ function PathCard({ g, seed, onOpen, onEdit }: { g: GoalState; seed: number; onO
   );
 }
 
+const TANGLE_GRID = phiGrid(680, 140);
+const TANGLE_SPIRAL = goldenSpiralPath(680 / 1.618, 140 / 1.618, 1.2, 8, Math.PI);
+
 /** Milestones arrival: the four goals as moving, tangled strands. Focus or hover one to untangle it. */
 function Tangle({ goals, onFocus, onGrid }: { goals: GoalState[]; onFocus: (id: string) => void; onGrid: () => void }) {
   return (
     <div className="d18-tangle" data-testid="milestones-tangle">
       <svg viewBox="0 0 680 140" className="d18-tangle__svg" role="img" aria-label={`${goals.length} goals, at rest. Choose one to see its path.`}>
+        <path className="d18-golden-art d18-golden-art--grid" d={TANGLE_GRID} />
+        <path className="d18-golden-art" d={TANGLE_SPIRAL} />
         {goals.map((g, i) => (
           <g key={g.goal.id} className="d18-strand" data-k={i % 4}>
             <path d={strandPath(i, 1360, 140)} className="d18-strand__line" />

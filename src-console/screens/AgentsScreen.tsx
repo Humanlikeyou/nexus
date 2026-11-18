@@ -5,6 +5,7 @@ import type { SystemSnapshot } from "../types";
 import { Badge, Button, InsetGroup, ListRow, More, PageHero, type Tone } from "../ui";
 import { AgentOrbs, TodaysPulse, deliveryLine } from "../design1118/Agents";
 import { PageTake } from "../design1118/PageTake";
+import { GoldenUnderlay } from "../design1118/GoldenUnderlay";
 import { HermesSubtitle } from "./agentLabels";
 import "./AgentsScreen.css";
 
@@ -43,7 +44,8 @@ export function AgentsField({ data, onOpenCrews, onRetry }: { data: SystemSnapsh
   const kb = data.kb;
   const unreachable = rows.some((r) => r.label === "Not reachable");
   return (
-    <div className="agents page-inset d18-page">
+    <div className="agents page-inset d18-page d18-golden">
+      <GoldenUnderlay />
       <PageHero title="Agents" statement={loading ? "Checking" : `${online} online`}
         detail={loading ? undefined : `${data.hermes.activeSchedules} schedule${data.hermes.activeSchedules === 1 ? "" : "s"} active · crews ${crewReady ? "ready" : "unavailable"} · ${deliveryLine(data.outbox, data.unavailableSources.some((s) => s.command === "get_outbox_status")).toLowerCase()}`} />
       <PageTake surface="agents" />

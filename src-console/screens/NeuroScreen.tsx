@@ -1,4 +1,5 @@
 import { BrainCircuit, Bluetooth, Inbox, Play, RefreshCw, Square, Unplug, X } from "lucide-react";
+import { GoldenUnderlay } from "../design1118/GoldenUnderlay";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import { dateTime } from "../lib/format";
@@ -132,7 +133,8 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
   const heroIdle = connected && !streaming && !running;
 
   return (
-    <div className="neuro page-inset" data-state={!connected ? "empty" : streaming ? "streaming" : "ready"}>
+    <div className="neuro page-inset d18-golden" data-state={!connected ? "empty" : streaming ? "streaming" : "ready"}>
+      <GoldenUnderlay />
       {header}
       {!running && !streaming && <AmaraTake page="neuro" className="neuro__take" />}
 
