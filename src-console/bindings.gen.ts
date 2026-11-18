@@ -289,6 +289,8 @@ export const commands = {
 	haClearToken: (options?: InvokeOptions) => __TAURI_INVOKE<HaClearResult>("ha_clear_token", undefined, options),
 	/**  GET `/api/config` with the resolved settings. Never rejects; failures are `{ok:false, kind}`. */
 	haTestConnection: (url: string | null, token: string | null, options?: InvokeOptions) => __TAURI_INVOKE<HaTestResult_Serialize>("ha_test_connection", { url, token }, options),
+	haDevicesList: (options?: InvokeOptions) => __TAURI_INVOKE<HaDevicesResult_Serialize>("ha_devices_list", undefined, options),
+	haDeviceSet: (entityId: string, service: string, value: Value | null, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<HaDeviceSetResult_Serialize>("ha_device_set", { entityId, service, value, via }, options),
 	noopQuery: (tool: string, args: Value | null, options?: InvokeOptions) => __TAURI_INVOKE<Value>("noop_query", { tool, args }, options),
 	/**
 	 *  Read-only: where the CLI resolves from, its SHA-256 and whether it matches the pin file.
@@ -2271,6 +2273,90 @@ export type HaContainerStatus = {
 };
 
 export type HaConversationResult = { kind: "match"; speech: string } | { kind: "noMatch" };
+
+export type HaDevice = HaDevice_Serialize | HaDevice_Deserialize;
+
+export type HaDeviceSetResult = HaDeviceSetResult_Serialize | HaDeviceSetResult_Deserialize;
+
+export type HaDeviceSetResult_Deserialize = {
+	/**  History id: `add_undo("ha", id)` within 8 s. None when there is nothing to undo. */
+	id?: string | null,
+	undoable: boolean,
+	/**  Short sentence for the toast. */
+	message: string,
+};
+
+export type HaDeviceSetResult_Serialize = {
+	/**  History id: `add_undo("ha", id)` within 8 s. None when there is nothing to undo. */
+	id: string | null,
+	undoable: boolean,
+	/**  Short sentence for the toast. */
+	message: string,
+};
+
+export type HaDevice_Deserialize = {
+	entityId: string,
+	name: string,
+	/**  "light" | "switch" | "fan" | "climate" | "cover" | "scene" | "media" | "sensor" */
+	deviceType: string,
+	room?: string | null,
+	/**  None when HA says unknown / unavailable (the page shows "No reading"). */
+	state?: string | null,
+	unit?: string | null,
+	/**  Backup / container / supervisor entities: status-only, listed under System. */
+	system: boolean,
+	controllable: boolean,
+	/**  The `service` names `ha_device_set` accepts for this device (empty when status-only). */
+	services: string[],
+	brightnessPct?: number | null,
+	percentage?: number | null,
+	temperature?: number | null,
+	currentTemperature?: number | null,
+	minTemperature?: number | null,
+	maxTemperature?: number | null,
+	hvacModes: string[],
+	/**  0..1 */
+	volume?: number | null,
+};
+
+export type HaDevice_Serialize = {
+	entityId: string,
+	name: string,
+	/**  "light" | "switch" | "fan" | "climate" | "cover" | "scene" | "media" | "sensor" */
+	deviceType: string,
+	room: string | null,
+	/**  None when HA says unknown / unavailable (the page shows "No reading"). */
+	state: string | null,
+	unit: string | null,
+	/**  Backup / container / supervisor entities: status-only, listed under System. */
+	system: boolean,
+	controllable: boolean,
+	/**  The `service` names `ha_device_set` accepts for this device (empty when status-only). */
+	services: string[],
+	brightnessPct: number | null,
+	percentage: number | null,
+	temperature: number | null,
+	currentTemperature: number | null,
+	minTemperature: number | null,
+	maxTemperature: number | null,
+	hvacModes: string[],
+	/**  0..1 */
+	volume: number | null,
+};
+
+export type HaDevicesResult = HaDevicesResult_Serialize | HaDevicesResult_Deserialize;
+
+export type HaDevicesResult_Deserialize = {
+	devices: HaDevice_Deserialize[],
+	/**  false when the area lookup failed (rooms are then all None). */
+	roomsAvailable: boolean,
+};
+
+export type HaDevicesResult_Serialize = {
+	devices: HaDevice_Serialize[],
+	/**  false when the area lookup failed (rooms are then all None). */
+	roomsAvailable: boolean,
+};
 
 export type HaEntity = HaEntity_Serialize | HaEntity_Deserialize;
 

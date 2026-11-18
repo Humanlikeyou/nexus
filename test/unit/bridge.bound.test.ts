@@ -235,6 +235,8 @@ const CALLER_COMMANDS: Array<[string, Record<string, unknown> | undefined]> = [
   ["ha_test_connection", {url: "url-v", token: "token-v"}],
   ["noop_query", {tool: "tool-v", args: "args-v"}],
   ["ha_call_service", {domain: "domain-v", service: "service-v", entityId: "entityId-v", data: "data-v"}],
+  ["ha_devices_list", undefined],
+  ["ha_device_set", {entityId: "entityId-v", service: "service-v", value: "value-v", via: "via-v"}],
   ["ha_conversation", {text: "text-v"}],
   ["ha_container_status", undefined],
   ["ha_container_start", undefined],

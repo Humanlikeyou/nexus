@@ -18,6 +18,7 @@ pub mod goal_roadmap;
 pub mod goal_route;
 pub mod goals;
 pub mod ha;
+pub mod ha_devices;
 pub mod hemisync;
 pub mod home_brief;
 pub mod home_hr_take;

@@ -8,12 +8,12 @@ use commands::n8n_status;
 use commands::voice;
 use commands::{
     arm, assistant, ble_common, business_ledger, continuity, crew, crew_grants, events,
-    experiments, followups, goal_roadmap, goal_route, goals, ha, home_brief, home_hr_take,
-    kb_status, kv, llm_router, muse, noop, noop_freeze, noop_query, onboarding, openclaw, outbox,
-    packager, recordings, replay, research, restart_services, screen_opens, sessions, snapshots,
-    system, take_events, take_log, telegram, terrence_actions, terrence_automations,
-    terrence_context, terrence_priorities, terrence_projects, terrence_runtime,
-    terrence_runtime_bridge,
+    experiments, followups, goal_roadmap, goal_route, goals, ha, ha_devices, home_brief,
+    home_hr_take, kb_status, kv, llm_router, muse, noop, noop_freeze, noop_query, onboarding,
+    openclaw, outbox, packager, recordings, replay, research, restart_services, screen_opens,
+    sessions, snapshots, system, take_events, take_log, telegram, terrence_actions,
+    terrence_automations, terrence_context, terrence_priorities, terrence_projects,
+    terrence_runtime, terrence_runtime_bridge,
 };
 // design-1111v stores
 use commands::home_windows;
@@ -318,6 +318,8 @@ pub fn run() {
             ha::ha_set_config,
             ha::ha_clear_token,
             ha::ha_test_connection,
+            ha_devices::ha_devices_list,
+            ha_devices::ha_device_set,
             // Telegram
             telegram::get_config,
             telegram::save_settings,

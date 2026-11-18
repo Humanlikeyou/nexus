@@ -190,6 +190,12 @@ pub(crate) enum UndoRef {
         /// refuses if anything, including a legacy roadmap write or the planner, changed it since.
         after_hash: String,
     },
+    /// 1118a B3: a Smart home device change. `restore` is `{service, value}` that puts the device back
+    /// (None = irreversible, e.g. a scene). Undo re-applies it through the same allowlist.
+    Ha {
+        entity_id: String,
+        restore: Option<Value>,
+    },
     /// 1118a B2: a recorded or dismissed watch-only proposal; Undo puts it back to `proposed`.
     Watch {
         id: String,
@@ -262,8 +268,20 @@ impl Dirs {
     }
 }
 
-fn kind_ok(kind: &str) -> Result<(), String> {
+/// Kinds the generic add_preview / add_save path takes. "ha" is not one: device writes have their own command.
+fn kind_ok_generic(kind: &str) -> Result<(), String> {
     if matches!(kind, "goal" | "date" | "task" | "idea" | "route" | "watch") {
+        Ok(())
+    } else {
+        Err("invalid input".into())
+    }
+}
+
+fn kind_ok(kind: &str) -> Result<(), String> {
+    if matches!(
+        kind,
+        "goal" | "date" | "task" | "idea" | "route" | "watch" | "ha"
+    ) {
         Ok(())
     } else {
         Err("invalid input".into())
@@ -554,7 +572,7 @@ pub(crate) fn preview_in(
     dirs: &Dirs,
     today: NaiveDate,
 ) -> Result<ParseResult, String> {
-    kind_ok(kind)?;
+    kind_ok_generic(kind)?;
     let text = clean_text(text, 1, MAX_TEXT)?;
     let preview = match kind {
         "date" => return date_reading(&text, today),
@@ -794,6 +812,10 @@ fn revert(u: &UndoRef, dirs: &Dirs) -> Result<(), String> {
     match u {
         UndoRef::Branch { id } => super::goal_route::reopen_in(&dirs.data, id),
         UndoRef::Watch { id } => super::watch_proposals::reopen_in(&dirs.data, id),
+        UndoRef::Ha { entity_id, restore } => super::ha_devices::restore_blocking(
+            entity_id,
+            super::ha_devices::decode_restore(restore).as_ref(),
+        ),
         UndoRef::Route {
             goal_id,
             prev,
@@ -891,6 +913,42 @@ pub(crate) fn logged_write<T>(
     Ok((id, out))
 }
 
+/// Records a change that was ALREADY applied outside the lock (a Home Assistant call must not hold the History
+/// lock). Takes the lock only to write History. If the write fails nothing is reverted: the caller reports
+/// "applied but not recorded".
+pub(crate) fn logged_record(
+    kind: &str,
+    text: String,
+    via: Option<&str>,
+    dirs: &Dirs,
+    now: DateTime<FixedOffset>,
+    undo: UndoRef,
+) -> Result<String, String> {
+    kind_ok(kind)?;
+    let via = match via.unwrap_or("typed") {
+        v @ ("typed" | "voice" | "chat") => v,
+        _ => return Err("invalid input".into()),
+    };
+    let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut hist: HistFile = read_json(&dirs.history(), MAX_MD_BYTES)?;
+    let id = new_id(kind);
+    hist.entries.insert(
+        0,
+        HistEntry {
+            id: id.clone(),
+            kind: kind.into(),
+            text,
+            via: via.into(),
+            at: iso(&now),
+            undo,
+        },
+    );
+    hist.entries.truncate(MAX_HISTORY);
+    strip_old_snapshots(&mut hist, now);
+    write_json_atomic(&dirs.history(), &hist, MAX_MD_BYTES)?;
+    Ok(id)
+}
+
 pub(crate) fn save_in(
     kind: &str,
     preview: &AddPreview,
@@ -898,7 +956,7 @@ pub(crate) fn save_in(
     dirs: &Dirs,
     now: DateTime<FixedOffset>,
 ) -> Result<Saved, String> {
-    kind_ok(kind)?;
+    kind_ok_generic(kind)?;
     let via = match via.unwrap_or("typed") {
         v @ ("typed" | "voice" | "chat") => v,
         _ => return Err("invalid input".into()),

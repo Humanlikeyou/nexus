@@ -38,7 +38,7 @@ const MAX_STATES: usize = 5_000;
 const BACKOFF_START: Duration = Duration::from_secs(1);
 const BACKOFF_CAP: Duration = Duration::from_secs(60);
 /// Max HTTP response body for /api/states and /api/conversation/process.
-const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
+pub(super) const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 const WS_MAX_MESSAGE: usize = 1024 * 1024;
 const WS_MAX_FRAME: usize = 256 * 1024;
 /// TCP connect + websocket handshake must finish within this.
@@ -50,9 +50,9 @@ const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Client ping cadence once subscribed.
 const WS_PING_INTERVAL: Duration = Duration::from_secs(30);
 /// Climate set_temperature bounds (covers °C and °F setpoints).
-const MIN_TEMPERATURE: f64 = 5.0;
-const MAX_TEMPERATURE: f64 = 95.0;
-const HVAC_MODES: &[&str] = &[
+pub(super) const MIN_TEMPERATURE: f64 = 5.0;
+pub(super) const MAX_TEMPERATURE: f64 = 95.0;
+pub(super) const HVAC_MODES: &[&str] = &[
     "off",
     "heat",
     "cool",
@@ -128,23 +128,23 @@ const ERR_CONFIG: &str =
 const ERR_TOKEN_REQUIRED: &str =
     "token_required: Enter the token to test a URL that is not the saved one.";
 const ERR_URL: &str = "bad_url: HA_URL must be a loopback http address.";
-const ERR_UNREACHABLE: &str = "unreachable: Home Assistant is not reachable.";
+pub(super) const ERR_UNREACHABLE: &str = "unreachable: Home Assistant is not reachable.";
 const ERR_AUTH: &str = "auth_rejected: Home Assistant rejected the token.";
 const ERR_FAILED: &str = "upstream_error: Home Assistant returned an error.";
-const ERR_BAD_REPLY: &str = "upstream_error: Home Assistant sent an unexpected reply.";
-const ERR_INVALID: &str = "invalid_input: Invalid domain, service or entity id.";
+pub(super) const ERR_BAD_REPLY: &str = "upstream_error: Home Assistant sent an unexpected reply.";
+pub(super) const ERR_INVALID: &str = "invalid_input: Invalid domain, service or entity id.";
 const ERR_TEXT: &str = "invalid_input: Message is empty or too long.";
 const ERR_BUSY: &str = "already_running: A Home Assistant container action is already running.";
 const ERR_DOCKER: &str = "docker_unavailable: Docker is not available.";
 const ERR_DOCKER_FAILED: &str = "upstream_error: The Home Assistant container command failed.";
 const ERR_DOCKER_TIMEOUT: &str = "timed_out: The Home Assistant container command timed out.";
-const ERR_TOO_LARGE: &str = "too_large: Home Assistant sent a reply that is too large.";
-const ERR_NOT_ALLOWED: &str = "not_allowed: That Home Assistant action is not allowed.";
+pub(super) const ERR_TOO_LARGE: &str = "too_large: Home Assistant sent a reply that is too large.";
+pub(super) const ERR_NOT_ALLOWED: &str = "not_allowed: That Home Assistant action is not allowed.";
 const ERR_DOMAIN_MISMATCH: &str =
     "domain_mismatch: The entity does not belong to the service's domain.";
-const ERR_BAD_DATA: &str =
+pub(super) const ERR_BAD_DATA: &str =
     "invalid_input: Invalid or missing data for this Home Assistant service.";
-const ERR_NEEDS_APPROVAL: &str =
+pub(super) const ERR_NEEDS_APPROVAL: &str =
     "needs_approval: This Home Assistant action needs approval, and the approval dialog could not be shown.";
 const ERR_BUSY_APPROVAL: &str =
     "already_running: An approval for this Home Assistant domain is already in progress.";
@@ -247,7 +247,7 @@ impl std::fmt::Debug for SecretText {
 }
 
 #[derive(Debug, Clone)]
-struct HaConfig {
+pub(super) struct HaConfig {
     base: String,
     token: HaToken,
 }
@@ -332,11 +332,11 @@ fn parse_config(text: &str) -> Result<HaConfig, String> {
     })
 }
 
-fn load_config() -> Result<HaConfig, String> {
+pub(super) fn load_config() -> Result<HaConfig, String> {
     resolve(&Sources::live())
 }
 
-fn client() -> reqwest::Client {
+pub(super) fn client() -> reqwest::Client {
     super::shared::http::builder(super::shared::http::HttpSpec::loopback().timeout(HTTP_TIMEOUT))
         .build()
         .unwrap_or_default()
@@ -428,7 +428,7 @@ fn authorize(
 }
 
 /// Read a JSON body, refusing anything over `cap` bytes (Content-Length first, then streamed).
-async fn read_capped(mut resp: reqwest::Response, cap: usize) -> Result<Value, String> {
+pub(super) async fn read_capped(mut resp: reqwest::Response, cap: usize) -> Result<Value, String> {
     if resp.content_length().is_some_and(|n| n > cap as u64) {
         return Err(ERR_TOO_LARGE.to_string());
     }
@@ -503,7 +503,7 @@ fn state_changed_from(event: &Value) -> Option<HaStateChanged> {
     })
 }
 
-fn status_error(status: reqwest::StatusCode) -> String {
+pub(super) fn status_error(status: reqwest::StatusCode) -> String {
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         ERR_AUTH.to_string()
     } else {
@@ -513,7 +513,7 @@ fn status_error(status: reqwest::StatusCode) -> String {
 
 // ─── HTTP calls (pure over config, tested against a mock) ────────────────────
 
-async fn states_with(cfg: &HaConfig) -> Result<Vec<HaEntity>, String> {
+pub(super) async fn states_with(cfg: &HaConfig) -> Result<Vec<HaEntity>, String> {
     let resp = client()
         .get(format!("{}/api/states", cfg.base))
         .bearer_auth(&cfg.token.0)
@@ -532,7 +532,7 @@ async fn states_with(cfg: &HaConfig) -> Result<Vec<HaEntity>, String> {
         .collect())
 }
 
-async fn call_service_with(
+pub(super) async fn call_service_with(
     cfg: &HaConfig,
     domain: &str,
     service: &str,
@@ -552,6 +552,31 @@ async fn call_service_with(
         return Err(status_error(resp.status()));
     }
     Ok(())
+}
+
+/// Renders a Jinja template through HA's REST API (read-only; used for area names, which the plain states
+/// list does not carry). The reply is JSON text.
+pub(super) async fn render_template_with(cfg: &HaConfig, template: &str) -> Result<Value, String> {
+    let resp = client()
+        .post(format!("{}/api/template", cfg.base))
+        .bearer_auth(&cfg.token.0)
+        .json(&json!({ "template": template }))
+        .send()
+        .await
+        .map_err(|_| ERR_UNREACHABLE.to_string())?;
+    if !resp.status().is_success() {
+        return Err(status_error(resp.status()));
+    }
+    read_capped(resp, MAX_BODY_BYTES).await
+}
+
+/// Test-only config for a mock server.
+#[cfg(test)]
+pub(super) fn test_config(base: &str, token: &str) -> HaConfig {
+    HaConfig {
+        base: base.to_string(),
+        token: HaToken(token.to_string()),
+    }
 }
 
 async fn conversation_with(cfg: &HaConfig, text: &str) -> Result<HaConversationResult, String> {
@@ -603,7 +628,7 @@ pub async fn ha_states() -> Result<Vec<HaEntity>, String> {
 }
 
 /// Map approval_gate's errors onto our fixed kinds (its text is not passed through).
-fn approval_error(e: &str) -> String {
+pub(super) fn approval_error(e: &str) -> String {
     if e.starts_with(super::approval_gate::DECLINED_PREFIX) {
         ERR_DECLINED.to_string()
     } else if e.starts_with(super::approval_gate::BUSY_PREFIX) {

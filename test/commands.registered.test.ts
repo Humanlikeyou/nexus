@@ -180,6 +180,16 @@ describe("Tauri command registry", () => {
     expect(names.filter((n: string) => /^(money|fx|treasury)_/.test(n) && /transfer|pay|trade|convert|withdraw|send|buy|sell|move|wire|remit|swap|sign|broadcast|order|deposit|exchange/.test(n))).toEqual([]);
   });
 
+  it("the Smart home device commands are registered: one write command, no unlock/arm/run commands", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    expect(names).toContain("ha_devices_list");
+    expect(names).toContain("ha_device_set");
+    expect(names.filter((n: string) => n.startsWith("ha_device")).sort()).toEqual(["ha_device_set", "ha_devices_list"]);
+    expect(names.filter((n: string) => n.startsWith("ha_") && /unlock|arm|disarm|garage|run_script|restart/.test(n))).toEqual([]);
+  });
+
   it("the watch-only proposal commands are registered and no name carries a money word", async () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");

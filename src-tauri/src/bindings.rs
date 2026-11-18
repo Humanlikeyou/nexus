@@ -232,6 +232,8 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::ha::ha_set_config,
             crate::ha::ha_clear_token,
             crate::ha::ha_test_connection,
+            crate::commands::ha_devices::ha_devices_list,
+            crate::commands::ha_devices::ha_device_set,
             crate::noop_query::noop_query,
             crate::noop_query::noop_binary_status,
             crate::noop_freeze::noop_freeze_report,
