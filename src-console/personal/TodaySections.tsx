@@ -9,6 +9,9 @@ import { Rich } from "./parts";
 import { HabitRow } from "../goals/HabitTracker";
 import { HabitsUnderMap, MilestonesMap, type PathGoal } from "../design1118/GoalPath";
 import { PageTake } from "../design1118/PageTake";
+import { AddChooser, GoalForm, GoalsHelperLine, HabitForm } from "../design1118/GoalEditors";
+import { goalStore, type GoalDraft, type HabitDraft } from "../design1118/goalStore";
+import { roadmapAdapter, type StepSize } from "../goals/roadmap";
 import { ReadyToKeepCard, SuggestedLatelyCard, TakeChange, TakesThisWeekCard, WeekSuggestionsCard, WeekSuggestionsTile } from "../takes/WeekTakes";
 import { takesAdapter } from "../takes/adapters";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
@@ -22,32 +25,57 @@ const WIRE_NOTE = "Needs wiring: this appears once Claude builds its store (HAND
  *  (arrival tangle → a goal in focus → the four-path grid), habits under the map with one shared
  *  "Link a source", then the add composer. One progress meaning: roadmap percent + steps done. */
 export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, added = [], onLinkSource }: { adapter: PersonalAdapter; goals: Goal[]; goalsFailed?: boolean; onRetry?: () => void; composer?: ReactNode; added?: Array<{ id: string; title: string }>; onLinkSource?: () => void }) {
+  useStoresTick();
+  const store = goalStore();
+  const roadmaps = roadmapAdapter();
+  const [adding, setAdding] = useState<null | "choose" | "goal" | "habit">(null);
+  const [editing, setEditing] = useState<{ kind: "goal" | "habit"; id: string } | null>(null);
+  const [msg, setMsg] = useState("");
+  const [gridSignal, setGridSignal] = useState(0);
   const week = adapter.goals();
-  const w = valueOf(week);
+  const raw = valueOf(week);
+  const w = raw ? store.overlay(raw) : null;
   const ready = valueOf(takesAdapter().goals())?.ready.length ?? 0;
   const pathGoals: PathGoal[] = w ? w.milestones.map((m) => ({ id: m.id, title: m.title, tag: m.detail.split(" · ")[0] || undefined }))
     : goals.map((g) => ({ id: g.id, title: g.title, tag: g.category ? g.category.charAt(0).toUpperCase() + g.category.slice(1) : undefined }));
-  const habits: Habit[] = [
-    ...added.map((h) => ({ id: h.id, title: h.title, source: "You", rule: "added just now · starts Monday", days: Array.from({ length: 7 }, () => "none" as const), done: 0, target: 7, note: "new" })),
+  const habits: Habit[] = store.overlayHabits([
+    ...added.filter((h) => !w?.habits.some((x) => x.id === h.id)).map((h) => ({ id: h.id, title: h.title, source: "You", rule: "added just now · starts Monday", days: Array.from({ length: 7 }, () => "none" as const), done: 0, target: 7, note: "new" })),
     ...(w?.habits ?? []),
-  ];
+  ]);
+  const NOT_SAVED = "Not saved. The goals store isn't answering on this Mac, so nothing changed.";
+  const done = (r: { state: string }, ok: string) => { if (r.state === "unwired") { setMsg(NOT_SAVED); return false; } setMsg(ok); return true; };
+  const addGoal = async (d: GoalDraft) => { const r = await store.addGoal(d); if (done(r, `Added “${d.title.trim()}”. Its path card is below; Amara plans the stations.`)) { setAdding(null); setGridSignal((n) => n + 1); } };
+  const saveGoal = async (id: string, d: GoalDraft) => { const r = await store.updateGoal(id, d); if (done(r, "Goal saved.")) setEditing(null); };
+  const saveStep = async (id: string, stepId: string, title: string, size: StepSize) => { const r = await roadmaps.editStep(id, stepId, { title, size }); if (r.state === "unwired") setMsg("The goal saved, but its steps didn't: the roadmap store isn't answering."); };
+  const saveHabit = async (id: string, d: HabitDraft) => { const r = await store.updateHabit(id, d); if (done(r, "Habit saved.")) setEditing(null); };
+  const remove = async (id: string, what: string) => { const r = await store.remove(id); if (done(r, `Deleted ${what}.`)) setEditing(null); };
+  const editGoal = editing?.kind === "goal" ? pathGoals.find((g) => g.id === editing.id) : undefined;
+  const editHabit = editing?.kind === "habit" ? habits.find((h) => h.id === editing.id) : undefined;
   const n = pathGoals.length;
   return (
     <div className="v-page d18-page" id="goals">
       <PageHero title="Goals" statement={n ? `${n} path${n === 1 ? "" : "s"}${w?.nextMilestone ? ` · next: ${w.nextMilestone}` : ""}` : "Habits and milestones"}
         detail={w ? <>{w.habits.length} habit{w.habits.length === 1 ? "" : "s"} this week{ready ? ` · ${ready} suggestion ready to become a habit` : ""} {week.state === "sample" && <DataTag kind="sample" />}</> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
+      <div className="d18-goalbar"><GoalsHelperLine /><span className="d18-grow" />
+        <AddChooser open={adding === "choose"} onOpen={() => { setAdding("choose"); setEditing(null); }} onClose={() => setAdding(null)} onChoose={(k) => { setAdding(k); setMsg(""); }} /></div>
+      {adding === "goal" && <GoalForm onSave={(d) => { void addGoal(d); }} onCancel={() => setAdding(null)} />}
+      {adding === "habit" && (composer ?? <p className="d18-note">Adding habits needs the add store to be wired first.</p>)}
+      {editGoal && <GoalForm key={editGoal.id} row={store.row(editGoal.id) ?? { id: editGoal.id, title: editGoal.title, category: "personal", target: 0, current: 0, unit: "", deadline: null }}
+        roadmap={valueOf(roadmaps.roadmap(editGoal.id))} onSave={(d) => { void saveGoal(editGoal.id, d); }} onSaveStep={(sid, t, sz) => { void saveStep(editGoal.id, sid, t, sz); }}
+        onDelete={() => { void remove(editGoal.id, `“${editGoal.title}”`); }} onCancel={() => setEditing(null)} />}
+      {editHabit && <HabitForm key={editHabit.id} habit={editHabit} row={store.row(editHabit.id)} onSave={(d) => { void saveHabit(editHabit.id, d); }} onDelete={() => { void remove(editHabit.id, `“${editHabit.title}”`); }} onCancel={() => setEditing(null)} />}
+      {msg && <p className="d18-msg" role="status">{msg}</p>}
       <PageTake surface="goals" className="life__take" />
       {goalsFailed && pathGoals.length === 0 ? (
         <Card title="Milestones"><p className="pk-note">Goals couldn&apos;t be read.</p>{onRetry && <Button variant="secondary" size="small" onClick={onRetry}>Retry</Button>}</Card>
-      ) : <MilestonesMap goals={pathGoals} sampleTag={week.state === "sample"} />}
-      {w ? <HabitsUnderMap habits={habits} sample={week.state === "sample"} onLinkSource={onLinkSource} /> : <Card title="Habits this week" accessory={<span className="pk-acc">{wiredTag(week)}</span>}><p className="pk-note">{WIRE_NOTE}</p></Card>}
+      ) : <MilestonesMap goals={pathGoals} sampleTag={week.state === "sample"} gridSignal={gridSignal} onEditGoal={(id) => { setEditing({ kind: "goal", id }); setAdding(null); }} />}
+      {w ? <HabitsUnderMap habits={habits} sample={week.state === "sample"} onLinkSource={onLinkSource} onEdit={(h) => { setEditing({ kind: "habit", id: h.id }); setAdding(null); }} /> : <Card title="Habits this week" accessory={<span className="pk-acc">{wiredTag(week)}</span>}><p className="pk-note">{WIRE_NOTE}</p></Card>}
       {w && w.habits.length > 0 && (
         <More label="The full habit grid">
           {w.habits.map((h) => <HabitRow h={h} key={h.id} />)}
           <p className="pk-note">Each square is a day, newest on the right. Half squares: nearly (within 15 min). Amara counts from the source data; you can&apos;t tick these by hand unless a source is missing.</p>
         </More>
       )}
-      {composer}
       <ReadyToKeepCard title="Ready to become a habit" />
     </div>
   );

@@ -263,3 +263,29 @@ html[data-navy="on"] .d18-orb[data-tone="ok"] { box-shadow: none; }
 html[data-navy="on"] .d18-slider input { accent-color: var(--nv-red); }
 html[data-navy="on"] .d18-scene[aria-pressed="true"] { border-color: var(--nv-red); background: transparent; }
 .d18-count { display: flex; gap: var(--space-5); align-items: center; }
+
+/* ---- Goals flow (1118a round 6): one Add with a Goal / Habit choice, edit pencils, edit forms ---- */
+.d18-goalbar { display: flex; align-items: flex-start; gap: var(--space-3); min-width: 0; }
+.d18-helper { margin: 0; max-width: 62ch; color: var(--label-secondary); font-size: 13px; line-height: 1.5; }
+.d18-add { position: relative; flex: none; }
+.d18-add__menu { position: absolute; right: 0; top: calc(100% + var(--space-2)); z-index: 20; display: grid; gap: var(--space-1); width: min(340px, 80vw); padding: var(--space-2);
+  border: var(--hairline); border-radius: var(--radius-md); background: var(--bg-content); box-shadow: var(--elev-2, var(--elev-1)); }
+.d18-add__opt { all: unset; box-sizing: border-box; display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm, 8px); cursor: pointer; color: var(--label); }
+.d18-add__opt:hover { background: var(--fill-secondary); }
+.d18-add__opt:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.d18-add__opt svg { flex: none; margin-top: 2px; color: var(--copper-text, var(--copper)); }
+.d18-add__opt span { display: grid; gap: 2px; }
+.d18-add__opt b { font-size: 13px; font-weight: 600; }
+.d18-add__opt small { font-size: 12px; line-height: 1.45; color: var(--label-secondary); }
+.d18-pcard-wrap { position: relative; display: grid; min-width: 0; }
+.d18-pcard-wrap > .d18-pcard { padding-right: calc(var(--space-3) + 32px); }
+.d18-pcard-wrap > .d18-pencil { position: absolute; top: var(--space-2); right: var(--space-2); }
+.d18-habit .d18-pencil { flex: none; }
+.d18-editor { gap: var(--space-3); }
+.d18-editor__row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); }
+.d18-editor__steps { margin: 0; padding: 0; border: 0; display: grid; gap: var(--space-2); }
+.d18-editor__step { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: var(--space-2); align-items: end; }
+.d18-editor__step[data-done] .ui-text-field__input { color: var(--label-secondary); }
+.d18-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: 12px; color: var(--label); }
+.d18-danger.ui-button, .d18-danger { color: var(--tone-danger-text); }
+.d18-confirm .d18-danger[data-variant="primary"] { color: #fff; background: var(--tone-danger); border-color: var(--tone-danger); }

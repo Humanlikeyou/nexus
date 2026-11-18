@@ -11,6 +11,7 @@ import {
   SIZE_LABEL, STATION_RADIUS, currentStation, fillFraction, glanceOf, pathLabel, pathPhase, smoothPath, stationPoints, stationsOf, strandPath,
   type Glance, type PathPhase, type Station,
 } from "./pathModel";
+import { EditPencil } from "./GoalEditors";
 import "./design1118.css";
 
 /** One goal on the map: its title, tag and the roadmap that draws its path. */
@@ -112,15 +113,18 @@ function useGoalStates(goals: PathGoal[], adapter: RoadmapAdapter, over: Record<
   }, [goals, adapter, over, tick]);
 }
 
-function PathCard({ g, seed, onOpen }: { g: GoalState; seed: number; onOpen: () => void }) {
+function PathCard({ g, seed, onOpen, onEdit }: { g: GoalState; seed: number; onOpen: () => void; onEdit?: () => void }) {
   const here = currentStation(g.stations);
   const foot = g.phase === "planning" ? "Amara is planning the route" : g.phase === "unwired" ? "Route appears once the roadmap store answers" : here ? `You are here · ${here.title ?? "step"} · ${SIZE_LABEL[here.size]}` : "All steps done";
   return (
+    <div className="d18-pcard-wrap">
     <button type="button" className="d18-pcard" onClick={onOpen} aria-label={`Open ${g.goal.title}. ${pathLabel(g.goal.title, g.glance, g.stations)}`}>
       <span className="d18-pcard__head"><span className="d18-pcard__t">{g.goal.title}</span>{g.goal.tag && <span className="d18-chip">{g.goal.tag}</span>}<span className="d18-grow" /><GlanceRing glance={g.glance} /></span>
       <PathSvg stations={g.stations} phase={g.phase} seed={seed} label={pathLabel(g.goal.title, g.glance, g.stations)} />
       <span className="d18-pcard__foot">{foot}</span>
     </button>
+    {onEdit && <EditPencil label={`Edit ${g.goal.title}`} onClick={onEdit} />}
+    </div>
   );
 }
 
@@ -200,7 +204,7 @@ function BranchReasonCard({ b, onAccept, onDecline }: { b: BranchSuggestion; onA
  * Life › Goals, Milestones (design-1118a rounds 2–5): arrival tangle → a goal in focus (drill-in) →
  * the four-path grid, which stays until he leaves the page (no re-tangle on this visit).
  */
-export function MilestonesMap({ goals, adapter, branches, sampleTag }: { goals: PathGoal[]; adapter?: RoadmapAdapter; branches?: BranchAdapter; sampleTag?: boolean }) {
+export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal, gridSignal = 0 }: { goals: PathGoal[]; adapter?: RoadmapAdapter; branches?: BranchAdapter; sampleTag?: boolean; onEditGoal?: (id: string) => void; gridSignal?: number }) {
   const a = adapter ?? roadmapAdapter();
   const br = branches ?? branchAdapter();
   const [view, setView] = useState<"tangle" | "focus" | "grid">("tangle");
@@ -220,6 +224,9 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag }: { goals: 
     for (const g of states) { if (prevPhase.current[g.goal.id] === "planning" && g.phase === "ready" && !reducedMotion()) next[g.goal.id] = true; prevPhase.current[g.goal.id] = g.phase; }
     if (Object.keys(next).length) { const t0 = window.setTimeout(() => setGrowing((x) => ({ ...x, ...next })), 0); const t = window.setTimeout(() => setGrowing({}), 2200); return () => { window.clearTimeout(t0); window.clearTimeout(t); }; }
   }, [states]);
+  // a goal was just added: show every path card so the new one is in view
+  const [lastGrid, setLastGrid] = useState(gridSignal);
+  if (gridSignal !== lastGrid) { setLastGrid(gridSignal); setView("grid"); setFocus(null); }
   useEffect(() => { if (!undo) return; const t = window.setTimeout(() => setUndo(null), 8000); return () => window.clearTimeout(t); }, [undo]);
 
   const focused = states.find((g) => g.goal.id === focus) ?? null;
@@ -276,13 +283,14 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag }: { goals: 
   return (
     <section className="d18-map" id="milestones" aria-label="Milestones" data-view={view}>
       <header className="d18-map__head"><h2 className="d18-h2">Milestones</h2>{sampleTag && <DataTag kind="sample" />}<span className="d18-grow" />
+        {view === "focus" && focused && onEditGoal && <EditPencil label={`Edit ${focused.goal.title}`} onClick={() => onEditGoal(focused.goal.id)} />}
         {view === "focus" && <Button size="small" variant="plain" onClick={leave}>All goals</Button>}
       </header>
       {states.length === 0 && <p className="d18-note">Goals you set with Amara appear here as paths.</p>}
       {states.length > 0 && view === "tangle" && <Tangle goals={states} onFocus={open} onGrid={() => setView("grid")} />}
       {states.length > 0 && view === "grid" && (
         <div className="d18-grid" data-testid="milestones-grid">
-          {states.map((g) => <PathCard key={g.goal.id} g={{ ...g }} seed={seedOf(g.goal.id)} onOpen={() => open(g.goal.id)} />)}
+          {states.map((g) => <PathCard key={g.goal.id} g={{ ...g }} seed={seedOf(g.goal.id)} onOpen={() => open(g.goal.id)} onEdit={onEditGoal ? () => onEditGoal(g.goal.id) : undefined} />)}
         </div>
       )}
       {focused && view === "focus" && (
@@ -312,7 +320,7 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag }: { goals: 
 }
 
 /** Habits under the map: a flame, a 7-day strip, and one shared "Link a source". */
-export function HabitsUnderMap({ habits, sample, onLinkSource }: { habits: Habit[]; sample: boolean; onLinkSource?: () => void }) {
+export function HabitsUnderMap({ habits, sample, onLinkSource, onEdit }: { habits: Habit[]; sample: boolean; onLinkSource?: () => void; onEdit?: (h: Habit) => void }) {
   const linked = habits.some((h) => h.days.some((d) => d !== "none"));
   return (
     <section className="d18-card d18-habits" aria-label="Habits this week">
@@ -328,6 +336,7 @@ export function HabitsUnderMap({ habits, sample, onLinkSource }: { habits: Habit
                 <span className="d18-habit__t"><b>{h.title}</b><small>{h.source} · {known ? h.rule : "daily · no reading yet"}</small></span>
                 <span className="d18-grow" />
                 <span className="d18-habit__strip"><Dots days={h.days.slice(-7)} label={`${h.title}, last 7 days`} /><small>{streak > 0 ? `${streak} day streak` : "No streak yet"}</small></span>
+                {onEdit && <EditPencil label={`Edit ${h.title}`} onClick={() => onEdit(h)} />}
               </li>
             );
           })}

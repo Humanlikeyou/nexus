@@ -18,7 +18,7 @@ export function LifeField({ data, view = "goals", onOpen, onRetry }: { data: Sys
   // Only the mount point moved (HANDOFF-1111v §3): the 1111t money contract is unchanged.
   if (view === "money") return <PersonalMoneyView adapter={personal} onOpenFinances={onOpen ? () => onOpen({ id: "enterprise", view: "finances" }) : undefined} />;
   const composer = (
-    <Composer title="New goal or habit" kind="Habit" adapter={addAdapter("goal")} placeholder="e.g. Read 20 minutes before bed, 5 nights a week"
+    <Composer title="New habit" kind="Habit" adapter={addAdapter("goal")} placeholder="e.g. Read 20 minutes before bed, 5 nights a week"
       hint="Amara turns it into a goal and shows you a preview first. Voice is transcribed on this Mac." working="Amara is reading your goal…" saveLabel="Save habit" onOpen={onOpen}
       onSaved={(s) => setAdded((a) => [{ id: s.id, title: s.title }, ...a])} onUndone={(id) => setAdded((a) => a.filter((x) => x.id !== id))}
       savedText={(s) => `Added “${s.title}” to This week's habits.`} />
