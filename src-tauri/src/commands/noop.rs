@@ -189,7 +189,7 @@ const STORE_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2
 
 /// Open a NOOP store strictly read-only. NOOP may be writing to it right now:
 /// never write, checkpoint, VACUUM or copy it.
-fn open_store(path: &Path) -> rusqlite::Result<Connection> {
+pub(crate) fn open_store(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -346,7 +346,7 @@ fn unavailable_snapshot(
     }
 }
 
-fn table_names(conn: &Connection) -> Result<HashSet<String>, String> {
+pub(crate) fn table_names(conn: &Connection) -> Result<HashSet<String>, String> {
     let mut statement = conn
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
         .map_err(|error| format!("NOOP health store could not be inspected: {error}"))?;
@@ -357,7 +357,7 @@ fn table_names(conn: &Connection) -> Result<HashSet<String>, String> {
         .map_err(|error| format!("NOOP health store could not be inspected: {error}"))
 }
 
-fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+pub(crate) fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
     let sql = format!("PRAGMA table_info({table})");
     let mut statement = conn
         .prepare(&sql)

@@ -845,3 +845,17 @@ Nothing committed, pushed or installed. Live app data, Muse files, the real NOOP
   - Verified: the new process has `~/Library/Application Support/OpenWhoop/whoop.sqlite` open, bonded at 15:57:53, and sent Set Clock.
   - The NOOP checkout is left on the fix branch, so it matches what's installed.
   - Not verified yet: a power-loss recovery (needs a drained strap). Watch the strap-log for "Link health:" lines.
+
+### 32. Heart-rate-only night pointer in Needs you (decision 0034, 2026-11-18, not committed)
+- New `src-tauri/src/commands/strap_night.rs` (registered in `mod.rs`; no new command, reuses `needs_you_list`). Opens the NOOP store with the existing `open_store` (READ_ONLY, NO_MUTEX, 2 s busy timeout) via `resolve_store_path()` (so `NOOP_DB_PATH` is honoured). `noop.rs`: only `open_store`, `table_names`, `has_column` made `pub(crate)`.
+- COUNTS only, no value is ever read or formatted. Window: night ends 10:00 JST, starts 14 h earlier (20:00 the evening before); before 10:00 the previous night is used, so the pointer stays all day and clears at the next 10:00 when a normal night is in the window. Why: covers an early bedtime and a late riser, and lets a morning sync land before the new night is judged.
+- Raises when hrSample rows in the window >= 3600 (an hour at 1 row/s) and gravitySample rows < 5% of them. skinTempSample/respSample are counted when present (tolerated absent). A second fixed detail is used when today's dailyMetric row exists with recovery NULL (explains the missing recovery); that case needs the HR-only window too.
+- Missing store, hrSample/gravitySample table or `ts` column: source `unwired`. Open/read failure: `failed`. Neither hides other sources.
+- `needs_you.rs`: new `strap` source (ok/failed/unwired like the others), id `strap-hr-only`, fixed title "Last night came through as heart rate only", fixed detail, deep link `mindbody`/`fitness`.
+- UI touches (logic only, no markup, see `tasks/design-1118-coordination.md`): `inbox/needsYou.ts` (source name, labels, order), `lib/localStores.ts` (union), `inbox/NeedsYouToday.tsx` (one hook line; strap shown only when the backend reports it). Design to review the labels.
+- Tests: strap_night (window, HR-only fixture raises, normal night quiet, thresholds, next-morning clear, missing tables/ts column unwired, bad/missing file fails, store byte-identical after read, source scan: read-only, COUNT-only, no values/logging); needs_you (pointer text and link, clears, unwired/failed keep others, no `format!` in strap text). Fixtures are temp dbs only.
+- Not run: against the real NOOP store (by instruction), e2e, Security review, a live app check.
+- **Security review (strap night): 0 HIGH, 0 MED, 3 LOW. All accepted for now:**
+  - LOW-1: any store-path resolve error reads as unwired, not failed.
+  - LOW-2: counts aren't filtered by deviceId. Only `my-whoop` is present in hrSample and gravitySample today (checked by counts). Add `deviceId IN (id, id-noop)` if a second device appears.
+  - LOW-3: `has_column`'s raw error text is collapsed to "failed" by needs_you. Wrap it if `read_in`'s Err is ever surfaced.

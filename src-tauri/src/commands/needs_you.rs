@@ -68,6 +68,9 @@ pub(crate) struct Inputs {
     pub crew: Result<Option<Vec<CrewIn>>, String>,
     /// Open Treasury flags, stale first. `Ok(None)` when Treasury has no database yet (unwired).
     pub treasury: Result<Option<Vec<super::treasury_monitor::Flag>>, String>,
+    /// The last night's heart-rate-only check (counts only). `Ok(None)` when NOOP has no store or
+    /// lacks the sample tables (unwired); `Err` when the store could not be read.
+    pub strap: Result<Option<super::strap_night::StrapNight>, String>,
 }
 
 fn link(id: &str, view: &str) -> Route {
@@ -281,7 +284,32 @@ pub(crate) fn build(i: Inputs) -> Vec<SourceReport> {
         ),
     };
 
-    vec![todos, dates, checkin, decisions, crew, treasury]
+    let strap = match i.strap {
+        Err(_) => report("strap", Err("failed".into())),
+        Ok(None) => unwired("strap"),
+        Ok(Some(n)) => report(
+            "strap",
+            Ok(if n.hr_only {
+                // Fixed text only: no counts and no health values are formatted in.
+                vec![pointer(
+                    "strap",
+                    "strap-hr-only".into(),
+                    super::strap_night::TITLE.into(),
+                    if n.recovery_missing {
+                        super::strap_night::DETAIL_NO_RECOVERY
+                    } else {
+                        super::strap_night::DETAIL
+                    }
+                    .into(),
+                    link("mindbody", "fitness"),
+                )]
+            } else {
+                vec![]
+            }),
+        ),
+    };
+
+    vec![todos, dates, checkin, decisions, crew, treasury, strap]
 }
 
 fn treasury_title(kind: &str) -> &'static str {
@@ -324,6 +352,9 @@ async fn gather() -> Inputs {
         let e = || "failed".to_string();
         (Err(e()), Err(e()), Err(e()), Err(e()), Err(e()))
     });
+    let strap = tauri::async_runtime::spawn_blocking(move || super::strap_night::read(now))
+        .await
+        .unwrap_or_else(|_| Err("failed".to_string()));
     let crew = match crew::crew_health().await.as_deref() {
         Ok("not_configured") => Ok(None),
         Ok("operational") => crew::crew_list_approvals("pending".into())
@@ -351,6 +382,7 @@ async fn gather() -> Inputs {
         decided,
         crew,
         treasury,
+        strap,
     }
 }
 
@@ -366,6 +398,7 @@ mod tests {
     use super::*;
     use crate::commands::life_dates::{LifeDateRecord, Reminder};
     use crate::commands::shared::time::jst;
+    use crate::commands::strap_night::StrapNight;
     use chrono::TimeZone;
 
     fn today() -> NaiveDate {
@@ -429,6 +462,10 @@ mod tests {
                 tflag("stale_data:s1", "stale_data"),
                 tflag("no_income:s1", "no_income"),
             ])),
+            strap: Ok(Some(StrapNight {
+                hr_only: true,
+                recovery_missing: true,
+            })),
         }
     }
     fn tflag(id: &str, kind: &str) -> super::super::treasury_monitor::Flag {
@@ -597,5 +634,76 @@ mod tests {
         ] {
             assert!(!body.contains(word), "needs_you must not use {word}");
         }
+    }
+
+    #[test]
+    fn strap_pointer_is_fixed_text_links_mindbody_and_clears_on_a_normal_night() {
+        let r = build(inputs());
+        let s = by(&r, "strap");
+        assert_eq!(s.state, "ok");
+        assert_eq!(s.rows.len(), 1);
+        assert_eq!(
+            s.rows[0].title,
+            "Last night came through as heart rate only"
+        );
+        assert_eq!(
+            s.rows[0].reason,
+            crate::commands::strap_night::DETAIL_NO_RECOVERY
+        );
+        assert_eq!(
+            s.rows[0].deep_link,
+            Route {
+                id: "mindbody".into(),
+                view: "fitness".into()
+            }
+        );
+        let mut i = inputs();
+        i.strap = Ok(Some(StrapNight {
+            hr_only: true,
+            recovery_missing: false,
+        }));
+        assert_eq!(
+            by(&build(i), "strap").rows[0].reason,
+            crate::commands::strap_night::DETAIL
+        );
+        let mut i = inputs();
+        i.strap = Ok(Some(StrapNight {
+            hr_only: false,
+            recovery_missing: false,
+        }));
+        let r = build(i);
+        assert_eq!(
+            (by(&r, "strap").state.as_str(), by(&r, "strap").rows.len()),
+            ("ok", 0)
+        );
+    }
+
+    #[test]
+    fn strap_unwired_and_failed_never_hide_other_sources() {
+        let mut i = inputs();
+        i.strap = Ok(None);
+        assert_eq!(by(&build(i), "strap").state, "unwired");
+        let mut i = inputs();
+        i.strap = Err("boom".into());
+        let r = build(i);
+        assert_eq!(by(&r, "strap").state, "failed");
+        assert!(by(&r, "strap").rows.is_empty());
+        assert_eq!(by(&r, "todos").rows.len(), 2);
+        assert_eq!(by(&r, "treasury").rows.len(), 2);
+    }
+
+    #[test]
+    fn strap_source_text_formats_no_health_value() {
+        let src = include_str!("needs_you.rs");
+        let body = src.split("#[cfg(test)]").next().unwrap();
+        let block = body
+            .split("let strap = match i.strap")
+            .nth(1)
+            .unwrap()
+            .split("vec![todos")
+            .next()
+            .unwrap();
+        assert!(!block.contains("format!"), "strap text must be fixed");
+        assert!(!block.contains("hr:") && !block.contains("motion"));
     }
 }

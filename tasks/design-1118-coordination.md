@@ -40,3 +40,6 @@ From 1118b (later):
 
 ## UI touches by Claude Code since this note
 - be64e9b: Settings › Startup "Open at login" toggle, and the `.m-warn b` light contrast token (`--copper-text-on-tint`).
+
+## UI touches (Integrations, strap pointer, 2026-11-18)
+- No markup, class or token change. Logic only, so the "strap" Needs-you source can render: `src-console/inbox/needsYou.ts` (`InboxSource` + `SOURCE_LABEL`/`OPEN_LABEL`/`UNWIRED_REASON` entries, `ORDER`), `src-console/lib/localStores.ts` (`NeedsYouReport.source` union), `src-console/inbox/NeedsYouToday.tsx` (one line in the hook: reads the `strap` report when the backend gave one). Design: please review the labels "Strap" and "Open in Mind–Body ›".

@@ -103,6 +103,7 @@ pub mod login_item;
 pub mod needs_you;
 pub mod patterns;
 pub mod patterns_generic;
+pub mod strap_night;
 pub mod update_install;
 pub mod updater;
 pub mod weekly_review;
