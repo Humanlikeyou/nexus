@@ -44,6 +44,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "resources/third-party/noop/NOTICE": "third-party/noop/NOTICE",
+      "resources/third-party/noop/ATTRIBUTION.md": "third-party/noop/ATTRIBUTION.md",
+      "resources/third-party/noop/LICENSE": "third-party/noop/LICENSE"
+    },
     "category": "Productivity",
     "shortDescription": "Local intelligence and sensing workspace",
     "longDescription": "Amara OS brings local intelligence, neural sessions, health signals, and deliberate execution into one private workspace.",

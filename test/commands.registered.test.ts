@@ -125,6 +125,17 @@ describe("Tauri command registry", () => {
     expect(lib).toContain("commands::notify_relay::start();");
   });
 
+  it("Stage G3/G6 commands are registered: freeze report + gated copy, binary status, secret moves; no unattended copy or delete", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    for (const name of ["noop_binary_status", "noop_freeze_report", "noop_freeze_copy", "keychain_move_review", "keychain_move_one"]) expect(names).toContain(name);
+    for (const name of ["noop_freeze_run", "noop_store_delete", "keychain_delete", "keychain_move_all"]) expect(names).not.toContain(name);
+    // the copy switch and the secret-move gate are compile-time constants in Rust
+    const freeze = readFileSync(new URL("../src-tauri/src/commands/noop_freeze.rs", import.meta.url), "utf8");
+    expect(freeze).toContain("pub const FREEZE_COPY_ENABLED: bool = false;");
+  });
+
   it("the supervisor commands are registered (observe, log tail, act setting); start/stop commands are not built", async () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");

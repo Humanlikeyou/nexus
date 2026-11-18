@@ -196,6 +196,13 @@ export const commands = {
 	 *  the key (never a value) and says the file stays as it is.
 	 */
 	keychainMigrateOne: (name: string, options?: InvokeOptions) => __TAURI_INVOKE<MigrateResult>("keychain_migrate_one", { name }, options),
+	/**  Presence only; never a value. Attribute-only Keychain search for NOOP's items, no prompt. */
+	keychainMoveReview: (options?: InvokeOptions) => __TAURI_INVOKE<MoveRow[]>("keychain_move_review", undefined, options),
+	/**
+	 *  Click-only; one native approval per item. The dialog names the key and says what happens to the
+	 *  old copy; it never shows a value.
+	 */
+	keychainMoveOne: (name: string, options?: InvokeOptions) => __TAURI_INVOKE<MoveResult>("keychain_move_one", { name }, options),
 	backupNow: (options?: InvokeOptions) => __TAURI_INVOKE<BackupRunResult>("backup_now", undefined, options),
 	backupSettingsSet: (patch: BackupSettingsPatch_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<BackupSettings_Serialize>("backup_settings_set", { patch }, options),
 	notifySettingsSet: (patch: RelayPatch_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<RelayView_Serialize>("notify_settings_set", { patch }, options),
@@ -283,6 +290,17 @@ export const commands = {
 	/**  GET `/api/config` with the resolved settings. Never rejects; failures are `{ok:false, kind}`. */
 	haTestConnection: (url: string | null, token: string | null, options?: InvokeOptions) => __TAURI_INVOKE<HaTestResult_Serialize>("ha_test_connection", { url, token }, options),
 	noopQuery: (tool: string, args: Value | null, options?: InvokeOptions) => __TAURI_INVOKE<Value>("noop_query", { tool, args }, options),
+	/**
+	 *  Read-only: where the CLI resolves from, its SHA-256 and whether it matches the pin file.
+	 *  Hashes one local file; runs nothing.
+	 */
+	noopBinaryStatus: (options?: InvokeOptions) => __TAURI_INVOKE<BinaryStatus_Serialize>("noop_binary_status", undefined, options),
+	noopFreezeReport: (options?: InvokeOptions) => __TAURI_INVOKE<FreezeReport_Serialize>("noop_freeze_report", undefined, options),
+	/**
+	 *  Gated and click-only. Refuses while the switch is off or NOOP.app runs; asks in the native
+	 *  dialog (names the destination folder, never a value); returns counts only.
+	 */
+	noopFreezeCopy: (options?: InvokeOptions) => __TAURI_INVOKE<FreezeCopyResult_Serialize>("noop_freeze_copy", undefined, options),
 	haCallService: (domain: string, service: string, entityId: string, data: HaServiceData_Deserialize | null, options?: InvokeOptions) => __TAURI_INVOKE<null>("ha_call_service", { domain, service, entityId, data }, options),
 	haConversation: (text: string, options?: InvokeOptions) => __TAURI_INVOKE<HaConversationResult>("ha_conversation", { text }, options),
 	haContainerStatus: (options?: InvokeOptions) => __TAURI_INVOKE<HaContainerStatus>("ha_container_status", undefined, options),
@@ -393,6 +411,10 @@ export const commands = {
 	getSystemInfo: (options?: InvokeOptions) => __TAURI_INVOKE<SystemInfo>("get_system_info", undefined, options),
 	healthCheck: (options?: InvokeOptions) => __TAURI_INVOKE<string>("health_check", undefined, options),
 	readSkills: (options?: InvokeOptions) => __TAURI_INVOKE<Skill_Serialize[]>("read_skills", undefined, options),
+	/**
+	 *  The webview never receives the bot token (Stage G review MED-3): it is always null here. The
+	 *  token is managed through `secrets_status` / `secret_set` (Keychain).
+	 */
 	getConfig: (options?: InvokeOptions) => __TAURI_INVOKE<NexusConfig_Serialize>("get_config", undefined, options),
 	saveSettings: (config: NexusConfig_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<null>("save_settings", { config }, options),
 	getTelegramMessages: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TelegramMessage[]>("get_telegram_messages", { limit }, options),
@@ -913,6 +935,30 @@ export type Bands = {
 	alpha: (number | null)[],
 	beta: (number | null)[],
 	gamma: (number | null)[],
+};
+
+export type BinaryStatus = BinaryStatus_Serialize | BinaryStatus_Deserialize;
+
+export type BinaryStatus_Deserialize = {
+	/**  `bundled` | `projects` | `settings` | `none` */
+	source: string,
+	found: boolean,
+	/**  SHA-256 of the resolved file (not a secret); what Taisun logs and pins. */
+	sha256?: string | null,
+	pinsListed: number,
+	/**  `unpinned` | `match` | `mismatch` | `unknown` */
+	pinState: string,
+};
+
+export type BinaryStatus_Serialize = {
+	/**  `bundled` | `projects` | `settings` | `none` */
+	source: string,
+	found: boolean,
+	/**  SHA-256 of the resolved file (not a secret); what Taisun logs and pins. */
+	sha256: string | null,
+	pinsListed: number,
+	/**  `unpinned` | `match` | `mismatch` | `unknown` */
+	pinState: string,
 };
 
 /**  A timestamped proof event for the debug/proof log. */
@@ -1962,6 +2008,74 @@ export type FollowupLists_Serialize = {
 	muted: MutedTopic_Serialize[],
 };
 
+export type FreezeCopyResult = FreezeCopyResult_Serialize | FreezeCopyResult_Deserialize;
+
+export type FreezeCopyResult_Deserialize = {
+	ok: boolean,
+	tables: FreezeTable_Deserialize[],
+	migrationCount?: number | null,
+};
+
+export type FreezeCopyResult_Serialize = {
+	ok: boolean,
+	tables: FreezeTable_Serialize[],
+	migrationCount: number | null,
+};
+
+export type FreezeFile = {
+	name: string,
+	bytes: number,
+	sha256: string,
+};
+
+export type FreezeReport = FreezeReport_Serialize | FreezeReport_Deserialize;
+
+export type FreezeReport_Deserialize = {
+	storeFound: boolean,
+	files: FreezeFile[],
+	userVersion?: number | null,
+	migrationCount?: number | null,
+	lastMigration?: string | null,
+	tables: FreezeTable_Deserialize[],
+	/**  `yes` | `no` | `unknown` */
+	noopRunning: string,
+	keychainItems: KeychainName[],
+	copyEnabled: boolean,
+	/**  Why the report is partial (fixed text, no path), when it is. */
+	note?: string | null,
+};
+
+export type FreezeReport_Serialize = {
+	storeFound: boolean,
+	files: FreezeFile[],
+	userVersion: number | null,
+	migrationCount: number | null,
+	lastMigration: string | null,
+	tables: FreezeTable_Serialize[],
+	/**  `yes` | `no` | `unknown` */
+	noopRunning: string,
+	keychainItems: KeychainName[],
+	copyEnabled: boolean,
+	/**  Why the report is partial (fixed text, no path), when it is. */
+	note: string | null,
+};
+
+export type FreezeTable = FreezeTable_Serialize | FreezeTable_Deserialize;
+
+export type FreezeTable_Deserialize = {
+	name: string,
+	rows?: number | null,
+	/**  Newest `ts` when the table has one (a timestamp, never a measurement). */
+	maxTs?: string | null,
+};
+
+export type FreezeTable_Serialize = {
+	name: string,
+	rows: number | null,
+	/**  Newest `ts` when the table has one (a timestamp, never a measurement). */
+	maxTs: string | null,
+};
+
 export type FundingRequest = FundingRequest_Serialize | FundingRequest_Deserialize;
 
 export type FundingRequest_Deserialize = {
@@ -2389,6 +2503,11 @@ export type KeyFileStatus_Serialize = {
 	made: boolean,
 	madeAt?: string,
 	where: string,
+};
+
+export type KeychainName = {
+	name: string,
+	present: boolean,
 };
 
 export type Lane = {
@@ -2920,6 +3039,21 @@ export type MotionWindow = {
 	events: MotionEvent[],
 };
 
+export type MoveResult = {
+	ok: boolean,
+	name: string,
+	/**  True only when a plaintext copy existed and was removed after the Keychain copy verified. */
+	plaintextRemoved: boolean,
+};
+
+export type MoveRow = {
+	name: string,
+	/**  `noopKeychain` | `configJson` | `none`. Whether a source exists, never its value. */
+	source: string,
+	/**  Whether Amara's own Keychain item is set. */
+	amaraSet: boolean,
+};
+
 export type MuseConnectionState = MuseConnectionState_Serialize | MuseConnectionState_Deserialize;
 
 export type MuseConnectionState_Deserialize = {
@@ -3162,7 +3296,7 @@ export type NoopHealthSnapshot_Serialize = {
 	message: string | null,
 };
 
-export type NoopQueryError = { kind: "tool_not_allowed"; detail: string } | { kind: "invalid_args"; detail: string } | { kind: "binary_missing"; detail: string } | { kind: "spawn_failed"; detail: string } | { kind: "timeout"; detail: number } | { kind: "process_failed"; detail: string } | { kind: "bad_output"; detail: string } | { kind: "tool_error"; detail: string } | { kind: "invalid_path"; detail: string } | { kind: "sandbox_missing"; detail: string };
+export type NoopQueryError = { kind: "tool_not_allowed"; detail: string } | { kind: "invalid_args"; detail: string } | { kind: "binary_missing"; detail: string } | { kind: "spawn_failed"; detail: string } | { kind: "timeout"; detail: number } | { kind: "process_failed"; detail: string } | { kind: "bad_output"; detail: string } | { kind: "tool_error"; detail: string } | { kind: "invalid_path"; detail: string } | { kind: "sandbox_missing"; detail: string } | { kind: "pin_mismatch"; detail: string } | { kind: "pin_missing"; detail: string };
 
 export type NoopSettings = NoopSettings_Serialize | NoopSettings_Deserialize;
 

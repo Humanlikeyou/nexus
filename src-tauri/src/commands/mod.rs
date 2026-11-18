@@ -40,6 +40,7 @@ pub mod money_summary;
 pub mod muse;
 pub mod n8n_status;
 pub mod noop;
+pub mod noop_freeze;
 pub mod noop_parity;
 pub mod noop_query;
 pub mod notify_relay;

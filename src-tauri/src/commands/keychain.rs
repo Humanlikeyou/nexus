@@ -27,6 +27,10 @@ pub(crate) const SECRETS: &[(&str, &str)] = &[
     ("weaviate_api_key", "Knowledge base (Weaviate) key"),
     ("n8n_api_key", "n8n API key"),
     ("crew_service_token", "Crew service token"),
+    // Stage G (decision 0033 Q6): moved here from NOOP.app's own Keychain items by keychain_move_one.
+    ("oura_tokens", "Oura connection"),
+    ("hevy_api_key", "Hevy key"),
+    ("coach_api_key", "AI coach key"),
 ];
 
 pub(crate) const N8N_KEY: &str = "n8n_encryption_key";

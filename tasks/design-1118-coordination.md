@@ -49,3 +49,7 @@ From 1118b (later):
 - Only when today's recovery is missing AND that pointer is present. Otherwise the normal pending copy. Never falls back to an older day.
 - Copy: "No score today. Last night came through as heart rate only, so recovery couldn't be scored." + link "See the note ›" (opens Home › Needs you).
 - Test: `src-console/screens/HealthScreen.hronly.test.tsx` (4, bridge mocked).
+
+## UI touches (Stage G3/G6, 2026-11-18)
+- Type only, no markup: `src-console/legacy-core/lib/types.ts` (`NoopQueryError` gains `{ kind: "pin_mismatch" }` and `{ kind: "pin_missing" }`, the new fixed refusal codes); `src-console/bindings.gen.ts` and `boundTable.ts` (generated/bound for the new commands). `MindBodyScreen.tsx` already shows its generic error state for any unknown kind, so no screen change. Design: if you want fixed copy for a pinned-binary refusal, ask in `tasks/design-questions.md`. About-screen copy for NOOP attribution is yours; the files ship in the bundle under `Resources/third-party/noop/`.
+- `get_config` now always returns `telegram_bot_token: null` to the webview (no screen reads or writes that field; checked by grep). The Telegram token is set only through Settings > Notifications (`secret_set`) and shown as set/not set (`secrets_status`). Nothing for Design to change.

@@ -271,6 +271,284 @@ pub async fn keychain_migrate_one(
     .map_err(|_| WRITE_FAILED.to_string())?
 }
 
+// ── Stage G6: Oura, coach and the legacy Telegram token (decision 0033 Q6, Q7) ──
+//
+// Where they live today (names only):
+//   oura_tokens      NOOP.app's Keychain item  service `com.noop.oura`,   account `oauth-tokens`
+//   coach_api_key    NOOP.app's Keychain item  service `com.noop.aicoach`, account `api-key`
+//   telegram_bot_token  plaintext key `telegram_bot_token` in `<data>/config.json`
+//   hevy_api_key     nowhere: NOOP only imports Hevy CSV files and stores no Hevy key
+// `keychain_move_one` copies one of them into Amara's own item (`com.taisun.nexus.<name>`), reads it
+// back and compares, and only for the config.json token removes the plaintext, after that check.
+// NOOP.app's own Keychain items are NOT deleted: they are not plaintext and NOOP.app still needs
+// them until Taisun retires it.
+
+/// The gate for these moves. Taisun's words are logged in decision 0033 (Q6, Q7); each move still
+/// needs its own native approval.
+pub const SECRET_MOVE_ENABLED: bool = true;
+const NO_SOURCE_FOUND: &str = "Nothing to move was found for that key; nothing was changed.";
+const REMOVE_FAILED: &str =
+    "The Keychain copy is verified, but the old plaintext could not be removed.";
+const PLAINTEXT_STILL_THERE: &str =
+    "The Keychain copy is verified, but the plaintext is still in the file.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MoveSource {
+    /// Another app's Keychain item (service, account). Copied, never deleted.
+    NoopKeychain(&'static str, &'static str),
+    /// The plaintext Telegram token in `config.json`. Removed after the copy is verified.
+    ConfigTelegram,
+}
+
+pub(crate) const MOVES: &[(&str, MoveSource)] = &[
+    (
+        "oura_tokens",
+        MoveSource::NoopKeychain("com.noop.oura", "oauth-tokens"),
+    ),
+    (
+        "coach_api_key",
+        MoveSource::NoopKeychain("com.noop.aicoach", "api-key"),
+    ),
+    ("telegram_bot_token", MoveSource::ConfigTelegram),
+];
+
+fn move_source(name: &str) -> Option<MoveSource> {
+    MOVES.iter().find(|(n, _)| *n == name).map(|(_, s)| *s)
+}
+
+/// Reads another app's Keychain item. The value is only ever held in `Zeroizing` memory.
+pub(crate) trait LegacyReader {
+    fn read(&self, service: &str, account: &str) -> Result<Vec<u8>, KeychainError>;
+}
+
+pub(crate) struct MacLegacyReader;
+
+#[cfg(target_os = "macos")]
+impl LegacyReader for MacLegacyReader {
+    fn read(&self, service: &str, account: &str) -> Result<Vec<u8>, KeychainError> {
+        use security_framework::passwords::get_generic_password;
+        get_generic_password(service, account).map_err(|e| {
+            if e.code() == -25300 {
+                KeychainError::NotFound
+            } else {
+                KeychainError::Other(format!("keychain error {}", e.code()))
+            }
+        })
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+impl LegacyReader for MacLegacyReader {
+    fn read(&self, _: &str, _: &str) -> Result<Vec<u8>, KeychainError> {
+        Err(KeychainError::Other("Keychain is macOS only".into()))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveRow {
+    pub name: String,
+    /// `noopKeychain` | `configJson` | `none`. Whether a source exists, never its value.
+    pub source: String,
+    /// Whether Amara's own Keychain item is set.
+    pub amara_set: bool,
+}
+
+pub(crate) fn move_review_with(
+    kc: &dyn Keychain,
+    legacy: &dyn super::noop_freeze::KeychainNames,
+    config_path: &Path,
+) -> Vec<MoveRow> {
+    let mut rows: Vec<MoveRow> = MOVES
+        .iter()
+        .map(|(name, src)| {
+            let has = match src {
+                MoveSource::NoopKeychain(service, _) => legacy.exists(service),
+                MoveSource::ConfigTelegram => {
+                    super::telegram::plaintext_token_at(config_path).is_some()
+                }
+            };
+            MoveRow {
+                name: (*name).to_string(),
+                source: match (has, src) {
+                    (false, _) => "none",
+                    (true, MoveSource::NoopKeychain(..)) => "noopKeychain",
+                    (true, MoveSource::ConfigTelegram) => "configJson",
+                }
+                .to_string(),
+                amara_set: keychain_value(kc, name).is_some(),
+            }
+        })
+        .collect();
+    // Hevy has no stored key anywhere; listed so the screen can say so.
+    rows.push(MoveRow {
+        name: "hevy_api_key".into(),
+        source: "none".into(),
+        amara_set: keychain_value(kc, "hevy_api_key").is_some(),
+    });
+    rows
+}
+
+/// Presence only; never a value. Attribute-only Keychain search for NOOP's items, no prompt.
+#[tauri::command]
+#[specta::specta]
+pub async fn keychain_move_review() -> Result<Vec<MoveRow>, String> {
+    tokio::task::spawn_blocking(|| {
+        move_review_with(
+            &super::keychain::MacKeychain,
+            &super::noop_freeze::MacKeychainNames,
+            &super::telegram::config_path(),
+        )
+    })
+    .await
+    .map_err(|_| "The review could not run.".to_string())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveResult {
+    pub ok: bool,
+    pub name: String,
+    /// True only when a plaintext copy existed and was removed after the Keychain copy verified.
+    pub plaintext_removed: bool,
+}
+
+/// Does the source exist at all? Checked before the dialog so Taisun is never asked about nothing.
+/// NOOP's Keychain items by attribute search only (no value read, no prompt).
+pub(crate) fn move_source_exists(
+    src: MoveSource,
+    names: &dyn super::noop_freeze::KeychainNames,
+    config_path: &Path,
+) -> bool {
+    match src {
+        MoveSource::NoopKeychain(service, _) => names.exists(service),
+        MoveSource::ConfigTelegram => super::telegram::plaintext_token_at(config_path).is_some(),
+    }
+}
+
+fn read_move_value(
+    src: MoveSource,
+    legacy: &dyn LegacyReader,
+    config_path: &Path,
+) -> Option<Zeroizing<String>> {
+    let v = match src {
+        MoveSource::NoopKeychain(service, account) => {
+            let bytes = Zeroizing::new(legacy.read(service, account).ok()?);
+            let t = std::str::from_utf8(&bytes).ok()?.trim().to_string();
+            Zeroizing::new(t)
+        }
+        MoveSource::ConfigTelegram => super::telegram::plaintext_token_at(config_path)?,
+    };
+    (!v.is_empty() && v.len() <= MAX_SECRET_BYTES).then_some(v)
+}
+
+/// Copy, read back and compare; then, for the config.json token only, remove the plaintext and
+/// check it is gone. An Amara item that already holds a DIFFERENT value is never overwritten; one
+/// that holds the SAME value lets an interrupted move finish (verify, then remove).
+pub(crate) fn move_core(
+    kc: &dyn Keychain,
+    legacy: &dyn LegacyReader,
+    name: &str,
+    config_path: &Path,
+    _approved: &ApprovalToken,
+) -> Result<MoveResult, String> {
+    let src = move_source(name).ok_or_else(|| NOT_MOVABLE.to_string())?;
+    if !super::keychain::is_allowed(name) {
+        return Err(NOT_MOVABLE.to_string());
+    }
+    let value =
+        read_move_value(src, legacy, config_path).ok_or_else(|| NO_SOURCE_FOUND.to_string())?;
+    let service = service_for(name);
+    match kc.get(&service) {
+        Err(KeychainError::NotFound) => {
+            kc.set(&service, value.as_bytes())
+                .map_err(|_| WRITE_FAILED.to_string())?;
+        }
+        Ok(existing) => {
+            let existing = Zeroizing::new(existing);
+            if !ct_eq(existing.as_slice(), value.as_bytes()) {
+                return Err(ALREADY.to_string());
+            }
+        }
+        Err(KeychainError::Other(_)) => return Err(KEYCHAIN_UNREADABLE.to_string()),
+    }
+    let back = kc
+        .get(&service)
+        .map(Zeroizing::new)
+        .map_err(|_| MISMATCH.to_string())?;
+    if !ct_eq(back.as_slice(), value.as_bytes()) {
+        return Err(MISMATCH.to_string());
+    }
+    let mut plaintext_removed = false;
+    if src == MoveSource::ConfigTelegram {
+        // Only now, after the verified read-back.
+        super::telegram::clear_plaintext_token_at(config_path)
+            .map_err(|_| REMOVE_FAILED.to_string())?;
+        if super::telegram::plaintext_token_at(config_path).is_some() {
+            return Err(PLAINTEXT_STILL_THERE.to_string());
+        }
+        plaintext_removed = true;
+    }
+    Ok(MoveResult {
+        ok: true,
+        name: name.to_string(),
+        plaintext_removed,
+    })
+}
+
+/// Click-only; one native approval per item. The dialog names the key and says what happens to the
+/// old copy; it never shows a value.
+#[tauri::command]
+#[specta::specta]
+pub async fn keychain_move_one(app: tauri::AppHandle, name: String) -> Result<MoveResult, String> {
+    gate(SECRET_MOVE_ENABLED)?;
+    let src = move_source(&name).ok_or_else(|| NOT_MOVABLE.to_string())?;
+    let label = super::keychain::SECRETS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, l)| *l)
+        .unwrap_or("key");
+    let after = match src {
+        MoveSource::NoopKeychain(..) => {
+            "NOOP.app's own copy is left as it is. macOS may ask once to let Amara read it."
+        }
+        MoveSource::ConfigTelegram => {
+            "The saved copy is checked, then the plaintext token is removed from config.json."
+        }
+    };
+    // Nothing to move: say so without a dialog.
+    let exists_src = tokio::task::spawn_blocking(move || {
+        move_source_exists(
+            src,
+            &super::noop_freeze::MacKeychainNames,
+            &super::telegram::config_path(),
+        )
+    })
+    .await
+    .map_err(|_| NO_SOURCE_FOUND.to_string())?;
+    if !exists_src {
+        return Err(NO_SOURCE_FOUND.to_string());
+    }
+    let text = super::approval_gate::approval_text(
+        &format!("Move the {label} into Amara's Keychain"),
+        &format!("{after} Choose Allow, not Always Allow. Allow only if you just asked for this."),
+    )?;
+    let key = super::approval_gate::service_key(&format!("keychain-move-{name}"));
+    let _guard = super::approval_gate::require_approval(&app, &[key], text).await?;
+    let token = ApprovalToken(());
+    tokio::task::spawn_blocking(move || {
+        move_core(
+            &super::keychain::MacKeychain,
+            &MacLegacyReader,
+            &name,
+            &super::telegram::config_path(),
+            &token,
+        )
+    })
+    .await
+    .map_err(|_| WRITE_FAILED.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::keychain::FakeKeychain;
@@ -430,7 +708,8 @@ mod tests {
         assert_eq!(gate(false).unwrap_err(), DISABLED);
         assert!(gate(true).is_ok());
         let src = include_str!("keychain_migrate.rs");
-        let body = src.split("mod tests {").next().unwrap();
+        // The file-backed copier only; the Stage G6 section below has its own pinned test.
+        let body = src.split("// ── Stage G6").next().unwrap();
         let cmd = &body[body.find("pub async fn keychain_migrate_one").unwrap()..];
         let g = cmd.find("gate(KEYCHAIN_MIGRATE_ENABLED)").unwrap();
         let a = cmd.find("require_approval(").unwrap();
@@ -641,5 +920,273 @@ mod tests {
         for n in ["n8n_api_key", "crew_service_token", "weaviate_api_key"] {
             assert!(super::super::keychain::is_allowed(n), "{n}");
         }
+    }
+
+    // ── Stage G6 moves ──
+
+    struct FakeLegacy(std::collections::HashMap<(String, String), Vec<u8>>);
+    impl LegacyReader for FakeLegacy {
+        fn read(&self, service: &str, account: &str) -> Result<Vec<u8>, KeychainError> {
+            self.0
+                .get(&(service.to_string(), account.to_string()))
+                .cloned()
+                .ok_or(KeychainError::NotFound)
+        }
+    }
+    struct Exists(Vec<&'static str>);
+    impl super::super::noop_freeze::KeychainNames for Exists {
+        fn exists(&self, s: &str) -> bool {
+            self.0.contains(&s)
+        }
+    }
+    fn legacy_with(service: &str, account: &str, v: &str) -> FakeLegacy {
+        let mut m = std::collections::HashMap::new();
+        m.insert(
+            (service.to_string(), account.to_string()),
+            v.as_bytes().to_vec(),
+        );
+        FakeLegacy(m)
+    }
+    fn cfg_with_token(dir: &Path, tok: &str) -> PathBuf {
+        let p = dir.join("config.json");
+        std::fs::write(
+            &p,
+            format!(
+                r#"{{"telegram_bot_token":"{tok}","telegram_chat_id":"42","unknown_future_key":{{"a":1}},"allow_claude":false}}"#
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        p
+    }
+    use std::path::PathBuf;
+
+    #[test]
+    fn new_names_are_on_the_allowlist_under_the_nexus_prefix() {
+        for n in ["oura_tokens", "hevy_api_key", "coach_api_key"] {
+            assert!(super::super::keychain::is_allowed(n));
+            assert_eq!(service_for(n), format!("com.taisun.nexus.{n}"));
+        }
+    }
+
+    #[test]
+    fn noop_keychain_items_are_copied_verified_and_left_in_place() {
+        let kc = FakeKeychain::default();
+        let leg = legacy_with("com.noop.oura", "oauth-tokens", SENTINEL);
+        let d = tmp();
+        let r = move_core(&kc, &leg, "oura_tokens", &d.join("config.json"), &token()).unwrap();
+        assert_eq!(
+            r,
+            MoveResult {
+                ok: true,
+                name: "oura_tokens".into(),
+                plaintext_removed: false
+            }
+        );
+        assert_eq!(
+            keychain_value(&kc, "oura_tokens").unwrap().as_str(),
+            SENTINEL
+        );
+        assert!(!format!("{r:?}").contains(SENTINEL));
+        // The other app's item is only ever read: the trait has no write or delete.
+        assert_eq!(leg.0.len(), 1);
+        let c = legacy_with("com.noop.aicoach", "api-key", "  coach-secret-value \n");
+        move_core(&kc, &c, "coach_api_key", &d.join("config.json"), &token()).unwrap();
+        assert_eq!(
+            keychain_value(&kc, "coach_api_key").unwrap().as_str(),
+            "coach-secret-value"
+        );
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn nothing_to_move_or_unmovable_names_change_nothing() {
+        let kc = FakeKeychain::default();
+        let d = tmp();
+        let none = FakeLegacy(Default::default());
+        let cfg = d.join("config.json");
+        for name in ["oura_tokens", "coach_api_key", "telegram_bot_token"] {
+            assert_eq!(
+                move_core(&kc, &none, name, &cfg, &token()).unwrap_err(),
+                NO_SOURCE_FOUND
+            );
+            assert!(keychain_value(&kc, name).is_none());
+        }
+        // Hevy stores no key anywhere, so it is not movable; neither is an arbitrary name.
+        for name in ["hevy_api_key", "ha_token", "weaviate_api_key", "../x"] {
+            assert_eq!(
+                move_core(&kc, &none, name, &cfg, &token()).unwrap_err(),
+                NOT_MOVABLE
+            );
+        }
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn a_different_existing_keychain_value_is_never_overwritten() {
+        let kc = FakeKeychain::default();
+        put(&kc, "oura_tokens", "existing-value");
+        let leg = legacy_with("com.noop.oura", "oauth-tokens", SENTINEL);
+        let d = tmp();
+        assert_eq!(
+            move_core(&kc, &leg, "oura_tokens", &d.join("c.json"), &token()).unwrap_err(),
+            ALREADY
+        );
+        assert_eq!(
+            keychain_value(&kc, "oura_tokens").unwrap().as_str(),
+            "existing-value"
+        );
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn telegram_plaintext_is_removed_only_after_the_keychain_copy_verifies() {
+        let kc = FakeKeychain::default();
+        let d = tmp();
+        let cfg = cfg_with_token(&d, SENTINEL);
+        let none = FakeLegacy(Default::default());
+        let r = move_core(&kc, &none, "telegram_bot_token", &cfg, &token()).unwrap();
+        assert!(r.plaintext_removed);
+        assert_eq!(
+            keychain_value(&kc, "telegram_bot_token").unwrap().as_str(),
+            SENTINEL
+        );
+        let text = std::fs::read_to_string(&cfg).unwrap();
+        assert!(!text.contains(SENTINEL), "plaintext gone");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(v["telegram_bot_token"].is_null());
+        assert_eq!(v["telegram_chat_id"], "42");
+        assert_eq!(v["unknown_future_key"]["a"], 1, "other keys are kept");
+        assert_eq!(
+            std::fs::metadata(&cfg).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        // A second run has no plaintext left.
+        assert_eq!(
+            move_core(&kc, &none, "telegram_bot_token", &cfg, &token()).unwrap_err(),
+            NO_SOURCE_FOUND
+        );
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// A Keychain whose write is accepted but reads back something else.
+    struct LyingKeychain;
+    impl Keychain for LyingKeychain {
+        fn get(&self, _: &str) -> Result<Vec<u8>, KeychainError> {
+            Err(KeychainError::NotFound)
+        }
+        fn set(&self, _: &str, _: &[u8]) -> Result<(), KeychainError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_failed_verification_leaves_the_plaintext_in_place() {
+        let d = tmp();
+        let cfg = cfg_with_token(&d, SENTINEL);
+        let before = std::fs::read(&cfg).unwrap();
+        let none = FakeLegacy(Default::default());
+        let r = move_core(&LyingKeychain, &none, "telegram_bot_token", &cfg, &token());
+        assert_eq!(r.unwrap_err(), MISMATCH);
+        assert_eq!(std::fs::read(&cfg).unwrap(), before, "file untouched");
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn an_interrupted_move_finishes_when_the_keychain_already_has_the_same_value() {
+        let kc = FakeKeychain::default();
+        put(&kc, "telegram_bot_token", SENTINEL);
+        let d = tmp();
+        let cfg = cfg_with_token(&d, SENTINEL);
+        let none = FakeLegacy(Default::default());
+        let r = move_core(&kc, &none, "telegram_bot_token", &cfg, &token()).unwrap();
+        assert!(r.plaintext_removed);
+        // A different Keychain value keeps the plaintext and refuses.
+        let kc2 = FakeKeychain::default();
+        put(&kc2, "telegram_bot_token", "other");
+        let cfg2 = cfg_with_token(&d.join(".."), SENTINEL);
+        let before = std::fs::read(&cfg2).unwrap();
+        assert_eq!(
+            move_core(&kc2, &none, "telegram_bot_token", &cfg2, &token()).unwrap_err(),
+            ALREADY
+        );
+        assert_eq!(std::fs::read(&cfg2).unwrap(), before);
+        let _ = std::fs::remove_file(cfg2);
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn a_corrupt_config_is_not_rewritten() {
+        let d = tmp();
+        let cfg = d.join("config.json");
+        std::fs::write(&cfg, "{ not json").unwrap();
+        assert!(super::super::telegram::clear_plaintext_token_at(&cfg).is_err());
+        assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "{ not json");
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn source_existence_is_checked_without_reading_values() {
+        let d = tmp();
+        let cfg = cfg_with_token(&d, SENTINEL);
+        let has = Exists(vec!["com.noop.oura"]);
+        let oura = move_source("oura_tokens").unwrap();
+        let coach = move_source("coach_api_key").unwrap();
+        let tg = move_source("telegram_bot_token").unwrap();
+        assert!(move_source_exists(oura, &has, &cfg));
+        assert!(!move_source_exists(coach, &has, &cfg));
+        assert!(move_source_exists(tg, &has, &cfg));
+        assert!(!move_source_exists(tg, &has, &d.join("none.json")));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn review_reports_presence_and_names_only() {
+        let kc = FakeKeychain::default();
+        put(&kc, "coach_api_key", SENTINEL);
+        let d = tmp();
+        let cfg = cfg_with_token(&d, SENTINEL);
+        let rows = move_review_with(&kc, &Exists(vec!["com.noop.oura"]), &cfg);
+        let got: Vec<_> = rows
+            .iter()
+            .map(|r| (r.name.as_str(), r.source.as_str(), r.amara_set))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("oura_tokens", "noopKeychain", false),
+                ("coach_api_key", "none", true),
+                ("telegram_bot_token", "configJson", false),
+                ("hevy_api_key", "none", false),
+            ]
+        );
+        assert!(!serde_json::to_string(&rows).unwrap().contains(SENTINEL));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn move_command_is_gated_asks_once_per_item_and_never_logs() {
+        let src = include_str!("keychain_migrate.rs");
+        let prod = &src[..src.find("#[cfg(test)]\nmod tests {").unwrap()];
+        let cmd = &prod[prod.find("pub async fn keychain_move_one").unwrap()..];
+        let i_gate = cmd.find("gate(SECRET_MOVE_ENABLED)").unwrap();
+        let i_ask = cmd.find("require_approval").unwrap();
+        let i_move = cmd.find("move_core(").unwrap();
+        assert!(
+            i_gate < i_ask && i_ask < i_move,
+            "gate, then approval, then the move"
+        );
+        assert!(cmd.contains("keychain-move-{name}"), "a lock key per item");
+        let mv = &prod[prod.find("pub(crate) fn move_core").unwrap()
+            ..prod.find("pub async fn keychain_move_one").unwrap()];
+        let i_back = mv.find("MISMATCH").unwrap();
+        let i_clear = mv.find("clear_plaintext_token_at").unwrap();
+        assert!(
+            i_back < i_clear,
+            "the plaintext is removed after the read-back check"
+        );
+        assert!(
+            !prod.contains("println!") && !prod.contains("eprintln!") && !prod.contains("log::")
+        );
     }
 }

@@ -659,7 +659,9 @@ export type NoopQueryError =
   | { kind: "bad_output"; detail: string }
   | { kind: "tool_error"; detail: string }
   | { kind: "invalid_path"; detail: string }
-  | { kind: "sandbox_missing"; detail: string };
+  | { kind: "sandbox_missing"; detail: string }
+  | { kind: "pin_mismatch"; detail: string }
+  | { kind: "pin_missing"; detail: string };
 
 export interface NfSession extends RecordedSession {
   protocol_id: string;

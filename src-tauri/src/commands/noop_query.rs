@@ -72,6 +72,8 @@ pub enum NoopQueryError {
     ToolError(String),
     InvalidPath(String),
     SandboxMissing(String),
+    PinMismatch(String),
+    PinMissing(String),
 }
 
 impl NoopQueryError {
@@ -88,6 +90,8 @@ impl NoopQueryError {
             Self::ToolError(_) => "tool_error",
             Self::InvalidPath(_) => "invalid_path",
             Self::SandboxMissing(_) => "sandbox_missing",
+            Self::PinMismatch(_) => "pin_mismatch",
+            Self::PinMissing(_) => "pin_missing",
         }
     }
 }
@@ -106,6 +110,7 @@ pub const DEFAULT_BINARY_REL: &str =
     "projects/noop-lucid-current/Packages/NoopLocalAccess/.build/arm64-apple-macosx/release/noop-local-access";
 
 /// `$HOME/<DEFAULT_BINARY_REL>`, or None if there is no home directory.
+#[cfg(test)]
 pub fn default_binary_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| default_binary_under(&h))
 }
@@ -114,13 +119,277 @@ pub(crate) fn default_binary_under(home: &Path) -> PathBuf {
     home.join(DEFAULT_BINARY_REL)
 }
 
+/// File name of the bundled sidecar, next to the main executable (`Contents/MacOS/`), the same
+/// place `amara-router` lives. Staged by the packaging step once the binary exists (Phase 10).
+pub const BUNDLED_BINARY_NAME: &str = "noop-local-access";
+
+/// The bundled sidecar inside `exe_dir`, if it is there.
+pub(crate) fn bundled_binary_in(exe_dir: &Path) -> Option<PathBuf> {
+    let p = exe_dir.join(BUNDLED_BINARY_NAME);
+    p.is_file().then_some(p)
+}
+
+/// Where the CLI comes from. Order: bundled sidecar, then the `~/projects` build. (`~/.hermes/bin`
+/// holds a copy but nothing in Nexus uses it, so it is not a candidate.)
+pub(crate) fn resolve_binary(exe_dir: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+    exe_dir
+        .and_then(bundled_binary_in)
+        .or_else(|| home.map(default_binary_under))
+}
+
+/// The folder of the main executable, only when the executable sits inside a `.app` bundle.
+/// Outside a bundle (dev runs, tests) there is no bundled-sidecar root.
+pub(crate) fn bundle_dir_for_exe(exe: &Path) -> Option<PathBuf> {
+    let inside_app = exe
+        .ancestors()
+        .skip(1)
+        .any(|a| a.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")));
+    inside_app.then(|| exe.parent().map(Path::to_path_buf))?
+}
+
+fn current_exe_dir() -> Option<PathBuf> {
+    bundle_dir_for_exe(&std::env::current_exe().ok()?.canonicalize().ok()?)
+}
+
+// ── SHA-256 pin ──
+//
+// The pinned digests live in ONE file, `src-tauri/resources/noop-local-access.sha256`, compiled in.
+// Taisun adds a digest there (see the file header). Empty = unpinned (runs, reported as such).
+
+/// Fixed refusal text. Carries no path and no digest.
+pub const PIN_MISMATCH: &str = "The NOOP CLI does not match its pinned SHA-256; it was not run.";
+const PINS_RAW: &str = include_str!("../../resources/noop-local-access.sha256");
+
+/// Digests from a pin file: `#` comments and blanks skipped; a line that is not 64 hex characters
+/// is ignored (so a typo can never become "pinned to garbage" and silently match nothing).
+pub(crate) fn parse_pins(raw: &str) -> Vec<String> {
+    raw.lines()
+        .map(|l| {
+            l.split('#')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase()
+        })
+        .filter(|l| l.len() == 64 && l.bytes().all(|b| b.is_ascii_hexdigit()))
+        .collect()
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_PINS: std::cell::RefCell<Option<Vec<String>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn active_pins() -> Vec<String> {
+    // Tests never read the shipped pin file (their fake binaries would not match it); a test that
+    // wants pins sets TEST_PINS. The shipped file is checked by its own test.
+    #[cfg(test)]
+    return TEST_PINS.with(|t| t.borrow().clone()).unwrap_or_default();
+    #[cfg(not(test))]
+    parse_pins(PINS_RAW)
+}
+
+/// Lowercase hex SHA-256 of a file.
+pub(crate) fn sha256_file(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut f = std::fs::File::open(path)?;
+    let mut h = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok(hex::encode(h.finalize()))
+}
+
+/// Fixed refusal when no pin is listed but one is required.
+pub const PIN_MISSING: &str = "No SHA-256 pin is set for the NOOP CLI; it was not run.";
+
+/// Decide from the digest of the exact bytes about to run. `require_pin` is true in release
+/// builds and for any bundled binary: an empty list then refuses with `pin_missing`. Otherwise an
+/// empty list means "unpinned" and runs. A non-empty list must contain the digest.
+pub(crate) fn pin_decision(
+    digest: &str,
+    pins: &[String],
+    require_pin: bool,
+) -> Result<(), NoopQueryError> {
+    if pins.is_empty() {
+        return if require_pin {
+            Err(NoopQueryError::PinMissing(PIN_MISSING.into()))
+        } else {
+            Ok(())
+        };
+    }
+    if pins.iter().any(|p| p == digest) {
+        Ok(())
+    } else {
+        Err(NoopQueryError::PinMismatch(PIN_MISMATCH.into()))
+    }
+}
+
+/// A private, hashed copy of the binary. The copy is what runs, so a swap of the original after
+/// validation cannot be executed. Removed (file and folder) when dropped.
+pub(crate) struct PrivateCopy {
+    dir: PathBuf,
+    path: PathBuf,
+}
+
+impl PrivateCopy {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Open `binary` with O_NOFOLLOW, fstat it (regular file, ours), copy the bytes into a fresh
+    /// 0700 folder while hashing them, chmod 0500, then check the pin against that hash.
+    pub(crate) fn prepare(
+        binary: &Path,
+        pins: &[String],
+        require_pin: bool,
+    ) -> Result<Self, NoopQueryError> {
+        use sha2::{Digest, Sha256};
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+        let bad = |m: &str| NoopQueryError::InvalidPath(m.to_string());
+        let mut src = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(binary)
+            .map_err(|_| bad("cannot open the binary"))?;
+        let meta = src.metadata().map_err(|_| bad("cannot stat the binary"))?;
+        // SAFETY: getuid has no preconditions and cannot fail.
+        if !meta.is_file() || meta.uid() != unsafe { libc::getuid() } {
+            return Err(bad("binary is not a regular file owned by you"));
+        }
+        let dir = std::env::temp_dir().join(format!("nexus-noop-{}", uuid::Uuid::new_v4()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&dir)
+            .map_err(|_| bad("cannot create a private folder"))?;
+        let path = dir.join(BUNDLED_BINARY_NAME);
+        let guard = PrivateCopy {
+            dir,
+            path: path.clone(),
+        };
+        let mut out = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o700)
+            .open(&path)
+            .map_err(|_| bad("cannot create the private copy"))?;
+        let mut h = Sha256::new();
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let n = src
+                .read(&mut buf)
+                .map_err(|_| bad("cannot read the binary"))?;
+            if n == 0 {
+                break;
+            }
+            h.update(&buf[..n]);
+            out.write_all(&buf[..n])
+                .map_err(|_| bad("cannot write the private copy"))?;
+        }
+        out.sync_all().ok();
+        drop(out);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o500))
+            .map_err(|_| bad("cannot lock the private copy"))?;
+        pin_decision(&hex::encode(h.finalize()), pins, require_pin)?;
+        Ok(guard)
+    }
+}
+
+impl Drop for PrivateCopy {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_dir(&self.dir);
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BinaryStatus {
+    /// `bundled` | `projects` | `settings` | `none`
+    pub source: String,
+    pub found: bool,
+    /// SHA-256 of the resolved file (not a secret); what Taisun logs and pins.
+    pub sha256: Option<String>,
+    pub pins_listed: u32,
+    /// `unpinned` | `match` | `mismatch` | `unknown`
+    pub pin_state: String,
+}
+
+pub(crate) fn binary_status_for(
+    settings: &NoopSettings,
+    exe_dir: Option<&Path>,
+    home: Option<&Path>,
+    pins: &[String],
+) -> BinaryStatus {
+    let explicit = settings.binary_path.as_deref().filter(|p| !p.is_empty());
+    let (source, path) = match explicit {
+        Some(p) => ("settings", Some(PathBuf::from(p))),
+        None => match exe_dir.and_then(bundled_binary_in) {
+            Some(p) => ("bundled", Some(p)),
+            None => ("projects", home.map(default_binary_under)),
+        },
+    };
+    let digest = path
+        .as_deref()
+        .filter(|p| p.is_file())
+        .and_then(|p| sha256_file(p).ok());
+    let source = if digest.is_none() && explicit.is_none() {
+        "none"
+    } else {
+        source
+    };
+    let pin_state = match (&digest, pins.is_empty()) {
+        (_, true) => "unpinned",
+        (Some(d), false) if pins.iter().any(|p| p == d) => "match",
+        (Some(_), false) => "mismatch",
+        (None, false) => "unknown",
+    };
+    BinaryStatus {
+        source: source.into(),
+        found: digest.is_some(),
+        sha256: digest,
+        pins_listed: pins.len() as u32,
+        pin_state: pin_state.into(),
+    }
+}
+
+/// Read-only: where the CLI resolves from, its SHA-256 and whether it matches the pin file.
+/// Hashes one local file; runs nothing.
+#[tauri::command]
+#[specta::specta]
+pub async fn noop_binary_status() -> BinaryStatus {
+    tauri::async_runtime::spawn_blocking(|| {
+        binary_status_for(
+            &load_settings(),
+            current_exe_dir().as_deref(),
+            dirs::home_dir().as_deref(),
+            &active_pins(),
+        )
+    })
+    .await
+    .unwrap_or(BinaryStatus {
+        source: "none".into(),
+        found: false,
+        sha256: None,
+        pins_listed: 0,
+        pin_state: "unknown".into(),
+    })
+}
+
 /// Fill unset paths with defaults: `db_path` from the same resolver Home uses
 /// (`noop::resolve_store_path`) so Mind-Body and Home read the same store, and `binary_path`
 /// from `default_binary_path()`. An explicit Settings value always wins, and the result is
 /// still validated by `run_query` (allowlist, canonicalization, ownership, sandbox).
 pub fn with_resolved_db(mut s: NoopSettings) -> NoopSettings {
     if s.binary_path.as_deref().is_none_or(str::is_empty) {
-        if let Some(p) = default_binary_path() {
+        let home = dirs::home_dir();
+        if let Some(p) = resolve_binary(current_exe_dir().as_deref(), home.as_deref()) {
             s.binary_path = Some(p.display().to_string());
         }
     }
@@ -245,18 +514,23 @@ pub enum PathKind {
 pub struct Roots {
     home: PathBuf,
     usr_local_bin: PathBuf,
+    /// The folder holding the main executable (`Contents/MacOS/`); the bundled CLI lives there.
+    bundle_dir: Option<PathBuf>,
 }
 
 impl Roots {
     pub fn current() -> Result<Self, String> {
         let home = dirs::home_dir().ok_or("no home directory")?;
-        Ok(Self::with_home(&home))
+        let mut r = Self::with_home(&home);
+        r.bundle_dir = current_exe_dir();
+        Ok(r)
     }
     pub(crate) fn with_home(home: &Path) -> Self {
         let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
         Roots {
             home: canon(home),
             usr_local_bin: canon(Path::new("/usr/local/bin")),
+            bundle_dir: None,
         }
     }
 }
@@ -286,7 +560,13 @@ fn allowlist_root(p: &Path, kind: PathKind, r: &Roots) -> Option<PathBuf> {
     let projects = r.home.join("projects");
     match kind {
         PathKind::Binary => glob_root(p, &projects, &["Packages", "NoopLocalAccess", ".build"])
-            .or_else(|| prefix_root(p, &r.usr_local_bin)),
+            .or_else(|| prefix_root(p, &r.usr_local_bin))
+            .or_else(|| {
+                r.bundle_dir
+                    .as_deref()
+                    .filter(|b| p == b.join(BUNDLED_BINARY_NAME))
+                    .map(Path::to_path_buf)
+            }),
         PathKind::Db => {
             let app_support = r.home.join("Library/Application Support");
             let containers = r.home.join("Library/Containers");
@@ -356,7 +636,7 @@ pub fn validate_path(raw: &str, kind: PathKind, r: &Roots) -> Result<PathBuf, No
     }
     let Some(root) = allowlist_root(&canon, kind, r) else {
         return bad(match kind {
-            PathKind::Binary => "binary must be under ~/projects/*/Packages/NoopLocalAccess/.build/ or /usr/local/bin/",
+            PathKind::Binary => "binary must be the bundled sidecar, under ~/projects/*/Packages/NoopLocalAccess/.build/, or under /usr/local/bin/",
             PathKind::Db => "database must be under ~/Library/Application Support/{OpenWhoop,NOOP}/, the NOOP app container, or ~/projects/*/",
         });
     };
@@ -493,6 +773,13 @@ pub(crate) fn run_query_in(
         .filter(|p| !p.is_empty())
         .ok_or_else(binary_missing)?;
     let binary = validate_path(raw_bin, PathKind::Binary, roots)?;
+    // Bundled binary, or any release build, must be pinned. Dev builds may run unpinned.
+    let bundled = roots
+        .bundle_dir
+        .as_deref()
+        .is_some_and(|b| binary == b.join(BUNDLED_BINARY_NAME));
+    let private =
+        PrivateCopy::prepare(&binary, &active_pins(), bundled || !cfg!(debug_assertions))?;
     let db = match settings.db_path.as_deref().filter(|p| !p.is_empty()) {
         Some(d) => Some(validate_path(d, PathKind::Db, roots)?),
         None => None,
@@ -506,7 +793,7 @@ pub(crate) fn run_query_in(
     let mut cmd = Command::new(sandbox_exec);
     cmd.arg("-p")
         .arg(SANDBOX_PROFILE)
-        .arg(&binary)
+        .arg(private.path())
         .arg("mcp")
         .env_clear()
         .stdin(Stdio::piped())
@@ -1003,6 +1290,318 @@ mod tests {
 
     fn load_settings_for_live() -> NoopSettings {
         NoopSettings::default()
+    }
+
+    fn sha_of(p: &Path) -> String {
+        sha256_file(p).unwrap()
+    }
+
+    fn with_pins<R>(pins: &[&str], f: impl FnOnce() -> R) -> R {
+        TEST_PINS.with(|t| *t.borrow_mut() = Some(pins.iter().map(|s| s.to_string()).collect()));
+        let r = f();
+        TEST_PINS.with(|t| *t.borrow_mut() = None);
+        r
+    }
+
+    #[test]
+    fn pin_file_parses_comments_blanks_and_rejects_typos() {
+        let good = "a".repeat(64);
+        let upper = "AB".repeat(32);
+        let raw = format!(
+            "# note\n\n{good}  # trailing\n{upper}\nnot-hex\n{}\n",
+            "c".repeat(63)
+        );
+        let pins = parse_pins(&raw);
+        assert_eq!(pins, vec![good, upper.to_ascii_lowercase()]);
+        // The shipped file only holds comments or valid digests, so a typo cannot hide in it.
+        for l in PINS_RAW.lines() {
+            let t = l.trim();
+            assert!(
+                t.is_empty() || t.starts_with('#') || parse_pins(t).len() == 1,
+                "malformed line in noop-local-access.sha256"
+            );
+        }
+    }
+
+    #[test]
+    fn pin_decision_unset_match_mismatch_and_missing_in_release() {
+        let d = "a".repeat(64);
+        let other = "b".repeat(64);
+        // Dev: an empty list runs. Release or bundled (require_pin): it refuses with pin_missing.
+        assert!(pin_decision(&d, &[], false).is_ok());
+        let miss = pin_decision(&d, &[], true).unwrap_err();
+        assert_eq!(miss.kind(), "pin_missing");
+        assert!(serde_json::to_string(&miss).unwrap().contains(PIN_MISSING));
+        // A listed digest decides regardless of mode.
+        for req in [false, true] {
+            assert!(pin_decision(&d, &[other.clone(), d.clone()], req).is_ok());
+            let e = pin_decision(&d, std::slice::from_ref(&other), req).unwrap_err();
+            assert_eq!(e.kind(), "pin_mismatch");
+            let t = serde_json::to_string(&e).unwrap();
+            assert!(t.contains(PIN_MISMATCH) && !t.contains(&d) && !t.contains(&other));
+        }
+        // The shipped pin file lists the binary used today, so a release build is not "missing".
+        assert!(!parse_pins(PINS_RAW).is_empty());
+    }
+
+    #[test]
+    fn private_copy_is_hashed_locked_and_removed_on_drop() {
+        use std::os::unix::fs::PermissionsExt;
+        let h = FakeHome::new();
+        let p = h.script("echo hi");
+        let d = sha_of(&p);
+        let (dir, copy_path);
+        {
+            let c = PrivateCopy::prepare(&p, std::slice::from_ref(&d), true).unwrap();
+            copy_path = c.path().to_path_buf();
+            dir = copy_path.parent().unwrap().to_path_buf();
+            assert_eq!(
+                std::fs::read(&copy_path).unwrap(),
+                std::fs::read(&p).unwrap()
+            );
+            assert_eq!(
+                std::fs::metadata(&copy_path).unwrap().permissions().mode() & 0o777,
+                0o500
+            );
+            assert_eq!(
+                std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            // Changing the original afterwards does not change what would run.
+            std::fs::write(&p, "#!/bin/sh\necho swapped\n").unwrap();
+            assert_eq!(sha_of(&copy_path), d);
+        }
+        assert!(
+            !copy_path.exists() && !dir.exists(),
+            "copy and folder are removed"
+        );
+        // A refused pin also leaves nothing behind.
+        let before: Vec<_> = std::fs::read_dir(std::env::temp_dir())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("nexus-noop-"))
+            .map(|e| e.path())
+            .collect();
+        let _ = PrivateCopy::prepare(&p, &["0".repeat(64)], true)
+            .err()
+            .unwrap();
+        let after = std::fs::read_dir(std::env::temp_dir())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("nexus-noop-"))
+            .filter(|e| !before.contains(&e.path()))
+            .count();
+        assert_eq!(after, 0, "refusal leaves no private folder behind");
+    }
+
+    #[test]
+    fn a_swap_after_validation_is_not_executed() {
+        let h = FakeHome::new();
+        let marker = h.0.join("ran");
+        let p = h.script("exit 0");
+        let roots = h.roots();
+        let canon = validate_path(&p.display().to_string(), PathKind::Binary, &roots).unwrap();
+        let pin = sha_of(&canon);
+        // Swap the file for one that would touch the marker, after validation and the pin read.
+        std::fs::write(&p, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+        let r = PrivateCopy::prepare(&canon, &[pin], true);
+        assert!(matches!(r, Err(NoopQueryError::PinMismatch(_))));
+        assert!(!marker.exists());
+        // A symlink swapped in for the file is refused by O_NOFOLLOW before any read.
+        let target = h.file("elsewhere/real", "#!/bin/sh\ntrue\n", 0o755);
+        std::fs::remove_file(&p).unwrap();
+        std::os::unix::fs::symlink(&target, &p).unwrap();
+        let r = PrivateCopy::prepare(&p, &[], false);
+        assert_eq!(r.err().unwrap().kind(), "invalid_path");
+    }
+
+    #[test]
+    fn bundled_binary_without_pins_is_refused_and_a_run_uses_the_copy() {
+        let h = FakeHome::new();
+        let b = h.file(
+            "App.app/Contents/MacOS/noop-local-access",
+            "#!/bin/sh\ncat >/dev/null; echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}'; echo '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"n\\\":1}\"}]}}'\n",
+            0o755,
+        );
+        let mut roots = h.roots();
+        roots.bundle_dir = Some(b.parent().unwrap().canonicalize().unwrap());
+        let sandbox = h.sandbox();
+        let run = |pins: &[&str]| {
+            with_pins(pins, || {
+                run_query_in(
+                    &sandbox,
+                    &with_bin(&b),
+                    &roots,
+                    "data_freshness",
+                    &Value::Null,
+                    DEFAULT_TIMEOUT,
+                )
+            })
+        };
+        assert_eq!(run(&[]).unwrap_err().kind(), "pin_missing");
+        let pin = sha_of(&b);
+        assert_eq!(run(&[pin.as_str()]).unwrap()["n"], 1);
+    }
+
+    #[test]
+    fn bundle_root_needs_a_dot_app_and_matches_only_the_exact_file() {
+        let app = Path::new("/Applications/Amara OS.app/Contents/MacOS/nexus");
+        assert_eq!(
+            bundle_dir_for_exe(app),
+            Some(PathBuf::from("/Applications/Amara OS.app/Contents/MacOS"))
+        );
+        assert_eq!(bundle_dir_for_exe(Path::new("/x/target/debug/nexus")), None);
+        assert_eq!(bundle_dir_for_exe(Path::new("/x/App.app")), None);
+    }
+
+    #[test]
+    fn a_pin_mismatch_refuses_before_anything_is_spawned() {
+        let h = FakeHome::new();
+        let marker = h.0.join("ran");
+        let p = h.script(&format!("touch '{}'", marker.display()));
+        let sandbox = h.sandbox();
+        let r = with_pins(&["0".repeat(64).as_str()], || {
+            run_query_in(
+                &sandbox,
+                &with_bin(&p),
+                &h.roots(),
+                "data_freshness",
+                &Value::Null,
+                DEFAULT_TIMEOUT,
+            )
+        });
+        assert!(matches!(r, Err(NoopQueryError::PinMismatch(_))));
+        assert!(!marker.exists(), "the binary must not run on a mismatch");
+    }
+
+    #[test]
+    fn a_matching_pin_runs_and_a_changed_binary_stops() {
+        let h = FakeHome::new();
+        let body = r#"cat >/dev/null; echo '{"jsonrpc":"2.0","id":1,"result":{}}'; echo '{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"n\":7}"}]}}'"#;
+        let p = h.script(body);
+        let pin = sha_of(&p);
+        let sandbox = h.sandbox();
+        let run = |pin: &str| {
+            with_pins(&[pin], || {
+                run_query_in(
+                    &sandbox,
+                    &with_bin(&p),
+                    &h.roots(),
+                    "data_freshness",
+                    &Value::Null,
+                    DEFAULT_TIMEOUT,
+                )
+            })
+        };
+        assert_eq!(run(&pin).unwrap()["n"], 7);
+        // Same path, different bytes: the old pin no longer matches.
+        h.script(&format!("{body}\n# tampered"));
+        assert!(matches!(run(&pin), Err(NoopQueryError::PinMismatch(_))));
+    }
+
+    #[test]
+    fn bundled_sidecar_wins_then_projects_fallback() {
+        let h = FakeHome::new();
+        let exe = h.0.join("App.app/Contents/MacOS");
+        std::fs::create_dir_all(&exe).unwrap();
+        let home = h.0.clone();
+        assert_eq!(
+            resolve_binary(Some(&exe), Some(&home)),
+            Some(default_binary_under(&home)),
+            "no bundled file: projects fallback"
+        );
+        let b = h.file(
+            "App.app/Contents/MacOS/noop-local-access",
+            "#!/bin/sh\n",
+            0o755,
+        );
+        assert_eq!(resolve_binary(Some(&exe), Some(&home)), Some(b.clone()));
+        assert_eq!(
+            resolve_binary(None, Some(&home)),
+            Some(default_binary_under(&home))
+        );
+        assert_eq!(resolve_binary(None, None), None);
+        // An explicit Settings value is untouched by resolution.
+        let filled = with_resolved_db(NoopSettings {
+            binary_path: Some("/usr/local/bin/x".into()),
+            ..Default::default()
+        });
+        assert_eq!(filled.binary_path.as_deref(), Some("/usr/local/bin/x"));
+    }
+
+    #[test]
+    fn bundle_folder_is_an_allowlisted_binary_root_but_only_for_that_folder() {
+        let h = FakeHome::new();
+        let exe = h.0.join("App.app/Contents/MacOS");
+        let b = h.file(
+            "App.app/Contents/MacOS/noop-local-access",
+            "#!/bin/sh\n",
+            0o755,
+        );
+        let other = h.file("elsewhere/noop-local-access", "#!/bin/sh\n", 0o755);
+        let mut roots = h.roots();
+        let raw = b.display().to_string();
+        assert!(
+            validate_path(&raw, PathKind::Binary, &roots).is_err(),
+            "not allowed without a bundle root"
+        );
+        roots.bundle_dir = Some(exe.canonicalize().unwrap());
+        assert!(validate_path(&raw, PathKind::Binary, &roots).is_ok());
+        assert!(validate_path(&other.display().to_string(), PathKind::Binary, &roots).is_err());
+        // Another file in the same folder is not the sidecar.
+        let sibling = h.file("App.app/Contents/MacOS/other-tool", "#!/bin/sh\n", 0o755);
+        assert!(validate_path(&sibling.display().to_string(), PathKind::Binary, &roots).is_err());
+    }
+
+    #[test]
+    fn binary_status_reports_source_digest_and_pin_state_only() {
+        let h = FakeHome::new();
+        let exe = h.0.join("App.app/Contents/MacOS");
+        let home = h.0.clone();
+        let none = binary_status_for(&NoopSettings::default(), Some(&exe), Some(&home), &[]);
+        assert_eq!(
+            (none.source.as_str(), none.found, none.pin_state.as_str()),
+            ("none", false, "unpinned")
+        );
+        let p = h.script("echo hi");
+        // Put the script where the ~/projects default expects it.
+        let dst = default_binary_under(&home);
+        std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        std::fs::copy(&p, &dst).unwrap();
+        let d = sha_of(&dst);
+        let st = binary_status_for(&NoopSettings::default(), Some(&exe), Some(&home), &[]);
+        assert_eq!(
+            (
+                st.source.as_str(),
+                st.sha256.as_deref(),
+                st.pin_state.as_str()
+            ),
+            ("projects", Some(d.as_str()), "unpinned")
+        );
+        let m = binary_status_for(
+            &NoopSettings::default(),
+            Some(&exe),
+            Some(&home),
+            std::slice::from_ref(&d),
+        );
+        assert_eq!(m.pin_state, "match");
+        let x = binary_status_for(
+            &NoopSettings::default(),
+            Some(&exe),
+            Some(&home),
+            &["0".repeat(64)],
+        );
+        assert_eq!((x.pin_state.as_str(), x.pins_listed), ("mismatch", 1));
+        let b = h.file(
+            "App.app/Contents/MacOS/noop-local-access",
+            "#!/bin/sh\n:\n",
+            0o755,
+        );
+        let bs = binary_status_for(&NoopSettings::default(), Some(&exe), Some(&home), &[]);
+        assert_eq!(
+            (bs.source.as_str(), bs.sha256),
+            ("bundled", Some(sha_of(&b)))
+        );
     }
 
     #[test]

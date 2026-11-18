@@ -9,10 +9,10 @@ use commands::voice;
 use commands::{
     arm, assistant, ble_common, business_ledger, continuity, crew, crew_grants, events,
     experiments, followups, goal_roadmap, goals, ha, home_brief, home_hr_take, kb_status, kv,
-    llm_router, muse, noop, noop_query, onboarding, openclaw, outbox, packager, recordings, replay,
-    research, restart_services, screen_opens, sessions, snapshots, system, take_events, take_log,
-    telegram, terrence_actions, terrence_automations, terrence_context, terrence_priorities,
-    terrence_projects, terrence_runtime, terrence_runtime_bridge,
+    llm_router, muse, noop, noop_freeze, noop_query, onboarding, openclaw, outbox, packager,
+    recordings, replay, research, restart_services, screen_opens, sessions, snapshots, system,
+    take_events, take_log, telegram, terrence_actions, terrence_automations, terrence_context,
+    terrence_priorities, terrence_projects, terrence_runtime, terrence_runtime_bridge,
 };
 // design-1111v stores
 use commands::home_windows;
@@ -283,6 +283,9 @@ pub fn run() {
             home_windows::home_window_sign_out,
             needs_you::needs_you_list,
             noop_query::noop_query,
+            noop_query::noop_binary_status,
+            noop_freeze::noop_freeze_report,
+            noop_freeze::noop_freeze_copy,
             noop_query::get_noop_settings,
             noop_query::set_noop_settings,
             home_brief::home_brief,
@@ -415,6 +418,8 @@ pub fn run() {
             commands::keychain::secret_set,
             commands::keychain_migrate::keychain_import_review,
             commands::keychain_migrate::keychain_migrate_one,
+            commands::keychain_migrate::keychain_move_review,
+            commands::keychain_migrate::keychain_move_one,
             commands::notify_relay::notify_settings_get,
             commands::notify_relay::notify_settings_set,
             commands::notify_relay::notify_preview,

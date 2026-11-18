@@ -90,11 +90,85 @@ struct TgResponse {
     result: Option<serde_json::Value>,
 }
 
+/// The bot token: the Keychain item first (Stage G, decision 0033 Q7), else the legacy plaintext
+/// `config.json` value. Empty string when neither has one. Never logged.
+pub(crate) fn telegram_token(config: &NexusConfig) -> zeroize::Zeroizing<String> {
+    super::keychain_migrate::with_live_keychain(|kc| {
+        super::keychain_migrate::secret_prefer_keychain(
+            kc,
+            "telegram_bot_token",
+            |v| v,
+            || {
+                zeroize::Zeroizing::new(
+                    config
+                        .telegram_bot_token
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_string(),
+                )
+            },
+        )
+    })
+}
+
+/// One process-wide lock around every read-modify-write of config.json (Stage G review MED-3), so
+/// a settings save can never interleave with the token removal and bring the token back.
+static CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn config_lock() -> std::sync::MutexGuard<'static, ()> {
+    CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Read a file without following a final symlink, into zeroizing memory (it may hold the token).
+fn read_nofollow(path: &std::path::Path) -> Option<zeroize::Zeroizing<Vec<u8>>> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .ok()?;
+    if !f.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut buf = zeroize::Zeroizing::new(Vec::new());
+    f.read_to_end(&mut buf).ok()?;
+    Some(buf)
+}
+
+fn parse_config_value(bytes: &[u8]) -> Option<serde_json::Value> {
+    serde_json::from_slice(bytes).ok()
+}
+
+/// The plaintext bot token in the config file at `path`, if any (read as plain JSON so unknown
+/// keys never matter; no symlink followed). Never logged.
+pub(crate) fn plaintext_token_at(path: &std::path::Path) -> Option<zeroize::Zeroizing<String>> {
+    let bytes = read_nofollow(path)?;
+    let v = parse_config_value(&bytes)?;
+    let t = v.get("telegram_bot_token")?.as_str()?.trim();
+    (!t.is_empty()).then(|| zeroize::Zeroizing::new(t.to_string()))
+}
+
+/// Set `telegram_bot_token` to null in the config file at `path`, keeping every other key as it is
+/// (edited as plain JSON, so nothing is dropped), written atomically with mode 0600. Takes the
+/// config lock and re-reads the file under it. Refuses a file that is not a JSON object.
+pub(crate) fn clear_plaintext_token_at(path: &std::path::Path) -> Result<(), String> {
+    let _lock = config_lock();
+    let bytes = read_nofollow(path).ok_or_else(|| "config unreadable".to_string())?;
+    let mut v = parse_config_value(&bytes).ok_or_else(|| "config is not valid JSON".to_string())?;
+    let obj = v
+        .as_object_mut()
+        .ok_or_else(|| "config is not an object".to_string())?;
+    obj.insert("telegram_bot_token".into(), serde_json::Value::Null);
+    let json = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
+    crate::commands::shared::fsx::atomic_write_with_mode(path, json.as_bytes(), Some(0o600))
+        .map_err(|e| e.to_string())
+}
+
 pub fn load_config() -> NexusConfig {
     let path = config_path();
-    fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
+    read_nofollow(&path)
+        .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default()
 }
 
@@ -102,28 +176,57 @@ fn save_config(config: &NexusConfig) -> Result<(), String> {
     save_config_at(&config_path(), config)
 }
 
-/// config.json holds the bot token and gateway auth: always write it
-/// atomically with mode 0600, whatever mode the previous file had.
+fn keychain_has_token() -> bool {
+    super::keychain_migrate::with_live_keychain(|kc| {
+        super::keychain_migrate::keychain_value(kc, "telegram_bot_token").is_some()
+    })
+}
+
+/// config.json holds gateway auth: always write it atomically with mode 0600, whatever mode the
+/// previous file had. The bot token never comes from the caller: it is written as null when the
+/// Keychain holds it (the Keychain is the source). Only an UNMOVED plaintext token already on disk
+/// is kept, so a save cannot destroy it before it has been moved. Takes the config lock.
 fn save_config_at(path: &std::path::Path, config: &NexusConfig) -> Result<(), String> {
+    let _lock = config_lock();
+    write_config_unlocked(path, config, keychain_has_token())
+}
+
+fn write_config_unlocked(
+    path: &std::path::Path,
+    config: &NexusConfig,
+    keychain_has_token: bool,
+) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    let keep = if keychain_has_token {
+        None
+    } else {
+        plaintext_token_at(path).map(|t| t.to_string())
+    };
+    let mut out = config.clone();
+    out.telegram_bot_token = keep;
+    let json = serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?;
     crate::commands::shared::fsx::atomic_write_with_mode(path, json.as_bytes(), Some(0o600))
         .map_err(|e| e.to_string())
 }
 
-/// Load, change one thing, save (0600, atomic).
+/// Load, change one thing, save (0600, atomic), all under the config lock.
 pub(crate) fn update_config(change: impl FnOnce(&mut NexusConfig)) -> Result<(), String> {
+    let _lock = config_lock();
     let mut config = load_config();
     change(&mut config);
-    save_config(&config)
+    write_config_unlocked(&config_path(), &config, keychain_has_token())
 }
 
+/// The webview never receives the bot token (Stage G review MED-3): it is always null here. The
+/// token is managed through `secrets_status` / `secret_set` (Keychain).
 #[tauri::command]
 #[specta::specta]
 pub fn get_config() -> Result<NexusConfig, String> {
-    Ok(load_config())
+    let mut c = load_config();
+    c.telegram_bot_token = None;
+    Ok(c)
 }
 
 #[tauri::command]
@@ -136,7 +239,8 @@ pub fn save_settings(config: NexusConfig) -> Result<(), String> {
 #[specta::specta]
 pub async fn get_telegram_messages(limit: Option<u32>) -> Result<Vec<TelegramMessage>, String> {
     let config = load_config();
-    let token = config.telegram_bot_token.as_deref().unwrap_or("");
+    let token_owned = telegram_token(&config);
+    let token = token_owned.as_str();
     let chat_id = config.telegram_chat_id.as_deref().unwrap_or("");
 
     if token.is_empty() || chat_id.is_empty() {
@@ -358,7 +462,8 @@ async fn send_telegram_message_gated(
         ));
     }
     let config = load_config();
-    let token = config.telegram_bot_token.as_deref().unwrap_or("");
+    let token_owned = telegram_token(&config);
+    let token = token_owned.as_str();
     let chat_id = config.telegram_chat_id.as_deref().unwrap_or("");
 
     if token.is_empty() || chat_id.is_empty() {
@@ -416,7 +521,8 @@ async fn send_telegram_message_gated(
 #[specta::specta]
 pub async fn test_telegram_connection() -> Result<String, String> {
     let config = load_config();
-    let token = config.telegram_bot_token.as_deref().unwrap_or("");
+    let token_owned = telegram_token(&config);
+    let token = token_owned.as_str();
 
     if token.is_empty() {
         return Err("No bot token configured".to_string());
@@ -474,7 +580,8 @@ pub struct TelegramUpdate {
 #[specta::specta]
 pub async fn poll_telegram_updates(last_update_id: i64) -> Result<Vec<TelegramUpdate>, String> {
     let config = load_config();
-    let token = config.telegram_bot_token.as_deref().unwrap_or("");
+    let token_owned = telegram_token(&config);
+    let token = token_owned.as_str();
     let chat_id = config.telegram_chat_id.as_deref().unwrap_or("");
 
     if token.is_empty() || chat_id.is_empty() {
@@ -791,6 +898,109 @@ mod tests {
             assert!(err.contains("gemma4 is not installed"), "{err}");
         }
         assert!(!include_str!("telegram.rs").contains(concat!("deepseek", "-r1:32b")));
+    }
+
+    const TOK: &str = "SENTINEL-tg-9c41-do-not-leak-zzzzzzzzzz";
+
+    fn cfg_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("nexus-tgcfg-{tag}-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn with_keychain_token<R>(f: impl FnOnce() -> R) -> R {
+        use super::super::keychain::{service_for, FakeKeychain, Keychain};
+        let kc = FakeKeychain::default();
+        kc.set(&service_for("telegram_bot_token"), TOK.as_bytes())
+            .unwrap();
+        super::super::keychain_migrate::TEST_KEYCHAIN
+            .with(|k| *k.borrow_mut() = Some(std::sync::Arc::new(kc)));
+        let r = f();
+        super::super::keychain_migrate::TEST_KEYCHAIN.with(|k| *k.borrow_mut() = None);
+        r
+    }
+
+    #[test]
+    fn a_save_after_the_move_does_not_resurrect_the_token() {
+        let d = cfg_dir("resurrect");
+        let path = d.join("config.json");
+        // The plaintext is gone from the file and the Keychain holds the token.
+        fs::write(
+            &path,
+            r#"{"telegram_bot_token":null,"telegram_chat_id":"42"}"#,
+        )
+        .unwrap();
+        let cfg = NexusConfig {
+            telegram_bot_token: Some(TOK.into()),
+            telegram_chat_id: Some("43".into()),
+            ..Default::default()
+        };
+        with_keychain_token(|| save_config_at(&path, &cfg).unwrap());
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains(TOK), "the caller's token is never written");
+        assert!(text.contains("\"43\""), "other settings are saved");
+        // Even a stale plaintext on disk is nulled once the Keychain has the token.
+        fs::write(&path, format!(r#"{{"telegram_bot_token":"{TOK}"}}"#)).unwrap();
+        with_keychain_token(|| save_config_at(&path, &cfg).unwrap());
+        assert!(!fs::read_to_string(&path).unwrap().contains(TOK));
+        // An unmoved on-disk token survives a save while the Keychain has none.
+        fs::write(&path, format!(r#"{{"telegram_bot_token":"{TOK}"}}"#)).unwrap();
+        save_config_at(&path, &NexusConfig::default()).unwrap();
+        assert_eq!(
+            plaintext_token_at(&path).as_deref().map(String::as_str),
+            Some(TOK)
+        );
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn concurrent_saves_and_the_token_removal_never_bring_the_token_back() {
+        let d = cfg_dir("race");
+        let path = d.join("config.json");
+        for round in 0..40 {
+            fs::write(
+                &path,
+                format!(r#"{{"telegram_bot_token":"{TOK}","telegram_chat_id":"{round}"}}"#),
+            )
+            .unwrap();
+            let (p1, p2) = (path.clone(), path.clone());
+            let saver = std::thread::spawn(move || {
+                for i in 0..10 {
+                    let cfg = NexusConfig {
+                        telegram_chat_id: Some(format!("{i}")),
+                        ..Default::default()
+                    };
+                    save_config_at(&p1, &cfg).unwrap();
+                }
+            });
+            let clearer = std::thread::spawn(move || clear_plaintext_token_at(&p2).unwrap());
+            saver.join().unwrap();
+            clearer.join().unwrap();
+            // One more save after the removal: the token must stay gone.
+            save_config_at(&path, &NexusConfig::default()).unwrap();
+            let text = fs::read_to_string(&path).unwrap();
+            assert!(!text.contains(TOK), "round {round}: token came back");
+            serde_json::from_str::<serde_json::Value>(&text).expect("valid JSON");
+        }
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn get_config_never_returns_the_token_and_reads_do_not_follow_symlinks() {
+        let src = include_str!("telegram.rs");
+        let g = &src[src.find("pub fn get_config").unwrap()..];
+        let g = &g[..g.find("pub fn save_settings").unwrap()];
+        assert!(g.contains("telegram_bot_token = None"));
+        // A symlinked config is not read.
+        let d = cfg_dir("link");
+        let real = d.join("real.json");
+        fs::write(&real, format!(r#"{{"telegram_bot_token":"{TOK}"}}"#)).unwrap();
+        let link = d.join("config.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(plaintext_token_at(&link).is_none());
+        assert!(clear_plaintext_token_at(&link).is_err());
+        assert!(fs::read_to_string(&real).unwrap().contains(TOK));
+        let _ = fs::remove_dir_all(d);
     }
 
     #[test]
