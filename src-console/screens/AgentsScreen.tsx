@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import { Bot, Database, RotateCcw, Users, Wrench } from "lucide-react";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot } from "../types";
-import { Badge, Button, InsetGroup, ListRow, PageHero, type Tone } from "../ui";
+import { Badge, Button, InsetGroup, ListRow, More, PageHero, type Tone } from "../ui";
+import { AgentOrbs, TodaysPulse, deliveryLine } from "../design1118/Agents";
+import { PageTake } from "../design1118/PageTake";
 import { HermesSubtitle } from "./agentLabels";
 import "./AgentsScreen.css";
 
@@ -41,9 +43,13 @@ export function AgentsField({ data, onOpenCrews, onRetry }: { data: SystemSnapsh
   const kb = data.kb;
   const unreachable = rows.some((r) => r.label === "Not reachable");
   return (
-    <div className="agents page-inset">
+    <div className="agents page-inset d18-page">
       <PageHero title="Agents" statement={loading ? "Checking" : `${online} online`}
-        detail={loading ? undefined : `${data.hermes.activeSchedules} schedule${data.hermes.activeSchedules === 1 ? "" : "s"} active · crews ${crewReady ? "ready" : "unavailable"}`} />
+        detail={loading ? undefined : `${data.hermes.activeSchedules} schedule${data.hermes.activeSchedules === 1 ? "" : "s"} active · crews ${crewReady ? "ready" : "unavailable"} · ${deliveryLine(data.outbox, data.unavailableSources.some((s) => s.command === "get_outbox_status")).toLowerCase()}`} />
+      <PageTake surface="agents" />
+      {!loading && <AgentOrbs data={data} />}
+      {!loading && <TodaysPulse data={data} />}
+      <More label="Agents, tools and knowledge base">
       <InsetGroup title="Agents">
         {rows.map((a) => <ListRow key={a.id} icon={a.icon} title={a.title} subtitle={a.subtitle} accessory={<Badge tone={a.tone} aria-label={`${a.title} status: ${a.label}`}>{a.label}</Badge>} />)}
         {onOpenCrews && <ListRow icon={Users} title="Crews" value={crewsValue(data.crew)} onSelect={onOpenCrews} />}
@@ -61,6 +67,7 @@ export function AgentsField({ data, onOpenCrews, onRetry }: { data: SystemSnapsh
         <ListRow icon={Database} title="Knowledge base" subtitle={[kb.docs != null ? `${kb.docs} documents` : null, kb.model].filter(Boolean).join(" · ") || undefined}
           accessory={<Badge tone={kb.state === "running" ? "success" : kb.state === "error" ? "danger" : "neutral"}>{kb.state === "not_running" ? "Not running" : cap(kb.state)}</Badge>} />
       </InsetGroup>
+      </More>
     </div>
   );
 }

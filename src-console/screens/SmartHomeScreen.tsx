@@ -1,10 +1,14 @@
 import { Lightbulb, Minus, Plug, Plus, Power, RefreshCw, Settings2, Thermometer, ThermometerSun, ToggleLeft, type LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   type HaContainerStatus, type HaEntity, type HaInactiveKind, type HaLiveState,
   HA_ERROR_COPY, HVAC_LABEL, type HaServiceData, applyStateChange, rememberEntityNames, clampTemperature, climateRange, hvacModesFor, isHvacMode, targetTemperature, validServiceData, classifyHaError, containerErrorCopy, inactiveKindFor, isServiceRefusal, domainLabel, entityName, haBackend, isToggleable, sortDevices, stateLabel, toggleService,
 } from "../lib/homeAssistant";
 import { Badge, Button, InsetGroup, ListRow, More, PageHero, Select, Toggle } from "../ui";
+import { displayName, groupDevices } from "../design1118/homeGroups";
+import { PageTake } from "../design1118/PageTake";
+import { SampleHomeControls } from "../design1118/SampleHomeControls";
+import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
 import "./SmartHomeScreen.css";
 
 export type DevicesState =
@@ -155,8 +159,8 @@ export function Inactive({ kind, onRetry, onOpenSettings }: { kind: HaInactiveKi
   );
 }
 
-/** Devices shown before the disclosure. */
-const FIRST_GLANCE = 4;
+/** Devices per group shown before the disclosure. */
+const GROUP_GLANCE = 6;
 
 export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: () => Promise<DevicesState>; onOpenSettings?: () => void }) {
   const [state, setState] = useState<DevicesState>({ status: "loading" });
@@ -248,18 +252,34 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
     }
   };
 
-  const hiddenDevices = state.status === "ready" ? state.devices.slice(FIRST_GLANCE) : [];
-  const deviceRow = (d: (typeof hiddenDevices)[number]) => (
-                  <ListRow key={d.entityId} icon={ICONS[d.domain]} title={entityName(d)}
+  const runScene = async (device: HaEntity) => {
+    setRowError(null);
+    setPending((p) => ({ ...p, [device.entityId]: true }));
+    try { await haBackend().callService(device.domain, "turn_on", device.entityId); }
+    catch (error) { const kind = classifyHaError(error); if (mounted.current) setRowError({ entityId: device.entityId, message: isServiceRefusal(kind) ? HA_ERROR_COPY[kind] : `Couldn't run ${displayName(device)}.` }); }
+    finally { if (mounted.current) setPending((p) => { const next = { ...p }; delete next[device.entityId]; return next; }); }
+  };
+
+  const devices = state.status === "ready" ? state.devices : [];
+  const groups = groupDevices(devices);
+  const household = groups.filter((g) => g.id !== "system");
+  const householdCount = household.reduce((n, g) => n + g.devices.length, 0);
+  const system = groups.find((g) => g.id === "system")?.devices ?? [];
+  const preview = sampleAdaptersEnabled();
+  const deviceRow = (d: HaEntity) => (
+                  <ListRow key={d.entityId} icon={ICONS[d.domain]} title={displayName(d)}
                     subtitle={rowError?.entityId === d.entityId ? <span role="alert" className="smart-home__row-error">{rowError.message}</span> : domainLabel(d.domain)}
-                    value={isToggleable(d) || d.domain === "climate" ? undefined : stateLabel(d)}
-                    accessory={d.domain === "climate" ? <ClimateControl device={d} pending={!!pending[d.entityId]} onSend={(service, data) => { void setClimate(d, service, data); }} /> : isToggleable(d) ? <Toggle checked={d.state === "on"} disabled={!!pending[d.entityId]} aria-label={entityName(d)} onCheckedChange={(on) => { void toggle(d, on); }} /> : undefined} />
+                    value={isToggleable(d) || d.domain === "climate" || d.domain === "scene" || d.domain === "script" ? undefined : stateLabel(d)}
+                    accessory={d.domain === "climate" ? <ClimateControl device={d} pending={!!pending[d.entityId]} onSend={(service, data) => { void setClimate(d, service, data); }} />
+                      : d.domain === "scene" || d.domain === "script" ? <Button size="small" variant="secondary" disabled={!!pending[d.entityId]} onClick={() => { void runScene(d); }} aria-label={`Run ${displayName(d)}`}>Run</Button>
+                      : isToggleable(d) ? <Toggle checked={d.state === "on"} disabled={!!pending[d.entityId]} aria-label={displayName(d)} onCheckedChange={(on) => { void toggle(d, on); }} /> : undefined} />
   );
 
   return (
-    <div className="smart-home page-inset">
-      <PageHero title="Smart home" statement={state.status === "ready" && state.devices.length ? `${state.devices.length} device${state.devices.length === 1 ? "" : "s"}` : "Home Assistant"}
+    <div className="smart-home page-inset d18-page">
+      <PageHero title="Smart home" statement={state.status === "ready" && devices.length ? `${householdCount} household device${householdCount === 1 ? "" : "s"}` : "Home Assistant"}
         detail={live ? <Badge className="smart-home__live" tone={LIVE_TONE[live]} role="status" aria-label={`Live updates: ${LIVE_COPY[live]}`}>{LIVE_COPY[live]}</Badge> : undefined} />
+      <PageTake surface="smarthome" />
       {state.status === "loading" ? <p className="smart-home__meta" role="status">Loading devices…</p>
         : state.status === "inactive" ? <Inactive kind={state.kind} onRetry={refresh} onOpenSettings={onOpenSettings} />
           : live === "authFailed" ? <Inactive kind="auth" onRetry={refresh} />
@@ -268,21 +288,29 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
               <p>Couldn't load devices.</p>
               <div><Button size="small" icon={RefreshCw} onClick={refresh}>Retry</Button></div>
             </div>
-          ) : state.devices.length === 0 ? (
+          ) : devices.length === 0 ? (
             <div className="smart-home__panel smart-home__empty" role="region" aria-label="Devices">
               <h2 className="smart-home__title">No devices yet.</h2>
               <p className="smart-home__meta">Add devices in Home Assistant and they'll show up here.</p>
             </div>
           ) : (
             <div className="smart-home__list">
-              <InsetGroup title="Devices">{state.devices.slice(0, FIRST_GLANCE).map(deviceRow)}</InsetGroup>
+              {preview && <SampleHomeControls />}
+              {household.map((g) => (
+                <Fragment key={g.id}>
+                  <InsetGroup title={g.title}>{g.devices.slice(0, GROUP_GLANCE).map(deviceRow)}</InsetGroup>
+                  {g.devices.length > GROUP_GLANCE && <More label={`${g.devices.length - GROUP_GLANCE} more ${g.title.toLowerCase()}`}><InsetGroup title={`More ${g.title.toLowerCase()}`}>{g.devices.slice(GROUP_GLANCE).map(deviceRow)}</InsetGroup></More>}
+                </Fragment>
+              ))}
+              {household.length === 0 && <p className="smart-home__meta">No household devices yet. Only Home Assistant&apos;s own system sensors are connected.</p>}
             </div>
           )}
-      <More label={hiddenDevices.length ? `${hiddenDevices.length} more devices, and the container` : "Container"}>
-        {hiddenDevices.length > 0 && <InsetGroup title="More devices">{hiddenDevices.map(deviceRow)}</InsetGroup>}
+      <section className="smart-home__system" aria-labelledby="sh-system">
+        <h2 id="sh-system" className="smart-home__title">System</h2>
+        {system.length > 0 && <InsetGroup title="Backups and Home Assistant" footer="These are Home Assistant's own sensors, not household devices.">{system.map(deviceRow)}</InsetGroup>}
         <ContainerBar container={container} busy={busy} error={containerError} onStart={() => { void runContainer("start"); }} onStop={() => { void runContainer("stop"); }} />
         <p className="smart-home__meta">Changes come from Home Assistant as they happen.</p>
-      </More>
+      </section>
     </div>
   );
 }

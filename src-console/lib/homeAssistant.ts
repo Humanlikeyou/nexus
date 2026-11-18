@@ -203,7 +203,7 @@ export const domainLabel = (d: string) => DOMAIN_LABEL[d] ?? d.replace(/_/g, " "
 
 export function stateLabel(e: HaEntity): string {
   if (e.state === "unavailable") return "Unavailable";
-  if (e.state === "unknown") return "Unknown";
+  if (e.state === "unknown" || e.state === "") return "No reading"; // design-1118a: never "Unknown"
   const unit = typeof e.attributes.unit_of_measurement === "string" ? ` ${e.attributes.unit_of_measurement}` : "";
   if (e.state === "on" || e.state === "off") return e.state === "on" ? "On" : "Off";
   return `${e.state.replace(/_/g, " ")}${unit}`;
