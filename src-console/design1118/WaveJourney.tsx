@@ -51,7 +51,7 @@ export function WaveJourney({ waves, doneIds, timesDone, connected, pickedId, on
             <g key={p.w.wave} className={`d18-st ${here ? "d18-st--current" : n === p.w.tracks.length && n > 0 ? "d18-st--done" : "d18-st--upcoming"}`} transform={`translate(${p.x} ${p.y})`}>
               {here && <circle className="d18-st__halo" r="20" />}
               <circle className="d18-st__dot" r={here ? 11 : 7} />
-              {here && <text className="d18-st__here" y="-28" textAnchor="middle">YOU ARE HERE</text>}
+              {here && <text className="d18-st__here" y="-28" textAnchor="middle">You are here</text>}
               <text className="d18-st__label" y={ly} textAnchor="middle">{p.w.waveName}</text>
               <text className="d18-st__label d18-st__label--sub" y={sy} textAnchor="middle">{n} of {p.w.tracks.length}</text>
             </g>

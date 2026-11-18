@@ -87,7 +87,7 @@ export function PathSvg({ stations, phase, seed = 0, drill = false, grow = false
             <circle className="d18-st__dot" cx={p.x} cy={p.y} r={r} />
             {s.state === "done" && !ghost && <path className="d18-st__check" d={`M${p.x - r * 0.45},${p.y} l${r * 0.32},${r * 0.34} l${r * 0.6},-${r * 0.66}`} />}
             {drill && s.title && <text className="d18-st__label" x={p.x} y={p.y + (i % 2 ? r + 16 : -(r + 9))} textAnchor="middle">{s.title.length > 26 ? `${s.title.slice(0, 24)}…` : s.title}</text>}
-            {drill && s.state === "current" && !ghost && <text className="d18-st__here" x={p.x} y={p.y - (i % 2 ? r + 9 : r + 26)} textAnchor="middle">YOU ARE HERE</text>}
+            {drill && s.state === "current" && !ghost && <text className="d18-st__here" x={p.x} y={p.y - (i % 2 ? r + 9 : r + 26)} textAnchor="middle">You are here</text>}
           </g>
         );
       })}
