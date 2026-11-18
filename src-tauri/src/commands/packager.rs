@@ -1847,3 +1847,348 @@ mod pack_tests {
         let _ = fs::remove_dir_all(&home);
     }
 }
+
+/// Phase 16: migration probe on SYNTHETIC data. Builds a fake app-data dir in a temp folder, backs it
+/// up with the app's own backup path (`backups::run_backup`), restores that archive into a SECOND temp
+/// dir with the app's own restore steps (`unpack_archive_checked`, `plan_restore`, `apply_restore`),
+/// and checks parity. Never reads the real app data, the Keychain, a real backup or the network.
+/// `scripts/migration-probe.sh` runs it with `--nocapture` and prints the `PROBE` lines.
+#[cfg(test)]
+mod migration_probe_tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeMap;
+    use std::sync::atomic::AtomicBool;
+
+    fn sha(b: &[u8]) -> String {
+        hex::encode(Sha256::digest(b))
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "nexus-migration-probe-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    /// rel path (`/`-joined) -> bytes, skipping the restore-backups folder.
+    fn tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
+        let mut out = BTreeMap::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in fs::read_dir(&d).unwrap().flatten() {
+                let t = e.file_type().unwrap();
+                if t.is_dir() {
+                    stack.push(e.path());
+                } else if t.is_file() {
+                    let rel = e
+                        .path()
+                        .strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    if !rel.starts_with(RESTORE_BACKUP_DIR) {
+                        out.insert(rel, fs::read(e.path()).unwrap());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn make_db(path: &Path) -> usize {
+        let c = rusqlite::Connection::open(path).unwrap();
+        c.execute_batch(
+            "PRAGMA journal_mode=DELETE;
+             CREATE TABLE events (id INTEGER PRIMARY KEY, kind TEXT, at TEXT);
+             CREATE INDEX events_kind ON events(kind);",
+        )
+        .unwrap();
+        for i in 0..250 {
+            c.execute(
+                "INSERT INTO events (kind, at) VALUES (?1, ?2)",
+                rusqlite::params![
+                    format!("fixture-{}", i % 7),
+                    format!("2026-01-01T00:{:02}:00", i % 60)
+                ],
+            )
+            .unwrap();
+        }
+        250
+    }
+
+    fn db_probe(path: &Path) -> (String, i64) {
+        let c =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .unwrap();
+        let check: String = c
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .unwrap();
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
+            .unwrap();
+        (check, n)
+    }
+
+    /// Fixture bytes that look like data but are fake: counters and a repeating pattern.
+    fn blob(seed: u8, len: usize) -> Vec<u8> {
+        (0..len)
+            .map(|i| seed.wrapping_add((i % 251) as u8))
+            .collect()
+    }
+
+    #[test]
+    fn migration_probe_backup_restore_parity_on_synthetic_data() {
+        let home = scratch("home");
+        let data = home.join("app-data-original");
+        let restored = home.join("app-data-restored");
+        fs::create_dir_all(&data).unwrap();
+        for d in ["replays", "sessions", "muse", "takes", "workspace/notes"] {
+            fs::create_dir_all(data.join(d)).unwrap();
+        }
+        // ---- fixture data (invented; nothing from a real install) ----
+        fs::write(
+            data.join("config.json"),
+            r#"{"theme":"dark","llm_token_threshold":4000,"telegram_bot_token":"FIXTURE-NOT-A-SECRET","allow_claude":true}"#,
+        )
+        .unwrap();
+        fs::write(
+            data.join("goals.json"),
+            r#"[{"id":"g1","title":"fixture goal"}]"#,
+        )
+        .unwrap();
+        fs::write(
+            data.join("takes/take-1.json"),
+            r#"{"text":"fixture take","day":"2026-01-01"}"#,
+        )
+        .unwrap();
+        fs::write(data.join("workspace/notes/n1.md"), "# fixture note\n").unwrap();
+        fs::write(data.join("replays/eeg_fixture_1.ndjson"), blob(1, 40_000)).unwrap();
+        fs::write(
+            data.join("replays/eeg_fixture_1.ndjson.bands.json"),
+            r#"{"a":[0.1,0.25]}"#,
+        )
+        .unwrap();
+        fs::write(
+            data.join("sessions/session_fixture.json"),
+            r#"{"id":"s1","hr":[60,61,62]}"#,
+        )
+        .unwrap();
+        fs::write(data.join("muse/fixture.bin"), blob(9, 5_000)).unwrap();
+        let db_rows = make_db(&data.join("events.db"));
+        // Secrets that must never travel (all fake).
+        fs::write(data.join("crew_service_token"), "FIXTURE").unwrap();
+        fs::write(data.join("amara-n8n.key"), "FIXTURE").unwrap();
+        fs::write(data.join(".env"), "HA_TOKEN=FIXTURE\n").unwrap();
+        // Live-only state a restore must never bring back.
+        fs::write(data.join("notify_relay.json"), r#"{"enabled":true}"#).unwrap();
+
+        let src_before = tree(&data);
+
+        // ---- 1. backup with the app's own code path ----
+        let settings = super::super::backups::BackupSettings {
+            dir: "~/Amara Backups".into(),
+            ..Default::default()
+        };
+        let busy = AtomicBool::new(false);
+        let quiet = |_: &str, _: u8| {};
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let run = rt
+            .block_on(super::super::backups::run_backup(
+                &home,
+                &data,
+                &settings,
+                &|_| Ok(u64::MAX / 2),
+                &quiet,
+                &busy,
+            ))
+            .unwrap();
+        let archive = home.join("Amara Backups").join(&run.entry.id);
+        use std::os::unix::fs::PermissionsExt;
+        let amode = fs::metadata(&archive).unwrap().permissions().mode() & 0o777;
+        let dmode = fs::metadata(home.join("Amara Backups"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(amode, 0o600, "archive mode");
+        assert_eq!(dmode, 0o700, "archive dir mode");
+        println!("PROBE archive_modes archive={amode:o} dir={dmode:o} ok");
+
+        // ---- 2. restore preview: names only ----
+        let nb = AtomicBool::new(false);
+        let nb2 = AtomicBool::new(false);
+        let preview = super::super::backup_schedule::restore_preview_in(
+            &home,
+            &data,
+            "~/Amara Backups",
+            &run.entry.id,
+            &nb,
+            &nb2,
+        )
+        .unwrap();
+        assert!(preview.verify.ok, "{:?}", preview.verify);
+        assert!(!preview.reenter.is_empty());
+        let names: Vec<&str> = preview.reenter.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"telegram_bot_token") && names.contains(&"n8n_encryption_key"));
+        for r in &preview.reenter {
+            // names and labels only: no value-looking text
+            assert!(!r.name.contains("FIXTURE") && !r.label.contains("FIXTURE"));
+        }
+        println!(
+            "PROBE keys_to_reenter count={} names={} ok",
+            names.len(),
+            names.join(",")
+        );
+
+        // ---- 3. restore into a SECOND dir with the app's own steps ----
+        let staging = scratch("staging");
+        unpack_archive_checked(&archive, &staging, 1 << 30, 100_000).unwrap();
+        let pack = find_pack_root(&staging).unwrap();
+        // manifest hashes vs the unpacked pack
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(pack.join("manifest.json")).unwrap()).unwrap();
+        let listed = manifest["sha256"].as_object().unwrap();
+        let packed = tree(&pack);
+        let mut manifest_bad = 0usize;
+        for (k, v) in listed {
+            match packed.get(k) {
+                Some(b) if Some(sha(b).as_str()) == v.as_str() => {}
+                _ => manifest_bad += 1,
+            }
+        }
+        let packed_files = packed.keys().filter(|k| *k != "manifest.json").count();
+        assert_eq!(manifest_bad, 0);
+        assert_eq!(
+            listed.len(),
+            packed_files,
+            "manifest lists every packed file"
+        );
+        println!(
+            "PROBE manifest_hashes listed={} matching={} ok",
+            listed.len(),
+            listed.len() - manifest_bad
+        );
+
+        let plan = plan_restore(&pack).unwrap();
+        let roots = RestoreRoots {
+            data: restored.clone(),
+        };
+        let msgs = apply_restore(&plan, &roots, "probe").unwrap();
+        assert!(
+            msgs.iter().any(|m| m.contains("files restored")),
+            "{msgs:?}"
+        );
+
+        // ---- 4. parity probes ----
+        let dst = tree(&restored);
+        // 4a. what must be absent in the restore
+        let never_travel = [
+            "crew_service_token",
+            "amara-n8n.key",
+            ".env",
+            "notify_relay.json",
+        ];
+        for n in never_travel {
+            assert!(!dst.contains_key(n), "{n} must not be restored");
+        }
+        // 4b. everything else: present, byte-identical, except config.json (sanitised)
+        let (mut same, mut checked, mut json_semantic) = (0usize, 0usize, 0usize);
+        let mut counts_src: BTreeMap<String, usize> = BTreeMap::new();
+        let mut counts_dst: BTreeMap<String, usize> = BTreeMap::new();
+        for (k, v) in &src_before {
+            if never_travel.contains(&k.as_str()) || k == "config.json" {
+                continue;
+            }
+            checked += 1;
+            let top = k.split('/').next().unwrap().to_string();
+            *counts_src.entry(top.clone()).or_default() += 1;
+            let got = dst
+                .get(k)
+                .unwrap_or_else(|| panic!("missing after restore: {k}"));
+            // Muse folders and every non-JSON file: byte-identical. Other JSON goes through the
+            // secret-field redaction pass, which may re-serialise it: compare the parsed value.
+            let muse = ["replays/", "sessions/", "muse/"]
+                .iter()
+                .any(|p| k.starts_with(p));
+            if k.ends_with(".json") && !muse {
+                let (a, b): (serde_json::Value, serde_json::Value) = (
+                    serde_json::from_slice(got).unwrap(),
+                    serde_json::from_slice(v).unwrap(),
+                );
+                assert_eq!(a, b, "json differs: {k}");
+                json_semantic += 1;
+            } else {
+                assert_eq!(sha(got), sha(v), "checksum differs: {k}");
+            }
+            *counts_dst.entry(top).or_default() += 1;
+            same += 1;
+        }
+        let extra: Vec<_> = dst
+            .keys()
+            .filter(|k| *k != "config.json" && !src_before.contains_key(*k))
+            .collect();
+        assert!(extra.is_empty(), "unexpected extra files: {extra:?}");
+        assert_eq!(counts_src, counts_dst);
+        let groups = counts_src
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        println!("PROBE file_parity files={checked} matching={same} (json compared as parsed value: {json_semantic}) extra=0 groups={groups} ok");
+        // 4c. config.json: no secret field, allow_claude never turned on, other fields kept
+        let cfg: serde_json::Value =
+            serde_json::from_slice(dst.get("config.json").expect("config.json restored")).unwrap();
+        assert!(cfg.get("telegram_bot_token").is_none());
+        assert!(cfg
+            .get("allow_claude")
+            .is_none_or(|v| v != &serde_json::Value::Bool(true)));
+        assert_eq!(cfg["theme"], "dark");
+        assert_eq!(cfg["llm_token_threshold"], 4000);
+        println!("PROBE config_json secret_fields=0 allow_claude_on=false kept_fields=ok ok");
+        // 4d. database integrity + row count
+        let (check_src, n_src) = db_probe(&data.join("events.db"));
+        let (check_dst, n_dst) = db_probe(&restored.join("events.db"));
+        assert_eq!(check_src, "ok");
+        assert_eq!(check_dst, "ok", "integrity_check on the restored db");
+        assert_eq!(n_src, db_rows as i64);
+        assert_eq!(n_dst, n_src);
+        println!("PROBE sqlite events.db integrity_check={check_dst} rows={n_dst} (source rows={n_src}) ok");
+        // 4e. no path of the source Mac is baked into the restored data
+        let src_str = data.to_string_lossy().into_owned();
+        let home_str = home.to_string_lossy().into_owned();
+        let hits = dst
+            .values()
+            .filter(|b| {
+                let s = String::from_utf8_lossy(b);
+                s.contains(&src_str) || s.contains(&home_str)
+            })
+            .count();
+        assert_eq!(hits, 0, "restored files contain an absolute source path");
+        println!("PROBE no_absolute_paths hits=0 ok");
+        // 4f. file modes under the restored dir
+        let leaky = fs::read_dir(&restored)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_type().unwrap().is_file())
+            .filter(|e| {
+                e.metadata().unwrap().permissions().mode() & 0o077 != 0
+                    && e.file_name() == "config.json"
+            })
+            .count();
+        assert_eq!(leaky, 0, "config.json restored with group/world bits");
+        println!("PROBE config_mode group_world_bits=0 ok");
+        // ---- 5. the source was not modified by the whole exercise ----
+        assert_eq!(tree(&data), src_before, "source dir changed");
+        println!("PROBE source_untouched ok");
+
+        for d in [&home, &staging] {
+            let _ = fs::remove_dir_all(d);
+        }
+    }
+}

@@ -760,3 +760,28 @@ All behind default-off switches. Nothing was signed, notarized, registered, inst
 5. Turn the Startup toggle on himself, in the UI, when Design wires it.
 
 **Not run:** the signed path of `release-local.sh` (no identity), notarization, stapling, `spctl`, quarantine test, a live check of hardened runtime with Muse/Ollama/router, `SMAppService` registration on this Mac, any real update check, download or swap, `make-update-manifest.mjs` past its refusals, a rebuilt unsigned DMG with the final config, the e2e suite (no UI change).
+
+## 29. Stage I: Phases 16 and 17, migration probe, parity matrix, readiness report (2026-11-18, not committed)
+Nothing committed, pushed or installed. Live app data, Muse files, the real NOOP store, `~/.hermes`, Letta and any real backup were not read or changed.
+
+**Built**
+- `scripts/migration-probe.sh` runs the Rust test `commands::packager::migration_probe_tests::migration_probe_backup_restore_parity_on_synthetic_data` (in `src-tauri/src/commands/packager.rs`). Synthetic fixtures in a temp dir, `backups::run_backup`, then restore into a second temp dir with `unpack_archive_checked`, `plan_restore`, `apply_restore`. Probes: archive 0600 / dir 0700, keys-to-re-enter (names only, 10), manifest hashes 13/13, file parity (8 files, per-folder counts, byte-identical; JSON outside Muse folders compared as parsed value), secret files absent, config.json sanitised (`allow_claude` never on), SQLite `integrity_check` ok and 250/250 rows, no absolute path in restored files, source untouched. Result: PASS, 9 probe lines.
+- `test/scripts/noAbsolutePaths.test.ts`: fails if `/Users/thevisualdude`, `/Users/taisun` or `/home/thevisualdude` is in shipped source. The `rg` found none in shipped code (only fixtures in `*.test.ts`), so no source fix was needed. Allow-listed: launchd labels `com.thevisualdude.amara-voice` / `open-webui` (identifiers, not paths). Home-relative `~/projects/...` fallbacks remain (listed in READINESS).
+- `docs/release/migration-test.md` (Part B is the fresh-account run), `docs/release/parity-0.1.0.md`, `docs/release/READINESS-0.1.0.md`.
+- BOARD phase rows 8-17 set to done or explicitly waiting on Taisun.
+
+**Evidence (this run)**
+- gates.sh: all PASS; vitest 2351 / 9 skipped, neuro 21, src-tauri 1455 / 6 ignored, router 131.
+- Full e2e: 784 passed, 12 skipped (LANDING_SHOTS / LISTS_SHOTS screenshot tools), 0 failed.
+- crew-service: 230 passed (`--network none`). swift test for NOOP: not run.
+- DMG sentinel scan (read-only mount): no secret; 6 entropy false positives in the bundled `ollama` binary (env-var names). Repo scan ok.
+- Muse counts (counts only): replays 23, sessions 13, muse 7.
+
+**Findings**
+- `standalone-app-plan.md` is not in the repo or under `~/projects`. Parity rows come from the handover's definition of done; diff against section 4 if he supplies the file.
+- takes-1111t.spec.ts:80 [light] passed in the full run but failed 5 of 6 alone (`color-contrast: div[role="alert"] > b`, `.m-warn b`). Design-owned token; unfixed.
+- No `NOTICE` file and no PolyForm text for NOOP attribution (DoD box, Phase 12).
+
+**TAISUN steps / open gates:** see READINESS-0.1.0.md (Stage H gates, 0032 #7 "77 vs 7", Stage G Q1-Q8, Treasury 3-5, fresh-account migration).
+
+**Not run:** swift test, signed build, notarization, any live relaunch, fresh-account migration, live NOOP parity report, live Telegram send.

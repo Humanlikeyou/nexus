@@ -1,7 +1,9 @@
 # Board (read this first when resuming)
 
 Branch `amara-integration`, local commits only, nothing pushed (decision 0001). Decisions: `docs/decisions/0001–0021`.
-**Gates on HEAD `bda3c15` (2026-11-14):**
+**Phase 17 run (HEAD 71d8d7e + uncommitted Phase 16/17 files, 2026-11-18):** vitest 2351 / 9 skipped, neuro 21, src-tauri 1455 / 6 ignored, amara-router 131, crew-service 230, full e2e 784 passed / 12 skipped (env-gated shot tools) / 0 failed. takes-1111t:80 [light] is intermittent (5 of 6 alone), Design's contrast fix. Readiness: `docs/release/READINESS-0.1.0.md`.
+
+**Older gates on HEAD `bda3c15` (2026-11-14):**
 - src-tauri 982 passed / 6 ignored · amara-router 126 · vitest 1899 / 9 skipped · neuro 21.
 - fmt / clippy -D warnings / tsc / lint / check:secrets clean.
 - **Full e2e 784 passed / 12 skipped / 0 failed.**
@@ -23,16 +25,16 @@ Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2
 | 5 | 1111t step 6 Money (read-only) | partial | done: spike 3be01d3, backend 7b448bb, accounts/fx UI 9b95d68, balances b438574, rows 1c93d5e, bank CSV picker a783a5f. Gated: JPY→USD rule, ledger data, aggregators |
 | 6 | Backups: nightly, restore, drill on a copy | done | 6507382 1c93d5e a783a5f de30ebe; `docs/release/restore-drill.md` |
 | 7 | Harden in place | partial | wave 1 988a464, wave 2 (this commit): launch token, outbound setting, logs, Keychain-first readers, router-only bridge client, voice/Weaviate plumbing. Gated: chmod, Keychain moves, Weaviate switch-over, token enforcement, Hermes key rotation |
-| 8 | Services supervisor | todo | gated: LaunchAgent retirement, crew rebuild |
-| 9 | Bundled runtime + first run | todo | gated: light-tier model name, router restart |
-| 10 | NOOP merge 0–3 + WHOOP ownership | todo | 0017 plan, 7e9895c inventory. Gated: takeover on hardware |
+| 8 | Services supervisor | partial | done 2642629 (observe-only, act paths off). **Waiting on Taisun:** LaunchAgent retirement, crew rebuild |
+| 9 | Bundled runtime + first run | partial | done 11c7883 bcd1385 9a4e84b. **Waiting on Taisun:** live first run, router restart |
+| 10 | NOOP merge 0–3 + WHOOP ownership | waiting (Taisun) | 0017 plan, 7e9895c inventory, bddb46f parity report built. Takeover on hardware is his; Stage G Q1-Q8 |
 | 11 | Telegram relay of NOOP notifications | partial | relay settings, preview and approvals a783a5f; daily_table 5994114 for the number check. Gated: bot token, first send |
-| 12 | NOOP 4–5: secrets, Lucid cues, attribution, 14-day parity report | todo | Fitness tabs e265648 (0017) are related but not this phase. Gated: retire NOOP.app, old-store delete |
-| 13 | Open at login | todo | gated: mechanism |
-| 14 | Signing, notarization, DMG | blocked | Apple Developer ID (Taisun) |
-| 15 | Auto-update | todo | gated: manifest host, updater key |
-| 16 | Migration test | todo | gated: fresh-account run (Taisun) |
-| 17 | Final e2e, parity matrix, readiness report | todo | n/a |
+| 12 | NOOP 4–5: secrets, Lucid cues, attribution, 14-day parity report | waiting (Taisun) | not built; needs 2-week parity and his sign-off; NOOP attribution/NOTICE missing |
+| 13 | Open at login | partial | built 71d8d7e (SMAppService, default off). **Waiting on Taisun:** mechanism decision, Startup toggle (Design) |
+| 14 | Signing, notarization, DMG | waiting (Taisun) | built up to the gate 71d8d7e; needs Apple Developer ID + notary profile (stage-h-gates.md) |
+| 15 | Auto-update | waiting (Taisun) | built inert 71d8d7e; needs manifest host, updater key, switch OK |
+| 16 | Migration test | partial | automated part done (this run): scripts/migration-probe.sh, docs/release/migration-test.md, noAbsolutePaths.test.ts. **Waiting on Taisun:** fresh-account run (Part B) |
+| 17 | Final e2e, parity matrix, readiness report | done (uncommitted) | gates + full e2e 784/12/0 + crew 230; docs/release/parity-0.1.0.md and READINESS-0.1.0.md written; release itself waiting on Taisun |
 
 Shared pieces (REVIEW §8):
 - shared helpers f6fad35
