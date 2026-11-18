@@ -407,6 +407,9 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::enterprise_views::venture_tracking_list,
             crate::commands::content_pipeline::content_stage_set,
             crate::commands::content_pipeline::content_draft_propose,
+            crate::commands::content_drafts::content_draft_save,
+            crate::commands::content_drafts::content_draft_get,
+            crate::commands::goal_venture::goal_venture_set,
             crate::commands::restart_services::restart_services,
         ])
 }

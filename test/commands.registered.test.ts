@@ -207,11 +207,15 @@ describe("Tauri command registry", () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
     const names = registeredCommands(lib).map((c: { name: string }) => c.name);
-    const b4 = ["finances_view", "venture_tracking_list", "content_stage_set", "content_draft_propose"];
+    const b4 = ["finances_view", "venture_tracking_list", "content_stage_set", "content_draft_propose", "content_draft_save", "content_draft_get"];
     for (const name of b4) expect(names).toContain(name);
     expect(names.filter((n: string) => /^(finances|venture|content)_/.test(n)).sort()).toEqual([...b4].sort());
     const banned = /transfer|pay|trade|convert|withdraw|send|buy|sell|move|wire|remit|swap|sign|broadcast|order|deposit|exchange|post|publish|tweet|share|submit|schedule/;
     expect(names.filter((n: string) => /^(finances|venture|content)_/.test(n) && banned.test(n))).toEqual([]);
+    // 0037: the goal-to-venture link is one registered command, with a name that cannot post or send.
+    expect(names).toContain("goal_venture_set");
+    expect(names.filter((n: string) => /^goal_venture_/.test(n))).toEqual(["goal_venture_set"]);
+    expect(names.filter((n: string) => /^(goal_venture|content_draft)_/.test(n) && banned.test(n))).toEqual([]);
     // No money_* / fx_* / treasury_* name was added for these views.
     expect(names.filter((n: string) => /^(finances|venture|content)_/.test(n) && /^(money|fx|treasury)_/.test(n))).toEqual([]);
   });

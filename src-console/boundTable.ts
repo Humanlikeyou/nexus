@@ -348,5 +348,8 @@ export const BOUND_TABLE: Record<string, Row> = {
   venture_tracking_list: () => bound.ventureTrackingList(),
   content_stage_set: (a) => bound.contentStageSet(a.title as never, a.from as never, a.to as never, a.postedByMe as never, a.via as never),
   content_draft_propose: (a) => bound.contentDraftPropose(a.title as never),
+  content_draft_save: (a) => bound.contentDraftSave(a.title as never, a.text as never, a.via as never),
+  content_draft_get: (a) => bound.contentDraftGet(a.title as never),
+  goal_venture_set: (a) => bound.goalVentureSet(a.goalId as never, a.ventureId as never, a.via as never),
   restart_services: (a) => bound.restartServices(a.services as never, a.deadlineMs as never),
 };

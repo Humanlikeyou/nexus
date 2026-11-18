@@ -66,3 +66,6 @@ From 1118b (later):
 ## UI touches (B4 Finances, venture tracking, Content backend, 2026-11-18)
 - Logic only, no markup, class or token: new `src-console/design1118/enterpriseLive.ts` (+ test). No screen edited. `boundTable.ts` / `bindings.gen.ts` gained `finances_view`, `venture_tracking_list`, `content_stage_set`, `content_draft_propose`.
 - For Design/Frontend: `enterpriseAdapter()` gives `finances()`, `fx()` (with `asOf` and `stale`), `funds()`, `sources()`, `ventures()`, `draft(title)`, `setStage(...)`, `undoStage(id)`. Content "Draft with Amara" is still the `OffButton` in `EnterprisePages.tsx`; swap it for `draft()` when you build it. Path goals have no venture tag, so Ventures cannot show linked goals yet.
+
+## UI touches (B4 gaps: goal-venture link, saved drafts, 2026-11-19, decision 0037)
+- Logic only, no markup, class or token: `src-console/design1118/enterpriseLive.ts` (+ test) gained `saveDraft`, `savedDraft`, `undoDraft`, `linkGoal`, `undoGoalLink`; `ventures()[i].goals` now carries each venture's goals (server percent, N of M steps). `boundTable.ts` / `bindings.gen.ts` gained `content_draft_save`, `content_draft_get`, `goal_venture_set`; the `Goal` type gained optional `venture_id`. No screen edited. Design: wire "Draft with Amara" save and the Ventures goal list / goal venture picker when you build them.

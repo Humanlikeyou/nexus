@@ -218,6 +218,23 @@ pub(crate) enum UndoRef {
         /// SHA-256 (hex) of the file text the move wrote. Undo refuses if the file changed since.
         after_hash: String,
     },
+    /// 0037: a goal's venture link set or cleared. Undo puts back the previous link and `updated_at`, only if
+    /// goals.json still hashes to what the write produced.
+    GoalVenture {
+        goal_id: String,
+        prev: Option<String>,
+        prev_updated_at: String,
+        after_hash: String,
+    },
+    /// 0037: a saved Content draft file (`drafts/<file>`). Undo restores the previous text (`prev`, when
+    /// `had_prev`) or removes the file, only if the file still hashes to what the save wrote. `prev` is dropped
+    /// from History once Undo can no longer use it.
+    Draft {
+        file: String,
+        prev: Option<String>,
+        had_prev: bool,
+        after_hash: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,7 +283,7 @@ impl Dirs {
         }
         read_md(&self.legacy.join(name))
     }
-    fn goals(&self) -> PathBuf {
+    pub(crate) fn goals(&self) -> PathBuf {
         self.data.join("goals.json")
     }
     fn history(&self) -> PathBuf {
@@ -716,6 +733,7 @@ fn apply(
                 deadline: None,
                 created_at: iso(&now),
                 updated_at: iso(&now),
+                venture_id: None,
             });
             write_json_atomic(&path, &goals, MAX_MD_BYTES)?;
             Ok((
@@ -830,6 +848,18 @@ fn revert(u: &UndoRef, dirs: &Dirs) -> Result<(), String> {
             to,
             after_hash,
         } => super::content_pipeline::revert_move(dirs, line, from, to, after_hash),
+        UndoRef::GoalVenture {
+            goal_id,
+            prev,
+            prev_updated_at,
+            after_hash,
+        } => super::goal_venture::revert(dirs, goal_id, prev, prev_updated_at, after_hash),
+        UndoRef::Draft {
+            file,
+            prev,
+            had_prev,
+            after_hash,
+        } => super::content_drafts::revert(dirs, file, prev.as_deref(), *had_prev, after_hash),
         UndoRef::Branch { id } => super::goal_route::reopen_in(&dirs.data, id),
         UndoRef::Watch { id } => super::watch_proposals::reopen_in(&dirs.data, id),
         UndoRef::Ha { entity_id, restore } => super::ha_devices::restore_blocking(
@@ -870,11 +900,46 @@ fn revert(u: &UndoRef, dirs: &Dirs) -> Result<(), String> {
     }
 }
 
+/// A saved draft's old text is only for Undo, which closes after the window. Drops it once expired; true if
+/// anything changed.
+fn trim_drafts(hist: &mut HistFile, now: DateTime<FixedOffset>) -> bool {
+    let mut changed = false;
+    for e in hist.entries.iter_mut() {
+        if let UndoRef::Draft { prev, .. } = &mut e.undo {
+            let age = DateTime::parse_from_rfc3339(&e.at)
+                .map(|t| now.signed_duration_since(t).num_milliseconds())
+                .unwrap_or(i64::MAX);
+            if prev.is_some() && !(0..=UNDO_MS).contains(&age) {
+                *prev = None;
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// Trims expired draft text from History under the lock, writing back only if something changed.
+pub(crate) fn trim_expired_drafts_in(dirs: &Dirs, now: DateTime<FixedOffset>) {
+    let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let Ok(mut hist) = read_json::<HistFile>(&dirs.history(), MAX_MD_BYTES) else {
+        return;
+    };
+    if trim_drafts(&mut hist, now) {
+        let _ = write_json_atomic(&dirs.history(), &hist, MAX_MD_BYTES);
+    }
+}
+
+/// Once at startup.
+pub(crate) fn trim_expired_drafts() {
+    trim_expired_drafts_in(&Dirs::real(), now_jst());
+}
+
 /// Route entries carry a whole-roadmap snapshot for Undo. Only the newest few within the Undo window keep it,
 /// so route writes can't fill the file shared with every other kind. The History line stays.
 pub(crate) const MAX_SNAPSHOTS: usize = 10;
 
 fn strip_old_snapshots(hist: &mut HistFile, now: DateTime<FixedOffset>) {
+    trim_drafts(hist, now);
     let mut kept = 0;
     for e in hist.entries.iter_mut() {
         if let UndoRef::Route { prev, .. } = &mut e.undo {
@@ -1042,7 +1107,10 @@ pub(crate) fn undo_in(
 pub(crate) fn history_in(kind: &str, dirs: &Dirs) -> Result<Vec<HistoryItem>, String> {
     kind_ok(kind)?;
     let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let hist: HistFile = read_json(&dirs.history(), MAX_MD_BYTES)?;
+    let mut hist: HistFile = read_json(&dirs.history(), MAX_MD_BYTES)?;
+    if trim_drafts(&mut hist, now_jst()) {
+        let _ = write_json_atomic(&dirs.history(), &hist, MAX_MD_BYTES);
+    }
     Ok(hist
         .entries
         .iter()

@@ -583,6 +583,12 @@ export const commands = {
 	contentStageSet: (title: string, from: string, to: string, postedByMe: boolean, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<ContentStageSet>("content_stage_set", { title, from, to, postedByMe, via }, options),
 	/**  Draft text for an idea that is really in the pipeline file (Idea or Drafting). Local tier only; writes nothing. */
 	contentDraftPropose: (title: string, options?: InvokeOptions) => __TAURI_INVOKE<ContentDraft>("content_draft_propose", { title }, options),
+	/**  Save a reviewed draft for a pipeline item. Local file, History + 8 s Undo. Posts nothing. */
+	contentDraftSave: (title: string, text: string, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<ContentDraftSaved>("content_draft_save", { title, text, via }, options),
+	/**  The saved draft for a title, or `None`. */
+	contentDraftGet: (title: string, options?: InvokeOptions) => __TAURI_INVOKE<ContentDraftSavedText | null>("content_draft_get", { title }, options),
+	/**  Link a goal to a ledger venture, or clear the link with `ventureId: null`. History + 8 s Undo. */
+	goalVentureSet: (goalId: string, ventureId: string | null, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<GoalVentureSet_Serialize>("goal_venture_set", { goalId, ventureId, via }, options),
 	restartServices: (services: string[], deadlineMs: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ServiceRestartResult_Serialize[]>("restart_services", { services, deadlineMs }, options),
 };
 
@@ -1348,6 +1354,22 @@ export type ContentDraft = {
 	text: string,
 	/**  Always `local`: the loopback router with Claude forced off. */
 	tier: string,
+};
+
+export type ContentDraftSaved = {
+	/**  The History id: what `add_undo("content", id)` takes. */
+	id: string,
+	title: string,
+	/**  `drafts/<name>.md`, relative to the content workspace. */
+	file: string,
+	bytes: number,
+	toast: string,
+};
+
+export type ContentDraftSavedText = {
+	title: string,
+	text: string,
+	file: string,
 };
 
 export type ContentPipelineItem = ContentPipelineItem_Serialize | ContentPipelineItem_Deserialize;
@@ -2324,6 +2346,24 @@ export type GoalRoute_Serialize = {
 	note: string | null,
 };
 
+export type GoalVentureSet = GoalVentureSet_Serialize | GoalVentureSet_Deserialize;
+
+export type GoalVentureSet_Deserialize = {
+	/**  The History id: what `add_undo("goal", id)` takes. */
+	id: string,
+	goalId: string,
+	ventureId?: string | null,
+	toast: string,
+};
+
+export type GoalVentureSet_Serialize = {
+	/**  The History id: what `add_undo("goal", id)` takes. */
+	id: string,
+	goalId: string,
+	ventureId: string | null,
+	toast: string,
+};
+
 export type GoalWeek = GoalWeek_Serialize | GoalWeek_Deserialize;
 
 export type GoalWeek_Deserialize = {
@@ -2356,6 +2396,11 @@ export type Goal_Deserialize = {
 	deadline?: string | null,
 	created_at: string,
 	updated_at: string,
+	/**
+	 *  Optional link to a business-ledger venture (decision 0037). Old files without it load as `None`.
+	 *  Set only through `goal_venture_set`, which checks the ledger and logs History + Undo.
+	 */
+	venture_id?: string | null,
 };
 
 export type Goal_Serialize = {
@@ -2368,6 +2413,11 @@ export type Goal_Serialize = {
 	deadline: string | null,
 	created_at: string,
 	updated_at: string,
+	/**
+	 *  Optional link to a business-ledger venture (decision 0037). Old files without it load as `None`.
+	 *  Set only through `goal_venture_set`, which checks the ledger and logs History + Undo.
+	 */
+	venture_id?: string,
 };
 
 export type GoalsSection = {
@@ -5954,6 +6004,35 @@ export type VentureDetail_Serialize = {
 	openVotes: number,
 };
 
+/**  One goal under a venture in `venture_tracking_list`. */
+export type VentureGoal = VentureGoal_Serialize | VentureGoal_Deserialize;
+
+/**  One goal under a venture in `venture_tracking_list`. */
+export type VentureGoal_Deserialize = {
+	id: string,
+	title: string,
+	/**  `planning | ready` (as `goal_route_get`). A goal with no roadmap is `planning`. */
+	routeStatus: string,
+	/**  Server percent from the route; `None` until the route is ready. */
+	percent?: number | null,
+	/**  Steps done and steps on the path (ghosts excluded); `None` until the route is ready. */
+	stepsDone?: number | null,
+	stepsTotal?: number | null,
+};
+
+/**  One goal under a venture in `venture_tracking_list`. */
+export type VentureGoal_Serialize = {
+	id: string,
+	title: string,
+	/**  `planning | ready` (as `goal_route_get`). A goal with no roadmap is `planning`. */
+	routeStatus: string,
+	/**  Server percent from the route; `None` until the route is ready. */
+	percent: number | null,
+	/**  Steps done and steps on the path (ghosts excluded); `None` until the route is ready. */
+	stepsDone: number | null,
+	stepsTotal: number | null,
+};
+
 export type VentureTrack = VentureTrack_Serialize | VentureTrack_Deserialize;
 
 export type VentureTrack_Deserialize = {
@@ -5972,6 +6051,8 @@ export type VentureTrack_Deserialize = {
 	/**  Logged minutes over the last 30 days; `None` when nothing was logged. */
 	attentionMinutes30d?: number | null,
 	perHour30d: TreasuryPerHour_Deserialize[],
+	/**  Goals linked to this venture (`goal_venture_set`), with the route's server percent. 0037. */
+	goals: VentureGoal_Deserialize[],
 };
 
 export type VentureTrack_Serialize = {
@@ -5990,6 +6071,8 @@ export type VentureTrack_Serialize = {
 	/**  Logged minutes over the last 30 days; `None` when nothing was logged. */
 	attentionMinutes30d: number | null,
 	perHour30d: TreasuryPerHour_Serialize[],
+	/**  Goals linked to this venture (`goal_venture_set`), with the route's server percent. 0037. */
+	goals: VentureGoal_Serialize[],
 };
 
 export type VentureTracking = VentureTracking_Serialize | VentureTracking_Deserialize;

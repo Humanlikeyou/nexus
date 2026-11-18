@@ -1,4 +1,4 @@
-import type { ContentDraft, ContentStageSet, FinancesView_Serialize, VentureTracking_Serialize } from "../bindings.gen";
+import type { ContentDraft, ContentDraftSaved, ContentDraftSavedText, ContentStageSet, GoalVentureSet_Serialize, FinancesView_Serialize, VentureTracking_Serialize } from "../bindings.gen";
 import { invokeBound } from "../bridge";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 import { announceStores, inTauri, live } from "../lib/localStores";
@@ -41,6 +41,16 @@ export interface EnterpriseLive {
   setStage(title: string, from: ContentStage, to: ContentStage, postedByMe?: boolean): Promise<Wired<ContentStageSet>>;
   /** Undo within 8 s via the shared write path. */
   undoStage(historyId: string): Promise<boolean>;
+  /** Save the reviewed draft text for a pipeline item (local file, History + 8 s Undo). Saving posts nothing. Failure is `unwired`. */
+  saveDraft(title: string, text: string): Promise<Wired<ContentDraftSaved>>;
+  /** The saved draft for a title; `unwired` when there is none or the read failed. */
+  savedDraft(title: string): Promise<Wired<ContentDraftSavedText>>;
+  /** Undo a draft save within 8 s (`add_undo("content", id)`). */
+  undoDraft(historyId: string): Promise<boolean>;
+  /** Link a goal to a ledger venture, or clear it with `null` (History + 8 s Undo). Refused without a ledger or for an unknown venture: `unwired`. Reloads the tracking view. */
+  linkGoal(goalId: string, ventureId: string | null): Promise<Wired<GoalVentureSet_Serialize>>;
+  /** Undo a goal link within 8 s (`add_undo("goal", id)`). Reloads the tracking view. */
+  undoGoalLink(historyId: string): Promise<boolean>;
 }
 
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
@@ -84,6 +94,26 @@ export function makeEnterpriseLive(deps: EnterpriseDeps = defaultDeps): Enterpri
     async undoStage(historyId) {
       try { const ok = await deps.call<boolean>("add_undo", { kind: "content", id: historyId }); deps.notify(); return ok === true; } catch { return false; }
     },
+    async saveDraft(title, text) {
+      try { const r = await deps.call<ContentDraftSaved>("content_draft_save", { title, text, via: "typed" }); deps.notify(); return live(r); } catch { return UNWIRED; }
+    },
+    async savedDraft(title) {
+      try { const r = await deps.call<ContentDraftSavedText | null>("content_draft_get", { title }); return r ? live(r) : UNWIRED; } catch { return UNWIRED; }
+    },
+    async undoDraft(historyId) {
+      try { const ok = await deps.call<boolean>("add_undo", { kind: "content", id: historyId }); deps.notify(); return ok === true; } catch { return false; }
+    },
+    async linkGoal(goalId, ventureId) {
+      try {
+        const r = await deps.call<GoalVentureSet_Serialize>("goal_venture_set", { goalId, ventureId, via: "typed" });
+        await load();
+        deps.notify();
+        return live(r);
+      } catch { return UNWIRED; }
+    },
+    async undoGoalLink(historyId) {
+      try { const ok = await deps.call<boolean>("add_undo", { kind: "goal", id: historyId }); await load(); deps.notify(); return ok === true; } catch { return false; }
+    },
   };
 }
 
@@ -91,6 +121,7 @@ export function makeEnterpriseLive(deps: EnterpriseDeps = defaultDeps): Enterpri
 export const unwiredEnterprise: EnterpriseLive = {
   finances: () => UNWIRED, fx: () => UNWIRED, funds: () => UNWIRED, sources: () => UNWIRED, ventures: () => UNWIRED,
   draft: async () => UNWIRED, setStage: async () => UNWIRED, undoStage: async () => false,
+  saveDraft: async () => UNWIRED, savedDraft: async () => UNWIRED, undoDraft: async () => false, linkGoal: async () => UNWIRED, undoGoalLink: async () => false,
 };
 
 let shared: EnterpriseLive | null = null;

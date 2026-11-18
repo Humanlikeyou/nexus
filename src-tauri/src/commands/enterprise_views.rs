@@ -14,10 +14,12 @@
 //! - A missing figure is `None`, never 0.
 //! - Read-only: no write, no network, no process. Opens `treasury.db` only when the file already exists, so
 //!   a read never creates the store.
-//! - Path goals do not carry a `#venture:<id>` tag (a goal has no tags field; only tasks and content
-//!   ideas do), so no goal link is returned.
+//! - Goals carry an optional `venture_id` (0037, set by `goal_venture_set`). Each venture lists its goals with
+//!   the route's server percent and N of M steps from `goal_route`; a goal without a ready route has `None`,
+//!   never an invented figure.
 
 use super::business_ledger::{read_ledger_in, BusinessLedger, Health, Progress};
+use super::goal_venture::{goals_by_venture, VentureGoal};
 use super::shared::task::{blocking, JoinErr};
 use super::treasury::{
     attention_list_in, db_path, fx_stale, income_month_in, open_db, per_hour_in, store_err, today,
@@ -98,6 +100,8 @@ pub struct VentureTrack {
     /// Logged minutes over the last 30 days; `None` when nothing was logged.
     pub attention_minutes_30d: Option<i64>,
     pub per_hour_30d: Vec<PerHour>,
+    /// Goals linked to this venture (`goal_venture_set`), with the route's server percent. 0037.
+    pub goals: Vec<VentureGoal>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
@@ -277,6 +281,7 @@ pub(crate) fn tracking_in(data: &Path, today: NaiveDate) -> VentureTracking {
     } else {
         Vec::new()
     };
+    let mut goals = goals_by_venture(data);
     let ventures = ledger
         .ventures
         .iter()
@@ -317,6 +322,7 @@ pub(crate) fn tracking_in(data: &Path, today: NaiveDate) -> VentureTracking {
                     .cloned()
                     .collect(),
                 stream_ids: ids,
+                goals: goals.remove(&v.id).unwrap_or_default(),
             }
         })
         .collect();

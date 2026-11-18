@@ -690,6 +690,7 @@ mod tests {
             deadline: None,
             created_at: String::new(),
             updated_at: String::new(),
+            venture_id: None,
         }
     }
 

@@ -86,4 +86,26 @@ describe("enterprise live adapters (B4)", () => {
     const src = enterpriseSource as string;
     for (const bad of ["money_", "fx_rate", "moneySummary", "fetch(", "XMLHttpRequest", "WebSocket", "http://", "https://", "¥", "￥", "sendMessage", "publishPost"]) expect(src.includes(bad), bad).toBe(false);
   });
+  it("goal links and saved drafts call only their commands, send via, and refusals are unwired (0037)", async () => {
+    const trkGoals = trk({ ventures: [{ id: "taiyo-skin", name: "Taiyo Skin", streamIds: [], incomeMonth: [], attentionMinutes30d: null, perHour30d: [], goals: [{ id: "g-1", title: "Launch", routeStatus: "ready", percent: 50, stepsDone: 1, stepsTotal: 2 }] }] });
+    const { a, calls } = make(fin(), trkGoals, (c) => (c === "goal_venture_set" ? { id: "goal-1", goalId: "g-1", ventureId: "taiyo-skin", toast: "ok" } : c === "content_draft_save" ? { id: "content-2", title: "T", file: "drafts/t-1.md", bytes: 9, toast: "ok" } : c === "content_draft_get" ? { title: "T", text: "Hi", file: "drafts/t-1.md" } : true));
+    expect((await a.linkGoal("g-1", "taiyo-skin")).state).toBe("live");
+    expect((await a.linkGoal("g-1", null)).state).toBe("live");
+    expect(await a.undoGoalLink("goal-1")).toBe(true);
+    expect((await a.saveDraft("T", "Hi")).state).toBe("live");
+    expect((await a.savedDraft("T")).state).toBe("live");
+    expect(await a.undoDraft("content-2")).toBe(true);
+    expect(calls.filter(([c]) => c === "goal_venture_set").map(([, x]) => x)).toEqual([{ goalId: "g-1", ventureId: "taiyo-skin", via: "typed" }, { goalId: "g-1", ventureId: null, via: "typed" }]);
+    expect(calls.find(([c]) => c === "content_draft_save")?.[1]).toEqual({ title: "T", text: "Hi", via: "typed" });
+    expect(calls.filter(([c]) => c === "add_undo").map(([, x]) => x)).toEqual([{ kind: "goal", id: "goal-1" }, { kind: "content", id: "content-2" }]);
+    await vi.waitFor(() => expect(a.ventures().state).toBe("live"));
+    const v = a.ventures();
+    expect(v.state === "live" && v.value[0].goals[0].percent).toBe(50);
+    const bad = makeEnterpriseLive({ call: (async () => { throw new Error("venture: unknown"); }) as never, notify: () => {} });
+    expect((await bad.linkGoal("g-1", "nope")).state).toBe("unwired");
+    expect((await bad.saveDraft("T", "x")).state).toBe("unwired");
+    expect((await bad.savedDraft("T")).state).toBe("unwired");
+    expect(await bad.undoGoalLink("x")).toBe(false);
+    expect(unwiredEnterprise.linkGoal).toBeDefined();
+  });
 });

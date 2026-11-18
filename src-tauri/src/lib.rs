@@ -145,6 +145,8 @@ pub fn run() {
             commands::telegram::init_navy_flag();
             // Outbound is off unless Settings enabled it (and the env var does not force it off).
             commands::outbound::init_outbound_setting();
+            // Saved-draft undo text is dropped from History once its 8 s window is over.
+            commands::adds::trim_expired_drafts();
             // Updater: registered only when the switch, a real public key and https endpoints all
             // exist (none do today, so this is a no-op). Open at login is never touched here.
             if commands::updater::resolve_from_config(app.config()).is_ok() {
@@ -461,6 +463,9 @@ pub fn run() {
             commands::enterprise_views::venture_tracking_list,
             commands::content_pipeline::content_stage_set,
             commands::content_pipeline::content_draft_propose,
+            commands::content_drafts::content_draft_save,
+            commands::content_drafts::content_draft_get,
+            commands::goal_venture::goal_venture_set,
             // Sessions
             sessions::save_session,
             sessions::list_sessions,
