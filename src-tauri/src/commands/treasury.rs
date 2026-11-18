@@ -38,7 +38,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_IMPORT_BYTES: u64 = 5 * 1024 * 1024;
 const MAX_ROWS: usize = 100_000;
-const MAX_CELLS: usize = 64;
+pub(super) const MAX_CELLS: usize = 64;
 /// One event may not exceed this many minor units, so sums over `MAX_ROWS` rows stay inside i64.
 const MAX_AMOUNT_MINOR: i64 = 1_000_000_000_000;
 /// A ledger rate older than this many days is flagged stale (decision 0032 #7).
@@ -224,13 +224,52 @@ CREATE TABLE IF NOT EXISTS attention_log(
   source TEXT NOT NULL DEFAULT 'manual',
   PRIMARY KEY(stream_id, day, source)
 );
+CREATE TABLE IF NOT EXISTS segment_counts(
+  stream_id TEXT NOT NULL REFERENCES streams(id),
+  as_of TEXT NOT NULL,
+  stage TEXT NOT NULL CHECK(stage IN ('lead','waitlist','first_purchase','repeat','lapsed')),
+  segment TEXT NOT NULL,
+  count INTEGER NOT NULL CHECK(count >= 0),
+  import_id TEXT REFERENCES imports(id),
+  PRIMARY KEY(stream_id, as_of, stage, segment)
+);
+CREATE TABLE IF NOT EXISTS sequence_drafts(
+  id TEXT PRIMARY KEY,
+  venture_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('welcome','post_purchase','reorder','win_back')),
+  emails_json TEXT NOT NULL,
+  checklist_json TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('draft','approved')),
+  content_hash TEXT NOT NULL,
+  approved_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS results_imports(
+  id TEXT PRIMARY KEY,
+  sequence_id TEXT NOT NULL REFERENCES sequence_drafts(id),
+  file_sha256 TEXT,
+  row_count INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sequence_results(
+  sequence_id TEXT NOT NULL REFERENCES sequence_drafts(id),
+  day TEXT NOT NULL,
+  sends INTEGER CHECK(sends IS NULL OR sends >= 0),
+  bounces INTEGER CHECK(bounces IS NULL OR bounces >= 0),
+  unsubscribes INTEGER CHECK(unsubscribes IS NULL OR unsubscribes >= 0),
+  purchases_after INTEGER CHECK(purchases_after IS NULL OR purchases_after >= 0),
+  import_id TEXT REFERENCES results_imports(id),
+  PRIMARY KEY(sequence_id, day)
+);
 ";
 
-fn store_err<E>(_: E) -> String {
+pub(super) fn store_err<E>(_: E) -> String {
     "store_error".to_string()
 }
 
-fn open_db(data: &Path) -> Result<Connection, String> {
+pub(super) fn open_db(data: &Path) -> Result<Connection, String> {
     let biz = data.join("business");
     match std::fs::symlink_metadata(&biz) {
         Ok(m) if !m.file_type().is_dir() => return Err("unsafe_storage".into()),
@@ -248,7 +287,7 @@ fn open_db(data: &Path) -> Result<Connection, String> {
     Ok(conn)
 }
 
-fn is_date(s: &str) -> bool {
+pub(super) fn is_date(s: &str) -> bool {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok() && s.len() == 10
 }
 
@@ -256,11 +295,11 @@ fn is_month(s: &str) -> bool {
     s.len() == 7 && is_date(&format!("{s}-01"))
 }
 
-fn now_iso() -> String {
+pub(super) fn now_iso() -> String {
     super::local_store::iso(&now_jst())
 }
 
-fn today() -> NaiveDate {
+pub(super) fn today() -> NaiveDate {
     now_jst().date_naive()
 }
 
@@ -292,7 +331,7 @@ fn get_stream(conn: &Connection, id: &str) -> Result<Option<Stream>, String> {
     .map_err(store_err)
 }
 
-fn stream_exists(conn: &Connection, id: &str) -> Result<bool, String> {
+pub(super) fn stream_exists(conn: &Connection, id: &str) -> Result<bool, String> {
     Ok(get_stream(conn, id)?.is_some())
 }
 
@@ -472,7 +511,7 @@ trait CsvAdapter {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum DateOrder {
+pub(super) enum DateOrder {
     Ymd,
     Mdy,
     Dmy,
@@ -489,7 +528,7 @@ struct GenericMapper {
     reference: Option<usize>,
 }
 
-fn find_col(header: &[String], name: &str) -> Option<usize> {
+pub(super) fn find_col(header: &[String], name: &str) -> Option<usize> {
     let want = name.trim().to_lowercase();
     if want.is_empty() {
         return None;
@@ -615,7 +654,7 @@ fn adapter_for(adapter_id: &str, mapping: Option<CsvMapping>) -> Result<GenericM
     }
 }
 
-fn parse_date(raw: &str, order: DateOrder) -> Option<String> {
+pub(super) fn parse_date(raw: &str, order: DateOrder) -> Option<String> {
     let token = raw
         .trim()
         .trim_start_matches('\u{feff}')
@@ -705,7 +744,7 @@ fn parse_amount(raw: &str, currency: &str) -> Option<i64> {
 /// RFC 4180-ish. Quotes, doubled quotes, newlines inside quotes, CRLF. Returns `(record number, cells)`
 /// with the header as record 1; fully blank records are skipped but still counted. A record keeps at
 /// most `MAX_CELLS + 1` cells (the extra one marks a wide row). More than `MAX_ROWS` records is an error.
-fn parse_csv(text: &str) -> Result<Vec<(usize, Vec<String>)>, String> {
+pub(super) fn parse_csv(text: &str) -> Result<Vec<(usize, Vec<String>)>, String> {
     let mut rows: Vec<(usize, Vec<String>)> = Vec::new();
     let mut record_no = 0usize;
     let mut row: Vec<String> = Vec::new();
@@ -767,7 +806,7 @@ fn parse_csv(text: &str) -> Result<Vec<(usize, Vec<String>)>, String> {
 
 // ───────────────────────────── import ─────────────────────────────
 
-fn read_import_file(path: &Path) -> Result<Vec<u8>, String> {
+pub(super) fn read_import_file(path: &Path) -> Result<Vec<u8>, String> {
     use std::path::Component;
     if !path.is_absolute() || path.components().any(|c| c == Component::ParentDir) {
         return Err("invalid_input".into());
@@ -920,7 +959,13 @@ fn read_and_parse(
 }
 
 /// Best effort: the failure being reported is the import's, not this one's.
-fn record_failed(conn: &Connection, stream_id: &str, adapter: &str, sha: Option<&str>, code: &str) {
+pub(super) fn record_failed(
+    conn: &Connection,
+    stream_id: &str,
+    adapter: &str,
+    sha: Option<&str>,
+    code: &str,
+) {
     let _ = conn.execute(
         "INSERT INTO imports(id, stream_id, adapter, file_sha256, row_count, added, skipped, status, at)
          VALUES(?1, ?2, ?3, ?4, 0, 0, 0, ?5, ?6)",
@@ -1412,10 +1457,10 @@ fn per_hour_in(
 static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
 
 /// Held for the whole pick call (dialog and import). Dropping it frees the slot, panics included.
-struct Slot;
+pub(super) struct Slot;
 
 impl Slot {
-    fn take() -> Option<Slot> {
+    pub(super) fn take() -> Option<Slot> {
         DIALOG_OPEN
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .ok()
@@ -1431,13 +1476,21 @@ impl Drop for Slot {
 
 /// The native open-file dialog. The renderer never supplies a path; `None` when cancelled.
 async fn pick_csv(app: tauri::AppHandle) -> Result<Option<PathBuf>, String> {
+    pick_csv_titled(app, "Choose an income CSV").await
+}
+
+/// Same dialog with another title (the counts and results imports in the sibling modules).
+pub(super) async fn pick_csv_titled(
+    app: tauri::AppHandle,
+    title: &'static str,
+) -> Result<Option<PathBuf>, String> {
     use tauri::Manager;
     use tauri_plugin_dialog::DialogExt;
     let picked = tauri::async_runtime::spawn_blocking(move || {
         let mut dialog = app
             .dialog()
             .file()
-            .set_title("Choose an income CSV")
+            .set_title(title)
             .add_filter("CSV", &["csv"]);
         // Parent the sheet to the main window when there is one, so it can't hide behind it.
         if let Some(window) = app.get_webview_window("main") {
@@ -2420,5 +2473,70 @@ mod tests {
             let p = production(src).to_lowercase();
             assert!(!p.contains("treasury"), "{name} mentions treasury");
         }
+    }
+}
+
+/// Fixtures shared with the sibling `treasury_counts` and `treasury_sequences` test modules.
+/// After the `tests` module on purpose: the source-scan tests cut the file at that module.
+#[cfg(test)]
+pub(super) mod test_support {
+    use super::*;
+    use std::fs;
+
+    pub(crate) const BANNED: [&str; 17] = [
+        "transfer",
+        "pay",
+        "trade",
+        "convert",
+        "withdraw",
+        "send",
+        "buy",
+        "sell",
+        "move",
+        "wire",
+        "remit",
+        "swap",
+        "sign",
+        "broadcast",
+        "order",
+        "deposit",
+        "exchange",
+    ];
+
+    pub(crate) fn temp_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("amara-treasury-{tag}-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    pub(crate) fn write_ledger(dir: &Path, ventures: &[&str]) {
+        let biz = dir.join("business");
+        fs::create_dir_all(&biz).unwrap();
+        let v: Vec<String> = ventures
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"{{"id":"{id}","name":"{id}","stage":"idea","health":"on_track","note":""}}"#
+                )
+            })
+            .collect();
+        fs::write(
+            biz.join("ledger.json"),
+            format!(r#"{{"version":1,"fx":null,"ventures":[{}]}}"#, v.join(",")),
+        )
+        .unwrap();
+    }
+
+    pub(crate) fn setup(tag: &str) -> (PathBuf, String) {
+        let d = temp_dir(tag);
+        write_ledger(&d, &["v1"]);
+        let s = stream_add_in(&d, "v1", "Shop", "product_sales", None, None).unwrap();
+        (d, s.id)
+    }
+
+    pub(crate) fn csv_file(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let p = dir.join(name);
+        fs::write(&p, body).unwrap();
+        p
     }
 }

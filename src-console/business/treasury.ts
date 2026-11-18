@@ -1,5 +1,6 @@
 import { commands } from "../bindings.gen";
 import type {
+  TreasuryCountsSnapshot_Serialize, TreasurySequenceDraft_Serialize, TreasurySequenceResultRow_Serialize,
   FxRate, TreasuryAttentionRow, TreasuryPerHour_Serialize, TreasuryStreamMonth_Serialize,
   TreasuryStream_Serialize, TreasuryTrendRow_Serialize,
 } from "../bindings.gen";
@@ -85,5 +86,70 @@ export function liveTreasury(snapshot: unknown): TreasuryAdapter {
     trend: () => (trend.some((t) => t.avgMinor !== null && num(t.avgMinor)) ? live(trend) : UNWIRED),
     perHour: () => (perHour.some((p) => num(p.incomeMinor) || num(p.minutes)) ? live(perHour) : UNWIRED),
     fx: () => (fx && typeof fx === "object" && typeof fx.stale === "boolean" ? live(fx) : UNWIRED),
+  };
+}
+
+/**
+ * Phases 3 and 4: customer counts and email sequence drafts. Counts only: the backend never holds a
+ * name, email or phone (decision 0032 #2), so none can appear here. Gmail has no timed sequences, so a
+ * draft is paste-ready text plus a checklist for a manual or scheduled-send workflow. A missing figure
+ * is `null`, never 0; with nothing real the adapter is `unwired`.
+ */
+export type TreasuryCounts = TreasuryCountsSnapshot_Serialize;
+export type TreasurySequence = TreasurySequenceDraft_Serialize;
+export type TreasurySequenceResult = TreasurySequenceResultRow_Serialize;
+
+export interface TreasurySequencesSnapshot { drafts: TreasurySequence[]; results: TreasurySequenceResult[] }
+
+export type TreasuryCountsCalls = Pick<typeof commands, "treasuryCountsList">;
+export type TreasurySequenceCalls = Pick<typeof commands, "treasurySequenceList" | "treasuryResultsList">;
+
+export async function loadTreasuryCounts(streamId: string, calls: TreasuryCountsCalls = commands): Promise<TreasuryCounts | null> {
+  return part(() => calls.treasuryCountsList(streamId) as Promise<TreasuryCounts | null>, null);
+}
+
+export async function loadTreasurySequences(calls: TreasurySequenceCalls = commands): Promise<TreasurySequencesSnapshot> {
+  const [drafts, results] = await Promise.all([
+    part(() => calls.treasurySequenceList() as Promise<TreasurySequence[]>, []),
+    part(() => calls.treasuryResultsList(null) as Promise<TreasurySequenceResult[]>, []),
+  ]);
+  return { drafts, results };
+}
+
+export interface TreasuryContactsAdapter {
+  /** Latest counts per stage and segment plus the per-import-date trend. */
+  counts(): Wired<TreasuryCounts>;
+  /** Drafts (status `draft` or `approved`) with their Gmail checklists. */
+  sequences(): Wired<TreasurySequence[]>;
+  /** Imported provider counts per sequence per day (sends, bounces, unsubscribes, purchases after). */
+  results(): Wired<TreasurySequenceResult[]>;
+}
+
+export const unwiredTreasuryContacts: TreasuryContactsAdapter = {
+  counts: () => UNWIRED, sequences: () => UNWIRED, results: () => UNWIRED,
+};
+
+const isCounts = (x: unknown): x is TreasuryCounts => {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return false;
+  const c = x as Record<string, unknown>;
+  return typeof c.asOf === "string" && isArr(c.stages) && isArr(c.segments) && isArr(c.trend);
+};
+
+/** Live counts only for a real import (an `asOf` date and at least one reported stage); else unwired. */
+export function liveTreasuryCounts(counts: unknown): Wired<TreasuryCounts> {
+  if (!isCounts(counts)) return UNWIRED;
+  return counts.stages.some((s) => s.count !== null && num(s.count)) ? live(counts) : UNWIRED;
+}
+
+export function liveTreasuryContacts(counts: unknown, sequences: unknown): TreasuryContactsAdapter {
+  const seq = sequences && typeof sequences === "object" && !Array.isArray(sequences) ? (sequences as Record<string, unknown>) : null;
+  const drafts = seq && isArr(seq.drafts) ? (seq.drafts as TreasurySequence[]) : [];
+  const results = seq && isArr(seq.results) ? (seq.results as TreasurySequenceResult[]) : [];
+  const hasFigure = (r: TreasurySequenceResult) =>
+    [r.sends, r.bounces, r.unsubscribes, r.purchasesAfter].some((v) => v !== null && num(v));
+  return {
+    counts: () => liveTreasuryCounts(counts),
+    sequences: () => (drafts.length > 0 ? live(drafts) : UNWIRED),
+    results: () => (results.some(hasFigure) ? live(results) : UNWIRED),
   };
 }

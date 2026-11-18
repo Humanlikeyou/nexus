@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { UNWIRED } from "../lib/sampleAdapters";
-import { isTreasurySnapshot, liveTreasury, loadTreasury, unwiredTreasury, type TreasuryCalls, type TreasurySnapshot } from "./treasury";
+import {
+  isTreasurySnapshot, liveTreasury, liveTreasuryContacts, liveTreasuryCounts, loadTreasury, loadTreasuryCounts, loadTreasurySequences,
+  unwiredTreasury, type TreasuryCalls, type TreasuryCountsCalls, type TreasurySequenceCalls, type TreasurySnapshot,
+} from "./treasury";
 
 const stream = { id: "str-1", ventureId: "v1", name: "Shop", streamType: "product_sales", status: "active", setupDate: null, notes: null, createdAt: "2026-11-01T00:00:00.000+09:00", ventureMissing: false };
 const empty: TreasurySnapshot = { streams: [stream], months: [], trend: [], perHour: [], fx: null };
@@ -67,5 +70,42 @@ describe("loadTreasury", () => {
     } as unknown as TreasuryCalls;
     const snap = await loadTreasury(range, calls);
     expect(snap).toEqual({ streams: [stream], months: [], trend: [], perHour: [], fx: null });
+  });
+});
+
+describe("Treasury counts and sequences (phases 3 and 4)", () => {
+  const stages = (lead: number | null) => ["lead", "waitlist", "first_purchase", "repeat", "lapsed"].map((stage, i) => ({ stage, count: i === 0 ? lead : null }));
+  const counts = { asOf: "2026-11-18", stages: stages(12), segments: [{ stage: "lead", segment: "newsletter", count: 7 }], trend: [{ asOf: "2026-11-18", stages: stages(12) }] };
+  const draft = { id: "seq-1", ventureId: "v1", kind: "reorder", emails: [{ subject: "S", body: "b {{unsubscribe_link}} {{mailing_address}}" }], checklist: ["Send only to contacts with recorded consent."], status: "draft", approvedAt: null, createdAt: "x", updatedAt: "x" };
+  const row = (sends: number | null) => ({ sequenceId: "seq-1", day: "2026-11-02", sends, bounces: null, unsubscribes: null, purchasesAfter: null });
+
+  it("counts are live only for a real import with a reported stage, and nulls stay null", () => {
+    expect(liveTreasuryCounts(null)).toBe(UNWIRED);
+    expect(liveTreasuryCounts({})).toBe(UNWIRED);
+    expect(liveTreasuryCounts({ ...counts, stages: stages(null) })).toBe(UNWIRED);
+    const w = liveTreasuryCounts(counts);
+    expect(w).toEqual({ state: "live", value: counts });
+    if (w.state === "live") expect(w.value.stages[1].count).toBeNull();
+  });
+
+  it("sequences and results are live only with real rows", () => {
+    const none = liveTreasuryContacts(null, null);
+    for (const k of ["counts", "sequences", "results"] as const) expect(none[k]()).toBe(UNWIRED);
+    expect(liveTreasuryContacts(null, { drafts: [], results: [row(null)] }).results()).toBe(UNWIRED);
+    const a = liveTreasuryContacts(counts, { drafts: [draft], results: [row(5)] });
+    expect(a.sequences()).toEqual({ state: "live", value: [draft] });
+    expect(a.results()).toEqual({ state: "live", value: [row(5)] });
+    expect(a.counts().state).toBe("live");
+  });
+
+  it("loaders call the typed bridge and a failed read leaves that part empty", async () => {
+    const cc = { treasuryCountsList: vi.fn().mockResolvedValue(counts) } as unknown as TreasuryCountsCalls;
+    expect(await loadTreasuryCounts("str-1", cc)).toEqual(counts);
+    expect(cc.treasuryCountsList).toHaveBeenCalledWith("str-1");
+    const bad = { treasuryCountsList: vi.fn().mockRejectedValue("unknown_stream") } as unknown as TreasuryCountsCalls;
+    expect(await loadTreasuryCounts("x", bad)).toBeNull();
+    const sc = { treasurySequenceList: vi.fn().mockResolvedValue([draft]), treasuryResultsList: vi.fn().mockRejectedValue("store_error") } as unknown as TreasurySequenceCalls;
+    expect(await loadTreasurySequences(sc)).toEqual({ drafts: [draft], results: [] });
+    expect(sc.treasuryResultsList).toHaveBeenCalledWith(null);
   });
 });

@@ -357,6 +357,14 @@ export const commands = {
 	treasuryIncomeTrend: (streamId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryTrendRow_Serialize[]>("treasury_income_trend", { streamId }, options),
 	treasuryPerHour: (from: string, to: string, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryPerHour_Serialize[]>("treasury_per_hour", { from, to }, options),
 	treasuryFxStatus: (options?: InvokeOptions) => __TAURI_INVOKE<TreasuryFxStatus_Serialize>("treasury_fx_status", undefined, options),
+	treasuryCountsImportPick: (streamId: string, mapping: TreasuryCountsMapping_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryImportResult>("treasury_counts_import_pick", { streamId, mapping }, options),
+	treasuryCountsList: (streamId: string, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryCountsSnapshot_Serialize>("treasury_counts_list", { streamId }, options),
+	treasurySequenceDraft: (kind: string, ventureId: string, options?: InvokeOptions) => __TAURI_INVOKE<TreasurySequenceDraft_Serialize>("treasury_sequence_draft", { kind, ventureId }, options),
+	treasurySequenceList: (options?: InvokeOptions) => __TAURI_INVOKE<TreasurySequenceDraft_Serialize[]>("treasury_sequence_list", undefined, options),
+	treasurySequenceUpdate: (id: string, emails: TreasurySequenceEmailInput[], options?: InvokeOptions) => __TAURI_INVOKE<TreasurySequenceDraft_Serialize>("treasury_sequence_update", { id, emails }, options),
+	treasurySequenceApprove: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<TreasurySequenceDraft_Serialize>("treasury_sequence_approve", { id }, options),
+	treasuryResultsImportPick: (sequenceId: string, mapping: TreasuryResultsMapping_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryResultsImportResult>("treasury_results_import_pick", { sequenceId, mapping }, options),
+	treasuryResultsList: (sequenceId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasurySequenceResultRow_Serialize[]>("treasury_results_list", { sequenceId }, options),
 	moneyAccountAdd: (draft: MoneyAccountDraft, options?: InvokeOptions) => __TAURI_INVOKE<MoneyAccount>("money_account_add", { draft }, options),
 	moneyWatchAdd: (accountId: string, value: string, options?: InvokeOptions) => __TAURI_INVOKE<WatchAdded>("money_watch_add", { accountId, value }, options),
 	moneyBalanceSetManual: (accountId: string, nativeAmount: number | null, asOf: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("money_balance_set_manual", { accountId, nativeAmount, asOf }, options),
@@ -4792,6 +4800,70 @@ export type TreasuryAttentionRow = {
 	minutes: number,
 };
 
+export type TreasuryCountRow = {
+	stage: string,
+	segment: string,
+	count: number,
+};
+
+export type TreasuryCountsMapping = TreasuryCountsMapping_Serialize | TreasuryCountsMapping_Deserialize;
+
+export type TreasuryCountsMapping_Deserialize = {
+	/**  The column holding `lead | waitlist | first_purchase | repeat | lapsed`. */
+	stageColumn: string,
+	/**  A column with a number of contacts for that row. Without it each row counts as one. */
+	countColumn?: string | null,
+	/**  A column with a segment or tag name (never a name, email or phone). */
+	segmentColumn?: string | null,
+};
+
+export type TreasuryCountsMapping_Serialize = {
+	/**  The column holding `lead | waitlist | first_purchase | repeat | lapsed`. */
+	stageColumn: string,
+	/**  A column with a number of contacts for that row. Without it each row counts as one. */
+	countColumn: string | null,
+	/**  A column with a segment or tag name (never a name, email or phone). */
+	segmentColumn: string | null,
+};
+
+export type TreasuryCountsSnapshot = TreasuryCountsSnapshot_Serialize | TreasuryCountsSnapshot_Deserialize;
+
+export type TreasuryCountsSnapshot_Deserialize = {
+	/**  The newest import date; `None` when nothing was imported. */
+	asOf?: string | null,
+	/**  Latest per-stage totals (all five stages, `None` where not reported). */
+	stages: TreasuryStageCount_Deserialize[],
+	/**  Latest per stage and segment (only rows that have a segment). */
+	segments: TreasuryCountRow[],
+	/**  The last 12 import dates, oldest first. */
+	trend: TreasuryCountsTrendRow_Deserialize[],
+};
+
+export type TreasuryCountsSnapshot_Serialize = {
+	/**  The newest import date; `None` when nothing was imported. */
+	asOf: string | null,
+	/**  Latest per-stage totals (all five stages, `None` where not reported). */
+	stages: TreasuryStageCount_Serialize[],
+	/**  Latest per stage and segment (only rows that have a segment). */
+	segments: TreasuryCountRow[],
+	/**  The last 12 import dates, oldest first. */
+	trend: TreasuryCountsTrendRow_Serialize[],
+};
+
+export type TreasuryCountsTrendRow = TreasuryCountsTrendRow_Serialize | TreasuryCountsTrendRow_Deserialize;
+
+export type TreasuryCountsTrendRow_Deserialize = {
+	asOf: string,
+	/**  All five stages, in `STAGES` order. */
+	stages: TreasuryStageCount_Deserialize[],
+};
+
+export type TreasuryCountsTrendRow_Serialize = {
+	asOf: string,
+	/**  All five stages, in `STAGES` order. */
+	stages: TreasuryStageCount_Serialize[],
+};
+
 /**
  *  The user's column mapping for the generic adapter. Column names are matched against the header
  *  (trimmed, case-insensitive).
@@ -4892,11 +4964,119 @@ export type TreasuryPerHour_Serialize = {
 	reason: string | null,
 };
 
+export type TreasuryResultsImportResult = {
+	/**  Days written (new or changed). */
+	added: number,
+	/**  Days whose counts were already stored unchanged. */
+	skipped: number,
+	failed: number,
+	importId: string,
+};
+
+export type TreasuryResultsMapping = TreasuryResultsMapping_Serialize | TreasuryResultsMapping_Deserialize;
+
+export type TreasuryResultsMapping_Deserialize = {
+	dateColumn: string,
+	sendsColumn?: string | null,
+	bouncesColumn?: string | null,
+	unsubscribesColumn?: string | null,
+	/**  Purchases made after the sequence (a count, never who). */
+	purchasesColumn?: string | null,
+	/**  `ymd` (default), `mdy` or `dmy`. */
+	dateFormat?: string | null,
+};
+
+export type TreasuryResultsMapping_Serialize = {
+	dateColumn: string,
+	sendsColumn: string | null,
+	bouncesColumn: string | null,
+	unsubscribesColumn: string | null,
+	/**  Purchases made after the sequence (a count, never who). */
+	purchasesColumn: string | null,
+	/**  `ymd` (default), `mdy` or `dmy`. */
+	dateFormat: string | null,
+};
+
 /**  A row-level problem. Never carries the row's text. */
 export type TreasuryRowError = {
 	row: number,
 	/**  `bad_date | bad_amount | bad_currency | short_row | wide_row`. */
 	code: string,
+};
+
+export type TreasurySequenceDraft = TreasurySequenceDraft_Serialize | TreasurySequenceDraft_Deserialize;
+
+export type TreasurySequenceDraft_Deserialize = {
+	id: string,
+	ventureId: string,
+	kind: string,
+	emails: TreasurySequenceEmail[],
+	checklist: string[],
+	/**  `draft | approved`. */
+	status: string,
+	approvedAt?: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type TreasurySequenceDraft_Serialize = {
+	id: string,
+	ventureId: string,
+	kind: string,
+	emails: TreasurySequenceEmail[],
+	checklist: string[],
+	/**  `draft | approved`. */
+	status: string,
+	approvedAt: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type TreasurySequenceEmail = {
+	subject: string,
+	body: string,
+};
+
+export type TreasurySequenceEmailInput = {
+	subject: string,
+	body: string,
+};
+
+/**  Counts for one sequence on one day. `None` = not reported (never 0). */
+export type TreasurySequenceResultRow = TreasurySequenceResultRow_Serialize | TreasurySequenceResultRow_Deserialize;
+
+/**  Counts for one sequence on one day. `None` = not reported (never 0). */
+export type TreasurySequenceResultRow_Deserialize = {
+	sequenceId: string,
+	day: string,
+	sends?: number | null,
+	bounces?: number | null,
+	unsubscribes?: number | null,
+	purchasesAfter?: number | null,
+};
+
+/**  Counts for one sequence on one day. `None` = not reported (never 0). */
+export type TreasurySequenceResultRow_Serialize = {
+	sequenceId: string,
+	day: string,
+	sends: number | null,
+	bounces: number | null,
+	unsubscribes: number | null,
+	purchasesAfter: number | null,
+};
+
+export type TreasuryStageCount = TreasuryStageCount_Serialize | TreasuryStageCount_Deserialize;
+
+export type TreasuryStageCount_Deserialize = {
+	stage: string,
+	/**  `None` when that import had no row for the stage (never 0). */
+	count?: number | null,
+};
+
+export type TreasuryStageCount_Serialize = {
+	stage: string,
+	/**  `None` when that import had no row for the stage (never 0). */
+	count: number | null,
 };
 
 export type TreasuryStream = TreasuryStream_Serialize | TreasuryStream_Deserialize;

@@ -789,3 +789,28 @@ Nothing committed, pushed or installed. Live app data, Muse files, the real NOOP
   - Clean build in `~/projects/nexus-amara-install` (sidecars:prepare, then tauri build, ad-hoc signed; hardened runtime off).
   - Rollback: `~/Backups/Amara OS-backup-20261118b.app` (bddb46f). The copy from before this session is `~/Backups/Amara OS-backup-20261118.app`.
   - Not relaunched. The autostart plugin is gone: open-at-login now uses SMAppService, off until Taisun turns it on.
+
+### 30. Treasury Phases 3 and 4: customer counts, sequence drafts, results import (decision 0032, 2026-11-18, not committed)
+- **Phase 3, `commands/treasury_counts.rs`** (tables added to `treasury.db`: `segment_counts`):
+  - `treasury_counts_import_pick(streamId, mapping)`: generic mapper (stage column, optional count column, optional segment column). Only those cells are read; every other cell (names, emails, phones) is dropped unread. One snapshot per import date (JST); re-import the same day replaces it (idempotent).
+  - `treasury_counts_list(streamId)`: latest per-stage totals, per-segment rows and the last 12 dates. A stage with no row is `null`, never 0.
+  - A segment must be an ASCII slug `^[a-z0-9][a-z0-9_-]{0,23}$` after trim and lowercase. Spaces inside, non-ASCII (names, fullwidth digits), `.`, `:`, `@` and 7+ digits are all refused (a value with a space is refused, not turned into a dash, so "john smith" can't pass as a slug). An empty cell means no segment.
+  - A file with more distinct segments than min(30, max(20, rows/20)) fails with `too_many_segments` and stores nothing. A one-word first name still fits a slug, so this cap is the backstop for a wrongly mapped name column.
+  - Tests: byte scan of the db files finds no name, email or phone from a fixture; errors are fixed codes with no file text; source scans show no logging, network or chat/context module reading counts.
+- **Phase 4, `commands/treasury_sequences.rs`** (tables: `sequence_drafts`, `results_imports`, `sequence_results`):
+  - `treasury_sequence_draft(kind, ventureId)`: welcome x3, post_purchase, reorder, win_back. Writer is `llm_router::local_complete` only (light local tier; Claude tier refused there). The prompt holds the kind, email count and the ledger venture name, no contact data (tested).
+  - Every email body must contain `{{unsubscribe_link}}` and `{{mailing_address}}` (present anywhere in the body; position is not checked); a draft or edit missing either is rejected and nothing is stored.
+  - Copy rules (drafts and edits): body controls other than newline/tab, all subject controls, hidden Unicode (bidi, zero-width, U+2028/2029), `<` `>`, `javascript:`, URLs, `@`, phone-like digit runs and any `{{...}}` other than `{{first_name}}` and the two footer placeholders are rejected.
+  - One model call at a time (`busy`), at most 200 stored drafts (`too_many_drafts`), at most 3 emails and bounded field sizes per edit, ids at most 64 and mapping column names at most 128 chars; the venture name in the prompt is whitespace-collapsed and capped at 60 chars; results days must fall in 2000-01-01 ..= today + 365 days.
+  - **Future UI requirement:** show the full email body before the Approve button is enabled (the native dialog shows subjects only).
+  - `treasury_sequence_list`, `treasury_sequence_update(id, emails)` (revalidated; an approved draft returns to `draft`).
+  - `treasury_sequence_approve(id)`: native `approval_gate` dialog (subjects shown), stores `approved_at`; an edit during the dialog gives `changed:` and approves nothing.
+  - The Gmail checklist is built in code: trigger, delays, stage changes, tags, Schedule-send note, consent and opt-out line, Japan opt-in / GDPR note (not legal advice).
+  - `treasury_results_import_pick(sequenceId, mapping)` and `treasury_results_list(sequenceId?)`: counts per sequence per day (sends, bounces, unsubscribes, purchases after). Only mapped columns are read; an unmapped metric is `null`. Idempotent.
+  - [GATE] No Gmail API: `ProviderResultsSource` is an interface only; a fixture implements it in tests.
+  - Amara sends no email. Relay alert kind is Phase 5.
+- Shared pieces in `treasury.rs` became `pub(super)`; `pick_csv_titled` added; `test_support` module at the end of the file.
+- Registered: `mod.rs`, `lib.rs`, `bindings.rs`, `bindings.gen.ts` (UPDATE_BINDINGS=1), `boundTable.ts`, `bridge.bound.test.ts`, `commands.registered.test.ts` (exact `treasury_*` set is now 19). `src-console/business/treasury.ts` gained `loadTreasuryCounts`, `loadTreasurySequences`, `liveTreasuryContacts` (unwired without real rows) plus vitest. No UI.
+- Security review: found 1 HIGH, 3 MED, 4 LOW; all fixed in this tree (segment slug and distinct-segment cap, copy rules, single-flight and draft cap, early size checks, prompt name bound, honest placeholder wording, date clamp, full-body-before-Approve note). A re-review of the fixes is not run.
+- Not run: the native import and approval dialogs in the running app; a real local-model draft (tests use fixture replies); e2e (no UI).
+- Taisun steps: supply a real counts export and Gmail/provider results header row for real column names; the consent/legal check (decision 0032 #14) before any sequence goes live.
