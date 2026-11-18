@@ -1,4 +1,6 @@
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
+import { inTauri } from "../lib/localStores";
+import { makeLiveMarket } from "./marketProposalsLive";
 
 /**
  * design-1118a Ventures › Trading: Amara's PROPOSALS from world news. Proposals only.
@@ -64,8 +66,10 @@ export function makeSampleMarket(now: () => Date = () => new Date()): MarketProp
 }
 
 let sampleSingleton: MarketProposalAdapter | null = null;
+let liveSingleton: MarketProposalAdapter | null = null;
 export function marketAdapter(): MarketProposalAdapter {
   if (sampleAdaptersEnabled()) return (sampleSingleton ??= makeSampleMarket());
+  if (inTauri()) return (liveSingleton ??= makeLiveMarket());
   return unwiredMarket;
 }
 export function __resetMarketForTests() { sampleSingleton = null; }

@@ -190,6 +190,10 @@ pub(crate) enum UndoRef {
         /// refuses if anything, including a legacy roadmap write or the planner, changed it since.
         after_hash: String,
     },
+    /// 1118a B2: a recorded or dismissed watch-only proposal; Undo puts it back to `proposed`.
+    Watch {
+        id: String,
+    },
     Date {
         id: String,
     },
@@ -259,7 +263,7 @@ impl Dirs {
 }
 
 fn kind_ok(kind: &str) -> Result<(), String> {
-    if matches!(kind, "goal" | "date" | "task" | "idea" | "route") {
+    if matches!(kind, "goal" | "date" | "task" | "idea" | "route" | "watch") {
         Ok(())
     } else {
         Err("invalid input".into())
@@ -789,6 +793,7 @@ fn payload_kind(p: &Payload) -> &'static str {
 fn revert(u: &UndoRef, dirs: &Dirs) -> Result<(), String> {
     match u {
         UndoRef::Branch { id } => super::goal_route::reopen_in(&dirs.data, id),
+        UndoRef::Watch { id } => super::watch_proposals::reopen_in(&dirs.data, id),
         UndoRef::Route {
             goal_id,
             prev,

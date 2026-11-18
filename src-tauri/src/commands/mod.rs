@@ -108,4 +108,5 @@ pub mod patterns_generic;
 pub mod strap_night;
 pub mod update_install;
 pub mod updater;
+pub mod watch_proposals;
 pub mod weekly_review;

@@ -57,3 +57,8 @@ From 1118b (later):
 ## UI touches (B1 Path backend, 2026-11-18)
 - Logic only, no markup, class or token: new `src-console/design1118/branchesLive.ts` (+ `branchesLive.test.ts`), and `branchAdapter()` in `src-console/design1118/branches.ts` returns it inside Tauri (sample flag still wins). `boundTable.ts` / `bindings.gen.ts` gained the 8 `goal_route_*` / `goal_step_*` / `goal_branch_*` commands.
 - For Design/Frontend: call `goal_route_get` for the Path (it returns ghosts and a server `percent`; `roadmap_get` hides ghosts). Complete and edit a step with `goal_step_complete` / `goal_step_edit` and Undo with `add_undo("route", id)`.
+
+## UI touches (B2 watch-only proposals backend, 2026-11-18)
+- Logic only, no markup, class or token: new `src-console/design1118/marketProposalsLive.ts` (+ test); `marketAdapter()` in `marketProposals.ts` returns it inside Tauri (sample flag still wins). `boundTable.ts` / `bindings.gen.ts` gained `watch_proposals_list`, `watch_proposal_record`, `watch_proposal_dismiss`, `market_feed_status`.
+- Market line and news note stay "Needs wiring" (gated feeds). Toast text comes back from `watch_proposal_record` ("Recorded. Watch-only — no order was sent."). Undo: `add_undo("watch", id)`.
+- Flaky (for Design): `test/e2e/sand-lens.spec.ts:28` [dark] "voice off: the sand keeps floating" failed once in the full suite on 2026-11-18 (12.3 s, under load). It passed 40/40 run alone with `--repeat-each=4`. It probably needs a deterministic wait on the lens frame instead of timing. Not changed by Claude Code.

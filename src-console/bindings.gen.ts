@@ -569,6 +569,13 @@ export const commands = {
 	goalBranchDecline: (suggestionId: string, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<RouteWrite_Serialize>("goal_branch_decline", { suggestionId, via }, options),
 	goalRouteSettingsGet: (options?: InvokeOptions) => __TAURI_INVOKE<RouteSettings>("goal_route_settings_get", undefined, options),
 	goalRouteSettingsSet: (stagnationDays: number, options?: InvokeOptions) => __TAURI_INVOKE<RouteSettings>("goal_route_settings_set", { stagnationDays }, options),
+	/**  `include_sample` is true only when the page's sample flag is on. */
+	watchProposalsList: (includeSample: boolean | null, options?: InvokeOptions) => __TAURI_INVOKE<WatchList_Serialize>("watch_proposals_list", { includeSample }, options),
+	/**  Only after the page's second confirm. Records the choice; never sends anything. */
+	watchProposalRecord: (id: string, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<WatchDecision_Serialize>("watch_proposal_record", { id, via }, options),
+	watchProposalDismiss: (id: string, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<WatchDecision_Serialize>("watch_proposal_dismiss", { id, via }, options),
+	/**  There is no live price feed (a new outbound host stays gated), so this is always `not_connected`. */
+	marketFeedStatus: (options?: InvokeOptions) => __TAURI_INVOKE<MarketFeedStatus>("market_feed_status", undefined, options),
 	restartServices: (services: string[], deadlineMs: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ServiceRestartResult_Serialize[]>("restart_services", { services, deadlineMs }, options),
 };
 
@@ -1936,6 +1943,8 @@ export type Experiment_Serialize = {
 	pair: string | null,
 };
 
+export type FeedState = "not_connected";
+
 export type Finding = Finding_Serialize | Finding_Deserialize;
 
 export type Finding_Deserialize = {
@@ -2795,6 +2804,10 @@ export type MapPath_Serialize = {
 	lastOkAt: string | null,
 	reason: string | null,
 	fix: string | null,
+};
+
+export type MarketFeedStatus = {
+	state: FeedState,
 };
 
 export type MeasureRanking = {
@@ -5801,6 +5814,89 @@ export type WatchAdded = {
 	chain: string,
 	form: string,
 };
+
+export type WatchConfidence = "low" | "medium" | "high";
+
+export type WatchDecision = WatchDecision_Serialize | WatchDecision_Deserialize;
+
+export type WatchDecision_Deserialize = {
+	/**  History id: `add_undo("watch", id)` within 8 s takes it back. */
+	id: string,
+	proposal: WatchProposal_Deserialize,
+	/**  Fixed text for the toast. */
+	toast: string,
+};
+
+export type WatchDecision_Serialize = {
+	/**  History id: `add_undo("watch", id)` within 8 s takes it back. */
+	id: string,
+	proposal: WatchProposal_Serialize,
+	/**  Fixed text for the toast. */
+	toast: string,
+};
+
+export type WatchKind = "crypto" | "stock";
+
+export type WatchList = WatchList_Serialize | WatchList_Deserialize;
+
+export type WatchList_Deserialize = {
+	proposals: WatchProposal_Deserialize[],
+	/**  Shown on every proposal. */
+	disclaimer: string,
+};
+
+export type WatchList_Serialize = {
+	proposals: WatchProposal_Serialize[],
+	/**  Shown on every proposal. */
+	disclaimer: string,
+};
+
+export type WatchProposal = WatchProposal_Serialize | WatchProposal_Deserialize;
+
+export type WatchProposal_Deserialize = {
+	id: string,
+	createdAt: string,
+	kind: WatchKind,
+	side: WatchSide,
+	ticker: string,
+	reasonText: string,
+	sourceName: string,
+	/**  https only, display-only: never fetched. */
+	sourceUrl?: string | null,
+	confidence: WatchConfidence,
+	riskText: string,
+	size?: WatchSize | null,
+	status: WatchStatus,
+	decidedAt?: string | null,
+	sample?: boolean | null,
+};
+
+export type WatchProposal_Serialize = {
+	id: string,
+	createdAt: string,
+	kind: WatchKind,
+	side: WatchSide,
+	ticker: string,
+	reasonText: string,
+	sourceName: string,
+	/**  https only, display-only: never fetched. */
+	sourceUrl?: string,
+	confidence: WatchConfidence,
+	riskText: string,
+	size?: WatchSize,
+	status: WatchStatus,
+	decidedAt?: string,
+	sample?: boolean,
+};
+
+export type WatchSide = "buy" | "sell" | "watch";
+
+export type WatchSize = {
+	amount: number | null,
+	currency: string,
+};
+
+export type WatchStatus = "proposed" | "recorded" | "dismissed";
 
 export type WeeklyReviewHealth = WeeklyReviewHealth_Serialize | WeeklyReviewHealth_Deserialize;
 

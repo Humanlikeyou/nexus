@@ -338,5 +338,9 @@ export const BOUND_TABLE: Record<string, Row> = {
   goal_branch_decline: (a) => bound.goalBranchDecline(a.suggestionId as never, a.via as never),
   goal_route_settings_get: () => bound.goalRouteSettingsGet(),
   goal_route_settings_set: (a) => bound.goalRouteSettingsSet(a.stagnationDays as never),
+  watch_proposals_list: (a) => bound.watchProposalsList(a.includeSample as never),
+  watch_proposal_record: (a) => bound.watchProposalRecord(a.id as never, a.via as never),
+  watch_proposal_dismiss: (a) => bound.watchProposalDismiss(a.id as never, a.via as never),
+  market_feed_status: () => bound.marketFeedStatus(),
   restart_services: (a) => bound.restartServices(a.services as never, a.deadlineMs as never),
 };

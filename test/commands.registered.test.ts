@@ -180,6 +180,19 @@ describe("Tauri command registry", () => {
     expect(names.filter((n: string) => /^(money|fx|treasury)_/.test(n) && /transfer|pay|trade|convert|withdraw|send|buy|sell|move|wire|remit|swap|sign|broadcast|order|deposit|exchange/.test(n))).toEqual([]);
   });
 
+  it("the watch-only proposal commands are registered and no name carries a money word", async () => {
+    const { readFileSync } = await import("node:fs");
+    const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const names = registeredCommands(lib).map((c: { name: string }) => c.name);
+    const watch = ["watch_proposals_list", "watch_proposal_record", "watch_proposal_dismiss", "market_feed_status"];
+    for (const name of watch) expect(names).toContain(name);
+    expect(names.filter((n: string) => n.startsWith("watch_proposal")).sort()).toEqual(["watch_proposal_dismiss", "watch_proposal_record", "watch_proposals_list"]);
+    // There is no create command (service only) and no way to place anything.
+    expect(names).not.toContain("watch_proposal_create");
+    const banned = /trade|order|transfer|pay|convert|withdraw|send|buy|sell|move|wire|remit|swap|sign|broadcast|deposit|exchange|broker|place|execute|submit/;
+    expect(names.filter((n: string) => (n.startsWith("watch_proposal") || n.startsWith("market_")) && banned.test(n))).toEqual([]);
+  });
+
   it("the treasury commands are registered, with no way to move money and no repeat of the personal money names", async () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");

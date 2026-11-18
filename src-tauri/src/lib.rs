@@ -451,6 +451,10 @@ pub fn run() {
             goal_route::goal_branch_decline,
             goal_route::goal_route_settings_get,
             goal_route::goal_route_settings_set,
+            commands::watch_proposals::watch_proposals_list,
+            commands::watch_proposals::watch_proposal_record,
+            commands::watch_proposals::watch_proposal_dismiss,
+            commands::watch_proposals::market_feed_status,
             // Sessions
             sessions::save_session,
             sessions::list_sessions,

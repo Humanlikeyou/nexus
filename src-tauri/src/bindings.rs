@@ -397,6 +397,10 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::goal_route::goal_branch_decline,
             crate::commands::goal_route::goal_route_settings_get,
             crate::commands::goal_route::goal_route_settings_set,
+            crate::commands::watch_proposals::watch_proposals_list,
+            crate::commands::watch_proposals::watch_proposal_record,
+            crate::commands::watch_proposals::watch_proposal_dismiss,
+            crate::commands::watch_proposals::market_feed_status,
             crate::commands::restart_services::restart_services,
         ])
 }
