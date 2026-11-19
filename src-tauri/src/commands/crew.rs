@@ -556,8 +556,38 @@ pub(crate) fn http_error(op: &str, status: reqwest::StatusCode) -> String {
     format!("Crew {op} failed (HTTP {}).", status.as_u16())
 }
 
+/// True for the error a crew service gives when it has no approvals endpoint at all (a build from before
+/// R13-D: 404). Such a service can't hold an approval, so nothing can be waiting: callers treat it as none.
+pub(crate) fn approvals_not_supported(err: &str) -> bool {
+    err == http_error("approvals", reqwest::StatusCode::NOT_FOUND)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_404_from_approvals_means_not_supported() {
+        use reqwest::StatusCode;
+        assert!(super::approvals_not_supported(&super::http_error(
+            "approvals",
+            StatusCode::NOT_FOUND
+        )));
+        for s in [
+            StatusCode::UNAUTHORIZED,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::BAD_GATEWAY,
+        ] {
+            assert!(!super::approvals_not_supported(&super::http_error(
+                "approvals",
+                s
+            )));
+        }
+        assert!(!super::approvals_not_supported(&super::http_error(
+            "runs",
+            StatusCode::NOT_FOUND
+        )));
+        assert!(!super::approvals_not_supported("Crew service unreachable."));
+    }
+
     #[test]
     fn crew_start_is_gated_on_the_outbound_switch_before_any_request() {
         let src = include_str!("crew.rs");

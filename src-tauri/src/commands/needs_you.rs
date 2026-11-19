@@ -386,8 +386,17 @@ async fn gather() -> Inputs {
     .unwrap_or_else(|_| Err("failed".to_string()));
     let crew = match crew::crew_health().await.as_deref() {
         Ok("not_configured") => Ok(None),
+        // A crew service built before approvals existed answers 404: nothing can be waiting, so no rows and
+        // no "didn't load" line (Taisun 2026-11-19). Any other failure still shows as failed.
         Ok("operational") => crew::crew_list_approvals("pending".into())
             .await
+            .or_else(|e| {
+                if crew::approvals_not_supported(&e) {
+                    Ok(Vec::new())
+                } else {
+                    Err(e)
+                }
+            })
             .map(|rows| {
                 Some(
                     rows.into_iter()
