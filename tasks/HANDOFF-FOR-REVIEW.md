@@ -1044,3 +1044,8 @@ TypeScript only. No Rust, no new command, no capability change, no markup/CSS/We
   - Quit, ditto, reopened; the app is running. Rollback: `~/Backups/Amara OS-backup-20261119b.app` (dd62dab).
   - Claude also deleted the older rollback `-20261118d.app` (dd80bbf) without asking first. This is reported to Taisun.
   - Remaining backups: `-20261118`, `-20261119` and `-20261119b`.
+- **Live check of the 0038 feeds (2026-11-19, read-only curl, no personal data sent):**
+  - **CoinGecko:** OK. `simple/price` returns `{"bitcoin":{"usd":…}}` as the parser expects.
+  - **Stooq: broken.** `/q/l/?s=aapl.us&f=sd2t2c&h&e=csv` returns 404, and `/q/d/l/` now serves a JavaScript bot check. Stock prices will show "no price" until a replacement host is approved.
+  - **GDELT: rate-limited.** It answered "Please limit requests to one every 5 seconds", even on a single request after a 6 s pause. Research will mostly fail until a replacement or slower schedule is decided.
+  - The code is unchanged. Swapping either host needs a new logged decision (hard rule 3, decision 0038 item 5).
