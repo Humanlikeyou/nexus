@@ -1,3 +1,4 @@
+import { useSvgTextScale } from "../ui/useSvgTextScale";
 import { useState } from "react";
 import type { Route } from "../app/routes";
 import { addAdapter } from "../adds/adapters";
@@ -26,6 +27,7 @@ const enterpriseLink = (d: LifeDate): Route => (/taiyo skin launch/i.test(d.titl
 
 /** design-1111v LaneTimeline: 12 months, three lanes, labels that never overlap (placeLabels). */
 export function LaneTimeline({ dates, highlight }: { dates: LifeDate[]; highlight?: Set<string> }) {
+  const textScale = useSvgTextScale();
   const lanes = LANES.map((l) => {
     const pts = dates.filter((d) => d.lane === l.lane);
     const placed = placeLabels(pts.map((d) => ({ id: d.id, x: x(d.month), label: d.short ?? d.title, date: d.date })), { width: W, rows: 2 });
@@ -35,7 +37,7 @@ export function LaneTimeline({ dates, highlight }: { dates: LifeDate[]; highligh
   const tops = lanes.reduce<number[]>((acc, l, i) => [...acc, i === 0 ? TOP : acc[i - 1] + lanes[i - 1].h], []);
   const bottom = tops[tops.length - 1] + lanes[lanes.length - 1].h;
   return (
-    <svg className="v-tl" viewBox={`0 0 ${W} ${bottom + 8}`} role="img" aria-label={`Dates over the next 12 months in three lanes: ${dates.map((d) => `${d.title}, ${d.date}, ${LANE_NAME[d.lane]}`).join("; ")}`}>
+    <svg ref={textScale} className="v-tl" viewBox={`0 0 ${W} ${bottom + 8}`} role="img" aria-label={`Dates over the next 12 months in three lanes: ${dates.map((d) => `${d.title}, ${d.date}, ${LANE_NAME[d.lane]}`).join("; ")}`}>
       {MONTHS.map((m, i) => <g key={m}><line className="grid" x1={x(i)} x2={x(i)} y1={TOP - 8} y2={bottom} /><text x={x(i) + 5} y={TOP - 8}>{m}</text></g>)}
       <line className="today" x1={x(0)} x2={x(0)} y1={TOP - 3} y2={bottom} />
       {lanes.map((l, k) => (

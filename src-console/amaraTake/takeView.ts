@@ -13,6 +13,17 @@ export type TakeView =
   | { state: "failed"; reason: string }
   | { state: "unwired"; reason?: string };
 
+/** What makes a page's take refresh, said plainly (it refreshes once a day when its own facts change). */
+export const TAKE_REFRESH_LINE: Record<TakePage, string> = {
+  neuro: "refreshes once if a new session lands",
+  fitness: "refreshes once if new health data lands",
+  mindBody: "refreshes once if new health data lands",
+  life: "refreshes once if your goals or habits change",
+  business: "refreshes once if new business data lands",
+  home: "refreshes once if something new lands",
+  agents: "refreshes once if agent activity changes",
+  smarthome: "refreshes once if your devices change",
+};
 export const TAKE_PAGE_LABEL: Record<TakePage, string> = { home: "Home", fitness: "Fitness", neuro: "Neuro", mindBody: "Mind–Body", business: "Enterprise", life: "Life", agents: "Agents", smarthome: "Smart home" };
 
 /** What each page waits for before Amara writes (HANDOFF-1110f triggers). */

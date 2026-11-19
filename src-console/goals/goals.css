@@ -38,12 +38,12 @@
 .gl-size { font-size: 11px; padding: 0 var(--space-2); border-radius: var(--radius-pill); box-shadow: inset 0 0 0 1px var(--separator); color: var(--label-secondary); }
 .gl-size[data-size="big"] { color: var(--copper-text); }
 .gl-step__act { display: flex; gap: var(--space-1); align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-.gl-smaller { margin: var(--space-1) 0 0; font-size: 12px; color: var(--copper-text); }
+.gl-smaller { margin: var(--space-1) 0 0; font-size: 13px; color: var(--copper-text); }
 .gl-edit { grid-column: 1 / -1; display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end; }
 .gl-done { margin: 0; display: flex; align-items: center; gap: var(--space-2); font-size: 13px; color: var(--tone-accent-text); }
 .gl-msg { margin: 0; min-height: 0; font-size: 11px; color: var(--label-secondary); }
 .gl-msg:empty { display: none; }
 .gl-q { display: grid; gap: var(--space-2); padding: var(--space-4); border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--separator); }
-.gl-q__text { margin: 0; font-size: 14px; color: var(--label); }
+.gl-q__text { margin: 0; font-size: 13px; color: var(--label); }
 @media (prefers-reduced-motion: no-preference) { .gl-heat i, .gl-tick { transition: background-color .2s; } }
 @media (forced-colors: active) { .gl-heat i[data-m="met"], .gl-tick[data-on] { forced-color-adjust: none; background: Highlight; } .gl-heat i[data-m="missed"] { box-shadow: inset 0 0 0 1.5px CanvasText; } }

@@ -9,7 +9,7 @@
 }
 .ui-dialog[open] { display: grid; gap: var(--space-3, 13px); animation: ui-dialog-in 200ms cubic-bezier(.2, .8, .2, 1) both; }
 .ui-dialog::backdrop { background: rgba(0, 0, 0, .28); }
-.ui-dialog__title { margin: 0; font: var(--type-title3, 600 15px/1.3 -apple-system, system-ui, sans-serif); }
+.ui-dialog__title { margin: 0; font: var(--type-title3, 600 17px/1.3 -apple-system, system-ui, sans-serif); }
 .ui-dialog__body { color: var(--label-secondary); font: var(--type-body, 13px/1.45 -apple-system, system-ui, sans-serif); }
 .ui-dialog__body > p { margin: 0; }
 .ui-dialog__actions { display: flex; justify-content: flex-end; gap: var(--space-2, 8px); margin-top: var(--space-2, 8px); }

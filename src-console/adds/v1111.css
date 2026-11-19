@@ -64,7 +64,7 @@
 .v-box .ui-list-row { min-height: 0; }
 /* timeline */
 .v-tl { width: 100%; height: auto; display: block; }
-.v-tl text { font-size: 11px; fill: var(--label-secondary); }
+.v-tl text { font-size: calc(11px * var(--svg-u, 1)); fill: var(--label-secondary); }
 .v-tl .lbl { fill: var(--label); }
 .v-tl .lane { fill: var(--label); font-weight: 600; }
 .v-tl .grid { stroke: var(--separator); }

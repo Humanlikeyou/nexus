@@ -1,3 +1,4 @@
+import { useSvgTextScale } from "../ui/useSvgTextScale";
 import { Fragment } from "react";
 import type { DayMark } from "./adapters";
 
@@ -25,6 +26,7 @@ export function Confidence({ n, label }: { n: number; label: string }) {
 }
 
 export function Scatter({ points, split, x, y, xLabel, yLabel }: { points: Array<[number, number]>; split: number; x: [number, number]; y: [number, number]; xLabel: string; yLabel: string }) {
+  const textScale = useSvgTextScale();
   const w = 340, h = 170;
   const X = (v: number) => 34 + ((v - x[0]) / (x[1] - x[0])) * (w - 47);
   const Y = (v: number) => h - 21 - ((v - y[0]) / (y[1] - y[0])) * (h - 34);
@@ -32,20 +34,21 @@ export function Scatter({ points, split, x, y, xLabel, yLabel }: { points: Array
   const above = points.filter(([px]) => px >= split), below = points.filter(([px]) => px < split);
   const mean = (a: Array<[number, number]>) => (a.length ? Math.round(a.reduce((s, p) => s + p[1], 0) / a.length) : 0);
   return (
-    <svg className="pk-svg" viewBox={`0 0 ${w} ${h}`} role="img" aria-label={`${yLabel} against ${xLabel}: ${points.length} points; ${above.length} at ${split}+ average ${mean(above)}, ${below.length} under ${split} average ${mean(below)}`}>
+    <svg ref={textScale} className="pk-svg" viewBox={`0 0 ${w} ${h}`} role="img" aria-label={`${yLabel} against ${xLabel}: ${points.length} points; ${above.length} at ${split}+ average ${mean(above)}, ${below.length} under ${split} average ${mean(below)}`}>
       {ys.map((v) => <g key={v}><line className="gr" x1="34" x2={w - 13} y1={Y(v)} y2={Y(v)} /><text x="29" y={Y(v) + 4} textAnchor="end">{v}</text></g>)}
       <line className="ax" x1={X(split)} x2={X(split)} y1="8" y2={h - 21} strokeDasharray="3 3" />
-      {xs.map((v) => <text key={v} x={X(v)} y={h - 5} textAnchor="middle">{`${v}h`}</text>)}
+      {xs.map((v, i) => <text key={v} x={X(v)} y={h - 5} textAnchor={i === 0 ? "start" : i === xs.length - 1 ? "end" : "middle"}>{`${v}h`}</text>)}
       {points.map(([px, py], i) => <circle key={i} className={px >= split ? "d1" : "d2"} cx={X(px).toFixed(1)} cy={Y(py).toFixed(1)} r="3.5" />)}
     </svg>
   );
 }
 
 export function PairBars({ rows, legend, max = 80 }: { rows: Array<[string, number, number]>; legend: [string, string]; max?: number }) {
+  const textScale = useSvgTextScale();
   const bw = 21, gap = 55, h = 110, w = 34 + rows.length * (2 * bw + gap);
   const Y = (v: number) => h - 21 - (v / max) * (h - 34);
   return (
-    <svg className="pk-svg" viewBox={`0 0 ${w} ${h}`} style={{ width: w, maxWidth: "100%" }} role="img" aria-label={rows.map(([l, a, b]) => `${l}: ${a} ${legend[0]}, ${b} ${legend[1]}`).join("; ")}>
+    <svg ref={textScale} className="pk-svg" viewBox={`0 0 ${w} ${h}`} style={{ width: w, maxWidth: "100%" }} role="img" aria-label={rows.map(([l, a, b]) => `${l}: ${a} ${legend[0]}, ${b} ${legend[1]}`).join("; ")}>
       {[0, max / 2, max].map((v) => <g key={v}><line className="gr" x1="34" x2={w - 8} y1={Y(v)} y2={Y(v)} /><text x="29" y={Y(v) + 4} textAnchor="end">{v}</text></g>)}
       {rows.map(([label, a, b], i) => {
         const x = 34 + i * (2 * bw + gap);

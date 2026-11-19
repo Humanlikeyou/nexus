@@ -14,7 +14,7 @@
 .take__when { font-size: 11px; color: var(--label-secondary); }
 .take__spacer { flex: 1; }
 .take__lane { font-size: 11px; color: var(--tone-accent-text); border: 1px solid color-mix(in srgb, var(--tone-accent-text) 40%, transparent); border-radius: 999px; padding: 1px 8px; }
-.take__body { margin: 0; font-size: 15px; line-height: 1.5; color: var(--label); text-wrap: pretty; }
+.take__body { margin: 0; font-size: 17px; line-height: 1.5; color: var(--label); text-wrap: pretty; }
 .take__body b { font-weight: 600; }
 .take__chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .take__chip { display: inline-flex; align-items: baseline; gap: 5px; font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--separator); background: color-mix(in srgb, var(--bg-content, #fff) 70%, transparent); color: var(--label); }

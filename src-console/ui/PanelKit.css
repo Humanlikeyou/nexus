@@ -74,7 +74,7 @@
 .pk-svg .bar1 { fill: color-mix(in srgb, var(--tone-accent-text) 70%, transparent); }
 .pk-svg .bar2 { fill: color-mix(in srgb, var(--copper-text) 70%, transparent); }
 .pk-svg .bar0 { fill: color-mix(in srgb, var(--label) 14%, transparent); }
-.pk-svg text { fill: var(--label-secondary); font-size: 11px; font-family: var(--font-text); }
+.pk-svg text { fill: var(--label-secondary); font-size: calc(11px * var(--svg-u, 1)); font-family: var(--font-text); }
 .pk-svg .tl { fill: var(--label); }
 .pk-legend { display: flex; gap: 13px; font-size: 11px; color: var(--label-secondary); align-items: center; flex-wrap: wrap; }
 .pk-legend i { display: inline-block; width: 13px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: 3px; background: var(--tone-accent-text); }

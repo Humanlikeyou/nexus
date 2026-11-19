@@ -293,7 +293,8 @@ html[data-navy="on"] .d18-scene[aria-pressed="true"] { border-color: var(--nv-re
 .d18-editor__steps { margin: 0; padding: 0; border: 0; display: grid; gap: var(--space-2); }
 .d18-editor__step { display: grid; grid-template-columns: minmax(0, 1.618fr) minmax(89px, 1fr); gap: var(--space-2); align-items: end; }
 .d18-editor__step[data-done] .ui-text-field__input { color: var(--label-secondary); }
-.d18-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--text-callout); color: var(--label); }
+/* The inline delete row (GoalEditors). Not the trading <dialog> that shares the class: a closed dialog must stay hidden. */
+.d18-confirm:not(dialog) { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--text-callout); color: var(--label); }
 .d18-danger.ui-button, .d18-danger { color: var(--tone-danger-text); }
 .d18-confirm .d18-danger[data-variant="primary"] { color: #fff; background: var(--tone-danger); border-color: var(--tone-danger); }
 

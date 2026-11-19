@@ -36,7 +36,7 @@
 .w-rail__state small { display: block; font-size: 11px; color: var(--w-muted); }
 .w-rail__right { margin-left: auto; display: flex; align-items: center; gap: 13px; font-size: 13px; color: var(--w-muted); }
 .w-rail__right b { color: var(--w-label); font-weight: 500; font-variant-numeric: tabular-nums; }
-.w-pill { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 13px; border-radius: 99px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: var(--w-label); font: 500 12px/1 var(--font-text); cursor: pointer; }
+.w-pill { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 13px; border-radius: 99px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: var(--w-label); font: 500 13px/1 var(--font-text); cursor: pointer; }
 .w-pill:disabled { opacity: .5; cursor: not-allowed; }
 .w-area { position: relative; display: grid; gap: 21px; min-height: 0; }
 .w-area[data-n="1"] { grid-template-columns: minmax(0, 1fr); justify-items: center; }
@@ -59,7 +59,7 @@ html[data-reduce-transparency="true"] .w-win { background: var(--glass-solid, #1
 .w-win[data-focus] { box-shadow: 0 21px 55px rgba(0,0,0,.5), 0 0 0 1px color-mix(in srgb, var(--accent, #c9a476) 55%, transparent); }
 .w-win:not([data-focus]) .w-bar__title { color: var(--w-muted); }
 .w-bar { display: flex; align-items: center; gap: 8px; padding: 0 5px 0 13px; border-bottom: 1px solid rgba(255,255,255,.12); font-size: 13px; min-width: 0; }
-.w-fav { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font: 700 10px/1 var(--font-text); color: #fff; flex: none; }
+.w-fav { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font: 700 11px/1 var(--font-text); color: #fff; flex: none; }
 .w-bar__title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .w-bar__src { font-size: 11px; color: var(--w-muted); white-space: nowrap; }
 .w-chip { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 8px; border-radius: 99px; font-size: 11px; white-space: nowrap; border: 1px solid rgba(255,255,255,.16); color: var(--w-muted); }
@@ -135,7 +135,7 @@ html[data-reduce-transparency="true"] .w-win { background: var(--glass-solid, #1
 .pdf { position: absolute; inset: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); background: #161e1b; }
 .pdf__top { display: flex; align-items: center; gap: 13px; padding: 0 13px; font-size: 11px; color: var(--w-muted); border-bottom: 1px solid rgba(255,255,255,.12); background: #0f1714; }
 .pdf__page { margin: 13px auto 0; width: min(89%, 470px); background: #fbfaf7; color: #1d1d1b; padding: 34px 34px 21px; box-shadow: 0 5px 21px rgba(0,0,0,.25); font: 400 11px/1.55 Georgia, serif; overflow: hidden; }
-.pdf__page h4 { margin: 0 0 8px; font: 700 15px/1.3 Georgia, serif; }
+.pdf__page h4 { margin: 0 0 8px; font: 700 17px/1.3 Georgia, serif; }
 .pdf__page p { margin: 0 0 8px; }
 .pdf__page mark { background: #f6e3a8; color: inherit; }
 

@@ -46,7 +46,7 @@ export function WaveJourney({ waves, doneIds, timesDone, connected, pickedId, on
           const here = i === curIdx, top = i % 2 === 1;
           const n = p.w.tracks.filter((t) => doneIds.has(t.id)).length;
           // Top stations label above; bottom stations label below. "You are here" sits on the free side.
-          const ly = top ? (here ? 30 : -30) : 26, sy = ly + 12;
+          const ly = top ? (here ? 30 : -30) : 26, sy = ly + 13; // 11px labels on a 13-unit (Fibonacci) line pitch: they never touch
           return (
             <g key={p.w.wave} className={`d18-st ${here ? "d18-st--current" : n === p.w.tracks.length && n > 0 ? "d18-st--done" : "d18-st--upcoming"}`} transform={`translate(${p.x} ${p.y})`}>
               {here && <circle className="d18-st__halo" r="20" />}

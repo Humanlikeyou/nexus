@@ -27,7 +27,7 @@
 :root:root .hchat .chat-screen__conversation { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 5px; padding: 8px 13px 13px; min-height: 0; height: 100%; box-sizing: border-box; }
 :root:root .hchat__head { display: flex; align-items: center; gap: 8px; min-height: 26px; }
 :root:root .hchat__title { margin: 0; font: 500 13px/16px var(--font-text); color: var(--landing-wordmark); letter-spacing: .02em; }
-:root:root .hchat__status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--landing-muted); font: 400 12px/15px var(--font-text); }
+:root:root .hchat__status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--landing-muted); font: 400 13px/15px var(--font-text); }
 :root:root .hchat__status i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--landing-muted); }
 :root:root .hchat__status i[data-online] { background: var(--lens-rim); }
 :root:root .hchat__tools { margin-left: auto; display: flex; align-items: center; gap: 5px; }
@@ -39,7 +39,7 @@
 :root:root .hchat .chat-message { max-width: 86%; }
 :root:root .hchat .chat-message[data-start] { margin-top: 5px; }
 :root:root .hchat .chat-message__meta { display: inline-flex; align-items: center; gap: 5px; margin: 0 0 3px; color: var(--landing-muted); font: 400 11px/14px var(--font-text); }
-:root:root .hchat .chat-bubble { padding: 0; background: transparent; font: 400 14px/20px var(--font-text); color: var(--landing-label); }
+:root:root .hchat .chat-bubble { padding: 0; background: transparent; font: 400 13px/20px var(--font-text); color: var(--landing-label); }
 :root:root .hchat .chat-bubble[data-role="user"] { padding: 8px 13px; border-radius: 14px; background: rgba(52, 199, 154, .16); box-shadow: inset 0 0 0 1px rgba(52, 199, 154, .22); }
 :root:root .hchat .chat-bubble[data-failed] { padding: 8px 13px; border-radius: 14px; background: rgba(255, 122, 102, .14); }
 :root:root .hchat .chat-message[data-speaking] .chat-bubble { padding-left: 8px; box-shadow: inset 2px 0 0 var(--landing-icon); }

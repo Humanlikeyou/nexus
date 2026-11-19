@@ -69,7 +69,7 @@ function NeuroWave({ session, focus, calm }: { session: RecordedSession; focus: 
       <VibratingStrings strings={strings.map((x) => x.string)} hot={null} colourOf={colourOf} onFail={() => setGl(false)} viewW={640} viewH={80} swing={0.4}
         className="d18-swave" testId="neuro-strings" label={`Your last session's brainwaves: ${strings.map((x) => named(x.key)?.name ?? x.key).join(", ")}, each at its own frequency`} />
       <div className="rec-legend" ref={keyRef}>
-        {strings.map((x) => <span key={x.key} data-band={x.key} style={{ ["--c" as string]: `var(--band-${x.key})` }}><i aria-hidden="true" />{named(x.key)?.name} <small>{named(x.key)?.range}</small></span>)}
+        {strings.map((x) => <span key={x.key} data-band={x.key} style={{ ["--c" as string]: `var(--band-${x.key})` }}><i aria-hidden="true" />{named(x.key)?.name} <span>{named(x.key)?.range}</span></span>)}
       </div>
       <p className="d18-note">{bandAvg ? "Your last session's brainwaves" : "Calm (alpha) and focus (beta) from your last session"} · each band vibrates at its own frequency, {EEG_SLOWDOWN}× slower · stronger bands swing wider · loops every {LOOP_S === 60 ? "minute" : `${LOOP_S} s`} until your next session</p>
     </>

@@ -128,4 +128,4 @@ li[data-lean="down"] .mb-delta__fill { background: var(--copper); box-shadow: 0 
 .mb-stagekey dt i[data-tone="rem"] { background: var(--data-sleep-rem); }
 .mb-stagekey dt i[data-tone="light"] { background: var(--data-sleep-light); }
 .mb-stagekey dd { margin: 3px 0 0; color: var(--label); font: 400 17px/1.3 var(--font-text); font-variant-numeric: tabular-nums; }
-.mb-stagekey dd small { margin-left: 5px; color: var(--label-secondary); font: 400 12px/1 var(--font-text); }
+.mb-stagekey dd small { margin-left: 5px; color: var(--label-secondary); font: 400 13px/1 var(--font-text); }

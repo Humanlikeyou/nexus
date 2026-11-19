@@ -66,16 +66,16 @@
 .neuro__last-scores { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-6, 21px); }
 .neuro__score-head { display: grid; gap: 3px; margin: 0; }
 .neuro__score-head span { color: var(--label-secondary); font: var(--type-callout); }
-.neuro__score-head strong { color: var(--label); font: 300 22px/1.2 var(--font-text); font-variant-numeric: tabular-nums; }
-.neuro__score-head small { color: var(--label-secondary); font: 400 12px/1 var(--font-text); }
+.neuro__score-head strong { color: var(--label); font: 300 21px/1.2 var(--font-text); font-variant-numeric: tabular-nums; }
+.neuro__score-head small { color: var(--label-secondary); font: 400 13px/1 var(--font-text); }
 .neuro__score-bar { position: relative; height: 6px; margin-top: 8px; border-radius: 3px; background: var(--fill-tertiary, color-mix(in srgb, var(--label) 12%, transparent)); overflow: hidden; }
 .neuro__score-bar::after { content: ""; position: absolute; inset: 0 auto 0 50%; width: 1px; background: var(--bg-content); }
 .neuro__score-bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
 .neuro__score-scale { display: flex; justify-content: space-between; margin: 5px 0 0; color: var(--label-secondary); font: 400 11px/14px var(--font-text); font-variant-numeric: tabular-nums; }
 .neuro__last-body { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3, 13px); margin: var(--space-4, 13px) 0 0; padding-top: var(--space-4, 13px); border-top: 1px solid var(--separator); }
 .neuro__last-body div { display: grid; gap: 3px; }
-.neuro__last-body dd { margin: 0; color: var(--label); font: 300 20px/1.2 var(--font-text); font-variant-numeric: tabular-nums; }
-.neuro__last-body dd small { color: var(--label-secondary); font: 400 12px/1 var(--font-text); }
+.neuro__last-body dd { margin: 0; color: var(--label); font: 300 21px/1.2 var(--font-text); font-variant-numeric: tabular-nums; }
+.neuro__last-body dd small { color: var(--label-secondary); font: 400 13px/1 var(--font-text); }
 .neuro__last-body dt { color: var(--label-secondary); font: var(--type-subheadline); }
 .neuro__last-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 13px); margin: var(--space-4, 13px) 0 0; color: var(--label-secondary); font: var(--type-subheadline); }
 @media (max-width: 900px) { .neuro__last-body { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

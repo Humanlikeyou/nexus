@@ -39,9 +39,9 @@
   --z-toast: 80;
   --scrim: rgba(5, 12, 10, .40);
 
-  --type-large-title: 700 28px/34px var(--font-sans);
+  --type-large-title: 700 27px/34px var(--font-sans);
   --track-large-title: -0.4px;
-  --type-title1: 600 22px/28px var(--font-sans);
+  --type-title1: 600 21px/28px var(--font-sans);
   --track-title1: -0.3px;
   --type-title2: 600 17px/22px var(--font-sans);
   --track-title2: -0.2px;
@@ -49,11 +49,11 @@
   --track-headline: -0.08px;
   --type-body: 400 13px/18px var(--font-sans);
   --track-body: -0.08px;
-  --type-callout: 400 12px/16px var(--font-sans);
+  --type-callout: 400 13px/16px var(--font-sans);
   --track-callout: 0;
   --type-footnote: 400 11px/14px var(--font-sans);
   --track-footnote: 0.06px;
-  --type-caption: 500 10px/13px var(--font-sans);
+  --type-caption: 500 11px/13px var(--font-sans);
   --track-caption: 0.1px;
 
   --ease-out: cubic-bezier(.2, .8, .2, 1);

@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import { DataTag } from "../ui";
 import { useAmaraTakeStatus } from "./useAmaraTake";
-import { askMore, goToCite, PREVIEW_DEPS, previewMode, sampleTakeView, TAKE_PAGE_LABEL, takeView, type TakeNote, type TakeView } from "./takeView";
+import { askMore, goToCite, PREVIEW_DEPS, previewMode, sampleTakeView, TAKE_PAGE_LABEL, TAKE_REFRESH_LINE, takeView, type TakeNote, type TakeView } from "./takeView";
 import type { TakePage } from "./types";
 import { useTakeSlots } from "../takes/TakeExtras";
 import { TakeStepQuestion } from "../goals/TakeStepQuestion";
@@ -92,7 +92,7 @@ export function AmaraTakeCard({ page, view, compact = false, onRetry, slots = {}
       </ul>
       {slots.block}
       <div className="take__foot">
-        {!compact && <span className="take__src">{note.sourceLine} · {slots.refresh ?? "refreshes once if a new session lands"}</span>}
+        {!compact && <span className="take__src">{note.sourceLine} · {slots.refresh ?? TAKE_REFRESH_LINE[page]}</span>}
         <span className="take__spacer" />
         {slots.sheet}
         <button type="button" className="take__ask" onClick={() => askMore({ from: TAKE_PAGE_LABEL[page], chips: note.chips, question: note.question, sample: view.sample })}>Ask more ›</button>
