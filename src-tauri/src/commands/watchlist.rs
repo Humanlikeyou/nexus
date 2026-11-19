@@ -2,7 +2,7 @@
 //! crypto to WATCH; the ones he accepts stay up as panels with live prices until, about every 14 days,
 //! she asks whether he wants new picks.
 //!
-//! Flow: research (`watchlist_research_now`) reads recent headlines (`api.gdeltproject.org`, through the
+//! Flow: research (`watchlist_research_now`) reads recent headlines (Google News RSS at `news.google.com`, through the
 //! pinned client in `market_feed.rs`), asks the LOCAL deep tier for 3 to 5 picks, validates them, and stores
 //! the survivors as `proposed` watch proposals through `watch_proposals::ingest_in`. He accepts with the
 //! existing `watch_proposal_record`, which adds the pick here (`add_pick_in`).
@@ -14,7 +14,7 @@
 //!   flattened and capped, and every pick must cite a headline URL that was really fetched this run (exact
 //!   match) or it is dropped. The source name and URL shown come from the fetched headline, not the model.
 //! - Headlines are data, not instructions: they are numbered text in the prompt and nothing from them is
-//!   executed, fetched or stored except the cleaned title, domain, URL and date.
+//!   executed, fetched or stored except the cleaned title, source name, URL and date.
 //! - Every call checks the outbound gate first (`Pinned::blocked`): a closed gate makes no request.
 //! - Research is single-flight and rate limited to once per hour. It never runs on a timer; only he starts it.
 //! - The 14-day question is one Needs-you pointer and nothing else (no message, no notification).
@@ -32,7 +32,7 @@ use super::watch_proposals::{
     self as wp, FeedItem, FeedSource, WatchConfidence, WatchKind, WatchProposal, WatchSide,
     NOT_ADVICE,
 };
-use chrono::{DateTime, Duration, FixedOffset, NaiveDateTime};
+use chrono::{DateTime, Duration, FixedOffset};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::future::Future;
@@ -47,12 +47,13 @@ const MAX_STORED: usize = 60;
 const REVIEW_DAYS: i64 = 14;
 const RESEARCH_EVERY: Duration = Duration::hours(1);
 const MAX_PICKS: usize = 5;
-const MAX_HEADLINES: usize = 25;
+const MAX_HEADLINES: usize = 40;
 const MAX_TITLE: usize = 160;
+const MAX_SOURCE: usize = 80;
 const MAX_REASON: usize = 300;
 const MAX_RISK: usize = 200;
 const REPLY_CAP: usize = 20_000;
-const GDELT_CAP: usize = 512 * 1024;
+const NEWS_CAP: usize = 512 * 1024;
 const LLM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(240);
 const DEFAULT_RISK: &str = "Prices can fall as well as rise. Watch only.";
 pub const TOAST_REMOVED: &str = "Removed from your watchlist.";
@@ -421,77 +422,133 @@ pub(crate) fn get_in(
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Headline {
     pub title: String,
-    pub domain: String,
+    /// The `<source>` name the feed gives (display only).
+    pub source: String,
     pub url: String,
     /// `YYYY-MM-DD`.
     pub seen: String,
 }
 
-fn valid_domain(d: &str) -> bool {
-    (3..=80).contains(&d.len())
-        && d.contains('.')
-        && !d.starts_with('.')
-        && !d.starts_with('-')
-        && d.bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
+/// The text of `<name>...</name>` inside `block`, with CDATA unwrapped and the five predefined entities
+/// decoded. `None` when the element is missing, or holds markup or any other entity.
+fn rss_elem(block: &str, name: &str) -> Option<String> {
+    let open = format!("<{name}");
+    let mut from = 0;
+    let start = loop {
+        let at = from + block[from..].find(&open)?;
+        let after = block[at + open.len()..].chars().next()?;
+        if after == '>' || after.is_whitespace() {
+            break at;
+        }
+        from = at + open.len();
+    };
+    let gt = start + block[start..].find('>')?;
+    if block[..gt].ends_with('/') {
+        return None;
+    }
+    let inner = &block[gt + 1..];
+    let end = inner.find(&format!("</{name}>"))?;
+    let raw = inner[..end].trim();
+    if let Some(c) = raw.strip_prefix("<![CDATA[") {
+        let c = c.strip_suffix("]]>")?;
+        return (!c.contains("<![CDATA[")).then(|| c.to_string());
+    }
+    if raw.contains('<') {
+        return None;
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        let semi = tail.find(';')?;
+        out.push(match &tail[..=semi] {
+            "&amp;" => '&',
+            "&lt;" => '<',
+            "&gt;" => '>',
+            "&quot;" => '"',
+            "&apos;" => '\'',
+            _ => return None,
+        });
+        rest = &tail[semi + 1..];
+    }
+    out.push_str(rest);
+    Some(out)
 }
 
-/// GDELT DOC `artlist` JSON. Only headline, source domain, URL and seen date are kept; a row that fails any
-/// check is skipped. Duplicates by URL are skipped. At most 25.
-pub(crate) fn parse_gdelt(body: &[u8]) -> Vec<Headline> {
-    let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
+/// Google News RSS. A strict minimal reader, not a general XML parser: a DOCTYPE, an ENTITY, a processing
+/// instruction other than the XML declaration, or a body over 512 KB refuses the whole document (empty
+/// result); no entity other than the five predefined ones is ever expanded. Per `<item>` only title, link
+/// (https only), pubDate and the `<source>` name are kept; an item missing or failing any check is skipped.
+/// Duplicates by link are skipped. At most 40 items.
+pub(crate) fn parse_rss(body: &[u8]) -> Vec<Headline> {
+    if body.len() > NEWS_CAP {
+        return Vec::new();
+    }
+    let Ok(text) = std::str::from_utf8(body) else {
         return Vec::new();
     };
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("<!doctype") || lower.contains("<!entity") || lower.contains("<!element") {
+        return Vec::new();
+    }
+    if text
+        .match_indices("<?")
+        .any(|(i, _)| !text[i..].starts_with("<?xml "))
+    {
+        return Vec::new();
+    }
     let mut seen_urls = HashSet::new();
     let mut out = Vec::new();
-    for a in v
-        .get("articles")
-        .and_then(|a| a.as_array())
-        .into_iter()
-        .flatten()
-    {
-        let (Some(url), Some(title), Some(domain), Some(seen)) = (
-            a.get("url").and_then(|x| x.as_str()),
-            a.get("title").and_then(|x| x.as_str()),
-            a.get("domain").and_then(|x| x.as_str()),
-            a.get("seendate").and_then(|x| x.as_str()),
+    let mut rest = text;
+    while out.len() < MAX_HEADLINES {
+        let Some(a) = rest.find("<item>") else { break };
+        let after = &rest[a + 6..];
+        let Some(b) = after.find("</item>") else {
+            break;
+        };
+        let block = &after[..b];
+        rest = &after[b + 7..];
+        let (Some(title), Some(link), Some(date), Some(source)) = (
+            rss_elem(block, "title"),
+            rss_elem(block, "link"),
+            rss_elem(block, "pubDate"),
+            rss_elem(block, "source"),
         ) else {
             continue;
         };
-        let Some(url) = wp::clean_url(url) else {
+        let Some(url) = wp::clean_url(link.trim()) else {
             continue;
         };
-        let title = clean_text(title, MAX_TITLE);
-        let domain = domain.trim().to_ascii_lowercase();
-        let Ok(when) = NaiveDateTime::parse_from_str(seen, "%Y%m%dT%H%M%SZ") else {
+        let title = clean_text(&title, MAX_TITLE);
+        let source = clean_text(&source, MAX_SOURCE);
+        let Ok(when) = DateTime::parse_from_rfc2822(date.trim()) else {
             continue;
         };
-        if title.is_empty() || !valid_domain(&domain) || !seen_urls.insert(url.clone()) {
+        if title.is_empty() || source.is_empty() || !seen_urls.insert(url.clone()) {
             continue;
         }
         out.push(Headline {
             title,
-            domain,
+            source,
             url,
             seen: when.format("%Y-%m-%d").to_string(),
         });
-        if out.len() >= MAX_HEADLINES {
-            break;
-        }
     }
     out
 }
 
-fn gdelt_url(base: &str) -> String {
-    // A fixed query: finance and crypto news in English from the last three days, newest first.
+/// A fixed, generic query (finance and crypto news). Never built from user data.
+fn news_url(base: &str) -> String {
     format!(
-        "{base}/api/v2/doc/doc?query=(%22stock%20market%22%20OR%20earnings%20OR%20bitcoin%20OR%20ethereum%20OR%20semiconductors%20OR%20%22interest%20rates%22)%20sourcelang:english&mode=artlist&format=json&maxrecords=40&timespan=3d&sort=datedesc"
+        "{base}/rss/search?q=stock%20market%20OR%20earnings%20OR%20bitcoin%20OR%20ethereum%20OR%20semiconductors%20OR%20%22interest%20rates%22&hl=en-US&gl=US&ceid=US:en"
     )
 }
 
+/// The links are Google News redirect URLs: display and citation matching only, never fetched.
 pub(crate) async fn fetch_headlines(client: &Pinned, base: &str) -> Result<Vec<Headline>, FeedErr> {
-    let body = client.get(&gdelt_url(base), GDELT_CAP).await?;
-    Ok(parse_gdelt(&body))
+    let body = client.get(&news_url(base), NEWS_CAP).await?;
+    Ok(parse_rss(&body))
 }
 
 // ── Research: prompt and validation ──────────────────────────────────────────
@@ -512,7 +569,7 @@ pub(crate) fn build_prompt(h: &[Headline]) -> String {
             "[{}] {} | {} | {} | {}\n",
             i + 1,
             x.seen,
-            x.domain,
+            x.source,
             x.title,
             x.url
         ));
@@ -593,7 +650,7 @@ pub(crate) fn validate_picks(
                 None
             },
             reason_text: reason,
-            source_name: h.domain.clone(),
+            source_name: h.source.clone(),
             source_url: Some(h.url.clone()),
             confidence,
             risk_text: if risk.is_empty() {
@@ -659,7 +716,7 @@ pub(crate) async fn research_in<F, Fut>(
     data: &Path,
     now: DateTime<FixedOffset>,
     client: &Pinned,
-    gdelt_base: &str,
+    news_base: &str,
     llm: F,
 ) -> Result<ResearchEnd, String>
 where
@@ -670,7 +727,7 @@ where
         return Ok(ResearchEnd::Blocked);
     }
     let end = async {
-        let headlines = match fetch_headlines(client, gdelt_base).await {
+        let headlines = match fetch_headlines(client, news_base).await {
             Ok(h) if h.is_empty() => return Ok(ResearchEnd::NoHeadlines),
             Ok(h) => h,
             Err(_) => return Ok(ResearchEnd::FetchFailed),
@@ -743,7 +800,7 @@ async fn run_live(data: PathBuf) {
         .await
         .map_err(|_| "timeout".to_string())?
     };
-    let _ = research_in(&data, now_jst(), &client, market_feed::GDELT_BASE, llm).await;
+    let _ = research_in(&data, now_jst(), &client, market_feed::NEWS_BASE, llm).await;
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
@@ -820,7 +877,7 @@ mod tests {
     fn h(n: u32) -> Headline {
         Headline {
             title: format!("Headline {n}"),
-            domain: "news.example.com".into(),
+            source: "Example News".into(),
             url: format!("https://news.example.com/a{n}"),
             seen: "2026-11-19".into(),
         }
@@ -838,31 +895,96 @@ mod tests {
 
     // ── parse ──
 
+    fn item(title: &str, link: &str, date: &str, source: &str) -> String {
+        format!(
+            "<item><title>{title}</title><link>{link}</link><pubDate>{date}</pubDate><description>x</description><source url=\"https://x.example\">{source}</source></item>"
+        )
+    }
+    fn feed(items: &str) -> String {
+        format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><rss version=\"2.0\"><channel><title>t</title>{items}</channel></rss>")
+    }
+    const D: &str = "Thu, 19 Nov 2026 03:15:00 GMT";
+
     #[test]
-    fn gdelt_keeps_only_four_fields_and_skips_bad_rows() {
-        let body = br#"{"articles":[
-          {"url":"https://a.example.com/1","title":"  Chips\u0000 rally ","domain":"A.Example.com","seendate":"20261119T031500Z","language":"English","socialimage":"https://x/y.png"},
-          {"url":"https://a.example.com/1","title":"dup","domain":"a.example.com","seendate":"20261119T031500Z"},
-          {"url":"http://insecure.example.com/1","title":"http","domain":"insecure.example.com","seendate":"20261119T031500Z"},
-          {"url":"https://u:p@evil.example.com/1","title":"userinfo","domain":"evil.example.com","seendate":"20261119T031500Z"},
-          {"url":"https://b.example.com/2","title":"bad date","domain":"b.example.com","seendate":"yesterday"},
-          {"url":"https://c.example.com/3","title":"","domain":"c.example.com","seendate":"20261119T031500Z"},
-          {"url":"https://d.example.com/4","title":"bad domain","domain":"D D","seendate":"20261119T031500Z"},
-          {"title":"no url","domain":"e.example.com","seendate":"20261119T031500Z"}
-        ]}"#;
-        let r = parse_gdelt(body);
-        assert_eq!(r.len(), 1);
-        assert_eq!(r[0].title, "Chips rally");
-        assert_eq!(r[0].domain, "a.example.com");
+    fn rss_keeps_four_fields_and_skips_bad_items() {
+        let body = feed(&[
+            item("  Chips &amp; rally ", "https://news.google.com/rss/articles/a1?oc=5", D, "Example News"),
+            item("dup", "https://news.google.com/rss/articles/a1?oc=5", D, "Example News"),
+            item("http link", "http://news.google.com/rss/articles/a2", D, "X"),
+            item("userinfo", "https://u:p@evil.example.com/1", D, "X"),
+            item("bad date", "https://news.google.com/rss/articles/a3", "yesterday", "X"),
+            item("", "https://news.google.com/rss/articles/a4", D, "X"),
+            item("no source", "https://news.google.com/rss/articles/a5", D, ""),
+            "<item><title>no link</title><pubDate>Thu, 19 Nov 2026 03:15:00 GMT</pubDate></item>".to_string(),
+            "<item><title><![CDATA[Cdata <b>title</b>]]></title><link>https://news.google.com/rss/articles/a6</link><pubDate>Thu, 19 Nov 2026 03:15:00 GMT</pubDate><source url=\"u\">Src</source></item>".to_string(),
+        ]
+        .join(""));
+        let r = parse_rss(body.as_bytes());
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].title, "Chips & rally");
+        assert_eq!(r[0].source, "Example News");
+        assert_eq!(r[0].url, "https://news.google.com/rss/articles/a1?oc=5");
         assert_eq!(r[0].seen, "2026-11-19");
-        for junk in [&b"nope"[..], b"{}", b"[]", b"{\"articles\":5}"] {
-            assert!(parse_gdelt(junk).is_empty());
+        assert_eq!(r[1].title, "Cdata <b>title</b>");
+        for junk in [&b"nope"[..], b"{}", b"", &[0xff, 0xfe][..], b"<rss><item>"] {
+            assert!(parse_rss(junk).is_empty());
         }
+    }
+
+    #[test]
+    fn rss_refuses_doctype_entities_and_processing_instructions() {
+        let ok = item("T", "https://news.google.com/rss/articles/a1", D, "S");
+        assert_eq!(parse_rss(feed(&ok).as_bytes()).len(), 1);
+        let dtd = format!(
+            "<!DOCTYPE rss [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>{}",
+            feed(&ok)
+        );
+        assert!(parse_rss(dtd.as_bytes()).is_empty());
+        let lower = format!("<!doctype rss>{}", feed(&ok));
+        assert!(parse_rss(lower.as_bytes()).is_empty());
+        let ent = format!("<!ENTITY a \"b\">{}", feed(&ok));
+        assert!(parse_rss(ent.as_bytes()).is_empty());
+        let pi = format!("<?xml-stylesheet href=\"x\"?>{}", feed(&ok));
+        assert!(parse_rss(pi.as_bytes()).is_empty());
+        // An undeclared or custom entity in a field drops that item, and is never expanded.
+        let custom = feed(&item(
+            "A &xxe; B",
+            "https://news.google.com/rss/articles/a1",
+            D,
+            "S",
+        ));
+        assert!(parse_rss(custom.as_bytes()).is_empty());
+    }
+
+    #[test]
+    fn rss_caps_items_and_size() {
         let many: Vec<String> = (0..60)
-            .map(|i| format!(r#"{{"url":"https://a.example.com/{i}","title":"t{i}","domain":"a.example.com","seendate":"20261119T031500Z"}}"#))
+            .map(|i| {
+                item(
+                    &format!("t{i}"),
+                    &format!("https://news.google.com/rss/articles/{i}"),
+                    D,
+                    "S",
+                )
+            })
             .collect();
-        let big = format!(r#"{{"articles":[{}]}}"#, many.join(","));
-        assert_eq!(parse_gdelt(big.as_bytes()).len(), 25);
+        assert_eq!(parse_rss(feed(&many.join("")).as_bytes()).len(), 40);
+        let big = feed(&format!(
+            "{}{}",
+            item("T", "https://news.google.com/rss/articles/a1", D, "S"),
+            " ".repeat(NEWS_CAP)
+        ));
+        assert!(parse_rss(big.as_bytes()).is_empty());
+    }
+
+    #[test]
+    fn news_query_is_fixed_and_generic() {
+        let u = news_url("https://news.google.com");
+        assert!(
+            u.starts_with("https://news.google.com/rss/search?q=stock%20market%20OR%20earnings")
+        );
+        assert!(u.ends_with("&hl=en-US&gl=US&ceid=US:en"));
+        assert!(!news_url("http://127.0.0.1:1").contains("example"));
     }
 
     // ── validation ──
@@ -884,7 +1006,7 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].ticker, "AAPL");
         // Source name and url come from the fetched headline, not the model.
-        assert_eq!(items[0].source_name, "news.example.com");
+        assert_eq!(items[0].source_name, "Example News");
         assert_eq!(
             items[0].source_url.as_deref(),
             Some("https://news.example.com/a1")
@@ -965,9 +1087,9 @@ mod tests {
     #[test]
     fn the_prompt_carries_headlines_as_data_and_no_personal_data() {
         let p = build_prompt(&[h(1)]);
-        assert!(p.contains(
-            "[1] 2026-11-19 | news.example.com | Headline 1 | https://news.example.com/a1"
-        ));
+        assert!(
+            p.contains("[1] 2026-11-19 | Example News | Headline 1 | https://news.example.com/a1")
+        );
         assert!(RESEARCH_SYSTEM.contains("untrusted data"));
         assert!(RESEARCH_SYSTEM.contains("not financial advice"));
     }
@@ -1001,14 +1123,19 @@ mod tests {
         Pinned::test_loopback(addr, blocked)
     }
 
-    fn gdelt_body() -> String {
-        r#"{"articles":[{"url":"https://news.example.com/a1","title":"Chip makers rally","domain":"news.example.com","seendate":"20261119T031500Z"}]}"#.into()
+    fn news_body() -> String {
+        feed(&item(
+            "Chip makers rally",
+            "https://news.example.com/a1",
+            D,
+            "Example News",
+        ))
     }
 
     #[tokio::test]
     async fn research_stores_only_cited_picks_as_proposals() {
         let d = dirs();
-        let (addr, hits) = serve_once(gdelt_body()).await;
+        let (addr, hits) = serve_once(news_body()).await;
         let c = local_client(&addr, false);
         let mut seen_prompt = String::new();
         let model_reply = reply(
@@ -1042,7 +1169,7 @@ mod tests {
         assert_eq!(w.research.last_outcome.as_deref(), Some("done"));
         assert_eq!(w.research.last_proposed, 1);
         // A second run does not re-propose an open ticker.
-        let (addr, _) = serve_once(gdelt_body()).await;
+        let (addr, _) = serve_once(news_body()).await;
         let c = local_client(&addr, false);
         let again = reply(&stock_pick("NVDA", "https://news.example.com/a1"));
         let end = research_in(
@@ -1060,7 +1187,7 @@ mod tests {
     #[tokio::test]
     async fn research_blocked_makes_no_request_and_no_model_call() {
         let d = dirs();
-        let (addr, hits) = serve_once(gdelt_body()).await;
+        let (addr, hits) = serve_once(news_body()).await;
         let c = local_client(&addr, true);
         let called = std::cell::Cell::new(false);
         let end = research_in(&d.data, t(NOW), &c, &format!("http://{addr}"), |_, _| {
@@ -1079,7 +1206,7 @@ mod tests {
     #[tokio::test]
     async fn research_failures_are_fixed_codes() {
         let d = dirs();
-        let (addr, _) = serve_once(r#"{"articles":[]}"#.into()).await;
+        let (addr, _) = serve_once(feed("")).await;
         let c = local_client(&addr, false);
         let end = research_in(
             &d.data,
@@ -1091,7 +1218,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(end, ResearchEnd::NoHeadlines);
-        let (addr, _) = serve_once(gdelt_body()).await;
+        let (addr, _) = serve_once(news_body()).await;
         let c = local_client(&addr, false);
         let end = research_in(
             &d.data,
@@ -1168,7 +1295,7 @@ mod tests {
             ticker: ticker.into(),
             coin_id: crypto.then(|| "bitcoin".to_string()),
             reason_text: "Because of a headline.".into(),
-            source_name: "news.example.com".into(),
+            source_name: "Example News".into(),
             source_url: Some("https://news.example.com/a1".into()),
             confidence: WatchConfidence::Low,
             risk_text: "Risk.".into(),

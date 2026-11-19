@@ -1,8 +1,9 @@
 //! Watchlist price feed (decision 0038 #5, Taisun 2026-11-19). The only code that talks to the price hosts.
 //!
-//! Hosts (read-only, keyless, `host:port` pinned, https only): `api.coingecko.com:443` (crypto simple price),
-//! `stooq.com:443` (stock CSV quote) and `api.gdeltproject.org:443` (headlines for Amara's research, used by
-//! `watchlist.rs` through the same pinned client). Any other host is refused before a connection is made.
+//! Hosts (read-only, keyless, `host:port` pinned, https only, decisions 0038 and 0039): `api.coingecko.com:443`
+//! (crypto simple price), `query1.finance.yahoo.com:443` (stock chart JSON) and `news.google.com:443` (RSS
+//! headlines for Amara's research, used by `watchlist.rs` through the same pinned client). Any other host is
+//! refused before a connection is made.
 //!
 //! Rules this file keeps (each has a test):
 //! - Every call goes through `Pinned::get`. It answers `Blocked` BEFORE any request when
@@ -22,22 +23,25 @@
 use super::local_store::{iso, now_jst, read_json, write_json_atomic};
 use super::shared::http::{self, HttpSpec};
 use super::shared::task::{blocking, JoinErr};
-use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, FixedOffset};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-/// The three hosts decision 0038 approved, as `host:port`. Nothing else is reachable from this module.
+/// The three approved hosts, as `host:port`. Nothing else is reachable from this module.
 pub(crate) const COINGECKO: &str = "api.coingecko.com:443";
-pub(crate) const STOOQ: &str = "stooq.com:443";
-pub(crate) const GDELT: &str = "api.gdeltproject.org:443";
-pub(crate) const PROD_HOSTS: &[&str] = &[COINGECKO, STOOQ, GDELT];
+pub(crate) const YAHOO: &str = "query1.finance.yahoo.com:443";
+pub(crate) const NEWS: &str = "news.google.com:443";
+pub(crate) const PROD_HOSTS: &[&str] = &[COINGECKO, YAHOO, NEWS];
 
 pub(crate) const COINGECKO_BASE: &str = "https://api.coingecko.com";
-pub(crate) const STOOQ_BASE: &str = "https://stooq.com";
-pub(crate) const GDELT_BASE: &str = "https://api.gdeltproject.org";
+pub(crate) const YAHOO_BASE: &str = "https://query1.finance.yahoo.com";
+pub(crate) const NEWS_BASE: &str = "https://news.google.com";
+
+/// A generic browser-like User-Agent. It names no app, person or machine.
+const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
 
 /// Poll interval, in minutes: at most one poll this often.
 pub const POLL_MINUTES: i64 = 15;
@@ -49,7 +53,7 @@ const FIRST_DELAY: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(15);
 const CAP_PRICE: usize = 64 * 1024;
-const CAP_CSV: usize = 4 * 1024;
+const CAP_YAHOO: usize = 256 * 1024;
 const FILE: &str = "prices.json";
 const MAX_BYTES: u64 = 256 * 1024;
 const MAX_QUOTES: usize = 40;
@@ -112,7 +116,7 @@ impl Pinned {
 
     fn build(allowed: Vec<String>, spec: HttpSpec, gate: fn() -> bool) -> Result<Self, FeedErr> {
         let client = http::builder(spec)
-            .user_agent("AmaraOS-watchlist/1")
+            .user_agent(USER_AGENT)
             .build()
             .map_err(|_| FeedErr::Network)?;
         Ok(Pinned {
@@ -207,14 +211,14 @@ fn production_spec() -> HttpSpec {
 /// Where each service lives. Production uses the three constants; tests point at a loopback server.
 pub(crate) struct Bases {
     pub coingecko: String,
-    pub stooq: String,
+    pub yahoo: String,
 }
 
 impl Bases {
     pub(crate) fn production() -> Self {
         Bases {
             coingecko: COINGECKO_BASE.into(),
-            stooq: STOOQ_BASE.into(),
+            yahoo: YAHOO_BASE.into(),
         }
     }
 }
@@ -272,48 +276,53 @@ pub(crate) fn parse_coingecko(
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct StooqQuote {
+pub(crate) struct YahooQuote {
     pub price: f64,
-    pub date: NaiveDate,
-    pub time: NaiveTime,
+    /// `regularMarketTime`, unix seconds.
+    pub time: i64,
 }
 
-/// Stooq CSV (`f=sd2t2c&h&e=csv`): header `Symbol,Date,Time,Close` and exactly one row for `want`
-/// (`AAPL.US`). `N/D` anywhere is `Unavailable`; anything else off-shape is `Parse`.
-pub(crate) fn parse_stooq(body: &[u8], want: &str) -> Result<StooqQuote, FeedErr> {
-    let text = std::str::from_utf8(body).map_err(|_| FeedErr::Parse)?;
-    let lines: Vec<&str> = text
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .collect();
-    if lines.len() != 2 || lines[0] != "Symbol,Date,Time,Close" {
-        return Err(FeedErr::Parse);
-    }
-    let cols: Vec<&str> = lines[1].split(',').map(str::trim).collect();
-    if cols.len() != 4 || !cols[0].eq_ignore_ascii_case(want) {
-        return Err(FeedErr::Parse);
-    }
-    if cols[1..].iter().any(|c| c.eq_ignore_ascii_case("N/D")) {
+/// Yahoo chart JSON: `chart.result[0].meta` with `regularMarketPrice` (number), `regularMarketTime` (unix
+/// seconds), `currency` (must be `USD`) and `exchangeTimezoneName` (string, shape-checked only). An error
+/// object, no result, a non-USD currency or a missing price is `Unavailable`; a wrong type or a bad number is
+/// `Parse`. Never `0`.
+pub(crate) fn parse_yahoo(body: &[u8]) -> Result<YahooQuote, FeedErr> {
+    let v: serde_json::Value = serde_json::from_slice(body).map_err(|_| FeedErr::Parse)?;
+    let chart = v.get("chart").ok_or(FeedErr::Parse)?;
+    if chart.get("error").is_some_and(|e| !e.is_null()) {
         return Err(FeedErr::Unavailable);
     }
-    let date = NaiveDate::parse_from_str(cols[1], "%Y-%m-%d").map_err(|_| FeedErr::Parse)?;
-    let time = NaiveTime::parse_from_str(cols[2], "%H:%M:%S").map_err(|_| FeedErr::Parse)?;
-    let price = cols[3]
-        .parse::<f64>()
-        .ok()
-        .and_then(good_price)
+    let meta = chart
+        .get("result")
+        .and_then(|r| r.as_array())
+        .and_then(|r| r.first())
+        .and_then(|r| r.get("meta"))
+        .ok_or(FeedErr::Unavailable)?;
+    match meta.get("currency").and_then(|c| c.as_str()) {
+        Some("USD") => {}
+        _ => return Err(FeedErr::Unavailable),
+    }
+    if meta
+        .get("exchangeTimezoneName")
+        .is_some_and(|z| z.as_str().is_none_or(|z| z.is_empty() || z.len() > 64))
+    {
+        return Err(FeedErr::Parse);
+    }
+    let price = match meta.get("regularMarketPrice") {
+        None | Some(serde_json::Value::Null) => return Err(FeedErr::Unavailable),
+        Some(p) => p.as_f64().and_then(good_price).ok_or(FeedErr::Parse)?,
+    };
+    let time = meta
+        .get("regularMarketTime")
+        .and_then(|t| t.as_i64())
+        .filter(|t| *t > 0)
         .ok_or(FeedErr::Parse)?;
-    Ok(StooqQuote { price, date, time })
+    Ok(YahooQuote { price, time })
 }
 
-/// Market closed as the quote itself reports it: no trade today, or the last trade is older than
-/// `QUOTE_FRESH_MIN` minutes. Stooq stamps Central European time (UTC+1 or +2); the later reading (UTC+1)
-/// is used so a quote is never called closed too early.
-pub(crate) fn stooq_closed(q: &StooqQuote, now: DateTime<FixedOffset>) -> bool {
-    let now_utc = now.with_timezone(&Utc).naive_utc();
-    let quote_utc = q.date.and_time(q.time) - ChronoDuration::hours(1);
-    now_utc - quote_utc > ChronoDuration::minutes(QUOTE_FRESH_MIN)
+/// Market closed as the quote itself reports it: the last trade is older than `QUOTE_FRESH_MIN` minutes.
+pub(crate) fn yahoo_closed(q: &YahooQuote, now: DateTime<FixedOffset>) -> bool {
+    now.timestamp() - q.time > QUOTE_FRESH_MIN * 60
 }
 
 // ── Cache ────────────────────────────────────────────────────────────────────
@@ -550,7 +559,7 @@ fn record(
 /// One fetched price: slot key, (price, market closed) or the failure, currency.
 type Fetched = (String, Result<(f64, bool), FeedErr>, &'static str);
 
-/// One poll: a single CoinGecko call for all crypto picks, then one Stooq call per stock pick. Returns
+/// One poll: a single CoinGecko call for all crypto picks, then one Yahoo call per stock pick. Returns
 /// `Blocked` before any request when the gate is closed, and `TooSoon` inside the 15-minute window.
 pub(crate) async fn poll_in(
     data: &Path,
@@ -605,10 +614,12 @@ pub(crate) async fn poll_in(
         if !valid_stock_ticker(&p.ticker) {
             continue;
         }
-        let sym = format!("{}.us", p.ticker.to_lowercase());
-        let url = format!("{}/q/l/?s={sym}&f=sd2t2c&h&e=csv", bases.stooq);
-        let r = match client.get(&url, CAP_CSV).await {
-            Ok(body) => parse_stooq(&body, &sym).map(|q| (q.price, stooq_closed(&q, now))),
+        let url = format!(
+            "{}/v8/finance/chart/{}?range=1d&interval=15m",
+            bases.yahoo, p.ticker
+        );
+        let r = match client.get(&url, CAP_YAHOO).await {
+            Ok(body) => parse_yahoo(&body).map(|q| (q.price, yahoo_closed(&q, now))),
             Err(e) => Err(e),
         };
         results.push((format!("stock:{}", p.ticker), r, "USD"));
@@ -736,7 +747,7 @@ mod tests {
     fn bases(addr: &str) -> Bases {
         Bases {
             coingecko: format!("http://{addr}"),
-            stooq: format!("http://{addr}"),
+            yahoo: format!("http://{addr}"),
         }
     }
 
@@ -761,12 +772,12 @@ mod tests {
             PROD_HOSTS,
             [
                 "api.coingecko.com:443",
-                "stooq.com:443",
-                "api.gdeltproject.org:443"
+                "query1.finance.yahoo.com:443",
+                "news.google.com:443"
             ]
         );
-        assert!(COINGECKO_BASE.starts_with("https://") && STOOQ_BASE.starts_with("https://"));
-        assert!(GDELT_BASE.starts_with("https://"));
+        assert!(COINGECKO_BASE.starts_with("https://") && YAHOO_BASE.starts_with("https://"));
+        assert!(NEWS_BASE.starts_with("https://"));
         let spec_src = include_str!("market_feed.rs");
         let prod = &spec_src[spec_src
             .find("pub(crate) fn production() -> Result")
@@ -826,7 +837,12 @@ mod tests {
             "https://evil.example/x",
             "https://api.coingecko.com.evil.example/x",
             "https://api.coingecko.com:8443/x",
-            "https://stooq.com@evil.example/x",
+            "https://query1.finance.yahoo.com@evil.example/x",
+            // The retired hosts are refused.
+            "https://stooq.com/q/l/?s=aapl.us",
+            "https://api.gdeltproject.org/api/v2/doc/doc",
+            "https://query1.finance.yahoo.com:8443/x",
+            "http://news.google.com/rss/search",
         ] {
             assert_eq!(prod.get(u, 100).await, Err(FeedErr::HostNotAllowed), "{u}");
         }
@@ -902,31 +918,72 @@ mod tests {
         }
     }
 
+    fn chart(meta: &str) -> String {
+        format!(r#"{{"chart":{{"result":[{{"meta":{{{meta}}}}}],"error":null}}}}"#)
+    }
+
     #[test]
-    fn stooq_parse_edge_cases() {
-        let good = b"Symbol,Date,Time,Close\r\nAAPL.US,2026-11-18,22:00:00,230.5\r\n";
-        let q = parse_stooq(good, "aapl.us").unwrap();
+    fn yahoo_parse_gives_null_never_zero() {
+        let good = chart(
+            r#""currency":"USD","regularMarketPrice":230.5,"regularMarketTime":1763500000,"exchangeTimezoneName":"America/New_York""#,
+        );
+        let q = parse_yahoo(good.as_bytes()).unwrap();
         assert_eq!(q.price, 230.5);
-        assert_eq!(q.date.to_string(), "2026-11-18");
-        // Unknown symbol: every field is N/D.
-        let nd = b"Symbol,Date,Time,Close\nXXXX.US,N/D,N/D,N/D\n";
-        assert_eq!(parse_stooq(nd, "xxxx.us"), Err(FeedErr::Unavailable));
-        for (body, why) in [
-            (&b""[..], "empty"),
-            (b"Symbol,Date,Time,Close\n", "header only"),
-            (b"Symbol,Date,Time,Open\nAAPL.US,2026-11-18,22:00:00,1\n", "wrong header"),
-            (b"Symbol,Date,Time,Close\nMSFT.US,2026-11-18,22:00:00,1\n", "wrong symbol"),
-            (b"Symbol,Date,Time,Close\nAAPL.US,2026-11-18,22:00:00,abc\n", "text price"),
-            (b"Symbol,Date,Time,Close\nAAPL.US,2026-11-18,22:00:00,0\n", "zero"),
-            (b"Symbol,Date,Time,Close\nAAPL.US,2026-11-18,22:00:00,-1\n", "negative"),
-            (b"Symbol,Date,Time,Close\nAAPL.US,2026-13-18,22:00:00,1\n", "bad date"),
-            (b"Symbol,Date,Time,Close\nAAPL.US,2026-11-18,25:00:00,1\n", "bad time"),
-            (b"Symbol,Date,Time,Close\nAAPL.US,2026-11-18,22:00:00,1,9\n", "extra column"),
-            (b"Symbol,Date,Time,Close\nAAPL.US,2026-11-18,22:00:00,1\nAAPL.US,2026-11-18,22:00:00,2\n", "two rows"),
-            (b"Symbol,Date,Time,Close\nAAPL.US,2026-11-18,22:00:00,NaN\n", "NaN"),
-            (&[0xff, 0xfe][..], "not utf8"),
+        assert_eq!(q.time, 1763500000);
+        // Error object, no result, empty result.
+        let err = br#"{"chart":{"result":null,"error":{"code":"Not Found","description":"No data found"}}}"#;
+        assert_eq!(parse_yahoo(err), Err(FeedErr::Unavailable));
+        assert_eq!(
+            parse_yahoo(br#"{"chart":{"result":[],"error":null}}"#),
+            Err(FeedErr::Unavailable)
+        );
+        // Non-USD is null, not converted.
+        let jpy =
+            chart(r#""currency":"JPY","regularMarketPrice":3000.0,"regularMarketTime":1763500000"#);
+        assert_eq!(parse_yahoo(jpy.as_bytes()), Err(FeedErr::Unavailable));
+        let nocur = chart(r#""regularMarketPrice":3.0,"regularMarketTime":1763500000"#);
+        assert_eq!(parse_yahoo(nocur.as_bytes()), Err(FeedErr::Unavailable));
+        // Missing or null price.
+        let missing = chart(r#""currency":"USD","regularMarketTime":1763500000"#);
+        assert_eq!(parse_yahoo(missing.as_bytes()), Err(FeedErr::Unavailable));
+        let null =
+            chart(r#""currency":"USD","regularMarketPrice":null,"regularMarketTime":1763500000"#);
+        assert_eq!(parse_yahoo(null.as_bytes()), Err(FeedErr::Unavailable));
+        for (meta, why) in [
+            (
+                r#""currency":"USD","regularMarketPrice":0,"regularMarketTime":1763500000"#,
+                "zero",
+            ),
+            (
+                r#""currency":"USD","regularMarketPrice":-4,"regularMarketTime":1763500000"#,
+                "negative",
+            ),
+            (
+                r#""currency":"USD","regularMarketPrice":"12","regularMarketTime":1763500000"#,
+                "text price",
+            ),
+            (
+                r#""currency":"USD","regularMarketPrice":1e300,"regularMarketTime":1763500000"#,
+                "huge",
+            ),
+            (r#""currency":"USD","regularMarketPrice":5"#, "no time"),
+            (
+                r#""currency":"USD","regularMarketPrice":5,"regularMarketTime":"now""#,
+                "text time",
+            ),
+            (
+                r#""currency":"USD","regularMarketPrice":5,"regularMarketTime":1763500000,"exchangeTimezoneName":7"#,
+                "bad tz",
+            ),
         ] {
-            assert_eq!(parse_stooq(body, "aapl.us"), Err(FeedErr::Parse), "{why}");
+            assert_eq!(
+                parse_yahoo(chart(meta).as_bytes()),
+                Err(FeedErr::Parse),
+                "{why}"
+            );
+        }
+        for body in [&b""[..], b"not json", b"[]", b"{}", b"null"] {
+            assert!(parse_yahoo(body).is_err());
         }
     }
 
@@ -1035,30 +1092,29 @@ mod tests {
     }
 
     #[test]
-    fn stooq_closed_by_quote_age() {
-        let q = |time: &str| StooqQuote {
+    fn yahoo_closed_by_quote_age() {
+        let now = t("2026-11-19T12:00:00+09:00");
+        let q = |age_s: i64| YahooQuote {
             price: 1.0,
-            date: NaiveDate::from_ymd_opt(2026, 11, 18).unwrap(),
-            time: NaiveTime::parse_from_str(time, "%H:%M:%S").unwrap(),
+            time: now.timestamp() - age_s,
         };
-        // 22:00 CET is 21:00 UTC. At 21:20 UTC (06:20 JST next day) the quote is 20 min old: open.
-        assert!(!stooq_closed(
-            &q("22:00:00"),
-            t("2026-11-19T06:20:00+09:00")
-        ));
-        // An hour later it is closed.
-        assert!(stooq_closed(&q("22:00:00"), t("2026-11-19T07:30:00+09:00")));
-        // A quote from yesterday is closed.
-        assert!(stooq_closed(&q("17:00:00"), t("2026-11-19T12:00:00+09:00")));
+        assert!(!yahoo_closed(&q(20 * 60), now));
+        assert!(!yahoo_closed(&q(45 * 60), now));
+        assert!(yahoo_closed(&q(45 * 60 + 1), now));
+        assert!(yahoo_closed(&q(20 * 3600), now));
     }
 
     #[tokio::test]
     async fn poll_caches_good_prices_keeps_the_last_good_and_reports_status() {
         let d = temp_dir("mf-poll");
-        let csv = "Symbol,Date,Time,Close\nAAPL.US,2026-11-19,02:50:00,230.5\n";
+        // 03:00 UTC now; the AAPL quote is from 01:50 UTC, 70 minutes old.
+        let yahoo = chart(&format!(
+            r#""currency":"USD","regularMarketPrice":230.5,"regularMarketTime":{}"#,
+            t("2026-11-19T10:50:00+09:00").timestamp()
+        ));
         let (addr, hits, lines) = serve(vec![
             ok(r#"{"bitcoin":{"usd":67000.5},"nope":{}}"#),
-            ok(csv),
+            ok(&yahoo),
         ])
         .await;
         let c = test_client(&addr, false);
@@ -1067,13 +1123,13 @@ mod tests {
             crypto("nope", "NOPE"),
             stock("AAPL"),
         ];
-        let now = t("2026-11-19T12:00:00+09:00"); // 03:00 UTC: AAPL quote 02:50 CET = 01:50 UTC, 70 min old
+        let now = t("2026-11-19T12:00:00+09:00");
         let out = poll_in(&d, &c, &bases(&addr), &picks, now).await.unwrap();
         assert_eq!(out, PollOutcome::Ran { good: 2, wanted: 3 });
         assert_eq!(hits.load(Ordering::SeqCst), 2);
         let l = lines.lock().unwrap().clone();
         assert!(l[0].contains("ids=bitcoin,nope") && l[0].contains("vs_currencies=usd"));
-        assert!(l[1].contains("s=aapl.us"));
+        assert!(l[1].contains("/v8/finance/chart/AAPL?range=1d&interval=15m"));
 
         let q = quotes_in(&d, &picks, now).unwrap();
         assert_eq!(q[0].price, Some(67000.5));
@@ -1228,7 +1284,12 @@ mod tests {
             .collect();
         for h in hosts {
             assert!(
-                ["api.coingecko.com", "stooq.com", "api.gdeltproject.org"].contains(&h),
+                [
+                    "api.coingecko.com",
+                    "query1.finance.yahoo.com",
+                    "news.google.com"
+                ]
+                .contains(&h),
                 "unexpected host {h}"
             );
         }

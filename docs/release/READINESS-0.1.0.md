@@ -112,7 +112,7 @@ then; counts cannot prove no file was altered. This run made no write to those f
 
 ## Open gates (all waiting on Taisun)
 - Stage H inputs: `tasks/proposed/stage-h-gates.md` (login mechanism, Developer ID, notary profile, version bump, entitlements, manifest host, updater key, switch, swap host).
-- Feeds: approved by decision 0038 (2026-11-19). Outside calls, all read-only, keyless, https, `host:443` pinned, behind `NEXUS_OUTBOUND_DISABLED` / navy / Settings > Outbound: `api.coingecko.com` (crypto prices), `stooq.com` (stock prices), `api.gdeltproject.org` (headlines for Amara's research). Not run against the real hosts yet. Design still has to wire the watchlist panels (`LiveMarket` in `marketProposalsLive.ts`).
+- Feeds: approved by decision 0038, hosts swapped by decision 0039 (2026-11-19). Outside calls, all read-only, keyless, https, `host:443` pinned, behind `NEXUS_OUTBOUND_DISABLED` / navy / Settings > Outbound: `api.coingecko.com` (crypto prices), `query1.finance.yahoo.com` (stock prices), `news.google.com` (RSS headlines for Amara's research). Not run against the real hosts yet. Design still has to wire the watchlist panels (`LiveMarket` in `marketProposalsLive.ts`).
 - Treasury inputs: provider exports, customer data, results files, and "77 vs 7" (0032 item 7).
 - Keychain approvals (Oura, coach, Telegram) and the Telegram token rotation (last).
 - Relay bot: bot, token, chat, Send Test.
