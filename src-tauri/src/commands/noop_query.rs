@@ -279,6 +279,9 @@ pub(crate) struct PrivateCopy {
     sha: String,
     /// None when the source changed while it was being copied: never reused.
     stamp: Option<SourceStamp>,
+    /// The copy's own dev/ino/size/mtime/ctime right after it was locked (0500). Any later write,
+    /// chmod or replacement changes ctime (or ino), so a tampered copy is never reused unhashed.
+    copy_stamp: Option<SourceStamp>,
 }
 
 /// Open `binary` with O_NOFOLLOW and fstat it: a regular file owned by us.
@@ -340,6 +343,7 @@ impl PrivateCopy {
             path: path.clone(),
             sha: String::new(),
             stamp: None,
+            copy_stamp: None,
         };
         let mut out = std::fs::OpenOptions::new()
             .write(true)
@@ -366,6 +370,9 @@ impl PrivateCopy {
             .map_err(|_| bad("cannot lock the private copy"))?;
         guard.sha = hex::encode(h.finalize());
         pin_decision(&guard.sha, pins, require_pin)?;
+        guard.copy_stamp = std::fs::symlink_metadata(&path)
+            .ok()
+            .map(|m| SourceStamp::of(&m));
         let before = SourceStamp::of(meta);
         guard.stamp = src
             .metadata()
@@ -394,6 +401,8 @@ impl PrivateCopy {
             && d.is_dir()
             && d.uid() == uid
             && d.permissions().mode() & 0o777 == 0o700
+            && self.copy_stamp.is_some()
+            && self.copy_stamp == Some(SourceStamp::of(&f))
     }
 }
 
@@ -1889,6 +1898,29 @@ mod tests {
             std::fs::metadata(d.path()).unwrap().permissions().mode() & 0o777,
             0o500
         );
+        PRIVATE_BASE.with(|b| *b.borrow_mut() = None);
+    }
+
+    #[test]
+    fn copy_cache_rejects_a_copy_rewritten_with_the_same_mode_and_size() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let h = FakeHome::new();
+        let _base = private_base_in(&h, "base-rewrite");
+        let p = h.script("echo safe");
+        let a = prepare_cached(&p, &[], false).unwrap();
+        let path = a.path().to_path_buf();
+        drop(a);
+        // Same-size different bytes, mode put back to 0500: only the copy's own ctime betrays it.
+        let len = std::fs::metadata(&path).unwrap().len() as usize;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.write_all(&vec![b'#'; len]).unwrap();
+        drop(f);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let b = prepare_cached(&p, &[], false).unwrap();
+        assert_ne!(b.path(), path, "a rewritten copy is never reused");
+        assert_eq!(std::fs::read(b.path()).unwrap(), std::fs::read(&p).unwrap());
         PRIVATE_BASE.with(|b| *b.borrow_mut() = None);
     }
 
