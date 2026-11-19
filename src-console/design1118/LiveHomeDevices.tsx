@@ -56,8 +56,8 @@ function LevelSlider({ d, busy, onCommit }: { d: Dev; busy: boolean; onCommit: (
   if (seen !== current) { setSeen(current); if (current != null) setVal(current); }
   useEffect(() => { if (current != null) latest.current = current; }, [current]);
   useEffect(() => () => { if (timer.current != null) window.clearTimeout(timer.current); }, []);
-  if (!cfg) return null;
   const commit = () => {
+    if (!cfg) return;
     if (timer.current != null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       timer.current = null;
@@ -66,10 +66,24 @@ function LevelSlider({ d, busy, onCommit }: { d: Dev; busy: boolean; onCommit: (
       onCommit(d, cfg.service, v / cfg.scale);
     }, COMMIT_DELAY_MS);
   };
+  // The native `change` fires once on release, even when the pointer is let go outside the input
+  // (React's onChange follows every `input` while dragging). The debounce folds it with pointerup / keyup.
+  const inputRef = useRef<HTMLInputElement>(null);
+  const commitRef = useRef(commit);
+  useEffect(() => { commitRef.current = commit; });
+  const hasSlider = cfg != null;
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const onRelease = () => commitRef.current();
+    el.addEventListener("change", onRelease);
+    return () => el.removeEventListener("change", onRelease);
+  }, [hasSlider]);
+  if (!cfg) return null;
   return (
     <label className="d18-slider">
       <span>{cfg.word.charAt(0).toUpperCase() + cfg.word.slice(1)}</span>
-      <input type="range" min={cfg.min} max={100} step={1} value={val} disabled={busy}
+      <input ref={inputRef} type="range" min={cfg.min} max={100} step={1} value={val} disabled={busy}
         aria-label={`${d.name} ${cfg.word}`} aria-valuetext={`${val}%`}
         onChange={(e) => { const v = Number(e.target.value); latest.current = v; setVal(v); }}
         onPointerUp={commit}

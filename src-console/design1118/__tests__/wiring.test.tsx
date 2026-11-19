@@ -131,8 +131,8 @@ describe("Smart home live level sliders", () => {
     render(<LiveHomeDevices calls={calls as never} />);
     const sl = (await screen.findByRole("slider", { name: "Lamp brightness" })) as HTMLInputElement;
     expect(sl.getAttribute("aria-valuetext")).toBe("50%");
-    fireEvent.change(sl, { target: { value: "62" } });
-    fireEvent.change(sl, { target: { value: "70" } });
+    fireEvent.input(sl, { target: { value: "62" } });
+    fireEvent.input(sl, { target: { value: "70" } });
     expect(sl.getAttribute("aria-valuetext")).toBe("70%");
     await new Promise((r) => setTimeout(r, 400));
     expect(calls.set).not.toHaveBeenCalled();
@@ -143,12 +143,26 @@ describe("Smart home live level sliders", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
     await waitFor(() => expect(calls.undo).toHaveBeenCalledWith("h1"));
   });
+  // Security review LOW-2: a drag released outside the input fires no pointerup there, but the native
+  // change event still fires once on release, so the value is committed exactly once.
+  it("commits once from the native change event when the pointer is released elsewhere", async () => {
+    const calls = mk([dev({})]);
+    render(<LiveHomeDevices calls={calls as never} />);
+    const sl = (await screen.findByRole("slider", { name: "Lamp brightness" })) as HTMLInputElement;
+    fireEvent.input(sl, { target: { value: "64" } });
+    fireEvent.input(sl, { target: { value: "66" } });
+    await new Promise((r) => setTimeout(r, 400));
+    expect(calls.set).not.toHaveBeenCalled();
+    sl.dispatchEvent(new Event("change", { bubbles: true }));
+    await waitFor(() => expect(calls.set).toHaveBeenCalledTimes(1));
+    expect(calls.set).toHaveBeenCalledWith("light.a", "turn_on", 66, "typed");
+  });
   it("commits on a key release and sends media volume as 0..1", async () => {
     const calls = mk([dev({ entityId: "media_player.tv", name: "TV", deviceType: "media", services: ["media_play", "media_pause", "volume_set"], levelService: "volume_set", level: 0.3, levelMax: 1 })]);
     render(<LiveHomeDevices calls={calls as never} />);
     const sl = await screen.findByRole("slider", { name: "TV volume" });
     expect((sl as HTMLInputElement).value).toBe("30");
-    fireEvent.change(sl, { target: { value: "40" } });
+    fireEvent.input(sl, { target: { value: "40" } });
     fireEvent.keyUp(sl, { key: "Tab" });
     await new Promise((r) => setTimeout(r, 400));
     expect(calls.set).not.toHaveBeenCalled();
@@ -162,7 +176,7 @@ describe("Smart home live level sliders", () => {
     render(<LiveHomeDevices calls={calls as never} />);
     expect(screen.queryByRole("slider", { name: "Plain brightness" })).toBeNull();
     const sl = (await screen.findByRole("slider", { name: "Lamp brightness" })) as HTMLInputElement;
-    fireEvent.change(sl, { target: { value: "20" } });
+    fireEvent.input(sl, { target: { value: "20" } });
     fireEvent.pointerUp(sl);
     await waitFor(() => expect(set).toHaveBeenCalled());
     await waitFor(() => expect(sl.disabled).toBe(true));
@@ -174,7 +188,7 @@ describe("Smart home live level sliders", () => {
     render(<LiveHomeDevices calls={calls as never} />);
     const sl = await screen.findByRole("slider", { name: "Blind position" });
     expect(screen.getAllByText(/Asks for your approval on this Mac/).length).toBe(2);
-    fireEvent.change(sl, { target: { value: "10" } });
+    fireEvent.input(sl, { target: { value: "10" } });
     fireEvent.pointerUp(sl);
     await waitFor(() => expect(calls.set).toHaveBeenCalledWith("cover.b", "set_cover_position", 10, "typed"));
     fireEvent.click(screen.getByRole("button", { name: /Activate Evening/ }));
@@ -190,7 +204,7 @@ describe("Smart home sample sliders", () => {
     render(<SampleHomeControls />);
     expect(screen.getAllByText(/Sample data/).length).toBeGreaterThan(0);
     const sl = screen.getByRole("slider", { name: "Living light brightness" });
-    fireEvent.change(sl, { target: { value: "30" } });
+    fireEvent.input(sl, { target: { value: "30" } });
     fireEvent.pointerUp(sl);
     expect(invoke).not.toHaveBeenCalled();
     delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;

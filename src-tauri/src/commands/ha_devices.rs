@@ -555,9 +555,13 @@ fn prior_call(domain: &str, service: &str, d: &HaDevice) -> Option<(String, Opti
     match (domain, service) {
         ("light", "turn_on" | "turn_off" | "toggle") => {
             if on {
+                // A brightness restore only where the device accepts a level; else a plain turn_on.
+                let level = d.level_service.as_deref() == Some("turn_on");
                 Some((
                     "turn_on".into(),
-                    d.brightness_pct.map(|b| json!(b.round().max(1.0))),
+                    d.brightness_pct
+                        .filter(|_| level)
+                        .map(|b| json!(b.round().max(1.0))),
                 ))
             } else if off {
                 Some(("turn_off".into(), None))
@@ -576,7 +580,10 @@ fn prior_call(domain: &str, service: &str, d: &HaDevice) -> Option<(String, Opti
         }
         ("fan", "turn_on" | "turn_off" | "toggle" | "set_percentage") => {
             if on {
-                match d.percentage {
+                match d
+                    .percentage
+                    .filter(|_| d.level_service.as_deref() == Some("set_percentage"))
+                {
                     Some(p) => Some((
                         "set_percentage".into(),
                         Some(json!(p.round().clamp(0.0, 100.0))),
@@ -2004,7 +2011,7 @@ mod tests {
 
     #[test]
     fn restore_of_a_level_is_clamped_into_the_allowlist() {
-        let mk = |state: &str, b: Option<f64>, p: Option<f64>| HaDevice {
+        let mk = |state: &str, b: Option<f64>, p: Option<f64>, lvl: Option<&str>| HaDevice {
             entity_id: "x.y".into(),
             name: "N".into(),
             device_type: "light".into(),
@@ -2022,21 +2029,68 @@ mod tests {
             max_temperature: None,
             hvac_modes: vec![],
             volume: None,
-            level_service: None,
+            level_service: lvl.map(str::to_string),
             level: None,
             level_max: None,
         };
         // Brightness 0 % (HA brightness 1) restores as 1, and a fractional fan speed is rounded.
-        let (s, v) = prior_call("light", "turn_on", &mk("on", Some(0.0), None)).unwrap();
+        let (s, v) = prior_call(
+            "light",
+            "turn_on",
+            &mk("on", Some(0.0), None, Some("turn_on")),
+        )
+        .unwrap();
+        assert_eq!(v, Some(json!(1.0)));
         assert!(plan("light", &s, v.as_ref(), None).is_ok());
-        let (s, v) = prior_call("fan", "set_percentage", &mk("on", None, Some(33.3))).unwrap();
+        let (s, v) = prior_call(
+            "fan",
+            "set_percentage",
+            &mk("on", None, Some(33.3), Some("set_percentage")),
+        )
+        .unwrap();
+        assert_eq!(v, Some(json!(33.0)));
         assert!(plan("fan", &s, v.as_ref(), None).is_ok());
         // Off before: Undo turns it off.
         assert_eq!(
-            prior_call("light", "turn_on", &mk("off", None, None))
+            prior_call("light", "turn_on", &mk("off", None, None, None))
                 .unwrap()
                 .0,
             "turn_off"
         );
+    }
+
+    // Security review LOW-1: a device that reports a level but doesn't accept level calls
+    // (light with only "onoff", fan without SET_SPEED) gets a plain turn_on Undo, which its
+    // re-check allows, instead of a level restore that the re-check would refuse.
+    #[test]
+    fn undo_of_a_device_without_level_support_is_a_plain_turn_on() {
+        let mk = |kind: &str, b: Option<f64>, p: Option<f64>| HaDevice {
+            entity_id: format!("{kind}.plain"),
+            name: "N".into(),
+            device_type: kind.into(),
+            room: None,
+            state: Some("on".into()),
+            unit: None,
+            system: false,
+            controllable: true,
+            services: vec![],
+            brightness_pct: b,
+            percentage: p,
+            temperature: None,
+            current_temperature: None,
+            min_temperature: None,
+            max_temperature: None,
+            hvac_modes: vec![],
+            volume: None,
+            level_service: None,
+            level: None,
+            level_max: None,
+        };
+        let light = prior_call("light", "turn_off", &mk("light", Some(100.0), None)).unwrap();
+        assert_eq!(light, ("turn_on".to_string(), None));
+        let fan = prior_call("fan", "turn_off", &mk("fan", None, Some(40.0))).unwrap();
+        assert_eq!(fan, ("turn_on".to_string(), None));
+        assert!(plan("light", &light.0, light.1.as_ref(), None).is_ok());
+        assert!(plan("fan", &fan.0, fan.1.as_ref(), None).is_ok());
     }
 }
