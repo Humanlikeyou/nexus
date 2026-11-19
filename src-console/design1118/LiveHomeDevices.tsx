@@ -7,7 +7,7 @@ import "./design1118.css";
 /**
  * Smart home, live devices (decision 0039): names, types and rooms from `ha_devices_list`; controls through
  * `ha_device_set`. Scenes and covers ask for approval in a native dialog on this Mac (the backend shows it;
- * this panel only says so) and can't be undone. Status-only devices show their state and no control.
+ * this panel only says so). Scenes can't be undone; a blind's Undo sends the reverse move, which asks again. Status-only devices show their state and no control.
  * Sample controls (SampleHomeControls) stay separate, labelled, and never send.
  */
 export type HomeCalls = {
@@ -92,13 +92,24 @@ function LevelSlider({ d, busy, onCommit }: { d: Dev; busy: boolean; onCommit: (
   );
 }
 
+/** A blind's reverse move: back to the position it had, or close after open (and open after close). None after stop. */
+export function coverBack(d: Dev, service: string): { d: Dev; service: string; value: number | null } | undefined {
+  if (d.deviceType !== "cover") return undefined;
+  if (service === "set_cover_position") return d.level != null ? { d, service, value: Math.round(d.level) } : undefined;
+  if (service === "open_cover") return { d, service: "close_cover", value: null };
+  if (service === "close_cover") return { d, service: "open_cover", value: null };
+  return undefined;
+}
+
 export function LiveHomeDevices({ calls = defaultCalls }: { calls?: HomeCalls }) {
   const [res, setRes] = useState<Result | null | "error">(null);
-  const [note, setNote] = useState<{ text: string; undo: string | null } | null>(null);
+  // undo: a History id (Undo via add_undo), or for a blind the reverse move, sent again through ha_device_set
+  // so the Mac asks for approval again (Taisun 2026-11-19: "yes add undo").
+  const [note, setNote] = useState<{ text: string; undo: string | null; back?: { d: Dev; service: string; value: number | null } } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const load = useCallback(() => { void calls.list().then(setRes).catch(() => setRes("error")); }, [calls]);
   useEffect(load, [load]);
-  useEffect(() => { if (!note?.undo) return; const t = window.setTimeout(() => setNote((n) => (n ? { ...n, undo: null } : n)), 8000); return () => window.clearTimeout(t); }, [note]);
+  useEffect(() => { if (!note?.undo && !note?.back) return; const t = window.setTimeout(() => setNote((n) => (n ? { ...n, undo: null, back: undefined } : n)), 8000); return () => window.clearTimeout(t); }, [note]);
   if (res === null || res === "error") return res === "error" ? <p className="d18-note" role="status">Devices couldn&apos;t be read just now.</p> : null;
   const devices = res.devices.filter((d) => !d.system);
   if (devices.length === 0) return null;
@@ -106,12 +117,14 @@ export function LiveHomeDevices({ calls = defaultCalls }: { calls?: HomeCalls })
     setBusy(d.entityId);
     try {
       const r = await calls.set(d.entityId, service, value, "typed");
-      setNote({ text: r.message, undo: r.undoable ? r.id : null });
+      setNote({ text: r.message, undo: r.undoable ? r.id : null, back: r.undoable ? undefined : coverBack(d, service) });
       load();
     } catch { setNote({ text: `${d.name} didn't change. If an approval dialog was open, it may have been declined.`, undo: null }); }
     setBusy(null);
   };
   const undo = async () => {
+    const back = note?.back;
+    if (back) { setNote({ text: note?.text ?? "", undo: null }); await send(back.d, back.service, back.value); return; }
     const id = note?.undo; if (!id) return;
     setNote({ text: note?.text ?? "", undo: null });
     const ok = await calls.undo(id).catch(() => false);
@@ -134,7 +147,7 @@ export function LiveHomeDevices({ calls = defaultCalls }: { calls?: HomeCalls })
               <Fragment key={d.entityId}>
               <div className="d18-ctl">
                 <div><b>{d.name}</b><small>{TYPE_LABEL[d.deviceType] ?? d.deviceType}{d.state ? ` · ${d.state}${d.unit ? ` ${d.unit}` : ""}` : ""}{!c && d.deviceType !== "climate" ? " · status only" : ""}</small>
-                  {c && asks && <small>Asks for your approval on this Mac. Can&apos;t be undone.</small>}</div>
+                  {c && asks && <small>Asks for your approval on this Mac. {d.deviceType === "cover" ? "Undo asks again." : "Can't be undone."}</small>}</div>
                 {c && (
                   <span className="d18-actions">
                     <Button size="small" variant="secondary" disabled={busy === d.entityId} aria-label={`${d.deviceType === "scene" ? "Activate" : on && c.off ? "Turn off or close" : "Turn on or open"} ${d.name}`}
@@ -150,7 +163,7 @@ export function LiveHomeDevices({ calls = defaultCalls }: { calls?: HomeCalls })
           })}
         </div>
       ))}
-      {note && <p className="d18-msg" role="status">{note.text}{note.undo && <> <Button size="small" variant="plain" onClick={() => { void undo(); }}>Undo</Button></>}</p>}
+      {note && <p className="d18-msg" role="status">{note.text}{(note.undo || note.back) && <> <Button size="small" variant="plain" onClick={() => { void undo(); }}>Undo</Button></>}</p>}
     </section>
   );
 }

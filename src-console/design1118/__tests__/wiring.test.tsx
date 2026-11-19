@@ -99,10 +99,10 @@ describe("Treasury", () => {
   });
 });
 
-import { LiveHomeDevices } from "../LiveHomeDevices";
+import { LiveHomeDevices, coverBack } from "../LiveHomeDevices";
 describe("Smart home live devices", () => {
   const dev = (o: object) => ({ entityId: "x.1", name: "N", deviceType: "light", room: "Living", state: "off", unit: null, system: false, controllable: true, services: ["turn_on", "turn_off"], brightnessPct: null, percentage: null, temperature: null, currentTemperature: null, minTemperature: null, maxTemperature: null, hvacModes: [], volume: null, levelService: null, level: null, levelMax: null, ...o });
-  it("rooms, controls via ha_device_set, undo; scenes/covers say approval + can't be undone; status-only has no control", async () => {
+  it("rooms, controls via ha_device_set, undo; scenes say approval + can't be undone, blinds approval + Undo asks again; status-only has no control", async () => {
     const calls = {
       list: vi.fn(async () => ({ roomsAvailable: true, devices: [dev({ entityId: "light.a", name: "Lamp" }), dev({ entityId: "scene.e", name: "Evening", deviceType: "scene", state: null, services: ["turn_on"] }), dev({ entityId: "cover.c", name: "Blind", deviceType: "cover", state: "closed", services: ["open_cover", "close_cover"] }), dev({ entityId: "sensor.t", name: "Temp", deviceType: "sensor", controllable: false, services: [], state: "21", unit: "°C" })] })),
       set: vi.fn(async () => ({ id: "h9", undoable: true, message: "Lamp is on." })),
@@ -117,6 +117,31 @@ describe("Smart home live devices", () => {
     await waitFor(() => expect(calls.set).toHaveBeenCalledWith("light.a", "turn_on", null, "typed"));
     fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
     await waitFor(() => expect(calls.undo).toHaveBeenCalledWith("h9"));
+  });
+});
+
+describe("Smart home blind Undo asks again (Taisun 2026-11-19)", () => {
+  const dev = (o: object) => ({ entityId: "cover.c", name: "Blind", deviceType: "cover", room: "Living", state: "open", unit: null, system: false, controllable: true, services: ["open_cover", "close_cover", "set_cover_position"], brightnessPct: null, percentage: null, temperature: null, currentTemperature: null, minTemperature: null, maxTemperature: null, hvacModes: [], volume: null, levelService: "set_cover_position", level: 40, levelMax: 100, ...o });
+  it("Undo of a position change sends the previous position through ha_device_set again", async () => {
+    const set = vi.fn(async () => ({ id: null, undoable: false, message: "Done. Undo asks for your approval again." }));
+    const calls = { list: vi.fn(async () => ({ roomsAvailable: true, devices: [dev({})] })), set, undo: vi.fn(async () => true) };
+    render(<LiveHomeDevices calls={calls as never} />);
+    expect(await screen.findByText(/Undo asks again/)).toBeTruthy();
+    const sl = await screen.findByRole("slider", { name: "Blind position" });
+    fireEvent.input(sl, { target: { value: "80" } });
+    fireEvent.pointerUp(sl);
+    await waitFor(() => expect(set).toHaveBeenCalledWith("cover.c", "set_cover_position", 80, "typed"));
+    fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(set).toHaveBeenLastCalledWith("cover.c", "set_cover_position", 40, "typed"));
+    expect(calls.undo).not.toHaveBeenCalled();
+  });
+  it("reverse moves: open <-> close, none after stop or with no known position", () => {
+    const d = dev({}) as never;
+    expect(coverBack(d, "open_cover")).toMatchObject({ service: "close_cover", value: null });
+    expect(coverBack(d, "close_cover")).toMatchObject({ service: "open_cover", value: null });
+    expect(coverBack(d, "stop_cover")).toBeUndefined();
+    expect(coverBack(dev({ level: null }) as never, "set_cover_position")).toBeUndefined();
+    expect(coverBack(dev({ deviceType: "light" }) as never, "open_cover")).toBeUndefined();
   });
 });
 

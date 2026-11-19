@@ -793,6 +793,9 @@ where
             "Done. Undo is available for a few seconds.".into()
         } else if is_scene {
             "Scene activated. Scenes can't be undone.".into()
+        } else if domain == "cover" {
+            // Taisun 2026-11-19 ("yes add undo"): the panel's Undo sends the reverse move, which asks again.
+            "Done. Undo asks for your approval again.".into()
         } else {
             "Done. This one can't be undone.".into()
         },
@@ -839,7 +842,7 @@ pub async fn ha_device_set(
                 (
                     "Home Assistant: move a blind or cover",
                     format!(
-                        "Device: {name}\n\nThis moves something physical and can't be undone here."
+                        "Device: {name}\n\nThis moves something physical. Undo moves it back and asks again."
                     ),
                 )
             } else {
@@ -1564,6 +1567,8 @@ mod tests {
         assert!(calls(&seen).is_empty());
         let r = run(true).await.unwrap();
         assert!(!r.undoable && r.id.is_none());
+        // No History Undo; the panel's Undo is the reverse move, which asks again.
+        assert_eq!(r.message, "Done. Undo asks for your approval again.");
         assert_eq!(calls(&seen).len(), 1);
         let a = asked.lock().unwrap();
         assert_eq!(a.len(), 2);
