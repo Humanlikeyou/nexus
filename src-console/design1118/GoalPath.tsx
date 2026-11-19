@@ -13,6 +13,7 @@ import {
   type Glance, type PathPhase, type Station,
 } from "./pathModel";
 import { EditPencil } from "./GoalEditors";
+import { TangleWaves, tangleGlAvailable } from "./TangleWaves";
 import "./design1118.css";
 
 /** One goal on the map: its title, tag and the roadmap that draws its path. */
@@ -131,9 +132,19 @@ function PathCard({ g, seed, onOpen, onEdit }: { g: GoalState; seed: number; onO
 
 /** Milestones arrival: the four goals as moving, tangled strands. Focus or hover one to untangle it. */
 function Tangle({ goals, onFocus, onGrid }: { goals: GoalState[]; onFocus: (id: string) => void; onGrid: () => void }) {
+  // Vibrating strings in WebGL when the Mac can (each goal in its own key); the SVG strands otherwise.
+  const [gl, setGl] = useState(tangleGlAvailable);
+  const [hot, setHot] = useState<number | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const label = `${goals.length} goals, at rest. Choose one to see its path.`;
+  const colourOf = (k: number) => {
+    const sw = rootRef.current?.querySelector<HTMLElement>(`.d18-legend__b[data-k="${k}"] i`);
+    return sw ? getComputedStyle(sw).backgroundColor : null;
+  };
   return (
-    <div className="d18-tangle" data-testid="milestones-tangle">
-      <svg viewBox="0 0 680 140" className="d18-tangle__svg" role="img" aria-label={`${goals.length} goals, at rest. Choose one to see its path.`}>
+    <div className="d18-tangle" data-testid="milestones-tangle" ref={rootRef}>
+      {gl ? <TangleWaves count={goals.length} hot={hot} colourOf={colourOf} label={label} onFail={() => setGl(false)} /> :
+      <svg viewBox="0 0 680 140" className="d18-tangle__svg" role="img" aria-label={label}>
         {goals.map((g, i) => (
           <g key={g.goal.id} className="d18-strand" data-k={i % 4}>
             <g className="d18-strand__t"><g className="d18-strand__tphi"><g className="d18-strand__tphi2">
@@ -141,9 +152,9 @@ function Tangle({ goals, onFocus, onGrid }: { goals: GoalState[]; onFocus: (id: 
             </g></g></g>
           </g>
         ))}
-      </svg>
+      </svg>}
       <div className="d18-legend">
-        {goals.map((g, i) => <button key={g.goal.id} type="button" className="d18-legend__b" data-k={i % 4} onMouseEnter={() => undefined} onClick={() => onFocus(g.goal.id)}><i aria-hidden="true" />{g.goal.title}</button>)}
+        {goals.map((g, i) => <button key={g.goal.id} type="button" className="d18-legend__b" data-k={i % 4} onMouseEnter={() => setHot(i)} onMouseLeave={() => setHot(null)} onFocus={() => setHot(i)} onBlur={() => setHot(null)} onClick={() => onFocus(g.goal.id)}><i aria-hidden="true" />{g.goal.title}</button>)}
         <span className="d18-grow" />
         <Button size="small" variant="plain" onClick={onGrid}>See all paths</Button>
       </div>
