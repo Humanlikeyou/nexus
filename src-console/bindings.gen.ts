@@ -2504,6 +2504,15 @@ export type HaDevice_Deserialize = {
 	hvacModes: string[],
 	/**  0..1 */
 	volume?: number | null,
+	/**
+	 *  The one level service this device accepts, when it reports support for it: "turn_on" (light
+	 *  brightness), "set_percentage" (fan), "set_cover_position" (cover), "volume_set" (media). None otherwise.
+	 */
+	levelService?: string | null,
+	/**  Current level in the units of `level_service`: 0..=100, or 0..=1 for "volume_set". */
+	level?: number | null,
+	/**  Upper bound of `level`: 100, or 1 for "volume_set". */
+	levelMax?: number | null,
 };
 
 export type HaDevice_Serialize = {
@@ -2529,6 +2538,15 @@ export type HaDevice_Serialize = {
 	hvacModes: string[],
 	/**  0..1 */
 	volume: number | null,
+	/**
+	 *  The one level service this device accepts, when it reports support for it: "turn_on" (light
+	 *  brightness), "set_percentage" (fan), "set_cover_position" (cover), "volume_set" (media). None otherwise.
+	 */
+	levelService: string | null,
+	/**  Current level in the units of `level_service`: 0..=100, or 0..=1 for "volume_set". */
+	level: number | null,
+	/**  Upper bound of `level`: 100, or 1 for "volume_set". */
+	levelMax: number | null,
 };
 
 export type HaDevicesResult = HaDevicesResult_Serialize | HaDevicesResult_Deserialize;

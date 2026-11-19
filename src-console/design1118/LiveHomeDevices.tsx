@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { HaDevice_Serialize as Dev, HaDeviceSetResult_Serialize as SetResult, HaDevicesResult_Serialize as Result } from "../bindings.gen";
 import { invokeBound } from "../bridge";
 import { Button } from "../ui";
@@ -12,7 +12,7 @@ import "./design1118.css";
  */
 export type HomeCalls = {
   list: () => Promise<Result>;
-  set: (entityId: string, service: string, value: null, via: string) => Promise<SetResult>;
+  set: (entityId: string, service: string, value: number | null, via: string) => Promise<SetResult>;
   undo: (id: string) => Promise<boolean>;
 };
 const defaultCalls: HomeCalls = {
@@ -34,6 +34,50 @@ export function controlFor(d: Dev): { on: string; off: string | null } | null {
   return null;
 }
 
+const LEVEL_WORD: Record<string, string> = { turn_on: "brightness", set_percentage: "speed", set_cover_position: "position", volume_set: "volume" };
+const COMMIT_DELAY_MS = 250;
+const COMMIT_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+
+/** The level slider a device accepts (the backend lists `levelService` only when the device reports support), or null. */
+export function sliderFor(d: Dev): { service: string; word: string; min: number; scale: number } | null {
+  if (!d.controllable || !d.levelService || !d.services.includes(d.levelService)) return null;
+  const word = LEVEL_WORD[d.levelService]; if (!word) return null;
+  return { service: d.levelService, word, min: d.levelService === "turn_on" ? 1 : 0, scale: d.levelService === "volume_set" ? 100 : 1 };
+}
+
+/** Native range input. Moving only changes the local value; release (pointer up or a key) commits once after a short debounce. */
+function LevelSlider({ d, busy, onCommit }: { d: Dev; busy: boolean; onCommit: (d: Dev, service: string, value: number) => void }) {
+  const cfg = sliderFor(d);
+  const current = cfg && d.level != null ? Math.round(d.level * cfg.scale) : null;
+  const [val, setVal] = useState<number>(current ?? cfg?.min ?? 0);
+  const timer = useRef<number | null>(null);
+  const latest = useRef(val);
+  const [seen, setSeen] = useState(current);
+  if (seen !== current) { setSeen(current); if (current != null) setVal(current); }
+  useEffect(() => { if (current != null) latest.current = current; }, [current]);
+  useEffect(() => () => { if (timer.current != null) window.clearTimeout(timer.current); }, []);
+  if (!cfg) return null;
+  const commit = () => {
+    if (timer.current != null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
+      const v = latest.current;
+      if (v === current) return;
+      onCommit(d, cfg.service, v / cfg.scale);
+    }, COMMIT_DELAY_MS);
+  };
+  return (
+    <label className="d18-slider">
+      <span>{cfg.word.charAt(0).toUpperCase() + cfg.word.slice(1)}</span>
+      <input type="range" min={cfg.min} max={100} step={1} value={val} disabled={busy}
+        aria-label={`${d.name} ${cfg.word}`} aria-valuetext={`${val}%`}
+        onChange={(e) => { const v = Number(e.target.value); latest.current = v; setVal(v); }}
+        onPointerUp={commit}
+        onKeyUp={(e) => { if (COMMIT_KEYS.has(e.key)) commit(); }} />
+    </label>
+  );
+}
+
 export function LiveHomeDevices({ calls = defaultCalls }: { calls?: HomeCalls }) {
   const [res, setRes] = useState<Result | null | "error">(null);
   const [note, setNote] = useState<{ text: string; undo: string | null } | null>(null);
@@ -44,10 +88,10 @@ export function LiveHomeDevices({ calls = defaultCalls }: { calls?: HomeCalls })
   if (res === null || res === "error") return res === "error" ? <p className="d18-note" role="status">Devices couldn&apos;t be read just now.</p> : null;
   const devices = res.devices.filter((d) => !d.system);
   if (devices.length === 0) return null;
-  const send = async (d: Dev, service: string) => {
+  const send = async (d: Dev, service: string, value: number | null = null) => {
     setBusy(d.entityId);
     try {
-      const r = await calls.set(d.entityId, service, null, "typed");
+      const r = await calls.set(d.entityId, service, value, "typed");
       setNote({ text: r.message, undo: r.undoable ? r.id : null });
       load();
     } catch { setNote({ text: `${d.name} didn't change. If an approval dialog was open, it may have been declined.`, undo: null }); }
@@ -73,7 +117,8 @@ export function LiveHomeDevices({ calls = defaultCalls }: { calls?: HomeCalls })
             const asks = APPROVAL_TYPES.has(d.deviceType);
             const on = d.state === "on" || d.state === "open";
             return (
-              <div className="d18-ctl" key={d.entityId}>
+              <Fragment key={d.entityId}>
+              <div className="d18-ctl">
                 <div><b>{d.name}</b><small>{TYPE_LABEL[d.deviceType] ?? d.deviceType}{d.state ? ` · ${d.state}${d.unit ? ` ${d.unit}` : ""}` : ""}{!c && d.deviceType !== "climate" ? " · status only" : ""}</small>
                   {c && asks && <small>Asks for your approval on this Mac. Can&apos;t be undone.</small>}</div>
                 {c && (
@@ -85,6 +130,8 @@ export function LiveHomeDevices({ calls = defaultCalls }: { calls?: HomeCalls })
                   </span>
                 )}
               </div>
+              {sliderFor(d) && <LevelSlider d={d} busy={busy === d.entityId} onCommit={(dev, svc, v) => { void send(dev, svc, v); }} />}
+              </Fragment>
             );
           })}
         </div>

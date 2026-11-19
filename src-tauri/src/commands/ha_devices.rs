@@ -68,6 +68,13 @@ pub struct HaDevice {
     pub hvac_modes: Vec<String>,
     /// 0..1
     pub volume: Option<f64>,
+    /// The one level service this device accepts, when it reports support for it: "turn_on" (light
+    /// brightness), "set_percentage" (fan), "set_cover_position" (cover), "volume_set" (media). None otherwise.
+    pub level_service: Option<String>,
+    /// Current level in the units of `level_service`: 0..=100, or 0..=1 for "volume_set".
+    pub level: Option<f64>,
+    /// Upper bound of `level`: 100, or 1 for "volume_set".
+    pub level_max: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
@@ -204,12 +211,64 @@ fn sensor_ok(e: &ha::HaEntity) -> bool {
     listed && !personal
 }
 
+/// HA `supported_features` bit test (a plain integer attribute).
+fn feature(attrs: &Value, bit: u64) -> bool {
+    attrs["supported_features"]
+        .as_u64()
+        .is_some_and(|f| f & bit != 0)
+}
+
+/// The level service a device accepts, judged only from the attributes HA reports. Lights need a colour mode
+/// that is more than `onoff`; fans need SET_SPEED (1); covers SET_POSITION (4); media players VOLUME_SET (4).
+fn level_service_for(domain: &str, attrs: &Value) -> Option<&'static str> {
+    match domain {
+        "light" => attrs["supported_color_modes"]
+            .as_array()
+            .is_some_and(|m| {
+                m.iter().filter_map(Value::as_str).any(|x| {
+                    matches!(
+                        x,
+                        "brightness"
+                            | "color_temp"
+                            | "hs"
+                            | "xy"
+                            | "rgb"
+                            | "rgbw"
+                            | "rgbww"
+                            | "white"
+                    )
+                })
+            })
+            .then_some("turn_on"),
+        "fan" => feature(attrs, 1).then_some("set_percentage"),
+        "cover" => feature(attrs, 4).then_some("set_cover_position"),
+        "media_player" => feature(attrs, 4).then_some("volume_set"),
+        _ => None,
+    }
+}
+
+/// True when `service` with `value` is a level change (not a plain on / off).
+fn is_level_call(domain: &str, service: &str, value: Option<&Value>) -> bool {
+    match (domain, service) {
+        ("light", "turn_on") => value.is_some_and(|v| !v.is_null()),
+        ("fan", "set_percentage")
+        | ("cover", "set_cover_position")
+        | ("media_player", "volume_set") => true,
+        _ => false,
+    }
+}
+
 fn services_for(domain: &str) -> &'static [&'static str] {
     match domain {
         "light" | "switch" => &["turn_on", "turn_off", "toggle"],
         "fan" => &["turn_on", "turn_off", "toggle", "set_percentage"],
         "climate" => &["set_temperature", "set_hvac_mode"],
-        "cover" => &["open_cover", "close_cover", "stop_cover"],
+        "cover" => &[
+            "open_cover",
+            "close_cover",
+            "stop_cover",
+            "set_cover_position",
+        ],
         "scene" => &["turn_on"],
         "media_player" => &["media_play", "media_pause", "volume_set"],
         _ => &[],
@@ -232,6 +291,21 @@ fn device_from(e: &ha::HaEntity, rooms: &HashMap<String, String>) -> Option<HaDe
     let cover_ok = e.domain != "cover" || cover_class_ok(&e.attributes);
     let controllable = !system && !gate && cover_ok && !services_for(&e.domain).is_empty();
     let a = &e.attributes;
+    let level = if controllable {
+        level_service_for(&e.domain, a)
+    } else {
+        None
+    };
+    let (level_now, level_max) = match level {
+        Some("turn_on") => (
+            num(&a["brightness"]).map(|b| (b / 255.0 * 100.0).round().clamp(0.0, 100.0)),
+            Some(100.0),
+        ),
+        Some("set_percentage") => (num(&a["percentage"]), Some(100.0)),
+        Some("set_cover_position") => (num(&a["current_position"]), Some(100.0)),
+        Some("volume_set") => (num(&a["volume_level"]), Some(1.0)),
+        _ => (None, None),
+    };
     let state = match e.state.as_str() {
         "" | "unknown" | "unavailable" => None,
         s => Some(clean(s, STATE_MAX)),
@@ -252,6 +326,11 @@ fn device_from(e: &ha::HaEntity, rooms: &HashMap<String, String>) -> Option<HaDe
         services: if controllable {
             services_for(&e.domain)
                 .iter()
+                // Level services are listed only when the device reports support for them.
+                .filter(|s| match **s {
+                    "set_percentage" | "set_cover_position" | "volume_set" => level == Some(**s),
+                    _ => true,
+                })
                 .map(|s| s.to_string())
                 .collect()
         } else {
@@ -275,6 +354,9 @@ fn device_from(e: &ha::HaEntity, rooms: &HashMap<String, String>) -> Option<HaDe
             })
             .unwrap_or_default(),
         volume: num(&a["volume_level"]),
+        level_service: level.map(str::to_string),
+        level: level_now,
+        level_max,
     })
 }
 
@@ -348,10 +430,11 @@ struct Call {
     extra: Map<String, Value>,
 }
 
-fn pct(value: Option<&Value>) -> Result<f64, String> {
+/// A whole number in `lo..=hi` (JSON number; a string, bool or fraction is refused).
+fn whole(value: Option<&Value>, lo: f64, hi: f64) -> Result<f64, String> {
     value
         .and_then(Value::as_f64)
-        .filter(|n| n.is_finite() && (0.0..=100.0).contains(n))
+        .filter(|n| n.is_finite() && n.fract() == 0.0 && (lo..=hi).contains(n))
         .ok_or_else(|| ha::ERR_BAD_DATA.to_string())
 }
 
@@ -388,14 +471,25 @@ fn plan(
     match (domain, service) {
         ("light", "turn_on") => match value.filter(|v| !v.is_null()) {
             None => none("turn_on"),
-            Some(_) => one("turn_on", "brightness_pct", json!(pct(value)?.round())),
+            Some(_) => one(
+                "turn_on",
+                "brightness_pct",
+                json!(whole(value, 1.0, 100.0)?),
+            ),
         },
         ("light" | "switch" | "fan", "turn_off") => none("turn_off"),
         ("switch" | "fan", "turn_on") => none("turn_on"),
         ("light" | "switch" | "fan", "toggle") => none("toggle"),
-        ("fan", "set_percentage") => {
-            one("set_percentage", "percentage", json!(pct(value)?.round()))
-        }
+        ("fan", "set_percentage") => one(
+            "set_percentage",
+            "percentage",
+            json!(whole(value, 0.0, 100.0)?),
+        ),
+        ("cover", "set_cover_position") => one(
+            "set_cover_position",
+            "position",
+            json!(whole(value, 0.0, 100.0)?),
+        ),
         ("climate", "set_temperature") => {
             let (lo, hi) = min_max
                 .filter(|(a, b)| a.is_finite() && b.is_finite() && a < b)
@@ -441,6 +535,7 @@ fn action_text(service: &str, value: Option<&Value>) -> String {
         ("turn_off", _) => "turned off".into(),
         ("toggle", _) => "toggled".into(),
         ("set_percentage", Some(p)) => format!("speed {}%", p.round()),
+        ("set_cover_position", Some(p)) => format!("position {}%", p.round()),
         ("set_temperature", Some(t)) => format!("set to {t}"),
         ("set_hvac_mode", _) => format!("mode {}", value.and_then(Value::as_str).unwrap_or("")),
         ("open_cover", _) => "opened".into(),
@@ -460,7 +555,10 @@ fn prior_call(domain: &str, service: &str, d: &HaDevice) -> Option<(String, Opti
     match (domain, service) {
         ("light", "turn_on" | "turn_off" | "toggle") => {
             if on {
-                Some(("turn_on".into(), d.brightness_pct.map(|b| json!(b))))
+                Some((
+                    "turn_on".into(),
+                    d.brightness_pct.map(|b| json!(b.round().max(1.0))),
+                ))
             } else if off {
                 Some(("turn_off".into(), None))
             } else {
@@ -479,7 +577,10 @@ fn prior_call(domain: &str, service: &str, d: &HaDevice) -> Option<(String, Opti
         ("fan", "turn_on" | "turn_off" | "toggle" | "set_percentage") => {
             if on {
                 match d.percentage {
-                    Some(p) => Some(("set_percentage".into(), Some(json!(p)))),
+                    Some(p) => Some((
+                        "set_percentage".into(),
+                        Some(json!(p.round().clamp(0.0, 100.0))),
+                    )),
                     None => Some(("turn_on".into(), None)),
                 }
             } else if off {
@@ -496,11 +597,13 @@ fn prior_call(domain: &str, service: &str, d: &HaDevice) -> Option<(String, Opti
             .as_deref()
             .filter(|m| ha::HVAC_MODES.contains(m))
             .map(|m| ("set_hvac_mode".to_string(), Some(json!(m)))),
-        ("cover", "open_cover" | "close_cover") => match d.state.as_deref() {
-            Some("open") => Some(("open_cover".into(), None)),
-            Some("closed") => Some(("close_cover".into(), None)),
-            _ => None,
-        },
+        ("cover", "open_cover" | "close_cover" | "set_cover_position") => {
+            match d.state.as_deref() {
+                Some("open") => Some(("open_cover".into(), None)),
+                Some("closed") => Some(("close_cover".into(), None)),
+                _ => None,
+            }
+        }
         ("media_player", "media_play" | "media_pause") => match d.state.as_deref() {
             Some("playing") => Some(("media_play".into(), None)),
             Some("paused") => Some(("media_pause".into(), None)),
@@ -585,10 +688,13 @@ pub(crate) fn restore_blocking(
     let body = body_for(entity_id, &call);
     run_sync(async move {
         let list = fast(devices_with(&cfg, false)).await?;
-        let ok = list
-            .devices
-            .iter()
-            .any(|d| d.entity_id == entity_id && d.controllable && !d.system);
+        let ok = list.devices.iter().any(|d| {
+            d.entity_id == entity_id
+                && d.controllable
+                && !d.system
+                && (!is_level_call(domain, service, value.as_ref())
+                    || d.level_service.as_deref() == Some(service))
+        });
         if !ok {
             return Err(ERR_STATUS_ONLY.to_string());
         }
@@ -634,6 +740,12 @@ where
         .ok_or_else(|| ERR_UNKNOWN.to_string())?;
     if dev.system || !dev.controllable {
         return Err(ERR_STATUS_ONLY.to_string());
+    }
+    // A level change needs the device to report support for that level service.
+    if is_level_call(&domain, &service, value.as_ref())
+        && dev.level_service.as_deref() != Some(service.as_str())
+    {
+        return Err(ha::ERR_NOT_ALLOWED.to_string());
     }
     let min_max = dev.min_temperature.zip(dev.max_temperature);
     let call = plan(&domain, &service, value.as_ref(), min_max)?;
@@ -836,13 +948,34 @@ mod tests {
                 "light.kitchen",
                 "on",
                 json!({"friendly_name": "Kitchen", "brightness": 128,
+                "supported_color_modes": ["brightness"],
                 "entity_picture": format!("/x?token={TOKEN}"), "access_token": TOKEN})
             ),
             st("switch.heater", "off", json!({"friendly_name": "Heater"})),
             st(
+                "light.plain",
+                "on",
+                json!({"friendly_name": "Plain", "brightness": 255, "supported_color_modes": ["onoff"]})
+            ),
+            st(
+                "fan.basic",
+                "on",
+                json!({"friendly_name": "Basic fan", "supported_features": 0})
+            ),
+            st(
+                "cover.nopos",
+                "open",
+                json!({"friendly_name": "Slat", "device_class": "shade", "supported_features": 3})
+            ),
+            st(
+                "media_player.mute",
+                "playing",
+                json!({"friendly_name": "Mute box", "supported_features": 0, "volume_level": 0.5})
+            ),
+            st(
                 "fan.bed",
                 "on",
-                json!({"friendly_name": "Bed fan", "percentage": 40})
+                json!({"friendly_name": "Bed fan", "percentage": 40, "supported_features": 1})
             ),
             st(
                 "climate.main",
@@ -854,7 +987,8 @@ mod tests {
             st(
                 "cover.blind",
                 "open",
-                json!({"friendly_name": "Blind", "device_class": "blind"})
+                json!({"friendly_name": "Blind", "device_class": "blind",
+                "supported_features": 15, "current_position": 60})
             ),
             st(
                 "cover.noclass",
@@ -914,7 +1048,7 @@ mod tests {
             st(
                 "media_player.tv",
                 "playing",
-                json!({"friendly_name": "TV", "volume_level": 0.3,
+                json!({"friendly_name": "TV", "volume_level": 0.3, "supported_features": 4,
                 "entity_picture": "/api/media_player_proxy/x?token=abc"})
             ),
             st(
@@ -1158,7 +1292,8 @@ mod tests {
     #[test]
     fn value_ranges() {
         let v = |x: Value| Some(x);
-        assert!(plan("light", "turn_on", v(json!(0)).as_ref(), None).is_ok());
+        assert!(plan("light", "turn_on", v(json!(0)).as_ref(), None).is_err());
+        assert!(plan("light", "turn_on", v(json!(1)).as_ref(), None).is_ok());
         assert!(plan("light", "turn_on", v(json!(100)).as_ref(), None).is_ok());
         assert!(plan("light", "turn_on", v(json!(101)).as_ref(), None).is_err());
         assert!(plan("light", "turn_on", v(json!(-1)).as_ref(), None).is_err());
@@ -1590,5 +1725,318 @@ mod tests {
         let src = include_str!("ha_devices.rs");
         let body = src.split("#[cfg(test)]").next().unwrap();
         assert!(!body.contains("println!") && !body.contains("eprintln!"));
+    }
+
+    // ─── level sliders ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_exposes_level_service_and_level() {
+        let (base, _) = mock(fixture(), None).await;
+        let r = devices_with(&cfg(&base), false).await.unwrap();
+        let get = |id: &str| {
+            r.devices
+                .iter()
+                .find(|d| d.entity_id == id)
+                .unwrap()
+                .clone()
+        };
+        let lv = |id: &str| {
+            let d = get(id);
+            (d.level_service, d.level, d.level_max)
+        };
+        assert_eq!(
+            lv("light.kitchen"),
+            (Some("turn_on".into()), Some(50.0), Some(100.0))
+        );
+        assert_eq!(lv("light.plain"), (None, None, None));
+        assert_eq!(
+            lv("fan.bed"),
+            (Some("set_percentage".into()), Some(40.0), Some(100.0))
+        );
+        assert_eq!(lv("fan.basic"), (None, None, None));
+        assert_eq!(
+            lv("cover.blind"),
+            (Some("set_cover_position".into()), Some(60.0), Some(100.0))
+        );
+        assert_eq!(lv("cover.nopos"), (None, None, None));
+        assert_eq!(
+            lv("media_player.tv"),
+            (Some("volume_set".into()), Some(0.3), Some(1.0))
+        );
+        assert_eq!(lv("media_player.mute"), (None, None, None));
+        assert!(get("cover.blind")
+            .services
+            .contains(&"set_cover_position".to_string()));
+        assert!(!get("cover.nopos")
+            .services
+            .contains(&"set_cover_position".to_string()));
+        assert!(!get("fan.basic")
+            .services
+            .contains(&"set_percentage".to_string()));
+        assert!(!get("media_player.mute")
+            .services
+            .contains(&"volume_set".to_string()));
+        // Camel case on the wire.
+        let j = serde_json::to_value(get("fan.bed")).unwrap();
+        assert_eq!(j["levelService"], json!("set_percentage"));
+    }
+
+    #[test]
+    fn level_plan_accepts_in_range_whole_numbers_only() {
+        let p = |d: &str, s: &str, v: Value| plan(d, s, Some(&v), None);
+        // accepted
+        assert!(p("light", "turn_on", json!(1)).is_ok());
+        assert!(p("light", "turn_on", json!(100)).is_ok());
+        assert!(p("fan", "set_percentage", json!(0)).is_ok());
+        assert!(p("fan", "set_percentage", json!(100)).is_ok());
+        assert!(p("cover", "set_cover_position", json!(0)).is_ok());
+        assert!(p("cover", "set_cover_position", json!(100)).is_ok());
+        assert!(p("media_player", "volume_set", json!(0.0)).is_ok());
+        assert!(p("media_player", "volume_set", json!(1.0)).is_ok());
+        let c = p("cover", "set_cover_position", json!(40)).ok().unwrap();
+        assert_eq!(
+            (c.ha_service, c.extra.get("position")),
+            ("set_cover_position", Some(&json!(40.0)))
+        );
+        // out of range
+        for (d, s, v) in [
+            ("light", "turn_on", json!(0)),
+            ("light", "turn_on", json!(101)),
+            ("fan", "set_percentage", json!(-1)),
+            ("fan", "set_percentage", json!(101)),
+            ("cover", "set_cover_position", json!(101)),
+            ("cover", "set_cover_position", json!(-5)),
+            ("media_player", "volume_set", json!(1.01)),
+            ("media_player", "volume_set", json!(-0.01)),
+        ] {
+            assert_eq!(p(d, s, v).err().unwrap(), ha::ERR_BAD_DATA, "{d} {s}");
+        }
+        // wrong type or fraction
+        for (d, s, v) in [
+            ("light", "turn_on", json!("50")),
+            ("light", "turn_on", json!(50.5)),
+            ("light", "turn_on", json!(true)),
+            ("light", "turn_on", json!([50])),
+            ("light", "turn_on", json!({"brightness_pct": 50})),
+            ("fan", "set_percentage", json!("50")),
+            ("cover", "set_cover_position", json!(12.5)),
+            ("cover", "set_cover_position", json!(null)),
+            ("media_player", "volume_set", json!("0.5")),
+        ] {
+            assert_eq!(p(d, s, v).err().unwrap(), ha::ERR_BAD_DATA, "{d} {s}");
+        }
+        assert!(plan("cover", "set_cover_position", None, None).is_err());
+        // unknown key: a service that is not on the list
+        for (d, s) in [
+            ("light", "set_level"),
+            ("light", "brightness_pct"),
+            ("cover", "set_cover_tilt_position"),
+            ("fan", "set_speed"),
+            ("media_player", "volume_mute"),
+            ("lock", "set_cover_position"),
+        ] {
+            assert_eq!(
+                plan(d, s, Some(&json!(50)), None).err().unwrap(),
+                ha::ERR_NOT_ALLOWED,
+                "{d} {s}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn level_writes_reach_ha_with_the_exact_body() {
+        let (base, seen) = mock(fixture(), None).await;
+        let d = dirs("ha-level");
+        set(&base, &d, "light.kitchen", "turn_on", Some(json!(75)))
+            .await
+            .unwrap();
+        set(&base, &d, "fan.bed", "set_percentage", Some(json!(60)))
+            .await
+            .unwrap();
+        set(&base, &d, "media_player.tv", "volume_set", Some(json!(0.5)))
+            .await
+            .unwrap();
+        let c: Vec<(String, Value)> = calls(&seen)
+            .into_iter()
+            .map(|(p, b)| (p, serde_json::from_str(&b).unwrap()))
+            .collect();
+        assert_eq!(
+            c[0],
+            (
+                "/api/services/light/turn_on".into(),
+                json!({"entity_id": "light.kitchen", "brightness_pct": 75.0})
+            )
+        );
+        assert_eq!(
+            c[1],
+            (
+                "/api/services/fan/set_percentage".into(),
+                json!({"entity_id": "fan.bed", "percentage": 60.0})
+            )
+        );
+        assert_eq!(
+            c[2],
+            (
+                "/api/services/media_player/volume_set".into(),
+                json!({"entity_id": "media_player.tv", "volume_level": 0.5})
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn level_writes_are_refused_for_unsupported_devices() {
+        let (base, seen) = mock(fixture(), None).await;
+        let d = dirs("ha-level-unsupported");
+        for (id, svc, v) in [
+            ("light.plain", "turn_on", json!(50)),
+            ("fan.basic", "set_percentage", json!(50)),
+            ("cover.nopos", "set_cover_position", json!(50)),
+            ("media_player.mute", "volume_set", json!(0.5)),
+            // a service from another domain's list
+            ("light.kitchen", "set_percentage", json!(50)),
+        ] {
+            let e = set(&base, &d, id, svc, Some(v)).await.unwrap_err();
+            assert!(e.starts_with("not_allowed:"), "{id}: {e}");
+        }
+        // A plain on / off still works on an on/off light.
+        set(&base, &d, "light.plain", "turn_off", None)
+            .await
+            .unwrap();
+        assert_eq!(calls(&seen).len(), 1);
+        // Out of range never reaches HA either.
+        assert!(set(&base, &d, "light.kitchen", "turn_on", Some(json!(0)))
+            .await
+            .is_err());
+        assert_eq!(calls(&seen).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_cover_position_asks_for_approval_and_has_no_undo() {
+        let (base, seen) = mock(fixture(), None).await;
+        let d = dirs("ha-cover-pos");
+        let asked: Arc<Mutex<Vec<String>>> = Default::default();
+        let r = set_with(
+            cfg(&base),
+            d.clone(),
+            ok_approver(asked.clone()),
+            "cover.blind".into(),
+            "set_cover_position".into(),
+            Some(json!(25)),
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(!r.undoable && r.id.is_none());
+        assert_eq!(asked.lock().unwrap().len(), 1);
+        let c = calls(&seen);
+        assert_eq!(c[0].0, "/api/services/cover/set_cover_position");
+        assert_eq!(
+            serde_json::from_str::<Value>(&c[0].1).unwrap(),
+            json!({"entity_id": "cover.blind", "position": 25.0})
+        );
+        // Declined: nothing sent.
+        let denied = set_with(
+            cfg(&base),
+            d,
+            |_d: String, _n: String| {
+                std::future::ready(Err::<Guard, String>(ha::approval_error(
+                    &crate::commands::approval_gate::denied_message(),
+                )))
+            },
+            "cover.blind".into(),
+            "set_cover_position".into(),
+            Some(json!(25)),
+            None,
+        )
+        .await;
+        assert!(denied.unwrap_err().starts_with("declined:"));
+        assert_eq!(calls(&seen).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn undo_restores_the_previous_level() {
+        let _g = SERIAL.lock().await;
+        let (base, seen) = mock(fixture(), None).await;
+        *TEST_CFG.lock().unwrap() = Some(cfg(&base));
+        let d = dirs("ha-level-undo");
+        for (id, svc, v, back_path, key, back) in [
+            (
+                "light.kitchen",
+                "turn_on",
+                json!(90),
+                "/api/services/light/turn_on",
+                "brightness_pct",
+                json!(50.0),
+            ),
+            (
+                "fan.bed",
+                "set_percentage",
+                json!(90),
+                "/api/services/fan/set_percentage",
+                "percentage",
+                json!(40.0),
+            ),
+            (
+                "media_player.tv",
+                "volume_set",
+                json!(0.9),
+                "/api/services/media_player/volume_set",
+                "volume_level",
+                json!(0.3),
+            ),
+        ] {
+            let r = set(&base, &d, id, svc, Some(v)).await.unwrap();
+            assert!(r.undoable, "{id}");
+            let rid = r.id.unwrap();
+            let d2 = d.clone();
+            let ok = tokio::task::spawn_blocking(move || adds::undo_in("ha", &rid, &d2, now_jst()))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(ok);
+            let last = calls(&seen).pop().unwrap();
+            assert_eq!(last.0, back_path, "{id}");
+            let body: Value = serde_json::from_str(&last.1).unwrap();
+            assert_eq!(body[key], back, "{id}");
+        }
+        *TEST_CFG.lock().unwrap() = None;
+    }
+
+    #[test]
+    fn restore_of_a_level_is_clamped_into_the_allowlist() {
+        let mk = |state: &str, b: Option<f64>, p: Option<f64>| HaDevice {
+            entity_id: "x.y".into(),
+            name: "N".into(),
+            device_type: "light".into(),
+            room: None,
+            state: Some(state.into()),
+            unit: None,
+            system: false,
+            controllable: true,
+            services: vec![],
+            brightness_pct: b,
+            percentage: p,
+            temperature: None,
+            current_temperature: None,
+            min_temperature: None,
+            max_temperature: None,
+            hvac_modes: vec![],
+            volume: None,
+            level_service: None,
+            level: None,
+            level_max: None,
+        };
+        // Brightness 0 % (HA brightness 1) restores as 1, and a fractional fan speed is rounded.
+        let (s, v) = prior_call("light", "turn_on", &mk("on", Some(0.0), None)).unwrap();
+        assert!(plan("light", &s, v.as_ref(), None).is_ok());
+        let (s, v) = prior_call("fan", "set_percentage", &mk("on", None, Some(33.3))).unwrap();
+        assert!(plan("fan", &s, v.as_ref(), None).is_ok());
+        // Off before: Undo turns it off.
+        assert_eq!(
+            prior_call("light", "turn_on", &mk("off", None, None))
+                .unwrap()
+                .0,
+            "turn_off"
+        );
     }
 }
