@@ -7,6 +7,9 @@ import { isSnapshot, noopQuery } from "../lib/noop";
 import type { NoopSnapshotPayload, RecordedSession, RevenueSummary } from "../types";
 import { personalAdapter } from "../personal/adapters";
 import { roadmapAdapter } from "../goals/roadmap";
+import { agentsFacts, smartHomeFacts } from "./factsSurfaces";
+import type { ActivityEntry, HermesRuntimeHealth, OutboxStatus } from "../types";
+import type { HaDevicesResult } from "../bindings.gen";
 import { businessFacts, lifeGoalFacts, fitnessFacts, homeFacts, mindBodyFacts, neuroFacts } from "./facts";
 import type { TakeDeps } from "./generate";
 import { appendTake, entryFromTake, takeLogEntries } from "../takes/takeLog";
@@ -36,6 +39,17 @@ export const liveDeps: TakeDeps = {
       case "home": return homeFacts(await snapshot(), await getHomeBrief().catch(() => null), today, Date.now());
       case "neuro": return neuroFacts(await invokeBound<RecordedSession[]>("list_sessions").catch(() => []), today);
       case "business": return businessFacts(await invokeBound<RevenueSummary>("arm_get_revenue_summary", { from: null, to: null }).catch(() => null), today);
+      case "agents": {
+        // Each read is independent: one that fails is simply missing from the facts, never guessed.
+        const [amara, crew, outbox, activity] = await Promise.all([
+          invokeBound<HermesRuntimeHealth>("get_terrence_runtime_health").then((h) => h.status).catch(() => null),
+          invokeBound<string>("crew_health").catch(() => null),
+          invokeBound<OutboxStatus>("get_outbox_status").catch(() => null),
+          invokeBound<ActivityEntry[]>("list_activity_entries", { limit: 30 }).catch(() => null),
+        ]);
+        return agentsFacts({ amara, crew, outbox, activity }, today);
+      }
+      case "smarthome": return smartHomeFacts(await invokeBound<HaDevicesResult>("ha_devices_list").catch(() => null), today);
       case "life": {
         const g = personalAdapter().goals();
         if (g.state !== "live") return null; // sample or unwired goals are never facts

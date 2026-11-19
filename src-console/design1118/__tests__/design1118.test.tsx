@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { HaEntity } from "../../lib/homeAssistant";
 import { stateLabel } from "../../lib/homeAssistant";
@@ -39,15 +39,15 @@ describe("design-1118a: Amara's take card on every page", () => {
     for (const [name, src, re] of pages) expect(src, name).toMatch(re);
   });
 
-  it("pages without a take generator show the card only in previews, tagged Sample data", () => {
+  it("Agents and Smart home use their live generators: hidden once unwired, Sample data note only in previews", async () => {
     for (const s of ["agents", "smarthome"] as TakeSurface[]) {
       const { container, unmount } = render(<PageTake surface={s} />);
-      expect(container.textContent).toBe(""); // app: hidden until a take is written
+      await waitFor(() => expect(container.textContent).toBe("")); // app, no data readable: hidden until a take is written
       unmount();
       localStorage.setItem("nexus.sampleAdapters", "1");
       render(<PageTake surface={s} />);
       expect(screen.getByText(PREVIEW_NOTES[s].text)).toBeInTheDocument();
-      expect(screen.getByText(/Sample data/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Sample data/).length).toBeGreaterThan(0);
       cleanup(); localStorage.removeItem("nexus.sampleAdapters");
     }
   });

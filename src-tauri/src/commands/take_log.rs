@@ -15,7 +15,16 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-pub const PAGES: [&str; 6] = ["fitness", "neuro", "mindBody", "business", "home", "life"];
+pub const PAGES: [&str; 8] = [
+    "fitness",
+    "neuro",
+    "mindBody",
+    "business",
+    "home",
+    "life",
+    "agents",
+    "smarthome",
+];
 const MAX_TEXT_CHARS: usize = 2000;
 const MAX_ID_CHARS: usize = 120;
 
@@ -337,6 +346,21 @@ pub(crate) mod tests {
             &entry("fitness-1762800000000", "fitness", 1762800000000, "x")
         )
         .unwrap());
+        let _ = fs::remove_dir_all(d);
+        let _ = fs::remove_dir_all(kv);
+    }
+
+    #[test]
+    fn agents_and_smarthome_takes_are_logged_and_migrated() {
+        let d = temp_dir("newpages");
+        let kv = temp_dir("newpageskv");
+        assert!(append_in(&d, &entry("agents-1", "agents", 1, "fixture a")).unwrap());
+        assert!(append_in(&d, &entry("smarthome-2", "smarthome", 2, "fixture s")).unwrap());
+        assert!(append_in(&d, &entry("x-3", "garage", 3, "nope")).is_err());
+        let rec = r#"{"day":"2026-11-11","attempts":1,"fingerprint":"fp","take":{"page":"smarthome","day":"2026-11-11","text":"Fixture.","cited":[],"fingerprint":"fp","generatedAt":1762800000001}}"#;
+        fs::write(kv.join("amara_take_smarthome.json"), rec).unwrap();
+        assert_eq!(migrate_in(&d, &kv).unwrap(), 1);
+        assert_eq!(list_in(&d).len(), 3);
         let _ = fs::remove_dir_all(d);
         let _ = fs::remove_dir_all(kv);
     }

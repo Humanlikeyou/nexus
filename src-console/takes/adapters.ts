@@ -131,7 +131,10 @@ export const liveTakes: TakesAdapter = {
 
 const P = (cite: string): Source => ({ cite, verified: false });
 
-const SUGGESTIONS: Record<TakePage, Suggestion> = {
+/** Agents and Smart home have a take but no suggestion, memory or sample history of their own. */
+const NO_SAMPLE: readonly TakePage[] = ["agents", "smarthome"];
+type SamplePage = Exclude<TakePage, "agents" | "smarthome">;
+const SUGGESTIONS: Record<SamplePage, Suggestion> = {
   neuro: {
     id: "s-neuro-1028", page: "neuro", type: "breathe_before_session", typeLabel: "Breathing before a session", seen: "First time this week",
     title: "Breathe slowly for 5 minutes right before your next Muse session.",
@@ -242,7 +245,7 @@ const OUTCOMES: TypeOutcome[] = [
     periods: [{ label: "Oct 20 – today", suggested: 9, done: 7, diff: null, verdict: "too_early" }], points: [] },
 ];
 
-const MEMORY: Record<TakePage, MemoryLine | null> = {
+const MEMORY: Record<SamplePage, MemoryLine | null> = {
   neuro: { day: "Oct 27", text: "**Oct 7–27** I suggested a 10-minute walk before sessions on **19** days. You did it on **12**; calm was **+1** on walk days (range −4 to +6), so no clear change. Today I'm suggesting something different." },
   fitness: { day: "Oct 20", text: "Since **Oct 20** I've suggested a brisk walk on **9** days and you did it on **7**. I won't say whether it helps your sleep until there are 7 days each way: first look **Nov 3**." },
   mindBody: { day: "Oct 26", text: "Easy days when HRV is low: next-morning HRV **+4 ms** (range +1 to +7) over **13** low-HRV days. It's now one of your habits." },
@@ -289,7 +292,7 @@ export function sampleTakes(opts: TakesPreview = {}): TakesAdapter {
   let autoDone = true;
   const off = new Set(opts.unwired ?? []);
   const suggestionFor = (page: TakePage): Suggestion => {
-    const base = SUGGESTIONS[page];
+    const base = SUGGESTIONS[page as SamplePage];
     const forced = opts.answer?.[page];
     const preset: Answer | null = !forced ? null : forced === "detected" ? (SUGGESTIONS.fitness.answer) : forced === "done" ? { state: "done", source: "tap", at: "8:12 PM" } : forced === "skipped" ? { state: "skipped", source: "tap", at: "8:40 PM", reason: null } : { state: forced };
     const answer = answers.get(base.id) ?? preset ?? base.answer;
@@ -297,15 +300,15 @@ export function sampleTakes(opts: TakesPreview = {}): TakesAdapter {
   };
   return {
     today: (page) => {
-      if (off.has("suggestions")) return UNWIRED;
+      if (off.has("suggestions") || NO_SAMPLE.includes(page)) return UNWIRED;
       const k = opts.today?.[page] ?? "suggestion";
       if (k === "learning") return sample({ kind: "learning", have: 3, need: 7, unit: "sessions" });
       if (k === "none_today") return sample({ kind: "none_today", why: "Your numbers are where they usually are. A suggestion now would be noise." });
       if (k === "followup") return sample({ kind: "followup", outcome: OUTCOMES.find((o) => o.page === page) ?? OUTCOMES[0] });
       return sample({ kind: "suggestion", suggestion: suggestionFor(page) });
     },
-    memory: (page) => (off.has("suggestions") ? UNWIRED : sample(opts.today?.[page] === "learning" ? null : opts.today?.[page] === "followup" ? { day: "Nov 4", text: "On **Nov 4** I said it was too early to tell (4 done days). With **11** now, I can say more, but carefully." } : MEMORY[page])),
-    historyCount: (page) => (off.has("history") ? UNWIRED : sample(opts.historyEmpty ? 0 : opts.today?.[page] === "learning" ? 3 : 22)),
+    memory: (page) => (off.has("suggestions") || NO_SAMPLE.includes(page) ? UNWIRED : sample(opts.today?.[page] === "learning" ? null : opts.today?.[page] === "followup" ? { day: "Nov 4", text: "On **Nov 4** I said it was too early to tell (4 done days). With **11** now, I can say more, but carefully." } : MEMORY[page as SamplePage])),
+    historyCount: (page) => (off.has("history") || NO_SAMPLE.includes(page) ? UNWIRED : sample(opts.historyEmpty ? 0 : opts.today?.[page] === "learning" ? 3 : 22)),
     history: (_page, filter, q) => {
       if (off.has("history")) return UNWIRED;
       if (opts.historyEmpty) return sample([]);

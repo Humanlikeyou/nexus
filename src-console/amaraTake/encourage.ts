@@ -33,7 +33,7 @@ export function validateLift(text: string, facts: Fact[]): LiftCheck {
 /** Which dimensions fit a page, in preference order. Goals (a goal fact) lean on leadership and spirit. */
 const PAGE_DIMS: Record<TakePage, Dimension[]> = {
   fitness: ["body"], mindBody: ["body", "mind", "spirit"], neuro: ["mind", "spirit"],
-  home: ["spirit", "body"], business: ["leadership"], life: ["leadership", "spirit", "mind"],
+  home: ["spirit", "body"], business: ["leadership"], life: ["leadership", "spirit", "mind"], agents: ["leadership"], smarthome: ["spirit"],
 };
 
 type Template = { dim: Dimension; text: string; /** Needs a fact: `{fact}` becomes its label and display, both from the facts. */ fact?: boolean; goal?: boolean };

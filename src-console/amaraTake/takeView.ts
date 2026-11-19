@@ -13,7 +13,7 @@ export type TakeView =
   | { state: "failed"; reason: string }
   | { state: "unwired"; reason?: string };
 
-export const TAKE_PAGE_LABEL: Record<TakePage, string> = { home: "Home", fitness: "Fitness", neuro: "Neuro", mindBody: "Mind–Body", business: "Enterprise", life: "Life" };
+export const TAKE_PAGE_LABEL: Record<TakePage, string> = { home: "Home", fitness: "Fitness", neuro: "Neuro", mindBody: "Mind–Body", business: "Enterprise", life: "Life", agents: "Agents", smarthome: "Smart home" };
 
 /** What each page waits for before Amara writes (HANDOFF-1110f triggers). */
 export const WAITING_FOR: Record<TakePage, string> = {
@@ -23,6 +23,8 @@ export const WAITING_FOR: Record<TakePage, string> = {
   mindBody: "Amara writes this once last night's sleep syncs.",
   business: "Amara writes this once today's business snapshot loads.",
   life: "Amara writes this once a habit, a date or this week's review has something to say.",
+  agents: "Amara writes this once the Agents page can read her status.",
+  smarthome: "Amara writes this once Home Assistant lists a device.",
 };
 
 const tokyoTime = (ms: number) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Tokyo" });
@@ -66,6 +68,8 @@ export const SAMPLE_NOTES: Record<TakePage, TakeNote> = {
   neuro: { text: "Last night's **20-minute** session averaged **62 focus** and **71 calm**. You went in on **74%** recovery, and calm led focus, so a short focus block may suit you today.", chips: [{ label: "Focus", value: "62 / 100" }, { label: "Calm", value: "71 / 100" }, { label: "Session", value: "20 min" }, { label: "Recovery", value: "74%" }], time: "Today, 7:40", sourceLine: "From the Oct 27 session", question: "What kind of focus block would suit me today?" },
   mindBody: { lane: "Health + Neuro", text: "Body and mind mostly agree today. Resting HR is **50 bpm**, 2 below your usual, and HRV is **56 ms**, a little under your 60. Last night's session held calm at **71** and focus at **62**. Favour steady work over a hard workout.", chips: [{ label: "Resting HR", value: "50 bpm", lane: "health" }, { label: "HRV", value: "56 ms", lane: "health" }, { label: "Sleep", value: "7h 32m", lane: "health" }, { label: "Calm", value: "71", lane: "neuro" }, { label: "Focus", value: "62", lane: "neuro" }], time: "Today, 7:40", sourceLine: "From today's readiness and the Oct 27 session", question: "Why steady work over a hard workout today?" },
   business: { text: "Net is **$1,580** over 30 days on **$1,820** revenue. Two things need you: the Taiyo Skin funding vote and the supplier invoice with no tax line. Trading is within limits at risk index **0.18**.", chips: [{ label: "Net · 30 days", value: "$1,580" }, { label: "Revenue", value: "$1,820" }, { label: "Needs a decision", value: "2" }, { label: "Risk index", value: "0.18" }], time: "Today, 7:40", sourceLine: "From Enterprise overview", question: "Which decision should I take first?" },
+  agents: { text: "Amara is online. Health checks ran this morning. Nothing has been delivered yet.", chips: [], time: "Today, 7:40", sourceLine: "From Agents", question: "What ran today?" },
+  smarthome: { text: "Household controls are grouped by type. Backup sensors stay out of those groups.", chips: [], time: "Today, 7:40", sourceLine: "From Smart home", question: "What's on right now?" },
   life: { text: "This week's habits are **4 of 5** on track, and the lease notice is due by **Mar 1**. Sunday's weekly review is the place to decide whether to keep the reading habit.", chips: [{ label: "Habits this week", value: "4 of 5" }, { label: "Lease notice", value: "Mar 1" }, { label: "Weekly review", value: "Sunday" }], time: "Today, 7:40", sourceLine: "From Life · Goals and Dates", question: "What should I look at first in Life today?" },
 };
 
