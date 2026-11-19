@@ -1053,3 +1053,10 @@ TypeScript only. No Rust, no new command, no capability change, no markup/CSS/We
 - **Installed 5b3b08f (2026-11-19).** Taisun: "commit everything once you are done and install and save session".
   - Quit, ditto, reopened; the app is running. Rollback: `~/Backups/Amara OS-backup-20261119c.app` (e87c7bd). No backups were deleted.
   - For Taisun to confirm: the new Enterprise › **Treasury** tab (decision 0032 #4 said no new nav label; a sub-tab was added and kept, pending his word).
+
+
+## 42. Cheap cleanups: Rust test modules split out, e2e specs named by feature (2026-11-19, committed)
+- **Where the stages stand.** Stages A to I are built as far as they can go without Taisun. Everything left is his gate (hardware, accounts, approvals) or Design's (the Keychain move button is not on decision 0039's lifted list; the Home lens hook swap was left by choice). So this run did the prompt's "cheap cleanups", which have no behaviour change.
+- **Rust test modules.** `#[cfg(test)] mod tests` of ha, terrence_actions, money, hemisync, noop, terrence_runtime and backups moved to `<name>/tests.rs`, one commit each (2cff4d3 ea1d284 45a50ec d469c24 b0f7f2b c7692e7 440fd0b). Bodies are verbatim and rustfmt re-indented them. `include_str!` paths gained `../`. money's `production_source()` marker now matches `mod tests;`. noop's small `repro_tests` stays inline. Proof: src-tauri lib 1707 passed / 6 ignored before and after, and `cargo test --list` is identical.
+- **e2e renames.** b658d19: 14 build-tagged specs were renamed by feature (map in BOARD.md). `playwright --list` shows 806 tests in 43 files, the same set before and after. The renamed specs ran 284 passed after `npm run build`.
+- **Gates (b658d19):** tsc, lint, vitest 2510 / 9 skipped, neuro 21, secrets, src-tauri fmt + clippy + test 1725 / 6 ignored, amara-router 131. **Not run:** full e2e, crew-service tests, the app (nothing to install: no app behaviour change).
