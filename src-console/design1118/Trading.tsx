@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { money } from "../lib/format";
 import type { SystemSnapshot } from "../types";
 import { Button, DataTag, Dialog, Sparkline, StatusText } from "../ui";
 import { marketAdapter, type MarketProposal, type MarketProposalAdapter } from "./marketProposals";
+import type { LiveMarket } from "./marketProposalsLive";
 import "./design1118.css";
 
 /**
@@ -93,13 +94,23 @@ export function ProposalsCard({ adapter: given, capUsd }: { adapter?: MarketProp
   const [confirming, setConfirming] = useState<MarketProposal | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [undo, setUndo] = useState<string | null>(null); // History id, live only
+  useEffect(() => { if (!undo) return; const t = window.setTimeout(() => setUndo(null), 8000); return () => window.clearTimeout(t); }, [undo]);
   const sample = proposals.state === "sample";
   const recorded = new Map((choices.state === "unwired" ? [] : choices.value).map((c) => [c.proposalId, c]));
   const record = async (p: MarketProposal, choice: "approved" | "dismissed") => {
     setBusy(true);
     const r = await adapter.recordChoice(p.id, choice);
     setBusy(false); setConfirming(null);
-    setNote(r.state === "unwired" ? "Your choice couldn't be saved: the choice log needs wiring. Nothing was sent." : choice === "approved" ? `Recorded: you approved “${p.title}”. No order was sent.` : `Dismissed “${p.title}”.`);
+    const toast = r.state === "live" ? r.value.toast : undefined;
+    setNote(r.state === "unwired" ? "Your choice couldn't be saved: the choice log needs wiring. Nothing was sent." : toast ?? (choice === "approved" ? `Recorded: you approved “${p.title}”. No order was sent.` : `Dismissed “${p.title}”.`));
+    setUndo(r.state === "live" && r.value.historyId ? r.value.historyId : null);
+    bump();
+  };
+  const undoChoice = async () => {
+    const id = undo; setUndo(null);
+    const ok = id && typeof (adapter as Partial<LiveMarket>).undoWatch === "function" ? await (adapter as LiveMarket).undoWatch(id) : false;
+    setNote(ok ? "Undone. The proposal is open again." : "That couldn't be undone. Check History.");
     bump();
   };
   return (
@@ -126,7 +137,7 @@ export function ProposalsCard({ adapter: given, capUsd }: { adapter?: MarketProp
           })}
         </div>
       )}
-      {note && <p className="d18-msg" role="status">{note}</p>}
+      {note && <p className="d18-msg" role="status">{note}{undo && <> <Button size="small" variant="plain" onClick={() => { void undoChoice(); }}>Undo</Button></>}</p>}
       <Dialog open={confirming != null} title="Confirm this record" confirmLabel="Confirm" busy={busy} onConfirm={() => { if (confirming) void record(confirming, "approved"); }} onCancel={() => setConfirming(null)} className="d18-confirm">
         {confirming && (
           <div data-testid="trade-confirm">
@@ -136,6 +147,56 @@ export function ProposalsCard({ adapter: given, capUsd }: { adapter?: MarketProp
           </div>
         )}
       </Dialog>
+    </section>
+  );
+}
+
+const RESEARCH_NOTE: Record<string, string> = {
+  started: "Amara is looking for new picks. They arrive as proposals above.",
+  already_running: "Amara is already researching. New picks arrive as proposals above.",
+  blocked: "Research is blocked while outbound access is off. Turn it on in Settings to research.",
+};
+const STATUS_LABEL = { open: "Market open", closed: "Market closed", stale: "Price is stale" } as const;
+
+/** Watchlist (decision 0038). Read-only prices: no price is ever invented ("No price yet" when none was fetched). */
+export function WatchlistCard({ adapter: given }: { adapter?: MarketProposalAdapter }) {
+  const adapter = (given ?? marketAdapter()) as Partial<LiveMarket> & MarketProposalAdapter;
+  const [, bump] = useAdapterTick();
+  const [note, setNote] = useState<string | null>(null);
+  const [undo, setUndo] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (!undo) return; const t = window.setTimeout(() => setUndo(null), 8000); return () => window.clearTimeout(t); }, [undo]);
+  const w = typeof adapter.watchlist === "function" ? adapter.watchlist() : null;
+  if (!w) return null;
+  const research = async () => {
+    setBusy(true);
+    const r = await adapter.researchNow!();
+    setBusy(false);
+    if (r.state === "unwired") setNote("Research couldn't start. Try again in a moment.");
+    else if (r.value.state === "rate_limited") setNote(`Research ran recently. Try again in ${r.value.retryAfterMinutes ?? "a few"} minutes.`);
+    else setNote(RESEARCH_NOTE[r.value.state] ?? null);
+    bump();
+  };
+  const drop = async (ticker: string) => {
+    const r = await adapter.dropPick!(ticker);
+    if (r.state === "unwired") { setNote("That didn't save. Try again in a moment."); return; }
+    setNote(`Removed ${ticker} from the watchlist.`); setUndo(r.value.historyId); bump();
+  };
+  const undoDrop = async () => { const id = undo; setUndo(null); const ok = id ? await adapter.undoWatch!(id) : false; setNote(ok ? "Undone. The pick is back." : "That couldn't be undone. Check History."); bump(); };
+  return (
+    <section className="d18-card" aria-labelledby="d18-watch" data-testid="watchlist">
+      <div className="d18-map__head"><h2 id="d18-watch" className="d18-h">Watchlist</h2><span className="d18-chip d18-chip--quiet">Not financial advice</span>
+        {w.state === "unwired" ? <DataTag kind="wire" /> : <Button size="small" variant="secondary" disabled={busy || w.value.research.running} onClick={() => { void research(); }}>Research now</Button>}</div>
+      {w.state === "unwired" ? <p className="d18-note">The watchlist isn&apos;t available yet.</p> : w.value.picks.length === 0 ? <p className="d18-note">No picks yet. Research now asks Amara for ideas. Watch-only: nothing is ever bought.</p> : (
+        <ul className="d18-clist">
+          {w.value.picks.map((p) => (
+            <li key={p.ticker}><div><b>{p.ticker}</b><small>{p.reason}{p.source ? ` · ${p.source}` : ""}</small>
+              <small>{p.quote.price == null ? "No price yet" : `${p.quote.price}${p.quote.currency ? ` ${p.quote.currency}` : ""}`} · {STATUS_LABEL[p.quote.status]}</small></div>
+              <Button size="small" variant="plain" aria-label={`Drop ${p.ticker}`} onClick={() => { void drop(p.ticker); }}>Drop</Button></li>
+          ))}
+        </ul>
+      )}
+      {note && <p className="d18-msg" role="status">{note}{undo && <> <Button size="small" variant="plain" onClick={() => { void undoDrop(); }}>Undo</Button></>}</p>}
     </section>
   );
 }

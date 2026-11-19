@@ -7,6 +7,8 @@ import {
 import { Badge, Button, InsetGroup, ListRow, More, PageHero, Select, Toggle } from "../ui";
 import { displayName, groupDevices } from "../design1118/homeGroups";
 import { PageTake } from "../design1118/PageTake";
+import { LiveHomeDevices } from "../design1118/LiveHomeDevices";
+import { inTauri } from "../lib/localStores";
 import { SampleHomeControls } from "../design1118/SampleHomeControls";
 import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
 import "./SmartHomeScreen.css";
@@ -295,7 +297,7 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
             </div>
           ) : (
             <div className="smart-home__list">
-              {preview && <SampleHomeControls />}
+              {preview ? <SampleHomeControls /> : inTauri() && <LiveHomeDevices />}
               {household.map((g) => (
                 <Fragment key={g.id}>
                   <InsetGroup title={g.title}>{g.devices.slice(0, GROUP_GLANCE).map(deviceRow)}</InsetGroup>

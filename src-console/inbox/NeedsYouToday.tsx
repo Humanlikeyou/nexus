@@ -86,6 +86,7 @@ export function useNeedsYou(data: SystemSnapshot, now: number): NeedsYou {
       { source: "approvals", state: data.unavailableSources.some((s) => s.command === "list_terrence_actions") ? "failed" : "ok", rows: approvalPointers(data.actions) },
       fromAgg("crew") ?? (crew.state === "unwired" ? { source: "crew", state: "unwired", rows: [] } : { source: "crew", state: "ok", rows: crew.value, sample: crew.state === "sample" }),
       ...(fromAgg("strap") ? [fromAgg("strap") as SourceState] : []),
+      ...(fromAgg("watchlist") ? [fromAgg("watchlist") as SourceState] : []),
     ];
   }, [data, todos, today, tick, agg]);
   const inbox = mergeInbox(states);

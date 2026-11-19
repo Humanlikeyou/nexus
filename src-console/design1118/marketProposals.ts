@@ -26,7 +26,7 @@ export type MarketProposal = {
   confidence: "low" | "medium" | "high";
   risk: string;
 };
-export type ProposalChoice = { proposalId: string; choice: "approved" | "dismissed"; recordedAt: string };
+export type ProposalChoice = { proposalId: string; choice: "approved" | "dismissed"; recordedAt: string; /** Backend toast text (live only). */ toast?: string; /** History id for Undo within 8 s (live only). */ historyId?: string };
 export type MarketPoint = number;
 
 export interface MarketProposalAdapter {

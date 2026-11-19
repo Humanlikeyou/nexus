@@ -49,7 +49,7 @@ export const HOST_VIEWS: Partial<Record<ModuleId, SubView[]>> = {
   settings: [{ view: "main", label: "General", screen: "settings" }, { view: "services", label: "Services", screen: "settings" }, { view: "devices", label: "Devices", screen: "settings" }, { view: "notifications", label: "Notifications", screen: "settings" }, { view: "backup", label: "Backup", screen: "settings" }, { view: "voice", label: "Voice", screen: "settings" }, { view: "memory", label: "Memory", screen: "settings" }],
   // design-1111v: Business became Enterprise. Money → Finances (old ids "revenue" and "money" redirect), Work → Tasks,
   // Personal moved to Life › Personal money. A venture is its own route: "ventures/<id>".
-  enterprise: [{ view: "main", label: "Overview", screen: "business" }, { view: "decisions", label: "Decisions", screen: "business" }, { view: "ventures", label: "Ventures", screen: "business" }, { view: "finances", label: "Finances", screen: "revenue" }, { view: "tasks", label: "Tasks", screen: "business" }, { view: "content", label: "Content", screen: "business" }],
+  enterprise: [{ view: "main", label: "Overview", screen: "business" }, { view: "decisions", label: "Decisions", screen: "business" }, { view: "ventures", label: "Ventures", screen: "business" }, { view: "finances", label: "Finances", screen: "revenue" }, { view: "treasury", label: "Treasury", screen: "business" }, { view: "tasks", label: "Tasks", screen: "business" }, { view: "content", label: "Content", screen: "business" }],
 };
 
 /** Folded ids stay valid ModuleIds (stored state, ⌘K, onNavigate) and resolve to their host. */

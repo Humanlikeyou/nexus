@@ -3,6 +3,7 @@ import { ventureRoute, type Route } from "../app/routes";
 import { businessAdapter, type BusinessAdapter } from "../business/adapters";
 import type { SystemSnapshot } from "../types";
 import { DataTag } from "../ui";
+import { TreasuryView } from "../design1118/TreasuryView";
 import { BusinessOverview, LinkCard, VenturesView } from "./BusinessPanels";
 import { ContentView, DecisionsView, TasksView, workStatement } from "./EnterprisePages";
 import "./BusinessScreen.css";
@@ -36,6 +37,7 @@ export function BusinessField({ data, onRetry, view = "main", onView, onOpen, ad
   if (view === "main") return <BusinessOverview data={data} adapter={adapter} onView={onView} onOpenVenture={(id) => openVenture(id)} work={<WorkCards data={data} onView={onView} />} />;
   if (view === "decisions") return <DecisionsView data={data} adapter={adapter} onOpen={onOpen} />;
   if (view === "ventures" || routed) return <VenturesView data={data} adapter={adapter} ventureId={routed ?? local} onOpen={openVenture} onView={onView} />;
+  if (view === "treasury") return <TreasuryView />;
   if (view === "content") return <ContentView data={data} onRetry={onRetry} onOpen={onOpen} />;
   return <TasksView data={data} onRetry={onRetry} onOpen={onOpen} />;
 }

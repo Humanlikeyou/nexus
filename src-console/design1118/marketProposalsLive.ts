@@ -143,12 +143,12 @@ export function makeLiveMarket(deps: WatchDeps = defaultDeps): LiveMarket {
     async recordChoice(proposalId, choice) {
       const command = choice === "approved" ? "watch_proposal_record" : "watch_proposal_dismiss";
       try {
-        const d = await deps.call<{ id?: string }>(command, { id: proposalId, via: "typed" });
+        const d = await deps.call<{ id?: string; toast?: string }>(command, { id: proposalId, via: "typed" });
         if (typeof d?.id === "string") lastWrite.set(proposalId, d.id);
+        await load();
+        deps.notify();
+        return live({ proposalId, choice, recordedAt: new Date().toISOString(), ...(typeof d?.toast === "string" ? { toast: d.toast } : {}), ...(typeof d?.id === "string" ? { historyId: d.id } : {}) });
       } catch { return UNWIRED; }
-      await load();
-      deps.notify();
-      return live({ proposalId, choice, recordedAt: new Date().toISOString() });
     },
   };
 }

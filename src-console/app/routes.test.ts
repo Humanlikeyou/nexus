@@ -112,7 +112,7 @@ describe("design-1111v redirects (HANDOFF-1111v §2): old routes keep working", 
 
   it("the tabs keep Taisun's names", () => {
     expect(HOST_VIEWS.life?.map((v) => v.label)).toEqual(["Goals", "Weekly review", "Dates & deadlines", "Personal money"]);
-    expect(HOST_VIEWS.enterprise?.map((v) => v.label)).toEqual(["Overview", "Decisions", "Ventures", "Finances", "Tasks", "Content"]);
+    expect(HOST_VIEWS.enterprise?.map((v) => v.label)).toEqual(["Overview", "Decisions", "Ventures", "Finances", "Treasury", "Tasks", "Content"]);
     expect(HOST_VIEWS.business).toBeUndefined();
   });
 });

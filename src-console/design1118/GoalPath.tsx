@@ -6,6 +6,7 @@ import type { Habit } from "../personal/adapters";
 import { Dots } from "../personal/parts";
 import { reducedMotion } from "../shell/Splash";
 import { Button, DataTag, Select, TextField } from "../ui";
+import type { LiveRoadmapAdapter } from "../goals/roadmapLive";
 import { branchAdapter, type BranchAdapter, type BranchSuggestion } from "./branches";
 import {
   SIZE_LABEL, STATION_RADIUS, currentStation, fillFraction, glanceOf, pathLabel, pathPhase, smoothPath, stationPoints, stationsOf, strandPath,
@@ -215,7 +216,7 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
   const [msg, setMsg] = useState("");
   const [cele, setCele] = useState<Celebration | null>(null);
   const [branchState, setBranchState] = useState<Record<string, "accepted" | "retracting" | "declined">>({});
-  const [undo, setUndo] = useState<{ id: string; goalId: string } | null>(null);
+  const [undo, setUndo] = useState<{ id: string; goalId: string; kind?: "branch" | "step"; label?: string } | null>(null);
   const [, bump] = useState(0);
   const states = useGoalStates(goals, a, over);
   const prevPhase = useRef<Record<string, PathPhase>>({});
@@ -253,6 +254,7 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
     try {
       const r = await a.answerStep(g.goal.id, here.id, "yes");
       if (r.state === "unwired") { setMsg(NOT_SAVED); return; }
+      if (r.state === "live") setUndo({ id: here.id, goalId: g.goal.id, kind: "step", label: "Step done." });
     } catch { setMsg("That didn't save. Try again in a moment."); return; }
     const big = here.size === "big";
     const apply = () => setOver((o) => ({ ...o, [g.goal.id]: new Set([...(o[g.goal.id] ?? []), here.id]) }));
@@ -266,7 +268,7 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
   };
   const edit = async (g: GoalState, title: string, size: StepSize) => {
     const here = currentStation(g.stations); if (!here) return;
-    try { const r = await a.editStep(g.goal.id, here.id, { title, size }); setMsg(r.state === "unwired" ? NOT_SAVED : "Step updated."); bump((n) => n + 1); } catch { setMsg("That didn't save. Try again in a moment."); }
+    try { const r = await a.editStep(g.goal.id, here.id, { title, size }); setMsg(r.state === "unwired" ? NOT_SAVED : "Step updated."); if (r.state === "live") setUndo({ id: here.id, goalId: g.goal.id, kind: "step", label: "Step updated." }); bump((n) => n + 1); } catch { setMsg("That didn't save. Try again in a moment."); }
   };
   const acceptRoute = async (g: GoalState) => { const r = await a.accept(g.goal.id); setMsg(r.state === "unwired" ? NOT_SAVED : "Route accepted."); bump((n) => n + 1); };
   const takeBranch = async (g: GoalState, b: BranchSuggestion) => {
@@ -278,6 +280,15 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
     const r = await br.decline(b.id);
     if (r.state === "unwired") { setMsg("Not saved. This needs the branch store to be wired first."); return; }
     setBranchState((s) => ({ ...s, [g.goal.id]: "retracting" })); window.setTimeout(() => setBranchState((s) => ({ ...s, [g.goal.id]: "declined" })), reducedMotion() ? 0 : 500); setMsg("Kept the current route.");
+  };
+  const undoStep = async () => {
+    if (!undo) return;
+    const u = undo; const live = a as Partial<LiveRoadmapAdapter>;
+    const ok = typeof live.undoStepWrite === "function" ? await live.undoStepWrite(u.goalId, u.id) : false;
+    setUndo(null);
+    if (!ok) { setMsg("That couldn't be undone. Check History."); return; }
+    setOver((o) => { const n = new Set(o[u.goalId] ?? []); n.delete(u.id); return { ...o, [u.goalId]: n }; });
+    setCele(null); bump((n) => n + 1); setMsg("Undone.");
   };
   const undoBranch = async () => { if (!undo) return; await br.undo(undo.id); setBranchState((s) => { const n = { ...s }; delete n[undo.goalId]; return n; }); setUndo(null); setMsg("Back to the previous route."); };
 
@@ -313,7 +324,7 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
           {cele && cele.goalId === focused.goal.id && <p className="d18-amara-line" data-big={cele.big || undefined} role="status">{cele.line} <span className="d18-note">{focused.glance.done} of {focused.glance.total} steps</span></p>}
           {branch && bstate !== "retracting" && bstate !== "declined" && bstate !== "accepted" && <BranchReasonCard b={branch} onAccept={() => { void takeBranch(focused, branch); }} onDecline={() => { void declineBranch(focused, branch); }} />}
           <NextActionCard g={focused} msg={msg} onYes={() => { void yes(focused); }} onNotYet={() => { void notYet(focused); }} onEdit={(t, s) => { void edit(focused, t, s); }} onAccept={() => { void acceptRoute(focused); }} />
-          {undo && <div className="d18-toast" role="status">Route changed. <Button size="small" variant="plain" onClick={() => { void undoBranch(); }}>Undo</Button></div>}
+          {undo && <div className="d18-toast" role="status">{undo.label ?? "Route changed."} <Button size="small" variant="plain" onClick={() => { void (undo.kind === "step" ? undoStep() : undoBranch()); }}>Undo</Button></div>}
         </div>
       )}
       {view !== "focus" && msg && <p className="d18-msg" role="status">{msg}</p>}

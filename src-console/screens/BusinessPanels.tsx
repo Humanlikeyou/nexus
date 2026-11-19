@@ -8,7 +8,8 @@ import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { LinkButton, OffButton } from "../adds/Composer";
 import { decisionsLog, jst } from "../decisions/log";
 import { PageTake } from "../design1118/PageTake";
-import { MarketNewsCards, ProposalsCard, TradingCard } from "../design1118/Trading";
+import { VentureGoalsCard } from "../design1118/EnterpriseWiring";
+import { MarketNewsCards, ProposalsCard, TradingCard, WatchlistCard } from "../design1118/Trading";
 import "./CommandCenter.css";
 import "../adds/v1111.css";
 
@@ -162,6 +163,7 @@ export function VenturesView({ data, adapter = businessAdapter(data), ventureId,
                   : <OffButton reason="Needs wiring">{a.action}</OffButton>}
             </div>
           ))}</Card>
+          <VentureGoalsCard ventureId={v.id} />
         </>}
       </div>
     );
@@ -176,6 +178,7 @@ export function VenturesView({ data, adapter = businessAdapter(data), ventureId,
       <TradingCard data={data} />
       <MarketNewsCards />
       <ProposalsCard capUsd={riskDown ? undefined : data.risk.global_daily_loss_cap} />
+      <WatchlistCard />
       <div className="d18-grid2 d18-grid2--end">
         {ventures.state === "unwired" ? (
           <section className="d18-card" aria-labelledby="d18-taiyo">

@@ -33,6 +33,7 @@ describe("⌘K command palette", () => {
         "Enterprise › Decisions",
         "Enterprise › Ventures",
         "Enterprise › Finances",
+        "Enterprise › Treasury",
         "Enterprise › Tasks",
         "Enterprise › Content",
         "Agents › Crews",

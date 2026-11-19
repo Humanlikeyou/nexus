@@ -1,6 +1,9 @@
 import { useEffect, useId, useState } from "react";
 import type { Route } from "../app/routes";
 import { addAdapter } from "../adds/adapters";
+import { inTauri } from "../lib/localStores";
+import { ContentItemTools } from "../design1118/EnterpriseWiring";
+import type { ContentStage } from "../design1118/enterpriseLive";
 import { Composer, LinkButton, OffButton, ResultLine } from "../adds/Composer";
 import type { Saved } from "../adds/flow";
 import { businessAdapter, type BusinessAdapter, type FundingRequest, type TaxFlag } from "../business/adapters";
@@ -256,7 +259,7 @@ export function ContentView({ data, onRetry, onOpen }: { data: SystemSnapshot; o
                 <p className="d18-eyebrow">Next step</p>
                 <h3 className="d18-next__t">{first.stage === "ideation" ? "Draft this idea with Amara" : first.stage === "review" ? "Review the draft" : "Keep it moving"}</h3>
                 <p className="d18-next__why">Amara writes a draft. She never posts it. The board comes back once there are {BOARD_AT} or more items.</p>
-                <div className="d18-actions"><OffButton variant="primary" reason="Needs wiring · Amara drafts from an idea">Draft with Amara</OffButton></div>
+                {first.type.startsWith("Just added") || !inTauri() ? <div className="d18-actions"><OffButton variant="primary" reason="Needs wiring · Amara drafts from an idea">Draft with Amara</OffButton></div> : <ContentItemTools title={first.title} stage={first.stage as ContentStage} />}
               </section>
             )}
           </div>
