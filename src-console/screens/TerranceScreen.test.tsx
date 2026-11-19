@@ -224,6 +224,15 @@ describe("Home status strip (Command center feel)", () => {
     expect(onNavigate.mock.calls.map((c) => c[0])).toEqual(["chat", "settings", "health"]);
   });
 
+  it("G15: with onOpen the scheduler segment opens its Settings section, the others keep their screen", () => {
+    const onNavigate = vi.fn(), onOpen = vi.fn();
+    render(<TerranceField data={fresh} now={NOW} scheduler={running} onNavigate={onNavigate} onOpen={onOpen} />);
+    for (const key of ["agents", "scheduler", "noop"]) fireEvent.click(segment(key));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith({ id: "settings", view: "about" });
+    expect(onNavigate.mock.calls.map((c) => c[0])).toEqual(["chat", "health"]);
+  });
+
   it("Background jobs stopped; Amara offline; NOOP stale (yellow) and unavailable (red), always with the word", () => {
     const offline = { ...full, hermes: { ...full.hermes, status: "offline" as const }, noop: { ...full.noop, status: "stale" as const, generatedAt: new Date(NOW - 2 * 86_400_000).toISOString() } };
     const segs = statusStrip(offline, { running: false, lastConsolidation: null, lastReasoning: null }, NOW);

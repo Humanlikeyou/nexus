@@ -47,6 +47,8 @@ export type SettingsFieldProps = {
   /** design-1111s: Settings tab (General · Services · Devices · Notifications · Backup · Voice · Memory). */
   view?: string;
   onRunSetup?: () => void;
+  /** decision 0042: after Home Assistant is saved or tested, continue to Smart home. */
+  onOpenSmartHome?: () => void;
   adapter?: StandaloneAdapter;
 };
 
@@ -76,7 +78,7 @@ export function SettingsField(props: SettingsFieldProps) {
     <div className="page-inset cc-page settings-tab pk-host sa-page" data-tab="devices">
       <WhoopPanel adapter={adapter} data={data} />
       <DevicesGroup data={data} devices={devices} operation={operation} error={error} onScan={onScan} onConnect={onConnect} onDisconnect={onDisconnect} onRetry={onRetry} />
-      <HomeAssistantSettingsGroup />
+      <HomeAssistantSettingsGroup onOpenSmartHome={props.onOpenSmartHome} />
       <NoopSettingsGroup />
     </div>
   );

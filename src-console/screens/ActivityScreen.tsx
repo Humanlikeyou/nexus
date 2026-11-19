@@ -3,6 +3,7 @@ import { dateTime, humanize, plainText, sentenceStart, shortDuration } from "../
 import type { SystemSnapshot } from "../types";
 import { Badge, Button, InsetGroup, ListRow, More, PageHero } from "../ui";
 import { activityBadge } from "./businessTone";
+import { CREWS_ROUTE, type Route } from "../app/routes";
 import { deliveryLine } from "../design1118/Agents";
 import "./ActivityScreen.css";
 
@@ -19,7 +20,7 @@ function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }
 
 const FIRST_GLANCE = 3;
 
-export function ActivityField({ data, onRetry }: { data: SystemSnapshot; onRetry?: () => void }) {
+export function ActivityField({ data, onRetry, onOpen }: { data: SystemSnapshot; onRetry?: () => void; onOpen?: (route: Route) => void }) {
   const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
   const { outbox, activity } = data;
   const outboxDown = down("get_outbox_status");
@@ -32,7 +33,8 @@ export function ActivityField({ data, onRetry }: { data: SystemSnapshot; onRetry
       <ListRow key={item.id} title={sentenceStart(plainText(item.name.replace(/_/g, " ")))}
         subtitle={<span className="activity__clamp" title={detail || undefined}>{humanize(item.type)}{detail ? ` · ${detail}` : ""}</span>}
         value={`${shortDuration(item.durationMs)} · ${dateTime(item.startedAt)}`}
-        accessory={<Badge tone={badge.tone}>{badge.label}</Badge>} />
+        accessory={<Badge tone={badge.tone}>{badge.label}</Badge>}
+        onSelect={onOpen && /crew/i.test(`${item.type} ${item.name}`) ? () => onOpen(CREWS_ROUTE) : undefined} />
     );
   };
   return (

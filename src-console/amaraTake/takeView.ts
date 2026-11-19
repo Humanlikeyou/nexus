@@ -1,11 +1,13 @@
 import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
 import type { AmaraTake, TakePage, TakeResult } from "./types";
+import { takeEntryId } from "../takes/takeLog";
+import { recordTakeAsked } from "../takes/events";
 import type { TakeDeps } from "./generate";
 
 /** design-1110f: what the card shows. Lane colours a chip (Mind–Body: emerald = health, copper = neuro). */
 export type TakeLane = "health" | "neuro" | "business";
 export type TakeChip = { label: string; value: string; lane?: TakeLane; sourceId?: string };
-export type TakeNote = { text: string; chips: TakeChip[]; time: string; sourceLine: string; lane?: string; question: string };
+export type TakeNote = { text: string; chips: TakeChip[]; time: string; sourceLine: string; lane?: string; question: string; /** The take log id of a live take; sample notes have none. */ takeId?: string };
 export type TakeView =
   | { state: "fresh"; note: TakeNote; sample: boolean }
   | { state: "generating" }
@@ -69,6 +71,7 @@ export function liveNote(take: AmaraTake): TakeNote {
     time: `Today, ${tokyoTime(take.generatedAt)}`,
     sourceLine: `From today's ${TAKE_PAGE_LABEL[take.page]} data`,
     question: `What's behind today's ${TAKE_PAGE_LABEL[take.page]} note?`,
+    takeId: takeEntryId(take.page, take.generatedAt),
   };
 }
 
@@ -114,7 +117,9 @@ export const previewMode = sampleAdaptersEnabled;
 
 /** "Ask more ›": Home chat opens with this context strip and the question pre-filled; nothing is sent. */
 export const ASK_MORE_EVENT = "amara:ask-more";
-export type AskMoreDetail = { from: string; chips: TakeChip[]; question: string; sample: boolean };
+export type AskMoreDetail = { from: string; chips: TakeChip[]; question: string; sample: boolean; /** The take's own sentence, so the chat knows what is being asked about. */ text?: string; /** Take log id (live takes only). */ takeId?: string; page?: TakePage };
+/** Opens the chat with the take as context, and logs the follow-up as a `take_asked` fact for live takes. Never throws. */
 export function askMore(detail: AskMoreDetail) {
   window.dispatchEvent(new CustomEvent<AskMoreDetail>(ASK_MORE_EVENT, { detail }));
+  if (!detail.sample && detail.takeId && detail.page) void recordTakeAsked(detail.page, detail.takeId).catch(() => undefined);
 }

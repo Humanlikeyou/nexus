@@ -324,6 +324,7 @@ const CALLER_COMMANDS: Array<[string, Record<string, unknown> | undefined]> = [
   ["poll_telegram_updates", {lastUpdateId: "lastUpdateId-v"}],
   ["pack_it_up", undefined],
   ["unpack_backup", {archivePath: "archivePath-v"}],
+  ["restore_backup", {file: "file-v"}],
   ["get_app_paths", undefined],
   ["save_goals", {goals: "goals-v"}],
   ["delete_goal", {goalId: "goalId-v"}],

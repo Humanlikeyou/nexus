@@ -1,6 +1,9 @@
-import { getServiceEvents, getServicesStatus, getServicesSummary, invokeBound } from "../bridge";
+import { getServiceEvents, getServicesStatus, getServicesSummary, invokeBound, pluginDialogOpen } from "../bridge";
+import { announceSnapshot } from "../lib/localStores";
+import { approvalOutcome } from "../legacy-core/terrance/system/approvalErrors";
+import { backupError } from "../settings/BackupSection";
 import { listen } from "@tauri-apps/api/event";
-import type { AlertKind, BackupRun, ModelTier, SetupDownload, BackupSettings, BackupStatus, KeyFileStatus, RelayPreview, RelaySettings, RestorePreview, SecretName, SecretStatus, ServiceEvent, ServiceLogs, ServicesSummary, StandaloneAdapter, SystemProfile, WhoopStatus } from "./adapters";
+import type { AlertKind, Fail, UpdateStatus, BackupRun, ModelTier, SetupDownload, BackupSettings, BackupStatus, KeyFileStatus, RelayPreview, RelaySettings, RestorePreview, SecretName, SecretStatus, ServiceEvent, ServiceLogs, ServicesSummary, StandaloneAdapter, SystemProfile, WhoopStatus } from "./adapters";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
 import { servicesFromMap } from "./servicesFromMap";
 import { eventsFromSupervisor, isSupStatus, serviceFromSupervisor, servicesFromSupervisor } from "./servicesFromSupervisor";
@@ -23,7 +26,17 @@ export type VerifyRow = { file: string; at: string; size: number; ok: boolean; c
 export type WhoopRow = { owner: "amara" | "legacy" | "none"; storeFound: boolean; lastSampleAt: number | null; gaps14d: number | null };
 /** `system_profile` (src-tauri system_profile.rs). No serial number, hostname or user name exists in it. */
 export type ProfileRow = { ramGb: number; chip: string; arch: string; cores: number; macos: string | null; fileVault: boolean | null };
+/** `update_status` (src-tauri updater.rs). Snake-case, no secrets. `announced_version_unverified` is the manifest's claim, not proof. */
+export type UpdateRow = { state: "not_configured" | "outbound_disabled" | "idle" | "available"; configured: boolean; current_version: string; auto_update: boolean; check_daily: boolean; announced_version_unverified: string | null };
+const isUpdateRow = (v: unknown): v is UpdateRow => {
+  const o = v as Record<string, unknown> | null;
+  return !!o && (o.state === "not_configured" || o.state === "outbound_disabled" || o.state === "idle" || o.state === "available") && typeof o.configured === "boolean"
+    && typeof o.current_version === "string" && typeof o.auto_update === "boolean" && typeof o.check_daily === "boolean"
+    && (o.announced_version_unverified == null || typeof o.announced_version_unverified === "string");
+};
 type Cache = {
+  update: UpdateRow | null;
+  lastUpdateCheck: string | null;
   secrets: SecretStatus[] | null;
   keyFile: KeyFileStatus | null;
   backupSettings: BackupSettings | null;
@@ -44,7 +57,7 @@ type Cache = {
   models: Record<string, ModelProg>;
   startRows: StartAllRow[] | null;
 };
-const cache: Cache = { secrets: null, keyFile: null, backupSettings: null, backupList: null, verify: null, run: null, map: null, relay: null, preview: null, whoop: null, profile: null, sup: null, supSummary: null, tiers: null, setupDone: null, models: {}, startRows: null };
+const cache: Cache = { update: null, lastUpdateCheck: null, secrets: null, keyFile: null, backupSettings: null, backupList: null, verify: null, run: null, map: null, relay: null, preview: null, whoop: null, profile: null, sup: null, supSummary: null, tiers: null, setupDone: null, models: {}, startRows: null };
 let version = 0;
 const listeners = new Set<() => void>();
 const notify = () => { version += 1; listeners.forEach((l) => l()); };
@@ -297,8 +310,74 @@ export function setupReady(downloadedTier: string | null, tier: string, rows: St
 let downloadedTier: string | null = null;
 const setupCode = (e: unknown) => (typeof e === "string" && SETUP_CODES.has(e) ? e : "failed");
 
+// ---- Workflow outcomes (decision 0042): every action says how it ended, in fixed words ----
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e ?? "")).trimStart();
+/** Approval-gate prefixes first, then the fixed codes the service commands return. Never the raw text. */
+function restartFail(e: unknown): Fail {
+  const o = approvalOutcome(e);
+  if (o === "declined" || o === "busy" || o === "expired") return o;
+  const t = errText(e);
+  if (t.startsWith("unsupported") || t.startsWith("unknown_service")) return "unsupported";
+  if (t.startsWith("needs_you:")) return "gave_up";
+  return "failed";
+}
+/** How long to wait for a restarted service to report healthy. Mutable for tests only. */
+export const SERVICE_POLL = { everyMs: 2000, maxMs: 30_000 };
+const serviceState = (id: string) => (cache.sup ? servicesFromSupervisor(cache.sup) : cache.map ? servicesFromMap(cache.map) : null)?.services.find((s) => s.id === id)?.state ?? null;
+/** Bounded poll of the supervisor until `id` is healthy. False when it is not by the deadline or the row is unknown. */
+async function waitHealthy(id: string): Promise<boolean> {
+  const t0 = Date.now();
+  for (;;) {
+    try {
+      const sv = await getServicesStatus();
+      if (Array.isArray(sv) && sv.length > 0 && sv.every(isSupStatus)) cache.sup = sv; else await refreshLive();
+    } catch { /* keep waiting until the deadline */ }
+    notify();
+    const st = serviceState(id);
+    if (st === "healthy") return true;
+    if (st === null || Date.now() - t0 >= SERVICE_POLL.maxMs) return false;
+    await new Promise((r) => setTimeout(r, SERVICE_POLL.everyMs));
+  }
+}
+/** `notify_send_test` failures: the backend's three fixed messages plus the approval prefixes. */
+function relayFail(e: unknown): Fail {
+  const o = approvalOutcome(e);
+  if (o === "declined" || o === "busy" || o === "expired") return o;
+  const t = errText(e);
+  if (t.startsWith("Outbound sends are disabled")) return "off";
+  if (t.startsWith("Telegram bot token and chat are not both set")) return "missing";
+  if (t.startsWith("Telegram API returned an error")) return "telegram";
+  return "failed";
+}
+const PREVIEW_MSGS = ["No reading for this alert yet.", "This alert isn't connected yet."];
+const dirMessage = (e: unknown) => {
+  const t = errText(e);
+  if (t.startsWith("dir_not_in_home")) return "Choose a folder inside your home folder.";
+  if (t.startsWith("dir_")) return "That folder can't be used. Choose another one.";
+  return "Couldn't save the backup folder. Nothing changed.";
+};
+const previewMessage = (e: unknown) => {
+  const t = errText(e);
+  if (t.startsWith("backup_running")) return "A backup is running. Try again when it finishes.";
+  if (t.startsWith("busy")) return "Another check is running. Try again in a moment.";
+  if (t.startsWith("not_found")) return "That backup file is no longer in the backup folder.";
+  return "Couldn't read this backup. Nothing was changed.";
+};
+const nowClock = () => `today at ${new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+/** `update_status` to the Updates section. Version and notes are the manifest's claim only; there is no history to show. */
+export function toUpdates(r: UpdateRow | null, lastCheck: string | null): Wired<UpdateStatus> {
+  if (!r) return UNWIRED;
+  return { state: "live", value: {
+    current: r.current_version,
+    available: r.state === "available" ? { version: r.announced_version_unverified, notes: [], scheduledFor: "" } : null,
+    backend: r.state,
+    lastCheck: lastCheck ?? "not checked this session",
+    autoUpdate: r.auto_update, checkDaily: r.check_daily, history: [],
+  } };
+}
+
 export async function refreshLive(): Promise<void> {
-  const [s, k, bs, bl, sm, rl, wh, pr, sv, ss, td, st] = await Promise.allSettled([
+  const [s, k, bs, bl, sm, rl, wh, pr, sv, ss, td, st, up] = await Promise.allSettled([
     invokeBound<SecretStatus[]>("secrets_status"),
     invokeBound<KeyFileStatus>("key_file_status"),
     invokeBound<BackupSettings>("backup_settings_get"),
@@ -312,6 +391,7 @@ export async function refreshLive(): Promise<void> {
     getServicesSummary(),
     invokeBound<unknown>("model_tiers"),
     invokeBound<unknown>("setup_done"),
+    invokeBound<unknown>("update_status"),
   ]);
   cache.secrets = s.status === "fulfilled" ? s.value : null;
   cache.keyFile = k.status === "fulfilled" ? k.value : null;
@@ -325,6 +405,7 @@ export async function refreshLive(): Promise<void> {
   cache.sup = sv.status === "fulfilled" && Array.isArray(sv.value) && sv.value.length > 0 && sv.value.every(isSupStatus) ? sv.value : null;
   cache.supSummary = ss.status === "fulfilled" ? summaryFromSupervisor(ss.value) : null;
   cache.tiers = td.status === "fulfilled" ? toTiers(td.value) : null;
+  cache.update = up.status === "fulfilled" && isUpdateRow(up.value) ? up.value : null;
   cache.setupDone = st.status === "fulfilled" && typeof st.value === "boolean" ? st.value : null;
   notify();
 }
@@ -361,13 +442,16 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
     services: () => live(cache.sup ? servicesFromSupervisor(cache.sup) : cache.map ? servicesFromMap(cache.map) : null),
     summary: () => live(cache.sup ? (cache.supSummary ?? summaryFromServices(servicesFromSupervisor(cache.sup).services)) : cache.map ? summaryFromServices(servicesFromMap(cache.map).services) : null),
     serviceLogs: (id: string) => askLogs(id),
-    // Restart only (the supervisor's "start" has no backend). Every restart asks in the native approval dialog; a
-    // decline, `unsupported`, `needs_you:` or failure comes back unwired and only a fixed code is logged.
+    // Restart only (the supervisor has no start command). Every restart asks in the native approval dialog. The outcome
+    // says declined / unsupported / gave up / failed; on success the supervisor is polled (bounded) until the service is healthy,
+    // and the app snapshot is nudged so Agents and the System map update at once.
     serviceAction: async (id: string, action: "restart" | "start") => {
-      if (action !== "restart") return UNWIRED;
-      try { await invokeBound("service_restart", { id }); } catch (e) { console.warn("[standalone] service_restart refused:", code(e)); return UNWIRED; }
+      if (action !== "restart") return { state: "unsupported" };
+      try { await invokeBound("service_restart", { id }); } catch (e) { const f = restartFail(e); console.warn("[standalone] service_restart refused:", f); return { state: f }; }
       await refreshLive();
-      return OK;
+      const healthy = await waitHealthy(id);
+      announceSnapshot();
+      return { state: "done", healthy };
     },
     tiers: () => live(cache.tiers),
     setupDone: () => live(cache.setupDone),
@@ -416,6 +500,37 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
         backups: list.map((r) => ({ id: r.id, label: r.label, madeAt: fmtMadeAt(r.madeAt), version: "", daysOld: r.daysOld })),
       });
     },
+    previewBackup: async (id: string) => {
+      const row = cache.backupList?.find((r) => r.id === id);
+      if (!row) return { state: "missing", message: "That backup file is no longer in the backup folder." };
+      try {
+        const v = toRestorePreview(await invokeBound<unknown>("restore_preview", { file: id }), row, cache.keyFile?.made === true);
+        return v.state === "live" ? { state: "done", preview: v.value } : { state: "failed", message: "Couldn't read this backup. Nothing was changed." };
+      } catch (e) { console.warn("[standalone] restore_preview refused:", code(e)); return { state: "failed", message: previewMessage(e) }; }
+    },
+    // The destructive step. The backend asks in its native approval dialog and saves a full safety copy first; nothing is bypassed here.
+    restore: async (id: string) => {
+      if (!cache.backupList?.some((r) => r.id === id)) return { state: "missing", message: "That backup file is no longer in the backup folder." };
+      try {
+        const lines = await invokeBound<string[]>("restore_backup", { file: id });
+        await refreshLive();
+        return { state: "done", lines: Array.isArray(lines) ? lines.filter((l): l is string => typeof l === "string") : [] };
+      } catch (e) {
+        const o = approvalOutcome(e);
+        console.warn("[standalone] restore_backup refused:", o);
+        if (o === "changed") return { state: "failed", message: "Your data changed while the confirmation was open. Nothing was restored; try again." };
+        return { state: o === "declined" || o === "busy" || o === "expired" ? o : "failed", message: backupError(e, "restore") };
+      }
+    },
+    pickBackupDir: async () => {
+      let picked: string | string[] | null;
+      try { picked = await pluginDialogOpen<string | string[] | null>({ title: "Choose a backup folder", directory: true, multiple: false }); } catch { return { state: "unsupported", message: "The folder picker isn't available here." }; }
+      const dir = Array.isArray(picked) ? (picked[0] ?? null) : picked;
+      if (!dir) return { state: "cancelled" };
+      try { await invokeBound("backup_settings_set", { patch: { dir } }); } catch (e) { console.warn("[standalone] backup_settings_set refused:", code(e)); return { state: "failed", message: dirMessage(e) }; }
+      await refreshLive();
+      return { state: "done", dir };
+    },
     backupNow: async () => {
       cache.run = { pct: 0, phase: "Starting", done: "", total: "", left: "" };
       notify();
@@ -445,9 +560,52 @@ export function makeLiveStandalone(base: StandaloneAdapter): StandaloneAdapter {
     },
     relayPreview: () => { askPreview(); return live(cache.preview); },
     relaySendTest: async () => {
-      try { await invokeBound("notify_send_test"); } catch (e) { console.warn("[standalone] notify_send_test refused:", code(e)); return UNWIRED; }
+      try { await invokeBound("notify_send_test"); } catch (e) { const f = relayFail(e); console.warn("[standalone] notify_send_test refused:", f); return { state: f }; }
+      await refreshLive();
+      return { state: "done" };
+    },
+    // A fresh `notify_preview`: the local model writes a new text each time. Only the backend's two fixed "nothing to preview" lines pass through.
+    writeAnotherPreview: async () => {
+      try {
+        const p = toPreview(await invokeBound("notify_preview", { kind: "recovery" }));
+        if (!p) return { state: "failed", message: "Couldn't write another one right now." };
+        cache.preview = p; notify();
+        return { state: "done" };
+      } catch (e) {
+        const t = errText(e);
+        console.warn("[standalone] notify_preview refused:", code(e));
+        return { state: "failed", message: PREVIEW_MSGS.includes(t) ? t : "Couldn't write another one right now." };
+      }
+    },
+    updates: () => toUpdates(cache.update, cache.lastUpdateCheck),
+    setUpdatePrefs: async (p: { autoUpdate?: boolean; checkDaily?: boolean }) => {
+      try { await invokeBound("update_set_prefs", { patch: { auto_update: p.autoUpdate ?? null, check_daily: p.checkDaily ?? null } }); } catch (e) { console.warn("[standalone] update_set_prefs refused:", code(e)); return UNWIRED; }
       await refreshLive();
       return OK;
+    },
+    // The backend fails closed: switch off / no key / no host gives `not_configured`; outbound off gives `outbound_disabled`.
+    checkUpdate: async () => {
+      try { await invokeBound("update_check"); } catch (e) {
+        const t = errText(e);
+        const f: Fail = t.startsWith("not_configured") ? "unsupported" : t.startsWith("outbound_disabled") ? "off" : "failed";
+        console.warn("[standalone] update_check refused:", f);
+        await refreshLive();
+        return { state: f };
+      }
+      cache.lastUpdateCheck = nowClock();
+      await refreshLive();
+      return { state: "done" };
+    },
+    installUpdate: async () => {
+      try { await invokeBound("update_install_now"); } catch (e) {
+        const t = errText(e);
+        const o = approvalOutcome(e);
+        const f: Fail = o === "declined" || o === "busy" || o === "expired" ? o : t.startsWith("not_configured") || t.startsWith("install_not_available") ? "unsupported" : "failed";
+        console.warn("[standalone] update_install_now refused:", f);
+        return { state: f };
+      }
+      await refreshLive();
+      return { state: "done" };
     },
     keyFile: () => live(cache.keyFile),
     makeKeyFile: async (passphrase: string) => {

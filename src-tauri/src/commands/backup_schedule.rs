@@ -645,6 +645,66 @@ pub(crate) fn restore_preview_in(
     })
 }
 
+/// Pre-approval checks shared by `restore_backup` and `unpack_backup`: a backup file name (never a
+/// path), no backup running, a plain file (no symlink) whose archive verifies. Returns the canonical
+/// path. Read-only; nothing is extracted. Errors are fixed codes.
+pub(crate) fn restore_check_archive(
+    path: &Path,
+    backup_busy: &std::sync::atomic::AtomicBool,
+    verify_busy: &std::sync::atomic::AtomicBool,
+) -> Result<std::path::PathBuf, String> {
+    let file = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "invalid_file".to_string())?;
+    let Some(naive) = parse_backup_name(file).or_else(|| amara_archive(file).map(|(t, _)| t))
+    else {
+        return Err("invalid_file".into());
+    };
+    if backup_busy.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("backup_running".into());
+    }
+    let _guard = BusyGuard::acquire(verify_busy).ok_or_else(|| "busy".to_string())?;
+    let meta = std::fs::symlink_metadata(path).map_err(|_| "not_found".to_string())?;
+    if meta.file_type().is_symlink() {
+        return Err("symlink_refused".into());
+    }
+    if !meta.is_file() {
+        return Err("not_a_file".into());
+    }
+    let at = Local
+        .from_local_datetime(&naive)
+        .earliest()
+        .map(|d| d.to_rfc3339())
+        .unwrap_or_default();
+    let report = verify_archive(path, file, at, VERIFY_CAPS)?;
+    if !report.ok {
+        return Err("verify_failed".into());
+    }
+    path.canonicalize().map_err(|_| "not_found".to_string())
+}
+
+/// `restore_backup(file)`: `file` is an id from `backup_list`. Resolves the backup folder from the
+/// settings, joins safely, then runs the shared checks. Returns the canonical archive path.
+pub(crate) fn restore_precheck_in(
+    home: &Path,
+    data_dir: &Path,
+    dir_setting: &str,
+    file: &str,
+    backup_busy: &std::sync::atomic::AtomicBool,
+    verify_busy: &std::sync::atomic::AtomicBool,
+) -> Result<std::path::PathBuf, String> {
+    if parse_backup_name(file)
+        .or_else(|| amara_archive(file).map(|(t, _)| t))
+        .is_none()
+    {
+        return Err("invalid_file".into());
+    }
+    let dir = resolve_dir(dir_setting, home, data_dir)?;
+    let path = super::path_safety::safe_join(&dir, file).map_err(|_| "invalid_file".to_string())?;
+    restore_check_archive(&path, backup_busy, verify_busy)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn restore_preview(file: String) -> Result<RestorePreview, String> {
@@ -1272,6 +1332,47 @@ mod tests {
             );
         }
         let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn restore_precheck_refuses_paths_and_foreign_names_before_any_dialog() {
+        let home = tmp("precheck-bad");
+        let data = home.join("Library-data");
+        fs::create_dir_all(home.join("Amara Backups")).unwrap();
+        fs::create_dir_all(&data).unwrap();
+        for f in [
+            "../x",
+            "/etc/passwd",
+            "a/b.tar.gz",
+            "notes.tar.gz",
+            "..",
+            "",
+        ] {
+            assert_eq!(
+                restore_precheck_in(&home, &data, "~/Amara Backups", f, &nb(), &nb()).unwrap_err(),
+                "invalid_file",
+                "{f}"
+            );
+        }
+    }
+
+    #[test]
+    fn restore_precheck_refuses_corrupt_archive_and_running_backup() {
+        let home = tmp("precheck-corrupt");
+        let data = home.join("Library-data");
+        let dir = home.join("Amara Backups");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&data).unwrap();
+        let name = "nexus-backup-20261029_101500.tar.gz";
+        fs::write(dir.join(name), b"not a gzip archive").unwrap();
+        let e =
+            restore_precheck_in(&home, &data, "~/Amara Backups", name, &nb(), &nb()).unwrap_err();
+        assert!(e != "invalid_file" && !e.is_empty(), "{e}");
+        let busy = std::sync::atomic::AtomicBool::new(true);
+        assert_eq!(
+            restore_precheck_in(&home, &data, "~/Amara Backups", name, &busy, &nb()).unwrap_err(),
+            "backup_running"
+        );
     }
 
     #[test]

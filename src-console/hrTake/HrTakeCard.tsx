@@ -3,6 +3,7 @@ import { askMore } from "../amaraTake/takeView";
 import { TakeEmber } from "../amaraTake/AmaraTakeCard";
 import { useNow } from "../shell/useNow";
 import { Rich } from "../takes/parts";
+import { TakeRating } from "../takes/TakeRating";
 import { DataTag } from "../ui";
 import type { Wired } from "../lib/sampleAdapters";
 import { ageLabel, HR_MIN_COVERED, HR_WINDOW_MIN, tokyoTime, trendOf, type HrTake, type HrTakeStatus, type HrWindow } from "./adapters";
@@ -114,7 +115,8 @@ export function HrTakeCard({ w, reading, now, variant, block, onOpenDevices }: H
   const prev = s.kind === "take" ? s.take : s.kind === "none_yet" ? null : s.previous;
   const foot = (take: HrTake) => (
     <div className="take__foot"><span className="take__spacer" />
-      <button type="button" className="take__ask" onClick={() => askMore({ from: "Home", chips: chipsOf(take.window), question: take.question, sample: w.state === "sample" })}>Ask more ›</button>
+      {w.state !== "sample" && <TakeRating key={take.id} page="home" takeId={take.id} />}
+      <button type="button" className="take__ask" onClick={() => askMore({ from: "Home", chips: chipsOf(take.window), question: take.question, sample: w.state === "sample", text: take.text.replace(/\*\*/g, ""), takeId: take.id, page: "home" })}>Ask more ›</button>
     </div>
   );
   if (reading) {

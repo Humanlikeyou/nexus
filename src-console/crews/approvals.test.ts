@@ -17,7 +17,7 @@ const NOW = Date.parse("2026-01-01T00:10:00Z");
 describe("crew approvals mapping", () => {
   it("maps a pending request to the adapter shape; amount is never wired", () => {
     const [a] = mapPending([row()], NOW);
-    expect(a).toEqual({ id: "a1", title: "Allow this run to make changes", crew: "Research", agents: "researcher → writer", impact: "Changes · edit_file, send_note", requested: "10 min ago", risk: "Medium", reason: "the run wants to change something", amount: { state: "unwired" } });
+    expect(a).toEqual({ id: "a1", runId: "r1", title: "Allow this run to make changes", crew: "Research", agents: "researcher → writer", impact: "Changes · edit_file, send_note", requested: "10 min ago", risk: "Medium", reason: "the run wants to change something", amount: { state: "unwired" } });
   });
 
   it("maps decided rows with approved only when explicitly true", () => {

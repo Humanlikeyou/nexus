@@ -1,7 +1,8 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { HaDevice_Serialize as Dev, HaDeviceSetResult_Serialize as SetResult, HaDevicesResult_Serialize as Result } from "../bindings.gen";
 import { invokeBound } from "../bridge";
-import { Button } from "../ui";
+import { HVAC_LABEL } from "../lib/homeAssistant";
+import { Button, Select } from "../ui";
 import "./design1118.css";
 
 /**
@@ -12,7 +13,7 @@ import "./design1118.css";
  */
 export type HomeCalls = {
   list: () => Promise<Result>;
-  set: (entityId: string, service: string, value: number | null, via: string) => Promise<SetResult>;
+  set: (entityId: string, service: string, value: number | string | null, via: string) => Promise<SetResult>;
   undo: (id: string) => Promise<boolean>;
 };
 const defaultCalls: HomeCalls = {
@@ -101,7 +102,44 @@ export function coverBack(d: Dev, service: string): { d: Dev; service: string; v
   return undefined;
 }
 
-export function LiveHomeDevices({ calls = defaultCalls }: { calls?: HomeCalls }) {
+/** A climate device's setpoint step and clamp, from what the device reports. */
+export function climateStep(d: Dev): { min: number; max: number; step: number } {
+  const t = d.temperature;
+  return { min: d.minTemperature ?? 7, max: d.maxTemperature ?? 35, step: t != null && !Number.isInteger(t) ? 0.5 : 1 };
+}
+
+/** Climate: a setpoint stepper and a mode select, both through ha_device_set (so they confirm and can be undone). */
+function ClimateRow({ d, busy, onSend }: { d: Dev; busy: boolean; onSend: (d: Dev, service: string, value: number | string) => void }) {
+  const canTemp = d.services.includes("set_temperature") && d.temperature != null;
+  const modes = d.services.includes("set_hvac_mode") ? d.hvacModes.filter((m) => m in HVAC_LABEL) : [];
+  if (!d.controllable || (!canTemp && modes.length === 0)) return null;
+  const { min, max, step } = climateStep(d);
+  const t = d.temperature;
+  const to = (next: number) => onSend(d, "set_temperature", Math.min(max, Math.max(min, next)));
+  return (
+    <div className="d18-ctl" role="group" aria-label={`${d.name} controls`}>
+      {canTemp && t != null && (
+        <span className="d18-actions">
+          <Button size="small" variant="secondary" disabled={busy || t <= min} aria-label={`Lower ${d.name} temperature`} onClick={() => to(t - step)}>−</Button>
+          <small>Target {t}{d.unit ?? ""}</small>
+          <Button size="small" variant="secondary" disabled={busy || t >= max} aria-label={`Raise ${d.name} temperature`} onClick={() => to(t + step)}>+</Button>
+        </span>
+      )}
+      {modes.length > 0 && (
+        <Select label={`${d.name} mode`} hideLabel disabled={busy} value={d.state && modes.includes(d.state) ? d.state : ""}
+          options={[...(d.state && modes.includes(d.state) ? [] : [{ value: "", label: "Mode", disabled: true }]), ...modes.map((m) => ({ value: m, label: HVAC_LABEL[m as keyof typeof HVAC_LABEL] }))]}
+          onChange={(e) => { if (e.target.value && e.target.value !== d.state) onSend(d, "set_hvac_mode", e.target.value); }} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * `refreshSignal` changes when Home Assistant reports a change to one of these devices (the page listens to the
+ * live stream); the list is re-read shortly after. `onListed` reports which entities this panel controls or shows,
+ * so the grouped list below never repeats them (one source of truth per device).
+ */
+export function LiveHomeDevices({ calls = defaultCalls, refreshSignal = 0, onListed }: { calls?: HomeCalls; refreshSignal?: number; onListed?: (ids: Set<string>) => void }) {
   const [res, setRes] = useState<Result | null | "error">(null);
   // undo: a History id (Undo via add_undo), or for a blind the reverse move, sent again through ha_device_set
   // so the Mac asks for approval again (Taisun 2026-11-19: "yes add undo").
@@ -109,11 +147,18 @@ export function LiveHomeDevices({ calls = defaultCalls }: { calls?: HomeCalls })
   const [busy, setBusy] = useState<string | null>(null);
   const load = useCallback(() => { void calls.list().then(setRes).catch(() => setRes("error")); }, [calls]);
   useEffect(load, [load]);
+  useEffect(() => { if (!refreshSignal) return; const t = window.setTimeout(load, 400); return () => window.clearTimeout(t); }, [refreshSignal, load]);
+  const listedRef = useRef(onListed);
+  useEffect(() => { listedRef.current = onListed; });
+  useEffect(() => {
+    if (res === null) return;
+    listedRef.current?.(res === "error" ? new Set() : new Set(res.devices.filter((d) => !d.system).map((d) => d.entityId)));
+  }, [res]);
   useEffect(() => { if (!note?.undo && !note?.back) return; const t = window.setTimeout(() => setNote((n) => (n ? { ...n, undo: null, back: undefined } : n)), 8000); return () => window.clearTimeout(t); }, [note]);
   if (res === null || res === "error") return res === "error" ? <p className="d18-note" role="status">Devices couldn&apos;t be read just now.</p> : null;
   const devices = res.devices.filter((d) => !d.system);
   if (devices.length === 0) return null;
-  const send = async (d: Dev, service: string, value: number | null = null) => {
+  const send = async (d: Dev, service: string, value: number | string | null = null) => {
     setBusy(d.entityId);
     try {
       const r = await calls.set(d.entityId, service, value, "typed");
@@ -157,6 +202,7 @@ export function LiveHomeDevices({ calls = defaultCalls }: { calls?: HomeCalls })
                   </span>
                 )}
               </div>
+              {d.deviceType === "climate" && <ClimateRow d={d} busy={busy === d.entityId} onSend={(dev, svc, v) => { void send(dev, svc, v); }} />}
               {sliderFor(d) && <LevelSlider d={d} busy={busy === d.entityId} onCommit={(dev, svc, v) => { void send(dev, svc, v); }} />}
               </Fragment>
             );

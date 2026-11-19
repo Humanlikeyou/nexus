@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { money } from "../lib/format";
 import type { SystemSnapshot } from "../types";
 import { Button, DataTag, Dialog, Sparkline, StatusText } from "../ui";
@@ -95,15 +95,20 @@ export function ProposalsCard({ adapter: given, capUsd }: { adapter?: MarketProp
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [undo, setUndo] = useState<string | null>(null); // History id, live only
+  const [toWatch, setToWatch] = useState(false);
   useEffect(() => { if (!undo) return; const t = window.setTimeout(() => setUndo(null), 8000); return () => window.clearTimeout(t); }, [undo]);
   const sample = proposals.state === "sample";
+  const recentW = typeof (adapter as Partial<LiveMarket>).recent === "function" ? (adapter as LiveMarket).recent() : null;
+  const recent = recentW && recentW.state === "live" ? recentW.value : null;
   const recorded = new Map((choices.state === "unwired" ? [] : choices.value).map((c) => [c.proposalId, c]));
   const record = async (p: MarketProposal, choice: "approved" | "dismissed") => {
     setBusy(true);
     const r = await adapter.recordChoice(p.id, choice);
     setBusy(false); setConfirming(null);
     const toast = r.state === "live" ? r.value.toast : undefined;
-    setNote(r.state === "unwired" ? "Your choice couldn't be saved: the choice log needs wiring. Nothing was sent." : toast ?? (choice === "approved" ? `Recorded: you approved “${p.title}”. No order was sent.` : `Dismissed “${p.title}”.`));
+    const base = toast ?? (choice === "approved" ? `Recorded: you approved “${p.title}”. No order was sent.` : `Dismissed “${p.title}”.`);
+    setNote(r.state === "unwired" ? "Your choice couldn't be saved: the choice log needs wiring. Nothing was sent." : choice === "approved" ? `${base} Now on your watchlist.` : base);
+    setToWatch(r.state === "live" && choice === "approved");
     setUndo(r.state === "live" && r.value.historyId ? r.value.historyId : null);
     bump();
   };
@@ -111,6 +116,7 @@ export function ProposalsCard({ adapter: given, capUsd }: { adapter?: MarketProp
     const id = undo; setUndo(null);
     const ok = id && typeof (adapter as Partial<LiveMarket>).undoWatch === "function" ? await (adapter as LiveMarket).undoWatch(id) : false;
     setNote(ok ? "Undone. The proposal is open again." : "That couldn't be undone. Check History.");
+    setToWatch(false);
     bump();
   };
   return (
@@ -137,7 +143,16 @@ export function ProposalsCard({ adapter: given, capUsd }: { adapter?: MarketProp
           })}
         </div>
       )}
-      {note && <p className="d18-msg" role="status">{note}{undo && <> <Button size="small" variant="plain" onClick={() => { void undoChoice(); }}>Undo</Button></>}</p>}
+      {note && <p className="d18-msg" role="status">{note}{toWatch && <> <Button size="small" variant="plain" onClick={() => document.getElementById("d18-watch")?.scrollIntoView?.({ behavior: "smooth" })}>See watchlist</Button></>}{undo && <> <Button size="small" variant="plain" onClick={() => { void undoChoice(); }}>Undo</Button></>}</p>}
+      {recent && recent.length > 0 && (
+        <div data-testid="recently-decided">
+          <p className="d18-eyebrow">Recently decided</p>
+          <ul className="d18-clist">
+            {recent.map((d) => <li key={d.id}><div><b>{d.title}</b><small>{d.choice === "approved" ? "Recorded as approved. On your watchlist. No order was sent." : "Dismissed."} · {d.at.slice(0, 10)}</small></div></li>)}
+          </ul>
+          <p className="d18-note">Every choice is also in History, where you can undo it for 8 seconds.</p>
+        </div>
+      )}
       <Dialog open={confirming != null} title="Confirm this record" confirmLabel="Confirm" busy={busy} onConfirm={() => { if (confirming) void record(confirming, "approved"); }} onCancel={() => setConfirming(null)} className="d18-confirm">
         {confirming && (
           <div data-testid="trade-confirm">
@@ -156,6 +171,19 @@ const RESEARCH_NOTE: Record<string, string> = {
   already_running: "Amara is already researching. New picks arrive as proposals above.",
   blocked: "Research is blocked while outbound access is off. Turn it on in Settings to research.",
 };
+const RESEARCH_POLL_MS = 10_000;
+const RESEARCH_MAX_POLLS = 30;
+
+/** A pick's source as an outbound link: https only, opened by the user's click (the shell plugin opens _blank links). Nothing is fetched here. */
+export function SourceLink({ name, url }: { name: string; url: string | null }) {
+  let host = "";
+  try {
+    const u = url != null ? new URL(url) : null;
+    // https only, and never a URL with credentials (`https://good.com@evil.com/` shows good.com but goes to evil.com).
+    if (u && u.protocol === "https:" && !u.username && !u.password) host = u.hostname;
+  } catch { host = ""; }
+  return host ? <><a href={url as string} target="_blank" rel="noopener noreferrer" aria-label={`Open source: ${name}`}>{name}</a> ({host})</> : <>{name}</>;
+}
 const STATUS_LABEL = { open: "Market open", closed: "Market closed", stale: "Price is stale" } as const;
 
 /** Watchlist (decision 0038). Read-only prices: no price is ever invented ("No price yet" when none was fetched). */
@@ -165,8 +193,31 @@ export function WatchlistCard({ adapter: given }: { adapter?: MarketProposalAdap
   const [note, setNote] = useState<string | null>(null);
   const [undo, setUndo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [watching, setWatching] = useState(false);
+  const [, poke] = useState(0);
+  const base = useRef<{ finished: string | null; sawRunning: boolean; polls: number }>({ finished: null, sawRunning: false, polls: 0 });
   useEffect(() => { if (!undo) return; const t = window.setTimeout(() => setUndo(null), 8000); return () => window.clearTimeout(t); }, [undo]);
   const w = typeof adapter.watchlist === "function" ? adapter.watchlist() : null;
+  const research_ = w && w.state === "live" ? w.value.research : null;
+  // Poll (bounded) while research runs, then say what it found.
+  useEffect(() => {
+    if (!watching || typeof adapter.refresh !== "function") return;
+    const id = window.setInterval(() => {
+      base.current.polls += 1;
+      if (base.current.polls > RESEARCH_MAX_POLLS) { setWatching(false); setNote("Research is taking a while. New picks will still arrive as proposals."); return; }
+      void adapter.refresh!().then(() => poke((n) => n + 1));
+    }, RESEARCH_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [watching, adapter]);
+  useEffect(() => {
+    if (!watching || !research_) return;
+    if (research_.running) { base.current.sawRunning = true; return; }
+    if (base.current.sawRunning || research_.lastFinishedAt !== base.current.finished) {
+      setWatching(false);
+      const n = research_.lastProposed;
+      setNote(n > 0 ? `Amara found ${n} new pick${n === 1 ? "" : "s"}. They are in the proposals above.` : "No new picks.");
+    }
+  }, [watching, research_]);
   if (!w) return null;
   const research = async () => {
     setBusy(true);
@@ -174,7 +225,13 @@ export function WatchlistCard({ adapter: given }: { adapter?: MarketProposalAdap
     setBusy(false);
     if (r.state === "unwired") setNote("Research couldn't start. Try again in a moment.");
     else if (r.value.state === "rate_limited") setNote(`Research ran recently. Try again in ${r.value.retryAfterMinutes ?? "a few"} minutes.`);
-    else setNote(RESEARCH_NOTE[r.value.state] ?? null);
+    else {
+      setNote(RESEARCH_NOTE[r.value.state] ?? null);
+      if (r.value.state === "started" || r.value.state === "already_running") {
+        base.current = { finished: w.state === "live" ? w.value.research.lastFinishedAt : null, sawRunning: r.value.state === "already_running", polls: 0 };
+        setWatching(true);
+      }
+    }
     bump();
   };
   const drop = async (ticker: string) => {
@@ -190,7 +247,7 @@ export function WatchlistCard({ adapter: given }: { adapter?: MarketProposalAdap
       {w.state === "unwired" ? <p className="d18-note">The watchlist isn&apos;t available yet.</p> : w.value.picks.length === 0 ? <p className="d18-note">No picks yet. Research now asks Amara for ideas. Watch-only: nothing is ever bought.</p> : (
         <ul className="d18-clist">
           {w.value.picks.map((p) => (
-            <li key={p.ticker}><div><b>{p.ticker}</b><small>{p.reason}{p.source ? ` · ${p.source}` : ""}</small>
+            <li key={p.ticker}><div><b>{p.ticker}</b><small>{p.reason}{p.source ? <> · <SourceLink name={p.source} url={p.sourceUrl} /></> : null}</small>
               <small>{p.quote.price == null ? "No price yet" : `${p.quote.price}${p.quote.currency ? ` ${p.quote.currency}` : ""}`} · {STATUS_LABEL[p.quote.status]}</small></div>
               <Button size="small" variant="plain" aria-label={`Drop ${p.ticker}`} onClick={() => { void drop(p.ticker); }}>Drop</Button></li>
           ))}

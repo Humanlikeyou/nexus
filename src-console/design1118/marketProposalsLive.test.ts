@@ -29,7 +29,8 @@ describe("live watch-only proposals", () => {
     const names = calls.map(([c]) => c);
     expect(names).toContain("watch_proposal_record");
     expect(names).toContain("watch_proposal_dismiss");
-    expect(new Set(names)).toEqual(new Set(["watch_proposals_list", "watch_proposal_record", "watch_proposal_dismiss"]));
+    // An approval also re-reads the watchlist (the pick is added in the same write).
+    expect(new Set(names)).toEqual(new Set(["watch_proposals_list", "watch_proposal_record", "watch_proposal_dismiss", "watchlist_get"]));
     const c = a.choices();
     expect(c.state === "live" && c.value.map((x) => x.proposalId)).toEqual(["wp-1"]);
     const p = a.proposals();

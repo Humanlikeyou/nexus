@@ -30,12 +30,16 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
   const [museDevices, setMuseDevices] = useState<MuseDevice[]>([]);
   const [museOperation, setMuseOperation] = useState<MuseOperation>(null);
   const [museError, setMuseError] = useState<string | null>(null);
+  // True after a search that found no headset: Neuro keeps saying so (and offers "Search again") until something is found.
+  const [scanEmpty, setScanEmpty] = useState(false);
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
   const [recordingFile, setRecordingFile] = useState<string | null>(null);
   const [sessionEndedAt, setSessionEndedAt] = useState<number | null>(null);
   // Allocated when the recording starts, so Hemi-Sync can link to it while it runs. The saved session reuses it.
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  // The session that was just saved by Stop: Neuro shows a "Session saved" card for it until Done.
+  const [lastSavedId, setLastSavedId] = useState<string | null>(null);
   const sessionFinalizer = useRef<SessionFinalizer<{ session: RecordedSession & { file_path: string }; data: Record<string, unknown> }> | null>(null);
   const sessionOperation = useRef(false);
   const sessionStopTime = useRef<number | null>(null);
@@ -81,6 +85,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     try {
       const found = await scanMuse();
       setMuseDevices(found);
+      setScanEmpty(found.length === 0);
       setNotice(found.length ? `${found.length} Muse headset${found.length === 1 ? "" : "s"} found` : "No Muse headsets found");
     } catch (error) {
       setMuseError(readableError(error));
@@ -101,6 +106,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     try {
       await connectMuse(device.address);
       setMuseDevices([]);
+      setScanEmpty(false);
       setNotice(`${device.name} connected`);
       await refresh();
     } catch (error) {
@@ -174,6 +180,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       auxDetector.current = new AuxDetector();
       auxFound.current = null;
       sessionIdRef.current = newSessionId(startedAt);
+      setLastSavedId(null);
       setSessionId(sessionIdRef.current);
       setSessionStartedAt(startedAt);
       beginTraining();
@@ -194,6 +201,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     sessionOperation.current = true;
     setMuseOperation("stopping");
     setMuseError(null);
+    const savingId = sessionIdRef.current;
     try {
       // Same bounded wait as disconnect; a retry joins the finalizer's in-flight save, so there is never a second save.
       const saved = await withTimeout(persistMuseSession(), SAVE_TIMEOUT_MS, "The headset didn't answer while saving the session. The recording is kept. Press Stop session to retry.");
@@ -204,6 +212,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       setRecordingFile(null);
       setSessionEndedAt(null);
       sessionFinalizer.current = null;
+      if (saved && savingId) setLastSavedId(savingId);
       setNotice(saved ? "Muse session saved" : "Muse stream stopped");
     } catch (error) {
       setMuseError(`Session could not be finalized. Keep Amara OS open and retry. ${readableError(error)}`);
@@ -246,5 +255,6 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     }
   }, [data.muse.streaming, sessionStartedAt, persistMuseSession, refresh, resetTelemetry, finishTraining, setNotice]);
 
-  return { museDevices, museOperation, museError, sessionId, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession };
+  const dismissSaved = useCallback(() => setLastSavedId(null), []);
+  return { museDevices, museOperation, museError, scanEmpty, sessionId, lastSavedId, dismissSaved, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession };
 }

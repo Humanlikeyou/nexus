@@ -6,7 +6,9 @@ import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
 import { useNow } from "../shell/useNow";
 import { Button, DataTag } from "../ui";
 import { addAdapter } from "../adds/adapters";
-import { PreviewCard, ResultLine } from "../adds/Composer";
+import { LinkButton, OffButton, PreviewCard, ResultLine } from "../adds/Composer";
+import { dictateOnce, dictationReady } from "../adds/dictation";
+import type { Route } from "../app/routes";
 import type { AddPreview, Saved } from "../adds/flow";
 import { entryById } from "./catalog";
 import { canComment, shouldSpeakComment } from "./intents";
@@ -75,7 +77,7 @@ function Wave() {
   );
 }
 
-function PdfDateAdd({ hint }: { hint: string }) {
+function PdfDateAdd({ hint, onOpen }: { hint: string; onOpen?: (route: Route) => void }) {
   const [phase, setPhase] = useState<"idle" | "preview" | "saved">("idle");
   const [preview, setPreview] = useState<AddPreview | null>(null);
   const [saved, setSaved] = useState<Saved | null>(null);
@@ -112,12 +114,14 @@ function PdfDateAdd({ hint }: { hint: string }) {
     );
   }
   if (phase === "saved" && saved) {
-    return <ResultLine onUndo={undo} startedAt={savedAt}>{`Added “${saved.title}” to Dates & deadlines.`}{sample ? " (sample data: preview only)" : ""}</ResultLine>;
+    const also = saved.also;
+    const link = onOpen && saved.id !== "unwired" ? <LinkButton small onClick={() => onOpen(also?.link ?? { id: "life", view: "dates" })}>Also in Life › Dates ›</LinkButton> : undefined;
+    return <ResultLine onUndo={undo} startedAt={savedAt} extra={link}>{`Added “${saved.title}” to Dates & deadlines.`}{sample ? " (sample data: preview only)" : ""}</ResultLine>;
   }
   return <Button size="small" onClick={start}>Add {hint} to Dates & deadlines…</Button>;
 }
 
-function Caption({ win, compact }: { win: HomeWindow; compact: boolean }) {
+function Caption({ win, compact, onOpen }: { win: HomeWindow; compact: boolean; onOpen?: (route: Route) => void }) {
   if (win.comment.phase === "off" || win.comment.phase === "paused") return null;
   if (!canComment(win) && win.comment.phase !== "reading") return null;
   const speak = shouldSpeakComment(win);
@@ -135,7 +139,7 @@ function Caption({ win, compact }: { win: HomeWindow; compact: boolean }) {
         {win.kind === "pdf" && win.comment.phase === "ready" && entry.pdfBullets && (
           <ul>{entry.pdfBullets.map((b) => <li key={b}>{b}</li>)}</ul>
         )}
-        {win.kind === "pdf" && win.comment.phase === "ready" && entry.pdfDateHint && <PdfDateAdd hint={entry.pdfDateHint} />}
+        {win.kind === "pdf" && win.comment.phase === "ready" && entry.pdfDateHint && <PdfDateAdd hint={entry.pdfDateHint} onOpen={onOpen} />}
         <div className="w-cap__meta">
           {speak && <><Wave /><span>Spoken</span><Button variant="plain" size="small" onClick={replay}>Replay</Button></>}
           <span>Local · light tier · from what's on screen</span>
@@ -146,9 +150,9 @@ function Caption({ win, compact }: { win: HomeWindow; compact: boolean }) {
   );
 }
 
-function WindowCard({ win, slot, focused, leaving, onSignIn, onRetry }: {
+function WindowCard({ win, slot, focused, leaving, onSignIn, onRetry, onOpen }: {
   win: HomeWindow; slot: "primary" | "a" | "b"; focused: boolean; leaving: boolean;
-  onSignIn: () => void; onRetry: () => void;
+  onSignIn: () => void; onRetry: () => void; onOpen?: (route: Route) => void;
 }) {
   const titleRef = useRef<HTMLSpanElement>(null);
   useEffect(() => { if (focused) titleRef.current?.focus(); }, [focused, win.id]);
@@ -186,24 +190,39 @@ function WindowCard({ win, slot, focused, leaving, onSignIn, onRetry }: {
         />
         {sampleAdaptersEnabled() ? <SampleBody win={win} /> : win.contentState === "ready" && !liveEmbedding() ? <div className="w-center"><h3>Needs wiring</h3><p>A live page needs a webview from Claude before it can open here.</p><DataTag kind="wire" /></div> : null}
       </div>
-      <Caption win={win} compact={slot !== "primary"} />
+      <Caption win={win} compact={slot !== "primary"} onOpen={onOpen} />
     </section>
   );
 }
 
 function CommandBar({ onAsk }: { onAsk?: (text: string) => void }) {
   const [text, setText] = useState("");
+  const [micReady, setMicReady] = useState(false);
+  const [listening, setListening] = useState(false);
+  useEffect(() => { let on = true; void dictationReady().then((r) => { if (on) setMicReady(r); }); return () => { on = false; }; }, []);
+  const ask = (q: string) => {
+    if (handleWindowPrompt(q, "chat")) return;
+    onAsk?.(q);
+  };
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const q = text.trim();
     if (!q) return;
     setText("");
-    if (handleWindowPrompt(q, "chat")) return;
-    onAsk?.(q);
+    ask(q);
+  };
+  // Mic: one on-device dictation (the same call the adds composer uses), then the typed path. Nothing is saved by it.
+  const dictate = async () => {
+    setListening(true);
+    const heard = await dictateOnce("add");
+    setListening(false);
+    if (heard) ask(heard);
   };
   return (
     <form className="w-cmd" onSubmit={submit}>
-      <button type="button" className="w-cmd__mic" aria-label="Talk to Amara" disabled><IconMic /></button>
+      {micReady
+        ? <button type="button" className="w-cmd__mic" aria-label="Talk to Amara" data-live={listening || undefined} disabled={listening} onClick={() => { void dictate(); }}><IconMic /></button>
+        : <OffButton variant="plain" reason="Needs wiring · on-device dictation" label="Talk to Amara"><IconMic /></OffButton>}
       <input className="w-cmd__field" value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask Amara, or say “close the chart”" aria-label="Ask Amara" />
       <span className="w-kbd" aria-hidden="true">Esc</span>
       <span style={{ fontSize: 11 }}>closes the focused window</span>
@@ -211,7 +230,10 @@ function CommandBar({ onAsk }: { onAsk?: (text: string) => void }) {
   );
 }
 
-export function HomeWindowsStage({ onAsk }: { onAsk?: (text: string) => void }) {
+/** The reply to a question typed in the command bar, shown here because the Home chat is hidden while windows are open. */
+export type WindowAsk = { pending: boolean; reply: string | null };
+
+export function HomeWindowsStage({ onAsk, onOpen, ask, onOpenChat }: { onAsk?: (text: string) => void; onOpen?: (route: Route) => void; ask?: WindowAsk | null; onOpenChat?: () => void }) {
   useHomeWindowsClock();
   useWindowKeys();
   const state = useHomeWindowsState();
@@ -262,6 +284,7 @@ export function HomeWindowsStage({ onAsk }: { onAsk?: (text: string) => void }) 
                 slot={slot}
                 focused={state.focusedId === win.id}
                 leaving={state.closingId === win.id}
+                onOpen={onOpen}
                 onSignIn={() => homeWindowsStore.dispatch({ type: "setContent", id: win.id, contentState: "signing_in" })}
                 onRetry={() => {
                   if (!sampleAdaptersEnabled()) { homeWindowsStore.dispatch({ type: "setContent", id: win.id, contentState: "unwired" }); return; }
@@ -274,6 +297,14 @@ export function HomeWindowsStage({ onAsk }: { onAsk?: (text: string) => void }) 
         </div>
       )}
       {state.phase === "returning" && <div className="w-area" data-n="1" />}
+      {showCmd && ask && (
+        <div className="w-toast" data-reply role="status">
+          {ask.reply == null
+            ? <span className="w-working"><i aria-hidden="true" />Amara is answering…</span>
+            : <span className="w-toast__reply"><b>Amara:</b> {ask.reply}</span>}
+          {ask.reply != null && <Button variant="secondary" size="small" onClick={() => { closeAll(); onOpenChat?.(); }}>Open in chat ›</Button>}
+        </div>
+      )}
       {showCmd && <CommandBar onAsk={onAsk} />}
       {state.toast && (
         <div className="w-toast" role="status">

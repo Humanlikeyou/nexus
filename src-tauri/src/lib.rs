@@ -384,6 +384,7 @@ pub fn run() {
             // Packager
             packager::pack_it_up,
             packager::unpack_backup,
+            packager::restore_backup,
             packager::get_app_paths,
             commands::backups::backup_settings_get,
             commands::backups::backup_settings_set,

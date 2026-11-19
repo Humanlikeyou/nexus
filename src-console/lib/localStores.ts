@@ -29,6 +29,10 @@ export function useStoresTick(): number {
   return n;
 }
 
+/** Fired when something changed the system underneath the snapshot (a service restarted), so App's snapshot reloads now instead of at its next 15 s tick. */
+export const SNAPSHOT_EVENT = "amara:snapshot";
+export const announceSnapshot = () => { try { window.dispatchEvent(new Event(SNAPSHOT_EVENT)); } catch { /* no window in node tests */ } };
+
 /** Fired after an add is saved or undone, so stores that list what adds write (life dates) re-read. */
 export const ADDS_EVENT = "amara:adds";
 export const announceAdds = () => { try { window.dispatchEvent(new Event(ADDS_EVENT)); } catch { /* no window in node tests */ } };

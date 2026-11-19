@@ -35,8 +35,9 @@ export function BusinessField({ data, onRetry, view = "main", onView, onOpen, ad
     else setLocal(id);
   };
   if (view === "main") return <BusinessOverview data={data} adapter={adapter} onView={onView} onOpenVenture={(id) => openVenture(id)} work={<WorkCards data={data} onView={onView} />} />;
-  if (view === "decisions") return <DecisionsView data={data} adapter={adapter} onOpen={onOpen} />;
-  if (view === "ventures" || routed) return <VenturesView data={data} adapter={adapter} ventureId={routed ?? local} onOpen={openVenture} onView={onView} />;
+  // "decisions/<itemId>" opens Decisions with that item highlighted.
+  if (view === "decisions" || view.startsWith("decisions/")) return <DecisionsView data={data} adapter={adapter} onOpen={onOpen} focusId={view.startsWith("decisions/") ? view.slice("decisions/".length) : undefined} />;
+  if (view === "ventures" || routed) return <VenturesView data={data} adapter={adapter} ventureId={routed ?? local} onOpen={openVenture} onView={onView} onRoute={onOpen} />;
   if (view === "treasury") return <TreasuryView />;
   if (view === "content") return <ContentView data={data} onRetry={onRetry} onOpen={onOpen} />;
   return <TasksView data={data} onRetry={onRetry} onOpen={onOpen} />;

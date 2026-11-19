@@ -4,7 +4,7 @@ import { HermesSubtitle } from "./agentLabels";
 import { Activity, Bot, Brain, Check, Maximize2, Mic, Minimize2, PanelRight, RotateCcw, Search, Send, SquarePen, Users, X } from "lucide-react";
 import { HOME_COLLAPSED_MESSAGES, type HomeMessage, speakingIndex, withVoiceTurns } from "../app/homeThread";
 import { type ConversationMessage, actionPlan } from "../app/conversation";
-import { tierLabel, tierTitle } from "../app/amaraChat";
+import { guardExternal, tierLabel, tierTitle } from "../app/amaraChat";
 import { dateTime, time } from "../lib/format";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot, TerrenceAction, VoiceTurn } from "../types";
@@ -58,6 +58,8 @@ export interface ChatFieldProps {
   /** design-1110f "Ask more ›": the take this question comes from, shown above the composer until sent or dismissed. */
   askContext?: AskMoreDetail | null;
   onClearContext?: () => void;
+  /** Needs you › "Open on Home": scroll to this pending action card and focus its Approve button. `n` re-fires the same id. */
+  focusAction?: { id: string; n: number } | null;
 }
 
 const ACTION_TONE: Record<TerrenceAction["status"], Tone> = {
@@ -167,10 +169,16 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
+/** A take's text goes into the user turn: injection-guard it, drop quote/newline/angle-bracket characters, cap it. */
+export function takeForPrompt(text: string): string {
+  const guarded = guardExternal(text).text;
+  return guarded.replace(/[\u200B-\u200F\u2028-\u202F\u2060-\u206F\uFEFF]/g, "").replace(/["<>\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 400);
+}
+
 export function ChatField({
   data, messages, sending, loading: loadingProp, lastSavedAt = null, onSend, onNewConversation, onCancelPending, loadingModel = false, onOpenContext, onOpenActivity, onOpenCrews, initialDraft = "",
   onApproveAction, onRetryAction, onCancelAction, onRetrySources, busy = false, conversationId = null,
-  variant = "page", expanded = false, onToggleExpanded, voiceTurns, focusSignal = 0, askContext = null, onClearContext,
+  variant = "page", expanded = false, onToggleExpanded, voiceTurns, focusSignal = 0, askContext = null, onClearContext, focusAction = null,
 }: ChatFieldProps) {
   const home = variant === "home";
   const [draft, setDraft] = useState(initialDraft);
@@ -211,7 +219,7 @@ export function ChatField({
     }
     const plan = a.status === "awaiting_approval" ? actionPlan(a) : [];
     return (
-      <li key={a.id} className="chat-action">
+      <li key={a.id} className="chat-action" data-action-id={a.id}>
         <Card as="article" title={a.title} headingLevel={3} accessory={<Badge tone={ACTION_TONE[a.status]}>{ACTION_LABEL[a.status]}</Badge>}>
           {a.summary && <p className="chat-action__summary">{a.summary}</p>}
           {plan.length > 0 && <InsetGroup title="Plan">{plan.map((step, i) => <ListRow key={i} title={step} />)}</InsetGroup>}
@@ -243,6 +251,22 @@ export function ChatField({
     const bottom = el.scrollHeight - el.clientHeight;
     el.scrollTop = lastUser ? Math.min(bottom, Math.max(0, lastUser.offsetTop - el.offsetTop - 16)) : bottom;
   }, [all.length, sending, expanded]);
+
+  // Needs you › Open on Home: the card is in the thread (pending ones always are); bring it into view and put focus on the card (never on Approve).
+  useEffect(() => {
+    if (!focusAction) return;
+    let frame = 0, tries = 0;
+    const go = () => {
+      const li = Array.from(document.querySelectorAll<HTMLElement>("li.chat-action[data-action-id]")).find((el) => el.dataset.actionId === focusAction.id);
+      if (!li) { if (tries++ < 60) frame = requestAnimationFrame(go); return; }
+      li.scrollIntoView?.({ block: "center" });
+      // The card, not Approve: a stray Enter must not approve anything.
+      li.tabIndex = -1;
+      li.focus();
+    };
+    frame = requestAnimationFrame(go);
+    return () => cancelAnimationFrame(frame);
+  }, [focusAction, actions.length]);
 
   // ⌘1 (design-1110b A): focus the Home composer. 0 = not asked yet.
   useEffect(() => { if (home && focusSignal > 0) composerRef.current?.focus(); }, [home, focusSignal]);
@@ -287,7 +311,8 @@ export function ChatField({
     if (!message || sending) return;
     setDraft("");
     // A live take's numbers go with the question; sample numbers never reach Amara as if they were real.
-    const context = askContext && !askContext.sample ? `\n\n(From Amara's take on ${askContext.from}: ${askContext.chips.map((c) => `${c.label} ${c.value}`).join(", ")})` : "";
+    const takeText = askContext && !askContext.sample && askContext.text ? takeForPrompt(askContext.text) : "";
+    const context = askContext && !askContext.sample ? `\n\n(From Amara's take on ${askContext.from}${askContext.takeId ? ` [${askContext.takeId}]` : ""}${takeText ? `: "${takeText}"` : ""}${askContext.chips.length ? `. Numbers: ${askContext.chips.map((c) => `${c.label} ${c.value}`).join(", ")}` : ""})` : "";
     if (askContext) onClearContext?.();
     await onSend(message + context, { deep: deep && deepAvailable });
   };
@@ -417,7 +442,7 @@ export function ChatField({
         )}
 
         {askContext && (
-          <div className="take-ctx" role="note" aria-label="Context for this question">
+          <div className="take-ctx" role="note" aria-label="Context for this question" title={askContext.text}>
             <TakeEmber small /><b>From Amara&apos;s take · {askContext.from}</b>
             <span>{askContext.chips.map((c) => `${c.label} ${c.value}`).join(" · ")}</span>
             {askContext.sample && <DataTag kind="sample" />}

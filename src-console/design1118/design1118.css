@@ -245,6 +245,9 @@ html[data-navy="on"] .d18-rail__here, html[data-navy="on"] .d18-rail li[data-her
 .d18-orb b { font-size: var(--text-callout); font-weight: 600; } .d18-orb small { font-size: var(--text-subheadline); color: var(--label-secondary); white-space: nowrap; }
 .d18-orb[data-tone="ok"] { border-color: var(--accent-strong, var(--accent)); box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 35%, transparent); }
 .d18-orb[data-tone="warn"] { border-color: var(--copper); }
+/* A linked orb stays a list item; the button inside fills it (axe: lists hold only list items). */
+.d18-orb__hit { all: unset; display: grid; place-content: center; width: 100%; height: 100%; border-radius: 50%; cursor: pointer; }
+.d18-orb__hit:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .d18-orb--core { width: 110px; height: 110px; border-width: 3px; border-color: var(--copper) !important; box-shadow: 0 0 28px color-mix(in srgb, var(--copper) 30%, transparent) !important; }
 .d18-orb--core b { font-size: var(--text-title3); }
 .d18-pulse { display: grid; gap: var(--space-2); }

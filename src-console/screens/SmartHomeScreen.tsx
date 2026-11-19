@@ -4,10 +4,10 @@ import {
   type HaContainerStatus, type HaEntity, type HaInactiveKind, type HaLiveState,
   HA_ERROR_COPY, HVAC_LABEL, type HaServiceData, applyStateChange, rememberEntityNames, clampTemperature, climateRange, hvacModesFor, isHvacMode, targetTemperature, validServiceData, classifyHaError, containerErrorCopy, inactiveKindFor, isServiceRefusal, domainLabel, entityName, haBackend, isToggleable, sortDevices, stateLabel, toggleService,
 } from "../lib/homeAssistant";
-import { Badge, Button, InsetGroup, ListRow, More, PageHero, Select, Toggle } from "../ui";
+import { Badge, Button, Dialog, InsetGroup, ListRow, More, PageHero, Select, Toggle } from "../ui";
 import { displayName, groupDevices } from "../design1118/homeGroups";
 import { PageTake } from "../design1118/PageTake";
-import { LiveHomeDevices } from "../design1118/LiveHomeDevices";
+import { LiveHomeDevices, type HomeCalls } from "../design1118/LiveHomeDevices";
 import { inTauri } from "../lib/localStores";
 import { SampleHomeControls } from "../design1118/SampleHomeControls";
 import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
@@ -119,7 +119,7 @@ export async function loadDevices(): Promise<DevicesState> {
 const LIVE_TONE: Record<HaLiveState, "success" | "warning" | "neutral" | "danger"> = { connecting: "neutral", connected: "success", authFailed: "danger", disconnected: "warning", stopped: "neutral" };
 const LIVE_COPY: Record<HaLiveState, string> = { connecting: "Connecting…", connected: "Live", authFailed: "Token rejected", disconnected: "Reconnecting…", stopped: "Live updates off" };
 
-function ContainerBar({ container, busy, onStart, onStop, error }: { container: Container; busy: "start" | "stop" | null; onStart: () => void; onStop: () => void; error: string | null }) {
+function ContainerBar({ container, busy, onStart, onStop, error, note }: { container: Container; busy: "start" | "stop" | null; onStart: () => void; onStop: () => void; error: string | null; note?: string | null }) {
   const running = container.status === "ok" && container.value.running;
   const label = container.status === "loading" ? "Checking…" : container.status === "unavailable" ? "Unknown" : running ? "Up" : "Down";
   const tone = container.status === "ok" ? (running ? "success" : "warning") : "neutral";
@@ -135,6 +135,7 @@ function ContainerBar({ container, busy, onStart, onStop, error }: { container: 
         </span>
       </div>
       {busy && <p className="smart-home__meta" role="status">{busy === "start" ? "Starting Home Assistant… this can take up to 2 minutes." : "Stopping Home Assistant…"}</p>}
+      {note && !busy && !error && <p className="smart-home__meta" role="status">{note}</p>}
       {container.status === "unavailable" && <p className="smart-home__meta">{container.message}</p>}
       {error && <p role="alert" className="smart-home__error">{error}</p>}
     </section>
@@ -164,7 +165,8 @@ export function Inactive({ kind, onRetry, onOpenSettings }: { kind: HaInactiveKi
 /** Devices per group shown before the disclosure. */
 const GROUP_GLANCE = 6;
 
-export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: () => Promise<DevicesState>; onOpenSettings?: () => void }) {
+/** Set by default only inside the app: there the live panel (ha_devices_list / ha_device_set) owns every device it lists. */
+export function SmartHomeField({ load = loadDevices, onOpenSettings, liveDevices, homeCalls }: { load?: () => Promise<DevicesState>; onOpenSettings?: () => void; liveDevices?: boolean; homeCalls?: HomeCalls }) {
   const [state, setState] = useState<DevicesState>({ status: "loading" });
   const [container, setContainer] = useState<Container>({ status: "loading" });
   const [busy, setBusy] = useState<"start" | "stop" | null>(null);
@@ -172,6 +174,17 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [rowError, setRowError] = useState<{ entityId: string; message: string } | null>(null);
   const [live, setLive] = useState<HaLiveState | null>(null);
+  const [containerNote, setContainerNote] = useState<string | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [homeNote, setHomeNote] = useState<string | null>(null);
+  // One source of truth (decision 0042): in the app, the live panel controls and shows every device it lists, the
+  // grouped list below holds only the rest. `listed` is null until the panel has reported.
+  const preview = sampleAdaptersEnabled();
+  const useLivePanel = !preview && (liveDevices ?? inTauri());
+  const [listed, setListed] = useState<Set<string> | null>(null);
+  const listedRef = useRef<Set<string> | null>(null);
+  const [liveTick, setLiveTick] = useState(0);
+  const onListed = useCallback((ids: Set<string>) => { listedRef.current = ids; setListed(ids); }, []);
   const mounted = useRef(true);
 
   const refreshContainer = useCallback(() => {
@@ -192,7 +205,11 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
     refreshContainer();
     const ha = haBackend();
     const unlisten: Array<() => void> = [];
-    void ha.onStateChanged((change) => { if (mounted.current) setState((s) => s.status === "ready" ? { ...s, devices: applyStateChange(s.devices, change) } : s); })
+    void ha.onStateChanged((change) => {
+      if (!mounted.current) return;
+      setState((s) => s.status === "ready" ? { ...s, devices: applyStateChange(s.devices, change) } : s);
+      if (listedRef.current?.has(change.entityId)) setLiveTick((n) => n + 1); // the live panel re-reads on the same events
+    })
       .then((u) => { if (mounted.current) unlisten.push(u); else u(); }, () => {});
     void ha.onLiveStatus((s) => { if (mounted.current) setLive(s); })
       .then((u) => { if (mounted.current) unlisten.push(u); else u(); }, () => {});
@@ -208,10 +225,12 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
     busyRef.current = true;
     setBusy(action);
     setContainerError(null);
+    setContainerNote(null);
     try {
       const value = action === "start" ? await haBackend().containerStart() : await haBackend().containerStop();
       if (!mounted.current) return;
       setContainer({ status: "ok", value });
+      setContainerNote(action === "start" ? "Home Assistant started. Your devices will load as it comes up." : "Home Assistant stopped. Amara OS can't read or control your devices until you start it again.");
       if (action === "start") void load().then((s) => { if (mounted.current) setState(s); });
     } catch (error) {
       if (mounted.current) setContainerError(containerErrorCopy(error));
@@ -223,10 +242,12 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
 
   const setClimate = async (device: HaEntity, service: "set_temperature" | "set_hvac_mode", data: HaServiceData) => {
     setRowError(null);
+    setHomeNote(null);
     if (!validServiceData("climate", service, data)) { setRowError({ entityId: device.entityId, message: HA_ERROR_COPY.invalid_input }); return; }
     setPending((p) => ({ ...p, [device.entityId]: true }));
     try {
       await haBackend().callService("climate", service, device.entityId, data);
+      if (mounted.current) setHomeNote(service === "set_hvac_mode" ? `${displayName(device)} mode changed.` : `${displayName(device)} set to ${data.temperature}.`);
       if (mounted.current) setState((s) => s.status === "ready" ? { ...s, devices: s.devices.map((d) => d.entityId !== device.entityId ? d
         : service === "set_hvac_mode" ? { ...d, state: data.hvacMode! } : { ...d, attributes: { ...d.attributes, temperature: data.temperature } }) } : s);
     } catch (error) {
@@ -240,9 +261,11 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
 
   const toggle = async (device: HaEntity, on: boolean) => {
     setRowError(null);
+    setHomeNote(null);
     setPending((p) => ({ ...p, [device.entityId]: true }));
     try {
       await haBackend().callService(device.domain, toggleService(on), device.entityId);
+      if (mounted.current) setHomeNote(`Turned ${on ? "on" : "off"} ${displayName(device)}.`);
       if (mounted.current) setState((s) => s.status === "ready" ? { ...s, devices: s.devices.map((d) => d.entityId === device.entityId ? { ...d, state: on ? "on" : "off" } : d) } : s);
     } catch (error) {
       // The switch never flipped optimistically, so it stays at its previous state (reverted).
@@ -256,18 +279,20 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
 
   const runScene = async (device: HaEntity) => {
     setRowError(null);
+    setHomeNote(null);
     setPending((p) => ({ ...p, [device.entityId]: true }));
-    try { await haBackend().callService(device.domain, "turn_on", device.entityId); }
+    try { await haBackend().callService(device.domain, "turn_on", device.entityId); if (mounted.current) setHomeNote(`Ran ${displayName(device)}. A scene can't be undone.`); }
     catch (error) { const kind = classifyHaError(error); if (mounted.current) setRowError({ entityId: device.entityId, message: isServiceRefusal(kind) ? HA_ERROR_COPY[kind] : `Couldn't run ${displayName(device)}.` }); }
     finally { if (mounted.current) setPending((p) => { const next = { ...p }; delete next[device.entityId]; return next; }); }
   };
 
   const devices = state.status === "ready" ? state.devices : [];
   const groups = groupDevices(devices);
-  const household = groups.filter((g) => g.id !== "system");
-  const householdCount = household.reduce((n, g) => n + g.devices.length, 0);
+  const householdCount = groups.filter((g) => g.id !== "system").reduce((n, g) => n + g.devices.length, 0);
+  // Devices the live panel lists are shown there only; until it reports, the grouped list waits so nothing appears twice.
+  const rest = useLivePanel ? (listed ? devices.filter((d) => !listed.has(d.entityId)) : []) : devices;
+  const household = groupDevices(rest).filter((g) => g.id !== "system");
   const system = groups.find((g) => g.id === "system")?.devices ?? [];
-  const preview = sampleAdaptersEnabled();
   const deviceRow = (d: HaEntity) => (
                   <ListRow key={d.entityId} icon={ICONS[d.domain]} title={displayName(d)}
                     subtitle={rowError?.entityId === d.entityId ? <span role="alert" className="smart-home__row-error">{rowError.message}</span> : domainLabel(d.domain)}
@@ -284,7 +309,7 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
       <PageTake surface="smarthome" />
       {state.status === "loading" ? <p className="smart-home__meta" role="status">Loading devices…</p>
         : state.status === "inactive" ? <Inactive kind={state.kind} onRetry={refresh} onOpenSettings={onOpenSettings} />
-          : live === "authFailed" ? <Inactive kind="auth" onRetry={refresh} />
+          : live === "authFailed" ? <Inactive kind="auth" onRetry={refresh} onOpenSettings={onOpenSettings} />
           : state.status === "error" ? (
             <div className="smart-home__panel" role="region" aria-label="Devices">
               <p>Couldn't load devices.</p>
@@ -297,22 +322,27 @@ export function SmartHomeField({ load = loadDevices, onOpenSettings }: { load?: 
             </div>
           ) : (
             <div className="smart-home__list">
-              {preview ? <SampleHomeControls /> : inTauri() && <LiveHomeDevices />}
+              {preview ? <SampleHomeControls /> : useLivePanel && <LiveHomeDevices calls={homeCalls} refreshSignal={liveTick} onListed={onListed} />}
               {household.map((g) => (
                 <Fragment key={g.id}>
                   <InsetGroup title={g.title}>{g.devices.slice(0, GROUP_GLANCE).map(deviceRow)}</InsetGroup>
                   {g.devices.length > GROUP_GLANCE && <More label={`${g.devices.length - GROUP_GLANCE} more ${g.title.toLowerCase()}`}><InsetGroup title={`More ${g.title.toLowerCase()}`}>{g.devices.slice(GROUP_GLANCE).map(deviceRow)}</InsetGroup></More>}
                 </Fragment>
               ))}
-              {household.length === 0 && <p className="smart-home__meta">No household devices yet. Only Home Assistant&apos;s own system sensors are connected.</p>}
+              {householdCount === 0 && <p className="smart-home__meta">No household devices yet. Only Home Assistant&apos;s own system sensors are connected.</p>}
+              {homeNote && <p className="smart-home__meta" role="status">{homeNote}</p>}
             </div>
           )}
       <section className="smart-home__system" aria-labelledby="sh-system">
         <h2 id="sh-system" className="smart-home__title">System</h2>
         {system.length > 0 && <InsetGroup title="Backups and Home Assistant" footer="These are Home Assistant's own sensors, not household devices.">{system.map(deviceRow)}</InsetGroup>}
-        <ContainerBar container={container} busy={busy} error={containerError} onStart={() => { void runContainer("start"); }} onStop={() => { void runContainer("stop"); }} />
+        <ContainerBar container={container} busy={busy} error={containerError} onStart={() => { void runContainer("start"); }} onStop={() => setConfirmStop(true)} note={containerNote} />
         <p className="smart-home__meta">Changes come from Home Assistant as they happen.</p>
       </section>
+      <Dialog open={confirmStop} title="Stop Home Assistant?" confirmLabel="Stop" destructive
+        onConfirm={() => { setConfirmStop(false); void runContainer("stop"); }} onCancel={() => setConfirmStop(false)}>
+        Stopping the container turns Home Assistant off on this Mac. Your devices keep their own settings, but Amara OS can&apos;t read or control them until you start it again.
+      </Dialog>
     </div>
   );
 }

@@ -25,8 +25,10 @@ export const SENSORS: Array<{ channel: string; name: string }> = [
   { channel: "TP10", name: "Right ear" },
 ];
 
-export type NfNote = { at: string; protocol: string; targetPercent: number | null; strategy: string; note: string };
+export type NfNote = { at: string; protocol: string; targetPercent: number | null; strategy: string; note: string; sessionId?: string };
 export const NOTES_KEY = "neurofeedback-notes";
+/** The "What helped?" note of one saved session (the list in NOTES_KEY is still read for "Last time"). */
+export const sessionNoteKey = (sessionId: string) => `neurofeedback-note:${sessionId}`;
 
 export function parseNotes(raw: string | null): NfNote[] {
   if (!raw) return [];

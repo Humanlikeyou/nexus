@@ -31,7 +31,7 @@ pub struct LifeDateRecord {
     pub sub: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LifeDateDraft {
     #[serde(default)]
@@ -403,11 +403,13 @@ pub async fn life_date_list() -> Result<Vec<LifeDateView>, String> {
 /// Direct save (an edit, or a caller that already holds a checked date). The add flow goes through
 /// `add_preview` → `add_save`, which ends here too.
 #[tauri::command]
+#[specta::specta]
 pub async fn life_date_upsert(draft: LifeDateDraft) -> Result<LifeDateRecord, String> {
     blocking(JoinErr::Plain, move || upsert_in(&data_dir(), &draft)).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn life_date_delete(id: String) -> Result<bool, String> {
     blocking(JoinErr::Plain, move || delete_in(&data_dir(), &id)).await
 }

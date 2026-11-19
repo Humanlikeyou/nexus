@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button, DataTag, Dialog, PageHero, StatusText, wiredTag } from "../ui";
 import { valueOf } from "../lib/sampleAdapters";
-import { SERVICE_GROUPS, type Service, type StandaloneAdapter } from "./adapters";
+import { SERVICE_GROUPS, type Service, type ServiceLogs, type StandaloneAdapter } from "./adapters";
 import { SaCard, ServiceStatus, Spin, WireNote } from "./parts";
 import { SignedInSites } from "../homeWindows/SignedInSites";
 import { SystemMap } from "./SystemMapView";
@@ -34,7 +34,7 @@ function ServiceRow({ s, onLogs, onAction, onWhy, busy }: { s: Service; onLogs: 
   if (s.group === "side") acts = <Button size="small" variant="secondary" disabled aria-label={`Open ${s.name} (needs wiring)`}>Open ›</Button>;
   else if (s.state === "waiting" && s.reasonOwner === "transition") acts = <Button size="small" variant="secondary" onClick={onWhy}>Why?</Button>;
   else acts = <>
-    {s.state === "stopped" ? <Button size="small" variant="secondary" onClick={() => onAction("start")} disabled={busy} aria-label={`Start ${s.name}`}>Start</Button>
+    {s.state === "stopped" ? null
       : <Button size="small" variant={s.state === "degraded" || s.state === "failed" ? "primary" : "secondary"} onClick={() => onAction("restart")} disabled={restartDisabled} aria-label={`Restart ${s.name}`}>{busy ? "Restarting…" : "Restart"}</Button>}
     <Button size="small" variant="secondary" onClick={onLogs} aria-label={`Logs for ${s.name}`}>Logs</Button>
   </>;
@@ -47,6 +47,26 @@ function ServiceRow({ s, onLogs, onAction, onWhy, busy }: { s: Service; onLogs: 
   );
 }
 
+/** One line per outcome (decision 0042): what happened and what is next. Never "needs wiring" for a real refusal. */
+export function serviceNote(name: string, a: "restart" | "start", r: Awaited<ReturnType<StandaloneAdapter["serviceAction"]>>): string {
+  if (r.state === "done") return r.healthy ? `${name} is healthy again.` : `${name} restarted, but hasn't reported healthy yet. Check its logs.`;
+  switch (r.state) {
+    case "declined": return "Cancelled. Nothing changed.";
+    case "busy": return "Another approval is still open. Finish it, then try again. Nothing changed.";
+    case "expired": return "The confirmation timed out. Nothing changed; try again.";
+    case "unsupported": return a === "start" ? `${name} can't be started from here. Nothing changed.` : `${name} can't be restarted from here. Nothing changed.`;
+    case "gave_up": return `${name} was restarted 3 times and still isn't working. Amara won't try again on its own. Open its logs.`;
+    case "unwired": return "Restart isn't connected in this view. Nothing changed.";
+    default: return `${name} didn't restart. Check its logs.`;
+  }
+}
+
+/** The logs as shown (plain events, then the redacted raw tail), copied for pasting into Claude. False when the clipboard refuses. */
+export async function copyLogs(name: string, logs: ServiceLogs): Promise<boolean> {
+  const text = [`${name} · what happened`, ...logs.events.map((e) => `${e.at} ${e.level.toUpperCase()} ${e.text}${e.hint ? ` (${e.hint})` : ""}`), "", "Raw log (keys hidden)", ...logs.tail].join("\n");
+  try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
+}
+
 /** Settings › Services (design-1111s s2a/s2b): every service Amara supervises, in plain words. */
 export function ServicesView({ adapter }: { adapter: StandaloneAdapter }) {
   const w = adapter.services();
@@ -54,12 +74,14 @@ export function ServicesView({ adapter }: { adapter: StandaloneAdapter }) {
   const [logsFor, setLogsFor] = useState<Service | null>(null);
   const [why, setWhy] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useState<{ text: string; logs: Service | null } | null>(null);
+  const [copied, setCopied] = useState(false);
   const act = async (s: Service, a: "restart" | "start") => {
     setBusy(s.id);
+    setNote({ text: `Restarting ${s.name}. Waiting for it to be healthy…`, logs: null });
     const r = await adapter.serviceAction(s.id, a);
     setBusy(null);
-    setNote(r.state === "unwired" ? `${s.name}: restart needs wiring.` : `${s.name}: ${a === "start" ? "starting" : "restarting"}.`);
+    setNote({ text: serviceNote(s.name, a, r), logs: r.state === "done" && r.healthy ? null : s });
   };
   if (!v) return (
     <div className="pk-host sa-page">
@@ -95,15 +117,14 @@ export function ServicesView({ adapter }: { adapter: StandaloneAdapter }) {
         <div className="pk-stack">{group("health")}{group("side")}</div>
       </div>
       <p className="pk-note">Every service listens on this Mac only and needs Amara&apos;s key, which changes each launch. Amara restarts a stopped service up to 3 times, then tells you. Logs hide keys and passwords. {wiredTag(w)}</p>
-      {note && <p className="pk-note" role="status">{note}</p>}
-      <Dialog open={logsFor !== null} title={logsFor ? `${logsFor.name} · what happened` : "Logs"} onCancel={() => setLogsFor(null)} className="sa-sheet sa-sheet--wide">
+      {note && <p className="pk-note" role="status">{note.text}{note.logs && <> <Button size="small" variant="plain" onClick={() => setLogsFor(note.logs)}>Open logs</Button></>}</p>}
+      <Dialog open={logsFor !== null} title={logsFor ? `${logsFor.name} · what happened` : "Logs"} onCancel={() => { setLogsFor(null); setCopied(false); }} className="sa-sheet sa-sheet--wide">
         <p>In plain words, newest first. {logs && <DataTag kind="sample" />}</p>
         {logs && <ol className="pk-log">{logs.events.map((e, i) => <li key={i}><time>{e.at}</time><StatusText kind={e.level === "ok" ? "ok" : e.level === "warn" ? "wait" : "fail"} /><span>{e.text}{e.hint && <small>{e.hint}</small>}</span></li>)}</ol>}
         {logs && <details open><summary className="pk-note">Raw log (last {logs.tail.length} lines, keys hidden)</summary><pre className="pk-raw">{logs.tail.join("\n")}</pre></details>}
         <div className="pk-sheet__actions">
-          <Button size="small" variant="secondary" disabled>Copy for Claude</Button>
-          <Button size="small" variant="secondary" disabled>Show in Finder</Button>
-          <Button size="small" variant="secondary" onClick={() => setLogsFor(null)}>Close</Button>
+          {logs && <Button size="small" variant="secondary" onClick={() => { void copyLogs(logsFor!.name, logs).then((ok) => { setCopied(ok); }); }}>{copied ? "Copied" : "Copy for Claude"}</Button>}
+          <Button size="small" variant="secondary" onClick={() => { setLogsFor(null); setCopied(false); }}>Close</Button>
           {logsFor && logsFor.state !== "stopped" && <Button size="small" variant="primary" onClick={() => { const s = logsFor; setLogsFor(null); void act(s, "restart"); }}>Restart {logsFor.name.replace(/^Automations \((.+)\)$/, "$1")}</Button>}
         </div>
       </Dialog>

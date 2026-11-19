@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { askMore } from "../amaraTake/takeView";
+import { loadKv, saveKv } from "../bridge";
+import { hoursMinutes } from "../lib/mindBodyDeep";
+import type { BodyState } from "../types";
 import { Button, Card, DataTag, Dialog, PageHero, SegmentedControl, StatusText, wiredTag, type StatusKind } from "../ui";
 import type { Wired } from "../lib/sampleAdapters";
 import { COLOR, laneFor } from "../neuro/LiveSignal";
 import { RETENTION_DAYS, type BandName, type RecordingListItem, type RecordingsAdapter, type SessionSeries, type WindowSecs } from "../neuro/recordings";
 import { SignalLanes } from "../neuro/SignalLanes";
 import "../neuro/Recordings.css";
+import "./MindBodyScreen.css";
 
 /** design-1110e E1–E8, E11, E12: Neuro history as recordings. Data only through RecordingsAdapter. */
 const dateFmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -24,9 +29,12 @@ function rawStatus(r: RecordingListItem): [StatusKind, string] {
   return r.raw === "available" && (r.hasHeart || r.hasMotion) ? [k, "EEG + heart + motion"] : [k, t];
 }
 
-type Filter = "all" | "4" | "5";
-export function RecordingsList({ list, onOpen }: { list: Wired<RecordingListItem[]>; onOpen: (id: string) => void }) {
-  const [filter, setFilter] = useState<Filter>("all");
+export type Filter = "all" | "4" | "5";
+/** `filter` / `onFilter` let the page keep the channel filter while a recording is open (Back returns to the same list). */
+export function RecordingsList({ list, onOpen, filter: given, onFilter }: { list: Wired<RecordingListItem[]>; onOpen: (id: string) => void; filter?: Filter; onFilter?: (filter: Filter) => void }) {
+  const [own, setOwn] = useState<Filter>("all");
+  const filter = given ?? own;
+  const setFilter = (next: Filter) => { setOwn(next); onFilter?.(next); };
   if (list.state === "unwired") return <Card title="Recordings" accessory={wiredTag(list)}><p className="rec-note">Recordings appear here once sessions are saved.</p></Card>;
   const rows = list.value.filter((r) => filter === "all" || String(r.channels.length) === filter);
   return (
@@ -55,12 +63,31 @@ export function RecordingsList({ list, onOpen }: { list: Wired<RecordingListItem
   );
 }
 
+export const RETENTION_KEPT_KEY = "recordings-retention-kept";
+const parseKept = (raw: string | null): string[] => {
+  try { const v = raw ? JSON.parse(raw) as unknown : []; return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []; } catch { return []; }
+};
+
 /** E12: 90-day retention that never deletes on its own. Removal only through the dialog, only what was ticked. */
 export function RetentionCard({ adapter }: { adapter: RecordingsAdapter }) {
   const state = adapter.retention();
   const expiring = state.state === "unwired" ? [] : state.value.expiring;
   const [open, setOpen] = useState(false);
   const [kept, setKept] = useState(false);
+  // "Keep them" is remembered (the ids it was said for), so the banner stays dismissed on the next visit. A newer expiring recording asks again.
+  const [keptIds, setKeptIds] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    loadKv(RETENTION_KEPT_KEY).then((raw) => { if (live) setKeptIds(parseKept(raw)); }, () => undefined);
+    return () => { live = false; };
+  }, []);
+  const keepThem = () => {
+    const ids = [...new Set([...keptIds, ...expiring.map((r) => r.id)])];
+    setKept(true);
+    setKeptIds(ids);
+    saveKv(RETENTION_KEPT_KEY, JSON.stringify(ids)).catch(() => undefined);
+  };
+  const askAgain = expiring.some((r) => !keptIds.includes(r.id));
   const [ticked, setTicked] = useState<Set<string>>(() => new Set(expiring.map((r) => r.id)));
   const [note, setNote] = useState<string | null>(null);
   const confirm = () => {
@@ -72,11 +99,11 @@ export function RetentionCard({ adapter }: { adapter: RecordingsAdapter }) {
   };
   return (
     <Card title="Keep raw recordings" headingLevel={2} className="rec-card" accessory={<span className="rec-acc"><span className="rec-select">{RETENTION_DAYS} days</span>{wiredTag(state)}</span>}>
-      {expiring.length > 0 && !kept && !note && (
+      {expiring.length > 0 && !kept && askAgain && !note && (
         <div className="rec-banner" role="note">
           <StatusText kind="risk"><b>{expiring.length} recording{expiring.length === 1 ? " is" : "s are"} older than {RETENTION_DAYS} days.</b></StatusText>
           <span>They will be removed only after you confirm; nothing is deleted on its own.</span>
-          <span className="rec-banner__actions"><Button variant="secondary" size="small" onClick={() => setKept(true)}>Keep them</Button><Button variant="primary" size="small" onClick={() => setOpen(true)}>Review {expiring.length}</Button></span>
+          <span className="rec-banner__actions"><Button variant="secondary" size="small" onClick={keepThem}>Keep them</Button><Button variant="primary" size="small" onClick={() => setOpen(true)}>Review {expiring.length}</Button></span>
         </div>
       )}
       {note && <p className="rec-note" role="status">{note}</p>}
@@ -140,8 +167,44 @@ function ScoresChart({ s, at }: { s: SessionSeries; at: number }) {
 const SPANS: WindowSecs[] = [2, 5, 10, 30];
 const ticksFor = (start: number, span: number) => Array.from({ length: 6 }, (_, i) => clock(start + (i * span) / 5).replace(/\.0$/, ""));
 
+/** What the rest of the app knows about one session: its Hemi-Sync track and rating, the body context saved at its start, and the "What helped?" note. */
+export type RecordingContext = {
+  hemisync: { title: string; wave: string | null; rating: number | null; note: string | null } | null;
+  body: BodyState | null;
+  note: string | null;
+};
+const NO_CONTEXT: RecordingContext = { hemisync: null, body: null, note: null };
+const num = (v: number | null | undefined, unit = "") => (typeof v === "number" && Number.isFinite(v) ? `${Math.round(v)}${unit}` : "—");
+
+function ContextCard({ item, context }: { item: RecordingListItem; context: RecordingContext }) {
+  const { hemisync, body, note } = context;
+  const chips = [
+    { label: "Focus", value: whole(item.avgFocus) }, { label: "Calm", value: whole(item.avgCalm) }, { label: "Length", value: length(item.durationSecs) },
+    ...(hemisync ? [{ label: "Hemi-Sync", value: hemisync.title }, ...(hemisync.rating != null ? [{ label: "Rating", value: `${hemisync.rating}/5` }] : [])] : []),
+    ...(body?.recovery != null ? [{ label: "Recovery that day", value: `${Math.round(body.recovery)}%` }] : []),
+    ...(note ? [{ label: "What helped", value: note }] : []),
+  ];
+  const ask = () => askMore({ from: "Neuro history", chips, sample: false, question: `What stands out about my Muse session on ${dateFmt.format(new Date(item.startedAt))}${hemisync ? `, with ${hemisync.title}` : ""}?` });
+  return (
+    <Card title="This session" headingLevel={2} className="rec-card" accessory={<Button variant="secondary" size="small" onClick={ask}>Ask Amara ›</Button>}>
+      {hemisync ? (
+        <p className="rec-note" data-testid="rec-hemisync">Hemi-Sync: <b>{hemisync.title}</b>{hemisync.wave ? ` · ${hemisync.wave}` : ""} · {hemisync.rating == null ? "not rated yet" : `rated ${hemisync.rating} of 5`}{hemisync.note ? `. “${hemisync.note}”` : ""}</p>
+      ) : <p className="rec-note">No Hemi-Sync track was linked to this session.</p>}
+      {body ? (
+        <dl className="mb-also" aria-label="Body context at the start of this session">
+          <div><dt>Recovery</dt><dd>{num(body.recovery, "%")}</dd></div>
+          <div><dt>HRV</dt><dd>{num(body.hrv_ms, " ms")}</dd></div>
+          <div><dt>Resting HR</dt><dd>{num(body.resting_hr, " bpm")}</dd></div>
+          <div><dt>Sleep before</dt><dd>{typeof body.sleep_minutes === "number" ? hoursMinutes(body.sleep_minutes) : "—"}</dd></div>
+        </dl>
+      ) : <p className="rec-note">No body context was saved for this session.</p>}
+      {note ? <p className="rec-note" data-testid="rec-note">What helped: {note}</p> : <p className="rec-note">No “What helped?” note for this session.</p>}
+    </Card>
+  );
+}
+
 /** E2–E6, E8, E11: one recording, every channel stacked, scrub and zoom with a shared playhead. */
-export function RecordingDetail({ item, adapter, onBack }: { item: RecordingListItem; adapter: RecordingsAdapter; onBack: () => void }) {
+export function RecordingDetail({ item, adapter, onBack, context = NO_CONTEXT }: { item: RecordingListItem; adapter: RecordingsAdapter; onBack: () => void; context?: RecordingContext }) {
   const total = Math.max(1, item.durationSecs);
   const [span, setSpan] = useState<WindowSecs>(5);
   const [pos, setPos] = useState(() => Math.min(Math.max(0, total * 0.37), Math.max(0, total - 5)));
@@ -177,6 +240,8 @@ export function RecordingDetail({ item, adapter, onBack }: { item: RecordingList
         <li className="rec-tile"><span className="rec-tile__k">Time in target</span><span className="rec-tile__v">{item.timeInTarget == null ? "—" : `${Math.round(item.timeInTarget)}%`}</span><span className="rec-tile__s" /></li>
         <li className="rec-tile"><span className="rec-tile__k">Contact</span><span className="rec-tile__v">{goodCount == null ? "—" : `${goodCount} of ${item.channels.length} good`}</span><span className="rec-tile__s">{contact.state === "unwired" ? <DataTag kind="wire" /> : five ? "Occipital AUX found automatically" : wiredTag(contact)}</span></li>
       </ul>
+
+      <ContextCard item={item} context={context} />
 
       <Card title="Raw EEG · µV" headingLevel={2} className="rec-card" accessory={<span className="rec-acc"><ChannelBadge item={item} />{win.state !== "unwired" && <span className="rec-pills"><SegmentedControl label="Window" size="small" value={String(span)} options={SPANS.map((s) => ({ value: String(s), label: `${s} s` }))} onChange={(v) => setSpan(Number(v) as WindowSecs)} /></span>}{tag}</span>}>
         {win.state === "unwired"

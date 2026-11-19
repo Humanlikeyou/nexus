@@ -5,6 +5,8 @@ import { NoopShapeError, isSnapshot, noopQuery, parseBodyContext, parseMetricSer
 import type { NoopDayRow, NoopLatestNight, NoopMetricPoint, NoopMetricSeries, NoopSnapshotPayload, RecordedSession } from "../types";
 import { Badge, Button, PageHero, SegmentedControl } from "../ui";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
+import type { Route } from "../app/routes";
+import { LinkButton } from "../adds/Composer";
 import { monotonePath } from "../ui/charts/chartMath";
 import { BaselineChart, DeltaBar, SleepSpan, StageStrip, readingDelta } from "./MindBodyCharts";
 import { ChartHeader } from "../ui/charts/TrendChart";
@@ -162,7 +164,9 @@ const DRIVERS: Array<{ key: DriverKey; label: string; noun: string; unit: string
   { key: "recovery", label: "Recovery", noun: "recovery", unit: "recovery (%)" },
 ];
 
-export function Inactive({ steps }: { steps: string | null }) {
+const DEVICES_ROUTE: Route = { id: "settings", view: "devices" };
+
+export function Inactive({ steps, onOpen }: { steps: string | null; onOpen?: (route: Route) => void }) {
   return (
     <div className="subsystem-inactive" role="region" aria-label="Health sync setup">
       <h2>Health sync isn't connected</h2>
@@ -172,6 +176,7 @@ export function Inactive({ steps }: { steps: string | null }) {
         <li>Under WHOOP connection, choose &ldquo;Health sync (recommended)&rdquo;.</li>
         <li>Come back here once the first sync is done.</li>
       </ol>}
+      {onOpen && <div><Button variant="secondary" size="small" onClick={() => onOpen(DEVICES_ROUTE)}>Open Settings › Devices</Button></div>}
     </div>
   );
 }
@@ -180,9 +185,9 @@ const RANGES = [{ value: "7", label: "Week" }, { value: "30", label: "Month" }, 
 const TREND_ROWS: MetricKey[] = ["recovery", "hrv", "resting_hr", "strain"];
 const COMPARE_ROWS: MetricKey[] = ["sleep", "recovery", "hrv", "resting_hr", "strain"];
 
-export type MindBodyFieldProps = { sessions: RecordedSession[]; load?: () => Promise<MindBodyState> };
+export type MindBodyFieldProps = { sessions: RecordedSession[]; load?: () => Promise<MindBodyState>; /** App's navigate: the Settings › Devices buttons. Plain text without it. */ onOpen?: (route: Route) => void };
 
-export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldProps) {
+export function MindBodyField({ sessions, load = loadMindBody, onOpen }: MindBodyFieldProps) {
   const [state, setState] = useState<MindBodyState>({ status: "loading" });
   const [driver, setDriver] = useState<DriverKey>("sleep");
   const refresh = useCallback(() => { setState({ status: "loading" }); void load().then(setState, () => setState({ status: "inactive", steps: null })); }, [load]);
@@ -244,8 +249,8 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
 
   return (
     <div className="mind-body page-inset">
-      <PageHero title="Mind–Body" statement={statement} detail={ready && ready.level !== "none" ? copy.help : stale && lastDay ? `The last reading was ${shortDay(lastDay)}. Sync from Settings › Devices.` : undefined} />
-      {state.status === "inactive" ? <Inactive steps={state.steps} /> : state.status === "error" ? <ChartBox state="error" label="Mind–Body" onRetry={refresh} /> : (
+      <PageHero title="Mind–Body" statement={statement} detail={ready && ready.level !== "none" ? copy.help : stale && lastDay ? (onOpen ? <>The last reading was {shortDay(lastDay)}. <LinkButton small onClick={() => onOpen(DEVICES_ROUTE)} label="Open Settings, Devices, to sync your health data">Sync from Settings › Devices</LinkButton></> : `The last reading was ${shortDay(lastDay)}. Sync from Settings › Devices.`) : undefined} />
+      {state.status === "inactive" ? <Inactive steps={state.steps} onOpen={onOpen} /> : state.status === "error" ? <ChartBox state="error" label="Mind–Body" onRetry={refresh} /> : (
         <>
           {!loading && <p className="mind-body__meta mb-reading">{asOf ? `Reading for ${shortDay(asOf)}${earlier ? ", the latest with data" : ""}` : "No reading day yet"} · Compared with your own 28-day baseline</p>}
           {!loading && <AmaraTake page="mindBody" className="mb-take" />}

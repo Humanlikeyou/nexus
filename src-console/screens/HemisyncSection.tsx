@@ -6,7 +6,8 @@ import { hemisyncAdapter } from "../neuro/hemisync/live";
 import { Button, DataTag, Dialog, InsetGroup, ListRow, More, SegmentedControl, StatusText, wiredTag } from "../ui";
 import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
 import { deltaWords, usualRange } from "../ui/charts/chartMath";
-import { useHemisyncRun } from "./useHemisyncRun";
+import { useHemisyncRun, notice } from "./useHemisyncRun";
+import { hemisyncRanking, type HemiTrackRanking } from "../bridge";
 import { WaveJourney } from "../design1118/WaveJourney";
 import "../ui/PanelKit.css";
 import "./NeuroSections.css";
@@ -27,6 +28,12 @@ export type HemisyncSectionProps = {
   setProtocolId: (id: string) => void;
   onStartMuse: () => void;
   onStopMuse: () => void;
+  /** Search for a Muse (the "Connect your Muse first" note offers it). */
+  onFindMuse?: () => void;
+  /** Opens a session's Muse recording in Neuro history. */
+  onOpenRecording?: (sessionId: string) => void;
+  /** Overrides the ranking read (tests). */
+  ranking?: () => Promise<HemiTrackRanking>;
 };
 
 /** One tag per Wired value, shown only when that value's state says so (sample or unwired). */
@@ -73,11 +80,12 @@ function ImportBar({ adapter, empty, onDone }: { adapter: HemisyncAdapter; empty
 function RatingSheet({ title, onSave, onSkip }: { title: string; onSave: (rating: 1 | 2 | 3 | 4 | 5, note: string) => void; onSkip: () => void }) {
   const [rating, setRating] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
   const [note, setNote] = useState("");
+  const [tried, setTried] = useState(false);
   return (
-    <Dialog open title="How was that session?" confirmLabel="Save" cancelLabel="Skip" onConfirm={() => rating && onSave(rating, note)} onCancel={onSkip} className="hs-sheet">
+    <Dialog open title="How was that session?" confirmLabel="Save" cancelLabel="Skip" onConfirm={() => { if (rating) onSave(rating, note); else setTried(true); }} onCancel={onSkip} className="hs-sheet">
       <p className="hs-note">{title}</p>
       <SegmentedControl label="Rating, 1 to 5" value={rating ? String(rating) : ""} options={RATINGS.map((n) => ({ value: String(n), label: String(n) }))} onChange={(v) => setRating(Number(v) as 1 | 2 | 3 | 4 | 5)} />
-      <p className="hs-note">1 is rough, 5 is very good. {rating == null ? "Pick a number to save." : ""}</p>
+      <p className="hs-note" {...(tried && rating == null ? { role: "alert", "data-tone": "warning" } : {})}>1 is rough, 5 is very good. {rating == null ? (tried ? "Nothing was saved. Pick a number from 1 to 5, then press Save, or press Skip." : "Pick a number to save.") : ""}</p>
       <label className="hs-field">Note (optional)
         <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="What you noticed" />
       </label>
@@ -86,7 +94,7 @@ function RatingSheet({ title, onSave, onSkip }: { title: string; onSave: (rating
 }
 
 /** Per-track history: sessions, last date, average rating, and Muse focus and calm, with the trend over sessions. */
-export function DoneWithMuse({ tracks, waves, stats, sessions }: { tracks: HemisyncTrack[]; waves: HemisyncWave[]; stats: Wired<HemisyncTrackStats[]>; sessions: Wired<HemisyncSession[]> }) {
+export function DoneWithMuse({ tracks, waves, stats, sessions, onRate, onOpenRecording }: { tracks: HemisyncTrack[]; waves: HemisyncWave[]; stats: Wired<HemisyncTrackStats[]>; sessions: Wired<HemisyncSession[]>; onRate?: (sessionId: string, title: string) => void; onOpenRecording?: (sessionId: string) => void }) {
   const rows = valueOf(stats) ?? [];
   const log = [...(valueOf(sessions) ?? [])].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   const byId = new Map(tracks.map((t) => [t.id, t]));
@@ -136,15 +144,19 @@ export function DoneWithMuse({ tracks, waves, stats, sessions }: { tracks: Hemis
                 : <div className="hs-charts">{chart("Focus", (s) => s.metrics.focusAvg)}{chart("Calm", (s) => s.metrics.calmAvg)}</div>}
               {done.length > 0 && (
               <table className="mb-table hs-table" aria-label="Tracks done with the Muse">
-                <thead><tr><th scope="col">Track</th><th scope="col">Sessions</th><th scope="col">Last</th><th scope="col">Rating</th><th scope="col">Focus</th><th scope="col">Calm</th></tr></thead>
+                <thead><tr><th scope="col">Track</th><th scope="col">Sessions</th><th scope="col">Last</th><th scope="col">Rating</th><th scope="col">Focus</th><th scope="col">Calm</th>{onOpenRecording && <th scope="col">Recording</th>}</tr></thead>
                 <tbody>
                   {done.map((r) => {
                     const t = byId.get(r.trackId);
+                    const mine = log.filter((x) => x.trackId === r.trackId);
+                    const latest = mine[mine.length - 1] ?? null;
+                    const unrated = [...mine].reverse().find((x) => x.rating == null) ?? null;
                     return (
                       <tr key={r.trackId}>
                         <th scope="row">{t?.title ?? "Unknown track"}<small>{t ? `Wave ${t.wave} · ${t.waveName}` : ""}</small></th>
                         <td>{r.sessions}</td><td>{r.lastAt ? day.format(new Date(r.lastAt)) : "—"}</td>
-                        <td>{r.avgRating == null ? "—" : `${r.avgRating.toFixed(1)} / 5`}</td><td>{whole(r.focusAvg)}</td><td>{whole(r.calmAvg)}</td>
+                        <td>{r.avgRating == null ? "—" : `${r.avgRating.toFixed(1)} / 5`}{unrated && onRate && <> <Button variant="plain" size="small" aria-label={`Rate ${t?.title ?? "this track"}`} onClick={() => onRate(unrated.id, t?.title ?? "This session")}>Rate</Button></>}</td><td>{whole(r.focusAvg)}</td><td>{whole(r.calmAvg)}</td>
+                        {onOpenRecording && <td>{latest ? <Button variant="plain" size="small" aria-label={`Open the recording of ${t?.title ?? "this track"}`} onClick={() => onOpenRecording(latest.id)}>Open ›</Button> : "—"}</td>}
                       </tr>
                     );
                   })}
@@ -157,7 +169,34 @@ export function DoneWithMuse({ tracks, waves, stats, sessions }: { tracks: Hemis
   );
 }
 
-export function HemisyncSection({ adapter: given, connected, recording, sessionId, operation, protocolId, setProtocolId, onStartMuse, onStopMuse }: HemisyncSectionProps) {
+const MEASURES: Array<[keyof Pick<HemiTrackRanking, "focus" | "calm" | "rating">, string, string]> = [["focus", "Focus", "/ 100"], ["calm", "Calm", "/ 100"], ["rating", "Rating", "/ 5"]];
+
+/** The backend's own ranking (hemisync_ranking, read-only): the mean per track, only for tracks with enough sessions. */
+export function BestTracks({ ranking, tracks }: { ranking: HemiTrackRanking | null; tracks: HemisyncTrack[] }) {
+  if (!ranking) return null;
+  const byId = new Map(tracks.map((t) => [t.id, t]));
+  const any = MEASURES.some(([k]) => ranking[k].ranked.length > 0);
+  return (
+    <section className="mb-section" aria-labelledby="hs-best">
+      <div className="mb-section__head"><h2 id="hs-best" className="mb-section__title">Best tracks for you</h2></div>
+      {!any ? <p className="mind-body__hint">Once a track has {ranking.minSessions} sessions with the Muse, your best tracks show here.</p> : (
+        <div className="hs-charts">
+          {MEASURES.map(([key, label, unit]) => ranking[key].ranked.length > 0 && (
+            <div key={key} className="mb-row mb-row--stack">
+              <h3>{label}</h3>
+              <ol aria-label={`Best tracks by ${label.toLowerCase()}`}>
+                {ranking[key].ranked.slice(0, 3).map((r) => <li key={r.trackId}>{byId.get(r.trackId)?.title ?? "Unknown track"} · {key === "rating" ? r.mean.toFixed(1) : Math.round(r.mean)} {unit} <small>over {r.n} sessions</small></li>)}
+              </ol>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="mind-body__hint">Plain averages over your own sessions, not a prediction. Tracks need {ranking.minSessions} sessions to be ranked.</p>
+    </section>
+  );
+}
+
+export function HemisyncSection({ adapter: given, connected, recording, sessionId, operation, protocolId, setProtocolId, onStartMuse, onStopMuse, onFindMuse, onOpenRecording, ranking: readRanking = hemisyncRanking }: HemisyncSectionProps) {
   const adapter = useMemo(() => given ?? hemisyncAdapter(), [given]);
   const [tick, setTick] = useState(0);
   const changed = useCallback(() => setTick((n) => n + 1), []);
@@ -181,10 +220,29 @@ export function HemisyncSection({ adapter: given, connected, recording, sessionI
   const playing = run.phase !== "idle";
   const empty = lib.state !== "unwired" && tracks.length === 0;
   const [hint, setHint] = useState<string | null>(null);
-  const start = () => {
-    if (!picked) { setHint("Pick a track first."); return; }
+  const start = (track: HemisyncTrack | null = picked) => {
+    if (!track) { setHint("Pick a track first."); return; }
+    setPickedId(track.id);
     setHint(null);
-    void run.begin(picked);
+    void run.begin(track);
+  };
+  // Best tracks (hemisync_ranking): read again whenever a session is rated or finished.
+  const [ranking, setRanking] = useState<HemiTrackRanking | null>(null);
+  const sessionCount = valueOf(sessions)?.length ?? 0;
+  const ratedCount = (valueOf(sessions) ?? []).filter((s) => s.rating != null).length;
+  useEffect(() => {
+    let live = true;
+    readRanking().then((r) => { if (live) setRanking(r); }, () => { if (live) setRanking(null); });
+    return () => { live = false; };
+  }, [readRanking, sessionCount, ratedCount]);
+  // "Rate" on a Done-with-Muse row: the same sheet, for a session that was skipped.
+  const [late, setLate] = useState<{ sessionId: string; title: string } | null>(null);
+  const rateLate = async (rating: 1 | 2 | 3 | 4 | 5, text: string) => {
+    if (!late) return;
+    const result = await adapter.rate({ sessionId: late.sessionId, rating, ...(text.trim() ? { note: text.trim() } : {}) }).catch(() => null);
+    notice(result && result.state !== "unwired" ? `Rated ${late.title} ${rating} of 5` : "The rating couldn't be saved yet");
+    changed();
+    setLate(null);
   };
   const note = hint ?? run.message;
 
@@ -205,7 +263,7 @@ export function HemisyncSection({ adapter: given, connected, recording, sessionI
         {tracks.length > 0 && (
           <>
             <WaveJourney waves={waves} doneIds={new Set([...statsById.values()].filter((x) => x.sessions > 0).map((x) => x.trackId))} timesDone={(id) => statsById.get(id)?.sessions ?? 0}
-              connected={connected} pickedId={pickedId} onPick={(t) => { if (!playing) { setPickedId(t.id); setHint(null); } }} />
+              connected={connected} pickedId={pickedId} onPick={(t) => { if (!playing) { setPickedId(t.id); setHint(null); } }} onStart={(t) => start(t)} playing={playing} />
             <More label="All tracks by wave">
             <div className="hs-waves">
               {waves.map((w, i) => (
@@ -227,7 +285,7 @@ export function HemisyncSection({ adapter: given, connected, recording, sessionI
               {playing ? (
                 <Button variant="destructive" icon={Square} onClick={run.stop}>Stop</Button>
               ) : (
-                <Button variant="primary" icon={Play} onClick={start} aria-disabled={!connected || undefined} loading={operation === "starting"}>Start</Button>
+                <Button variant="primary" icon={Play} onClick={() => start()} aria-disabled={!connected || undefined} loading={operation === "starting"}>Start</Button>
               )}
             </div>
             {playing && (
@@ -236,7 +294,12 @@ export function HemisyncSection({ adapter: given, connected, recording, sessionI
                 <div className="hs-import__bar" role="progressbar" aria-label="Track position" aria-valuemin={0} aria-valuemax={100} aria-valuenow={run.position.of ? Math.round((run.position.at / run.position.of) * 100) : 0}><i style={{ transform: `scaleX(${run.position.of ? run.position.at / run.position.of : 0})` }} /></div>
               </div>
             )}
-            {!playing && !connected && <p className="hs-note" role="status">Connect your Muse first. Start records with the Muse and plays the track together, so it never plays on its own.</p>}
+            {!playing && !connected && (
+              <div className="hs-note" role="status">
+                <p>Connect your Muse first. Start records with the Muse and plays the track together, so it never plays on its own.</p>
+                {onFindMuse && <Button variant="secondary" size="small" onClick={onFindMuse} disabled={operation !== null} loading={operation === "scanning"}>Find Muse</Button>}
+              </div>
+            )}
             {!playing && connected && protocolId !== "off" && <p className="hs-note">Hemi-Sync sessions record only, with no feedback sounds on top of the track.</p>}
             {note && <p className="hs-note" role="status" data-tone="warning">{note}</p>}
             {run.unsaved && <p className="hs-note" role="status"><DataTag kind="wire" /> This session was recorded, but its Hemi-Sync link isn&apos;t saved yet.</p>}
@@ -244,8 +307,10 @@ export function HemisyncSection({ adapter: given, connected, recording, sessionI
         )}
       </section>
 
-      <DoneWithMuse tracks={tracks} waves={waves} stats={stats} sessions={sessions} />
+      <DoneWithMuse tracks={tracks} waves={waves} stats={stats} sessions={sessions} onRate={(sessionId, title) => setLate({ sessionId, title })} onOpenRecording={onOpenRecording} />
+      <BestTracks ranking={ranking} tracks={tracks} />
 
+      {late && !run.finished && <RatingSheet key={late.sessionId} title={`${late.title}. Rate how it went.`} onSave={(r, n) => { void rateLate(r, n); }} onSkip={() => setLate(null)} />}
       {run.finished && <RatingSheet title={`${run.finished.title}. Rate how it went.`} onSave={(r, n) => { void run.rate(r, n); }} onSkip={run.dismissFinished} />}
     </>
   );

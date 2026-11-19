@@ -120,7 +120,7 @@ function Pending({ title, m, unit, text, ring, action }: { title: string; m: Rin
 export function RecoveryCard({ m, hrOnly = false, onOpenNote }: { m: RecoveryModel; hrOnly?: boolean; onOpenNote?: () => void }) {
   if (m.state === "unwired") return <Unwired title="Recovery" src="Appears once your WHOOP sends a nightly score." />;
   if (m.state === "pending" || m.value == null) {
-    if (hrOnly) return <Pending title="Recovery" m={m} unit="%" text={HR_ONLY_REASON} action={<LinkButton onClick={onOpenNote} label="Open the Needs you note about last night">See the note ›</LinkButton>} />;
+    if (hrOnly) return <Pending title="Recovery" m={m} unit="%" text={HR_ONLY_REASON} action={<LinkButton onClick={onOpenNote} label="Open Settings, Devices, to check the strap sync">Check the strap sync ›</LinkButton>} />;
     return <Pending title="Recovery" m={m} unit="%" text={PENDING} />;
   }
   const color = m.band ? BAND_COLOR[m.band] : "var(--data-recovery-high)";

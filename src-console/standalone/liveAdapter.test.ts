@@ -74,7 +74,7 @@ describe("live standalone adapter (secrets + n8n key file + backups)", () => {
     expect(b.value.running).toBeNull();
     expect(b.value.backups).toHaveLength(1);
     expect(b.value.backups[0]).toMatchObject({ id: ROWS[0].id, label: "Nov 12, 3:00 AM", version: "", daysOld: 0 });
-    expect(a.restore).toBe(unwiredStandalone.restore);
+    expect(a.restore).not.toBe(unwiredStandalone.restore); // restore is wired now (restore_backup)
   });
 
   it("a failed or malformed backup call leaves backup() unwired", async () => {

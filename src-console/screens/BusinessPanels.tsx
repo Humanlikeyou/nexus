@@ -1,14 +1,18 @@
 import { ChevronLeft } from "lucide-react";
+import type { Route } from "../app/routes";
+import { askMore } from "../amaraTake/takeView";
 import { businessAdapter, type BusinessAdapter, type Health, type Venture } from "../business/adapters";
 import { humanize, money } from "../lib/format";
 import { valueOf, type Wired } from "../lib/sampleAdapters";
 import type { SystemSnapshot } from "../types";
 import { Button, Card, DataTag, Meter, PageHero, StatusText, wiredTag, type StatusKind } from "../ui";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
-import { LinkButton, OffButton } from "../adds/Composer";
+import { LinkButton } from "../adds/Composer";
 import { decisionsLog, jst } from "../decisions/log";
 import { PageTake } from "../design1118/PageTake";
 import { VentureGoalsCard } from "../design1118/EnterpriseWiring";
+import { VentureTreasuryCard } from "../design1118/TreasuryLinks";
+import { enterpriseAdapter } from "../design1118/enterpriseLive";
 import { MarketNewsCards, ProposalsCard, TradingCard, WatchlistCard } from "../design1118/Trading";
 import "./CommandCenter.css";
 import "../adds/v1111.css";
@@ -91,10 +95,11 @@ export function waitingDecisions(adapter: BusinessAdapter) {
   return { open, tax, n: open.length + tax.length, unwired, sample };
 }
 
-export function DecisionsCard({ adapter, onOpen }: { adapter: BusinessAdapter; onOpen?: () => void }) {
+/** `onOpen(itemId)` carries the one waiting item so Decisions opens on it; with several waiting it opens the page. */
+export function DecisionsCard({ adapter, onOpen }: { adapter: BusinessAdapter; onOpen?: (itemId?: string) => void }) {
   const w = waitingDecisions(adapter);
   const line = w.unwired ? "Funding votes and tax flags from the ledger appear here." : w.n === 0 ? "Nothing is waiting for a decision." : [...w.open.map((v) => `${v.requester} ${v.purpose.replace(/ \(.*\)$/, "").toLowerCase()} vote`), ...w.tax.map((t) => `tax flag: ${t.label.charAt(0).toLowerCase()}${t.label.slice(1)}`)].join(" · ");
-  return <LinkCard title={w.unwired ? "Decisions" : `Decisions · ${w.n} waiting`} line={line} open="Open Decisions ›" onOpen={onOpen} tag={w.unwired ? <DataTag kind="wire" /> : w.sample ? <DataTag kind="sample" /> : null} />;
+  return <LinkCard title={w.unwired ? "Decisions" : `Decisions · ${w.n} waiting`} line={line} open="Open Decisions ›" onOpen={onOpen ? () => onOpen(w.n === 1 ? (w.open[0]?.id ?? w.tax[0]?.id) : undefined) : undefined} tag={w.unwired ? <DataTag kind="wire" /> : w.sample ? <DataTag kind="sample" /> : null} />;
 }
 
 /** Enterprise › Overview (D-B2–B6, design-1111v): the take and recommendation stay here; Decisions, Tasks and Content are link cards. */
@@ -118,7 +123,7 @@ export function BusinessOverview({ data, adapter = businessAdapter(data), onOpen
         <li className="cc-tile"><span className="cc-tile__k">Trading risk</span><span className="cc-tile__v">{riskDown ? <StatusText kind="off">Unavailable</StatusText> : risk.kill_switch_active ? <StatusText kind="fail">Kill switch</StatusText> : <StatusText kind="ok">Within limits</StatusText>}</span><span className="cc-tile__s">{riskDown ? "" : `Risk index ${risk.risk_index} · kill switch ${risk.kill_switch_active ? "on" : "off"}`}</span></li>
       </ul>
       <AmaraTake page="business" className="biz__take" />
-      <DecisionsCard adapter={adapter} onOpen={onView ? () => onView("decisions") : undefined} />
+      <DecisionsCard adapter={adapter} onOpen={onView ? (id) => onView(id ? `decisions/${id}` : "decisions") : undefined} />
       <VenturesCard data={data} adapter={adapter} onOpen={onOpenVenture} />
       {work}
     </div>
@@ -126,7 +131,7 @@ export function BusinessOverview({ data, adapter = businessAdapter(data), onOpen
 }
 
 /** Enterprise › Ventures (D-B5, D-B7, D-B8): every venture, or one on its own page (design-1111v: route ventures/<id>). */
-export function VenturesView({ data, adapter = businessAdapter(data), ventureId, onOpen, onView }: { data: SystemSnapshot; adapter?: BusinessAdapter; ventureId: string | null; onOpen: (id: string | null) => void; onView?: (view: string) => void }) {
+export function VenturesView({ data, adapter = businessAdapter(data), ventureId, onOpen, onView, onRoute }: { data: SystemSnapshot; adapter?: BusinessAdapter; ventureId: string | null; onOpen: (id: string | null) => void; onView?: (view: string) => void; onRoute?: (route: Route) => void }) {
   const ventures = enterpriseVentures(adapter.ventures());
   const list = ventures.state === "unwired" ? [] : ventures.value;
   const v = ventureId ? list.find((x) => x.id === ventureId) : undefined;
@@ -137,7 +142,9 @@ export function VenturesView({ data, adapter = businessAdapter(data), ventureId,
     const tag = wiredTag(detail);
     // design-1111v §4: the venture page reads the decisions log; nothing copies it.
     const logged = (valueOf(decisionsLog().list()) ?? []).filter((r) => r.sourceLink.view === `ventures/${v.id}`);
-    const waiting = waitingDecisions(adapter).open.filter((r) => r.requester === v.name).length;
+    const waitingVotes = waitingDecisions(adapter).open.filter((r) => r.requester === v.name);
+    const waiting = waitingVotes.length;
+    const nextStepChat = (label: string, more: string) => askMore({ from: `Enterprise · ${v.name}`, chips: [{ label: "Venture", value: v.name }, { label: "Next step", value: label }], question: `Help me with the next step for ${v.name}: ${label}${more ? ` (${more})` : ""}. What should I do first?`, sample: detail.state === "sample" });
     return (
       <div className="biz page-inset cc-page">
         <nav className="cc-crumb" aria-label="Breadcrumb"><Button className="cc-back" variant="plain" size="small" icon={ChevronLeft} onClick={() => onOpen(null)}>Ventures</Button> › {v.name}</nav>
@@ -153,17 +160,17 @@ export function VenturesView({ data, adapter = businessAdapter(data), ventureId,
             <Card title="Launch tasks" accessory={acc(tag)}><ul className="cc-check">{d.checklist.map((c) => <li key={c.label} data-done={c.done || undefined}><span className="cc-sr">{c.done ? "Done: " : "To do: "}</span>{c.label}</li>)}</ul></Card>
             <Card title="Milestones" accessory={acc(tag)}>
               {d.milestones.map((m) => <div className="cc-row" key={m.label}><div className="cc-row__main"><span>{m.label}</span><small>{m.due}</small></div><StatusText kind={HEALTH[m.health].kind}>{HEALTH[m.health].text}</StatusText></div>)}
-              {logged.map((r) => <div className="cc-row" key={r.id}><div className="cc-row__main"><span>Decided: {r.title.replace(/^[^·]+· /, "")}</span><small>{jst(r.decidedAt)} JST · from the decisions log</small></div><StatusText kind="ok">{r.choice === "handled" ? "Handled" : r.choice === "yes" ? "Yes" : "No"}</StatusText></div>)}
+              {logged.map((r) => <div className="cc-row" key={r.id}><div className="cc-row__main"><span>Decided: {r.title.replace(/^[^·]+· /, "")}</span><small>{jst(r.decidedAt)} JST · from the decisions log{r.outcome ? ` · Outcome: ${r.outcome}` : ""}</small></div><StatusText kind="ok">{r.choice === "handled" ? "Handled" : r.choice === "yes" ? "Yes" : "No"}</StatusText></div>)}
             </Card>
           </div>
           <Card title="Next steps" accessory={acc(tag)}>{d.nextActions.map((a, i) => (
             <div className="cc-row" key={a.label}><div className="cc-row__main"><span>{a.label}</span><small>{a.detail}</small></div>
-              {a.action === "Draft with crew" ? <OffButton variant={i === 0 ? "primary" : "secondary"} reason="Needs wiring · crew drafts from a venture">{a.action}</OffButton>
-                : a.action === "Open vote" ? <LinkButton small onClick={onView ? () => onView("decisions") : undefined}>Open in Decisions ›</LinkButton>
-                  : <OffButton reason="Needs wiring">{a.action}</OffButton>}
+              {a.action === "Open vote" ? <LinkButton small onClick={onView ? () => onView(waitingVotes[0] ? `decisions/${waitingVotes[0].id}` : "decisions") : undefined}>Open in Decisions ›</LinkButton>
+                : <Button size="small" variant={a.action === "Draft with crew" && i === 0 ? "primary" : "secondary"} onClick={() => nextStepChat(a.label, a.detail)}>{a.action}</Button>}
             </div>
           ))}</Card>
-          <VentureGoalsCard ventureId={v.id} />
+          <VentureGoalsCard ventureId={v.id} onOpen={onRoute} />
+          {(() => { const tv = enterpriseAdapter().ventures(); const tr = tv.state === "unwired" ? null : tv.value.find((x) => x.id === v.id); return tr ? <VentureTreasuryCard venture={tr} onOpen={onRoute} /> : null; })()}
         </>}
       </div>
     );
@@ -188,7 +195,7 @@ export function VenturesView({ data, adapter = businessAdapter(data), ventureId,
         ) : (
           <Card title="Ventures" accessory={acc(wiredTag(ventures))}>{list.map((x) => <VentureCell key={x.id} v={x} w={ventures} onOpen={(id) => onOpen(id)} />)}</Card>
         )}
-        <p className="cc-note">Akiya is a personal item now. Its dates are in {onView ? <LinkButton small onClick={() => onView("life")}>Life › Dates &amp; deadlines</LinkButton> : "Life › Dates & deadlines"}.</p>
+        <p className="cc-note">Akiya is a personal item now. Its dates are in {onRoute ? <LinkButton small onClick={() => onRoute({ id: "life", view: "dates" })}>Life › Dates &amp; deadlines</LinkButton> : "Life › Dates & deadlines"}.</p>
       </div>
     </div>
   );

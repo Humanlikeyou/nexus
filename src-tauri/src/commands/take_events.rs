@@ -16,7 +16,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-const KINDS: [&str; 8] = [
+const KINDS: [&str; 9] = [
     "today",
     "answer",
     "undo",
@@ -25,6 +25,7 @@ const KINDS: [&str; 8] = [
     "ledger_seen",
     "take_shown",
     "take_rating",
+    "take_asked",
 ];
 const MAX_ID_CHARS: usize = 160;
 const MAX_EVENT_BYTES: usize = 4096;
@@ -71,7 +72,7 @@ fn valid(e: &TakeEvent) -> Result<(), String> {
             return Err("unknown page".into());
         }
     }
-    if e.kind == "take_shown" || e.kind == "take_rating" {
+    if matches!(e.kind.as_str(), "take_shown" | "take_rating" | "take_asked") {
         valid_take_fact(e)?;
     }
     if serde_json::to_string(e).map_err(|x| x.to_string())?.len() > MAX_EVENT_BYTES {
@@ -80,7 +81,7 @@ fn valid(e: &TakeEvent) -> Result<(), String> {
     Ok(())
 }
 
-/// `take_shown` data is exactly `{takeId}`; `take_rating` is exactly `{takeId, helpful}`. Both carry a page and a
+/// `take_shown` and `take_asked` (the user tapped "Ask more") data is exactly `{takeId}`; `take_rating` is exactly `{takeId, helpful}`. Both carry a page and a
 /// `YYYY-MM-DD` day (the daily table counts them per day). Nothing else may ride along.
 fn valid_take_fact(e: &TakeEvent) -> Result<(), String> {
     if e.page.is_none() {
@@ -270,9 +271,33 @@ mod tests {
             "take_rating",
             serde_json::json!({"takeId": "fitness-1", "helpful": false}),
         );
+        let asked = fact(
+            "q1",
+            "take_asked",
+            serde_json::json!({"takeId": "fitness-1"}),
+        );
         assert!(append_in(&d, &shown, 10).unwrap());
         assert!(append_in(&d, &rate, 10).unwrap());
-        assert_eq!(list_in(&d).len(), 2);
+        assert!(append_in(&d, &asked, 10).unwrap());
+        assert_eq!(list_in(&d).len(), 3);
+    }
+
+    #[test]
+    fn take_asked_rejects_extra_keys_missing_day_and_page() {
+        let d = tmp("asked");
+        let extra = fact(
+            "x",
+            "take_asked",
+            serde_json::json!({"takeId": "t", "text": "the take"}),
+        );
+        assert!(append_in(&d, &extra, 10).is_err());
+        let mut no_day = fact("y", "take_asked", serde_json::json!({"takeId": "t"}));
+        no_day.day = None;
+        assert!(append_in(&d, &no_day, 10).is_err());
+        let mut no_page = fact("z", "take_asked", serde_json::json!({"takeId": "t"}));
+        no_page.page = None;
+        assert!(append_in(&d, &no_page, 10).is_err());
+        assert!(list_in(&d).is_empty());
     }
 
     #[test]

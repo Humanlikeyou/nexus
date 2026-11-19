@@ -82,7 +82,7 @@ describe("weeklyReviewFrom", () => {
   it("the suggestion is the backend's, quoted", () => {
     const w = emptyReview();
     w.suggestion = { title: "Protect 7 hours of sleep before your focus sessions.", reason: "After 7 h+ ...", evidenceFindingId: "sleep_focus", confidence: 4 };
-    expect(weeklyReviewFrom(w).change).toEqual({ title: w.suggestion.title, body: "After 7 h+ ..." });
+    expect(weeklyReviewFrom(w).change).toEqual({ title: w.suggestion.title, body: "After 7 h+ ...", findingId: "sleep_focus" });
   });
 });
 

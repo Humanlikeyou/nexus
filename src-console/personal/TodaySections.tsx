@@ -15,6 +15,8 @@ import { roadmapAdapter, type StepSize } from "../goals/roadmap";
 import { ReadyToKeepCard, SuggestedLatelyCard, TakeChange, TakesThisWeekCard, WeekSuggestionsCard, WeekSuggestionsTile } from "../takes/WeekTakes";
 import { takesAdapter } from "../takes/adapters";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
+import { GoalsThisWeekCard, LastTryCard } from "../life/WeekReviewExtras";
+import { humanize } from "../lib/format";
 import "../ui/PanelKit.css";
 import "./personal.css";
 import "../adds/v1111.css";
@@ -24,27 +26,28 @@ const WIRE_NOTE = "Needs wiring: this appears once Claude builds its store (HAND
 /** Life › Goals (design-1118a, Direction A "the Path"): hero, Amara's take under it, the Milestones map
  *  (arrival tangle → a goal in focus → the four-path grid), habits under the map with one shared
  *  "Link a source", then the add composer. One progress meaning: roadmap percent + steps done. */
-export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, added = [], onLinkSource }: { adapter: PersonalAdapter; goals: Goal[]; goalsFailed?: boolean; onRetry?: () => void; composer?: ReactNode; added?: Array<{ id: string; title: string }>; onLinkSource?: () => void }) {
+export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, added = [], onLinkSource, focusGoal = null, onOpenVenture }: { adapter: PersonalAdapter; goals: Goal[]; goalsFailed?: boolean; onRetry?: () => void; composer?: ReactNode; added?: Array<{ id: string; title: string }>; onLinkSource?: () => void; focusGoal?: string | null; onOpenVenture?: (ventureId: string) => void }) {
   useStoresTick();
   const store = goalStore();
   const roadmaps = roadmapAdapter();
   const [adding, setAdding] = useState<null | "choose" | "goal" | "habit">(null);
   const [editing, setEditing] = useState<{ kind: "goal" | "habit"; id: string } | null>(null);
   const [msg, setMsg] = useState("");
-  const [gridSignal, setGridSignal] = useState(0);
+  const [newGoalId, setNewGoalId] = useState<string | null>(null);
+  const [req, setReq] = useState<{ id: string | null; n: number }>({ id: null, n: 0 });
   const week = adapter.goals();
   const raw = valueOf(week);
   const w = raw ? store.overlay(raw) : null;
   const ready = valueOf(takesAdapter().goals())?.ready.length ?? 0;
-  const pathGoals: PathGoal[] = w ? w.milestones.map((m) => ({ id: m.id, title: m.title, tag: m.detail.split(" · ")[0] || undefined }))
-    : goals.map((g) => ({ id: g.id, title: g.title, tag: g.category ? g.category.charAt(0).toUpperCase() + g.category.slice(1) : undefined }));
+  const pathGoals: PathGoal[] = w ? w.milestones.map((m) => ({ id: m.id, title: m.title, tag: m.detail.split(" · ")[0] || undefined, ventureId: store.row(m.id)?.venture_id ?? null }))
+    : goals.map((g) => ({ id: g.id, title: g.title, tag: g.category ? g.category.charAt(0).toUpperCase() + g.category.slice(1) : undefined, ventureId: store.row(g.id)?.venture_id ?? null }));
   const habits: Habit[] = store.overlayHabits([
     ...added.filter((h) => !w?.habits.some((x) => x.id === h.id)).map((h) => ({ id: h.id, title: h.title, source: "You", rule: "added just now · starts Monday", days: Array.from({ length: 7 }, () => "none" as const), done: 0, target: 7, note: "new" })),
     ...(w?.habits ?? []),
   ]);
   const NOT_SAVED = "Not saved. The goals store isn't answering on this Mac, so nothing changed.";
   const done = (r: { state: string }, ok: string) => { if (r.state === "unwired") { setMsg(NOT_SAVED); return false; } setMsg(ok); return true; };
-  const addGoal = async (d: GoalDraft) => { const r = await store.addGoal(d); if (done(r, `Added “${d.title.trim()}”. Its path card is below; Amara plans the stations.`)) { setAdding(null); setGridSignal((n) => n + 1); } };
+  const addGoal = async (d: GoalDraft) => { const r = await store.addGoal(d); if (done(r, `Added “${d.title.trim()}”. It's open below: Amara is planning its route.`)) { setAdding(null); if (r.state !== "unwired") setNewGoalId(r.value.id); } };
   const saveGoal = async (id: string, d: GoalDraft) => { const r = await store.updateGoal(id, d); if (done(r, "Goal saved.")) setEditing(null); };
   const saveStep = async (id: string, stepId: string, title: string, size: StepSize) => { const r = await roadmaps.editStep(id, stepId, { title, size }); if (r.state === "unwired") setMsg("The goal saved, but its steps didn't: the roadmap store isn't answering."); };
   const saveHabit = async (id: string, d: HabitDraft) => { const r = await store.updateHabit(id, d); if (done(r, "Habit saved.")) setEditing(null); };
@@ -52,10 +55,11 @@ export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, a
   const editGoal = editing?.kind === "goal" ? pathGoals.find((g) => g.id === editing.id) : undefined;
   const editHabit = editing?.kind === "habit" ? habits.find((h) => h.id === editing.id) : undefined;
   const n = pathGoals.length;
+  const nextGoal = w?.nextMilestone ? w.milestones.find((m) => m.title === w.nextMilestone) : undefined;
   return (
     <div className="v-page d18-page" id="goals">
       <PageHero title="Goals" statement={n ? `${n} path${n === 1 ? "" : "s"}${w?.nextMilestone ? ` · next: ${w.nextMilestone}` : ""}` : "Habits and milestones"}
-        detail={w ? <>{w.habits.length} habit{w.habits.length === 1 ? "" : "s"} this week{ready ? ` · ${ready} suggestion ready to become a habit` : ""} {week.state === "sample" && <DataTag kind="sample" />}</> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
+        detail={w ? <>{w.habits.length} habit{w.habits.length === 1 ? "" : "s"} this week{ready ? ` · ${ready} suggestion ready to become a habit` : ""} {week.state === "sample" && <DataTag kind="sample" />}{nextGoal && <> · <button type="button" className="v-link" onClick={() => setReq((r) => ({ id: nextGoal.id, n: r.n + 1 }))}>Open {nextGoal.title} ›</button></>}</> : <>Habits count themselves from Fitness, Neuro and check-ins once wired <DataTag kind="wire" /></>} />
       <div className="d18-goalbar"><GoalsHelperLine /><span className="d18-grow" />
         <AddChooser open={adding === "choose"} onOpen={() => { setAdding("choose"); setEditing(null); }} onClose={() => setAdding(null)} onChoose={(k) => { setAdding(k); setMsg(""); }} /></div>
       {adding === "goal" && <GoalForm onSave={(d) => { void addGoal(d); }} onCancel={() => setAdding(null)} />}
@@ -68,7 +72,7 @@ export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, a
       <PageTake surface="goals" className="life__take" />
       {goalsFailed && pathGoals.length === 0 ? (
         <Card title="Milestones"><p className="pk-note">Goals couldn&apos;t be read.</p>{onRetry && <Button variant="secondary" size="small" onClick={onRetry}>Retry</Button>}</Card>
-      ) : <MilestonesMap goals={pathGoals} sampleTag={week.state === "sample"} gridSignal={gridSignal} onEditGoal={(id) => { setEditing({ kind: "goal", id }); setAdding(null); }} />}
+      ) : <MilestonesMap goals={pathGoals} sampleTag={week.state === "sample"} focusGoal={req.id ?? focusGoal} focusNonce={req.n} newGoalId={newGoalId} onOpenVenture={onOpenVenture} onEditGoal={(id) => { setEditing({ kind: "goal", id }); setAdding(null); }} />}
       {w ? <HabitsUnderMap habits={habits} sample={week.state === "sample"} onLinkSource={onLinkSource} onEdit={(h) => { setEditing({ kind: "habit", id: h.id }); setAdding(null); }} /> : <Card title="Habits this week" accessory={<span className="pk-acc">{wiredTag(week)}</span>}><p className="pk-note">{WIRE_NOTE}</p></Card>}
       {w && w.habits.length > 0 && (
         <More label="The full habit grid">
@@ -166,15 +170,25 @@ export function CheckInSection({ adapter }: { adapter: PersonalAdapter }) {
 
 /** Life › Weekly review (1111a #7, design-1111v): health, work and money, one suggested change, highlights and notes.
  *  Today shows "Your weekly review is ready ›" on Sundays and links here. */
-export function WeeklyReviewSection({ adapter, onOpenCheckIn }: { adapter: PersonalAdapter; onOpenCheckIn?: () => void }) {
+/** "Not this week" is kept on this Mac per week and suggestion, so the same suggestion doesn't come straight back. */
+const SKIP_KEY = "nexus.review.skipped";
+const readSkips = (): string[] => { try { const v: unknown = JSON.parse(localStorage.getItem(SKIP_KEY) ?? "[]"); return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(-40) : []; } catch { return []; } };
+const writeSkips = (v: string[]) => { try { localStorage.setItem(SKIP_KEY, JSON.stringify(v.slice(-40))); } catch { /* private window: the choice holds until the page is left */ } };
+
+export function WeeklyReviewSection({ adapter, onOpenCheckIn, onOpenGoal, onOpenPatterns }: { adapter: PersonalAdapter; onOpenCheckIn?: () => void; onOpenGoal?: (goalId: string) => void; onOpenPatterns?: () => void }) {
   const wr = adapter.weeklyReview();
   const v = valueOf(wr);
   const [why, setWhy] = useState(false);
   const [decided, setDecided] = useState<string | null>(null);
   const hasTakeChange = valueOf(takesAdapter().week())?.change != null;
+  const [skips, setSkips] = useState<string[]>(readSkips);
+  const skipKey = v ? `${v.week}|${v.change.findingId ?? v.change.title}` : "";
+  const skipped = skipKey !== "" && skips.includes(skipKey);
+  const setSkipped = (on: boolean) => { const next = on ? [...skips, skipKey] : skips.filter((k) => k !== skipKey); setSkips(next); writeSkips(next); };
   const decide = async (take: boolean) => {
+    if (!take) { setSkipped(true); setDecided(null); return; }
     const r = await adapter.tryChange(take);
-    setDecided(r.state === "unwired" ? "Needs wiring, so nothing was set." : take ? `${r.state === "sample" ? "Sample data: " : ""}${r.value.reminder ?? "Reminder set"}. Your goals didn't change.` : `${r.state === "sample" ? "Sample data: " : ""}Skipped for this week.`);
+    setDecided(r.state === "unwired" ? "Needs wiring, so nothing was set." : `${r.state === "sample" ? "Sample data: " : ""}${r.value.reminder ?? "Reminder set"}. Your goals didn't change.`);
   };
   return (
     <div className="v-page" id="weekly-review">
@@ -194,18 +208,22 @@ export function WeeklyReviewSection({ adapter, onOpenCheckIn }: { adapter: Perso
             <span className="pk-eyebrow">ONE CHANGE TO TRY THIS WEEK</span>
             <h3>{v.change.title}</h3>
             <p><Rich text={v.change.body} /> {wr.state === "sample" && <DataTag kind="sample" />}</p>
-            {why && <p className="pk-note">From the pattern &ldquo;Training load → focus&rdquo; (Mind–Body › Patterns, medium confidence, 21 days). Try it sets a reminder; it never changes a goal by itself.</p>}
-            <div className="pk-actions">
+            {why && <p className="pk-note">{v.change.findingId ? `Why: Amara's pattern “${humanize(v.change.findingId.replace(/[:_]/g, " "))}” in Mind–Body › Patterns says so.` : "Why: this comes from your own data in Mind–Body › Patterns."} {v.change.body} Try it sets a reminder; it never changes a goal by itself. {onOpenPatterns && <button type="button" className="pk-link" onClick={onOpenPatterns}>Open Patterns ›</button>}</p>}
+            {skipped ? (
+              <div className="pk-actions"><p className="pk-note" role="status">Skipped for this week. Amara won&apos;t bring this one back until next Sunday&apos;s review.</p><Button size="small" variant="plain" onClick={() => setSkipped(false)}>Undo</Button></div>
+            ) : <div className="pk-actions">
               <Button size="small" variant="primary" onClick={() => { void decide(true); }} disabled={decided !== null}>Try it this week</Button>
               <Button size="small" onClick={() => { void decide(false); }} disabled={decided !== null}>Not this week</Button>
               <button type="button" className="pk-link" aria-expanded={why} onClick={() => setWhy((x) => !x)}>Why? ›</button>
-            </div>
+            </div>}
             {decided && <p className="pk-note" role="status">{decided}</p>}
           </div>}
+          <LastTryCard experiments={v.experiments ?? []} />
+          <GoalsThisWeekCard onOpenGoal={onOpenGoal} />
           <TakesThisWeekCard />
           <div className="pk-g2">
             <Card title="Highlights" accessory={<span className="pk-acc">{wr.state === "sample" && <DataTag kind="sample" />}</span>}>
-              {v.highlights.map((h) => <div className="pk-row" key={h.title}><StatusText kind={h.ok ? "ok" : "wait"} /><div className="pk-row__main"><span>{h.title}</span><small>{h.sub}</small></div></div>)}
+              {v.highlights.map((h) => <div className="pk-row" key={h.title}><StatusText kind={h.ok ? "ok" : "wait"} /><div className="pk-row__main"><span>{h.title}</span><small>{h.sub}</small></div>{h.goalId && onOpenGoal && <Button size="small" variant="plain" onClick={() => onOpenGoal(h.goalId as string)} aria-label={`Open goal: ${h.title}`}>Open goal ›</Button>}</div>)}
             </Card>
             <Card title="Your notes this week" accessory={<span className="pk-acc">{wr.state === "sample" && <DataTag kind="sample" />}</span>}>
               {v.notes.map((n) => <p className="pk-take" key={n.text}>&ldquo;{n.text}&rdquo; · {n.day}</p>)}

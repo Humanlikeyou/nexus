@@ -34,7 +34,7 @@ function setup(adapter: HemisyncAdapter, props: Partial<HemisyncSectionProps> = 
   const again = (next: Partial<HemisyncSectionProps>) => view.rerender(<HemisyncSection {...base} {...props} {...next} />);
   return { ...handlers, again };
 }
-const pick = (title: string) => fireEvent.click(screen.getByRole("button", { name: new RegExp(title) }));
+const pick = (title: string) => fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${title}`) }));
 const start = () => fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
 describe("Hemi-Sync section", () => {
@@ -224,5 +224,87 @@ describe("Hemi-Sync section", () => {
     expect(await screen.findByText(/Hemi-Sync records only/)).toBeInTheDocument();
     expect(FakeAudio.count).toBe(0);
     expect(onStartMuse).not.toHaveBeenCalled();
+  });
+});
+
+describe("Hemi-Sync workflow gaps", () => {
+  it("no Muse: the note offers Find Muse", () => {
+    const onFindMuse = vi.fn();
+    setup(liveAdapter(), { connected: false, onFindMuse });
+    fireEvent.click(screen.getByRole("button", { name: "Find Muse" }));
+    expect(onFindMuse).toHaveBeenCalledTimes(1);
+  });
+
+  it("the Next-track card has its own Start: Pick and start picks the track and starts it, outside the collapsed list", async () => {
+    const h = setup(liveAdapter());
+    const card = screen.getByRole("region", { name: "Next track" });
+    fireEvent.click(within(card).getByRole("button", { name: "Pick and start" }));
+    await waitFor(() => expect(h.onStartMuse).toHaveBeenCalledTimes(1));
+    expect(FakeAudio.last?.src).toBe("asset://hs/1-1.m4a");
+  });
+
+  it("journey rows pick a track, and the card then says Start this track", () => {
+    setup(liveAdapter());
+    fireEvent.click(screen.getByRole("button", { name: "Choose Orientation" }));
+    const card = screen.getByRole("region", { name: "Next track" });
+    expect(within(card).getByRole("button", { name: "Start this track" })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Picked" })).toBeDisabled();
+  });
+
+  it("saving a rating with no number says why and saves nothing; a saved rating confirms with a notice", async () => {
+    const notices: string[] = [];
+    const on = (e: Event) => notices.push((e as CustomEvent).detail.message);
+    window.addEventListener("nexus:notice", on);
+    const adapter = liveAdapter();
+    const h = setup(adapter);
+    pick("Orientation"); start();
+    await waitFor(() => expect(h.onStartMuse).toHaveBeenCalled());
+    h.again({ operation: null, recording: true, sessionId: "ses-3" });
+    await waitFor(() => expect(adapter.linkSession).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    const sheet = await screen.findByRole("dialog", { name: "How was that session?", hidden: true });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save", hidden: true }));
+    expect(within(sheet).getByText(/Nothing was saved\. Pick a number/)).toBeInTheDocument();
+    expect(adapter.rate).not.toHaveBeenCalled();
+    fireEvent.click(within(sheet).getByRole("radio", { name: "5", hidden: true }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save", hidden: true }));
+    await waitFor(() => expect(adapter.rate).toHaveBeenCalled());
+    await waitFor(() => expect(notices).toContain("Rated Orientation 5 of 5"));
+    window.removeEventListener("nexus:notice", on);
+  });
+
+  const withSessions = (rating: 1 | 2 | 3 | 4 | 5 | null) => liveAdapter({
+    sessions: () => live([{ id: "ses-7", trackId: "t-5-1", startedAt: "2026-11-10T21:30:00+09:00", listenedMs: 60_000, completed: true, rating, note: null, metrics: { focusAvg: 60, calmAvg: 70, bands: null } }]),
+    stats: () => live([{ trackId: "t-5-1", sessions: 1, lastAt: "2026-11-10T21:30:00+09:00", avgRating: rating, focusAvg: 60, calmAvg: 70 }]),
+  });
+
+  it("Done with the Muse: an unrated row gets Rate, and a row opens its recording", async () => {
+    const adapter = withSessions(null);
+    const onOpenRecording = vi.fn();
+    setup(adapter, { onOpenRecording });
+    const table = screen.getByRole("table", { name: "Tracks done with the Muse" });
+    fireEvent.click(within(table).getByRole("button", { name: "Open the recording of Advanced Focus 12" }));
+    expect(onOpenRecording).toHaveBeenCalledWith("ses-7");
+    fireEvent.click(within(table).getByRole("button", { name: "Rate Advanced Focus 12" }));
+    const sheet = await screen.findByRole("dialog", { name: "How was that session?", hidden: true });
+    fireEvent.click(within(sheet).getByRole("radio", { name: "4", hidden: true }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save", hidden: true }));
+    await waitFor(() => expect(adapter.rate).toHaveBeenCalledWith({ sessionId: "ses-7", rating: 4 }));
+  });
+
+  it("a rated row has no Rate button", () => {
+    setup(withSessions(4));
+    expect(screen.queryByRole("button", { name: /^Rate / })).toBeNull();
+  });
+
+  it("Best tracks for you shows the backend ranking, with the plain caveat", async () => {
+    const ranking = async () => ({ minSessions: 3, focusField: "focusAvg", calmField: "calmAvg",
+      focus: { ranked: [{ rank: 1, trackId: "t-5-1", n: 4, mean: 71.2, sessionIds: [] }], notEnoughSessions: [] },
+      calm: { ranked: [], notEnoughSessions: [] }, rating: { ranked: [{ rank: 1, trackId: "t-1-1", n: 3, mean: 4.5, sessionIds: [] }], notEnoughSessions: [] } });
+    setup(liveAdapter(), { ranking });
+    expect(await screen.findByRole("heading", { name: "Best tracks for you" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Best tracks by focus" })).toHaveTextContent("Advanced Focus 12 · 71 / 100");
+    expect(screen.getByRole("list", { name: "Best tracks by rating" })).toHaveTextContent("Orientation · 4.5 / 5");
+    expect(screen.getByText(/Plain averages over your own sessions/)).toBeInTheDocument();
   });
 });

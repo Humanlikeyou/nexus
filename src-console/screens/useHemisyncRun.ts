@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { NEXUS_NOTICE_EVENT } from "../legacy-core/terrance/system/selfDiagnosis";
 import type { HemisyncAdapter, HemisyncTrack } from "../neuro/hemisync/adapters";
+
+/** A quiet in-app confirmation (the shell shows it as a toast). */
+export function notice(message: string) {
+  try { window.dispatchEvent(new CustomEvent(NEXUS_NOTICE_EVENT, { detail: { message } })); } catch { /* no window */ }
+}
 
 /**
  * The one Start flow (decision 0010): the track and the Muse recording start together and stop together.
@@ -127,7 +133,9 @@ export function useHemisyncRun({ adapter, connected, recording, sessionId, opera
   const rate = useCallback(async (rating: 1 | 2 | 3 | 4 | 5, note: string) => {
     if (!finished) return;
     const result = await adapter.rate({ sessionId: finished.sessionId, rating, ...(note.trim() ? { note: note.trim() } : {}) }).catch(() => null);
-    if (!result || result.state === "unwired") setUnsaved(true);
+    const ok = !!result && result.state !== "unwired";
+    if (!ok) setUnsaved(true);
+    notice(ok ? `Rated ${finished.title} ${rating} of 5` : "The rating couldn't be saved yet");
     changed();
     setFinished(null);
   }, [adapter, changed, finished]);

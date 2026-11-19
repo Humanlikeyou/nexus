@@ -1,6 +1,6 @@
 import { invokeBound } from "../bridge";
 import { UNWIRED, type Wired } from "../lib/sampleAdapters";
-import { announceStores, live } from "../lib/localStores";
+import { announceAdds, announceStores, live } from "../lib/localStores";
 import type { Roadmap, RoadmapAdapter, RoadmapStep, StepQuestion, StepSize } from "./roadmap";
 
 /**
@@ -13,6 +13,8 @@ export type RoadmapDeps = {
   call: <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
   today: () => string; // YYYY-MM-DD, local (JST on his Mac)
   notify: () => void;
+  /** A step moved (done, edited, undone): the goal's other readers (Weekly review, Home) re-read. */
+  moved?: () => void;
 };
 
 export const localDay = (d: Date = new Date()): string => {
@@ -20,7 +22,7 @@ export const localDay = (d: Date = new Date()): string => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
-const defaultDeps: RoadmapDeps = { call: (c, a) => invokeBound(c, a), today: () => localDay(), notify: announceStores };
+const defaultDeps: RoadmapDeps = { call: (c, a) => invokeBound(c, a), today: () => localDay(), notify: announceStores, moved: announceAdds };
 
 const SIZES: ReadonlySet<string> = new Set(["small", "medium", "big"]);
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
@@ -44,7 +46,8 @@ export function mapRoadmap(raw: unknown): Roadmap | null {
     .map((s) => mapStep(s as Record<string, unknown>))
     .filter((s): s is RoadmapStep => s !== null)
     .sort((a, b) => a.order - b.order);
-  return { goalId, status, draftedAt: str(r.draftedAt), steps, pct: Math.max(0, Math.min(100, num(r.pct))) };
+  const planNote = str(r.planNote);
+  return { goalId, status, draftedAt: str(r.draftedAt), steps, pct: Math.max(0, Math.min(100, num(r.pct))), ...(planNote ? { planNote } : {}) };
 }
 
 export function mapQuestion(raw: unknown): StepQuestion | null {
@@ -58,7 +61,21 @@ export function mapQuestion(raw: unknown): StepQuestion | null {
 export type LiveRoadmapAdapter = RoadmapAdapter & {
   /** Undo the last logged step write (edit or Yes) for this step: `add_undo("route", historyId)`. True if undone. */
   undoStepWrite(goalId: string, stepId: string): Promise<boolean>;
+  /** Re-read one goal's roadmap now (after a manual planning run wrote it). */
+  reload(goalId: string): Promise<void>;
 };
+
+/** Fixed words for a manual planning run (`roadmap_draft_pending` with catchUp): the Rust side re-checks power, idle time
+ *  and "already ran today" itself, so a refusal is a normal answer, never an error to hide. */
+export const PLAN_NIGHTLY = "Amara plans new goals overnight, and any time the Mac is on power and idle for 10 minutes.";
+export function planNowNote(outcome: { ok: number } | { err: unknown }): string {
+  if ("ok" in outcome) return outcome.ok > 0 ? "Planned. The path grows in now." : `Nothing was ready to plan yet. ${PLAN_NIGHTLY}`;
+  const e = typeof outcome.err === "string" ? outcome.err : "";
+  if (e === "busy") return "Amara is busy with something else right now. Try again in a few minutes. " + PLAN_NIGHTLY;
+  if (e === "already_ran") return "Amara already ran today's planning. This goal is planned in tomorrow's run.";
+  if (e === "not_idle") return "Planning needs the Mac on power and untouched for 10 minutes. " + PLAN_NIGHTLY;
+  return "Planning didn't start. " + PLAN_NIGHTLY;
+}
 
 export function makeLiveRoadmaps(deps: RoadmapDeps = defaultDeps): LiveRoadmapAdapter {
   const lastWrite = new Map<string, string>(); // `${goalId}/${stepId}` -> History id, for Undo
@@ -81,6 +98,7 @@ export function makeLiveRoadmaps(deps: RoadmapDeps = defaultDeps): LiveRoadmapAd
     try { await deps.call(command, args); } catch { return UNWIRED; }
     await Promise.all([loadRoadmap(goalId), loadQuestion()]);
     deps.notify();
+    deps.moved?.();
     return live({ ok: true as const });
   }
 
@@ -92,10 +110,12 @@ export function makeLiveRoadmaps(deps: RoadmapDeps = defaultDeps): LiveRoadmapAd
     } catch { return UNWIRED; }
     await Promise.all([loadRoadmap(goalId), loadQuestion()]);
     deps.notify();
+    deps.moved?.();
     return live({ ok: true as const });
   }
 
   return {
+    async reload(goalId) { await loadRoadmap(goalId); deps.notify(); },
     async undoStepWrite(goalId, stepId) {
       const key = `${goalId}/${stepId}`, id = lastWrite.get(key);
       if (!id) return false;
@@ -104,6 +124,7 @@ export function makeLiveRoadmaps(deps: RoadmapDeps = defaultDeps): LiveRoadmapAd
       try { ok = (await deps.call<boolean>("add_undo", { kind: "route", id })) === true; } catch { return false; }
       await Promise.all([loadRoadmap(goalId), loadQuestion()]);
       deps.notify();
+      deps.moved?.();
       return ok;
     },
     roadmap(goalId) {

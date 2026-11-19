@@ -306,6 +306,14 @@ const RESTORE_APPROVAL_TTL: std::time::Duration = std::time::Duration::from_secs
 const RESTORE_LOCK_KEY: &str = "restore:backup";
 const RESTORE_BACKUP_DIR: &str = "restore-backups";
 
+/// What the approval dialog names: the full canonical path, so it cannot be mistaken for another file.
+fn restore_archive_label(canonical: &Path) -> String {
+    canonical.display().to_string()
+}
+
+/// Restore from a file picked by hand (the legacy Settings flow). The file must be a plain file with
+/// a backup name, no backup may be running, and the archive must verify, all before the approval
+/// dialog, which shows the full canonical path.
 #[tauri::command]
 #[specta::specta]
 pub async fn unpack_backup(
@@ -316,7 +324,43 @@ pub async fn unpack_backup(
     if !archive.is_file() {
         return Err("Archive file not found".to_string());
     }
+    let to_check = archive.clone();
+    let canonical = tokio::task::spawn_blocking(move || {
+        super::backup_schedule::restore_check_archive(
+            &to_check,
+            &super::backups::BUSY,
+            &super::backups::VERIFY_BUSY,
+        )
+    })
+    .await
+    .map_err(|_| "io_error".to_string())??;
+    unpack_verified(&app, canonical).await
+}
 
+/// Restore a backup chosen by id from the backup folder. `file` is a name from `backup_list`, never
+/// a path. Refused while a backup runs or when the archive does not verify, before any approval.
+#[tauri::command]
+#[specta::specta]
+pub async fn restore_backup(app: tauri::AppHandle, file: String) -> Result<Vec<String>, String> {
+    let (home, data) = (super::backups::home_dir()?, crate::app_paths::data_dir());
+    let canonical = tokio::task::spawn_blocking(move || {
+        let s = super::backups::load_settings(&data)?;
+        super::backup_schedule::restore_precheck_in(
+            &home,
+            &data,
+            &s.dir,
+            &file,
+            &super::backups::BUSY,
+            &super::backups::VERIFY_BUSY,
+        )
+    })
+    .await
+    .map_err(|_| "io_error".to_string())??;
+    unpack_verified(&app, canonical).await
+}
+
+/// Shared restore: extract to staging, plan, native approval (TTL, recheck), safety copy, apply.
+async fn unpack_verified(app: &tauri::AppHandle, archive: PathBuf) -> Result<Vec<String>, String> {
     // Unique, freshly created staging dir (create_dir fails if it already exists).
     let staging =
         std::env::temp_dir().join(format!("nexus-unpack-{}", uuid::Uuid::new_v4().simple()));
@@ -349,14 +393,11 @@ pub async fn unpack_backup(
     }
     let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
     let replaced = replaced_files(&plan, &roots);
-    let archive_name = archive
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let archive_name = restore_archive_label(&archive);
 
     let asked_at = std::time::Instant::now();
     let _approval = super::approval_gate::require_approval(
-        &app,
+        app,
         &[RESTORE_LOCK_KEY.to_string()],
         super::approval_gate::approval_text(
             &restore_operation(&archive_name, &plan, &replaced, &roots, &stamp),
@@ -1605,6 +1646,25 @@ mod restore_tests {
         ] {
             assert_eq!(ok(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn approval_text_shows_the_full_canonical_path() {
+        let pack = tmp("label");
+        let canonical = pack
+            .canonicalize()
+            .unwrap()
+            .join("nexus-backup-20261029_101500.tar.gz");
+        let label = restore_archive_label(&canonical);
+        let plan = RestorePlan {
+            items: vec![],
+            skipped: vec![],
+        };
+        let roots = RestoreRoots {
+            data: pack.join("data"),
+        };
+        let op = restore_operation(&label, &plan, &[], &roots, "20261029_101600");
+        assert!(op.contains(&canonical.display().to_string()), "{op}");
     }
 
     #[test]

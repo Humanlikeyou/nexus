@@ -9,7 +9,7 @@ import { notifyTakeLog } from "./takeLog";
  * Everything the adapter shows (today's answer, the week, outcomes) is a pure reduction over these events,
  * so a reload gives the same answer and an Undo or a midnight is just another event or a derived state.
  */
-export type TakeEvent = { id: string; kind: "today" | "answer" | "undo" | "setting" | "type_action" | "ledger_seen" | "take_shown" | "take_rating"; at: number; page?: TakePage | null; day?: string | null; data: Record<string, unknown> };
+export type TakeEvent = { id: string; kind: "today" | "answer" | "undo" | "setting" | "type_action" | "ledger_seen" | "take_shown" | "take_rating" | "take_asked"; at: number; page?: TakePage | null; day?: string | null; data: Record<string, unknown> };
 
 let cache: TakeEvent[] | null = null;
 let attempted = false;
@@ -41,10 +41,22 @@ export async function recordTakeShown(page: TakePage, takeId: string, day: strin
   return appendTakeEvent({ id: `shown-${takeId}-${day}`, kind: "take_shown", at: Date.now(), day, page, data: { takeId } });
 }
 
-/** Records whether a take was helpful. Several ratings of one take are allowed; the latest counts. No control calls this yet. */
+/** Records whether a take was helpful. The store allows several ratings of one take (the latest counts); the take footers allow one a day. */
 export async function recordTakeRating(page: TakePage, takeId: string, helpful: boolean): Promise<boolean> {
   const at = Date.now();
   return appendTakeEvent({ id: `rate-${takeId}-${at}`, kind: "take_rating", at, day: tokyoDay(new Date(at).toISOString()) ?? "", page, data: { takeId, helpful } });
+}
+
+/** True when a rating for this take is already in the loaded log for that JST day (the footer then shows "Thanks", not the buttons). */
+export function ratedOn(takeId: string, day: string, events: readonly TakeEvent[] | null = cache): boolean {
+  return !!events?.some((x) => x.kind === "take_rating" && x.day === day && x.data.takeId === takeId);
+}
+export const todayJst = (): string => tokyoDay(new Date().toISOString()) ?? "";
+
+/** "Ask more ›" was tapped on this take: one `take_asked` fact `{takeId}` so the take log shows which takes people followed up. */
+export async function recordTakeAsked(page: TakePage, takeId: string): Promise<boolean> {
+  const at = Date.now();
+  return appendTakeEvent({ id: `ask-${takeId}-${at}`, kind: "take_asked", at, day: todayJst(), page, data: { takeId } });
 }
 
 // ---------------- pure reducers ----------------

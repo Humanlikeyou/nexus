@@ -1,6 +1,6 @@
 import { Heart } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
-import { LANDING_ENTRIES } from "../app/routes";
+import { LANDING_ENTRIES, type Route } from "../app/routes";
 import { AmaraVoiceAnnouncer } from "../components/AmaraLens/AmaraLens";
 import { CanopyLight } from "../sandLens/CanopyLight";
 import { SandLensLayer } from "../sandLens/SandLens";
@@ -14,7 +14,7 @@ import { HrTake } from "../hrTake/HrTakeCard";
 import { useTakeSlots } from "../takes/TakeExtras";
 import type { ModuleId } from "../types";
 import { Wordmark } from "../ui/Wordmark";
-import { HomeWindowsStage, landingInert } from "../homeWindows/HomeWindows";
+import { HomeWindowsStage, landingInert, type WindowAsk } from "../homeWindows/HomeWindows";
 import { useHomeWindowsState } from "../homeWindows/store";
 import "./LandingScreen.css";
 
@@ -84,7 +84,7 @@ function Welcome({ onSelect }: { onSelect: (id: ModuleId) => void }) {
  * it stand in for the sidebar. Always dark in both themes: the lens is an object and its glow only
  * reads against the emerald field (LandingScreen.css).
  */
-export function LandingField({ onSelect, onToday, chat, chatExpanded = false, onAsk }: { onSelect: (id: ModuleId) => void; onToday: () => void; chat?: ReactNode; chatExpanded?: boolean; onAsk?: (text: string) => void }) {
+export function LandingField({ onSelect, onToday, chat, chatExpanded = false, onAsk, onOpen, windowAsk, onOpenChat }: { onSelect: (id: ModuleId) => void; onToday: () => void; chat?: ReactNode; chatExpanded?: boolean; onAsk?: (text: string) => void; onOpen?: (route: Route) => void; windowAsk?: WindowAsk | null; onOpenChat?: () => void }) {
   const voice = useLandingVoice();
   const windows = useHomeWindowsState();
   const hide = landingInert(windows.phase);
@@ -115,7 +115,7 @@ export function LandingField({ onSelect, onToday, chat, chatExpanded = false, on
         })}
       </nav>
       </div>
-      <HomeWindowsStage onAsk={onAsk} />
+      <HomeWindowsStage onAsk={onAsk} onOpen={onOpen} ask={windowAsk} onOpenChat={onOpenChat} />
     </div>
   );
 }

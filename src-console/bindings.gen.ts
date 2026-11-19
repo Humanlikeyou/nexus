@@ -353,6 +353,12 @@ export const commands = {
 	updateInstallNow: (options?: InvokeOptions) => __TAURI_INVOKE<null>("update_install_now", undefined, options),
 	updateSetPrefs: (patch: UpdatePrefsPatch_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<UpdatePrefs_Serialize>("update_set_prefs", { patch }, options),
 	lifeDateList: (options?: InvokeOptions) => __TAURI_INVOKE<LifeDateView_Serialize[]>("life_date_list", undefined, options),
+	/**
+	 *  Direct save (an edit, or a caller that already holds a checked date). The add flow goes through
+	 *  `add_preview` → `add_save`, which ends here too.
+	 */
+	lifeDateUpsert: (draft: LifeDateDraft_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<LifeDateRecord_Serialize>("life_date_upsert", { draft }, options),
+	lifeDateDelete: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("life_date_delete", { id }, options),
 	checkinList: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<CheckInRecord_Serialize[]>("checkin_list", { limit }, options),
 	patternsRead: (options?: InvokeOptions) => __TAURI_INVOKE<PatternsResult_Serialize>("patterns_read", undefined, options),
 	weeklyReviewRead: (options?: InvokeOptions) => __TAURI_INVOKE<Review_Serialize>("weekly_review_read", undefined, options),
@@ -431,7 +437,17 @@ export const commands = {
 	 */
 	pollTelegramUpdates: (lastUpdateId: number, options?: InvokeOptions) => __TAURI_INVOKE<TelegramUpdate[]>("poll_telegram_updates", { lastUpdateId }, options),
 	packItUp: (options?: InvokeOptions) => __TAURI_INVOKE<PackageInfo>("pack_it_up", undefined, options),
+	/**
+	 *  Restore from a file picked by hand (the legacy Settings flow). The file must be a plain file with
+	 *  a backup name, no backup may be running, and the archive must verify, all before the approval
+	 *  dialog, which shows the full canonical path.
+	 */
 	unpackBackup: (archivePath: string, options?: InvokeOptions) => __TAURI_INVOKE<string[]>("unpack_backup", { archivePath }, options),
+	/**
+	 *  Restore a backup chosen by id from the backup folder. `file` is a name from `backup_list`, never
+	 *  a path. Refused while a backup runs or when the archive does not verify, before any approval.
+	 */
+	restoreBackup: (file: string, options?: InvokeOptions) => __TAURI_INVOKE<string[]>("restore_backup", { file }, options),
 	getAppPaths: (options?: InvokeOptions) => __TAURI_INVOKE<Value>("get_app_paths", undefined, options),
 	saveGoals: (goals: Goal_Deserialize[], options?: InvokeOptions) => __TAURI_INVOKE<null>("save_goals", { goals }, options),
 	deleteGoal: (goalId: string, options?: InvokeOptions) => __TAURI_INVOKE<Goal_Serialize[]>("delete_goal", { goalId }, options),
@@ -2971,6 +2987,24 @@ export type Library_Serialize = {
 	tracks: LibTrack_Serialize[],
 	importedAt: string | null,
 	sourceFolder: string | null,
+};
+
+export type LifeDateDraft = LifeDateDraft_Serialize | LifeDateDraft_Deserialize;
+
+export type LifeDateDraft_Deserialize = {
+	id?: string | null,
+	title: string,
+	date: string,
+	lane: string,
+	sub?: string | null,
+};
+
+export type LifeDateDraft_Serialize = {
+	id: string | null,
+	title: string,
+	date: string,
+	lane: string,
+	sub: string | null,
 };
 
 export type LifeDateRecord = LifeDateRecord_Serialize | LifeDateRecord_Deserialize;

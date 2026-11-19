@@ -133,6 +133,9 @@ function ago(ms: number, now: number) {
   return h < 24 ? `${h} h ago` : `${Math.floor(h / 24)} d ago`;
 }
 
+/** Background jobs live in Settings › General › About & Diagnostics. */
+const SCHEDULER_ROUTE: Route = { id: "settings", view: "about" };
+
 export interface StripSegment {
   key: "agents" | "scheduler" | "noop";
   text: string;
@@ -142,6 +145,8 @@ export interface StripSegment {
   /** Exact time for the title attribute. */
   title?: string;
   to: ModuleId;
+  /** decision 0042: the exact section the segment is about; used instead of `to` when the screen can open routes. */
+  route?: Route;
 }
 
 /** Home status strip (screen-specs › Command center feel): plain text segments, not Badges. */
@@ -160,10 +165,10 @@ export function statusStrip(data: SystemSnapshot, scheduler: SchedulerView, now:
     .filter((r): r is [string, number] => r[1] != null)
     .sort((a, b) => a[1] - b[1])[0];
   const sched: StripSegment = !scheduler.running
-    ? { key: "scheduler", to: "settings", tone: "danger", live: false, text: "Background jobs stopped" }
+    ? { key: "scheduler", to: "settings", route: SCHEDULER_ROUTE, tone: "danger", live: false, text: "Background jobs stopped" }
     : next
-      ? { key: "scheduler", to: "settings", tone: "success", live: true, text: `Next: ${next[0]} ${nextIn(next[1], now)}`, title: dateTime(next[1]) }
-      : { key: "scheduler", to: "settings", tone: "neutral", live: false, text: "Background jobs running" };
+      ? { key: "scheduler", to: "settings", route: SCHEDULER_ROUTE, tone: "success", live: true, text: `Next: ${next[0]} ${nextIn(next[1], now)}`, title: dateTime(next[1]) }
+      : { key: "scheduler", to: "settings", route: SCHEDULER_ROUTE, tone: "neutral", live: false, text: "Background jobs running" };
 
   const noop = data.noop;
   const noopDown = data.unavailableSources.some((s) => s.command === "get_noop_health_snapshot") || noop.status === "unavailable";
@@ -181,14 +186,14 @@ export function statusStrip(data: SystemSnapshot, scheduler: SchedulerView, now:
 }
 
 /** Owns its own 30s tick so NOOP staleness (and "synced N ago") re-evaluates without re-rendering the screen. */
-function StatusStrip({ data, scheduler, fixedNow, onNavigate }: { data: SystemSnapshot; scheduler: SchedulerView; fixedNow?: number; onNavigate?: (id: ModuleId) => void }) {
+function StatusStrip({ data, scheduler, fixedNow, onNavigate, onOpen }: { data: SystemSnapshot; scheduler: SchedulerView; fixedNow?: number; onNavigate?: (id: ModuleId) => void; onOpen?: (route: Route) => void }) {
   const now = useNow(fixedNow);
   const segments = statusStrip(data, scheduler, now);
   return (
     <div className="home__strip" role="group" aria-label="Status">
       {segments.map((s) => (
         <button key={s.key} type="button" className="home__strip-item" data-key={s.key} data-live={s.live || undefined}
-          title={s.title} disabled={!onNavigate} onClick={() => onNavigate?.(s.to)}>
+          title={s.title} disabled={!onNavigate && !onOpen} onClick={() => { if (s.route && onOpen) onOpen(s.route); else onNavigate?.(s.to); }}>
           <StatusDot tone={s.tone}>{s.text}</StatusDot>
         </button>
       ))}
@@ -365,7 +370,7 @@ export function TerranceField({ data, onNavigate, onOpen, todos, onRetry, loadin
       {todos}
 
       <More label="Agents, schedule and insights" id="home-more">
-      {!isLoading && <StatusStrip data={data} scheduler={scheduler} fixedNow={fixedNow} onNavigate={onNavigate} />}
+      {!isLoading && <StatusStrip data={data} scheduler={scheduler} fixedNow={fixedNow} onNavigate={onNavigate} onOpen={onOpen} />}
       <div className="home__top">
         <Card title="Scheduler" accessory={scheduler.running ? <Badge tone="success">Running</Badge> : undefined /* stopped is already stated by the status strip */}>
           <InsetGroup>

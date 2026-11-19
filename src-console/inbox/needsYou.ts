@@ -11,6 +11,8 @@ import type { FollowupLists, TerrenceAction } from "../types";
  */
 /** ListsScreen announces every fresh read so the inbox follows To-dos without a second poll. */
 export const TODOS_EVENT = "amara:todos";
+/** "Open on Home" for an Amara approval: detail `{ id }` is the action id. App expands the chat; the chat scrolls to the card and focuses Approve. */
+export const FOCUS_ACTION_EVENT = "amara:focus-action";
 
 export type InboxSource = "todos" | "dates" | "checkin" | "decisions" | "approvals" | "crew" | "strap" | "watchlist";
 export const SOURCE_LABEL: Record<InboxSource, string> = { todos: "To-dos", dates: "Dates & deadlines", checkin: "Check-in", decisions: "Decisions", approvals: "Amara approvals", crew: "Crew approvals", strap: "Strap", watchlist: "Watchlist" };

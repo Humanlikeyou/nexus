@@ -30,7 +30,7 @@ beforeEach(() => needsYou.mockReset());
 afterEach(() => needsYou.mockReset());
 
 describe("Fitness Recovery card empty reason (0035)", () => {
-  it("HR-only pointer and no score: shows the reason and opens the Needs you note", async () => {
+  it("HR-only pointer and no score: shows the reason and opens Settings › Devices", async () => {
     needsYou.mockResolvedValue(reports([strapRow]));
     const onOpen = vi.fn();
     render(<HealthField data={snap(null)} onOpen={onOpen} />);
@@ -38,8 +38,8 @@ describe("Fitness Recovery card empty reason (0035)", () => {
     expect(await within(card).findByText(REASON)).toBeInTheDocument();
     expect(within(card).queryByText("Arrives after the sleep record closes")).toBeNull();
     expect(within(card).queryByRole("meter")).toBeNull();
-    fireEvent.click(within(card).getByRole("button", { name: "Open the Needs you note about last night" }));
-    expect(onOpen).toHaveBeenCalledWith({ id: "terrance", view: "needs-you" });
+    fireEvent.click(within(card).getByRole("button", { name: "Open Settings, Devices, to check the strap sync" }));
+    expect(onOpen).toHaveBeenCalledWith({ id: "settings", view: "devices" });
   });
 
   it("no pointer and no score: the usual pending copy, and never an older day's score", async () => {

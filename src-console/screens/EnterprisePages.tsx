@@ -9,7 +9,8 @@ import type { Saved } from "../adds/flow";
 import { businessAdapter, type BusinessAdapter, type FundingRequest, type TaxFlag } from "../business/adapters";
 import { DECISIONS_EVENT, announceDecisions, decisionsLog, jst, type DecisionChoice, type DecisionDraft, type DecisionRecord } from "../decisions/log";
 import { humanize, money, plainText } from "../lib/format";
-import { valueOf } from "../lib/sampleAdapters";
+import { valueOf, sampleAdaptersEnabled } from "../lib/sampleAdapters";
+import { askMore } from "../amaraTake/takeView";
 import type { SystemSnapshot } from "../types";
 import { Badge, Button, Card, DataTag, InsetGroup, ListRow, PageHero, StatusText, wiredTag, type StatusKind } from "../ui";
 import { waitingDecisions } from "./BusinessPanels";
@@ -43,7 +44,7 @@ const ventureOfRequester = (name: string) => (/taiyo/i.test(name) ? "taiyo-skin"
 
 /** design-1111v §4: Enterprise › Decisions. Waiting votes and tax flags, and the separate decisions log.
  *  Recording a decision writes one log record. It never moves money and never contacts anyone. */
-export function DecisionsView({ data, adapter = businessAdapter(data), onOpen }: { data: SystemSnapshot; adapter?: BusinessAdapter; onOpen?: (route: Route) => void }) {
+export function DecisionsView({ data, adapter = businessAdapter(data), onOpen, focusId }: { data: SystemSnapshot; adapter?: BusinessAdapter; onOpen?: (route: Route) => void; focusId?: string }) {
   useDecisionsTick();
   const log = decisionsLog();
   const records = log.list();
@@ -54,6 +55,7 @@ export function DecisionsView({ data, adapter = businessAdapter(data), onOpen }:
   const [recorded, setRecorded] = useState<{ record: DecisionRecord; at: number } | null>(null);
   const [outcomeFor, setOutcomeFor] = useState<string | null>(null);
   const [outcome, setOutcome] = useState("");
+  const [failed, setFailed] = useState(false);
   const whyId = useId();
   const now = new Date();
   const unwiredReason = "Needs wiring · decisions log";
@@ -62,15 +64,19 @@ export function DecisionsView({ data, adapter = businessAdapter(data), onOpen }:
     if (p.kind === "vote") {
       const v = p.item as FundingRequest;
       const venture = ventureOfRequester(v.requester);
-      return { itemId: v.id, subject: "vote", title: `${v.requester} · ${v.purpose.charAt(0).toLowerCase()}${v.purpose.slice(1)}`, choice: p.choice, note: why.trim() || undefined, proposer: `${v.requester} crew`, sourceLink: { id: "enterprise", view: `ventures/${venture}` }, sourceLabel: `Ventures › ${v.requester} ›` };
+      // Only link to a venture page that exists; otherwise the Ventures list, labelled as such.
+      const known = (valueOf(adapter.ventures()) ?? []).some((x) => x.id === venture);
+      return { itemId: v.id, subject: "vote", title: `${v.requester} · ${v.purpose.charAt(0).toLowerCase()}${v.purpose.slice(1)}`, choice: p.choice, note: why.trim() || undefined, proposer: `${v.requester} crew`, sourceLink: { id: "enterprise", view: known ? `ventures/${venture}` : "ventures" }, sourceLabel: known ? `Ventures › ${v.requester} ›` : "Ventures ›" };
     }
     const t = p.item as TaxFlag;
     return { itemId: t.id, subject: "tax_flag", title: `Tax flag · ${t.label.charAt(0).toLowerCase()}${t.label.slice(1)}`, choice: "handled", note: why.trim() || undefined, proposer: "Business ledger", sourceLink: { id: "enterprise", view: "finances" }, sourceLabel: "Finances ›" };
   };
   const record = async () => {
     if (!pending) return;
-    const r = await log.append(draftOf(pending));
-    if (r.state === "unwired") return;
+    setFailed(false);
+    let r: Awaited<ReturnType<typeof log.append>>;
+    try { r = await log.append(draftOf(pending)); } catch { setFailed(true); return; }
+    if (r.state === "unwired") { setFailed(true); return; }
     setRecorded({ record: r.value, at: Date.parse(r.value.decidedAt) });
     setPending(null); setWhy("");
     announceDecisions();
@@ -95,7 +101,7 @@ export function DecisionsView({ data, adapter = businessAdapter(data), onOpen }:
 
   const tag = w.unwired ? <DataTag kind="wire" /> : w.sample ? <DataTag kind="sample" /> : null;
   const act = (item: FundingRequest | TaxFlag, kind: Pending["kind"], choice: DecisionChoice, label: string, primary = false) => log.wired
-    ? <Button size="small" variant={primary ? "primary" : "secondary"} aria-pressed={pending?.item.id === item.id ? pending.choice === choice : undefined} onClick={() => { setPending({ item, kind, choice }); setRecorded(null); }}>{label}</Button>
+    ? <Button size="small" variant={primary ? "primary" : "secondary"} aria-pressed={pending?.item.id === item.id ? pending.choice === choice : undefined} onClick={() => { setPending({ item, kind, choice }); setRecorded(null); setFailed(false); }}>{label}</Button>
     : <OffButton reason={unwiredReason} variant={primary ? "primary" : "secondary"}>{label}</OffButton>;
   const preview = (p: Pending) => {
     const d = draftOf(p);
@@ -107,24 +113,35 @@ export function DecisionsView({ data, adapter = businessAdapter(data), onOpen }:
         <label className="v-composer__label" htmlFor={whyId}>Why (optional)</label>
         <input id={whyId} className="v-composer__input" value={why} maxLength={500} onChange={(e) => setWhy(e.target.value)} placeholder="A line for future you" />
         <p className="v-note"><b>Nothing moves money. Nothing is sent.</b> This goes in your decisions log.</p>
+        {failed && <p className="v-note" role="alert">That didn&apos;t save. Nothing was recorded.</p>}
         <div className="v-actions"><Button size="small" variant="primary" onClick={() => { void record(); }}>{p.kind === "vote" ? "Record vote" : "Record"}</Button><Button size="small" variant="plain" onClick={() => { setPending(null); setWhy(""); }}>Cancel</Button></div>
       </section>
     );
   };
   const list = valueOf(records) ?? [];
+  const inWaiting = focusId != null && (w.open.some((v) => v.id === focusId) || w.tax.some((t) => t.id === focusId));
+  const inLog = focusId != null && list.some((r) => r.itemId === focusId);
+  useEffect(() => {
+    if (!focusId) return;
+    const el = document.getElementById(inWaiting ? `dec-${focusId}` : `dec-log-${focusId}`);
+    el?.scrollIntoView?.({ block: "center" });
+  }, [focusId, inWaiting, inLog]);
   return (
     <div className="biz page-inset cc-page">
       <PageHero title="Decisions" statement={w.unwired ? "Votes and tax flags" : `${w.n} waiting`} detail={<>Votes and tax flags from your ventures. Recording a vote never moves money and never contacts anyone. {tag}</>} />
-      {recorded && <ResultLine onUndo={() => { void undo(); }} startedAt={recorded.at} extra={onOpen && <LinkButton small onClick={() => onOpen(recorded.record.sourceLink)}>Also shows on {recorded.record.sourceLabel.replace(/^Ventures › /, "").replace(/ ›$/, "")} › Milestones ›</LinkButton>}>
+      {focusId && !inWaiting && !inLog && <p className="cc-note" role="status">That item isn&apos;t waiting any more. Everything recorded is in the Decisions log below.</p>}
+      {recorded && <ResultLine onUndo={() => { void undo(); }} startedAt={recorded.at} extra={onOpen && (recorded.record.sourceLink.view === "ventures" && recorded.record.subject === "vote"
+        ? <LinkButton small onClick={() => onOpen(recorded.record.sourceLink)}>No venture page for this yet. Open the Ventures list ›</LinkButton>
+        : <LinkButton small onClick={() => onOpen(recorded.record.sourceLink)}>Also shows on {recorded.record.sourceLabel.replace(/^Ventures › /, "").replace(/ ›$/, "")} › Milestones ›</LinkButton>)}>
         Recorded: {recorded.record.choice === "handled" ? "Handled" : recorded.record.choice === "yes" ? "Yes" : "No"} on {recorded.record.title.replace(/^[^·]+· /, "")}, {jst(recorded.record.decidedAt).split(" · ")[1]} JST.</ResultLine>}
       <Card title={w.unwired ? "Waiting" : `Waiting · ${w.n}`} accessory={acc(tag)}>
         {w.unwired ? <p className="cc-note">Funding votes and tax flags from the business ledger appear here.</p> : w.n === 0 ? <p className="cc-note">Nothing is waiting for a decision.</p> : (
           <>
             <InsetGroup>
-              {w.open.map((v) => <ListRow key={v.id} title={<>Funding vote · {v.requester} {v.purpose.charAt(0).toLowerCase()}{v.purpose.slice(1)} <Badge tone="warning">Waiting</Badge></>}
+              {w.open.map((v) => <ListRow key={v.id} id={`dec-${v.id}`} className={focusId === v.id ? "v-new" : undefined} title={<>Funding vote · {v.requester} {v.purpose.charAt(0).toLowerCase()}{v.purpose.slice(1)} <Badge tone="warning">Waiting</Badge></>}
                 subtitle={<>Proposed by the {v.requester} crew · amount {v.amountUsd.state === "unwired" ? wiredTag(v.amountUsd) : money(v.amountUsd.value)} · vote rules {rules.state === "unwired" ? wiredTag(rules) : `${rules.value.needed} yes votes`}</>}
                 accessory={<span className="v-actions">{act(v, "vote", "no", "Vote no")}{act(v, "vote", "yes", "Vote yes", true)}</span>} />)}
-              {w.tax.map((t) => <ListRow key={t.id} title={`Tax flag · ${t.label}`} subtitle={`${t.area} · ${t.date} · from the business ledger`}
+              {w.tax.map((t) => <ListRow key={t.id} id={`dec-${t.id}`} className={focusId === t.id ? "v-new" : undefined} title={`Tax flag · ${t.label}`} subtitle={`${t.area} · ${t.date} · from the business ledger`}
                 accessory={<span className="v-actions">{act(t, "tax_flag", "handled", "Mark handled")}<OffButton reason="Amara doesn't contact anyone outside">Ask the accountant</OffButton></span>} />)}
             </InsetGroup>
             {pending && preview(pending)}
@@ -136,7 +153,7 @@ export function DecisionsView({ data, adapter = businessAdapter(data), onOpen }:
           <table className="pk-table" aria-label="Decisions log">
             <thead><tr><th scope="col">When (JST)</th><th scope="col">Decision</th><th scope="col">Your choice</th><th scope="col">Proposed by</th><th scope="col">Source</th><th scope="col">Outcome</th></tr></thead>
             <tbody>{list.map((r) => (
-              <tr key={r.id} className={recorded?.record.id === r.id ? "v-new" : undefined}>
+              <tr key={r.id} id={`dec-log-${r.itemId}`} className={recorded?.record.id === r.id || focusId === r.itemId ? "v-new" : undefined}>
                 <td>{jst(r.decidedAt)}</td><td>{r.title}{r.note && <small>{r.note}</small>}</td><td>{r.choice === "handled" ? "Handled" : r.choice === "yes" ? "Yes" : "No"}</td><td>{r.proposer}</td>
                 <td><LinkButton small onClick={onOpen ? () => onOpen(r.sourceLink) : undefined}>{r.sourceLabel}</LinkButton></td>
                 <td>{r.outcome ?? (outcomeFor === r.id
@@ -158,6 +175,9 @@ const GROUPS: Array<{ status: string; title: string }> = [{ status: "active", ti
 /** Enterprise › Tasks (was Work): add a task, then In progress · Waiting · Backlog · Done. Personal to-dos stay on Today. */
 export function TasksView({ data, onRetry, onOpen }: { data: SystemSnapshot; onRetry?: () => void; onOpen?: (route: Route) => void }) {
   const [added, setAdded] = useState<Saved[]>([]);
+  // With the live add path the task is stored in TASKS.md; reload the snapshot so it shows in Backlog instead of a local row.
+  const reload = inTauri() && !sampleAdaptersEnabled() && onRetry ? onRetry : null;
+  const ask = (t: Task) => askMore({ from: "Enterprise · Tasks", chips: [{ label: "Task", value: plainText(t.title) }, { label: "Status", value: humanize(t.status) }], question: `What is the next step on “${plainText(t.title)}”, and what should I do first?`, sample: false });
   const tasksDown = data.unavailableSources.some((s) => s.command === "read_tasks") && data.tasks.length === 0;
   const tasks = data.tasks;
   const other = tasks.filter((t) => !GROUPS.some((g) => g.status === t.status));
@@ -166,7 +186,7 @@ export function TasksView({ data, onRetry, onOpen }: { data: SystemSnapshot; onR
       <PageHero title="Tasks" statement={tasksDown ? "Tasks are out of reach" : workStatement(tasks)} detail="Enterprise work across your ventures. Personal to-dos are on Today › To-dos." />
       <Composer title="Add a task" kind="Task" adapter={addAdapter("task")} placeholder="e.g. Order 50 sample jars for Taiyo Skin by Friday" addLabel="Add task" saveLabel="Add task"
         hint="Enterprise work only. Personal to-dos live on Today." working="Reading your task…" onOpen={onOpen}
-        onSaved={(s) => setAdded((a) => [s, ...a])} onUndone={(id) => setAdded((a) => a.filter((x) => x.id !== id))}
+        onSaved={(s) => (reload ? reload() : setAdded((a) => [s, ...a]))} onUndone={(id) => (reload ? reload() : setAdded((a) => a.filter((x) => x.id !== id)))}
         savedText={(s) => `Added “${s.title}” to Backlog.`} />
       {tasksDown ? <div className="biz__unavailable"><p>Task source unavailable</p>{onRetry && <Button variant="secondary" size="small" onClick={onRetry}>Retry</Button>}</div> : tasks.length === 0 && added.length === 0 ? <p className="cc-note">No tasks yet. Tracked work collects here as it&apos;s created.</p> : (
         <div className="cc-grid2">
@@ -178,7 +198,7 @@ export function TasksView({ data, onRetry, onOpen }: { data: SystemSnapshot; onR
               <Card key={g.status} title={`${g.title} · ${items.length + fresh.length}`}>
                 <InsetGroup>
                   {fresh.map((s) => <ListRow key={s.id} className="v-new" title={s.title} subtitle="Just added · sample data" accessory={<Badge tone="accent">New</Badge>} />)}
-                  {items.map((t, i) => <ListRow key={`${t.title}-${i}`} title={plainText(t.title)} subtitle={[...(t.tags ?? []).map(humanize), t.priority ? humanize(t.priority) : null, "venture link needs wiring"].filter(Boolean).join(" · ")} accessory={<StatusText kind={TASK_KIND[t.status] ?? "off"}>{humanize(t.status)}</StatusText>} />)}
+                  {items.map((t, i) => <ListRow key={`${t.title}-${i}`} title={plainText(t.title)} subtitle={[...(t.tags ?? []).map(humanize), t.priority ? humanize(t.priority) : null, "venture link needs wiring"].filter(Boolean).join(" · ")} accessory={<span className="v-actions"><LinkButton small onClick={() => ask(t)} label={`Ask Amara about ${plainText(t.title)}`}>Ask Amara ›</LinkButton><StatusText kind={TASK_KIND[t.status] ?? "off"}>{humanize(t.status)}</StatusText></span>} />)}
                 </InsetGroup>
               </Card>
             );
@@ -199,6 +219,9 @@ export const BOARD_AT = 3;
 /** Enterprise › Content: the pipeline Idea → Drafting → Review → Scheduled → Published. Amara drafts; she never posts. */
 export function ContentView({ data, onRetry, onOpen }: { data: SystemSnapshot; onRetry?: () => void; onOpen?: (route: Route) => void }) {
   const [added, setAdded] = useState<Saved[]>([]);
+  // With the live add path the idea is stored in CONTENT-PIPELINE.md (add_save "idea"); reload the snapshot so it is a real
+  // pipeline item that Draft with Amara works on. Without it (browser, sample mode) it stays a labelled local row.
+  const reload = inTauri() && !sampleAdaptersEnabled() && onRetry ? onRetry : null;
   const pipeline = data.pipeline;
   const down = data.unavailableSources.some((s) => s.command === "read_content_pipeline") && pipeline.length === 0;
   const count = (stage: string) => pipeline.filter((p) => p.stage === stage).length + (stage === "ideation" ? added.length : 0);
@@ -211,7 +234,7 @@ export function ContentView({ data, onRetry, onOpen }: { data: SystemSnapshot; o
   const composer = (
     <Composer title="New idea" kind="Idea" adapter={addAdapter("idea")} placeholder="e.g. Reel: how the label approval works, for Taiyo Skin" addLabel="Add idea" saveLabel="Add idea"
       hint="Shows as a preview first, then lands in Idea." working="Reading your idea…" onOpen={onOpen}
-      onSaved={(s) => setAdded((a) => [s, ...a])} onUndone={(id) => setAdded((a) => a.filter((x) => x.id !== id))}
+      onSaved={(s) => (reload ? reload() : setAdded((a) => [s, ...a]))} onUndone={(id) => (reload ? reload() : setAdded((a) => a.filter((x) => x.id !== id)))}
       savedText={(s) => `Added “${s.title}” to Idea.`} />
   );
   return (
@@ -230,7 +253,7 @@ export function ContentView({ data, onRetry, onOpen }: { data: SystemSnapshot; o
                   {its.map((p) => (
                     <div className="v-kc" key={p.key}>
                       <span>{p.title}</span><small>{p.type}</small>
-                      {stage === "review" && <div className="v-actions"><OffButton reason="Amara doesn't post for you">Publish</OffButton></div>}
+                      {inTauri() && !p.type.startsWith("Just added") && <ContentItemTools title={p.title} stage={p.stage as ContentStage} onChanged={onRetry} />}
                     </div>
                   ))}
                   {its.length === 0 && <p className="v-note">{stage === "scheduled" ? "Nothing scheduled. You schedule posts in the platform itself." : "Nothing here."}</p>}
@@ -251,7 +274,7 @@ export function ContentView({ data, onRetry, onOpen }: { data: SystemSnapshot; o
             {count("scheduled") === 0 && <p className="d18-note">Nothing scheduled. You schedule posts in the platform itself.</p>}
             {items.length === 0 ? <p className="d18-note">No ideas yet. Add one below; it starts in Idea.</p> : (
               <ul className="d18-clist">
-                {items.map((p) => <li key={p.key}><span className="d18-eyebrow">{STAGES.find(([st]) => st === p.stage)?.[1] ?? humanize(p.stage)}</span><div><b>{p.title}</b><small>{p.type}</small></div></li>)}
+                {items.map((p, i) => <li key={p.key}><span className="d18-eyebrow">{STAGES.find(([st]) => st === p.stage)?.[1] ?? humanize(p.stage)}</span><div><b>{p.title}</b><small>{p.type}</small>{i > 0 && inTauri() && !p.type.startsWith("Just added") && <ContentItemTools title={p.title} stage={p.stage as ContentStage} onChanged={onRetry} />}</div></li>)}
               </ul>
             )}
             {first && (
@@ -259,12 +282,12 @@ export function ContentView({ data, onRetry, onOpen }: { data: SystemSnapshot; o
                 <p className="d18-eyebrow">Next step</p>
                 <h3 className="d18-next__t">{first.stage === "ideation" ? "Draft this idea with Amara" : first.stage === "review" ? "Review the draft" : "Keep it moving"}</h3>
                 <p className="d18-next__why">Amara writes a draft. She never posts it. The board comes back once there are {BOARD_AT} or more items.</p>
-                {first.type.startsWith("Just added") || !inTauri() ? <div className="d18-actions"><OffButton variant="primary" reason="Needs wiring · Amara drafts from an idea">Draft with Amara</OffButton></div> : <ContentItemTools title={first.title} stage={first.stage as ContentStage} />}
+                {first.type.startsWith("Just added") || !inTauri() ? <div className="d18-actions"><OffButton variant="primary" reason="Needs wiring · Amara drafts from an idea">Draft with Amara</OffButton></div> : <ContentItemTools title={first.title} stage={first.stage as ContentStage} onChanged={onRetry} />}
               </section>
             )}
           </div>
         )}
-        {board && <p className="cc-note">Moving a card between stages needs wiring. Venture links for content need wiring.</p>}
+        {board && <p className="cc-note">Moving to Published asks whether you posted it. Amara never posts. Venture links for content need wiring.</p>}
       </Card>
       {!board && composer}
     </div>

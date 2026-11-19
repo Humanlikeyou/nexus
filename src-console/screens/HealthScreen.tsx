@@ -8,6 +8,7 @@ import type { NoopDailyMetric, NoopHealthInsight, NoopHealthSnapshot, SystemSnap
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, SegmentedControl, StatTile, type Tone } from "../ui";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
+import { LinkButton } from "../adds/Composer";
 import { LastFourteenDays } from "./FitnessTrends";
 import { calendarDays, deltaWords, usualRange } from "../ui/charts/chartMath";
 import { SleepCard } from "./SleepCard";
@@ -160,7 +161,7 @@ export type HealthFieldProps = {
   onRetry?: () => void;
   /** Overrides the first-load detection (refreshedAt still equals INITIAL_SNAPSHOT's). */
   loading?: boolean;
-  /** Opens a route (App's navigate); the Recovery card's link to the Needs you note. */
+  /** Opens a route (App's navigate); the Recovery card's link to Settings › Devices (where the strap sync is fixed) and the stale-data sync link. */
   onOpen?: (route: Route) => void;
 };
 
@@ -294,12 +295,12 @@ function FitnessReady({ health, header, onOpen }: { health: NoopHealthSnapshot; 
       <AmaraTake page="fitness" className="fitness__take" />
       {health.status === "stale" && (
         <p className="fitness__callout" role="note">
-          Last health data {health.latestDay ? dayLabel(health.latestDay) : "unknown"}. <span className="fitness__hint">Sync from Settings › Devices.</span>
+          Last health data {health.latestDay ? dayLabel(health.latestDay) : "unknown"}. {onOpen ? <LinkButton small onClick={() => onOpen({ id: "settings", view: "devices" })} label="Open Settings, Devices, to sync your health data">Sync from Settings › Devices</LinkButton> : <span className="fitness__hint">Sync from Settings › Devices.</span>}
         </p>
       )}
 
       <div className="fitness__row fitness__row--today">
-        <RecoveryCard m={recoveryCardModel} hrOnly={hrOnly} onOpenNote={onOpen ? () => onOpen({ id: "terrance", view: "needs-you" }) : undefined} />
+        <RecoveryCard m={recoveryCardModel} hrOnly={hrOnly} onOpenNote={onOpen ? () => onOpen({ id: "settings", view: "devices" }) : undefined} />
         <EffortCard m={effortCardModel} max={EFFORT_MAX} />
         <SleepCard model={nightly ? null : sleepModel} pending={nightly ? pending : undefined} />
       </div>

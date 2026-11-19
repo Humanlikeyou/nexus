@@ -10,15 +10,21 @@ const RUN_KIND: Record<string, StatusKind> = { running: "run", awaiting_approval
 const acc = (node: React.ReactNode) => <span className="cc-card__acc">{node}</span>;
 
 /** D-C3/C4: crew requests only (Terrance's approvals keep their own queue in chat and Today). */
-export function CrewApprovalsCard({ approvals, full = false, onViewAll, onDecide }: { approvals: Wired<CrewApproval[]>; full?: boolean; onViewAll?: () => void; onDecide?: (id: string, approve: boolean) => Promise<string | null> }) {
-  const [note, setNote] = useState<string | null>(null);
+export function CrewApprovalsCard({ approvals, full = false, onViewAll, onDecide, onOpenRun, runKnown }: { approvals: Wired<CrewApproval[]>; full?: boolean; onViewAll?: () => void; onDecide?: (id: string, approve: boolean) => Promise<string | null>; onOpenRun?: (runId: string) => void; runKnown?: (runId: string) => boolean }) {
+  // Decision 0042: a decision says what happens next and links to the run it belongs to.
+  const [note, setNote] = useState<{ text: string; runId?: string } | null>(null);
   if (approvals.state === "unwired") {
     return <Card title="Crew approvals" accessory={acc(wiredTag(approvals))}><p className="cc-note">Crew requests that need your yes (outbound email, posts, spending) appear here once crews report them.</p></Card>;
   }
   const items = full ? approvals.value : approvals.value.slice(0, 2);
   const decide = (item: CrewApproval, yes: boolean) => {
-    if (approvals.state === "live" && onDecide) { void onDecide(item.id, yes).then(setNote); return; }
-    setNote(approvals.state === "sample" ? `Sample data: nothing was ${yes ? "approved" : "denied"} for \u201c${item.title}\u201d.` : null);
+    if (approvals.state === "live" && onDecide) {
+      void onDecide(item.id, yes).then((error) => setNote(error
+        ? { text: error }
+        : { text: yes ? `Approved \u201c${item.title}\u201d. The crew is continuing.` : `Denied \u201c${item.title}\u201d. Nothing runs for it.`, runId: item.runId }));
+      return;
+    }
+    setNote(approvals.state === "sample" ? { text: `Sample data: nothing was ${yes ? "approved" : "denied"} for \u201c${item.title}\u201d.` } : null);
   };
   return (
     <Card title={`Crew approvals \u00b7 ${approvals.value.length}`} accessory={acc(<>{wiredTag(approvals)}{!full && onViewAll && approvals.value.length > 0 && <button type="button" className="cc-link" onClick={onViewAll}>View all ›</button>}</>)}>
@@ -35,16 +41,16 @@ export function CrewApprovalsCard({ approvals, full = false, onViewAll, onDecide
           <Button size="small" variant="primary" onClick={() => decide(item, true)} aria-label={`Approve ${item.title}`}>Approve</Button>
         </div>
       ))}
-      {note && <p className="cc-note" role="status">{note}</p>}
+      {note && <p className="cc-note" role="status">{note.text}{note.runId && onOpenRun && (!runKnown || runKnown(note.runId)) && <> <button type="button" className="cc-link" onClick={() => onOpenRun(note.runId!)}>Open run ›</button></>}</p>}
     </Card>
   );
 }
 
-export function CrewDecidedCard({ decided }: { decided: Wired<CrewDecision[]> }) {
+export function CrewDecidedCard({ decided, onOpenRun, runKnown }: { decided: Wired<CrewDecision[]>; onOpenRun?: (runId: string) => void; runKnown?: (runId: string) => boolean }) {
   return (
     <Card title="Recently decided" accessory={acc(wiredTag(decided))}>
       {decided.state === "unwired" ? <p className="cc-note">Your past crew decisions appear here.</p> : decided.value.map((d) => (
-        <div className="cc-row" key={d.id}><div className="cc-row__main"><span>{d.title}</span><small>{d.crew} · {d.approved ? "approved" : "denied"} by you · {d.when}</small></div><StatusText kind={d.approved ? "ok" : "fail"}>{d.approved ? "Approved" : "Denied"}</StatusText></div>
+        <div className="cc-row" key={d.id}><div className="cc-row__main"><span>{d.title}</span><small>{d.crew} · {d.approved ? "approved" : "denied"} by you · {d.when}</small></div>{d.runId && onOpenRun && (!runKnown || runKnown(d.runId)) && <button type="button" className="cc-link" onClick={() => onOpenRun(d.runId!)} aria-label={`Open run for ${d.title}`}>Open run ›</button>}<StatusText kind={d.approved ? "ok" : "fail"}>{d.approved ? "Approved" : "Denied"}</StatusText></div>
       ))}
     </Card>
   );

@@ -4,7 +4,7 @@ import { deriveElectrodeMode, isOutputAllowed } from "../legacy-core/lib/electro
 import { useAudioFeedback } from "../legacy-core/hooks/useAudioFeedback";
 import { loadKv, saveKv } from "../bridge";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
-import { GOALS, NOTES_KEY, SENSORS, goalOf, parseNotes, recommendedGoal, suggestedStrategy, type NfNote } from "../neuro/goals";
+import { GOALS, NOTES_KEY, sessionNoteKey, SENSORS, goalOf, parseNotes, recommendedGoal, suggestedStrategy, type NfNote } from "../neuro/goals";
 import { AUX_PROVEN, FIT_LABEL, HOLD_COPY, feedbackLevel, type ChannelFit } from "../neuro/training";
 import type { MuseTelemetry } from "../neuro/telemetryStore";
 import type { useTraining } from "../neuro/useTraining";
@@ -167,7 +167,7 @@ function SummaryStep({ training, sessions, onNote, lastStrategy }: { training: T
 }
 
 /** The session itself: goal, fit, baseline, training, summary. The lens is the feedback. */
-export function NeuroFlow({ training, telemetry, sessions, running, action }: { training: Training; telemetry: MuseTelemetry; sessions: RecordedSession[]; running: boolean; action: ReactNode }) {
+export function NeuroFlow({ training, telemetry, sessions, running, action, savedSessionId = null }: { training: Training; telemetry: MuseTelemetry; sessions: RecordedSession[]; running: boolean; action: ReactNode; /** The session just saved: the "What helped?" note is stored with its id and shown in its recording. */ savedSessionId?: string | null }) {
   const aux = AUX_PROVEN ? telemetry.aux : null;
   const { state } = training;
   const { notes, add } = useNotes();
@@ -217,7 +217,10 @@ export function NeuroFlow({ training, telemetry, sessions, running, action }: { 
     try { updateState("calm", state.phase === "training" && state.signal?.action === "reward"); } catch { /* the light still works */ }
   }, [stage, state.phase, state.signal, updateState]);
 
-  if (training.finished && !running) return <SummaryStep training={training} sessions={sessions} lastStrategy={strategy} onNote={(note) => add({ at: new Date().toISOString(), protocol: training.finished!.protocol_name, targetPercent: training.finished!.time_in_target_pct, strategy, note })} />;
+  if (training.finished && !running) return <SummaryStep training={training} sessions={sessions} lastStrategy={strategy} onNote={(note) => {
+    add({ at: new Date().toISOString(), protocol: training.finished!.protocol_name, targetPercent: training.finished!.time_in_target_pct, strategy, note, ...(savedSessionId ? { sessionId: savedSessionId } : {}) });
+    if (savedSessionId) saveKv(sessionNoteKey(savedSessionId), note).catch(() => undefined);
+  }} />;
   if (!running || !state.stage) {
     if (running) return <div className="nf-actions">{action}</div>; // a plain recording: the live readings below are the screen
     return <GoalStep training={training} aux={aux} lastNote={notes[0] ?? null} action={action} />;

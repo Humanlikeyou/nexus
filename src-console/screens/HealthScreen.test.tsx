@@ -112,6 +112,13 @@ describe("Fitness (HealthField)", () => {
     expect(screen.getByText("Updated 38 days ago at", { exact: false })).toBeInTheDocument();
   });
 
+  it("stale with onOpen: the sync hint is a button to Settings › Devices", () => {
+    const onOpen = vi.fn();
+    render(<HealthField onOpen={onOpen} data={snap({ ...ready, status: "stale", dataAgeDays: 38, latestDay: "2026-09-20" })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open Settings, Devices, to sync your health data" }));
+    expect(onOpen).toHaveBeenCalledWith({ id: "settings", view: "devices" });
+  });
+
   it("ready data shows no stale note", () => {
     render(<HealthField data={snap(ready)} />);
     expect(screen.queryByText("Sync from Settings › Devices.")).not.toBeInTheDocument();

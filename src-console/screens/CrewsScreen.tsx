@@ -58,7 +58,7 @@ export const RUN_STATUS: Record<string, StatusKind> = { running: "run", complete
 type CrewPage = { kind: "overview" } | { kind: "run"; id: string } | { kind: "approvals" } | { kind: "crew"; name: string };
 
 /** design-1110d D-C1–C11: Agents › Crews as a command center. Panels with no source read from `adapter`. */
-export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), tools = crewToolsAdapter() }: { data: SystemSnapshot; onRetry?: () => void; loading?: boolean; adapter?: CrewsAdapter; tools?: CrewToolsAdapter }) {
+export function CrewsField({ data, onRetry, loading, openRunId = null, adapter = crewsAdapter(), tools = crewToolsAdapter() }: { data: SystemSnapshot; onRetry?: () => void; loading?: boolean; /** Opens this run's page (a link from Agents or Today). */ openRunId?: string | null; adapter?: CrewsAdapter; tools?: CrewToolsAdapter }) {
   const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const { health } = data.crew;
   const listDown = data.unavailableSources.some((s) => s.command === "crew_list");
@@ -71,7 +71,9 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
     setSnapshotRuns(data.crew.runs);
     setRuns(data.crew.runs);
   }
-  const [page, setPage] = useState<CrewPage>({ kind: "overview" });
+  const [page, setPage] = useState<CrewPage>(openRunId ? { kind: "run", id: openRunId } : { kind: "overview" });
+  const [seenRunId, setSeenRunId] = useState(openRunId);
+  if (seenRunId !== openRunId) { setSeenRunId(openRunId); setPage(openRunId ? { kind: "run", id: openRunId } : { kind: "overview" }); }
   const selected = page.kind === "run" ? runs.find((r) => r.id === page.id) ?? null : null;
   const runAdapter = useLiveRunAdapter(adapter, selected);
   const approvalAdapter = useLiveN8n(useLiveApprovals(runAdapter, data.crew.health === "online"), data.crew.health === "online");
@@ -85,6 +87,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
   const [confirmStop, setConfirmStop] = useState<CrewInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [startedNote, setStartedNote] = useState<string | null>(null);
 
   const nameError = name && !CREW_NAME_RE.test(name) ? "Start with a letter or digit; then letters, digits, space, _ . - (max 64)." : undefined;
   const canStart = health === "online" && !busy && CREW_NAME_RE.test(name) && task.trim().length > 0 && task.length <= CREW_MAX_TASK_CHARS;
@@ -118,6 +121,9 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
       setRuns((prev) => [info, ...prev.filter((r) => r.id !== info.id)]);
       setName("");
       setTask("");
+      // Decision 0042: carry the user to the run they just started (Stop and live status are there).
+      setStartedNote("Started. This page checks every 5 seconds.");
+      setPage({ kind: "run", id: info.id });
     } catch (e) {
       setActionError(errorText(e));
     } finally {
@@ -131,6 +137,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
   const decide = async (id: string, approve: boolean): Promise<string | null> => {
     try {
       await decideCrewApproval(id, approve);
+      onRetry?.(); // refresh the snapshot now so Today \u203a Needs you and Agents drop the item at once
       return null;
     } catch (e) {
       return errorText(e);
@@ -165,10 +172,13 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
     );
   }
 
+  const runKnown = (id: string) => runs.some((r) => r.id === id);
+  const openRun = (id: string) => { setStartedNote(null); setPage({ kind: "run", id }); };
   const badge = HEALTH_BADGE[health];
   const dialogs = (
     <>
       {actionError && <p className="crews__error" role="alert">{actionError}</p>}
+      {startedNote && <p className="crews__note" role="status">{startedNote}</p>}
       <Dialog open={confirmStart} title="Start this run?" confirmLabel="Start run" busy={busy}
         onConfirm={() => { void start(); }} onCancel={() => { setConfirmStart(false); setRetryOf(null); }}>
         Runs on the local model inside the crew service. It may take a few minutes; you can stop it from the run.
@@ -183,7 +193,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
   if (selected) {
     return (
       <div className="crews page-inset cc-page">
-        <CrewRunPage run={selected} adapter={runAdapter} busy={busy} onBack={() => setPage({ kind: "overview" })}
+        <CrewRunPage run={selected} adapter={runAdapter} busy={busy} onBack={() => { setStartedNote(null); setPage({ kind: "overview" }); }}
           onStop={() => setConfirmStop(selected)}
           onRetry={health === "online" ? () => { setName(selected.name); setTask(selected.task ?? ""); setRetryOf(selected.id); setConfirmStart(true); } : undefined} />
         {dialogs}
@@ -211,8 +221,8 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
         <Button className="cc-back" variant="plain" size="small" icon={ChevronLeft} onClick={() => setPage({ kind: "overview" })}>Crews</Button>
         <PageHero title="Crews" statement={approvals.state === "unwired" ? "Crew approvals" : `${count} crew approval${count === 1 ? "" : "s"} waiting`}
           detail={<>Only crew requests are here; Terrance&apos;s approvals stay in chat and Today.{wiredTag(approvals) && <span className="cc-hero-tag">{wiredTag(approvals)}</span>}</>} />
-        <CrewApprovalsCard approvals={approvals} full onDecide={decide} />
-        <CrewDecidedCard decided={approvalAdapter.decided()} />
+        <CrewApprovalsCard approvals={approvals} full onDecide={decide} onOpenRun={openRun} runKnown={runKnown} />
+        <CrewDecidedCard decided={approvalAdapter.decided()} onOpenRun={openRun} runKnown={runKnown} />
       </div>
     );
   }
@@ -249,7 +259,7 @@ export function CrewsField({ data, onRetry, loading, adapter = crewsAdapter(), t
         <li className="cc-tile"><span className="cc-tile__k">Schedules</span><span className="cc-tile__v">{data.hermes.activeSchedules} active</span><span className="cc-tile__s">Next run {next.state === "unwired" ? wiredTag(next) : next.value}</span></li>
       </ul>
 
-      <CrewApprovalsCard approvals={approvals} onViewAll={() => setPage({ kind: "approvals" })} onDecide={decide} />
+      <CrewApprovalsCard approvals={approvals} onViewAll={() => setPage({ kind: "approvals" })} onDecide={decide} onOpenRun={openRun} runKnown={runKnown} />
 
       {health === "online" && (
         <Card title="Runs" accessory={<span className="cc-card__acc"><Button variant="secondary" size="small" icon={Plus} onClick={() => { setFormOpen(true); requestAnimationFrame(() => document.getElementById("crews-new-run")?.scrollIntoView({ block: "nearest" })); }}>New run</Button></span>}>

@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { HOST_VIEWS, SECTION_ANCHORS, SYSTEMS, TODAY_LABEL, TODAY_ROUTE, canonicalRoute, resolveRoute, screenFor, tabOf } from "./app/routes";
+import { HOST_VIEWS, SECTION_ANCHORS, goalRoute, SYSTEMS, TODAY_LABEL, TODAY_ROUTE, canonicalRoute, crewRunOf, resolveRoute, screenFor, tabOf, type Route } from "./app/routes";
 import { PageSection } from "./ui";
 import { AgentsField } from "./screens/AgentsScreen";
 import { useChatAdds } from "./adds/useChatAdds";
@@ -36,6 +36,8 @@ import type { ModuleId } from "./types";
 import { personalAdapter } from "./personal/adapters";
 import { PatternsView } from "./personal/PageViews";
 import { ASK_MORE_EVENT, type AskMoreDetail } from "./amaraTake/takeView";
+import { OPEN_GOAL_EVENT } from "./goals/openGoal";
+import { FOCUS_ACTION_EVENT } from "./inbox/needsYou";
 import { standaloneAdapter } from "./standalone/adapters";
 import { FirstRun } from "./standalone/FirstRun";
 import { settingsTab } from "./app/settingsTabs";
@@ -51,6 +53,9 @@ function readBusinessView(): string | null {
 function writeBusinessView(view: string) {
   try { sessionStorage.setItem(BUSINESS_VIEW_KEY, view); } catch { /* storage unavailable: choice just isn't remembered */ }
 }
+
+/** "neuro-history/<session id>": the recording that Neuro, the journey chips or a link opened. */
+const historyIdOf = (view: string): string | null => (view.startsWith("neuro-history/") ? view.slice("neuro-history/".length) || null : null);
 
 const INITIAL_ROUTE = { id: "terrance", view: "main" } as const;
 
@@ -88,7 +93,10 @@ export default function App() {
   }, [navigate]);
   const { data, busy, setBusy, refresh } = useSnapshot();
   const [notice, setNotice] = useState<string | null>(null);
-  const { museDevices, museOperation, museError, sessionId, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession } = useMuseSession(data, refresh, setNotice);
+  const [noticeLink, setNoticeLink] = useState<{ label: string; route: Route } | null>(null);
+  const { museDevices, museOperation, museError, scanEmpty, lastSavedId, dismissSaved, sessionId, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession } = useMuseSession(data, refresh, setNotice);
+  // Neuro history › "Start session": Neuro opens with Find Muse or Start session focused.
+  const [neuroFocus, setNeuroFocus] = useState(0);
   const [contextInspectorOpen, setContextInspectorOpen] = useState(false);
   const { theme, setTheme, reduceMotion, setReduceMotion } = useAppearance();
   // Key-window state → <html data-window-active> (Decision 21).
@@ -114,11 +122,32 @@ export default function App() {
     window.addEventListener(ASK_MORE_EVENT, onAsk);
     return () => window.removeEventListener(ASK_MORE_EVENT, onAsk);
   }, [navigate]);
+  // "Open goal ›" from the step question in a take: Life › Goals with that goal in focus.
+  useEffect(() => {
+    const onGoal = (event: Event) => { const id = (event as CustomEvent<{ goalId?: string }>).detail?.goalId; if (id) navigate(goalRoute(id)); };
+    window.addEventListener(OPEN_GOAL_EVENT, onGoal);
+    return () => window.removeEventListener(OPEN_GOAL_EVENT, onGoal);
+  }, [navigate]);
   // design-1110b A: the Home chat. Expand is the largest it gets; ⌘1 focuses its composer.
   const [chatExpanded, setChatExpanded] = useState(false);
+  // Needs you › "Open on Home" for an Amara approval: expand the chat; it scrolls to the card and focuses Approve.
+  const [focusAction, setFocusAction] = useState<{ id: string; n: number } | null>(null);
+  useEffect(() => {
+    const onFocus = (event: Event) => {
+      const id = (event as CustomEvent<{ id?: string }>).detail?.id;
+      if (!id) return;
+      setChatExpanded(true);
+      setFocusAction((f) => ({ id, n: (f?.n ?? 0) + 1 }));
+      navigate({ id: "terrance", view: "main" });
+    };
+    window.addEventListener(FOCUS_ACTION_EVENT, onFocus);
+    return () => window.removeEventListener(FOCUS_ACTION_EVENT, onFocus);
+  }, [navigate]);
   // design-1111s first-run: opens on launch only when setup_state is live and not done; any time from Settings › General.
   const [setup, setSetup] = useState<null | "first" | "again">(() => { const d = standaloneAdapter().setupDone(); return d.state === "live" && !d.value ? "first" : null; });
   const [chatFocus, setChatFocus] = useState(0);
+  // A question typed in the Home windows command bar: the chat is hidden behind the windows, so its reply shows in the bar.
+  const [windowAsk, setWindowAsk] = useState<{ base: number } | null>(null);
   const voiceTurns = useVoiceTurns(screenId === "landing");
   useVoiceNavyPrompts(voiceTurns);
   useVoiceWindowPrompts(voiceTurns);
@@ -176,30 +205,45 @@ export default function App() {
   const subViews = HOST_VIEWS[active];
   const onLanding = screenId === "landing";
   const fieldLabel = screenId === "terrance" ? TODAY_LABEL : selected.label;
+  // Toolbar Refresh: say how it went once the snapshot is back (G14).
+  const [refreshing, setRefreshing] = useState(false);
+  const manualRefresh = () => { setRefreshing(true); void refresh(); };
+  useEffect(() => {
+    if (!refreshing || busy) return;
+    const down = data.unavailableSources.length;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reports the finished refresh once
+    setRefreshing(false);
+    setNotice("Refreshed");
+    setNoticeLink(down === 0 ? null : { label: "Some sources unavailable ›", route: { id: "settings", view: "about" } });
+    const t = window.setTimeout(() => { setNotice(null); setNoticeLink(null); }, 6000);
+    return () => window.clearTimeout(t);
+  }, [refreshing, busy, data]);
   const retrySnapshot = () => { void refresh(); };
+  const windowReplyText = windowAsk ? messages.slice(windowAsk.base).find((m) => m.role === "assistant")?.content ?? null : null;
+  const windowReply = windowAsk ? { pending: sending && windowReplyText == null, reply: windowReplyText } : null;
   const chat = <ChatField key={askDraft.n} variant="home" expanded={chatExpanded} onToggleExpanded={() => setChatExpanded((open) => !open)} voiceTurns={voiceTurns} focusSignal={chatFocus + askDraft.n}
-    conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendHome} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} askContext={askContext} onClearContext={() => setAskContext(null)} />;
-  const view = onLanding ? <LandingField onSelect={setActive} onToday={() => navigate(TODAY_ROUTE)} chat={chat} chatExpanded={chatExpanded} onAsk={(text) => { void sendHome(text); }} />
+    conversationId={conversationId} initialDraft={askDraft.text} data={data} messages={messages} sending={sending} loadingModel={loadingModel} onCancelPending={cancelPending} lastSavedAt={autoSave.lastSavedAt} onSend={sendHome} onNewConversation={startNewConversation} onOpenContext={() => setContextInspectorOpen(true)} busy={busy} onRetrySources={retrySnapshot} onApproveAction={(action) => { void approveAction(action); }} onRetryAction={(action) => { void act(`Preparing retry for ${action.title}`, () => retryTerrenceAction(action.id)); }} onCancelAction={(action) => { void act(`Cancelling ${action.title}`, () => cancelTerrenceAction(action.id)); }} askContext={askContext} onClearContext={() => setAskContext(null)} focusAction={focusAction} />;
+  const view = onLanding ? <LandingField onSelect={setActive} onToday={() => navigate(TODAY_ROUTE)} chat={chat} chatExpanded={chatExpanded} onAsk={(text) => { setWindowAsk({ base: messages.length }); void sendHome(text); }} onOpen={navigate} windowAsk={windowReply} onOpenChat={() => setWindowAsk(null)} />
     : screenId === "terrance" ? <TerranceField data={data} onNavigate={setActive} onOpen={navigate} onRetry={retrySnapshot} todos={<PageSection id="lists"><ListsField refreshSignal={data.refreshedAt} /></PageSection>} />
     : screenId === "health" ? <HealthField data={data} onRetry={retrySnapshot} onOpen={navigate} />
-    : screenId === "mindbody" ? (route.view === "patterns" ? <PatternsView adapter={personalAdapter()} /> : <MindBodyField sessions={data.sessions} />)
+    : screenId === "mindbody" ? (route.view === "patterns" ? <PatternsView adapter={personalAdapter()} /> : <MindBodyField sessions={data.sessions} onOpen={navigate} />)
     : screenId === "smarthome" ? <SmartHomeField onOpenSettings={() => navigate({ id: "settings", view: "home-assistant" })} />
-    : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} onOpenHistory={() => setActive("sessions")} devices={museDevices} operation={museOperation} error={museError} sessionId={sessionId} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
-    : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => setActive("neuro")} />
+    : screenId === "neuro" ? <NeuroField training={training} data={data} onRetry={retrySnapshot} onOpenHistory={() => setActive("sessions")} onOpenRecording={(id) => navigate({ id: "mindbody", view: `neuro-history/${id}` })} scanEmpty={scanEmpty} lastSavedId={lastSavedId} onDismissSaved={dismissSaved} focusPrimary={neuroFocus} devices={museDevices} operation={museOperation} error={museError} sessionId={sessionId} sessionStartedAt={sessionStartedAt} sessionEndedAt={sessionEndedAt} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onStart={() => { void startMuseSession(); }} onStop={() => { void stopMuseSession(); }} />
+    : screenId === "sessions" ? <SessionsField data={data} onRetry={retrySnapshot} onStartSession={() => { setNeuroFocus((n) => n + 1); setActive("neuro"); }} initialOpenId={historyIdOf(route.view)} onClose={() => navigate({ id: "mindbody", view: "neuro-history" })} />
     : screenId === "business" ? <BusinessField data={data} onRetry={retrySnapshot} view={route.view} onView={(view) => navigate({ id: "enterprise", view })} onOpen={navigate} />
     : screenId === "revenue" ? <RevenueField data={data} onRetry={retrySnapshot} onOpen={navigate} />
     : screenId === "life" ? <LifeField data={data} view={route.view} onOpen={navigate} onRetry={retrySnapshot} />
     : screenId === "assistant" ? <ActivityField data={data} onRetry={retrySnapshot} />
     : screenId === "lists" ? <ListsField refreshSignal={data.refreshedAt} />
-    : screenId === "crews" ? <CrewsField data={data} onRetry={retrySnapshot} />
+    : screenId === "crews" ? <CrewsField data={data} onRetry={retrySnapshot} openRunId={crewRunOf(route)} />
     : screenId === "voice" ? <VoiceField />
-    : screenId === "chat" ? <><AgentsField data={data} onOpenCrews={() => navigate({ id: "chat", view: "crews" })} onRetry={retrySnapshot} /><PageSection id="activity"><ActivityField data={data} onRetry={retrySnapshot} /></PageSection></>
-    : <SettingsField view={route.view} onRunSetup={() => setSetup("again")} data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} />;
+    : screenId === "chat" ? <><AgentsField data={data} onOpenCrews={() => navigate({ id: "chat", view: "crews" })} onOpen={navigate} onRetry={retrySnapshot} /><PageSection id="activity"><ActivityField data={data} onRetry={retrySnapshot} onOpen={navigate} /></PageSection></>
+    : <SettingsField view={route.view} onRunSetup={() => setSetup("again")} onOpenSmartHome={() => navigate({ id: "smarthome", view: "main" })} data={data} theme={theme} setTheme={setTheme} reduceMotion={reduceMotion} setReduceMotion={setReduceMotion} devices={museDevices} operation={museOperation} error={museError} onScan={() => { void scanForMuse(); }} onConnect={(device) => { void connectToMuse(device); }} onDisconnect={() => { void disconnectFromMuse(); }} onRetry={retrySnapshot} />;
 
   return (
     <NavyRoot>
     <CommandSurface mode={screenId}>
-      {!onLanding && <Toolbar label={fieldLabel} busy={busy} onRefresh={refresh} onSearch={() => setPaletteOpen(true)} />}
+      {!onLanding && <Toolbar label={fieldLabel} busy={busy} onRefresh={manualRefresh} onSearch={() => setPaletteOpen(true)} />}
       <Splash loaded={data.refreshedAt !== INITIAL_SNAPSHOT.refreshedAt} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate}
         onAsk={(text) => { setAskContext(null); setAskDraft((d) => ({ text, n: d.n + 1 })); navigate({ id: "terrance", view: "main" }); }} />
@@ -207,7 +251,7 @@ export default function App() {
       <section className="active-field" aria-label={`${fieldLabel} system`}>{subViews && <div className="subview-bar" data-host={active}><SegmentedControl label={`${selected.label} view`} size="small" value={active === "settings" ? settingsTab(route.view) : tabOf(route)} options={subViews.map((entry) => ({ value: entry.view, label: entry.label }))} onChange={(view) => { if (active === "enterprise") writeBusinessView(view); navigate({ id: active, view }); }} /></div>}<ScreenErrorBoundary resetKey={screenId} onRetry={retryLazyScreens}><Suspense fallback={<ScreenSkeleton />}>{view}</Suspense></ScreenErrorBoundary></section>
       {!onLanding && <Footer data={data} busy={busy} />}
       {!onLanding && <AmaraVoiceAnnouncer />}
-      {notice && <div className="field-notice"><i />{notice}</div>}
+      {notice && <div className="field-notice"><i />{notice}{noticeLink && notice === "Refreshed" && <button type="button" className="take__ask" onClick={() => { navigate(noticeLink.route); setNotice(null); setNoticeLink(null); }}>{noticeLink.label}</button>}</div>}
       {setup && <FirstRun adapter={standaloneAdapter()} again={setup === "again"} onClose={() => setSetup(null)} />}
       <ContextInspector visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} onChanged={refresh} />
     </CommandSurface>

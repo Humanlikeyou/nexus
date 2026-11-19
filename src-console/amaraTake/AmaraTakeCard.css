@@ -24,6 +24,7 @@
 .take__chip[data-lane="health"] { border-color: color-mix(in srgb, var(--tone-accent-text) 45%, var(--separator)); }
 .take__foot { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--label-secondary); }
 .take__src { font-size: 11px; color: var(--label-secondary); }
+.take__rate { display: inline-flex; align-items: center; gap: 8px; }
 .take__ask { font: inherit; font-size: 11px; font-weight: 500; white-space: nowrap; color: var(--tone-accent-text); background: none; border: 1px solid color-mix(in srgb, var(--tone-accent-text) 45%, transparent); border-radius: 999px; padding: 3px 13px; cursor: pointer; }
 .take__ask:focus-visible, .take__link:focus-visible { outline: 2px solid var(--focus-ring, var(--tone-accent-text)); outline-offset: 3px; }
 .take__link { font: inherit; background: none; border: 0; padding: 0; color: var(--tone-accent-text); cursor: pointer; text-decoration: underline; }

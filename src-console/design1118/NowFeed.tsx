@@ -5,12 +5,13 @@ import { invokeBound } from "../bridge";
 import type { ActivityEvent } from "../legacy-core/terrance/system/activityBus";
 import type { AgentsNow } from "../bindings.gen";
 import type { SystemSnapshot } from "../types";
+import { ACTIVITY_ROUTE, NEEDS_YOU_ROUTE, crewRunRoute, type Route } from "../app/routes";
 import { DataTag, InsetGroup, ListRow, More, StatusText } from "../ui";
 import "./design1118.css";
 
 /** Who's working on what right now. Fixed labels and titles only: never prompts, messages, ids or health values. */
 export type NowStatus = "running" | "waiting" | "queued";
-export type NowRow = { key: string; kind: "amara" | "crew" | "routine" | "service" | "action" | "delivery"; who: string; what: string; status: NowStatus; since: number | null };
+export type NowRow = { key: string; kind: "amara" | "crew" | "routine" | "service" | "action" | "delivery"; who: string; what: string; status: NowStatus; since: number | null; /** Where the row opens (decision 0042). Absent when there is nowhere better to go. */ to?: Route };
 export type NowJob = Pick<ActivityEvent, "id" | "type" | "name" | "status" | "startedAt">;
 
 export const MAX_NOW_ROWS = 6;
@@ -42,11 +43,11 @@ export function nowReadable(data: SystemSnapshot, src: NowSources): boolean {
 export function buildNowRows(data: SystemSnapshot, src: NowSources): NowRow[] {
   const rows: NowRow[] = [];
   const down = (c: string) => data.unavailableSources.some((u) => u.command === c);
-  src.backend?.items.forEach((b, i) => rows.push({ key: `b${i}`, kind: b.kind === "amara" ? "amara" : "service", who: b.who, what: b.what, status: b.status === "queued" ? "queued" : "running", since: b.sinceMs ?? null }));
+  src.backend?.items.forEach((b, i) => rows.push({ key: `b${i}`, kind: b.kind === "amara" ? "amara" : "service", who: b.who, what: b.what, status: b.status === "queued" ? "queued" : "running", since: b.sinceMs ?? null, to: ACTIVITY_ROUTE }));
   if (data.crew.health === "online") {
     for (const r of data.crew.runs) {
       if (r.status !== "running" && r.status !== "awaiting_approval") continue;
-      rows.push({ key: `c${r.id}`, kind: "crew", who: `Crew: ${r.name}`, what: r.status === "running" ? "Working on a task" : "Needs your OK", status: r.status === "running" ? "running" : "waiting", since: ms(r.started_at) });
+      rows.push({ key: `c${r.id}`, kind: "crew", who: `Crew: ${r.name}`, what: r.status === "running" ? "Working on a task" : "Needs your OK", status: r.status === "running" ? "running" : "waiting", since: ms(r.started_at), to: crewRunRoute(r.id) });
     }
   }
   if (!down("list_terrence_actions")) {
@@ -54,16 +55,16 @@ export function buildNowRows(data: SystemSnapshot, src: NowSources): NowRow[] {
       if (a.toolId === "agent.hermes_chat") continue;
       const status: NowStatus | null = a.status === "awaiting_approval" ? "waiting" : a.status === "requested" ? "queued" : a.status === "planning" || a.status === "approved" || a.status === "executing" ? "running" : null;
       if (!status) continue;
-      rows.push({ key: `a${a.id}`, kind: "action", who: "Amara", what: status === "waiting" ? `${actionLabel(a.toolId)}: needs your OK` : actionLabel(a.toolId), status, since: ms(a.startedAt) ?? ms(a.requestedAt) });
+      rows.push({ key: `a${a.id}`, kind: "action", who: "Amara", what: status === "waiting" ? `${actionLabel(a.toolId)}: needs your OK` : actionLabel(a.toolId), status, since: ms(a.startedAt) ?? ms(a.requestedAt), to: status === "waiting" ? NEEDS_YOU_ROUTE : ACTIVITY_ROUTE });
     }
   }
   for (const j of src.jobs ?? []) {
     if (j.status !== "running" && j.status !== "pending") continue;
     const routine = j.type === "custom_job" || ROUTINE_TYPES.has(j.type);
-    rows.push({ key: `j${j.id}`, kind: routine ? "routine" : "amara", who: j.type === "custom_job" ? "Automation" : routine ? "Routine" : "Amara", what: j.name, status: j.status === "pending" ? "queued" : "running", since: j.startedAt });
+    rows.push({ key: `j${j.id}`, kind: routine ? "routine" : "amara", who: j.type === "custom_job" ? "Automation" : routine ? "Routine" : "Amara", what: j.name, status: j.status === "pending" ? "queued" : "running", since: j.startedAt, to: ACTIVITY_ROUTE });
   }
   if (!down("get_outbox_status") && data.outbox.queue_depth > 0) {
-    rows.push({ key: "outbox", kind: "delivery", who: "Delivery", what: `${data.outbox.queue_depth} waiting to send`, status: "queued", since: null });
+    rows.push({ key: "outbox", kind: "delivery", who: "Delivery", what: `${data.outbox.queue_depth} waiting to send`, status: "queued", since: null, to: ACTIVITY_ROUTE });
   }
   const rank: Record<NowStatus, number> = { waiting: 0, running: 1, queued: 2 };
   return rows.sort((a, b) => rank[a.status] - rank[b.status] || (a.since ?? Infinity) - (b.since ?? Infinity));
@@ -93,14 +94,14 @@ export function sinceText(t: number | null, now: number): string | null {
 const ICON: Record<NowRow["kind"], LucideIcon> = { amara: Bot, crew: Users, routine: Clock, service: Server, action: Zap, delivery: Mail };
 const STATUS: Record<NowStatus, { kind: "run" | "wait" | "off"; text: string }> = { running: { kind: "run", text: "Running" }, waiting: { kind: "wait", text: "Waiting for you" }, queued: { kind: "off", text: "Queued" } };
 
-function NowRowItem({ r, now }: { r: NowRow; now: number }) {
+function NowRowItem({ r, now, onOpen }: { r: NowRow; now: number; onOpen?: (route: Route) => void }) {
   const since = sinceText(r.since, now);
   const st = STATUS[r.status];
-  return <ListRow icon={ICON[r.kind]} title={r.who} subtitle={[r.what, since ? `since ${since}` : null].filter(Boolean).join(" · ")} accessory={<StatusText kind={st.kind}>{st.text}</StatusText>} />;
+  return <ListRow icon={ICON[r.kind]} title={r.who} subtitle={[r.what, since ? `since ${since}` : null].filter(Boolean).join(" · ")} accessory={<StatusText kind={st.kind}>{st.text}</StatusText>} onSelect={onOpen && r.to ? () => onOpen(r.to!) : undefined} />;
 }
 
 /** Presentational feed. `now` is passed in so tests are deterministic. */
-export function NowFeedView({ data, backend, jobs, now }: { data: SystemSnapshot; backend: AgentsNow | null; jobs: NowJob[] | null; now: number }) {
+export function NowFeedView({ data, backend, jobs, now, onOpen }: { data: SystemSnapshot; backend: AgentsNow | null; jobs: NowJob[] | null; now: number; onOpen?: (route: Route) => void }) {
   if (!nowReadable(data, { backend, jobs })) {
     return <section className="d18-card" aria-label="Working now"><h2 className="d18-h">Working now</h2><p className="d18-note"><DataTag kind="wire" /></p></section>;
   }
@@ -119,11 +120,11 @@ export function NowFeedView({ data, backend, jobs, now }: { data: SystemSnapshot
   return (
     <section aria-label="Working now" data-testid="now-feed">
       <InsetGroup title="Working now">
-        {shown.map((r) => <NowRowItem key={r.key} r={r} now={now} />)}
+        {shown.map((r) => <NowRowItem key={r.key} r={r} now={now} onOpen={onOpen} />)}
       </InsetGroup>
       {rest.length > 0 && (
         <More label={`${rest.length} more`}>
-          <InsetGroup>{rest.map((r) => <NowRowItem key={r.key} r={r} now={now} />)}</InsetGroup>
+          <InsetGroup>{rest.map((r) => <NowRowItem key={r.key} r={r} now={now} onOpen={onOpen} />)}</InsetGroup>
         </More>
       )}
     </section>
@@ -131,7 +132,7 @@ export function NowFeedView({ data, backend, jobs, now }: { data: SystemSnapshot
 }
 
 /** Live wrapper: polls the backend every few seconds while the page is visible, and reads renderer-only jobs. */
-export function NowFeed({ data }: { data: SystemSnapshot }) {
+export function NowFeed({ data, onOpen }: { data: SystemSnapshot; onOpen?: (route: Route) => void }) {
   const [backend, setBackend] = useState<AgentsNow | null>(null);
   const [jobs, setJobs] = useState<NowJob[] | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -152,5 +153,5 @@ export function NowFeed({ data }: { data: SystemSnapshot }) {
     document.addEventListener("visibilitychange", onVis);
     return () => { alive = false; window.clearInterval(timer); document.removeEventListener("visibilitychange", onVis); };
   }, []);
-  return <NowFeedView data={data} backend={backend} jobs={jobs} now={now} />;
+  return <NowFeedView data={data} backend={backend} jobs={jobs} now={now} onOpen={onOpen} />;
 }

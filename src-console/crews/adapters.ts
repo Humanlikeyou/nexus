@@ -3,8 +3,8 @@ import { makeLiveCrewsSchedule } from "./liveSchedule";
 import { NEEDS_CONVERSION, UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
 
 /** A request from a crew that waits for Taisun (separate from Terrance's approvals). */
-export interface CrewApproval { id: string; title: string; crew: string; agents: string; impact: string; requested: string; risk: "Low" | "Medium" | "High"; reason: string; amount: Wired<number> }
-export interface CrewDecision { id: string; title: string; crew: string; when: string; approved: boolean }
+export interface CrewApproval { id: string; runId?: string; title: string; crew: string; agents: string; impact: string; requested: string; risk: "Low" | "Medium" | "High"; reason: string; amount: Wired<number> }
+export interface CrewDecision { id: string; runId?: string; title: string; crew: string; when: string; approved: boolean }
 export interface CrewRunMetrics { durationS: number; tokens: number; requests: number; costUsd: number }
 export interface CrewStep { id: string; label: string; agent: string; startPct: number; endPct: number; status: "ok" | "failed" | "skipped"; took: string }
 export interface CrewHandoff { from: string; to: string }

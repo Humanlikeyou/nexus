@@ -4,6 +4,7 @@ import { useAmaraTakeStatus } from "./useAmaraTake";
 import { askMore, goToCite, PREVIEW_DEPS, previewMode, sampleTakeView, TAKE_PAGE_LABEL, TAKE_REFRESH_LINE, takeView, type TakeNote, type TakeView } from "./takeView";
 import type { TakePage } from "./types";
 import { useTakeSlots } from "../takes/TakeExtras";
+import { TakeRating } from "../takes/TakeRating";
 import { TakeStepQuestion } from "../goals/TakeStepQuestion";
 import "./AmaraTakeCard.css";
 
@@ -95,7 +96,8 @@ export function AmaraTakeCard({ page, view, compact = false, onRetry, slots = {}
         {!compact && <span className="take__src">{note.sourceLine} · {slots.refresh ?? TAKE_REFRESH_LINE[page]}</span>}
         <span className="take__spacer" />
         {slots.sheet}
-        <button type="button" className="take__ask" onClick={() => askMore({ from: TAKE_PAGE_LABEL[page], chips: note.chips, question: note.question, sample: view.sample })}>Ask more ›</button>
+        {note.takeId && !view.sample && <TakeRating key={note.takeId} page={page} takeId={note.takeId} />}
+        <button type="button" className="take__ask" onClick={() => askMore({ from: TAKE_PAGE_LABEL[page], chips: note.chips, question: note.question, sample: view.sample, text: note.text.replace(/\*\*/g, ""), takeId: note.takeId, page })}>Ask more ›</button>
       </div>
     </section>
   );

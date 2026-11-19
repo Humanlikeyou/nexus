@@ -1,9 +1,9 @@
 import { useId, useRef, useState } from "react";
 import { Button, DataTag, Dialog, PageHero, StatusText, Toggle } from "../ui";
 import { valueOf } from "../lib/sampleAdapters";
-import { BACKUP_CONTENTS, BACKUP_DEFAULTS, type StandaloneAdapter } from "./adapters";
+import { BACKUP_CONTENTS, BACKUP_DEFAULTS, type RestorePreview, type StandaloneAdapter } from "./adapters";
 import { Bar, KeyState, Row, SaCard, WireNote } from "./parts";
-import { BackupSection } from "../settings/BackupSection";
+import { BackupSection, RESTORE_SAFETY_NOTE, RESTORE_WARNING } from "../settings/BackupSection";
 
 /** Wording for the verify result: only a per-file sha256 match is called a checksum. */
 const checkWord = (l: { checksumOk: boolean | null; checks?: string }) => (l.checksumOk === null ? "not checked yet" : l.checksumOk ? (l.checks === "sha256" ? "checksum OK" : "readable, no key files found") : "check failed");
@@ -43,6 +43,11 @@ export function BackupView({ adapter }: { adapter: StandaloneAdapter }) {
   const [restoring, setRestoring] = useState(false);
   const [keySheet, setKeySheet] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // Restore: which backup is picked, its real preview, and the result once it has run.
+  const [pickId, setPickId] = useState<string | null>(null);
+  const [prev, setPrev] = useState<{ id: string; state: "loading" } | { id: string; state: "error"; message: string } | { id: string; state: "ready"; preview: RestorePreview } | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restored, setRestored] = useState<{ label: string; lines: string[] } | null>(null);
   const bw = adapter.backup();
   const b = valueOf(bw);
   const kw = adapter.keyFile();
@@ -51,7 +56,33 @@ export function BackupView({ adapter }: { adapter: StandaloneAdapter }) {
   const keys = valueOf(sw);
   const s = b?.settings ?? BACKUP_DEFAULTS;
   const run = b?.running ?? null;
-  const target = b?.backups.find((x) => x.daysOld > 0) ?? null;
+  const picked = b?.backups.find((x) => x.id === pickId) ?? null;
+  const ready = prev && prev.id === pickId && prev.state === "ready" ? prev.preview : null;
+  const choose = (id: string) => {
+    setPickId(id);
+    setPrev({ id, state: "loading" });
+    void adapter.previewBackup(id).then((r) => setPrev(r.state === "done" ? { id, state: "ready", preview: r.preview } : { id, state: "error", message: r.message ?? "Couldn't read this backup. Nothing was changed." }));
+  };
+  const closeRestore = () => { setRestoring(false); setPickId(null); setPrev(null); };
+  const runRestore = () => {
+    if (!picked || !ready) return;
+    const label = picked.madeAt;
+    setRestoring(false); setRestoreBusy(true); setRestored(null);
+    setNote("Waiting for your confirmation. Nothing is replaced until you allow it.");
+    void adapter.restore(picked.id).then((r) => {
+      setRestoreBusy(false); setPickId(null); setPrev(null);
+      if (r.state === "done") { setNote(null); setRestored({ label, lines: r.lines }); }
+      else setNote(r.state === "declined" ? "Restore cancelled. Nothing was changed." : r.message ?? "Restore didn't finish. Nothing was changed.");
+      bump((n) => n + 1);
+    });
+  };
+  const changeDir = () => {
+    void adapter.pickBackupDir().then((r) => {
+      if (r.state === "done") setNote(`Backups will go to ${r.dir} from now on. Existing backups stay where they are.`);
+      else if (r.state !== "cancelled") setNote(r.message ?? "Couldn't change the backup folder. Nothing changed.");
+      bump((n) => n + 1);
+    });
+  };
   const say = (r: { state: string }, ok: string) => { setNote(r.state === "unwired" ? "That needs wiring. Nothing changed." : ok); bump((n) => n + 1); };
   return (
     <div className="pk-host sa-page">
@@ -62,15 +93,14 @@ export function BackupView({ adapter }: { adapter: StandaloneAdapter }) {
         <div className="pk-stack">
           <SaCard title="Back up and restore" w={bw}>
             <div className="pk-actions sa-actions-pad">
-              <Button size="small" variant="primary" disabled={!!run || !b} onClick={() => { void adapter.backupNow().then((r) => say(r, "Backup started.")); }}>Back Up Now</Button>
-              <Button size="small" variant="secondary" disabled={!b} onClick={() => setRestoring(true)}>Restore from a Backup…</Button>
-              <Button size="small" variant="secondary" disabled={!b}>Show Backups in Finder</Button>
+              <Button size="small" variant="primary" disabled={!!run || !b} onClick={() => { void adapter.backupNow().then((r) => say(r, "Backup finished.")); }}>Back Up Now</Button>
+              <Button size="small" variant="secondary" disabled={!b || restoreBusy} onClick={() => setRestoring(true)}>Restore from a Backup…</Button>
             </div>
             {b?.last ? <Row title="Last backup" sub={`${b.last.at} · ${b.last.size} · ${checkWord(b.last)}`}><StatusText kind={b.last.checksumOk === false ? "fail" : "ok"}>{b.last.checksumOk === false ? "Check failed" : "Done"}</StatusText></Row>
               : bw.state === "live" ? <Row title="Last backup" sub="No backup yet in the backup folder"><StatusText kind="off">None</StatusText></Row>
               : <Row title="Last backup" sub="Shows here once nightly backups are wired"><DataTag kind="wire" /></Row>}
             <Row title={`Every night at ${at12(s.at)}`} sub={`Skipped on battery under ${s.skipOnBatteryBelow}%`}><Toggle aria-label="Nightly backup" checked={s.nightly} disabled={!b} onCheckedChange={(v) => { void adapter.setBackupSettings({ nightly: v }).then((r) => say(r, v ? "Nightly backup on." : "Nightly backup off.")); }} /></Row>
-            <Row title="Where" sub={`${s.dir} · keeps the last ${s.keep}`}><Button size="small" variant="secondary" disabled={!b}>Change…</Button></Row>
+            <Row title="Where" sub={`${s.dir} · keeps the last ${s.keep}`}><Button size="small" variant="secondary" disabled={!b} onClick={changeDir}>Change…</Button></Row>
             <Row title="Before each update" sub="A backup runs first, so an update can be undone"><StatusText kind={s.beforeUpdate ? "ok" : "off"}>{s.beforeUpdate ? "On" : "Off"}</StatusText></Row>
           </SaCard>
           <SaCard title="What's in a backup">
@@ -83,7 +113,7 @@ export function BackupView({ adapter }: { adapter: StandaloneAdapter }) {
           <SaCard title="n8n key file" w={kw}>
             {kf ? <Row title={kf.made ? "Key file made" : "No key file yet"} sub={kf.made ? `${kf.madeAt} · ${kf.where}` : "Make one before you move to a new Mac"}><StatusText kind={kf.made ? "ok" : "off"}>{kf.made ? "Ready" : "Not made"}</StatusText></Row>
               : <Row title="Key file" sub="Locked with your passphrase, kept outside the backup"><DataTag kind="wire" /></Row>}
-            <div className="pk-actions"><Button size="small" variant={kf?.made ? "secondary" : "primary"} onClick={() => setKeySheet(true)}>{kf?.made ? "Make a New Key File…" : "Make Key File…"}</Button><Button size="small" variant="secondary" disabled={!kf?.made}>Show in Finder</Button></div>
+            <div className="pk-actions"><Button size="small" variant={kf?.made ? "secondary" : "primary"} onClick={() => setKeySheet(true)}>{kf?.made ? "Make a New Key File…" : "Make Key File…"}</Button></div>
             <p className="pk-note">n8n&apos;s saved logins only open with the same key, so it can&apos;t be regenerated. On the new Mac, setup asks for this file and its passphrase.</p>
           </SaCard>
           <SaCard title="Move to a new Mac">
@@ -106,11 +136,27 @@ export function BackupView({ adapter }: { adapter: StandaloneAdapter }) {
       </div>
       {note && <p className="pk-note" role="status">{note}</p>}
       <section className="sa-legacy" aria-label="Back up to a file now"><BackupSection /></section>
-      <Dialog open={restoring} title={target ? `Restore from ${target.label}?` : "Restore from a backup?"} onCancel={() => setRestoring(false)} className="sa-sheet">
-        <p>Amara replaces today&apos;s data with the backup from {target?.madeAt ?? "the file you pick"}{bw.state === "sample" && <> <DataTag kind="sample" /></>}. First it saves today&apos;s data as a separate backup, so you can switch back.</p>
-        {target && <div className="pk-warn"><strong>⚠ {target.daysOld} days of data will be replaced</strong><ul><li>Chats, check-ins and memories since then go into the safety backup, not the live app.</li><li>Health data from those days stays in the safety backup; the strap fills in whatever it still holds.</li><li>Services restart once; crews that are running finish first.</li></ul></div>}
-        <dl className="pk-kv"><dt>Backup checksum</dt><dd><StatusText kind="ok">Matches</StatusText></dd><dt>Made by version</dt><dd>{target?.version ?? "—"} · same as now</dd><dt>Keys</dt><dd>Unchanged. They stay in the Keychain.</dd></dl>
-        <div className="pk-sheet__actions"><Button size="small" variant="secondary" onClick={() => setRestoring(false)}>Cancel</Button><Button size="small" variant="destructive" onClick={() => { setRestoring(false); void adapter.restore(target?.id ?? "").then((r) => say(r, "Restore started. Today's data was saved first.")); }}>Save Today, Then Restore</Button></div>
+      {restored && (
+        <div className="backup-restore__result" role="status">
+          <p>Restored from the backup of {restored.label}. Restart Amara OS to load the restored data.</p>
+          {restored.lines.length > 0 && <ul>{restored.lines.map((line, i) => <li key={`${i}-${line}`}>{line}</li>)}</ul>}
+        </div>
+      )}
+      <Dialog open={restoring} title={picked ? `Restore from ${picked.label}?` : "Restore from a backup?"} onCancel={closeRestore} className="sa-sheet">
+        <p>Pick the backup to restore{bw.state === "sample" && <> <DataTag kind="sample" /></>}. {RESTORE_WARNING}</p>
+        {(b?.backups.length ?? 0) === 0 ? <p className="pk-note">There are no backups in the backup folder yet. Back up first.</p> : (
+          <div className="pk-chips" role="group" aria-label="Backups">
+            {b!.backups.map((x) => <button key={x.id} type="button" className="pk-chip sa-chip" data-on={x.id === pickId || undefined} aria-pressed={x.id === pickId} onClick={() => choose(x.id)}>{x.madeAt}</button>)}
+          </div>
+        )}
+        {prev && prev.id === pickId && prev.state === "loading" && <p className="pk-note" role="status">Checking this backup…</p>}
+        {prev && prev.id === pickId && prev.state === "error" && <p role="alert" className="sa-error">{prev.message}</p>}
+        {ready && <>
+          <dl className="pk-kv"><dt>Backup check</dt><dd><StatusText kind={ready.checksumOk ? "ok" : "fail"}>{ready.checksumOk ? "Passed" : "Failed: this backup can't be restored"}</StatusText></dd><dt>Made</dt><dd>{ready.madeOn}{ready.version ? ` · version ${ready.version}` : ""}</dd><dt>Size</dt><dd>{ready.size}</dd><dt>Keys</dt><dd>Unchanged. They stay in the Keychain.</dd></dl>
+          {ready.contents.length > 0 && <div className="pk-warn"><strong>⚠ This backup holds</strong><ul>{ready.contents.map((c) => <li key={c.title}>{c.title} · {c.sub}</li>)}</ul></div>}
+          <p className="pk-note">{RESTORE_SAFETY_NOTE} Amara asks you to confirm once more in a native dialog before anything is replaced.</p>
+        </>}
+        <div className="pk-sheet__actions"><Button size="small" variant="secondary" onClick={closeRestore}>Cancel</Button><Button size="small" variant="destructive" disabled={!ready || !ready.checksumOk} onClick={runRestore}>Save Today, Then Restore</Button></div>
       </Dialog>
       <KeyFileSheet open={keySheet} adapter={adapter} onClose={(m) => { setKeySheet(false); if (m) setNote(m); bump((n) => n + 1); }} />
     </div>

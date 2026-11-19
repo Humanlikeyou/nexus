@@ -81,8 +81,8 @@ export function weeklyReviewFrom(w: ReviewWire): WeeklyReview {
       : { key: "Money", big: "No data", unit: "", delta: "", up: true, sub: m.note },
   ];
   const s = w.suggestion;
-  const change = s ? { title: s.title, body: s.reason } : { title: "No change to suggest this week", body: w.suggestionNote };
-  const highlights: WeeklyReview["highlights"] = g.milestones.map((x) => ({ ok: x.pct >= 100, title: `${x.title}: ${x.current} of ${x.target} ${x.unit}`.trim(), sub: `${x.pct}%` }));
+  const change = s ? { title: s.title, body: s.reason, findingId: s.evidenceFindingId } : { title: "No change to suggest this week", body: w.suggestionNote };
+  const highlights: WeeklyReview["highlights"] = g.milestones.map((x) => ({ ok: x.pct >= 100, title: `${x.title}: ${x.current} of ${x.target} ${x.unit}`.trim(), sub: `${x.pct}%`, goalId: x.id }));
   if (g.state === "none") highlights.push({ ok: false, title: "No goals saved yet", sub: "" });
   if (g.habits > 0) highlights.push({ ok: false, title: "Habit days aren't tracked yet", sub: g.note });
   highlights.push(c.state === "data"

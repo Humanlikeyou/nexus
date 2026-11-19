@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Bot, Database, RotateCcw, Users, Wrench } from "lucide-react";
 import { INITIAL_SNAPSHOT } from "../bridge";
+import type { Route } from "../app/routes";
 import type { SystemSnapshot } from "../types";
 import { Badge, Button, InsetGroup, ListRow, More, PageHero, type Tone } from "../ui";
 import { AgentOrbs, TodaysPulse, deliveryLine } from "../design1118/Agents";
@@ -36,7 +37,7 @@ export function agentRows(data: SystemSnapshot, _loading?: boolean): AgentRow[] 
  * design-1110b B3: Agents overview. Chat moved to Home (under the lens), so this page is who is
  * running, what they can use, and (below, as a section) what they did: Activity.
  */
-export function AgentsField({ data, onOpenCrews, onRetry }: { data: SystemSnapshot; onOpenCrews?: () => void; onRetry?: () => void }) {
+export function AgentsField({ data, onOpenCrews, onOpen, onRetry }: { data: SystemSnapshot; onOpenCrews?: () => void; /** Opens a route (decision 0042): feed rows, orbs and the pulse go where the work continues. */ onOpen?: (route: Route) => void; onRetry?: () => void }) {
   const loading = data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const rows = agentRows(data, loading);
   const online = rows.filter((r) => r.label === "Online").length;
@@ -48,9 +49,9 @@ export function AgentsField({ data, onOpenCrews, onRetry }: { data: SystemSnapsh
       <PageHero title="Agents" statement={loading ? "Checking" : `${online} online`}
         detail={loading ? undefined : `${data.hermes.activeSchedules} schedule${data.hermes.activeSchedules === 1 ? "" : "s"} active · crews ${crewReady ? "ready" : "unavailable"} · ${deliveryLine(data.outbox, data.unavailableSources.some((s) => s.command === "get_outbox_status")).toLowerCase()}`} />
       <PageTake surface="agents" />
-      {!loading && <NowFeed data={data} />}
-      {!loading && <AgentOrbs data={data} />}
-      {!loading && <TodaysPulse data={data} />}
+      {!loading && <NowFeed data={data} onOpen={onOpen} />}
+      {!loading && <AgentOrbs data={data} onOpen={onOpen} />}
+      {!loading && <TodaysPulse data={data} onOpen={onOpen} />}
       <More label="Agents, tools and knowledge base">
       <InsetGroup title="Agents">
         {rows.map((a) => <ListRow key={a.id} icon={a.icon} title={a.title} subtitle={a.subtitle} accessory={<Badge tone={a.tone} aria-label={`${a.title} status: ${a.label}`}>{a.label}</Badge>} />)}

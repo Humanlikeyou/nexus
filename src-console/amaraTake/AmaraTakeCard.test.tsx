@@ -45,7 +45,7 @@ describe("design-1110f Amara's take", () => {
     render(<AmaraTakeCard page="fitness" view={{ state: "fresh", note: liveNote(live), sample: false }} />);
     fireEvent.click(screen.getByRole("button", { name: "Ask more ›" }));
     window.removeEventListener(ASK_MORE_EVENT, on);
-    expect(seen).toEqual([{ from: "Fitness", chips: [{ label: "Recovery", value: "74 %" }], question: "What's behind today's Fitness note?", sample: false }]);
+    expect(seen).toEqual([{ from: "Fitness", chips: [{ label: "Recovery", value: "74 %" }], question: "What's behind today's Fitness note?", sample: false, text: live.text, takeId: `fitness-${live.generatedAt}`, page: "fitness" }]);
   });
   it("compact (Home) drops the source line", () => {
     render(<AmaraTakeCard page="home" compact view={sampleTakeView("home", null)} />);

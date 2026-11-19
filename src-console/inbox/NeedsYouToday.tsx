@@ -10,7 +10,7 @@ import { UNWIRED, sample, sampleAdaptersEnabled, valueOf, type Wired } from "../
 import { CHECKIN_EVENT, PERSONAL_DEFAULTS, personalAdapter } from "../personal/adapters";
 import type { FollowupLists, SystemSnapshot } from "../types";
 import { Badge, Button, Card, DataTag } from "../ui";
-import { OPEN_LABEL, SOURCE_LABEL, TODOS_EVENT, UNWIRED_REASON, approvalPointers, checkinPointer, datePointers, decisionPointers, doneAtSource, mergeInbox, todoPointers, type Inbox, type InboxPointer, type InboxSource, type SourceState } from "./needsYou";
+import { FOCUS_ACTION_EVENT, OPEN_LABEL, SOURCE_LABEL, TODOS_EVENT, UNWIRED_REASON, approvalPointers, checkinPointer, datePointers, decisionPointers, doneAtSource, mergeInbox, todoPointers, type Inbox, type InboxPointer, type InboxSource, type SourceState } from "./needsYou";
 import "../adds/v1111.css";
 
 
@@ -90,7 +90,8 @@ export function useNeedsYou(data: SystemSnapshot, now: number): NeedsYou {
     ];
   }, [data, todos, today, tick, agg]);
   const inbox = mergeInbox(states);
-  return { ...inbox, states, done, retry: () => { setDone([]); load(); } };
+  // Try again re-reads every source: the follow-ups directly, and the aggregator (dates, check-in, decisions, crew, strap, watchlist) through the tick.
+  return { ...inbox, states, done, retry: () => { setDone([]); load(); setTick((n) => n + 1); } };
 }
 
 function InboxRow({ p, onOpen }: { p: InboxPointer; onOpen?: (route: Route) => void }) {
@@ -98,7 +99,7 @@ function InboxRow({ p, onOpen }: { p: InboxPointer; onOpen?: (route: Route) => v
     <li data-source={p.source} data-quiet={p.quiet || undefined}>
       <span className="v-src">{SOURCE_LABEL[p.source]}</span>
       <span className="v-inbox__t"><b>{p.title} {p.badge && <Badge tone={p.badge.tone}>{p.badge.label}</Badge>}</b><span>{p.reason}</span></span>
-      <LinkButton onClick={onOpen ? () => onOpen(p.deepLink) : undefined} label={`${OPEN_LABEL[p.source].replace(/ [›↓]$/, "")}: ${p.title}`}>{OPEN_LABEL[p.source]}</LinkButton>
+      <LinkButton onClick={onOpen ? () => { if (p.source === "approvals") window.dispatchEvent(new CustomEvent(FOCUS_ACTION_EVENT, { detail: { id: p.id.replace(/^action-/, "") } })); onOpen(p.deepLink); } : undefined} label={`${OPEN_LABEL[p.source].replace(/ [›↓]$/, "")}: ${p.title}`}>{OPEN_LABEL[p.source]}</LinkButton>
     </li>
   );
 }

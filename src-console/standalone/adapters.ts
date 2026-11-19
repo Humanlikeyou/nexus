@@ -58,6 +58,8 @@ export type UpdateStatus = {
   current: string;
   /** Version text comes from the signed manifest only; null when the manifest has none. */
   available: { version: string | null; notes: string[]; scheduledFor: string } | null;
+  /** Live only: the backend's own state. `not_configured` and `outbound_disabled` mean no check can run, and the UI says so. */
+  backend?: "not_configured" | "outbound_disabled" | "idle" | "available";
   lastCheck: string;
   autoUpdate: boolean; checkDaily: boolean;
   history: Array<{ version: string; when: string; how: string }>;
@@ -99,10 +101,18 @@ export type RestorePreview = { file: string; madeOn: string; version: string; si
 
 export type Action = Promise<Wired<{ ok: true }>>;
 
+/**
+ * An action that must say HOW it ended (Settings workflows, decision 0042). `done` carries what happened;
+ * every other state is a distinct, plain-words reason. `message` is fixed copy from the adapter, never raw backend text.
+ */
+export type Fail = "declined" | "unsupported" | "failed" | "off" | "missing" | "telegram" | "cancelled" | "busy" | "expired" | "gave_up" | "unwired";
+export type Outcome<T extends object = object> = ({ state: "done" } & T) | { state: Fail; message?: string };
+
 export interface StandaloneAdapter {
   services(): Wired<ServicesOverview>;
   serviceLogs(id: string): Wired<ServiceLogs>;
-  serviceAction(id: string, action: "restart" | "start"): Action;
+  /** `done` carries `healthy`: whether the service reported healthy within the wait (live), else it only restarted. */
+  serviceAction(id: string, action: "restart" | "start"): Promise<Outcome<{ healthy: boolean }>>;
   summary(): Wired<ServicesSummary>;
   secrets(): Wired<SecretStatus[]>;
   /** Write-only. The value goes straight to the Keychain; nothing is returned but ok. */
@@ -110,17 +120,26 @@ export interface StandaloneAdapter {
   backup(): Wired<BackupStatus>;
   backupNow(): Action;
   setBackupSettings(s: Partial<BackupSettings>): Action;
-  restore(id: string): Action;
+  /** Read-only preview of one backup (`backup_list` id): its real contents and checksum. */
+  previewBackup(id: string): Promise<Outcome<{ preview: RestorePreview }>>;
+  /** Restores one backup (`backup_list` id) through the native approval gate; `lines` is what the backend reports. */
+  restore(id: string): Promise<Outcome<{ lines: string[] }>>;
+  /** Native folder picker, then saves it as the backup folder. `cancelled` when the picker is closed. */
+  pickBackupDir(): Promise<Outcome<{ dir: string }>>;
   keyFile(): Wired<KeyFileStatus>;
   /** Write-only: the passphrase locks the key file and is never stored or returned. */
   makeKeyFile(passphrase: string): Action;
   updates(): Wired<UpdateStatus>;
   setUpdatePrefs(p: { autoUpdate?: boolean; checkDaily?: boolean }): Action;
+  checkUpdate(): Promise<Outcome>;
+  installUpdate(): Promise<Outcome>;
   relay(): Wired<RelaySettings>;
   setRelay(p: Partial<RelaySettings>): Action;
   relayPreview(): Wired<RelayPreview>;
   /** Asks in a native dialog first; never sends under the outbound switch or navy. */
-  relaySendTest(): Action;
+  relaySendTest(): Promise<Outcome>;
+  /** Asks the backend for a fresh preview text (`notify_preview`); the new text shows through `relayPreview()`. */
+  writeAnotherPreview(): Promise<Outcome>;
   whoop(): Wired<WhoopStatus>;
   whoopAction(a: "sync" | "buzz" | "forget" | "take_over" | "lucid_on" | "lucid_off"): Action;
   pairSteps(): Wired<PairStep[]>;
@@ -139,17 +158,19 @@ export interface StandaloneAdapter {
 }
 
 const never = async () => UNWIRED;
+const nope = async (): Promise<Outcome<never>> => ({ state: "unwired" });
 export const unwiredStandalone: StandaloneAdapter = {
-  services: () => UNWIRED, serviceLogs: () => UNWIRED, serviceAction: never, summary: () => UNWIRED,
-  secrets: () => UNWIRED, setSecret: never, backup: () => UNWIRED, backupNow: never, setBackupSettings: never, restore: never,
-  keyFile: () => UNWIRED, makeKeyFile: never, updates: () => UNWIRED, setUpdatePrefs: never,
-  relay: () => UNWIRED, setRelay: never, relayPreview: () => UNWIRED, relaySendTest: never,
+  services: () => UNWIRED, serviceLogs: () => UNWIRED, serviceAction: nope, summary: () => UNWIRED,
+  secrets: () => UNWIRED, setSecret: never, backup: () => UNWIRED, backupNow: never, setBackupSettings: never, restore: nope, previewBackup: nope, pickBackupDir: nope,
+  keyFile: () => UNWIRED, makeKeyFile: never, updates: () => UNWIRED, setUpdatePrefs: never, checkUpdate: nope, installUpdate: nope,
+  relay: () => UNWIRED, setRelay: never, relayPreview: () => UNWIRED, relaySendTest: nope, writeAnotherPreview: nope,
   whoop: () => UNWIRED, whoopAction: never, pairSteps: () => UNWIRED,
   profile: () => UNWIRED, tiers: () => UNWIRED, setupDownload: () => UNWIRED, restorePreview: () => UNWIRED, setupDone: () => UNWIRED,
   pickTier: never, startDownload: never, finishSetup: never, startServices: never, resetSetup: never,
 };
 
 const OK = { state: "sample", value: { ok: true } } as const;
+const DONE = { state: "done" } as const;
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Preview/test only. Every value is "◇ Sample data"; nothing here is a real reading, size, time or version. */
@@ -196,7 +217,7 @@ export function sampleStandalone(opts: { whoopOwner?: WhoopStatus["owner"]; rela
       ],
       tail: ["14:01:07 WARN  health  check took 6214 ms", "13:56:40 INFO  run     sample-digest ok 3.4s", "13:52:11 WARN  memory  1.9 GB of 2 GB", "13:47:58 INFO  webhook received ([redacted] path)", "13:48:02 WARN  health  check took 5120 ms", "09:02:15 INFO  start   ready"],
     } : { events: [{ at: "9:02 AM", level: "ok", text: "Started with Amara. Healthy." }], tail: ["09:02:15 INFO  start   ready"] }),
-    serviceAction: async () => { await wait(300); return OK; },
+    serviceAction: async () => { await wait(300); return { state: "done", healthy: true }; },
     summary: () => sample({ attention: 1, updateReady: opts.updateReady ?? false }),
     secrets: () => sample(secrets),
     setSecret: async (name) => { await wait(200); const s = secrets.find((x) => x.name === name); if (s) s.set = true; return OK; },
@@ -208,7 +229,10 @@ export function sampleStandalone(opts: { whoopOwner?: WhoopStatus["owner"]; rela
     }),
     backupNow: async () => { await wait(300); return OK; },
     setBackupSettings: async () => OK,
-    restore: async () => { await wait(300); return OK; },
+    previewBackup: async () => ({ state: "done", preview: { file: "amara-backup-oct-21.tar.gz", madeOn: "Oct 21, 3:00 AM", version: APP_VERSION, size: "8.1 GB", checksumOk: true, keyFileFound: true,
+      contents: [{ title: "Chats and Today", sub: "1,120 messages" }, { title: "Memory and knowledge", sub: "Letta, Postgres, Weaviate" }, { title: "Settings", sub: "Theme, voice, model size" }] } }),
+    restore: async () => { await wait(300); return { state: "done", lines: ["Safety backup of current data saved (sample)", "Restored goals.json (sample)"] }; },
+    pickBackupDir: async () => ({ state: "done", dir: "~/Amara Backups" }),
     keyFile: () => sample({ made, madeAt: made ? "Oct 28, 3:00 AM" : undefined, where: "~/Amara Backups · beside the backups, never inside one" }),
     makeKeyFile: async () => { await wait(300); made = true; return OK; },
     updates: () => sample({
@@ -219,9 +243,12 @@ export function sampleStandalone(opts: { whoopOwner?: WhoopStatus["owner"]; rela
       history: [{ version: APP_VERSION, when: "Oct 14, 3:30 AM", how: "automatic" }, { version: "Earlier version", when: "Sep 20", how: "from the DMG, by you" }],
     }),
     setUpdatePrefs: async () => OK,
+    checkUpdate: async () => DONE,
+    installUpdate: async () => DONE,
     relay: () => sample(relay),
     setRelay: async (p) => { relay = { ...relay, ...p, kinds: { ...relay.kinds, ...(p.kinds ?? {}) } }; return OK; },
-    relaySendTest: async () => OK,
+    relaySendTest: async () => DONE,
+    writeAnotherPreview: async () => DONE,
     relayPreview: () => sample({ from: "From this morning\u2019s \u201cRecovery ready\u201d alert. Amara writes a new one each time, never a template.", at: "7:12 AM", text: "Morning, Taisun. You slept 7h 32m, about 20 minutes more than usual, and recovery is 74%. HRV is up to 66 ms, so today can take a hard session. Strap is at 18%: charge it before bed so tonight\u2019s sleep is recorded." }),
     whoop: () => sample({
       owner, connected: !legacy,

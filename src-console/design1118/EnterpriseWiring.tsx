@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { invokeBound } from "../bridge";
 import { useStoresTick } from "../lib/localStores";
+import type { Route } from "../app/routes";
+import { LinkButton } from "../adds/Composer";
 import { Button } from "../ui";
 import { enterpriseAdapter, type ContentStage, type EnterpriseLive } from "./enterpriseLive";
 import "./design1118.css";
@@ -63,7 +65,7 @@ export function LiveFinancesCard({ adapter }: { adapter?: Ent }) {
 type GoalOpt = { id: string; title: string; venture_id?: string | null };
 
 /** Venture page: linked goals (N of M, server percent) and a goal-venture picker. */
-export function VentureGoalsCard({ ventureId, adapter }: { ventureId: string; adapter?: Ent }) {
+export function VentureGoalsCard({ ventureId, adapter, onOpen }: { ventureId: string; adapter?: Ent; onOpen?: (route: Route) => void }) {
   useStoresTick();
   const a = adapter ?? enterpriseAdapter();
   const [setToast, toast] = useUndoToast();
@@ -88,7 +90,7 @@ export function VentureGoalsCard({ ventureId, adapter }: { ventureId: string; ad
       {v.goals.length === 0 ? <p className="d18-note">No goals are linked to this venture yet.</p> : (
         <ul className="d18-clist">
           {v.goals.map((g) => (
-            <li key={g.id}><div><b>{g.title}</b>
+            <li key={g.id}><div><b>{onOpen ? <LinkButton small onClick={() => onOpen({ id: "life", view: "goals" })} label={`Open goal in Life: ${g.title}`}>{g.title}</LinkButton> : g.title}</b>
               <small>{g.stepsTotal == null ? "Route not ready yet" : `${g.stepsDone ?? 0} of ${g.stepsTotal} steps`}{g.percent != null ? ` · ${Math.round(g.percent)}%` : ""}</small></div>
               <Button size="small" variant="plain" aria-label={`Unlink ${g.title}`} onClick={() => { void link(g.id, null); }}>Unlink</Button></li>
           ))}
@@ -112,17 +114,29 @@ export function VentureGoalsCard({ ventureId, adapter }: { ventureId: string; ad
 const STAGE_LABEL: Record<ContentStage, string> = { ideation: "Idea", drafting: "Drafting", review: "Review", scheduled: "Scheduled", published: "Published" };
 const ORDER: ContentStage[] = ["ideation", "drafting", "review", "scheduled", "published"];
 
-/** Content: move a piece to another stage (Undo), Published asks "Did you post it?", and Draft with Amara. */
-export function ContentItemTools({ title, stage, adapter }: { title: string; stage: ContentStage; adapter?: Ent }) {
+/** The next stage a saved draft moves on to (Idea → Drafting → Review). */
+const NEXT: Partial<Record<ContentStage, ContentStage>> = { ideation: "drafting", drafting: "review" };
+
+/** Content: move a piece to another stage (Undo), Published asks "Did you post it?", and Draft with Amara.
+ *  A saved draft is read back (content_draft_get) with Redraft, and offers the next stage move. `onChanged` runs after a move so the page can reload. */
+export function ContentItemTools({ title, stage, adapter, onChanged }: { title: string; stage: ContentStage; adapter?: Ent; onChanged?: () => void }) {
   const a = adapter ?? enterpriseAdapter();
   const [setToast, toast] = useUndoToast();
   const [asking, setAsking] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    if (typeof a.savedDraft !== "function") return;
+    void a.savedDraft(title).then((r) => { if (live && r.state === "live") setSaved(r.value.text); });
+    return () => { live = false; };
+  }, [a, title]);
   const move = async (to: ContentStage, posted = false) => {
     setAsking(false);
     const r = await a.setStage(title, stage, to, posted);
     setToast(r.state === "unwired" ? { text: "That didn't move. Try again in a moment.", undo: null } : { text: r.value.toast, undo: () => a.undoStage(r.value.id) });
+    if (r.state !== "unwired") onChanged?.();
   };
   const makeDraft = async () => {
     setBusy(true);
@@ -134,13 +148,17 @@ export function ContentItemTools({ title, stage, adapter }: { title: string; sta
   const save = async () => {
     if (draft == null) return;
     const r = await a.saveDraft(title, draft);
-    setToast(r.state === "unwired" ? { text: "The draft didn't save. Try again in a moment.", undo: null } : { text: r.value.toast, undo: () => a.undoDraft(r.value.id) });
+    if (r.state === "unwired") { setToast({ text: "The draft didn't save. Try again in a moment.", undo: null }); return; }
+    setSaved(draft); setDraft(null);
+    setToast({ text: r.value.toast, undo: () => a.undoDraft(r.value.id) });
   };
   const options = ORDER.filter((s) => s !== stage);
+  const next = NEXT[stage];
+  const sid = `mv-${stage}-${title}`;
   return (
     <div className="d18-actions" data-testid="content-tools">
-      <label className="d18-note" htmlFor={`mv-${title}`}>Move “{title}” to</label>
-      <select id={`mv-${title}`} value="" onChange={(e) => { const to = e.target.value as ContentStage; if (!to) return; if (to === "published") setAsking(true); else void move(to); }}>
+      <label className="d18-note" htmlFor={sid}>Move “{title}” to</label>
+      <select id={sid} value="" onChange={(e) => { const to = e.target.value as ContentStage; if (!to) return; if (to === "published") setAsking(true); else void move(to); }}>
         <option value="">Choose a stage</option>
         {options.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
       </select>
@@ -149,12 +167,19 @@ export function ContentItemTools({ title, stage, adapter }: { title: string; sta
           <Button size="small" variant="secondary" onClick={() => { void move("published", true); }}>Yes, I posted it</Button>{" "}
           <Button size="small" variant="plain" onClick={() => { void move("published", false); }}>No, not yet</Button></p>
       )}
-      <Button size="small" variant="primary" disabled={busy} onClick={() => { void makeDraft(); }}>Draft with Amara</Button>
+      <Button size="small" variant="primary" disabled={busy} onClick={() => { void makeDraft(); }}>{saved != null && draft == null ? "Redraft" : "Draft with Amara"}</Button>
       {draft != null && (
         <div data-testid="model-draft">
           <p className="d18-eyebrow">Model draft · not posted</p>
           <pre className="d18-note" style={{ whiteSpace: "pre-wrap" }}>{draft}</pre>
           <Button size="small" variant="secondary" onClick={() => { void save(); }}>Save draft</Button>
+        </div>
+      )}
+      {saved != null && draft == null && (
+        <div data-testid="saved-draft">
+          <p className="d18-eyebrow">Saved draft · not posted</p>
+          <pre className="d18-note" style={{ whiteSpace: "pre-wrap" }}>{saved}</pre>
+          {next && <p className="d18-note">Draft saved. Next step: <Button size="small" variant="secondary" onClick={() => { void move(next); }}>{`Move to ${STAGE_LABEL[next]}`}</Button></p>}
         </div>
       )}
       {toast}

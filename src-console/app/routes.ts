@@ -129,6 +129,18 @@ export function screenFor(route: Route): ModuleId {
   return HOST_VIEWS[route.id]?.find((entry) => entry.view === tab)?.screen ?? route.id;
 }
 
+/** decision 0042: Agents > Crews, opened on one run's page. Views under "crews/" stay on the Crews tab (see tabOf). */
+export const crewRunRoute = (runId: string): Route => ({ id: "chat", view: `crews/run/${runId}` });
+export const crewRunOf = (route: Route): string | null => (route.id === "chat" && route.view.startsWith("crews/run/") ? route.view.slice("crews/run/".length) || null : null);
+/** Where an approval is answered (Today > Needs you) and the Activity section under Agents. */
+export const NEEDS_YOU_ROUTE: Route = { id: "terrance", view: "needs-you" };
+export const ACTIVITY_ROUTE: Route = { id: "chat", view: "activity" };
+export const CREWS_ROUTE: Route = { id: "chat", view: "crews" };
+
 /** design-1111v: a venture's own page. */
 export const ventureRoute = (id: string): Route => ({ id: "enterprise", view: `ventures/${id}` });
 export const ventureOf = (route: Route): string | null => (route.id === "enterprise" && route.view.startsWith("ventures/") ? route.view.slice("ventures/".length) || null : null);
+
+/** Life › Goals with one goal in focus ("goals/<id>", like a venture's page). The Goals tab stays selected (tabOf). */
+export const goalRoute = (id: string): Route => ({ id: "life", view: `goals/${id}` });
+export const goalOf = (route: Route): string | null => (route.id === "life" && route.view.startsWith("goals/") ? route.view.slice("goals/".length) || null : null);

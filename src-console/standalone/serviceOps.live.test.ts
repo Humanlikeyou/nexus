@@ -59,19 +59,20 @@ describe("W2 live adapter: services, whoop, profile, restore preview", () => {
   it("serviceAction restart calls service_restart with the id only; start has no backend", async () => {
     mock({ service_restart: { id: "n8n", failedTries: 0 } });
     const { a } = await load();
-    expect((await a.serviceAction("n8n", "restart")).state).toBe("live");
+    expect((await a.serviceAction("n8n", "restart")).state).toBe("done");
     expect(invoke.mock.calls.filter((c) => c[0] === "service_restart")).toEqual([["service_restart", { id: "n8n" }]]);
     invoke.mockClear();
-    expect((await a.serviceAction("n8n", "start")).state).toBe("unwired");
+    expect((await a.serviceAction("n8n", "start")).state).toBe("unsupported");
     expect(invoke.mock.calls.some((c) => c[0] === "service_restart")).toBe(false);
   });
 
-  it("a declined, unsupported or needs_you restart is unwired and logs only a short code", async () => {
+  it("a declined, unsupported, needs_you or failed restart each get their own outcome and log only a short code", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    for (const err of ["declined: Denied in the native approval dialog. Nothing was changed.", "unsupported", "needs_you: restart tried 3 times"]) {
+    const want: Array<[string, string]> = [["declined: Denied in the native approval dialog. Nothing was changed.", "declined"], ["unsupported", "unsupported"], ["needs_you: restart tried 3 times", "gave_up"], ["restart_failed", "failed"]];
+    for (const [err, state] of want) {
       mock({ service_restart: () => { throw err; } });
       const { a } = await load();
-      expect((await a.serviceAction("n8n", "restart")).state).toBe("unwired");
+      expect((await a.serviceAction("n8n", "restart")).state).toBe(state);
     }
     for (const c of warn.mock.calls) expect(String(c[1]).length).toBeLessThanOrEqual(40);
     warn.mockRestore();
@@ -135,7 +136,7 @@ describe("W2 live adapter: services, whoop, profile, restore preview", () => {
     expect(invoke.mock.calls.filter((c) => c[0] === "restore_preview")).toEqual([["restore_preview", { file: ROWS[1].id }]]);
   });
 
-  it("restorePreview() with no backups or a refused preview stays unwired, and restore itself stays unbound", async () => {
+  it("restorePreview() with no backups or a refused preview stays unwired, and restore of an unknown backup never calls restore_backup", async () => {
     mock({ backup_list: [], restore_preview: new Error("x") });
     const { a, live } = await load();
     await live.refreshLive();
@@ -146,8 +147,8 @@ describe("W2 live adapter: services, whoop, profile, restore preview", () => {
     await b.live.refreshLive();
     b.a.restorePreview(); await flush(); await flush();
     expect(b.a.restorePreview().state).toBe("unwired");
-    expect((await b.a.restore("anything")).state).toBe("unwired");
-    expect(invoke.mock.calls.some((c) => /restore$|unpack/.test(String(c[0])) && c[0] !== "restore_preview")).toBe(false);
+    expect((await b.a.restore("anything")).state).toBe("missing");
+    expect(invoke.mock.calls.some((c) => /unpack/.test(String(c[0])))).toBe(false);
   });
 });
 

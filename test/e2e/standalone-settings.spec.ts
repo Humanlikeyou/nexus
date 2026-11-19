@@ -96,10 +96,31 @@ test("(1111s) Backup: restore asks first and saves today; first-run opens from G
   await openApp(page, { theme, reduceMotion: true });
   const field = await openSettingsTab(page, "Backup");
   await field.getByRole("button", { name: "Restore from a Backup…" }).click();
-  const dialog = page.getByRole("dialog", { name: /Restore from amara-backup/ });
-  await expect(dialog.getByRole("button", { name: "Save Today, Then Restore" })).toBeVisible();
+  // Asks first: the dialog opens before anything is replaced, and nothing has been restored yet.
+  const dialog = page.getByRole("dialog", { name: "Restore from a backup?" });
+  await expect(dialog.getByText("This replaces current Amara OS config and local data with the archive's contents. This can't be undone.")).toBeVisible();
+  await expect(page.getByText(/Restored from the backup of/)).toHaveCount(0);
+  const confirm = dialog.getByRole("button", { name: "Save Today, Then Restore" });
+  await expect(confirm).toBeDisabled(); // nothing chosen yet, so nothing can be confirmed
+  // Pick a backup: the real preview (check, date, size, contents) and the safety-copy wording appear.
+  await dialog.getByRole("group", { name: "Backups" }).getByRole("button", { name: "Oct 21, 3:00 AM" }).click();
+  const picked = page.getByRole("dialog", { name: "Restore from amara-backup-oct-21?" });
+  await expect(picked.getByText("Backup check")).toBeVisible();
+  await expect(picked.getByText("Passed")).toBeVisible();
+  await expect(picked.getByText("8.1 GB")).toBeVisible();
+  await expect(picked.getByText("Chats and Today · 1,120 messages")).toBeVisible();
+  await expect(picked.getByText(/Your current data is saved to a safety backup in the Amara OS data folder before anything is replaced\./)).toBeVisible();
+  await expect(picked.getByText(/confirm once more in a native dialog/)).toBeVisible();
   expect(await blocking(page)).toEqual([]);
-  await dialog.getByRole("button", { name: "Cancel" }).click();
+  // Cancel changes nothing; reopen, pick, and confirm to reach the result line.
+  await picked.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByText(/Restored from the backup of/)).toHaveCount(0);
+  await field.getByRole("button", { name: "Restore from a Backup…" }).click();
+  await page.getByRole("dialog", { name: "Restore from a backup?" }).getByRole("button", { name: "Oct 21, 3:00 AM" }).click();
+  await expect(page.getByRole("button", { name: "Save Today, Then Restore" })).toBeEnabled();
+  await page.getByRole("button", { name: "Save Today, Then Restore" }).click();
+  await expect(page.getByText("Restored from the backup of Oct 21, 3:00 AM. Restart Amara OS to load the restored data.")).toBeVisible();
+  await expect(page.getByText("Safety backup of current data saved (sample)")).toBeVisible();
   const general = await openSettingsTab(page, "General");
   await general.getByRole("button", { name: "Run Setup Again…" }).click();
   const setup = page.getByRole("dialog", { name: "Set up Amara OS" });

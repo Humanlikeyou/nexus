@@ -49,12 +49,12 @@ describe("Enterprise › Content", () => {
     expect(screen.getByRole("button", { name: "Draft with Amara" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /publish|post/i })).toBeNull();
   });
-  it("is a board from Idea to Published at 3 or more items, and Publish is disabled: Amara doesn't post for you", () => {
+  it("is a board from Idea to Published at 3 or more items; the dead Publish button is gone (stage moves live in ContentItemTools)", () => {
     render(<BusinessField view="content" data={snap({ pipeline: [{ title: "Post", stage: "review", content_type: "blog_post", notes: null }, { title: "Idea", stage: "ideation", content_type: "reel", notes: null }, { title: "Draft", stage: "drafting", content_type: "reel", notes: null }] })} />);
     expect(screen.getByTestId("content-board")).toBeInTheDocument();
     for (const col of ["Idea · 1", "Drafting · 1", "Review · 1", "Scheduled · 0", "Published · 0"]) expect(screen.getByRole("region", { name: col })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
-    expect(screen.getByText("Amara doesn't post for you")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+    expect(screen.queryByText(/Moving a card between stages needs wiring/)).toBeNull();
   });
 });
 

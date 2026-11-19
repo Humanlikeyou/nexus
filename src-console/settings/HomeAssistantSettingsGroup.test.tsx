@@ -193,3 +193,34 @@ describe("HomeAssistantSettingsGroup · token_required", () => {
     expect(await screen.findByText("Re-enter the token to test a new address.")).toBeInTheDocument();
   });
 });
+
+describe("HomeAssistantSettingsGroup: carries on to Smart home (decision 0042)", () => {
+  it("Save success offers Open Smart home", async () => {
+    backend();
+    const onOpenSmartHome = vi.fn();
+    render(<HomeAssistantSettingsGroup onOpenSmartHome={onOpenSmartHome} />);
+    expect(screen.queryByRole("button", { name: "Open Smart home ›" })).toBeNull();
+    fireEvent.change(await screen.findByLabelText("Access token"), { target: { value: TOKEN } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Saved.");
+    fireEvent.click(screen.getByRole("button", { name: "Open Smart home ›" }));
+    expect(onOpenSmartHome).toHaveBeenCalled();
+  });
+
+  it("a good Test offers it; a failed Test or Save does not", async () => {
+    backend({ testConnection: vi.fn(async () => ({ ok: true, version: "2026.10" })) });
+    const { unmount } = render(<HomeAssistantSettingsGroup onOpenSmartHome={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Test connection" }));
+    expect(await screen.findByRole("button", { name: "Open Smart home ›" })).toBeInTheDocument();
+    unmount();
+    backend({ testConnection: vi.fn(async () => ({ ok: false })), setConfig: vi.fn(async () => { throw "bad"; }) });
+    render(<HomeAssistantSettingsGroup onOpenSmartHome={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Test connection" }));
+    await waitFor(() => expect(screen.getAllByRole("status").some((n) => n.textContent)).toBe(true));
+    expect(screen.queryByRole("button", { name: "Open Smart home ›" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: TOKEN } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByText("Saved.")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Open Smart home ›" })).toBeNull();
+  });
+});

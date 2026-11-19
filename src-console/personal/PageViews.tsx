@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, DataTag, PageHero, StatusText, TextField, wiredTag } from "../ui";
 import { valueOf, type Wired } from "../lib/sampleAdapters";
 import { MEMORY_LABEL, PERSONAL_DEFAULTS, type Memory, type MemoryCategory, type PersonalAdapter } from "./adapters";
@@ -124,11 +124,12 @@ export function PersonalMoneyView({ adapter, onOpenFinances }: { adapter: Person
   );
 }
 
-function MemoryRow({ m, adapter, onDone }: { m: Memory; adapter: PersonalAdapter; onDone: (note: string) => void }) {
+/** `undoId` is set after a live edit or delete: the block whose earlier text `restoreMemory` can put back (8 s window). */
+function MemoryRow({ m, adapter, onDone }: { m: Memory; adapter: PersonalAdapter; onDone: (note: string, undoId?: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(m.text);
   const [confirm, setConfirm] = useState(false);
-  const result = (r: Wired<{ ok: true }>, what: string) => onDone(adapter.memoryWriteNote?.() ?? (r.state === "unwired" ? `${what} needs wiring, so nothing changed.` : r.state === "sample" ? `Sample data: ${what.toLowerCase()} in the preview only.` : `${what} done.`));
+  const result = (r: Wired<{ ok: true }>, what: string) => onDone(adapter.memoryWriteNote?.() ?? (r.state === "unwired" ? `${what} needs wiring, so nothing changed.` : r.state === "sample" ? `Sample data: ${what.toLowerCase()} in the preview only.` : `${what} done.`), r.state === "live" && adapter.restoreMemory ? m.id : undefined);
   if (editing) {
     return (
       <form className="pk-mem" onSubmit={(e) => { e.preventDefault(); void adapter.editMemory(m.id, text.trim()).then((r) => { setEditing(false); result(r, "Editing"); }); }}>
@@ -154,12 +155,16 @@ export function MemorySection({ adapter }: { adapter: PersonalAdapter }) {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<MemoryCategory | "all">("all");
   const [note, setNote] = useState<string | null>(null);
+  const [undoId, setUndoId] = useState<string | null>(null);
   const mem = adapter.memories();
   const pend = adapter.pendingMemories();
   const all = valueOf(mem);
   const pending = valueOf(pend) ?? [];
   const note0 = adapter.memoriesNote?.() ?? null;
-  const done = (n: string) => { setNote(n); bump((x) => x + 1); };
+  const done = (n: string, undo?: string) => { setNote(n); setUndoId(undo ?? null); bump((x) => x + 1); };
+  // The standard 8 s Undo window (same as Smart home): after that the button goes and the note stays.
+  useEffect(() => { if (!undoId) return; const t = window.setTimeout(() => setUndoId(null), 8000); return () => window.clearTimeout(t); }, [undoId]);
+  const undo = () => { const id = undoId; if (!id || !adapter.restoreMemory) return; setUndoId(null); void adapter.restoreMemory(id).then((r) => done(adapter.memoryWriteNote?.() ?? (r.state === "unwired" ? "Undo didn't go through. Nothing changed." : "Put back the earlier text."))); };
   const shown = (all ?? []).filter((m) => (cat === "all" || m.category === cat) && m.text.toLowerCase().includes(q.trim().toLowerCase()));
   const cats = (Object.keys(MEMORY_LABEL) as MemoryCategory[]).filter((c) => (all ?? []).some((m) => m.category === c));
   return (
@@ -195,11 +200,11 @@ export function MemorySection({ adapter }: { adapter: PersonalAdapter }) {
             })}
           </div>
           {shown.length === 0 && <p className="pk-note">No memories match.</p>}
-          {note && <p className="pk-note" role="status">{note}</p>}
+          {note && <p className="pk-note" role="status">{note}{undoId && <> <Button size="small" variant="plain" onClick={undo}>Undo</Button></>}</p>}
         </>
       )}
       <TakesSettingsCard />
-      <div className="pk-info">{mem.state === "live" ? <>Deleting empties the memory in Amara&apos;s store (Letta) on this Mac and asks you first. The block itself stays, and the old text is saved on this Mac so it can be put back (there&apos;s no Undo button yet). Amara&apos;s own &ldquo;wants to remember&rdquo; suggestions aren&apos;t connected yet. Past chat transcripts are separate and stay until you delete them in Agents.</> : <>Deleting removes the memory from Amara&apos;s store (Letta) on this Mac and from future answers; it can&apos;t be undone. Past chat transcripts are separate and stay until you delete them in Agents.</>}</div>
+      <div className="pk-info">{mem.state === "live" ? <>Deleting empties the memory in Amara&apos;s store (Letta) on this Mac and asks you first. The block itself stays, and the old text is saved on this Mac so it can be put back (Undo shows for 8 seconds after a change). Amara&apos;s own &ldquo;wants to remember&rdquo; suggestions aren&apos;t connected yet. Past chat transcripts are separate and stay until you delete them in Agents.</> : <>Deleting removes the memory from Amara&apos;s store (Letta) on this Mac and from future answers; it can&apos;t be undone. Past chat transcripts are separate and stay until you delete them in Agents.</>}</div>
     </div>
   );
 }

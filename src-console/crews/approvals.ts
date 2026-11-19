@@ -41,7 +41,7 @@ export function ago(iso: string, now: number = Date.now()): string {
 
 export function mapPending(rows: CrewApprovalRow[], now?: number): CrewApproval[] {
   return rows.filter(isCrewApproval).map((r) => ({
-    id: r.id, title: r.title, crew: r.crew, agents: r.agents.join(" → "),
+    id: r.id, runId: r.run_id, title: r.title, crew: r.crew, agents: r.agents.join(" → "),
     impact: [IMPACT[r.kind] ?? "Action", ...(r.items?.length ? [r.items.join(", ")] : [])].join(" \u00b7 "), requested: ago(r.requested_at, now),
     risk: (RISK.has(r.risk) ? r.risk : "Medium") as CrewApproval["risk"],
     reason: r.reason, amount: UNWIRED, // no money tools exist, so there is never an amount
@@ -50,7 +50,7 @@ export function mapPending(rows: CrewApprovalRow[], now?: number): CrewApproval[
 
 export function mapDecided(rows: CrewApprovalRow[]): CrewDecision[] {
   return rows.filter(isCrewApproval).map((r) => ({
-    id: r.id, title: r.title, crew: r.crew, when: r.decided_at ? dateTime(r.decided_at) : "", approved: r.approved === true,
+    id: r.id, runId: r.run_id, title: r.title, crew: r.crew, when: r.decided_at ? dateTime(r.decided_at) : "", approved: r.approved === true,
   }));
 }
 

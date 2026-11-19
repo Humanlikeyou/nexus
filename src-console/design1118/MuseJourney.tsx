@@ -76,8 +76,10 @@ function NeuroWave({ session, focus, calm }: { session: RecordedSession; focus: 
   );
 }
 
-export function MuseJourney({ session, recoveryNow, sessions, action, devices, onOpenHistory }: {
+export function MuseJourney({ session, recoveryNow, sessions, action, devices, onOpenHistory, onOpenSession, hideNext = false }: {
   session: RecordedSession | null; recoveryNow: number | null; sessions: RecordedSession[]; action: ReactNode; devices?: ReactNode; onOpenHistory?: () => void;
+  /** A session chip or the hero opens that recording. */ onOpenSession?: (sessionId: string) => void;
+  /** Last-session hero only (connected and idle: the page already has its own next step). */ hideNext?: boolean;
 }) {
   const body = session ? parseBodyContext(session.body_context) : null;
   const that = whole(body?.recovery);
@@ -111,8 +113,8 @@ export function MuseJourney({ session, recoveryNow, sessions, action, devices, o
             {body?.sleep_minutes != null && <span className="d18-stat"><b>{hoursMinutes(body.sleep_minutes)}</b><small>Sleep before</small></span>}
           </div>
           <div className="d18-muse__strip">
-            {sessions.slice(0, 4).map((s) => { const b = parseBodyContext(s.body_context); return <span key={s.id} className="d18-muse__chip"><i aria-hidden="true" /><b>{dayFmt.format(new Date(s.start))}</b><small>{Math.max(1, Math.round(s.duration_secs / 60))} min{b?.recovery != null ? ` · ${Math.round(b.recovery)}%` : ""}</small></span>; })}
-            <span className="d18-muse__more"><span>Next sessions will line up here.</span>{onOpenHistory && <Button size="small" variant="plain" onClick={onOpenHistory}>Session history</Button>}</span>
+            {sessions.slice(0, 4).map((s) => { const b = parseBodyContext(s.body_context); const open = onOpenSession ? { role: "button" as const, tabIndex: 0, "aria-label": `Open the ${dayFmt.format(new Date(s.start))} recording`, onClick: () => onOpenSession(s.id), onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenSession(s.id); } } } : {}; return <span key={s.id} className="d18-muse__chip" {...open}><i aria-hidden="true" /><b>{dayFmt.format(new Date(s.start))}</b><small>{Math.max(1, Math.round(s.duration_secs / 60))} min{b?.recovery != null ? ` · ${Math.round(b.recovery)}%` : ""}</small></span>; })}
+            <span className="d18-muse__more"><span>Next sessions will line up here.</span>{onOpenSession && <Button size="small" variant="plain" onClick={() => onOpenSession(session.id)}>Open recording</Button>}{onOpenHistory && <Button size="small" variant="plain" onClick={onOpenHistory}>Session history</Button>}</span>
           </div>
           <p className="d18-note">{session.file_path ? "The raw signal of this session is saved on this Mac." : "This session has its summary only."}</p>
         </section>
@@ -122,13 +124,13 @@ export function MuseJourney({ session, recoveryNow, sessions, action, devices, o
           {now != null && <Ring value={now} size={104} tone="copper" label={`Recovery now ${now}%`}><span className="d18-eyebrow">Now</span><b className="d18-mring__mid">{now}%</b><small>Recovery now</small></Ring>}
         </section>
       )}
-      <section className="d18-next" aria-label="Next step">
+      {!hideNext && <section className="d18-next" aria-label="Next step">
         <p className="d18-eyebrow">Next step</p>
         <h3 className="d18-next__t">Find Muse</h3>
         <p className="d18-next__why">Put your headset in pairing mode</p>
         <div className="d18-actions">{action}</div>
         {devices}
-      </section>
+      </section>}
     </div>
   );
 }

@@ -17,8 +17,9 @@ export function journeyPosition(waves: HemisyncWave[], doneIds: Set<string>) {
  * the current wave opens into its tracks, and one next-track card. Start never plays without Muse
  * (enforced by useHemisyncRun.begin); the source folder is only read.
  */
-export function WaveJourney({ waves, doneIds, timesDone, connected, pickedId, onPick }: {
+export function WaveJourney({ waves, doneIds, timesDone, connected, pickedId, onPick, onStart, playing = false }: {
   waves: HemisyncWave[]; doneIds: Set<string>; timesDone: (id: string) => number; connected: boolean; pickedId: string | null; onPick: (t: HemisyncTrack) => void;
+  /** Starts this track right here (Start is never only behind the collapsed list). */ onStart?: (t: HemisyncTrack) => void; playing?: boolean;
 }) {
   const pos = journeyPosition(waves, doneIds);
   if (!pos.total) return null;
@@ -64,7 +65,7 @@ export function WaveJourney({ waves, doneIds, timesDone, connected, pickedId, on
           <ol className="d18-wj__tracks">
             {cur.tracks.map((t) => {
               const d = doneIds.has(t.id), nx = t.id === pos.next?.id;
-              return <li key={t.id} data-state={d ? "done" : nx ? "next" : "open"}>{nx && <span className="d18-wj__nexttag">Next</span>}<i aria-hidden="true">{d ? "✓" : ""}</i><b>{t.title}</b>{d && <small>Done {timesDone(t.id)}×</small>}</li>;
+              return <li key={t.id} data-state={d ? "done" : nx ? "next" : "open"}>{nx && <span className="d18-wj__nexttag">Next</span>}<i aria-hidden="true">{d ? "✓" : ""}</i><b role="button" tabIndex={0} aria-pressed={t.id === pickedId} aria-label={`Choose ${t.title}`} onClick={() => onPick(t)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(t); } }}>{t.title}</b>{d && <small>Done {timesDone(t.id)}×</small>}</li>;
             })}
           </ol>
         </>
@@ -74,7 +75,10 @@ export function WaveJourney({ waves, doneIds, timesDone, connected, pickedId, on
           <p className="d18-eyebrow">Next track · Wave {pos.next.wave}</p>
           <h3 className="d18-next__t">{pos.next.title}</h3>
           <p className="d18-next__why">Start records with the Muse and plays the track together, so it never plays on its own.{connected ? "" : " Connect your Muse first."}</p>
-          <div className="d18-actions"><Button size="small" variant={pickedId === pos.next.id ? "secondary" : "primary"} onClick={() => onPick(pos.next!)} disabled={pickedId === pos.next.id}>{pickedId === pos.next.id ? "Picked" : "Pick this track"}</Button></div>
+          <div className="d18-actions">
+            <Button size="small" variant="secondary" onClick={() => onPick(pos.next!)} disabled={pickedId === pos.next.id}>{pickedId === pos.next.id ? "Picked" : "Pick this track"}</Button>
+            {onStart && !playing && <Button size="small" variant="primary" onClick={() => onStart(pos.next!)}>{pickedId === pos.next.id ? "Start this track" : "Pick and start"}</Button>}
+          </div>
         </section>
       ) : <p className="d18-note">Every track has a Muse session. The journey is complete.</p>}
     </div>

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockHaBackend, mockEntity, setHaBackend } from "../lib/homeAssistant";
 import { SmartHomeField } from "./SmartHomeScreen";
@@ -95,6 +95,8 @@ describe("Smart home", () => {
     expect(await screen.findByLabelText("Home Assistant container: Up")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(containerStop).not.toHaveBeenCalled(); // asks first
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Stop Home Assistant?" })).getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(containerStop).toHaveBeenCalledTimes(1));
     expect(containerStart).toHaveBeenCalledTimes(1);
   });

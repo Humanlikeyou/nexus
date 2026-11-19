@@ -56,13 +56,15 @@ test("(1112n) sample library: tracks grouped by wave; with no Muse, Start explai
   await expect(field.getByTestId("wave-journey")).toBeVisible();
   await field.getByText("All tracks by wave").click();
   // His most recent session is in wave 5, so that wave is open and wave 1 is not.
-  await expect(field.getByRole("button", { name: /Intro to Focus 15/ })).toBeVisible();
-  await expect(field.getByRole("button", { name: /Orientation/ })).toBeHidden();
-  await field.getByRole("button", { name: /Intro to Focus 15/ }).click();
+  // Scope to the list rows (.hs-group): the wave journey above also shows "Choose <track>" buttons, and each row now has a second "Open the recording of ..." button, so anchor on the row's main button.
+  const rows = field.locator(".hs-group");
+  await expect(rows.getByRole("button", { name: /^Intro to Focus 15/ })).toBeVisible();
+  await expect(rows.getByRole("button", { name: /^Orientation/ })).toBeHidden();
+  await rows.getByRole("button", { name: /^Intro to Focus 15/ }).click();
   await expect(field.getByText("Intro to Focus 15", { exact: true }).first()).toBeVisible();
   // aria-disabled (not disabled), so it stays clickable and can explain itself; Playwright treats aria-disabled as disabled.
-  await expect(field.getByRole("button", { name: "Start" })).toHaveAttribute("aria-disabled", "true");
-  await field.getByRole("button", { name: "Start" }).click({ force: true });
+  await expect(field.getByRole("button", { name: "Start", exact: true })).toHaveAttribute("aria-disabled", "true");
+  await field.getByRole("button", { name: "Start", exact: true }).click({ force: true });
   await expect(field.getByText(/Connect your Muse first/).first()).toBeVisible();
   expect(await page.evaluate(() => document.querySelectorAll("audio").length)).toBe(0);
   expect(await blocking(page)).toEqual([]);

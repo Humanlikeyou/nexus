@@ -69,6 +69,10 @@ describe("design-1118a Goals flow: the page", () => {
     fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Run a half marathon" } });
     fireEvent.change(screen.getByLabelText("Size (target)"), { target: { value: "21" } });
     fireEvent.click(screen.getByRole("button", { name: "Add goal" }));
+    // The new goal opens in focus (planning state), then its card is in the grid with a path and stations.
+    const focus = await screen.findByTestId("milestones-focus");
+    expect(within(focus).getAllByText(/Run a half marathon/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "All goals" }));
     const grid = await screen.findByTestId("milestones-grid");
     const card = await within(grid).findByRole("button", { name: /Open Run a half marathon/ });
     expect(card.querySelector(".d18-path__track")).toBeTruthy();

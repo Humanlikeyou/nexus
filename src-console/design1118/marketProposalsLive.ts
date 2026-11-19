@@ -56,7 +56,10 @@ export type LiveMarket = MarketProposalAdapter & {
   /** Takes a pick off the list. The History id goes to `undoWatch` within 8 s. */
   dropPick(ticker: string): Promise<Wired<{ historyId: string }>>;
   undoWatch(historyId: string): Promise<boolean>;
+  /** The last few recorded or dismissed proposals, newest first, from the same read (no extra command). */
+  recent(): Wired<DecidedProposal[]>;
 };
+export type DecidedProposal = { id: string; title: string; choice: "approved" | "dismissed"; at: string };
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const STATUS = new Set(["open", "closed", "stale"]);
@@ -136,6 +139,13 @@ export function makeLiveMarket(deps: WatchDeps = defaultDeps): LiveMarket {
       await Promise.all([load(), loadWatchlist()]); deps.notify();
       return ok;
     },
+    recent: (): Wired<DecidedProposal[]> => {
+      ensure();
+      if (!rows) return UNWIRED;
+      const done = rows.filter((r) => (r.status === "recorded" || r.status === "dismissed") && r.decidedAt)
+        .map((r) => ({ id: r.proposal.id, title: r.proposal.title, choice: r.status === "recorded" ? "approved" as const : "dismissed" as const, at: r.decidedAt as string }));
+      return live(done.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, 5));
+    },
     choices: (): Wired<ProposalChoice[]> => {
       ensure();
       return rows ? live(rows.filter((r) => r.status === "recorded" && r.decidedAt).map((r) => ({ proposalId: r.proposal.id, choice: "approved" as const, recordedAt: r.decidedAt as string }))) : UNWIRED;
@@ -145,7 +155,8 @@ export function makeLiveMarket(deps: WatchDeps = defaultDeps): LiveMarket {
       try {
         const d = await deps.call<{ id?: string; toast?: string }>(command, { id: proposalId, via: "typed" });
         if (typeof d?.id === "string") lastWrite.set(proposalId, d.id);
-        await load();
+        // An approval adds the pick to the watchlist in the same write, so re-read both.
+        await Promise.all([load(), loadWatchlist()]);
         deps.notify();
         return live({ proposalId, choice, recordedAt: new Date().toISOString(), ...(typeof d?.toast === "string" ? { toast: d.toast } : {}), ...(typeof d?.id === "string" ? { historyId: d.id } : {}) });
       } catch { return UNWIRED; }

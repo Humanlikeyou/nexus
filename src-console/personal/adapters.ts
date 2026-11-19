@@ -4,6 +4,7 @@ import type { RawSummary } from "../money/overview";
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
 import { patternsFrom, weeklyReviewFrom, type PatternsWire, type ReviewWire, type ExperimentResultWire } from "./liveInsights";
 import { dictateOnce } from "../adds/dictation";
+import { roadmapAdapter } from "../goals/roadmap";
 import { ADDS_EVENT, announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
 
 /**
@@ -56,17 +57,21 @@ export type MemoryWire = { id: string; label: string; value: string; agent: stri
 /** design-1111v: three lanes. "enterprise" dates are read-only in Life (they live in Enterprise › Ventures).
  *  `month` is months from Nov 1 on the 12-month timeline; `short` is its timeline label. */
 export type LifeLane = "personal" | "residence" | "enterprise";
-export type LifeDate = { id: string; title: string; short?: string; sub: string; date: string; month: number; inDays?: number; reminder: string; due: boolean; lane: LifeLane };
+export type LifeDate = { id: string; title: string; short?: string; sub: string; date: string; month: number; inDays?: number; reminder: string; due: boolean; lane: LifeLane;
+  /** The stored row (YYYY-MM-DD and the typed sub line), for an inline edit or an Undo that puts it back. */
+  iso?: string; rawSub?: string };
 export type LifeAdmin = { next: string; dates: LifeDate[] };
 
 // ---- Weekly review ----
 export type WeeklyReview = {
   title: string; week: string;
   tiles: Array<{ key: string; big: string; unit: string; delta: string; up: boolean; sub: string }>;
-  change: { title: string; body: string };
-  highlights: Array<{ ok: boolean; title: string; sub: string }>;
+  /** `findingId` is the published finding behind the suggestion (Mind–Body › Patterns); both are absent when there is no suggestion. */
+  change: { title: string; body: string; findingId?: string };
+  /** `goalId` is set on a goal's row so it can open that goal in focus. */
+  highlights: Array<{ ok: boolean; title: string; sub: string; goalId?: string }>;
   notes: Array<{ text: string; day: string }>;
-  /** "Try it this week" results due this week (weekly_review.rs `experiments`), passed through as the backend sent them; no screen shows them yet. */
+  /** "Try it this week" results due this week (weekly_review.rs `experiments`), passed through as the backend sent them; the Weekly review shows them as "Last week's try". */
   experiments?: ExperimentResultWire[];
 };
 
@@ -85,7 +90,7 @@ export interface PersonalAdapter {
   editMemory(id: string, text: string): Promise<MemoryWrite>;
   deleteMemory(id: string): Promise<MemoryWrite>;
   decideMemory(id: string, keep: boolean): Promise<MemoryWrite>;
-  /** Undo: puts back the text the last edit or delete replaced (Letta rows only). No button calls it yet. */
+  /** Undo: puts back the text the last edit or delete replaced (Letta rows only). The Memory page offers it for 8 s. */
   restoreMemory?(id: string): Promise<MemoryWrite>;
   /** Plain-words result of the last edit, delete or undo (also set on success); null before any. */
   memoryWriteNote?(): string | null;
@@ -229,7 +234,7 @@ export function lifeAdminFrom(rows: LifeDateWire[]): LifeAdmin {
   const dates: LifeDate[] = rows.filter((r) => r.inDays >= 0).map((r) => {
     const next = r.reminders.find((x) => !x.passed) ?? r.reminders[r.reminders.length - 1];
     return {
-      id: r.id, title: r.title, short: r.title, sub: r.sub || (r.lane === "residence" ? "Japan · residence" : "Personal"), date: dayLabel(r.date),
+      id: r.id, title: r.title, short: r.title, sub: r.sub || (r.lane === "residence" ? "Japan · residence" : "Personal"), date: dayLabel(r.date), iso: r.date, rawSub: r.sub,
       month: r.inDays / 30.4, inDays: r.inDays, reminder: next ? `${next.days} days · ${dayLabel(next.on)}` : "", due: r.activeWindow != null, lane: r.lane,
     };
   });
@@ -241,7 +246,8 @@ const WHEN = new Intl.DateTimeFormat("en-US", { weekday: "short", hour: "numeric
 export const checkInFrom = (r: CheckInWire): CheckIn => ({ id: r.id, when: WHEN.format(new Date(r.at)).replace(",", ""), mood: r.mood, energy: r.energy, tags: r.tags, text: r.text, transcribed: r.transcribed || undefined });
 
 /** Row as src-tauri goals.rs `read_goals` returns it. Habits are `category === "habit"` (adds.rs). */
-export type GoalWire = { id: string; title: string; category: string; target: number; current: number; unit: string; deadline?: string | null };
+export type GoalWire = { id: string; title: string; category: string; target: number; current: number; unit: string; deadline?: string | null;
+  /** Link to an Enterprise venture (goal_venture_set). */ venture_id?: string | null };
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const isGoalWire = (g: unknown): g is GoalWire => { const o = g as Record<string, unknown> | null; return !!o && typeof o.id === "string" && typeof o.title === "string"; };
@@ -252,14 +258,20 @@ const deadlineTime = (d: string | null | undefined): number | null => {
   return Number.isNaN(t) ? null : t;
 };
 
-/** Goals and habits from `read_goals`. Habit days stay "none": no source data is linked to them, so nothing is ever met or missed. */
-export function goalsFrom(rows: GoalWire[]): GoalsWeek {
+/** A goal's roadmap progress, as the roadmap adapter reports it (steps done / total, weighted percent). */
+export type RoadmapProgress = { pct: number; done: number; total: number };
+
+/** Goals and habits from `read_goals`. Habit days stay "none": no source data is linked to them, so nothing is ever met or missed.
+ *  A goal that has a roadmap shows the roadmap's percent and steps done (one progress meaning, as on the Goals page); the stale
+ *  `current` / `target` only speaks for a goal with no roadmap. */
+export function goalsFrom(rows: GoalWire[], roadmapOf?: (goalId: string) => RoadmapProgress | null): GoalsWeek {
   const clamp = (n: number) => Math.max(0, Math.min(100, n));
   const rowsOk = rows.filter(isGoalWire);
   const items = rowsOk.filter((g) => g.category !== "habit").map((g) => {
     const target = num(g.target), current = num(g.current), unit = typeof g.unit === "string" ? g.unit.trim() : "";
-    const pct = target > 0 ? Math.round(clamp((current / target) * 100)) : 0;
-    const right = unit === "%" ? `${pct}%` : target > 0 ? `${current} of ${target}${unit ? ` ${unit}` : ""}` : `${current}${unit ? ` ${unit}` : ""}`;
+    const rm = roadmapOf?.(g.id) ?? null;
+    const pct = rm ? Math.round(clamp(rm.pct)) : target > 0 ? Math.round(clamp((current / target) * 100)) : 0;
+    const right = rm ? `${pct}% · ${rm.done} of ${rm.total} steps` : unit === "%" ? `${pct}%` : target > 0 ? `${current} of ${target}${unit ? ` ${unit}` : ""}` : `${current}${unit ? ` ${unit}` : ""}`;
     const dl = g.deadline ? deadlineLabel(g.deadline) : "";
     const m: Milestone = { id: g.id, title: g.title, detail: [g.category, dl].filter(Boolean).join(" · "), right, pct };
     return { m, t: deadlineTime(g.deadline) };
@@ -307,12 +319,15 @@ export function localDatePlus(now: Date, days: number): string {
 
 /** Weekly review › "Try it this week" / "Not this week". Only a real suggestion can be tried; the follow-up add asks
  *  first (native dialog), and a cancel or error says nothing was set. Goals are never touched. */
-export async function tryChangeWith(call: Invoke, take: boolean, suggestion: string | null, now = new Date(), pair: string | null = null): Promise<Wired<{ reminder: string | null }>> {
+export async function tryChangeWith(call: Invoke, take: boolean, suggestion: string | null, now = new Date(), pair: string | null = null, why: { reason?: string | null; findingId?: string | null } = {}): Promise<Wired<{ reminder: string | null }>> {
   if (!suggestion) return UNWIRED;
   if (!take) return live({ reminder: null });
   const due = localDatePlus(now, 6);
   try {
-    const added = await call<{ id?: unknown }>("followups_add_item", { text: `Try this week: ${suggestion}`, due, next: null });
+    // The follow-up keeps its reason and the finding behind it, so Needs you can say why and Patterns is one step away.
+    const reason = (why.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 240);
+    const next = [reason && `Why: ${reason}`, why.findingId ? `Finding: ${why.findingId} (Mind–Body › Patterns)` : ""].filter(Boolean).join(" · ") || null;
+    const added = await call<{ id?: unknown }>("followups_add_item", { text: `Try this week: ${suggestion}`, due, next });
     const reminder = `Follow-up added for ${due}: ${suggestion}`;
     // Track the try-it as an experiment (sidecar in Rust; the follow-up itself gets no new fields). `pair` is the finding behind
     // the suggestion; with none, Rust stores no measure and the result says so. A failure here never undoes the follow-up.
@@ -348,14 +363,22 @@ export function memoryWriteNote(e: unknown, what: "Edit" | "Delete" | "Undo"): s
  * The stores built so far (life dates, check-ins, goals, Letta memory blocks: read, edit, clear, undo). Everything else stays unwired. Each reads as unwired until its
  * first successful read, so a missing backend never shows an empty live list.
  */
+/** Steps done / total and percent from the roadmap adapter's cache; null while the goal has no live steps (then the goal's own numbers speak). */
+function roadmapProgress(goalId: string): RoadmapProgress | null {
+  const w = roadmapAdapter().roadmap(goalId);
+  if (w.state === "unwired" || !w.value || w.value.steps.length === 0) return null;
+  return { pct: w.value.pct, done: w.value.steps.filter((x) => x.done).length, total: w.value.steps.length };
+}
+
 export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & { refresh(): Promise<void> } {
   let admin: LifeAdmin | null = null;
   let checkins: CheckIn[] | null = null;
-  let goals: GoalsWeek | null = null;
+  let goalRows: GoalWire[] | null = null;
   let patterns: Patterns | null = null;
   let review: WeeklyReview | null = null;
   let suggestionTitle: string | null = null;
   let suggestionPair: string | null = null; // from the finding id: "<pair>" or "tag_mood:<tag>"
+  let suggestionWhy: { reason: string | null; findingId: string | null } = { reason: null, findingId: null };
   let memories: Memory[] | null = null;
   let money: PersonalMoney | null = null;
   let memoriesNote: string | null = null;
@@ -367,11 +390,11 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
       call<CheckInWire[]>("checkin_list", { limit: 30 }).then((r) => { checkins = r.map(checkInFrom); }).catch(() => { checkins = null; }),
       call<PatternsWire>("patterns_read").then((r) => { patterns = r && Array.isArray(r.findings) ? patternsFrom(r) : null; }).catch(() => { patterns = null; }),
       call<ReviewWire>("weekly_review_read")
-        .then((r) => { review = r && r.health ? weeklyReviewFrom(r) : null; suggestionTitle = review && r.suggestion ? r.suggestion.title : null; suggestionPair = review && r.suggestion?.evidenceFindingId ? r.suggestion.evidenceFindingId.split(":")[0] : null; })
-        .catch(() => { review = null; suggestionTitle = null; suggestionPair = null; }),
+        .then((r) => { review = r && r.health ? weeklyReviewFrom(r) : null; suggestionTitle = review && r.suggestion ? r.suggestion.title : null; suggestionPair = review && r.suggestion?.evidenceFindingId ? r.suggestion.evidenceFindingId.split(":")[0] : null; suggestionWhy = { reason: r.suggestion?.reason ?? null, findingId: r.suggestion?.evidenceFindingId ?? null }; })
+        .catch(() => { review = null; suggestionTitle = null; suggestionPair = null; suggestionWhy = { reason: null, findingId: null }; }),
       Promise.all([call<RawSummary | null>("money_summary_read"), call<{ rate: number; date: string; source: string } | null>("fx_rate_get")])
         .then(([sm, f]) => { money = personalMoneyFrom(sm && Array.isArray(sm.recurring) ? sm : null, mapFx(f)); }).catch(() => { money = null; }),
-      call<GoalWire[]>("read_goals").then((r) => { goals = Array.isArray(r) ? goalsFrom(r) : null; }).catch(() => { goals = null; }),
+      call<GoalWire[]>("read_goals").then((r) => { goalRows = Array.isArray(r) ? r : null; }).catch(() => { goalRows = null; }),
       call<MemoryWire[]>("memory_list").then(
         (r) => { memories = Array.isArray(r) ? memoriesFrom(r) : null; memoriesNote = memories ? null : memoryNote(null); },
         (e) => { memories = null; memoriesNote = memoryNote(e); },
@@ -395,7 +418,8 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
   return {
     ...unwiredPersonal,
     refresh,
-    goals: () => (goals ? live(goals) : UNWIRED),
+    // Read at call time so a step finished on the roadmap moves the goal here without waiting for a re-read of goals.json.
+    goals: () => (goalRows ? live(goalsFrom(goalRows, roadmapProgress)) : UNWIRED),
     money: () => (money ? live(money) : UNWIRED),
     patterns: () => (patterns ? live(patterns) : UNWIRED),
     weeklyReview: () => (review ? live(review) : UNWIRED),
@@ -409,7 +433,7 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
     lifeAdmin: () => (admin ? live(admin) : UNWIRED),
     // "Try it this week" adds one follow-up (native approval dialog in Rust), due in 6 days; it never changes a goal.
     // "Not this week" stores nothing. With no real suggestion from the weekly review there's nothing to try.
-    tryChange: async (take) => tryChangeWith(call, take, suggestionTitle, new Date(), suggestionPair),
+    tryChange: async (take) => tryChangeWith(call, take, suggestionTitle, new Date(), suggestionPair, suggestionWhy),
     checkins: () => (checkins ? live([...checkins]) : UNWIRED),
     // On-device dictation via Amara Voice (voice.rs dictate_once): text only. Unwired until the patched loop is ready.
     transcribe: async () => { const t = await dictateOnce("checkin", call); return t ? live(t) : UNWIRED; },

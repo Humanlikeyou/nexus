@@ -98,7 +98,10 @@ describe("Agents › Crews", () => {
     expect(crew.startCrew).not.toHaveBeenCalled();
     await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Start run" })); });
     expect(crew.startCrew).toHaveBeenCalledWith("smoke", "Reply with the word OK");
-    expect(within(screen.getByRole("table", { name: "Runs" })).getByText("Running")).toBeInTheDocument();
+    // Decision 0042: starting a run opens that run's page (Stop, live status) with a note, instead of staying on the list.
+    expect(screen.getByText(/^Started\./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Runs" })).toBeNull();
   });
 
   it("Retry run starts a new run linked to the old one (retryOf)", async () => {
@@ -109,6 +112,9 @@ describe("Agents › Crews", () => {
     const dialog = screen.getByRole("dialog", { name: "Start this run?" });
     await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Start run" })); });
     expect(crew.startCrew).toHaveBeenCalledWith("smoke", "Reply with the word OK", "r1");
+    // ...and lands on the NEW run, not the old one.
+    expect(screen.queryByRole("table", { name: "Runs" })).toBeNull();
+    expect(screen.getByText(/^Started\./)).toBeInTheDocument();
   });
 
   it("live crew approvals: listed from the crew service; Approve and Deny call crew_decide_approval", async () => {
@@ -241,5 +247,59 @@ describe("Crews › design-1110d panels", () => {
     expect(screen.getByRole("table", { name: "Task timeline" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /Handoffs: planner to writer/ })).toBeInTheDocument();
     expect(screen.getAllByText("Sample data").length).toBeGreaterThan(3);
+  });
+  describe("decision 0042: decisions and starts carry through", () => {
+    const row = { id: "a1", run_id: "r1", crew: "smoke", agents: ["writer"], kind: "write", title: "Run tool send_note", reason: "x", risk: "Low", requested_at: new Date().toISOString() };
+    const setup = async (onRetry = vi.fn()) => {
+      crew.listCrewApprovals.mockImplementation(async (state: string) => (state === "pending" ? [row] : []));
+      await act(async () => { render(<CrewsField onRetry={onRetry} data={snap({ runs: [run({ status: "awaiting_approval", result: null })] })} />); });
+      return onRetry;
+    };
+
+    it("Approve says what happens next, links to the run and refreshes the snapshot", async () => {
+      crew.decideCrewApproval.mockResolvedValue({ ...row, approved: true });
+      crew.getCrewStatus.mockResolvedValue(run({ status: "running", result: null }));
+      const onRetry = await setup();
+      await act(async () => { fireEvent.click(await screen.findByRole("button", { name: "Approve Run tool send_note" })); });
+      expect(screen.getByRole("status")).toHaveTextContent("The crew is continuing");
+      expect(onRetry).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByRole("button", { name: "Open run ›" }));
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument(); // the run page
+    });
+
+    it("Deny says nothing runs and still links and refreshes", async () => {
+      crew.decideCrewApproval.mockResolvedValue({ ...row, approved: false });
+      const onRetry = await setup();
+      await act(async () => { fireEvent.click(await screen.findByRole("button", { name: "Deny Run tool send_note" })); });
+      expect(screen.getByRole("status")).toHaveTextContent("Nothing runs");
+      expect(onRetry).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Open run ›" })).toBeInTheDocument();
+    });
+
+    it("a declined or failed decision shows the error, no link, no refresh", async () => {
+      crew.decideCrewApproval.mockRejectedValue("declined: Denied in the native approval dialog. Nothing was changed.");
+      const onRetry = await setup();
+      await act(async () => { fireEvent.click(await screen.findByRole("button", { name: "Approve Run tool send_note" })); });
+      expect(screen.getByRole("status")).toHaveTextContent(/declined/i);
+      expect(screen.queryByRole("button", { name: "Open run ›" })).toBeNull();
+      expect(onRetry).not.toHaveBeenCalled();
+    });
+
+    it("a failed start stays on the list with the error and opens no run", async () => {
+      crew.startCrew.mockRejectedValue("crew service refused");
+      render(<CrewsField data={snap({})} />);
+      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "smoke" } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Task" }), { target: { value: "Do it" } });
+      fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+      await act(async () => { fireEvent.click(within(screen.getByRole("dialog", { name: "Start this run?" })).getByRole("button", { name: "Start run" })); });
+      expect(screen.getByRole("alert")).toHaveTextContent("crew service refused");
+      expect(screen.getByRole("region", { name: "Runs" })).toBeInTheDocument();
+    });
+
+    it("openRunId opens that run's page (a link from Agents)", () => {
+      render(<CrewsField openRunId="r1" data={snap({ runs: [run()] })} />);
+      expect(screen.getByRole("button", { name: /Crews/ })).toBeInTheDocument();
+      expect(screen.queryByRole("table", { name: "Runs" })).toBeNull();
+    });
   });
 });

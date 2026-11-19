@@ -1,12 +1,16 @@
 import { Check, Flame, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { roadmapAdapter, type Roadmap, type RoadmapAdapter, type StepSize } from "../goals/roadmap";
 import { useStoresTick } from "../lib/localStores";
 import type { Habit } from "../personal/adapters";
 import { Dots } from "../personal/parts";
 import { reducedMotion } from "../shell/Splash";
 import { Button, DataTag, Select, TextField } from "../ui";
-import type { LiveRoadmapAdapter } from "../goals/roadmapLive";
+import { PLAN_NIGHTLY, planNowNote, type LiveRoadmapAdapter } from "../goals/roadmapLive";
+import { invokeBound } from "../bridge";
+import { humanize } from "../lib/format";
+import { HistorySheet } from "../takes/HistorySheet";
+import { takesAdapter } from "../takes/adapters";
 import { branchAdapter, type BranchAdapter, type BranchSuggestion } from "./branches";
 import {
   SIZE_LABEL, STATION_RADIUS, currentStation, fillFraction, glanceOf, pathLabel, pathPhase, smoothPath, stationPoints, stationsOf, strandPath,
@@ -17,7 +21,7 @@ import { TangleWaves, tangleGlAvailable } from "./TangleWaves";
 import "./design1118.css";
 
 /** One goal on the map: its title, tag and the roadmap that draws its path. */
-export type PathGoal = { id: string; title: string; tag?: string; detail?: string };
+export type PathGoal = { id: string; title: string; tag?: string; detail?: string; /** Enterprise venture this goal is linked to (goal_venture_set). */ ventureId?: string | null };
 type GoalState = { goal: PathGoal; rm: Roadmap | null; phase: PathPhase; sample: boolean; stations: Station[]; glance: Glance };
 
 const SIZE_OPTIONS = (["small", "medium", "big"] as const).map((v) => ({ value: v, label: SIZE_LABEL[v] }));
@@ -115,7 +119,7 @@ function useGoalStates(goals: PathGoal[], adapter: RoadmapAdapter, over: Record<
   }, [goals, adapter, over, tick]);
 }
 
-function PathCard({ g, seed, onOpen, onEdit }: { g: GoalState; seed: number; onOpen: () => void; onEdit?: () => void }) {
+function PathCard({ g, seed, onOpen, onEdit, onVenture }: { g: GoalState; seed: number; onOpen: () => void; onEdit?: () => void; onVenture?: () => void }) {
   const here = currentStation(g.stations);
   const foot = g.phase === "planning" ? "Amara is planning the route" : g.phase === "unwired" ? "Route appears once the roadmap store answers" : here ? `You are here · ${here.title ?? "step"} · ${SIZE_LABEL[here.size]}` : "All steps done";
   return (
@@ -126,8 +130,17 @@ function PathCard({ g, seed, onOpen, onEdit }: { g: GoalState; seed: number; onO
       <span className="d18-pcard__foot">{foot}</span>
     </button>
     {onEdit && <EditPencil label={`Edit ${g.goal.title}`} onClick={onEdit} />}
+    {g.goal.ventureId && <VentureChip id={g.goal.ventureId} goal={g.goal.title} onOpen={onVenture} />}
     </div>
   );
+}
+
+/** A goal's venture, linking to that venture's page in Enterprise. Plain text when no one can open it. */
+function VentureChip({ id, goal, onOpen }: { id: string; goal: string; onOpen?: () => void }) {
+  const name = humanize(id);
+  return onOpen
+    ? <Button size="small" variant="plain" aria-label={`Open the ${name} venture page for ${goal}`} onClick={onOpen}>Venture · {name} ›</Button>
+    : <span className="d18-chip">Venture · {name}</span>;
 }
 
 /** Milestones arrival: the four goals as moving, tangled strands. Focus or hover one to untangle it. */
@@ -165,11 +178,12 @@ function Tangle({ goals, onFocus, onGrid }: { goals: GoalState[]; onFocus: (id: 
 
 type Celebration = { goalId: string; stationId: string; big: boolean; phase: "charge" | "burst" | "travel" | "settle" | "reduced"; line: string };
 
-function NextActionCard({ g, onYes, onNotYet, onEdit, onAccept, msg }: { g: GoalState; onYes: () => void; onNotYet: () => void; onEdit: (title: string, size: StepSize) => void; onAccept: () => void; msg: string }) {
+function NextActionCard({ g, onYes, onNotYet, onEdit, onAccept, msg }: { g: GoalState; onYes: () => void; onNotYet: () => void; onEdit: (title: string, size: StepSize) => void; onAccept: () => void; msg: ReactNode }) {
   const here = currentStation(g.stations);
   const step = here ? g.rm?.steps.find((s) => s.id === here.id) : null;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ title: "", size: "small" as StepSize });
+  const [smallUsed, setSmallUsed] = useState(false);
   if (g.phase !== "ready" || !here || !step) return null;
   return (
     <section className="d18-next" aria-label="Next step">
@@ -186,6 +200,9 @@ function NextActionCard({ g, onYes, onNotYet, onEdit, onAccept, msg }: { g: Goal
           <h3 className="d18-next__t">{step.title}</h3>
           {step.why && <p className="d18-next__why">{step.why}</p>}
           {g.rm?.status === "suggested" && <p className="d18-next__why">Amara suggested this route. Accept it, or edit any step first.</p>}
+          {step.smallerSuggestion && !smallUsed && (
+            <p className="d18-next__why" data-testid="smaller-step">A smaller first move: {step.smallerSuggestion} <Button size="small" variant="secondary" onClick={() => { setSmallUsed(true); onEdit(step.smallerSuggestion as string, "small"); }}>Use this</Button></p>
+          )}
           <div className="d18-actions">
             <Button size="small" variant="primary" onClick={onYes}>Yes, it&apos;s done</Button>
             <Button size="small" variant="secondary" onClick={onNotYet}>Not yet</Button>
@@ -218,11 +235,27 @@ function BranchReasonCard({ b, onAccept, onDecline }: { b: BranchSuggestion; onA
  * Life › Goals, Milestones (design-1118a rounds 2–5): arrival tangle → a goal in focus (drill-in) →
  * the four-path grid, which stays until he leaves the page (no re-tangle on this visit).
  */
-export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal, gridSignal = 0 }: { goals: PathGoal[]; adapter?: RoadmapAdapter; branches?: BranchAdapter; sampleTag?: boolean; onEditGoal?: (id: string) => void; gridSignal?: number }) {
+export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal, gridSignal = 0, focusGoal = null, focusNonce = 0, newGoalId = null, onOpenVenture, planNow }: {
+  goals: PathGoal[]; adapter?: RoadmapAdapter; branches?: BranchAdapter; sampleTag?: boolean; onEditGoal?: (id: string) => void; gridSignal?: number;
+  /** Open this goal in focus (a link from the Weekly review, Dates, the take or a venture). Changing it opens the new one. */
+  focusGoal?: string | null;
+  /** Bump to open `focusGoal` again after leaving it. */
+  focusNonce?: number;
+  /** The goal just added: it opens in focus with its planning state. Takes over from `gridSignal`. */
+  newGoalId?: string | null;
+  onOpenVenture?: (ventureId: string) => void;
+  /** Manual planning run for a goal still being planned; defaults to the live `roadmap_draft_pending` catch-up. */
+  planNow?: (goalId: string) => Promise<string>;
+}) {
   const a = adapter ?? roadmapAdapter();
   const br = branches ?? branchAdapter();
-  const [view, setView] = useState<"tangle" | "focus" | "grid">("tangle");
-  const [focus, setFocus] = useState<string | null>(null);
+  const [view, setView] = useState<"tangle" | "focus" | "grid">(focusGoal ? "focus" : "tangle");
+  const [focus, setFocus] = useState<string | null>(focusGoal);
+  const [lastFocusGoal, setLastFocusGoal] = useState(`${focusGoal}|${focusNonce}`);
+  const [lastNew, setLastNew] = useState(newGoalId);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [planMsg, setPlanMsg] = useState<Record<string, string>>({});
+  const [planning, setPlanning] = useState(false);
   const [over, setOver] = useState<Record<string, Set<string>>>({});
   const [msg, setMsg] = useState("");
   const [cele, setCele] = useState<Celebration | null>(null);
@@ -241,10 +274,26 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
   // a goal was just added: show every path card so the new one is in view
   const [lastGrid, setLastGrid] = useState(gridSignal);
   if (gridSignal !== lastGrid) { setLastGrid(gridSignal); setView("grid"); setFocus(null); }
+  // a link opened one goal: focus it (adjusting state while rendering, like gridSignal above)
+  if (`${focusGoal}|${focusNonce}` !== lastFocusGoal) { setLastFocusGoal(`${focusGoal}|${focusNonce}`); if (focusGoal) { setFocus(focusGoal); setView("focus"); setMsg(""); } }
+  if (newGoalId !== lastNew) { setLastNew(newGoalId); if (newGoalId) { setFocus(newGoalId); setView("focus"); setMsg(""); } }
   useEffect(() => { if (!undo) return; const t = window.setTimeout(() => setUndo(null), 8000); return () => window.clearTimeout(t); }, [undo]);
 
   const focused = states.find((g) => g.goal.id === focus) ?? null;
   const open = (id: string) => { setFocus(id); setView("focus"); setMsg(""); };
+  const livePlan = typeof (a as Partial<LiveRoadmapAdapter>).reload === "function";
+  const runPlan = async (goalId: string) => {
+    setPlanning(true);
+    let note: string;
+    if (planNow) note = await planNow(goalId).catch(() => planNowNote({ err: "" }));
+    else {
+      try { note = planNowNote({ ok: await invokeBound<number>("roadmap_draft_pending", { catchUp: true }) }); } catch (e) { note = planNowNote({ err: e }); }
+      try { await (a as LiveRoadmapAdapter).reload(goalId); } catch { /* the next read catches up */ }
+    }
+    setPlanMsg((m) => ({ ...m, [goalId]: note })); setPlanning(false); bump((n) => n + 1);
+  };
+  // "Check History" in a failure line is a link that opens the History sheet (the takes' record on this Mac)
+  const msgNode: ReactNode = /Check History\.?$/.test(msg) ? <>{msg.replace(/\s*Check History\.?$/, "")} <Button size="small" variant="plain" onClick={() => setHistoryOpen(true)}>Check History ›</Button></> : msg;
   const leave = () => { setFocus(null); setView("grid"); setCele(null); };
 
   const branchW = focused ? br.open(focused.goal.id) : null;
@@ -285,12 +334,12 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
   const takeBranch = async (g: GoalState, b: BranchSuggestion) => {
     const r = await br.accept(b.id);
     if (r.state === "unwired") { setMsg("Not saved. This needs the branch store to be wired first."); return; }
-    setBranchState((s) => ({ ...s, [g.goal.id]: "accepted" })); setUndo({ id: b.id, goalId: g.goal.id }); setMsg("Route changed. The old route stays as a faint ghost.");
+    setBranchState((s) => ({ ...s, [g.goal.id]: "accepted" })); setUndo({ id: b.id, goalId: g.goal.id, kind: "branch" }); setMsg("Route changed. The old route stays as a faint ghost.");
   };
   const declineBranch = async (g: GoalState, b: BranchSuggestion) => {
     const r = await br.decline(b.id);
     if (r.state === "unwired") { setMsg("Not saved. This needs the branch store to be wired first."); return; }
-    setBranchState((s) => ({ ...s, [g.goal.id]: "retracting" })); window.setTimeout(() => setBranchState((s) => ({ ...s, [g.goal.id]: "declined" })), reducedMotion() ? 0 : 500); setMsg("Kept the current route.");
+    setBranchState((s) => ({ ...s, [g.goal.id]: "retracting" })); window.setTimeout(() => setBranchState((s) => ({ ...s, [g.goal.id]: "declined" })), reducedMotion() ? 0 : 500); setMsg("Kept the current route."); setUndo({ id: b.id, goalId: g.goal.id, kind: "branch", label: "Route kept." });
   };
   const undoStep = async () => {
     if (!undo) return;
@@ -301,7 +350,12 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
     setOver((o) => { const n = new Set(o[u.goalId] ?? []); n.delete(u.id); return { ...o, [u.goalId]: n }; });
     setCele(null); bump((n) => n + 1); setMsg("Undone.");
   };
-  const undoBranch = async () => { if (!undo) return; await br.undo(undo.id); setBranchState((s) => { const n = { ...s }; delete n[undo.goalId]; return n; }); setUndo(null); setMsg("Back to the previous route."); };
+  const undoBranch = async () => {
+    if (!undo) return;
+    const u = undo; const r = await br.undo(u.id); setUndo(null);
+    if (r.state === "unwired") { setMsg("That couldn't be undone. Check History."); return; }
+    setBranchState((s) => { const n = { ...s }; delete n[u.goalId]; return n; }); setMsg(u.label === "Route kept." ? "Amara's suggestion is back. Take it or keep the route." : "Back to the previous route.");
+  };
 
   const seedOf = (id: string) => Math.max(0, goals.findIndex((g) => g.id === id));
   return (
@@ -312,9 +366,9 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
       </header>
       {states.length === 0 && <p className="d18-note">Goals you set with Amara appear here as paths.</p>}
       {states.length > 0 && view === "tangle" && <Tangle goals={states} onFocus={open} onGrid={() => setView("grid")} />}
-      {states.length > 0 && view === "grid" && (
+      {states.length > 0 && (view === "grid" || (view === "focus" && !focused)) && (
         <div className="d18-grid" data-testid="milestones-grid">
-          {states.map((g) => <PathCard key={g.goal.id} g={{ ...g }} seed={seedOf(g.goal.id)} onOpen={() => open(g.goal.id)} onEdit={onEditGoal ? () => onEditGoal(g.goal.id) : undefined} />)}
+          {states.map((g) => <PathCard key={g.goal.id} g={{ ...g }} seed={seedOf(g.goal.id)} onOpen={() => open(g.goal.id)} onEdit={onEditGoal ? () => onEditGoal(g.goal.id) : undefined} onVenture={onOpenVenture && g.goal.ventureId ? () => onOpenVenture(g.goal.ventureId as string) : undefined} />)}
         </div>
       )}
       {focused && view === "focus" && (
@@ -323,6 +377,7 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
             <GlanceRing glance={focused.glance} size={58} />
             <div><p className="d18-eyebrow d18-eyebrow--quiet">{focused.goal.title}{focused.goal.tag ? ` · ${focused.goal.tag}` : ""} {focused.sample && <DataTag kind="sample" />}</p>
               <p className="d18-drill__glance" data-testid="glance">{focused.phase === "ready" ? focused.glance.text : focused.phase === "planning" ? "Amara is planning the route" : "Route appears once the roadmap store answers"}</p>
+              {focused.goal.ventureId && <VentureChip id={focused.goal.ventureId} goal={focused.goal.title} onOpen={onOpenVenture ? () => onOpenVenture(focused.goal.ventureId as string) : undefined} />}
               {currentStation(focused.stations) && <p className="d18-note">You are here · {currentStation(focused.stations)!.title} · {SIZE_LABEL[currentStation(focused.stations)!.size]}</p>}
             </div>
           </div>
@@ -330,15 +385,22 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
             <PathSvg drill stations={focused.stations} phase={focused.phase} seed={seedOf(focused.goal.id)} grow={!!growing[focused.goal.id]} branch={branchDraw}
               celebrate={cele && cele.goalId === focused.goal.id ? cele : null} label={pathLabel(focused.goal.title, focused.glance, focused.stations)} />
             {focused.phase === "planning" && <p className="d18-seedline">Amara is planning the route. The path grows in once she has decided the steps.</p>}
+            {focused.phase === "planning" && (
+              <div className="d18-actions" data-testid="plan-now">
+                {(livePlan || planNow) && <Button size="small" variant="secondary" disabled={planning} onClick={() => { void runPlan(focused.goal.id); }}>{planning ? "Planning…" : "Plan now"}</Button>}
+                <p className="d18-note" role="status">{planMsg[focused.goal.id] ?? focused.rm?.planNote ?? PLAN_NIGHTLY}</p>
+              </div>
+            )}
             <div className="d18-size-key" aria-label="Station size key"><span><i data-s="small" />Small</span><span><i data-s="medium" />Medium</span><span><i data-s="big" />Big</span></div>
           </div>
           {cele && cele.goalId === focused.goal.id && <p className="d18-amara-line" data-big={cele.big || undefined} role="status">{cele.line} <span className="d18-note">{focused.glance.done} of {focused.glance.total} steps</span></p>}
           {branch && bstate !== "retracting" && bstate !== "declined" && bstate !== "accepted" && <BranchReasonCard b={branch} onAccept={() => { void takeBranch(focused, branch); }} onDecline={() => { void declineBranch(focused, branch); }} />}
-          <NextActionCard g={focused} msg={msg} onYes={() => { void yes(focused); }} onNotYet={() => { void notYet(focused); }} onEdit={(t, s) => { void edit(focused, t, s); }} onAccept={() => { void acceptRoute(focused); }} />
+          <NextActionCard g={focused} msg={msgNode} onYes={() => { void yes(focused); }} onNotYet={() => { void notYet(focused); }} onEdit={(t, s) => { void edit(focused, t, s); }} onAccept={() => { void acceptRoute(focused); }} />
           {undo && <div className="d18-toast" role="status">{undo.label ?? "Route changed."} <Button size="small" variant="plain" onClick={() => { void (undo.kind === "step" ? undoStep() : undoBranch()); }}>Undo</Button></div>}
         </div>
       )}
-      {view !== "focus" && msg && <p className="d18-msg" role="status">{msg}</p>}
+      {view !== "focus" && msg && <p className="d18-msg" role="status">{msgNode}</p>}
+      <HistorySheet page="life" open={historyOpen} onClose={() => setHistoryOpen(false)} adapter={takesAdapter()} />
     </section>
   );
 }

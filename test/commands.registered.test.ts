@@ -101,7 +101,7 @@ describe("Tauri command registry", () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
     const names = registeredCommands(lib).map((c: { name: string }) => c.name);
-    for (const name of ["backup_prune_plan", "restore_preview"]) expect(names).toContain(name);
+    for (const name of ["backup_prune_plan", "restore_preview", "restore_backup"]) expect(names).toContain(name);
     // Taisun's gates: restore() is not built and nothing deletes a backup (hard rule 7).
     for (const name of ["restore", "backup_restore", "backup_prune", "backup_delete"]) expect(names).not.toContain(name);
   });

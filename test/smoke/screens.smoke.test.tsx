@@ -117,6 +117,21 @@ describe("lazy screens", () => {
     expect(errorSpy.mock.calls.map((c) => String(c[0]).slice(0, 200))).toEqual([]);
   });
 
+  it("G14: Toolbar Refresh says it finished and links to the unavailable sources", async () => {
+    vi.useFakeTimers();
+    render(<App />);
+    await flush();
+    go("Settings");
+    await settle("Settings");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all systems" }));
+    await vi.waitFor(() => expect(screen.getByText("Refreshed")).toBeInTheDocument());
+    // Every unmocked command fails in this harness, so some sources are unavailable.
+    const link = screen.getByRole("button", { name: "Some sources unavailable ›" });
+    fireEvent.click(link);
+    expect(screen.queryByText("Refreshed")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Some sources unavailable ›" })).toBeNull();
+  });
+
   it("revisiting a screen renders synchronously (no fallback flash)", async () => {
     vi.useFakeTimers();
     render(<App />);

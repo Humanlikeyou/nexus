@@ -29,6 +29,7 @@ export type Roadmap = {
   draftedAt: string | null; // ISO, when the overnight job wrote it
   steps: RoadmapStep[];
   pct: number;              // done weight / total weight × 100 (0 if no steps)
+  planNote?: string;        // short fixed reason the planner has not produced a plan yet
 };
 
 /** The one step question of the day (across the whole app), shown in whichever take he sees first. */

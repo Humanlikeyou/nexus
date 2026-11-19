@@ -650,13 +650,57 @@ fn gather_live(
     }
 }
 
+/// A goal with a roadmap measures progress by its steps, not by the stale `current / target` in goals.json
+/// (a step marked Yes moves the roadmap percent only). Applied on every read, never stored, so a step done
+/// after the Sunday review was built still shows. Milestones become "<done> of <total> steps"; a goal that has
+/// a roadmap but no target gets a milestone too. Roadmaps still being drafted (no live steps) change nothing.
+pub(crate) fn overlay_roadmaps(
+    review: &mut Review,
+    goals: &[super::goals::Goal],
+    store: &super::goal_roadmap::Store,
+) {
+    for g in goals
+        .iter()
+        .filter(|g| g.category != "habit" && !is_business_goal(g))
+    {
+        let Some(rm) = store.roadmaps.iter().find(|r| r.goal_id == g.id) else {
+            continue;
+        };
+        let live: Vec<_> = rm.steps.iter().filter(|s| !s.deferred).collect();
+        if live.is_empty() {
+            continue;
+        }
+        let m = Milestone {
+            id: g.id.clone(),
+            title: g.title.clone(),
+            current: live.iter().filter(|s| s.done).count() as f64,
+            target: live.len() as f64,
+            unit: "steps".into(),
+            pct: rm.pct.min(100),
+        };
+        match review.goals.milestones.iter_mut().find(|x| x.id == g.id) {
+            Some(slot) => *slot = m,
+            None => review.goals.milestones.push(m),
+        }
+    }
+    if !review.goals.milestones.is_empty() && review.goals.state == "none" {
+        review.goals.state = "data".into();
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn weekly_review_read() -> Result<Review, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let dir = crate::app_paths::data_dir();
         let now = now_jst();
-        read_in(&dir, now, gather_live(&dir, now))
+        let mut review = read_in(&dir, now, gather_live(&dir, now))?;
+        let goals = read_json::<Vec<super::goals::Goal>>(&dir.join("goals.json"), MAX_BYTES * 8)
+            .unwrap_or_default();
+        if let Ok(store) = super::goal_roadmap::read_store_at(&dir) {
+            overlay_roadmaps(&mut review, &goals, &store);
+        }
+        Ok(review)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -705,6 +749,86 @@ mod tests {
 
     /// A2: the review's health section reads days from the daily table; everything else stays per-row
     /// (per-session count, per-check-in means, check-in text are not in a per-day row).
+    #[test]
+    fn roadmap_progress_replaces_stale_goal_numbers_in_the_review() {
+        use super::super::goal_roadmap::{Roadmap, Step, StepSize, Store};
+        let step = |id: &str, size: StepSize, done: bool, deferred: bool| Step {
+            id: id.into(),
+            title: id.into(),
+            why: None,
+            size,
+            order: 1,
+            done,
+            done_at: None,
+            not_yet_count: 0,
+            smaller_suggestion: None,
+            last_asked: None,
+            deferred,
+        };
+        let store = Store {
+            roadmaps: vec![
+                Roadmap {
+                    goal_id: "g1".into(),
+                    status: "accepted".into(),
+                    drafted_at: None,
+                    steps: vec![
+                        step("a", StepSize::Small, true, false),
+                        step("b", StepSize::Small, false, false),
+                        step("ghost", StepSize::Big, false, true),
+                    ],
+                    pct: 50,
+                    version: 2,
+                    moved_at: None,
+                    plan_note: None,
+                },
+                Roadmap {
+                    goal_id: "g2".into(),
+                    status: "drafting".into(),
+                    drafted_at: None,
+                    steps: vec![],
+                    pct: 0,
+                    version: 0,
+                    moved_at: None,
+                    plan_note: None,
+                },
+            ],
+            ..Store::default()
+        };
+        let now = at(2026, 11, 12, 10);
+        let g = vec![
+            goal("g1", "personal", 25.0, 17.0),
+            goal("g2", "personal", 10.0, 2.0),
+            goal("g3", "personal", 0.0, 0.0),
+        ];
+        let mut r = build(
+            &Inputs::default(),
+            &patterns::compute(&Inputs::default(), now),
+            &g,
+            no_money(),
+            last_due(now),
+            now,
+        );
+        assert_eq!(
+            r.goals
+                .milestones
+                .iter()
+                .find(|m| m.id == "g1")
+                .unwrap()
+                .pct,
+            68
+        );
+        overlay_roadmaps(&mut r, &g, &store);
+        let m1 = r.goals.milestones.iter().find(|m| m.id == "g1").unwrap();
+        assert_eq!(
+            (m1.pct, m1.current, m1.target, m1.unit.as_str()),
+            (50, 1.0, 2.0, "steps")
+        );
+        // still drafting: the old numbers stay; a goal with no target and no roadmap gets nothing
+        let m2 = r.goals.milestones.iter().find(|m| m.id == "g2").unwrap();
+        assert_eq!((m2.pct, m2.unit.as_str()), (20, "USD"));
+        assert!(r.goals.milestones.iter().all(|m| m.id != "g3"));
+    }
+
     #[test]
     fn review_is_identical_with_days_taken_from_the_daily_table() {
         use super::super::patterns::tests::{stored_rows, world};

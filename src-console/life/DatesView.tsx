@@ -2,13 +2,13 @@ import { useSvgTextScale } from "../ui/useSvgTextScale";
 import { useState } from "react";
 import type { Route } from "../app/routes";
 import { addAdapter } from "../adds/adapters";
-import { useStoresTick } from "../lib/localStores";
-import { Composer, LinkButton, OffButton } from "../adds/Composer";
+import { announceAdds, inTauri, realInvoke, useStoresTick } from "../lib/localStores";
+import { Composer, LinkButton, ResultLine } from "../adds/Composer";
 import type { AddPreview, Saved } from "../adds/flow";
 import { valueOf } from "../lib/sampleAdapters";
 import { PERSONAL_DEFAULTS, type LifeDate, type LifeLane, type PersonalAdapter } from "../personal/adapters";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
-import { Card, DataTag, PageHero, StatusText } from "../ui";
+import { Button, Card, DataTag, Dialog, PageHero, Select, StatusText, TextField } from "../ui";
 import { placeLabels } from "./timeline";
 import "../ui/PanelKit.css";
 
@@ -68,6 +68,14 @@ function fromPreview(saved: Saved, p: AddPreview): LifeDate {
   return { id: saved.id, title: saved.title, short: saved.title, sub: "you typed it · just now", date: m ? `${m[1]} ${m[2]}` : "", month: Math.max(0, mi) + (m ? Number(m[2]) / 31 : 0), reminder: (f.Reminders ?? "").split(" · ")[0], due: false, lane: f.Lane === "Japan · residence" ? "residence" : "personal" };
 }
 
+/** The stored row behind a date (the wire fields `life_date_upsert` takes). */
+type DateRow = { id: string; title: string; date: string; lane: string; sub: string };
+const rowOf = (d: LifeDate): DateRow | null => (d.iso ? { id: d.id, title: d.title, date: d.iso, lane: d.lane, sub: d.rawSub ?? "" } : null);
+const LANE_OPTIONS = [{ value: "personal", label: "Personal" }, { value: "residence", label: "Japan · residence" }];
+/** Module-level so the Undo window's start is read when an action finishes, never during render. */
+const stampNow = () => Date.now();
+const saveRow = (r: DateRow) => realInvoke("life_date_upsert", { draft: { id: r.id, title: r.title, date: r.date, lane: r.lane, sub: r.sub || null } });
+
 /** Life › Dates & deadlines (was Today › Life admin): add, timeline, upcoming. Dates only from Taisun or his documents. */
 export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpen?: (route: Route) => void }) {
   useStoresTick();
@@ -76,6 +84,28 @@ export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpe
   const [added, setAdded] = useState<LifeDate[]>([]);
   const add = addAdapter("date");
   const fresh = new Set(added.map((d) => d.id));
+  // Edit and delete work on the stored row (life_date_upsert / life_date_delete). Neither is logged in History, so Undo puts the
+  // old row back with the same id (upsert), and only while this page stays open.
+  const [editing, setEditing] = useState<DateRow | null>(null);
+  const [deleting, setDeleting] = useState<LifeDate | null>(null);
+  const [done, setDone] = useState<{ text: string; at: number; undo?: () => void; error?: boolean } | null>(null);
+  const live = inTauri();
+  const fail = (text: string) => setDone({ text, at: stampNow(), error: true });
+  const submitEdit = async () => {
+    if (!editing) return;
+    const prev = v?.dates.find((d) => d.id === editing.id); const before = prev ? rowOf(prev) : null;
+    if (!editing.title.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(editing.date)) { fail("Give it a title and a full date. Nothing was changed."); return; }
+    try { await saveRow({ ...editing, title: editing.title.trim() }); } catch { fail("That date didn't save. Nothing was changed."); return; }
+    setEditing(null); announceAdds();
+    setDone({ text: `Saved “${editing.title.trim()}”. Its reminders were recalculated.`, at: stampNow(), undo: before ? () => { void saveRow(before).then(() => { announceAdds(); setDone({ text: `Put “${before.title}” back as it was.`, at: stampNow() }); }, () => fail("That couldn't be undone. Edit the date again to fix it.")); } : undefined });
+  };
+  const confirmDelete = async () => {
+    const d = deleting; setDeleting(null); if (!d) return;
+    const row = rowOf(d);
+    try { await realInvoke<boolean>("life_date_delete", { id: d.id }); } catch { fail("That date wasn't deleted. Nothing was changed."); return; }
+    announceAdds();
+    setDone({ text: `Deleted “${d.title}”. Its reminders are gone.`, at: stampNow(), undo: row ? () => { void saveRow(row).then(() => { announceAdds(); setDone({ text: `Put “${row.title}” back.`, at: stampNow() }); }, () => fail("That couldn't be undone. Add the date again.")); } : undefined });
+  };
   // A live list already holds the saved date once re-read; the highlighted copy replaces it, never doubles it.
   const all = v ? [...v.dates.filter((d) => !fresh.has(d.id)), ...added].sort((a, b) => a.month - b.month) : added;
   const composer = (
@@ -91,6 +121,7 @@ export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpe
         detail={v ? <>{v.dates.length} dates in the next 12 months · reminders at {PERSONAL_DEFAULTS.lifeAdminLadder.join(", ")} days · Enterprise dates are read-only here {la.state === "sample" && <DataTag kind="sample" />}</> : <>Visa, residence card and contract dates come from you or your documents <DataTag kind="wire" /></>} />
       <AmaraTake page="life" className="life__take" />
       {composer}
+      {done && <ResultLine error={done.error} onUndo={done.undo} startedAt={done.at}>{done.text}</ResultLine>}
       {!v ? <Card title="Next 12 months" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">Needs wiring: dates appear once the life dates store exists (HANDOFF-1111a). Nothing here is made up.</p></Card> : (
         <>
           <Card title="Timeline" accessory={<span className="pk-acc">{la.state === "sample" && <DataTag kind="sample" />}<span className="v-note">Next 12 months</span></span>}>
@@ -107,11 +138,32 @@ export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpe
                   <td><StatusText kind={d.due ? "wait" : "off"}>{d.reminder}</StatusText></td>
                   <td className="r">{d.lane === "enterprise"
                     ? <><span className="v-ro">Read-only · </span><LinkButton small onClick={onOpen ? () => onOpen(enterpriseLink(d)) : undefined} label={`Edit in Enterprise: ${d.title}`}>Edit in Enterprise ›</LinkButton></>
-                    : <OffButton variant="plain" reason="Needs wiring · life_date_upsert" label={`Edit: ${d.title}`}>Edit</OffButton>}</td>
+                    : <>
+                      <Button size="small" variant="plain" disabled={!live || !d.iso || fresh.has(d.id)} aria-label={`Edit: ${d.title}`} onClick={() => { const r = rowOf(d); if (r) setEditing(r); }}>Edit</Button>
+                      <Button size="small" variant="plain" disabled={!live || fresh.has(d.id)} aria-label={`Delete: ${d.title}`} onClick={() => setDeleting(d)}>Delete</Button>
+                    </>}</td>
                 </tr>
               ))}</tbody>
             </table>
           </Card>
+          {editing && (
+            <Card title={`Edit: ${editing.title || "date"}`}>
+              <form className="ci-form" onSubmit={(e) => { e.preventDefault(); void submitEdit(); }}>
+                <div className="pk-g2">
+                  <TextField label="What" value={editing.title} maxLength={140} onChange={(e) => setEditing({ ...editing, title: e.target.value })} />
+                  <TextField label="Date" type="date" value={editing.date} onChange={(e) => setEditing({ ...editing, date: e.target.value })} />
+                </div>
+                <div className="pk-g2">
+                  <Select label="Lane" options={LANE_OPTIONS} value={editing.lane} onChange={(e) => setEditing({ ...editing, lane: e.target.value })} />
+                  <TextField label="Note" value={editing.sub} maxLength={140} onChange={(e) => setEditing({ ...editing, sub: e.target.value })} />
+                </div>
+                <div className="pk-actions"><Button size="small" variant="primary" type="submit">Save date</Button><Button size="small" variant="plain" onClick={() => setEditing(null)}>Cancel</Button></div>
+              </form>
+            </Card>
+          )}
+          <Dialog open={deleting !== null} title={deleting ? `Delete “${deleting.title}”?` : "Delete this date?"} destructive confirmLabel="Delete" onConfirm={() => { void confirmDelete(); }} onCancel={() => setDeleting(null)}>
+            Its reminders stop. You can undo this until you leave the page.
+          </Dialog>
         </>
       )}
     </div>
