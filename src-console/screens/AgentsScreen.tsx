@@ -4,6 +4,7 @@ import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot } from "../types";
 import { Badge, Button, InsetGroup, ListRow, More, PageHero, type Tone } from "../ui";
 import { AgentOrbs, TodaysPulse, deliveryLine } from "../design1118/Agents";
+import { NowFeed } from "../design1118/NowFeed";
 import { PageTake } from "../design1118/PageTake";
 import { HermesSubtitle } from "./agentLabels";
 import "./AgentsScreen.css";
@@ -47,6 +48,7 @@ export function AgentsField({ data, onOpenCrews, onRetry }: { data: SystemSnapsh
       <PageHero title="Agents" statement={loading ? "Checking" : `${online} online`}
         detail={loading ? undefined : `${data.hermes.activeSchedules} schedule${data.hermes.activeSchedules === 1 ? "" : "s"} active · crews ${crewReady ? "ready" : "unavailable"} · ${deliveryLine(data.outbox, data.unavailableSources.some((s) => s.command === "get_outbox_status")).toLowerCase()}`} />
       <PageTake surface="agents" />
+      {!loading && <NowFeed data={data} />}
       {!loading && <AgentOrbs data={data} />}
       {!loading && <TodaysPulse data={data} />}
       <More label="Agents, tools and knowledge base">

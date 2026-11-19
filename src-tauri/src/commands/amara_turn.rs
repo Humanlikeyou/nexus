@@ -162,7 +162,14 @@ struct DoneInfo {
 #[derive(Clone, Default)]
 #[allow(clippy::type_complexity)]
 pub struct TurnRegistry {
-    inner: Arc<Mutex<HashMap<String, (String, Arc<Notify>)>>>,
+    inner: Arc<Mutex<HashMap<String, (String, Arc<Notify>, u64)>>>,
+}
+
+fn unix_ms_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Most turns running at once (across conversations).
@@ -178,19 +185,22 @@ impl TurnRegistry {
         let notify = Arc::new(Notify::new());
         let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         // A new turn replaces its conversation's old one, so only other conversations count.
-        let others = map.values().filter(|(c, _)| c != conversation_id).count();
+        let others = map
+            .values()
+            .filter(|(c, _, _)| c != conversation_id)
+            .count();
         if others >= MAX_ACTIVE_TURNS {
             return Err(Busy);
         }
-        for (conv, old) in map.values() {
+        for (conv, old, _) in map.values() {
             if conv == conversation_id {
                 old.notify_one();
             }
         }
-        map.retain(|_, (conv, _)| conv != conversation_id);
+        map.retain(|_, (conv, _, _)| conv != conversation_id);
         map.insert(
             turn_id.to_string(),
-            (conversation_id.to_string(), notify.clone()),
+            (conversation_id.to_string(), notify.clone(), unix_ms_now()),
         );
         Ok(notify)
     }
@@ -198,7 +208,7 @@ impl TurnRegistry {
     pub(crate) fn cancel(&self, turn_id: &str) -> bool {
         let map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         match map.get(turn_id) {
-            Some((_, n)) => {
+            Some((_, n, _)) => {
                 n.notify_one();
                 true
             }
@@ -211,6 +221,14 @@ impl TurnRegistry {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(turn_id);
+    }
+
+    /// Start times (epoch ms) of the turns running now, oldest first. No ids, no text.
+    pub(crate) fn started_ms(&self) -> Vec<u64> {
+        let map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut v: Vec<u64> = map.values().map(|(_, _, t)| *t).collect();
+        v.sort_unstable();
+        v
     }
 
     #[cfg(test)]

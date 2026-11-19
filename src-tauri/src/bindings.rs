@@ -246,6 +246,7 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::ha::ha_live_start,
             crate::ha::ha_live_stop,
             crate::needs_you::needs_you_list,
+            crate::commands::agents_now::agents_now,
             crate::commands::hemisync::hemisync_library,
             crate::commands::hemisync::hemisync_sessions,
             crate::commands::hemisync::hemisync_stats,

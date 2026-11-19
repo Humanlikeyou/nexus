@@ -319,6 +319,7 @@ export const commands = {
 	haLiveStop: (options?: InvokeOptions) => __TAURI_INVOKE<boolean>("ha_live_stop", undefined, options),
 	/**  One report per source. A failed source never hides the others. */
 	needsYouList: (options?: InvokeOptions) => __TAURI_INVOKE<SourceReport_Serialize[]>("needs_you_list", undefined, options),
+	agentsNow: (options?: InvokeOptions) => __TAURI_INVOKE<AgentsNow_Serialize>("agents_now", undefined, options),
 	hemisyncLibrary: (options?: InvokeOptions) => __TAURI_INVOKE<Library_Serialize>("hemisync_library", undefined, options),
 	hemisyncSessions: (options?: InvokeOptions) => __TAURI_INVOKE<SessionRow_Serialize[]>("hemisync_sessions", undefined, options),
 	hemisyncStats: (options?: InvokeOptions) => __TAURI_INVOKE<TrackStats_Serialize[]>("hemisync_stats", undefined, options),
@@ -676,6 +677,16 @@ export type AddPreview_Serialize = {
 	note?: string,
 	/**  What `add_save` writes. Opaque to the UI, which hands the preview back unchanged. */
 	payload?: Value,
+};
+
+export type AgentsNow = AgentsNow_Serialize | AgentsNow_Deserialize;
+
+export type AgentsNow_Deserialize = {
+	items: NowItem_Deserialize[],
+};
+
+export type AgentsNow_Serialize = {
+	items: NowItem_Serialize[],
 };
 
 export type Also = {
@@ -3774,6 +3785,34 @@ export type Note = {
 	text: string,
 	day: string,
 	id: string,
+};
+
+export type NowItem = NowItem_Serialize | NowItem_Deserialize;
+
+export type NowItem_Deserialize = {
+	/**  "amara" or "service". */
+	kind: string,
+	/**  Who: a fixed label. */
+	who: string,
+	/**  What: a fixed label. */
+	what: string,
+	/**  "running" or "queued". */
+	status: string,
+	/**  Epoch ms when it started, when known. */
+	sinceMs?: number | null,
+};
+
+export type NowItem_Serialize = {
+	/**  "amara" or "service". */
+	kind: string,
+	/**  Who: a fixed label. */
+	who: string,
+	/**  What: a fixed label. */
+	what: string,
+	/**  "running" or "queued". */
+	status: string,
+	/**  Epoch ms when it started, when known. */
+	sinceMs: number | null,
 };
 
 export type OpenResult = OpenResult_Serialize | OpenResult_Deserialize;

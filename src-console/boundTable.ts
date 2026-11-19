@@ -187,6 +187,7 @@ export const BOUND_TABLE: Record<string, Row> = {
   ha_live_start: () => bound.haLiveStart(),
   ha_live_stop: () => bound.haLiveStop(),
   needs_you_list: () => bound.needsYouList(),
+  agents_now: () => bound.agentsNow(),
   hemisync_library: () => bound.hemisyncLibrary(),
   hemisync_sessions: () => bound.hemisyncSessions(),
   hemisync_stats: () => bound.hemisyncStats(),

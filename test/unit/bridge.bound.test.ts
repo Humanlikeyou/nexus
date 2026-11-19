@@ -244,6 +244,7 @@ const CALLER_COMMANDS: Array<[string, Record<string, unknown> | undefined]> = [
   ["ha_live_start", undefined],
   ["ha_live_stop", undefined],
   ["needs_you_list", undefined],
+  ["agents_now", undefined],
   ["hemisync_library", undefined],
   ["hemisync_sessions", undefined],
   ["hemisync_stats", undefined],

@@ -100,6 +100,7 @@ pub mod voice_heartbeat;
 pub mod whoop_status;
 // design-1111v stores (decisions, life dates, adds, check-in, Needs you today)
 pub mod adds;
+pub mod agents_now;
 pub mod checkin;
 pub mod decisions_log;
 pub mod goal_progress;

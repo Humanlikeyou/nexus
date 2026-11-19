@@ -289,6 +289,7 @@ pub fn run() {
             home_windows::home_window_sites,
             home_windows::home_window_sign_out,
             needs_you::needs_you_list,
+            commands::agents_now::agents_now,
             noop_query::noop_query,
             noop_query::noop_binary_status,
             noop_freeze::noop_freeze_report,
