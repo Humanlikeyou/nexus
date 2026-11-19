@@ -99,6 +99,10 @@ pub struct VoiceLevelEvent {
     pub state: VoiceState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub utterance_id: Option<String>,
+    /// Speaking only: the 1-3 strongest spectral peaks of what amara-voice plays, `[hz, amp]`,
+    /// 80..4000 Hz, amp relative to the strongest (0..1]. Absent when the feed has none (decision 0040).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peaks: Option<Vec<[f64; 2]>>,
 }
 
 // ─── state: mapping + change detection (pure, tested) ───────────────────────
@@ -196,6 +200,29 @@ fn clamp01(v: &Value) -> Option<f64> {
     x.is_finite().then(|| x.clamp(0.0, 1.0))
 }
 
+const MAX_PEAKS: usize = 3;
+
+/// The optional `peaks` field: 1..=3 `[hz, amp]` pairs, hz finite in 80..=4000, amp finite in (0, 1].
+/// Anything else drops the peaks only; the level itself still counts.
+fn parse_peaks(v: Option<&Value>) -> Option<Vec<[f64; 2]>> {
+    let arr = v?.as_array()?;
+    if arr.is_empty() || arr.len() > MAX_PEAKS {
+        return None;
+    }
+    arr.iter()
+        .map(|p| {
+            let pair = p.as_array().filter(|a| a.len() == 2)?;
+            let f = pair[0]
+                .as_f64()
+                .filter(|f| f.is_finite() && (80.0..=4000.0).contains(f))?;
+            let a = pair[1]
+                .as_f64()
+                .filter(|a| a.is_finite() && *a > 0.0 && *a <= 1.0)?;
+            Some([f, a])
+        })
+        .collect()
+}
+
 fn valid_utterance_id(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= MAX_UTTERANCE_ID
@@ -203,7 +230,7 @@ fn valid_utterance_id(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// Parse one feed frame `{ts, rms, peak, state, utteranceId?}`. Malformed → None (dropped).
+/// Parse one feed frame `{ts, rms, peak, state, utteranceId?, peaks?}`. Malformed → None (dropped).
 /// rms/peak are clamped to 0..1; the publisher's `ts` must be a number but we restamp on receipt.
 fn parse_level(text: &str) -> Option<VoiceLevelEvent> {
     let v: Value = serde_json::from_str(text).ok()?;
@@ -224,12 +251,18 @@ fn parse_level(text: &str) -> Option<VoiceLevelEvent> {
         Some(Value::String(s)) if valid_utterance_id(s) => Some(s.clone()),
         Some(_) => return None,
     };
+    let peaks = if state == VoiceState::Speaking {
+        parse_peaks(obj.get("peaks"))
+    } else {
+        None
+    };
     Some(VoiceLevelEvent {
         ts: now_ms(),
         rms,
         peak: peak.max(rms),
         state,
         utterance_id,
+        peaks,
     })
 }
 
@@ -413,6 +446,51 @@ pub async fn voice_bridge_stop() -> bool {
 mod tests {
     use super::*;
     use futures::SinkExt;
+
+    #[test]
+    fn speaking_frames_carry_valid_peaks_and_nothing_else_does() {
+        let ok = parse_level(
+            r#"{"ts":1,"rms":0.3,"peak":0.5,"state":"speaking","peaks":[[440.5,1.0],[880,0.25]]}"#,
+        )
+        .unwrap();
+        assert_eq!(ok.peaks, Some(vec![[440.5, 1.0], [880.0, 0.25]]));
+        let ev = serde_json::to_value(&ok).unwrap();
+        assert_eq!(
+            ev["peaks"],
+            serde_json::json!([[440.5, 1.0], [880.0, 0.25]])
+        );
+        // Not speaking: peaks are ignored even when well formed.
+        let mic =
+            parse_level(r#"{"ts":1,"rms":0.3,"peak":0.5,"state":"listening","peaks":[[440,1]]}"#)
+                .unwrap();
+        assert_eq!(mic.peaks, None);
+        assert!(serde_json::to_value(&mic).unwrap().get("peaks").is_none());
+        // Bad peaks drop the peaks only; the level still counts.
+        for bad in [
+            r#"[]"#,
+            r#"[[440,1],[500,1],[600,1],[700,1]]"#,
+            r#"[[79.9,1]]"#,
+            r#"[[4000.1,1]]"#,
+            r#"[[440,0]]"#,
+            r#"[[440,1.01]]"#,
+            r#"[[440,-1]]"#,
+            r#"[[440]]"#,
+            r#"[[440,1,2]]"#,
+            r#"[["440",1]]"#,
+            r#"[[440,1],"x"]"#,
+            r#"{"f":440}"#,
+            r#""440""#,
+            r#"null"#,
+        ] {
+            let frame =
+                format!(r#"{{"ts":1,"rms":0.3,"peak":0.5,"state":"speaking","peaks":{bad}}}"#);
+            let ev = parse_level(&frame).unwrap_or_else(|| panic!("level dropped for {bad}"));
+            assert_eq!(ev.peaks, None, "{bad}");
+            assert_eq!(ev.rms, 0.3);
+        }
+        let none = parse_level(r#"{"ts":1,"rms":0.3,"peak":0.5,"state":"speaking"}"#).unwrap();
+        assert_eq!(none.peaks, None);
+    }
     use serde_json::json;
     use std::sync::{Arc, Mutex};
 

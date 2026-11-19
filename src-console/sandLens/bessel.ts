@@ -81,7 +81,7 @@ export type Peak = { f: number; amp: number };
 
 /**
  * 2–3 strongest spectral peaks in 80–4000 Hz from a dB spectrum (AnalyserNode.getFloatFrequencyData).
- * Used when a spectrum of her voice is available (Needs wiring: the voice plays in the sidecar).
+ * amara-voice runs the same picking rules on what it plays and sends the result in its level frames (decision 0040).
  */
 export function pickPeaks(fd: Float32Array, binHz: number, max = 3): Peak[] {
   const lo = Math.max(1, Math.ceil(80 / binHz)), hi = Math.min(fd.length - 2, Math.floor(4000 / binHz));
@@ -98,8 +98,7 @@ export function pickPeaks(fd: Float32Array, binHz: number, max = 3): Peak[] {
 }
 
 /**
- * Speech fallback (no spectrum in the UI: her voice is played by the sidecar and only rms/peak level
- * events reach the app). Each loudness onset advances a fixed, deterministic walk through speech-band
+ * Speech fallback, used only when a level frame has no peaks (an older amara-voice, or no peaks in band). Each loudness onset advances a fixed, deterministic walk through speech-band
  * modes (≈100–1000 Hz) and blends the 2–3 nearest, loudness driving the amplitude. Documented in REPORT.
  */
 export function fallbackPeaks(onsetIndex: number, modes = buildModes().modes): Peak[] {
@@ -114,6 +113,11 @@ export function fallbackPeaks(onsetIndex: number, modes = buildModes().modes): P
   const c = band[(phrase * step + 3) % band.length];
   const k = onsetIndex % 6;
   return [{ f: a.f, amp: 1 }, { f: b.f, amp: k === 1 ? 0.06 : 0 }, { f: c.f, amp: k === 2 ? 0.04 : 0 }].filter((p) => p.amp > 0);
+}
+
+/** Real peaks from her voice when the feed sent them (decision 0040), else the loudness-onset fallback. */
+export function voicePeaks(real: Peak[] | undefined, onsetIndex: number, modes = buildModes().modes): Peak[] {
+  return real && real.length ? real : fallbackPeaks(onsetIndex, modes);
 }
 
 /** Mode scheduler: hold ≥ 250 ms, ~400 ms crossfade, at most 4 modes (shader uniforms). */

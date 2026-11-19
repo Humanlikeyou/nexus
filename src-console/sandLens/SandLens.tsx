@@ -4,7 +4,7 @@ import type { AmaraVoiceState } from "../hooks/useAmaraVoice";
 import { amaraVoiceLevel, amaraVoiceLevelAge } from "../hooks/useAmaraVoice";
 import { useLiveHeartRate } from "../hooks/useLiveHeartRate";
 import { pulsePeriod } from "./pulse";
-import { buildModes, fallbackPeaks } from "./bessel";
+import { buildModes, fallbackPeaks, voicePeaks } from "./bessel";
 import type { SandEngine, SandState } from "./engine";
 import { webgl2Available } from "./gl";
 import { calmActive, sessionSeed, useSandSettings } from "./settings";
@@ -79,7 +79,8 @@ export function SandLensLayer({ voice, line, active = true }: { voice: AmaraVoic
   useEffect(() => { engineRef.current?.setCalm(calm); }, [calm, sand, ready]);
   useEffect(() => { engineRef.current?.setPulse(period); }, [period, sand, ready]);
 
-  // voice level → Chladni amplitude; loudness onsets advance the speech-band modes (no spectrum in the UI)
+  // voice level → Chladni amplitude. Her real spectral peaks drive the modes when amara-voice sends them
+  // (decision 0040); otherwise loudness onsets advance the speech-band fallback walk.
   useEffect(() => {
     if (!sand) return;
     let raf = 0, onsets = 0, wasQuiet = true, env = 0;
@@ -91,7 +92,7 @@ export function SandLensLayer({ voice, line, active = true }: { voice: AmaraVoic
         const loud = Math.min(1, Math.max(0, rms * 3.2));
         env += (loud - env) * 0.3;
         if (wasQuiet && env > 0.18) { onsets++; wasQuiet = false; } else if (env < 0.06) wasQuiet = true;
-        if (target === "speak") e.setVoice(env, fallbackPeaks(onsets));
+        if (target === "speak") e.setVoice(env, voicePeaks(fresh ? amaraVoiceLevel.current.peaks : undefined, onsets));
       }
       raf = requestAnimationFrame(tick);
     };

@@ -8,8 +8,10 @@ import { amaraVoiceLevel, amaraVoiceLevelAge, useAmaraVoice, LEVEL_SILENCE_MS, t
  * separate amara-voice process, so the webview never holds her audio. The Rust voice bridge relays that
  * process's loudness (ws 127.0.0.1:8791/level) as `amara-voice://level` (rms/peak, up to 30 Hz), and
  * `useAmaraVoice` keeps the latest frame in `amaraVoiceLevel`. `voiceLoudness()` below is the AnalyserNode
- * stand-in: a 0..1 value a render loop reads each frame. It carries loudness only, no spectrum (the lens
- * fakes its speech-band peaks from loudness onsets, see sandLens/bessel.ts `fallbackPeaks`).
+ * stand-in: a 0..1 value a render loop reads each frame. The spectrum comes separately: while she speaks,
+ * amara-voice measures the 1-3 strongest peaks of what it plays and the frame carries them
+ * (`amaraVoiceLevel.current.peaks`, decision 0040); the lens uses them, and falls back to loudness onsets
+ * (sandLens/bessel.ts `fallbackPeaks`) only when a frame has none.
  * No audio, transcript or health value passes through here.
  */
 export type AmaraLensState = "off" | "wake" | "listening" | "speaking";

@@ -18,7 +18,7 @@ export type AmaraVoiceReason = (typeof AMARA_VOICE_REASONS)[number];
  * Payloads per Rust's voice bridge: levels up to 30 Hz (peak >= rms, ts restamped on arrival);
  * state on change plus a 5s heartbeat. utteranceId / tts_failed aren't sent yet (handled tolerantly).
  */
-export interface AmaraVoiceLevel { ts: number; rms: number; peak: number; state: AmaraVoiceState; utteranceId?: string }
+export interface AmaraVoiceLevel { ts: number; rms: number; peak: number; state: AmaraVoiceState; utteranceId?: string; peaks?: Array<[number, number]> }
 export interface AmaraVoiceStateEvent { ts: number; state: AmaraVoiceState; utteranceId?: string; reason?: AmaraVoiceReason }
 
 /** No level event for 2s: the meter decays to 0 (state is untouched). */
@@ -33,7 +33,23 @@ export const VOICE_BRIDGE_STOP = "voice_bridge_stop";
 const WATCHDOG_TICK_MS = 250;
 
 export interface AmaraVoiceSnapshot { state: AmaraVoiceState; reason: AmaraVoiceReason | null }
-export interface LevelSample { rms: number; peak: number }
+/** `peaks`: her voice's 1–3 strongest spectral peaks ({f Hz, amp}) while she speaks, when amara-voice sends them (decision 0040). */
+export interface LevelSample { rms: number; peak: number; peaks?: VoicePeak[] }
+export interface VoicePeak { f: number; amp: number }
+
+/** Same rules as the Rust bridge: 1–3 `[hz, amp]` pairs, 80–4000 Hz, amp in (0, 1]. Anything else: no peaks. */
+export function parseVoicePeaks(v: unknown): VoicePeak[] | undefined {
+  if (!Array.isArray(v) || v.length === 0 || v.length > 3) return undefined;
+  const out: VoicePeak[] = [];
+  for (const p of v) {
+    if (!Array.isArray(p) || p.length !== 2) return undefined;
+    const [f, amp] = p as unknown[];
+    if (typeof f !== "number" || !Number.isFinite(f) || f < 80 || f > 4000) return undefined;
+    if (typeof amp !== "number" || !Number.isFinite(amp) || amp <= 0 || amp > 1) return undefined;
+    out.push({ f, amp });
+  }
+  return out;
+}
 
 const clamp01 = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
 const isState = (v: unknown): v is AmaraVoiceState => typeof v === "string" && (AMARA_VOICE_STATES as readonly string[]).includes(v);
@@ -93,7 +109,8 @@ export function ingestLevel(raw: unknown) {
   if (!accept(p)) return;
   lastLevelAt = Date.now();
   const rms = clamp01(p.rms);
-  amaraVoiceLevel.current = { rms, peak: Math.max(rms, clamp01(p.peak)) };
+  const peaks = p.state === "speaking" ? parseVoicePeaks(p.peaks) : undefined;
+  amaraVoiceLevel.current = peaks ? { rms, peak: Math.max(rms, clamp01(p.peak)), peaks } : { rms, peak: Math.max(rms, clamp01(p.peak)) };
   if (isState(p.state) && p.state !== snapshot.state) {
     lastStateAt = lastLevelAt;
     setSnapshot({ state: p.state, reason: p.state === "error" ? snapshot.reason : null });
