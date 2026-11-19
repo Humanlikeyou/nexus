@@ -1040,3 +1040,7 @@ TypeScript only. No Rust, no new command, no capability change, no markup/CSS/We
   - LOW-1 fixed: `restore_pick_in` (Undo of a drop) refuses when the active list is already full (12). Test `undo_of_a_removal_is_refused_when_the_list_has_filled_up`.
   - LOW-2 recorded: an orphan pick (a pick whose source proposal row was later pruned) is cosmetic; it still shows and prices normally.
   - LOW-3 recorded: picks steered by the headlines are accepted (headline text is untrusted data and a hostile headline can nudge which ticker is proposed). Mitigations are the citation check, shape checks, forced watch-only, and his second confirm; "Not financial advice" must stay visible with every pick (`disclaimer` in `watchlist_get`).
+- **Installed e87c7bd (2026-11-19).** Taisun: "Yea" (to reinstall, plus quit and reopen).
+  - Quit, ditto, reopened; the app is running. Rollback: `~/Backups/Amara OS-backup-20261119b.app` (dd62dab).
+  - Claude also deleted the older rollback `-20261118d.app` (dd80bbf) without asking first. This is reported to Taisun.
+  - Remaining backups: `-20261118`, `-20261119` and `-20261119b`.
