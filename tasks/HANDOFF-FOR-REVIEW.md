@@ -1099,3 +1099,63 @@ Taisun: "1. I'm giving you permission to change the voice in how you see fit to 
   7. History logging + Undo for roadmap accept / Not yet / goal delete; backup runs not in History/Needs-you; HA container stop has no native gate (L2, pre-existing); friendlier copy for restore_backup error codes.
   8. Legacy scheduler prune tests are timing-flaky under heavy parallel load (pass alone).
 - **Not run live:** the app with real devices, Muse, HA, Telegram, crew service. Not installed yet (installed build is 222b486).
+
+## 46. Decision 0045: improvement-cycle brief, part 1 (2026-11-20, committed)
+
+Plan: `tasks/PLAN-0045.md`. Taisun answered all four questions (logged in 0045). Weekly usage ran low, so the cycle stopped at a safe point.
+
+**Built:**
+- **Sand lens:**
+  - A new "think" state: grains gather into three drifting, spinning rings that rearrange every ~7 s.
+  - Speak reacts to syllable onsets (ripples) and to intensity.
+  - Chat replies make the sand think when the voice is off; the line under the lens says "Amara is thinking".
+  - New spec `test/e2e/sand-states.spec.ts` checks the shaders compile. `SAND_SHOTS=1` saves frames.
+- **Mind-Body speed:**
+  - One batched NOOP read (`noop_query_batch`, one sandboxed spawn).
+  - The verified private copy is cached by dev/ino/size/mtime/ctime, and the pin is re-checked every call.
+  - The last page shows instantly, then refreshes.
+  - The take shares the snapshot.
+  - Timing under load: 0.84–2.9 s before, ~0.4–0.5 s after.
+  - Residual risk: the cached copy is checked by metadata only, not re-hashed per call. Tampering would need code already running as the same user.
+- **Fitness take:** a catalog of 40 fitness entries across 9 kinds plus 3 progressive ladders. Selection is condition-aware and avoids repeating recent offers and kinds.
+- **Neuro:**
+  - Find Muse is one compact row.
+  - "Done with the Muse" is now "What the Muse found".
+  - The false "You are in Threshold" line is gone.
+  - Wave One: a separate `hemisync/marked_done.json` flag that every view reads, with no fake sessions. **Taisun: press "Mark wave done" on Wave 1 in Hemi-Sync › All tracks by wave** (Claude did not write his data).
+- **Habits:**
+  - `habits/days.json` with `habit_mark`/`habit_days` and Undo.
+  - Done today / Undo on habit rows; why, remind-at and pause fields.
+  - A Needs-you habit row after the remind time.
+  - The weekly review counts real habit days.
+  - Amara context `nexus_habits` and `nexus_dates`.
+- **Money:**
+  - Append-only `money/entries.jsonl` (balance, income, expense, savings, bill, commitment), with void-and-replace edits and Undo.
+  - `money_month_view` rollups and a savings goal.
+  - A dashboard with 6 tiles, an Add sheet and recent entries.
+  - The ¥ glyph is fixed in MoneyView.
+  - Amara context `nexus_money` (keyword-gated).
+- **Enterprise:**
+  - The ledger can be written: add, edit, archive and restore a venture, set the FX rate, with History and Undo.
+  - Treasury quick income/cost entries.
+  - Overview is now a start page: what this is, 3 actions, ventures with this month's in/out, and "Needs your call".
+  - Trading is shown once. Dead ends are removed.
+- **Bug fixed:** the roadmap "today's question" retried forever after a failed load, which froze Enterprise under the e2e mock (`roadmapLive.ts`).
+- **Hermes side of Telegram replies:** `~/projects/hermes-patches/nexus-inbox/` (MCP tools that drop validated JSON into `<data>/inbox/`). This is Taisun's step to install. Smoke-tested in a temp dir.
+- **Mock-ups:** `tasks/mockups-0045/index.html` plus screenshots. Taisun said "I approved the best markup", so the next step is building the chosen variants.
+
+**Not done (next session, in this order):**
+1. **Nexus side of the Telegram inbox:**
+   - an ingest job for `<data>/inbox/` (validate, apply, move to done/rejected) and `asks/open.json`
+   - the proactive Rust job for the check-in ask at a configurable time, habit reminders and the weekly money check-in
+   - wire `money_checkin_due` (marked `allow(dead_code)`)
+2. **Dates & Deadlines:** per-date lead days, Done state, goal link, a purpose line.
+3. **Build the approved mock-ups:**
+   - Neuro rings (brain data)
+   - the HR take graph
+   - the Mind-Body charts: variant A (2D) for Trends and Sleep, B for Readiness and Training Load, to confirm with Taisun
+   - the money charts
+4. **Money:** charts, the advice engine with stated assumptions, the manual FX form, and the ¥ glyphs still in sample-mode strings in `money/adapters.ts`.
+5. **Habits:** chat marking ("I did X"), and the Needs-you habits source label.
+6. **Enterprise:** the History list UI, and venture links on tasks and content.
+7. **bindings.gen.ts:** regenerate once the `GoalProgress` name clash between money_entries and goal_progress is resolved.

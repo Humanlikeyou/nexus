@@ -3,7 +3,7 @@ import { buildRouterConfig } from "../legacy-core/lib/llm-router";
 import { getConfig } from "../legacy-core/lib/api";
 import type { RouterResponse } from "../legacy-core/lib/types";
 import { getHomeBrief, loadKv, saveKv } from "../bridge";
-import { isSnapshot, noopQuery } from "../lib/noop";
+import { readSnapshot } from "../lib/noopSnapshot";
 import type { NoopSnapshotPayload, RecordedSession, RevenueSummary } from "../types";
 import { personalAdapter } from "../personal/adapters";
 import { roadmapAdapter } from "../goals/roadmap";
@@ -14,10 +14,7 @@ import { businessFacts, lifeGoalFacts, fitnessFacts, homeFacts, mindBodyFacts, n
 import type { TakeDeps } from "./generate";
 import { appendTake, entryFromTake, takeLogEntries } from "../takes/takeLog";
 
-const snapshot = async (): Promise<NoopSnapshotPayload | null> => {
-  const read = await noopQuery("health_snapshot", { days: 29 });
-  return read.ok && isSnapshot(read.value) ? read.value : null;
-};
+const snapshot = (): Promise<NoopSnapshotPayload | null> => readSnapshot();
 
 /** Real sources, read only when the page's take is asked for. A failed read is "no data", never a guess. */
 export const liveDeps: TakeDeps = {

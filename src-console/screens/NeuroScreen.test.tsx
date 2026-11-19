@@ -65,6 +65,21 @@ describe("Neuro screen", () => {
     expect(screen.getByText("Your first completed session will appear here.")).toBeInTheDocument();
   });
 
+  it("Find Muse is one compact row: status chip, short line and the primary button share a row; the device list shows only when scanning or found", () => {
+    renderNeuro({});
+    const row = document.querySelector(".d18-next__row") as HTMLElement;
+    expect(within(row).getByText("No Muse connected")).toBeInTheDocument();
+    expect(within(row).getByText("Put your headset in pairing mode")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Find Muse" })).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Nearby headsets" })).toBeNull();
+    expect(screen.queryByText("Results appear here after a scan.")).toBeNull();
+  });
+
+  it("while scanning, the nearby list opens below the row", () => {
+    renderNeuro({ operation: "scanning" });
+    expect(screen.getByText("Looking for headsets… Scanning takes about five seconds.")).toBeInTheDocument();
+  });
+
   it("loading operation: the primary button shows progress and other controls are disabled", () => {
     renderNeuro({ operation: "scanning" });
     expect(screen.getByRole("button", { name: /Searching…/ })).toBeDisabled();
@@ -179,7 +194,7 @@ describe("Neuro sections (1112n)", () => {
     renderNeuro({ data: snap({ muse: connected }) });
     expect(screen.getByRole("heading", { level: 2, name: "Hemi-Sync" })).toBeInTheDocument();
     expect(screen.getByText("Your Hemi-Sync library isn't connected yet.")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Done with the Muse" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "What the Muse found" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Focus and calm over time" })).toBeInTheDocument();
     expect(screen.getByText("Trends appear after two sessions with a focus or calm score.")).toBeInTheDocument();
     expect(screen.queryByText("Sample data")).toBeNull();

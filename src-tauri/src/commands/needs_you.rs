@@ -55,6 +55,19 @@ pub(crate) struct CrewIn {
     pub title: String,
 }
 
+/// A habit that may need a "mark today" pointer: only its own facts, no marks.
+pub(crate) struct HabitIn {
+    pub id: String,
+    pub title: String,
+    /// `HH:MM` JST; `None` = `HABIT_DEFAULT_REMIND`.
+    pub remind_at: Option<String>,
+    pub paused: bool,
+    pub marked_today: bool,
+}
+
+/// A habit is asked about from this time JST when it has no `remind_at` of its own.
+pub const HABIT_DEFAULT_REMIND: &str = "20:00";
+
 /// What each source returned. `Ok(None)` is "not set up" (unwired); `Err` is "didn't load".
 pub(crate) struct Inputs {
     pub today: NaiveDate,
@@ -73,6 +86,8 @@ pub(crate) struct Inputs {
     pub strap: Result<Option<super::strap_night::StrapNight>, String>,
     /// 0038: true when the watchlist's "Want new picks?" question is due (14 days, feeds allowed).
     pub watchlist: Result<bool, String>,
+    /// 0045: habits and whether today is marked. `Err` when goals or the habit log could not be read.
+    pub habits: Result<Vec<HabitIn>, String>,
 }
 
 fn link(id: &str, view: &str) -> Route {
@@ -286,6 +301,38 @@ pub(crate) fn build(i: Inputs) -> Vec<SourceReport> {
         ),
     };
 
+    // One quiet row per active habit that is still unmarked after its reminder time. Pointers only.
+    let habits = report(
+        "habits",
+        i.habits.map(|hs| {
+            let minutes = i.now.hour() * 60 + i.now.minute();
+            hs.iter()
+                .filter(|h| !h.paused && !h.marked_today)
+                .filter(|h| {
+                    let at = h.remind_at.as_deref().unwrap_or(HABIT_DEFAULT_REMIND);
+                    super::goals::valid_hhmm(at)
+                        .or_else(|| super::goals::valid_hhmm(HABIT_DEFAULT_REMIND))
+                        .and_then(|t| {
+                            let (hh, mm) = t.split_once(':')?;
+                            Some(hh.parse::<u32>().ok()? * 60 + mm.parse::<u32>().ok()?)
+                        })
+                        .is_some_and(|m| minutes >= m)
+                })
+                .map(|h| {
+                    let mut p = pointer(
+                        "habits",
+                        format!("habit-{}", h.id),
+                        h.title.clone(),
+                        "Not marked today".into(),
+                        link("life", "goals"),
+                    );
+                    p.quiet = true;
+                    p
+                })
+                .collect()
+        }),
+    );
+
     let strap = match i.strap {
         Err(_) => report("strap", Err("failed".into())),
         Ok(None) => unwired("strap"),
@@ -330,7 +377,7 @@ pub(crate) fn build(i: Inputs) -> Vec<SourceReport> {
     );
 
     vec![
-        todos, dates, checkin, decisions, crew, treasury, strap, watchlist,
+        todos, dates, checkin, decisions, crew, treasury, strap, watchlist, habits,
     ]
 }
 
@@ -374,6 +421,10 @@ async fn gather() -> Inputs {
         let e = || "failed".to_string();
         (Err(e()), Err(e()), Err(e()), Err(e()), Err(e()))
     });
+    let d3 = data.clone();
+    let habits = tauri::async_runtime::spawn_blocking(move || habits_now(&d3, today))
+        .await
+        .unwrap_or_else(|_| Err("failed".to_string()));
     let strap = tauri::async_runtime::spawn_blocking(move || super::strap_night::read(now))
         .await
         .unwrap_or_else(|_| Err("failed".to_string()));
@@ -422,7 +473,29 @@ async fn gather() -> Inputs {
         treasury,
         strap,
         watchlist,
+        habits,
     }
+}
+
+/// Habit rows from goals.json with whether today has a done mark. Read-only.
+fn habits_now(data: &std::path::Path, today: NaiveDate) -> Result<Vec<HabitIn>, String> {
+    let goals: Vec<super::goals::Goal> =
+        super::local_store::read_json(&data.join("goals.json"), super::adds::MAX_MD_BYTES)?;
+    let rows = super::habits::rows_in(&super::habits::dir_in(data))?;
+    let key = today.format("%Y-%m-%d").to_string();
+    Ok(goals
+        .into_iter()
+        .filter(|g| g.category == "habit")
+        .map(|g| HabitIn {
+            marked_today: rows
+                .iter()
+                .any(|r| r.habit_id == g.id && r.day == key && r.done),
+            id: g.id,
+            title: g.title,
+            remind_at: g.remind_at,
+            paused: g.paused,
+        })
+        .collect())
 }
 
 /// One report per source. A failed source never hides the others.
@@ -506,6 +579,7 @@ mod tests {
                 recovery_missing: true,
             })),
             watchlist: Ok(false),
+            habits: Ok(vec![]),
         }
     }
     fn tflag(id: &str, kind: &str) -> super::super::treasury_monitor::Flag {
@@ -762,5 +836,79 @@ mod tests {
             .unwrap();
         assert!(!block.contains("format!"), "strap text must be fixed");
         assert!(!block.contains("hr:") && !block.contains("motion"));
+    }
+
+    fn hab(id: &str, remind: Option<&str>, paused: bool, marked: bool) -> HabitIn {
+        HabitIn {
+            id: id.into(),
+            title: format!("Habit {id}"),
+            remind_at: remind.map(Into::into),
+            paused,
+            marked_today: marked,
+        }
+    }
+
+    #[test]
+    fn habit_rows_wait_for_the_reminder_time_and_skip_paused_and_marked() {
+        let hs = || {
+            Ok(vec![
+                hab("a", None, false, false),
+                hab("b", Some("21:30"), false, false),
+                hab("c", None, true, false),
+                hab("d", None, false, true),
+            ])
+        };
+        let mut i = inputs();
+        i.habits = hs();
+        i.now = at(11, 19, 59);
+        assert!(by(&build(i), "habits").rows.is_empty());
+        let mut i = inputs();
+        i.habits = hs();
+        i.now = at(11, 20, 0);
+        let r = build(i);
+        let rows = &by(&r, "habits").rows;
+        assert_eq!(
+            rows.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            ["habit-a"]
+        );
+        assert_eq!(rows[0].reason, "Not marked today");
+        assert_eq!(
+            rows[0].deep_link,
+            Route {
+                id: "life".into(),
+                view: "goals".into()
+            }
+        );
+        let mut i = inputs();
+        i.habits = hs();
+        i.now = at(11, 21, 30);
+        let r = build(i);
+        assert_eq!(
+            by(&r, "habits")
+                .rows
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
+            ["habit-a", "habit-b"]
+        );
+        let mut i = inputs();
+        i.habits = Err("x".into());
+        assert_eq!(by(&build(i), "habits").state, "failed");
+    }
+
+    #[test]
+    fn habits_now_reads_goals_and_marks() {
+        use crate::commands::local_store::tests::temp_dir;
+        let d = temp_dir("nyh");
+        assert!(habits_now(&d, today()).unwrap().is_empty());
+        let g = r#"[{"id":"h1","title":"Walk","category":"habit","target":5,"current":0,"unit":"","deadline":null,"remind_at":"21:00","paused":true},{"id":"g1","title":"G","category":"health","target":5,"current":0,"unit":"","deadline":null}]"#;
+        std::fs::write(d.join("goals.json"), g).unwrap();
+        let hs = habits_now(&d, today()).unwrap();
+        assert_eq!(hs.len(), 1);
+        assert_eq!(
+            (hs[0].paused, hs[0].remind_at.as_deref(), hs[0].marked_today),
+            (true, Some("21:00"), false)
+        );
+        let _ = std::fs::remove_dir_all(d);
     }
 }

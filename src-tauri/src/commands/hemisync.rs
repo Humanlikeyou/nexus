@@ -42,6 +42,8 @@ const AMARA_NOTE_CHARS: usize = 120;
 const AMARA_TITLE_CHARS: usize = 80;
 const STORE_FILE: &str = "sessions.json";
 const META_FILE: &str = "import.json";
+const MARKED_FILE: &str = "marked_done.json";
+const MAX_MARKED_TRACKS: usize = 2000;
 
 static IMPORT_BUSY: AtomicBool = AtomicBool::new(false);
 static STORE_LOCK: Mutex<()> = Mutex::new(());
@@ -57,6 +59,9 @@ pub struct LibTrack {
     pub order: u32,
     pub title: String,
     pub duration_ms: Option<u64>,
+    /// 0045: Taisun marked this track done by hand (a separate flag; it is never a session and
+    /// never counts toward minutes, ratings, rankings or patterns). Filled by `library_in`.
+    pub marked_done: bool,
     /// Never sent to the renderer (no path leaves the backend).
     #[serde(skip)]
     pub rel_path: String,
@@ -327,6 +332,7 @@ pub(crate) fn scan_library(data: &Path) -> Library {
                     order,
                     title,
                     duration_ms: None,
+                    marked_done: false,
                     rel_path,
                 });
             }
@@ -663,6 +669,110 @@ pub(crate) fn import_in(
     PATH_CACHE.clear();
     progress(total, total, "done");
     Ok(ImportResult { added, skipped })
+}
+
+// ---------------------------------------------------------------- marked done (0045)
+
+/// One hand-marked track. Separate from `sessions.json`: a mark is NOT a session, so stats,
+/// minutes, ratings, rankings, daily_table and patterns never see it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct MarkedRow {
+    track_id: String,
+    marked_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct MarkedStore {
+    #[serde(default)]
+    marked: Vec<MarkedRow>,
+}
+
+fn marked_path(data: &Path) -> PathBuf {
+    hemisync_dir(data).join(MARKED_FILE)
+}
+
+fn load_marked(data: &Path) -> Result<MarkedStore, String> {
+    check_root(data)?;
+    local_store::read_json(&marked_path(data), MAX_STORE_BYTES).map_err(|_| "store_error".into())
+}
+
+/// Track ids marked done by hand. Read-only; a damaged store reads as empty.
+pub(crate) fn marked_ids_in(data: &Path) -> std::collections::HashSet<String> {
+    load_marked(data)
+        .map(|m| m.marked.into_iter().map(|r| r.track_id).collect())
+        .unwrap_or_default()
+}
+
+/// The library with each track's `marked_done` flag filled from the marked store.
+pub(crate) fn library_in(data: &Path) -> Library {
+    let mut lib = scan_library(data);
+    let marked = marked_ids_in(data);
+    for t in &mut lib.tracks {
+        t.marked_done = marked.contains(&t.id);
+    }
+    lib
+}
+
+/// Mark (or unmark) tracks done. Every id must be in the library; the whole call is rejected
+/// otherwise. Idempotent. Returns how many marks changed.
+pub(crate) fn mark_done_in(data: &Path, track_ids: &[String], done: bool) -> Result<u64, String> {
+    if track_ids.is_empty() || track_ids.len() > MAX_MARKED_TRACKS {
+        return Err("invalid_track_ids".into());
+    }
+    let known: std::collections::HashSet<String> = scan_library(data)
+        .tracks
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    for id in track_ids {
+        if !valid_track_id(id) || !known.contains(id) {
+            return Err("track_not_found".into());
+        }
+    }
+    let _l = STORE_LOCK.lock().map_err(|_| "store_error".to_string())?;
+    let mut store = load_marked(data)?;
+    let mut changed = 0u64;
+    let now = chrono::Utc::now().to_rfc3339();
+    for id in track_ids {
+        let has = store.marked.iter().any(|r| &r.track_id == id);
+        if done && !has {
+            if store.marked.len() >= MAX_MARKED_TRACKS {
+                return Err("store_full".into());
+            }
+            store.marked.push(MarkedRow {
+                track_id: id.clone(),
+                marked_at: now.clone(),
+                note: None,
+            });
+            changed += 1;
+        } else if !done && has {
+            store.marked.retain(|r| &r.track_id != id);
+            changed += 1;
+        }
+    }
+    if changed > 0 {
+        check_root(data)?;
+        local_store::write_json_atomic(&marked_path(data), &store, MAX_STORE_BYTES)
+            .map_err(|_| "store_error".to_string())?;
+    }
+    Ok(changed)
+}
+
+/// Every track of one wave (by number), marked or unmarked in one call.
+pub(crate) fn mark_wave_done_in(data: &Path, wave: u32, done: bool) -> Result<u64, String> {
+    let ids: Vec<String> = scan_library(data)
+        .tracks
+        .into_iter()
+        .filter(|t| t.wave == wave)
+        .map(|t| t.id)
+        .collect();
+    if ids.is_empty() {
+        return Err("wave_not_found".into());
+    }
+    mark_done_in(data, &ids, done)
 }
 
 // ---------------------------------------------------------------- session store
@@ -1138,14 +1248,49 @@ fn num_or_na(v: Option<f64>) -> String {
 /// known to the backend, so there is no listened percentage).
 pub(crate) fn context_section_in(data: &Path, muse_sessions_dir: &Path) -> Option<String> {
     let rows = sessions_in(data, muse_sessions_dir).ok()?;
-    if rows.is_empty() {
+    let lib = library_in(data);
+    // 0045: a wave is complete when every track has a session link or a hand mark.
+    let linked: std::collections::HashSet<String> = load_store(data)
+        .map(|s| s.sessions.into_iter().map(|r| r.track_id).collect())
+        .unwrap_or_default();
+    let mut complete: Vec<String> = Vec::new();
+    let mut waves: Vec<(u32, &str)> = lib
+        .tracks
+        .iter()
+        .filter(|t| t.wave > 0)
+        .map(|t| (t.wave, t.wave_name.as_str()))
+        .collect();
+    waves.dedup();
+    for (w, name) in waves {
+        if lib
+            .tracks
+            .iter()
+            .filter(|t| t.wave == w)
+            .all(|t| t.marked_done || linked.contains(&t.id))
+        {
+            complete.push(format!(
+                "Wave {w} {}: complete",
+                plain_capped(name, AMARA_TITLE_CHARS)
+            ));
+        }
+    }
+    if rows.is_empty() && complete.is_empty() {
         return None;
     }
-    let lib = scan_library(data);
-    let mut lines = vec![
+    let mut lines = Vec::new();
+    if !complete.is_empty() {
+        lines.push(format!(
+            "Hemi-Sync waves Taisun has finished (with Muse sessions or marked done by him): {}.",
+            complete.join("; ")
+        ));
+    }
+    if rows.is_empty() {
+        return Some(lines.join("\n"));
+    }
+    lines.push(
         "Taisun's latest Hemi-Sync listening sessions recorded with the Muse (local, newest first):"
             .to_string(),
-    ];
+    );
     for r in rows.iter().take(AMARA_SESSIONS) {
         let date: String = r.started_at.chars().take(10).collect();
         let track = lib.tracks.iter().find(|t| t.id == r.track_id).map_or_else(
@@ -1490,7 +1635,27 @@ pub async fn hemisync_import(
 #[specta::specta]
 pub async fn hemisync_library() -> Result<Library, String> {
     let data = crate::app_paths::data_dir();
-    blocking(JoinErr::Code("io_error"), move || Ok(scan_library(&data))).await
+    blocking(JoinErr::Code("io_error"), move || Ok(library_in(&data))).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hemisync_mark_done(track_ids: Vec<String>, done: bool) -> Result<u64, String> {
+    let data = crate::app_paths::data_dir();
+    blocking(JoinErr::Code("io_error"), move || {
+        mark_done_in(&data, &track_ids, done)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hemisync_mark_wave_done(wave_number: u32, done: bool) -> Result<u64, String> {
+    let data = crate::app_paths::data_dir();
+    blocking(JoinErr::Code("io_error"), move || {
+        mark_wave_done_in(&data, wave_number, done)
+    })
+    .await
 }
 
 #[tauri::command]

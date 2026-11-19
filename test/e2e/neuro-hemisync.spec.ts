@@ -32,14 +32,13 @@ for (const [name, opts] of [
 ] as const) {
   test(`(1112n) Neuro ${name}: sections present, honest tags, axe serious/critical = 0`, async ({ page, theme }) => {
     const field = await openNeuro(page, theme, opts);
-    await expect(field.getByRole("heading", { level: 2, name: "Done with the Muse" })).toBeVisible();
+    await expect(field.getByRole("heading", { level: 2, name: "What the Muse found" })).toBeVisible();
     await expect(field.getByRole("heading", { level: 2, name: "Focus and calm over time" })).toBeVisible();
     if (opts.sample) {
       await expect(field.getByText("5 tracks across 3 waves", { exact: false })).toBeVisible();
       await expect(field.getByText("Sample data").first()).toBeVisible();
-      await expect(field.getByRole("table", { name: "Tracks done with the Muse" })).toBeVisible();
-      await expect(field.getByText("2 of 5 done")).toBeVisible();
-      await expect(field.getByRole("region", { name: "Wave 5 Exploring checklist" })).toBeVisible();
+      await expect(field.getByRole("table", { name: "Focus and calm by track" })).toBeVisible();
+      await expect(field.getByText("Next track to try: Orientation", { exact: false })).toBeVisible();
     } else {
       await expect(field.getByText("Your Hemi-Sync library isn't connected yet.")).toBeVisible();
       await expect(field.getByText("Needs wiring").first()).toBeVisible();

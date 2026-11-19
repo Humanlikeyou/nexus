@@ -166,7 +166,7 @@ describe("Tauri command registry", () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
     const names = registeredCommands(lib).map((c: { name: string }) => c.name);
-    for (const name of ["hemisync_import", "hemisync_library", "hemisync_session_link", "hemisync_session_finish", "hemisync_session_rate", "hemisync_sessions", "hemisync_stats", "hemisync_ranking"]) expect(names).toContain(name);
+    for (const name of ["hemisync_import", "hemisync_library", "hemisync_session_link", "hemisync_session_finish", "hemisync_session_rate", "hemisync_sessions", "hemisync_stats", "hemisync_ranking", "hemisync_mark_done", "hemisync_mark_wave_done"]) expect(names).toContain(name);
   });
 
   it("the money commands are registered and none can move money", async () => {
@@ -235,9 +235,11 @@ describe("Tauri command registry", () => {
     const { readFileSync } = await import("node:fs");
     const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
     const names = registeredCommands(lib).map((c: { name: string }) => c.name);
-    const treasury = ["treasury_stream_add", "treasury_stream_update", "treasury_streams_list", "treasury_import_pick", "treasury_import_preview", "treasury_attention_set", "treasury_attention_list", "treasury_income_month", "treasury_income_trend", "treasury_per_hour", "treasury_fx_status", "treasury_counts_import_pick", "treasury_counts_list", "treasury_sequence_draft", "treasury_sequence_list", "treasury_sequence_update", "treasury_sequence_approve", "treasury_results_import_pick", "treasury_results_list", "treasury_flags_list", "treasury_flags_ack", "treasury_monitor_run_now", "treasury_monitor_settings_get", "treasury_monitor_settings_set", "treasury_review_read", "treasury_review_build"];
+    const treasury = ["treasury_stream_add", "treasury_stream_update", "treasury_streams_list", "treasury_import_pick", "treasury_import_preview", "treasury_attention_set", "treasury_attention_list", "treasury_income_month", "treasury_income_trend", "treasury_per_hour", "treasury_fx_status", "treasury_counts_import_pick", "treasury_counts_list", "treasury_sequence_draft", "treasury_sequence_list", "treasury_sequence_update", "treasury_sequence_approve", "treasury_results_import_pick", "treasury_results_list", "treasury_flags_list", "treasury_flags_ack", "treasury_monitor_run_now", "treasury_monitor_settings_get", "treasury_monitor_settings_set", "treasury_review_read", "treasury_review_build", "treasury_entry_add", "treasury_entry_undo", "treasury_venture_month"];
     for (const name of treasury) expect(names).toContain(name);
     expect(names.filter((n: string) => n.startsWith("treasury_")).sort()).toEqual([...treasury].sort());
+    // Enterprise write path (0045): ventures and the rate are written to the ledger, never to a bank or payment service.
+    for (const n of ["ledger_venture_save", "ledger_venture_archive", "ledger_fx_set", "ledger_history_list", "ledger_undo"]) expect(names).toContain(n);
   });
 
   it("patterns_read and weekly_review_read are registered", async () => {

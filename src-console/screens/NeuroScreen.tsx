@@ -182,7 +182,7 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
           {/* design-1118a: last session is the hero; recovery that day and recovery now stay separate. */}
           <MuseJourney session={lastSession} sessions={sessions.length ? sessions : data.sessions}
             recoveryNow={recoveryNow} onOpenHistory={onOpenHistory} onOpenSession={onOpenRecording}
-            action={<><span className="d18-chip" role="status">{operation === "scanning" ? "Searching for Muse" : "No Muse connected"}</span>{primary}</>}
+            status={<span className="d18-chip" role="status">{operation === "scanning" ? "Searching for Muse" : "No Muse connected"}</span>} action={primary}
             devices={(devices.length > 0 || operation === "scanning") ? (
               <InsetGroup title="Nearby headsets" className="neuro__group" aria-live="polite" footer={devices.length ? undefined : "Looking for headsets… Scanning takes about five seconds."}>
                 {devices.map((device) => (
@@ -195,7 +195,7 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
                 <p>No Muse found. Put it in pairing mode (hold the power button until the light pulses), then search again.</p>
                 <Button size="small" variant="secondary" icon={Bluetooth} onClick={onScan} disabled={busy || failed}>Search again</Button>
               </div>
-            ) : <p className="d18-note" aria-live="polite">Results appear here after a scan.</p>} />
+            ) : null} />
           </>
         )
         : (

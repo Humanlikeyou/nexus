@@ -1512,6 +1512,7 @@ pub async fn fx_rate_get() -> Result<Option<FxRate>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn fx_rate_set_manual(rate: f64, date: String) -> Result<FxRate, String> {
     blocking(JoinErr::Code("store_error"), move || {
         fx_set_manual_in(&data_dir(), rate, &date)

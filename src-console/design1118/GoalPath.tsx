@@ -405,8 +405,8 @@ export function MilestonesMap({ goals, adapter, branches, sampleTag, onEditGoal,
   );
 }
 
-/** Habits under the map: a flame, a 7-day strip, and one shared "Link a source". */
-export function HabitsUnderMap({ habits, sample, onLinkSource, onEdit }: { habits: Habit[]; sample: boolean; onLinkSource?: () => void; onEdit?: (h: Habit) => void }) {
+/** Habits under the map: a flame, a 7-day strip, and a "Done today" tap. */
+export function HabitsUnderMap({ habits, sample, onMark, onEdit }: { habits: Habit[]; sample: boolean; onMark?: (h: Habit, done: boolean) => void; onEdit?: (h: Habit) => void }) {
   const linked = habits.some((h) => h.days.some((d) => d !== "none"));
   return (
     <section className="d18-card d18-habits" aria-label="Habits this week">
@@ -422,16 +422,14 @@ export function HabitsUnderMap({ habits, sample, onLinkSource, onEdit }: { habit
                 <span className="d18-habit__t"><b>{h.title}</b><small>{h.source} · {known ? h.rule : "daily · no reading yet"}</small></span>
                 <span className="d18-grow" />
                 <span className="d18-habit__strip"><Dots days={h.days.slice(-7)} label={`${h.title}, last 7 days`} /><small>{streak > 0 ? `${streak} day streak` : "No streak yet"}</small></span>
+                {onMark && h.today && !h.paused && <Button size="small" variant={h.today === "done" ? "plain" : "secondary"} onClick={() => onMark(h, h.today !== "done")}>{h.today === "done" ? "Undo today" : "Done today"}</Button>}
                 {onEdit && <EditPencil label={`Edit ${h.title}`} onClick={() => onEdit(h)} />}
               </li>
             );
           })}
         </ul>
       )}
-      {!linked && habits.length > 0 && (
-        <div className="d18-linkrow"><p className="d18-note">Amara counts these from a source. The 7-day strip and the flame fill in once a source is linked.</p><span className="d18-grow" />
-          <Button size="small" variant="primary" onClick={onLinkSource} disabled={!onLinkSource}>Link a source</Button></div>
-      )}
+      {!linked && habits.length > 0 && <p className="d18-note">Tap Done today on a habit. The strip and the flame fill in from your marks.</p>}
     </section>
   );
 }

@@ -15,7 +15,7 @@ import {
  */
 
 // Shapes the Rust commands return (camelCase).
-type RawTrack = { id: string; wave: number; waveName: string; order: number; title: string; durationMs: number | null };
+type RawTrack = { id: string; wave: number; waveName: string; order: number; title: string; durationMs: number | null; markedDone?: boolean };
 type RawLibrary = { tracks: RawTrack[]; importedAt: string | null; sourceFolder: string | null };
 type RawSession = { id: string; trackId: string; startedAt: string; listenedMs: number; completed: boolean; rating: number | null; note: string | null; metrics: { focusAvg: number | null; calmAvg: number | null; bands: HemisyncMetrics["bands"] | null } };
 
@@ -50,7 +50,7 @@ const asRating = (v: number | null): HemisyncSession["rating"] => (v === 1 || v 
 export function mapLibrary(raw: RawLibrary, srcs: Record<string, string>): HemisyncLibrary {
   const byWave = new Map<number, HemisyncWave>();
   for (const t of raw.tracks) {
-    const track: HemisyncTrack = { id: t.id, wave: t.wave, waveName: t.waveName, order: t.order, title: t.title, durationMs: finiteOrNull(t.durationMs), src: srcs[t.id] ?? "" };
+    const track: HemisyncTrack = { id: t.id, wave: t.wave, waveName: t.waveName, order: t.order, title: t.title, durationMs: finiteOrNull(t.durationMs), src: srcs[t.id] ?? "", markedDone: t.markedDone === true };
     const w = byWave.get(t.wave) ?? { wave: t.wave, waveName: t.waveName, tracks: [] };
     w.tracks.push(track);
     byWave.set(t.wave, w);
@@ -137,6 +137,8 @@ export function makeLiveHemisync(deps: HemisyncDeps = defaultDeps): HemisyncAdap
     },
     linkSession: (i) => write("hemisync_session_link", { sessionId: i.sessionId, trackId: i.trackId, startedAt: i.startedAt }, { ok: true as const }),
     finishSession: (i) => write("hemisync_session_finish", { sessionId: i.sessionId, listenedMs: Math.max(0, Math.round(i.listenedMs)), completed: i.completed }, { ok: true as const }),
+    markDone: (ids, done) => write("hemisync_mark_done", { trackIds: ids, done }, { ok: true as const }),
+    markWaveDone: (wave, done) => write("hemisync_mark_wave_done", { waveNumber: wave, done }, { ok: true as const }),
     rate: (i) => write("hemisync_session_rate", { sessionId: i.sessionId, rating: i.rating, note: i.note ?? null }, { ok: true as const }),
   };
 }

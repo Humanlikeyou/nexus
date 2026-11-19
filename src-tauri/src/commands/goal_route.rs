@@ -1177,6 +1177,9 @@ mod tests {
             created_at: "2026-11-01T09:00:00+09:00".into(),
             updated_at: "2026-11-01T09:00:00+09:00".into(),
             venture_id: None,
+            why: None,
+            remind_at: None,
+            paused: false,
         });
         write_json_atomic(&path, &goals, MAX_BYTES).unwrap();
         rm::with_store_at(&d.data, |s| {

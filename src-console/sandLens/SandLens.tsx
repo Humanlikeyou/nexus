@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
 import type { AmaraVoiceState } from "../hooks/useAmaraVoice";
 import { amaraVoiceLevel, amaraVoiceLevelAge } from "../hooks/useAmaraVoice";
+import { useAmaraActivity, type AmaraActivity } from "../hooks/amaraActivity";
 import { useLiveHeartRate } from "../hooks/useLiveHeartRate";
 import { pulsePeriod } from "./pulse";
+import { OnsetDetector } from "./onset";
 import { buildModes, fallbackPeaks, voicePeaks } from "./bessel";
 import type { SandEngine, SandState } from "./engine";
 import { webgl2Available } from "./gl";
@@ -14,9 +16,16 @@ import "./sandLens.css";
 /** Lens voice state → sand state. Voice off (or out of reach) = a calm floating layer, gently breathing. */
 export function sandStateFor(voice: AmaraVoiceState, line: string): SandState {
   if (voice === "speaking") return "speak";
-  if (voice === "listening" || voice === "thinking") return "listen";
+  if (voice === "thinking") return "think";
+  if (voice === "listening") return "listen";
   if (voice === "error" && !/reach/i.test(line)) return "listen";
   return "off";
+}
+
+/** Voice first; when the voice is off (or out of reach) a pending text-chat reply makes the sand think. */
+export function lensStateFor(voice: AmaraVoiceState, line: string, activity: AmaraActivity): SandState {
+  const v = sandStateFor(voice, line);
+  return v === "off" && activity === "thinking" ? "think" : v;
 }
 
 /** Capture/dev only: pin a particle tier (0 = densest). Users get the auto-scaler. */
@@ -39,7 +48,10 @@ export function SandLensLayer({ voice, line, active = true }: { voice: AmaraVoic
   const engineRef = useRef<SandEngine | null>(null);
   const [failed, setFailed] = useState(false);
   const override = useRef<{ state: SandState | null }>({ state: null });
-  const target = sandStateFor(voice, line);
+  const activity = useAmaraActivity();
+  const target = lensStateFor(voice, line, activity);
+  const targetRef = useRef<SandState>(target);
+  useEffect(() => { targetRef.current = target; }, [target]);
   const prev = useRef<SandState>("off");
   const calm = calmActive(s);
   // heartbeat: the same live heart-rate feed as the Home heart card; no data or a stale reading = no pulse
@@ -69,7 +81,7 @@ export function SandLensLayer({ voice, line, active = true }: { voice: AmaraVoic
   useEffect(() => {
     const e = engineRef.current; if (!e) return;
     const want = override.current.state ?? target;
-    if (prev.current === "off" && want !== "off") { e.setState("wake"); e.onWakeDone = () => { e.setState(want === "speak" ? "speak" : "listen"); }; }
+    if (prev.current === "off" && want !== "off") { e.setState("wake"); e.onWakeDone = () => { const t = override.current.state ?? targetRef.current; e.setState(t === "off" ? "listen" : t); }; }
     else e.setState(want);
     if (prev.current !== want && s.sound) { const g = soundOut(s.volume, s.mute); if (g) rustle(g); }
     prev.current = want;
@@ -83,8 +95,10 @@ export function SandLensLayer({ voice, line, active = true }: { voice: AmaraVoic
   // (decision 0040); otherwise loudness onsets advance the speech-band fallback walk.
   useEffect(() => {
     if (!sand) return;
-    let raf = 0, onsets = 0, wasQuiet = true, env = 0;
-    const tick = () => {
+    let raf = 0, onsets = 0, wasQuiet = true, env = 0, lastT = 0;
+    const det = new OnsetDetector();
+    const tick = (now = performance.now()) => {
+      const dt = lastT ? Math.min(0.1, (now - lastT) / 1000) : 1 / 60; lastT = now;
       const e = engineRef.current;
       if (e) {
         const fresh = amaraVoiceLevelAge() < 2000;
@@ -92,6 +106,7 @@ export function SandLensLayer({ voice, line, active = true }: { voice: AmaraVoic
         const loud = Math.min(1, Math.max(0, rms * 3.2));
         env += (loud - env) * 0.3;
         if (wasQuiet && env > 0.18) { onsets++; wasQuiet = false; } else if (env < 0.06) wasQuiet = true;
+        if (target === "speak") { const on = det.update(loud, dt); if (on > 0) e.onset(on); } else det.reset();
         if (target === "speak") e.setVoice(env, voicePeaks(fresh ? amaraVoiceLevel.current.peaks : undefined, onsets));
       }
       raf = requestAnimationFrame(tick);

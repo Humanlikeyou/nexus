@@ -52,7 +52,7 @@ const BODY: Record<string, Spec & { pick: (r: NoopDayRow) => number | null }> = 
 
 const PAGE_METRICS: Record<"mindBody" | "fitness" | "home", string[]> = {
   mindBody: ["hrv", "recovery", "sleep", "rhr"],
-  fitness: ["steps", "strain", "kcal", "exercises", "recovery"],
+  fitness: ["steps", "strain", "kcal", "exercises", "recovery", "sleep", "hrv"],
   home: ["recovery", "hrv", "sleep"],
 };
 

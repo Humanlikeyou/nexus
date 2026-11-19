@@ -120,6 +120,9 @@ html[data-navy="on"] .d18-st__here { fill: var(--nv-red-text); }
 .d18-next { border-color: var(--copper-hairline); background: color-mix(in srgb, var(--copper) 7%, var(--bg-content)); }
 .d18-next__t { margin: 0; font: var(--type-title3); }
 .d18-next__why { margin: 0; color: var(--label-secondary); font-size: var(--text-callout); }
+.d18-next:has(.d18-next__row) { gap: var(--space-2); }
+.d18-next__row { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); align-items: center; }
+.d18-next__row .d18-next__why { flex: 1 1 12rem; min-width: 0; }
 .d18-next__edit { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; }
 .d18-branch { border-style: dashed; border-color: var(--copper-hairline); animation: d18-rise 240ms var(--ease-standard, ease-out) both; }
 .d18-branch__why { margin: 0; font-size: var(--text-callout); }

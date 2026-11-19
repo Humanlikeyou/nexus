@@ -123,12 +123,20 @@ export function HabitForm({ habit, row, onSave, onDelete, onCancel, msg }: { hab
   const [title, setTitle] = useState(row?.title ?? habit.title);
   const [rule, setRule] = useState(row?.unit ?? habit.rule);
   const [per, setPer] = useState(String(row && row.target > 0 ? Math.min(7, row.target) : habit.target || 7));
+  const [why, setWhy] = useState(row?.why ?? habit.why ?? "");
+  const [remind, setRemind] = useState(row?.remind_at ?? habit.remindAt ?? "");
+  const [paused, setPaused] = useState(row?.paused ?? habit.paused ?? false);
   return (
-    <Panel title={`Edit habit · ${habit.title}`} onSubmit={() => { if (title.trim()) onSave({ title, rule, perWeek: Number(per) }); }}>
+    <Panel title={`Edit habit · ${habit.title}`} onSubmit={() => { if (title.trim()) onSave({ title, rule, perWeek: Number(per), why, remindAt: remind, paused }); }}>
       <TextField label="Habit" value={title} onChange={(e) => setTitle(e.target.value)} required />
       <div className="d18-editor__row">
         <TextField label="Rule" value={rule} onChange={(e) => setRule(e.target.value)} placeholder="e.g. 20 minutes before bed" />
         <Select label="Times a week" options={[1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: String(n), label: String(n) }))} value={per} onChange={(e) => setPer(e.target.value)} />
+      </div>
+      <TextField label="Why it matters" value={why} onChange={(e) => setWhy(e.target.value)} placeholder="In your words, so Amara can back you up" maxLength={300} />
+      <div className="d18-editor__row">
+        <TextField label="Ask me if it's not marked after" type="time" value={remind} onChange={(e) => setRemind(e.target.value)} />
+        <Select label="Status" options={[{ value: "active", label: "Active" }, { value: "paused", label: "Paused" }]} value={paused ? "paused" : "active"} onChange={(e) => setPaused(e.target.value === "paused")} />
       </div>
       <div className="d18-actions">
         <Button size="small" variant="primary" type="submit">Save habit</Button>

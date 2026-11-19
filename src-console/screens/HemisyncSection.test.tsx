@@ -55,22 +55,23 @@ describe("Hemi-Sync section", () => {
     expect(screen.getByText("Wave 5 · Exploring · 2 tracks")).toBeInTheDocument();
     expect(screen.getByText("Wave 7 · Odyssey · 1 track")).toBeInTheDocument();
     expect(screen.getByText("5 tracks across 3 waves. Pick one, press Start, and the Muse records while it plays.")).toBeInTheDocument();
-    const table = screen.getByRole("table", { name: "Tracks done with the Muse" });
-    expect(within(table).getByText("Advanced Focus 12")).toBeInTheDocument();
-    expect(within(table).getByText("4.0 / 5")).toBeInTheDocument();
-    expect(screen.getByText("2 of 5 done")).toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "Tracks done with the Muse" })).toHaveAttribute("aria-valuenow", "2");
+    expect(screen.getByRole("heading", { level: 2, name: "What the Muse found" })).toBeInTheDocument();
   });
 
-  it("checklist: every track by wave with a done tick (text, not colour alone) and per-wave counts", () => {
+  it("What the Muse found: per-track focus and calm against his usual, best tracks, next track; no duplicated checklist or progress bar", () => {
     setup(makeSampleHemisync());
-    const w5 = screen.getByRole("region", { name: "Wave 5 Exploring checklist" });
-    expect(within(w5).getByText("2 of 2")).toBeInTheDocument();
-    expect(within(w5).getByText(/Advanced Focus 12/)).toHaveTextContent("done");
-    const w1 = screen.getByRole("region", { name: "Wave 1 Discovery checklist" });
-    expect(within(w1).getByText("0 of 2")).toBeInTheDocument();
-    expect(within(w1).getByText(/Orientation/)).toHaveTextContent("not done yet");
-    expect(screen.getByRole("region", { name: "Wave 7 Odyssey checklist" })).toBeInTheDocument();
+    const table = screen.getByRole("table", { name: "Focus and calm by track" });
+    const row = within(table).getByText("Advanced Focus 12").closest("tr") as HTMLElement;
+    expect(row).toHaveTextContent("62 · +3 vs usual");   // usual focus = mean(62, 55) = 58.5 -> 59
+    expect(row).toHaveTextContent("71 · +2 vs usual");   // usual calm = mean(71, 66) = 68.5 -> 69
+    expect(screen.getByText(/Your usual: focus 59, calm 69/)).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Best tracks so far" })).toHaveTextContent("Best for focus: Advanced Focus 12 · 62 / 100");
+    expect(screen.getByRole("list", { name: "Best tracks so far" })).toHaveTextContent("Best for calm: Advanced Focus 12 · 71 / 100");
+    expect(screen.getByText("Next track to try: Orientation (Wave 1 · Discovery).")).toBeInTheDocument();
+    // the Wave journey already counts tracks: no second checklist, "n of m done" or progress bar here
+    expect(screen.queryByText("2 of 5 done")).toBeNull();
+    expect(screen.queryByRole("region", { name: /checklist$/ })).toBeNull();
+    expect(screen.queryByRole("progressbar", { name: "Tracks done with the Muse" })).toBeNull();
   });
 
   it("opens the wave of the most recent session; wave 1 until any session exists", () => {
@@ -83,14 +84,13 @@ describe("Hemi-Sync section", () => {
     setup(liveAdapter());
     expect(open("Wave 1 · Discovery · 1 track")).toBe(true);
     expect(open("Wave 5 · Exploring · 2 tracks")).toBe(false);
-    expect(screen.getByText("0 of 3 done")).toBeInTheDocument();
   });
 
   it("live: no sample tag and no tags at all when every value is live", () => {
     setup(liveAdapter());
     expect(screen.queryByText("Sample data")).toBeNull();
     expect(screen.queryByText("Needs wiring")).toBeNull();
-    expect(screen.getByText("No Hemi-Sync sessions yet. Pick a track above and press Start with your Muse on.")).toBeInTheDocument();
+    expect(screen.getByText(/No Hemi-Sync sessions with the Muse yet\. Pick .+ above and press Start with your Muse on\./)).toBeInTheDocument();
   });
 
   it("empty library: asks to import, and importing shows progress then the result", async () => {
@@ -278,14 +278,22 @@ describe("Hemi-Sync workflow gaps", () => {
     stats: () => live([{ trackId: "t-5-1", sessions: 1, lastAt: "2026-11-10T21:30:00+09:00", avgRating: rating, focusAvg: 60, calmAvg: 70 }]),
   });
 
-  it("Done with the Muse: an unrated row gets Rate, and a row opens its recording", async () => {
+  it("What the Muse found: one scored session draws no trend and no 'best'", () => {
+    setup(withSessions(null));
+    expect(screen.getByText(/Your usual appears after two scored sessions\./)).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Best tracks so far" })).toBeNull();
+    expect(screen.queryByText(/A trend appears/)).toBeNull();
+    expect(screen.queryByLabelText(/across your Hemi-Sync sessions/)).toBeNull();
+  });
+
+  it("What the Muse found: an unrated session gets Rate, and a row opens its recording", async () => {
     const adapter = withSessions(null);
     const onOpenRecording = vi.fn();
     setup(adapter, { onOpenRecording });
-    const table = screen.getByRole("table", { name: "Tracks done with the Muse" });
+    const table = screen.getByRole("table", { name: "Focus and calm by track" });
     fireEvent.click(within(table).getByRole("button", { name: "Open the recording of Advanced Focus 12" }));
     expect(onOpenRecording).toHaveBeenCalledWith("ses-7");
-    fireEvent.click(within(table).getByRole("button", { name: "Rate Advanced Focus 12" }));
+    fireEvent.click(within(screen.getByRole("list", { name: "Sessions not rated yet" })).getByRole("button", { name: "Rate Advanced Focus 12" }));
     const sheet = await screen.findByRole("dialog", { name: "How was that session?", hidden: true });
     fireEvent.click(within(sheet).getByRole("radio", { name: "4", hidden: true }));
     fireEvent.click(within(sheet).getByRole("button", { name: "Save", hidden: true }));
@@ -306,5 +314,27 @@ describe("Hemi-Sync workflow gaps", () => {
     expect(screen.getByRole("list", { name: "Best tracks by focus" })).toHaveTextContent("Advanced Focus 12 · 71 / 100");
     expect(screen.getByRole("list", { name: "Best tracks by rating" })).toHaveTextContent("Orientation · 4.5 / 5");
     expect(screen.getByText(/Plain averages over your own sessions/)).toBeInTheDocument();
+  });
+});
+
+describe("Hemi-Sync marked done (0045)", () => {
+  it("Mark wave done and per-track Mark done call the adapter; a marked track shows Marked done and Undo", async () => {
+    const markDone = vi.fn(async () => live({ ok: true as const }));
+    const markWaveDone = vi.fn(async () => live({ ok: true as const }));
+    setup(liveAdapter({ markDone, markWaveDone } as never));
+    fireEvent.click(screen.getAllByRole("button", { name: "Mark wave done" })[0]);
+    await waitFor(() => expect(markWaveDone).toHaveBeenCalledWith(1, true));
+    fireEvent.click(screen.getByRole("button", { name: "Mark Orientation done" }));
+    await waitFor(() => expect(markDone).toHaveBeenCalledWith(["t-1-1"], true));
+  });
+  it("a marked wave counts as done everywhere: Marked done label, Undo, and the next track moves on", () => {
+    const marked: HemisyncLibrary = { ...LIB, waves: LIB.waves.map((w) => (w.wave === 1 ? { ...w, tracks: w.tracks.map((t) => ({ ...t, markedDone: true })) } : w)) };
+    setup(liveAdapter({}, live(marked)));
+    fireEvent.click(screen.getByText("All tracks by wave"));
+    fireEvent.click(screen.getByText(/^Wave 1 · Discovery/));
+    expect(screen.getAllByText(/Marked done/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Undo marked done for Orientation" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Undo wave done" })).toBeTruthy();
+    expect(screen.getByText(/Pick Advanced Focus 12 above/)).toBeTruthy();
   });
 });

@@ -7,6 +7,7 @@ import { FollowThroughView } from "../takes/FollowThrough";
 import { takesAdapter } from "../takes/adapters";
 import { TakesSettingsCard } from "../takes/TakesSettings";
 import { moneyAdapter } from "../money/adapters";
+import { MoneyEntriesPanel } from "../money/MoneyEntriesPanel";
 import { MoneyAccounts, MoneyFollowUps, MoneyOverviewSection, PersonalMoneyTake, shown, type Currency } from "../money/MoneyView";
 import "../ui/PanelKit.css";
 import "./personal.css";
@@ -84,13 +85,14 @@ export function PersonalMoneyView({ adapter, onOpenFinances }: { adapter: Person
   // design-1111v: the "Kept apart" banner and the "Business › Personal" eyebrow are gone; a link points to Finances.
   const finances = <> · Enterprise money is in {onOpenFinances ? <button type="button" className="v-link" onClick={onOpenFinances}>Enterprise › Finances ›</button> : "Enterprise › Finances"}</>;
   const statement = ov ? (ov.totalUsd != null ? `${shown(ov.totalUsd, ov.fx ? cur : "USD", ov.fx?.rate ?? 1)} personal, across ${ov.balances} balances` : "Balances entered, no personal total yet") : accts && accts.length ? `${accts.filter((a) => a.status !== "not_connected").length} accounts connected, all read-only` : "Your own accounts, read-only";
-  const detail = ov ? <>Personal only · {ov.fx ? cur : "USD"}{ov.fx ? <> · yen converted at ¥{ov.fx.rate.toFixed(2)} = $1</> : " · no FX rate stored"}{finances} {ovw.state === "sample" && <DataTag kind="sample" />}</>
+  const detail = ov ? <>Personal only · {ov.fx ? cur : "USD"}{ov.fx ? <> · yen converted at {ov.fx.rate.toFixed(2)} JPY = $1</> : " · no FX rate stored"}{finances} {ovw.state === "sample" && <DataTag kind="sample" />}</>
     : accts ? <>Personal only · Amara can see balances and transactions; she can never move money{finances} {acctsw.state === "sample" && <DataTag kind="sample" />}</>
     : <>Personal only · read-only connections and statement import{finances} <DataTag kind="wire" /></>;
   return (
     <div className="biz page-inset cc-page pk-host">
       <PageHero title="Personal money" statement={statement} detail={detail} />
       <PersonalMoneyTake adapter={ma} />
+      <MoneyEntriesPanel />
       <MoneyOverviewSection adapter={ma} currency={cur} onCurrency={setCur} />
       <MoneyAccounts adapter={ma} />
       <MoneyFollowUps adapter={ma} />

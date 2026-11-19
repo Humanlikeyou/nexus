@@ -16,7 +16,11 @@ import { ADDS_EVENT, announceStores, inTauri, live, realInvoke, type Invoke } fr
 
 // ---- Goals and habits ----
 export type DayMark = "met" | "nearly" | "missed" | "none";
-export type Habit = { id: string; title: string; source: string; rule: string; days: DayMark[]; done: number; target: number; note: string };
+export type Habit = { id: string; title: string; source: string; rule: string; days: DayMark[]; done: number; target: number; note: string;
+  /** Why it matters, `HH:MM` JST reminder and pause, from the goals row (decision 0045). */
+  why?: string; remindAt?: string; paused?: boolean;
+  /** Today's mark from the habit-day store: done, marked not done, or not marked. Absent when no store is wired. */
+  today?: "done" | "not" | "open" };
 export type Milestone = { id: string; title: string; detail: string; right: string; pct: number; tone?: "copper" };
 export type GoalsWeek = { habits: Habit[]; milestones: Milestone[]; nextMilestone: string | null };
 
@@ -247,6 +251,9 @@ export const checkInFrom = (r: CheckInWire): CheckIn => ({ id: r.id, when: WHEN.
 
 /** Row as src-tauri goals.rs `read_goals` returns it. Habits are `category === "habit"` (adds.rs). */
 export type GoalWire = { id: string; title: string; category: string; target: number; current: number; unit: string; deadline?: string | null;
+  created_at?: string; updated_at?: string;
+  /** Habits only (0045): why it matters, `HH:MM` JST reminder, paused. Round-tripped by the goal store so a save never drops them. */
+  why?: string | null; remind_at?: string | null; paused?: boolean;
   /** Link to an Enterprise venture (goal_venture_set). */ venture_id?: string | null };
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -261,10 +268,38 @@ const deadlineTime = (d: string | null | undefined): number | null => {
 /** A goal's roadmap progress, as the roadmap adapter reports it (steps done / total, weighted percent). */
 export type RoadmapProgress = { pct: number; done: number; total: number };
 
+/** A row of `habit_days` (src-tauri habits.rs): one habit, one JST day. */
+export type HabitDayWire = { habitId: string; day: string; done: boolean; source: string; at: string };
+/** The habit grid covers this many days ending today (the Heatmap's 12 weeks). */
+export const HABIT_WINDOW_DAYS = 84;
+const JST_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" });
+/** Today in JST as YYYY-MM-DD. */
+export const jstToday = (now: Date = new Date()): string => JST_DAY.format(now);
+/** `YYYY-MM-DD` plus `n` days (calendar arithmetic, no time zone involved). */
+export const addDays = (day: string, n: number): string => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const mondayOf = (day: string): string => addDays(day, -((new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7));
+
+/** One habit's grid from its marks. A done mark is "met", an explicit not-done is "missed", a past day on or after the
+ *  day the habit was created with no mark is "missed" (not marked), today with no mark and any earlier day stay "none". */
+export function habitDays(g: GoalWire, rows: HabitDayWire[], today: string): { days: DayMark[]; done: number; todayState: "done" | "not" | "open" } {
+  const mine = new Map(rows.filter((r) => r.habitId === g.id).map((r) => [r.day, r.done]));
+  const created = typeof g.created_at === "string" && /^\d{4}-\d{2}-\d{2}/.test(g.created_at) ? g.created_at.slice(0, 10) : null;
+  const days: DayMark[] = [];
+  for (let i = HABIT_WINDOW_DAYS - 1; i >= 0; i--) {
+    const d = addDays(today, -i);
+    const m = mine.get(d);
+    days.push(m === true ? "met" : m === false ? "missed" : d < today && created !== null && d >= created && !g.paused ? "missed" : "none");
+  }
+  const week = mondayOf(today);
+  const done = [...mine].filter(([d, v]) => v && d >= week && d <= today).length;
+  const t = mine.get(today);
+  return { days, done, todayState: t === true ? "done" : t === false ? "not" : "open" };
+}
+
 /** Goals and habits from `read_goals`. Habit days stay "none": no source data is linked to them, so nothing is ever met or missed.
  *  A goal that has a roadmap shows the roadmap's percent and steps done (one progress meaning, as on the Goals page); the stale
  *  `current` / `target` only speaks for a goal with no roadmap. */
-export function goalsFrom(rows: GoalWire[], roadmapOf?: (goalId: string) => RoadmapProgress | null): GoalsWeek {
+export function goalsFrom(rows: GoalWire[], roadmapOf?: (goalId: string) => RoadmapProgress | null, habitMarks?: HabitDayWire[] | null, today: string = jstToday()): GoalsWeek {
   const clamp = (n: number) => Math.max(0, Math.min(100, n));
   const rowsOk = rows.filter(isGoalWire);
   const items = rowsOk.filter((g) => g.category !== "habit").map((g) => {
@@ -282,7 +317,11 @@ export function goalsFrom(rows: GoalWire[], roadmapOf?: (goalId: string) => Road
   const habits: Habit[] = rowsOk.filter((g) => g.category === "habit").map((g) => {
     const unit = typeof g.unit === "string" ? g.unit : "";
     const t = num(g.target);
-    return { id: g.id, title: g.title, source: "You", rule: unit, days: Array.from({ length: 7 }, () => "none" as DayMark), done: 0, target: t > 0 ? Math.min(7, Math.round(t)) : 7, note: "No data source linked yet" };
+    const target = t > 0 ? Math.min(7, Math.round(t)) : 7;
+    const extra = { ...(typeof g.why === "string" && g.why ? { why: g.why } : {}), ...(typeof g.remind_at === "string" && g.remind_at ? { remindAt: g.remind_at } : {}), ...(g.paused ? { paused: true } : {}) };
+    if (!habitMarks) return { id: g.id, title: g.title, source: "You", rule: unit, days: Array.from({ length: 7 }, () => "none" as DayMark), done: 0, target, note: "No data source linked yet", ...extra };
+    const h = habitDays(g, habitMarks, today);
+    return { id: g.id, title: g.title, source: "You", rule: unit, days: h.days, done: h.done, target, note: `${h.done} of ${target} this week`, today: h.todayState, ...extra };
   });
   return { habits, milestones: items.map((x) => x.m), nextMilestone: next ? next.m.title : null };
 }
@@ -374,6 +413,7 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
   let admin: LifeAdmin | null = null;
   let checkins: CheckIn[] | null = null;
   let goalRows: GoalWire[] | null = null;
+  let habitMarks: HabitDayWire[] | null = null;
   let patterns: Patterns | null = null;
   let review: WeeklyReview | null = null;
   let suggestionTitle: string | null = null;
@@ -395,6 +435,9 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
       Promise.all([call<RawSummary | null>("money_summary_read"), call<{ rate: number; date: string; source: string } | null>("fx_rate_get")])
         .then(([sm, f]) => { money = personalMoneyFrom(sm && Array.isArray(sm.recurring) ? sm : null, mapFx(f)); }).catch(() => { money = null; }),
       call<GoalWire[]>("read_goals").then((r) => { goalRows = Array.isArray(r) ? r : null; }).catch(() => { goalRows = null; }),
+      // A habit log that can't be read leaves the marks unknown (the grid stays empty), never a made-up miss.
+      (() => { const t = jstToday(); return call<HabitDayWire[]>("habit_days", { from: addDays(t, -(HABIT_WINDOW_DAYS - 1)), to: t }); })()
+        .then((r) => { habitMarks = Array.isArray(r) ? r : null; }).catch(() => { habitMarks = null; }),
       call<MemoryWire[]>("memory_list").then(
         (r) => { memories = Array.isArray(r) ? memoriesFrom(r) : null; memoriesNote = memories ? null : memoryNote(null); },
         (e) => { memories = null; memoriesNote = memoryNote(e); },
@@ -419,7 +462,7 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
     ...unwiredPersonal,
     refresh,
     // Read at call time so a step finished on the roadmap moves the goal here without waiting for a re-read of goals.json.
-    goals: () => (goalRows ? live(goalsFrom(goalRows, roadmapProgress)) : UNWIRED),
+    goals: () => (goalRows ? live(goalsFrom(goalRows, roadmapProgress, habitMarks)) : UNWIRED),
     money: () => (money ? live(money) : UNWIRED),
     patterns: () => (patterns ? live(patterns) : UNWIRED),
     weeklyReview: () => (review ? live(review) : UNWIRED),

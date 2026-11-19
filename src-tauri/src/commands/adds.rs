@@ -207,6 +207,12 @@ pub(crate) enum UndoRef {
     Date {
         id: String,
     },
+    /// 0045: a habit day marked. Undo puts the day back to `prev` (`None` removes the row).
+    Habit {
+        habit_id: String,
+        day: String,
+        prev: Option<super::habits::HabitDayRow>,
+    },
     Task {
         line: String,
     },
@@ -310,7 +316,7 @@ fn kind_ok_generic(kind: &str) -> Result<(), String> {
 fn kind_ok(kind: &str) -> Result<(), String> {
     if matches!(
         kind,
-        "goal" | "date" | "task" | "idea" | "route" | "watch" | "ha" | "content"
+        "goal" | "date" | "task" | "idea" | "route" | "watch" | "ha" | "content" | "habit"
     ) {
         Ok(())
     } else {
@@ -738,6 +744,9 @@ fn apply(
                 created_at: iso(&now),
                 updated_at: iso(&now),
                 venture_id: None,
+                why: None,
+                remind_at: None,
+                paused: false,
             });
             write_json_atomic(&path, &goals, MAX_MD_BYTES)?;
             Ok((
@@ -891,6 +900,11 @@ fn revert(u: &UndoRef, dirs: &Dirs) -> Result<(), String> {
             goals.retain(|g| &g.id != id);
             write_json_atomic(&path, &goals, MAX_MD_BYTES)
         }
+        UndoRef::Habit {
+            habit_id,
+            day,
+            prev,
+        } => super::habits::revert(dirs, habit_id, day, prev),
         UndoRef::Date { id } => life_dates::delete_in(&dirs.life(), id).map(|_| ()),
         UndoRef::Task { line } | UndoRef::Idea { line } => {
             let name = if matches!(u, UndoRef::Task { .. }) {

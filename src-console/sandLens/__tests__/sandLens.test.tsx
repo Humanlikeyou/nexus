@@ -15,7 +15,7 @@ vi.mock("../gl", () => ({ webgl2Available: () => gl.ok }));
 import { NavyRoot } from "../../navyMode/NavyRoot";
 import { enterNavy, navyStore } from "../../navyMode/store";
 import { SAND_KEY, __resetSandSettings } from "../settings";
-import { SandLensLayer, sandStateFor } from "../SandLens";
+import { SandLensLayer, lensStateFor, sandStateFor } from "../SandLens";
 
 describe("design-1118b sand lens layer", () => {
   beforeEach(() => { gl.ok = true; localStorage.removeItem(SAND_KEY); __resetSandSettings(); });
@@ -24,9 +24,19 @@ describe("design-1118b sand lens layer", () => {
   it("maps the voice to sand states (voice off = a calm floating layer)", () => {
     expect(sandStateFor("speaking", "")).toBe("speak");
     expect(sandStateFor("listening", "")).toBe("listen");
-    expect(sandStateFor("thinking", "")).toBe("listen");
+    expect(sandStateFor("thinking", "")).toBe("think");
+    expect(sandStateFor("error", "oops")).toBe("listen");
     expect(sandStateFor("idle", "Amara's voice is off")).toBe("off");
     expect(sandStateFor("error", "Can't reach Amara's voice")).toBe("off");
+  });
+
+  it("chat activity only thinks when the voice is off; the voice wins otherwise", () => {
+    expect(lensStateFor("idle", "Amara's voice is off", "thinking")).toBe("think");
+    expect(lensStateFor("error", "Can't reach Amara's voice", "thinking")).toBe("think");
+    expect(lensStateFor("idle", "", "idle")).toBe("off");
+    expect(lensStateFor("listening", "", "thinking")).toBe("listen");
+    expect(lensStateFor("speaking", "", "thinking")).toBe("speak");
+    expect(lensStateFor("idle", "", "speaking")).toBe("off");
   });
 
   it("draws nothing where the lens was: only an invisible hit area plus the shared click-through canvas", () => {

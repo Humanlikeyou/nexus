@@ -26,7 +26,7 @@ const WIRE_NOTE = "Needs wiring: this appears once Claude builds its store (HAND
 /** Life › Goals (design-1118a, Direction A "the Path"): hero, Amara's take under it, the Milestones map
  *  (arrival tangle → a goal in focus → the four-path grid), habits under the map with one shared
  *  "Link a source", then the add composer. One progress meaning: roadmap percent + steps done. */
-export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, added = [], onLinkSource, focusGoal = null, onOpenVenture }: { adapter: PersonalAdapter; goals: Goal[]; goalsFailed?: boolean; onRetry?: () => void; composer?: ReactNode; added?: Array<{ id: string; title: string }>; onLinkSource?: () => void; focusGoal?: string | null; onOpenVenture?: (ventureId: string) => void }) {
+export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, added = [], focusGoal = null, onOpenVenture }: { adapter: PersonalAdapter; goals: Goal[]; goalsFailed?: boolean; onRetry?: () => void; composer?: ReactNode; added?: Array<{ id: string; title: string }>; focusGoal?: string | null; onOpenVenture?: (ventureId: string) => void }) {
   useStoresTick();
   const store = goalStore();
   const roadmaps = roadmapAdapter();
@@ -73,7 +73,7 @@ export function GoalsSection({ adapter, goals, goalsFailed, onRetry, composer, a
       {goalsFailed && pathGoals.length === 0 ? (
         <Card title="Milestones"><p className="pk-note">Goals couldn&apos;t be read.</p>{onRetry && <Button variant="secondary" size="small" onClick={onRetry}>Retry</Button>}</Card>
       ) : <MilestonesMap goals={pathGoals} sampleTag={week.state === "sample"} focusGoal={req.id ?? focusGoal} focusNonce={req.n} newGoalId={newGoalId} onOpenVenture={onOpenVenture} onEditGoal={(id) => { setEditing({ kind: "goal", id }); setAdding(null); }} />}
-      {w ? <HabitsUnderMap habits={habits} sample={week.state === "sample"} onLinkSource={onLinkSource} onEdit={(h) => { setEditing({ kind: "habit", id: h.id }); setAdding(null); }} /> : <Card title="Habits this week" accessory={<span className="pk-acc">{wiredTag(week)}</span>}><p className="pk-note">{WIRE_NOTE}</p></Card>}
+      {w ? <HabitsUnderMap habits={habits} sample={week.state === "sample"} onMark={(h, d) => { void store.markHabit(h.id, d); }} onEdit={(h) => { setEditing({ kind: "habit", id: h.id }); setAdding(null); }} /> : <Card title="Habits this week" accessory={<span className="pk-acc">{wiredTag(week)}</span>}><p className="pk-note">{WIRE_NOTE}</p></Card>}
       {w && w.habits.length > 0 && (
         <More label="The full habit grid">
           {w.habits.map((h) => <HabitRow h={h} key={h.id} />)}

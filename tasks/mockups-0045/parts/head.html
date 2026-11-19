@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Amara OS chart mock-ups 0045</title>
+<script type="importmap">{"imports":{"three":"https://cdnjs.cloudflare.com/ajax/libs/three.js/0.170.0/three.module.min.js"}}</script>
+<style>
+:root{
+  color-scheme:light;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",system-ui,sans-serif;
+  --t11:11px;--t13:13px;--t17:17px;--t21:21px;--t27:27px;--t34:34px;
+  --c-bg:#f5f5f7;--c-bg2:#ececf0;--c-content:#ffffff;--c-label:#1d1d1f;--c-label2:#5e5e63;--c-label3:#7a7a7f;
+  --c-accent:#0e7a5f;--c-accent2:#0b5e49;--c-copper:#8c6239;--c-copper-text:#8c6239;--c-sep:rgba(60,60,67,.18);--c-hl:rgba(255,255,255,.9);
+  --c-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06);--c-tip:#ffffff;
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --c-bg:#0b2a22;--c-bg2:#071d17;--c-content:#10332a;--c-label:#f5f5f7;--c-label2:#aeaeb3;--c-label3:#8d8d92;
+  --c-accent:#34c79a;--c-accent2:#4fd6a9;--c-copper:#c99c66;--c-copper-text:#c99c66;--c-sep:rgba(255,255,255,.1);--c-hl:rgba(255,255,255,.07);
+  --c-shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.25);--c-tip:#0c2a22;
+}
+*{box-sizing:border-box}
+html{background:var(--c-bg)}
+body{margin:0;font:400 var(--t13)/1.45 var(--font);color:var(--c-label);background:radial-gradient(1200px 700px at 50% -10%,var(--c-content),var(--c-bg) 60%,var(--c-bg2));min-width:820px}
+#gl{position:fixed;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:5}
+.top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:13px;padding:11px 27px;background:color-mix(in srgb,var(--c-bg) 90%,transparent);box-shadow:inset 0 -1px 0 var(--c-sep)}
+.top b{font-size:var(--t17);font-weight:650;letter-spacing:.02em}
+.top span{color:var(--c-label2)}
+.top nav{margin-left:auto;display:flex;gap:6px;align-items:center}
+.top nav a{color:var(--c-label2);text-decoration:none;padding:3px 8px;border-radius:8px;font-size:var(--t11)}
+.top nav a:hover{background:var(--c-sep);color:var(--c-label)}
+button{font:inherit;color:inherit}
+.btn{border:0;cursor:pointer;padding:5px 13px;border-radius:9px;background:var(--c-content);box-shadow:inset 0 0 0 1px var(--c-sep);font-size:var(--t13)}
+.btn:focus-visible,.seg button:focus-visible{outline:3px solid var(--c-accent);outline-offset:2px}
+main{max-width:1320px;margin:0 auto;padding:21px 27px 80px}
+.note{margin:0 0 27px;padding:13px 17px;border-radius:12px;background:color-mix(in srgb,var(--c-copper) 14%,var(--c-content));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--c-copper) 40%,transparent);font-size:var(--t17)}
+.note b{color:var(--c-copper-text)}
+.panel{margin:0 0 34px}
+.panel>header{display:flex;gap:13px;align-items:baseline;margin-bottom:13px}
+.num{display:inline-grid;place-items:center;min-width:27px;height:27px;border-radius:14px;background:var(--c-accent);color:var(--c-bg2);font-weight:700;font-size:var(--t13)}
+:root:not([data-theme="dark"]) .num{color:#fff}
+h2{margin:0;font-size:var(--t21);font-weight:650;letter-spacing:-.01em}
+.sub{color:var(--c-label2);font-size:var(--t13)}
+.card{position:relative;background:var(--c-content);border-radius:17px;box-shadow:inset 0 1px 0 var(--c-hl),inset 0 0 0 1px var(--c-sep),var(--c-shadow);padding:17px}
+.pair,.ab{display:grid;grid-template-columns:1fr 1fr;gap:17px}
+.vt{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:var(--c-label2);font-size:var(--t13)}
+.vt i{font-style:normal;font-weight:700;color:var(--c-label);padding:1px 8px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--c-sep)}
+.slot{position:relative;width:100%}
+.lbls{position:absolute;inset:0;z-index:10;pointer-events:none;overflow:hidden}
+.lb{position:absolute;white-space:nowrap;color:var(--c-label2);font-size:var(--t11);line-height:1.2;font-variant-numeric:tabular-nums}
+.lb.a-l{transform:translate(0,-50%)}.lb.a-c{transform:translate(-50%,-50%)}.lb.a-r{transform:translate(-100%,-50%)}
+.lb.a-bc{transform:translate(-50%,-100%)}.lb.a-tc{transform:translate(-50%,0)}.lb.a-bl{transform:translate(0,-100%)}.lb.a-br{transform:translate(-100%,-100%)}
+.lb.t13{font-size:var(--t13)}.lb.t17{font-size:var(--t17)}.lb.t21{font-size:var(--t21)}.lb.t27{font-size:var(--t27)}.lb.t34{font-size:var(--t34)}
+.lb.k{color:var(--c-label)}.lb.w{font-weight:650}.lb.l3{color:var(--c-label3)}.lb.up{color:var(--c-accent2)}.lb.dn{color:var(--c-copper-text)}.lb.big{font-weight:300;color:var(--c-label)}
+.lb b{font-weight:650;color:var(--c-label)}.lb i{font-style:normal;color:var(--c-label2)}
+.lb.pill{padding:2px 7px;border-radius:9px;background:color-mix(in srgb,var(--c-content) 82%,transparent);box-shadow:inset 0 0 0 1px var(--c-sep)}
+.lb.two{text-align:center;line-height:1.25}
+.tip{position:absolute;z-index:12;pointer-events:none;padding:7px 11px;border-radius:10px;background:var(--c-tip);color:var(--c-label);box-shadow:inset 0 0 0 1px var(--c-sep),0 6px 20px rgba(0,0,0,.28);font-size:var(--t13);line-height:1.35;white-space:nowrap;display:none;font-variant-numeric:tabular-nums}
+.tip small{display:block;color:var(--c-label2);font-size:var(--t11)}
+.chips{display:flex;flex-wrap:wrap;gap:8px 17px;margin-top:13px}
+.chip{display:grid;gap:3px;min-width:150px}
+.chip span{color:var(--c-label2);font-size:var(--t11)}
+.chip strong{font-size:var(--t21);font-weight:300;font-variant-numeric:tabular-nums}
+.chip strong small{font-size:var(--t13);color:var(--c-label2);margin-left:4px}
+.chip em{font-style:normal;color:var(--c-label2);font-size:var(--t11)}
+.dbar{position:relative;height:2px;background:var(--c-sep);border-radius:1px;margin:7px 0 4px}
+.dbar::after{content:"";position:absolute;left:50%;top:-3px;width:1px;height:8px;background:var(--c-label3)}
+.dbar i{position:absolute;top:0;height:2px;border-radius:1px}
+.dbar i.r{left:50%;background:var(--c-accent);box-shadow:0 0 6px color-mix(in srgb,var(--c-accent) 45%,transparent)}
+.dbar i.l{right:50%;background:var(--c-copper);box-shadow:0 0 6px color-mix(in srgb,var(--c-copper) 45%,transparent)}
+.seg{display:inline-flex;padding:3px;border-radius:10px;background:color-mix(in srgb,var(--c-label) 6%,transparent);box-shadow:inset 0 0 0 1px var(--c-sep)}
+.seg button{border:0;background:none;padding:3px 11px;border-radius:7px;font-size:var(--t11);color:var(--c-label2);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--c-content);color:var(--c-label);box-shadow:0 1px 3px rgba(0,0,0,.25),inset 0 0 0 1px var(--c-sep)}
+.toolbar{display:flex;align-items:center;gap:13px;margin-bottom:11px;flex-wrap:wrap}
+.toolbar .sp{flex:1}
+.legend{display:flex;gap:13px;align-items:center;color:var(--c-label2);font-size:var(--t11)}
+.legend s{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px;text-decoration:none}
+.cap{list-style:none;margin:13px 2px 0;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:13px;color:var(--c-label2);font-size:var(--t11);line-height:1.45}
+.cap b{display:block;color:var(--c-label);font-size:var(--t11);letter-spacing:.04em;margin-bottom:2px;font-weight:650}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:17px;margin-bottom:17px}
+.mgrid{display:grid;grid-template-columns:1.5fr 1fr;gap:17px}
+.mgrid .full{grid-column:1/-1}
+.cat{display:grid;grid-template-columns:1fr 1fr;gap:13px;align-items:center}
+.catlist{display:grid;gap:8px;font-size:var(--t13)}
+.catlist div{display:grid;grid-template-columns:11px 1fr auto;gap:8px;align-items:center}
+.catlist s{width:11px;height:11px;border-radius:3px}
+.catlist em{font-style:normal;color:var(--c-label2);font-variant-numeric:tabular-nums}
+@media (max-width:1000px){.cap{grid-template-columns:1fr 1fr}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<canvas id="gl" aria-hidden="true"></canvas>
+<header class="top"><b>AMARA</b><span>Chart mock-ups, decision 0045</span>
+<nav aria-label="Panels"><a href="#panel-1">1</a><a href="#panel-2">2</a><a href="#panel-3">3</a><a href="#panel-4">4</a><a href="#panel-5">5</a><a href="#panel-6">6</a><a href="#panel-7">7</a><a href="#panel-8">8</a>
+<button class="btn" id="themeBtn" type="button" aria-label="Toggle light and dark theme">Theme: dark</button></nav></header>
+<main>
+<p class="note"><b>Mock-ups only</b> — nothing in the app changes until you pick. Reply with the panel number + A/B. All data here is synthetic. Hover any chart for values.</p>
+
+<div class="pair">
+<section class="panel" id="panel-1"><header><span class="num">1</span><div><h2>Neuro: Last session</h2><div class="sub">Brain data ring</div></div></header>
+<div class="card"><div class="slot" data-slot="p1" style="height:420px"></div>
+<div class="chips" id="p1chips"></div>
+<ul class="cap"><li><b>Shows</b>Band power from delta to gamma as a radial spectrum. Solid bar = this session, ghost slab = your usual range.</li><li><b>Inputs</b>Muse band-power summary for the session, focus and calm scores, 30-session usual range.</li><li><b>Interaction</b>Hover a band for exact share and usual range.</li><li><b>Better</b>Replaces a decorative ring with labelled values and an honest usual range.</li></ul></div></section>
+
+<section class="panel" id="panel-2"><header><span class="num">2</span><div><h2>Neuro: Now</h2><div class="sub">Live Muse bands</div></div></header>
+<div class="card"><div class="toolbar"><div class="seg" id="p2seg" role="group" aria-label="Preview state"><button type="button" aria-pressed="true" data-v="1">Connected</button><button type="button" aria-pressed="false" data-v="0">Not connected</button></div><span class="sub">Preview switch, the app decides this itself</span></div>
+<div class="slot" data-slot="p2" style="height:372px"></div>
+<ul class="cap"><li><b>Shows</b>Five concentric loops, one per band. Wave height is live power, the soft halo is your usual envelope.</li><li><b>Inputs</b>Muse band power at about 10 Hz (simulated here), smoothed.</li><li><b>Interaction</b>Hover a loop for the live value. When Muse is off the ring flattens and a note explains why.</li><li><b>Better</b>One glance tells you which band leads and whether it is outside your usual.</li></ul></div></section>
+</div>
+
+<section class="panel" id="panel-3"><header><span class="num">3</span><div><h2>Today: heart-rate take</h2><div class="sub">Last 15 minutes against your usual band</div></div></header>
+<div class="card"><div class="toolbar"><div class="legend"><span><s style="background:var(--c-accent)"></s>Inside usual</span><span><s style="background:var(--c-copper)"></s>Above usual</span><span><s style="background:color-mix(in srgb,var(--c-accent) 22%,transparent)"></s>Usual band 62 to 78 bpm</span></div></div>
+<div class="slot" data-slot="p3" style="height:320px"></div>
+<ul class="cap"><li><b>Shows</b>A glowing ribbon of the last 15 minutes of bpm over a soft usual band. The last point pulses.</li><li><b>Inputs</b>NOOP heart-rate samples every 5 s, your usual resting band.</li><li><b>Interaction</b>Hover for time and bpm. A dashed bridge marks a gap in the data instead of a false line.</li><li><b>Better</b>Gaps are honest, in/out of range is colour as well as position, and it feels live.</li></ul></div></section>
+
+<section class="panel" id="panel-4"><header><span class="num">4</span><div><h2>Mind-Body: Readiness</h2><div class="sub">Drivers against your usual</div></div></header>
+<div class="card"><div class="ab"><div><div class="vt"><i>A</i>2D clean, drawn in three.js orthographic</div><div class="slot" data-slot="p4a" style="height:400px"></div></div><div><div class="vt"><i>B</i>Richer 2.5D, lit bars on a glass floor</div><div class="slot" data-slot="p4b" style="height:400px"></div></div></div>
+<ul class="cap"><li><b>Shows</b>Today's readiness score and each driver as distance from your usual. Emerald = better than usual, copper = worse.</li><li><b>Inputs</b>HRV, resting HR, sleep, respiratory rate, skin temperature, yesterday's strain, each against a 28-day usual.</li><li><b>Interaction</b>Hover a row for value, usual range and how far off in σ.</li><li><b>Better</b>Keeps the look you like and adds the usual range as a shaded zone so the bar means something.</li></ul></div></section>
+
+<section class="panel" id="panel-5"><header><span class="num">5</span><div><h2>Mind-Body: Sleep</h2><div class="sub">Last night's span and stages, then nightly bars</div></div></header>
+<div class="card"><div class="toolbar"><div class="legend" id="p5leg"></div><span class="sp"></span><div class="seg" id="p5seg" role="group" aria-label="Range"><button type="button" aria-pressed="true" data-v="7">7 nights</button><button type="button" aria-pressed="false" data-v="30">30</button><button type="button" aria-pressed="false" data-v="90">90</button></div></div>
+<div class="ab"><div><div class="vt"><i>A</i>2D clean</div><div class="slot" data-slot="p5a" style="height:420px"></div></div><div><div class="vt"><i>B</i>Richer 3D, stacked stage bars</div><div class="slot" data-slot="p5b" style="height:420px"></div></div></div>
+<ul class="cap"><li><b>Shows</b>Last night's span (in bed to wake) with stages over time, then one bar per night against your usual 7.0 to 8.0 h.</li><li><b>Inputs</b>NOOP sleep stages per night.</li><li><b>Interaction</b>Switch 7, 30 or 90 nights. Hover a night or a stage for minutes.</li><li><b>Better</b>Stages and history share one stage palette, usual band is always visible.</li></ul></div></section>
+
+<section class="panel" id="panel-6"><header><span class="num">6</span><div><h2>Mind-Body: Trends against your usual</h2><div class="sub">Recovery, HRV, resting HR, strain</div></div></header>
+<div class="card"><div class="toolbar"><div class="legend"><span><s style="background:color-mix(in srgb,var(--c-accent) 25%,transparent)"></s>Usual (28-day mean ± 1 σ)</span><span><s style="background:var(--c-copper)"></s>Outside usual</span></div><span class="sp"></span><div class="seg" id="p6seg" role="group" aria-label="Range"><button type="button" aria-pressed="true" data-v="7">7</button><button type="button" aria-pressed="false" data-v="30">30</button><button type="button" aria-pressed="false" data-v="90">90</button><button type="button" aria-pressed="false" data-v="365">365</button></div></div>
+<div class="ab"><div><div class="vt"><i>A</i>2D clean, four small multiples</div><div class="slot" data-slot="p6a" style="height:440px"></div></div><div><div class="vt"><i>B</i>Richer 3D, four glass layers</div><div class="slot" data-slot="p6b" style="height:440px"></div></div></div>
+<ul class="cap"><li><b>Shows</b>Each metric as a line with a moving usual band behind it. Dots mark days outside the band.</li><li><b>Inputs</b>Daily recovery, HRV, resting HR, strain.</li><li><b>Interaction</b>Range 7/30/90/365 days. Hover a day for the value and band.</li><li><b>Better</b>One shared scale logic and the band answers "is this normal for me".</li></ul></div></section>
+
+<section class="panel" id="panel-7"><header><span class="num">7</span><div><h2>Mind-Body: Training load</h2><div class="sub">28 days of strain, 7-day and 28-day averages, ratio</div></div></header>
+<div class="card"><div class="toolbar"><div class="legend"><span><s style="background:var(--c-accent)"></s>Daily strain</span><span><s style="background:var(--c-copper)"></s>High day (75+)</span><span><b style="color:var(--c-label)">&mdash;</b>&nbsp;7-day average</span><span><b style="color:var(--c-copper-text)">- -</b>&nbsp;28-day average</span></div></div>
+<div class="ab"><div><div class="vt"><i>A</i>2D clean</div><div class="slot" data-slot="p7a" style="height:380px"></div></div><div><div class="vt"><i>B</i>Richer 3D, lit bars and ratio dial</div><div class="slot" data-slot="p7b" style="height:380px"></div></div></div>
+<ul class="cap"><li><b>Shows</b>Daily strain bars, rolling averages and the acute to chronic ratio against a 0.8 to 1.3 sweet spot.</li><li><b>Inputs</b>Daily strain (effort 0 to 100).</li><li><b>Interaction</b>Hover a day for strain, 7d and 28d.</li><li><b>Better</b>The ratio gets a real scale instead of a bare number.</li></ul></div></section>
+
+<section class="panel" id="panel-8"><header><span class="num">8</span><div><h2>Personal Money: dashboard preview</h2><div class="sub">USD amounts, JPY written as text</div></div></header>
+<div class="card"><div class="stats" id="mstats"></div>
+<div class="mgrid">
+<div><div class="vt">Income vs expenses by month</div><div class="slot" data-slot="m1" style="height:270px"></div></div>
+<div><div class="vt">Savings over time vs target</div><div class="slot" data-slot="m2" style="height:270px"></div></div>
+<div class="full"><div class="vt">Spending categories, this month</div><div class="cat"><div class="slot" data-slot="m3" style="height:270px"></div><div class="catlist" id="catlist"></div></div></div>
+</div>
+<ul class="cap"><li><b>Shows</b>Balance, monthly income and spend, savings against a target line, and where the money goes.</li><li><b>Inputs</b>Personal Money ledger (synthetic here), savings target, JPY/USD rate.</li><li><b>Interaction</b>Hover bars, the savings line or a category slice.</li><li><b>Better</b>One page answers "am I on track". JPY appears as text, never the yen glyph.</li></ul></div></section>
+</main>
+<script type="module">

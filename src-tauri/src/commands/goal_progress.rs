@@ -411,6 +411,9 @@ mod tests {
             created_at: String::new(),
             updated_at: String::new(),
             venture_id: None,
+            why: None,
+            remind_at: None,
+            paused: false,
         }
     }
     fn gr(day: &str, id: &str, n: i64) -> DailyGoalRow {

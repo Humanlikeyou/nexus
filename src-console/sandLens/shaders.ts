@@ -7,7 +7,7 @@ import { LUT_W } from "./bessel";
  * density map, and an organic uneven outer edge (per-session seed) that leaves the core physics untouched.
  */
 export const COMMON = /* glsl */ `
-uniform float uDt, uTime, uFrame, uState, uWakeT, uLoud, uMic, uBreathP, uCalm, uSnap, uStir;
+uniform float uDt, uTime, uFrame, uState, uWakeT, uLoud, uMic, uBreathP, uCalm, uSnap, uStir, uRipAge, uRipAmp, uInt;
 uniform sampler2D uLut; uniform vec4 uRow, uN, uA, uPk;
 uvec3 pcg3d(uvec3 v){ v = v*1664525u + 1013904223u; v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y; v ^= v>>16u; v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y; return v; }
 vec3 rnd3(uvec3 v){ return vec3(pcg3d(v)) * (1.0/4294967296.0); }
@@ -51,6 +51,31 @@ vec2 idleMorph(vec2 hp, float t, float amt){
   float rs=(r+dr)*pow(PHI, d/1.5707963*0.35);
   vec2 p=rs*vec2(cos(th+d*(1.0-0.5*r)), sin(th+d*(1.0-0.5*r)))+drift*(0.4+r);
   return mix(hp, p, amt); }
+// THINKING: three soft attractor rings drift on incommensurate paths and, every ~7 s, ease into a new
+// configuration (centre, radius and spin per ring come from a hash of the configuration index).
+vec4 thinkRing(float k, float c){
+  vec2 a=vec2(vh(vec2(c*3.1+k*7.7,1.3)), vh(vec2(c*5.3+k*2.9,8.1)));
+  vec2 b=vec2(vh(vec2(c*1.7+k*4.4,3.9)), vh(vec2(c*9.1+k*6.2,5.5)));
+  vec2 ctr=(a-0.5)*0.36; float rad=0.40+0.18*b.x; float spin=(b.y<0.5?-1.0:1.0)*(0.5+1.5*abs(b.y-0.5)*2.0);
+  return vec4(ctr,rad,spin); }
+vec2 rot2(vec2 p,float a){ float c=cos(a), s=sin(a); return vec2(p.x*c-p.y*s, p.x*s+p.y*c); }
+vec3 thinkTarget(vec4 h, vec2 hp, float t){
+  float t7=t/7.0; float c=floor(t7); float s=smoothstep(0.68,1.0,fract(t7));
+  float k=floor(h.z*3.0);
+  vec4 R=mix(thinkRing(k,c), thinkRing(k,c+1.0), s);
+  vec2 ctr=R.xy+0.07*vec2(sin(t*0.37+k*2.1), cos(t*0.29+k*1.3));
+  float ph=h.x*6.2831853+t*R.w*(0.55+0.7*h.y);
+  float rad=R.z*(0.66+0.62*h.y*h.y)*(1.0+0.05*sin(t*0.8+k));
+  vec2 ringP=ctr+rad*vec2(cos(ph),sin(ph));
+  // the rest of the grains turn as one body, the core faster than the rim, with the turn slowly reversing
+  float r0=length(hp);
+  vec2 body=rot2(hp, 0.28*t*(1.0-0.6*r0)+0.5*sin(t*0.11))*(0.9+0.05*sin(t*0.7+r0*3.0));
+  vec2 tg=h.w<0.74?ringP:body;
+  // a slow curl-like drift so no ring is ever a clean circle
+  vec2 q=tg*2.3+vec2(t*0.11,-t*0.08);
+  tg+=(vec2(vnoise(q+vec2(3.1,7.7)),vnoise(q+vec2(9.4,1.2)))-0.5)*0.09;
+  float rr=length(tg); if(rr>0.93) tg*=0.93/rr;
+  return vec3(tg, 0.02*sin(t*0.9+h.x*20.0)); }
 vec2 nodal(vec2 p){ const float e=0.002;
   for(int i=0;i<10;i++){ float w=field(p); vec2 g=vec2(field(p+vec2(e,0.))-field(p-vec2(e,0.)), field(p+vec2(0.,e))-field(p-vec2(0.,e)))/(2.0*e);
     vec2 s=w*g/max(dot(g,g),1e-5); float sl=length(s); if(sl>0.05) s*=0.05/sl; p-=s; float r=length(p); if(r>0.995) p*=0.995/r; }
@@ -71,6 +96,10 @@ void main(){
     vec2 sw=hp*pow(PHI, d/1.5707963*0.25); sw=vec2(sw.x*cos(d)-sw.y*sin(d), sw.x*sin(d)+sw.y*cos(d));
     vec3 tg=vec3(sw*(1.0+0.06*b), (0.08+0.25*h.z)*b*0.4);
     v+=((tg-p)*9.0-v*5.0)*dt;
+  } else if(st==4){ // THINKING: grains gather into drifting rings, turn, and reorganise; low contrast, no jolts
+    vec2 hp=homePos(h);
+    vec3 tg=thinkTarget(h, hp, uTime);
+    v+=((tg-p)*5.0-v*4.2)*dt;
   } else if(st==2 || st==0){ // LISTENING / VOICE OFF: an even floating layer, softly breathing and slowly morphing
     vec2 hp=idleMorph(homePos(h), uTime, 1.0); float br=sin(uTime*6.2831853/uBreathP + length(hp)*2.2);
     vec3 tg=vec3(hp*(1.0+0.012*br), 0.025*br*(0.5+h.z));
@@ -84,7 +113,9 @@ void main(){
       const float e=0.004;
       // the clamped rim is a nodal line too; only a few grains rest there (the organic edge), the rest feel a free edge
       bool rim=h.w<0.12;
-      float w=fieldG(p.xy,rim); float aw=abs(w); float L=uLoud;
+      // a syllable onset sends a ripple out from the centre: grains under its front are tossed and re-settle on the lines
+      float rd=(r-uRipAge*1.15)/0.1; float rw=exp(-rd*rd)*uRipAmp*step(uRipAge,1.0);
+      float w=fieldG(p.xy,rim); float aw=abs(w); float L=max(uLoud, rw*0.55);
       vec2 g=vec2(fieldG(p.xy+vec2(e,0.),rim)-fieldG(p.xy-vec2(e,0.),rim), fieldG(p.xy+vec2(0.,e),rim)-fieldG(p.xy-vec2(0.,e),rim))/(2.0*e);
       vec2 down=-sign(w)*g; float gl=length(down); vec2 dir=gl>1e-4?down/gl:vec2(0.);
       float dn=aw/max(length(g),1e-3); // distance to the nearest nodal line: quiet regions of high-n modes still clear
@@ -92,8 +123,8 @@ void main(){
       // (most close to it, a few out at the shoulder), and the band width wanders along the line so it clumps.
       float hb=rnd3(uvec3(uvec2(gl_FragCoord.xy),611u)).x;
       float lump=0.55+0.9*vnoise(p.xy*9.0+vec2(uSeedV,1.7))*vnoise(p.xy*23.0+vec2(4.1,uSeedV));
-      float tol=0.012+0.095*pow(hb,1.25)*lump;
-      float act=smoothstep(tol,tol+0.012,dn)*smoothstep(0.002,0.01,aw)*L; // inside its band a grain is still
+      float tol=(0.012+0.095*pow(hb,1.25)*lump)*mix(1.3,0.78,uInt); // louder, crisper lines; quiet speech, softer heaps
+      float act=smoothstep(tol,tol+0.012,dn)*smoothstep(0.002,0.01,aw)*L; act=max(act, rw*0.7); // inside its band a grain is still
       if(uStir>0.6 && rn.x<0.85){ // pitch change: the plate's attack tosses the whole layer, so every line of the new figure fills
         float vz=(0.5+0.4*rn2.x); float fl=2.0*vz/40.0; // each toss lands about half-way back to the grain's place in an even layer
         vec2 tv=(homePos(h)-p.xy)*0.5/fl; float tl=length(tv); v=vec3(tl>1.6?tv*(1.6/tl):tv, vz); // capped: one frame never jumps the rim

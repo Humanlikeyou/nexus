@@ -142,7 +142,7 @@ export function DecisionsView({ data, adapter = businessAdapter(data), onOpen, f
                 subtitle={<>Proposed by the {v.requester} crew · amount {v.amountUsd.state === "unwired" ? wiredTag(v.amountUsd) : money(v.amountUsd.value)} · vote rules {rules.state === "unwired" ? wiredTag(rules) : `${rules.value.needed} yes votes`}</>}
                 accessory={<span className="v-actions">{act(v, "vote", "no", "Vote no")}{act(v, "vote", "yes", "Vote yes", true)}</span>} />)}
               {w.tax.map((t) => <ListRow key={t.id} id={`dec-${t.id}`} className={focusId === t.id ? "v-new" : undefined} title={`Tax flag · ${t.label}`} subtitle={`${t.area} · ${t.date} · from the business ledger`}
-                accessory={<span className="v-actions">{act(t, "tax_flag", "handled", "Mark handled")}<OffButton reason="Amara doesn't contact anyone outside">Ask the accountant</OffButton></span>} />)}
+                accessory={<span className="v-actions">{act(t, "tax_flag", "handled", "Mark handled")}</span>} />)}
             </InsetGroup>
             {pending && preview(pending)}
           </>
@@ -178,6 +178,7 @@ export function TasksView({ data, onRetry, onOpen }: { data: SystemSnapshot; onR
   // With the live add path the task is stored in TASKS.md; reload the snapshot so it shows in Backlog instead of a local row.
   const reload = inTauri() && !sampleAdaptersEnabled() && onRetry ? onRetry : null;
   const ask = (t: Task) => askMore({ from: "Enterprise · Tasks", chips: [{ label: "Task", value: plainText(t.title) }, { label: "Status", value: humanize(t.status) }], question: `What is the next step on “${plainText(t.title)}”, and what should I do first?`, sample: false });
+  const done = (t: Task) => askMore({ from: "Enterprise · Tasks", chips: [{ label: "Task", value: plainText(t.title) }, { label: "Status", value: humanize(t.status) }], question: `Mark “${plainText(t.title)}” as done in my tasks, then tell me what is next.`, sample: false });
   const tasksDown = data.unavailableSources.some((s) => s.command === "read_tasks") && data.tasks.length === 0;
   const tasks = data.tasks;
   const other = tasks.filter((t) => !GROUPS.some((g) => g.status === t.status));
@@ -198,7 +199,7 @@ export function TasksView({ data, onRetry, onOpen }: { data: SystemSnapshot; onR
               <Card key={g.status} title={`${g.title} · ${items.length + fresh.length}`}>
                 <InsetGroup>
                   {fresh.map((s) => <ListRow key={s.id} className="v-new" title={s.title} subtitle="Just added · sample data" accessory={<Badge tone="accent">New</Badge>} />)}
-                  {items.map((t, i) => <ListRow key={`${t.title}-${i}`} title={plainText(t.title)} subtitle={[...(t.tags ?? []).map(humanize), t.priority ? humanize(t.priority) : null, "venture link needs wiring"].filter(Boolean).join(" · ")} accessory={<span className="v-actions"><LinkButton small onClick={() => ask(t)} label={`Ask Amara about ${plainText(t.title)}`}>Ask Amara ›</LinkButton><StatusText kind={TASK_KIND[t.status] ?? "off"}>{humanize(t.status)}</StatusText></span>} />)}
+                  {items.map((t, i) => <ListRow key={`${t.title}-${i}`} title={plainText(t.title)} subtitle={[...(t.tags ?? []).map(humanize), t.priority ? humanize(t.priority) : null].filter(Boolean).join(" · ")} accessory={<span className="v-actions"><LinkButton small onClick={() => ask(t)} label={`Ask Amara about ${plainText(t.title)}`}>Ask Amara ›</LinkButton>{t.status !== "done" && <LinkButton small onClick={() => done(t)} label={`Mark done: ${plainText(t.title)}`}>Mark done ›</LinkButton>}<StatusText kind={TASK_KIND[t.status] ?? "off"}>{humanize(t.status)}</StatusText></span>} />)}
                 </InsetGroup>
               </Card>
             );
@@ -206,7 +207,7 @@ export function TasksView({ data, onRetry, onOpen }: { data: SystemSnapshot; onR
           {other.length > 0 && <Card title={`Other · ${other.length}`}><InsetGroup>{other.map((t, i) => <ListRow key={`${t.title}-${i}`} title={plainText(t.title)} accessory={<StatusText kind="off">{humanize(t.status)}</StatusText>} />)}</InsetGroup></Card>}
         </div>
       )}
-      <p className="cc-note">Marking a task done or editing it from here needs wiring; Amara updates tasks from chat today.</p>
+      <p className="cc-note">To finish or change a task, use Ask Amara or Mark done on its row; she updates your task list from chat.</p>
     </div>
   );
 }
@@ -282,12 +283,12 @@ export function ContentView({ data, onRetry, onOpen }: { data: SystemSnapshot; o
                 <p className="d18-eyebrow">Next step</p>
                 <h3 className="d18-next__t">{first.stage === "ideation" ? "Draft this idea with Amara" : first.stage === "review" ? "Review the draft" : "Keep it moving"}</h3>
                 <p className="d18-next__why">Amara writes a draft. She never posts it. The board comes back once there are {BOARD_AT} or more items.</p>
-                {first.type.startsWith("Just added") || !inTauri() ? <div className="d18-actions"><OffButton variant="primary" reason="Needs wiring · Amara drafts from an idea">Draft with Amara</OffButton></div> : <ContentItemTools title={first.title} stage={first.stage as ContentStage} onChanged={onRetry} />}
+                {first.type.startsWith("Just added") || !inTauri() ? null : <ContentItemTools title={first.title} stage={first.stage as ContentStage} onChanged={onRetry} />}
               </section>
             )}
           </div>
         )}
-        {board && <p className="cc-note">Moving to Published asks whether you posted it. Amara never posts. Venture links for content need wiring.</p>}
+        {board && <p className="cc-note">Moving to Published asks whether you posted it. Amara never posts.</p>}
       </Card>
       {!board && composer}
     </div>

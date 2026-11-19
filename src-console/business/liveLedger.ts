@@ -10,6 +10,8 @@ export interface BusinessLedger {
     id: string; name: string; stage: string; health: Health;
     progress: { done: number; total: number; label: string } | null;
     nextStep: string | null; note: string; targetJpy: number | null;
+    /** Added by the write path; absent on older ledgers. */
+    targetUsdCents?: number | null; currency?: "JPY" | "USD" | null; archived?: boolean;
     detail: {
       headline: string; checklist: { label: string; done: boolean }[];
       milestones: { label: string; due: string; health: Health }[];
@@ -47,9 +49,13 @@ export function liveBusiness(ledger: unknown): BusinessAdapter {
   if (!isLedger(ledger)) return unwiredBusiness;
   const { fx } = ledger;
   return {
-    ventures: () => live(ledger.ventures.map((v) => ({
+    // Archived ventures stay in the file and in History but are not listed.
+    ventures: () => live(ledger.ventures.filter((v) => !v.archived).map((v) => ({
       id: v.id, name: v.name, stage: v.stage, health: v.health, progress: v.progress,
-      nextStep: v.nextStep, note: v.note, target: usdFrom(v.targetJpy, fx),
+      nextStep: v.nextStep, note: v.note,
+      target: v.currency === "USD" && v.targetUsdCents != null ? live(v.targetUsdCents / 100) : usdFrom(v.targetJpy, fx),
+      currency: v.currency === "USD" ? "USD" as const : "JPY" as const,
+      targetMinor: v.currency === "USD" ? v.targetUsdCents ?? null : v.targetJpy,
     }))),
     venture: (id) => {
       const d = ledger.ventures.find((v) => v.id === id)?.detail;

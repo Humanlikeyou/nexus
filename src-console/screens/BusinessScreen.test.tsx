@@ -46,7 +46,7 @@ describe("Enterprise › Content", () => {
     expect(screen.queryByTestId("content-board")).toBeNull();
     const rail = screen.getByRole("list", { name: "Pipeline stages" });
     for (const st of ["Idea · 1", "Drafting · 0", "Review · 1", "Scheduled · 0", "Published · 0"]) expect(within(rail).getByText(st)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Draft with Amara" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Draft with Amara" })).toBeNull();
     expect(screen.queryByRole("button", { name: /publish|post/i })).toBeNull();
   });
   it("is a board from Idea to Published at 3 or more items; the dead Publish button is gone (stage moves live in ContentItemTools)", () => {
@@ -82,8 +82,7 @@ describe("Enterprise › Decisions (design-1111v §4)", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^Undo/ })); });
     expect(within(screen.getByRole("table", { name: "Decisions log" })).getAllByRole("row")).toHaveLength(before);
     expect(screen.getByRole("button", { name: "Vote yes" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ask the accountant" })).toBeDisabled();
-    expect(screen.getByText("Amara doesn't contact anyone outside")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ask the accountant" })).toBeNull();
     localStorage.removeItem("nexus.sampleAdapters");
   });
   it("unwired: votes are disabled with the reason and no log is shown", () => {
@@ -132,13 +131,20 @@ describe("Business › Overview (design-1110d D-B2–B6)", () => {
     const onView = vi.fn();
     render(<BusinessField adapter={unwiredBusiness} onView={onView} data={snap({ revenue, strategies: [strategy], risk, tasks: [{ title: "Ship", status: "active", priority: "high", tags: [] }] })} />);
     expect(screen.getByRole("heading", { level: 1, name: "Enterprise" })).toBeInTheDocument();
-    expect(screen.getByText("$900 net in 30 days")).toBeInTheDocument();
-    expect(within(screen.getByRole("list", { name: "Revenue, last 30 days" })).getByText("$1,200")).toBeInTheDocument();
+    expect(screen.getByText(/What this is: the businesses you run/)).toBeInTheDocument();
+    expect(screen.getByText(/\$900 net from trading in 30 days/)).toBeInTheDocument();
     expect(screen.queryByText("Sample data")).toBeNull();
+    // Trading appears once, as one line; the old risk tile and venture cell are gone.
+    expect(screen.getByTestId("trading-line")).toHaveTextContent("$1,200 revenue in 30 days");
+    expect(screen.queryByText(/Kill switch|Within limits|Risk index/)).toBeNull();
+    // Empty states give the next step.
+    expect(screen.getByText(/No ventures yet\. Add the first one/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing needs your call/)).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Tasks · 1 in progress" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open Tasks ›" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Decisions ›" }));
-    expect(onView.mock.calls).toEqual([["tasks"], ["decisions"]]);
+    fireEvent.click(screen.getByRole("button", { name: "Record a decision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Trading in Ventures ›" }));
+    expect(onView.mock.calls).toEqual([["tasks"], ["decisions"], ["ventures"]]);
   });
 });
 

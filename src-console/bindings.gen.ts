@@ -37,7 +37,14 @@ export const commands = {
 	crewTools: (options?: InvokeOptions) => __TAURI_INVOKE<CrewToolInfo[]>("crew_tools", undefined, options),
 	kbStatus: (options?: InvokeOptions) => __TAURI_INVOKE<KbStatus_Serialize>("kb_status", undefined, options),
 	readBusinessLedger: (options?: InvokeOptions) => __TAURI_INVOKE<BusinessLedger_Serialize | null>("read_business_ledger", undefined, options),
+	ledgerVentureSave: (draft: VentureDraft_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<LedgerChange_Serialize>("ledger_venture_save", { draft }, options),
+	ledgerVentureArchive: (id: string, archived: boolean, options?: InvokeOptions) => __TAURI_INVOKE<LedgerChange_Serialize>("ledger_venture_archive", { id, archived }, options),
+	ledgerFxSet: (jpyPerUsd: number | null, asOf: string, options?: InvokeOptions) => __TAURI_INVOKE<LedgerChange_Serialize>("ledger_fx_set", { jpyPerUsd, asOf }, options),
+	ledgerHistoryList: (options?: InvokeOptions) => __TAURI_INVOKE<LedgerChange_Serialize[]>("ledger_history_list", undefined, options),
+	ledgerUndo: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("ledger_undo", { id }, options),
 	hemisyncRanking: (options?: InvokeOptions) => __TAURI_INVOKE<TrackRanking>("hemisync_ranking", undefined, options),
+	hemisyncMarkDone: (trackIds: string[], done: boolean, options?: InvokeOptions) => __TAURI_INVOKE<number>("hemisync_mark_done", { trackIds, done }, options),
+	hemisyncMarkWaveDone: (waveNumber: number, done: boolean, options?: InvokeOptions) => __TAURI_INVOKE<number>("hemisync_mark_wave_done", { waveNumber, done }, options),
 	dailyRange: (from: string, to: string, options?: InvokeOptions) => __TAURI_INVOKE<DailyRange_Serialize>("daily_range", { from, to }, options),
 	dailyRebuild: (options?: InvokeOptions) => __TAURI_INVOKE<DailyBuild>("daily_rebuild", undefined, options),
 	/**  Stored experiments (read-only). */
@@ -293,6 +300,13 @@ export const commands = {
 	haDeviceSet: (entityId: string, service: string, value: Value | null, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<HaDeviceSetResult_Serialize>("ha_device_set", { entityId, service, value, via }, options),
 	noopQuery: (tool: string, args: Value | null, options?: InvokeOptions) => __TAURI_INVOKE<Value>("noop_query", { tool, args }, options),
 	/**
+	 *  Several allowlisted reads in ONE sandboxed session (one spawn instead of one per read).
+	 *  Same validation, sandbox, pin and timeout as [`noop_query`]; at most [`MAX_BATCH_CALLS`] calls.
+	 *  A session-level failure rejects the whole batch with the usual error; a bad call yields its own
+	 *  error in its slot.
+	 */
+	noopQueryBatch: (calls: NoopCall_Deserialize[], options?: InvokeOptions) => __TAURI_INVOKE<NoopBatchItem_Serialize[]>("noop_query_batch", { calls }, options),
+	/**
 	 *  Read-only: where the CLI resolves from, its SHA-256 and whether it matches the pin file.
 	 *  Hashes one local file; runs nothing.
 	 */
@@ -374,6 +388,9 @@ export const commands = {
 	moneyBalancesList: (options?: InvokeOptions) => __TAURI_INVOKE<MoneyBalances_Serialize>("money_balances_list", undefined, options),
 	moneyImportPick: (options?: InvokeOptions) => __TAURI_INVOKE<ImportPicked>("money_import_pick", undefined, options),
 	treasuryStreamAdd: (ventureId: string, name: string, streamType: string, setupDate: string | null, notes: string | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryStream_Serialize>("treasury_stream_add", { ventureId, name, streamType, setupDate, notes }, options),
+	treasuryEntryAdd: (ventureId: string, date: string, amountMinor: number, currency: string, kind: string, note: string | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryEntry>("treasury_entry_add", { ventureId, date, amountMinor, currency, kind, note }, options),
+	treasuryEntryUndo: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("treasury_entry_undo", { id }, options),
+	treasuryVentureMonth: (month: string, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryVentureMonth[]>("treasury_venture_month", { month }, options),
 	treasuryStreamUpdate: (id: string, status: string | null, name: string | null, notes: string | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryStream_Serialize>("treasury_stream_update", { id, status, name, notes }, options),
 	treasuryStreamsList: (options?: InvokeOptions) => __TAURI_INVOKE<TreasuryStream_Serialize[]>("treasury_streams_list", undefined, options),
 	treasuryImportPick: (streamId: string, adapterId: string, mapping: TreasuryCsvMapping_Deserialize | null, options?: InvokeOptions) => __TAURI_INVOKE<TreasuryImportResult>("treasury_import_pick", { streamId, adapterId, mapping }, options),
@@ -409,6 +426,12 @@ export const commands = {
 	moneyBalanceSetManual: (accountId: string, nativeAmount: number | null, asOf: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("money_balance_set_manual", { accountId, nativeAmount, asOf }, options),
 	moneySummaryRead: (options?: InvokeOptions) => __TAURI_INVOKE<MoneySummary_Serialize | null>("money_summary_read", undefined, options),
 	moneyFactsRead: (options?: InvokeOptions) => __TAURI_INVOKE<MoneyFacts_Serialize>("money_facts_read", undefined, options),
+	fxRateSetManual: (rate: number | null, date: string, options?: InvokeOptions) => __TAURI_INVOKE<MoneyFxRate>("fx_rate_set_manual", { rate, date }, options),
+	moneyEntryAdd: (draft: EntryDraft_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<MoneyEntry_Serialize>("money_entry_add", { draft }, options),
+	moneyEntryVoid: (id: string, replacement: EntryDraft_Deserialize | null, options?: InvokeOptions) => __TAURI_INVOKE<MoneyEntry_Serialize | null>("money_entry_void", { id, replacement }, options),
+	moneyEntriesList: (range: EntryRange_Deserialize | null, options?: InvokeOptions) => __TAURI_INVOKE<EntriesList_Serialize>("money_entries_list", { range }, options),
+	moneyMonthView: (months: number | null, options?: InvokeOptions) => __TAURI_INVOKE<MonthView_Serialize>("money_month_view", { months }, options),
+	moneySavingsGoalSet: (currency: string, targetMinor: number, deadline: string | null, options?: InvokeOptions) => __TAURI_INVOKE<null>("money_savings_goal_set", { currency, targetMinor, deadline }, options),
 	addHistory: (kind: string, options?: InvokeOptions) => __TAURI_INVOKE<HistoryItem[]>("add_history", { kind }, options),
 	addPreview: (kind: string, text: string, options?: InvokeOptions) => __TAURI_INVOKE<ParseResult_Serialize>("add_preview", { kind, text }, options),
 	addSave: (kind: string, preview: AddPreview_Deserialize, via: string | null, options?: InvokeOptions) => __TAURI_INVOKE<Saved_Serialize>("add_save", { kind, preview, via }, options),
@@ -880,6 +903,15 @@ export type AuxInfo_Serialize = {
 	detectedAt?: string,
 };
 
+export type Available = {
+	amount_minor: number,
+	base_minor: number,
+	base_date: string,
+	/**  "entry" (a balance you typed) | "accounts" (stored account balances). */
+	base_source: string,
+	since_net_minor: number,
+};
+
 export type BackendStatus = "not_registered" | "enabled" | "requires_approval" | "not_found" | 
 /**  Not macOS, or macOS older than 13. */
 "unsupported";
@@ -1203,6 +1235,11 @@ export type CatchUpStatus = {
 	idleSecs: number,
 };
 
+export type CategoryTotal = {
+	category: string,
+	minor: number,
+};
+
 export type Chart = Chart_Serialize | Chart_Deserialize;
 
 export type Chart_Deserialize = {
@@ -1339,6 +1376,23 @@ export type Checkins_Serialize = {
 export type ChecklistItem = {
 	label: string,
 	done: boolean,
+};
+
+export type CombinedUsd = {
+	rate: number | null,
+	rate_date: string,
+	rate_source: string,
+	income_cents: number,
+	expense_cents: number,
+	savings_cents: number,
+};
+
+export type Commitment = {
+	id: string,
+	label: string,
+	amount_minor: number,
+	recurrence: string,
+	monthly_minor: number,
 };
 
 export type CommonCause = {
@@ -1738,6 +1792,44 @@ export type CrewToolInfo = {
 	allowed: boolean,
 };
 
+export type CurrencyView = CurrencyView_Serialize | CurrencyView_Deserialize;
+
+export type CurrencyView_Deserialize = {
+	currency: string,
+	months: MonthTotals[],
+	available?: Available | null,
+	upcoming: Upcoming[],
+	commitments: Commitment[],
+	committed_monthly_minor: number,
+	goal?: MoneySavingsProgress_Deserialize | null,
+	/**  Cumulative savings at the end of each month of the window. */
+	savings_series: SeriesPoint[],
+	/**  Balance entries in this currency, oldest first (last 24). */
+	balance_series: SeriesPoint[],
+	has_statement: boolean,
+	statement_through?: string | null,
+	/**  Manual rows left out of the totals because a statement already covers that date. */
+	excluded_duplicates: number,
+};
+
+export type CurrencyView_Serialize = {
+	currency: string,
+	months: MonthTotals[],
+	available: Available | null,
+	upcoming: Upcoming[],
+	commitments: Commitment[],
+	committed_monthly_minor: number,
+	goal: MoneySavingsProgress_Serialize | null,
+	/**  Cumulative savings at the end of each month of the window. */
+	savings_series: SeriesPoint[],
+	/**  Balance entries in this currency, oldest first (last 24). */
+	balance_series: SeriesPoint[],
+	has_statement: boolean,
+	statement_through: string | null,
+	/**  Manual rows left out of the totals because a statement already covers that date. */
+	excluded_duplicates: number,
+};
+
 export type DailyBuild = {
 	days: number,
 	builtAtMs: number,
@@ -1911,6 +2003,65 @@ export type DecisionRecord_Serialize = {
 export type DownloadSummary = {
 	tier: string,
 	completed: number,
+};
+
+export type EntriesList = EntriesList_Serialize | EntriesList_Deserialize;
+
+export type EntriesList_Deserialize = {
+	/**  Newest first (by when it was recorded). Voided rows are included, marked with `voided_by`. */
+	entries: MoneyEntry_Deserialize[],
+	skipped_lines: number,
+};
+
+export type EntriesList_Serialize = {
+	/**  Newest first (by when it was recorded). Voided rows are included, marked with `voided_by`. */
+	entries: MoneyEntry_Serialize[],
+	skipped_lines: number,
+};
+
+/**  What the UI sends. */
+export type EntryDraft = EntryDraft_Serialize | EntryDraft_Deserialize;
+
+/**  What the UI sends. */
+export type EntryDraft_Deserialize = {
+	kind: string,
+	account_id?: string | null,
+	amount_minor: number,
+	currency: string,
+	date: string,
+	due?: string | null,
+	recurrence?: string | null,
+	category?: string | null,
+	note?: string | null,
+	source?: string | null,
+};
+
+/**  What the UI sends. */
+export type EntryDraft_Serialize = {
+	kind: string,
+	account_id: string | null,
+	amount_minor: number,
+	currency: string,
+	date: string,
+	due: string | null,
+	recurrence: string | null,
+	category: string | null,
+	note: string | null,
+	source: string | null,
+};
+
+export type EntryRange = EntryRange_Serialize | EntryRange_Deserialize;
+
+export type EntryRange_Deserialize = {
+	from?: string | null,
+	to?: string | null,
+	limit?: number | null,
+};
+
+export type EntryRange_Serialize = {
+	from: string | null,
+	to: string | null,
+	limit: number | null,
 };
 
 export type Event = Event_Serialize | Event_Deserialize;
@@ -2441,13 +2592,19 @@ export type Goal_Deserialize = {
 	current: number | null,
 	unit: string,
 	deadline?: string | null,
-	created_at: string,
-	updated_at: string,
+	created_at?: string,
+	updated_at?: string,
 	/**
 	 *  Optional link to a business-ledger venture (decision 0037). Old files without it load as `None`.
 	 *  Set only through `goal_venture_set`, which checks the ledger and logs History + Undo.
 	 */
 	venture_id?: string | null,
+	/**  Habits only (decision 0045 item 3): why this habit matters to Taisun, in his words. Old files load as `None`. */
+	why?: string | null,
+	/**  Habits only: the `HH:MM` JST time Needs you may start asking whether today is marked. `None` = 20:00. */
+	remind_at?: string | null,
+	/**  Habits only: a paused habit is not asked about and does not count as missed. */
+	paused?: boolean,
 };
 
 export type Goal_Serialize = {
@@ -2465,12 +2622,37 @@ export type Goal_Serialize = {
 	 *  Set only through `goal_venture_set`, which checks the ledger and logs History + Undo.
 	 */
 	venture_id?: string,
+	/**  Habits only (decision 0045 item 3): why this habit matters to Taisun, in his words. Old files load as `None`. */
+	why?: string,
+	/**  Habits only: the `HH:MM` JST time Needs you may start asking whether today is marked. `None` = 20:00. */
+	remind_at?: string,
+	/**  Habits only: a paused habit is not asked about and does not count as missed. */
+	paused?: boolean,
 };
 
-export type GoalsSection = {
+export type GoalsSection = GoalsSection_Serialize | GoalsSection_Deserialize;
+
+export type GoalsSection_Deserialize = {
 	state: string,
 	milestones: WeeklyReviewMilestone[],
 	habits: number,
+	/**
+	 *  Per-habit done/target from the habit-day store. Filled on every read (never stored), so a mark made
+	 *  after the review was built still counts. Old stored reviews load with none.
+	 */
+	habitWeeks?: HabitWeek[],
+	note: string,
+};
+
+export type GoalsSection_Serialize = {
+	state: string,
+	milestones: WeeklyReviewMilestone[],
+	habits: number,
+	/**
+	 *  Per-habit done/target from the habit-day store. Filled on every read (never stored), so a mark made
+	 *  after the review was built still counts. Old stored reviews load with none.
+	 */
+	habitWeeks: HabitWeek[],
 	note: string,
 };
 
@@ -2655,6 +2837,15 @@ export type HaTestResult_Serialize = {
 	ok: boolean,
 	kind?: string,
 	version?: string,
+};
+
+export type HabitWeek = {
+	id: string,
+	title: string,
+	/**  Days marked done in the review week (Mon to Sun, up to the review day). */
+	done: number,
+	/**  Days a week the habit is meant for. */
+	target: number,
 };
 
 export type HardenPlan = {
@@ -2917,6 +3108,35 @@ export type Lane = {
 	values: (number | null)[],
 };
 
+/**  One line of ledger History. `subject` is a venture id, or `fx` for the rate. */
+export type LedgerChange = LedgerChange_Serialize | LedgerChange_Deserialize;
+
+/**  One line of ledger History. `subject` is a venture id, or `fx` for the rate. */
+export type LedgerChange_Deserialize = {
+	id: string,
+	/**  RFC 3339, JST. */
+	at: string,
+	/**  `venture_add`, `venture_edit`, `venture_archive`, `venture_restore` or `fx_set`. */
+	action: string,
+	subject: string,
+	/**  Plain words for the History row, e.g. the venture name. */
+	label: string,
+	undone?: boolean,
+};
+
+/**  One line of ledger History. `subject` is a venture id, or `fx` for the rate. */
+export type LedgerChange_Serialize = {
+	id: string,
+	/**  RFC 3339, JST. */
+	at: string,
+	/**  `venture_add`, `venture_edit`, `venture_archive`, `venture_restore` or `fx_set`. */
+	action: string,
+	subject: string,
+	/**  Plain words for the History row, e.g. the venture name. */
+	label: string,
+	undone: boolean,
+};
+
 export type LedgerFund = {
 	name: string,
 	balanceJpy: number,
@@ -2934,6 +3154,12 @@ export type LedgerVenture_Deserialize = {
 	note?: string,
 	targetJpy?: number | null,
 	detail?: VentureDetail_Deserialize | null,
+	/**  Monthly target when the venture is kept in US dollars (cents). `target_jpy` stays for yen. */
+	targetUsdCents?: number | null,
+	/**  `JPY` or `USD`; `None` on ledgers written before the write path existed (read as JPY). */
+	currency?: string | null,
+	/**  Archived ventures stay in the file and in History; the UI hides them by default. */
+	archived?: boolean,
 };
 
 export type LedgerVenture_Serialize = {
@@ -2946,6 +3172,12 @@ export type LedgerVenture_Serialize = {
 	note: string,
 	targetJpy: number | null,
 	detail: VentureDetail_Serialize | null,
+	/**  Monthly target when the venture is kept in US dollars (cents). `target_jpy` stays for yen. */
+	targetUsdCents: number | null,
+	/**  `JPY` or `USD`; `None` on ledgers written before the write path existed (read as JPY). */
+	currency: string | null,
+	/**  Archived ventures stay in the file and in History; the UI hides them by default. */
+	archived: boolean,
 };
 
 export type LegacyContextMigrationReport = {
@@ -2964,6 +3196,11 @@ export type LibTrack_Deserialize = {
 	order: number,
 	title: string,
 	durationMs?: number | null,
+	/**
+	 *  0045: Taisun marked this track done by hand (a separate flag; it is never a session and
+	 *  never counts toward minutes, ratings, rankings or patterns). Filled by `library_in`.
+	 */
+	markedDone: boolean,
 };
 
 export type LibTrack_Serialize = {
@@ -2973,6 +3210,11 @@ export type LibTrack_Serialize = {
 	order: number,
 	title: string,
 	durationMs: number | null,
+	/**
+	 *  0045: Taisun marked this track done by hand (a separate flag; it is never a session and
+	 *  never counts toward minutes, ratings, rankings or patterns). Filled by `library_in`.
+	 */
+	markedDone: boolean,
 };
 
 export type Library = Library_Serialize | Library_Deserialize;
@@ -3313,6 +3555,42 @@ export type MoneyBalances_Serialize = {
 	fx: MoneyFxRate | null,
 };
 
+export type MoneyEntry = MoneyEntry_Serialize | MoneyEntry_Deserialize;
+
+export type MoneyEntry_Deserialize = {
+	id: string,
+	kind: string,
+	account_id?: string | null,
+	amount_minor: number,
+	currency: string,
+	date: string,
+	due?: string | null,
+	recurrence?: string | null,
+	category?: string | null,
+	note?: string | null,
+	source: string,
+	created_at: string,
+	/**  Filled when read: the id of the void marker that cancelled this row. Never written to the file. */
+	voided_by?: string | null,
+};
+
+export type MoneyEntry_Serialize = {
+	id: string,
+	kind: string,
+	account_id?: string,
+	amount_minor: number,
+	currency: string,
+	date: string,
+	due?: string,
+	recurrence?: string,
+	category?: string,
+	note?: string,
+	source: string,
+	created_at: string,
+	/**  Filled when read: the id of the void marker that cancelled this row. Never written to the file. */
+	voided_by?: string,
+};
+
 export type MoneyFact = MoneyFact_Serialize | MoneyFact_Deserialize;
 
 export type MoneyFact_Deserialize = {
@@ -3388,6 +3666,30 @@ export type MoneyRecurring = {
 	last_date: string,
 };
 
+export type MoneySavingsProgress = MoneySavingsProgress_Serialize | MoneySavingsProgress_Deserialize;
+
+export type MoneySavingsProgress_Deserialize = {
+	title: string,
+	target_minor: number,
+	deadline?: string | null,
+	/**  Sum of savings entries (all time) in this currency. */
+	saved_minor: number,
+	remaining_minor: number,
+	pct: number | null,
+	per_month_needed_minor?: number | null,
+};
+
+export type MoneySavingsProgress_Serialize = {
+	title: string,
+	target_minor: number,
+	deadline: string | null,
+	/**  Sum of savings entries (all time) in this currency. */
+	saved_minor: number,
+	remaining_minor: number,
+	pct: number | null,
+	per_month_needed_minor: number | null,
+};
+
 export type MoneySavingsRate = MoneySavingsRate_Serialize | MoneySavingsRate_Deserialize;
 
 export type MoneySavingsRate_Deserialize = {
@@ -3460,6 +3762,51 @@ export type MoneySummary_Serialize = {
 	buffer_months: number | null,
 	savings_rate: MoneySavingsRate_Serialize | null,
 	recurring: MoneyRecurring[],
+};
+
+export type MonthTotals = {
+	/**  `YYYY-MM` */
+	month: string,
+	/**  False when nothing at all is recorded for the month: the page shows "–", not 0. */
+	has_data: boolean,
+	income_minor: number,
+	expense_minor: number,
+	savings_minor: number,
+	/**  income - expense (savings contributions are shown separately). */
+	net_minor: number,
+	by_category: CategoryTotal[],
+	manual_income_minor: number,
+	manual_expense_minor: number,
+	statement_income_minor: number,
+	statement_expense_minor: number,
+};
+
+export type MonthView = MonthView_Serialize | MonthView_Deserialize;
+
+export type MonthView_Deserialize = {
+	today: string,
+	/**  Oldest first; the last is the current month. */
+	months: string[],
+	currencies: CurrencyView_Deserialize[],
+	fx?: MoneyFxRate | null,
+	/**  This month in USD, only when both currencies have data AND a stored rate exists. */
+	combined_usd?: CombinedUsd | null,
+	/**  True when both currencies have data and no rate is stored (NEEDS_CONVERSION). */
+	needs_conversion: boolean,
+	skipped_lines: number,
+};
+
+export type MonthView_Serialize = {
+	today: string,
+	/**  Oldest first; the last is the current month. */
+	months: string[],
+	currencies: CurrencyView_Serialize[],
+	fx: MoneyFxRate | null,
+	/**  This month in USD, only when both currencies have data AND a stored rate exists. */
+	combined_usd: CombinedUsd | null,
+	/**  True when both currencies have data and no rate is stored (NEEDS_CONVERSION). */
+	needs_conversion: boolean,
+	skipped_lines: number,
 };
 
 export type MotionEvent = {
@@ -3628,6 +3975,21 @@ export type NexusConfig_Serialize = {
 
 export type NodeKind = "app" | "backend" | "service" | "device" | "store" | "external";
 
+/**  One call's outcome in a [`noop_query_batch`]: exactly one of `value` / `error` is set. */
+export type NoopBatchItem = NoopBatchItem_Serialize | NoopBatchItem_Deserialize;
+
+/**  One call's outcome in a [`noop_query_batch`]: exactly one of `value` / `error` is set. */
+export type NoopBatchItem_Deserialize = {
+	value?: Value | null,
+	error?: NoopQueryError | null,
+};
+
+/**  One call's outcome in a [`noop_query_batch`]: exactly one of `value` / `error` is set. */
+export type NoopBatchItem_Serialize = {
+	value: Value | null,
+	error: NoopQueryError | null,
+};
+
 export type NoopBatteryState = NoopBatteryState_Serialize | NoopBatteryState_Deserialize;
 
 export type NoopBatteryState_Deserialize = {
@@ -3640,6 +4002,21 @@ export type NoopBatteryState_Serialize = {
 	percentage: number | null,
 	charging: boolean | null,
 	observedAt: string,
+};
+
+/**  One call in a [`noop_query_batch`]. */
+export type NoopCall = NoopCall_Serialize | NoopCall_Deserialize;
+
+/**  One call in a [`noop_query_batch`]. */
+export type NoopCall_Deserialize = {
+	tool: string,
+	args?: Value | null,
+};
+
+/**  One call in a [`noop_query_batch`]. */
+export type NoopCall_Serialize = {
+	tool: string,
+	args: Value | null,
 };
 
 export type NoopDailyMetric = NoopDailyMetric_Serialize | NoopDailyMetric_Deserialize;
@@ -4282,7 +4659,7 @@ export type Review_Deserialize = {
 	health: WeeklyReviewHealth_Deserialize,
 	work: Work_Deserialize,
 	checkins: Checkins_Deserialize,
-	goals: GoalsSection,
+	goals: GoalsSection_Deserialize,
 	money: MoneySection_Deserialize,
 	suggestion?: Suggestion_Deserialize | null,
 	suggestionNote: string,
@@ -4307,7 +4684,7 @@ export type Review_Serialize = {
 	health: WeeklyReviewHealth_Serialize,
 	work: Work_Serialize,
 	checkins: Checkins_Serialize,
-	goals: GoalsSection,
+	goals: GoalsSection_Serialize,
 	money: MoneySection_Serialize,
 	suggestion: Suggestion_Serialize | null,
 	suggestionNote: string,
@@ -4492,6 +4869,11 @@ export type SecretStatus = {
 	name: string,
 	label: string,
 	set: boolean,
+};
+
+export type SeriesPoint = {
+	label: string,
+	value_minor: number,
 };
 
 export type ServiceEvent = {
@@ -5663,6 +6045,15 @@ export type TreasuryCsvMapping_Serialize = {
 	dateFormat: string | null,
 };
 
+export type TreasuryEntry = {
+	id: string,
+	ventureId: string,
+	date: string,
+	/**  Signed: income positive, a cost negative. */
+	amountMinor: number,
+	currency: string,
+};
+
 export type TreasuryFlag = TreasuryFlag_Serialize | TreasuryFlag_Deserialize;
 
 export type TreasuryFlag_Deserialize = {
@@ -6108,6 +6499,17 @@ export type TreasuryTrendRow_Serialize = {
 	avgMinor: number | null,
 };
 
+/**  What one venture took in and paid out in one month, per currency. Never merged across currencies. */
+export type TreasuryVentureMonth = {
+	ventureId: string,
+	currency: string,
+	month: string,
+	incomeMinor: number,
+	/**  Costs, refunds and fees as a positive number. */
+	costMinor: number,
+	rows: number,
+};
+
 /**  One event on the channel. Fixed shapes: nothing here can carry a model, provider or secret. */
 export type TurnEvent = TurnEvent_Serialize | TurnEvent_Deserialize;
 
@@ -6123,6 +6525,15 @@ export type UnrankedTrack = {
 	sessionIds: string[],
 	/**  Always "not enough sessions". */
 	reason: string,
+};
+
+export type Upcoming = {
+	id: string,
+	label: string,
+	amount_minor: number,
+	due: string,
+	days_until: number,
+	recurrence: string,
 };
 
 export type UpdatePrefs = UpdatePrefs_Serialize | UpdatePrefs_Deserialize;
@@ -6205,6 +6616,37 @@ export type VentureDetail_Serialize = {
 	budgetUsedJpy: number | null,
 	fundJpy: number | null,
 	openVotes: number,
+};
+
+/**  What the form sends. Money is integer minor units (yen, or US cents), never a float. */
+export type VentureDraft = VentureDraft_Serialize | VentureDraft_Deserialize;
+
+/**  What the form sends. Money is integer minor units (yen, or US cents), never a float. */
+export type VentureDraft_Deserialize = {
+	/**  `None` adds a venture; `Some` edits that one. */
+	id?: string | null,
+	name: string,
+	stage: string,
+	/**  One line: what it is. */
+	oneLiner: string,
+	nextStep?: string | null,
+	monthlyTargetMinor?: number | null,
+	/**  `JPY` or `USD`. */
+	currency: string,
+};
+
+/**  What the form sends. Money is integer minor units (yen, or US cents), never a float. */
+export type VentureDraft_Serialize = {
+	/**  `None` adds a venture; `Some` edits that one. */
+	id: string | null,
+	name: string,
+	stage: string,
+	/**  One line: what it is. */
+	oneLiner: string,
+	nextStep: string | null,
+	monthlyTargetMinor: number | null,
+	/**  `JPY` or `USD`. */
+	currency: string,
 };
 
 /**  One goal under a venture in `venture_tracking_list`. */

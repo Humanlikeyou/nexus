@@ -2,7 +2,9 @@ import { NEEDS_CONVERSION, UNWIRED, sample, sampleAdaptersEnabled, type Wired } 
 import { liveBusiness, type BusinessLedger } from "./liveLedger";
 
 export type Health = "on_track" | "at_risk" | "off_track" | "done" | "waiting" | "searching";
-export interface Venture { id: string; name: string; stage: string; health: Health; progress: { done: number; total: number; label: string } | null; nextStep: string | null; note: string; target: Wired<number> }
+export interface Venture { id: string; name: string; stage: string; health: Health; progress: { done: number; total: number; label: string } | null; nextStep: string | null; note: string; target: Wired<number>;
+  /** What the target is kept in, and its raw minor-unit amount (yen, or US cents). Absent on sample data. */
+  currency?: "JPY" | "USD"; targetMinor?: number | null }
 export interface VentureDetail { headline: string; checklist: { label: string; done: boolean }[]; milestones: { label: string; due: string; health: Health }[]; nextActions: { label: string; detail: string; action: string }[]; budgetUsedUsd: Wired<number>; fundUsd: Wired<number>; openVotes: number }
 export interface FundingRequest { id: string; requester: string; purpose: string; amountUsd: Wired<number>; status: "open" | "approved" | "denied" }
 export interface TaxFlag { id: string; label: string; area: string; date: string }

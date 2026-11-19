@@ -15,6 +15,8 @@ export type HemisyncTrack = {
   title: string;         // human title parsed from the file name ("Intro to Focus 15")
   durationMs: number | null; // null until known (the player reads it from the audio metadata)
   src: string;           // playable URL (asset protocol), only ever under <app data>/hemisync/
+  /** 0045: marked done by hand. Separate from sessions: it never counts as a session, minutes or a rating. */
+  markedDone?: boolean;
 };
 
 export type HemisyncWave = { wave: number; waveName: string; tracks: HemisyncTrack[] };
@@ -55,6 +57,10 @@ export interface HemisyncAdapter {
   linkSession(input: { sessionId: string; trackId: string; startedAt: string }): Promise<Wired<{ ok: true }>>;
   /** Called when the track ends or on Stop. */
   finishSession(input: { sessionId: string; listenedMs: number; completed: boolean }): Promise<Wired<{ ok: true }>>;
+  /** 0045: mark tracks done (or undo) by hand. No session is created. */
+  markDone(trackIds: string[], done: boolean): Promise<Wired<{ ok: true }>>;
+  /** 0045: the same for every track of one wave. */
+  markWaveDone(wave: number, done: boolean): Promise<Wired<{ ok: true }>>;
   /** The post-session sheet: 1–5 and an optional note. */
   rate(input: { sessionId: string; rating: 1 | 2 | 3 | 4 | 5; note?: string }): Promise<Wired<{ ok: true }>>;
 }
@@ -63,6 +69,7 @@ export const unwiredHemisync: HemisyncAdapter = {
   library: () => UNWIRED, sessions: () => UNWIRED, stats: () => UNWIRED,
   importFrom: async () => UNWIRED, importProgress: () => null,
   linkSession: async () => UNWIRED, finishSession: async () => UNWIRED, rate: async () => UNWIRED,
+  markDone: async () => UNWIRED, markWaveDone: async () => UNWIRED,
 };
 
 /** Mock mode only. Titles are the real collection's names; every number is sample. */
@@ -88,5 +95,6 @@ export function makeSampleHemisync(): HemisyncAdapter {
     sessions: () => sample(sessions), stats: () => sample(stats),
     importFrom: async () => sample({ added: 0, skipped: 42 }), importProgress: () => null,
     linkSession: async () => ok, finishSession: async () => ok, rate: async () => ok,
+    markDone: async () => ok, markWaveDone: async () => ok,
   };
 }

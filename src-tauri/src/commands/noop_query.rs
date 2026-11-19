@@ -247,11 +247,55 @@ fn private_base() -> std::path::PathBuf {
     std::env::temp_dir()
 }
 
+/// Identity of the source file at copy time (from the open handle). Equal stamps mean the same
+/// inode with the same size, mtime and ctime, so the earlier copy and hash still describe it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SourceStamp {
+    dev: u64,
+    ino: u64,
+    size: u64,
+    mtime: (i64, i64),
+    ctime: (i64, i64),
+}
+
+impl SourceStamp {
+    fn of(m: &std::fs::Metadata) -> Self {
+        use std::os::unix::fs::MetadataExt;
+        SourceStamp {
+            dev: m.dev(),
+            ino: m.ino(),
+            size: m.len(),
+            mtime: (m.mtime(), m.mtime_nsec()),
+            ctime: (m.ctime(), m.ctime_nsec()),
+        }
+    }
+}
+
 /// A private, hashed copy of the binary. The copy is what runs, so a swap of the original after
 /// validation cannot be executed. Removed (file and folder) when dropped.
 pub(crate) struct PrivateCopy {
     dir: PathBuf,
     path: PathBuf,
+    sha: String,
+    /// None when the source changed while it was being copied: never reused.
+    stamp: Option<SourceStamp>,
+}
+
+/// Open `binary` with O_NOFOLLOW and fstat it: a regular file owned by us.
+fn open_source(binary: &Path) -> Result<(std::fs::File, std::fs::Metadata), NoopQueryError> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let bad = |m: &str| NoopQueryError::InvalidPath(m.to_string());
+    let src = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(binary)
+        .map_err(|_| bad("cannot open the binary"))?;
+    let meta = src.metadata().map_err(|_| bad("cannot stat the binary"))?;
+    // SAFETY: getuid has no preconditions and cannot fail.
+    if !meta.is_file() || meta.uid() != unsafe { libc::getuid() } {
+        return Err(bad("binary is not a regular file owned by you"));
+    }
+    Ok((src, meta))
 }
 
 impl PrivateCopy {
@@ -261,33 +305,41 @@ impl PrivateCopy {
 
     /// Open `binary` with O_NOFOLLOW, fstat it (regular file, ours), copy the bytes into a fresh
     /// 0700 folder while hashing them, chmod 0500, then check the pin against that hash.
+    /// (Uncached; production goes through [`prepare_cached`].)
+    #[cfg(test)]
     pub(crate) fn prepare(
         binary: &Path,
         pins: &[String],
         require_pin: bool,
     ) -> Result<Self, NoopQueryError> {
+        let (src, meta) = open_source(binary)?;
+        Self::copy_from(src, &meta, pins, require_pin)
+    }
+
+    fn copy_from(
+        mut src: std::fs::File,
+        meta: &std::fs::Metadata,
+        pins: &[String],
+        require_pin: bool,
+    ) -> Result<Self, NoopQueryError> {
         use sha2::{Digest, Sha256};
-        use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
         let bad = |m: &str| NoopQueryError::InvalidPath(m.to_string());
-        let mut src = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(binary)
-            .map_err(|_| bad("cannot open the binary"))?;
-        let meta = src.metadata().map_err(|_| bad("cannot stat the binary"))?;
-        // SAFETY: getuid has no preconditions and cannot fail.
-        if !meta.is_file() || meta.uid() != unsafe { libc::getuid() } {
-            return Err(bad("binary is not a regular file owned by you"));
-        }
-        let dir = private_base().join(format!("nexus-noop-{}", uuid::Uuid::new_v4()));
+        let dir = private_base().join(format!(
+            "{COPY_DIR_PREFIX}{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
         std::fs::DirBuilder::new()
             .mode(0o700)
             .create(&dir)
             .map_err(|_| bad("cannot create a private folder"))?;
         let path = dir.join(BUNDLED_BINARY_NAME);
-        let guard = PrivateCopy {
+        let mut guard = PrivateCopy {
             dir,
             path: path.clone(),
+            sha: String::new(),
+            stamp: None,
         };
         let mut out = std::fs::OpenOptions::new()
             .write(true)
@@ -312,8 +364,132 @@ impl PrivateCopy {
         drop(out);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o500))
             .map_err(|_| bad("cannot lock the private copy"))?;
-        pin_decision(&hex::encode(h.finalize()), pins, require_pin)?;
+        guard.sha = hex::encode(h.finalize());
+        pin_decision(&guard.sha, pins, require_pin)?;
+        let before = SourceStamp::of(meta);
+        guard.stamp = src
+            .metadata()
+            .ok()
+            .map(|m| SourceStamp::of(&m))
+            .filter(|after| *after == before);
         Ok(guard)
+    }
+
+    /// The copy on disk is still what we made: a regular file of ours, mode 0500, in a 0700
+    /// folder, with the size of the source.
+    fn intact(&self, size: u64) -> bool {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        // SAFETY: getuid has no preconditions and cannot fail.
+        let uid = unsafe { libc::getuid() };
+        let (Ok(f), Ok(d)) = (
+            std::fs::symlink_metadata(&self.path),
+            std::fs::symlink_metadata(&self.dir),
+        ) else {
+            return false;
+        };
+        f.is_file()
+            && f.uid() == uid
+            && f.permissions().mode() & 0o777 == 0o500
+            && f.len() == size
+            && d.is_dir()
+            && d.uid() == uid
+            && d.permissions().mode() & 0o777 == 0o700
+    }
+}
+
+const COPY_DIR_PREFIX: &str = "nexus-noop-";
+/// Most distinct binaries kept (normally one; tests and path changes add a few).
+const COPY_CACHE_MAX: usize = 64;
+
+type CacheKey = (PathBuf, PathBuf);
+/// Verified private copies kept for the life of the process, keyed by (copy base, source path).
+static COPY_CACHE: std::sync::Mutex<Vec<(CacheKey, std::sync::Arc<PrivateCopy>)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// A verified private copy, reused while the source file is unchanged.
+///
+/// Reuse needs all of: same source inode, size, mtime and ctime (read from the O_NOFOLLOW handle
+/// just opened), the copy still intact on disk, and the pin decision passing again with the
+/// current pins on the digest computed when the copy was made. Anything else makes a fresh
+/// copy + hash, exactly as before. The run always executes the private copy, never the source,
+/// so a stale cache can only mean "an older, already pin-checked build runs", never an unchecked
+/// one. A failed pin check drops the entry. The lock is held across a copy so concurrent callers
+/// share one copy instead of each making their own.
+pub(crate) fn prepare_cached(
+    binary: &Path,
+    pins: &[String],
+    require_pin: bool,
+) -> Result<std::sync::Arc<PrivateCopy>, NoopQueryError> {
+    let (src, meta) = open_source(binary)?;
+    let key = (private_base(), binary.to_path_buf());
+    let mut cache = COPY_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(i) = cache.iter().position(|(k, _)| *k == key) {
+        let copy = &cache[i].1;
+        if copy.stamp == Some(SourceStamp::of(&meta)) && copy.intact(meta.len()) {
+            return match pin_decision(&copy.sha, pins, require_pin) {
+                Ok(()) => Ok(copy.clone()),
+                Err(e) => {
+                    cache.remove(i);
+                    Err(e)
+                }
+            };
+        }
+        cache.remove(i);
+    } else {
+        sweep_dead_process_copies(&key.0);
+    }
+    let copy = std::sync::Arc::new(PrivateCopy::copy_from(src, &meta, pins, require_pin)?);
+    if copy.stamp.is_some() {
+        if cache.len() >= COPY_CACHE_MAX {
+            cache.remove(0);
+        }
+        cache.push((key, copy.clone()));
+    }
+    Ok(copy)
+}
+
+/// Drop every cached copy (removing the files once no run holds one). Called on app exit.
+pub fn clear_private_copies() {
+    COPY_CACHE.lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
+/// Remove copy folders left by processes that no longer exist (crash or kill: a normal exit
+/// clears the cache). Only `nexus-noop-<pid>-<uuid>` folders directly under `base`, real
+/// directories (not symlinks) owned by us, whose pid is gone; only the known file and the folder
+/// are removed, never recursively.
+fn sweep_dead_process_copies(base: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(rd) = std::fs::read_dir(base) else {
+        return;
+    };
+    // SAFETY: getuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let Some(rest) = name.to_str().and_then(|n| n.strip_prefix(COPY_DIR_PREFIX)) else {
+            continue;
+        };
+        let Some(pid) = rest
+            .split('-')
+            .next()
+            .and_then(|p| p.parse::<i32>().ok())
+            .filter(|p| *p > 1 && rest.contains('-'))
+        else {
+            continue;
+        };
+        let Ok(m) = std::fs::symlink_metadata(e.path()) else {
+            continue;
+        };
+        if !m.is_dir() || m.uid() != uid {
+            continue;
+        }
+        // SAFETY: signal 0 only checks that the pid exists.
+        let alive = unsafe { libc::kill(pid, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+        if !alive {
+            let _ = std::fs::remove_file(e.path().join(BUNDLED_BINARY_NAME));
+            let _ = std::fs::remove_dir(e.path());
+        }
     }
 }
 
@@ -782,7 +958,41 @@ pub(crate) fn run_query_in(
     args: &Value,
     timeout: Duration,
 ) -> Result<Value, NoopQueryError> {
-    let args = validate(tool, args)?;
+    run_calls_in(
+        sandbox_exec,
+        settings,
+        roots,
+        &[(tool.to_string(), args.clone())],
+        timeout,
+    )?
+    .pop()
+    .unwrap_or_else(|| Err(NoopQueryError::BadOutput("no result".into())))
+}
+
+/// Most calls one batch may carry.
+pub const MAX_BATCH_CALLS: usize = 12;
+
+/// Run several tools/calls in ONE sandboxed MCP session (one copy lookup, one spawn, one
+/// initialize). Each call is validated on its own; an invalid one yields its own error and is not
+/// sent. The outer `Err` is a session failure (path policy, pin, sandbox, spawn, timeout, exit
+/// status) and applies to the whole batch. Results are in call order, matched by JSON-RPC id.
+pub(crate) fn run_calls_in(
+    sandbox_exec: &Path,
+    settings: &NoopSettings,
+    roots: &Roots,
+    calls: &[(String, Value)],
+    timeout: Duration,
+) -> Result<Vec<Result<Value, NoopQueryError>>, NoopQueryError> {
+    if calls.len() > MAX_BATCH_CALLS {
+        return Err(NoopQueryError::InvalidArgs(format!(
+            "at most {MAX_BATCH_CALLS} calls per batch"
+        )));
+    }
+    let checked: Vec<Result<Map<String, Value>, NoopQueryError>> =
+        calls.iter().map(|(t, a)| validate(t, a)).collect();
+    if checked.iter().all(Result::is_err) {
+        return Ok(checked.into_iter().map(|r| r.map(Value::Object)).collect());
+    }
     let raw_bin = settings
         .binary_path
         .as_deref()
@@ -794,8 +1004,7 @@ pub(crate) fn run_query_in(
         .bundle_dir
         .as_deref()
         .is_some_and(|b| binary == b.join(BUNDLED_BINARY_NAME));
-    let private =
-        PrivateCopy::prepare(&binary, &active_pins(), bundled || !cfg!(debug_assertions))?;
+    let private = prepare_cached(&binary, &active_pins(), bundled || !cfg!(debug_assertions))?;
     let db = match settings.db_path.as_deref().filter(|p| !p.is_empty()) {
         Some(d) => Some(validate_path(d, PathKind::Db, roots)?),
         None => None,
@@ -825,48 +1034,73 @@ pub(crate) fn run_query_in(
         .spawn()
         .map_err(|e| NoopQueryError::SpawnFailed(e.kind().to_string()))?;
     let init = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"nexus","version":"1"}}});
-    let call = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":tool,"arguments":Value::Object(args)}});
     {
+        // Call i has JSON-RPC id i + 2 (id 1 is initialize).
+        let mut lines = vec![init.to_string()];
+        for (i, ((tool, _), args)) in calls.iter().zip(&checked).enumerate() {
+            if let Ok(args) = args {
+                lines.push(json!({"jsonrpc":"2.0","id":i + 2,"method":"tools/call","params":{"name":tool,"arguments":Value::Object(args.clone())}}).to_string());
+            }
+        }
         let mut stdin = child.stdin.take().expect("piped stdin");
-        let _ = writeln!(stdin, "{init}\n{call}");
+        let _ = writeln!(stdin, "{}", lines.join("\n"));
     } // closing stdin ends the server's read loop
     let mut stdout = child.stdout.take().expect("piped stdout");
-    let reader = std::thread::spawn(move || {
+    // The reader reports as soon as stdout closes, so the caller wakes on the event instead of
+    // polling the child on a timer.
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = stdout.by_ref().take(16 * 1024 * 1024).read_to_end(&mut buf);
-        buf
+        let _ = tx.send(buf);
     });
     let start = Instant::now();
+    let timed_out = |child: &mut std::process::Child| {
+        let _ = child.kill();
+        let _ = child.wait();
+        NoopQueryError::Timeout(timeout.as_secs())
+    };
+    let out = match rx.recv_timeout(timeout) {
+        Ok(buf) => buf,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => return Err(timed_out(&mut child)),
+        Err(_) => Vec::new(),
+    };
+    // stdout is closed, so the child is exiting: reap it, checking every millisecond at most.
     let status = loop {
         match child.try_wait() {
             Ok(Some(s)) => break s,
-            Ok(None) if start.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(NoopQueryError::Timeout(timeout.as_secs()));
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) if start.elapsed() >= timeout => return Err(timed_out(&mut child)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(1)),
             Err(e) => return Err(NoopQueryError::ProcessFailed(e.kind().to_string())),
         }
     };
-    let out = reader.join().unwrap_or_default();
     if !status.success() {
         return Err(NoopQueryError::ProcessFailed(format!(
             "exit {:?}",
             status.code()
         )));
     }
-    parse_response(&out)
+    Ok(checked
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| c.and_then(|_| parse_response_id(&out, i as u64 + 2)))
+        .collect())
 }
 
 /// Find the id=2 response; return parsed structured content (or JSON text content).
+#[cfg(test)]
 pub fn parse_response(out: &[u8]) -> Result<Value, NoopQueryError> {
+    parse_response_id(out, 2)
+}
+
+/// [`parse_response`] for the response with JSON-RPC id `id`.
+pub fn parse_response_id(out: &[u8], id: u64) -> Result<Value, NoopQueryError> {
     let text = std::str::from_utf8(out)
         .map_err(|_| NoopQueryError::BadOutput("non-UTF-8 stdout".into()))?;
     let resp = text
         .lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .find(|v| v.get("id") == Some(&json!(2)))
+        .find(|v| v.get("id") == Some(&json!(id)))
         .ok_or_else(|| NoopQueryError::BadOutput("no tools/call response".into()))?;
     if let Some(err) = resp.get("error") {
         let msg = err
@@ -904,6 +1138,56 @@ pub async fn noop_query(tool: String, args: Option<Value>) -> Result<Value, Noop
     })
     .await
     .map_err(|_| NoopQueryError::ProcessFailed("join".into()))?
+}
+
+/// One call in a [`noop_query_batch`].
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct NoopCall {
+    pub tool: String,
+    pub args: Option<Value>,
+}
+
+/// One call's outcome in a [`noop_query_batch`]: exactly one of `value` / `error` is set.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct NoopBatchItem {
+    pub value: Option<Value>,
+    pub error: Option<NoopQueryError>,
+}
+
+impl From<Result<Value, NoopQueryError>> for NoopBatchItem {
+    fn from(r: Result<Value, NoopQueryError>) -> Self {
+        match r {
+            Ok(value) => NoopBatchItem {
+                value: Some(value),
+                error: None,
+            },
+            Err(error) => NoopBatchItem {
+                value: None,
+                error: Some(error),
+            },
+        }
+    }
+}
+
+/// Several allowlisted reads in ONE sandboxed session (one spawn instead of one per read).
+/// Same validation, sandbox, pin and timeout as [`noop_query`]; at most [`MAX_BATCH_CALLS`] calls.
+/// A session-level failure rejects the whole batch with the usual error; a bad call yields its own
+/// error in its slot.
+#[tauri::command]
+#[specta::specta]
+pub async fn noop_query_batch(calls: Vec<NoopCall>) -> Result<Vec<NoopBatchItem>, NoopQueryError> {
+    let s = with_resolved_db(load_settings());
+    let roots = Roots::current().map_err(NoopQueryError::InvalidPath)?;
+    let calls: Vec<(String, Value)> = calls
+        .into_iter()
+        .map(|c| (c.tool, c.args.unwrap_or(Value::Null)))
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_calls_in(Path::new(SANDBOX_EXEC), &s, &roots, &calls, DEFAULT_TIMEOUT)
+    })
+    .await
+    .map_err(|_| NoopQueryError::ProcessFailed("join".into()))?
+    .map(|v| v.into_iter().map(NoopBatchItem::from).collect())
 }
 
 /// Test helper: a fake `home` with an allowlisted build dir for fake CLI scripts.
@@ -1304,6 +1588,63 @@ mod tests {
         }
     }
 
+    /// Live timing of the Mind-Body read pattern against the real binary. Prints durations only.
+    #[test]
+    #[ignore]
+    fn live_timing_mind_body_pattern() {
+        let s = with_resolved_db(load_settings_for_live());
+        let r = Roots::current().unwrap();
+        let calls: Vec<(&str, Value)> = vec![
+            ("health_snapshot", json!({"days": 29})),
+            (
+                "metric_series",
+                json!({"key": "sleep_total_min", "days": 365}),
+            ),
+            ("metric_series", json!({"key": "hrv", "days": 365})),
+            ("metric_series", json!({"key": "recovery", "days": 365})),
+            ("metric_series", json!({"key": "rhr", "days": 365})),
+            ("metric_series", json!({"key": "strain", "days": 365})),
+        ];
+        let par = |cs: &[(&str, Value)]| {
+            std::thread::scope(|sc| {
+                let hs: Vec<_> = cs
+                    .iter()
+                    .map(|(t, a)| {
+                        let (s, r) = (&s, &r);
+                        sc.spawn(move || run_query(s, r, t, a, DEFAULT_TIMEOUT).is_ok())
+                    })
+                    .collect();
+                hs.into_iter().all(|h| h.join().unwrap())
+            })
+        };
+        let t = Instant::now();
+        let ok1 = par(&calls[..4]);
+        let ok2 = par(&calls[4..]);
+        println!(
+            "TIMING two-phase (4 then 2) ok={}: {:?}",
+            ok1 && ok2,
+            t.elapsed()
+        );
+        let t = Instant::now();
+        let ok = par(&calls);
+        println!(
+            "TIMING single phase (6 parallel) ok={ok}: {:?}",
+            t.elapsed()
+        );
+        let t = Instant::now();
+        let ok = run_query(&s, &r, "data_freshness", &json!({}), DEFAULT_TIMEOUT).is_ok();
+        println!("TIMING one call ok={ok}: {:?}", t.elapsed());
+        let owned: Vec<(String, Value)> = calls
+            .iter()
+            .map(|(t, a)| (t.to_string(), a.clone()))
+            .collect();
+        let t = Instant::now();
+        let ok = run_calls_in(Path::new(SANDBOX_EXEC), &s, &r, &owned, DEFAULT_TIMEOUT)
+            .map(|v| v.iter().all(Result::is_ok))
+            .unwrap_or(false);
+        println!("TIMING batch (6 in one session) ok={ok}: {:?}", t.elapsed());
+    }
+
     fn load_settings_for_live() -> NoopSettings {
         NoopSettings::default()
     }
@@ -1506,6 +1847,172 @@ mod tests {
         // Same path, different bytes: the old pin no longer matches.
         h.script(&format!("{body}\n# tampered"));
         assert!(matches!(run(&pin), Err(NoopQueryError::PinMismatch(_))));
+    }
+
+    fn private_base_in(h: &FakeHome, name: &str) -> PathBuf {
+        let base = h.0.join(name);
+        std::fs::create_dir_all(&base).unwrap();
+        PRIVATE_BASE.with(|b| *b.borrow_mut() = Some(base.clone()));
+        base
+    }
+
+    fn copy_dirs(base: &Path) -> usize {
+        std::fs::read_dir(base).unwrap().count()
+    }
+
+    #[test]
+    fn copy_cache_reuses_an_unchanged_file_and_recopies_a_changed_one() {
+        let h = FakeHome::new();
+        let base = private_base_in(&h, "base-reuse");
+        let p = h.script("echo one");
+        let a = prepare_cached(&p, &[], false).unwrap();
+        let b = prepare_cached(&p, &[], false).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&a, &b), "same file: same copy");
+        assert_eq!(copy_dirs(&base), 1, "no second copy was made");
+        let first = a.path().to_path_buf();
+        drop((a, b));
+        // Different bytes at the same path: a fresh copy with the new content, old one removed.
+        h.script("echo two-two");
+        let c = prepare_cached(&p, &[], false).unwrap();
+        assert_ne!(c.path(), first);
+        assert_eq!(std::fs::read(c.path()).unwrap(), std::fs::read(&p).unwrap());
+        assert!(!first.exists(), "the stale copy is removed once unused");
+        assert_eq!(copy_dirs(&base), 1);
+        // A copy deleted or loosened behind our back is not trusted.
+        let path = c.path().to_path_buf();
+        drop(c);
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let d = prepare_cached(&p, &[], false).unwrap();
+        assert_ne!(d.path(), path, "tampered mode forces a re-copy");
+        assert_eq!(
+            std::fs::metadata(d.path()).unwrap().permissions().mode() & 0o777,
+            0o500
+        );
+        PRIVATE_BASE.with(|b| *b.borrow_mut() = None);
+    }
+
+    #[test]
+    fn copy_cache_still_enforces_the_pin_on_a_hit() {
+        let h = FakeHome::new();
+        let base = private_base_in(&h, "base-pin");
+        let p = h.script("echo pinned");
+        let good = sha_of(&p);
+        let a = prepare_cached(&p, std::slice::from_ref(&good), true).unwrap();
+        drop(a);
+        // Cached copy, but the pin list no longer contains its digest: refused, entry dropped.
+        let r = prepare_cached(&p, &["0".repeat(64)], true);
+        assert!(matches!(r, Err(NoopQueryError::PinMismatch(_))));
+        assert_eq!(copy_dirs(&base), 0, "a refused pin leaves no copy");
+        // An empty list with a required pin is also refused on a hit.
+        prepare_cached(&p, std::slice::from_ref(&good), true).unwrap();
+        let r = prepare_cached(&p, &[], true);
+        assert!(matches!(r, Err(NoopQueryError::PinMissing(_))));
+        // A symlink in place of the file is refused before the cache is consulted.
+        let target = h.file("elsewhere/real2", "#!/bin/sh\ntrue\n", 0o755);
+        std::fs::remove_file(&p).unwrap();
+        std::os::unix::fs::symlink(&target, &p).unwrap();
+        let r = prepare_cached(&p, &[], false);
+        assert_eq!(r.err().unwrap().kind(), "invalid_path");
+        PRIVATE_BASE.with(|b| *b.borrow_mut() = None);
+    }
+
+    #[test]
+    fn sweep_removes_only_folders_of_dead_processes() {
+        let h = FakeHome::new();
+        let base = private_base_in(&h, "base-sweep");
+        let mk = |name: &str| {
+            let d = base.join(name);
+            std::fs::create_dir(&d).unwrap();
+            std::fs::write(d.join(BUNDLED_BINARY_NAME), b"x").unwrap();
+            d
+        };
+        let dead = mk("nexus-noop-2147483646-aaaa");
+        let mine = mk(&format!("nexus-noop-{}-bbbb", std::process::id()));
+        let other = mk("unrelated-2147483646-cccc");
+        let old_format = mk("nexus-noop-nodashpid");
+        sweep_dead_process_copies(&base);
+        assert!(!dead.exists());
+        assert!(mine.exists() && other.exists() && old_format.exists());
+        PRIVATE_BASE.with(|b| *b.borrow_mut() = None);
+    }
+
+    #[test]
+    fn batch_runs_all_calls_in_one_spawn_and_keeps_order_and_errors() {
+        let h = FakeHome::new();
+        let spawns = h.0.join("spawns");
+        let body = format!(
+            r#"echo x >> '{}'; cat >/dev/null
+echo '{{"jsonrpc":"2.0","id":1,"result":{{}}}}'
+echo '{{"jsonrpc":"2.0","id":3,"result":{{"content":[{{"type":"text","text":"{{\"n\":30}}"}}]}}}}'
+echo '{{"jsonrpc":"2.0","id":2,"result":{{"content":[{{"type":"text","text":"{{\"n\":20}}"}}]}}}}'
+echo '{{"jsonrpc":"2.0","id":5,"error":{{"message":"boom"}}}}'"#,
+            spawns.display()
+        );
+        let p = h.script(&body);
+        let sandbox = h.sandbox();
+        let calls = vec![
+            ("data_freshness".to_string(), Value::Null),
+            ("health_snapshot".to_string(), json!({"days": 5})),
+            ("rm".to_string(), Value::Null), // invalid: not sent, own error (id 4 unused)
+            ("data_freshness".to_string(), Value::Null),
+        ];
+        let out =
+            run_calls_in(&sandbox, &with_bin(&p), &h.roots(), &calls, DEFAULT_TIMEOUT).unwrap();
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0].as_ref().unwrap()["n"], 20);
+        assert_eq!(out[1].as_ref().unwrap()["n"], 30);
+        assert!(matches!(out[2], Err(NoopQueryError::ToolNotAllowed(_))));
+        assert!(matches!(out[3], Err(NoopQueryError::ToolError(_))));
+        assert_eq!(
+            std::fs::read_to_string(&spawns).unwrap().lines().count(),
+            1,
+            "one process for the whole batch"
+        );
+    }
+
+    #[test]
+    fn batch_rejects_too_many_and_spawns_nothing_when_all_invalid() {
+        let h = FakeHome::new();
+        let marker = h.0.join("ran");
+        let p = h.script(&format!("touch '{}'", marker.display()));
+        let sandbox = h.sandbox();
+        let many = vec![("data_freshness".to_string(), Value::Null); MAX_BATCH_CALLS + 1];
+        let r = run_calls_in(&sandbox, &with_bin(&p), &h.roots(), &many, DEFAULT_TIMEOUT);
+        assert_eq!(r.err().unwrap().kind(), "invalid_args");
+        let bad = vec![("rm".to_string(), Value::Null)];
+        let r = run_calls_in(&sandbox, &with_bin(&p), &h.roots(), &bad, DEFAULT_TIMEOUT).unwrap();
+        assert!(matches!(r[0], Err(NoopQueryError::ToolNotAllowed(_))));
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    fn a_hung_child_times_out_and_a_fast_one_returns_without_the_old_poll_delay() {
+        let h = FakeHome::new();
+        let sandbox = h.sandbox();
+        let hung = h.script("sleep 30");
+        let t = Instant::now();
+        let r = run_query_in(
+            &sandbox,
+            &with_bin(&hung),
+            &h.roots(),
+            "data_freshness",
+            &Value::Null,
+            Duration::from_millis(400),
+        );
+        assert!(matches!(r, Err(NoopQueryError::Timeout(_))));
+        assert!(t.elapsed() < Duration::from_secs(5));
+        // A child that closes stdout but lingers is also bounded by the timeout.
+        let lingers = h.script("exec 1>&-; sleep 30");
+        let r = run_query_in(
+            &sandbox,
+            &with_bin(&lingers),
+            &h.roots(),
+            "data_freshness",
+            &Value::Null,
+            Duration::from_millis(400),
+        );
+        assert!(matches!(r, Err(NoopQueryError::Timeout(_))));
     }
 
     #[test]

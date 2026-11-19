@@ -84,7 +84,7 @@ describe("design-1111t money: read-only", () => {
     expect(screen.getByText("$20,607")).toBeInTheDocument();
     expect(screen.getByText(/Venture funds · not in your personal total/)).toBeInTheDocument();
     rerender(<MoneyOverviewSection adapter={sampleMoney()} currency="JPY" onCurrency={() => {}} />);
-    expect(screen.getByText("¥3,115,778")).toBeInTheDocument();
+    expect(screen.getByText("3,115,778 JPY")).toBeInTheDocument();
     expect(screen.getAllByText("Sample data").length).toBeGreaterThan(0);
   });
   it("live overview: no Sample tag, buffer and savings rate stay Needs wiring, no USD without fx", () => {

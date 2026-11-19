@@ -7,6 +7,8 @@ import type { TypeOutcome } from "./adapters";
 import type { Suggestion, TodayState } from "./adapters";
 import { detectEasyDay, detectEveningLights, detectLedgerDecision, detectWalk, hasDetector, ledgerSeenData, type Detection, type HaState, type LedgerRequest, type Workout } from "./detectors";
 import { answerOf, autoDoneOn, sidOf, todayRecords, typeActions, type TakeEvent, type TodayRecord } from "./events";
+import { loadRatio } from "../lib/mindBodyDeep";
+import { offerHistory, type PickCtx } from "./variety";
 import { gate, pickEntry, viewFacts, whyFor } from "./selection";
 import { buildGoals, buildTypeOutcomes, buildWeek, type Sources } from "./typeOutcomes";
 
@@ -81,6 +83,17 @@ export function holds(events: readonly TakeEvent[]): { stopped: Set<string>; coo
   return { stopped, cooldownUntil };
 }
 
+/** Variety inputs for fitness and mind-body: offer history, the JST hour, recent workouts and the load ratio. Anything unreadable is left unknown. */
+async function pickContext(page: TakePage, events: readonly TakeEvent[], deps: SuggestDeps, day: string): Promise<PickCtx> {
+  const offers = offerHistory(events, page, day);
+  if (page !== "fitness" && page !== "mindBody") return { offers };
+  const hour = Number(new Date(deps.now()).toLocaleString("en-US", { hour: "numeric", hourCycle: "h23", timeZone: "Asia/Tokyo" }));
+  const workouts = await deps.workouts().catch(() => null);
+  const src = await deps.sources().catch(() => null);
+  const strain = (src?.rows ?? []).filter((r) => typeof r.strain === "number").map((r) => ({ day: r.day, value: r.strain as number }));
+  return { offers, hour, workouts, loadRatio: loadRatio(strain, day)?.ratio ?? null };
+}
+
 export async function resolveToday(page: TakePage, deps: SuggestDeps, outcomes: () => Promise<TypeOutcome[]>): Promise<TodayBase | null> {
   const events = deps.events(); if (!events) return null;
   const now = deps.now(), day = dayOf(now);
@@ -102,7 +115,8 @@ export async function resolveToday(page: TakePage, deps: SuggestDeps, outcomes: 
   const g = gate(set);
   if (!g.ok) return { kind: "learning", have: g.have, need: 7, unit: page === "neuro" ? "sessions" : page === "business" ? "readings" : "days" };
   const { stopped, cooldownUntil } = holds(events);
-  const pick = pickEntry({ page, set, stopped, cooldownUntil, day });
+  const ctx = await pickContext(page, events, deps, day);
+  const pick = pickEntry({ page, set, stopped, cooldownUntil, day, ctx });
   if (!pick.entry || !pick.fact) return { kind: "none_today", why: "Your numbers are where they usually are. A suggestion now would be noise." };
   const why = await whyFor(pick.entry, pick.fact, set, deps.ask);
   const facts = viewFacts(pick.fact, set);

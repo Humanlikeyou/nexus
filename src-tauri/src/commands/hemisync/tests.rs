@@ -1148,3 +1148,86 @@ fn module_never_writes_under_sessions_replays_or_muse() {
     // the store and meta are written inside <data>/hemisync/ only
     assert!(src.contains("hemisync_dir(data).join(STORE_FILE)"));
 }
+
+// ---- 0045: marked done (a separate flag, never a session) ----
+
+#[test]
+fn marking_done_is_idempotent_reversible_and_rejects_unknown_ids() {
+    let (_h, data, tracks) = imported("marked");
+    let id = vec![tracks[0].id.clone()];
+    assert!(library_in(&data).tracks.iter().all(|t| !t.marked_done));
+    assert_eq!(mark_done_in(&data, &id, true).unwrap(), 1);
+    assert_eq!(mark_done_in(&data, &id, true).unwrap(), 0); // idempotent
+    let lib = library_in(&data);
+    assert!(
+        lib.tracks
+            .iter()
+            .find(|t| t.id == id[0])
+            .unwrap()
+            .marked_done
+    );
+    assert_eq!(lib.tracks.iter().filter(|t| t.marked_done).count(), 1);
+    let mode = fs::metadata(marked_path(&data)).unwrap().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    assert_eq!(mark_done_in(&data, &id, false).unwrap(), 1);
+    assert_eq!(mark_done_in(&data, &id, false).unwrap(), 0);
+    assert!(library_in(&data).tracks.iter().all(|t| !t.marked_done));
+    // Unknown, malformed or empty: nothing is written.
+    let bad = vec![tracks[0].id.clone(), "0123456789abcdef".to_string()];
+    assert_eq!(
+        mark_done_in(&data, &bad, true).unwrap_err(),
+        "track_not_found"
+    );
+    assert_eq!(
+        mark_done_in(&data, &["../x".to_string()], true).unwrap_err(),
+        "track_not_found"
+    );
+    assert_eq!(
+        mark_done_in(&data, &[], true).unwrap_err(),
+        "invalid_track_ids"
+    );
+    assert!(library_in(&data).tracks.iter().all(|t| !t.marked_done));
+}
+
+#[test]
+fn marking_a_wave_marks_only_that_wave_and_never_creates_sessions_or_stats() {
+    let (_h, data, tracks) = imported("markwave");
+    let wave1: Vec<&LibTrack> = tracks.iter().filter(|t| t.wave == 1).collect();
+    assert!(wave1.len() >= 2);
+    assert_eq!(
+        mark_wave_done_in(&data, 1, true).unwrap(),
+        wave1.len() as u64
+    );
+    let lib = library_in(&data);
+    assert!(lib.tracks.iter().all(|t| t.marked_done == (t.wave == 1)));
+    assert_eq!(
+        mark_wave_done_in(&data, 99, true).unwrap_err(),
+        "wave_not_found"
+    );
+    // No link rows, so every stat, ranking and listening reader sees nothing new.
+    let muse = data.join("sessions");
+    assert!(sessions_in(&data, &muse).unwrap().is_empty());
+    assert!(stats_from(&sessions_in(&data, &muse).unwrap()).is_empty());
+    assert!(link_rows_in(&data).unwrap().is_empty());
+    assert_eq!(
+        mark_wave_done_in(&data, 1, false).unwrap(),
+        wave1.len() as u64
+    );
+    assert!(library_in(&data).tracks.iter().all(|t| !t.marked_done));
+}
+
+#[test]
+fn amara_section_says_a_marked_wave_is_complete_without_listing_sessions() {
+    let (_h, data, tracks) = imported("markctx");
+    let muse = data.join("sessions");
+    assert_eq!(context_section_in(&data, &muse), None);
+    mark_wave_done_in(&data, 1, true).unwrap();
+    let s = context_section_in(&data, &muse).unwrap();
+    assert!(s.contains("Wave 1 Discovery: complete"), "{s}");
+    assert!(!s.contains("Wave 5"), "{s}");
+    assert!(!s.contains("listened"), "{s}");
+    // Partial wave: one marked track of wave 1 only is not complete.
+    mark_wave_done_in(&data, 1, false).unwrap();
+    mark_done_in(&data, &[tracks[0].id.clone()], true).unwrap();
+    assert_eq!(context_section_in(&data, &muse), None);
+}

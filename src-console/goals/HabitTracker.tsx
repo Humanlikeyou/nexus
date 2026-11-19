@@ -46,7 +46,7 @@ export function HabitRow({ h }: { h: Habit }) {
         <div className="gl-streak">{s === null ? <span className="pk-sub">No streak yet</span> : <><b>{s}</b><small className="pk-sub">day streak</small></>}</div>
       </div>
       <Heatmap days={h.days} label={h.title} />
-      {!known && <p className="gl-note">Starts counting once a source is linked.</p>}
+      {!known && <p className="gl-note">Starts counting once you mark a day.</p>}
       {missedYesterday(h.days) && <p className="gl-note">Missed yesterday. Today keeps it from turning into a habit of missing.</p>}
     </div>
   );

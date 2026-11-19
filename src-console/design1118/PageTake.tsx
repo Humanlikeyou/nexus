@@ -13,11 +13,11 @@ export type TakeSurface = "goals" | "neuro" | "hemisync" | "ventures" | "finance
 
 const note = (text: string, sourceLine: string, question: string): TakeNote => ({ text, chips: [], time: "Today", sourceLine, question });
 
-/** Round-5 final-still notes (preview / tests only, always tagged Sample data). */
+/** Round-5 final-still notes (preview / tests only, always tagged Sample data). Live takes come from the take generator, never from these lines, so a sample must not state a journey position as fact. */
 export const PREVIEW_NOTES: Record<TakeSurface, TakeNote> = {
   goals: note("The next move on Taiyo Skin is the manufacturer contract. Link a source for your habits and the week will start counting.", "From Life", "What's the smallest next step?"),
   neuro: note("Last session was five minutes on Sunday. Recovery that day and recovery now are kept apart. Find Muse when you want the next one.", "From Neuro", "When should I do the next session?"),
-  hemisync: note("You are in Threshold. Problem Solving is the next track, and it plays only while the Muse records.", "From Hemi-Sync", "Which track next?"),
+  hemisync: note("Sample note: once you have recorded a Hemi-Sync session, your next track is named here. A track plays only while the Muse records.", "From Hemi-Sync", "Which track next?"),
   ventures: note("Trading is within limits. The ideas below are proposals only. Approving one records your choice; no order is sent.", "From Enterprise", "Why these two ideas?"),
   finances: note("No revenue has reported in yet. Fund rows stay folded until there is a balance.", "From Enterprise", "What will show up first?"),
   content: note("One idea is waiting at Idea. Draft it with me when you're ready; I never post for you.", "From Enterprise", "Draft the first one?"),

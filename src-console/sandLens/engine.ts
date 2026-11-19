@@ -6,9 +6,9 @@ import { DFRAG, DVERT, PFRAG, POS, PVERT, QVERT, SHADOWFRAG, VEL } from "./shade
 import type { SandMaterial } from "./settings";
 import { calmPulse, heartPulse } from "./pulse";
 
-/** Lens states: Voice Off / Wake / Listening / Speaking. */
-export type SandState = "off" | "wake" | "listen" | "speak";
-export const STATE_NUM: Record<SandState, number> = { off: 0, wake: 1, listen: 2, speak: 3 };
+/** Lens states: Voice Off / Wake / Listening / Speaking / Thinking. */
+export type SandState = "off" | "wake" | "listen" | "speak" | "think";
+export const STATE_NUM: Record<SandState, number> = { off: 0, wake: 1, listen: 2, speak: 3, think: 4 };
 
 /** 150k, 100k, 60k, 30k grains; auto-scaled down when frames run slow. */
 export const TIERS = [388, 316, 245, 174];
@@ -54,7 +54,7 @@ export class SandEngine {
     lt.minFilter = lt.magFilter = THREE.NearestFilter; lt.needsUpdate = true;
     this.U = {
       uDt: { value: 0 }, uTime: { value: 0 }, uFrame: { value: 0 }, uState: { value: 0 }, uWakeT: { value: 0 }, uLoud: { value: 0 }, uMic: { value: 0 },
-      uBreathP: { value: 5 }, uCalm: { value: 0 }, uSnap: { value: 0 }, uStir: { value: 0 },
+      uBreathP: { value: 5 }, uCalm: { value: 0 }, uSnap: { value: 0 }, uStir: { value: 0 }, uRipAge: { value: 9 }, uRipAmp: { value: 0 }, uInt: { value: 0 },
       uLut: { value: lt }, uRow: { value: new THREE.Vector4() }, uPk: { value: new THREE.Vector4(1, 1, 1, 1) }, uN: { value: new THREE.Vector4() }, uA: { value: new THREE.Vector4() },
     };
     const shared = { tPos: { value: null }, uC: { value: new THREE.Vector2() }, uR: { value: 130 }, uTilt: { value: 0 }, uPx: { value: DPR }, uViewH: { value: window.innerHeight }, uSeed: { value: seed }, uWarp: { value: 0 }, uScale: { value: 1 }, uMat: { value: 0 }, uBeat: { value: 0 }, uGlow: { value: 0 } };
@@ -122,6 +122,9 @@ export class SandEngine {
   }
 
   setState(s: SandState) { if (s === this.state) return; this.state = s; if (s === "wake") this.wakeT = 0; if (s !== "speak") this.sched.reset(); if (this.calm) this.snapPending = true; }
+  /** A syllable onset (0..1 strength) in her speech: launches one ripple across the plate. Ignored when calm or not speaking. */
+  onset(strength: number) { if (this.state !== "speak" || this.calm) return; this.ripAge = 0; this.ripAmp = Math.min(1, Math.max(0.25, strength)); }
+  private ripAge = 9; private ripAmp = 0; private intens = 0;
   setMaterial(m: SandMaterial) { this.material = m; }
   setCalm(on: boolean) { if (on !== this.calm) { this.calm = on; this.snapPending = true; } }
   /** Voice level (0–1) and, when a spectrum exists, its peaks. Without peaks the caller passes fallbackPeaks(). */
@@ -179,6 +182,8 @@ export class SandEngine {
     // the plate rings down over ~0.3 s, so the short gaps between syllables don't stop the figure forming
     this.ring = Math.max(this.loud, this.ring * Math.exp(-dt / 0.3));
     U.uLoud.value = this.state === "speak" ? this.ring : this.loud; U.uMic.value = this.state === "listen" && !this.calm ? 0.12 + 0.08 * Math.sin(this.simTime * 0.9) * Math.sin(this.simTime * 0.37) : 0;
+    this.ripAge += dt / 0.7; this.intens += ((this.state === "speak" ? this.loud : 0) - this.intens) * (1 - Math.exp(-dt / 0.6));
+    U.uRipAge.value = this.ripAge; U.uRipAmp.value = this.ripAmp; U.uInt.value = Math.min(1, this.intens);
     U.uBreathP.value = breathP; U.uCalm.value = this.calm ? 1 : 0;
     // heartbeat: rate eased toward the live bpm, fading in/out; calm = slower brightness-only swell
     const bt = this.pulseBpm;

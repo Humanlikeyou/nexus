@@ -3,12 +3,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { valueOf, type Wired } from "../lib/sampleAdapters";
 import type { HemisyncAdapter, HemisyncSession, HemisyncWave, HemisyncTrack, HemisyncTrackStats, ImportProgress } from "../neuro/hemisync/adapters";
 import { hemisyncAdapter } from "../neuro/hemisync/live";
-import { Button, DataTag, Dialog, InsetGroup, ListRow, More, SegmentedControl, StatusText, wiredTag } from "../ui";
+import { Button, DataTag, Dialog, InsetGroup, ListRow, More, SegmentedControl, wiredTag } from "../ui";
 import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
 import { deltaWords, usualRange } from "../ui/charts/chartMath";
 import { useHemisyncRun, notice } from "./useHemisyncRun";
 import { hemisyncRanking, type HemiTrackRanking } from "../bridge";
-import { WaveJourney } from "../design1118/WaveJourney";
+import { WaveJourney, journeyPosition, trackDoneIds } from "../design1118/WaveJourney";
 import "../ui/PanelKit.css";
 import "./NeuroSections.css";
 
@@ -93,78 +93,97 @@ function RatingSheet({ title, onSave, onSkip }: { title: string; onSave: (rating
   );
 }
 
-/** Per-track history: sessions, last date, average rating, and Muse focus and calm, with the trend over sessions. */
+const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+/** "+6 vs usual", only when there is a real usual to compare with. */
+const vsUsual = (v: number | null, usual: number | null) => {
+  if (v == null || usual == null) return "";
+  const d = Math.round(v) - Math.round(usual);
+  return d === 0 ? " · at your usual" : ` · ${d > 0 ? "+" : "−"}${Math.abs(d)} vs usual`;
+};
+
+/**
+ * "What the Muse found": what the recorded Hemi-Sync sessions say, not a checklist (the Wave journey above already
+ * counts tracks). Focus and calm per track against his usual (the mean of all his Hemi-Sync sessions), the best track
+ * for each, sessions still unrated, and the next track to try. Every number is a plain mean of his own sessions.
+ */
 export function DoneWithMuse({ tracks, waves, stats, sessions, onRate, onOpenRecording }: { tracks: HemisyncTrack[]; waves: HemisyncWave[]; stats: Wired<HemisyncTrackStats[]>; sessions: Wired<HemisyncSession[]>; onRate?: (sessionId: string, title: string) => void; onOpenRecording?: (sessionId: string) => void }) {
   const rows = valueOf(stats) ?? [];
   const log = [...(valueOf(sessions) ?? [])].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   const byId = new Map(tracks.map((t) => [t.id, t]));
   const done = rows.filter((r) => r.sessions > 0);
-  const doneIds = new Set(done.map((r) => r.trackId));
-  const total = tracks.length || done.length;
+  const doneIds = trackDoneIds(waves, rows); // sessions OR marked done (0045)
+  const next = journeyPosition(waves, doneIds).next;
   const labels = log.map((s) => day.format(new Date(s.startedAt)));
-  const chart = (title: string, pick: (s: HemisyncSession) => number | null) => {
-    const values = log.map(pick);
+  const focusVals = log.map((s) => s.metrics.focusAvg), calmVals = log.map((s) => s.metrics.calmAvg);
+  const realCount = (vals: Array<number | null>) => vals.filter((v) => v != null).length;
+  // His usual needs at least two scored sessions; one session is only compared with itself.
+  const usualFocus = realCount(focusVals) >= 2 ? mean(focusVals.filter((v): v is number => v != null)) : null;
+  const usualCalm = realCount(calmVals) >= 2 ? mean(calmVals.filter((v): v is number => v != null)) : null;
+  const titleOf = (id: string) => byId.get(id)?.title ?? "Unknown track";
+  const best = (pick: (r: HemisyncTrackStats) => number | null) => {
+    const scored = done.filter((r) => pick(r) != null);
+    if (scored.length < 2) return null; // "best" of one track is not a finding
+    return scored.reduce((a, b) => ((pick(b) as number) > (pick(a) as number) ? b : a));
+  };
+  const bestFocus = best((r) => r.focusAvg), bestCalm = best((r) => r.calmAvg);
+  const unrated = done.flatMap((r) => { const u = [...log].reverse().find((x) => x.trackId === r.trackId && x.rating == null); return u ? [u] : []; });
+  const chart = (title: string, values: Array<number | null>) => {
     const real = values.filter((v): v is number => v != null);
     const usual = usualRange(values);
     const last = real.length ? real[real.length - 1] : null;
     return (
       <div className="mb-row mb-row--stack">
         <div className="mb-row__head"><ChartHeader title={title} value={whole(last)} unit="/ 100" delta={deltaWords(last, usual?.median ?? null, " pts")} usual={usual ? `usual ${whole(usual.median)}` : "no usual yet"} /></div>
-        <div className="mb-plot">
-          {real.length >= 2
-            ? <TrendChart values={values} labels={labels} lastLabel={labels[labels.length - 1]} label={`${title} across your Hemi-Sync sessions, latest ${whole(last)} of 100`} domain={[0, 100]} height={120} usual={usual} />
-            : <p className="trend-chart__empty">A trend appears after two Hemi-Sync sessions with the Muse.</p>}
-        </div>
+        <div className="mb-plot"><TrendChart values={values} labels={labels} lastLabel={labels[labels.length - 1]} label={`${title} across your Hemi-Sync sessions, latest ${whole(last)} of 100`} domain={[0, 100]} height={120} usual={usual} /></div>
       </div>
     );
   };
+  const nextLine = next
+    ? `Next track to try: ${next.title} (Wave ${next.wave} · ${next.waveName}).`
+    : tracks.length > 0 ? (tracks.some((t) => t.markedDone) ? "Every track is done, some marked done by you." : "You have recorded a session on every track.") : null;
   return (
     <section className="mb-section" aria-labelledby="hs-done">
-      <div className="mb-section__head"><h2 id="hs-done" className="mb-section__title">Done with the Muse</h2>{tagOf(stats)}</div>
+      <div className="mb-section__head"><h2 id="hs-done" className="mb-section__title">What the Muse found</h2>{tagOf(stats)}</div>
       {stats.state === "unwired"
         ? <p className="mind-body__hint">Your history per track needs wiring before it can show here.</p>
-        : (
-            <>
-              <p className="mb-section__lede">{doneIds.size} of {total} done</p>
-              <div className="hs-done__bar" role="progressbar" aria-label="Tracks done with the Muse" aria-valuemin={0} aria-valuemax={total} aria-valuenow={doneIds.size} aria-valuetext={`${doneIds.size} of ${total} tracks done`}><i style={{ transform: `scaleX(${total ? doneIds.size / total : 0})` }} /></div>
-              {waves.length > 0 && (
-                <div className="hs-checklist">
-                  {waves.map((w) => (
-                    <section key={w.wave} aria-label={`Wave ${w.wave} ${w.waveName} checklist`}>
-                      <h3>Wave {w.wave} · {w.waveName}<small>{w.tracks.filter((t) => doneIds.has(t.id)).length} of {w.tracks.length}</small></h3>
-                      <ul>
-                        {w.tracks.map((t) => <li key={t.id}><StatusText kind={doneIds.has(t.id) ? "ok" : "off"}>{t.title}<span className="sr-only">{doneIds.has(t.id) ? ", done" : ", not done yet"}</span></StatusText></li>)}
-                      </ul>
-                    </section>
-                  ))}
-                </div>
-              )}
-              {done.length === 0
-                ? <p className="mind-body__hint">No Hemi-Sync sessions yet. Pick a track above and press Start with your Muse on.</p>
-                : <div className="hs-charts">{chart("Focus", (s) => s.metrics.focusAvg)}{chart("Calm", (s) => s.metrics.calmAvg)}</div>}
-              {done.length > 0 && (
-              <table className="mb-table hs-table" aria-label="Tracks done with the Muse">
-                <thead><tr><th scope="col">Track</th><th scope="col">Sessions</th><th scope="col">Last</th><th scope="col">Rating</th><th scope="col">Focus</th><th scope="col">Calm</th>{onOpenRecording && <th scope="col">Recording</th>}</tr></thead>
-                <tbody>
-                  {done.map((r) => {
-                    const t = byId.get(r.trackId);
-                    const mine = log.filter((x) => x.trackId === r.trackId);
-                    const latest = mine[mine.length - 1] ?? null;
-                    const unrated = [...mine].reverse().find((x) => x.rating == null) ?? null;
-                    return (
-                      <tr key={r.trackId}>
-                        <th scope="row">{t?.title ?? "Unknown track"}<small>{t ? `Wave ${t.wave} · ${t.waveName}` : ""}</small></th>
-                        <td>{r.sessions}</td><td>{r.lastAt ? day.format(new Date(r.lastAt)) : "—"}</td>
-                        <td>{r.avgRating == null ? "—" : `${r.avgRating.toFixed(1)} / 5`}{unrated && onRate && <> <Button variant="plain" size="small" aria-label={`Rate ${t?.title ?? "this track"}`} onClick={() => onRate(unrated.id, t?.title ?? "This session")}>Rate</Button></>}</td><td>{whole(r.focusAvg)}</td><td>{whole(r.calmAvg)}</td>
-                        {onOpenRecording && <td>{latest ? <Button variant="plain" size="small" aria-label={`Open the recording of ${t?.title ?? "this track"}`} onClick={() => onOpenRecording(latest.id)}>Open ›</Button> : "—"}</td>}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              )}
-            </>
-          )}
+        : done.length === 0
+          ? <p className="mind-body__hint">No Hemi-Sync sessions with the Muse yet. {next ? `Pick ${next.title} above and press Start with your Muse on.` : "Pick a track above and press Start with your Muse on."}</p>
+          : (
+              <>
+                <p className="mb-section__lede">{log.length} Hemi-Sync session{log.length === 1 ? "" : "s"} on {done.length} track{done.length === 1 ? "" : "s"}. {usualFocus == null && usualCalm == null ? "Your usual appears after two scored sessions." : `Your usual: focus ${whole(usualFocus)}, calm ${whole(usualCalm)}.`}</p>
+                {(bestFocus || bestCalm) && (
+                  <ul className="hs-found" aria-label="Best tracks so far">
+                    {bestFocus && <li>Best for focus: <strong>{titleOf(bestFocus.trackId)}</strong> · {whole(bestFocus.focusAvg)} / 100</li>}
+                    {bestCalm && <li>Best for calm: <strong>{titleOf(bestCalm.trackId)}</strong> · {whole(bestCalm.calmAvg)} / 100</li>}
+                  </ul>
+                )}
+                <table className="mb-table hs-table" aria-label="Focus and calm by track">
+                  <thead><tr><th scope="col">Track</th><th scope="col">Sessions</th><th scope="col">Focus</th><th scope="col">Calm</th>{onOpenRecording && <th scope="col">Recording</th>}</tr></thead>
+                  <tbody>
+                    {done.map((r) => {
+                      const t = byId.get(r.trackId);
+                      const latest = [...log].reverse().find((x) => x.trackId === r.trackId) ?? null;
+                      return (
+                        <tr key={r.trackId}>
+                          <th scope="row">{t?.title ?? "Unknown track"}<small>{t ? `Wave ${t.wave} · ${t.waveName}` : ""}{r.lastAt ? ` · last ${day.format(new Date(r.lastAt))}` : ""}</small></th>
+                          <td>{r.sessions}</td>
+                          <td>{whole(r.focusAvg)}<small>{vsUsual(r.focusAvg, usualFocus)}</small></td>
+                          <td>{whole(r.calmAvg)}<small>{vsUsual(r.calmAvg, usualCalm)}</small></td>
+                          {onOpenRecording && <td>{latest ? <Button variant="plain" size="small" aria-label={`Open the recording of ${t?.title ?? "this track"}`} onClick={() => onOpenRecording(latest.id)}>Open ›</Button> : "—"}</td>}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {unrated.length > 0 && onRate && (
+                  <ul className="hs-found" aria-label="Sessions not rated yet">
+                    {unrated.map((u) => <li key={u.id}>{titleOf(u.trackId)} · {day.format(new Date(u.startedAt))} not rated <Button variant="plain" size="small" aria-label={`Rate ${titleOf(u.trackId)}`} onClick={() => onRate(u.id, byId.get(u.trackId)?.title ?? "This session")}>Rate</Button></li>)}
+                  </ul>
+                )}
+                {realCount(focusVals) >= 2 && realCount(calmVals) >= 2 && <div className="hs-charts">{chart("Focus", focusVals)}{chart("Calm", calmVals)}</div>}
+                {nextLine && <p className="hs-note">{nextLine}</p>}
+              </>
+            )}
     </section>
   );
 }
@@ -244,6 +263,17 @@ export function HemisyncSection({ adapter: given, connected, recording, sessionI
     changed();
     setLate(null);
   };
+  // 0045: hand marks. A mark is its own flag, never a session; every view reads sessions OR the mark.
+  const markTrack = async (t: HemisyncTrack, done: boolean) => {
+    const r = await adapter.markDone([t.id], done).catch(() => null);
+    notice(r && r.state !== "unwired" ? (done ? `Marked ${t.title} done` : `Undid marked done for ${t.title}`) : "The mark couldn't be saved yet");
+    changed();
+  };
+  const markWave = async (wave: number, name: string, done: boolean) => {
+    const r = await adapter.markWaveDone(wave, done).catch(() => null);
+    notice(r && r.state !== "unwired" ? (done ? `Marked Wave ${wave} ${name} done` : `Undid marked done for Wave ${wave} ${name}`) : "The mark couldn't be saved yet");
+    changed();
+  };
   const note = hint ?? run.message;
 
   return (
@@ -262,17 +292,28 @@ export function HemisyncSection({ adapter: given, connected, recording, sessionI
 
         {tracks.length > 0 && (
           <>
-            <WaveJourney waves={waves} doneIds={new Set([...statsById.values()].filter((x) => x.sessions > 0).map((x) => x.trackId))} timesDone={(id) => statsById.get(id)?.sessions ?? 0}
+            <WaveJourney waves={waves} doneIds={trackDoneIds(waves, valueOf(stats) ?? [])} timesDone={(id) => statsById.get(id)?.sessions ?? 0}
               connected={connected} pickedId={pickedId} onPick={(t) => { if (!playing) { setPickedId(t.id); setHint(null); } }} onStart={(t) => start(t)} playing={playing} />
             <More label="All tracks by wave">
             <div className="hs-waves">
               {waves.map((w, i) => (
                 <More key={w.wave} label={`Wave ${w.wave} · ${w.waveName} · ${w.tracks.length} track${w.tracks.length === 1 ? "" : "s"}`} open={(recentWave == null ? i === 0 : w.wave === recentWave) || w.tracks.some((t) => t.id === pickedId) || undefined}>
+                  {w.wave > 0 && (() => {
+                    const undone = w.tracks.filter((t) => !t.markedDone && !((statsById.get(t.id)?.sessions ?? 0) > 0));
+                    const marked = w.tracks.some((t) => t.markedDone);
+                    if (undone.length === 0 && !marked) return null;
+                    return undone.length > 0
+                      ? <Button variant="secondary" size="small" disabled={playing} onClick={() => { void markWave(w.wave, w.waveName, true); }}>Mark wave done</Button>
+                      : <Button variant="secondary" size="small" disabled={playing} onClick={() => { void markWave(w.wave, w.waveName, false); }}>Undo wave done</Button>;
+                  })()}
                   <InsetGroup className="hs-group" aria-label={`Wave ${w.wave} ${w.waveName} tracks`}>
                     {w.tracks.map((t) => {
                       const s = statsById.get(t.id);
-                      const meta = [minutes(t.durationMs), s && s.sessions > 0 ? `Done ${s.sessions}×` : null].filter(Boolean).join(" · ");
-                      return <ListRow key={t.id} icon={Disc3} title={t.title} subtitle={meta || undefined} selected={t.id === pickedId} onSelect={() => { if (!playing) setPickedId(t.id); }} disabled={playing && t.id !== pickedId} />;
+                      const meta = [minutes(t.durationMs), s && s.sessions > 0 ? `Done ${s.sessions}×` : t.markedDone ? "Marked done" : null].filter(Boolean).join(" · ");
+                      return <ListRow key={t.id} icon={Disc3} title={t.title} subtitle={meta || undefined} selected={t.id === pickedId} onSelect={() => { if (!playing) setPickedId(t.id); }} disabled={playing && t.id !== pickedId}
+                        accessory={t.markedDone
+                          ? <Button variant="plain" size="small" aria-label={`Undo marked done for ${t.title}`} onClick={() => { void markTrack(t, false); }}>Undo</Button>
+                          : !(s && s.sessions > 0) ? <Button variant="plain" size="small" aria-label={`Mark ${t.title} done`} onClick={() => { void markTrack(t, true); }}>Mark done</Button> : undefined} />;
                     })}
                   </InsetGroup>
                 </More>

@@ -1,9 +1,10 @@
 import { Heart } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import { LANDING_ENTRIES, type Route } from "../app/routes";
-import { AmaraVoiceAnnouncer } from "../components/AmaraLens/AmaraLens";
+import { AmaraVoiceAnnouncer, LENS_LABEL } from "../components/AmaraLens/AmaraLens";
 import { CanopyLight } from "../sandLens/CanopyLight";
-import { SandLensLayer } from "../sandLens/SandLens";
+import { lensStateFor, SandLensLayer } from "../sandLens/SandLens";
+import { useAmaraActivity } from "../hooks/amaraActivity";
 import { freshBrief, usableWeather, useHomeBrief } from "../hooks/useHomeBrief";
 import { useLandingVoice } from "../hooks/useLandingVoice";
 import { beatSeconds, useLiveHeartRate } from "../hooks/useLiveHeartRate";
@@ -88,6 +89,9 @@ export function LandingField({ onSelect, onToday, chat, chatExpanded = false, on
   const voice = useLandingVoice();
   const windows = useHomeWindowsState();
   const hide = landingInert(windows.phase);
+  // decision 0045: a text reply in progress makes the sand think when the voice is off; say so under the lens too
+  const activity = useAmaraActivity();
+  const line = lensStateFor(voice.state, voice.line, activity) === "think" && voice.state !== "thinking" ? LENS_LABEL.thinking : voice.line;
   return (
     <div className="landing" data-voice={voice.state} data-wphase={windows.phase} data-chat={chat ? (chatExpanded ? "expanded" : "collapsed") : undefined}>
       <CanopyLight active={!hide} />
@@ -99,8 +103,8 @@ export function LandingField({ onSelect, onToday, chat, chatExpanded = false, on
       </div>
       <div className="landing__stage" inert={hide || undefined} aria-hidden={hide || undefined}>
       <div className="landing__lens"><SandLensLayer voice={voice.state} line={voice.line} active={!hide} /></div>
-      <p className="landing__line">{voice.line}</p>
-      <AmaraVoiceAnnouncer message={voice.line} />
+      <p className="landing__line">{line}</p>
+      <AmaraVoiceAnnouncer message={line} />
       {/* design-1110b A: the chat lives here, directly under the lens. */}
       {chat}
       <nav className="landing__nav" aria-label="Amara OS navigation">

@@ -12,6 +12,13 @@ export function journeyPosition(waves: HemisyncWave[], doneIds: Set<string>) {
   return { total: tracks.length, done: tracks.filter((t) => doneIds.has(t.id)).length, next, wave };
 }
 
+/** 0045: a track is done when it has a Muse session OR he marked it done by hand. Stats never see the mark. */
+export function trackDoneIds(waves: HemisyncWave[], stats: Array<{ trackId: string; sessions: number }>): Set<string> {
+  const ids = new Set(stats.filter((s) => s.sessions > 0).map((s) => s.trackId));
+  for (const w of waves) for (const t of w.tracks) if (t.markedDone) ids.add(t.id);
+  return ids;
+}
+
 /**
  * design-1118a Hemi-Sync (round 5): the collection as a journey. Waves are stations on one wave line,
  * the current wave opens into its tracks, and one next-track card. Start never plays without Muse
@@ -65,7 +72,7 @@ export function WaveJourney({ waves, doneIds, timesDone, connected, pickedId, on
           <ol className="d18-wj__tracks">
             {cur.tracks.map((t) => {
               const d = doneIds.has(t.id), nx = t.id === pos.next?.id;
-              return <li key={t.id} data-state={d ? "done" : nx ? "next" : "open"}>{nx && <span className="d18-wj__nexttag">Next</span>}<i aria-hidden="true">{d ? "✓" : ""}</i><b role="button" tabIndex={0} aria-pressed={t.id === pickedId} aria-label={`Choose ${t.title}`} onClick={() => onPick(t)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(t); } }}>{t.title}</b>{d && <small>Done {timesDone(t.id)}×</small>}</li>;
+              return <li key={t.id} data-state={d ? "done" : nx ? "next" : "open"}>{nx && <span className="d18-wj__nexttag">Next</span>}<i aria-hidden="true">{d ? "✓" : ""}</i><b role="button" tabIndex={0} aria-pressed={t.id === pickedId} aria-label={`Choose ${t.title}`} onClick={() => onPick(t)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(t); } }}>{t.title}</b>{d && <small>{timesDone(t.id) > 0 ? `Done ${timesDone(t.id)}×` : "Marked done"}</small>}</li>;
             })}
           </ol>
         </>

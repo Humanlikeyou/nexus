@@ -5,10 +5,15 @@ import type { SystemSnapshot } from "../types";
 import { Button, Card, DataTag, PageHero } from "../ui";
 import type { Route } from "../app/routes";
 import { LinkCard, PERSONAL_ITEMS, waitingDecisions } from "./BusinessPanels";
+import { LinkButton } from "../adds/Composer";
 import { valueOf } from "../lib/sampleAdapters";
 import { PageTake } from "../design1118/PageTake";
 import { LiveFinancesCard } from "../design1118/EnterpriseWiring";
 import { TreasuryFinancesLink } from "../design1118/TreasuryLinks";
+import { ledgerWrites, useVentureMonth, type LedgerWrites } from "../business/ledgerWrite";
+import { RateForm } from "./EnterpriseForms";
+import { monthLine } from "./EnterpriseStart";
+import { useState } from "react";
 import "../design1118/design1118.css";
 import "./BusinessScreen.css";
 import "./CommandCenter.css";
@@ -26,12 +31,15 @@ function Unavailable({ label, onRetry }: { label: string; onRetry?: () => void }
 
 const acc = (node: React.ReactNode) => <span className="cc-card__acc">{node}</span>;
 
-export function RevenueField({ data, onRetry, onOpen, adapter = businessAdapter(data) }: { data: SystemSnapshot; onRetry?: () => void; onOpen?: (route: Route) => void; adapter?: BusinessAdapter }) {
+export function RevenueField({ data, onRetry, onOpen, adapter = businessAdapter(data), writes = ledgerWrites() }: { data: SystemSnapshot; onRetry?: () => void; onOpen?: (route: Route) => void; adapter?: BusinessAdapter; writes?: LedgerWrites | null }) {
   const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
   const { revenue } = data;
   const isAwaitingRevenue = [revenue.total_revenue, revenue.total_expenses, revenue.net_income, revenue.today_revenue, revenue.week_revenue, revenue.month_revenue]
     .every((value) => value === 0) && revenue.by_strategy.length === 0;
   const summaryDown = down("arm_get_revenue_summary") && isAwaitingRevenue;
+  const [rateOpen, setRateOpen] = useState(false);
+  const month = useVentureMonth(writes);
+  const ventureList = valueOf(adapter.ventures()) ?? [];
   const funds = adapter.funds();
   const waiting = waitingDecisions(adapter);
   const top = Math.max(1, ...revenue.by_strategy.map((b) => Math.max(b.revenue, b.expenses)));
@@ -47,7 +55,16 @@ export function RevenueField({ data, onRetry, onOpen, adapter = businessAdapter(
       <PageHero title="Finances" statement={summaryDown ? "Revenue is out of reach" : isAwaitingRevenue ? "No revenue yet" : `${money(revenue.net_income)} net in 30 days`}
         detail={<>{isAwaitingRevenue ? "Tracking starts when a real source reports in." : `On ${money(revenue.total_revenue)} revenue and ${money(revenue.total_expenses)} costs. Amounts in USD; ledger values in yen wait for currency conversion.`} Read-only, from the business ledger. Personal money is in {onOpen ? <button type="button" className="v-link" onClick={() => onOpen({ id: "life", view: "money" })}>Life › Personal money ›</button> : "Life › Personal money"}.</>} />
       <PageTake surface="finances" className="biz__take" />
+      <Card title="This month by venture" accessory={acc(<LinkButton small onClick={onOpen ? () => onOpen({ id: "enterprise", view: "treasury" }) : undefined}>Log income or a cost in Treasury ›</LinkButton>)}>
+        {ventureList.length === 0 ? <p className="cc-note">No ventures yet. Add one in Ventures, then log what it earns and costs in Treasury.</p> : (
+          <ul className="d18-clist" aria-label="This month by venture">{ventureList.filter((v) => !PERSONAL_ITEMS.has(v.id)).map((v) => <li key={v.id}><div><b>{v.name}</b><small>{monthLine(month, v.id).replace(/^This month: /, "")}</small></div></li>)}</ul>
+        )}
+      </Card>
       <LiveFinancesCard />
+      <Card title="Exchange rate" accessory={acc(<Button size="small" variant="plain" aria-expanded={rateOpen} onClick={() => setRateOpen(!rateOpen)}>{rateOpen ? "Close" : "Set the rate"}</Button>)}>
+        <p className="cc-note">Yen amounts show in dollars only when you give a rate and its date. Amara never looks one up.</p>
+        {rateOpen && <RateForm writes={writes} current={data.ledger?.fx ?? null} />}
+      </Card>
       <TreasuryFinancesLink onOpen={onOpen} />
       {summaryDown && <Unavailable label="Revenue summary" onRetry={onRetry} />}
       {empty ? (

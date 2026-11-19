@@ -16,6 +16,9 @@ import { buildTypeOutcomes, buildWeek, buildGoals, type Sources } from "./typeOu
 const NOW = Date.parse("2026-11-12T10:00:00+09:00");
 const prior = [60, 62, 61, 63, 60, 62, 61, 60, 62];
 const set = (page: FactSet["page"], day: string, facts: ReturnType<typeof makeFact>[]): FactSet => ({ page, day, facts: facts.filter((f) => f !== null) as never, fingerprint: "fp" });
+const only = (id: string) => CATALOG.entries.filter((e) => e.id === id);
+/** Today's stored brisk-walk suggestion, so detector tests don't depend on which fitness entry selection picks. */
+const seedWalk = (d: SuggestDeps) => d.append({ id: "today-fitness-2026-11-12", kind: "today", at: NOW, page: "fitness", day: "2026-11-12", data: { kind: "suggestion", recId: "brisk_walk", why: "w", whySource: "template", facts: [] } });
 const hrvLow = (day = "2026-11-12") => set("mindBody", day, [makeFact({ key: "hrv", label: "HRV", unit: "ms" }, 52, prior)]);
 
 function fakeDeps(over: Partial<SuggestDeps> = {}) {
@@ -35,8 +38,9 @@ function fakeDeps(over: Partial<SuggestDeps> = {}) {
 describe("selection", () => {
   it("is deterministic and picks the same entry every time", () => {
     const a = pickEntry({ page: "mindBody", set: hrvLow(), day: "2026-11-12" }), b = pickEntry({ page: "mindBody", set: hrvLow(), day: "2026-11-12" });
-    expect(a.entry?.id).toBe("easy_day_low_hrv");
+    expect(a.entry?.page).toBe("mindBody");
     expect(b.entry?.id).toBe(a.entry?.id);
+    expect(pickEntry({ page: "mindBody", set: hrvLow(), day: "2026-11-12", entries: only("easy_day_low_hrv") }).entry?.id).toBe("easy_day_low_hrv");
   });
   it("never picks a weak entry, only lists it as also considered", () => {
     const relax = set("neuro", "2026-11-12", [makeFact({ key: "relax", label: "Average relaxation today", unit: "", decimals: 1 }, 50, prior)]);
@@ -45,14 +49,14 @@ describe("selection", () => {
     expect(p.alsoConsidered.map((e) => e.id)).toContain("reading_before_session");
   });
   it("skips stopped types and types in cooldown, and picks nothing when no trigger fires", () => {
-    expect(pickEntry({ page: "mindBody", set: hrvLow(), day: "d", stopped: new Set(["easy_day_low_hrv"]) }).entry).toBeNull();
-    expect(pickEntry({ page: "mindBody", set: hrvLow(), day: "2026-11-12", cooldownUntil: new Map([["easy_day_low_hrv", "2026-12-01"]]) }).entry).toBeNull();
+    expect(pickEntry({ page: "mindBody", set: hrvLow(), day: "d", entries: only("easy_day_low_hrv"), stopped: new Set(["easy_day_low_hrv"]) }).entry).toBeNull();
+    expect(pickEntry({ page: "mindBody", set: hrvLow(), day: "2026-11-12", entries: only("easy_day_low_hrv"), cooldownUntil: new Map([["easy_day_low_hrv", "2026-12-01"]]) }).entry).toBeNull();
     const normal = set("mindBody", "2026-11-12", [makeFact({ key: "hrv", label: "HRV", unit: "ms" }, 61, prior)]);
-    expect(pickEntry({ page: "mindBody", set: normal, day: "2026-11-12" }).entry).toBeNull();
+    expect(pickEntry({ page: "mindBody", set: normal, day: "2026-11-12", entries: only("easy_day_low_hrv") }).entry).toBeNull();
   });
   it("honours contraindications (walk is held back at recovery under 34%)", () => {
     const f = set("fitness", "d", [makeFact({ key: "exercises", label: "Workouts logged today", unit: "" }, 0, []), makeFact({ key: "recovery", label: "Recovery", unit: "%" }, 30, prior)]);
-    expect(pickEntry({ page: "fitness", set: f, day: "d" }).entry).toBeNull();
+    expect(pickEntry({ page: "fitness", set: f, day: "d", entries: only("brisk_walk") }).entry).toBeNull();
   });
   it("gates on a 7+ day baseline", () => {
     const young = set("mindBody", "d", [makeFact({ key: "hrv", label: "HRV", unit: "ms" }, 52, [60, 61, 62])]);
@@ -126,8 +130,8 @@ describe("answers", () => {
     expect(undone.answer.state).toBe("waiting"); expect(undone.blockedDetection).toBe(true);
   });
   it("writeAnswer / writeUndo store events and refuse unknown suggestions or states", async () => {
-    const h = fakeDeps(); await resolveToday("mindBody", h.deps, async () => []);
-    const day = "2026-11-12", id = sidOf("mindBody", day, "easy_day_low_hrv");
+    const h = fakeDeps(); const t = await resolveToday("mindBody", h.deps, async () => []);
+    const day = "2026-11-12", id = sidOf("mindBody", day, t?.kind === "suggestion" ? t.suggestion.type : "");
     expect(await writeAnswer(h.deps, "mindBody", "nope", "done", null)).toBe(false);
     expect(await writeAnswer(h.deps, "mindBody", id, "unknown", null)).toBe(false);
     expect(await writeAnswer(h.deps, "mindBody", id, "skipped", "forgot")).toBe(true);
@@ -177,7 +181,7 @@ describe("detectors", () => {
   });
   it("runDetectors writes a detected answer with a detail, once, and never over a tap or when auto-done is off", async () => {
     const h = fakeDeps({ workouts: async () => [walk], facts: async (p, d) => (p === "fitness" ? set("fitness", d, [makeFact({ key: "exercises", label: "Workouts logged today", unit: "" }, 0, []), makeFact({ key: "recovery", label: "Recovery", unit: "%" }, 70, prior)]) : null) });
-    await resolveToday("fitness", h.deps, async () => []);
+    await seedWalk(h.deps);
     resetDetectThrottle();
     expect(await runDetectors(h.deps, true)).toBe(1);
     const sid = sidOf("fitness", "2026-11-12", "brisk_walk");
@@ -185,11 +189,11 @@ describe("detectors", () => {
     expect(answerOf(h.events, sid, "2026-11-12", "2026-11-12").answer.detail).toMatch(/WHOOP/);
     expect(await runDetectors(h.deps, true)).toBe(0);
     const off = fakeDeps({ workouts: async () => [walk], facts: h.deps.facts });
-    await resolveToday("fitness", off.deps, async () => []);
+    await seedWalk(off.deps);
     await off.deps.append({ id: "s", kind: "setting", at: 1, data: { autoDone: false } });
     expect(await runDetectors(off.deps, true)).toBe(0);
     const tapped = fakeDeps({ workouts: async () => [walk], facts: h.deps.facts });
-    await resolveToday("fitness", tapped.deps, async () => []);
+    await seedWalk(tapped.deps);
     await writeAnswer(tapped.deps, "fitness", sid, "skipped", "no_time");
     expect(await runDetectors(tapped.deps, true)).toBe(0);
   });

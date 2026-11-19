@@ -17,7 +17,7 @@ use commands::{
 };
 // design-1111v stores
 use commands::home_windows;
-use commands::{adds, checkin, decisions_log, life_dates, needs_you};
+use commands::{adds, checkin, decisions_log, habits, life_dates, needs_you};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
@@ -271,6 +271,8 @@ pub fn run() {
             life_dates::life_date_upsert,
             life_dates::life_date_delete,
             life_dates::life_date_preview,
+            habits::habit_mark,
+            habits::habit_days,
             adds::add_preview,
             adds::add_save,
             adds::add_undo,
@@ -291,6 +293,7 @@ pub fn run() {
             needs_you::needs_you_list,
             commands::agents_now::agents_now,
             noop_query::noop_query,
+            noop_query::noop_query_batch,
             noop_query::noop_binary_status,
             noop_freeze::noop_freeze_report,
             noop_freeze::noop_freeze_copy,
@@ -299,6 +302,11 @@ pub fn run() {
             home_brief::home_brief,
             // Amara's follow-up lists (commands/followups.rs)
             business_ledger::read_business_ledger,
+            business_ledger::ledger_venture_save,
+            business_ledger::ledger_venture_archive,
+            business_ledger::ledger_fx_set,
+            business_ledger::ledger_history_list,
+            business_ledger::ledger_undo,
             followups::followups_list,
             followups::followups_session_edits,
             followups::followups_add_item,
@@ -361,6 +369,9 @@ pub fn run() {
             commands::treasury::treasury_income_trend,
             commands::treasury::treasury_per_hour,
             commands::treasury::treasury_fx_status,
+            commands::treasury_entries::treasury_entry_add,
+            commands::treasury_entries::treasury_entry_undo,
+            commands::treasury_entries::treasury_venture_month,
             commands::treasury_counts::treasury_counts_import_pick,
             commands::treasury_counts::treasury_counts_list,
             commands::treasury_sequences::treasury_sequence_draft,
@@ -381,6 +392,11 @@ pub fn run() {
             commands::money::fx_rate_refresh,
             commands::money_summary::money_summary_read,
             commands::money_summary::money_facts_read,
+            commands::money_entries::money_entry_add,
+            commands::money_entries::money_entry_void,
+            commands::money_entries::money_entries_list,
+            commands::money_entries::money_month_view,
+            commands::money_entries::money_savings_goal_set,
             // Packager
             packager::pack_it_up,
             packager::unpack_backup,
@@ -424,6 +440,8 @@ pub fn run() {
             commands::hemisync::hemisync_sessions,
             commands::hemisync::hemisync_stats,
             commands::hemisync::hemisync_ranking,
+            commands::hemisync::hemisync_mark_done,
+            commands::hemisync::hemisync_mark_wave_done,
             // Keychain secrets + n8n key file (write-only; never return a value)
             commands::keychain::secrets_status,
             commands::keychain::secret_set,
@@ -647,6 +665,7 @@ pub fn run() {
             tauri::RunEvent::Exit => {
                 commands::voice_heartbeat::stop();
                 commands::launch_token::remove();
+                commands::noop_query::clear_private_copies();
             }
             _ => {}
         });

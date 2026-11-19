@@ -6,7 +6,10 @@ import {
 import { enterpriseAdapter } from "./enterpriseLive";
 import { commands } from "../bindings.gen";
 import { inTauri, useStoresTick } from "../lib/localStores";
-import { Button, PageHero } from "../ui";
+import { Button, Card, PageHero } from "../ui";
+import type { Route } from "../app/routes";
+import { ledgerWrites, type LedgerWrites } from "../business/ledgerWrite";
+import { MoneyForm } from "../screens/EnterpriseForms";
 import { TreasuryActions, treasuryError, type TreasuryTools } from "./TreasuryTools";
 import "./design1118.css";
 
@@ -62,6 +65,7 @@ export function TreasuryBody({ treasury, monitor, tools }: { treasury: TreasuryA
       </section>
       <section className="d18-card" aria-labelledby="tr-streams">
         <div className="d18-map__head"><h2 id="tr-streams" className="d18-h">Streams</h2></div>
+        <p className="d18-note">A stream is one way a venture earns, such as product sales. Logging income adds it to a venture's stream.</p>
         {streams.state === "unwired" ? <p className="d18-note">No income streams yet. They appear once one is set up.</p> : (
           <ul className="d18-clist">
             {streams.value.map((s) => <li key={s.id}><div><b>{s.name}</b><small>{s.streamType} · {s.status}</small></div></li>)}
@@ -76,6 +80,7 @@ export function TreasuryBody({ treasury, monitor, tools }: { treasury: TreasuryA
       </section>
       <section className="d18-card" aria-labelledby="tr-hour">
         <div className="d18-map__head"><h2 id="tr-hour" className="d18-h">Per hour</h2></div>
+        <p className="d18-note">Income divided by the time you logged, so you can see what an hour of work earns.</p>
         {perHour.state === "unwired" ? <p className="d18-note">Per-hour needs logged time and income for the same stream.</p> : (
           <ul className="d18-clist">
             {perHour.value.map((p) => <li key={p.streamId}><div><b>{name(p.streamId)}</b>
@@ -94,9 +99,10 @@ export function TreasuryBody({ treasury, monitor, tools }: { treasury: TreasuryA
   );
 }
 
-export function TreasuryView() {
+export function TreasuryView({ onOpen, writes = ledgerWrites() }: { onOpen?: (route: Route) => void; writes?: LedgerWrites | null } = {}) {
   const [snap, setSnap] = useState<{ t: TreasuryAdapter; m: TreasuryMonitorAdapter } | null>(() => (inTauri() ? null : { t: liveTreasury(null), m: liveTreasuryMonitor(null) }));
   const [reload, setReload] = useState(0);
+  const [logging, setLogging] = useState(false);
   useStoresTick();
   const ent = enterpriseAdapter().ventures();
   const tools: TreasuryTools = {
@@ -117,7 +123,12 @@ export function TreasuryView() {
   }, [reload]);
   return (
     <div className="biz page-inset cc-page d18-page">
-      <PageHero title="Treasury" statement="Income streams" detail="Amounts come from imports you make. Nothing is moved or sent." />
+      <PageHero title="Treasury" statement="Enter and review money" detail="Type an income or a cost, or import a CSV. Amounts come from what you enter. Nothing is moved or sent." />
+      <div className="v-actions">
+        <Button size="small" variant={logging ? "secondary" : "primary"} aria-expanded={logging} onClick={() => setLogging(!logging)}>Log income or a cost</Button>
+        {onOpen && <Button size="small" variant="plain" onClick={() => onOpen({ id: "enterprise", view: "finances" })}>See the summary in Finances ›</Button>}
+      </div>
+      {logging && <Card title="Log income or a cost"><MoneyForm writes={writes} ventures={ent.state === "unwired" ? [] : ent.value.map((v) => ({ id: v.id, name: v.name }))} onClose={() => { setLogging(false); setReload((n) => n + 1); }} onAddVenture={onOpen ? () => onOpen({ id: "enterprise", view: "ventures" }) : undefined} /></Card>}
       {snap ? <TreasuryBody treasury={snap.t} monitor={snap.m} tools={inTauri() ? tools : undefined} /> : <p className="d18-note" role="status">Loading…</p>}
     </div>
   );

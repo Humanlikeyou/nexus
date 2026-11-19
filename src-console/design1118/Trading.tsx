@@ -34,6 +34,7 @@ export function TradingCard({ data }: { data: SystemSnapshot }) {
             <li><small>Kill switch</small><b>{risk.kill_switch_active ? "On" : "Off"}</b></li>
             <li><small>Strategies</small><b>{risk.active_strategies} active</b></li>
           </ul>
+          <p className="d18-note">Daily P&amp;L is today's profit or loss against the loss cap you set. Kill switch: when On, trading is stopped. Risk index is the engine's overall risk score.</p>
         </div>
       )}
       {data.revenue.by_strategy.length > 0 && (

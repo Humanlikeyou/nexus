@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MIN_TREND_SESSIONS, READINESS_COPY, matchDriver, pearson, readinessReading, shortDay, tokyoDay, trendText, type DriverKey, type DriverPoint } from "../lib/mindBody";
 import { METRICS, driverSentence, drivers as rankDrivers, hoursMinutes, inRange, lean, loadRatio, mergeSeries, metricReading, windowAverage, type MetricKey } from "../lib/mindBodyDeep";
-import { NoopShapeError, isSnapshot, noopQuery, parseBodyContext, parseMetricSeries, snapshotDays } from "../lib/noop";
+import { NoopShapeError, isSnapshot, noopQueryBatch, parseBodyContext, parseMetricSeries, snapshotDays } from "../lib/noop";
+import { shareSnapshot } from "../lib/noopSnapshot";
 import type { NoopDayRow, NoopLatestNight, NoopMetricPoint, NoopMetricSeries, NoopSnapshotPayload, RecordedSession } from "../types";
 import { Badge, Button, PageHero, SegmentedControl } from "../ui";
 import { AmaraTake } from "../amaraTake/AmaraTakeCard";
@@ -49,12 +50,18 @@ export function seriesFromSnapshot(snap: NoopSnapshotPayload): MindBodySeries {
  */
 export async function loadMindBody(): Promise<MindBodyState> {
   const driverKeys = [["sleep", "sleep_total_min"], ["hrv", "hrv"], ["recovery", "recovery"]] as const;
-  const [snap, ...series] = await Promise.all([
-    noopQuery("health_snapshot", { days: 29 }),
-    ...driverKeys.map(([, key]) => noopQuery("metric_series", { key, days: 365 })),
+  // One backend session for all six reads (readiness, three driver series, then the two optional
+  // long series), not a two-step waterfall of separate spawns.
+  const batch = noopQueryBatch([
+    { tool: "health_snapshot", args: { days: 29 } },
+    ...driverKeys.map(([, key]) => ({ tool: "metric_series" as const, args: { key, days: 365 } })),
+    ...(["rhr", "strain"] as const).map((key) => ({ tool: "metric_series" as const, args: { key, days: 365 } })),
   ]);
-  // Longer history for the two metrics readiness doesn't need: the page still works without it.
-  const [rhrRead, strainRead] = await Promise.all((["rhr", "strain"] as const).map((key) => noopQuery("metric_series", { key, days: 365 })));
+  // The Amara take on this page reads the same snapshot instead of fetching it again.
+  shareSnapshot(batch.then(([s]) => (s.ok && isSnapshot(s.value) ? s.value : null)));
+  const [snap, ...rest] = await batch;
+  const series = rest.slice(0, 3);
+  const [rhrRead, strainRead] = rest.slice(3);
   const failed = [snap, ...series].find((r) => !r.ok);
   if (failed && !failed.ok) {
     const kind = failed.error.kind;
@@ -187,11 +194,33 @@ const COMPARE_ROWS: MetricKey[] = ["sleep", "recovery", "hrv", "resting_hr", "st
 
 export type MindBodyFieldProps = { sessions: RecordedSession[]; load?: () => Promise<MindBodyState>; /** App's navigate: the Settings › Devices buttons. Plain text without it. */ onOpen?: (route: Route) => void };
 
+type ReadyState = Extract<MindBodyState, { status: "ready" }>;
+/**
+ * Stale-while-revalidate across visits: the last ready result for this loader on the same Tokyo day
+ * renders at once while a fresh read runs, then replaces it. A new day (or a different loader)
+ * never shows an old result. In memory only; a non-ready result clears it.
+ */
+let mindBodyCache: { day: string; load: () => Promise<MindBodyState>; state: ReadyState } | null = null;
+const cacheDay = () => tokyoDay(new Date().toISOString()) ?? new Date().toDateString();
+const cachedFor = (load: () => Promise<MindBodyState>): ReadyState | null => (mindBodyCache && mindBodyCache.load === load && mindBodyCache.day === cacheDay() ? mindBodyCache.state : null);
+export function clearMindBodyCache(): void { mindBodyCache = null; }
+/** Runs `load`, keeping the cache in step: ready is stored, a transient error keeps what was shown. */
+async function loadAndCache(load: () => Promise<MindBodyState>, shown: ReadyState | null): Promise<MindBodyState> {
+  const day = cacheDay();
+  let s: MindBodyState;
+  try { s = await load(); } catch { s = { status: "inactive", steps: null }; }
+  if (s.status === "ready") { mindBodyCache = { day, load, state: s }; return s; }
+  if (s.status === "error" && shown) return shown;
+  mindBodyCache = null;
+  return s;
+}
+
 export function MindBodyField({ sessions, load = loadMindBody, onOpen }: MindBodyFieldProps) {
-  const [state, setState] = useState<MindBodyState>({ status: "loading" });
+  const [state, setState] = useState<MindBodyState>(() => cachedFor(load) ?? { status: "loading" });
   const [driver, setDriver] = useState<DriverKey>("sleep");
-  const refresh = useCallback(() => { setState({ status: "loading" }); void load().then(setState, () => setState({ status: "inactive", steps: null })); }, [load]);
-  useEffect(() => { let live = true; void load().then((s) => { if (live) setState(s); }, () => { if (live) setState({ status: "inactive", steps: null }); }); return () => { live = false; }; }, [load]);
+  const refresh = useCallback(() => { setState({ status: "loading" }); void loadAndCache(load, null).then(setState); }, [load]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- loads an external store once per mount (and shows the cached page first)
+  useEffect(() => { let live = true; const shown = cachedFor(load); if (shown) setState(shown); void loadAndCache(load, shown).then((s) => { if (live) setState(s); }); return () => { live = false; }; }, [load]);
 
   const [range, setRange] = useState("30");
   const series = state.status === "ready" ? state.series : null;

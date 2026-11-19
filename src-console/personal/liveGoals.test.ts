@@ -54,3 +54,21 @@ describe("live goals adapter", () => {
     expect(weird.goals().state).toBe("unwired");
   });
 });
+
+describe("goalsFrom with habit marks", () => {
+  const h = { id: "h1", title: "Walk", category: "habit", target: 5, current: 0, unit: "daily", deadline: null, created_at: "2026-11-10T09:00:00+09:00" };
+  it("fills days, week count and today from habit_days", () => {
+    const m = (day: string, done = true) => ({ habitId: "h1", day, done, source: "manual", at: "" });
+    const w = goalsFrom([h], undefined, [m("2026-11-18"), m("2026-11-17"), m("2026-11-16"), m("2026-11-15"), m("other", true)], "2026-11-19");
+    const x = w.habits[0];
+    expect(x.days).toHaveLength(84);
+    expect(x.days.slice(-5)).toEqual(["met", "met", "met", "met", "none"]);
+    expect(x.done).toBe(3);
+    expect(x.today).toBe("open");
+    expect(x.note).toBe("3 of 5 this week");
+  });
+  it("an unmarked past day since creation is missed; before creation and today are none", () => {
+    const x = goalsFrom([h], undefined, [], "2026-11-19").habits[0];
+    expect(x.days.slice(-11)).toEqual(["none", ...Array(9).fill("missed"), "none"]);
+  });
+});

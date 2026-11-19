@@ -14,7 +14,7 @@ import "./money.css";
 
 export type Currency = "USD" | "JPY";
 const usd = (v: number) => v.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-const jpy = (v: number) => `¥${Math.round(v).toLocaleString("en-US")}`;
+const jpy = (v: number) => `${Math.round(v).toLocaleString("en-US")} JPY`;
 export const shown = (v: number, cur: Currency, rate: number) => (cur === "USD" ? usd(v) : jpy(v * rate));
 
 const REGION: Record<Region, string> = { us: "United States · USD", jp: "Japan · JPY", crypto: "Crypto · Ledger" };
@@ -89,7 +89,7 @@ export function MoneyOverviewSection({ adapter = moneyAdapter(), currency, onCur
   return (
     <>
       <div className="m-bar"><SegmentedControl label="Show amounts in" size="small" value={currency} options={[{ value: "USD", label: "USD" }, { value: "JPY", label: "JPY" }]} onChange={(c) => onCurrency(c as Currency)} />
-        <span className="pk-note">{v.fx ? <>{currency === "USD" ? "Yen converted" : "Dollars converted"} at ¥{v.fx.rate.toFixed(2)} = $1 ({v.fx.at}, {v.fx.source}) {tag}</> : <>No FX rate stored, so yen has no USD value <DataTag kind="wire" /></>}</span></div>
+        <span className="pk-note">{v.fx ? <>{currency === "USD" ? "Yen converted" : "Dollars converted"} at {v.fx.rate.toFixed(2)} JPY = 1 USD ({v.fx.at}, {v.fx.source}) {tag}</> : <>No FX rate stored, so yen has no USD value <DataTag kind="wire" /></>}</span></div>
       <ul className="cc-strip" aria-label="Personal money">
         <li className="cc-tile"><span className="cc-tile__k">Cash</span><span className="cc-tile__v">{usdOrWire(v.cash.usd)}</span><span className="cc-tile__s">{v.cash.note}</span></li>
         <li className="cc-tile"><span className="cc-tile__k">Investments</span><span className="cc-tile__v">{usdOrWire(v.investments.usd)}</span><span className="cc-tile__s">{v.investments.note}</span></li>

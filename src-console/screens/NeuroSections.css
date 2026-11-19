@@ -28,3 +28,5 @@
 .hs-sheet .ui-dialog__body { display: grid; gap: var(--space-3); }
 @media (prefers-reduced-motion: reduce) { .hs-import__bar i { transition: none; } }
 :root[data-reduce-motion="true"] .hs-import__bar i { transition: none; }
+
+.hs-found { margin: 0; padding-left: var(--space-5); display: grid; gap: var(--space-1); font-size: var(--text-callout); }

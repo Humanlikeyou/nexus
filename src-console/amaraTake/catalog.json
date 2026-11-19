@@ -1,70 +1,1981 @@
 {
-  "version": 1,
-  "note": "Human-reviewed list. The model never adds or edits entries. Every citation is a placeholder (verified:false) until a person checks it against the source; the UI marks it as not checked.",
+  "version": 2,
+  "note": "Human-reviewed list. The model never adds or edits entries; it only writes the one-sentence why. Every citation is a placeholder (verified:false) until a person checks it against the source; the UI marks it as not checked. Fitness and mind-body entries cite general public physical-activity guidelines or none; no study is invented.",
   "entries": [
     {
-      "id": "breathe_before_session", "page": "neuro", "version": 1,
+      "id": "breathe_before_session",
+      "page": "neuro",
+      "version": 1,
       "title": "Breathe slowly for 5 minutes right before your next Muse session.",
       "how": "About 6 breaths a minute: in for 4 seconds, out for 6. The Muse breathing guide can pace it, or do it on your own.",
-      "typeLabel": "Breathing before a session", "shortTitle": "Breathe 5 min before a session",
-      "trigger": { "factKey": "relax", "op": "below_baseline", "by": 0.05 },
-      "outcome": { "source": "muse_relax", "metric": "calm in that session", "lag": "same_session", "better": "up", "wobbleFloor": 3, "unit": "" },
-      "detector": "muse_breathing_before_session", "cooldownDays": 60,
-      "evidence": { "level": "moderate", "summary": "Slow breathing near 6 a minute raised heart-rate variability and lowered self-rated anxiety across small studies. Effects are short-term; long-term evidence is thinner.",
-        "sources": [ { "cite": "Systematic review of slow breathing, 15 studies (Zaccaro 2018)", "verified": false }, { "cite": "HRV-biofeedback meta-analysis, 58 studies (Lehrer 2020)", "verified": false } ] }
+      "typeLabel": "Breathing before a session",
+      "shortTitle": "Breathe 5 min before a session",
+      "trigger": {
+        "factKey": "relax",
+        "op": "below_baseline",
+        "by": 0.05
+      },
+      "outcome": {
+        "source": "muse_relax",
+        "metric": "calm in that session",
+        "lag": "same_session",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": ""
+      },
+      "detector": "muse_breathing_before_session",
+      "cooldownDays": 60,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Slow breathing near 6 a minute raised heart-rate variability and lowered self-rated anxiety across small studies. Effects are short-term; long-term evidence is thinner.",
+        "sources": [
+          {
+            "cite": "Systematic review of slow breathing, 15 studies (Zaccaro 2018)",
+            "verified": false
+          },
+          {
+            "cite": "HRV-biofeedback meta-analysis, 58 studies (Lehrer 2020)",
+            "verified": false
+          }
+        ]
+      }
     },
     {
-      "id": "reading_before_session", "page": "neuro", "version": 1,
-      "title": "Read for 10 minutes before a session.", "how": "Any book, no screens.",
-      "typeLabel": "Reading before a session", "shortTitle": "Read before a session",
-      "trigger": { "factKey": "relax", "op": "below_baseline", "by": 0.05 },
-      "outcome": { "source": "muse_relax", "metric": "calm in that session", "lag": "same_session", "better": "up", "wobbleFloor": 3, "unit": "" },
-      "detector": null, "cooldownDays": 60,
-      "evidence": { "level": "weak", "summary": "One small unpublished test. Shown as also considered, never suggested.", "sources": [ { "cite": "Reading before a session, 2009 unpublished test (rated weak)", "verified": false } ] }
+      "id": "reading_before_session",
+      "page": "neuro",
+      "version": 1,
+      "title": "Read for 10 minutes before a session.",
+      "how": "Any book, no screens.",
+      "typeLabel": "Reading before a session",
+      "shortTitle": "Read before a session",
+      "trigger": {
+        "factKey": "relax",
+        "op": "below_baseline",
+        "by": 0.05
+      },
+      "outcome": {
+        "source": "muse_relax",
+        "metric": "calm in that session",
+        "lag": "same_session",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": ""
+      },
+      "detector": null,
+      "cooldownDays": 60,
+      "evidence": {
+        "level": "weak",
+        "summary": "One small unpublished test. Shown as also considered, never suggested.",
+        "sources": [
+          {
+            "cite": "Reading before a session, 2009 unpublished test (rated weak)",
+            "verified": false
+          }
+        ]
+      }
     },
     {
-      "id": "brisk_walk", "page": "fitness", "version": 1,
+      "id": "brisk_walk",
+      "page": "fitness",
+      "version": 1,
       "title": "Take a 25-minute brisk walk outside before 5 PM.",
       "how": "Brisk means you can talk but not sing. Outside beats a treadmill: you get the daylight too.",
-      "typeLabel": "Brisk walk before 5 PM", "shortTitle": "25-min brisk walk outside",
-      "trigger": { "factKey": "exercises", "op": "below", "by": 1 },
-      "outcome": { "source": "noop_efficiency", "metric": "that night's sleep efficiency", "lag": "that_night", "better": "up", "wobbleFloor": 2, "unit": "%" },
-      "detector": "whoop_walk", "cooldownDays": 60,
-      "contraindications": [ { "factKey": "recovery", "op": "below", "value": 34 } ],
-      "evidence": { "level": "strong", "summary": "Regular moderate activity improves sleep quality in large reviews.",
-        "sources": [ { "cite": "2018 US Physical Activity Guidelines Advisory Committee report", "verified": false } ] }
+      "typeLabel": "Brisk walk before 5 PM",
+      "shortTitle": "25-min brisk walk outside",
+      "trigger": {
+        "factKey": "exercises",
+        "op": "below",
+        "by": 1
+      },
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": "whoop_walk",
+      "cooldownDays": 60,
+      "contraindications": [
+        {
+          "factKey": "recovery",
+          "op": "below",
+          "value": 34
+        }
+      ],
+      "evidence": {
+        "level": "strong",
+        "summary": "Regular moderate activity improves sleep quality in large reviews.",
+        "sources": [
+          {
+            "cite": "2018 US Physical Activity Guidelines Advisory Committee report",
+            "verified": false
+          }
+        ]
+      },
+      "kind": "endurance",
+      "intensity": "easy"
     },
     {
-      "id": "easy_day_low_hrv", "page": "mindBody", "version": 1,
+      "id": "easy_day_low_hrv",
+      "page": "mindBody",
+      "version": 1,
       "title": "Keep today's training easy: a walk or mobility, not intervals.",
       "how": "Easy means effort under 10 on WHOOP. A hard day can wait until HRV is back near your usual.",
-      "typeLabel": "Easy day when HRV is low", "shortTitle": "Easy training when HRV is under your usual",
-      "trigger": { "factKey": "hrv", "op": "below_baseline", "by": 0.05 },
-      "outcome": { "source": "noop_hrv", "metric": "next-morning HRV", "lag": "next_morning", "better": "up", "wobbleFloor": 3, "unit": " ms" },
-      "detector": "whoop_easy_day", "cooldownDays": 60,
-      "evidence": { "level": "moderate", "summary": "Adjusting training to morning HRV gave similar or better fitness with fewer hard days in small trials.",
-        "sources": [ { "cite": "HRV-guided training trial (Kiviniemi 2007)", "verified": false } ] }
+      "typeLabel": "Easy day when HRV is low",
+      "shortTitle": "Easy training when HRV is under your usual",
+      "trigger": {
+        "factKey": "hrv",
+        "op": "below_baseline",
+        "by": 0.05
+      },
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": "whoop_easy_day",
+      "cooldownDays": 60,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Adjusting training to morning HRV gave similar or better fitness with fewer hard days in small trials.",
+        "sources": [
+          {
+            "cite": "HRV-guided training trial (Kiviniemi 2007)",
+            "verified": false
+          }
+        ]
+      },
+      "kind": "recovery",
+      "intensity": "easy"
     },
     {
-      "id": "decide_before_noon", "page": "business", "version": 1,
+      "id": "decide_before_noon",
+      "page": "business",
+      "version": 1,
       "title": "Decide the oldest waiting funding request before noon.",
       "how": "Open Business, read the request, and decide. Amara won't decide for you.",
-      "typeLabel": "Top decision before noon", "shortTitle": "Top decision before noon",
-      "trigger": { "factKey": "openRequests", "op": "above", "by": 0 },
-      "outcome": { "source": "none", "metric": "days to decide", "lag": "event", "better": "down", "wobbleFloor": 1, "unit": " days" },
-      "detector": "ledger_decision_before_noon", "cooldownDays": 60,
-      "evidence": { "level": "own", "summary": "From your own ledger only. There's no outside science claim for business habits.", "sources": [] }
+      "typeLabel": "Top decision before noon",
+      "shortTitle": "Top decision before noon",
+      "trigger": {
+        "factKey": "openRequests",
+        "op": "above",
+        "by": 0
+      },
+      "outcome": {
+        "source": "none",
+        "metric": "days to decide",
+        "lag": "event",
+        "better": "down",
+        "wobbleFloor": 1,
+        "unit": " days"
+      },
+      "detector": "ledger_decision_before_noon",
+      "cooldownDays": 60,
+      "evidence": {
+        "level": "own",
+        "summary": "From your own ledger only. There's no outside science claim for business habits.",
+        "sources": []
+      }
     },
     {
-      "id": "warm_lights", "page": "home", "version": 1,
+      "id": "warm_lights",
+      "page": "home",
+      "version": 1,
       "title": "Lights warm and dim after 9 PM.",
       "how": "Switch the living room and bedroom to the warm evening scene yourself. Amara only suggests and checks.",
-      "typeLabel": "Lights warm after 9 PM", "shortTitle": "Lights warm and dim after 9 PM",
-      "trigger": { "factKey": "sleep", "op": "below_baseline", "by": 0.1 },
-      "outcome": { "source": "noop_efficiency", "metric": "that night's sleep efficiency", "lag": "that_night", "better": "up", "wobbleFloor": 2, "unit": "%" },
-      "detector": "ha_evening_lights", "cooldownDays": 60,
-      "evidence": { "level": "moderate", "summary": "Bright room light in the evening delayed melatonin in a lab study; dimmer, warmer light did less.",
-        "sources": [ { "cite": "Room light and melatonin (Gooley 2011)", "verified": false } ] }
+      "typeLabel": "Lights warm after 9 PM",
+      "shortTitle": "Lights warm and dim after 9 PM",
+      "trigger": {
+        "factKey": "sleep",
+        "op": "below_baseline",
+        "by": 0.1
+      },
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": "ha_evening_lights",
+      "cooldownDays": 60,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Bright room light in the evening delayed melatonin in a lab study; dimmer, warmer light did less.",
+        "sources": [
+          {
+            "cite": "Room light and melatonin (Gooley 2011)",
+            "verified": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "bodyweight_circuit_basic",
+      "page": "fitness",
+      "version": 1,
+      "kind": "calisthenics",
+      "intensity": "moderate",
+      "title": "Do a 3-round bodyweight circuit: 10 squats, 8 push-ups, 20-second plank, 10 glute bridges.",
+      "how": "Rest 60 seconds between rounds. Knees-down push-ups are fine. Effort about 6 out of 10: you finish feeling you could do another round.",
+      "typeLabel": "Bodyweight circuit",
+      "shortTitle": "Bodyweight circuit, 3 rounds",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "strong",
+        "summary": "General exercise-science consensus, backed by public physical-activity guidelines. No single study is cited.",
+        "sources": [
+          {
+            "cite": "US Physical Activity Guidelines for Americans, 2nd edition (2018)",
+            "verified": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "calisthenics_emom_10",
+      "page": "fitness",
+      "version": 1,
+      "kind": "calisthenics",
+      "intensity": "moderate",
+      "title": "Run a 10-minute EMOM: on odd minutes 8 push-ups, on even minutes 12 squats.",
+      "how": "EMOM means every minute on the minute; the rest of each minute is your break. Stop early if form slips. Effort about 6 out of 10.",
+      "typeLabel": "10-minute EMOM",
+      "shortTitle": "10-minute EMOM",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "core_hollow_plank",
+      "page": "fitness",
+      "version": 1,
+      "kind": "calisthenics",
+      "intensity": "easy",
+      "title": "Do a 10-minute core session: 3 rounds of a 20-30 second plank, a 20-second side plank each side, and 8 dead bugs each side.",
+      "how": "Keep your ribs down and breathe steadily. This is a light session you can do on a tired day.",
+      "typeLabel": "Core session",
+      "shortTitle": "Core: planks and dead bugs",
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "single_leg_strength",
+      "page": "fitness",
+      "version": 1,
+      "kind": "strength",
+      "intensity": "moderate",
+      "title": "Do 3 sets of 6-8 split squats on each leg, lowering for 3 seconds.",
+      "how": "Hold a wall for balance if you need it. Rest 60-90 seconds between sets. Stop each set with 2 reps still in reserve.",
+      "typeLabel": "Single-leg strength",
+      "shortTitle": "Split squats, 3 sets each side",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "strong",
+        "summary": "General exercise-science consensus, backed by public physical-activity guidelines. No single study is cited.",
+        "sources": [
+          {
+            "cite": "US Physical Activity Guidelines for Americans, 2nd edition (2018)",
+            "verified": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "glute_hinge_strength",
+      "page": "fitness",
+      "version": 1,
+      "kind": "strength",
+      "intensity": "moderate",
+      "title": "Do 3 sets of 12 glute bridges, then 3 sets of 10 hip hinges with your hands behind your head.",
+      "how": "Move slowly and squeeze at the top. Keep your back flat on the hinge. Effort about 5-6 out of 10.",
+      "typeLabel": "Glutes and hips",
+      "shortTitle": "Glute bridges and hip hinges",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "strong",
+        "summary": "General exercise-science consensus, backed by public physical-activity guidelines. No single study is cited.",
+        "sources": [
+          {
+            "cite": "US Physical Activity Guidelines for Americans, 2nd edition (2018)",
+            "verified": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "upper_push_pull",
+      "page": "fitness",
+      "version": 1,
+      "kind": "strength",
+      "intensity": "moderate",
+      "title": "Do 3 sets of slow push-ups (3 seconds down) and 3 sets of 10 towel or table rows.",
+      "how": "Stop 1-2 reps before failure. Use an incline for the push-ups if 3-second reps break down. Skip rows if you have no safe anchor.",
+      "typeLabel": "Upper-body push and pull",
+      "shortTitle": "Slow push-ups and rows",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "strong",
+        "summary": "General exercise-science consensus, backed by public physical-activity guidelines. No single study is cited.",
+        "sources": [
+          {
+            "cite": "US Physical Activity Guidelines for Americans, 2nd edition (2018)",
+            "verified": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "tempo_squat_calves",
+      "page": "fitness",
+      "version": 1,
+      "kind": "strength",
+      "intensity": "moderate",
+      "title": "Do 4 sets of 10 squats with a 3-second lowering, then 2 sets of 15 calf raises.",
+      "how": "Rest 60 seconds between sets. Keep your heels down on the squats. Effort about 6 out of 10.",
+      "typeLabel": "Tempo squats",
+      "shortTitle": "Tempo squats and calf raises",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "strong",
+        "summary": "General exercise-science consensus, backed by public physical-activity guidelines. No single study is cited.",
+        "sources": [
+          {
+            "cite": "US Physical Activity Guidelines for Americans, 2nd edition (2018)",
+            "verified": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "hip_mobility_flow",
+      "page": "fitness",
+      "version": 1,
+      "kind": "mobility",
+      "intensity": "easy",
+      "title": "Spend 10 minutes on hip mobility: 90/90 switches, a world's-greatest-stretch each side, and a deep squat hold.",
+      "how": "Move within a range that feels easy. Breathe slowly, no pushing into pain.",
+      "typeLabel": "Hip mobility flow",
+      "shortTitle": "10-minute hip mobility flow",
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "thoracic_shoulder_mobility",
+      "page": "fitness",
+      "version": 1,
+      "kind": "mobility",
+      "intensity": "easy",
+      "title": "Spend 8 minutes on your upper back and shoulders: cat-cow, thread the needle each side, open books, and wall slides.",
+      "how": "Do about 8 slow reps of each. Keep it comfortable; this should feel like loosening up.",
+      "typeLabel": "Upper-back mobility",
+      "shortTitle": "8-minute upper-back and shoulder mobility",
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "ankle_knee_prep",
+      "page": "fitness",
+      "version": 1,
+      "kind": "mobility",
+      "intensity": "easy",
+      "title": "Spend 6 minutes on ankles and knees: ankle rocks, calf stretch against a wall, and slow knee circles.",
+      "how": "About 10 slow reps each side. Useful before a walk or a run, or on a stiff day.",
+      "typeLabel": "Ankles and knees",
+      "shortTitle": "6-minute ankle and knee prep",
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "hamstring_hip_flexor_stretch",
+      "page": "fitness",
+      "version": 1,
+      "kind": "flexibility",
+      "intensity": "easy",
+      "title": "Stretch for 10 minutes: hamstrings, hip flexors and pigeon pose, 2 rounds of 45 seconds each side.",
+      "how": "Stretch to a mild pull, never sharp pain. Breathe out slowly as you settle in.",
+      "typeLabel": "Hamstring and hip stretch",
+      "shortTitle": "Hamstring and hip-flexor stretches",
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "evening_full_body_stretch",
+      "page": "fitness",
+      "version": 1,
+      "kind": "flexibility",
+      "intensity": "easy",
+      "title": "Do a 10-minute slow full-body stretch this evening, 30-45 seconds per position.",
+      "how": "Lights low, no phone. Work from your neck down to your calves.",
+      "typeLabel": "Evening stretch",
+      "shortTitle": "Evening full-body stretch",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "hour",
+            "op": "above",
+            "by": 16
+          }
+        ]
+      },
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "desk_neck_shoulder_release",
+      "page": "fitness",
+      "version": 1,
+      "kind": "flexibility",
+      "intensity": "easy",
+      "title": "Do a 6-minute neck and shoulder release: gentle neck tilts, shoulder rolls, doorway chest stretch.",
+      "how": "Hold each stretch 30 seconds. Keep the stretch mild; no cranking on your neck.",
+      "typeLabel": "Neck and shoulder release",
+      "shortTitle": "Neck and shoulder release",
+      "triggers": {
+        "any": [
+          {
+            "factKey": "steps",
+            "op": "below",
+            "by": 5000
+          },
+          {
+            "factKey": "hour",
+            "op": "above",
+            "by": 14
+          }
+        ]
+      },
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "recovery_breath_downshift",
+      "page": "fitness",
+      "version": 1,
+      "kind": "recovery",
+      "intensity": "easy",
+      "title": "Lie down with your legs up on a couch for 5 minutes and breathe in for 4 seconds, out for 6.",
+      "how": "Aim for about 6 breaths a minute. Keep it easy; the aim is to down-shift, not to focus hard.",
+      "typeLabel": "Breathing reset",
+      "shortTitle": "5-minute breathing reset",
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "recovery_foam_roll",
+      "page": "fitness",
+      "version": 1,
+      "kind": "recovery",
+      "intensity": "easy",
+      "title": "Roll your calves, thighs, glutes and upper back for 10 minutes, about 45 seconds per area.",
+      "how": "Light pressure only. Avoid rolling directly over joints or any sharp pain.",
+      "typeLabel": "Light foam rolling",
+      "shortTitle": "10-minute light foam rolling",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "strain",
+            "op": "above",
+            "by": 8
+          }
+        ]
+      },
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      }
+    },
+    {
+      "id": "recovery_body_scan",
+      "page": "fitness",
+      "version": 1,
+      "kind": "recovery",
+      "intensity": "easy",
+      "title": "Lie down for a 10-minute body scan: relax each area from feet to head in turn.",
+      "how": "Eyes closed, slow breathing. If you fall asleep, that is fine.",
+      "typeLabel": "Body scan",
+      "shortTitle": "10-minute body scan",
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      }
+    },
+    {
+      "id": "recovery_walk_stretch",
+      "page": "fitness",
+      "version": 1,
+      "kind": "recovery",
+      "intensity": "easy",
+      "title": "Take an easy 15-minute walk, then stretch for 5 minutes.",
+      "how": "Easy means you can chat or even sing a little. No watch-checking.",
+      "typeLabel": "Easy walk and stretch",
+      "shortTitle": "Easy 15-minute walk plus 5 minutes stretching",
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "zone2_30",
+      "page": "fitness",
+      "version": 1,
+      "kind": "endurance",
+      "intensity": "moderate",
+      "title": "Do 30 minutes of steady zone 2 cardio: a jog, bike or row at a pace where you can talk in full sentences.",
+      "how": "If you cannot talk, slow down. Effort about 4-5 out of 10.",
+      "typeLabel": "Zone 2, 30 minutes",
+      "shortTitle": "30 minutes zone 2",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 6,
+      "evidence": {
+        "level": "strong",
+        "summary": "General exercise-science consensus, backed by public physical-activity guidelines. No single study is cited.",
+        "sources": [
+          {
+            "cite": "WHO guidelines on physical activity and sedentary behaviour (2020)",
+            "verified": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "zone2_long_45",
+      "page": "fitness",
+      "version": 1,
+      "kind": "endurance",
+      "intensity": "moderate",
+      "title": "Do 45 minutes of easy zone 2 cardio: walk-jog, bike or row, in full-sentence conversation pace.",
+      "how": "Take water. Effort about 4-5 out of 10. End feeling you could keep going.",
+      "typeLabel": "Zone 2, 45 minutes",
+      "shortTitle": "45 minutes zone 2",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          },
+          {
+            "factKey": "loadRatio",
+            "op": "below",
+            "by": 1.3
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 7,
+      "evidence": {
+        "level": "strong",
+        "summary": "General exercise-science consensus, backed by public physical-activity guidelines. No single study is cited.",
+        "sources": [
+          {
+            "cite": "WHO guidelines on physical activity and sedentary behaviour (2020)",
+            "verified": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "run_walk_intervals",
+      "page": "fitness",
+      "version": 1,
+      "kind": "endurance",
+      "intensity": "moderate",
+      "title": "Do 5 rounds of 3 minutes easy jogging and 2 minutes walking.",
+      "how": "Easy jog pace, never a sprint. Walk for the full 2 minutes even if you feel good.",
+      "typeLabel": "Run-walk intervals",
+      "shortTitle": "Run-walk intervals, 5 rounds",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "post_meal_walk",
+      "page": "fitness",
+      "version": 1,
+      "kind": "endurance",
+      "intensity": "easy",
+      "title": "Take a 10-minute easy walk after your next meal.",
+      "how": "Casual pace. Short walks add up, especially when you have been sitting.",
+      "typeLabel": "Post-meal walk",
+      "shortTitle": "10-minute walk after a meal",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "steps",
+            "op": "below",
+            "by": 6000
+          },
+          {
+            "factKey": "hour",
+            "op": "above",
+            "by": 10
+          }
+        ]
+      },
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "hard_intervals_1min",
+      "page": "fitness",
+      "version": 1,
+      "kind": "conditioning",
+      "intensity": "hard",
+      "title": "Warm up for 8 minutes, then do 6 rounds of 1 minute hard (effort about 8 out of 10) and 2 minutes easy, on a bike, hill or fast walk.",
+      "how": "Cool down 5 minutes. Stop if you feel dizzy or unwell. Hard days are best kept to 1-2 a week.",
+      "typeLabel": "Short hard intervals",
+      "shortTitle": "6 x 1-minute hard intervals",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 2
+          },
+          {
+            "factKey": "loadRatio",
+            "op": "below",
+            "by": 1.2
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "readiness",
+          "op": "below",
+          "by": 3
+        },
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        },
+        {
+          "factKey": "loadRatio",
+          "op": "above",
+          "by": 1.3
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 7,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": [],
+        "risk": "High-intensity work raises injury and overreach risk. Skip it if you feel ill or unusually tired."
+      }
+    },
+    {
+      "id": "bodyweight_tabata",
+      "page": "fitness",
+      "version": 1,
+      "kind": "conditioning",
+      "intensity": "hard",
+      "title": "After a 5-minute warm-up, do 4 rounds of 20 seconds hard and 40 seconds easy for squats, push-ups, mountain climbers and high knees.",
+      "how": "Effort about 7-8 out of 10. Swap squat jumps for plain squats if your knees complain.",
+      "typeLabel": "Bodyweight Tabata",
+      "shortTitle": "Bodyweight Tabata, 4 rounds",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 2
+          },
+          {
+            "factKey": "loadRatio",
+            "op": "below",
+            "by": 1.2
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "readiness",
+          "op": "below",
+          "by": 3
+        },
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 7,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": [],
+        "risk": "High-intensity work raises injury and overreach risk. Skip it if you feel ill or unusually tired."
+      }
+    },
+    {
+      "id": "shadow_boxing_rounds",
+      "page": "fitness",
+      "version": 1,
+      "kind": "conditioning",
+      "intensity": "moderate",
+      "title": "Do 5 rounds of 2 minutes of shadow boxing or light movement drills, with 1 minute rest.",
+      "how": "Stay loose and light on your feet. Effort about 5-6 out of 10.",
+      "typeLabel": "Shadow boxing rounds",
+      "shortTitle": "Shadow boxing, 5 rounds",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "amrap_12_minutes",
+      "page": "fitness",
+      "version": 1,
+      "kind": "conditioning",
+      "intensity": "moderate",
+      "title": "Set a 12-minute timer and repeat: 5 push-ups, 10 squats, 15 mountain climbers.",
+      "how": "AMRAP means as many rounds as possible, at a steady pace. Effort about 6-7 out of 10.",
+      "typeLabel": "12-minute AMRAP",
+      "shortTitle": "12-minute AMRAP",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          },
+          {
+            "factKey": "loadRatio",
+            "op": "below",
+            "by": 1.3
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "pushup_ladder_1",
+      "page": "fitness",
+      "version": 1,
+      "kind": "challenge",
+      "intensity": "moderate",
+      "title": "Push-up ladder, level 1: do 3 sets of 5 push-ups (incline is fine).",
+      "how": "Rest 90 seconds. Keep your body in one line. Do this level until it feels easy, then mark it done to move up.",
+      "typeLabel": "Push-up ladder",
+      "shortTitle": "Push-up ladder, level 1",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 3,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      },
+      "progression": {
+        "series": "pushup_ladder",
+        "level": 1
+      }
+    },
+    {
+      "id": "pushup_ladder_2",
+      "page": "fitness",
+      "version": 1,
+      "kind": "challenge",
+      "intensity": "moderate",
+      "title": "Push-up ladder, level 2: do 3 sets of 8 push-ups.",
+      "how": "Rest 90 seconds. Drop to an incline for a set if form breaks.",
+      "typeLabel": "Push-up ladder",
+      "shortTitle": "Push-up ladder, level 2",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 3,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      },
+      "progression": {
+        "series": "pushup_ladder",
+        "level": 2
+      }
+    },
+    {
+      "id": "pushup_ladder_3",
+      "page": "fitness",
+      "version": 1,
+      "kind": "challenge",
+      "intensity": "moderate",
+      "title": "Push-up ladder, level 3: do 4 sets of 8 push-ups.",
+      "how": "Rest 75 seconds between sets.",
+      "typeLabel": "Push-up ladder",
+      "shortTitle": "Push-up ladder, level 3",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 3,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      },
+      "progression": {
+        "series": "pushup_ladder",
+        "level": 3
+      }
+    },
+    {
+      "id": "pushup_ladder_4",
+      "page": "fitness",
+      "version": 1,
+      "kind": "challenge",
+      "intensity": "moderate",
+      "title": "Push-up ladder, level 4: do 3 sets of 12 push-ups.",
+      "how": "Rest 75 seconds. Stop each set 1-2 reps short of failure.",
+      "typeLabel": "Push-up ladder",
+      "shortTitle": "Push-up ladder, level 4",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 3,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      },
+      "progression": {
+        "series": "pushup_ladder",
+        "level": 4
+      }
+    },
+    {
+      "id": "plank_ladder_1",
+      "page": "fitness",
+      "version": 1,
+      "kind": "challenge",
+      "intensity": "moderate",
+      "title": "Plank ladder, level 1: hold 3 planks of 20 seconds.",
+      "how": "Rest 45 seconds between holds. Squeeze your glutes; keep hips level.",
+      "typeLabel": "Plank ladder",
+      "shortTitle": "Plank ladder, level 1",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 3,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      },
+      "progression": {
+        "series": "plank_ladder",
+        "level": 1
+      }
+    },
+    {
+      "id": "plank_ladder_2",
+      "page": "fitness",
+      "version": 1,
+      "kind": "challenge",
+      "intensity": "moderate",
+      "title": "Plank ladder, level 2: hold 3 planks of 30 seconds.",
+      "how": "Rest 45 seconds between holds.",
+      "typeLabel": "Plank ladder",
+      "shortTitle": "Plank ladder, level 2",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 3,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      },
+      "progression": {
+        "series": "plank_ladder",
+        "level": 2
+      }
+    },
+    {
+      "id": "plank_ladder_3",
+      "page": "fitness",
+      "version": 1,
+      "kind": "challenge",
+      "intensity": "moderate",
+      "title": "Plank ladder, level 3: hold 3 planks of 45 seconds.",
+      "how": "Rest 45 seconds. End the hold when form slips.",
+      "typeLabel": "Plank ladder",
+      "shortTitle": "Plank ladder, level 3",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 3,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      },
+      "progression": {
+        "series": "plank_ladder",
+        "level": 3
+      }
+    },
+    {
+      "id": "plank_ladder_4",
+      "page": "fitness",
+      "version": 1,
+      "kind": "challenge",
+      "intensity": "moderate",
+      "title": "Plank ladder, level 4: hold 3 planks of 60 seconds.",
+      "how": "Rest 60 seconds. Breathe steadily the whole time.",
+      "typeLabel": "Plank ladder",
+      "shortTitle": "Plank ladder, level 4",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 3,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      },
+      "progression": {
+        "series": "plank_ladder",
+        "level": 4
+      }
+    },
+    {
+      "id": "squat_ladder_1",
+      "page": "fitness",
+      "version": 1,
+      "kind": "challenge",
+      "intensity": "moderate",
+      "title": "Squat ladder, level 1: do 3 sets of 15 bodyweight squats.",
+      "how": "Rest 60 seconds. Full range you can control.",
+      "typeLabel": "Squat ladder",
+      "shortTitle": "Squat ladder, level 1",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 3,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      },
+      "progression": {
+        "series": "squat_ladder",
+        "level": 1
+      }
+    },
+    {
+      "id": "squat_ladder_2",
+      "page": "fitness",
+      "version": 1,
+      "kind": "challenge",
+      "intensity": "moderate",
+      "title": "Squat ladder, level 2: do 3 sets of 12 squats, 3 seconds down.",
+      "how": "Rest 60 seconds. Slow lowering is the challenge.",
+      "typeLabel": "Squat ladder",
+      "shortTitle": "Squat ladder, level 2",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 3,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      },
+      "progression": {
+        "series": "squat_ladder",
+        "level": 2
+      }
+    },
+    {
+      "id": "squat_ladder_3",
+      "page": "fitness",
+      "version": 1,
+      "kind": "challenge",
+      "intensity": "moderate",
+      "title": "Squat ladder, level 3: do 3 sets of 10 squats with a 2-second pause at the bottom.",
+      "how": "Rest 75 seconds. Keep your heels down.",
+      "typeLabel": "Squat ladder",
+      "shortTitle": "Squat ladder, level 3",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 3,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      },
+      "progression": {
+        "series": "squat_ladder",
+        "level": 3
+      }
+    },
+    {
+      "id": "combo_walk_mobility",
+      "page": "fitness",
+      "version": 1,
+      "kind": "combo",
+      "intensity": "easy",
+      "title": "Walk briskly for 20 minutes, then spend 8 minutes on hip and upper-back mobility.",
+      "how": "Walk at a pace where you can talk. Move through the mobility slowly.",
+      "typeLabel": "Walk and mobility",
+      "shortTitle": "20-minute walk plus 8 minutes mobility",
+      "contraindications": [
+        {
+          "factKey": "recovery",
+          "op": "below",
+          "value": 34
+        }
+      ],
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "combo_strength_walk",
+      "page": "fitness",
+      "version": 1,
+      "kind": "combo",
+      "intensity": "moderate",
+      "title": "Do 2 rounds of 10 squats, 8 push-ups and 10 glute bridges, then walk easily for 15 minutes.",
+      "how": "Keep the circuit controlled, effort about 5 out of 10. The walk is a cool-down.",
+      "typeLabel": "Strength and walk",
+      "shortTitle": "Circuit plus easy 15-minute walk",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "readiness",
+            "op": "above",
+            "by": 1
+          }
+        ]
+      },
+      "contraindications": [
+        {
+          "factKey": "sleep",
+          "op": "below_baseline",
+          "by": 0.15
+        }
+      ],
+      "outcome": {
+        "source": "noop_efficiency",
+        "metric": "that night's sleep efficiency",
+        "lag": "that_night",
+        "better": "up",
+        "wobbleFloor": 2,
+        "unit": "%"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "combo_core_flex",
+      "page": "fitness",
+      "version": 1,
+      "kind": "combo",
+      "intensity": "easy",
+      "title": "Do 5 minutes of planks and dead bugs, then 10 minutes of hamstring, hip and shoulder stretches.",
+      "how": "Everything stays easy. Finish with 5 slow breaths.",
+      "typeLabel": "Core and stretch",
+      "shortTitle": "Core then stretch, 15 minutes",
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "mb_breath_4_6",
+      "page": "mindBody",
+      "version": 1,
+      "kind": "recovery",
+      "intensity": "easy",
+      "title": "Breathe slowly for 5 minutes: in for 4 seconds, out for 6.",
+      "how": "Sit or lie down. About 6 breaths a minute. It is a short down-shift, not a fix for low HRV.",
+      "typeLabel": "Slow breathing",
+      "shortTitle": "5 minutes slow breathing",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "hrv",
+            "op": "below_baseline",
+            "by": 0.05
+          }
+        ]
+      },
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "mb_sunlight_walk_10",
+      "page": "mindBody",
+      "version": 1,
+      "kind": "endurance",
+      "intensity": "easy",
+      "title": "Take a 10-minute walk in daylight.",
+      "how": "Easy pace, outside if you can. Daylight early in the day helps keep your body clock steady.",
+      "typeLabel": "Morning light walk",
+      "shortTitle": "10-minute daylight walk",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "sleep",
+            "op": "below_baseline",
+            "by": 0.1
+          }
+        ]
+      },
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "mb_body_scan_10",
+      "page": "mindBody",
+      "version": 1,
+      "kind": "recovery",
+      "intensity": "easy",
+      "title": "Lie down for a 10-minute body scan.",
+      "how": "Relax each area from feet to head. If you doze off, that is fine.",
+      "typeLabel": "Body scan",
+      "shortTitle": "10-minute body scan",
+      "triggers": {
+        "any": [
+          {
+            "factKey": "recovery",
+            "op": "below",
+            "by": 50
+          },
+          {
+            "factKey": "rhr",
+            "op": "above_baseline",
+            "by": 0.05
+          }
+        ]
+      },
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      }
+    },
+    {
+      "id": "mb_light_mobility",
+      "page": "mindBody",
+      "version": 1,
+      "kind": "mobility",
+      "intensity": "easy",
+      "title": "Spend 10 minutes on light mobility: cat-cow, hip openers, gentle twists.",
+      "how": "Slow and comfortable. A way to move without adding load on a low day.",
+      "typeLabel": "Light mobility",
+      "shortTitle": "10 minutes light mobility",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "recovery",
+            "op": "below",
+            "by": 67
+          }
+        ]
+      },
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "moderate",
+        "summary": "Common practice in coaching, with reasonable support in the training literature. The evidence is mixed in places and individual response varies.",
+        "sources": []
+      }
+    },
+    {
+      "id": "mb_evening_winddown",
+      "page": "mindBody",
+      "version": 1,
+      "kind": "recovery",
+      "intensity": "easy",
+      "title": "Start winding down 60 minutes before bed: dim lights, no hard work, a gentle stretch.",
+      "how": "Pick one or two: a warm shower, 5 minutes of stretching, a printed book.",
+      "typeLabel": "Evening wind-down",
+      "shortTitle": "Evening wind-down",
+      "triggers": {
+        "all": [
+          {
+            "factKey": "sleep",
+            "op": "below_baseline",
+            "by": 0.1
+          },
+          {
+            "factKey": "hour",
+            "op": "above",
+            "by": 16
+          }
+        ]
+      },
+      "outcome": {
+        "source": "noop_hrv",
+        "metric": "next-morning HRV",
+        "lag": "next_morning",
+        "better": "up",
+        "wobbleFloor": 3,
+        "unit": " ms"
+      },
+      "detector": null,
+      "cooldownDays": 5,
+      "evidence": {
+        "level": "early",
+        "summary": "A common progression method used in coaching. There is little direct research on this exact format; treat it as a sensible plan, not a proven one.",
+        "sources": []
+      }
     }
   ]
 }

@@ -1,6 +1,8 @@
 import { CATALOG, type CatalogEntry } from "../amaraTake/catalog";
 import { validateTake } from "../amaraTake/validate";
 import type { Fact, FactSet, TakePage } from "../amaraTake/types";
+import { daysBetween, daysSinceKind, readinessLevel, seeded, seriesLevel, sportKind, type OfferRecord, type PickCtx } from "./variety";
+import type { TakeKind } from "../amaraTake/catalog";
 import { CAUSAL } from "./causal";
 import type { Fact as ViewFact } from "./adapters";
 
@@ -17,41 +19,98 @@ export function gate(set: FactSet): { ok: boolean; have: number } {
   return { ok: set.facts.some((f) => f.baseline !== null && f.baseline.n >= MIN_BASELINE), have };
 }
 
-/** Does the entry's trigger fire on these facts, and how far from usual is it (0..1+, for ranking)? */
-export function evalTrigger(entry: CatalogEntry, set: FactSet): { fires: boolean; distance: number; fact: Fact | null } {
-  const f = byKey(set, entry.trigger.factKey);
-  if (!f) return { fires: false, distance: 0, fact: null };
-  const by = entry.trigger.by ?? 0;
-  switch (entry.trigger.op) {
-    case "below_baseline": case "above_baseline": {
-      if (!f.baseline || f.baseline.n < MIN_BASELINE || f.baseline.mean === 0) return { fires: false, distance: 0, fact: f };
-      const rel = (f.value - f.baseline.mean) / Math.abs(f.baseline.mean);
-      const fires = entry.trigger.op === "below_baseline" ? rel < -by : rel > by;
-      return { fires, distance: Math.abs(rel), fact: f };
-    }
-    case "below": return { fires: f.value < by, distance: Math.abs(f.value - by) / Math.max(1, Math.abs(by)), fact: f };
-    case "above": return { fires: f.value > by, distance: Math.abs(f.value - by) / Math.max(1, Math.abs(by)), fact: f };
-  }
+type Cnd = { factKey: string; op: "below_baseline" | "above_baseline" | "below" | "above"; by?: number };
+type Hit = { met: boolean; distance: number; fact: Fact | null };
+
+/** Value of a fact key, or a derived one: readiness, hour, loadRatio, daysSince:<kind>. Undefined means unknown (a condition on it is unmet; a contraindication on it does not block). */
+function derived(key: string, set: FactSet, ctx: PickCtx): number | undefined {
+  if (key === "readiness") return readinessLevel(set);
+  if (key === "hour") return ctx.hour;
+  if (key === "loadRatio") return ctx.loadRatio ?? undefined;
+  if (key.startsWith("daysSince:")) return daysSinceKind(ctx.workouts, key.slice(10), set.day);
+  return undefined;
 }
 
-const blocked = (entry: CatalogEntry, set: FactSet) => (entry.contraindications ?? []).some((c) => {
+function evalCond(c: Cnd, set: FactSet, ctx: PickCtx): Hit {
   const f = byKey(set, c.factKey);
-  return !!f && (c.op === "below" ? f.value < c.value : f.value > c.value);
-});
+  const by = c.by ?? 0;
+  if (c.op === "below_baseline" || c.op === "above_baseline") {
+    if (!f || !f.baseline || f.baseline.n < MIN_BASELINE || f.baseline.mean === 0) return { met: false, distance: 0, fact: f };
+    const rel = (f.value - f.baseline.mean) / Math.abs(f.baseline.mean);
+    return { met: c.op === "below_baseline" ? rel < -by : rel > by, distance: Math.abs(rel), fact: f };
+  }
+  const v = f ? f.value : derived(c.factKey, set, ctx);
+  if (v === undefined) return { met: false, distance: 0, fact: f };
+  return { met: c.op === "below" ? v < by : v > by, distance: Math.abs(v - by) / Math.max(1, Math.abs(by)), fact: f };
+}
 
-export type PickInput = { page: TakePage; set: FactSet; entries?: CatalogEntry[]; stopped?: ReadonlySet<string>; cooldownUntil?: ReadonlyMap<string, string>; day: string };
+/** Does the entry's trigger fire on these facts, and how far from usual is it (0..1+, for ranking)? Old `trigger` and new `triggers` {all, any} both work; no trigger at all always fires. */
+export function evalTrigger(entry: CatalogEntry, set: FactSet, ctx: PickCtx = {}): { fires: boolean; distance: number; fact: Fact | null } {
+  const all = entry.triggers?.all ?? [], any = entry.triggers?.any ?? [];
+  const conds: Cnd[] = entry.triggers ? all : entry.trigger ? [entry.trigger] : [];
+  const hits = conds.map((c) => evalCond(c, set, ctx));
+  const anyHits = any.map((c) => evalCond(c, set, ctx));
+  const fires = hits.every((h) => h.met) && (!any.length || anyHits.some((h) => h.met));
+  const used = [...hits, ...anyHits.filter((h) => h.met)];
+  const lead = used.find((h) => h.fact && h.met) ?? used.find((h) => h.fact) ?? null;
+  return { fires, distance: used.reduce((m, h) => Math.max(m, h.distance), 0), fact: lead?.fact ?? set.facts[0] ?? null };
+}
+
+export const blocked = (entry: CatalogEntry, set: FactSet, ctx: PickCtx = {}) => (entry.contraindications ?? []).some((c) => evalCond({ factKey: c.factKey, op: c.op, by: c.value ?? c.by }, set, ctx).met);
+
+export type PickInput = { page: TakePage; set: FactSet; entries?: CatalogEntry[]; stopped?: ReadonlySet<string>; cooldownUntil?: ReadonlyMap<string, string>; day: string; ctx?: PickCtx };
 export type Pick = { entry: CatalogEntry | null; fact: Fact | null; alsoConsidered: CatalogEntry[] };
 
-/** Rank by evidence level (strong > moderate > early > own; weak is never picked), then distance from usual, then id. */
+/** How well the session's intensity matches today's readiness (0..1). Unknown readiness favours easy and moderate. */
+function fit(e: CatalogEntry, readiness: number | undefined): number {
+  const i = e.intensity ?? "moderate";
+  if (readiness === undefined) return i === "easy" ? 0.6 : i === "moderate" ? 0.5 : 0;
+  if (readiness === 3) return i === "hard" ? 1 : i === "moderate" ? 0.7 : 0.35;
+  if (readiness === 2) return i === "moderate" ? 1 : i === "easy" ? 0.6 : 0.2;
+  return i === "easy" ? 1 : 0;
+}
+
+/** Score = fit (readiness) + evidence + distance from usual, minus a recent-offer penalty and a same-kind penalty, plus a small seeded-by-day jitter. */
+export function scoreEntry(e: CatalogEntry, distance: number, inp: PickInput, offers: readonly OfferRecord[], lastKinds: { offered: TakeKind | undefined; offered2: TakeKind | undefined; did: TakeKind | null }): number {
+  const base = fit(e, readinessLevel(inp.set)) * 2 + (LEVEL_RANK[e.evidence.level] ?? 0) / 4 + Math.min(distance, 1) * 0.5;
+  const window = Math.min(e.cooldownDays, 14);
+  const ago = offers.filter((o) => o.recId === e.id).map((o) => daysBetween(o.day, inp.day)).filter((d) => d > 0 && d < window);
+  const recency = ago.length ? 3 * (1 - Math.min(...ago) / window) + 0.3 * (ago.length - 1) : 0;
+  const kind = e.kind;
+  const kindPen = kind ? (kind === lastKinds.offered ? 1.5 : 0) + (kind === lastKinds.did ? 1.5 : 0) + (kind === lastKinds.offered2 ? 0.5 : 0) : 0;
+  return base - recency - kindPen + seeded(inp.day, e.id) * 0.5;
+}
+
+/**
+ * Selection: filter by trigger, contraindication, stop and cooldown, keep only the current level of a progressive series,
+ * drop anything offered in the last few days when an alternative exists, then rank by score.
+ * Weak entries are never picked. The same day, facts and history always give the same entry; another day differs.
+ */
 export function pickEntry(inp: PickInput): Pick {
-  const entries = (inp.entries ?? CATALOG.entries).filter((e) => e.page === inp.page);
-  const scored = entries.map((e) => ({ e, t: evalTrigger(e, inp.set) })).filter((x) => x.t.fires && !blocked(x.e, inp.set));
-  const eligible = scored.filter((x) => x.e.evidence.level !== "weak" && !inp.stopped?.has(x.e.id) && !((inp.cooldownUntil?.get(x.e.id) ?? "") > inp.day));
-  eligible.sort((a, b) => (LEVEL_RANK[b.e.evidence.level] ?? 0) - (LEVEL_RANK[a.e.evidence.level] ?? 0) || b.t.distance - a.t.distance || a.e.id.localeCompare(b.e.id));
-  const top = eligible[0];
-  const also = scored.filter((x) => x !== top).map((x) => x.e).sort((a, b) => a.id.localeCompare(b.id));
+  const ctx = inp.ctx ?? {}, offers = (ctx.offers ?? []).filter((o) => o.day < inp.day);
+  const all = inp.entries ?? CATALOG.entries;
+  const entries = all.filter((e) => e.page === inp.page);
+  const scored = entries.map((e) => ({ e, t: evalTrigger(e, inp.set, ctx) })).filter((x) => x.t.fires && !blocked(x.e, inp.set, ctx));
+  const eligible = scored.filter((x) => x.e.evidence.level !== "weak" && !inp.stopped?.has(x.e.id) && !((inp.cooldownUntil?.get(x.e.id) ?? "") > inp.day)
+    && (!x.e.progression || x.e.progression.level === seriesLevel(x.e.progression.series, all, offers)));
+  const recent = (id: string, within: number) => offers.some((o) => o.recId === id && daysBetween(o.day, inp.day) < within);
+  const fresh = eligible.filter((x) => !recent(x.e.id, Math.min(x.e.cooldownDays, 6)));
+  const pool = fresh.length ? fresh : eligible;
+  // Kinds of the last offer, of the offer before it, and of what he actually trained yesterday.
+  const kindOn = (d: string) => { const o = offers.find((x) => x.day === d); return o ? entries.find((e) => e.id === o.recId)?.kind : undefined; };
+  const yesterday = addDay(inp.day, -1);
+  const didSport = (ctx.workouts ?? []).filter((w) => w.day === yesterday).map((w) => sportKind(w.sport)).find((k) => k !== null) ?? null;
+  const lastKinds = { offered: kindOn(yesterday), offered2: kindOn(addDay(inp.day, -2)), did: didSport };
+  const ranked = pool.map((x) => ({ ...x, score: scoreEntry(x.e, x.t.distance, inp, offers, lastKinds) }))
+    .sort((a, b) => b.score - a.score || (LEVEL_RANK[b.e.evidence.level] ?? 0) - (LEVEL_RANK[a.e.evidence.level] ?? 0) || b.t.distance - a.t.distance || a.e.id.localeCompare(b.e.id));
+  const top = ranked[0];
+  const weak = scored.filter((x) => x.e.evidence.level === "weak").map((x) => x.e);
+  const runners = ranked.slice(1, 3).map((x) => x.e);
+  const also = [...new Set([...weak, ...(entries.length > 6 ? runners : scored.map((x) => x.e))])].filter((e) => e !== top?.e).sort((a, b) => a.id.localeCompare(b.id));
   return { entry: top?.e ?? null, fact: top?.t.fact ?? null, alsoConsidered: also };
 }
+
+const addDay = (day: string, n: number) => { const t = Date.parse(`${day}T00:00:00Z`) + n * 86_400_000; return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : ""; };
 
 // ---------------- the why sentence ----------------
 export function buildWhyPrompt(entry: CatalogEntry, facts: Fact[]): string {

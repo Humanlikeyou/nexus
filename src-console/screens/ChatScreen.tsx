@@ -14,6 +14,7 @@ import type { AskMoreDetail } from "../amaraTake/takeView";
 import "../amaraTake/AmaraTakeCard.css";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
 import { useAmaraVoice } from "../hooks/useAmaraVoice";
+import { setAmaraActivity } from "../hooks/amaraActivity";
 import "./ChatScreen.css";
 import "./HomeChat.css";
 
@@ -185,6 +186,9 @@ export function ChatField({
   const [query, setQuery] = useState("");
   const [deep, setDeep] = useState(false);
   const voice = useAmaraVoice();
+  // the Home sand lens swirls while a reply is awaited (no content leaves this screen)
+  useEffect(() => { setAmaraActivity(sending ? "thinking" : "idle"); }, [sending]);
+  useEffect(() => () => setAmaraActivity("idle"), []);
   const listRef = useRef<HTMLOListElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   // Loading = first snapshot not in yet and no local transcript to show.

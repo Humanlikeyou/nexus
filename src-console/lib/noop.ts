@@ -23,6 +23,32 @@ export async function noopQuery(tool: NoopQueryTool, args: NoopQueryArgs | null 
   }
 }
 
+/**
+ * Several reads in ONE backend session (`noop_query_batch`: one spawn instead of one per read).
+ * Results come back in call order, each as a NoopRead, so callers treat them like single reads.
+ * A session-level failure (binary missing, pin, timeout...) fails every slot with that error. When
+ * the batch command itself is unavailable (older backend, mocks) it falls back to parallel single
+ * reads, so behaviour is unchanged. Never logs results or args.
+ */
+export async function noopQueryBatch(calls: Array<{ tool: NoopQueryTool; args?: NoopQueryArgs | null }>): Promise<NoopRead<unknown>[]> {
+  const payload = calls.map((c) => ({ tool: c.tool, args: c.args ?? null }));
+  try {
+    const items = await invokeBound<Array<{ value?: unknown; error?: NoopQueryError | null }>>("noop_query_batch", { calls: payload });
+    if (!Array.isArray(items) || items.length !== calls.length) throw new Error("batch shape");
+    return items.map((it, i): NoopRead<unknown> => {
+      if (it && it.error) { console.warn(`[console] noop_query ${calls[i].tool} failed: ${it.error.kind}`); return { ok: false, error: it.error }; }
+      return { ok: true, value: it?.value ?? null };
+    });
+  } catch (e) {
+    if (e && typeof e === "object" && "kind" in e && typeof (e as { kind: unknown }).kind === "string") {
+      const error = e as NoopQueryError;
+      console.warn(`[console] noop_query batch failed: ${error.kind}`);
+      return calls.map(() => ({ ok: false, error }));
+    }
+    return Promise.all(calls.map((c) => noopQuery(c.tool, c.args ?? null)));
+  }
+}
+
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const nn = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 

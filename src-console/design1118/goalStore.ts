@@ -1,6 +1,6 @@
 import { announceAdds, announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
 import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampleAdapters";
-import type { GoalWire, GoalsWeek, Habit, Milestone } from "../personal/adapters";
+import { jstToday, type GoalWire, type GoalsWeek, type Habit, type Milestone } from "../personal/adapters";
 
 /**
  * design-1118a Goals flow: add, edit and delete goals and habits in the SAME store the page reads
@@ -12,7 +12,7 @@ import type { GoalWire, GoalsWeek, Habit, Milestone } from "../personal/adapters
  */
 
 export type GoalDraft = { title: string; target: number; unit: string; deadline: string | null; category?: string };
-export type HabitDraft = { title: string; rule: string; perWeek: number };
+export type HabitDraft = { title: string; rule: string; perWeek: number; why?: string; remindAt?: string; paused?: boolean };
 type Ok = Wired<{ ok: true }>;
 
 export interface GoalStore {
@@ -23,6 +23,10 @@ export interface GoalStore {
   updateGoal(id: string, d: GoalDraft): Promise<Ok>;
   updateHabit(id: string, d: HabitDraft): Promise<Ok>;
   remove(id: string): Promise<Ok>;
+  /** Mark a habit done (or not done) for a JST day (today by default). Live: `habit_mark` (History + 8 s Undo); `historyId` is what `undoMark` takes, or null when the day already held that state. */
+  markHabit(id: string, done: boolean, day?: string): Promise<Wired<{ historyId: string | null }>>;
+  /** Takes the last mark back: `add_undo("habit", historyId)`. True if it was undone. */
+  undoMark(historyId: string): Promise<boolean>;
   /** Mock mode: applies the in-memory edits to the sample week. Live: unchanged (the store already holds them). */
   overlay(week: GoalsWeek): GoalsWeek;
   overlayHabits(habits: Habit[]): Habit[];
@@ -35,8 +39,13 @@ const goalRow = (id: string, d: GoalDraft, prev?: GoalWire | null): GoalWire => 
   id, title: clean(d.title), category: d.category ?? prev?.category ?? "personal", target: Number.isFinite(d.target) ? Math.max(0, d.target) : 0,
   current: prev?.current ?? 0, unit: clean(d.unit), deadline: d.deadline || null,
 });
+const hhmm = (s: string | undefined) => (s && /^([01]\d|2[0-3]):[0-5]\d$/.test(s.trim()) ? s.trim() : null);
+/** The 0045 fields: a draft that names one sets it; otherwise the stored value stays (a plain edit never drops them). */
 const habitRow = (id: string, d: HabitDraft, prev?: GoalWire | null): GoalWire => ({
-  id, title: clean(d.title), category: "habit", target: perWeek(d.perWeek), current: prev?.current ?? 0, unit: clean(d.rule), deadline: prev?.deadline ?? null,
+  ...(prev ?? {}), id, title: clean(d.title), category: "habit", target: perWeek(d.perWeek), current: prev?.current ?? 0, unit: clean(d.rule), deadline: prev?.deadline ?? null,
+  why: d.why !== undefined ? clean(d.why).slice(0, 300) || null : prev?.why ?? null,
+  remind_at: d.remindAt !== undefined ? hhmm(d.remindAt) : prev?.remind_at ?? null,
+  paused: d.paused ?? prev?.paused ?? false,
 });
 export const goalLabel = (r: GoalWire) => {
   const unit = (r.unit ?? "").trim();
@@ -71,6 +80,16 @@ export function makeLiveGoalStore(call: Invoke = realInvoke, notify: () => void 
       try { const r = await call<GoalWire[]>("delete_goal", { goalId: id }); if (Array.isArray(r)) rows = r; } catch { return UNWIRED; }
       notify(); return live({ ok: true as const });
     },
+    async markHabit(id, done, day) {
+      try {
+        const r = await call<{ changed: boolean; id: string | null }>("habit_mark", { habitId: id, day: day ?? jstToday(), done, source: "manual" });
+        notify();
+        return live({ historyId: r && r.changed ? r.id : null });
+      } catch { return UNWIRED; }
+    },
+    async undoMark(historyId) {
+      try { const ok = (await call<boolean>("add_undo", { kind: "habit", id: historyId })) === true; if (ok) notify(); return ok; } catch { return false; }
+    },
     overlay: (w) => w,
     overlayHabits: (h) => h,
   };
@@ -99,6 +118,8 @@ export function makeSampleGoalStore(): GoalStore {
     async updateGoal(id, d) { rows.set(id, goalRow(id, d, rows.get(id))); return ok(); },
     async updateHabit(id, d) { rows.set(id, habitRow(id, d, rows.get(id))); return ok(); },
     async remove(id) { deleted.add(id); return ok(); },
+    async markHabit() { return sample({ historyId: null }); },
+    async undoMark() { return false; },
     overlay(w) {
       const ms = w.milestones.filter((m) => !deleted.has(m.id)).map((m) => { const r = rows.get(m.id); return r && r.category !== "habit" && r.title !== m.title ? { ...m, title: r.title, right: goalLabel(r) } : r && r.category !== "habit" ? { ...m, right: goalLabel(r) } : m; });
       const extra = added.map((id) => rows.get(id)!).filter((r) => r.category !== "habit" && !deleted.has(r.id)).map((r) => toMilestone(r));
@@ -114,7 +135,7 @@ export function makeSampleGoalStore(): GoalStore {
 const habitOf = (r: GoalWire): Habit => ({ id: r.id, title: r.title, source: "You", rule: r.unit || "daily", days: Array.from({ length: 7 }, () => "none" as const), done: 0, target: perWeek(r.target), note: "added just now" });
 
 export const unwiredGoalStore: GoalStore = {
-  row: () => null, addGoal: async () => UNWIRED, addHabit: async () => UNWIRED, updateGoal: async () => UNWIRED, updateHabit: async () => UNWIRED, remove: async () => UNWIRED,
+  row: () => null, addGoal: async () => UNWIRED, addHabit: async () => UNWIRED, updateGoal: async () => UNWIRED, updateHabit: async () => UNWIRED, remove: async () => UNWIRED, markHabit: async () => UNWIRED, undoMark: async () => false,
   overlay: (w) => w, overlayHabits: (h) => h,
 };
 

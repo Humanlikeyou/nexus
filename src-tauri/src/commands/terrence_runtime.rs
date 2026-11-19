@@ -658,6 +658,9 @@ struct TurnContextSelection {
     checkins: bool,
     followups: bool,
     patterns: bool,
+    habits: bool,
+    dates: bool,
+    money: bool,
 }
 
 fn turn_context_selection(message: &str) -> TurnContextSelection {
@@ -759,6 +762,33 @@ fn turn_context_selection(message: &str) -> TurnContextSelection {
             "to-do",
             "todo",
         ]),
+        habits: contains_any(&[
+            "habit",
+            "streak",
+            "routine",
+            "consisten",
+            "did i ",
+            "have i been",
+            "keep up",
+            "commitment",
+            "missed",
+        ]),
+        money: contains_any(&[
+            "money", "spend", "spent", "budget", "afford", "saving", "income", "expense", "bill",
+            "balance", "cash", "finance",
+        ]),
+        dates: contains_any(&[
+            "deadline",
+            " due ",
+            "date",
+            "visa",
+            "expire",
+            "renew",
+            "coming up",
+            "upcoming",
+            "when is",
+            "residence",
+        ]),
         patterns: contains_any(&[
             "pattern",
             "trend",
@@ -783,6 +813,9 @@ struct TurnBriefs<'a> {
     checkin: &'a str,
     followup: &'a str,
     pattern: &'a str,
+    habits: &'a str,
+    dates: &'a str,
+    money: &'a str,
 }
 
 // ── Keyword-gated briefs: check-ins, follow-ups, pattern findings (read-only) ──
@@ -954,6 +987,36 @@ fn gated_briefs(message: &str) -> (String, String, String) {
     (checkin, followup, pattern)
 }
 
+/// Habit and date briefs from the stores. The habits section is always present when a habit exists (one
+/// summary line, the full brief when the message asks); the dates brief is keyword-gated. A missing or
+/// unreadable store is an empty brief.
+fn habit_date_briefs(message: &str) -> (String, String) {
+    let selection = turn_context_selection(message);
+    let data = crate::app_paths::data_dir();
+    let today = super::local_store::day_of(&super::local_store::now_jst());
+    let goals: Vec<super::goals::Goal> =
+        super::local_store::read_json(&data.join("goals.json"), super::adds::MAX_MD_BYTES)
+            .unwrap_or_default();
+    let habits = match super::habits::rows_in(&super::habits::dir_in(&data)) {
+        Ok(rows) => habit_brief::habits_brief(
+            &goals,
+            &rows,
+            today,
+            selection.habits,
+            if selection.habits { 1_800 } else { 400 },
+        ),
+        Err(_) => String::new(),
+    };
+    let dates = if selection.dates {
+        super::life_dates::list_in(&super::life_dates::dir_in(&data), today)
+            .map(|v| habit_brief::dates_brief(&v, 900))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    (habits, dates)
+}
+
 /// The turn's background sections; specialised history only when the message calls for it.
 fn nexus_turn_sections(
     message: &str,
@@ -979,6 +1042,9 @@ fn nexus_turn_sections(
         ("nexus_checkins", briefs.checkin, selection.checkins),
         ("nexus_followups", briefs.followup, selection.followups),
         ("nexus_patterns", briefs.pattern, selection.patterns),
+        ("nexus_habits", briefs.habits, true),
+        ("nexus_dates", briefs.dates, selection.dates),
+        ("nexus_money", briefs.money, selection.money),
         ("noop_health_context", briefs.health, true),
     ]
     .into_iter()
@@ -990,7 +1056,7 @@ fn nexus_turn_sections(
     .collect()
 }
 
-pub(crate) const ALLOWED_SECTION_TAGS: [&str; 13] = [
+pub(crate) const ALLOWED_SECTION_TAGS: [&str; 16] = [
     "nexus_context",
     "nexus_priorities",
     "nexus_recent_decisions",
@@ -1002,6 +1068,11 @@ pub(crate) const ALLOWED_SECTION_TAGS: [&str; 13] = [
     "nexus_checkins",
     "nexus_followups",
     "nexus_patterns",
+    // 0045: habits (always one summary line when a habit exists) and upcoming dates, from the stores.
+    "nexus_habits",
+    "nexus_dates",
+    // 0045: personal money facts from the entries store (keyword-gated; JPY stays native text).
+    "nexus_money",
     "nexus_deliberation",
     // Letta human/persona blocks, read-only (turn pipeline L2; turn_memory::letta_section).
     "letta_memory",
@@ -1467,6 +1538,13 @@ pub fn prepare_amara_turn(message: String) -> Result<AmaraTurnContext, String> {
     let health_brief = noop::runtime_health_brief(1_200);
     let stripped = terrence_runtime_bridge::strip_route_prefix(&message);
     let (checkin_brief, followup_brief, pattern_brief) = gated_briefs(&stripped);
+    let (habits_brief, dates_brief) = habit_date_briefs(&stripped);
+    let money_brief = if turn_context_selection(&stripped).money {
+        super::money_entries::money_context_section(&crate::app_paths::data_dir())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
     let sections = nexus_turn_sections(
         &stripped,
         &runtime_context,
@@ -1480,6 +1558,9 @@ pub fn prepare_amara_turn(message: String) -> Result<AmaraTurnContext, String> {
             checkin: &checkin_brief,
             followup: &followup_brief,
             pattern: &pattern_brief,
+            habits: &habits_brief,
+            dates: &dates_brief,
+            money: &money_brief,
         },
     );
     Ok(AmaraTurnContext {
@@ -2026,6 +2107,8 @@ pub fn list_terrence_interactions(
     }
     Ok(records)
 }
+
+mod habit_brief;
 
 #[cfg(test)]
 mod tests;

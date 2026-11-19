@@ -76,8 +76,8 @@ function NeuroWave({ session, focus, calm }: { session: RecordedSession; focus: 
   );
 }
 
-export function MuseJourney({ session, recoveryNow, sessions, action, devices, onOpenHistory, onOpenSession, hideNext = false }: {
-  session: RecordedSession | null; recoveryNow: number | null; sessions: RecordedSession[]; action: ReactNode; devices?: ReactNode; onOpenHistory?: () => void;
+export function MuseJourney({ session, recoveryNow, sessions, action, status, devices, onOpenHistory, onOpenSession, hideNext = false }: {
+  session: RecordedSession | null; recoveryNow: number | null; sessions: RecordedSession[]; action: ReactNode; /** Status chip, left of the primary button on the compact Find Muse row. */ status?: ReactNode; /** Nearby headsets and scan notes; render only while scanning or when there is something to say. */ devices?: ReactNode; onOpenHistory?: () => void;
   /** A session chip or the hero opens that recording. */ onOpenSession?: (sessionId: string) => void;
   /** Last-session hero only (connected and idle: the page already has its own next step). */ hideNext?: boolean;
 }) {
@@ -125,10 +125,11 @@ export function MuseJourney({ session, recoveryNow, sessions, action, devices, o
         </section>
       )}
       {!hideNext && <section className="d18-next" aria-label="Next step">
-        <p className="d18-eyebrow">Next step</p>
-        <h3 className="d18-next__t">Find Muse</h3>
-        <p className="d18-next__why">Put your headset in pairing mode</p>
-        <div className="d18-actions">{action}</div>
+        <div className="d18-next__row">
+          {status}
+          <p className="d18-next__why">Put your headset in pairing mode</p>
+          <div className="d18-actions">{action}</div>
+        </div>
         {devices}
       </section>}
     </div>

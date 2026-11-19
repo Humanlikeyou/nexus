@@ -82,10 +82,25 @@ pub struct Milestone {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
+pub struct HabitWeek {
+    pub id: String,
+    pub title: String,
+    /// Days marked done in the review week (Mon to Sun, up to the review day).
+    pub done: u32,
+    /// Days a week the habit is meant for.
+    pub target: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct GoalsSection {
     pub state: String,
     pub milestones: Vec<Milestone>,
     pub habits: usize,
+    /// Per-habit done/target from the habit-day store. Filled on every read (never stored), so a mark made
+    /// after the review was built still counts. Old stored reviews load with none.
+    #[serde(default)]
+    pub habit_weeks: Vec<HabitWeek>,
     pub note: String,
 }
 
@@ -345,10 +360,9 @@ pub fn build(
         }
         .into(),
         habits,
+        habit_weeks: vec![],
         note: if milestones.is_empty() && habits == 0 {
             "No goals saved yet.".into()
-        } else if habits > 0 {
-            "Habit day marks are not computed yet, so habits show no met or missed days.".into()
         } else {
             String::new()
         },
@@ -688,6 +702,47 @@ pub(crate) fn overlay_roadmaps(
     }
 }
 
+/// Per-habit done/target for the review week from the habit-day store. Applied on every read, never stored.
+/// Business-category and paused habits are left out. An unreadable habit log leaves a plain note instead of
+/// invented numbers.
+pub(crate) fn overlay_habits(
+    review: &mut Review,
+    goals: &[super::goals::Goal],
+    rows: Result<Vec<super::habits::HabitDayRow>, String>,
+) {
+    review.goals.habit_weeks.clear();
+    let habits: Vec<&super::goals::Goal> = goals
+        .iter()
+        .filter(|g| g.category == "habit" && !is_business_goal(g) && !g.paused)
+        .collect();
+    if habits.is_empty() {
+        return;
+    }
+    let (Ok(start), Ok(end)) = (
+        NaiveDate::parse_from_str(&review.week_start, "%Y-%m-%d"),
+        NaiveDate::parse_from_str(&review.week_end, "%Y-%m-%d"),
+    ) else {
+        return;
+    };
+    let Ok(rows) = rows else {
+        review.goals.note = "Habit marks couldn't be read, so habits show no counts.".into();
+        return;
+    };
+    review.goals.habit_weeks = habits
+        .iter()
+        .map(|g| HabitWeek {
+            id: g.id.clone(),
+            title: g.title.clone(),
+            done: rows
+                .iter()
+                .filter(|r| r.habit_id == g.id && r.done)
+                .filter(|r| in_range(&r.day, start, end))
+                .count() as u32,
+            target: super::habits::target_of(g),
+        })
+        .collect();
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn weekly_review_read() -> Result<Review, String> {
@@ -700,6 +755,11 @@ pub async fn weekly_review_read() -> Result<Review, String> {
         if let Ok(store) = super::goal_roadmap::read_store_at(&dir) {
             overlay_roadmaps(&mut review, &goals, &store);
         }
+        overlay_habits(
+            &mut review,
+            &goals,
+            super::habits::rows_in(&super::habits::dir_in(&dir)),
+        );
         Ok(review)
     })
     .await
@@ -735,6 +795,9 @@ mod tests {
             created_at: String::new(),
             updated_at: String::new(),
             venture_id: None,
+            why: None,
+            remind_at: None,
+            paused: false,
         }
     }
 
@@ -1426,5 +1489,62 @@ mod tests {
         assert_eq!(ids(&q), vec![5]);
         let _ = std::fs::remove_dir_all(dir);
         let _ = std::fs::remove_dir_all(dir2);
+    }
+
+    #[test]
+    fn habit_weeks_count_real_marks_in_the_review_week() {
+        use super::super::habits::HabitDayRow;
+        let now = at(2026, 11, 12, 10);
+        let p = patterns::compute(&Inputs::default(), now);
+        let mut h = goal("h1", "habit", 3.0, 0.0);
+        h.title = "Walk".into();
+        let mut paused = goal("h2", "habit", 3.0, 0.0);
+        paused.paused = true;
+        let goals = [h, paused, goal("g", "health", 10.0, 5.0)];
+        let mut r = build(
+            &Inputs::default(),
+            &p,
+            &goals,
+            no_money(),
+            last_due(now),
+            now,
+        );
+        assert!(r.goals.habit_weeks.is_empty());
+        assert!(!r.goals.note.contains("not computed"));
+        let row = |id: &str, day: &str, done: bool| HabitDayRow {
+            habit_id: id.into(),
+            day: day.into(),
+            done,
+            source: "manual".into(),
+            at: String::new(),
+        };
+        let (s, e) = (r.week_start.clone(), r.week_end.clone());
+        let before = (chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").unwrap()
+            - Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+        let rows = [
+            row("h1", &s, true),
+            row("h1", &e, true),
+            row("h1", &before, true),
+            row("h1", &s, true),
+            row("h2", &s, true),
+        ];
+        // a duplicate day row can't happen in the store, but only done rows in range count
+        overlay_habits(&mut r, &goals, Ok(rows[..3].to_vec()));
+        assert_eq!(
+            r.goals.habit_weeks,
+            vec![HabitWeek {
+                id: "h1".into(),
+                title: "Walk".into(),
+                done: 2,
+                target: 3
+            }]
+        );
+        overlay_habits(&mut r, &goals, Ok(vec![row("h1", &e, false)]));
+        assert_eq!(r.goals.habit_weeks[0].done, 0);
+        overlay_habits(&mut r, &goals, Err("x".into()));
+        assert!(r.goals.habit_weeks.is_empty());
+        assert!(r.goals.note.contains("couldn't be read"));
     }
 }

@@ -85,7 +85,7 @@ test("(1111t) money: read-only badges, seed phrase refused and cleared, JPY view
   await expect(field.getByText("Can't move money", { exact: true })).toHaveCount(8);
   await expect(field.getByText(/^Not financial advice\./)).toBeVisible();
   await field.getByRole("radio", { name: "JPY" }).click();
-  await expect(field.locator(".page-hero").first()).toContainText("¥7,511,767 personal");
+  await expect(field.locator(".page-hero").first()).toContainText("7,511,767 JPY personal");
   await field.getByRole("button", { name: "Connect an account…" }).click();
   const sheet = page.getByRole("dialog", { name: "Connect an account (read-only)" });
   const input = sheet.getByRole("textbox", { name: /xpub or address/ });

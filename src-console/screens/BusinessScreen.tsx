@@ -3,6 +3,7 @@ import { ventureRoute, type Route } from "../app/routes";
 import { businessAdapter, type BusinessAdapter } from "../business/adapters";
 import type { SystemSnapshot } from "../types";
 import { DataTag } from "../ui";
+import type { LedgerWrites } from "../business/ledgerWrite";
 import { TreasuryView } from "../design1118/TreasuryView";
 import { BusinessOverview, LinkCard, VenturesView } from "./BusinessPanels";
 import { ContentView, DecisionsView, TasksView, workStatement } from "./EnterprisePages";
@@ -26,7 +27,7 @@ function WorkCards({ data, onView }: { data: SystemSnapshot; onView?: (view: str
 
 /** Enterprise host (was Business; design-1110d D-B1, design-1111v): Overview · Decisions · Ventures · Tasks · Content
  *  render here; Finances is RevenueField. A venture is its own route, "ventures/<id>". */
-export function BusinessField({ data, onRetry, view = "main", onView, onOpen, adapter = businessAdapter(data) }: { data: SystemSnapshot; onRetry?: () => void; view?: string; onView?: (view: string) => void; onOpen?: (route: Route) => void; adapter?: BusinessAdapter }) {
+export function BusinessField({ data, onRetry, view = "main", onView, onOpen, adapter = businessAdapter(data), writes }: { data: SystemSnapshot; onRetry?: () => void; view?: string; onView?: (view: string) => void; onOpen?: (route: Route) => void; adapter?: BusinessAdapter; writes?: LedgerWrites | null }) {
   // Without a router (unit tests) a venture opens in place; in the app it is its own route with a back link.
   const [local, setLocal] = useState<string | null>(null);
   const routed = view.startsWith("ventures/") ? view.slice("ventures/".length) : null;
@@ -34,11 +35,11 @@ export function BusinessField({ data, onRetry, view = "main", onView, onOpen, ad
     if (onOpen) onOpen(id ? ventureRoute(id) : { id: "enterprise", view: "ventures" });
     else setLocal(id);
   };
-  if (view === "main") return <BusinessOverview data={data} adapter={adapter} onView={onView} onOpenVenture={(id) => openVenture(id)} work={<WorkCards data={data} onView={onView} />} />;
+  if (view === "main") return <BusinessOverview data={data} adapter={adapter} onView={onView} onOpenVenture={(id) => openVenture(id)} work={<WorkCards data={data} onView={onView} />} writes={writes} />;
   // "decisions/<itemId>" opens Decisions with that item highlighted.
   if (view === "decisions" || view.startsWith("decisions/")) return <DecisionsView data={data} adapter={adapter} onOpen={onOpen} focusId={view.startsWith("decisions/") ? view.slice("decisions/".length) : undefined} />;
-  if (view === "ventures" || routed) return <VenturesView data={data} adapter={adapter} ventureId={routed ?? local} onOpen={openVenture} onView={onView} onRoute={onOpen} />;
-  if (view === "treasury") return <TreasuryView />;
+  if (view === "ventures" || routed) return <VenturesView data={data} adapter={adapter} ventureId={routed ?? local} onOpen={openVenture} onView={onView} onRoute={onOpen} writes={writes} />;
+  if (view === "treasury") return <TreasuryView onOpen={onOpen} writes={writes} />;
   if (view === "content") return <ContentView data={data} onRetry={onRetry} onOpen={onOpen} />;
   return <TasksView data={data} onRetry={onRetry} onOpen={onOpen} />;
 }

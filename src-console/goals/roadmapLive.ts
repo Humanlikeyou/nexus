@@ -83,6 +83,8 @@ export function makeLiveRoadmaps(deps: RoadmapDeps = defaultDeps): LiveRoadmapAd
   const loading = new Set<string>();
   let question: StepQuestion | null | undefined; // undefined = not read yet
   let questionDay = "";
+  // a failed load waits for the next day: retrying on every render spun forever (it froze Enterprise under the e2e mock)
+  let questionFailedDay = "";
   let questionLoading = false;
 
   async function loadRoadmap(goalId: string): Promise<void> {
@@ -90,7 +92,7 @@ export function makeLiveRoadmaps(deps: RoadmapDeps = defaultDeps): LiveRoadmapAd
   }
   async function loadQuestion(): Promise<void> {
     const day = deps.today();
-    try { question = mapQuestion(await deps.call("roadmap_todays_question", { today: day })); questionDay = day; } catch { /* unwired */ }
+    try { question = mapQuestion(await deps.call("roadmap_todays_question", { today: day })); questionDay = day; questionFailedDay = ""; } catch { questionFailedDay = day; /* unwired */ }
   }
   const touch = (p: Promise<void>, done: () => void) => { void p.finally(() => { done(); deps.notify(); }); };
 
@@ -146,7 +148,7 @@ export function makeLiveRoadmaps(deps: RoadmapDeps = defaultDeps): LiveRoadmapAd
       : write("roadmap_answer_step", { goalId, stepId, answer }, goalId),
     todaysQuestion() {
       if (question !== undefined && questionDay !== deps.today()) question = undefined; // new day: ask again
-      if (question === undefined && !questionLoading) { questionLoading = true; touch(loadQuestion(), () => { questionLoading = false; }); }
+      if (question === undefined && !questionLoading && questionFailedDay !== deps.today()) { questionLoading = true; touch(loadQuestion(), () => { questionLoading = false; }); }
       return question === undefined ? UNWIRED : live(question);
     },
   };
