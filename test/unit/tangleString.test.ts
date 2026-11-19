@@ -44,7 +44,29 @@ describe("goal strings (struck, fixed ends)", () => {
     }
   });
 
-  it("slots repeat every 4 like the strand colours", () => {
-    expect(goalString(5)).toEqual(goalString(1));
+  // Taisun 2026-11-19: "make sure with every new goal a new wave is entangled".
+  it("every goal has its own string: up to 12 goals >= 5% apart, and no two of 40 alike", () => {
+    const gap = (n: number) => {
+      const fs = Array.from({ length: n }, (_, i) => goalString(i).f).sort((a, b) => a - b);
+      return Math.min(...fs.slice(1).map((f, j) => f / fs[j]));
+    };
+    expect(gap(12)).toBeGreaterThan(1.05);
+    expect(gap(40)).toBeGreaterThan(1.002);
+    const sig = new Set(Array.from({ length: 40 }, (_, i) => { const s = goalString(i); return `${s.f.toFixed(6)}|${s.pluck.toFixed(6)}`; }));
+    expect(sig.size).toBe(40);
+  });
+
+  it("later goals stay in the same range, off the middle, and never copy the first four", () => {
+    for (let i = 4; i < 40; i++) {
+      const s = goalString(i);
+      expect(s.f).toBeGreaterThanOrEqual(BASE_HZ);
+      expect(s.f).toBeLessThanOrEqual(BASE_HZ * Math.pow(PHI, 3) + 1e-12);
+      expect(Math.abs(s.pluck - 0.5)).toBeGreaterThanOrEqual(0.05);
+      for (let k = 0; k < 4; k++) expect(s.f).not.toBeCloseTo(goalString(k).f, 3);
+    }
+  });
+
+  it("the first four strings are the approved ones", () => {
+    expect([0, 1, 2, 3].map((i) => goalString(i).pluck)).toEqual([0.27, 0.38, 0.62, 0.73]);
   });
 });
