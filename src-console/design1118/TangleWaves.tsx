@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { webgl2Available } from "../sandLens/gl";
 import { reducedMotion } from "../shell/Splash";
-import { HARMONICS, goalString, type GoalString } from "./tangleString";
+import { DriftField, HARMONICS, goalString, type GoalString } from "./tangleString";
 
 /**
  * Milestones arrival, WebGL: one vibrating string per goal, each in its own key (see tangleString.ts for the physics).
@@ -23,7 +23,7 @@ const VERT = /* glsl */ `
   #define H ${HARMONICS}
   attribute float aU;
   attribute float aSide;
-  uniform float uT, uF, uW, uH, uSwing, uHalf, uLift, uGain;
+  uniform float uP, uW, uH, uSwing, uHalf, uLift, uGain, uShape, uPure;
   uniform float uA[H];
   uniform float uPh[H];
   varying float vSide;
@@ -32,9 +32,11 @@ const VERT = /* glsl */ `
     float y = 0.0, dy = 0.0;
     for (int j = 0; j < H; j++) {
       float n = float(j + 1);
-      float c = cos(2.0 * PI * n * uF * uT + uPh[j]);
-      y += uA[j] * sin(n * PI * aU) * c;
-      dy += uA[j] * n * PI * cos(n * PI * aU) * c;
+      float c = cos(n * uP + uPh[j] * uShape);
+      // In harmony the overtones fade and each string rings as one clean arc (uPure 0 -> 1).
+      float a = mix(uA[j], j == 0 ? 1.0 : 0.0, uPure);
+      y += a * sin(n * PI * aU) * c;
+      dy += a * n * PI * cos(n * PI * aU) * c;
     }
     float amp = uH * uSwing * uGain;
     vec2 p = vec2(aU * uW, uH * 0.5 + y * amp);
@@ -74,10 +76,12 @@ function cssToRgb(css: string): string | null {
 type StringsProps = {
   strings: GoalString[]; hot: number | null; colourOf: (i: number) => string | null; label: string; onFail: () => void;
   viewW?: number; viewH?: number; swing?: number; className?: string; testId?: string;
+  /** Random drift with occasional harmony (Milestones) instead of the exact loop (Neuro). */
+  drift?: boolean;
 };
 
 /** Vibrating strings in WebGL: one ribbon per string, the physics in tangleString.ts, evaluated in the shader. */
-export function VibratingStrings({ strings, hot, colourOf, label, onFail, viewW = VIEW_W, viewH = VIEW_H, swing = SWING, className = "d18-tangle__svg", testId = "tangle-gl" }: StringsProps) {
+export function VibratingStrings({ strings, hot, colourOf, label, onFail, viewW = VIEW_W, viewH = VIEW_H, swing = SWING, className = "d18-tangle__svg", testId = "tangle-gl", drift = false }: StringsProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hotRef = useRef(hot);
   const colourRef = useRef(colourOf);
@@ -120,7 +124,7 @@ export function VibratingStrings({ strings, hot, colourOf, label, onFail, viewW 
           vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide,
           blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
           uniforms: {
-            uT: { value: 0 }, uF: { value: str.f }, uW: { value: viewW }, uH: { value: viewH }, uSwing: { value: swing }, uHalf: { value: HALF_WIDTH }, uLift: { value: 1 }, uGain: { value: str.gain ?? 1 },
+            uP: { value: 0 }, uShape: { value: 1 }, uPure: { value: 0 }, uW: { value: viewW }, uH: { value: viewH }, uSwing: { value: swing }, uHalf: { value: HALF_WIDTH }, uLift: { value: 1 }, uGain: { value: str.gain ?? 1 },
             uA: { value: str.modes.map((m) => m.amp) }, uPh: { value: str.modes.map((m) => m.phase) },
             uColor: { value: new THREE.Color(1, 1, 1) }, uAlpha: { value: 1 },
           },
@@ -141,10 +145,19 @@ export function VibratingStrings({ strings, hot, colourOf, label, onFail, viewW 
         const rgb = css ? cssToRgb(css) : null;
         if (rgb) mat.uniforms.uColor.value.setStyle(rgb);
       });
+      const TAU = 2 * Math.PI;
+      const field = drift ? new DriftField(list) : null;
+      let last = -1;
       const draw = (t: number) => {
         const h = hotRef.current;
+        if (field) { field.step(last < 0 ? 0 : t - last); last = t; canvas.dataset.harmony = field.harmony.toFixed(2); }
         mats.forEach(({ mat, i, ghost }) => {
-          mat.uniforms.uT.value = t - ghost * GHOST_DT;
+          // Phase of string i now: the drift field's (Milestones) or the exact loop 2πft (Neuro); ghosts trail it.
+          const f = field ? field.freqs[i] : list[i].f;
+          const p = field ? field.phases[i] : (TAU * f * t) % TAU;
+          mat.uniforms.uP.value = (p - TAU * f * ghost * GHOST_DT) % TAU;
+          mat.uniforms.uShape.value = field ? 1 - field.harmony : 1;
+          mat.uniforms.uPure.value = field ? field.harmony : 0;
           const a = h === null || h === i ? 1 : 0.28;
           mat.uniforms.uAlpha.value = ghost ? a * GHOST_ALPHA * (1 - (ghost - 1) / GHOSTS) : a;
           mat.uniforms.uLift.value = h === i ? 1.35 : 1;
@@ -173,7 +186,7 @@ export function VibratingStrings({ strings, hot, colourOf, label, onFail, viewW 
       };
     }).catch((e) => { console.warn("[strings] falling back to the SVG strands", e); if (!gone) failRef.current(); });
     return () => { gone = true; cleanup(); };
-  }, [sig, viewW, viewH, swing]);
+  }, [sig, viewW, viewH, swing, drift]);
 
   // Reduced motion draws on demand: repaint the still frame when the hovered strand changes.
   useEffect(() => { canvasRef.current?.dispatchEvent(new Event("strings-hot")); }, [hot]);
@@ -181,10 +194,11 @@ export function VibratingStrings({ strings, hot, colourOf, label, onFail, viewW 
   return <canvas ref={canvasRef} className={className} data-testid={testId} role="img" aria-label={label} style={{ display: "block", width: "100%", aspectRatio: `${viewW} / ${viewH}` }} />;
 }
 
-/** Milestones: one string per goal (every goal its own; colours repeat every 4, like the legend). */
+/** Milestones: one string per goal (every goal its own; colours repeat every 4, like the legend), drifting at
+ *  random and now and then gliding into harmony (DriftField). */
 export function TangleWaves({ count, hot, colourOf, label, onFail }: { count: number; hot: number | null; colourOf: (k: number) => string | null; label: string; onFail: () => void }) {
   const strings = Array.from({ length: count }, (_, i) => goalString(i));
-  return <VibratingStrings strings={strings} hot={hot} colourOf={(i) => colourOf(i % 4)} label={label} onFail={onFail} />;
+  return <VibratingStrings strings={strings} hot={hot} colourOf={(i) => colourOf(i % 4)} label={label} onFail={onFail} drift />;
 }
 
 /** Whether the WebGL strands will be tried (the caller hides the SVG strands then). */

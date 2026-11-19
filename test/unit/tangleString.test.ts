@@ -114,3 +114,80 @@ describe("Neuro band strings", () => {
     expect(neuroStrings({ bandAvg: avg })).toEqual(neuroStrings({ bandAvg: { ...avg } }));
   });
 });
+
+// Taisun 2026-11-19: "the entangled waves on the goal page should be completely random but occasionally it should harmonize".
+import { DriftField, HARMONY, seeded } from "../../src-console/design1118/tangleString";
+
+describe("Milestones drift and harmony", () => {
+  const strings = [0, 1, 2, 3, 4].map(goalString);
+  const run = (seed: number, secs: number, dt = 1 / 60) => {
+    const f = new DriftField(strings, seed);
+    const trace: Array<{ t: number; h: number; ph: number[]; fr: number[] }> = [];
+    for (let k = 0; k * dt < secs; k++) { f.step(dt); trace.push({ t: f.t, h: f.harmony, ph: [...f.phases], fr: [...f.freqs] }); }
+    return { f, trace };
+  };
+
+  it("frequencies wander at random: each string covers a wide range, and two seeds differ", () => {
+    const { trace } = run(7, 120);
+    for (let i = 0; i < strings.length; i++) {
+      const fr = trace.filter((x) => x.h === 0).map((x) => x.fr[i]);
+      expect(Math.max(...fr) / Math.min(...fr)).toBeGreaterThan(1.2);
+    }
+    expect(run(7, 10).f.phases).not.toEqual(run(8, 10).f.phases);
+    expect(run(7, 10).f.phases).toEqual(run(7, 10).f.phases); // seeded: repeatable in tests
+  });
+
+  it("harmony comes now and then: first in its window, then after random gaps", () => {
+    const { f } = run(3, 400);
+    expect(f.events.length).toBeGreaterThanOrEqual(3);
+    expect(f.events[0]).toBeGreaterThanOrEqual(HARMONY.firstMin);
+    expect(f.events[0]).toBeLessThanOrEqual(HARMONY.firstMax);
+    const cycle = HARMONY.rise + HARMONY.hold + HARMONY.fall;
+    for (let k = 1; k < f.events.length; k++) {
+      const gap = f.events[k] - f.events[k - 1] - cycle;
+      expect(gap).toBeGreaterThanOrEqual(HARMONY.gapMin - 1e-6);
+      expect(gap).toBeLessThanOrEqual(HARMONY.gapMax + 1e-6);
+    }
+    const gaps = f.events.slice(1).map((e, k) => e - f.events[k]);
+    expect(new Set(gaps.map((g) => g.toFixed(2))).size).toBeGreaterThan(1); // not a fixed beat
+  });
+
+  it("in harmony the strings run at whole-number ratios and lock in step; free, they don't", () => {
+    const f = new DriftField(strings, 11);
+    const dt = 1 / 60;
+    while (f.events.length === 0) f.step(dt);
+    const start = f.events[0];
+    while (f.t < start + HARMONY.rise + HARMONY.hold - 0.1) f.step(dt);
+    expect(f.harmony).toBe(1);
+    strings.forEach((_, i) => {
+      expect(f.freqs[i] / f.fundamental).toBeCloseTo(DriftField.ratio(i), 9);
+      expect(f.offLock(i)).toBeLessThan(0.05);
+    });
+    while (f.t < start + HARMONY.rise + HARMONY.hold + HARMONY.fall + 8) f.step(dt);
+    expect(f.harmony).toBe(0);
+    while (f.t < start + HARMONY.rise + HARMONY.hold + HARMONY.fall + 20) f.step(dt);
+    expect(Math.max(...strings.map((_, i) => f.offLock(i)))).toBeGreaterThan(0.3); // drifted apart again
+  });
+
+  it("never jumps: every frame advances each phase by a small, bounded step", () => {
+    const { trace } = run(5, 300);
+    const wrap = (x: number) => x - 2 * Math.PI * Math.round(x / (2 * Math.PI));
+    for (let k = 1; k < trace.length; k++) for (let i = 0; i < strings.length; i++) {
+      expect(Math.abs(wrap(trace[k].ph[i] - trace[k - 1].ph[i]))).toBeLessThan(0.5);
+    }
+    for (let k = 1; k < trace.length; k++) expect(Math.abs(trace[k].h - trace[k - 1].h)).toBeLessThan(0.02);
+  });
+
+  it("a stalled frame (a long dt) is clamped, so nothing lurches", () => {
+    const f = new DriftField(strings, 2);
+    const before = [...f.phases];
+    f.step(5);
+    expect(f.t).toBeCloseTo(0.1, 12);
+    f.phases.forEach((p, i) => expect(Math.abs(p - before[i])).toBeLessThan(2));
+  });
+
+  it("the PRNG is in [0, 1)", () => {
+    const r = seeded(42);
+    for (let k = 0; k < 1000; k++) { const v = r(); expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThan(1); }
+  });
+});

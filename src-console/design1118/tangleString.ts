@@ -118,3 +118,89 @@ export function displacement(s: GoalString, u: number, t: number): number {
 export function period(s: GoalString): number {
   return 1 / s.f;
 }
+
+/* ---------- Milestones motion: random drift with occasional harmony (Taisun 2026-11-19) ---------- */
+
+/** Small seeded PRNG (mulberry32), so a page's randomness is its own and tests are repeatable. */
+export function seeded(seed: number): () => number {
+  let a = seed | 0;
+  return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+const TAU = 2 * Math.PI;
+const wrapPi = (x: number) => x - TAU * Math.round(x / TAU);
+const smooth = (x: number) => { const c = Math.max(0, Math.min(1, x)); return c * c * (3 - 2 * c); };
+
+/** Harmony timing (seconds): a random gap, a glide in, a hold, a glide out. */
+export const HARMONY = { firstMin: 15, firstMax: 35, gapMin: 25, gapMax: 55, rise: 3, hold: 5, fall: 4 } as const;
+/** How far a string's frequency wanders (in log-frequency, about ±50 %), and how hard harmony pulls phases into step. */
+export const WANDER = 0.42, PULL = 1.6;
+
+/**
+ * Each string wanders through its own smooth random frequency (three slow incommensurate sines per string,
+ * random rates and phases), so the tangle never repeats. At random moments the strings glide into whole-number
+ * ratios of one fundamental (1:2:3...) and a phase pull (like coupled oscillators) brings them into step, so the
+ * tangle resolves into one chord; then it lets go. Phases only ever advance continuously, so nothing jumps.
+ */
+export class DriftField {
+  t = 0;
+  /** 0 = free and random, 1 = fully in harmony. */
+  harmony = 0;
+  /** Each string's phase, radians, wrapped to [-π, π]. */
+  phases: number[];
+  /** Each string's frequency right now (Hz). */
+  freqs: number[];
+  /** Start times of the harmony events so far (s). */
+  events: number[] = [];
+  private theta = 0;
+  private nextAt: number;
+  private wander: Array<Array<{ rate: number; ph: number; w: number }>>;
+  constructor(private base: GoalString[], seed = (Math.random() * 2 ** 31) | 0) {
+    const r = seeded(seed);
+    this.phases = base.map(() => (r() * 2 - 1) * Math.PI);
+    this.freqs = base.map((s) => s.f);
+    this.wander = base.map(() => [0, 1, 2].map((k) => ({ rate: 0.011 + r() * 0.03 * (k + 1) / 2, ph: r() * TAU, w: [0.55, 0.3, 0.15][k] })));
+    this.rand = r;
+    this.nextAt = HARMONY.firstMin + r() * (HARMONY.firstMax - HARMONY.firstMin);
+  }
+  private rand: () => number;
+  /** The harmonic each string locks to: 1, 2, 3 ... 6, then round again. */
+  static ratio(i: number) { return 1 + (i % 6); }
+  /** The shared fundamental while in harmony: the first string's own base frequency. */
+  get fundamental() { return this.base[0]?.f ?? BASE_HZ; }
+
+  private envelope(): number {
+    const s = this.events[this.events.length - 1];
+    if (s == null) return 0;
+    const x = this.t - s, { rise, hold, fall } = HARMONY;
+    if (x < rise) return smooth(x / rise);
+    if (x < rise + hold) return 1;
+    return 1 - smooth((x - rise - hold) / fall);
+  }
+
+  step(dt: number): this {
+    const d = Math.max(0, Math.min(0.1, dt)); // a stalled frame never lurches
+    this.t += d;
+    if (this.t >= this.nextAt) {
+      this.events.push(this.nextAt);
+      const { rise, hold, fall, gapMin, gapMax } = HARMONY;
+      this.nextAt = this.nextAt + rise + hold + fall + gapMin + this.rand() * (gapMax - gapMin);
+    }
+    const h = (this.harmony = this.envelope());
+    const F = this.fundamental;
+    // Pull toward where the shared clock is now, then advance it: a string in lock keeps exactly in step.
+    this.base.forEach((s, i) => {
+      const noise = this.wander[i].reduce((a, w) => a + w.w * Math.sin(TAU * w.rate * this.t + w.ph), 0);
+      const free = s.f * Math.exp(WANDER * noise);
+      const k = DriftField.ratio(i);
+      const f = (this.freqs[i] = free * (1 - h) + F * k * h);
+      const pull = h * PULL * wrapPi(k * this.theta - this.phases[i]);
+      this.phases[i] = wrapPi(this.phases[i] + TAU * f * d + pull * d);
+    });
+    this.theta = wrapPi(this.theta + TAU * F * d);
+    return this;
+  }
+
+  /** How far string i is from its harmonic lock (radians, 0 = locked). */
+  offLock(i: number) { return Math.abs(wrapPi(DriftField.ratio(i) * this.theta - this.phases[i])); }
+}
