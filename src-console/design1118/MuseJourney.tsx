@@ -1,11 +1,14 @@
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { hoursMinutes } from "../lib/mindBodyDeep";
 import { parseBodyContext } from "../lib/noop";
-import { score } from "../neuro/sessionSamples";
+import { BANDS, hasSamples, score, sessionStats, type SessionWithSamples } from "../neuro/sessionSamples";
+import "../neuro/Recordings.css";
 import type { RecordedSession } from "../types";
 import { Button } from "../ui";
 import { PHI, phiWave } from "./golden";
 import { smoothPath } from "./pathModel";
+import { neuroStrings, EEG_SLOWDOWN, LOOP_S } from "./tangleString";
+import { VibratingStrings, tangleGlAvailable } from "./TangleWaves";
 import "./design1118.css";
 
 /**
@@ -43,6 +46,36 @@ function SessionWave({ focus, calm }: { focus: number | null; calm: number | nul
   );
 }
 
+/**
+ * Decision 0041: the same vibrating strings as Milestones, one per brainwave band of the most recent session.
+ * Each band's string runs at its real centre frequency slowed 40x (so delta to gamma keep their true ratios), its
+ * swing set by how strong that band was. Every string makes whole cycles per minute, so the picture loops
+ * seamlessly and only changes when a new session is saved. No band data: calm (alpha) and focus (beta) scores.
+ */
+function NeuroWave({ session, focus, calm }: { session: RecordedSession; focus: number | null; calm: number | null }) {
+  const [gl, setGl] = useState(tangleGlAvailable);
+  const keyRef = useRef<HTMLDivElement>(null);
+  const s = session as SessionWithSamples;
+  const bandAvg = hasSamples(s) ? sessionStats(s.samples).bandAvg : null;
+  const strings = neuroStrings({ bandAvg, calm, focus });
+  if (!gl || strings.length === 0) return <><SessionWave focus={focus} calm={calm} /><p className="d18-note">Session visualizer · calm in mint, focus in copper · not the raw trace</p></>;
+  const named = (k: string) => BANDS.find((b) => b.key === k);
+  const colourOf = (i: number) => {
+    const sw = keyRef.current?.querySelector<HTMLElement>(`[data-band="${strings[i]?.key}"] i`);
+    return sw ? getComputedStyle(sw).backgroundColor : null;
+  };
+  return (
+    <>
+      <VibratingStrings strings={strings.map((x) => x.string)} hot={null} colourOf={colourOf} onFail={() => setGl(false)} viewW={640} viewH={80} swing={0.4}
+        className="d18-swave" testId="neuro-strings" label={`Your last session's brainwaves: ${strings.map((x) => named(x.key)?.name ?? x.key).join(", ")}, each at its own frequency`} />
+      <div className="rec-legend" ref={keyRef}>
+        {strings.map((x) => <span key={x.key} data-band={x.key} style={{ ["--c" as string]: `var(--band-${x.key})` }}><i aria-hidden="true" />{named(x.key)?.name} <small>{named(x.key)?.range}</small></span>)}
+      </div>
+      <p className="d18-note">{bandAvg ? "Your last session's brainwaves" : "Calm (alpha) and focus (beta) from your last session"} · each band vibrates at its own frequency, {EEG_SLOWDOWN}× slower · stronger bands swing wider · loops every {LOOP_S === 60 ? "minute" : `${LOOP_S} s`} until your next session</p>
+    </>
+  );
+}
+
 export function MuseJourney({ session, recoveryNow, sessions, action, devices, onOpenHistory }: {
   session: RecordedSession | null; recoveryNow: number | null; sessions: RecordedSession[]; action: ReactNode; devices?: ReactNode; onOpenHistory?: () => void;
 }) {
@@ -69,8 +102,7 @@ export function MuseJourney({ session, recoveryNow, sessions, action, devices, o
               </Ring>
             )}
           </div>
-          <SessionWave focus={focus} calm={calm} />
-          <p className="d18-note">Session visualizer · calm in mint, focus in copper · not the raw trace</p>
+          <NeuroWave session={session} focus={focus} calm={calm} />
           <div className="d18-muse__stats">
             <Ring value={focus} size={60} tone="copper" label={`Focus ${focus ?? "not recorded"}`}><b>{focus ?? "—"}</b><small>focus</small></Ring>
             <Ring value={calm} size={60} tone="mint" label={`Calm ${calm ?? "not recorded"}`}><b>{calm ?? "—"}</b><small>calm</small></Ring>

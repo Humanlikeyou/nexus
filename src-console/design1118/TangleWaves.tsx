@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { webgl2Available } from "../sandLens/gl";
 import { reducedMotion } from "../shell/Splash";
-import { HARMONICS, goalString } from "./tangleString";
+import { HARMONICS, goalString, type GoalString } from "./tangleString";
 
 /**
  * Milestones arrival, WebGL: one vibrating string per goal, each in its own key (see tangleString.ts for the physics).
@@ -12,7 +12,7 @@ import { HARMONICS, goalString } from "./tangleString";
  * Falls back to the SVG strands (rendered by the caller) when WebGL2 is missing or the engine fails.
  * Reduced motion: one still frame. Off screen or in a hidden window: the loop stops.
  */
-const VIEW_W = 680, VIEW_H = 140;
+const VIEW_W = 680, VIEW_H = 140; // Milestones; other callers pass their own view size
 const SEGMENTS = 240;
 const SWING = 0.36; // of the view height, each side of the centre line
 const HALF_WIDTH = 7; // px: glow half-width; the core is ~1.6 px of it
@@ -23,7 +23,7 @@ const VERT = /* glsl */ `
   #define H ${HARMONICS}
   attribute float aU;
   attribute float aSide;
-  uniform float uT, uF, uW, uH, uSwing, uHalf, uLift;
+  uniform float uT, uF, uW, uH, uSwing, uHalf, uLift, uGain;
   uniform float uA[H];
   uniform float uPh[H];
   varying float vSide;
@@ -36,7 +36,7 @@ const VERT = /* glsl */ `
       y += uA[j] * sin(n * PI * aU) * c;
       dy += uA[j] * n * PI * cos(n * PI * aU) * c;
     }
-    float amp = uH * uSwing;
+    float amp = uH * uSwing * uGain;
     vec2 p = vec2(aU * uW, uH * 0.5 + y * amp);
     vec2 tangent = normalize(vec2(uW, dy * amp));
     vec2 normal = vec2(-tangent.y, tangent.x);
@@ -60,15 +60,38 @@ const FRAG = /* glsl */ `
   }
 `;
 
-export function TangleWaves({ count, hot, colourOf, label, onFail }: { count: number; hot: number | null; colourOf: (k: number) => string | null; label: string; onFail: () => void }) {
+/** Any CSS colour (incl. color-mix) to "rgb(r, g, b)" via a 1-pixel canvas; null when it can't be drawn. */
+function cssToRgb(css: string): string | null {
+  try {
+    const c = document.createElement("canvas"); c.width = c.height = 1;
+    const g = c.getContext("2d", { willReadFrequently: true }); if (!g) return null;
+    g.clearRect(0, 0, 1, 1); g.fillStyle = "#000"; g.fillStyle = css; g.fillRect(0, 0, 1, 1);
+    const [r, gg, b, a] = g.getImageData(0, 0, 1, 1).data;
+    return a === 0 ? null : `rgb(${r}, ${gg}, ${b})`;
+  } catch { return null; }
+}
+
+type StringsProps = {
+  strings: GoalString[]; hot: number | null; colourOf: (i: number) => string | null; label: string; onFail: () => void;
+  viewW?: number; viewH?: number; swing?: number; className?: string; testId?: string;
+};
+
+/** Vibrating strings in WebGL: one ribbon per string, the physics in tangleString.ts, evaluated in the shader. */
+export function VibratingStrings({ strings, hot, colourOf, label, onFail, viewW = VIEW_W, viewH = VIEW_H, swing = SWING, className = "d18-tangle__svg", testId = "tangle-gl" }: StringsProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hotRef = useRef(hot);
   const colourRef = useRef(colourOf);
   const failRef = useRef(onFail);
   useEffect(() => { hotRef.current = hot; colourRef.current = colourOf; failRef.current = onFail; });
+  // Rebuild only when the strings themselves change (a new goal, a new session), not on every render.
+  const sig = strings.map((s) => `${s.f}|${s.pluck}|${s.gain ?? 1}`).join(";");
+  const stringsRef = useRef(strings);
+  useEffect(() => { stringsRef.current = strings; });
 
   useEffect(() => {
     const canvas = canvasRef.current;
+    const list = stringsRef.current;
+    const count = list.length;
     if (!canvas || count === 0) return;
     let gone = false, raf = 0, visible = true;
     let cleanup = () => {};
@@ -77,7 +100,7 @@ export function TangleWaves({ count, hot, colourOf, label, onFail }: { count: nu
       const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, premultipliedAlpha: true });
       renderer.setClearColor(0x000000, 0);
       const scene = new THREE.Scene();
-      const camera = new THREE.OrthographicCamera(0, VIEW_W, VIEW_H, 0, -1, 1);
+      const camera = new THREE.OrthographicCamera(0, viewW, viewH, 0, -1, 1);
       const STILL_T = 1.3;
       const still = reducedMotion();
       const geo = new THREE.BufferGeometry();
@@ -92,12 +115,12 @@ export function TangleWaves({ count, hot, colourOf, label, onFail }: { count: nu
       const layers = still ? 1 : 1 + GHOSTS;
       const mats = Array.from({ length: count * layers }, (_, j) => {
         const i = j % count, ghost = Math.floor(j / count);
-        const str = goalString(i);
+        const str = list[i];
         const mat = new THREE.ShaderMaterial({
           vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide,
           blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
           uniforms: {
-            uT: { value: 0 }, uF: { value: str.f }, uW: { value: VIEW_W }, uH: { value: VIEW_H }, uSwing: { value: SWING }, uHalf: { value: HALF_WIDTH }, uLift: { value: 1 },
+            uT: { value: 0 }, uF: { value: str.f }, uW: { value: viewW }, uH: { value: viewH }, uSwing: { value: swing }, uHalf: { value: HALF_WIDTH }, uLift: { value: 1 }, uGain: { value: str.gain ?? 1 },
             uA: { value: str.modes.map((m) => m.amp) }, uPh: { value: str.modes.map((m) => m.phase) },
             uColor: { value: new THREE.Color(1, 1, 1) }, uAlpha: { value: 1 },
           },
@@ -109,13 +132,14 @@ export function TangleWaves({ count, hot, colourOf, label, onFail }: { count: nu
         return { mat, i, ghost };
       });
       const resize = () => {
-        const w = canvas.clientWidth || VIEW_W, dpr = Math.min(2, window.devicePixelRatio || 1);
+        const w = canvas.clientWidth || viewW, dpr = Math.min(2, window.devicePixelRatio || 1);
         renderer.setPixelRatio(dpr);
-        renderer.setSize(w, (w * VIEW_H) / VIEW_W, false);
+        renderer.setSize(w, (w * viewH) / viewW, false);
       };
       const paint = () => mats.forEach(({ mat, i }) => {
-        const css = colourRef.current(i % 4);
-        if (css) mat.uniforms.uColor.value.setStyle(css);
+        const css = colourRef.current(i);
+        const rgb = css ? cssToRgb(css) : null;
+        if (rgb) mat.uniforms.uColor.value.setStyle(rgb);
       });
       const draw = (t: number) => {
         const h = hotRef.current;
@@ -142,19 +166,25 @@ export function TangleWaves({ count, hot, colourOf, label, onFail }: { count: nu
       };
       if (still) draw(STILL_T); else raf = requestAnimationFrame(loop);
       const onHot = () => { if (still) draw(STILL_T); };
-      canvas.addEventListener("tangle-hot", onHot);
+      canvas.addEventListener("strings-hot", onHot);
       cleanup = () => {
-        cancelAnimationFrame(raf); ro.disconnect(); io.disconnect(); canvas.removeEventListener("tangle-hot", onHot);
+        cancelAnimationFrame(raf); ro.disconnect(); io.disconnect(); canvas.removeEventListener("strings-hot", onHot);
         mats.forEach(({ mat }) => mat.dispose()); geo.dispose(); renderer.dispose();
       };
-    }).catch((e) => { console.warn("[tangle] falling back to the SVG strands", e); if (!gone) failRef.current(); });
+    }).catch((e) => { console.warn("[strings] falling back to the SVG strands", e); if (!gone) failRef.current(); });
     return () => { gone = true; cleanup(); };
-  }, [count]);
+  }, [sig, viewW, viewH, swing]);
 
   // Reduced motion draws on demand: repaint the still frame when the hovered strand changes.
-  useEffect(() => { canvasRef.current?.dispatchEvent(new Event("tangle-hot")); }, [hot]);
+  useEffect(() => { canvasRef.current?.dispatchEvent(new Event("strings-hot")); }, [hot]);
 
-  return <canvas ref={canvasRef} className="d18-tangle__svg" data-testid="tangle-gl" role="img" aria-label={label} style={{ display: "block", aspectRatio: `${VIEW_W} / ${VIEW_H}` }} />;
+  return <canvas ref={canvasRef} className={className} data-testid={testId} role="img" aria-label={label} style={{ display: "block", width: "100%", aspectRatio: `${viewW} / ${viewH}` }} />;
+}
+
+/** Milestones: one string per goal (every goal its own; colours repeat every 4, like the legend). */
+export function TangleWaves({ count, hot, colourOf, label, onFail }: { count: number; hot: number | null; colourOf: (k: number) => string | null; label: string; onFail: () => void }) {
+  const strings = Array.from({ length: count }, (_, i) => goalString(i));
+  return <VibratingStrings strings={strings} hot={hot} colourOf={(i) => colourOf(i % 4)} label={label} onFail={onFail} />;
 }
 
 /** Whether the WebGL strands will be tried (the caller hides the SVG strands then). */

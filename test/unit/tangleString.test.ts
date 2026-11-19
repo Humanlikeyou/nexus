@@ -70,3 +70,47 @@ describe("goal strings (struck, fixed ends)", () => {
     expect([0, 1, 2, 3].map((i) => goalString(i).pluck)).toEqual([0.27, 0.38, 0.62, 0.73]);
   });
 });
+
+// Decision 0041: Neuro waves from the most recent session's bands, looping smoothly until the next session.
+import { BAND_CENTRES, EEG_SLOWDOWN, LOOP_S, bandString, neuroStrings } from "../../src-console/design1118/tangleString";
+
+describe("Neuro band strings", () => {
+  const avg = { delta: 30, theta: 20, alpha: 40, beta: 15, gamma: 5 };
+
+  it("one string per measured band, slow to fast, at its real centre frequency slowed down", () => {
+    const out = neuroStrings({ bandAvg: avg });
+    expect(out.map((x) => x.key)).toEqual(["delta", "theta", "alpha", "beta", "gamma"]);
+    out.forEach((x, i) => expect(x.string.f).toBeCloseTo(BAND_CENTRES[i].hz / EEG_SLOWDOWN, 1));
+    const fs = out.map((x) => x.string.f);
+    for (let i = 1; i < fs.length; i++) expect(fs[i]).toBeGreaterThan(fs[i - 1]);
+  });
+
+  it("loops exactly: every string makes whole cycles per loop, so the picture repeats every LOOP_S", () => {
+    for (const x of neuroStrings({ bandAvg: avg })) {
+      const cycles = x.string.f * LOOP_S;
+      expect(Math.abs(cycles - Math.round(cycles))).toBeLessThan(1e-9);
+      for (const u of [0.13, 0.5, 0.77]) expect(displacement(x.string, u, 3.3 + LOOP_S)).toBeCloseTo(displacement(x.string, u, 3.3), 9);
+    }
+  });
+
+  it("stronger bands swing wider; the strongest is full, a silent band still shows", () => {
+    const out = Object.fromEntries(neuroStrings({ bandAvg: avg }).map((x) => [x.key, x.string.gain]));
+    expect(out.alpha).toBeCloseTo(1, 12);
+    expect(out.delta!).toBeGreaterThan(out.theta!);
+    expect(out.theta!).toBeGreaterThan(out.gamma!);
+    expect(bandString("gamma", 0).gain).toBeCloseTo(0.3, 12);
+  });
+
+  it("only measured bands; no band data falls back to calm (alpha) and focus (beta); nothing measured gives nothing", () => {
+    expect(neuroStrings({ bandAvg: { alpha: 10, beta: Number.NaN } }).map((x) => x.key)).toEqual(["alpha"]);
+    const fb = neuroStrings({ bandAvg: null, calm: 80, focus: 20 });
+    expect(fb.map((x) => x.key)).toEqual(["alpha", "beta"]);
+    expect(fb[0].string.gain!).toBeGreaterThan(fb[1].string.gain!);
+    expect(neuroStrings({ bandAvg: { alpha: 0, beta: 0 }, calm: null, focus: null })).toEqual([]);
+    expect(neuroStrings({})).toEqual([]);
+  });
+
+  it("the same session always gives the same strings (it only changes with a new session)", () => {
+    expect(neuroStrings({ bandAvg: avg })).toEqual(neuroStrings({ bandAvg: { ...avg } }));
+  });
+});
