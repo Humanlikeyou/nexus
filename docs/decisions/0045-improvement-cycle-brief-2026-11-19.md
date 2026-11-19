@@ -72,3 +72,11 @@ He also asked for: dependencies identified, the approach explained, and work spl
   - **Wave One:** a separate per-track "marked done" flag that every view reads. No fake sessions.
   - **Take graph:** the heart-rate trace in the heart-rate take card. Mock-up first.
 - **His words:** "After you're done with everything commit and reinstall, I'm going to bed". This is the OK to commit locally and install when the gates pass. Chart replacements still wait for his mock-up approval, so only the mock-ups get built. No push and no merge. The plan is in `tasks/PLAN-0045.md`.
+
+## Later answers and outcome (2026-11-20)
+
+- **His words:** "I approved the best markup so you can and I want you to finish up the dates and deadlines too if you can". The mock-up variants Claude judges best are approved to build. Dates & Deadlines is approved.
+- **His words:** "we have about 5% weekly usage left". The cycle stopped at a safe point.
+- **Committed:** 6774aab (part 1) and 010624f (security fix).
+- **Installed:** 010624f, quit and reopened. Rollback: `~/Backups/Amara OS-backup-20261120a.app`.
+- **Next session:** see handoff §46 "Not done", including Dates & Deadlines and the approved chart builds.
