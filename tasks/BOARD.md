@@ -18,7 +18,7 @@ Branch `amara-integration`, local commits only, nothing pushed (decision 0001). 
 - Rust was last run at 0daa808, with no Rust change since.
 - takes-money:80 [light] (was takes-1111t:80) is a real Design contrast bug (4.28:1). It fails in some full runs; never weaken it.
 
-Installed: 222b486 (2026-11-19, quit and reopened): decision 0040/0041 work (voice spectrum, Milestones + Neuro vibrating strings, Agents/Smart home takes, Smart home sliders + blind Undo, Working now). Rollback: ~/Backups/Amara OS-backup-20261119d.app (5b3b08f).
+Installed: 7c7c5b0 (2026-11-19, quit and reopened): decision 0042 audit + workflow lanes. Rollback: ~/Backups/Amara OS-backup-20261119e.app (222b486). Crew rebuild waits on Taisun (0043).
 
 ### Handover phases (0–17)
 Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2026-11-14; it is untracked and his file, so don't commit it without his OK. Evidence is a commit or a decision.
