@@ -28,12 +28,12 @@ Also for Goals: habits added through the one add path have no `source`, so their
 - `backups[].version` is "" (the archive name has no app version; the dialog shows "—"); `last` needs a stored checksum verify (not built); `BackupRun` done/total/left are "" (progress events carry phase + pct only).
 - Files ≥ 50 MB (large Muse replays) are skipped and listed in the result, so a backup doesn't hold big raw EEG captures. Taisun's call whether backups should include them.
 
-## takes-1111t money e2e: light-theme contrast (2026-11-12)
-`test/e2e/takes-1111t.spec.ts:80` fails in light theme only, 3/3, on `0b2a312`, HEAD and the working tree alike (dark passes): axe `color-contrast` on `div[role="alert"] > b` in the Connect-an-account sheet after the seed phrase is refused. It passed in the 0b2a312 full run earlier the same day, so it is likely date/time-dependent content. Design-owned styling (money/ConnectSheet); not changed by Claude.
+## takes-money money e2e: light-theme contrast (2026-11-12)
+`test/e2e/takes-money.spec.ts:80` fails in light theme only, 3/3, on `0b2a312`, HEAD and the working tree alike (dark passes): axe `color-contrast` on `div[role="alert"] > b` in the Connect-an-account sheet after the seed phrase is refused. It passed in the 0b2a312 full run earlier the same day, so it is likely date/time-dependent content. Design-owned styling (money/ConnectSheet); not changed by Claude.
 
 ## 2026-11-13: light-theme contrast failure on the seed-phrase alert (real, not a flake)
 
-`takes-1111t.spec.ts:80` [light] fails the axe check `color-contrast: div[role="alert"] > b`. Measured with axe on a stable page at 0, 300 and 1500 ms after the alert shows: **4.28:1 in light every time** (needs 4.5:1), 5.99:1 in dark.
+`takes-money.spec.ts:80` [light] fails the axe check `color-contrast: div[role="alert"] > b`. Measured with axe on a stable page at 0, 300 and 1500 ms after the alert shows: **4.28:1 in light every time** (needs 4.5:1), 5.99:1 in dark.
 
 The element is `.m-warn b` (`src-console/money/money.css:28`): `color: var(--copper-text)` (light `#8c6239`, `tokens.css:38`) on the `.m-warn` background `color-mix(copper-text 10%, transparent)` over the sheet.
 

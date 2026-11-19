@@ -4,6 +4,9 @@ Branch `amara-integration`, local commits only, nothing pushed (decision 0001). 
 **Refresh 2026-11-19 (HEAD 07453c2 + uncommitted roadmap adapter change):** gates all PASS (vitest 2497/9 skipped, src-tauri 1686/6 ignored, router 131, neuro 21); Path/Goals e2e 6 passed; full e2e not re-run. `docs/release/parity-0.1.0.md` (rows 10, 11, 18, 20, 23, 27, 34, 38, 39 updated; rows 43-50 added) and `READINESS-0.1.0.md` refreshed for everything since 4ce7a8d (Treasury 3-5 22523f0/2ae105a, HR-only dd80bbf, Fitness reason ed4551c, G3/G6 46674a5, Stage H 71d8d7e, B1-B4 21ef607/2ac4d64/16b04d0/1d44a2b/fa5198f, 0037 dd62dab, 1118b c313b11). Roadmap step edit and Yes now use the logged `goal_step_edit` / `goal_step_complete`.
 **Open gates (waiting on Taisun):** Stage H inputs; market/news feeds; Treasury inputs and "77 vs 7"; Keychain approvals and Telegram rotation; relay bot; fresh-account migration test; WHOOP takeover G4/G5; Lucid; Muse hardware replay. **Waiting on Design:** wiring list (Smart home, Finances/Ventures/Content, SandLens hooks, roadmap Undo, About attribution, Startup toggle) and the flaky `sand-lens.spec.ts:28`.
 
+**e2e specs renamed by feature (2026-11-19, cheap cleanup; 806 tests before and after, same names):** `build1111` → `take-crew-personal-os`, `fitness-0017` → `fitness-tabs`, `goals-1112g` → `goals-roadmaps`, `home-windows-1111w` → `home-windows`, `hr-take-1111u` → `heart-rate-take`, `life-enterprise-1111v` → `life-enterprise`, `life-take-1111w` → `life-take`, `navy-1111x` → `navy-mode`, `neuro-1112n` → `neuro-hemisync`, `rings-1111` → `fitness-rings`, `standalone-1111s` → `standalone-settings`, `system-map-1112m` → `system-map`, `takes-1111t` → `takes-money`, `chat-retest2` → `chat-router-status`. Older notes below and in the handoffs keep the old names; use this map.
+
+
 **Phase 17 run (HEAD 71d8d7e + uncommitted Phase 16/17 files, 2026-11-18):** vitest 2351 / 9 skipped, neuro 21, src-tauri 1455 / 6 ignored, amara-router 131, crew-service 230, full e2e 784 passed / 12 skipped (env-gated shot tools) / 0 failed. takes-1111t:80 [light] is intermittent (5 of 6 alone), Design's contrast fix. Readiness: `docs/release/READINESS-0.1.0.md`.
 
 **Older gates on HEAD `bda3c15` (2026-11-14):**
@@ -11,7 +14,7 @@ Branch `amara-integration`, local commits only, nothing pushed (decision 0001). 
 - fmt / clippy -D warnings / tsc / lint / check:secrets clean.
 - **Full e2e 784 passed / 12 skipped / 0 failed.**
 - Rust was last run at 0daa808, with no Rust change since.
-- takes-1111t:80 [light] is a real Design contrast bug (4.28:1). It fails in some full runs; never weaken it.
+- takes-money:80 [light] (was takes-1111t:80) is a real Design contrast bug (4.28:1). It fails in some full runs; never weaken it.
 
 Installed: 5b3b08f (2026-11-19, quit and reopened): screens wired to the new backends, Yahoo/Google News feeds, Treasury tab. Rollback: ~/Backups/Amara OS-backup-20261119c.app (e87c7bd).
 
@@ -132,7 +135,7 @@ All 20 items + route-motion flake: done or proposed (see HANDOFF §2). B19 READM
 | L2 patterns_read + weekly_review_read | done 8af876a |
 | L3 navy localOnly covers chat (fail-closed, Q1 still open) | done 0dd3996 + cf93fd0; voice loop: waiting (Taisun applies tasks/proposed/amara-voice-navy-gate.diff); speak() unwired (no local TTS entry) |
 | L4 money account rows + backup_verify_last / Backup "last" | done 1c93d5e (sha256 per file in new backups) |
-| takes-1111t:80 light contrast: REAL 4.28:1 on .m-warn b (not a flake) | waiting (Design, tasks/design-questions.md) |
+| takes-money:80 (was takes-1111t:80) light contrast: REAL 4.28:1 on .m-warn b (not a flake) | waiting (Design, tasks/design-questions.md) |
 
 ## 2026-11-13 later
 | item | status |

@@ -17,7 +17,7 @@ waiting on Taisun. Capability-by-capability status: `docs/release/parity-0.1.0.m
 | Gate | Result |
 |---|---|
 | `.claude/skills/run-gates/gates.sh` | tsc PASS; lint PASS; vitest 2497 passed / 9 skipped; neuro 21 pass / 0 fail; check:secrets ok (1143 tracked files); src-tauri fmt + clippy PASS, 1686 passed / 0 failed / 6 ignored; amara-router fmt + clippy PASS, 131 passed / 0 failed / 0 ignored |
-| Path/Goals e2e (`npm run build`, then `npx playwright test goals-1112g`) | 6 passed (light and dark), 7.7 s |
+| Path/Goals e2e (`npm run build`, then `npx playwright test goals-roadmaps`) | 6 passed (light and dark), 7.7 s |
 | Full e2e `npm run test:e2e` | **not run this refresh.** Last full run (2026-11-18, before 1118b and the design commits): 784 passed, 12 skipped, 0 failed |
 | crew-service Docker tests | not run this refresh (last: 230 passed, 2026-11-18) |
 | swift test for NOOP packages | not run (NOOP repo out of bounds) |
@@ -31,7 +31,7 @@ All are opt-in screenshot generators, skipped by `test.skip(() => !process.env.X
 (`LISTS_SHOTS`, 2 skips). They are Design's sign-off screenshot tools, not assertions, and existed before
 this run. They were not changed and not run (they write image files).
 
-### takes-1111t.spec.ts:80 [light]: investigated, NOT fixed (Design-owned)
+### takes-money.spec.ts:80 [light]: investigated, NOT fixed (Design-owned)
 - The full e2e passed it this run, but it is intermittent: `--repeat-each=6 --project=light` ran it alone
   and 5 of 6 failed, each with axe `color-contrast: div[role="alert"] > b`.
 - Cause (unchanged from `tasks/design-questions.md` 2026-11-13): `.m-warn b` uses `--copper-text`
@@ -49,7 +49,7 @@ Key: PASS = evidence in repo; WAIT = waiting on Taisun; NOT BUILT.
 - [ ] Bundle id, productName, crate names unchanged; version bumped by a logged decision. Names PASS (`test/scripts/stageH.test.ts`). Bump WAIT (still 0.1.0, Q14.4).
 - [ ] Auto-update on, signed manifest, rollback. WAIT. Built and tested with a fake host (`71d8d7e`); `UPDATER_SWITCH=false`, placeholder pubkey, no host. One real update and one forced rollback: not run.
 - [ ] Opens at login. WAIT. `login_item.rs` SMAppService, default off, not registered live (`71d8d7e`); Startup toggle not wired (Design).
-- [ ] First run reaches Home with all lights green on a clean account. WAIT. Built (`11c7883`, `test/e2e/standalone-1111s.spec.ts` passes); clean-account run is `docs/release/migration-test.md` Part B.
+- [ ] First run reaches Home with all lights green on a clean account. WAIT. Built (`11c7883`, `test/e2e/standalone-settings.spec.ts` passes); clean-account run is `docs/release/migration-test.md` Part B.
 
 **Runtime and security**
 - [ ] Amara supervises the services. PARTIAL. Observe-only supervisor (`2642629`, 15 services); act paths behind `SUPERVISOR_ACT_ENABLED=false`; LaunchAgent retirement and crew rebuild gated.
@@ -104,7 +104,7 @@ then; counts cannot prove no file was altered. This run made no write to those f
 - Letta and n8n do not check Host/Origin; Letta stays 0.16.8 (CVE upgrade not applied).
 - Design wiring pending for B2, B3, B4, 0037 and 1118b (new backend commands and hooks that no screen calls). Roadmap step "Not yet" is still an unlogged legacy command; the Path page has no Undo control for step edits or Yes.
 - Flaky `test/e2e/sand-lens.spec.ts:28` [dark] (failed once under load; Design's deterministic wait).
-- `takes-1111t.spec.ts:80` [light] contrast on `.m-warn b`: `be64e9b` added a light token for it; not re-measured in a full run since. Treat as unverified until the next full e2e.
+- `takes-money.spec.ts:80` [light] contrast on `.m-warn b`: `be64e9b` added a light token for it; not re-measured in a full run since. Treat as unverified until the next full e2e.
 - Hemi-Sync audio of 50 MB or more is left out of backups (restore-drill.md).
 - `standalone-app-plan.md` section 4 not available; parity rows may miss capabilities.
 - Some runtime fallbacks are home-relative `~/projects/...` paths.
