@@ -1074,3 +1074,13 @@ Taisun: "1. I'm giving you permission to change the voice in how you see fit to 
 - **Open questions for Taisun:** (1) Smart home take when HA isn't connected: hidden (now) or a "not connected" note? (2) Cover position has no Undo, by the existing cover rule; want an Undo that asks again? (3) Should queued Amara actions count in "Working now" (now: yes, as Queued)?
 - **Not run:** a real voice turn with the new amara-voice, real HA devices, the feed with live agents running.
 - **Gates at 8b0478d:** tsc, lint, vitest 2563 / 9 skipped, neuro 21, secrets, src-tauri fmt + clippy + test 1739 / 6 ignored, amara-router 131. **Full e2e alone: 794 passed, 12 skipped, 0 failed.**
+
+## 44. Decision 0041: unique goal strings, voice restart, blind Undo, Neuro waves, clean, install (2026-11-19, committed)
+- **Waves approved** by Taisun from the screenshots. Every goal now gets its own string (da0c560): goals 0-3 unchanged, later goals placed by the golden sequence (up to 12 goals >= 6% apart).
+- **amara-voice started** with its own script (`amara start`, bootstraps the already-installed LaunchAgent; his direct instruction, logged in 0041). It is listening and the level feed is on 127.0.0.1:8791 with the 0040 code.
+- **Blind Undo** (407c286): the reverse move, sent again through ha_device_set, asks for approval again. Scenes still can't be undone.
+- **Neuro waves** (222b486): one string per brainwave band of the most recent session, at the band's centre frequency slowed 40x, swing from the band's strength, exact 60 s loop, changes only with a new session; summary-only sessions use calm (alpha) and focus (beta). Shared renderer VibratingStrings.
+- **Item 9 done:** `cargo clean --profile dev` in src-tauri (36.0 GiB of files) and amara-router (858 MiB); free disk 52 to 71 GB. Release builds kept. Three `vite preview` servers on ports 54280/54425/60966 were started from Cursor (not by Claude) and left alone.
+- **Gates at 222b486:** tsc, lint, vitest 2572 / 9, neuro 21, secrets, src-tauri fmt + clippy + test 1739 / 6, router 131. **Full e2e alone: 794 passed, 12 skipped, 0 failed.**
+- **Installed 222b486 (2026-11-19).** Taisun: "install" / "then install". Quit, ditto, reopened; the app is running. Rollback: `~/Backups/Amara OS-backup-20261119d.app` (5b3b08f). No backups were deleted.
+- **Not run live:** a spoken reply with the lens following her real pitches, real HA devices (sliders, blind Undo), a session with band data on the Neuro page (sample was summary-only).
