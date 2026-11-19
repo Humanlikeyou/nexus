@@ -13,7 +13,7 @@ Branch `amara-integration`, local commits only, nothing pushed (decision 0001). 
 - Rust was last run at 0daa808, with no Rust change since.
 - takes-1111t:80 [light] is a real Design contrast bug (4.28:1). It fails in some full runs; never weaken it.
 
-Installed: e87c7bd (2026-11-19, quit and reopened at Taisun's request): adds the watchlist feeds, roadmap Undo, 1118b hooks. Rollback: ~/Backups/Amara OS-backup-20261119b.app (dd62dab).
+Installed: 5b3b08f (2026-11-19, quit and reopened): screens wired to the new backends, Yahoo/Google News feeds, Treasury tab. Rollback: ~/Backups/Amara OS-backup-20261119c.app (e87c7bd).
 
 ### Handover phases (0–17)
 Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2026-11-14; it is untracked and his file, so don't commit it without his OK. Evidence is a commit or a decision.

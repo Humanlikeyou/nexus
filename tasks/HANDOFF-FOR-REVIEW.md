@@ -1050,3 +1050,6 @@ TypeScript only. No Rust, no new command, no capability change, no markup/CSS/We
   - **GDELT: rate-limited.** It answered "Please limit requests to one every 5 seconds", even on a single request after a 6 s pause. Research will mostly fail until a replacement or slower schedule is decided.
   - The code is unchanged. Swapping either host needs a new logged decision (hard rule 3, decision 0038 item 5).
   - **Update (decision 0039, Taisun "1"):** the swap is now in `market_feed.rs` and `watchlist.rs` (Yahoo chart JSON, Google News RSS); Stooq and GDELT code is removed. Not committed, not run against the real hosts.
+- **Installed 5b3b08f (2026-11-19).** Taisun: "commit everything once you are done and install and save session".
+  - Quit, ditto, reopened; the app is running. Rollback: `~/Backups/Amara OS-backup-20261119c.app` (e87c7bd). No backups were deleted.
+  - For Taisun to confirm: the new Enterprise › **Treasury** tab (decision 0032 #4 said no new nav label; a sub-tab was added and kept, pending his word).
