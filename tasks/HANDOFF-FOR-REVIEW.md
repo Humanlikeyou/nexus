@@ -1084,3 +1084,18 @@ Taisun: "1. I'm giving you permission to change the voice in how you see fit to 
 - **Gates at 222b486:** tsc, lint, vitest 2572 / 9, neuro 21, secrets, src-tauri fmt + clippy + test 1739 / 6, router 131. **Full e2e alone: 794 passed, 12 skipped, 0 failed.**
 - **Installed 222b486 (2026-11-19).** Taisun: "install" / "then install". Quit, ditto, reopened; the app is running. Rollback: `~/Backups/Amara OS-backup-20261119d.app` (5b3b08f). No backups were deleted.
 - **Not run live:** a spoken reply with the lens following her real pitches, real HA devices (sliders, blind Undo), a session with band data on the Neuro page (sample was summary-only).
+
+## 45. Decision 0042: whole-app audit, text on the φ scale, workflows carried through (2026-11-19, committed)
+- **Commits:** c7d89ce (Today crew approvals 404 = none), 05f3a82 (Milestones drift + harmony), bc72413 (φ type scale app-wide, chart text, overlaps, stray dialog), c02b05b (Treasury actions), cb65a3b (all workflow lanes + security fixes).
+- **Method:** a throwaway crawler (test/e2e/zz-audit.spec.ts, kept out of the repo) measured every view in both themes, sample and live, scrolled top to bottom: 0 off-scale, 0 overlapping, 0 clipped text after bc72413; the button pass found only already-fixed or filter buttons. Five read-only workflow maps (in the job's tmp/workflows/*.md, ~80 gaps) fed seven Sonnet fix lanes; orchestrator review, combined gates, full e2e and a nexus-security review (0 HIGH; M1, M2/L4, L1, L3 fixed).
+- **Gates at cb65a3b:** tsc, lint, vitest 2731/9, neuro 21, secrets, src-tauri 1745/6, router 131; full e2e alone 794 passed / 12 skipped / 0 failed.
+- **Left open (next):**
+  1. Needs-you rows still open a page/section top for to-dos, dates and the strap row (decisions, goals, crew runs and recordings now have item routes: `decisions/<id>`, `goals/<id>`, `crews/run/<id>`, `neuro-history/<id>`). ⌘K palette still lists pages only.
+  2. Habits never count (no habit-day store; needs a small backend command) — Life gap #4.
+  3. Patterns finding actions ("Try this", "Make it a habit", "Ask Amara") — personal/PageViews.tsx.
+  4. Today check-in parts: the copy says check-ins show on the Mind–Body timeline (no such consumer); recent check-ins can't be opened.
+  5. Treasury import picks the file twice (backend opens the dialog on preview and on import).
+  6. Smart home sample "Evening" scene button does nothing in sample mode.
+  7. History logging + Undo for roadmap accept / Not yet / goal delete; backup runs not in History/Needs-you; HA container stop has no native gate (L2, pre-existing); friendlier copy for restore_backup error codes.
+  8. Legacy scheduler prune tests are timing-flaky under heavy parallel load (pass alone).
+- **Not run live:** the app with real devices, Muse, HA, Telegram, crew service. Not installed yet (installed build is 222b486).
