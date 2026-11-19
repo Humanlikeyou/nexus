@@ -8,6 +8,7 @@ import { LinkCard, PERSONAL_ITEMS, waitingDecisions } from "./BusinessPanels";
 import { valueOf } from "../lib/sampleAdapters";
 import { PageTake } from "../design1118/PageTake";
 import { LiveFinancesCard } from "../design1118/EnterpriseWiring";
+import { TreasuryFinancesLink } from "../design1118/TreasuryLinks";
 import "../design1118/design1118.css";
 import "./BusinessScreen.css";
 import "./CommandCenter.css";
@@ -47,6 +48,7 @@ export function RevenueField({ data, onRetry, onOpen, adapter = businessAdapter(
         detail={<>{isAwaitingRevenue ? "Tracking starts when a real source reports in." : `On ${money(revenue.total_revenue)} revenue and ${money(revenue.total_expenses)} costs. Amounts in USD; ledger values in yen wait for currency conversion.`} Read-only, from the business ledger. Personal money is in {onOpen ? <button type="button" className="v-link" onClick={() => onOpen({ id: "life", view: "money" })}>Life › Personal money ›</button> : "Life › Personal money"}.</>} />
       <PageTake surface="finances" className="biz__take" />
       <LiveFinancesCard />
+      <TreasuryFinancesLink onOpen={onOpen} />
       {summaryDown && <Unavailable label="Revenue summary" onRetry={onRetry} />}
       {empty ? (
         /* design-1118a: an honest empty state. No rows of dashes; funds appear once one has a balance. */

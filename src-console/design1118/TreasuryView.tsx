@@ -3,12 +3,15 @@ import {
   liveTreasury, liveTreasuryMonitor, loadTreasury, loadTreasuryMonitor,
   type TreasuryAdapter, type TreasuryMonitorAdapter,
 } from "../business/treasury";
-import { inTauri } from "../lib/localStores";
-import { PageHero } from "../ui";
+import { enterpriseAdapter } from "./enterpriseLive";
+import { commands } from "../bindings.gen";
+import { inTauri, useStoresTick } from "../lib/localStores";
+import { Button, PageHero } from "../ui";
+import { TreasuryActions, treasuryError, type TreasuryTools } from "./TreasuryTools";
 import "./design1118.css";
 
 /**
- * Enterprise › Treasury (decision 0032 #4). Read-only: streams, this month's income, per hour, flags
+ * Enterprise › Treasury (decision 0032 #4, actions per 0042). Streams, this month's income, per hour, flags
  * (stale first, "ok as of"), and the monthly review (hidden unless it passed the number check).
  * No figure is invented: empty states until data.
  */
@@ -27,7 +30,15 @@ export const minorText = (minor: number, currency: string | null) => {
 const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 const ymd = (d: Date) => `${ym(d)}-${String(d.getDate()).padStart(2, "0")}`;
 
-export function TreasuryBody({ treasury, monitor }: { treasury: TreasuryAdapter; monitor: TreasuryMonitorAdapter }) {
+export function TreasuryBody({ treasury, monitor, tools }: { treasury: TreasuryAdapter; monitor: TreasuryMonitorAdapter; tools?: TreasuryTools }) {
+  const [msg, say] = useState("");
+  const [acking, setAcking] = useState<string | null>(null);
+  const ack = async (id: string) => {
+    if (!tools || acking) return;
+    setAcking(id);
+    try { await tools.calls.treasuryFlagsAck(id); say("Marked as seen. It stays listed until the cause is fixed."); tools.onChanged(); }
+    catch (e) { say(treasuryError(e)); } finally { setAcking(null); }
+  };
   const streams = treasury.streams(), months = treasury.incomeMonths(), perHour = treasury.perHour();
   const flags = monitor.flags(), status = monitor.status(), review = monitor.review();
   const name = (id: string) => (streams.state === "unwired" ? id : streams.value.find((s) => s.id === id)?.name ?? id);
@@ -35,6 +46,7 @@ export function TreasuryBody({ treasury, monitor }: { treasury: TreasuryAdapter;
   const incomeNow = months.state === "unwired" ? [] : months.value.filter((m) => m.month === thisMonth && m.totalMinor !== null);
   return (
     <>
+      {msg && <p className="d18-msg" role="status" data-testid="tr-msg">{msg}</p>}
       <section className="d18-card" aria-labelledby="tr-status">
         <div className="d18-map__head"><h2 id="tr-status" className="d18-h">Monitor</h2></div>
         {status.state === "unwired" ? <p className="d18-note">Nothing has been imported yet, so there is nothing to check.</p>
@@ -43,7 +55,8 @@ export function TreasuryBody({ treasury, monitor }: { treasury: TreasuryAdapter;
               : <p className="d18-note">{flags.state === "unwired" ? 0 : flags.value.length} to look at.</p>}
         {flags.state !== "unwired" && flags.value.length > 0 && (
           <ul className="d18-clist" aria-label="Flags">
-            {flags.value.map((f) => <li key={f.id}><div><b>{label(f.kind)}</b><small>{f.streamId ? `${name(f.streamId)} · ` : ""}since {f.since.slice(0, 10)}</small></div></li>)}
+            {flags.value.map((f) => <li key={f.id}><div><b>{label(f.kind)}</b><small>{f.streamId ? `${name(f.streamId)} · ` : ""}since {f.since.slice(0, 10)}{f.acked ? " · seen" : ""}</small></div>
+              {tools && !f.acked && <Button size="small" variant="plain" disabled={acking !== null} aria-label={`Mark ${label(f.kind)} as seen`} onClick={() => { void ack(f.id); }}>Mark as seen</Button>}</li>)}
           </ul>
         )}
       </section>
@@ -70,6 +83,7 @@ export function TreasuryBody({ treasury, monitor }: { treasury: TreasuryAdapter;
           </ul>
         )}
       </section>
+      {tools && <TreasuryActions tools={tools} streams={streams.state === "unwired" ? [] : streams.value} say={say} />}
       {review.state !== "unwired" && (
         <section className="d18-card" aria-labelledby="tr-review" data-testid="tr-review">
           <div className="d18-map__head"><h2 id="tr-review" className="d18-h">Monthly review · {review.value.month}</h2></div>
@@ -82,6 +96,14 @@ export function TreasuryBody({ treasury, monitor }: { treasury: TreasuryAdapter;
 
 export function TreasuryView() {
   const [snap, setSnap] = useState<{ t: TreasuryAdapter; m: TreasuryMonitorAdapter } | null>(() => (inTauri() ? null : { t: liveTreasury(null), m: liveTreasuryMonitor(null) }));
+  const [reload, setReload] = useState(0);
+  useStoresTick();
+  const ent = enterpriseAdapter().ventures();
+  const tools: TreasuryTools = {
+    calls: commands, reviewMonth: ym(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1)),
+    ventures: ent.state === "unwired" ? null : ent.value.map((v) => ({ id: v.id, name: v.name })),
+    onChanged: () => setReload((n) => n + 1),
+  };
   useEffect(() => {
     if (!inTauri()) return;
     let live = true;
@@ -92,11 +114,11 @@ export function TreasuryView() {
       loadTreasuryMonitor(ym(prev)),
     ]).then(([t, m]) => { if (live) setSnap({ t: liveTreasury(t), m: liveTreasuryMonitor(m) }); }).catch(() => { if (live) setSnap({ t: liveTreasury(null), m: liveTreasuryMonitor(null) }); });
     return () => { live = false; };
-  }, []);
+  }, [reload]);
   return (
     <div className="biz page-inset cc-page d18-page">
-      <PageHero title="Treasury" statement="Income streams" detail="Read-only. Amounts come from imports you make; nothing is moved or sent." />
-      {snap ? <TreasuryBody treasury={snap.t} monitor={snap.m} /> : <p className="d18-note" role="status">Loading…</p>}
+      <PageHero title="Treasury" statement="Income streams" detail="Amounts come from imports you make. Nothing is moved or sent." />
+      {snap ? <TreasuryBody treasury={snap.t} monitor={snap.m} tools={inTauri() ? tools : undefined} /> : <p className="d18-note" role="status">Loading…</p>}
     </div>
   );
 }
