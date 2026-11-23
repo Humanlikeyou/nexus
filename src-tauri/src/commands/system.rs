@@ -27,6 +27,7 @@ fn note_reduce_transparency(last: &AtomicU8, now: bool) -> bool {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_reduce_transparency() -> bool {
     let now = read_reduce_transparency();
     note_reduce_transparency(&REDUCE_TRANSPARENCY, now);
@@ -41,7 +42,7 @@ pub fn sync_reduce_transparency(app: &tauri::AppHandle) {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct SystemInfo {
     pub os: String,
     pub arch: String,
@@ -51,6 +52,7 @@ pub struct SystemInfo {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_system_info() -> Result<SystemInfo, String> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -71,6 +73,7 @@ pub fn get_system_info() -> Result<SystemInfo, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn health_check() -> Result<String, String> {
     Ok("ok".to_string())
 }
@@ -99,6 +102,7 @@ fn docker() -> Result<&'static str, String> {
 /// Check the status of a Docker container by name.
 /// Returns "running", "exited", "paused", "not_found", or the raw status string.
 #[tauri::command]
+#[specta::specta]
 pub async fn check_docker_service(name: String) -> Result<String, String> {
     validate_container_name(&name)?;
     let output = tokio::process::Command::new(docker()?)
@@ -129,6 +133,7 @@ pub(super) fn docker_restart_prompt(name: &str) -> (String, String) {
 
 /// Restart a Docker container by name (requires native approval).
 #[tauri::command]
+#[specta::specta]
 pub async fn restart_docker_service(app: tauri::AppHandle, name: String) -> Result<String, String> {
     validate_container_name(&name)?;
     let (operation, detail) = docker_restart_prompt(&name);
@@ -141,12 +146,26 @@ pub async fn restart_docker_service(app: tauri::AppHandle, name: String) -> Resu
     docker_restart(&name).await
 }
 
-/// The ungated restart. Only call with a validated name after approval.
-pub(super) async fn docker_restart(name: &str) -> Result<String, String> {
-    let output = tokio::process::Command::new(docker()?)
-        .args(["restart", name])
-        .output()
+/// Longest a `docker restart` may hold the approval lock before it is abandoned.
+pub(super) const DOCKER_RESTART_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Run `fut` for at most `limit`; a hung call is dropped (and, for a `kill_on_drop` child, ended).
+pub(super) async fn bounded<T>(
+    limit: std::time::Duration,
+    fut: impl std::future::Future<Output = T>,
+) -> Result<T, String> {
+    tokio::time::timeout(limit, fut)
         .await
+        .map_err(|_| "Docker did not answer in time.".to_string())
+}
+
+/// The ungated restart. Only call with a validated name after approval. Bounded by
+/// `DOCKER_RESTART_TIMEOUT` so a hung docker can't hold the approval guard forever.
+pub(super) async fn docker_restart(name: &str) -> Result<String, String> {
+    let mut cmd = tokio::process::Command::new(docker()?);
+    cmd.args(["restart", name]).kill_on_drop(true);
+    let output = bounded(DOCKER_RESTART_TIMEOUT, cmd.output())
+        .await?
         .map_err(|e| format!("Failed to run docker restart: {}", e))?;
 
     if output.status.success() {
@@ -159,6 +178,7 @@ pub(super) async fn docker_restart(name: &str) -> Result<String, String> {
 /// Check if a TCP port is open on a given host.
 /// Returns "open" or "closed".
 #[tauri::command]
+#[specta::specta]
 pub async fn check_service_port(host: String, port: u16) -> Result<String, String> {
     let addr = format!("{}:{}", host, port);
     match tokio::time::timeout(
@@ -194,6 +214,25 @@ mod tests {
         for bad in ["", "-rm", "--help", "a b", "a;b", "../x"] {
             assert!(validate_container_name(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_hung_call_is_abandoned_within_the_limit() {
+        let t = std::time::Instant::now();
+        let r = super::bounded(
+            std::time::Duration::from_millis(50),
+            std::future::pending::<()>(),
+        )
+        .await;
+        assert_eq!(r.unwrap_err(), "Docker did not answer in time.");
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
+        assert_eq!(
+            super::bounded(std::time::Duration::from_secs(5), async { 7 })
+                .await
+                .unwrap(),
+            7
+        );
+        assert_eq!(super::DOCKER_RESTART_TIMEOUT.as_secs(), 60);
     }
 
     #[test]

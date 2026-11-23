@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Archive, RotateCcw } from "lucide-react";
-import { packItUp, pickBackupArchive, unpackBackup } from "@/lib/api";
-import { approvalOutcome } from "@/terrance/system/approvalErrors";
-import type { PackageInfo } from "@/lib/types";
+import { packItUp, pickBackupArchive, unpackBackup } from "../legacy-core/lib/api";
+import { approvalOutcome } from "../legacy-core/terrance/system/approvalErrors";
+import type { PackageInfo } from "../legacy-core/lib/types";
 import { Button, Dialog, InsetGroup, ListRow, TextField } from "../ui";
 
 /** Older backends may omit `skipped`, or send something unexpected. */

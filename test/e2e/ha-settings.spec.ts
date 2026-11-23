@@ -1,13 +1,13 @@
-import { activeField, expect, navButton, openApp, test, openMore } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, openSettingsTab, test, openMore } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
-/** Settings › Home Assistant: write-only token, loopback URL, test connection, Smart home link. */
+/** Settings › Devices › Home Assistant: write-only token, loopback URL, test connection, Smart home link. */
 const TOKEN = "e2e-fake-ha-token-value";
 
 test.describe("Home Assistant settings", () => {
   test("missing commands show Coming soon, not an error", async ({ page, theme, consoleErrors }) => {
     await openApp(page, { theme });
-    await navButton(page, "Settings").click();
+    await openSettingsTab(page, "Devices");
     await openMore(page);
     const group = activeField(page, "Settings").locator("#home-assistant");
     await expect(group).toContainText("Coming soon: needs Nexus update.");
@@ -18,7 +18,7 @@ test.describe("Home Assistant settings", () => {
   test("save URL + token, token never rendered, test connection", async ({ page, theme, consoleErrors }) => {
     const data = { ...responses(), ha_get_config: { url: null, tokenSet: false, tokenSource: null }, ha_set_config: null, ha_test_connection: { ok: true, version: "2026.10.1" } };
     await openApp(page, { theme, data});
-    await navButton(page, "Settings").click();
+    await openSettingsTab(page, "Devices");
     await openMore(page);
     const group = activeField(page, "Settings").locator("#home-assistant");
     await expect(group.getByText("Not set", { exact: true })).toBeVisible();
@@ -50,7 +50,7 @@ test.describe("Home Assistant settings", () => {
   test("saved token: Replace/Clear, rejected test copy", async ({ page, theme }) => {
     const data = { ...responses(), ha_get_config: { url: "http://127.0.0.1:8123", tokenSet: true, tokenSource: "app" }, ha_clear_token: { fallbackActive: true }, ha_test_connection: { ok: false, kind: "auth_rejected" } };
     await openApp(page, { theme, data });
-    await navButton(page, "Settings").click();
+    await openSettingsTab(page, "Devices");
     await openMore(page);
     const group = activeField(page, "Settings").locator("#home-assistant");
     await expect(group.getByText("Saved", { exact: true })).toBeVisible();
@@ -76,7 +76,7 @@ test.describe("Home Assistant settings", () => {
   test("Test connection sends the edited fields; bad URL shows described inline error", async ({ page, theme }) => {
     const data = { ...responses(), ha_get_config: { url: "http://127.0.0.1:8123", tokenSet: true, tokenSource: "app" }, ha_test_connection: { ok: true, version: "2026.10.1" } };
     await openApp(page, { theme, data });
-    await navButton(page, "Settings").click();
+    await openSettingsTab(page, "Devices");
     await openMore(page);
     const group = activeField(page, "Settings").locator("#home-assistant");
     const address = group.getByLabel("Address");
@@ -99,7 +99,7 @@ test.describe("Home Assistant settings", () => {
   test("new address needs the token re-entered before Test; token_required copy", async ({ page, theme }) => {
     const data = { ...responses(), ha_get_config: { url: "http://127.0.0.1:8123", tokenSet: true, tokenSource: "app" }, ha_test_connection: { ok: false, kind: "token_required" } };
     await openApp(page, { theme, data });
-    await navButton(page, "Settings").click();
+    await openSettingsTab(page, "Devices");
     await openMore(page);
     const group = activeField(page, "Settings").locator("#home-assistant");
     const address = group.getByLabel("Address");

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /**
@@ -85,18 +85,18 @@ export const HA_STATE_CHANGED_EVENT = "ha://state_changed";
 export const HA_LIVE_STATUS_EVENT = "ha://live_status";
 
 export const tauriHaBackend: HaBackend = {
-  states: () => invoke<HaEntity[]>("ha_states"),
+  states: () => invokeBound<HaEntity[]>("ha_states"),
   callService: (domain, service, entityId, data) => {
     if (!validServiceCall(domain, service, entityId)) return Promise.reject(HA_INVALID);
     if (!validServiceData(domain, service, data)) return Promise.reject(HA_BAD_DATA);
-    return invoke<void>("ha_call_service", data ? { domain, service, entityId, data } : { domain, service, entityId });
+    return invokeBound<void>("ha_call_service", data ? { domain, service, entityId, data } : { domain, service, entityId });
   },
-  conversation: (text) => invoke<HaConversationResult>("ha_conversation", { text }),
-  containerStatus: () => invoke<HaContainerStatus>("ha_container_status"),
-  containerStart: () => invoke<HaContainerStatus>("ha_container_start"),
-  containerStop: () => invoke<HaContainerStatus>("ha_container_stop"),
-  liveStart: () => invoke<boolean>("ha_live_start"),
-  liveStop: () => invoke<boolean>("ha_live_stop"),
+  conversation: (text) => invokeBound<HaConversationResult>("ha_conversation", { text }),
+  containerStatus: () => invokeBound<HaContainerStatus>("ha_container_status"),
+  containerStart: () => invokeBound<HaContainerStatus>("ha_container_start"),
+  containerStop: () => invokeBound<HaContainerStatus>("ha_container_stop"),
+  liveStart: () => invokeBound<boolean>("ha_live_start"),
+  liveStop: () => invokeBound<boolean>("ha_live_stop"),
   onStateChanged: (handler) => listen<HaStateChanged>(HA_STATE_CHANGED_EVENT, (e) => handler(e.payload)),
   onLiveStatus: (handler) => listen<{ state: HaLiveState }>(HA_LIVE_STATUS_EVENT, (e) => handler(e.payload.state)),
 };
@@ -203,7 +203,7 @@ export const domainLabel = (d: string) => DOMAIN_LABEL[d] ?? d.replace(/_/g, " "
 
 export function stateLabel(e: HaEntity): string {
   if (e.state === "unavailable") return "Unavailable";
-  if (e.state === "unknown") return "Unknown";
+  if (e.state === "unknown" || e.state === "") return "No reading"; // design-1118a: never "Unknown"
   const unit = typeof e.attributes.unit_of_measurement === "string" ? ` ${e.attributes.unit_of_measurement}` : "";
   if (e.state === "on" || e.state === "off") return e.state === "on" ? "On" : "Off";
   return `${e.state.replace(/_/g, " ")}${unit}`;
@@ -222,6 +222,8 @@ export function dropLegacyHomeReplyIds() {
 const HOME_VERB_RE = /^(?:(?:please|hey amara|amara|can you|could you|would you)[,\s]+)*(?:turn|switch|set|dim|brighten|open|close|shut|lock|unlock|start|stop|toggle|activate|deactivate|raise|lower)\b/;
 const HOME_QUESTION_RE = /^(?:is|are)\s+(?:the\s+|my\s+)?(.+?)\s+(?:on|off|open|closed|locked|unlocked|running)\s*\??$/;
 const HOME_DEVICE_RE = /\b(?:lights?|lamps?|switch(?:es)?|plugs?|outlets?|fans?|thermostat|heating|heater|ac|a\/c|air ?con(?:ditioning|ditioner)?|tv|television|blinds?|curtains?|shades?|shutters?|doors?|locks?|garage|kettle|scene|speakers?|vacuum|hoover|heat|temperature|radiator|dehumidifier|humidifier|purifier)\b/;
+/** Physical-security and cover commands are never auto-run from chat (same list as amara_turn.rs SENSITIVE_HOME_WORDS). */
+const SENSITIVE_HOME_RE = /\b(?:lock|locks|locked|locking|unlock|unlocked|unlocking|door|doors|garage|alarm|alarms|cover|covers|blind|blinds|shutter|shutters|curtain|curtains|deadbolt|gate|gates|window|windows|siren|latch|bolt|disarm|arm-away)\b/;
 const MATH_RE = /\d\s*[-+*/x×÷^=%]\s*\d|\b(?:what is|what's|calculate|solve)\s+-?\d/;
 const HOME_MAX_WORDS = 14;
 const HOME_MAX_CHARS = 120;
@@ -230,6 +232,10 @@ const HOME_MAX_CHARS = 120;
 let knownNames: string[] = [];
 export function rememberEntityNames(entities: HaEntity[]) {
   knownNames = [...new Set(entities.map((e) => (e.friendlyName ?? "").trim().toLowerCase()).filter((n) => n.length >= 3))];
+}
+/** Names for the Rust turn pipeline (`haNames`): at most 200, each at most 64 chars, like amara_turn.rs. */
+export function homeEntityNamesForTurn(): string[] {
+  return knownNames.filter((n) => n.length <= 64).slice(0, 200);
 }
 const mentionsKnownName = (t: string) => knownNames.some((n) => new RegExp(`(?:^|\\W)${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|\\W)`).test(t));
 
@@ -242,6 +248,7 @@ export function looksLikeHomeCommand(text: string, names: string[] = knownNames)
   if (text.trim().includes("\n")) return false;
   const t = text.trim().toLowerCase().replace(/\s+/g, " ");
   if (!t || t.length > HOME_MAX_CHARS || t.split(" ").length > HOME_MAX_WORDS) return false;
+  if (SENSITIVE_HOME_RE.test(t)) return false;
   if (MATH_RE.test(t)) return false;
   const saved = knownNames; knownNames = names;
   try {

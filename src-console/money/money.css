@@ -1,0 +1,60 @@
+/* design-1111t money (m1–m6). Fibonacci spacing, app tokens only. */
+.m-callout { padding: 13px 21px; border-radius: 13px; border: 1px solid color-mix(in srgb, var(--tone-accent-text) 45%, var(--separator)); background: color-mix(in srgb, var(--tone-accent-text) 8%, transparent); font-size: 13px; line-height: 1.5; color: var(--label); }
+.m-callout b { color: var(--tone-accent-text); }
+.m-group { display: grid; }
+.m-region, .m-group__k { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--copper-text); padding: 13px 0 5px; }
+.m-group__k { padding: 0; }
+.m-acct { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto 144px 110px; gap: 8px 13px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--separator); }
+@media (max-width: 900px) { .m-acct { grid-template-columns: 34px minmax(0, 1fr) auto; } }
+.m-acct[data-greyed] .m-acct__amt, .m-acct[data-greyed] .m-acct__main > span { color: var(--label-secondary); }
+.m-mono { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--separator); font-size: 13px; font-weight: 600; color: var(--label); background: color-mix(in srgb, var(--label) 5%, transparent); }
+.m-acct__main { display: grid; gap: 3px; min-width: 0; font-size: 13px; color: var(--label); }
+.m-acct__main small { font-size: 11px; color: var(--label-secondary); }
+.m-acct__note { color: var(--copper-text) !important; }
+.m-acct__badges { display: flex; gap: 5px; flex-wrap: wrap; }
+.m-badge { display: inline-flex; gap: 3px; align-items: center; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--tone-accent-text) 55%, var(--separator)); color: var(--tone-accent-text); white-space: nowrap; }
+.m-badge--quiet { border-color: var(--separator); color: var(--label-secondary); }
+.m-acct__sync { font-size: 13px; color: var(--label); }
+.m-acct__sync[data-status="expired"], .m-acct__sync[data-status="stale"], .m-acct__sync[data-status="error"] { color: var(--copper-text); }
+.m-acct__sync[data-status="not_connected"] { color: var(--label-secondary); }
+.m-acct__amt { display: grid; justify-items: end; gap: 3px; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--label); }
+.m-acct__amt small { font-size: 11px; color: var(--label-secondary); display: inline-flex; gap: 5px; align-items: center; }
+.m-acct__acts { grid-column: 2 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.m-split { display: grid; grid-template-columns: minmax(0, 1.618fr) minmax(0, 1fr); gap: 13px; align-items: start; }
+@media (max-width: 900px) { .m-split { grid-template-columns: minmax(0, 1fr); } }
+.m-yes { color: var(--tone-accent-text); font-size: 13px; }
+.m-no { color: var(--label-secondary); font-size: 13px; }
+.m-warn { display: grid; gap: 5px; padding: 13px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--copper-text) 55%, var(--separator)); background: color-mix(in srgb, var(--copper-text) 10%, transparent); font-size: 13px; line-height: 1.5; color: var(--label); }
+.m-warn b { color: var(--copper-text-on-tint); font-weight: 600; }
+.m-bar { display: flex; gap: 13px; align-items: center; flex-wrap: wrap; }
+.m-alloc { display: flex; gap: 3px; height: 8px; border-radius: 5px; overflow: hidden; margin: 0 0 8px; }
+.m-alloc i, .m-sw { display: block; background: var(--tone-accent-text); }
+.m-sw { width: 13px; height: 3px; border-radius: 1px; }
+.m-alloc i[data-t="b"], .m-sw[data-t="b"] { background: color-mix(in srgb, var(--tone-accent-text) 60%, var(--label-secondary)); }
+.m-alloc i[data-t="c"], .m-sw[data-t="c"] { background: var(--copper-text); }
+.m-alloc i[data-t="d"], .m-sw[data-t="d"] { background: color-mix(in srgb, var(--copper-text) 55%, var(--label-secondary)); }
+.pk-table td small { display: block; font-size: 11px; color: var(--label-secondary); }
+.m-big { margin: 0; font-size: 21px; color: var(--label); font-variant-numeric: tabular-nums; }
+.m-big small { font-size: 13px; color: var(--label-secondary); }
+.m-nfa { margin: 0; padding: 5px 13px; border-radius: 8px; border: 1px dashed var(--separator-strong, var(--separator)); font-size: 11px; line-height: 1.5; color: var(--label-secondary); }
+.take .take__hist--static { margin-left: auto; font-size: 11px; color: var(--label-secondary); white-space: nowrap; }
+/* Connect sheet (m2) */
+.ui-dialog.m-sheet { width: min(610px, calc(100vw - 89px)); }
+.ui-dialog.m-sheet > .ui-dialog__body { display: grid; gap: 13px; }
+.m-routes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.m-route { display: flex; gap: 13px; align-items: flex-start; padding: 13px; border-radius: 13px; border: 1px solid var(--separator); background: none; color: var(--label); font: inherit; text-align: left; cursor: pointer; }
+.m-route[data-on] { border-color: var(--tone-accent-text); background: color-mix(in srgb, var(--tone-accent-text) 10%, transparent); }
+.m-route:focus-visible { outline: 2px solid var(--focus-ring, var(--tone-accent-text)); outline-offset: 3px; }
+.m-route__t { display: grid; gap: 3px; font-size: 13px; }
+.m-route__t small { font-size: 11px; color: var(--label-secondary); }
+.m-field { display: grid; gap: 5px; font-size: 11px; color: var(--label-secondary); }
+.m-input { display: flex; gap: 8px; align-items: center; padding: 5px 13px; border-radius: 8px; border: 1px solid var(--separator-strong, var(--separator)); }
+.m-input input { flex: 1; min-width: 0; font: inherit; font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; background: none; border: 0; color: var(--label); padding: 3px 0; outline: none; }
+.m-input:focus-within { outline: 2px solid var(--focus-ring, var(--tone-accent-text)); outline-offset: 1px; }
+.m-guard { font-size: 11px; white-space: nowrap; color: var(--label-secondary); }
+.m-guard[data-k="public"] { color: var(--tone-accent-text); }
+
+/* 1111w: money insight + recommendation folded into the Life take card (one "Amara's take"). */
+.life-money { display: grid; gap: 8px; margin-top: 5px; padding-top: 13px; border-top: 1px solid var(--separator); }
+.life-money__k { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--label-secondary); }
+.life-money .take__body { font-size: 17px; }

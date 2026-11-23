@@ -4,6 +4,7 @@
 pub mod config;
 pub mod engine;
 pub mod gemma_tools;
+pub mod launch_token;
 pub mod route;
 pub mod server;
 pub mod think;
@@ -17,6 +18,7 @@ pub async fn run(
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> Result<(), String> {
     let cfg = &state.cfg;
+    config::check_secrets(cfg, &state.secrets)?;
     let local = tokio::net::TcpListener::bind(&cfg.bind)
         .await
         .map_err(|e| format!("cannot bind {} ({e}); is another router or service using the port? Check with: lsof -nP -iTCP:{} -sTCP:LISTEN", cfg.bind, cfg.bind.rsplit(':').next().unwrap_or("")))?;

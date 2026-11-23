@@ -13,19 +13,14 @@ fn db_path() -> PathBuf {
 
 fn get_db() -> Result<Connection, String> {
     let path = db_path();
-    crate::app_paths::create_private_dir_all(path.parent().unwrap())
-        .map_err(|e| format!("Failed to create data dir: {}", e))?;
-    crate::app_paths::ensure_private_file(&path)
-        .map_err(|e| format!("Failed to create chat_history.db: {}", e))?;
-
-    let conn =
-        Connection::open(&path).map_err(|e| format!("Failed to open chat_history.db: {}", e))?;
-
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| format!("Failed to set WAL mode: {}", e))?;
-    crate::app_paths::restrict_sqlite_files(&path)
-        .map_err(|e| format!("Failed to secure chat_history.db: {}", e))?;
-
+    use super::shared::sqlite::{open_private_wal, OpenStep};
+    let conn = open_private_wal(&path).map_err(|step| match step {
+        OpenStep::Dir(e) => format!("Failed to create data dir: {e}"),
+        OpenStep::File(e) => format!("Failed to create chat_history.db: {e}"),
+        OpenStep::Open(e) => format!("Failed to open chat_history.db: {e}"),
+        OpenStep::Configure(e) => format!("Failed to set WAL mode: {e}"),
+        OpenStep::Secure(e) => format!("Failed to secure chat_history.db: {e}"),
+    })?;
     init_db(&conn)?;
     Ok(conn)
 }
@@ -63,7 +58,7 @@ fn init_db(conn: &Connection) -> Result<(), String> {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ChatSession {
     pub id: String,
     pub title: String,
@@ -72,7 +67,7 @@ pub struct ChatSession {
     pub message_count: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ChatMessage {
     pub id: i64,
     pub session_id: String,
@@ -88,6 +83,7 @@ pub struct ChatMessage {
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn create_chat_session(title: String) -> Result<ChatSession, String> {
     let conn = get_db()?;
     let id = uuid::Uuid::new_v4().to_string();
@@ -109,6 +105,7 @@ pub fn create_chat_session(title: String) -> Result<ChatSession, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_chat_sessions() -> Result<Vec<ChatSession>, String> {
     let conn = get_db()?;
     let mut stmt = conn
@@ -138,6 +135,7 @@ pub fn list_chat_sessions() -> Result<Vec<ChatSession>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_chat_message(message: ChatMessage) -> Result<i64, String> {
     let conn = get_db()?;
 
@@ -170,6 +168,7 @@ pub fn save_chat_message(message: ChatMessage) -> Result<i64, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn load_chat_history(
     session_id: String,
     limit: Option<u32>,
@@ -209,6 +208,7 @@ pub fn load_chat_history(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn delete_chat_session(session_id: String) -> Result<(), String> {
     let conn = get_db()?;
 

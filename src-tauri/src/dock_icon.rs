@@ -61,7 +61,8 @@ fn set_dock_icon(_icon: DockIcon) {}
 
 /// Called by the frontend after `setTheme` so an app-pinned theme updates the Dock too.
 #[tauri::command]
-pub fn sync_dock_icon<R: Runtime>(app: AppHandle<R>) {
+#[specta::specta]
+pub fn sync_dock_icon(app: AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         sync(&window);
     }

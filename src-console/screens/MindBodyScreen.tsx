@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MIN_TREND_SESSIONS, READINESS_COPY, matchDriver, pearson, readinessReading, shortDay, tokyoDay, trendText, type DriverKey, type DriverPoint } from "../lib/mindBody";
 import { METRICS, driverSentence, drivers as rankDrivers, hoursMinutes, inRange, lean, loadRatio, mergeSeries, metricReading, windowAverage, type MetricKey } from "../lib/mindBodyDeep";
-import { NoopShapeError, isSnapshot, noopQuery, parseBodyContext, parseMetricSeries, snapshotDays } from "../lib/noop";
+import { NoopShapeError, isSnapshot, noopQueryBatch, parseBodyContext, parseMetricSeries, snapshotDays } from "../lib/noop";
+import { shareSnapshot } from "../lib/noopSnapshot";
 import type { NoopDayRow, NoopLatestNight, NoopMetricPoint, NoopMetricSeries, NoopSnapshotPayload, RecordedSession } from "../types";
 import { Badge, Button, PageHero, SegmentedControl } from "../ui";
-import { BaselineChart, DeltaBar, StageStrip } from "./MindBodyCharts";
+import { AmaraTake } from "../amaraTake/AmaraTakeCard";
+import type { Route } from "../app/routes";
+import { LinkButton } from "../adds/Composer";
+import { monotonePath } from "../ui/charts/chartMath";
+import { BaselineChart, DeltaBar, SleepSpan, StageStrip, readingDelta } from "./MindBodyCharts";
+import { ChartHeader } from "../ui/charts/TrendChart";
 import "./MindBodyScreen.css";
 
-export const INVALID_PATH_STEPS = "The NOOP binary or database path in Settings isn't valid. Open Settings › WHOOP and set full paths that start with /.";
-export const SANDBOX_STEPS = "NOOP's local data access isn't set up yet. Open NOOP once so it can create its data folder, then check again.";
+export const INVALID_PATH_STEPS = "The health reader or health store path in Settings isn't valid. Open Settings › Devices › WHOOP connection and set full paths that start with /.";
+export const SANDBOX_STEPS = "Amara's health store isn't set up yet. Run a first sync from Settings › Devices, then check again.";
+/** Fixed copy for binary_missing (the backend detail named a separate program and build steps). */
+export const MISSING_STEPS = "Amara's health reader isn't set up on this Mac yet. Open Settings › Devices › WHOOP connection and check the paths, then come back here.";
 export const DISCLAIMER = "Personal estimates, not medical data.";
 const DASH = "—";
 /* Every plot fills its column edge to edge: no inner gutter, so plots line up across sections. */
@@ -42,17 +50,23 @@ export function seriesFromSnapshot(snap: NoopSnapshotPayload): MindBodySeries {
  */
 export async function loadMindBody(): Promise<MindBodyState> {
   const driverKeys = [["sleep", "sleep_total_min"], ["hrv", "hrv"], ["recovery", "recovery"]] as const;
-  const [snap, ...series] = await Promise.all([
-    noopQuery("health_snapshot", { days: 29 }),
-    ...driverKeys.map(([, key]) => noopQuery("metric_series", { key, days: 365 })),
+  // One backend session for all six reads (readiness, three driver series, then the two optional
+  // long series), not a two-step waterfall of separate spawns.
+  const batch = noopQueryBatch([
+    { tool: "health_snapshot", args: { days: 29 } },
+    ...driverKeys.map(([, key]) => ({ tool: "metric_series" as const, args: { key, days: 365 } })),
+    ...(["rhr", "strain"] as const).map((key) => ({ tool: "metric_series" as const, args: { key, days: 365 } })),
   ]);
-  // Longer history for the two metrics readiness doesn't need: the page still works without it.
-  const [rhrRead, strainRead] = await Promise.all((["rhr", "strain"] as const).map((key) => noopQuery("metric_series", { key, days: 365 })));
+  // The Amara take on this page reads the same snapshot instead of fetching it again.
+  shareSnapshot(batch.then(([s]) => (s.ok && isSnapshot(s.value) ? s.value : null)));
+  const [snap, ...rest] = await batch;
+  const series = rest.slice(0, 3);
+  const [rhrRead, strainRead] = rest.slice(3);
   const failed = [snap, ...series].find((r) => !r.ok);
   if (failed && !failed.ok) {
     const kind = failed.error.kind;
-    // binary_missing detail is NOOP's own setup text; other kinds get fixed copy (details may hold paths).
-    if (kind === "binary_missing") return { status: "inactive", steps: failed.error.detail };
+    // Every kind gets fixed copy: backend details may hold paths or name the legacy helper.
+    if (kind === "binary_missing") return { status: "inactive", steps: MISSING_STEPS };
     if (kind === "invalid_path") return { status: "inactive", steps: INVALID_PATH_STEPS };
     if (kind === "sandbox_missing") return { status: "inactive", steps: SANDBOX_STEPS };
     if (kind === "spawn_failed") return { status: "inactive", steps: null };
@@ -121,12 +135,13 @@ export function StrainBars({ points }: { points: NoopMetricPoint[] }) {
   // 7-day vs 28-day rolling average load (copper comparison line).
   const avg = (i: number, w: number) => { const xs = vals.slice(Math.max(0, i - w + 1), i + 1).map((p) => p.value).filter((v): v is number => typeof v === "number"); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0; };
   const yOf = (v: number) => CHART_BASE - (v / max) * (CHART_BASE - CHART_TOP);
-  const line = (w: number) => vals.map((_, i) => `${i ? "L" : "M"}${(step * i + bw / 2).toFixed(1)},${yOf(avg(i, w)).toFixed(1)}`).join(" ");
+  // design-1110c C1: the load lines are monotone curves, so they never overshoot a day.
+  const line = (w: number) => monotonePath(vals.map((_, i) => [step * i + bw / 2, yOf(avg(i, w))] as const));
   return (
     <ChartBox state="ready" label="Strain">
       <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} role="img" aria-label={`Daily strain with 7 and 28 day load, ${nums.length} days`} preserveAspectRatio="none">
         <Gridlines />
-        {vals.map((p, i) => typeof p.value === "number" && <rect key={p.day} className="mind-body__bar" x={step * i} width={bw} y={yOf(p.value)} height={CHART_BASE - yOf(p.value)} />)}
+        {vals.map((p, i) => typeof p.value === "number" && <rect key={p.day} className="mind-body__bar" rx={1.5} x={step * i} width={bw} y={yOf(p.value)} height={CHART_BASE - yOf(p.value)} />)}
         <path d={line(7)} className="mind-body__line" data-series="load" fill="none" />
         <path d={line(28)} className="mind-body__line" data-series="baseline" fill="none" />
       </svg>
@@ -156,16 +171,19 @@ const DRIVERS: Array<{ key: DriverKey; label: string; noun: string; unit: string
   { key: "recovery", label: "Recovery", noun: "recovery", unit: "recovery (%)" },
 ];
 
-export function Inactive({ steps }: { steps: string | null }) {
+const DEVICES_ROUTE: Route = { id: "settings", view: "devices" };
+
+export function Inactive({ steps, onOpen }: { steps: string | null; onOpen?: (route: Route) => void }) {
   return (
-    <div className="subsystem-inactive" role="region" aria-label="NOOP setup">
-      <h2>NOOP isn't connected</h2>
-      <p>Mind-Body needs NOOP's local health data. To set it up:</p>
+    <div className="subsystem-inactive" role="region" aria-label="Health sync setup">
+      <h2>Health sync isn't connected</h2>
+      <p>Mind-Body needs your health data on this Mac. To set it up:</p>
       {steps ? <p className="subsystem-inactive__detail">{steps}</p> : <ol>
-        <li>Build the NOOP CLI: run <code>swift build -c release</code> in Packages/NoopLocalAccess.</li>
-        <li>In Settings, set the NOOP binary path and database path.</li>
-        <li>Set WHOOP source to "NOOP (recommended)", then come back here.</li>
+        <li>Open Settings › Devices and check your WHOOP 4.</li>
+        <li>Under WHOOP connection, choose &ldquo;Health sync (recommended)&rdquo;.</li>
+        <li>Come back here once the first sync is done.</li>
       </ol>}
+      {onOpen && <div><Button variant="secondary" size="small" onClick={() => onOpen(DEVICES_ROUTE)}>Open Settings › Devices</Button></div>}
     </div>
   );
 }
@@ -174,13 +192,35 @@ const RANGES = [{ value: "7", label: "Week" }, { value: "30", label: "Month" }, 
 const TREND_ROWS: MetricKey[] = ["recovery", "hrv", "resting_hr", "strain"];
 const COMPARE_ROWS: MetricKey[] = ["sleep", "recovery", "hrv", "resting_hr", "strain"];
 
-export type MindBodyFieldProps = { sessions: RecordedSession[]; load?: () => Promise<MindBodyState> };
+export type MindBodyFieldProps = { sessions: RecordedSession[]; load?: () => Promise<MindBodyState>; /** App's navigate: the Settings › Devices buttons. Plain text without it. */ onOpen?: (route: Route) => void };
 
-export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldProps) {
-  const [state, setState] = useState<MindBodyState>({ status: "loading" });
+type ReadyState = Extract<MindBodyState, { status: "ready" }>;
+/**
+ * Stale-while-revalidate across visits: the last ready result for this loader on the same Tokyo day
+ * renders at once while a fresh read runs, then replaces it. A new day (or a different loader)
+ * never shows an old result. In memory only; a non-ready result clears it.
+ */
+let mindBodyCache: { day: string; load: () => Promise<MindBodyState>; state: ReadyState } | null = null;
+const cacheDay = () => tokyoDay(new Date().toISOString()) ?? new Date().toDateString();
+const cachedFor = (load: () => Promise<MindBodyState>): ReadyState | null => (mindBodyCache && mindBodyCache.load === load && mindBodyCache.day === cacheDay() ? mindBodyCache.state : null);
+export function clearMindBodyCache(): void { mindBodyCache = null; }
+/** Runs `load`, keeping the cache in step: ready is stored, a transient error keeps what was shown. */
+async function loadAndCache(load: () => Promise<MindBodyState>, shown: ReadyState | null): Promise<MindBodyState> {
+  const day = cacheDay();
+  let s: MindBodyState;
+  try { s = await load(); } catch { s = { status: "inactive", steps: null }; }
+  if (s.status === "ready") { mindBodyCache = { day, load, state: s }; return s; }
+  if (s.status === "error" && shown) return shown;
+  mindBodyCache = null;
+  return s;
+}
+
+export function MindBodyField({ sessions, load = loadMindBody, onOpen }: MindBodyFieldProps) {
+  const [state, setState] = useState<MindBodyState>(() => cachedFor(load) ?? { status: "loading" });
   const [driver, setDriver] = useState<DriverKey>("sleep");
-  const refresh = useCallback(() => { setState({ status: "loading" }); void load().then(setState, () => setState({ status: "inactive", steps: null })); }, [load]);
-  useEffect(() => { let live = true; void load().then((s) => { if (live) setState(s); }, () => { if (live) setState({ status: "inactive", steps: null }); }); return () => { live = false; }; }, [load]);
+  const refresh = useCallback(() => { setState({ status: "loading" }); void loadAndCache(load, null).then(setState); }, [load]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- loads an external store once per mount (and shows the cached page first)
+  useEffect(() => { let live = true; const shown = cachedFor(load); if (shown) setState(shown); void loadAndCache(load, shown).then((s) => { if (live) setState(s); }); return () => { live = false; }; }, [load]);
 
   const [range, setRange] = useState("30");
   const series = state.status === "ready" ? state.series : null;
@@ -221,6 +261,8 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
     { label: "Deep", minutes: night?.deepMin ?? day?.deepMin ?? 0, tone: "deep" },
     { label: "REM", minutes: night?.remMin ?? day?.remMin ?? 0, tone: "rem" },
     { label: "Light", minutes: night?.lightMin ?? day?.lightMin ?? 0, tone: "light" },
+    // design-1110c C9: awake = in bed minus asleep, from the real night record (hatched, never copper).
+    ...(night && night.inBedMin > night.totalSleepMin ? [{ label: "Awake", minutes: night.inBedMin - night.totalSleepMin, tone: "awake" }] : []),
   ];
   const efficiency = night?.efficiency ?? day?.efficiency ?? null;
   const also = day ? [
@@ -236,10 +278,11 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
 
   return (
     <div className="mind-body page-inset">
-      <PageHero title="Mind–Body" statement={statement} detail={ready && ready.level !== "none" ? copy.help : stale && lastDay ? `The last reading was ${shortDay(lastDay)}. Open NOOP to sync.` : undefined} />
-      {state.status === "inactive" ? <Inactive steps={state.steps} /> : state.status === "error" ? <ChartBox state="error" label="Mind–Body" onRetry={refresh} /> : (
+      <PageHero title="Mind–Body" statement={statement} detail={ready && ready.level !== "none" ? copy.help : stale && lastDay ? (onOpen ? <>The last reading was {shortDay(lastDay)}. <LinkButton small onClick={() => onOpen(DEVICES_ROUTE)} label="Open Settings, Devices, to sync your health data">Sync from Settings › Devices</LinkButton></> : `The last reading was ${shortDay(lastDay)}. Sync from Settings › Devices.`) : undefined} />
+      {state.status === "inactive" ? <Inactive steps={state.steps} onOpen={onOpen} /> : state.status === "error" ? <ChartBox state="error" label="Mind–Body" onRetry={refresh} /> : (
         <>
           {!loading && <p className="mind-body__meta mb-reading">{asOf ? `Reading for ${shortDay(asOf)}${earlier ? ", the latest with data" : ""}` : "No reading day yet"} · Compared with your own 28-day baseline</p>}
+          {!loading && <AmaraTake page="mindBody" className="mb-take" />}
 
           <section className="mb-section" aria-labelledby="mb-readiness">
             <h2 id="mb-readiness" className="mb-section__title">Readiness</h2>
@@ -265,38 +308,57 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
               <div className="mb-range"><SegmentedControl label="Range" size="small" value={range} options={ranges} onChange={setRange} /></div>
 
               <section className="mb-section" aria-labelledby="mb-sleep">
-                <h2 id="mb-sleep" className="mb-section__title">Sleep</h2>
-                <div className="mb-row">
+                <div className="mb-section__head">
+                  <h2 id="mb-sleep" className="mb-section__title">Sleep</h2>
+                  <p className="chart-legend" aria-hidden="true"><span><i />You</span><span><i data-key="usual" />Your usual ({days} days)</span></p>
+                </div>
+                <div className="mb-row mb-row--stack">
                   <div className="mb-row__head">
-                    <h3>Last night</h3>
-                    <p className="mb-row__value">{typeof sleepMin === "number" ? hoursMinutes(sleepMin) : DASH}</p>
-                    <p className="mb-row__usual">{typeof efficiency === "number" ? `${Math.round(efficiency * 100)}% efficient` : "\u00a0"}</p>
+                    <ChartHeader title="Last night" value={typeof sleepMin === "number" ? hoursMinutes(sleepMin) : DASH} delta={readingDelta(readingOf("sleep"))}
+                      usual={[typeof efficiency === "number" ? `${Math.round(efficiency * 100)}% efficient` : null, night ? `in bed ${hoursMinutes(night.inBedMin)}` : null].filter(Boolean).join(" · ") || "\u00a0"} />
                   </div>
                   <div className="mb-plot">
+                    {night && <SleepSpan start={night.start} end={night.end} />}
                     <StageStrip stages={stages} />
-                    {stages.some((stage) => stage.minutes > 0) && <p className="mind-body__meta">{stages.map((stage) => `${stage.label} ${hoursMinutes(stage.minutes)}`).join(" · ")}</p>}
-                    <BaselineChart points={inRange(merged.sleep, asOf, days)} reading={readingOf("sleep")} tall />
+                    {stages.some((stage) => stage.minutes > 0) && (
+                      <dl className="mb-stagekey">
+                        {stages.map((stage) => <div key={stage.tone}><dt><i data-tone={stage.tone} aria-hidden="true" />{stage.label}</dt><dd>{hoursMinutes(stage.minutes)}<small>{Math.round((stage.minutes / Math.max(1, stages.reduce((sum, item) => sum + item.minutes, 0))) * 100)}%</small></dd></div>)}
+                      </dl>
+                    )}
+                    <p className="mind-body__meta">Totals for the night. Stage order needs per-epoch data, which isn&apos;t sent yet.</p>
                   </div>
+                </div>
+                <div className="mb-row mb-row--stack mb-row--rule">
+                  <div className="mb-row__head">
+                    {(() => { const item = readingOf("sleep"); const nights = inRange(merged.sleep, asOf, days).filter((p) => typeof p.value === "number");
+                      const avg = nights.length ? nights.reduce((sum, p) => sum + (p.value as number), 0) / nights.length : null;
+                      return <ChartHeader title={`Nightly sleep · last ${nights.length} nights`} value={avg == null ? DASH : hoursMinutes(avg)} unit="avg"
+                        usual={item.base ? `usual ${hoursMinutes(item.base.mean - item.base.sd)}–${hoursMinutes(item.base.mean + item.base.sd)}` : "no baseline yet"} />; })()}
+                  </div>
+                  <div className="mb-plot"><BaselineChart points={inRange(merged.sleep, asOf, days)} reading={readingOf("sleep")} tall bars /></div>
                 </div>
               </section>
 
               <section className="mb-section" aria-labelledby="mb-trends">
-                <h2 id="mb-trends" className="mb-section__title">Trends against your baseline</h2>
+                <h2 id="mb-trends" className="mb-section__title">Trends against your usual</h2>
+                <p className="chart-legend mb-legend-line" aria-hidden="true"><span><i />You · daily value</span><span><i data-key="usual" />Your usual ({days} days)</span><span><i data-key="workout" />Workout day</span></p>
                 <div className="mb-rows">
                   {TREND_ROWS.map((key) => {
                     const item = readingOf(key);
+                    const pts = inRange(merged[key], asOf, days);
+                    const workouts = key === "strain" ? pts.map((p) => ((ready_?.days ?? []).find((row) => row.day === p.day)?.exerciseCount ?? 0) > 0) : undefined;
                     return (
-                      <div className="mb-row" key={key}>
+                      <div className="mb-row mb-row--stack" key={key}>
                         <div className="mb-row__head">
-                          <h3>{item.def.label}</h3>
-                          <p className="mb-row__value">{item.value === null ? DASH : item.def.format(item.value)}</p>
-                          <p className="mb-row__usual">{item.base ? `usual ${item.def.format(item.base.mean)}` : "no baseline yet"}</p>
+                          <ChartHeader title={key === "resting_hr" ? "Resting heart rate" : item.def.label} value={item.value === null ? DASH : item.def.format(item.value).replace(/ ?(ms|bpm|%)$/, "")}
+                            unit={item.def.unit || undefined} delta={readingDelta(item)} usual={item.base ? `usual ${item.def.format(item.base.mean)}` : "no baseline yet"} />
                         </div>
-                        <div className="mb-plot"><BaselineChart points={inRange(merged[key], asOf, days)} reading={item} /></div>
+                        <div className="mb-plot"><BaselineChart points={pts} reading={item} bars={key === "strain"} markers={workouts} /></div>
                       </div>
                     );
                   })}
                 </div>
+                <p className="mind-body__meta">Workouts are a daily count (no time or type yet). Meals aren&apos;t shown: no nutrition source is connected.</p>
               </section>
 
               <section className="mb-section" aria-labelledby="mb-load">
@@ -365,7 +427,7 @@ export function MindBodyField({ sessions, load = loadMindBody }: MindBodyFieldPr
                 <div><dt>Resting HR</dt><dd>{num(ctx.resting_hr)} bpm</dd></div>
                 <div><dt>Sleep</dt><dd>{typeof ctx.sleep_minutes === "number" ? hoursMinutes(ctx.sleep_minutes) : DASH}</dd></div>
               </dl>
-            ) : <p className="mind-body__hint">{lastSession ? "No body context saved for this session. Sessions recorded before NOOP was set up don't have one." : "No sessions yet."}</p>}
+            ) : <p className="mind-body__hint">{lastSession ? "No body context saved for this session. Sessions recorded before health sync was set up don't have one." : "No sessions yet."}</p>}
           </section>
         </>
       )}

@@ -5,8 +5,8 @@ import type {
   DeviceTelemetry,
   DataSource,
   ElectrodeMode,
-} from "@/lib/types";
-import { deriveElectrodeMode, isOutputAllowed } from "@/lib/electrode/electrodePolicy";
+} from "../../src-console/legacy-core/lib/types";
+import { deriveElectrodeMode, isOutputAllowed } from "../../src-console/legacy-core/lib/electrode/electrodePolicy";
 import {
   StubMyndliftAdapter,
   type ElectrodeAdapter,

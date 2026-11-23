@@ -4,7 +4,7 @@ import { StrictMode, createElement, type ReactNode } from "react";
 import { renderHook } from "@testing-library/react";
 
 const s = vi.hoisted(() => ({ startScheduler: vi.fn(), stopScheduler: vi.fn() }));
-vi.mock("@/terrance/system/scheduler", () => s);
+vi.mock("../legacy-core/terrance/system/scheduler", () => s);
 
 import { useSchedulerLifecycle } from "./useSchedulerLifecycle";
 

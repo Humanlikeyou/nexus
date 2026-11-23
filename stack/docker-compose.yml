@@ -206,18 +206,25 @@ services:
       CREW_SERVICE_PORT: "8400"
       CREW_SERVICE_TOKEN: ${CREW_SERVICE_TOKEN:?set CREW_SERVICE_TOKEN in .env}
       CREW_MAX_TASK_CHARS: ${CREW_MAX_TASK_CHARS:-4000}
-      CREW_MAX_CONCURRENT: ${CREW_MAX_CONCURRENT:-2}
+      CREW_MAX_CONCURRENT: ${CREW_MAX_CONCURRENT:-1}
       CREW_RUN_TIMEOUT_SECONDS: ${CREW_RUN_TIMEOUT_SECONDS:-900}
       CREW_ALLOWED_NAMES: ${CREW_ALLOWED_NAMES:-}
       # Tools: allowlist (empty = none) and the read-only Ingress webhook they call
       CREW_ALLOWED_TOOLS: ${CREW_ALLOWED_TOOLS:-}
       CREW_INGRESS_URL: ${CREW_INGRESS_URL:-http://n8n:5678/webhook/terrance/ingress-crew}
-      # LLM — local Ollama (gemma4) primary; MiniMax optional, only if MINIMAX_API_KEY is set
-      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
-      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.io/anthropic}
-      MINIMAX_MODEL: ${MINIMAX_MODEL:-MiniMax-M2.5}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      CREW_OLLAMA_MODEL: ${CREW_OLLAMA_MODEL:-gemma4:latest}
+      # LLM — every model call goes through the Amara Router (OpenAI /v1); tier by model alias
+      # (amara-fast / amara-deep) plus X-Amara-Route. Never Ollama directly.
+      CREW_ROUTER_URL: ${CREW_ROUTER_URL:-http://host.docker.internal:8787/v1}
+      CREW_ROUTER_KEY: ${CREW_ROUTER_KEY:-}
+      CREW_DEEP_WAIT_MAX_SECONDS: ${CREW_DEEP_WAIT_MAX_SECONDS:-300}
+      # R13-F signed n8n trigger: CREW_TRIGGER_SECRET is read from .env.crew (env_file) only. It is
+      # deliberately NOT listed here: an `environment:` entry would override env_file with a blank.
+      # Unset = endpoint disabled (every call 403).
+      # 1110i files/terminal sandbox: UNSET = the tools do not exist. TAISUN step, see tasks/active/D-1110i.md:
+      #   CREW_SANDBOX_ROOT: /crew-sandbox    and under `volumes:`  - ${HOME}/crew-sandbox:/crew-sandbox
+      # R13-E (optional, mapped app-data folders): CREW_MEMORY_WRITER=file, CREW_MEMORY_DIR=/crew-memory, CREW_SKILLS_DIR=/crew-skills
+      # No cloud path here (MiniMax removed). The kill switch also blocks any future Claude tier.
+      NEXUS_OUTBOUND_DISABLED: ${NEXUS_OUTBOUND_DISABLED:-}
       # Persistence — crew_runs table in the shared terrance DB
       CREW_DB_HOST: postgres
       CREW_DB_PORT: "5432"

@@ -7,13 +7,13 @@
 .quiet-lines { display: grid; margin: 0; padding: 0; list-style: none; }
 .quiet-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); padding-block: var(--space-3); box-shadow: inset 0 -1px 0 var(--separator); }
 .quiet-line:last-child { box-shadow: none; }
-.quiet-line__text { display: grid; gap: 2px; min-width: 0; }
+.quiet-line__text { display: grid; gap: 3px; min-width: 0; }
 .quiet-line__title { overflow: hidden; color: var(--label); font: 400 var(--text-title3)/var(--lh-title3) var(--font-text); text-overflow: ellipsis; white-space: nowrap; }
 .quiet-line__detail { color: var(--label-secondary); font: var(--type-callout); }
 .quiet-line__trailing { display: inline-flex; flex: none; align-items: center; gap: var(--space-3); color: var(--label-secondary); font: var(--type-callout); font-variant-numeric: tabular-nums; }
 
 .quiet-figures { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-10); margin: 0; }
-.quiet-figure { display: grid; gap: 2px; min-width: 0; }
+.quiet-figure { display: grid; gap: 3px; min-width: 0; }
 .quiet-figure dt { order: 2; color: var(--label-secondary); font: var(--type-callout); }
 .quiet-figure dd { order: 1; margin: 0; color: var(--label); font: 300 var(--text-title1)/1.2 var(--font-text); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
 
@@ -24,3 +24,8 @@
 .quiet-more__chevron { width: 14px; height: 14px; flex: none; transition: transform var(--dur-fast) var(--ease-standard); }
 .quiet-more[open] .quiet-more__chevron { transform: rotate(90deg); }
 .quiet-more__body { display: grid; gap: var(--space-8); padding-top: var(--space-6); }
+
+/* design-1110b B: a folded screen shown as a section of its host page. One hairline above, no second page inset. */
+.page-section { width: 100%; max-width: var(--page-column, 1120px); margin-inline: auto; padding: var(--space-6) 0 var(--space-10); border-top: 1px solid var(--separator); scroll-margin-top: var(--space-6); }
+.page-section > .page-inset, .page-section > .settings, .page-section > div { padding-top: 0; padding-bottom: 0; max-width: none; }
+.page-hero--section .page-hero__statement { font-size: var(--text-title2, 21px); }

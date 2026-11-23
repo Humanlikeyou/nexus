@@ -195,6 +195,7 @@ fast_num_ctx = 4096
 deep_num_ctx = 2048
 [routing]
 classifier_timeout_ms = 300
+auto_deep = {auto_deep}
 [loading]
 warm_fast_on_start = false
 rewarm_fast_after_deep = {rewarm}
@@ -208,6 +209,8 @@ anthropic_url = "{ollama}/v1/messages"
 path = "{log}"
 "#,
         extra_top = "",
+        // The code default is off; most tests here exercise the automatic paths.
+        auto_deep = !extra.contains("default_routing"),
         rewarm = extra.contains("rewarm"),
         filler = extra.contains("filler"),
         cloud = extra.contains("cloud"),
@@ -1681,7 +1684,11 @@ async fn a_resident_deep_is_served_with_no_load() {
 
 #[tokio::test]
 async fn a_fast_request_waits_for_deep_then_restores_fast() {
-    let r = rig(cold_deep(500, &["answer"])).await;
+    // Grace 0: this test is about the swap itself, not the grace period.
+    let r = rig_cfg(cold_deep(500, &["answer"]), "", None, false, |c| {
+        c.loading.deep_grace_secs = 0;
+    })
+    .await;
     let deep = tokio::spawn({
         let url = format!("{}/v1/chat/completions", r.url);
         async move { post(&url, oa("/deep hi", false), &[]).await }
@@ -2053,4 +2060,272 @@ async fn finished_reply_logs_one_ok_line_and_no_cancelled_line() {
     let lines = route_log_lines(&r).await;
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert_eq!(lines[0]["status"], "ok");
+}
+
+// ── B01: a fast request must not evict a deep model that was just used ───────
+
+const GB: u64 = 1_000_000_000;
+
+/// Deep resident (fast was swapped out), fast's size seen earlier.
+fn deep_resident_mock() -> Mock {
+    let mut m = mock("EASY", &["ok"]);
+    m.ps_models = vec![DEEP.into()];
+    m
+}
+
+#[tokio::test]
+async fn a_fast_request_does_not_unload_deep_inside_the_grace_period() {
+    let r = rig_cfg(deep_resident_mock(), "", None, false, |c| {
+        c.loading.deep_grace_secs = 1;
+    })
+    .await;
+    let url = format!("{}/v1/chat/completions", r.url);
+    assert_eq!(deep_ask(&r, false).await.status(), 200); // deep is used now
+    let fast = tokio::spawn({
+        let url = url.clone();
+        async move { post(&url, oa("/fast hi", false), &[]).await }
+    });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        r.mock.lock().unwrap().unloads.is_empty(),
+        "deep was unloaded inside the grace period"
+    );
+    let t = Instant::now();
+    let resp = fast.await.unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(route_headers(&resp).0, "fast");
+    assert!(t.elapsed() < Duration::from_secs(3));
+    assert_eq!(
+        r.mock.lock().unwrap().unloads,
+        [DEEP],
+        "deep goes once the grace has passed"
+    );
+}
+
+#[tokio::test]
+async fn a_fast_request_leaves_deep_when_both_fit_the_gpu_budget() {
+    let mut m = cold_deep(10, &["ok"]);
+    m.ps_vram.insert(FAST.into(), 5 * GB);
+    m.ps_vram.insert(DEEP.into(), 10 * GB);
+    let r = rig_cfg(m, "", None, false, |c| {
+        c.loading.deep_grace_secs = 0;
+        c.loading.gpu_budget_gb = 21.0;
+    })
+    .await;
+    deep_ask(&r, false).await.text().await.unwrap(); // fast seen at 5 GB, then swapped out
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/fast hi", false),
+        &[],
+    )
+    .await;
+    assert_eq!(route_headers(&resp).0, "fast");
+    assert_eq!(
+        r.mock.lock().unwrap().unloads,
+        [FAST],
+        "only the swap-out for deep; deep stays (5+10 GB fits 21 GB)"
+    );
+}
+
+#[tokio::test]
+async fn a_fast_request_moves_deep_out_when_both_do_not_fit() {
+    let mut m = cold_deep(10, &["ok"]);
+    m.ps_vram.insert(FAST.into(), 5 * GB);
+    m.ps_vram.insert(DEEP.into(), 10 * GB);
+    let r = rig_cfg(m, "", None, false, |c| {
+        c.loading.deep_grace_secs = 0;
+        c.loading.gpu_budget_gb = 12.0;
+    })
+    .await;
+    deep_ask(&r, false).await.text().await.unwrap();
+    let resp = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/fast hi", false),
+        &[],
+    )
+    .await;
+    assert_eq!(route_headers(&resp).0, "fast");
+    assert_eq!(r.mock.lock().unwrap().unloads, [FAST, DEEP]);
+}
+
+// ── B02: auto_deep is off by default and gates every automatic deep path ─────
+
+#[tokio::test]
+async fn by_default_nothing_goes_deep_automatically() {
+    let r = rig_with(mock("HARD", &["ok"]), "default_routing", None, false).await;
+    // Size and code block rules.
+    let long = "word ".repeat(1700);
+    let (tier, _) = route_of(&r, &long).await;
+    assert_eq!(tier, "fast");
+    let (tier, _) = route_of(&r, "fix:\n```py\nprint(1\n```").await;
+    assert_eq!(tier, "fast");
+    // Classifier says HARD: still fast.
+    let (tier, reason) = route_of(&r, "Compare three mortgage strategies").await;
+    assert_eq!(
+        (tier.as_str(), reason.as_str()),
+        ("fast", "classifier_hard_auto_deep_off")
+    );
+    // Explicit asks still go deep.
+    assert_eq!(route_of(&r, "/deep hello").await.0, "deep");
+}
+
+#[tokio::test]
+async fn by_default_hard_looking_prompts_stay_fast_when_ps_is_unavailable_or_fast_is_cold() {
+    let mut m = mock("EASY", &["ok"]);
+    m.ps_fails = true;
+    let r = rig_with(m, "default_routing", None, false).await;
+    let (tier, reason) = route_of(&r, "Explain why my build fails").await;
+    assert_eq!(
+        (tier.as_str(), reason.as_str()),
+        ("fast", "classifier_skipped_ps_unavailable")
+    );
+    let mut m = mock("EASY", &["ok"]);
+    m.ps_models = vec![DEEP.into()]; // fast not resident
+    let r = rig_with(m, "default_routing", None, false).await;
+    let (tier, reason) = route_of(&r, "debug this for me").await;
+    assert_eq!(
+        (tier.as_str(), reason.as_str()),
+        ("fast", "classifier_skipped_fast_not_resident")
+    );
+}
+
+// ── B05: with the cloud tier on, the loopback listener needs the bearer key ──
+
+#[tokio::test]
+async fn loopback_requires_bearer_when_the_cloud_tier_is_on() {
+    let key = "k".repeat(32);
+    for (cloud, keyed, anon_status) in [(true, true, 401), (false, true, 200), (true, false, 200)] {
+        let m = Arc::new(Mutex::new(mock("EASY", &[])));
+        let mock_url = start_mock(m).await;
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = base_config(
+            &mock_url,
+            &dir.path().join("l.jsonl"),
+            if cloud { "cloud" } else { "" },
+        );
+        let secrets = Secrets {
+            api_key: keyed.then(|| key.clone()),
+            anthropic_key: None,
+        };
+        let state = State::new(cfg, secrets, false);
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", l.local_addr().unwrap());
+        let app = server::local_router(state);
+        tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+        // /health stays open for probes; everything else is gated.
+        let anon = reqwest::get(format!("{url}/health")).await.unwrap();
+        assert_eq!(anon.status(), 200, "cloud={cloud} keyed={keyed}");
+        let anon = reqwest::Client::new()
+            .post(format!("{url}/v1/chat/completions"))
+            .json(&oa("hi", false))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(anon.status(), anon_status, "cloud={cloud} keyed={keyed}");
+        let anon = reqwest::get(format!("{url}/api/tags")).await.unwrap();
+        assert_eq!(anon.status(), anon_status);
+        let ok = reqwest::Client::new()
+            .get(format!("{url}/health"))
+            .bearer_auth(&key)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(ok.status(), 200);
+        let bad = reqwest::Client::new()
+            .get(format!("{url}/api/tags"))
+            .bearer_auth("wrong")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(bad.status(), anon_status);
+    }
+}
+
+// ---- per-launch token (opt-in; /amara/* and /api/* only) ----
+
+const LTOK_A: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const LTOK_B: &str = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+
+async fn token_rig(file: std::path::PathBuf, require: bool) -> Rig {
+    rig_cfg(mock("EASY", &["hi"]), "", None, false, move |cfg| {
+        cfg.security.require_launch_token = require;
+        cfg.security.launch_token_file = Some(file.to_string_lossy().into_owned());
+    })
+    .await
+}
+
+async fn status(url: &str, path: &str, tok: Option<&str>, post_req: bool) -> u16 {
+    let c = reqwest::Client::new();
+    let mut r = if post_req {
+        c.post(format!("{url}{path}")).json(&oa("hi", false))
+    } else {
+        c.get(format!("{url}{path}"))
+    };
+    if let Some(t) = tok {
+        r = r.header("X-Amara-Launch-Token", t);
+    }
+    r.send().await.unwrap().status().as_u16()
+}
+
+#[tokio::test]
+async fn launch_token_enforced_on_amara_and_api_only() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("launch_token");
+    std::fs::write(&f, format!("{LTOK_A}\n")).unwrap();
+    let r = token_rig(f.clone(), true).await;
+    // no header / wrong header: 401
+    assert_eq!(status(&r.url, "/api/tags", None, false).await, 401);
+    assert_eq!(status(&r.url, "/api/tags", Some(LTOK_B), false).await, 401);
+    assert_eq!(status(&r.url, "/amara/route", None, true).await, 401);
+    // right header: through
+    assert_eq!(status(&r.url, "/api/tags", Some(LTOK_A), false).await, 200);
+    assert_ne!(
+        status(&r.url, "/amara/route", Some(LTOK_A), true).await,
+        401
+    );
+    // /health open, /v1 unaffected (Hermes sends no header)
+    assert_eq!(status(&r.url, "/health", None, false).await, 200);
+    assert_eq!(status(&r.url, "/v1/models", None, false).await, 200);
+    // Host/Origin checks stay in force with a right token
+    let c = reqwest::Client::new();
+    let o = c
+        .get(format!("{}/api/tags", r.url))
+        .header("X-Amara-Launch-Token", LTOK_A)
+        .header("Origin", "http://evil.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(o.status(), 403);
+    // rotation: new token accepted, old rejected, no restart
+    std::fs::write(&f, format!("{LTOK_B}\n")).unwrap();
+    assert_eq!(status(&r.url, "/api/tags", Some(LTOK_B), false).await, 200);
+    assert_eq!(status(&r.url, "/api/tags", Some(LTOK_A), false).await, 401);
+}
+
+#[tokio::test]
+async fn launch_token_absent_or_malformed_file_fails_closed() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("launch_token");
+    let r = token_rig(f.clone(), true).await;
+    assert_eq!(status(&r.url, "/api/tags", Some(LTOK_A), false).await, 401);
+    assert_eq!(status(&r.url, "/api/tags", Some(""), false).await, 401);
+    std::fs::write(&f, "short\n").unwrap();
+    assert_eq!(status(&r.url, "/api/tags", Some("short"), false).await, 401);
+    std::fs::write(&f, LTOK_A.to_uppercase()).unwrap();
+    assert_eq!(
+        status(&r.url, "/api/tags", Some(&LTOK_A.to_uppercase()), false).await,
+        401
+    );
+    assert_eq!(status(&r.url, "/health", None, false).await, 200);
+    assert_eq!(status(&r.url, "/v1/models", None, false).await, 200);
+}
+
+#[tokio::test]
+async fn launch_token_switch_off_by_default_ignores_the_file() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("launch_token");
+    std::fs::write(&f, format!("{LTOK_A}\n")).unwrap();
+    let r = token_rig(f, false).await;
+    assert_eq!(status(&r.url, "/api/tags", None, false).await, 200);
+    assert!(!amara_router::config::Security::default().require_launch_token);
 }

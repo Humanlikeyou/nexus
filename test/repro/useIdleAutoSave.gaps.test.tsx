@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
 const silent = vi.hoisted(() => vi.fn());
-vi.mock("@/terrance/system/continuity", () => ({ summarizeAndStoreSessionSilent: silent }));
+vi.mock("../../src-console/legacy-core/terrance/system/continuity", () => ({ summarizeAndStoreSessionSilent: silent }));
 
 import { useIdleAutoSave, toSessionEntries, type AutoSaveMessage } from "../../src-console/hooks/useIdleAutoSave";
 

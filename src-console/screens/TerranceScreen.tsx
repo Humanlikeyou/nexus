@@ -1,17 +1,21 @@
-import { Bot, Brain, ChevronRight, CircleDollarSign, Cpu, Library, RefreshCw } from "lucide-react";
+import { Bot, Brain, ChevronRight, Library, RefreshCw } from "lucide-react";
 import { HermesSubtitle } from "./agentLabels";
 import { useEffect, useState, type ReactNode } from "react";
-import { getSchedulerStatus, type SchedulerStatus } from "@/terrance/system/scheduler";
+import { getSchedulerStatus, type SchedulerStatus } from "../legacy-core/terrance/system/scheduler";
 import type { ConversationMessage } from "../app/conversation";
-import { ASSISTANT_TITLE, assistantBadge } from "../app/openclaw";
-import { assistantView, kbView } from "../app/statusViews";
+import { kbView } from "../app/statusViews";
 import { INITIAL_SNAPSHOT } from "../bridge";
-import { dateTime, money, time } from "../lib/format";
+import { dateTime, time } from "../lib/format";
 import type { ModuleId, SystemSnapshot, TerrenceAction } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, StatusDot, type Tone, Line, Lines, More, PageHero } from "../ui";
+import { Badge, Button, Card, InsetGroup, ListRow, Ring, StatTile, StatusDot, type Tone, More, PageHero } from "../ui";
 import { recoveryBand } from "./HealthScreen";
-import { GoalsCard } from "./GoalsCard";
+import { personalAdapter, isTokyoSunday } from "../personal/adapters";
+import { CheckInSection } from "../personal/TodaySections";
+import { NeedsYouToday, WeeklyReadyCard, useNeedsYou } from "../inbox/NeedsYouToday";
+import type { Route } from "../app/routes";
 import { useReadinessLine } from "../lib/useReadiness";
+import { usualRange } from "../ui/charts/chartMath";
+import { HrTake } from "../hrTake/HrTakeCard";
 import "./TerranceScreen.css";
 
 const DASH = "—";
@@ -129,6 +133,9 @@ function ago(ms: number, now: number) {
   return h < 24 ? `${h} h ago` : `${Math.floor(h / 24)} d ago`;
 }
 
+/** Background jobs live in Settings › General › About & Diagnostics. */
+const SCHEDULER_ROUTE: Route = { id: "settings", view: "about" };
+
 export interface StripSegment {
   key: "agents" | "scheduler" | "noop";
   text: string;
@@ -138,6 +145,8 @@ export interface StripSegment {
   /** Exact time for the title attribute. */
   title?: string;
   to: ModuleId;
+  /** decision 0042: the exact section the segment is about; used instead of `to` when the screen can open routes. */
+  route?: Route;
 }
 
 /** Home status strip (screen-specs › Command center feel): plain text segments, not Badges. */
@@ -146,10 +155,9 @@ export const NOOP_STALE_AFTER_MS = 2 * 60 * 60 * 1000;
 
 export function statusStrip(data: SystemSnapshot, scheduler: SchedulerView, now: number): StripSegment[] {
   const amaraOnline = data.hermes.status === "online";
-  const assistant = assistantBadge(data.openclaw);
   const agents: StripSegment = {
     key: "agents", to: "chat", tone: amaraOnline ? "success" : "danger", live: amaraOnline,
-    text: `Amara ${amaraOnline ? "online" : "offline"}${assistant ? ` · ${ASSISTANT_TITLE} connected` : ""}`,
+    text: `Amara ${amaraOnline ? "online" : "offline"}`,
   };
 
   const runs = nextRuns(scheduler);
@@ -157,35 +165,35 @@ export function statusStrip(data: SystemSnapshot, scheduler: SchedulerView, now:
     .filter((r): r is [string, number] => r[1] != null)
     .sort((a, b) => a[1] - b[1])[0];
   const sched: StripSegment = !scheduler.running
-    ? { key: "scheduler", to: "settings", tone: "danger", live: false, text: "Background jobs stopped" }
+    ? { key: "scheduler", to: "settings", route: SCHEDULER_ROUTE, tone: "danger", live: false, text: "Background jobs stopped" }
     : next
-      ? { key: "scheduler", to: "settings", tone: "success", live: true, text: `Next: ${next[0]} ${nextIn(next[1], now)}`, title: dateTime(next[1]) }
-      : { key: "scheduler", to: "settings", tone: "neutral", live: false, text: "Background jobs running" };
+      ? { key: "scheduler", to: "settings", route: SCHEDULER_ROUTE, tone: "success", live: true, text: `Next: ${next[0]} ${nextIn(next[1], now)}`, title: dateTime(next[1]) }
+      : { key: "scheduler", to: "settings", route: SCHEDULER_ROUTE, tone: "neutral", live: false, text: "Background jobs running" };
 
   const noop = data.noop;
   const noopDown = data.unavailableSources.some((s) => s.command === "get_noop_health_snapshot") || noop.status === "unavailable";
   const synced = noop.generatedAt ? Date.parse(noop.generatedAt) : NaN;
   const syncedText = Number.isNaN(synced) ? null : `synced ${ago(synced, now)}`;
   const health: StripSegment = noopDown
-    ? { key: "noop", to: "health", tone: "danger", live: false, text: "NOOP unavailable" }
+    ? { key: "noop", to: "health", tone: "danger", live: false, text: "Health sync unavailable" }
     : noop.status === "stale"
-      ? { key: "noop", to: "health", tone: "warning", live: false, text: `NOOP stale${syncedText ? ` · ${syncedText}` : ""}`, title: dateTime(synced) }
+      ? { key: "noop", to: "health", tone: "warning", live: false, text: `Health sync stale${syncedText ? ` · ${syncedText}` : ""}`, title: dateTime(synced) }
       : noop.status === "ready"
         // NOOP is a nightly sync, not a live feed: never pulses; an old sync reads as a warning.
-        ? { key: "noop", to: "health", tone: !Number.isNaN(synced) && now - synced > NOOP_STALE_AFTER_MS ? "warning" : "success", live: false, text: `NOOP ${syncedText ?? "synced"}`, title: dateTime(synced) }
-        : { key: "noop", to: "health", tone: "neutral", live: false, text: noop.status === "waiting_for_nightly_data" ? "NOOP waiting for tonight's data" : "NOOP waiting for data" };
+        ? { key: "noop", to: "health", tone: !Number.isNaN(synced) && now - synced > NOOP_STALE_AFTER_MS ? "warning" : "success", live: false, text: `Health ${syncedText ?? "synced"}`, title: dateTime(synced) }
+        : { key: "noop", to: "health", tone: "neutral", live: false, text: noop.status === "waiting_for_nightly_data" ? "Health sync waiting for tonight's data" : "Health sync waiting for data" };
   return [agents, sched, health];
 }
 
 /** Owns its own 30s tick so NOOP staleness (and "synced N ago") re-evaluates without re-rendering the screen. */
-function StatusStrip({ data, scheduler, fixedNow, onNavigate }: { data: SystemSnapshot; scheduler: SchedulerView; fixedNow?: number; onNavigate?: (id: ModuleId) => void }) {
+function StatusStrip({ data, scheduler, fixedNow, onNavigate, onOpen }: { data: SystemSnapshot; scheduler: SchedulerView; fixedNow?: number; onNavigate?: (id: ModuleId) => void; onOpen?: (route: Route) => void }) {
   const now = useNow(fixedNow);
   const segments = statusStrip(data, scheduler, now);
   return (
     <div className="home__strip" role="group" aria-label="Status">
       {segments.map((s) => (
         <button key={s.key} type="button" className="home__strip-item" data-key={s.key} data-live={s.live || undefined}
-          title={s.title} disabled={!onNavigate} onClick={() => onNavigate?.(s.to)}>
+          title={s.title} disabled={!onNavigate && !onOpen} onClick={() => { if (s.route && onOpen) onOpen(s.route); else onNavigate?.(s.to); }}>
           <StatusDot tone={s.tone}>{s.text}</StatusDot>
         </button>
       ))}
@@ -193,12 +201,14 @@ function StatusStrip({ data, scheduler, fixedNow, onNavigate }: { data: SystemSn
   );
 }
 
-const PRIORITY_TONE: Record<string, Tone> = { active: "accent", in_progress: "accent", blocked: "danger", attention: "warning", awaiting_approval: "warning", done: "success", completed: "success" };
-
 export type TerranceFieldProps = {
   data: SystemSnapshot;
   /** Navigates to another screen (Home cards deep-link). Links are hidden without it. */
   onNavigate?: (id: ModuleId) => void;
+  /** design-1111v: opens a route (Needs you today rows, the Sunday card). Links are disabled without it. */
+  onOpen?: (route: Route) => void;
+  /** design-1111v: Today › To-dos (the folded Lists screen), rendered before the disclosure. */
+  todos?: ReactNode;
   /** Re-runs the snapshot load. Retry buttons are hidden without it. */
   onRetry?: () => void;
   /** Overrides first-load detection (refreshedAt still equals INITIAL_SNAPSHOT's). */
@@ -206,7 +216,7 @@ export type TerranceFieldProps = {
   /** Test seams. */
   now?: number;
   scheduler?: SchedulerView;
-  // Legacy chat props: the conversation moved to Chat & Agents. Still accepted so App keeps compiling.
+  // Legacy chat props: the conversation moved to the Home chat (design-1110b A). Still accepted so App keeps compiling.
   messages?: ConversationMessage[];
   sending?: boolean;
   onSend?: (message: string) => Promise<void>;
@@ -242,24 +252,28 @@ function OpenLink({ to, label, onNavigate }: { to: ModuleId; label: string; onNa
   return <Button variant="plain" size="small" onClick={() => onNavigate(to)} aria-label={label}>Open<ChevronRight className="home__chevron" aria-hidden="true" /></Button>;
 }
 
-export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNow, scheduler: schedulerOverride }: TerranceFieldProps) {
+export function TerranceField({ data, onNavigate, onOpen, todos, onRetry, loading, now: fixedNow, scheduler: schedulerOverride }: TerranceFieldProps) {
   const now = useNow(fixedNow);
   const readinessLine = useReadinessLine();
+  // design-1111v: Today is short. Card C, the Sunday card, Needs you today, Check-in and To-dos; Goals, Dates and
+  // Weekly review moved to Life, Revenue today to Enterprise, and Priorities became Needs you today rows.
+  const personal = personalAdapter();
+  const sunday = isTokyoSunday(new Date(now));
   const scheduler = useSchedulerStatus(schedulerOverride);
   const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const down = (command: string) => data.unavailableSources.some((s) => s.command === command);
   const unavailable = data.unavailableSources;
-  // Nothing to say until the first snapshot lands (no "All clear" flash while loading).
-  const summary = isLoading ? null : homeSummary(data);
+  const inbox = useNeedsYou(data, now);
+  // Nothing to count until the first snapshot lands (no "0 things" flash while loading).
+  const needCount = isLoading || (inbox.loading && inbox.count === 0) ? null : inbox.count;
 
   const header = (
-    <PageHero title="Command Center" statement={`${greeting(now)}, Taisun`}
+    <PageHero title="Today" statement={`${greeting(now)}, Taisun`}
       detail={<span className="home__summary">
-        {summary && (summary.kind === "actions" && onNavigate
-          ? <button type="button" className="home__summary-link" onClick={() => onNavigate("chat")}>{summary.text}</button>
-          : <span>{summary.text}</span>)}
-        {summary && " · "}
         <time dateTime={new Date(now).toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" })}>{homeDate(now)}</time>
+        {needCount != null && <>{" · "}{onOpen && needCount > 0
+          ? <button type="button" className="home__summary-link" onClick={() => onOpen({ id: "terrance", view: "needs-you" })}>{needCount} thing{needCount === 1 ? "" : "s"} need{needCount === 1 ? "s" : ""} you</button>
+          : <span>{needCount === 0 ? "nothing needs you" : `${needCount} thing${needCount === 1 ? "" : "s"} need${needCount === 1 ? "s" : ""} you`}</span>}</>}
       </span>} />
   );
   const sourcesNote = unavailable.length > 0 && <span className="home__status" data-tone="warning" title={unavailable.map((s) => s.label).join(", ")}><i className="home__dot" aria-hidden="true" />{unavailable.length} source{unavailable.length === 1 ? "" : "s"} unavailable</span>;
@@ -269,8 +283,7 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
       <div className="home" data-state="loading" aria-busy="true" aria-label="Loading Home">
         {header}
         <div className="home__top">{["Recovery & sleep", "Scheduler", "Latest insight"].map((t) => <Card key={t} title={t}><span className="home__skel" /></Card>)}</div>
-        <Card title="Agents"><span className="home__skel home__skel--short" /></Card>
-        <Card title="Priorities"><span className="home__skel home__skel--short" /></Card>
+        <Card title="Needs you today"><span className="home__skel home__skel--short" /></Card>
       </div>
     );
   }
@@ -284,29 +297,43 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
   const next = nextRuns(scheduler);
   const lastReasoning = scheduler.lastReasoning;
   const insight = noop.insights[0];
-  const priorities = data.prioritySnapshot.items.slice(0, 5);
   const muse = data.sessions.find((s) => s.device_type === "muse");
   const hermes = data.hermes;
   const hermesOnline = hermes.status === "online";
-  const assistant = assistantView(data.openclaw, { loading: false, unavailable: down("read_openclaw_status") });
   const kb = kbView(data.kb, down("kb_status"));
   const nextConsolidation = nextIn(next.consolidation, now);
   const nextReasoning = nextIn(next.reasoning, now);
 
+  // design-1111u C: "vs usual" from the days before today (median of at least 5), never made up.
+  const before = noop.recentDays.filter((d) => d.day !== noop.today?.day);
+  const usualOf = (pick: (d: (typeof before)[number]) => number | null) => usualRange(before.map(pick))?.median ?? null;
+  const vs = (value: number | null, usual: number | null, unit: string) => {
+    if (value == null || usual == null) return null;
+    const d = Math.round(value - usual);
+    if (d === 0) return <span className="body-today__vs" data-dir="flat">≈ usual</span>;
+    return <span className="body-today__vs" data-dir={d > 0 ? "up" : "down"}>{d > 0 ? "▲" : "▼"} {Math.abs(d)}{unit} vs usual</span>;
+  };
+  const sleepText = sleepMin == null ? DASH : `${Math.floor(sleepMin / 60)}h ${Math.round(sleepMin % 60)}m`;
+
   let recoveryBody: ReactNode;
-  if (down("get_noop_health_snapshot")) recoveryBody = <Unavailable label="NOOP health" onRetry={onRetry} />;
+  if (down("get_noop_health_snapshot")) recoveryBody = <Unavailable label="Health data" onRetry={onRetry} />;
   else recoveryBody = (
-    <div className="home__recovery">
-      <Ring value={recovery} label="Recovery" color={band?.color} valueText={band ? `${recovery}%, ${band.word}` : undefined}>
-        <span className="home__ring-value">{recovery == null ? DASH : `${Math.round(recovery)}%`}</span>
-        {band && <span className="home__ring-band" data-band={band.word.toLowerCase()}>{band.word}</span>}
-      </Ring>
-      <div className="home__recovery-stats">
-        <StatTile label="Sleep" value={sleepMin == null ? DASH : `${Math.floor(sleepMin / 60)}h ${Math.round(sleepMin % 60)}m`} />
-        <StatTile label="HRV" value={hrv == null ? DASH : Math.round(hrv)} unit="ms" />
+    <>
+      <div className="body-today__ring">
+        <Ring value={recovery} label="Recovery" color={band?.color} valueText={band ? `${recovery}%, ${band.word}` : undefined} size="sm">
+          <span className="home__ring-value">{recovery == null ? DASH : `${Math.round(recovery)}%`}</span>
+        </Ring>
+        <span className="body-today__k">Recovery
+          {band && <span className="home__ring-band" data-band={band.word.toLowerCase()}>{band.word}</span>}
+          {vs(recovery, usualOf((d) => d.recovery), "")}
+        </span>
       </div>
+      <dl className="body-today__mini" aria-label="Last night">
+        <dt>Sleep</dt><dd>{sleepText}</dd><dd>{vs(sleepMin, usualOf((d) => d.totalSleepMin), " min")}</dd>
+        <dt>HRV</dt><dd>{hrv == null ? DASH : `${Math.round(hrv)} ms`}</dd><dd>{vs(hrv, usualOf((d) => d.avgHrv), " ms")}</dd>
+      </dl>
       {recovery == null && <p className="home__note">No recovery yet{noop.message ? ` · ${noop.message}` : ""}</p>}
-    </div>
+    </>
   );
 
   return (
@@ -314,10 +341,17 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
       {header}
 
       {sourcesNote}
-      <section className="home__first" aria-label="Recovery & sleep">
-        {recoveryBody}
+      {/* design-1111u C (Taisun, 17:36 JST): Recovery & sleep merged with the heart-rate take; readiness keeps its own row. */}
+      <section className="home__recovery-card" aria-labelledby="home-recovery-title">
+      <div className="body-today__head">
+        <h2 id="home-recovery-title" className="home__recovery-title">Your body today</h2>
+        <span className="body-today__grow" />
         <OpenLink to="health" label="Open Fitness" onNavigate={onNavigate} />
-      </section>
+      </div>
+      <div className="body-today">
+        <div className="body-today__left">{recoveryBody}</div>
+        <HrTake variant="inline" onOpenDevices={onNavigate ? () => onNavigate("devices") : undefined} />
+      </div>
 
       {readinessLine && (
         <button type="button" className="home__readiness" disabled={!onNavigate} onClick={() => onNavigate?.("mindbody")} aria-label={`Open Mind–Body. Readiness ${readinessLine.score}, ${readinessLine.label}. ${readinessLine.reason}`}>
@@ -328,15 +362,15 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           </span>
         </button>
       )}
+      </section>
 
-      <Card title="Priorities" accessory={<OpenLink to="chat" label="Open Chat" onNavigate={onNavigate} />}>
-        {priorities.length === 0
-          ? <p className="home__note">No current priorities</p>
-          : <Lines label="Priorities">{priorities.slice(0, 3).map((p) => <Line key={`${p.sourceKind}-${p.sourceId}`} title={p.title} trailing={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{p.sourceStatus.replace(/_/g, " ")}</Badge>} />)}</Lines>}
-      </Card>
+      {sunday && <WeeklyReadyCard onOpen={onOpen} />}
+      <NeedsYouToday inbox={inbox} onOpen={onOpen} />
+      <CheckInSection adapter={personal} />
+      {todos}
 
-      <More label="Agents, schedule and everything else" id="home-more">
-      {!isLoading && <StatusStrip data={data} scheduler={scheduler} fixedNow={fixedNow} onNavigate={onNavigate} />}
+      <More label="Agents, schedule and insights" id="home-more">
+      {!isLoading && <StatusStrip data={data} scheduler={scheduler} fixedNow={fixedNow} onNavigate={onNavigate} onOpen={onOpen} />}
       <div className="home__top">
         <Card title="Scheduler" accessory={scheduler.running ? <Badge tone="success">Running</Badge> : undefined /* stopped is already stated by the status strip */}>
           <InsetGroup>
@@ -348,14 +382,14 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
 
         <Card title="Latest insight" accessory={<OpenLink to="health" label="Open insights in Fitness" onNavigate={onNavigate} />}>
           {down("get_noop_health_snapshot")
-            ? <Unavailable label="NOOP health" onRetry={onRetry} />
+            ? <Unavailable label="Health data" onRetry={onRetry} />
             : insight
               ? <div className="home__insight"><p className="home__insight-fact">{insight.fact}</p>{insight.context && <p className="home__note">{insight.context}</p>}</div>
-              : <p className="home__note">Insights appear after NOOP&apos;s nightly sync.</p>}
+              : <p className="home__note">Insights appear after tonight&apos;s health sync.</p>}
         </Card>
       </div>
 
-      <Card title="Agents" accessory={<OpenLink to="chat" label="Open Chat & Agents" onNavigate={onNavigate} />}>
+      <Card title="Agents" accessory={<OpenLink to="chat" label="Open Agents" onNavigate={onNavigate} />}>
         {down("get_terrence_runtime_health")
           ? <Unavailable label="Amara runtime" onRetry={onRetry} />
           : (
@@ -363,10 +397,8 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
               <ListRow icon={Bot} title="Amara" subtitle={<HermesSubtitle model={hermes.model} />}
                 accessory={<Badge tone={hermesOnline ? "success" : "warning"}>{hermesOnline ? "Online" : hermes.status ? hermes.status.replace(/_/g, " ") : "Offline"}</Badge>}
                 value={hermes.telegramStatus ? `Telegram ${hermes.telegramStatus}` : `Checked ${clock(hermes.checkedAt)}`} />
-              {assistant?.kind === "row" && <ListRow icon={Cpu} title={assistant.title} subtitle={assistant.subtitle} accessory={<Badge tone={assistant.tone} aria-label={`${assistant.title} status: ${assistant.label}`}>{assistant.label}</Badge>} />}
             </InsetGroup>
           )}
-        {assistant?.kind === "unreachable" && <StatusRetry tone="warning" badge="Not reachable" text={assistant.message} onRetry={onRetry} />}
       </Card>
 
       <Card title="Knowledge base" accessory={<Badge tone={kb.tone} aria-label={`Knowledge base status: ${kb.label}`}>{kb.label}</Badge>}>
@@ -375,16 +407,6 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
           : <InsetGroup><ListRow icon={Library} title={kb.title ?? "Verba"} subtitle={kb.body} /></InsetGroup>}
       </Card>
 
-      {priorities.length > 3 && (
-        <InsetGroup title="More priorities">
-          {priorities.slice(3).map((p) => (
-            <ListRow key={`${p.sourceKind}-${p.sourceId}`} title={p.title} subtitle={`#${p.rank} · ${p.sourceKind}`}
-              accessory={<Badge tone={PRIORITY_TONE[p.sourceStatus] ?? "neutral"}>{p.sourceStatus.replace(/_/g, " ")}</Badge>} />
-          ))}
-        </InsetGroup>
-      )}
-
-      <GoalsCard goals={data.goals} failed={down("read_goals")} onRetry={onRetry} />
 
       <div className="home__half">
         <Card title="Neuro" accessory={<OpenLink to="neuro" label="Open Neuro" onNavigate={onNavigate} />}>
@@ -397,13 +419,6 @@ export function TerranceField({ data, onNavigate, onRetry, loading, now: fixedNo
               </div>
             )
             : <p className="home__note"><Brain className="home__inline-icon" aria-hidden="true" /> Your first completed session will appear here.</p>}
-        </Card>
-        <Card title="Revenue today" accessory={<OpenLink to="revenue" label="Open Revenue" onNavigate={onNavigate} />}>
-          <div className="home__pair">
-            <StatTile label="Today" value={money(data.revenue.today_revenue)} />
-            <StatTile label="Net income" value={money(data.revenue.net_income)} />
-          </div>
-          <CircleDollarSign className="home__ghost-icon" aria-hidden="true" />
         </Card>
       </div>
 

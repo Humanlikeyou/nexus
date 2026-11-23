@@ -1,6 +1,6 @@
-import { computeBands } from "../../src/hooks/useFFT";
-import { assessChannel } from "../../src/hooks/useSignalQuality";
-import type { FrequencyBandPowers } from "../../src/lib/types";
+import { computeBands } from "../legacy-core/hooks/useFFT";
+import { assessChannel } from "../legacy-core/hooks/useSignalQuality";
+import type { FrequencyBandPowers } from "../legacy-core/lib/types";
 import { calmPercent, relaxationBaseline, type TimelineEntry } from "./training";
 
 /**

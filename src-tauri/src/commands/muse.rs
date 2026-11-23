@@ -156,6 +156,47 @@ lazy_static::lazy_static! {
     static ref MUSE_BLE_STATE: Arc<Mutex<BleState>> = Arc::new(Mutex::new(BleState::Idle));
 }
 
+lazy_static::lazy_static! {
+    /// Optional streams that subscribed on the current connection; the replay header lists these.
+    static ref SUBSCRIBED: std::sync::Mutex<replay::StreamSet> = std::sync::Mutex::new(replay::StreamSet::default());
+}
+
+/// Snapshot of the optional streams subscribed so far.
+pub fn subscribed_streams() -> replay::StreamSet {
+    SUBSCRIBED.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
+/// Test hook: pretend these optional streams subscribed.
+#[doc(hidden)]
+pub fn set_subscribed_streams(set: replay::StreamSet) {
+    if let Ok(mut s) = SUBSCRIBED.lock() {
+        *s = set;
+    }
+}
+
+fn reset_subscribed() {
+    if let Ok(mut s) = SUBSCRIBED.lock() {
+        *s = replay::StreamSet::default();
+    }
+}
+
+/// Adds `stream` to `set`. `AUX_L` is subscribed for the stream but is not recorded, so it is
+/// not listed.
+fn note_subscribed(set: &mut replay::StreamSet, stream: OptionalStream) {
+    let add = |v: &mut Vec<String>, name: &str| {
+        if !v.iter().any(|n| n == name) {
+            v.push(name.to_string());
+        }
+    };
+    match stream {
+        OptionalStream::Aux("AUX") => set.aux = true,
+        OptionalStream::Aux(_) => {}
+        OptionalStream::Accelerometer => add(&mut set.motion, "accelerometer"),
+        OptionalStream::Gyroscope => add(&mut set.motion, "gyroscope"),
+        OptionalStream::Ppg(name) => add(&mut set.ppg, name),
+    }
+}
+
 /// Structured BLE state payload with data_source discriminator.
 #[derive(Serialize, Clone)]
 struct MuseBleStatePayload {
@@ -203,7 +244,7 @@ async fn get_or_init_adapter() -> Result<btleplug::platform::Adapter, String> {
     Ok(adapter)
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct MuseDevice {
     pub name: String,
     pub address: String,
@@ -246,7 +287,7 @@ pub enum OptionalEvent {
     Ppg(PpgSample),
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct MuseConnectionState {
     pub connected: bool,
     pub device_name: Option<String>,
@@ -254,6 +295,7 @@ pub struct MuseConnectionState {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn scan_muse(app: AppHandle) -> Result<Vec<MuseDevice>, String> {
     println!("[muse] scan: status=starting");
     emit_muse_state(&app, BleState::Scanning).await;
@@ -351,8 +393,13 @@ pub async fn scan_muse(app: AppHandle) -> Result<Vec<MuseDevice>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn connect_muse(app: AppHandle, address: String) -> Result<MuseConnectionState, String> {
     println!("[muse] connect: target_id={address}");
+    // Supersede any disconnect that began earlier, then wait out a detached teardown
+    // (it skips itself if it starts after this bump).
+    bump_conn_gen();
+    drop(TEARDOWN.lock().await);
     emit_muse_state(&app, BleState::Connecting).await;
 
     // ---- Step 0: Stop active scan ----
@@ -513,8 +560,21 @@ pub async fn connect_muse(app: AppHandle, address: String) -> Result<MuseConnect
         name
     );
 
-    let mut stored = MUSE_PERIPHERAL.lock().await;
-    *stored = Some(peripheral);
+    // Lock, store, shadow write and generation bump are one step under the guard.
+    let new_id = peripheral.id();
+    let replaced = install_peripheral(&MUSE_PERIPHERAL, peripheral.clone(), |p| {
+        if let Ok(mut link) = MUSE_LINK.lock() {
+            *link = Some(p.clone());
+        }
+    })
+    .await;
+    if let Some(old) = replaced {
+        // A different peripheral being replaced must not keep its OS link; the same
+        // handle is the new link and is left alone.
+        if old.id() != new_id {
+            let _ = tokio::time::timeout(DISCONNECT_BOUND, old.disconnect()).await;
+        }
+    }
 
     emit_muse_state(&app, BleState::Connected).await;
 
@@ -525,23 +585,210 @@ pub async fn connect_muse(app: AppHandle, address: String) -> Result<MuseConnect
     })
 }
 
+/// Whole-command bound for `disconnect_muse`, lock waits included.
+const DISCONNECT_BOUND: std::time::Duration = std::time::Duration::from_secs(8);
+/// Fixed text the UI shows when the headset (or a held lock) does not answer.
+const DISCONNECT_TIMEOUT_TEXT: &str = "The headset didn't answer; try again";
+
+/// Bumped on every connect and every disconnect. A disconnect that began under
+/// an older value must not touch a headset connected afterwards.
+static MUSE_CONN_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+lazy_static::lazy_static! {
+    /// Shadow clone of the connected peripheral, readable without the async locks,
+    /// so a timed-out disconnect can still tear the OS link down.
+    static ref MUSE_LINK: std::sync::Mutex<Option<Peripheral>> = std::sync::Mutex::new(None);
+}
+
+fn conn_gen() -> u64 {
+    MUSE_CONN_GEN.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn bump_conn_gen() -> u64 {
+    MUSE_CONN_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
+/// True while no connect or disconnect has happened since `started_under`.
+fn gen_is_current(started_under: u64) -> bool {
+    conn_gen() == started_under
+}
+
+/// Fixed error for a disconnect that a newer connect or disconnect overtook.
+const SUPERSEDED: &str = "superseded";
+
+/// Serialises a detached teardown against a reconnect: connect waits for it.
+static TEARDOWN: Mutex<()> = Mutex::const_new(());
+
+/// Take the stored value only while `gen_is_current(started_under)`, checked right
+/// after each lock is acquired (streaming first, then stored). A stale caller touches
+/// nothing and gets `Err(SUPERSEDED)`.
+async fn take_if_current<T>(
+    started_under: u64,
+    streaming: &Mutex<bool>,
+    stored: &Mutex<Option<T>>,
+) -> Result<Option<T>, &'static str> {
+    let mut streaming = streaming.lock().await;
+    if !gen_is_current(started_under) {
+        return Err(SUPERSEDED);
+    }
+    let mut stored = stored.lock().await;
+    if !gen_is_current(started_under) {
+        return Err(SUPERSEDED);
+    }
+    *streaming = false;
+    Ok(stored.take())
+}
+
+/// Store a new value under the guard, run `shadow` and bump the generation before the
+/// guard is released. Returns what was replaced.
+async fn install_peripheral<T>(
+    stored: &Mutex<Option<T>>,
+    new: T,
+    shadow: impl FnOnce(&T),
+) -> Option<T> {
+    let mut guard = stored.lock().await;
+    shadow(&new);
+    let old = guard.replace(new);
+    bump_conn_gen();
+    old
+}
+
+/// Lock order everywhere: streaming, then stored.
+async fn lock_streaming_then_stored<'a, T>(
+    streaming: &'a Mutex<bool>,
+    stored: &'a Mutex<Option<T>>,
+) -> (
+    tokio::sync::MutexGuard<'a, bool>,
+    tokio::sync::MutexGuard<'a, Option<T>>,
+) {
+    let streaming = streaming.lock().await;
+    let stored = stored.lock().await;
+    (streaming, stored)
+}
+
+/// Run `work` under one bound; a timeout becomes the fixed UI error.
+async fn bounded<F: std::future::Future<Output = Result<(), String>>>(
+    limit: std::time::Duration,
+    work: F,
+) -> Result<(), String> {
+    match tokio::time::timeout(limit, work).await {
+        Ok(result) => result,
+        Err(_) => Err(DISCONNECT_TIMEOUT_TEXT.to_string()),
+    }
+}
+
 #[tauri::command]
+#[specta::specta]
 pub async fn disconnect_muse(app: AppHandle) -> Result<(), String> {
     println!("[muse] disconnect: status=starting");
-    let mut streaming = MUSE_STREAMING.lock().await;
-    *streaming = false;
-
-    let mut stored = MUSE_PERIPHERAL.lock().await;
-    if let Some(peripheral) = stored.take() {
-        peripheral.disconnect().await.map_err(|e| e.to_string())?;
-        println!("[muse] disconnect: status=done");
+    let started_under = bump_conn_gen();
+    let body = async {
+        let taken = take_if_current(started_under, &MUSE_STREAMING, &MUSE_PERIPHERAL)
+            .await
+            .map_err(|e| e.to_string())?;
+        // Held across the real disconnect so a same-device reconnect waits for it.
+        let _teardown = TEARDOWN.lock().await;
+        if let Some(peripheral) = taken {
+            if let Err(e) = peripheral.disconnect().await {
+                println!("[muse] disconnect: status=error detail={e}");
+                return Err(DISCONNECT_TIMEOUT_TEXT.to_string());
+            }
+            if gen_is_current(started_under) {
+                if let Ok(mut link) = MUSE_LINK.lock() {
+                    link.take();
+                }
+            }
+            println!("[muse] disconnect: status=done");
+        } else if !disconnect_shadow(&MUSE_LINK, DISCONNECT_BOUND, |p| async move {
+            p.disconnect().await.map_err(|e| e.to_string())
+        })
+        .await
+        {
+            // An earlier timed-out disconnect left the OS link up and it could not be closed now.
+            return Err(DISCONNECT_TIMEOUT_TEXT.to_string());
+        }
+        Ok(())
+    };
+    if let Err(message) = bounded(DISCONNECT_BOUND, body).await {
+        if message == SUPERSEDED {
+            println!("[muse] disconnect: status=superseded (nothing touched)");
+            return Err(message);
+        }
+        // Distinct from a clean disconnect: no state is emitted.
+        println!("[muse] disconnect: status=failed_unclean (no clean disconnect)");
+        let link = MUSE_LINK.lock().ok().and_then(|l| l.clone());
+        if let Some(peripheral) = link {
+            println!("[muse] disconnect: teardown=detached_scheduled");
+            // Best effort, detached, bounded, serialised against reconnects. MUSE_LINK
+            // is cleared only after the real disconnect finishes.
+            tokio::spawn(async move {
+                let _guard = TEARDOWN.lock().await;
+                if !gen_is_current(started_under) {
+                    println!("[muse] disconnect: teardown=skipped (newer connection)");
+                    return;
+                }
+                match tokio::time::timeout(DISCONNECT_BOUND, peripheral.disconnect()).await {
+                    Ok(Ok(())) => {
+                        if gen_is_current(started_under) {
+                            if let Ok(mut link) = MUSE_LINK.lock() {
+                                link.take();
+                            }
+                        }
+                        println!("[muse] disconnect: teardown=completed");
+                    }
+                    Ok(Err(e)) => println!("[muse] disconnect: teardown=error detail={e}"),
+                    Err(_) => println!("[muse] disconnect: teardown=timed_out"),
+                }
+            });
+        }
+        return Err(message);
+    }
+    // A connect may have installed a peripheral meanwhile; then this disconnect is stale.
+    if !gen_is_current(started_under) {
+        println!("[muse] disconnect: status=superseded (nothing touched)");
+        return Err(DISCONNECT_TIMEOUT_TEXT.to_string());
+    }
+    // A recording still open keeps its subscribed list for the header.
+    if replay::active_recording_name().await.is_none() {
+        reset_subscribed();
     }
 
     emit_muse_state(&app, BleState::Idle).await;
     Ok(())
 }
 
+/// Close a link left up by an earlier timed-out disconnect: clone the shadow, disconnect
+/// it under `limit`, and clear the shadow only on success. True when nothing is left up.
+/// The caller holds TEARDOWN.
+async fn disconnect_shadow<T, F, Fut>(
+    shadow: &std::sync::Mutex<Option<T>>,
+    limit: std::time::Duration,
+    disconnect: F,
+) -> bool
+where
+    T: Clone,
+    F: FnOnce(T) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    let link = shadow.lock().ok().and_then(|l| l.clone());
+    let Some(link) = link else { return true };
+    match tokio::time::timeout(limit, disconnect(link)).await {
+        Ok(Ok(())) => {
+            if let Ok(mut l) = shadow.lock() {
+                l.take();
+            }
+            println!("[muse] disconnect: shadow_link=closed");
+            true
+        }
+        _ => {
+            println!("[muse] disconnect: shadow_link=still_up");
+            false
+        }
+    }
+}
+
 #[tauri::command]
+#[specta::specta]
 pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
     println!("[muse] eeg_stream: status=starting");
     super::sessions::begin_body_context_capture();
@@ -708,7 +955,7 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
             };
 
             if let Some(stream) = optional_stream(&notification.uuid) {
-                emit_optional(&app_handle, stream, &notification.value);
+                emit_optional(&app_handle, stream, &notification.value).await;
                 continue;
             }
             silent_since = std::time::Instant::now();
@@ -814,6 +1061,7 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stop_eeg_stream(app: AppHandle) -> Result<(), String> {
     println!("[muse] eeg_stream: status=stopping");
     let mut streaming = MUSE_STREAMING.lock().await;
@@ -840,9 +1088,9 @@ pub async fn stop_eeg_stream(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_muse_state() -> Result<MuseConnectionState, String> {
-    let stored = MUSE_PERIPHERAL.lock().await;
-    let streaming = MUSE_STREAMING.lock().await;
+    let (streaming, stored) = lock_streaming_then_stored(&MUSE_STREAMING, &MUSE_PERIPHERAL).await;
 
     if let Some(peripheral) = stored.as_ref() {
         let connected = peripheral.is_connected().await.unwrap_or(false);
@@ -870,6 +1118,7 @@ pub async fn get_muse_state() -> Result<MuseConnectionState, String> {
 /// doesn't answer is logged and skipped; EEG goes on without it.
 pub async fn subscribe_optional_streams(peripheral: &Peripheral) {
     let chars = peripheral.characteristics();
+    reset_subscribed();
     for (prefix, stream) in &OPTIONAL_STREAMS {
         let Some(ch) = chars.iter().find(|c| uuid_prefix_match(&c.uuid, prefix)) else {
             println!("[muse] optional_stream: missing stream={stream:?}");
@@ -880,6 +1129,9 @@ pub async fn subscribe_optional_streams(peripheral: &Peripheral) {
             tokio::time::timeout(OPTIONAL_SUBSCRIBE_TIMEOUT, peripheral.subscribe(ch)).await;
         let detail = format!("uuid={} stream={stream:?}", ch.uuid);
         let event = if matches!(subscribed, Ok(Ok(()))) {
+            if let Ok(mut set) = SUBSCRIBED.lock() {
+                note_subscribed(&mut set, *stream);
+            }
             "optional_subscribed"
         } else {
             "optional_subscribe_failed"
@@ -944,13 +1196,26 @@ fn parse_ppg_samples(data: &[u8]) -> Vec<u32> {
         .collect()
 }
 
-/// Aux goes out on `muse-eeg` but is not recorded, so session files keep their four channels.
-fn emit_optional(app: &AppHandle, stream: OptionalStream, data: &[u8]) {
+/// Emits one optional packet and records it when a recording is open. `AUX` is recorded with
+/// the EEG channels; `AUX_L` is emitted but never recorded.
+async fn emit_optional(app: &AppHandle, stream: OptionalStream, data: &[u8]) {
     let timestamp = chrono::Utc::now().timestamp_millis() as f64;
     let emitted = match decode_optional(stream, data, timestamp) {
-        Some(OptionalEvent::Aux(sample)) => app.emit("muse-eeg", &sample),
-        Some(OptionalEvent::Motion(sample)) => app.emit("muse-motion", &sample),
-        Some(OptionalEvent::Ppg(sample)) => app.emit("muse-ppg", &sample),
+        Some(OptionalEvent::Aux(sample)) => {
+            let r = app.emit("muse-eeg", &sample);
+            replay::maybe_record_sample(&sample).await;
+            r
+        }
+        Some(OptionalEvent::Motion(sample)) => {
+            let r = app.emit("muse-motion", &sample);
+            replay::maybe_record_motion(&sample).await;
+            r
+        }
+        Some(OptionalEvent::Ppg(sample)) => {
+            let r = app.emit("muse-ppg", &sample);
+            replay::maybe_record_ppg(&sample).await;
+            r
+        }
         None => Ok(()),
     };
     if let Err(e) = emitted {
@@ -958,9 +1223,6 @@ fn emit_optional(app: &AppHandle, stream: OptionalStream, data: &[u8]) {
     }
 }
 
-/// Encode a Muse control command with the required length-prefix byte.
-/// Protocol: [length_of_remaining_bytes, ...command_ascii, 0x0a]
-/// e.g. "d" → [0x02, 0x64, 0x0a], "p50" → [0x04, 0x70, 0x35, 0x30, 0x0a]
 pub fn muse_cmd(cmd: &str) -> Vec<u8> {
     let cmd_bytes = cmd.as_bytes();
     let len = (cmd_bytes.len() + 1) as u8; // +1 for trailing 0x0a
@@ -1138,6 +1400,21 @@ mod tests {
     }
 
     #[test]
+    fn only_the_back_electrode_and_real_streams_are_listed_as_subscribed() {
+        let mut set = replay::StreamSet::default();
+        for (_, stream) in &OPTIONAL_STREAMS {
+            note_subscribed(&mut set, *stream);
+            note_subscribed(&mut set, *stream);
+        }
+        assert!(set.aux);
+        assert_eq!(set.ppg.len(), 3);
+        assert_eq!(set.motion.len(), 2);
+        let mut left_only = replay::StreamSet::default();
+        note_subscribed(&mut left_only, OptionalStream::Aux("AUX_L"));
+        assert_eq!(left_only, replay::StreamSet::default());
+    }
+
+    #[test]
     fn short_packets_are_skipped_not_fatal() {
         for stream in OPTIONAL_STREAMS.map(|(_, stream)| stream) {
             assert_eq!(decode_optional(stream, &[0; 19], 0.0), None);
@@ -1202,5 +1479,156 @@ mod tests {
     fn preset_commands_are_length_prefixed() {
         assert_eq!(muse_cmd("p50"), [0x04, b'p', b'5', b'0', 0x0a]);
         assert_eq!(muse_cmd("p20"), [0x04, b'p', b'2', b'0', 0x0a]);
+    }
+
+    /// The generation counter is process-wide; tests that read or bump it run one at a time.
+    static GEN_TESTS: Mutex<()> = Mutex::const_new(());
+
+    #[tokio::test]
+    async fn a_stale_caller_leaves_streaming_and_the_peripheral_alone() {
+        let _serial = GEN_TESTS.lock().await;
+        let streaming = Mutex::new(true);
+        let stored = Mutex::new(Some(7u8));
+        let started = bump_conn_gen();
+        bump_conn_gen(); // a newer connect or disconnect happened
+        assert!(!gen_is_current(started));
+        assert_eq!(
+            take_if_current(started, &streaming, &stored).await,
+            Err(SUPERSEDED)
+        );
+        assert!(*streaming.lock().await, "a live stream is not stopped");
+        assert_eq!(*stored.lock().await, Some(7));
+        let now = conn_gen();
+        assert_eq!(take_if_current(now, &streaming, &stored).await, Ok(Some(7)));
+        assert!(!*streaming.lock().await);
+    }
+
+    #[tokio::test]
+    async fn a_caller_overtaken_while_waiting_for_the_lock_touches_nothing() {
+        let _serial = GEN_TESTS.lock().await;
+        let streaming = Mutex::new(true);
+        let stored = Mutex::new(Some(3u8));
+        let started = conn_gen();
+        let held = stored.lock().await;
+        let fut = take_if_current(started, &streaming, &stored);
+        tokio::pin!(fut);
+        // Parked on `stored` with `streaming` held; a newer operation bumps now.
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(30), &mut fut)
+                .await
+                .is_err()
+        );
+        bump_conn_gen();
+        drop(held);
+        assert_eq!(fut.await, Err(SUPERSEDED));
+        assert!(*streaming.lock().await);
+        assert_eq!(*stored.lock().await, Some(3));
+    }
+
+    #[tokio::test]
+    async fn install_replaces_under_the_guard_and_bumps_once() {
+        let _serial = GEN_TESTS.lock().await;
+        let stored = Mutex::new(Some(1u8));
+        let before = conn_gen();
+        let seen = std::cell::Cell::new(0u8);
+        let old = install_peripheral(&stored, 2u8, |n| seen.set(*n)).await;
+        assert_eq!(old, Some(1));
+        assert_eq!(seen.get(), 2);
+        assert_eq!(*stored.lock().await, Some(2));
+        assert!(conn_gen() > before);
+    }
+
+    #[tokio::test]
+    async fn state_reads_lock_streaming_before_stored() {
+        let streaming = Mutex::new(false);
+        let stored = Mutex::new(Some(1u8));
+        let held = streaming.lock().await;
+        let blocked = tokio::time::timeout(
+            std::time::Duration::from_millis(30),
+            lock_streaming_then_stored(&streaming, &stored),
+        )
+        .await;
+        assert!(blocked.is_err());
+        // Waiting on streaming must not have taken `stored` (no inversion).
+        assert!(stored.try_lock().is_ok());
+        drop(held);
+        let (_s, st) = lock_streaming_then_stored(&streaming, &stored).await;
+        assert_eq!(*st, Some(1));
+    }
+
+    #[tokio::test]
+    async fn a_held_lock_hits_the_whole_body_bound() {
+        let _serial = GEN_TESTS.lock().await;
+        let streaming = Mutex::new(false);
+        let stored = Mutex::new(Some(1u8));
+        let _held = streaming.lock().await; // a hung stop_eeg_stream
+        let started = conn_gen();
+        let result = bounded(std::time::Duration::from_millis(50), async {
+            let _ = take_if_current(started, &streaming, &stored).await;
+            Ok(())
+        })
+        .await;
+        assert_eq!(result, Err(DISCONNECT_TIMEOUT_TEXT.to_string()));
+        assert_eq!(*stored.lock().await, Some(1), "nothing was taken");
+    }
+
+    #[tokio::test]
+    async fn teardown_guard_makes_a_reconnect_wait() {
+        let g = TEARDOWN.lock().await;
+        let waited =
+            tokio::time::timeout(std::time::Duration::from_millis(30), TEARDOWN.lock()).await;
+        assert!(waited.is_err());
+        drop(g);
+        assert!(TEARDOWN.try_lock().is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_slow_future_times_out_and_a_fast_one_passes() {
+        let slow = bounded(std::time::Duration::from_millis(20), async {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            Ok(())
+        })
+        .await;
+        assert_eq!(slow, Err(DISCONNECT_TIMEOUT_TEXT.to_string()));
+        assert_eq!(
+            bounded(std::time::Duration::from_secs(1), async { Ok(()) }).await,
+            Ok(())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_leftover_shadow_link_is_disconnected_and_cleared_on_success() {
+        let shadow = std::sync::Mutex::new(Some(9u8));
+        let ran = std::sync::atomic::AtomicBool::new(false);
+        let ok = disconnect_shadow(&shadow, std::time::Duration::from_secs(1), |n| {
+            ran.store(n == 9, std::sync::atomic::Ordering::SeqCst);
+            async { Ok(()) }
+        })
+        .await;
+        assert!(ok && ran.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(*shadow.lock().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_failed_or_hung_shadow_disconnect_keeps_the_shadow() {
+        let shadow = std::sync::Mutex::new(Some(9u8));
+        let failed = disconnect_shadow(&shadow, std::time::Duration::from_secs(1), |_| async {
+            Err("x".to_string())
+        })
+        .await;
+        assert!(!failed);
+        let hung = disconnect_shadow(&shadow, std::time::Duration::from_millis(20), |_| async {
+            std::future::pending::<Result<(), String>>().await
+        })
+        .await;
+        assert!(!hung);
+        assert_eq!(*shadow.lock().unwrap(), Some(9));
+        let empty: std::sync::Mutex<Option<u8>> = std::sync::Mutex::new(None);
+        assert!(
+            disconnect_shadow(&empty, std::time::Duration::from_millis(20), |_| async {
+                Ok(())
+            })
+            .await
+        );
     }
 }

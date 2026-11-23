@@ -17,7 +17,7 @@ const emit = (page: Page, event: string, payload: Record<string, unknown>) =>
   page.evaluate(([e, p]) => (window as unknown as { __E2E_EMIT: (e: unknown, p: unknown) => void }).__E2E_EMIT(e, { ts: Date.now(), ...p }), [event, payload] as const);
 const lens = (page: Page) => page.locator('.amara-lens[data-size="320"]');
 const line = (page: Page) => page.locator(".landing__line");
-const NAV = ["Today", "Chat & Agents", "Mind–Body", "Business", "Settings", "Smart home"];
+const NAV = ["Today", "Life", "Mind–Body", "Enterprise", "Agents", "Smart home", "Settings"]; // decision 0009
 
 /** e2e Chromium reports reduced transparency; force it off so shots show the real look. */
 async function realLook(page: Page, theme: Theme) {
@@ -98,7 +98,7 @@ test("Landing: Today opens the dashboard, Home returns to the lens, ⌘1 and ⌘
   await openApp(page, { theme, data: waiting });
   await navButton(page, "Today").click();
   const today = activeField(page, "Today");
-  await expect(today.getByRole("heading", { level: 1 })).toHaveText("Command Center");
+  await expect(today.getByRole("heading", { level: 1 })).toHaveText("Today");
   await expect(today.locator(".home__summary")).toBeVisible();
   await expect(page.locator(".toolbar-location")).toHaveText("Today");
   await expect(lens(page)).toHaveCount(0);
@@ -120,19 +120,23 @@ test("Landing: every button is keyboard reachable with the emerald focus ring", 
   const buttons = page.locator(".landing__nav").getByRole("button");
   // WebKit follows macOS: plain Tab skips buttons unless Keyboard navigation is on; Option+Tab always reaches them.
   const next = browserName === "webkit" ? "Alt+Tab" : "Tab";
-  for (const name of NAV) {
-    await page.keyboard.press(next);
+  // design-1110b A: the Home chat sits between the lens and the buttons, so its controls come first in Tab order.
+  for (let i = 0; i < 8 && !(await buttons.first().evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press(next);
+  await expect(buttons.first()).toBeFocused();
+  for (const [i, name] of NAV.entries()) {
+    if (i > 0) await page.keyboard.press(next);
     await expect(buttons.filter({ hasText: name })).toBeFocused();
   }
   const ring = await buttons.last().evaluate((el) => { const s = getComputedStyle(el); return `${s.outlineStyle} ${s.outlineWidth} ${s.outlineOffset} ${s.outlineColor}`; });
   expect(ring).toBe("solid 3px 2px rgb(52, 199, 154)");
   await page.keyboard.press("Enter");
-  await expect(activeField(page, "Smart home")).toBeVisible();
+  await expect(activeField(page, NAV[NAV.length - 1])).toBeVisible(); // the last button (Settings, decision 0009)
 });
 
+// Nov 13: the take now stays on Home at every height (it used to vanish under 760px), so on short windows the lens gives way first: its floor is the 136px --landing-lens-min.
 test("Landing: fits the window at every size with no clipping or page scroll", async ({ page, theme }) => {
   await openApp(page, { theme, data: waiting });
-  for (const [width, height, min] of [[1280, 800, 320], [1440, 900, 320], [1920, 1080, 320], [1024, 700, 240], [900, 620, 240], [820, 600, 220], [1600, 600, 240]] as const) {
+  for (const [width, height, min] of [[1280, 800, 320], [1440, 900, 320], [1920, 1080, 320], [1024, 700, 150], [900, 620, 136], [820, 600, 136], [1600, 600, 136]] as const) {
     await page.setViewportSize({ width, height });
     const box = (await lens(page).boundingBox())!;
     expect(box.width, `${width}×${height}`).toBeGreaterThanOrEqual(min);
@@ -148,17 +152,17 @@ test("Landing: fits the window at every size with no clipping or page scroll", a
   }
 });
 
-test("Landing: the six buttons sit in one centred row at both window sizes", async ({ page, theme }) => {
+test("Landing: the seven buttons sit in one centred row at both window sizes", async ({ page, theme }) => {
   await openApp(page, { theme, data: waiting });
   for (const viewport of [WIDE, SMALL]) {
     await page.setViewportSize(viewport);
     const boxes = await Promise.all((await page.locator(".landing__nav").getByRole("button").all()).map(async (b) => (await b.boundingBox())!));
-    expect(boxes).toHaveLength(6);
+    expect(boxes).toHaveLength(7);
     expect(new Set(boxes.map((b) => b.y)).size, `${viewport.width}: one row`).toBe(1);
     // Centred under the lens, which sits in the larger golden section on a wide window.
     const stage = (await page.locator(".landing__stage").boundingBox())!;
     const left = boxes[0].x;
-    const right = stage.x + stage.width - (boxes[5].x + boxes[5].width);
+    const right = stage.x + stage.width - (boxes[6].x + boxes[6].width);
     expect(Math.abs(left - stage.x - right), `${viewport.width}: centred`).toBeLessThanOrEqual(1);
     expect(left, `${viewport.width}: side margin`).toBeGreaterThanOrEqual(24);
     const gaps = boxes.slice(1).map((b, i) => Math.round(b.x - (boxes[i].x + boxes[i].width)));
@@ -294,3 +298,55 @@ test.describe("Landing: the welcome", () => {
     if (process.env.HR_SHOT) await page.screenshot({ path: process.env.HR_SHOT.replace(".png", "-small.png") });
   });
 });
+
+/** Taisun: Home must fit the window, never scroll. Worst case = the sample take (text, memory, chips, window line, today's one thing) plus the live heart trace. */
+const NO_SCROLL_SIZES = [[1280, 800], [1024, 640], [900, 560]] as const;
+for (const sample of [true, false]) {
+  test(`Landing: ${sample ? "with a full take" : "with the take unwired"} it fits 1280×800, 1024×640 and 900×560 with no scrolling, nothing hidden that matters`, async ({ page, theme }) => {
+    if (sample) await page.addInitScript(() => { localStorage.setItem("nexus.sampleAdapters", "1"); });
+    await openApp(page, { theme, data: waiting, reduceMotion: true });
+    // Settled: the take swaps height while it reads (that moment is transient and clips rather than scrolls).
+    await expect(page.locator(".landing .take")).not.toHaveAttribute("data-state", "regenerating");
+    for (const [width, height] of NO_SCROLL_SIZES) {
+      await page.setViewportSize({ width, height });
+      await page.waitForTimeout(150);
+      const m = await page.locator(".landing").evaluate((el) => {
+        const r = (sel: string) => { const b = el.querySelector(sel)?.getBoundingClientRect(); return b ? { top: Math.round(b.top), bottom: Math.round(b.bottom), h: Math.round(b.height) } : null; };
+        return { scrollH: el.scrollHeight, clientH: el.clientHeight, scrollW: el.scrollWidth, clientW: el.clientWidth, lens: r(".amara-lens"), take: r(".landing .take"), nav: r(".landing__nav"), hr: r(".landing__heart-rate") };
+      });
+      console.log(`MEASURE sample=${sample} ${width}x${height} ${theme} ${JSON.stringify(m)}`);
+      const at = `${width}×${height}`;
+      expect(m.scrollH, `${at}: no vertical scroll`).toBeLessThanOrEqual(m.clientH);
+      expect(m.scrollW, `${at}: no horizontal scroll`).toBeLessThanOrEqual(m.clientW);
+      expect(await page.locator(".landing").evaluate((el) => getComputedStyle(el).overflowY), at).toBe("hidden");
+      await expect(lens(page), at).toBeVisible();
+      await expect(page.locator(".landing .take"), at).toBeVisible();
+      await expect(page.locator(".landing__heart-rate"), at).toBeVisible();
+      await expect(page.locator(".landing__greeting"), at).toBeVisible();
+      await expect(page.locator(".landing__date"), at).toBeVisible();
+      const buttons = page.locator(".landing__nav").getByRole("button");
+      await expect(buttons, at).toHaveCount(7);
+      for (const b of await buttons.all()) {
+        await expect(b, at).toBeVisible();
+        const box = (await b.boundingBox())!;
+        expect(box.y + box.height, `${at}: button inside window`).toBeLessThanOrEqual(height);
+      }
+      // Everything on screen stays inside the window: the take's bottom edge and the lens included.
+      for (const sel of [".landing .take", ".amara-lens"]) {
+        const box = (await page.locator(sel).first().boundingBox())!;
+        expect(box.y, `${at} ${sel} top`).toBeGreaterThanOrEqual(0);
+        expect(box.y + box.height, `${at} ${sel} bottom`).toBeLessThanOrEqual(height);
+      }
+    }
+    // The clamp is visual only: the full take text is still in the page for screen readers.
+    if (sample) {
+      const body = page.locator(".landing .take__body").first();
+      const full = (await body.textContent())!.trim();
+      expect(full.length).toBeGreaterThan(40);
+      expect(await body.evaluate((el) => el.textContent!.trim().length)).toBe(full.length);
+    }
+    await page.setViewportSize({ width: 1024, height: 640 });
+    const axe = await new AxeBuilder({ page }).analyze();
+    expect(axe.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => `${v.id}: ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`)).toEqual([]);
+  });
+}

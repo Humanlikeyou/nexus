@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const invokeMock = vi.hoisted(() => vi.fn());
-vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => { while (a.length && a[a.length - 1] === undefined) a.pop(); return (invokeMock as (...x: unknown[]) => unknown)(...a); } }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 
 import {
-  applyStateChange, classifyHaError, containerErrorCopy, createMockHaBackend, haErrorCopy, inactiveKindFor, isServiceRefusal, dropLegacyHomeReplyIds, isToggleable, mockEntity, preRouteHome, setHaBackend, sortDevices, stateLabel, tauriHaBackend, validServiceCall, validServiceData, hvacModesFor, climateRange, HA_BAD_DATA, HA_ERROR_KINDS, looksLikeHomeCommand, isHaFailureSpeech,
+  applyStateChange, classifyHaError, containerErrorCopy, createMockHaBackend, haErrorCopy, inactiveKindFor, isServiceRefusal, dropLegacyHomeReplyIds, isToggleable, mockEntity, preRouteHome, setHaBackend, sortDevices, stateLabel, tauriHaBackend, validServiceCall, validServiceData, hvacModesFor, climateRange, HA_BAD_DATA, HA_ERROR_KINDS, looksLikeHomeCommand, isHaFailureSpeech, homeEntityNamesForTurn, rememberEntityNames,
 } from "./homeAssistant";
 
 afterEach(() => invokeMock.mockReset());
@@ -151,8 +151,11 @@ describe("Home Assistant wrapper", () => {
   });
 
   describe("pre-route gate", () => {
-    it.each(["turn on the desk lamp", "Switch off the kettle", "set the thermostat to 21", "dim the lights", "please lock the front door", "can you open the blinds", "is the garage door open?", "Are the lights on", "start the vacuum"])("device command: %s", (t) => {
+    it.each(["turn on the desk lamp", "Switch off the kettle", "set the thermostat to 21", "dim the lights", "Are the lights on", "start the vacuum"])("device command: %s", (t) => {
       expect(looksLikeHomeCommand(t, ["desk lamp", "kettle"])).toBe(true);
+    });
+    it.each(["please lock the front door", "unlock the front door", "can you open the blinds", "is the garage door open?", "open the garage", "set the alarm", "close the curtains", "raise the shutters", "open the cover"])("security and cover commands are never auto-run: %s", (t) => {
+      expect(looksLikeHomeCommand(t, ["front door", "garage"])).toBe(false);
     });
     it.each(["what is 2+2", "2 + 2", "what's 12 * 4", "hi", "open safari", "set a reminder for 5pm", "stop", "what is the capital of France?", "turn on the lights ".repeat(10), "turn on the light\nand write me an essay about lamps"])("skips: %s", (t) => {
       expect(looksLikeHomeCommand(t, [])).toBe(false);
@@ -160,6 +163,16 @@ describe("Home Assistant wrapper", () => {
     it("known friendly names count as devices", () => {
       expect(looksLikeHomeCommand("turn on Bubbles", ["bubbles"])).toBe(true);
       expect(looksLikeHomeCommand("turn on Bubbles", [])).toBe(false);
+    });
+    it("homeEntityNamesForTurn caps names like Rust (200 names, 64 chars)", () => {
+      rememberEntityNames([
+        ...Array.from({ length: 250 }, (_, i) => mockEntity({ entityId: `light.l${i}`, friendlyName: `lamp ${i}` })),
+        mockEntity({ entityId: "light.long", friendlyName: "x".repeat(65) }),
+      ]);
+      const names = homeEntityNamesForTurn();
+      expect(names).toHaveLength(200);
+      expect(names.every((n) => n.length <= 64)).toBe(true);
+      rememberEntityNames([]);
     });
     it("HA failure speech is detected", () => {
       expect(isHaFailureSpeech("Sorry, I am not aware of any device called 2+2")).toBe(true);

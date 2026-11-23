@@ -9,6 +9,7 @@ import {
 } from "../lib/followups";
 import type { FollowupItem, FollowupLists, MutedTopic } from "../types";
 import { Badge, Button, Card, Dialog, InsetGroup, ListRow, More, PageHero, TextField } from "../ui";
+import { TODOS_EVENT } from "../inbox/needsYou";
 import "./ListsScreen.css";
 
 type FieldErrors = { text?: string; due?: string; next?: string; form?: string };
@@ -195,6 +196,8 @@ export function ListsField({ refreshSignal }: { refreshSignal?: number }) {
       if (seq !== loadSeq.current) return;
       setLists(next);
       setLoadError(null);
+      // design-1111v: Needs you today points at overdue and due-today items; it re-reads from this.
+      window.dispatchEvent(new CustomEvent(TODOS_EVENT, { detail: next }));
     }, (error: unknown) => {
       if (seq !== loadSeq.current) return;
       const kind = followupErrorKind(error);
@@ -327,7 +330,7 @@ export function ListsField({ refreshSignal }: { refreshSignal?: number }) {
   const isPending = (key: string) => pending.includes(key);
   const banners = [...new Set([loadError ? FOLLOWUP_ERROR_COPY[loadError] : null, actionError].filter((text): text is string => !!text))];
   const count = lists?.open.length ?? 0;
-  const header = <PageHero title="Lists" statement={!lists ? "Keeping track" : count === 0 ? "Nothing open" : `${count} open`} detail="What Amara is keeping track of for you. She updates these too." />;
+  const header = <PageHero title="To-dos" statement={!lists ? "Keeping track" : count === 0 ? "Nothing open" : `${count} open`} detail="Your personal to-dos. Amara updates these too. Enterprise work lives in Enterprise › Tasks." />;
   const live = <p className="ui-visually-hidden" role="status">{status}</p>;
 
   if (!lists) {

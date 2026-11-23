@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { classifyHaError } from "./homeAssistant";
 
 /**
@@ -23,7 +23,7 @@ export interface HaConfigBackend {
 
 const tauriBackend: HaConfigBackend = {
   async getConfig() {
-    const raw = await invoke<Partial<HaConfig> | null>("ha_get_config");
+    const raw = await invokeBound<Partial<HaConfig> | null>("ha_get_config");
     // Pick only the two known fields so nothing else (e.g. a token) can reach the UI.
     const src = raw?.tokenSource;
     return {
@@ -37,10 +37,10 @@ const tauriBackend: HaConfigBackend = {
     const args: Record<string, string> = {};
     if (input.url !== undefined) args.url = input.url;
     if (input.token !== undefined) args.token = input.token;
-    return invoke<void>("ha_set_config", args);
+    return invokeBound<void>("ha_set_config", args);
   },
   async clearToken() {
-    const raw = await invoke<Partial<HaClearResult> | null>("ha_clear_token");
+    const raw = await invokeBound<Partial<HaClearResult> | null>("ha_clear_token");
     return { fallbackActive: raw?.fallbackActive === true };
   },
   async testConnection(input = {}) {
@@ -48,7 +48,7 @@ const tauriBackend: HaConfigBackend = {
     const args: Record<string, string> = {};
     if (input.url) args.url = input.url;
     if (input.token) args.token = input.token;
-    const raw = await invoke<HaTestResult | null>("ha_test_connection", args);
+    const raw = await invokeBound<HaTestResult | null>("ha_test_connection", args);
     return {
       ok: raw?.ok === true,
       kind: typeof raw?.kind === "string" ? raw.kind : undefined,

@@ -5,7 +5,7 @@ import { routeMotion, transitionRoute } from "./routeMotion";
 const landing = { id: "terrance", view: "main" } as const;
 const today = { id: "terrance", view: "today" } as const;
 const chat = { id: "chat", view: "main" } as const;
-const lists = { id: "chat", view: "lists" } as const;
+const crews = { id: "chat", view: "crews" } as const;
 const settings = { id: "settings", view: "main" } as const;
 const devices = { id: "settings", view: "devices" } as const;
 
@@ -18,7 +18,7 @@ describe("routeMotion", () => {
   it("moves sections and sub-views differently", () => {
     expect(routeMotion(chat, settings)).toBe("section");
     expect(routeMotion(today, chat)).toBe("section");
-    expect(routeMotion(chat, lists)).toBe("subview");
+    expect(routeMotion(chat, crews)).toBe("subview");
   });
   it("stays still when the screen doesn't change", () => {
     expect(routeMotion(chat, chat)).toBe("none");
@@ -39,7 +39,7 @@ describe("transitionRoute", () => {
     const commit = vi.fn();
     const finished = Promise.resolve();
     Object.assign(document, { startViewTransition: vi.fn((update: () => void) => { update(); return { ready: Promise.resolve(), finished }; }) });
-    transitionRoute("subview", lists, commit);
+    transitionRoute("subview", crews, commit);
     expect(commit).toHaveBeenCalledOnce();
     expect(document.documentElement.dataset.routeMotion).toBe("subview");
     await vi.waitFor(() => expect(document.documentElement.dataset.routeMotion).toBeUndefined());

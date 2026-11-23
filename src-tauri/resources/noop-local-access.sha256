@@ -1,0 +1,14 @@
+# SHA-256 pins for the `noop-local-access` binary (one lowercase hex digest per line).
+#
+# Behaviour: the binary Amara resolves (bundled sidecar first, else the ~/projects build) is copied
+# to a private folder, hashed, and the COPY is what runs. A digest not listed here refuses with the
+# fixed code `pin_mismatch`. An empty list refuses with `pin_missing` in release builds and for any
+# bundled binary; only dev builds run an empty list ("unpinned" in the status command).
+#
+# To pin (Taisun): run the command `noop_binary_status`, read the `sha256` field, and add it below
+# after you have checked it is the build you trust. Several lines are allowed (for example the
+# bundled build and a dev build). Rebuilding the binary changes its digest, so update this file
+# and rebuild Amara. Do not paste anything but 64 hex characters; `#` starts a comment.
+
+# 2026-11-18: ~/projects/noop-lucid-current/Packages/NoopLocalAccess/.build/arm64-apple-macosx/release/noop-local-access (built 2026-11-04, the build Amara resolves today)
+5fefd0da6ba706807d3397b3c92e6fe5625156cc8dc84675b8d3be78143b2950

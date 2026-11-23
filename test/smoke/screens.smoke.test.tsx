@@ -15,7 +15,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => h.invoke(...a) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}), emit: vi.fn() }));
-vi.mock("@/terrance/system/scheduler", () => ({ startScheduler: vi.fn(), stopScheduler: vi.fn() }));
+vi.mock("../../src-console/legacy-core/terrance/system/scheduler", () => ({ startScheduler: vi.fn(), stopScheduler: vi.fn() }));
 // Count App renders: App calls useSnapshot exactly once per render.
 vi.mock("../../src-console/app/useSnapshot", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../src-console/app/useSnapshot")>();
@@ -64,8 +64,11 @@ describe("lazy screens", () => {
   // Pre-warm every screen chunk so lazy() resolves in microtasks, not on module-transform
   // time; makes resolution independent of machine load (fake timers throughout).
   beforeAll(async () => {
-    await Promise.all(["Health", "Neuro", "Sessions", "Devices", "Settings", "Business", "Revenue", "Activity", "Lists", "Crews", "MindBody", "SmartHome"]
-      .map((n) => import(`../../src-console/screens/${n}Screen.tsx`)));
+    await Promise.all([
+      ...["Health", "Neuro", "Sessions", "Devices", "Settings", "Business", "Revenue", "Activity", "Lists", "Crews", "MindBody", "SmartHome"]
+        .map((n) => import(`../../src-console/screens/${n}Screen.tsx`)),
+      import("../../src-console/life/LifeScreen.tsx"),
+    ]);
   });
   const flush = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(0); }); };
   const loading = (label: string) => within(field(label)!).queryByRole("status", { name: "Loading" });
@@ -90,11 +93,12 @@ describe("lazy screens", () => {
     expect(errorSpy.mock.calls.map((c) => String(c[0]).slice(0, 200))).toEqual([]);
   });
 
-  it("folded screens stay reachable as host sub-views (ROUTE_ALIASES)", async () => {
+  it("folded screens stay reachable as host sub-views or sections (ROUTE_ALIASES)", async () => {
     vi.useFakeTimers();
     render(<App />);
     await flush();
-    for (const [host, view] of [["Chat & Agents", "Activity"], ["Chat & Agents", "Lists"], ["Chat & Agents", "Crews"], ["Mind–Body", "Fitness"], ["Mind–Body", "Neuro"], ["Mind–Body", "Neuro history"], ["Business", "Revenue"]] as const) {
+    // design-1111v: Business is Enterprise; Money lives under Life as Personal money; Work is Tasks.
+    for (const [host, view] of [["Agents", "Crews"], ["Mind–Body", "Fitness"], ["Mind–Body", "Neuro"], ["Mind–Body", "Neuro history"], ["Life", "Goals"], ["Life", "Weekly review"], ["Life", "Dates & deadlines"], ["Life", "Personal money"], ["Enterprise", "Decisions"], ["Enterprise", "Ventures"], ["Enterprise", "Finances"], ["Enterprise", "Tasks"], ["Enterprise", "Content"], ["Settings", "Services"], ["Settings", "Devices"], ["Settings", "Notifications"], ["Settings", "Backup"], ["Settings", "Voice"], ["Settings", "Memory"]] as const) {
       go(host);
       await settle(host);
       fireEvent.click(within(field(host)!).getByRole("radio", { name: view }));
@@ -104,7 +108,28 @@ describe("lazy screens", () => {
       await settle(host);
       expect(f.textContent!.trim().length, `${host} › ${view}: blank`).toBeGreaterThan(20);
     }
+    // design-1110b B: Activity is a section of Agents, Lists of Today. design-1111s: Voice is a Settings tab (above).
+    for (const [host, section] of [["Agents", "activity"]] as const) {
+      go(host);
+      await settle(host);
+      await vi.waitFor(() => expect(field(host)!.querySelector(`#${section}.page-section`), `${host} › ${section}`).not.toBeNull());
+    }
     expect(errorSpy.mock.calls.map((c) => String(c[0]).slice(0, 200))).toEqual([]);
+  });
+
+  it("G14: Toolbar Refresh says it finished and links to the unavailable sources", async () => {
+    vi.useFakeTimers();
+    render(<App />);
+    await flush();
+    go("Settings");
+    await settle("Settings");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all systems" }));
+    await vi.waitFor(() => expect(screen.getByText("Refreshed")).toBeInTheDocument());
+    // Every unmocked command fails in this harness, so some sources are unavailable.
+    const link = screen.getByRole("button", { name: "Some sources unavailable ›" });
+    fireEvent.click(link);
+    expect(screen.queryByText("Refreshed")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Some sources unavailable ›" })).toBeNull();
   });
 
   it("revisiting a screen renders synchronously (no fallback flash)", async () => {
@@ -153,7 +178,7 @@ describe("Neuro (Live) session timer (fake timers)", () => {
     await click(/Start session/);
     await flush(15_000);
     expect(readout()).toBe("00:15");
-    go("Business"); await flush(); await flush();
+    go("Enterprise"); await flush(); await flush();
     await flush(10_000);
     await openNeuro(); await flush();
     expect(readout()).toBe("00:25");

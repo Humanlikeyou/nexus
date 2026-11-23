@@ -1,22 +1,28 @@
 import { BrainCircuit, Bluetooth, Inbox, Play, RefreshCw, Square, Unplug, X } from "lucide-react";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import { dateTime } from "../lib/format";
+import { parseBodyContext } from "../lib/noop";
 import { BAND_KEYS, MIN_SAMPLES, createBandHistory, type BandKey } from "../neuro/bandHistory";
 import { useMuseTelemetry } from "../neuro/useMuseTelemetry";
 import type { useTraining } from "../neuro/useTraining";
 import { useNow } from "../shell/useNow";
 import type { RecordedSession } from "../types";
 import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, Select, Sparkline, StatTile, type Tone } from "../ui";
+import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import { recoveryBand } from "./HealthScreen";
 import { NeuroFlow } from "./NeuroFlow";
 import { type MuseScreenProps, museSignalState } from "./muse";
+import { LiveSignal } from "../neuro/LiveSignal";
+import { useRecordingsAdapter } from "../neuro/useRecordingsAdapter";
+import { HemisyncSection } from "./HemisyncSection";
+import { NeuroTrends } from "./NeuroTrends";
 import "./NeuroScreen.css";
+import { MuseJourney } from "../design1118/MuseJourney";
 
 const MUSE_COMMAND = "get_muse_state";
 const SESSIONS_COMMAND = "list_sessions";
 const DASH = "—";
-const SIGNAL_WINDOW = 256;
 
 const BANDS: Record<BandKey, { symbol: string; name: string }> = {
   delta: { symbol: "δ", name: "Delta" },
@@ -42,15 +48,30 @@ export type NeuroFieldProps = MuseScreenProps & {
   training: ReturnType<typeof useTraining>;
   /** Re-runs the snapshot load. Retry is hidden without it. */
   onRetry?: () => void;
+  /** design-1110c C12: "Session history ›" on the Last session card. */
+  onOpenHistory?: () => void;
+  /** Muse session id of the running recording (Hemi-Sync links its track to it). */
+  sessionId?: string | null;
+  /** The last search found no headset: the note and "Search again" stay until one is found. */
+  scanEmpty?: boolean;
+  /** The session Stop just saved: a "Session saved" card shows until Done. */
+  lastSavedId?: string | null;
+  onDismissSaved?: () => void;
+  /** Opens one saved session's recording in Neuro history (App's navigate). */
+  onOpenRecording?: (sessionId: string) => void;
+  /** Bumped by Neuro history's "Start session": focuses Find Muse or Start session once the page is up. */
+  focusPrimary?: number;
   /** Overrides the first-load detection (refreshedAt still equals INITIAL_SNAPSHOT's). */
   loading?: boolean;
 };
 
-export function NeuroField({ data, devices, operation, error, sessionStartedAt, sessionEndedAt, onScan, onConnect, onDisconnect, onStart, onStop, training, onRetry, loading }: NeuroFieldProps) {
+export function NeuroField({ data, devices, operation, error, sessionId = null, sessionStartedAt, sessionEndedAt, onScan, onConnect, onDisconnect, onStart, onStop, training, onRetry, loading, onOpenHistory, scanEmpty = false, lastSavedId = null, onDismissSaved, onOpenRecording, focusPrimary = 0 }: NeuroFieldProps) {
   const telemetry = useMuseTelemetry(); // only this screen subscribes to live readings
   const history = useBandHistory();
   const now = useNow(); // 1 s tick scoped to this screen
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const recordings = useRecordingsAdapter(data.sessions);
+  useFocusPrimary(focusPrimary);
 
   if (loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt) return <NeuroSkeleton />;
 
@@ -93,14 +114,14 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
 
   const header = (
     <>
-      <PageHero title="Neuro" statement={failed ? "Out of reach" : deviceBadge.text} detail={failed ? <Badge tone="danger">Unavailable</Badge> : band ? <Badge tone={band.tone}>Recovery {Math.round(recovery as number)}%</Badge> : undefined} />
-      <div className="neuro__actions">{secondary}{!connected && primary}</div>
+      <PageHero title="Neuro" statement={failed ? "Out of reach" : deviceBadge.text} detail={failed ? <Badge tone="danger">Unavailable</Badge> : band ? <Badge tone={band.tone}>Recovery now {Math.round(recovery as number)}%</Badge> : undefined} />
+      {secondary && <div className="neuro__actions">{secondary}</div>}
     </>
   );
 
   if (failed) {
     return (
-      <div className="neuro" data-state="error">
+      <div className="neuro page-inset" data-state="error">
         {header}
         <Card className="neuro__alert" data-tone="danger" role="alert" title="Muse status couldn't be read" headingLevel={2}>
           <p className="neuro__callout">Amara OS couldn't reach the Muse bridge. Try again in a moment.</p>
@@ -117,19 +138,36 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
       ? { tone: "warning", text: state.label }
       : { tone: state.signal?.action === "reward" ? "success" : "neutral", text: state.label };
 
-  const traceValues = telemetry.channels.TP9?.length ? telemetry.channels.TP9 : Object.values(telemetry.channels).find((v) => v.length) ?? [];
-  const traceChannel = telemetry.channels.TP9?.length ? "TP9" : Object.entries(telemetry.channels).find(([, v]) => v.length)?.[0] ?? "TP9";
+  const liveAux = recordings.liveAux();
   const sinceLastPacket = telemetry.lastPacketAt ? Math.max(0, Math.round((now.getTime() - telemetry.lastPacketAt) / 1000)) : null;
   const heroIdle = connected && !streaming && !running;
+  const saved = lastSavedId && !running ? data.sessions.find((s) => s.id === lastSavedId) ?? null : null;
+  const savedBody = saved ? parseBodyContext(saved.body_context) : null;
+  const lastSession = sessions[0] ?? data.sessions[0] ?? null;
+  const recoveryNow = typeof data.noop.today?.recovery === "number" ? data.noop.today.recovery : null;
 
   return (
-    <div className="neuro" data-state={!connected ? "empty" : streaming ? "streaming" : "ready"}>
+    <div className="neuro page-inset" data-state={!connected ? "empty" : streaming ? "streaming" : "ready"}>
       {header}
+      {!running && !streaming && <AmaraTake page="neuro" className="neuro__take" />}
 
       {error && (
         <Card className="neuro__alert" data-tone="danger" role="alert">
           <p className="neuro__callout">{error}</p>
           <Button variant="secondary" size="small" onClick={running ? onStop : onScan} disabled={busy}>{running ? "Retry Stop and Save" : "Try Again"}</Button>
+        </Card>
+      )}
+      {lastSavedId && !running && (
+        <Card className="neuro__alert" role="status" title="Session saved" headingLevel={2}>
+          <p className="neuro__callout">
+            {saved ? <>{Math.max(1, Math.round(saved.duration_secs / 60))} min · focus {whole(saved.summary.avg_focus) ?? DASH} · calm {whole(saved.summary.avg_relaxation) ?? DASH}</> : "Saved on this Mac. Reading it back…"}
+            {savedBody ? <> · recovery that day {savedBody.recovery != null ? `${Math.round(savedBody.recovery)}%` : DASH}{savedBody.hrv_ms != null ? ` · HRV ${Math.round(savedBody.hrv_ms)} ms` : ""}</> : null}
+          </p>
+          <p className="neuro__footnote">Amara&apos;s Neuro take is updating with this session. It appears below the headline when it is ready.</p>
+          <div className="neuro__actions">
+            {onOpenRecording && <Button variant="primary" size="small" onClick={() => onOpenRecording(lastSavedId)}>Open recording ›</Button>}
+            <Button variant="secondary" size="small" onClick={onDismissSaved}>Done</Button>
+          </div>
         </Card>
       )}
       {pendingSave && (
@@ -140,23 +178,33 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
 
       {!connected
         ? (
-          <Card className="neuro__empty" title={operation === "scanning" ? "Searching for Muse" : "No Muse connected"} headingLevel={2}>
-            <div className="neuro__empty-lead">
-              <BrainCircuit className="neuro__empty-icon" aria-hidden="true" />
-              <p className="neuro__callout">{operation === "scanning" ? "Keep the headset nearby. Scanning takes about five seconds." : "Put your headset in pairing mode"}</p>
-            </div>
-            <InsetGroup title="Nearby headsets" className="neuro__group" aria-live="polite" footer={devices.length ? undefined : operation === "scanning" ? "Looking for headsets…" : "Results appear here after a scan."}>
-              {devices.map((device) => (
-                <ListRow key={device.address} icon={BrainCircuit} title={device.name} subtitle={rssiText(device.rssi)}
-                  accessory={<Button size="small" onClick={() => onConnect(device)} disabled={busy} loading={operation === "connecting"}>{operation === "connecting" ? BUSY_LABEL.connecting : "Connect"}</Button>} />
-              ))}
-            </InsetGroup>
-          </Card>
+          <>
+          {/* design-1118a: last session is the hero; recovery that day and recovery now stay separate. */}
+          <MuseJourney session={lastSession} sessions={sessions.length ? sessions : data.sessions}
+            recoveryNow={recoveryNow} onOpenHistory={onOpenHistory} onOpenSession={onOpenRecording}
+            status={<span className="d18-chip" role="status">{operation === "scanning" ? "Searching for Muse" : "No Muse connected"}</span>} action={primary}
+            devices={(devices.length > 0 || operation === "scanning") ? (
+              <InsetGroup title="Nearby headsets" className="neuro__group" aria-live="polite" footer={devices.length ? undefined : "Looking for headsets… Scanning takes about five seconds."}>
+                {devices.map((device) => (
+                  <ListRow key={device.address} icon={BrainCircuit} title={device.name} subtitle={rssiText(device.rssi)}
+                    accessory={<Button size="small" onClick={() => onConnect(device)} disabled={busy} loading={operation === "connecting"}>{operation === "connecting" ? BUSY_LABEL.connecting : "Connect"}</Button>} />
+                ))}
+              </InsetGroup>
+            ) : scanEmpty ? (
+              <div className="d18-note" role="status" aria-live="polite">
+                <p>No Muse found. Put it in pairing mode (hold the power button until the light pulses), then search again.</p>
+                <Button size="small" variant="secondary" icon={Bluetooth} onClick={onScan} disabled={busy || failed}>Search again</Button>
+              </div>
+            ) : null} />
+          </>
         )
         : (
           <>
-            <NeuroFlow training={training} telemetry={telemetry} sessions={data.sessions} running={running} action={primary} />
-            <More label="Live readings and signal" open={running && !training.state.stage ? true : undefined}>
+            {heroIdle && !pendingSave && lastSession && (
+              <MuseJourney hideNext session={lastSession} sessions={sessions.length ? sessions : data.sessions} recoveryNow={recoveryNow} onOpenHistory={onOpenHistory} onOpenSession={onOpenRecording} action={null} />
+            )}
+            <NeuroFlow training={training} telemetry={telemetry} sessions={data.sessions} running={running} action={primary} savedSessionId={lastSavedId} />
+            <More label="Live readings and signal" open={(running && !training.state.stage) || streaming ? true : undefined}>
             <Card className="neuro__strip" aria-label="Session">
               <Select className="neuro__protocol" label="Protocol" hideLabel value={training.protocolId} options={protocolOptions}
                 onChange={(e) => training.setProtocolId(e.target.value)} disabled={running || busy} />
@@ -175,7 +223,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
                 </Card>
               )}
               <StatTile label="Focus" value={heroIdle ? "Ready" : whole(state.focus)} />
-              <StatTile label="Relaxation" value={heroIdle ? "Ready" : whole(state.relaxation)} />
+              <StatTile label="Calm" value={heroIdle ? "Ready" : whole(state.relaxation)} />
             </div>
 
             <div className="neuro__row">
@@ -194,11 +242,7 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
                 <p className="neuro__footnote">Relative power · 1–45 Hz · not a medical measurement.</p>
               </Card>
 
-              <Card title="Signal" className="neuro__signal">
-                {traceValues.length > 1
-                  ? <Sparkline size="lg" values={traceValues.slice(-SIGNAL_WINDOW)} label={`${traceChannel} raw EEG, last ${SIGNAL_WINDOW} samples`} />
-                  : <p className="neuro__pending">{streaming ? "Acquiring…" : "The live signal appears when a session starts."}</p>}
-                <p className="neuro__footnote">{traceChannel} · 4 Hz visual update</p>
+              <LiveSignal trace={telemetry.trace ?? telemetry.channels} aux={liveAux} streaming={streaming}>
                 <details className="neuro__disclosure">
                   <summary>Signal diagnostics</summary>
                   <InsetGroup className="neuro__group">
@@ -208,29 +252,30 @@ export function NeuroField({ data, devices, operation, error, sessionStartedAt, 
                     ))}
                   </InsetGroup>
                 </details>
-              </Card>
+              </LiveSignal>
             </div>
             </More>
           </>
         )}
 
+      <HemisyncSection connected={connected} recording={running && !pendingSave} sessionId={sessionId} operation={operation} protocolId={training.protocolId} setProtocolId={training.setProtocolId} onStartMuse={onStart} onStopMuse={onStop} onFindMuse={onScan} onOpenRecording={onOpenRecording} />
+      <NeuroTrends recordings={recordings} />
+
       <div className="neuro__row neuro__row--sessions">
-        <More label="Recent sessions">
         <InsetGroup title="Recent sessions" className="neuro__sessions"
           footer={sessionsFailed ? "Saved sessions couldn't be read." : sessions.length ? undefined : "Your first completed session will appear here."}>
           {sessions.slice(0, 5).map((s) => (
             <ListRow key={s.id} icon={Inbox} title={dateTime(s.start)} onSelect={() => setSelectedId(s.id === selectedId ? null : s.id)} selected={s.id === selectedId}
-              subtitle={<span className="neuro__num">{Math.max(1, Math.round(s.duration_secs / 60))} min · {s.data_points.toLocaleString()} samples · relax {whole(s.summary.avg_relaxation) ?? DASH}</span>} />
+              subtitle={<span className="neuro__num">{Math.max(1, Math.round(s.duration_secs / 60))} min · {s.data_points.toLocaleString()} samples · calm {whole(s.summary.avg_relaxation) ?? DASH}</span>} />
           ))}
         </InsetGroup>
-        </More>
-        {selected && <SessionPanel session={selected} onClose={() => setSelectedId(null)} />}
+        {selected && <SessionPanel session={selected} onClose={() => setSelectedId(null)} onOpen={onOpenRecording} />}
       </div>
     </div>
   );
 }
 
-function SessionPanel({ session, onClose }: { session: RecordedSession; onClose: () => void }) {
+function SessionPanel({ session, onClose, onOpen }: { session: RecordedSession; onClose: () => void; onOpen?: (sessionId: string) => void }) {
   const s = session.summary;
   return (
     <Card as="aside" className="neuro__panel" title="Session summary" headingLevel={2}
@@ -240,11 +285,28 @@ function SessionPanel({ session, onClose }: { session: RecordedSession; onClose:
         <StatTile label={<>Calm <Badge tone="neutral">Beta</Badge></>} value={whole(s.calm_pct)} unit="%" />
         <StatTile label="In target" value={whole(s.time_in_target_pct)} unit="%" />
         <StatTile label="Avg focus" value={whole(s.avg_focus)} />
-        <StatTile label="Avg relaxation" value={whole(s.avg_relaxation)} />
+        <StatTile label="Avg calm" value={whole(s.avg_relaxation)} />
       </div>
       <p className="neuro__footnote"><span className="neuro__num">{session.data_points.toLocaleString()}</span> samples recorded on this Mac.</p>
+      {onOpen && <Button variant="secondary" size="small" onClick={() => onOpen(session.id)}>Open recording ›</Button>}
     </Card>
   );
+}
+
+
+/** Focuses the page's one primary action (Find Muse / Start session) when `signal` is raised; waits for the page to render. */
+function useFocusPrimary(signal: number) {
+  useEffect(() => {
+    if (!signal) return;
+    let frame = 0, tries = 0;
+    const go = () => {
+      const target = [...document.querySelectorAll<HTMLButtonElement>(".neuro button")].find((b) => /^(Find Muse|Start session)$/.test(b.textContent?.trim() ?? "") && !b.disabled);
+      if (target) target.focus();
+      else if (tries++ < 90) frame = requestAnimationFrame(go);
+    };
+    frame = requestAnimationFrame(go);
+    return () => cancelAnimationFrame(frame);
+  }, [signal]);
 }
 
 /** 60 s band history (Decision 7); one buffer per mounted Neuro screen. */
@@ -255,7 +317,7 @@ function useBandHistory() {
 
 function NeuroSkeleton() {
   return (
-    <div className="neuro" data-state="loading" aria-busy="true" aria-label="Loading Neuro">
+    <div className="neuro page-inset" data-state="loading" aria-busy="true" aria-label="Loading Neuro">
       <header className="neuro__header"><div className="neuro__title-row"><h1>Neuro</h1><span className="neuro__skel neuro__skel--badge" /></div></header>
       <span className="neuro__skel neuro__skel--strip" />
       <div className="neuro__hero">{[0, 1, 2].map((i) => <span key={i} className="neuro__skel neuro__skel--tile" />)}</div>

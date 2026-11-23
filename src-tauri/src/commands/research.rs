@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 pub struct SearchResult {
     pub title: String,
     pub url: String,
@@ -23,6 +23,7 @@ fn outbound_gate(disabled: bool) -> Result<(), String> {
 /// Search the web using Brave Search API.
 /// Falls back to a simple DuckDuckGo scrape if no API key configured.
 #[tauri::command]
+#[specta::specta]
 pub async fn web_search(
     query: String,
     max_results: Option<u32>,
@@ -164,6 +165,7 @@ async fn duckduckgo_search(
 /// Fetch the text content of a URL (strips HTML tags for readability).
 /// Returns at most `max_chars` characters (default 10000).
 #[tauri::command]
+#[specta::specta]
 pub async fn fetch_url(url: String, max_chars: Option<usize>) -> Result<String, String> {
     outbound_gate(super::telegram::outbound_disabled())?;
     let limit = max_chars.unwrap_or(10_000);

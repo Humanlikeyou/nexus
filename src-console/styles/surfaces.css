@@ -1,0 +1,126 @@
+/*
+ * Surfaces (design-1110, approved Nov 10 with D2 = cards). Loaded after calm.css, which it refines:
+ * calm keeps the field, the type and the hairlines; this layer brings back one solid content card with a
+ * top highlight (Apple glass rule: blur on chrome, solid on content), the sidebar glass for when native
+ * vibrancy is off, one header position, one button family and the on-palette chart colours.
+ * Selectors use :root:root so they outrank calm.css's :root rules and lazy-screen CSS regardless of load order.
+ * Tokens: --card-* and --tabs-reserve live here; --copper-text, --landing-heart and --data-* are in tokens.css.
+ */
+:root {
+  --card-bg: var(--bg-content);
+  --card-sheen: linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 100%);
+  --card-shadow: var(--glass-hairline), var(--glass-specular), var(--elev-1);
+  --card-pad: var(--space-5);
+  --card-radius: var(--radius-lg);
+  --section-gap: var(--space-6);
+  --tabs-reserve: 26px; /* = .subview-bar height, so every page title sits at one y (P0.1) */
+}
+:root[data-theme="dark"] { --card-sheen: linear-gradient(180deg, rgba(255,255,255,.045) 0%, rgba(255,255,255,.015) 100%); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --card-sheen: linear-gradient(180deg, rgba(255,255,255,.045) 0%, rgba(255,255,255,.015) 100%); }
+}
+
+/* ── P0.3 Cards ─────────────────────────────────────────────────────────────── */
+:root:root :is(.ui-card, .home__recovery-card, .mb-section, .ui-inset-group:not(.ui-card .ui-inset-group):not(.chat-screen__side .ui-inset-group):not(.quiet-more__body .ui-inset-group), .quiet-lines:not(.ui-card .quiet-lines), .quiet-figures.biz__figures) {
+  padding: var(--card-pad);
+  border: 0;
+  border-radius: var(--card-radius);
+  background: var(--card-sheen), var(--card-bg);
+  box-shadow: var(--card-shadow);
+}
+:root:root .ui-card .ui-inset-group { padding: 0; background: none; box-shadow: none; }
+:root:root .ui-card__title, :root:root .ui-inset-group__title, :root:root .mb-section__title, :root:root .home__recovery-title {
+  color: var(--label); font: var(--type-headline); letter-spacing: .005em; padding: 0 0 var(--space-2);
+}
+:root:root .ui-card.neuro__empty .ui-card__header { display: flex; }
+:root:root .quiet-more__body :is(.ui-card) { background: var(--card-sheen), var(--card-bg); }
+/* Rings and figures inside cards keep their own rhythm. */
+:root:root .fitness__ring-card { padding: var(--card-pad); }
+:root:root .quiet-figures.biz__figures { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+:root:root .quiet-figures.biz__figures .quiet-figure + .quiet-figure { padding-left: var(--space-5); box-shadow: inset 1px 0 0 var(--separator); }
+:root:root .home__recovery-card { display: grid; gap: var(--space-4); }
+:root:root .home__recovery-card .home__readiness { padding-top: var(--space-4); box-shadow: inset 0 1px 0 var(--separator); }
+:root:root .home, :root:root .page-inset, :root:root .fitness, :root:root .neuro { gap: var(--section-gap); }
+
+/* ── P0.1, P0.4, P0.6, P3.2, P3.3, P5.2, P14, P15 ─────────────────────────── */
+/* P0.1 One header position: pages with no tabs reserve the tab row, so the copper page name never jumps. */
+:root:root .active-field:not(:has(> .subview-bar)) > :is(.home, .settings, .smart-home) { padding-top: calc(var(--space-6) + var(--tabs-reserve)); }
+/* P14: Settings joins the shared column instead of its own 640px one. */
+:root:root .settings { max-width: var(--page-column); margin-inline: auto; padding-top: calc(var(--space-6) + var(--tabs-reserve)); gap: var(--space-8); }
+:root:root .smart-home__list { max-width: none; }
+
+/* Page header: one rhythm. Name 13/500 copper-text, statement 40/300, detail 15 secondary; 8px between. */
+:root:root .page-hero__title { color: var(--page-name); font-weight: 500; letter-spacing: .02em; }
+:root:root .chat-screen__heading h1 { color: var(--page-name); }
+
+/* Sidebar fallback when native vibrancy is off: thin glass, hairline edge, group labels, selection pill. */
+:root:root:not([data-vibrancy="true"]) main.command-surface > nav.system-constellation {
+  background: rgba(var(--bg-rgb), .9); /* .9: sidebar text stays ≥4.5:1 even over a worst-case white or black backdrop */
+  -webkit-backdrop-filter: blur(30px) saturate(160%); backdrop-filter: blur(30px) saturate(160%);
+  box-shadow: inset -1px 0 0 var(--separator);
+}
+:root:root:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > .nexus-mark {
+  background: rgba(var(--bg-rgb), .9); /* .9: sidebar text stays ≥4.5:1 even over a worst-case white or black backdrop */
+  -webkit-backdrop-filter: blur(30px) saturate(160%); backdrop-filter: blur(30px) saturate(160%);
+  box-shadow: inset -1px 0 0 var(--separator);
+}
+:root:root main.command-surface > nav.system-constellation { gap: var(--space-4); padding-top: var(--space-4); }
+:root:root .nav-group h2 { position: static; width: auto; height: auto; overflow: visible; clip-path: none; margin: 0 0 var(--space-1); padding: 0 var(--space-2); color: var(--label-secondary); font: 600 var(--text-subheadline)/var(--lh-subheadline) var(--font-text); letter-spacing: .01em; text-transform: none; }
+:root:root main.command-surface .nav-group button { min-height: 30px; border-radius: var(--radius-sm); }
+:root:root main.command-surface .nav-group button.is-active { background: var(--active-emerald); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent); }
+:root:root main.command-surface .nav-group button.is-active::before { content: none; }
+:root:root main.command-surface .nav-group button:hover:not(.is-active) { background: var(--fill-tertiary); }
+
+/* Buttons: three variants, one height, one radius, one highlight. */
+:root:root .ui-button { border-radius: var(--radius-sm); }
+:root:root .ui-button:not([data-variant]), :root:root .ui-button[data-variant="secondary"] {
+  --ui-button-bg: var(--fill-tertiary); --ui-button-line: transparent;
+  box-shadow: var(--glass-hairline), var(--glass-specular);
+}
+:root:root .ui-button[data-variant="primary"] { --ui-button-highlight: var(--accent-highlight); box-shadow: inset 0 1px 0 var(--accent-highlight), var(--elev-1); }
+
+/* Disclosures read as a control, not stray text: small plain pill with the chevron. */
+:root:root .quiet-more > summary { padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2); margin-left: calc(var(--space-2) * -1); border-radius: var(--radius-sm); color: var(--label-secondary); }
+:root:root .quiet-more > summary:hover { background: var(--fill-tertiary); }
+
+/* Badges: the tone dot is slightly larger so it reads at a glance (P0.5). */
+:root:root .ui-badge::before { width: 6px; height: 6px; }
+
+/* Lists: the status word sits at the trailing edge like every other page; row actions float over it on hover. */
+:root:root .lists__row { position: relative; }
+:root:root .lists__row .ui-list-row__main { padding-right: 0; }
+:root:root .lists__row .ui-list-row__accessory { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+:root:root .lists__row .ui-list-row__value { margin-left: auto; }
+
+/* Chat: composer is chrome over the conversation, so it gets thick glass + highlight; user bubble is emerald-tinted. */
+:root:root .chat-screen .chat-screen__composer {
+  background: linear-gradient(var(--glass-tint), var(--glass-tint)), var(--glass-thick);
+  -webkit-backdrop-filter: blur(var(--blur-thick)) saturate(var(--saturate-thick)); backdrop-filter: blur(var(--blur-thick)) saturate(var(--saturate-thick));
+  box-shadow: var(--glass-hairline), var(--glass-specular), var(--elev-2);
+  border-radius: var(--radius-lg);
+}
+:root:root .chat-bubble[data-role="user"] { background: var(--active-emerald); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent); }
+
+/* Charts: emerald = you, copper = baseline/effort, tertiary = context. No off-palette blue or indigo. */
+:root:root .mb-legend { display: flex; gap: var(--space-4); margin: 0; color: var(--label-secondary); font: var(--type-callout); }
+:root:root .mb-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+
+
+/* Reduce Transparency / no backdrop-filter: the sidebar fallback goes solid like every other glass surface. */
+:root:root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > nav.system-constellation,
+:root:root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > .nexus-mark { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+@media (prefers-reduced-transparency: reduce) {
+  :root:root:not([data-vibrancy="true"]) main.command-surface > nav.system-constellation,
+  :root:root:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > .nexus-mark { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+:root:root .mb-legend i[data-tone="deep"] { background: var(--data-sleep-deep); }
+:root:root .mb-legend i[data-tone="rem"] { background: var(--data-sleep-rem); }
+:root:root .mb-legend i[data-tone="light"] { background: var(--data-sleep-light); }
+/* Neuro empty state: Find Muse sits in the card, under the hint (P10.1). */
+:root:root .neuro__empty-lead { display: grid; gap: var(--space-3); justify-items: start; }
+/* The composer's thick glass goes solid under Reduce Transparency and Reduce Motion, like every blurred surface. */
+@media (prefers-reduced-transparency: reduce), (prefers-reduced-motion: reduce) {
+  :root:root .chat-screen .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+:root:root[data-reduce-transparency="true"] .chat-screen .chat-screen__composer,
+:root:root[data-reduce-motion="true"] .chat-screen .chat-screen__composer { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }

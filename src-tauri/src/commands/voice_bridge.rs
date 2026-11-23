@@ -9,12 +9,15 @@
 //! Both run as one background pair, started/stopped with `voice_bridge_start` / `voice_bridge_stop`
 //! (idempotent, same pattern as `ha_live_start` / `ha_live_stop`).
 
+use super::shared::time::now_ms;
 use futures::StreamExt;
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Mutex as StdMutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::handshake::client::Request;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -40,6 +43,14 @@ const LEVEL_MIN_GAP: Duration = Duration::from_millis(33);
 const BACKOFF_START: Duration = Duration::from_millis(500);
 const BACKOFF_CAP: Duration = Duration::from_secs(30);
 const MAX_UTTERANCE_ID: usize = 64;
+/// Subprotocol prefix carrying the per-launch token (`amara-launch.<64 hex>`).
+const LEVEL_TOKEN_SUBPROTOCOL: &str = "amara-launch.";
+/// ON since decision 0027: `tasks/proposed/amara-voice-token.diff` is applied to amara-voice, so the
+/// server echoes the offered `Sec-WebSocket-Protocol`. tungstenite fails the client handshake
+/// (`NoSubProtocol`) against an unpatched server, so roll this back to false if the patch is undone.
+/// Retrying without the header on failure is deliberately NOT done: it would hand the token to
+/// whatever process squats on the port.
+const LEVEL_SEND_LAUNCH_TOKEN: bool = true;
 
 // ─── payloads (camelCase) ───────────────────────────────────────────────────
 
@@ -88,13 +99,10 @@ pub struct VoiceLevelEvent {
     pub state: VoiceState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub utterance_id: Option<String>,
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    /// Speaking only: the 1-3 strongest spectral peaks of what amara-voice plays, `[hz, amp]`,
+    /// 80..4000 Hz, amp relative to the strongest (0..1]. Absent when the feed has none (decision 0040).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peaks: Option<Vec<[f64; 2]>>,
 }
 
 // ─── state: mapping + change detection (pure, tested) ───────────────────────
@@ -192,6 +200,29 @@ fn clamp01(v: &Value) -> Option<f64> {
     x.is_finite().then(|| x.clamp(0.0, 1.0))
 }
 
+const MAX_PEAKS: usize = 3;
+
+/// The optional `peaks` field: 1..=3 `[hz, amp]` pairs, hz finite in 80..=4000, amp finite in (0, 1].
+/// Anything else drops the peaks only; the level itself still counts.
+fn parse_peaks(v: Option<&Value>) -> Option<Vec<[f64; 2]>> {
+    let arr = v?.as_array()?;
+    if arr.is_empty() || arr.len() > MAX_PEAKS {
+        return None;
+    }
+    arr.iter()
+        .map(|p| {
+            let pair = p.as_array().filter(|a| a.len() == 2)?;
+            let f = pair[0]
+                .as_f64()
+                .filter(|f| f.is_finite() && (80.0..=4000.0).contains(f))?;
+            let a = pair[1]
+                .as_f64()
+                .filter(|a| a.is_finite() && *a > 0.0 && *a <= 1.0)?;
+            Some([f, a])
+        })
+        .collect()
+}
+
 fn valid_utterance_id(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= MAX_UTTERANCE_ID
@@ -199,7 +230,7 @@ fn valid_utterance_id(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// Parse one feed frame `{ts, rms, peak, state, utteranceId?}`. Malformed → None (dropped).
+/// Parse one feed frame `{ts, rms, peak, state, utteranceId?, peaks?}`. Malformed → None (dropped).
 /// rms/peak are clamped to 0..1; the publisher's `ts` must be a number but we restamp on receipt.
 fn parse_level(text: &str) -> Option<VoiceLevelEvent> {
     let v: Value = serde_json::from_str(text).ok()?;
@@ -220,12 +251,18 @@ fn parse_level(text: &str) -> Option<VoiceLevelEvent> {
         Some(Value::String(s)) if valid_utterance_id(s) => Some(s.clone()),
         Some(_) => return None,
     };
+    let peaks = if state == VoiceState::Speaking {
+        parse_peaks(obj.get("peaks"))
+    } else {
+        None
+    };
     Some(VoiceLevelEvent {
         ts: now_ms(),
         rms,
         peak: peak.max(rms),
         state,
         utterance_id,
+        peaks,
     })
 }
 
@@ -240,6 +277,38 @@ fn level_port() -> u16 {
 /// Only ever 127.0.0.1; the port is the one configurable part.
 fn level_url(port: u16) -> String {
     format!("ws://127.0.0.1:{port}/level")
+}
+
+/// The handshake request for the level feed. The token (when given and the URL is loopback) rides
+/// in `Sec-WebSocket-Protocol`: unlike a `?t=` query it never lands in URLs, access logs, error
+/// strings or `Debug` output of the URL, and browsers cannot set it without the server echoing it.
+/// The value is never logged.
+fn level_request(
+    url: &str,
+    token: Option<&str>,
+) -> Result<Request, tokio_tungstenite::tungstenite::Error> {
+    let mut req = url.into_client_request()?;
+    if let Some(t) = token.filter(|_| super::loopback_http::is_loopback_url(url)) {
+        let v = format!("{LEVEL_TOKEN_SUBPROTOCOL}{t}");
+        if let Ok(hv) = v.parse() {
+            req.headers_mut().insert("Sec-WebSocket-Protocol", hv);
+        }
+    }
+    Ok(req)
+}
+
+/// The token to offer, or None (gate off, or no/invalid token file).
+#[cfg(not(test))]
+fn level_token() -> Option<String> {
+    LEVEL_SEND_LAUNCH_TOKEN
+        .then(super::launch_token::current)
+        .flatten()
+}
+
+/// Tests never read the real data dir: the loop tests run tokenless against mock publishers.
+#[cfg(test)]
+fn level_token() -> Option<String> {
+    None
 }
 
 fn level_ws_config() -> WebSocketConfig {
@@ -307,12 +376,21 @@ async fn level_loop(port: u16, t: LevelTimings, mut emit: impl FnMut(VoiceLevelE
     let url = level_url(port);
     let mut backoff = t.backoff_start;
     loop {
-        let conn = tokio::time::timeout(
-            t.connect,
-            tokio_tungstenite::connect_async_with_config(&url, Some(level_ws_config()), false),
-        )
-        .await;
-        if let Ok(Ok((ws, _))) = conn {
+        let conn = match level_request(&url, level_token().as_deref()) {
+            Ok(req) => Some(
+                tokio::time::timeout(
+                    t.connect,
+                    tokio_tungstenite::connect_async_with_config(
+                        req,
+                        Some(level_ws_config()),
+                        false,
+                    ),
+                )
+                .await,
+            ),
+            Err(_) => None,
+        };
+        if let Some(Ok(Ok((ws, _)))) = conn {
             if level_session(ws, t, &mut emit).await {
                 backoff = t.backoff_start;
             }
@@ -329,6 +407,7 @@ static TASKS: StdMutex<Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHan
 
 /// Start the state + level bridge. Idempotent: false if already running.
 #[tauri::command]
+#[specta::specta]
 pub async fn voice_bridge_start(app: AppHandle) -> bool {
     let mut slot = TASKS.lock().unwrap_or_else(|p| p.into_inner());
     if slot
@@ -351,6 +430,7 @@ pub async fn voice_bridge_start(app: AppHandle) -> bool {
 
 /// Stop the bridge. False if it wasn't running.
 #[tauri::command]
+#[specta::specta]
 pub async fn voice_bridge_stop() -> bool {
     match TASKS.lock().unwrap_or_else(|p| p.into_inner()).take() {
         Some((a, b)) => {
@@ -366,6 +446,51 @@ pub async fn voice_bridge_stop() -> bool {
 mod tests {
     use super::*;
     use futures::SinkExt;
+
+    #[test]
+    fn speaking_frames_carry_valid_peaks_and_nothing_else_does() {
+        let ok = parse_level(
+            r#"{"ts":1,"rms":0.3,"peak":0.5,"state":"speaking","peaks":[[440.5,1.0],[880,0.25]]}"#,
+        )
+        .unwrap();
+        assert_eq!(ok.peaks, Some(vec![[440.5, 1.0], [880.0, 0.25]]));
+        let ev = serde_json::to_value(&ok).unwrap();
+        assert_eq!(
+            ev["peaks"],
+            serde_json::json!([[440.5, 1.0], [880.0, 0.25]])
+        );
+        // Not speaking: peaks are ignored even when well formed.
+        let mic =
+            parse_level(r#"{"ts":1,"rms":0.3,"peak":0.5,"state":"listening","peaks":[[440,1]]}"#)
+                .unwrap();
+        assert_eq!(mic.peaks, None);
+        assert!(serde_json::to_value(&mic).unwrap().get("peaks").is_none());
+        // Bad peaks drop the peaks only; the level still counts.
+        for bad in [
+            r#"[]"#,
+            r#"[[440,1],[500,1],[600,1],[700,1]]"#,
+            r#"[[79.9,1]]"#,
+            r#"[[4000.1,1]]"#,
+            r#"[[440,0]]"#,
+            r#"[[440,1.01]]"#,
+            r#"[[440,-1]]"#,
+            r#"[[440]]"#,
+            r#"[[440,1,2]]"#,
+            r#"[["440",1]]"#,
+            r#"[[440,1],"x"]"#,
+            r#"{"f":440}"#,
+            r#""440""#,
+            r#"null"#,
+        ] {
+            let frame =
+                format!(r#"{{"ts":1,"rms":0.3,"peak":0.5,"state":"speaking","peaks":{bad}}}"#);
+            let ev = parse_level(&frame).unwrap_or_else(|| panic!("level dropped for {bad}"));
+            assert_eq!(ev.peaks, None, "{bad}");
+            assert_eq!(ev.rms, 0.3);
+        }
+        let none = parse_level(r#"{"ts":1,"rms":0.3,"peak":0.5,"state":"speaking"}"#).unwrap();
+        assert_eq!(none.peaks, None);
+    }
     use serde_json::json;
     use std::sync::{Arc, Mutex};
 
@@ -633,5 +758,83 @@ mod tests {
         let t0 = std::time::Instant::now();
         assert!(!level_session(ws, fast(), &mut emit).await);
         assert!(t0.elapsed() < Duration::from_secs(3));
+    }
+
+    const FIXTURE: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn proto(r: &Request) -> Option<String> {
+        r.headers()
+            .get("Sec-WebSocket-Protocol")
+            .map(|v| v.to_str().unwrap().to_string())
+    }
+
+    #[test]
+    fn request_carries_token_as_subprotocol_not_in_url() {
+        let url = level_url(8791);
+        let r = level_request(&url, Some(FIXTURE)).unwrap();
+        assert_eq!(proto(&r), Some(format!("amara-launch.{FIXTURE}")));
+        assert!(!r.uri().to_string().contains(FIXTURE));
+    }
+
+    #[test]
+    fn request_without_token_or_off_loopback_has_no_header() {
+        assert_eq!(proto(&level_request(&level_url(8791), None).unwrap()), None);
+        let remote = level_request("ws://example.com:8791/level", Some(FIXTURE)).unwrap();
+        assert_eq!(proto(&remote), None);
+        let lan = level_request("ws://192.168.1.5:8791/level", Some(FIXTURE)).unwrap();
+        assert_eq!(proto(&lan), None);
+    }
+
+    #[test]
+    fn missing_token_file_yields_no_token() {
+        let d = std::env::temp_dir().join(format!("vb-tok-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(super::super::launch_token::read_in(&d), None);
+        let t = super::super::launch_token::mint_in(&d).unwrap();
+        assert_eq!(super::super::launch_token::read_in(&d), Some(t));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn token_gate_is_on_after_decision_0027() {
+        // level_token() itself is not called here: with the gate on it reads the real data dir.
+        assert!(std::hint::black_box(LEVEL_SEND_LAUNCH_TOKEN));
+    }
+
+    /// Why the gate exists: an unpatched server that ignores the subprotocol fails the handshake.
+    #[tokio::test]
+    async fn server_not_echoing_subprotocol_fails_handshake() {
+        let (port, _) = publisher(vec![], 1, Duration::from_millis(1)).await;
+        let req = level_request(&level_url(port), Some(FIXTURE)).unwrap();
+        assert!(tokio_tungstenite::connect_async(req).await.is_err());
+    }
+
+    /// A patched server echoes the offered subprotocol and the feed works with it.
+    #[tokio::test]
+    async fn server_echoing_subprotocol_connects() {
+        use tokio_tungstenite::tungstenite::handshake::server::{Request as SReq, Response};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(None::<String>));
+        let s2 = seen.clone();
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let cb = |req: &SReq, mut resp: Response| {
+                let v = req.headers().get("Sec-WebSocket-Protocol").cloned();
+                *s2.lock().unwrap() = v.as_ref().map(|h| h.to_str().unwrap().to_string());
+                if let Some(v) = v {
+                    resp.headers_mut().insert("Sec-WebSocket-Protocol", v);
+                }
+                Ok(resp)
+            };
+            let _ws = tokio_tungstenite::accept_hdr_async(sock, cb).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        });
+        let req = level_request(&level_url(port), Some(FIXTURE)).unwrap();
+        assert!(tokio_tungstenite::connect_async(req).await.is_ok());
+        assert_eq!(
+            seen.lock().unwrap().clone(),
+            Some(format!("amara-launch.{FIXTURE}"))
+        );
     }
 }

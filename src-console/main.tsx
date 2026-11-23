@@ -12,6 +12,7 @@ import "./styles/glass-apply.css";
 import "./styles/glass-motion.css";
 import "./styles/route-motion.css";
 import "./styles/calm.css";
+import "./styles/surfaces.css";
 import { installReduceTransparency } from "./shell/reduceTransparency";
 import { installVibrancy } from "./shell/vibrancy";
 

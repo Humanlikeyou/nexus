@@ -65,6 +65,21 @@ describe("Neuro screen", () => {
     expect(screen.getByText("Your first completed session will appear here.")).toBeInTheDocument();
   });
 
+  it("Find Muse is one compact row: status chip, short line and the primary button share a row; the device list shows only when scanning or found", () => {
+    renderNeuro({});
+    const row = document.querySelector(".d18-next__row") as HTMLElement;
+    expect(within(row).getByText("No Muse connected")).toBeInTheDocument();
+    expect(within(row).getByText("Put your headset in pairing mode")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Find Muse" })).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Nearby headsets" })).toBeNull();
+    expect(screen.queryByText("Results appear here after a scan.")).toBeNull();
+  });
+
+  it("while scanning, the nearby list opens below the row", () => {
+    renderNeuro({ operation: "scanning" });
+    expect(screen.getByText("Looking for headsets… Scanning takes about five seconds.")).toBeInTheDocument();
+  });
+
   it("loading operation: the primary button shows progress and other controls are disabled", () => {
     renderNeuro({ operation: "scanning" });
     expect(screen.getByRole("button", { name: /Searching…/ })).toBeDisabled();
@@ -74,7 +89,7 @@ describe("Neuro screen", () => {
   it("connected but idle: Start session + Disconnect, hero tiles Ready, bands at 0 with —", () => {
     const h = renderNeuro({ data: snap({ muse: connected, noop: { ...INITIAL_SNAPSHOT.noop, today: { ...(INITIAL_SNAPSHOT.noop.today ?? {}), recovery: 74 } as SystemSnapshot["noop"]["today"] } }) });
     expect(screen.getByText("Muse S · Connected")).toBeInTheDocument();
-    expect(screen.getByText("Recovery 74%")).toBeInTheDocument();
+    expect(screen.getByText("Recovery now 74%")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start session" }));
     expect(h.onStart).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
@@ -121,7 +136,7 @@ describe("Neuro screen", () => {
     expect(screen.getByText("27%")).toBeInTheDocument(); // alpha 27.4
     expect(screen.getByRole("progressbar", { name: "Alpha relative power" })).toHaveAttribute("aria-valuenow", "27.4");
     expect(screen.getByText("Relative power · 1–45 Hz · not a medical measurement.")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /TP9 raw EEG, last 256 samples/ })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /TP9 raw EEG, last 10 seconds/ })).toBeInTheDocument();
     expect(screen.getByText("1s ago")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Protocol" })).toBeDisabled();
   });
@@ -171,6 +186,31 @@ describe("Neuro screen", () => {
     expect(panel).toHaveTextContent("Calm Beta—");
     fireEvent.click(within(panel).getByRole("button", { name: "Close session summary" }));
     expect(screen.queryByRole("complementary")).toBeNull();
+  });
+});
+
+describe("Neuro sections (1112n)", () => {
+  it("shows the Hemi-Sync and trend sections in the Mind–Body page language, with honest unwired states", () => {
+    renderNeuro({ data: snap({ muse: connected }) });
+    expect(screen.getByRole("heading", { level: 2, name: "Hemi-Sync" })).toBeInTheDocument();
+    expect(screen.getByText("Your Hemi-Sync library isn't connected yet.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "What the Muse found" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Focus and calm over time" })).toBeInTheDocument();
+    expect(screen.getByText("Trends appear after two sessions with a focus or calm score.")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).toBeNull();
+  });
+
+  it("trends: two or more scored sessions draw Focus and Calm rows from the real list", () => {
+    const at = (day: number, focus: number, calm: number) => ({ id: `s${day}`, device_type: "muse", start: `2026-10-${day}T21:00:00+09:00`, end: `2026-10-${day}T21:20:00+09:00`, duration_secs: 1200, data_points: 9000, summary: { avg_focus: focus, avg_relaxation: calm } });
+    renderNeuro({ data: snap({ muse: connected, sessions: [at(20, 50, 60), at(22, 58, 64), at(24, 62, 70)] }) });
+    expect(screen.getByText("Focus averaged 57 over your last 3 sessions.")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Focus across your last 3 sessions, latest 62/ })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Calm across your last 3 sessions, latest 70/ })).toBeInTheDocument();
+  });
+
+  it("disconnected: the Hemi-Sync section still shows", () => {
+    renderNeuro();
+    expect(screen.getByRole("heading", { level: 2, name: "Hemi-Sync" })).toBeInTheDocument();
   });
 });
 

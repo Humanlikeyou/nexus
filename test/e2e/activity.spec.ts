@@ -1,9 +1,9 @@
-import { activeField, expect, navButton, openApp, test, openMore } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, test, openMore, openView } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 const at = (iso: string) => Date.parse(iso);
 
-/** Chat & Agents › Activity: kill-switch Suppressed (neutral), outbox Expired row, prune archive count. */
+/** Agents › Activity: kill-switch Suppressed (neutral), outbox Expired row, prune archive count. */
 test("activity shows Suppressed as neutral, the Expired outbox row and the activity-archive count", async ({ page, theme, consoleErrors }) => {
   const base = responses() as Record<string, unknown>;
   await openApp(page, {
@@ -19,10 +19,8 @@ test("activity shows Suppressed as neutral, the Expired outbox row and the activ
       ],
     },
   });
-  await navButton(page, "Chat & Agents").click();
-  const field = activeField(page, "Chat & Agents");
-  await field.getByRole("radio", { name: "Activity" }).click();
-  await expect(field.getByRole("heading", { level: 1 })).toHaveText("Activity");
+  const field = (await openView(page, "Activity")).locator("#activity");
+  await expect(field.getByRole("heading", { level: 2 }).first()).toHaveText("Activity");
   await openMore(page);
 
   const expired = field.getByRole("listitem").filter({ hasText: "Expired" }).first();
@@ -51,9 +49,7 @@ test("activity shows Suppressed as neutral, the Expired outbox row and the activ
 
 test("no Expired row when nothing has expired", async ({ page, theme }) => {
   await openApp(page, { theme });
-  await navButton(page, "Chat & Agents").click();
-  const field = activeField(page, "Chat & Agents");
-  await field.getByRole("radio", { name: "Activity" }).click();
+  const field = (await openView(page, "Activity")).locator("#activity");
   await expect(field.getByText("Last delivered")).toBeVisible();
   await expect(field.getByText("Older than 24h, kept, not sent")).toHaveCount(0);
 });
@@ -76,9 +72,7 @@ test("skipped rituals render one neutral 'Skipped' row each, labelled Ritual", a
       ],
     },
   });
-  await navButton(page, "Chat & Agents").click();
-  const field = activeField(page, "Chat & Agents");
-  await field.getByRole("radio", { name: "Activity" }).click();
+  const field = (await openView(page, "Activity")).locator("#activity");
   const rows = field.getByRole("listitem").filter({ hasText: "Skipped (missed window)" });
   await expect(rows).toHaveCount(3);
   for (const row of await rows.all()) {

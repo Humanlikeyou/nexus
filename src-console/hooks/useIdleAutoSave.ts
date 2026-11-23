@@ -11,7 +11,7 @@
  * context cannot be loaded (bug 1); the session log is still stored.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { summarizeAndStoreSessionSilent, type SessionEntry } from "@/terrance/system/continuity";
+import { summarizeAndStoreSessionSilent, type SessionEntry } from "../legacy-core/terrance/system/continuity";
 
 export const IDLE_AUTOSAVE_MS = 10 * 60_000;
 export const AUTOSAVE_SIGNATURE_KEY = "nexus.terrence.autosave.lastSavedSignature";
@@ -21,6 +21,8 @@ export interface AutoSaveMessage {
   content: string;
   timestamp: string;
   status?: "failed";
+  /** Local-only lines (add previews) are not part of the conversation Amara summarizes. */
+  local?: boolean;
 }
 
 interface Snapshot {
@@ -30,7 +32,7 @@ interface Snapshot {
 
 export function toSessionEntries(messages: AutoSaveMessage[]): SessionEntry[] {
   return messages
-    .filter((m) => m.status !== "failed" && m.content.trim().length > 0)
+    .filter((m) => m.status !== "failed" && !m.local && m.content.trim().length > 0)
     .map((m) => ({
       role: m.role === "user" ? "user" : "terrance",
       text: m.content,

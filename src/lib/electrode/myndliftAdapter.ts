@@ -1,4 +1,4 @@
-import type { ElectrodeDeviceInfo, DeviceTelemetry } from "@/lib/types";
+import type { ElectrodeDeviceInfo, DeviceTelemetry } from "../../../src-console/legacy-core/lib/types";
 
 /**
  * Adapter interface for electrode devices (Myndlift and future devices).

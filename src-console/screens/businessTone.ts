@@ -3,6 +3,8 @@ import type { Tone } from "../ui";
 
 /** Legacy status tone (live/watch/fault/quiet) → ui Badge tone. */
 export function badgeTone(value: string | boolean | null | undefined): Tone {
+  // One status vocabulary (P0.5): Active is emerald everywhere, as on Today.
+  if (typeof value === "string" && value.toLowerCase() === "active") return "accent";
   const t = tone(value);
   return t === "live" ? "success" : t === "watch" ? "warning" : t === "fault" ? "danger" : "neutral";
 }

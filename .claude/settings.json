@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "NEXUS_OUTBOUND_DISABLED": "1"
+  },
+  "permissions": {
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(git push)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(launchctl load:*)",
+      "Bash(launchctl bootstrap:*)",
+      "Edit(~/.hermes/**)",
+      "Write(~/.hermes/**)",
+      "Edit(memory/**)",
+      "Write(memory/**)",
+      "Edit(~/Library/Application Support/com.taisun.nexus/replays/**)",
+      "Write(~/Library/Application Support/com.taisun.nexus/replays/**)",
+      "Edit(~/Library/Application Support/com.taisun.nexus/sessions/**)",
+      "Write(~/Library/Application Support/com.taisun.nexus/sessions/**)",
+      "Edit(~/Library/Application Support/com.taisun.nexus/muse/**)",
+      "Write(~/Library/Application Support/com.taisun.nexus/muse/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard-bash.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

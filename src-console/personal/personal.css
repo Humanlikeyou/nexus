@@ -1,0 +1,24 @@
+/* design-1111a: personal-OS surfaces (built from the approved mockups). */
+.pk-host { display: grid; gap: 21px; align-content: start; }
+.pk-host .ui-card, .page-section .pk-g2 .ui-card { display: grid; gap: 8px; }
+.page-section > .pk-g2, .page-section > .ui-card, .page-section > .pk-g3, .page-section > .pk-change { margin-top: 13px; }
+.pk-finding--one { grid-template-columns: 1fr; }
+.ci-form { display: grid; gap: 13px; }
+.ci-row { align-items: start; }
+.ci-scale button { display: grid; place-items: center; gap: 3px; padding: 8px 0; border-radius: 8px; border: 1px solid var(--separator); font: inherit; font-size: 11px; color: var(--label-secondary); text-align: center; background: transparent; cursor: pointer; }
+.ci-scale button b { font-size: 17px; font-weight: 400; color: var(--label); }
+.ci-scale button[data-on] { border-color: var(--tone-accent-text); background: color-mix(in srgb, var(--tone-accent-text) 14%, transparent); color: var(--label); }
+.ci-scale button:focus-visible, .ci-chip:focus-visible, .ci-mic:focus-visible { outline: 2px solid var(--focus-ring, var(--tone-accent-text)); outline-offset: 3px; }
+.ci-chip { font: inherit; font-size: 11px; background: transparent; cursor: pointer; }
+.ci-composer { padding: 5px 8px 5px 13px; }
+.ci-input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: var(--label); background: transparent; border: 0; outline: none; }
+.ci-input::placeholder { color: var(--label-secondary); }
+.ci-mic { cursor: pointer; padding: 0; }
+.pk-entry .pk-chips { margin-top: 3px; }
+.memory__search { flex-wrap: wrap; position: relative; }
+.memory__q { flex: 1; min-width: 144px; font: inherit; font-size: 13px; color: var(--label); background: transparent; border: 0; outline: none; }
+.memory__q::placeholder { color: var(--label-secondary); }
+.memory__search:focus-within { border-color: var(--tone-accent-text); }
+.memory__grid { align-items: start; }
+.pk-mem .ui-text-field { min-width: 0; }
+.ci-composer { position: relative; }

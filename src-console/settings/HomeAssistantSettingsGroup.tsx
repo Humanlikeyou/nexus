@@ -7,13 +7,13 @@ import { Badge, Button, InsetGroup, ListRow, TextField } from "../ui";
 export const HA_SETTINGS_ANCHOR = "home-assistant";
 
 type Load = { status: "loading" } | { status: "ready"; config: HaConfig } | { status: "coming_soon" } | { status: "error" };
-type Result = { ok: boolean; text: string } | null;
+type Result = { ok: boolean; text: string; next?: boolean } | null;
 
 /**
  * Settings › Home Assistant. The token is write-only: it lives in local state only while typed,
  * is cleared after save, and is never read back, prefilled, logged or put in an error.
  */
-export function HomeAssistantSettingsGroup() {
+export function HomeAssistantSettingsGroup({ onOpenSmartHome }: { onOpenSmartHome?: () => void } = {}) {
   const [load, setLoad] = useState<Load>({ status: "loading" });
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
@@ -83,7 +83,7 @@ export function HomeAssistantSettingsGroup() {
       await haConfigBackend().setConfig(input);
       if (!mounted.current) return;
       setToken(""); setReplacing(false);
-      setSaveResult({ ok: true, text: "Saved." });
+      setSaveResult({ ok: true, text: "Saved.", next: true });
       await refresh();
     } catch (err) {
       setToken("");
@@ -112,7 +112,7 @@ export function HomeAssistantSettingsGroup() {
       if (addressDiffers && url.trim() !== "") input.url = url.trim();
       if (token !== "") input.token = token;
       const result = await haConfigBackend().testConnection(input);
-      if (mounted.current) setTestResult({ ok: result.ok, text: testResultCopy(result) });
+      if (mounted.current) setTestResult({ ok: result.ok, text: testResultCopy(result), next: result.ok });
     } catch (err) {
       fail(err, comingSoon, () => testResultCopy({ ok: false }), setTestResult);
     } finally { if (mounted.current) setBusy(null); }
@@ -151,6 +151,9 @@ export function HomeAssistantSettingsGroup() {
           </div>
           <p className="settings__ha-result" role="status" aria-live="polite" data-ok={saveResult?.ok}>{saveResult?.text ?? ""}</p>
           <p className="settings__ha-result" role="status" aria-live="polite" data-ok={testResult?.ok}>{testResult?.text ?? ""}</p>
+          {onOpenSmartHome && (saveResult?.next || testResult?.next) && (
+            <div className="settings__ha-actions"><Button type="button" size="small" variant="primary" onClick={onOpenSmartHome}>Open Smart home ›</Button></div>
+          )}
         </form>
       </InsetGroup>
     </div>

@@ -14,7 +14,7 @@ const MAX_DECISION_ITEMS: usize = 12;
 const MAX_CONTEXT_ITEM_IDS: usize = 32;
 const DECISION_STATUSES: &[&str] = &["open", "decided", "observing", "closed", "cancelled"];
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrencePriority {
     pub rank: u32,
@@ -29,7 +29,7 @@ pub struct TerrencePriority {
     pub action_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrencePrioritySnapshot {
     pub id: String,
@@ -37,7 +37,7 @@ pub struct TerrencePrioritySnapshot {
     pub items: Vec<TerrencePriority>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionEvidence {
     pub detail: String,
@@ -45,14 +45,14 @@ pub struct DecisionEvidence {
     pub confidence: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionAlternative {
     pub label: String,
     pub tradeoffs: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceDecision {
     pub id: String,
@@ -922,6 +922,7 @@ pub fn record_terrence_decision(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_terrence_decisions(limit: Option<u32>) -> Result<Vec<TerrenceDecision>, String> {
     let conn = priority_db()?;
     ingest_hermes_decision_inbox(&conn);
@@ -987,6 +988,7 @@ fn resolve_terrence_decision_in(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_current_terrence_priority_snapshot() -> Result<TerrencePrioritySnapshot, String> {
     current_priority_snapshot()
 }

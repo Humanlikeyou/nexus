@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { connectMuse, disconnectMuse, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "../bridge";
+import { connectMuse, disconnectMuse, markRecordingAux, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "../bridge";
 import { readableError } from "../lib/format";
+import { AUX_STEP, AuxDetector, auxInfoDetected } from "../neuro/auxDetect";
+import type { AuxInfo } from "../neuro/recordings";
 import { RecordingSummarizer } from "../neuro/recordingSummary";
 import { SessionFinalizer } from "../neuro/sessionFinalizer";
 import { museTelemetry } from "../neuro/telemetryStore";
@@ -8,23 +10,44 @@ import { useTraining } from "../neuro/useTraining";
 import type { MuseOperation } from "../screens/muse";
 import type { MuseDevice, RecordedSession, SystemSnapshot } from "../types";
 
+const newSessionId = (startedAt: number) => (typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `muse-${startedAt}`);
+
 /**
  * Muse headset + recording session state and actions (scan, connect, start,
  * stop/save, disconnect). A plain hook, not a context: live telemetry stays
  * local to the component that calls it instead of fanning out app-wide.
  */
+export const DISCONNECT_TIMEOUT_MS = 10_000;
+export const SAVE_TIMEOUT_MS = 30_000;
+function withTimeout<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    work.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
 export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void>, setNotice: (notice: string | null) => void) {
   const [museDevices, setMuseDevices] = useState<MuseDevice[]>([]);
   const [museOperation, setMuseOperation] = useState<MuseOperation>(null);
   const [museError, setMuseError] = useState<string | null>(null);
+  // True after a search that found no headset: Neuro keeps saying so (and offers "Search again") until something is found.
+  const [scanEmpty, setScanEmpty] = useState(false);
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
   const [recordingFile, setRecordingFile] = useState<string | null>(null);
   const [sessionEndedAt, setSessionEndedAt] = useState<number | null>(null);
+  // Allocated when the recording starts, so Hemi-Sync can link to it while it runs. The saved session reuses it.
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  // The session that was just saved by Stop: Neuro shows a "Session saved" card for it until Done.
+  const [lastSavedId, setLastSavedId] = useState<string | null>(null);
   const sessionFinalizer = useRef<SessionFinalizer<{ session: RecordedSession & { file_path: string }; data: Record<string, unknown> }> | null>(null);
   const sessionOperation = useRef(false);
   const sessionStopTime = useRef<number | null>(null);
   // Plain-recording summary (no training protocol): sampled from live telemetry while recording.
   const recordingSummarizer = useRef<RecordingSummarizer | null>(null);
+  // W12c: back-of-head electrode detection, fit stage only; the result goes to the recording trailer and the saved session.
+  const auxDetector = useRef(new AuxDetector());
+  const auxFound = useRef<AuxInfo | null>(null);
   // Live telemetry lives in an external store; this hook never re-renders on packets.
   useEffect(() => museTelemetry.start(), []);
   const resetTelemetry = museTelemetry.reset;
@@ -39,12 +62,30 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     return () => window.clearInterval(timer);
   }, [recording]);
 
+  const fitStage = recording && training.state.stage === "fit";
+  useEffect(() => {
+    if (!fitStage) return;
+    const timer = window.setInterval(() => {
+      if (auxFound.current) return;
+      const snap = museTelemetry.getSnapshot();
+      const fresh = snap.aux && Date.now() - snap.aux.lastPacketAt < 1500;
+      const window1s = fresh ? (snap.trace?.AUX ?? null) : null;
+      // 1 s steps over the newest samples (a little more than 1 s warms the high-pass up).
+      if (!auxDetector.current.step(window1s && window1s.length >= AUX_STEP ? window1s.slice(-(AUX_STEP + 64)) : null)) return;
+      const info = auxInfoDetected();
+      auxFound.current = info;
+      void markRecordingAux(info).catch(() => undefined);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [fitStage]);
+
   const scanForMuse = useCallback(async () => {
     setMuseOperation("scanning");
     setMuseError(null);
     try {
       const found = await scanMuse();
       setMuseDevices(found);
+      setScanEmpty(found.length === 0);
       setNotice(found.length ? `${found.length} Muse headset${found.length === 1 ? "" : "s"} found` : "No Muse headsets found");
     } catch (error) {
       setMuseError(readableError(error));
@@ -65,6 +106,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     try {
       await connectMuse(device.address);
       setMuseDevices([]);
+      setScanEmpty(false);
       setNotice(`${device.name} connected`);
       await refresh();
     } catch (error) {
@@ -96,7 +138,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
         const plain = recordingSummarizer.current?.summary() ?? null;
         const pick = <K extends "avg_focus" | "avg_relaxation" | "calm_pct">(key: K) => trainingSummary?.[key] ?? plain?.[key] ?? null;
         const session: RecordedSession & { file_path: string } = {
-          id: typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `muse-${sessionStartedAt}`,
+          id: sessionIdRef.current ?? newSessionId(sessionStartedAt),
           device_type: "muse",
           start: new Date(sessionStartedAt).toISOString(),
           end: new Date(endedAt).toISOString(),
@@ -113,6 +155,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
           channel_samples: counters.channelSamples,
           neurofeedback: trainingSummary,
           recording_summary: trainingSummary ? null : plain,
+          aux: auxFound.current,
         } };
       },
       save: (payload) => saveMuseSession(payload.session, payload.data),
@@ -134,6 +177,11 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
       setRecordingFile(file);
       sessionStopTime.current = null;
       recordingSummarizer.current = new RecordingSummarizer();
+      auxDetector.current = new AuxDetector();
+      auxFound.current = null;
+      sessionIdRef.current = newSessionId(startedAt);
+      setLastSavedId(null);
+      setSessionId(sessionIdRef.current);
       setSessionStartedAt(startedAt);
       beginTraining();
       setNotice("Muse session started");
@@ -153,13 +201,18 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     sessionOperation.current = true;
     setMuseOperation("stopping");
     setMuseError(null);
+    const savingId = sessionIdRef.current;
     try {
-      const saved = await persistMuseSession();
+      // Same bounded wait as disconnect; a retry joins the finalizer's in-flight save, so there is never a second save.
+      const saved = await withTimeout(persistMuseSession(), SAVE_TIMEOUT_MS, "The headset didn't answer while saving the session. The recording is kept. Press Stop session to retry.");
       finishTraining();
       setSessionStartedAt(null);
+      sessionIdRef.current = null;
+      setSessionId(null);
       setRecordingFile(null);
       setSessionEndedAt(null);
       sessionFinalizer.current = null;
+      if (saved && savingId) setLastSavedId(savingId);
       setNotice(saved ? "Muse session saved" : "Muse stream stopped");
     } catch (error) {
       setMuseError(`Session could not be finalized. Keep Amara OS open and retry. ${readableError(error)}`);
@@ -178,18 +231,22 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     setMuseError(null);
     try {
       if (data.muse.streaming || sessionStartedAt !== null) {
-        await persistMuseSession();
+        await withTimeout(persistMuseSession(), SAVE_TIMEOUT_MS, "The headset didn't answer while saving the session. The recording is kept. Press Stop session to retry.");
       }
-      await disconnectMuse();
+      await withTimeout(disconnectMuse(), DISCONNECT_TIMEOUT_MS, "The Muse didn't answer the disconnect. Switch it off or move it closer, then try again.");
       finishTraining();
       setSessionStartedAt(null);
+      sessionIdRef.current = null;
+      setSessionId(null);
       setRecordingFile(null);
       setSessionEndedAt(null);
       sessionFinalizer.current = null;
       resetTelemetry();
       setNotice("Muse disconnected");
     } catch (error) {
-      setMuseError(readableError(error));
+      // "superseded" is internal: a newer connect or disconnect overtook this one.
+      const text = readableError(error);
+      setMuseError(/superseded/i.test(text) ? "The headset didn't answer; try again" : text);
     } finally {
       sessionOperation.current = false;
       setMuseOperation(null);
@@ -198,5 +255,6 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
     }
   }, [data.muse.streaming, sessionStartedAt, persistMuseSession, refresh, resetTelemetry, finishTraining, setNotice]);
 
-  return { museDevices, museOperation, museError, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession };
+  const dismissSaved = useCallback(() => setLastSavedId(null), []);
+  return { museDevices, museOperation, museError, scanEmpty, sessionId, lastSavedId, dismissSaved, sessionStartedAt, sessionEndedAt, training, scanForMuse, connectToMuse, disconnectFromMuse, startMuseSession, stopMuseSession };
 }

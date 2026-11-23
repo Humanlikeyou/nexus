@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { emulateDisplay, expect, openApp, openToday, reducedTransparency, test } from "./fixtures/tauri-mock";
+import { appFallbackApplied, emulateDisplay, expect, openApp, openToday, reducedTransparency, test } from "./fixtures/tauri-mock";
 
 const TOKENS = [
   "--glass-ultrathin", "--glass-thin", "--glass-regular", "--glass-thick", "--glass-solid",
@@ -85,9 +85,17 @@ test("glass renders with reduced transparency forced off (review shot)", async (
   }
 });
 
+test("the app's fallback check is not vacuous: without reduced transparency the sidebar keeps its blur and glass fill", async ({ page, theme }) => {
+  await emulateDisplay(page, theme, "no-preference");
+  await openToday(page, { theme, reduceMotion: false });
+  expect(await appFallbackApplied(page)).toBe(false);
+  expect(await reducedTransparency(page)).toBe(false);
+});
+
 test("reduced transparency: shell chrome and composer have no blur", async ({ page, theme }) => {
   await emulateDisplay(page, theme, "reduce");
-  await openToday(page, { theme, reduceMotion: true });
+  // reduceMotion stays off: reduced motion also drops blur, which would hide a broken transparency fallback.
+  await openToday(page, { theme, reduceMotion: false });
   expect(await reducedTransparency(page)).toBe(true);
   for (const sel of ["main.command-surface > .intelligence-overlay > .nexus-mark", "main.command-surface > .intelligence-overlay > .field-clock", "main.command-surface > nav.system-constellation"]) {
     expect(await page.locator(sel).first().evaluate((el) => getComputedStyle(el).backdropFilter), sel).toBe("none");

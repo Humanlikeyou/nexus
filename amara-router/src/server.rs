@@ -65,17 +65,76 @@ pub fn router(state: St) -> Router {
 /// than loopback (DNS rebinding) and any request carrying an Origin header (cross-site fetches from a
 /// browser). Hermes and Nexus's Rust client send neither.
 pub fn local_router(state: St) -> Router {
-    router(state).layer(middleware::from_fn(|req: Request, next: Next| async move {
-        let headers = req.headers();
-        if headers.contains_key(header::ORIGIN) || !loopback_host(headers) {
-            return (
-                StatusCode::FORBIDDEN,
-                axum::Json(json!({"error": {"message":
-                "amara-router only accepts local, non-browser requests on this port"}})),
+    // With the cloud tier on, any local process could otherwise spend the Anthropic key or send
+    // data off the Mac, so this listener also needs the bearer key (startup refuses to run
+    // without one: `config::check_secrets`).
+    let key: Option<Arc<String>> = state
+        .cfg
+        .cloud
+        .anthropic_enabled
+        .then(|| state.secrets.api_key.clone().map(Arc::new))
+        .flatten();
+    // Launch-token enforcement (default off): required on `/amara/*` and `/api/*` only, after the
+    // bearer and Host/Origin checks, which stay as they are.
+    let token_file: Option<Arc<std::path::PathBuf>> =
+        state.cfg.security.require_launch_token.then(|| {
+            Arc::new(
+                state
+                    .cfg
+                    .security
+                    .launch_token_file
+                    .as_deref()
+                    .map(crate::config::expand_home)
+                    .unwrap_or_else(crate::launch_token::default_path),
             )
-                .into_response();
+        });
+    router(state).layer(middleware::from_fn(move |req: Request, next: Next| {
+        let key = key.clone();
+        let token_file = token_file.clone();
+        async move {
+            let headers = req.headers();
+            // /health carries no secrets or content (model names, Ollama URL, load state) and
+            // launchd/Nexus probe it without a key.
+            let probe = req.method() == axum::http::Method::GET && req.uri().path() == "/health";
+            if let Some(key) = key.as_ref().filter(|_| !probe) {
+                let given = headers
+                    .get(header::AUTHORIZATION)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.strip_prefix("Bearer "))
+                    .unwrap_or("");
+                if !constant_time_eq(given.as_bytes(), key.as_bytes()) {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        axum::Json(json!({"error": "unauthorized"})),
+                    )
+                        .into_response();
+                }
+            }
+            if headers.contains_key(header::ORIGIN) || !loopback_host(headers) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    axum::Json(json!({"error": {"message":
+                "amara-router only accepts local, non-browser requests on this port"}})),
+                )
+                    .into_response();
+            }
+            if let Some(file) = token_file
+                .as_ref()
+                .filter(|_| crate::launch_token::path_needs_token(req.uri().path()))
+            {
+                let given = headers
+                    .get(crate::launch_token::HEADER_NAME)
+                    .and_then(|v| v.to_str().ok());
+                if !crate::launch_token::verify(file, given).await {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        axum::Json(json!({"error": "unauthorized"})),
+                    )
+                        .into_response();
+                }
+            }
+            next.run(req).await
         }
-        next.run(req).await
     }))
 }
 
@@ -118,7 +177,7 @@ pub fn lan_router(state: St, key: String) -> Router {
     }))
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

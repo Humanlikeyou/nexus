@@ -1,4 +1,4 @@
-import type { BrainState, StateTimelineEntry } from "@/lib/types";
+import type { BrainState, StateTimelineEntry } from "../../../src-console/legacy-core/lib/types";
 
 export function computeTickScore(state: BrainState, inZone: boolean): number {
   if (state === "calm" && inZone) return 3;

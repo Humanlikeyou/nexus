@@ -1,15 +1,22 @@
 import { Heart } from "lucide-react";
-import type { CSSProperties } from "react";
-import { LANDING_ENTRIES } from "../app/routes";
-import { AmaraLens, AmaraVoiceAnnouncer } from "../components/AmaraLens/AmaraLens";
+import type { CSSProperties, ReactNode } from "react";
+import { LANDING_ENTRIES, type Route } from "../app/routes";
+import { AmaraVoiceAnnouncer, LENS_LABEL } from "../components/AmaraLens/AmaraLens";
+import { CanopyLight } from "../sandLens/CanopyLight";
+import { lensStateFor, SandLensLayer } from "../sandLens/SandLens";
+import { useAmaraActivity } from "../hooks/amaraActivity";
 import { freshBrief, usableWeather, useHomeBrief } from "../hooks/useHomeBrief";
 import { useLandingVoice } from "../hooks/useLandingVoice";
 import { beatSeconds, useLiveHeartRate } from "../hooks/useLiveHeartRate";
 import { localGreeting } from "../lib/greeting";
 import { TRACE_HEIGHT, TRACE_WIDTH, traceShape } from "../lib/heartTrace";
 import { useNow } from "../shell/useNow";
+import { HrTake } from "../hrTake/HrTakeCard";
+import { useTakeSlots } from "../takes/TakeExtras";
 import type { ModuleId } from "../types";
 import { Wordmark } from "../ui/Wordmark";
+import { HomeWindowsStage, landingInert, type WindowAsk } from "../homeWindows/HomeWindows";
+import { useHomeWindowsState } from "../homeWindows/store";
 import "./LandingScreen.css";
 
 const formatTime = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
@@ -18,17 +25,20 @@ const formatDate = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "l
 /** Live heart rate from NOOP, with the last 89 seconds behind it. With no live reading it's all gone. */
 function HeartRate() {
   const heart = useLiveHeartRate();
-  if (!heart) return null;
-  const { paths, dot } = traceShape(heart.samples, heart.at);
+  const beat = beatSeconds(heart?.bpm);
+  if (!heart || beat == null) return null;
+  const { paths, areas = [], dot } = traceShape(heart.samples, heart.at);
   return (
     <div className="landing__heart-rate" role="img" aria-label={`Heart rate ${heart.bpm} beats per minute`}>
       <p className="landing__pulse">
-        <span className="landing__heart" style={{ "--landing-beat": `${beatSeconds(heart.bpm)}s` } as CSSProperties}><Heart size={13} fill="currentColor" aria-hidden="true" /></span>
+        <span className="landing__heart" style={{ "--landing-beat": `${beat}s` } as CSSProperties}><Heart size={13} fill="currentColor" aria-hidden="true" /></span>
         <span className="landing__bpm">{heart.bpm}</span>
         <span className="landing__weather-detail">bpm</span>
       </p>
       {dot && (
         <svg className="landing__trace" width={TRACE_WIDTH} height={TRACE_HEIGHT} viewBox={`0 0 ${TRACE_WIDTH} ${TRACE_HEIGHT}`} aria-hidden="true">
+          <defs><linearGradient id="landing-trace-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" className="landing__trace-stop0" /><stop offset="1" className="landing__trace-stop1" /></linearGradient></defs>
+          {areas.map((area) => <path key={area} className="landing__trace-area" d={area} fill="url(#landing-trace-fill)" />)}
           {paths.map((path) => <path key={path} className="landing__trace-line" d={path} />)}
           <circle className="landing__trace-halo" cx={dot.x} cy={dot.y} r="8" />
           <circle className="landing__trace-dot" cx={dot.x} cy={dot.y} r="3" />
@@ -38,8 +48,16 @@ function HeartRate() {
   );
 }
 
+/** design-1111u: Amara's take from the last 15 minutes of heart rate, with today's one thing (1111t) under it.
+ *  No button: it refreshes on open, focus and navigation, and the backend's 30-minute rule decides.
+ *  Taisun, 2026-11-12 (late): removing it from Home and Today in 686340d was a mistake; it is back on both. */
+function HomeTake({ onSelect }: { onSelect: (id: ModuleId) => void }) {
+  const { block } = useTakeSlots("home", true);
+  return <HrTake variant="landing" block={block} onOpenDevices={() => onSelect("devices")} />;
+}
+
 /** Greeting, time, date and weather. Nothing here is a box; the type scale does the work. */
-function Welcome() {
+function Welcome({ onSelect }: { onSelect: (id: ModuleId) => void }) {
   const now = useNow(1_000);
   const brief = freshBrief(useHomeBrief(), now.getTime());
   const weather = usableWeather(brief?.weather);
@@ -57,6 +75,7 @@ function Welcome() {
         </p>
       )}
       <HeartRate />
+      <HomeTake onSelect={onSelect} />
     </section>
   );
 }
@@ -66,18 +85,28 @@ function Welcome() {
  * it stand in for the sidebar. Always dark in both themes: the lens is an object and its glow only
  * reads against the emerald field (LandingScreen.css).
  */
-export function LandingField({ onSelect, onToday }: { onSelect: (id: ModuleId) => void; onToday: () => void }) {
+export function LandingField({ onSelect, onToday, chat, chatExpanded = false, onAsk, onOpen, windowAsk, onOpenChat }: { onSelect: (id: ModuleId) => void; onToday: () => void; chat?: ReactNode; chatExpanded?: boolean; onAsk?: (text: string) => void; onOpen?: (route: Route) => void; windowAsk?: WindowAsk | null; onOpenChat?: () => void }) {
   const voice = useLandingVoice();
+  const windows = useHomeWindowsState();
+  const hide = landingInert(windows.phase);
+  // decision 0045: a text reply in progress makes the sand think when the voice is off; say so under the lens too
+  const activity = useAmaraActivity();
+  const line = lensStateFor(voice.state, voice.line, activity) === "think" && voice.state !== "thinking" ? LENS_LABEL.thinking : voice.line;
   return (
-    <div className="landing" data-voice={voice.state}>
+    <div className="landing" data-voice={voice.state} data-wphase={windows.phase} data-chat={chat ? (chatExpanded ? "expanded" : "collapsed") : undefined}>
+      <CanopyLight active={!hide} />
       <div className="landing__drag" data-tauri-drag-region />
       <h1 className="ui-visually-hidden">Command Center</h1>
       <Wordmark size="landing" className="landing__wordmark" />
-      <Welcome />
-      <div className="landing__stage">
-      <div className="landing__lens"><AmaraLens state={voice.state} size={320} decorative /></div>
-      <p className="landing__line">{voice.line}</p>
-      <AmaraVoiceAnnouncer message={voice.line} />
+      <div className="landing__side" inert={hide || undefined} aria-hidden={hide || undefined}>
+      <Welcome onSelect={onSelect} />
+      </div>
+      <div className="landing__stage" inert={hide || undefined} aria-hidden={hide || undefined}>
+      <div className="landing__lens"><SandLensLayer voice={voice.state} line={voice.line} active={!hide} /></div>
+      <p className="landing__line">{line}</p>
+      <AmaraVoiceAnnouncer message={line} />
+      {/* design-1110b A: the chat lives here, directly under the lens. */}
+      {chat}
       <nav className="landing__nav" aria-label="Amara OS navigation">
         {LANDING_ENTRIES.map((entry) => {
           const Icon = entry.icon;
@@ -90,6 +119,7 @@ export function LandingField({ onSelect, onToday }: { onSelect: (id: ModuleId) =
         })}
       </nav>
       </div>
+      <HomeWindowsStage onAsk={onAsk} onOpen={onOpen} ask={windowAsk} onOpenChat={onOpenChat} />
     </div>
   );
 }

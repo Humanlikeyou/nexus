@@ -32,7 +32,7 @@ describe("Sidebar", () => {
     window.localStorage.setItem("nexus.sidebarWidth", "999");
     render(<Sidebar active="chat" onSelect={() => {}} data={online} />);
     expect(screen.getByRole("separator")).toHaveAttribute("aria-valuenow", "280");
-    expect(screen.getByRole("button", { name: /Chat & Agents/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: /^Agents/ })).toHaveAttribute("aria-current", "page");
   });
 
   it("shows ⌘-number hints instead of uppercase signal labels", () => {
@@ -40,7 +40,7 @@ describe("Sidebar", () => {
     expect(screen.queryByText("HISTORY")).toBeNull();
     expect(screen.queryByText("NOOP")).toBeNull();
     const hints = [...container.querySelectorAll(".nav-shortcut")].map((n) => n.textContent);
-    expect(hints).toEqual(["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6"]);
+    expect(hints).toEqual(["⌘1", "⌘2", "⌘3", "⌘4", "⌘5", "⌘6", "⌘7"]);
   });
 
   it("clamps", () => {

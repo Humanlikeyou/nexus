@@ -27,10 +27,10 @@
 /* Palette revamp (Oct 29): emerald primary with a soft top-lit gradient and inner highlight,
  * glass secondary with a copper-tinted hairline, emerald plain, warm-red destructive. */
 .ui-button { box-shadow: inset 0 0 0 1px var(--ui-button-line, transparent), inset 0 1px 0 var(--ui-button-highlight, transparent); }
-.ui-button:hover:not(:disabled) { background: var(--ui-button-bg-hover); }
+.ui-button:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--ui-button-bg-hover); }
 .ui-button:active:not(:disabled):not([data-loading]) { background: var(--ui-button-bg-pressed, var(--ui-button-bg-hover)); transform: scale(.98); }
 .ui-button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
-.ui-button:disabled { cursor: default; opacity: .38; filter: saturate(.3); }
+.ui-button:disabled, .ui-button[aria-disabled="true"] { cursor: default; opacity: .38; filter: saturate(.3); }
 .ui-button[data-loading] { cursor: progress; }
 
 /* Secondary (default): neutral glass, emerald label, copper hairline. */

@@ -1,0 +1,29 @@
+/* design-1110h option B "Dawn". Tokens only. */
+.sleep-dawn { position: relative; overflow: hidden; }
+.sleep-dawn__glow { position: absolute; inset: auto 0 0 0; height: 55%; pointer-events: none; background: linear-gradient(0deg, color-mix(in srgb, var(--copper-text) 16%, transparent), transparent); animation: sleep-dawn-rise 8s ease-in-out infinite alternate; }
+@keyframes sleep-dawn-rise { from { opacity: .55; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .sleep-dawn__glow { animation: none; } }
+:root[data-reduced-motion="true"] .sleep-dawn__glow { animation: none; }
+.sleep-dawn__body { position: relative; gap: var(--space-2); min-width: 0; }
+.sleep-dawn__top { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); }
+.sleep-dawn__dur { margin: 0; font-size: 27px; font-weight: 300; line-height: 1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; color: var(--label); }
+.sleep-dawn__dur small { font-size: 17px; color: var(--label-secondary); margin-left: 1px; }
+.sleep-dawn__vs { color: var(--copper-text); font: var(--type-callout); white-space: nowrap; }
+.sleep-dawn__axis { display: flex; justify-content: space-between; gap: var(--space-2); margin: 0; color: var(--label-secondary); font: var(--type-subheadline); font-variant-numeric: tabular-nums; }
+.sleep-dawn__axis b { color: var(--label); font-weight: 500; }
+.sleep-dawn__stages { display: flex; gap: 3px; height: 10px; border-radius: 5px; overflow: hidden; }
+.sleep-dawn__stages i { display: block; min-width: 2px; }
+.sleep-dawn__stages i[data-stage="awake"], .sleep-dawn__legend i[data-stage="awake"] { box-shadow: inset 0 0 0 1px var(--copper-text); }
+.sleep-dawn__legend { display: grid; grid-template-columns: repeat(2, auto); justify-content: start; gap: 3px var(--space-3); margin: 0; padding: 0; list-style: none; color: var(--label-secondary); font: var(--type-subheadline); }
+.sleep-dawn__legend li { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
+.sleep-dawn__legend i { width: 8px; height: 8px; border-radius: 2px; }
+.sleep-dawn__legend b { color: var(--label); font-weight: 500; }
+.sleep-dawn__pill { justify-self: start; margin: 0; padding: 1px var(--space-2); border: 1px solid var(--separator); border-radius: var(--radius-pill); color: var(--label); font: var(--type-subheadline); white-space: nowrap; }
+.sleep-dawn__pill b { font-weight: 600; }
+.sleep-dawn__week { display: grid; gap: 3px; }
+.sleep-dawn__k { color: var(--label-secondary); font: var(--type-subheadline); }
+.sleep-dawn__week svg { width: 100%; height: 24px; display: block; overflow: visible; }
+.sleep-dawn__bar { fill: var(--data-sleep-rem); }
+.sleep-dawn__bar[data-last] { fill: var(--data-sleep-deep); }
+.sleep-dawn__usual { stroke: var(--copper-text); stroke-dasharray: 3 3; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.sleep-dawn__take { margin: 0; padding-left: var(--space-2); border-left: 2px solid var(--copper-text); color: var(--label); font: var(--type-callout); }

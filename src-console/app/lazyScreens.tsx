@@ -65,4 +65,5 @@ export const ActivityField = retryableLazy("assistant", () => import("../screens
 export const VoiceField = retryableLazy("voice", () => import("../screens/VoiceScreen").then((m) => ({ default: m.VoiceField })));
 export const SmartHomeField = retryableLazy("smarthome", () => import("../screens/SmartHomeScreen").then((m) => ({ default: m.SmartHomeField })));
 export const MindBodyField = retryableLazy("mindbody", () => import("../screens/MindBodyScreen").then((m) => ({ default: m.MindBodyField })));
+export const LifeField = retryableLazy("life", () => import("../life/LifeScreen").then((m) => ({ default: m.LifeField })));
 export const ListsField = retryableLazy("lists", () => import("../screens/ListsScreen").then((m) => ({ default: m.ListsField })));

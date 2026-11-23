@@ -5,18 +5,18 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ emit: vi.fn(), listen: vi.fn() }));
-vi.mock("../../src/terrance/system/continuity", () => ({}));
-vi.mock("../../src/terrance/system/selfDiagnosis", () => ({}));
-vi.mock("../../src/terrance/system/rituals", () => ({}));
-vi.mock("../../src/terrance/system/customJobs", () => ({}));
-vi.mock("../../src/terrance/system/skillsEvolution", () => ({}));
-vi.mock("../../src/terrance/system/subagents", () => ({}));
-vi.mock("../../src/terrance/system/telegramBridge", () => ({}));
-vi.mock("../../src/terrance/system/activityBus", () => ({ activityBus: {} }));
+vi.mock("../../src-console/legacy-core/terrance/system/continuity", () => ({}));
+vi.mock("../../src-console/legacy-core/terrance/system/selfDiagnosis", () => ({}));
+vi.mock("../../src-console/legacy-core/terrance/system/rituals", () => ({}));
+vi.mock("../../src-console/legacy-core/terrance/system/customJobs", () => ({}));
+vi.mock("../../src-console/legacy-core/terrance/system/skillsEvolution", () => ({}));
+vi.mock("../../src-console/legacy-core/terrance/system/subagents", () => ({}));
+vi.mock("../../src-console/legacy-core/terrance/system/telegramBridge", () => ({}));
+vi.mock("../../src-console/legacy-core/terrance/system/activityBus", () => ({ activityBus: {} }));
 
 import {
   decideDueTasks, lastSlot, isTouchDue, type SchedulerTimestamps,
-} from "../../src/terrance/system/scheduler";
+} from "../../src-console/legacy-core/terrance/system/scheduler";
 
 const H = 3_600_000;
 const T = (local: string) => new Date(`${local}+09:00`).getTime();

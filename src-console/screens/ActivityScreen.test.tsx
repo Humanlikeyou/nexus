@@ -9,13 +9,13 @@ import { activityBadge } from "./businessTone";
 const snap = (extra: Partial<SystemSnapshot>): SystemSnapshot => ({ ...INITIAL_SNAPSHOT, refreshedAt: INITIAL_SNAPSHOT.refreshedAt + 1, ...extra });
 const outbox = { gateway_online: true, queue_depth: 2, last_delivered_at: "2026-10-28T13:40:00+09:00", last_error: "timeout", total_delivered: 41 };
 
-describe("Chat & Agents › Activity (§10)", () => {
+describe("Agents › Activity (§10)", () => {
   it("delivery card and activity rows", () => {
     render(<ActivityField data={snap({ outbox, activity: [{ id: "a1", type: "mac_action", name: "open_app", status: "completed", startedAt: Date.parse("2026-10-28T13:00:00+09:00"), completedAt: 0, durationMs: 1200, detail: "Opened Notes", outcome: null }] })} />);
     expect(screen.getByText("Gateway delivery")).toBeInTheDocument();
     expect(screen.getByText("Gateway online")).toBeInTheDocument();
     expect(screen.getByText("timeout")).toBeInTheDocument();
-    expect(screen.getByText("open app")).toBeInTheDocument();
+    expect(screen.getByText("Open app")).toBeInTheDocument();
     expect(screen.getByText("Mac action · Opened Notes")).toBeInTheDocument();
         expect(document.querySelector(".signal-stream")).toBeNull();
   });

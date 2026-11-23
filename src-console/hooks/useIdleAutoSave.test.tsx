@@ -5,7 +5,7 @@ import { renderHook, act } from "@testing-library/react";
 const silent = vi.hoisted(() =>
   vi.fn(async (_m: unknown): Promise<{ saved: boolean; summary: string | null }> => ({ saved: true, summary: "s" })),
 );
-vi.mock("@/terrance/system/continuity", () => ({ summarizeAndStoreSessionSilent: silent }));
+vi.mock("../legacy-core/terrance/system/continuity", () => ({ summarizeAndStoreSessionSilent: silent }));
 
 import { useIdleAutoSave, AUTOSAVE_SIGNATURE_KEY, type AutoSaveMessage } from "./useIdleAutoSave";
 

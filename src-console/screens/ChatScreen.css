@@ -33,7 +33,7 @@
   justify-content: space-between;
   gap: var(--space-3);
   min-height: var(--toolbar-h, 52px);
-  padding: 0 var(--inset-content, 20px);
+  padding: 0 var(--inset-content, 21px);
   border-bottom: var(--hairline, 1px solid var(--separator));
 }
 .chat-screen__heading { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
@@ -46,7 +46,7 @@
   min-height: 0;
   overflow-y: auto;
   margin: 0;
-  padding: var(--space-4) var(--inset-content, 20px);
+  padding: var(--space-4) var(--inset-content, 21px);
   list-style: none;
   display: flex;
   flex-direction: column;
@@ -87,7 +87,7 @@
 .chat-dots i:nth-child(3) { animation-delay: .4s; }
 
 /* Only the "ledger unavailable" notice lives outside the thread; bounded and never shrinks the list. */
-.chat-screen__actions { flex: none; padding: 0 var(--inset-content, 20px) var(--space-3); }
+.chat-screen__actions { flex: none; padding: 0 var(--inset-content, 21px) var(--space-3); }
 /* Action items are thread rows (in the scroll flow), never an overlay. */
 .chat-action { align-self: stretch; margin-top: var(--space-3); }
 .chat-action-line { display: flex; align-items: center; gap: var(--space-2); align-self: center; max-width: 100%; margin: var(--space-2) 0; font-size: var(--text-footnote); color: var(--label-secondary); }
@@ -100,7 +100,7 @@
   display: flex;
   align-items: flex-end;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4) 12px;
+  padding: var(--space-3) var(--space-4) 13px;
   border-top: 1px solid var(--separator);
   background: var(--material-toolbar, var(--bg-content));
   -webkit-backdrop-filter: var(--material-blur, none);

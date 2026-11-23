@@ -12,7 +12,7 @@ import type {
   ToastItem,
   ToastOptions,
   MuseConnectionState,
-} from "@/lib/types";
+} from "../../src-console/legacy-core/lib/types";
 
 // ============================================================
 // Context shape

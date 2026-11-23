@@ -6,6 +6,10 @@ ollama_url = "http://127.0.0.1:11434"
 bind = "127.0.0.1:8787"
 # Optional LAN listener (Bearer auth with AMARA_ROUTER_API_KEY from secrets_file). Off by default.
 # lan_bind = "0.0.0.0:8788"
+# Allow ollama_url to be a non-loopback host (prompts leave this Mac). Default false; refused
+# while NEXUS_OUTBOUND_DISABLED is set. With [cloud] anthropic_enabled = true the router also
+# refuses to start without AMARA_ROUTER_API_KEY, and the loopback listener then needs Bearer auth.
+# allow_remote_ollama = false
 # 0600 env file with AMARA_ROUTER_API_KEY=... and/or ANTHROPIC_API_KEY=...
 # secrets_file = "~/.config/amara-router/secrets.env"
 
@@ -56,6 +60,9 @@ warm_deep_on_start = false
 rewarm_fast_after_deep = true
 # Unused now that fast and deep are swapped by hand; kept so older configs parse.
 gpu_budget_gb = 21.0
+# After the last deep reply, a fast request does not unload deep for this many seconds (0-3600,
+# 0 = unload at once) unless fast + deep fit gpu_budget_gb together.
+deep_grace_secs = 60
 # Seconds between checks for deep unloading, for the re-warm above.
 poll_secs = 20
 # A deep request may wait this long for fast to go quiet and deep to load (100-300000 ms), then it
@@ -85,6 +92,13 @@ text = "Give me a moment to think this through."
 # the caller sends X-Amara-Allow-Claude: 0, and only with ANTHROPIC_API_KEY in secrets_file.
 anthropic_enabled = false
 anthropic_model = "claude-haiku-4-5-20251001"
+
+[security]
+# Require the per-launch token (header X-Amara-Launch-Token) on /amara/* and /api/* of the loopback
+# listener. /v1/* and /health are never covered. OFF by default; turn on only after the Amara app
+# has run once (it mints the token) and restart the router afterwards.
+require_launch_token = false
+# launch_token_file = "~/Library/Application Support/com.taisun.nexus/run/launch_token"
 
 [log]
 # JSONL, one line per request: timestamp, route, reason, model, latency, tokens. No content.

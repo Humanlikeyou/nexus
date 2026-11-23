@@ -17,11 +17,14 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
   box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.618fr);
+  /* A definite row, so the welcome column can be capped at the window height and shrink to fit. */
+  grid-template-rows: minmax(0, 1fr);
   align-items: center;
   height: 100%;
   min-height: 100%;
   padding: var(--landing-pad-top) var(--fib-34) var(--fib-34);
-  overflow: auto;
+  /* Home never scrolls (Taisun, Nov 13): it compresses instead. See the fit rules below. */
+  overflow: hidden;
   color: var(--landing-label);
   background: var(--landing-bg);
 }
@@ -30,7 +33,17 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 .landing__wordmark { position: fixed; top: var(--landing-pad-top); left: var(--space-8); z-index: 2; pointer-events: none; }
 
 .landing__stage { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--fib-21); height: 100%; min-height: 0; min-width: 0; }
-.landing__welcome { position: relative; align-self: start; display: grid; margin-top: calc(38.2vh - var(--landing-pad-top) - var(--fib-55)); padding-left: var(--fib-21); color: var(--landing-label); }
+/* The welcome column: a spacer puts its top on the 38.2% line, and it is the FIRST thing to shrink when the
+ * content is taller than the window, so the greeting, clock, weather, heart rate and take always fit. */
+.landing__side { align-self: center; display: flex; flex-direction: column; min-width: 0; min-height: 0; max-height: 100%; }
+/* flex-shrink 1000: the spacer gives up its room long before the take (shrink 1) loses a pixel. */
+.landing__side::before { content: ""; flex: 0 1000 calc(38.2vh - var(--landing-pad-top) - var(--fib-55)); min-height: 0; }
+.landing__welcome { position: relative; flex: 0 1 auto; display: flex; flex-direction: column; align-items: flex-start; min-height: 0; padding-left: var(--fib-21); color: var(--landing-label); }
+.landing__welcome > * { flex: none; }
+/* The take is the one part that may give: its text clamps (the full text stays in the page for screen readers). */
+.landing__welcome > .take-slot { flex: 0 1 auto; min-height: 0; overflow: hidden; }
+.landing .take-slot .take__body, .landing .take-slot .hrt-quiet { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; line-clamp: 4; -webkit-line-clamp: 4; }
+.landing .take-slot .hrt-quiet { line-clamp: 5; -webkit-line-clamp: 5; }
 .landing__greeting { margin: 0 0 var(--fib-34); font: 300 var(--fib-34)/1.15 var(--font-text); letter-spacing: -.015em; text-wrap: balance; }
 .landing__time { font: 200 var(--fib-55)/1 var(--font-text); letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
 .landing__date { margin: var(--fib-13) 0 0; color: var(--landing-muted); font: 300 var(--fib-21)/1.25 var(--font-text); }
@@ -44,6 +57,9 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 .landing__trace { display: block; margin-left: calc(var(--fib-8) * -1); overflow: visible; }
 .landing__trace-line { fill: none; stroke: var(--landing-heart); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .landing__trace-dot { fill: var(--landing-heart); }
+.landing__trace-stop0 { stop-color: var(--landing-heart); stop-opacity: .2; }
+.landing__trace-stop1 { stop-color: var(--landing-heart); stop-opacity: 0; }
+.landing__trace-area { stroke: none; }
 .landing__trace-halo { fill: var(--landing-heart); opacity: .34; }
 @keyframes landing-beat { 0%, 45%, 100% { transform: scale(1); } 15% { transform: scale(1.16); } }
 @media (prefers-reduced-motion: reduce) { .landing__heart { animation: none; } }
@@ -71,7 +87,7 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
   position: relative;
   flex: none;
   display: grid;
-  grid-template-columns: repeat(6, auto);
+  grid-template-columns: repeat(7, auto);
   justify-content: center;
   gap: var(--space-2);
   max-width: 100%;
@@ -98,16 +114,43 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
 .landing__button:active { background: var(--landing-button-active); }
 .landing__button:focus-visible { outline: 3px solid var(--landing-focus); outline-offset: 2px; }
 
+/* The app window is never shorter than 620, but the web shell pins body at 600: Home gives that up so it fits any height. */
+body:has(.landing) { min-height: 0; }
+
+/* Fit rules: shorter windows condense the secondary bits instead of scrolling. */
+@media (max-height: 800px) {
+  .landing__greeting { margin-bottom: var(--fib-21); }
+  .landing__weather { margin-top: var(--fib-21); }
+  .landing__heart-rate { margin-top: var(--fib-13); }
+  .landing .take-slot { margin-top: var(--fib-8); }
+  .landing .take-slot .take__body { line-clamp: 3; -webkit-line-clamp: 3; }
+  .landing .take-slot .hrt-quiet { line-clamp: 4; -webkit-line-clamp: 4; }
+  .landing .take-slot .take__memory, .landing .take-slot .hrt-win { display: none; }
+  .landing .take-slot .t-rec h3 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; line-clamp: 2; -webkit-line-clamp: 2; }
+}
+@media (max-height: 680px) {
+  .landing .take-slot .take__chips, .landing .take-slot .t-empty, .landing .take-slot .take__foot { display: none; }
+  .landing .take-slot .take__body, .landing .take-slot .hrt-quiet { line-clamp: 2; -webkit-line-clamp: 2; }
+  .landing .take-slot .take { padding-block: var(--fib-5); gap: var(--fib-5); }
+  .landing .take-slot .t-rec { padding-block: var(--fib-5); gap: 3px; }
+  .landing .take-slot .t-rec__top { display: none; }
+  .landing .take-slot .t-rec h3 { line-clamp: 1; -webkit-line-clamp: 1; }
+}
+
 /* Too small for two columns: the welcome becomes a short block above the lens, one step down the scale. */
 @media (max-width: 1180px), (max-height: 680px) {
   .landing { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--fib-13); padding: var(--fib-13) var(--fib-21) var(--fib-21); }
-  .landing__welcome { justify-self: center; justify-items: center; margin: 0; padding: 0; text-align: center; grid-template-columns: auto; }
+  .landing__side { align-self: start; justify-self: center; max-height: none; }
+  .landing__side::before { display: none; }
+  .landing__welcome { align-items: center; margin: 0; padding: 0; text-align: center; }
+  .landing .take-slot { margin-top: var(--fib-8); text-align: left; }
   .landing__greeting { margin: 0 0 var(--fib-8); font-size: var(--fib-21); }
   .landing__time { font-size: var(--fib-34); }
   .landing__date { margin-top: var(--fib-5); font-size: var(--fib-13); }
   .landing__weather { margin-top: var(--fib-5); display: block; font-size: var(--fib-13); }
   .landing__weather-detail { margin-left: var(--fib-8); }
   .landing__heart-rate { justify-items: center; margin-top: var(--fib-5); }
+  .landing__welcome .landing__heart-rate .landing__pulse { justify-content: center; }
   .landing__pulse { font-size: var(--fib-13); }
   .landing__pulse .landing__weather-detail { margin-left: 0; }
   .landing__trace { display: none; }
@@ -120,6 +163,7 @@ main.command-surface.command-surface--landing > .active-field { grid-column: 1; 
   .landing { background: Canvas; color: CanvasText; }
   .landing__line, .landing__welcome, .landing__date, .landing__weather-detail, .landing__pulse, .landing__heart { color: CanvasText; }
   .landing__trace-line { stroke: CanvasText; }
+  .landing__trace-area { display: none; }
   .landing__trace-dot, .landing__trace-halo { fill: CanvasText; }
   .landing__button { border: 1px solid ButtonText; background: ButtonFace; color: ButtonText; box-shadow: none; }
   .landing__button svg { color: ButtonText; }

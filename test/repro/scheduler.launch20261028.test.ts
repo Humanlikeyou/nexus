@@ -24,21 +24,21 @@ const c = vi.hoisted(() => ({
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ emit: vi.fn(), listen: vi.fn() }));
-vi.mock("../../src/terrance/system/continuity", () => c);
-vi.mock("../../src/terrance/system/selfDiagnosis", () => ({
+vi.mock("../../src-console/legacy-core/terrance/system/continuity", () => c);
+vi.mock("../../src-console/legacy-core/terrance/system/selfDiagnosis", () => ({
   runDiagnostics: vi.fn(async () => ({ issues: [] })),
   autoHeal: vi.fn(),
 }));
-vi.mock("../../src/terrance/system/rituals", () => ({ tickRituals: vi.fn() }));
-vi.mock("../../src/terrance/system/customJobs", () => ({ tickCustomJobs: vi.fn(async () => []) }));
-vi.mock("../../src/terrance/system/skillsEvolution", () => ({ evolveSkills: vi.fn(async () => ({ created: 0, updated: 0 })) }));
-vi.mock("../../src/terrance/system/subagents", () => ({ tickSubagents: vi.fn() }));
-vi.mock("../../src/terrance/system/telegramBridge", () => ({ startTelegramBridge: vi.fn(), stopTelegramBridge: vi.fn() }));
-vi.mock("../../src/terrance/system/activityBus", () => ({
+vi.mock("../../src-console/legacy-core/terrance/system/rituals", () => ({ tickRituals: vi.fn() }));
+vi.mock("../../src-console/legacy-core/terrance/system/customJobs", () => ({ tickCustomJobs: vi.fn(async () => []) }));
+vi.mock("../../src-console/legacy-core/terrance/system/skillsEvolution", () => ({ evolveSkills: vi.fn(async () => ({ created: 0, updated: 0 })) }));
+vi.mock("../../src-console/legacy-core/terrance/system/subagents", () => ({ tickSubagents: vi.fn() }));
+vi.mock("../../src-console/legacy-core/terrance/system/telegramBridge", () => ({ startTelegramBridge: vi.fn(), stopTelegramBridge: vi.fn() }));
+vi.mock("../../src-console/legacy-core/terrance/system/activityBus", () => ({
   activityBus: { register: vi.fn(() => "t"), complete: vi.fn(), fail: vi.fn(), update: vi.fn(), prune: vi.fn() },
 }));
 
-let scheduler: typeof import("../../src/terrance/system/scheduler");
+let scheduler: typeof import("../../src-console/legacy-core/terrance/system/scheduler");
 const LAUNCH = new Date("2026-10-28T15:54:11+09:00").getTime();
 /** Mutable stand-in for terrance_context.json: jobs that succeed persist their timestamp, like the real ones. */
 let store: Record<string, unknown>;
@@ -46,7 +46,7 @@ let store: Record<string, unknown>;
 describe("2026-10-28 15:54 launch replay", () => {
   beforeEach(async () => {
     vi.resetModules();
-    scheduler = await import("../../src/terrance/system/scheduler");
+    scheduler = await import("../../src-console/legacy-core/terrance/system/scheduler");
     vi.useFakeTimers();
     vi.setSystemTime(LAUNCH);
     Object.values(c).forEach((f) => (f as any).mockClear());

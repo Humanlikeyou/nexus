@@ -22,8 +22,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::Mutex;
+
+use super::loopback_http::{amara_service_client, loopback_client, LOOPBACK_CONNECT_TIMEOUT};
 
 pub const HERMES_API_BASE: &str = "http://127.0.0.1:8642";
 /// One long-term-memory scope for the app. A new key cold-starts Hermes (minutes on this Mac).
@@ -63,14 +66,14 @@ pub struct NexusRuntimeBridge {
     system_prompts: std::sync::Mutex<HashMap<String, String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 pub struct ChatTurn {
     pub role: String,
     pub content: String,
 }
 
 /// Where the shown tier came from. Never guessed: unknown means no badge.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AmaraTier {
     /// "fast" | "deep" | "claude" (router names).
@@ -81,7 +84,7 @@ pub struct AmaraTier {
 }
 
 /// Where the router says this reply was served, from its response headers (sanitized).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteInfo {
     /// "fast" | "deep" | "claude": the tier that actually answered (`X-Amara-Route`).
@@ -326,7 +329,7 @@ fn model_loading(retry_after: u64) -> String {
 }
 
 /// True when error text would read to the UI as a signal to re-send.
-fn is_retry_signal(message: &str) -> bool {
+pub fn is_retry_signal(message: &str) -> bool {
     let message = message
         .trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
         .to_ascii_lowercase();
@@ -592,19 +595,54 @@ pub(crate) trait JsonTransport {
 }
 
 pub(crate) struct HttpTransport {
-    client: reqwest::Client,
+    /// Hermes and everything that is not the router's token-gated surface: never a token.
+    plain: reqwest::Client,
+    /// Router client carrying the per-launch token. Used only for router `/amara/*` and `/api/*`.
+    service: reqwest::Client,
+    /// The router's base (`http://127.0.0.1:8787` unless the caller names another loopback one).
+    router_base: String,
+}
+
+impl HttpTransport {
+    /// A transport that sends the launch token to `router_base` (loopback only, else the default).
+    pub(crate) fn for_router(router_base: &str) -> Self {
+        let base = super::loopback_http::loopback_base(router_base)
+            .unwrap_or_else(|| super::llm_router::DEFAULT_ROUTER_URL.to_string());
+        Self {
+            // Both servers are loopback-only; a redirect off the Mac is never legitimate.
+            plain: loopback_client(LOOPBACK_CONNECT_TIMEOUT),
+            service: amara_service_client(LOOPBACK_CONNECT_TIMEOUT, &base),
+            router_base: base,
+        }
+    }
 }
 
 impl Default for HttpTransport {
     fn default() -> Self {
-        Self {
-            // Both servers are loopback-only; a redirect off the Mac is never legitimate.
-            client: reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .unwrap_or_default(),
-        }
+        Self::for_router(super::llm_router::DEFAULT_ROUTER_URL)
     }
+}
+
+/// True when a POST to `url` should carry the launch token: the URL's parsed origin (scheme, host,
+/// port) is the router's, there is no userinfo, and the path is a gated router surface (`/amara/*`
+/// or `/api/*`, decision 0026). `/v1/*` is open on the router, so it never gets the token, which
+/// also covers Hermes whose `base_url` is the router (`base_url_is_router`): Hermes turns go to
+/// `/v1/chat/completions` and stay token-free. Anything else (Hermes :8642, other ports,
+/// userinfo tricks like `http://127.0.0.1:8787@evil`) is plain.
+pub(crate) fn url_gets_router_token(url: &str, router_base: &str) -> bool {
+    let (Ok(u), Ok(r)) = (
+        reqwest::Url::parse(url.trim()),
+        reqwest::Url::parse(router_base.trim()),
+    ) else {
+        return false;
+    };
+    super::loopback_http::loopback_base(router_base).is_some()
+        && u.username().is_empty()
+        && u.password().is_none()
+        && u.scheme() == r.scheme()
+        && u.host_str() == r.host_str()
+        && u.port_or_known_default() == r.port_or_known_default()
+        && (u.path().starts_with("/amara/") || u.path().starts_with("/api/"))
 }
 
 impl JsonTransport for HttpTransport {
@@ -615,7 +653,12 @@ impl JsonTransport for HttpTransport {
         body: &Value,
         timeout: Duration,
     ) -> Result<(u16, HashMap<String, String>, Value), String> {
-        let mut req = self.client.post(url).json(body).timeout(timeout);
+        let client = if url_gets_router_token(url, &self.router_base) {
+            &self.service
+        } else {
+            &self.plain
+        };
+        let mut req = client.post(url).json(body).timeout(timeout);
         for (k, v) in headers {
             req = req.header(*k, v);
         }
@@ -744,6 +787,36 @@ pub fn default_route_log_path() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|h| h.join("Library/Logs/amara-router/routes.jsonl"))
 }
 
+/// Hermes chat turns in flight (queued or sending). Background jobs (the nightly roadmap draft)
+/// read this and stand down while it is above zero.
+pub(crate) static CHAT_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// Counts one chat turn in `CHAT_IN_FLIGHT` for as long as it lives (panic/cancel safe).
+pub(crate) struct ChatGuard(&'static AtomicUsize);
+
+impl ChatGuard {
+    pub(crate) fn enter() -> Self {
+        Self::on(&CHAT_IN_FLIGHT)
+    }
+
+    fn on(counter: &'static AtomicUsize) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
+        crate::commands::goal_roadmap::note_activity(); // decision 0018: a turn started
+        ChatGuard(counter)
+    }
+}
+
+impl Drop for ChatGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+        crate::commands::goal_roadmap::note_activity(); // decision 0018: the turn ended just now
+    }
+}
+
+pub(crate) fn chat_in_flight() -> bool {
+    CHAT_IN_FLIGHT.load(Ordering::SeqCst) > 0
+}
+
 impl NexusRuntimeBridge {
     /// The conversation's system message: the first one built for it, so Hermes keeps one session.
     pub fn system_prompt_for(
@@ -772,6 +845,7 @@ impl NexusRuntimeBridge {
         hermes_home: &Path,
         turn: HermesTurn<'_>,
     ) -> Result<HermesReply, HermesError> {
+        let _in_flight = ChatGuard::enter();
         let env_text = std::fs::read_to_string(hermes_home.join(".env")).unwrap_or_default();
         let api_key = env_value(&env_text, "API_SERVER_KEY")
             .ok_or_else(|| HermesError::from(HERMES_NO_KEY.to_string()))?;
@@ -801,6 +875,170 @@ impl NexusRuntimeBridge {
 
 #[cfg(test)]
 mod tests {
+    const FIXTURE_TOKEN: &str = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+
+    #[test]
+    fn router_token_is_chosen_by_parsed_origin_and_gated_path() {
+        let r = "http://127.0.0.1:8787";
+        // router dry run: token
+        assert!(url_gets_router_token(
+            "http://127.0.0.1:8787/amara/route",
+            r
+        ));
+        assert!(url_gets_router_token("http://127.0.0.1:8787/api/x", r));
+        // Hermes :8642 and Hermes-is-router /v1: none
+        assert!(!url_gets_router_token(
+            "http://127.0.0.1:8642/v1/chat/completions",
+            r
+        ));
+        assert!(!url_gets_router_token(
+            "http://127.0.0.1:8642/amara/route",
+            r
+        ));
+        assert!(!url_gets_router_token(
+            "http://127.0.0.1:8787/v1/chat/completions",
+            r
+        ));
+        // userinfo trick, different port, off-Mac, garbage
+        assert!(!url_gets_router_token(
+            "http://127.0.0.1:8787@evil.example/amara/route",
+            r
+        ));
+        assert!(!url_gets_router_token(
+            "http://127.0.0.1:8787:x@127.0.0.1:9/amara/route",
+            r
+        ));
+        assert!(!url_gets_router_token(
+            "http://127.0.0.1:8788/amara/route",
+            r
+        ));
+        assert!(!url_gets_router_token(
+            "https://example.com:8787/amara/route",
+            r
+        ));
+        assert!(!url_gets_router_token("nonsense", r));
+        // a non-loopback router base never earns the token
+        assert!(!url_gets_router_token(
+            "http://10.0.0.2:8787/amara/route",
+            "http://10.0.0.2:8787"
+        ));
+        // localhost alias on the same port is the same loopback origin only if the host matches
+        assert!(!url_gets_router_token(
+            "http://localhost:8787/amara/route",
+            r
+        ));
+        assert!(url_gets_router_token(
+            "http://localhost:8787/amara/route",
+            "http://localhost:8787"
+        ));
+    }
+
+    #[test]
+    fn hermes_base_equal_to_router_is_open_v1_no_token() {
+        let r = "http://127.0.0.1:8787";
+        assert!(base_url_is_router("http://127.0.0.1:8787/v1", r));
+        assert!(!url_gets_router_token(
+            "http://127.0.0.1:8787/v1/chat/completions",
+            r
+        ));
+    }
+
+    /// Fixture token, local listener: the router client sends the header, the plain one never does,
+    /// and `HttpTransport::post` picks by URL.
+    #[tokio::test]
+    async fn transport_sends_token_only_to_router_gated_urls() {
+        use crate::commands::shared::http::{builder_with_token, HttpSpec};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        async fn serve() -> (String, tokio::sync::oneshot::Receiver<String>) {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", l.local_addr().unwrap());
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            tokio::spawn(async move {
+                let (mut s, _) = l.accept().await.unwrap();
+                let mut buf = vec![0u8; 8192];
+                let n = s.read(&mut buf).await.unwrap();
+                let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase());
+                let _ = s
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")
+                    .await;
+            });
+            (base, rx)
+        }
+        let (base, rx_gated) = serve().await;
+        let service = builder_with_token(
+            HttpSpec::loopback().with_launch_token(),
+            &base,
+            Some(FIXTURE_TOKEN.to_string()),
+        )
+        .build()
+        .unwrap();
+        let t = HttpTransport {
+            plain: loopback_client(LOOPBACK_CONNECT_TIMEOUT),
+            service,
+            router_base: base.clone(),
+        };
+        let body = json!({});
+        t.post(
+            &format!("{base}/amara/route"),
+            &[],
+            &body,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        let seen = rx_gated.await.unwrap();
+        assert!(
+            seen.contains(&format!("x-amara-launch-token: {FIXTURE_TOKEN}")),
+            "{seen}"
+        );
+
+        // /v1 on the same origin: no token.
+        let (base2, rx_v1) = serve().await;
+        let service2 = builder_with_token(
+            HttpSpec::loopback().with_launch_token(),
+            &base2,
+            Some(FIXTURE_TOKEN.to_string()),
+        )
+        .build()
+        .unwrap();
+        let t2 = HttpTransport {
+            plain: loopback_client(LOOPBACK_CONNECT_TIMEOUT),
+            service: service2,
+            router_base: base2.clone(),
+        };
+        t2.post(
+            &format!("{base2}/v1/chat/completions"),
+            &[],
+            &body,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        let seen = rx_v1.await.unwrap();
+        assert!(!seen.contains("x-amara-launch-token"), "{seen}");
+    }
+
+    #[test]
+    fn transport_default_has_no_bare_client_and_dry_run_is_the_only_gated_url() {
+        let src = include_str!("terrence_runtime_bridge.rs");
+        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
+        assert!(!prod.contains("Client::new()"));
+        // Every URL this module posts to: Hermes /v1/chat/completions and the router /amara/route.
+        assert_eq!(prod.matches("{router_base}/amara/route").count(), 1);
+        assert!(prod.contains("/v1/chat/completions"));
+    }
+
+    /// The turn's dry run must build its transport for the saved router base, so a non-default
+    /// `amara_router_url` still gets the launch token once enforcement is on.
+    #[test]
+    fn turn_dry_run_transport_is_built_for_the_saved_router_base() {
+        let src = include_str!("terrence_runtime.rs");
+        // The last `#[cfg(test)]` opens the test module; earlier ones guard single helpers.
+        let prod = &src[..src.rfind("#[cfg(test)]").unwrap_or(src.len())];
+        assert!(prod.contains("HttpTransport::for_router(&router_base)"));
+        assert!(!prod.contains("HttpTransport::default()"));
+    }
+
     use super::*;
     use std::cell::RefCell;
 
@@ -1696,5 +1934,22 @@ mod tests {
         )));
         let reply = send_turn(&ok, "b", "k", "s", &json!({})).await.unwrap();
         assert_eq!(reply.route.unwrap().tier, "fast");
+    }
+
+    #[test]
+    fn chat_guard_counts_and_releases_even_on_unwind() {
+        static C: AtomicUsize = AtomicUsize::new(0);
+        {
+            let _a = ChatGuard::on(&C);
+            let _b = ChatGuard::on(&C);
+            assert_eq!(C.load(Ordering::SeqCst), 2);
+        }
+        assert_eq!(C.load(Ordering::SeqCst), 0);
+        let r = std::panic::catch_unwind(|| {
+            let _g = ChatGuard::on(&C);
+            panic!("boom");
+        });
+        assert!(r.is_err());
+        assert_eq!(C.load(Ordering::SeqCst), 0);
     }
 }

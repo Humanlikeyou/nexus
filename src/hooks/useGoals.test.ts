@@ -4,13 +4,13 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 const FAKE = "FAKE_TOKEN_NOT_REAL";
 const hostile = new Error(`EACCES: open '/Users/someone/Library/Application Support/com.taisun.nexus/goals.json' ${FAKE}`);
 
-vi.mock("@/lib/api", () => ({
+vi.mock("../../src-console/legacy-core/lib/api", () => ({
   readGoals: vi.fn(async () => []),
   saveGoals: vi.fn(async () => { throw hostile; }),
   deleteGoal: vi.fn(),
   insertEvents: vi.fn(async () => undefined),
 }));
-vi.mock("@/terrance/system/continuity", () => ({
+vi.mock("../../src-console/legacy-core/terrance/system/continuity", () => ({
   loadContext: vi.fn(async () => ({})),
   saveContext: vi.fn(async () => undefined),
 }));

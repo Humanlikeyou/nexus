@@ -1,29 +1,7 @@
-import type { CrewToolInfo, KbStatus } from "../src/lib/types";
-export type { CrewToolInfo, KbState, KbStatus } from "../src/lib/types";
+import type { CrewToolInfo, KbStatus } from "./legacy-core/lib/types";
+export type { CrewToolInfo, KbState, KbStatus } from "./legacy-core/lib/types";
 
-export type ModuleId = "landing" | "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings" | "voice" | "lists" | "mindbody" | "smarthome";
-
-export type OpenClawState = "online" | "configured" | "not_installed" | "offline";
-
-export interface OpenClawStatus {
-  /** online = fresh heartbeat (<5 min) or reachable loopback gateway; configured = config only. Optional for older backends. */
-  status?: OpenClawState;
-  online: boolean;
-  model: string;
-  gateway_url: string;
-  last_heartbeat: string | null;
-}
-
-export interface OpenClawHealth {
-  status: string;
-  version: string | null;
-  gateway: boolean;
-  rpc: boolean;
-  memory_search: string;
-  channels: { telegram: string; whatsapp: string };
-  timestamp: string;
-  installed?: boolean;
-}
+export type ModuleId = "landing" | "terrance" | "chat" | "health" | "neuro" | "sessions" | "devices" | "business" | "revenue" | "assistant" | "crews" | "trajectory" | "settings" | "voice" | "lists" | "mindbody" | "smarthome" | "life" | "enterprise";
 
 export interface HermesRuntimeHealth {
   runtime: string;
@@ -47,6 +25,14 @@ export interface AmaraTierInfo {
   /** hermes_metadata | router_log | router_dry_run | router_reply */
   source: string;
 }
+
+/** One event from the Rust turn pipeline (`amara_turn`, src-tauri commands/amara_turn.rs). Fields are snake_case as serialised. */
+export type TurnEvent =
+  | { type: "status"; phase: "routing" | "context" | "loading_model" | "sending" | "tools" | string; tier?: "fast" | "deep" | "claude"; sections?: string[] }
+  | { type: "delta"; text: string }
+  | { type: "action"; kind: "nexus_action" | "add_preview" | "navy" | "window_open" | "home" | string; payload?: unknown }
+  | { type: "done"; interaction_id: string; text: string; tier?: "fast" | "deep" | "claude"; path: "router" | "hermes" | "navy" | "home" | "add" | string; duration_ms: number; sections_used: string[] }
+  | { type: "error"; code: string; message: string };
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -290,6 +276,8 @@ export interface TaskItem {
   status: string;
   priority: string | null;
   tags: string[];
+  /** From a #venture:<id> tag (adds.rs). */
+  venture?: string | null;
 }
 
 export interface PipelineItem {
@@ -297,6 +285,7 @@ export interface PipelineItem {
   stage: string;
   content_type: string;
   notes: string | null;
+  venture?: string | null;
 }
 
 export interface MuseState {
@@ -336,7 +325,7 @@ export interface RecordedSession {
     time_in_target_pct?: number | null;
   };
   /** Minimised NOOP context captured at Muse session start; absent on older sessions. Parse with parseBodyContext. */
-  body_context?: import("../src/lib/types").BodyContext | null;
+  body_context?: import("./legacy-core/lib/types").BodyContext | null;
 }
 
 export interface NoopDailyMetric {
@@ -483,16 +472,16 @@ export interface SystemSnapshot {
   goals: Goal[];
   outbox: OutboxStatus;
   activity: ActivityEntry[];
-  /** OpenClaw gateway (local config + heartbeat file). `online` = config present. */
-  openclaw: OpenClawStatus;
   /** CrewAI service (stack/crew-service via crew.rs). */
   crew: CrewSnapshot;
   /** Knowledge base (Verba + Weaviate) via kb_status. */
   kb: KbStatus;
+  /** Business ledger (business/ledger.json, decision 0005); null when there is no file. */
+  ledger: import("./business/liveLedger").BusinessLedger | null;
 }
 
 /** crew-service run states (crew_runs.status). */
-export type CrewRunStatus = "running" | "completed" | "failed" | "stopped" | "interrupted";
+export type CrewRunStatus = "running" | "awaiting_approval" | "completed" | "failed" | "stopped" | "interrupted" | "cancelled";
 
 /** One crew run (crew.rs CrewInfo). For failed runs `result` holds the sanitized error. */
 export interface CrewInfo {
@@ -503,7 +492,47 @@ export interface CrewInfo {
   started_at: string | null;
   task: string | null;
   result: string | null;
+  /** R13-B totals; absent on older rows. cost_usd is 0 for local runs and null when unknown. */
+  finished_at?: string | null;
+  tokens?: number | null;
+  requests?: number | null;
+  cost_usd?: number | null;
+  /** R13-D: the run this one retries. */
+  retry_of?: string | null;
 }
+
+/** One crew approval request (crew.rs CrewApprovalRow). A separate queue from Terrance's actions. */
+export interface CrewApprovalRow {
+  id: string;
+  run_id: string;
+  crew: string;
+  agents: string[];
+  kind: "write" | "destructive" | "skill" | "retry_limit" | "claude_tier" | string;
+  title: string;
+  /** What this one approval covers: a run asks once for every write action it may take. */
+  items?: string[];
+  reason: string;
+  risk: "Low" | "Medium" | "High" | string;
+  requested_at: string;
+  decided_at?: string | null;
+  approved?: boolean | null;
+  decided_by?: string | null;
+}
+
+/** One timeline step of a run (crew.rs CrewStepRow); times are ms since the run's start. */
+export interface CrewStepRow { id: number; agent: string; kind: "task" | "tool" | "llm" | string; label: string; start_ms: number; end_ms: number; status: "ok" | "failed" | "skipped" | string; error?: string | null }
+export interface CrewHandoffRow { from: string; to: string; status: string }
+export interface CrewRunSteps { steps: CrewStepRow[]; handoffs: CrewHandoffRow[] }
+
+/** n8n_status (read-only probe). Counts are null unless obtainable without new secrets in the repo. */
+export interface N8nStatusRow { connected: boolean; workflows: number | null; failures7d: number | null }
+/** crew_tool_grant_get: what crew-service enforces for one crew (1110i). */
+export interface CrewToolGrantRow {
+  enabled: boolean; tools: string[]; scope_path?: string | null; duration?: string | null; granted_at?: number | null;
+  expires_at?: number | null; granted_by?: string | null; enforced_allowlist: string[];
+  pending_request?: { id: string; tools: string[]; duration: string; reason: string; scope_path: string; requested_at?: string | null; expires_at?: string | null } | null;
+}
+export interface CrewAuditApiRow { id: number; at: number; actor: string; kind: string; text: string; target?: string | null; exit_code?: number | null; duration_ms?: number | null; checkpoint?: string | null; run_id?: string | null }
 
 /** not_configured: no token in env or the app data dir; offline: unreachable or unhealthy. */
 export type CrewServiceHealth = "not_configured" | "offline" | "online";
@@ -562,10 +591,10 @@ export interface VoiceList {
 }
 
 /* ── NOOP query: contract types live in src/lib/types.ts (Integrations); re-exported, not duplicated. ── */
-export type { NoopMetricKey, NoopQueryArgs, NoopQueryError, NoopQueryTool, NoopSettings, WhoopSource } from "../src/lib/types";
-export { NOOP_QUERY_TOOLS } from "../src/lib/types";
+export type { NoopMetricKey, NoopQueryArgs, NoopQueryError, NoopQueryTool, NoopSettings, WhoopSource } from "./legacy-core/lib/types";
+export { NOOP_QUERY_TOOLS } from "./legacy-core/lib/types";
 
-export type { BodyContext } from "../src/lib/types";
+export type { BodyContext } from "./legacy-core/lib/types";
 
 /** UI-side body state, parsed from a session's body_context (see lib/noop.ts). */
 export interface BodyState {
@@ -602,7 +631,7 @@ export interface NoopSnapshotPayload {
   battery?: unknown | null;
 }
 export interface NoopSeriesPayload {
-  key: import("../src/lib/types").NoopMetricKey;
+  key: import("./legacy-core/lib/types").NoopMetricKey;
   requestedSource: string;
   range: { from: string; to: string };
   resolution: { candidates: Array<{ source: string; key: string }>; usedSources: string[] };
@@ -612,7 +641,7 @@ export interface NoopSeriesPayload {
 
 /** UI-side metric point. */
 export interface NoopMetricPoint { day: string; value: number | null }
-export interface NoopMetricSeries { key: import("../src/lib/types").NoopMetricKey; points: NoopMetricPoint[] }
+export interface NoopMetricSeries { key: import("./legacy-core/lib/types").NoopMetricKey; points: NoopMetricPoint[] }
 
 /** Amara's follow-up lists (commands/followups.rs). Dates are "YYYY-MM-DD" when the app wrote them. */
 export interface FollowupItem {

@@ -178,3 +178,28 @@ Section 5 doesn't remove this patch.
 - Order of what's left is in `NEXT_SESSION_PROMPT.md`. Home control comes after the live checks. The Muse eyes-closed test and key rotation are last, then the push.
 - Lid-awake is installed (AC power only). Its scripts are in `~/projects/hermes-patches/lid-awake`.
 - The rotation runbook `stack/ROTATION-RUNBOOK.md` stays out of git on purpose. It's in `.git/info/exclude`, along with `memory/session_logs/`.
+
+## 9. Steps from 2026-11-11 (Claude Code, amara-integration)
+
+Nothing here has been applied. Run each only when you want it. Merges and pushes stay frozen (`docs/decisions/0001`).
+
+1. **Router: install the fixes and switch the fast model** (`bb6669a`, decision 0004).
+   ```bash
+   cp ~/.config/amara-router/config.toml ~/.config/amara-router/config.toml.backup-$(date +%Y%m%d%H%M%S)
+   # In config.toml [models]: fast = "gemma4-12b-uncensored:latest"
+   cd ~/projects/nexus-amara/amara-router && cargo build --release
+   # install the binary the way amara-router/README.md › Install describes, then:
+   launchctl kickstart -k gui/$(id -u)/com.taisun.amara-router
+   curl -s http://127.0.0.1:8787/health
+   ```
+   New optional keys (defaults are fine): `deep_grace_secs = 60` (must stay ≤ `fast_wait_ms`/1000), `allow_remote_ollama = false`. Rollback: restore the backup and kickstart again. Watch `router.log` for the next `-9` exit (`amara-router/STABILITY.md`).
+2. **GitHub secret name** (B14): confirm the repo secret is `APPLE_API_KEY_P8` (633cbb9 renamed it from `APPLE_API_PRIVATE_KEY`). A release now fails if `APPLE_API_KEY` is set without it.
+3. **Hermes route patch** (B20): `~/projects/hermes-patches/hermes-amara-passthrough.patch` matches the live edits in `~/.hermes/hermes-agent` file for file (base `bf0203a794`, checked 2026-11-11). Run `pytest tests/agent/test_amara_route.py` there. Optional: `git init` `~/projects/hermes-patches` so patches are versioned.
+4. **Amara Voice** (B18): checked 2026-11-11: LaunchAgent loaded, `amara_voice.py` running, 8791 listening. No step needed.
+5. **Follow-ups dialog** (B08): every Lists edit that writes `~/.hermes/amara/*.json` now asks Allow/Deny. If that's too many dialogs, say which you prefer: one approval per session, or the app keeps its own copy and syncs.
+6. **Hermes key** (B06): `API_SERVER_KEY` is 24 bytes and containers can reach `:8642` (they get 401). Rotate it to ≥32 bytes in the final rotation batch, after everything else.
+7. **README nav names** (B19): `git apply tasks/proposed/README-nav.patch` fixes the Pages line in your uncommitted README edit.
+8. **Guard hook backstop** (optional): Claude Code's Bash guard is a pattern check. A real backstop would be a `pre-push` hook in the shared `.git` or `chflags uchg` on old recordings; both would also affect you, so they're your call.
+9. **Crew service: rebuild to pick up router calls, step timeline and totals** (`5f4eca9`, `1b57e9e`, and phase D when it lands). From `~/projects/nexus-amara/stack`: `docker compose build crew && docker compose up -d crew`. Nothing to add to `.env`; leave `CREW_ALLOW_CLOUD` empty (MiniMax stays off). Check: start a crew from Crews; `~/Library/Logs/amara-router/routes.jsonl` shows an `amara-fast` request and the run page shows steps. Rollback: `git -C ~/projects/nexus-amara show 0cc6d7e:stack/crew-service/main.py` is the pre-session service; rebuild with it.
+10. **Amara Voice "stop speaking"** (`153c7ce`): `cd ~/projects/amara-voice && patch -p1 --dry-run < ~/projects/nexus-amara/stack/patches/amara-voice-stop-speaking.patch`, then without `--dry-run`. Restart the loop (`./amara stop && ./amara start` or the Voice panel). Check: while she speaks, `pkill -USR1 -f amara_voice.py` cuts the reply and the loop keeps listening. Until the restart, the app's stop command does nothing (safe). Revert: `patch -R -p1 < …same file…`, then restart.
+11. **Business ledger** (decision 0005): the Business panels go live once `~/Library/Application Support/com.taisun.nexus/business/ledger.json` exists (format: `src-tauri/src/commands/business_ledger.rs` tests). Amounts in yen; add `"fx": {"usdPerJpy": …, "asOf": "YYYY-MM-DD"}` to see USD. `chmod 600` it.

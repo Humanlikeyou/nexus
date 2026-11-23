@@ -1,0 +1,60 @@
+/* System map (decision 0011). Existing tokens only: success / danger / label-secondary for green / red / grey. */
+.sysmap__root { display: grid; gap: 13px; container-type: normal; }
+.sysmap__top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 5px 13px; }
+.sysmap__summary { margin: 0; font-size: 17px; color: var(--label); font-weight: 600; }
+.sysmap__summary[data-broken] { color: var(--tone-danger-text); }
+.sysmap__stamp { margin: 0; font-size: 11px; color: var(--label-secondary); }
+.sysmap__legend { display: flex; flex-wrap: wrap; gap: 5px 13px; list-style: none; margin: 0; padding: 0; font-size: 11px; color: var(--label-secondary); }
+.sysmap__legend li { display: inline-flex; align-items: center; gap: 5px; }
+
+.sysmap__canvas { position: relative; height: calc(var(--rows) * 58px + 21px); min-height: 150px; }
+.sysmap__lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.sysmap__line { stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke: var(--separator-strong); }
+.sysmap__line[data-status="ok"] { stroke: color-mix(in srgb, var(--tone-success) 55%, transparent); }
+.sysmap__line[data-status="broken"] { stroke: var(--tone-danger); stroke-dasharray: 5 4; }
+.sysmap__line[data-status="off"] { stroke: var(--label-tertiary); stroke-dasharray: 2 4; }
+.sysmap__line[data-status="unknown"] { stroke: var(--label-tertiary); stroke-dasharray: 1 5; }
+
+.sysmap__node { position: absolute; transform: translate(-50%, -50%); width: calc(100% / var(--cols) - 16px); max-width: 156px; min-height: 40px; box-sizing: border-box; padding: 5px 8px; border-radius: 10px; background: var(--bg-content); box-shadow: inset 0 0 0 1px var(--separator-strong); display: grid; gap: 1px; text-align: center; align-content: center; font-size: 13px; line-height: 1.25; color: var(--label); overflow-wrap: anywhere; }
+.sysmap__node small { font-size: 11px; color: var(--label-secondary); }
+.sysmap__node[data-kind="app"] { box-shadow: inset 0 0 0 2px var(--tone-accent-text); font-weight: 600; }
+
+/* Dot: a real button with a 24px target; the pip inside is the visible 12px dot. */
+.sysmap__dot { all: unset; box-sizing: border-box; position: absolute; transform: translate(-50%, -50%); width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; cursor: pointer; }
+.sysmap__dot--legend { position: static; transform: none; width: 14px; height: 14px; cursor: default; }
+.sysmap__dot:focus-visible { outline: 3px solid var(--tone-accent-text); outline-offset: 2px; }
+.sysmap__dot[aria-expanded="true"] { background: var(--fill-secondary); }
+.sysmap__pip { width: 12px; height: 12px; border-radius: 50%; background: var(--label-secondary); box-sizing: border-box; }
+.sysmap__dot--legend .sysmap__pip { width: 10px; height: 10px; }
+.sysmap__dot[data-status="ok"] .sysmap__pip { background: var(--tone-success); }
+.sysmap__dot[data-status="off"] .sysmap__pip { background: var(--label-secondary); }
+.sysmap__dot[data-status="unknown"] .sysmap__pip { background: transparent; box-shadow: inset 0 0 0 2px var(--label-secondary); }
+/* Broken: red with a ring (the ring is the shape cue and is what stays when motion is reduced). */
+.sysmap__dot[data-status="broken"] .sysmap__pip { background: var(--tone-danger); box-shadow: 0 0 0 2px var(--bg-content), 0 0 0 4px var(--tone-danger); }
+.sysmap__dot[data-motion="blink"] .sysmap__pip { animation: sysmap-blink 1.2s ease-in-out infinite; }
+@keyframes sysmap-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .sysmap__dot .sysmap__pip { animation: none !important; } }
+:root[data-reduce-motion="true"] .sysmap__dot .sysmap__pip { animation: none !important; }
+@media (forced-colors: active) {
+  .sysmap__pip { background: CanvasText; }
+  .sysmap__dot[data-status="unknown"] .sysmap__pip { background: Canvas; box-shadow: inset 0 0 0 2px CanvasText; }
+  .sysmap__node { box-shadow: inset 0 0 0 1px CanvasText; }
+  .sysmap__line { stroke: CanvasText; }
+}
+
+/* Narrow: one row per path. */
+.sysmap__list { list-style: none; margin: 0; padding: 0; display: grid; }
+.sysmap__list li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 0; box-shadow: 0 1px 0 var(--separator); font-size: 13px; color: var(--label); }
+.sysmap__list li:last-child { box-shadow: none; }
+.sysmap__list .sysmap__dot { position: static; transform: none; }
+.sysmap__list-main { display: grid; min-width: 0; }
+.sysmap__list-main small, .sysmap__list-st { font-size: 11px; color: var(--label-secondary); }
+
+.sysmap__detail { border-radius: 10px; background: var(--fill-tertiary); padding: 13px; display: grid; gap: 8px; font-size: 13px; color: var(--label); }
+.sysmap__detail:focus-visible { outline: 3px solid var(--tone-accent-text); outline-offset: 2px; }
+.sysmap__detail-head { display: flex; justify-content: space-between; gap: 13px; align-items: start; }
+.sysmap__detail-head div { display: grid; }
+.sysmap__detail-head small { color: var(--label-secondary); font-size: 11px; }
+.sysmap__detail dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 13px; margin: 0; }
+.sysmap__detail dt { color: var(--label-secondary); font-size: 11px; padding-top: 3px; }
+.sysmap__detail dd { margin: 0; overflow-wrap: anywhere; }

@@ -1,9 +1,10 @@
 //! Batch service restart for auto-heal: one native approval for the whole set.
 //!
 //! TS: `invoke<ServiceRestartResult[]>("restart_services", { services, deadlineMs })`
-//! where `services` are ids like `"openclaw"` or `"docker:<container>"`.
+//! where `services` are ids like `"docker:<container>"`.
 
 use super::approval_gate;
+use super::shared::time::now_ms;
 use serde::Serialize;
 
 /// Max services in one request.
@@ -12,34 +13,30 @@ pub const EXPIRED_PREFIX: &str = "expired:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Service {
-    OpenClaw,
     Docker(String),
 }
 
 impl Service {
     fn id(&self) -> String {
         match self {
-            Service::OpenClaw => "openclaw".to_string(),
             Service::Docker(name) => format!("docker:{name}"),
         }
     }
 
     fn command_line(&self) -> String {
         match self {
-            Service::OpenClaw => super::openclaw::OPENCLAW_RESTART_OPERATION.to_string(),
             Service::Docker(name) => super::system::docker_restart_prompt(name).0,
         }
     }
 
     async fn restart(&self) -> Result<String, String> {
         match self {
-            Service::OpenClaw => super::openclaw::kickstart_openclaw().await,
             Service::Docker(name) => super::system::docker_restart(name).await,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceRestartResult {
     pub service: String,
@@ -58,15 +55,12 @@ fn parse_services(services: &[String]) -> Result<Vec<Service>, String> {
     }
     let mut parsed: Vec<Service> = Vec::with_capacity(services.len());
     for raw in services {
-        let service = match raw.as_str() {
-            "openclaw" => Service::OpenClaw,
-            other => match other.strip_prefix("docker:") {
-                Some(name) => {
-                    super::system::validate_container_name(name)?;
-                    Service::Docker(name.to_string())
-                }
-                None => return Err(format!("Unknown service: {raw:?}")),
-            },
+        let service = match raw.strip_prefix("docker:") {
+            Some(name) => {
+                super::system::validate_container_name(name)?;
+                Service::Docker(name.to_string())
+            }
+            None => return Err(format!("Unknown service: {raw:?}")),
         };
         if parsed.contains(&service) {
             return Err(format!("Duplicate service: {raw:?}"));
@@ -92,13 +86,6 @@ fn dialog_text(services: &[Service]) -> Result<String, String> {
         &lines.join("\n"),
         "Auto-heal restarts these services in order. Running requests may be interrupted.",
     )
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 /// Longest a restart approval stays valid, whatever the caller asks for.
@@ -160,21 +147,10 @@ where
     Ok(results)
 }
 
-/// `{ok:false, error:"unavailable: …"}` for OpenClaw when it isn't installed; `None` otherwise.
-fn unavailable(service: &Service, openclaw_installed: bool) -> Option<ServiceRestartResult> {
-    (*service == Service::OpenClaw && !openclaw_installed).then(|| ServiceRestartResult {
-        service: service.id(),
-        ok: false,
-        error: Some(super::openclaw::NOT_INSTALLED_ERROR.to_string()),
-    })
-}
-
-/// Unavailable services get their result without a dialog; only the rest go through
-/// `approve` (one dialog, held while they run) and `run_sequential`. Results keep the
-/// request's order. Nothing available: no dialog at all.
-async fn restart_available<Ap, ApFut, G, N, R, Fut>(
+/// One approval (held while the services restart), then `run_sequential`. Results keep the
+/// request's order.
+async fn restart_all<Ap, ApFut, G, N, R, Fut>(
     services: &[Service],
-    openclaw_installed: bool,
     deadline: u64,
     mut now: N,
     approve: Ap,
@@ -187,35 +163,14 @@ where
     R: FnMut(&Service) -> Fut,
     Fut: std::future::Future<Output = Result<String, String>>,
 {
-    let runnable: Vec<Service> = services
-        .iter()
-        .filter(|s| unavailable(s, openclaw_installed).is_none())
-        .cloned()
-        .collect();
-    let mut ran = Vec::new().into_iter();
-    if !runnable.is_empty() {
-        check_deadline(deadline, now())?;
-        let _approval = approve(runnable.clone()).await?;
-        check_deadline(deadline, now())?;
-        ran = run_sequential(&runnable, deadline, &mut now, restart, Service::id)
-            .await?
-            .into_iter();
-    }
-    Ok(services
-        .iter()
-        .map(|s| {
-            unavailable(s, openclaw_installed).unwrap_or_else(|| {
-                ran.next().unwrap_or_else(|| ServiceRestartResult {
-                    service: s.id(),
-                    ok: false,
-                    error: Some(format!("{EXPIRED_PREFIX} Not restarted.")),
-                })
-            })
-        })
-        .collect())
+    check_deadline(deadline, now())?;
+    let _approval = approve(services.to_vec()).await?;
+    check_deadline(deadline, now())?;
+    run_sequential(services, deadline, &mut now, restart, Service::id).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn restart_services(
     app: tauri::AppHandle,
     services: Vec<String>,
@@ -223,11 +178,8 @@ pub async fn restart_services(
 ) -> Result<Vec<ServiceRestartResult>, String> {
     let parsed = parse_services(&services)?;
     let deadline = effective_deadline(deadline_ms, now_ms());
-    let openclaw_installed =
-        !parsed.contains(&Service::OpenClaw) || super::openclaw::InstallPaths::system().installed();
-    restart_available(
+    restart_all(
         &parsed,
-        openclaw_installed,
         deadline,
         now_ms,
         |runnable| async move {
@@ -253,14 +205,16 @@ mod tests {
     #[test]
     fn validates_list_before_any_dialog() {
         assert_eq!(
-            parse_services(&s(&["openclaw", "docker:stack-n8n-1"])).unwrap(),
-            vec![Service::OpenClaw, Service::Docker("stack-n8n-1".into())]
+            parse_services(&s(&["docker:stack-n8n-1", "docker:ollama"])).unwrap(),
+            vec![
+                Service::Docker("stack-n8n-1".into()),
+                Service::Docker("ollama".into())
+            ]
         );
         assert!(parse_services(&[]).is_err());
         assert!(parse_services(&s(&["nginx"])).is_err());
         assert!(parse_services(&s(&["docker:-rm"])).is_err());
         assert!(parse_services(&s(&["docker:"])).is_err());
-        assert!(parse_services(&s(&["openclaw", "openclaw"])).is_err());
         assert!(parse_services(&s(&["docker:a", "docker:a"])).is_err());
         let many: Vec<String> = (0..=MAX_SERVICES).map(|i| format!("docker:c{i}")).collect();
         assert!(parse_services(&many).is_err());
@@ -268,16 +222,20 @@ mod tests {
 
     #[test]
     fn lock_key_is_order_independent_and_dialog_lists_every_command() {
-        let a = parse_services(&s(&["openclaw", "docker:n8n"])).unwrap();
-        let b = parse_services(&s(&["docker:n8n", "openclaw"])).unwrap();
+        let a = parse_services(&s(&["docker:ollama", "docker:n8n"])).unwrap();
+        let b = parse_services(&s(&["docker:n8n", "docker:ollama"])).unwrap();
         assert_eq!(lock_keys(&a), lock_keys(&b));
         assert_eq!(
             lock_keys(&a),
-            vec!["svc:docker:n8n".to_string(), "svc:openclaw".to_string()]
+            vec![
+                "svc:docker:n8n".to_string(),
+                "svc:docker:ollama".to_string()
+            ]
         );
         let text = dialog_text(&a).unwrap();
-        assert!(text.contains("Run: launchctl kickstart -k gui/<your uid>/ai.openclaw.gateway"));
         assert!(text.contains("Run: docker restart n8n"));
+        assert!(text.contains("Run: docker restart ollama"));
+        assert!(!text.to_lowercase().contains("openclaw"), "{text}");
     }
 
     #[test]
@@ -351,70 +309,55 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn openclaw_not_installed_is_unavailable_without_a_dialog() {
-        let parsed = parse_services(&s(&["openclaw"])).unwrap();
-        let dialogs = std::cell::Cell::new(0);
-        let results = restart_available(
-            &parsed,
-            false,
-            u64::MAX,
-            || 0,
-            |_| {
-                dialogs.set(dialogs.get() + 1);
-                async { Ok(()) }
-            },
-            |_| async { panic!("nothing may be restarted") },
-        )
-        .await
-        .unwrap();
-        assert_eq!(dialogs.get(), 0);
-        assert_eq!(
-            serde_json::to_value(&results).unwrap(),
-            serde_json::json!([{"service": "openclaw", "ok": false,
-                                "error": "unavailable: openclaw not installed"}])
-        );
+    #[test]
+    fn openclaw_is_not_a_service_any_more() {
+        for ids in [
+            &["openclaw"][..],
+            &["openclaw", "docker:n8n"],
+            &["OpenClaw"],
+        ] {
+            let err = parse_services(&s(ids)).unwrap_err();
+            assert!(err.starts_with("Unknown service"), "{err}");
+        }
     }
 
     #[tokio::test]
-    async fn mixed_batch_asks_once_for_the_available_services_only() {
-        let parsed = parse_services(&s(&["openclaw", "docker:n8n"])).unwrap();
+    async fn the_gate_runs_once_and_its_errors_stop_everything() {
+        let parsed = parse_services(&s(&["docker:n8n", "docker:ollama"])).unwrap();
         let asked: std::cell::RefCell<Vec<Vec<Service>>> = Default::default();
-        let results = restart_available(
+        let results = restart_all(
             &parsed,
-            false,
             u64::MAX,
             || 0,
             |runnable| {
                 asked.borrow_mut().push(runnable.clone());
-                assert_eq!(lock_keys(&runnable), vec!["svc:docker:n8n".to_string()]);
                 async { Ok(()) }
             },
             |_| async { Ok("ok".to_string()) },
         )
         .await
         .unwrap();
-        assert_eq!(*asked.borrow(), vec![vec![Service::Docker("n8n".into())]]);
+        assert_eq!(asked.borrow().len(), 1);
         assert_eq!(
             serde_json::to_value(&results).unwrap(),
             serde_json::json!([
-                {"service": "openclaw", "ok": false, "error": "unavailable: openclaw not installed"},
-                {"service": "docker:n8n", "ok": true, "error": null}
+                {"service": "docker:n8n", "ok": true, "error": null},
+                {"service": "docker:ollama", "ok": true, "error": null}
             ])
         );
-    }
-
-    #[tokio::test]
-    async fn installed_openclaw_still_goes_through_the_gate_and_its_errors() {
-        let parsed = parse_services(&s(&["openclaw"])).unwrap();
         for prefix in ["declined:", "busy:", "refused:", "changed:"] {
-            let err = restart_available(
+            let err = restart_all(
                 &parsed,
-                true,
                 u64::MAX,
                 || 0,
                 |runnable| {
-                    assert_eq!(lock_keys(&runnable), vec!["svc:openclaw".to_string()]);
+                    assert_eq!(
+                        lock_keys(&runnable),
+                        vec![
+                            "svc:docker:n8n".to_string(),
+                            "svc:docker:ollama".to_string()
+                        ]
+                    );
                     async move { Err::<(), _>(format!("{prefix} x")) }
                 },
                 |_| async { panic!("not approved") },
@@ -423,9 +366,8 @@ mod tests {
             .unwrap_err();
             assert!(err.starts_with(prefix), "{err}");
         }
-        let err = restart_available(
+        let err = restart_all(
             &parsed,
-            true,
             10,
             || 11,
             |_| async { Ok(()) },

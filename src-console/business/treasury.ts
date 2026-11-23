@@ -1,0 +1,237 @@
+import { commands } from "../bindings.gen";
+import type {
+  TreasuryCountsSnapshot_Serialize, TreasurySequenceDraft_Serialize, TreasurySequenceResultRow_Serialize,
+  FxRate, TreasuryAttentionRow, TreasuryPerHour_Serialize, TreasuryStreamMonth_Serialize,
+  TreasuryStream_Serialize, TreasuryTrendRow_Serialize,
+  TreasuryFlag_Serialize, TreasuryMonitorView_Serialize, TreasuryMonitorStatus_Serialize, TreasuryReview_Serialize,
+} from "../bindings.gen";
+import { UNWIRED, type Wired } from "../lib/sampleAdapters";
+
+/**
+ * Treasury live adapter (phase 2): backend and typed bridge only, no markup. Amounts are integer minor
+ * units (JPY yen, USD cents) in the row's own currency; a missing figure is `null`, never 0. The only
+ * exchange rate is the ledger's dated one (`fx`); no other rate is read. Values are `live` only when
+ * real rows exist, otherwise `unwired`. There is no sample data here.
+ */
+export type TreasuryStream = TreasuryStream_Serialize;
+export type TreasuryStreamMonth = TreasuryStreamMonth_Serialize;
+export type TreasuryTrendRow = TreasuryTrendRow_Serialize;
+export type TreasuryPerHour = TreasuryPerHour_Serialize;
+export type TreasuryAttention = TreasuryAttentionRow;
+export interface TreasuryFx { rate: FxRate | null; stale: boolean }
+
+export interface TreasurySnapshot {
+  streams: TreasuryStream[];
+  months: TreasuryStreamMonth[];
+  trend: TreasuryTrendRow[];
+  perHour: TreasuryPerHour[];
+  fx: TreasuryFx | null;
+}
+
+export interface TreasuryRange { fromMonth: string; toMonth: string; from: string; to: string }
+
+/** The slice of the generated bridge this loader calls, so tests can inject it. */
+export type TreasuryCalls = Pick<
+  typeof commands,
+  "treasuryStreamsList" | "treasuryIncomeMonth" | "treasuryIncomeTrend" | "treasuryPerHour" | "treasuryFxStatus"
+>;
+
+/** One failed read leaves that part empty; it never hides the others (same rule as the system snapshot). */
+async function part<T>(read: () => Promise<T>, fallback: T): Promise<T> {
+  try { return await read(); } catch { return fallback; }
+}
+
+export async function loadTreasury(range: TreasuryRange, calls: TreasuryCalls = commands): Promise<TreasurySnapshot> {
+  const [streams, months, trend, perHour, fx] = await Promise.all([
+    part(() => calls.treasuryStreamsList() as Promise<TreasuryStream[]>, []),
+    part(() => calls.treasuryIncomeMonth(range.fromMonth, range.toMonth) as Promise<TreasuryStreamMonth[]>, []),
+    part(() => calls.treasuryIncomeTrend(null) as Promise<TreasuryTrendRow[]>, []),
+    part(() => calls.treasuryPerHour(range.from, range.to) as Promise<TreasuryPerHour[]>, []),
+    part(() => calls.treasuryFxStatus() as Promise<TreasuryFx | null>, null),
+  ]);
+  return { streams, months, trend, perHour, fx };
+}
+
+export interface TreasuryAdapter {
+  streams(): Wired<TreasuryStream[]>;
+  /** Per stream, currency and month. `totalMinor` is null for a month with no events. */
+  incomeMonths(): Wired<TreasuryStreamMonth[]>;
+  trend(): Wired<TreasuryTrendRow[]>;
+  perHour(): Wired<TreasuryPerHour[]>;
+  fx(): Wired<TreasuryFx>;
+}
+
+export const unwiredTreasury: TreasuryAdapter = {
+  streams: () => UNWIRED, incomeMonths: () => UNWIRED, trend: () => UNWIRED, perHour: () => UNWIRED, fx: () => UNWIRED,
+};
+
+const live = <T,>(value: T): Wired<T> => ({ state: "live", value });
+const isArr = (x: unknown): x is unknown[] => Array.isArray(x);
+const num = (x: unknown) => typeof x === "number" && Number.isFinite(x);
+
+/** True only for a snapshot object whose parts are the right shape (the IPC reply is untrusted). */
+export function isTreasurySnapshot(x: unknown): x is TreasurySnapshot {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return false;
+  const s = x as Record<string, unknown>;
+  return ["streams", "months", "trend", "perHour"].every((k) => isArr(s[k]));
+}
+
+/** Live adapter over a loaded snapshot. No streams (or a malformed snapshot): the unwired adapter, unchanged. */
+export function liveTreasury(snapshot: unknown): TreasuryAdapter {
+  if (!isTreasurySnapshot(snapshot) || snapshot.streams.length === 0) return unwiredTreasury;
+  const { streams, months, trend, perHour, fx } = snapshot;
+  const hasFigures = (rows: { totalMinor: number | null }[]) => rows.some((r) => num(r.totalMinor));
+  return {
+    streams: () => live(streams),
+    incomeMonths: () => (hasFigures(months) ? live(months) : UNWIRED),
+    trend: () => (trend.some((t) => t.avgMinor !== null && num(t.avgMinor)) ? live(trend) : UNWIRED),
+    perHour: () => (perHour.some((p) => num(p.incomeMinor) || num(p.minutes)) ? live(perHour) : UNWIRED),
+    fx: () => (fx && typeof fx === "object" && typeof fx.stale === "boolean" ? live(fx) : UNWIRED),
+  };
+}
+
+/**
+ * Phases 3 and 4: customer counts and email sequence drafts. Counts only: the backend never holds a
+ * name, email or phone (decision 0032 #2), so none can appear here. Gmail has no timed sequences, so a
+ * draft is paste-ready text plus a checklist for a manual or scheduled-send workflow. A missing figure
+ * is `null`, never 0; with nothing real the adapter is `unwired`.
+ */
+export type TreasuryCounts = TreasuryCountsSnapshot_Serialize;
+export type TreasurySequence = TreasurySequenceDraft_Serialize;
+export type TreasurySequenceResult = TreasurySequenceResultRow_Serialize;
+
+export interface TreasurySequencesSnapshot { drafts: TreasurySequence[]; results: TreasurySequenceResult[] }
+
+export type TreasuryCountsCalls = Pick<typeof commands, "treasuryCountsList">;
+export type TreasurySequenceCalls = Pick<typeof commands, "treasurySequenceList" | "treasuryResultsList">;
+
+export async function loadTreasuryCounts(streamId: string, calls: TreasuryCountsCalls = commands): Promise<TreasuryCounts | null> {
+  return part(() => calls.treasuryCountsList(streamId) as Promise<TreasuryCounts | null>, null);
+}
+
+export async function loadTreasurySequences(calls: TreasurySequenceCalls = commands): Promise<TreasurySequencesSnapshot> {
+  const [drafts, results] = await Promise.all([
+    part(() => calls.treasurySequenceList() as Promise<TreasurySequence[]>, []),
+    part(() => calls.treasuryResultsList(null) as Promise<TreasurySequenceResult[]>, []),
+  ]);
+  return { drafts, results };
+}
+
+export interface TreasuryContactsAdapter {
+  /** Latest counts per stage and segment plus the per-import-date trend. */
+  counts(): Wired<TreasuryCounts>;
+  /** Drafts (status `draft` or `approved`) with their Gmail checklists. */
+  sequences(): Wired<TreasurySequence[]>;
+  /** Imported provider counts per sequence per day (sends, bounces, unsubscribes, purchases after). */
+  results(): Wired<TreasurySequenceResult[]>;
+}
+
+export const unwiredTreasuryContacts: TreasuryContactsAdapter = {
+  counts: () => UNWIRED, sequences: () => UNWIRED, results: () => UNWIRED,
+};
+
+const isCounts = (x: unknown): x is TreasuryCounts => {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return false;
+  const c = x as Record<string, unknown>;
+  return typeof c.asOf === "string" && isArr(c.stages) && isArr(c.segments) && isArr(c.trend);
+};
+
+/** Live counts only for a real import (an `asOf` date and at least one reported stage); else unwired. */
+export function liveTreasuryCounts(counts: unknown): Wired<TreasuryCounts> {
+  if (!isCounts(counts)) return UNWIRED;
+  return counts.stages.some((s) => s.count !== null && num(s.count)) ? live(counts) : UNWIRED;
+}
+
+export function liveTreasuryContacts(counts: unknown, sequences: unknown): TreasuryContactsAdapter {
+  const seq = sequences && typeof sequences === "object" && !Array.isArray(sequences) ? (sequences as Record<string, unknown>) : null;
+  const drafts = seq && isArr(seq.drafts) ? (seq.drafts as TreasurySequence[]) : [];
+  const results = seq && isArr(seq.results) ? (seq.results as TreasurySequenceResult[]) : [];
+  const hasFigure = (r: TreasurySequenceResult) =>
+    [r.sends, r.bounces, r.unsubscribes, r.purchasesAfter].some((v) => v !== null && num(v));
+  return {
+    counts: () => liveTreasuryCounts(counts),
+    sequences: () => (drafts.length > 0 ? live(drafts) : UNWIRED),
+    results: () => (results.some(hasFigure) ? live(results) : UNWIRED),
+  };
+}
+
+/**
+ * Phase 5: the exception monitor and the monthly review. The backend keeps the flags (six kinds, stale
+ * data first) and the status; this adapter only reads them. Two rules hold here as well as in Rust:
+ * stale data is never reported as healthy, and "ok" always carries its "as of" date. A review whose
+ * numbers did not match the ledger rows (`hidden`) or that has no data exposes no text. No markup.
+ */
+export type TreasuryFlag = TreasuryFlag_Serialize;
+export type TreasuryMonitorView = TreasuryMonitorView_Serialize;
+export type TreasuryMonitorStatus = TreasuryMonitorStatus_Serialize;
+export type TreasuryReview = TreasuryReview_Serialize;
+
+export interface TreasuryMonitorSnapshot {
+  flags: TreasuryFlag[];
+  monitor: TreasuryMonitorView | null;
+  review: TreasuryReview | null;
+}
+
+export type TreasuryMonitorCalls = Pick<typeof commands, "treasuryFlagsList" | "treasuryMonitorSettingsGet" | "treasuryReviewRead">;
+
+/** `month` is the complete month (YYYY-MM) whose stored review to read; null skips the read. */
+export async function loadTreasuryMonitor(month: string | null, calls: TreasuryMonitorCalls = commands): Promise<TreasuryMonitorSnapshot> {
+  const [flags, monitor, review] = await Promise.all([
+    part(() => calls.treasuryFlagsList() as Promise<TreasuryFlag[]>, []),
+    part(() => calls.treasuryMonitorSettingsGet() as Promise<TreasuryMonitorView | null>, null),
+    month ? part(() => calls.treasuryReviewRead(month) as Promise<TreasuryReview | null>, null) : Promise.resolve(null),
+  ]);
+  return { flags, monitor, review };
+}
+
+export interface TreasuryMonitorAdapter {
+  /** Open flags, stale data first. An empty list is real (live) only when the monitor has reported. */
+  flags(): Wired<TreasuryFlag[]>;
+  /** `stale | flags | ok | no_data`. Derived from the flags too, so stale can never read as ok. */
+  status(): Wired<TreasuryMonitorStatus>;
+  /** The review page, only when it passed the number check. */
+  review(): Wired<TreasuryReview>;
+}
+
+export const unwiredTreasuryMonitor: TreasuryMonitorAdapter = {
+  flags: () => UNWIRED, status: () => UNWIRED, review: () => UNWIRED,
+};
+
+const KIND_RANK = ["stale_data", "failed_import", "income_down", "no_income", "results_spike", "no_conversions"];
+const rank = (k: string) => { const i = KIND_RANK.indexOf(k); return i < 0 ? KIND_RANK.length : i; };
+
+const isFlag = (x: unknown): x is TreasuryFlag => {
+  if (!x || typeof x !== "object") return false;
+  const f = x as Record<string, unknown>;
+  return typeof f.id === "string" && typeof f.kind === "string" && typeof f.since === "string" && typeof f.detail === "string" && typeof f.acked === "boolean";
+};
+
+const isMonitor = (x: unknown): x is TreasuryMonitorView => {
+  if (!x || typeof x !== "object") return false;
+  const st = (x as Record<string, unknown>).status as Record<string, unknown> | undefined;
+  return !!st && typeof st.state === "string";
+};
+
+/** Live adapter over a loaded monitor snapshot. Without a monitor reply every part is unwired. */
+export function liveTreasuryMonitor(snapshot: unknown): TreasuryMonitorAdapter {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return unwiredTreasuryMonitor;
+  const s = snapshot as Record<string, unknown>;
+  if (!isMonitor(s.monitor)) return unwiredTreasuryMonitor;
+  const monitor = s.monitor;
+  const flags = (isArr(s.flags) ? s.flags.filter(isFlag) : []).slice().sort((a, b) => rank(a.kind) - rank(b.kind) || a.since.localeCompare(b.since));
+  const review = s.review as TreasuryReview | null | undefined;
+  return {
+    flags: () => live(flags),
+    status: () => {
+      const state = flags.some((f) => f.kind === "stale_data") ? "stale" : flags.length > 0 ? "flags" : monitor.status.state;
+      if (state === "no_data") return UNWIRED;
+      if (state === "ok") {
+        const asOf = monitor.status.asOf;
+        // "ok" is never shown without the date it is as of.
+        return typeof asOf === "string" && asOf.length === 10 ? live({ state: "ok", asOf }) : UNWIRED;
+      }
+      return live({ state, asOf: null });
+    },
+    review: () => (review && review.state === "ok" && typeof review.text === "string" && review.text.length > 0 ? live(review) : UNWIRED),
+  };
+}

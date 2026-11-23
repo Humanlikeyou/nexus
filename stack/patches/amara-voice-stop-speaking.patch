@@ -1,0 +1,74 @@
+--- a/amara_voice.py
++++ b/amara_voice.py
+@@ -39,7 +39,7 @@
+ from asr import Whisper
+ from barge_in import STOP_RE, BargeIn
+ from skills import Skills
+-from streaming import REPEAT_TEXT, SYNTH_LOCK, Player, Voice, load_fillers, load_repeat, speak_streaming, speakable
++from streaming import REPEAT_TEXT, SYNTH_LOCK, Player, Voice, load_fillers, load_repeat, speak_streaming, speakable, stop_speaking
+ from wake import WAKE_RE, WHISPER_MODEL, heard_wake
+ 
+ HERE = Path(__file__).parent
+@@ -276,6 +276,7 @@
+     ap.add_argument("--no-icon", action="store_true", help="no menu-bar indicator (logs/state is still written)")
+     args = ap.parse_args()
+     signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))  # launchctl bootout / Amara OS stop: run atexit (state file)
++    signal.signal(signal.SIGUSR1, stop_speaking)  # Amara OS "stop speaking": cuts the current reply only, loop keeps running
+     from status_icon import StatusIcon
+ 
+     try:
+--- a/streaming.py
++++ b/streaming.py
+@@ -175,6 +175,18 @@
+     return np.concatenate([blip(660), np.zeros(int(rate * 0.04)), blip(880)]).astype(np.float32), rate
+ 
+ 
++EXT_STOP = threading.Event()  # SIGUSR1 (Amara OS "stop speaking"): cut the current reply, keep listening
++_ACTIVE_PLAYER = None
++
++
++def stop_speaking(*_):
++    """Interrupt the reply being played now (same cut-off as a barge-in 'stop'). No-op when she is silent.
++    Safe in a signal handler: only sets Events."""
++    EXT_STOP.set()
++    if (p := _ACTIVE_PLAYER) is not None:
++        p.stop.set()
++
++
+ class Player:
+     """Blocked playback that can be cut off mid-clip or ducked (gain) and shares what it plays with barge-in.
+     Pieces of a take join seamlessly; a ramp only goes in where the speaker starts from, or runs out to, silence.
+@@ -243,10 +255,13 @@
+     t0: when he stopped talking (defaults to now), so the filler timer includes ASR.
+     Returns dict: text, token (s to first Hermes token), audio (s to first audio), barged (None | 'name' | 'stop'),
+     error (None or what went wrong with Hermes)."""
++    global _ACTIVE_PLAYER
+     t0 = t0 or time.time()
++    EXT_STOP.clear()  # a SIGUSR1 that arrived while she was silent must not cut this reply
+     stats, cancel, said = {}, threading.Event(), []
+     texts, clips = queue.Queue(), queue.Queue()
+     player = Player(out_dev)
++    _ACTIVE_PLAYER = player
+     player.more = lambda: not clips.empty()
+ 
+     def llm():
+@@ -290,6 +305,8 @@
+         while True:
+             if barging and barge.word:  # word is left over from the last turn until start() resets it
+                 break
++            if EXT_STOP.is_set():
++                break
+             wait = max(0.05, FILLER_S - (time.time() - t0)) if not filler_done else 0.1
+             try:
+                 item = clips.get(timeout=wait)
+@@ -322,6 +339,10 @@
+         player.stop.set()
+         cancel.set()
+         word = barge.stop() if barge else None  # also shuts the echo canceller if she never spoke
++        if EXT_STOP.is_set():
++            word = word or "stop"  # stopped from Amara OS: no follow-up listen, like a spoken "stop"
++        _ACTIVE_PLAYER = None
++        EXT_STOP.clear()
+         if (r := stats.get("resp")) is not None:
+             r.close()  # unblocks iter_lines if Hermes is still going
+         llm_thread.join(timeout=2)

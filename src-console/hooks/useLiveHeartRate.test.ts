@@ -69,6 +69,27 @@ describe("useLiveHeartRate", () => {
     act(() => { vi.advanceTimersByTime(LIVE_HEART_RATE_POLL_MS * 3); });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+
+  it("pauses the playback clock while the window is hidden and resumes when shown", async () => {
+    fetch.mockResolvedValueOnce(feed(100, 5)).mockResolvedValue(feed(110, 15));
+    const { result } = renderHook(() => useLiveHeartRate());
+    await flush();
+    act(() => { vi.advanceTimersByTime(LIVE_HEART_RATE_POLL_MS); });
+    await flush();
+    const before = result.current!.at;
+    const timers = vi.getTimerCount();
+    setHidden(true);
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(vi.getTimerCount()).toBe(timers - 1);
+    act(() => { vi.advanceTimersByTime(PLAYBACK_TICK_MS * 5); });
+    expect(result.current!.at).toBe(before);
+    setHidden(false);
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    await flush();
+    expect(result.current!.at).toBeGreaterThan(before);
+    act(() => { vi.advanceTimersByTime(PLAYBACK_TICK_MS * 2); });
+    expect(result.current!.at).toBeGreaterThan(before + 1);
+  });
 });
 
 describe("nextPlayhead", () => {
@@ -89,5 +110,12 @@ describe("beatSeconds", () => {
     expect(beatSeconds(120)).toBe(0.5);
     expect(beatSeconds(1000)).toBe(0.25);
     expect(beatSeconds(5)).toBe(2);
+  });
+  it("returns null instead of NaN when the heart rate is missing or unusable", () => {
+    expect(beatSeconds(undefined)).toBeNull();
+    expect(beatSeconds(null)).toBeNull();
+    expect(beatSeconds(Number.NaN)).toBeNull();
+    expect(beatSeconds(0)).toBeNull();
+    expect(beatSeconds(-40)).toBeNull();
   });
 });

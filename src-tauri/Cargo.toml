@@ -13,10 +13,23 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "unstable", "specta"] }
+# Typed bridge (decision 0023): pinned exactly; generates src-console/bindings.gen.ts from the commands.
+tauri-specta = { version = "=2.0.0-rc.29", features = ["derive", "typescript"] }
+specta = { version = "=2.0.0-rc.28", features = ["derive", "serde_json"] }
+specta-typescript = "=0.0.15"
 tauri-plugin-shell = "2"
-tauri-plugin-autostart = "2"
+# Phase 15 (decision pending): signed updater. Not registered as a plugin; commands/updater.rs uses its
+# builder only when configured. No updater permission is granted to the webview.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
 tauri-plugin-dialog = "2"
+# Minisign verification of an update artifact before the install sequence starts (same crate the updater uses).
+minisign-verify = "0.2"
+semver = "1"
+url = "2"
+# Same reqwest the updater plugin uses (already in the tree); named only to set the redirect policy via configure_client.
+reqwest-updater = { package = "reqwest", version = "0.13", default-features = false }
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -29,22 +42,35 @@ glob = "0.3"
 futures = "0.3"
 lazy_static = "1"
 hostname = "0.4"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
 sha2 = "0.10"
+encoding_rs = "0.8"
 hex = "0.4"
 rand = "0.8"
 tar = "0.4"
 flate2 = "1"
 libc = "0.2"
 zeroize = "1"
+ring = "0.17"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Already in the tree via tauri/tao; used for the Dock icon (dock_icon.rs) and to read the Reduce
 # Transparency setting (system.rs).
+security-framework = "2.11"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSImage", "NSResponder", "NSWorkspace"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSError", "NSString"] }
+# Phase 13: SMAppService.mainApp login item (no LaunchAgent plist). Only called from the user-invoked commands.
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "SMErrors", "objc2", "objc2-foundation"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Keep dev/test builds small on disk (Taisun, 2026-11-18: the build cache was ~60 GB).
+# Dependencies carry no debug info; our own crate keeps line tables for backtraces.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

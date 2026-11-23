@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { preloadAllScreens, preloadScreen } from "./lazyScreens";
 import { routeMotion, transitionRoute } from "./routeMotion";
-import { screenFor, type Route } from "./routes";
+import { canonicalRoute, screenFor, type Route } from "./routes";
 
 /** A slow chunk gets this long to arrive before the page moves anyway and shows its skeleton. */
 const CHUNK_WAIT_MS = 160;
@@ -18,7 +18,8 @@ function focusHeading(field: HTMLElement): boolean {
   if (focused && focused !== document.body && field.contains(focused)) return true;
   if (!heading.hasAttribute("tabindex")) heading.tabIndex = -1;
   heading.focus({ preventScroll: true });
-  return true;
+  // focus() is a no-op while the element can't take it yet (mid view-transition, not yet rendered): report whether it landed.
+  return document.activeElement === heading;
 }
 
 /** The app's route, with one `navigate` for every link, tab, shortcut and ⌘K jump. */
@@ -27,7 +28,9 @@ export function useRouteNavigation(initial: Route) {
   const committed = useRef(initial);
   const request = useRef(0);
 
-  const navigate = useCallback((to: Route) => {
+  const navigate = useCallback((target: Route) => {
+    // design-1111v: every old route (business:*, terrance:goals, …) lands on where it lives now.
+    const to = canonicalRoute(target);
     const id = ++request.current;
     const go = () => {
       if (id !== request.current) return; // a newer click won

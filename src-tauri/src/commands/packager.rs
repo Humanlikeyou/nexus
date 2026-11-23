@@ -8,13 +8,7 @@ pub(crate) fn nexus_data_dir() -> PathBuf {
     crate::app_paths::data_dir()
 }
 
-fn openclaw_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".openclaw")
-}
-
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 pub struct PackageInfo {
     pub path: String,
     pub size_mb: f64,
@@ -23,21 +17,79 @@ pub struct PackageInfo {
     pub skipped: Vec<String>,
 }
 
-/// Recorded in `PackageInfo::skipped` when there is no ~/.openclaw to back up.
-pub(crate) const OPENCLAW_NOT_INSTALLED: &str = "openclaw not installed";
-
 #[tauri::command]
+#[specta::specta]
 pub async fn pack_it_up() -> Result<PackageInfo, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     pack_at(&home, &nexus_data_dir()).await
 }
 
 /// `pack_it_up` with the home and data dirs injected (tests use temp dirs).
-async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
-    let desktop = home.join("Desktop");
+pub(crate) async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let archive_name = format!("nexus-backup-{}.tar.gz", timestamp);
-    let archive_path = desktop.join(&archive_name);
+    // Taisun, 2026-11-12: the Desktop archive leaves secrets out too (key file, tokens, .env, and
+    // secret fields of every JSON store), like Back Up Now. A restore of it asks for those again.
+    pack_to(
+        data_dir,
+        &home.join("Desktop"),
+        &archive_name,
+        &PackOpts {
+            exclude_secrets: true,
+            progress: None,
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+/// Progress callback: `(phase label, percent 0..=100)`.
+pub(crate) type Progress<'a> = &'a (dyn Fn(&str, u8) + Send + Sync);
+
+/// How `pack_to` differs between the one-off Desktop pack and a scheduled-style backup.
+#[derive(Default)]
+pub(crate) struct PackOpts<'a> {
+    /// Leave every secret file out and strip secret fields from `config.json`
+    /// (see `backups::EXCLUDED_*`). Both pack_it_up and Back Up Now set it (2026-11-12).
+    pub exclude_secrets: bool,
+    pub progress: Option<Progress<'a>>,
+    /// Tests only: pretend this recording file is open. `None` asks the live recorder.
+    pub active_recording: Option<String>,
+}
+
+/// Pack the app data into `<out_dir>/<file_name>` (a `.tar.gz` whose top folder is
+/// `nexus-pack-*`, which restore looks for). `out_dir` must already exist; the archive is
+/// created 0600 and never overwrites an existing file.
+pub(crate) async fn pack_to(
+    data_dir: &Path,
+    out_dir: &Path,
+    file_name: &str,
+    opts: &PackOpts<'_>,
+) -> Result<PackageInfo, String> {
+    let report = |phase: &str, pct: u8| {
+        if let Some(p) = opts.progress {
+            p(phase, pct);
+        }
+    };
+    // An open Muse recording is still being written: its file and its `.bands.json` sidecar are left
+    // out (and listed as skipped) rather than copied half-written.
+    let active = match &opts.active_recording {
+        Some(n) => Some(n.clone()),
+        None => super::replay::active_recording_name().await,
+    };
+    let active_names: Vec<String> = active
+        .into_iter()
+        .flat_map(|n| [format!("{n}.bands.json"), n])
+        .collect();
+    let exclude_secrets = opts.exclude_secrets;
+    let skip_secret = move |name: &str, depth: usize| {
+        active_names.iter().any(|a| a == name)
+            || (exclude_secrets && super::backups::is_excluded_name(name, depth))
+    };
+    let skip_secret: &dyn Fn(&str, usize) -> bool = &skip_secret;
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let archive_path = out_dir.join(file_name);
+    report("Preparing", 3);
 
     // Fresh, unguessable staging dir (create_dir fails if it already exists, so a
     // pre-planted dir or symlink in the temp dir is never reused). The archive's
@@ -58,35 +110,41 @@ async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
     let config_src = data_dir.to_path_buf();
     if config_src.exists() {
         let dest = staging.join("nexus-config");
-        copy_dir_recursive(&config_src, &dest, Some(MAX_PACK_FILE_BYTES), &mut skipped)?;
-        includes.push("Amara OS settings & config".to_string());
-    }
-
-    // 2. Copy OpenClaw data (optional: no ~/.openclaw is recorded, not an error)
-    let openclaw = home.join(".openclaw");
-    if openclaw.is_dir() {
-        let dest = staging.join("openclaw");
-        copy_dir_selective(
-            &openclaw,
+        report("Copying settings", 10);
+        copy_dir_filtered(
+            &config_src,
             &dest,
-            &["openclaw.json", "cron", "skills", "memory", "workspace"],
             Some(MAX_PACK_FILE_BYTES),
             &mut skipped,
+            0,
+            skip_secret,
+            if opts.exclude_secrets {
+                JsonMode::Redact
+            } else {
+                JsonMode::Copy
+            },
         )?;
-        includes.push("OpenClaw workspace & memory".to_string());
-    } else {
-        skipped.push(OPENCLAW_NOT_INSTALLED.to_string());
+        if opts.exclude_secrets {
+            super::backups::write_redacted_config(&config_src, &dest, &mut skipped)?;
+        }
+        includes.push("Amara OS settings & config".to_string());
     }
 
     // 3. Copy local session data
     let sessions_dir = data_dir.join("sessions");
     if sessions_dir.exists() {
         let dest = staging.join("sessions");
-        copy_dir_recursive(
+        report("Copying recordings", 40);
+        // Muse recordings are copied byte-for-byte: no redaction or rewrite pass (a secret-looking
+        // NAME still keeps a file out).
+        copy_dir_filtered(
             &sessions_dir,
             &dest,
             Some(MAX_PACK_FILE_BYTES),
             &mut skipped,
+            1,
+            skip_secret,
+            JsonMode::Muse,
         )?;
         includes.push("BLE session recordings".to_string());
     }
@@ -101,6 +159,7 @@ async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
 
     // 5. Copy events database
     let events_db = data_dir.join("events.db");
+    report("Copying databases", 60);
     if events_db.exists() {
         fs::copy(&events_db, staging.join("events.db"))
             .map_err(|e| format!("Failed to copy events.db: {}", e))?;
@@ -117,8 +176,12 @@ async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
     }
 
     // 5. Write a manifest with metadata
+    report("Writing manifest", 70);
+    // Hash every staged file (the manifest itself excluded) so a backup can be verified later.
+    let sha256 = hash_tree(&staging)?;
     let manifest = serde_json::json!({
         "version": "0.1.0",
+        "sha256": &sha256,
         "packed_at": chrono::Local::now().to_rfc3339(),
         "hostname": hostname::get().map(|h| h.to_string_lossy().to_string()).unwrap_or_default(),
         "includes": &includes,
@@ -148,6 +211,7 @@ async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
     ))?;
     // Pre-create the archive 0600 (tar truncates it but keeps the mode), so the
     // backup is never readable by other users, even briefly.
+    report("Compressing", 75);
     create_private_file(&archive_path)
         .map_err(|e| format!("Failed to create archive file: {}", e))?;
     let output = Command::new("tar")
@@ -186,6 +250,48 @@ async fn pack_at(home: &Path, data_dir: &Path) -> Result<PackageInfo, String> {
     })
 }
 
+/// sha256 (hex) of every regular file under `root`, keyed by its `/`-joined path relative to `root`.
+/// Symlinks and special files are not followed or listed (the copy step never stages them).
+fn hash_tree(root: &Path) -> Result<std::collections::BTreeMap<String, String>, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut out = std::collections::BTreeMap::new();
+    let mut stack = vec![(root.to_path_buf(), String::new())];
+    while let Some((dir, prefix)) = stack.pop() {
+        for e in fs::read_dir(&dir).map_err(|e| format!("Failed to hash backup: {e}"))? {
+            let e = e.map_err(|e| format!("Failed to hash backup: {e}"))?;
+            let name = e.file_name().to_string_lossy().into_owned();
+            let rel = if prefix.is_empty() {
+                name
+            } else {
+                format!("{prefix}/{name}")
+            };
+            let ft = e
+                .file_type()
+                .map_err(|e| format!("Failed to hash backup: {e}"))?;
+            if ft.is_dir() {
+                stack.push((e.path(), rel));
+            } else if ft.is_file() {
+                let mut f =
+                    fs::File::open(e.path()).map_err(|e| format!("Failed to hash backup: {e}"))?;
+                let mut h = Sha256::new();
+                let mut buf = [0u8; 64 * 1024];
+                loop {
+                    let n = f
+                        .read(&mut buf)
+                        .map_err(|e| format!("Failed to hash backup: {e}"))?;
+                    if n == 0 {
+                        break;
+                    }
+                    h.update(&buf[..n]);
+                }
+                out.insert(rel, hex::encode(h.finalize()));
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// `~/x` → `$HOME/x` (the Settings path field accepts it); anything else unchanged.
 pub(crate) fn expand_home(path: &str) -> PathBuf {
     match (path.strip_prefix("~/"), dirs::home_dir()) {
@@ -200,7 +306,16 @@ const RESTORE_APPROVAL_TTL: std::time::Duration = std::time::Duration::from_secs
 const RESTORE_LOCK_KEY: &str = "restore:backup";
 const RESTORE_BACKUP_DIR: &str = "restore-backups";
 
+/// What the approval dialog names: the full canonical path, so it cannot be mistaken for another file.
+fn restore_archive_label(canonical: &Path) -> String {
+    canonical.display().to_string()
+}
+
+/// Restore from a file picked by hand (the legacy Settings flow). The file must be a plain file with
+/// a backup name, no backup may be running, and the archive must verify, all before the approval
+/// dialog, which shows the full canonical path.
 #[tauri::command]
+#[specta::specta]
 pub async fn unpack_backup(
     app: tauri::AppHandle,
     archive_path: String,
@@ -209,7 +324,43 @@ pub async fn unpack_backup(
     if !archive.is_file() {
         return Err("Archive file not found".to_string());
     }
+    let to_check = archive.clone();
+    let canonical = tokio::task::spawn_blocking(move || {
+        super::backup_schedule::restore_check_archive(
+            &to_check,
+            &super::backups::BUSY,
+            &super::backups::VERIFY_BUSY,
+        )
+    })
+    .await
+    .map_err(|_| "io_error".to_string())??;
+    unpack_verified(&app, canonical).await
+}
 
+/// Restore a backup chosen by id from the backup folder. `file` is a name from `backup_list`, never
+/// a path. Refused while a backup runs or when the archive does not verify, before any approval.
+#[tauri::command]
+#[specta::specta]
+pub async fn restore_backup(app: tauri::AppHandle, file: String) -> Result<Vec<String>, String> {
+    let (home, data) = (super::backups::home_dir()?, crate::app_paths::data_dir());
+    let canonical = tokio::task::spawn_blocking(move || {
+        let s = super::backups::load_settings(&data)?;
+        super::backup_schedule::restore_precheck_in(
+            &home,
+            &data,
+            &s.dir,
+            &file,
+            &super::backups::BUSY,
+            &super::backups::VERIFY_BUSY,
+        )
+    })
+    .await
+    .map_err(|_| "io_error".to_string())??;
+    unpack_verified(&app, canonical).await
+}
+
+/// Shared restore: extract to staging, plan, native approval (TTL, recheck), safety copy, apply.
+async fn unpack_verified(app: &tauri::AppHandle, archive: PathBuf) -> Result<Vec<String>, String> {
     // Unique, freshly created staging dir (create_dir fails if it already exists).
     let staging =
         std::env::temp_dir().join(format!("nexus-unpack-{}", uuid::Uuid::new_v4().simple()));
@@ -234,7 +385,6 @@ pub async fn unpack_backup(
 
     let extracted = find_pack_root(&staging)?;
     let roots = RestoreRoots {
-        openclaw: openclaw_dir(),
         data: nexus_data_dir(),
     };
     let plan = plan_restore(&extracted)?;
@@ -243,14 +393,11 @@ pub async fn unpack_backup(
     }
     let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
     let replaced = replaced_files(&plan, &roots);
-    let archive_name = archive
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let archive_name = restore_archive_label(&archive);
 
     let asked_at = std::time::Instant::now();
     let _approval = super::approval_gate::require_approval(
-        &app,
+        app,
         &[RESTORE_LOCK_KEY.to_string()],
         super::approval_gate::approval_text(
             &restore_operation(&archive_name, &plan, &replaced, &roots, &stamp),
@@ -266,7 +413,7 @@ pub async fn unpack_backup(
     }
     // What gets replaced must still be what the dialog showed.
     if replaced_files(&plan, &roots) != replaced {
-        return Err("changed: files in ~/.openclaw or the Amara OS data folder changed while the dialog was open; nothing was restored".to_string());
+        return Err("changed: files in the Amara OS data folder changed while the dialog was open; nothing was restored".to_string());
     }
 
     // Full safety copy of the current data before anything is overwritten.
@@ -285,8 +432,8 @@ pub async fn unpack_backup(
     Ok(restored)
 }
 
-/// Copy the current data dir (minus earlier restore backups) and the
-/// OpenClaw files a backup covers into `<data>/restore-backups/<stamp>-full/`
+/// Copy the current data dir (minus earlier restore backups) into
+/// `<data>/restore-backups/<stamp>-full/`
 /// (0700), so a restore can be undone by hand. Symlinks are listed, not followed.
 fn snapshot_before_restore(
     roots: &RestoreRoots,
@@ -316,20 +463,11 @@ fn snapshot_before_restore(
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         copy_dir_selective(&roots.data, &target.join("data"), &refs, None, &mut skipped)?;
     }
-    if roots.openclaw.is_dir() {
-        copy_dir_selective(
-            &roots.openclaw,
-            &target.join("openclaw"),
-            &["openclaw.json", "cron", "skills", "memory", "workspace"],
-            None,
-            &mut skipped,
-        )?;
-    }
     Ok((target, skipped))
 }
 
 /// The `nexus-pack-*` (or legacy `electron-pack-*`) folder inside staging, else staging.
-fn find_pack_root(staging: &Path) -> Result<PathBuf, String> {
+pub(crate) fn find_pack_root(staging: &Path) -> Result<PathBuf, String> {
     Ok(fs::read_dir(staging)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
@@ -344,19 +482,16 @@ fn find_pack_root(staging: &Path) -> Result<PathBuf, String> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum RestoreRoot {
-    OpenClaw,
     Data,
 }
 
 struct RestoreRoots {
-    openclaw: PathBuf,
     data: PathBuf,
 }
 
 impl RestoreRoots {
     fn get(&self, root: RestoreRoot) -> &Path {
         match root {
-            RestoreRoot::OpenClaw => &self.openclaw,
             RestoreRoot::Data => &self.data,
         }
     }
@@ -375,40 +510,28 @@ pub(crate) struct RestorePlan {
     pub(crate) skipped: Vec<String>,
 }
 
-/// Lower-case extension of the last component, if any.
-fn ext_of(rel: &Path) -> Option<String> {
-    rel.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-}
+/// Live approval state a restore never overwrites: a crafted backup must not be able to switch the
+/// Telegram relay on without its approval dialog (`notify_relay.json`) or reset its once-a-day
+/// ledger (`notify_relay_sent.json`), or turn outbound on (`outbound_setting.json`).
+pub(crate) const RESTORE_NEVER: &[&str] = &[
+    "notify_relay.json",
+    "notify_relay_sent.json",
+    super::outbound::FILE_NAME,
+    super::supervisor::act::FILE_NAME,
+];
 
-/// Files pack_it_up writes under `openclaw/` (openclaw.json, cron, skills,
-/// memory, workspace), restricted to the file types those folders hold.
-fn openclaw_allowed(rel: &[String]) -> bool {
-    let path: PathBuf = rel.iter().collect();
-    let ext = ext_of(&path);
-    let ext = ext.as_deref();
-    match rel {
-        [only] => only == "openclaw.json",
-        [dir, _] if dir == "cron" => ext == Some("json"),
-        [dir, _] if dir == "skills" => ext == Some("md"),
-        [dir, rest @ ..] if dir == "memory" && rest.len() <= 3 => {
-            matches!(ext, Some("md" | "json" | "jsonl" | "txt"))
-        }
-        [dir, rest @ ..] if dir == "workspace" && rest.len() <= 3 => {
-            matches!(ext, Some("md" | "json" | "txt"))
-        }
-        _ => false,
-    }
+fn is_live_only(rel: &[String]) -> bool {
+    rel.last()
+        .is_some_and(|n| RESTORE_NEVER.contains(&n.to_ascii_lowercase().as_str()))
 }
 
 /// Map an archive file (path relative to the pack root) to where it may be restored.
 pub(crate) fn restore_target(rel: &[String]) -> Option<(RestoreRoot, PathBuf)> {
     let join = |parts: &[String]| parts.iter().collect::<PathBuf>();
+    if is_live_only(rel) {
+        return None;
+    }
     match rel {
-        [top, rest @ ..] if top == "openclaw" && !rest.is_empty() => {
-            openclaw_allowed(rest).then(|| (RestoreRoot::OpenClaw, join(rest)))
-        }
         [top, rest @ ..]
             if (top == "nexus-config" || top == "electron-config")
                 && !rest.is_empty()
@@ -447,6 +570,13 @@ pub(crate) fn plan_restore(pack_root: &Path) -> Result<RestorePlan, String> {
                 stack.push((entry.path(), rel));
             } else if ft.is_file() {
                 if rel == ["manifest.json"] || is_os_junk(&name) {
+                    continue;
+                }
+                if is_live_only(&rel) {
+                    plan.skipped.push(format!(
+                        "{} (live approval state, never restored)",
+                        rel.join("/")
+                    ));
                     continue;
                 }
                 match restore_target(&rel) {
@@ -503,10 +633,7 @@ fn restore_operation(
     let count = |r: RestoreRoot| plan.items.iter().filter(|i| i.root == r).count();
     let rcount = |r: RestoreRoot| replaced.iter().filter(|(x, _)| *x == r).count();
     let mut out = format!(
-        "Restore backup {archive_name}:\n- {} files into {} ({} replaced)\n- {} files into {} ({} replaced)\nReplaced files are first copied to {}/{stamp} in each folder.",
-        count(RestoreRoot::OpenClaw),
-        roots.openclaw.display(),
-        rcount(RestoreRoot::OpenClaw),
+        "Restore backup {archive_name}:\n- {} files into {} ({} replaced)\nReplaced files are first copied to {}/{stamp} in each folder.",
         count(RestoreRoot::Data),
         roots.data.display(),
         rcount(RestoreRoot::Data),
@@ -515,10 +642,8 @@ fn restore_operation(
     if !replaced.is_empty() {
         out.push_str("\nReplaces:");
         for (root, rel) in replaced.iter().take(12) {
-            let label = if *root == RestoreRoot::OpenClaw {
-                "~/.openclaw"
-            } else {
-                "data"
+            let label = match root {
+                RestoreRoot::Data => "data",
             };
             out.push_str(&format!("\n  {label}/{}", rel.display()));
         }
@@ -580,9 +705,35 @@ fn apply_restore(
 ) -> Result<Vec<String>, String> {
     let mut counts = std::collections::BTreeMap::new();
     let mut backed_up = 0usize;
+    let mut config_skipped: Vec<String> = Vec::new();
     for item in &plan.items {
         let root = roots.get(item.root);
         let dest = safe_dest(root, &item.rel)?;
+        // A JSON file restored over a live one keeps the live secret fields the backup left out
+        // (backups are written without secrets), so a restore never wipes this Mac's tokens.
+        let merged = (item.rel.extension().is_some_and(|e| e == "json") && dest.is_file())
+            .then(|| {
+                let (r, c) = (fs::read(&item.src).ok()?, fs::read(&dest).ok()?);
+                super::backups::merge_kept_secrets(&r, &c)
+            })
+            .flatten();
+        // `config.json` is ALWAYS rewritten, never raw-copied: `allow_claude` (Settings > Assistant
+        // > Allow Claude) is a consent that sends data off the Mac, so a backup never turns it on.
+        // Only a valid live file with an exact true/false keeps its value; otherwise it is dropped.
+        // A backup config that isn't a JSON object is skipped and listed.
+        let config_bytes = if item.rel == Path::new("config.json") {
+            match sanitised_config(merged.clone(), &item.src, &dest) {
+                Some(b) => Some(b),
+                None => {
+                    config_skipped.push(
+                        "config.json (not a valid settings file, left as it was)".to_string(),
+                    );
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         if dest.is_file() {
             let backup_rel = Path::new(RESTORE_BACKUP_DIR).join(stamp).join(&item.rel);
             let backup = safe_dest(root, &backup_rel)?;
@@ -594,7 +745,14 @@ fn apply_restore(
             dest.file_name().unwrap_or_default().to_string_lossy(),
             uuid::Uuid::new_v4().simple()
         ));
-        fs::copy(&item.src, &tmp).map_err(|e| format!("restore {}: {}", item.rel.display(), e))?;
+        match config_bytes.or(merged) {
+            Some(bytes) => crate::app_paths::write_private(&tmp, bytes)
+                .map_err(|e| format!("restore {}: {}", item.rel.display(), e))?,
+            None => {
+                fs::copy(&item.src, &tmp)
+                    .map_err(|e| format!("restore {}: {}", item.rel.display(), e))?;
+            }
+        }
         fs::rename(&tmp, &dest).map_err(|e| {
             let _ = fs::remove_file(&tmp);
             format!("restore {}: {}", item.rel.display(), e)
@@ -602,9 +760,7 @@ fn apply_restore(
         *counts.entry(item.root).or_insert(0usize) += 1;
     }
     let mut out = Vec::new();
-    if let Some(n) = counts.get(&RestoreRoot::OpenClaw) {
-        out.push(format!("OpenClaw: {n} files restored"));
-    }
+    out.extend(config_skipped.into_iter().map(|s| format!("Skipped: {s}")));
     if let Some(n) = counts.get(&RestoreRoot::Data) {
         out.push(format!("Amara OS data: {n} files restored"));
     }
@@ -616,8 +772,31 @@ fn apply_restore(
     Ok(out)
 }
 
+/// The `config.json` bytes a restore writes: the backup's settings (already merged with the live
+/// secrets when `restored` is `Some`) with `allow_claude` taken only from a valid live file and only
+/// when it is exactly `true` or `false`; otherwise the field is removed. `None` when the backup's
+/// config isn't a JSON object.
+fn sanitised_config(restored: Option<Vec<u8>>, src: &Path, live: &Path) -> Option<Vec<u8>> {
+    use serde_json::Value;
+    let bytes = match restored {
+        Some(b) => b,
+        None => fs::read(src).ok()?,
+    };
+    let mut r: Value = serde_json::from_slice(&bytes).ok()?;
+    let live_consent = fs::read(live)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v.get("allow_claude").and_then(Value::as_bool));
+    let map = r.as_object_mut()?;
+    match live_consent {
+        Some(v) => map.insert("allow_claude".into(), Value::Bool(v)),
+        None => map.remove("allow_claude"),
+    };
+    serde_json::to_vec_pretty(&r).ok()
+}
+
 /// New directory readable only by the user (0700 on Unix); fails if it exists.
-fn create_private_dir(path: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
     let mut b = fs::DirBuilder::new();
     #[cfg(unix)]
     {
@@ -628,7 +807,7 @@ fn create_private_dir(path: &Path) -> std::io::Result<()> {
 }
 
 /// New empty file readable only by the user (0600 on Unix); fails if it exists.
-fn create_private_file(path: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_file(path: &Path) -> std::io::Result<()> {
     let mut o = fs::OpenOptions::new();
     o.write(true).create_new(true);
     #[cfg(unix)]
@@ -761,10 +940,10 @@ pub(crate) fn unpack_archive_checked(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_app_paths() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "data_dir": nexus_data_dir().to_string_lossy(),
-        "openclaw_dir": openclaw_dir().to_string_lossy(),
         "home_dir": dirs::home_dir().map(|p| p.to_string_lossy().to_string()),
     }))
 }
@@ -775,7 +954,11 @@ const MAX_PACK_FILE_BYTES: u64 = 50_000_000;
 
 /// macOS metadata that is not user data (never packed or restored).
 fn is_os_junk(name: &str) -> bool {
-    name == ".DS_Store" || name.starts_with("._")
+    // The n8n key file (and its temp files) never goes into a backup or a restore.
+    name == ".DS_Store"
+        || name.starts_with("._")
+        || name == super::key_file::KEY_FILE_NAME
+        || (name.starts_with(".amara-n8n.key.") && name.ends_with(".tmp"))
 }
 
 /// Recursively copy `src` into `dst`. Dot-files are copied. Symlinks are never
@@ -787,6 +970,49 @@ fn copy_dir_recursive(
     max_file_bytes: Option<u64>,
     skipped: &mut Vec<String>,
 ) -> Result<(), String> {
+    copy_dir_filtered(
+        src,
+        dst,
+        max_file_bytes,
+        skipped,
+        0,
+        &|_, _| false,
+        JsonMode::Copy,
+    )
+}
+
+/// What `copy_dir_filtered` does with `.json` files.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JsonMode {
+    /// Copy as is.
+    Copy,
+    /// Parse and write without secret fields (a backup that excludes secrets).
+    Redact,
+    /// A Muse recording folder: byte-for-byte copies only; a JSON with a secret-looking field is
+    /// left out and listed.
+    Muse,
+}
+
+/// The data-root folders that hold Muse recordings.
+fn is_muse_dir(name: &str) -> bool {
+    matches!(name, "replays" | "sessions" | "muse")
+}
+
+/// `copy_dir_recursive` with an exclusion hook: `exclude(name, depth)` true leaves the
+/// entry (file or folder) out and records its name (never its contents) in `skipped`.
+/// `redact_json`: every `*.json` file is parsed and written without its secret fields
+/// (`backups::redact_json_bytes`); one that can't be parsed is left out and noted. Used only
+/// when a backup excludes secrets.
+#[allow(clippy::too_many_arguments)]
+fn copy_dir_filtered(
+    src: &Path,
+    dst: &Path,
+    max_file_bytes: Option<u64>,
+    skipped: &mut Vec<String>,
+    depth: usize,
+    exclude: &dyn Fn(&str, usize) -> bool,
+    mode: JsonMode,
+) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("mkdir {}: {}", dst.display(), e))?;
 
     for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
@@ -797,6 +1023,10 @@ fn copy_dir_recursive(
         if is_os_junk(&name) {
             continue;
         }
+        if exclude(&name, depth) {
+            skipped.push(format!("{name} (left out on purpose)"));
+            continue;
+        }
 
         let file_type = entry.file_type().map_err(|e| e.to_string())?;
         if file_type.is_symlink() {
@@ -804,7 +1034,22 @@ fn copy_dir_recursive(
             continue;
         }
         if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path, max_file_bytes, skipped)?;
+            // Muse recordings (`replays`, `sessions`, `muse` at the data root) are sacred: never
+            // redacted or rewritten (see `JsonMode::Muse`).
+            let sub_mode = if mode == JsonMode::Redact && depth == 0 && is_muse_dir(&name) {
+                JsonMode::Muse
+            } else {
+                mode
+            };
+            copy_dir_filtered(
+                &src_path,
+                &dst_path,
+                max_file_bytes,
+                skipped,
+                depth + 1,
+                exclude,
+                sub_mode,
+            )?;
             continue;
         }
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
@@ -815,6 +1060,43 @@ fn copy_dir_recursive(
                 size as f64 / 1_000_000.0,
                 max_file_bytes.unwrap_or(0) / 1_000_000
             ));
+            continue;
+        }
+        if mode == JsonMode::Muse && name.to_ascii_lowercase().ends_with(".json") {
+            // `.bands.json` sidecars and every non-JSON recording file fall through to the raw copy
+            // below. A session/muse JSON is copied byte-for-byte only when it holds no secret-looking
+            // field anywhere; one that does is left out (never redacted, never copied raw). JSON that
+            // doesn't parse is EEG data, not config: copied raw and noted.
+            if !name.to_ascii_lowercase().ends_with(".bands.json") {
+                let bytes = fs::read(&src_path).map_err(|e| format!("read {name}: {e}"))?;
+                match super::backups::redact_json_bytes(&bytes) {
+                    Some((_, removed)) if !removed.is_empty() => {
+                        skipped.push(format!(
+                            "{} (Muse JSON with a secret-looking field, left out of the backup; the original is untouched)",
+                            src_path.display()
+                        ));
+                        continue;
+                    }
+                    Some(_) => {}
+                    None => skipped.push(format!(
+                        "{} (Muse JSON that is not valid JSON, copied as is)",
+                        src_path.display()
+                    )),
+                }
+            }
+        }
+        if mode == JsonMode::Redact && name.to_ascii_lowercase().ends_with(".json") {
+            let bytes = fs::read(&src_path).map_err(|e| format!("read {name}: {e}"))?;
+            match super::backups::redact_json_bytes(&bytes) {
+                Some((clean, removed)) => {
+                    for k in removed {
+                        skipped.push(format!("{name} field {k} (secret, removed)"));
+                    }
+                    crate::app_paths::write_private(&dst_path, clean)
+                        .map_err(|e| format!("write {name}: {e}"))?;
+                }
+                None => skipped.push(format!("{name} (not valid JSON, left out)")),
+            }
             continue;
         }
         fs::copy(&src_path, &dst_path)
@@ -1131,6 +1413,141 @@ mod restore_tests {
         parts.iter().map(|p| p.to_string()).collect()
     }
 
+    fn restore_config(src: Option<&str>, live: Option<&str>) -> (Option<String>, Vec<String>) {
+        let pack = tmp("cfg-pack");
+        let data = tmp("cfg-data");
+        if let Some(c) = src {
+            put(&pack, "nexus-config/config.json", c);
+        }
+        put(&pack, "goals.json", "[]");
+        if let Some(l) = live {
+            put(&data, "config.json", l);
+        }
+        let plan = plan_restore(&pack).unwrap();
+        let out = apply_restore(&plan, &RestoreRoots { data: data.clone() }, "st").unwrap();
+        let got = fs::read_to_string(data.join("config.json")).ok();
+        let _ = (fs::remove_dir_all(&pack), fs::remove_dir_all(&data));
+        (got, out)
+    }
+
+    #[test]
+    fn config_json_is_always_sanitised_never_raw_copied() {
+        let on = r#"{"allow_claude":true,"theme":"light"}"#;
+        let allow = |g: &Option<String>| {
+            serde_json::from_str::<serde_json::Value>(g.as_deref().unwrap()).unwrap()
+                ["allow_claude"]
+                .clone()
+        };
+        // no live file: the consent is dropped, the rest restored
+        let (g, _) = restore_config(Some(on), None);
+        assert!(allow(&g).is_null());
+        assert!(g.unwrap().contains("light"));
+        // corrupt live file
+        let (g, _) = restore_config(Some(on), Some("{not json"));
+        assert!(allow(&g).is_null());
+        // live file is valid but its value isn't exactly true/false
+        let (g, _) = restore_config(Some(on), Some(r#"{"allow_claude":"true"}"#));
+        assert!(allow(&g).is_null());
+        let (g, _) = restore_config(Some(on), Some(r#"{"allow_claude":1}"#));
+        assert!(allow(&g).is_null());
+        // live file is an array
+        let (g, _) = restore_config(Some(on), Some("[true]"));
+        assert!(allow(&g).is_null());
+        // valid live file: its exact value wins, both ways
+        let (g, _) = restore_config(Some(on), Some(r#"{"allow_claude":false}"#));
+        assert_eq!(allow(&g), serde_json::json!(false));
+        let (g, _) = restore_config(
+            Some(r#"{"allow_claude":false}"#),
+            Some(r#"{"allow_claude":true}"#),
+        );
+        assert_eq!(allow(&g), serde_json::json!(true));
+        // non-object backup config: skipped and listed, the live file untouched
+        for bad in ["[1]", "\"x\"", "42", "{broken", "null"] {
+            let (g, out) = restore_config(Some(bad), Some(r#"{"allow_claude":true}"#));
+            assert_eq!(g.as_deref(), Some(r#"{"allow_claude":true}"#), "{bad}");
+            assert!(
+                out.iter().any(|l| l.starts_with("Skipped: config.json")),
+                "{bad}: {out:?}"
+            );
+        }
+        // ...and with no live file nothing is created from a bad config
+        let (g, out) = restore_config(Some("[1]"), None);
+        assert!(g.is_none() && out.iter().any(|l| l.contains("config.json")));
+    }
+
+    #[test]
+    fn restore_never_writes_the_relay_files_or_turns_on_allow_claude() {
+        let pack = tmp("never-pack");
+        let data = tmp("never-data");
+        for n in ["notify_relay.json", "notify_relay_sent.json"] {
+            put(
+                &pack,
+                &format!("nexus-config/{n}"),
+                "{\"enabled\":true,\"CRAFTED\":1}",
+            );
+            put(&data, n, &format!("live-{n}"));
+        }
+        put(
+            &pack,
+            "nexus-config/NOTIFY_RELAY.json",
+            "{\"enabled\":true}",
+        );
+        put(&pack, "nexus-config/other.json", "{\"v\":2}");
+        put(
+            &pack,
+            "nexus-config/config.json",
+            "{\"allow_claude\":true,\"theme\":\"light\"}",
+        );
+        put(&pack, "goals.json", "[2]");
+        put(&data, "other.json", "{\"v\":1}");
+        put(&data, "config.json", "{\"theme\":\"dark\"}");
+        put(&data, "goals.json", "[1]");
+        let plan = plan_restore(&pack).unwrap();
+        let skipped = plan.skipped.join("|");
+        assert!(skipped.contains("notify_relay.json (live approval state"));
+        assert!(skipped.contains("notify_relay_sent.json (live approval state"));
+        assert!(plan.items.iter().all(|i| !i
+            .rel
+            .to_string_lossy()
+            .to_lowercase()
+            .contains("notify_relay")));
+        let roots = RestoreRoots { data: data.clone() };
+        apply_restore(&plan, &roots, "stamp").unwrap();
+        for n in ["notify_relay.json", "notify_relay_sent.json"] {
+            assert_eq!(
+                fs::read_to_string(data.join(n)).unwrap(),
+                format!("live-{n}")
+            );
+        }
+        // everything else came back
+        assert_eq!(
+            fs::read_to_string(data.join("goals.json"))
+                .unwrap()
+                .split_whitespace()
+                .collect::<String>(),
+            "[2]"
+        );
+        assert!(fs::read_to_string(data.join("other.json"))
+            .unwrap()
+            .contains("2"));
+        let cfg: serde_json::Value =
+            serde_json::from_slice(&fs::read(data.join("config.json")).unwrap()).unwrap();
+        assert_eq!(cfg["theme"], "light");
+        assert!(
+            cfg.get("allow_claude").is_none(),
+            "a backup never turns Allow Claude on"
+        );
+        // a live "on" stays on
+        put(&data, "config.json", "{\"allow_claude\":true}");
+        let plan = plan_restore(&pack).unwrap();
+        apply_restore(&plan, &roots, "stamp2").unwrap();
+        let cfg: serde_json::Value =
+            serde_json::from_slice(&fs::read(data.join("config.json")).unwrap()).unwrap();
+        assert_eq!(cfg["allow_claude"], true);
+        assert_eq!(cfg["theme"], "light");
+        let _ = (fs::remove_dir_all(&pack), fs::remove_dir_all(&data));
+    }
+
     #[test]
     fn expand_home_only_touches_a_leading_tilde_slash() {
         let home = dirs::home_dir().unwrap();
@@ -1152,15 +1569,11 @@ mod restore_tests {
     fn snapshot_before_restore_copies_current_data_but_not_old_backups() {
         let base = tmp("snapshot");
         let roots = RestoreRoots {
-            openclaw: base.join("openclaw"),
             data: base.join("data"),
         };
         put(&roots.data, "goals.json", "[1]");
         put(&roots.data, "sessions/a.ndjson", "x");
         put(&roots.data, "restore-backups/old/goals.json", "old");
-        put(&roots.openclaw, "openclaw.json", "{}");
-        put(&roots.openclaw, "skills/s.md", "s");
-        put(&roots.openclaw, "secrets/not-in-backups.txt", "no");
 
         let (dir, skipped) = snapshot_before_restore(&roots, "20261029_100000").unwrap();
         assert_eq!(dir, roots.data.join("restore-backups/20261029_100000-full"));
@@ -1171,9 +1584,10 @@ mod restore_tests {
         );
         assert!(dir.join("data/sessions/a.ndjson").is_file());
         assert!(!dir.join("data/restore-backups").exists());
-        assert!(dir.join("openclaw/openclaw.json").is_file());
-        assert!(dir.join("openclaw/skills/s.md").is_file());
-        assert!(!dir.join("openclaw/secrets").exists());
+        assert!(
+            !dir.join("openclaw").exists(),
+            "no OpenClaw files in the safety copy"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1189,7 +1603,6 @@ mod restore_tests {
     fn snapshot_refuses_a_symlinked_backup_folder() {
         let base = tmp("snapshot-link");
         let roots = RestoreRoots {
-            openclaw: base.join("openclaw"),
             data: base.join("data"),
         };
         fs::create_dir_all(&roots.data).unwrap();
@@ -1208,26 +1621,6 @@ mod restore_tests {
     fn allow_list_matches_what_pack_it_up_writes() {
         let ok = |p: &[&str]| restore_target(&s(p));
         assert_eq!(
-            ok(&["openclaw", "openclaw.json"]),
-            Some((RestoreRoot::OpenClaw, "openclaw.json".into()))
-        );
-        assert_eq!(
-            ok(&["openclaw", "skills", "brief.md"]),
-            Some((RestoreRoot::OpenClaw, "skills/brief.md".into()))
-        );
-        assert_eq!(
-            ok(&["openclaw", "workspace", "TASKS.md"]),
-            Some((RestoreRoot::OpenClaw, "workspace/TASKS.md".into()))
-        );
-        assert_eq!(
-            ok(&["openclaw", "cron", "jobs.json"]),
-            Some((RestoreRoot::OpenClaw, "cron/jobs.json".into()))
-        );
-        assert_eq!(
-            ok(&["openclaw", "memory", "2026-10-28.md"]).map(|t| t.0),
-            Some(RestoreRoot::OpenClaw)
-        );
-        assert_eq!(
             ok(&["sessions", "eeg.ndjson"]),
             Some((RestoreRoot::Data, "sessions/eeg.ndjson".into()))
         );
@@ -1239,18 +1632,39 @@ mod restore_tests {
             ok(&["nexus-config", "settings.json"]),
             Some((RestoreRoot::Data, "settings.json".into()))
         );
+        // Old backups may still hold an `openclaw/` folder: nothing in it is ever restored.
         for bad in [
-            &["openclaw", "credentials", "telegram.json"][..],
+            &["openclaw", "openclaw.json"][..],
+            &["openclaw", "skills", "brief.md"],
+            &["openclaw", "workspace", "TASKS.md"],
+            &["openclaw", "cron", "jobs.json"],
+            &["openclaw", "memory", "2026-10-28.md"],
+            &["openclaw", "credentials", "telegram.json"],
             &["openclaw", "skills", "evil.sh"],
-            &["openclaw", "skills", "nested", "x.md"],
-            &["openclaw", "LaunchAgents", "x.plist"],
-            &["openclaw", "workspace", "run.sh"],
-            &["openclaw", "sessions", "whatsapp.json"],
             &["nexus-config", "restore-backups", "x.json"],
             &["random.txt"],
         ] {
             assert_eq!(ok(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn approval_text_shows_the_full_canonical_path() {
+        let pack = tmp("label");
+        let canonical = pack
+            .canonicalize()
+            .unwrap()
+            .join("nexus-backup-20261029_101500.tar.gz");
+        let label = restore_archive_label(&canonical);
+        let plan = RestorePlan {
+            items: vec![],
+            skipped: vec![],
+        };
+        let roots = RestoreRoots {
+            data: pack.join("data"),
+        };
+        let op = restore_operation(&label, &plan, &[], &roots, "20261029_101600");
+        assert!(op.contains(&canonical.display().to_string()), "{op}");
     }
 
     #[test]
@@ -1271,21 +1685,15 @@ mod restore_tests {
             .collect();
         assert_eq!(goals.len(), 1, "one write per destination");
         assert_eq!(fs::read_to_string(&goals[0].src).unwrap(), "top");
-        let plan = RestorePlan {
-            items: plan
-                .items
-                .into_iter()
-                .filter(|i| i.root == RestoreRoot::OpenClaw)
-                .collect(),
-            skipped: plan.skipped,
-        };
-        let rels: Vec<_> = plan
-            .items
+        assert!(
+            plan.items.iter().all(|i| !i.rel.starts_with("skills")),
+            "nothing under openclaw/ is planned"
+        );
+        assert_eq!(plan.skipped.len(), 4, "{:?}", plan.skipped);
+        assert!(plan
+            .skipped
             .iter()
-            .map(|i| i.rel.to_string_lossy().to_string())
-            .collect();
-        assert_eq!(rels, ["openclaw.json", "skills/a.md"]);
-        assert_eq!(plan.skipped.len(), 2, "{:?}", plan.skipped);
+            .any(|s| s.starts_with("openclaw/openclaw.json")));
         let _ = fs::remove_dir_all(&pack);
     }
 
@@ -1294,55 +1702,47 @@ mod restore_tests {
         let base = tmp("apply");
         let pack = base.join("pack");
         put(&pack, "openclaw/openclaw.json", "NEW");
-        put(&pack, "openclaw/skills/a.md", "# new skill");
         put(&pack, "goals.json", "[1]");
         let roots = RestoreRoots {
-            openclaw: base.join("home/.openclaw"),
             data: base.join("data"),
         };
-        put(&roots.openclaw, "openclaw.json", "OLD");
+        put(&roots.data, "goals.json", "OLD");
         let plan = plan_restore(&pack).unwrap();
         let replaced = replaced_files(&plan, &roots);
         assert_eq!(
             replaced,
-            vec![(RestoreRoot::OpenClaw, PathBuf::from("openclaw.json"))]
+            vec![(RestoreRoot::Data, PathBuf::from("goals.json"))]
         );
         let op = restore_operation("b.tar.gz", &plan, &replaced, &roots, "20261028_140000");
         assert!(
-            op.contains("2 files into")
+            op.contains("1 files into")
                 && op.contains("(1 replaced)")
-                && op.contains("~/.openclaw/openclaw.json"),
+                && op.contains("data/goals.json"),
             "{op}"
         );
+        assert!(!op.to_lowercase().contains("openclaw"), "{op}");
 
         let out = apply_restore(&plan, &roots, "20261028_140000").unwrap();
         assert_eq!(
-            fs::read_to_string(roots.openclaw.join("openclaw.json")).unwrap(),
-            "NEW"
+            fs::read_to_string(roots.data.join("goals.json")).unwrap(),
+            "[1]"
         );
         assert_eq!(
             fs::read_to_string(
                 roots
-                    .openclaw
-                    .join("restore-backups/20261028_140000/openclaw.json")
+                    .data
+                    .join("restore-backups/20261028_140000/goals.json")
             )
             .unwrap(),
             "OLD"
-        );
-        assert_eq!(
-            fs::read_to_string(roots.openclaw.join("skills/a.md")).unwrap(),
-            "# new skill"
-        );
-        assert_eq!(
-            fs::read_to_string(roots.data.join("goals.json")).unwrap(),
-            "[1]"
         );
         assert!(
             out.iter().any(|l| l.contains("1 replaced files saved")),
             "{out:?}"
         );
+        assert!(!roots.data.join("openclaw").exists());
         // No temp files left next to restored files.
-        let leftovers: Vec<_> = fs::read_dir(&roots.openclaw)
+        let leftovers: Vec<_> = fs::read_dir(&roots.data)
             .unwrap()
             .flatten()
             .filter(|e| e.file_name().to_string_lossy().contains(".restore-"))
@@ -1357,12 +1757,12 @@ mod restore_tests {
         let base = tmp("link");
         let outside = base.join("outside");
         fs::create_dir_all(&outside).unwrap();
-        let root = base.join(".openclaw");
+        let root = base.join("data");
         fs::create_dir_all(&root).unwrap();
         std::os::unix::fs::symlink(&outside, root.join("skills")).unwrap();
         assert!(safe_dest(&root, Path::new("skills/a.md")).is_err());
-        std::os::unix::fs::symlink(outside.join("x.json"), root.join("openclaw.json")).unwrap();
-        assert!(safe_dest(&root, Path::new("openclaw.json")).is_err());
+        std::os::unix::fs::symlink(outside.join("x.json"), root.join("goals.json")).unwrap();
+        assert!(safe_dest(&root, Path::new("goals.json")).is_err());
         assert!(safe_dest(&root, Path::new("../x")).is_err());
         assert!(safe_dest(&root, Path::new("/etc/hosts")).is_err());
         assert!(safe_dest(&root, Path::new("workspace/ok.md"))
@@ -1441,10 +1841,10 @@ mod pack_tests {
     }
 
     #[tokio::test]
-    async fn without_openclaw_it_skips_and_succeeds() {
+    async fn packing_never_expects_or_reads_openclaw() {
         let (home, data) = fake_home("no-openclaw");
         let info = pack_at(&home, &data).await.unwrap();
-        assert_eq!(info.skipped, vec![OPENCLAW_NOT_INSTALLED.to_string()]);
+        assert!(info.skipped.is_empty(), "{:?}", info.skipped);
         assert!(!info.includes.iter().any(|i| i.contains("OpenClaw")));
         let entries = archive_entries(&info.path);
         assert!(entries.iter().any(|e| e.ends_with("/goals.json")));
@@ -1453,32 +1853,26 @@ mod pack_tests {
     }
 
     #[tokio::test]
-    async fn with_openclaw_it_packs_the_allow_listed_files() {
+    async fn an_existing_dot_openclaw_is_not_backed_up() {
         let (home, data) = fake_home("with-openclaw");
         let oc = home.join(".openclaw");
         fs::create_dir_all(oc.join("skills")).unwrap();
         fs::write(oc.join("openclaw.json"), "{}").unwrap();
         fs::write(oc.join("skills/s.md"), "s").unwrap();
-        fs::write(oc.join("skills/.DS_Store"), "junk").unwrap();
-        fs::write(oc.join("not-backed-up.txt"), "x").unwrap();
         let info = pack_at(&home, &data).await.unwrap();
-        assert!(!info.skipped.contains(&OPENCLAW_NOT_INSTALLED.to_string()));
-        assert!(info
-            .includes
-            .contains(&"OpenClaw workspace & memory".to_string()));
+        assert!(info.skipped.is_empty(), "{:?}", info.skipped);
+        assert!(!info.includes.iter().any(|i| i.contains("OpenClaw")));
         let entries = archive_entries(&info.path);
-        assert!(entries
-            .iter()
-            .any(|e| e.ends_with("/openclaw/openclaw.json")));
-        assert!(entries.iter().any(|e| e.ends_with("/openclaw/skills/s.md")));
-        assert!(!entries.iter().any(|e| e.ends_with("not-backed-up.txt")));
-        // (macOS bsdtar may add its own ._* xattr entries; unpack skips those.)
-        assert!(!entries.iter().any(|e| e.ends_with(".DS_Store")));
+        assert!(
+            !entries.iter().any(|e| e.contains("openclaw")),
+            "{entries:?}"
+        );
+        assert!(oc.join("openclaw.json").is_file(), "left untouched");
         let _ = fs::remove_dir_all(&home);
     }
 
     #[tokio::test]
-    async fn a_backup_without_openclaw_restores() {
+    async fn a_backup_round_trips_without_openclaw() {
         let (home, data) = fake_home("roundtrip");
         let info = pack_at(&home, &data).await.unwrap();
 
@@ -1492,23 +1886,369 @@ mod pack_tests {
         )
         .unwrap();
         let plan = plan_restore(&find_pack_root(&staging).unwrap()).unwrap();
-        assert!(!plan.items.iter().any(|i| i.root == RestoreRoot::OpenClaw));
 
         let target = home.join("new-machine");
         let roots = RestoreRoots {
-            openclaw: target.join(".openclaw"),
             data: target.join("data"),
         };
         fs::create_dir_all(&roots.data).unwrap();
         snapshot_before_restore(&roots, "20261030_120000").unwrap();
         let out = apply_restore(&plan, &roots, "20261030_120000").unwrap();
         assert!(out.iter().any(|l| l.starts_with("Amara OS data:")));
-        assert!(!out.iter().any(|l| l.starts_with("OpenClaw")));
+        assert!(!out.iter().any(|l| l.to_lowercase().contains("openclaw")));
         assert_eq!(
             fs::read_to_string(roots.data.join("goals.json")).unwrap(),
             "[1]"
         );
-        assert!(!roots.openclaw.exists(), "no ~/.openclaw is created");
+        assert!(
+            !target.join(".openclaw").exists(),
+            "no ~/.openclaw is created"
+        );
         let _ = fs::remove_dir_all(&home);
+    }
+}
+
+/// Phase 16: migration probe on SYNTHETIC data. Builds a fake app-data dir in a temp folder, backs it
+/// up with the app's own backup path (`backups::run_backup`), restores that archive into a SECOND temp
+/// dir with the app's own restore steps (`unpack_archive_checked`, `plan_restore`, `apply_restore`),
+/// and checks parity. Never reads the real app data, the Keychain, a real backup or the network.
+/// `scripts/migration-probe.sh` runs it with `--nocapture` and prints the `PROBE` lines.
+#[cfg(test)]
+mod migration_probe_tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeMap;
+    use std::sync::atomic::AtomicBool;
+
+    fn sha(b: &[u8]) -> String {
+        hex::encode(Sha256::digest(b))
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "nexus-migration-probe-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    /// rel path (`/`-joined) -> bytes, skipping the restore-backups folder.
+    fn tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
+        let mut out = BTreeMap::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in fs::read_dir(&d).unwrap().flatten() {
+                let t = e.file_type().unwrap();
+                if t.is_dir() {
+                    stack.push(e.path());
+                } else if t.is_file() {
+                    let rel = e
+                        .path()
+                        .strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    if !rel.starts_with(RESTORE_BACKUP_DIR) {
+                        out.insert(rel, fs::read(e.path()).unwrap());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn make_db(path: &Path) -> usize {
+        let c = rusqlite::Connection::open(path).unwrap();
+        c.execute_batch(
+            "PRAGMA journal_mode=DELETE;
+             CREATE TABLE events (id INTEGER PRIMARY KEY, kind TEXT, at TEXT);
+             CREATE INDEX events_kind ON events(kind);",
+        )
+        .unwrap();
+        for i in 0..250 {
+            c.execute(
+                "INSERT INTO events (kind, at) VALUES (?1, ?2)",
+                rusqlite::params![
+                    format!("fixture-{}", i % 7),
+                    format!("2026-01-01T00:{:02}:00", i % 60)
+                ],
+            )
+            .unwrap();
+        }
+        250
+    }
+
+    fn db_probe(path: &Path) -> (String, i64) {
+        let c =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .unwrap();
+        let check: String = c
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .unwrap();
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
+            .unwrap();
+        (check, n)
+    }
+
+    /// Fixture bytes that look like data but are fake: counters and a repeating pattern.
+    fn blob(seed: u8, len: usize) -> Vec<u8> {
+        (0..len)
+            .map(|i| seed.wrapping_add((i % 251) as u8))
+            .collect()
+    }
+
+    #[test]
+    fn migration_probe_backup_restore_parity_on_synthetic_data() {
+        let home = scratch("home");
+        let data = home.join("app-data-original");
+        let restored = home.join("app-data-restored");
+        fs::create_dir_all(&data).unwrap();
+        for d in ["replays", "sessions", "muse", "takes", "workspace/notes"] {
+            fs::create_dir_all(data.join(d)).unwrap();
+        }
+        // ---- fixture data (invented; nothing from a real install) ----
+        fs::write(
+            data.join("config.json"),
+            r#"{"theme":"dark","llm_token_threshold":4000,"telegram_bot_token":"FIXTURE-NOT-A-SECRET","allow_claude":true}"#,
+        )
+        .unwrap();
+        fs::write(
+            data.join("goals.json"),
+            r#"[{"id":"g1","title":"fixture goal"}]"#,
+        )
+        .unwrap();
+        fs::write(
+            data.join("takes/take-1.json"),
+            r#"{"text":"fixture take","day":"2026-01-01"}"#,
+        )
+        .unwrap();
+        fs::write(data.join("workspace/notes/n1.md"), "# fixture note\n").unwrap();
+        fs::write(data.join("replays/eeg_fixture_1.ndjson"), blob(1, 40_000)).unwrap();
+        fs::write(
+            data.join("replays/eeg_fixture_1.ndjson.bands.json"),
+            r#"{"a":[0.1,0.25]}"#,
+        )
+        .unwrap();
+        fs::write(
+            data.join("sessions/session_fixture.json"),
+            r#"{"id":"s1","hr":[60,61,62]}"#,
+        )
+        .unwrap();
+        fs::write(data.join("muse/fixture.bin"), blob(9, 5_000)).unwrap();
+        let db_rows = make_db(&data.join("events.db"));
+        // Secrets that must never travel (all fake).
+        fs::write(data.join("crew_service_token"), "FIXTURE").unwrap();
+        fs::write(data.join("amara-n8n.key"), "FIXTURE").unwrap();
+        fs::write(data.join(".env"), "HA_TOKEN=FIXTURE\n").unwrap();
+        // Live-only state a restore must never bring back.
+        fs::write(data.join("notify_relay.json"), r#"{"enabled":true}"#).unwrap();
+
+        let src_before = tree(&data);
+
+        // ---- 1. backup with the app's own code path ----
+        let settings = super::super::backups::BackupSettings {
+            dir: "~/Amara Backups".into(),
+            ..Default::default()
+        };
+        let busy = AtomicBool::new(false);
+        let quiet = |_: &str, _: u8| {};
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let run = rt
+            .block_on(super::super::backups::run_backup(
+                &home,
+                &data,
+                &settings,
+                &|_| Ok(u64::MAX / 2),
+                &quiet,
+                &busy,
+            ))
+            .unwrap();
+        let archive = home.join("Amara Backups").join(&run.entry.id);
+        use std::os::unix::fs::PermissionsExt;
+        let amode = fs::metadata(&archive).unwrap().permissions().mode() & 0o777;
+        let dmode = fs::metadata(home.join("Amara Backups"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(amode, 0o600, "archive mode");
+        assert_eq!(dmode, 0o700, "archive dir mode");
+        println!("PROBE archive_modes archive={amode:o} dir={dmode:o} ok");
+
+        // ---- 2. restore preview: names only ----
+        let nb = AtomicBool::new(false);
+        let nb2 = AtomicBool::new(false);
+        let preview = super::super::backup_schedule::restore_preview_in(
+            &home,
+            &data,
+            "~/Amara Backups",
+            &run.entry.id,
+            &nb,
+            &nb2,
+        )
+        .unwrap();
+        assert!(preview.verify.ok, "{:?}", preview.verify);
+        assert!(!preview.reenter.is_empty());
+        let names: Vec<&str> = preview.reenter.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"telegram_bot_token") && names.contains(&"n8n_encryption_key"));
+        for r in &preview.reenter {
+            // names and labels only: no value-looking text
+            assert!(!r.name.contains("FIXTURE") && !r.label.contains("FIXTURE"));
+        }
+        println!(
+            "PROBE keys_to_reenter count={} names={} ok",
+            names.len(),
+            names.join(",")
+        );
+
+        // ---- 3. restore into a SECOND dir with the app's own steps ----
+        let staging = scratch("staging");
+        unpack_archive_checked(&archive, &staging, 1 << 30, 100_000).unwrap();
+        let pack = find_pack_root(&staging).unwrap();
+        // manifest hashes vs the unpacked pack
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(pack.join("manifest.json")).unwrap()).unwrap();
+        let listed = manifest["sha256"].as_object().unwrap();
+        let packed = tree(&pack);
+        let mut manifest_bad = 0usize;
+        for (k, v) in listed {
+            match packed.get(k) {
+                Some(b) if Some(sha(b).as_str()) == v.as_str() => {}
+                _ => manifest_bad += 1,
+            }
+        }
+        let packed_files = packed.keys().filter(|k| *k != "manifest.json").count();
+        assert_eq!(manifest_bad, 0);
+        assert_eq!(
+            listed.len(),
+            packed_files,
+            "manifest lists every packed file"
+        );
+        println!(
+            "PROBE manifest_hashes listed={} matching={} ok",
+            listed.len(),
+            listed.len() - manifest_bad
+        );
+
+        let plan = plan_restore(&pack).unwrap();
+        let roots = RestoreRoots {
+            data: restored.clone(),
+        };
+        let msgs = apply_restore(&plan, &roots, "probe").unwrap();
+        assert!(
+            msgs.iter().any(|m| m.contains("files restored")),
+            "{msgs:?}"
+        );
+
+        // ---- 4. parity probes ----
+        let dst = tree(&restored);
+        // 4a. what must be absent in the restore
+        let never_travel = [
+            "crew_service_token",
+            "amara-n8n.key",
+            ".env",
+            "notify_relay.json",
+        ];
+        for n in never_travel {
+            assert!(!dst.contains_key(n), "{n} must not be restored");
+        }
+        // 4b. everything else: present, byte-identical, except config.json (sanitised)
+        let (mut same, mut checked, mut json_semantic) = (0usize, 0usize, 0usize);
+        let mut counts_src: BTreeMap<String, usize> = BTreeMap::new();
+        let mut counts_dst: BTreeMap<String, usize> = BTreeMap::new();
+        for (k, v) in &src_before {
+            if never_travel.contains(&k.as_str()) || k == "config.json" {
+                continue;
+            }
+            checked += 1;
+            let top = k.split('/').next().unwrap().to_string();
+            *counts_src.entry(top.clone()).or_default() += 1;
+            let got = dst
+                .get(k)
+                .unwrap_or_else(|| panic!("missing after restore: {k}"));
+            // Muse folders and every non-JSON file: byte-identical. Other JSON goes through the
+            // secret-field redaction pass, which may re-serialise it: compare the parsed value.
+            let muse = ["replays/", "sessions/", "muse/"]
+                .iter()
+                .any(|p| k.starts_with(p));
+            if k.ends_with(".json") && !muse {
+                let (a, b): (serde_json::Value, serde_json::Value) = (
+                    serde_json::from_slice(got).unwrap(),
+                    serde_json::from_slice(v).unwrap(),
+                );
+                assert_eq!(a, b, "json differs: {k}");
+                json_semantic += 1;
+            } else {
+                assert_eq!(sha(got), sha(v), "checksum differs: {k}");
+            }
+            *counts_dst.entry(top).or_default() += 1;
+            same += 1;
+        }
+        let extra: Vec<_> = dst
+            .keys()
+            .filter(|k| *k != "config.json" && !src_before.contains_key(*k))
+            .collect();
+        assert!(extra.is_empty(), "unexpected extra files: {extra:?}");
+        assert_eq!(counts_src, counts_dst);
+        let groups = counts_src
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        println!("PROBE file_parity files={checked} matching={same} (json compared as parsed value: {json_semantic}) extra=0 groups={groups} ok");
+        // 4c. config.json: no secret field, allow_claude never turned on, other fields kept
+        let cfg: serde_json::Value =
+            serde_json::from_slice(dst.get("config.json").expect("config.json restored")).unwrap();
+        assert!(cfg.get("telegram_bot_token").is_none());
+        assert!(cfg
+            .get("allow_claude")
+            .is_none_or(|v| v != &serde_json::Value::Bool(true)));
+        assert_eq!(cfg["theme"], "dark");
+        assert_eq!(cfg["llm_token_threshold"], 4000);
+        println!("PROBE config_json secret_fields=0 allow_claude_on=false kept_fields=ok ok");
+        // 4d. database integrity + row count
+        let (check_src, n_src) = db_probe(&data.join("events.db"));
+        let (check_dst, n_dst) = db_probe(&restored.join("events.db"));
+        assert_eq!(check_src, "ok");
+        assert_eq!(check_dst, "ok", "integrity_check on the restored db");
+        assert_eq!(n_src, db_rows as i64);
+        assert_eq!(n_dst, n_src);
+        println!("PROBE sqlite events.db integrity_check={check_dst} rows={n_dst} (source rows={n_src}) ok");
+        // 4e. no path of the source Mac is baked into the restored data
+        let src_str = data.to_string_lossy().into_owned();
+        let home_str = home.to_string_lossy().into_owned();
+        let hits = dst
+            .values()
+            .filter(|b| {
+                let s = String::from_utf8_lossy(b);
+                s.contains(&src_str) || s.contains(&home_str)
+            })
+            .count();
+        assert_eq!(hits, 0, "restored files contain an absolute source path");
+        println!("PROBE no_absolute_paths hits=0 ok");
+        // 4f. file modes under the restored dir
+        let leaky = fs::read_dir(&restored)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_type().unwrap().is_file())
+            .filter(|e| {
+                e.metadata().unwrap().permissions().mode() & 0o077 != 0
+                    && e.file_name() == "config.json"
+            })
+            .count();
+        assert_eq!(leaky, 0, "config.json restored with group/world bits");
+        println!("PROBE config_mode group_world_bits=0 ok");
+        // ---- 5. the source was not modified by the whole exercise ----
+        assert_eq!(tree(&data), src_before, "source dir changed");
+        println!("PROBE source_untouched ok");
+
+        for d in [&home, &staging] {
+            let _ = fs::remove_dir_all(d);
+        }
     }
 }

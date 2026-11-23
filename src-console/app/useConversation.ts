@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { interactWithTerrence, listTerrenceInteractions, prepareAmaraTurn, recordAmaraInteraction } from "../bridge";
-import { deliberate } from "@/terrance/system/deliberation";
-import { resetCompressor } from "@/terrance/system/contextCompressor";
+import { deliberate } from "../legacy-core/terrance/system/deliberation";
+import { resetCompressor } from "../legacy-core/terrance/system/contextCompressor";
 import { type ConversationMessage, CONVERSATION_KEY, HERMES_SESSION_KEY, HERMES_SESSION_PROFILE_KEY, NEXUS_RUNTIME_PROFILE, createConversationId, messagesFromInteractions } from "./conversation";
-import { HOME_SOURCE, dropLegacyHomeReplyIds, preRouteHome } from "../lib/homeAssistant";
+import { HOME_SOURCE, dropLegacyHomeReplyIds, homeEntityNamesForTurn, preRouteHome } from "../lib/homeAssistant";
 import { MODEL_LOADING_FAILED, MODEL_LOADING_RETRIES, modelLoadingDelay, waitUnlessAborted } from "./modelLoading";
+import { runTurn, turnPipelineEnabled, type RunningTurn } from "./turnChannel";
 import { compressTurns, formatDeliberation, guardSections, historyTurns, parseChatCommand, tierFromRouter } from "./amaraChat";
 
 export interface SendOptions {
   /** Composer Deep toggle. */
   deep?: boolean;
+  /** Turn pipeline only: Rust `action` events (navy, window_open) for the caller to apply in the renderer. */
+  /** Decided once by sendHome; absent (other callers) reads the flag. */
+  turnPipeline?: boolean;
+  onAction?: (kind: string, payload: unknown) => void;
 }
 
 /** Background context for a message, through the injection guard. Never blocks a send. */
@@ -48,9 +53,12 @@ export function useConversation(refresh: () => Promise<void>) {
   /** "Model loading" (router 503): retries are in progress; the Thinking bubble says so. */
   const [loadingModel, setLoadingModel] = useState(false);
   const waitAbort = useRef<AbortController | null>(null);
+  /** The running amara_turn (flag nexus.turnPipeline only). */
+  const turnRef = useRef<RunningTurn | null>(null);
   useEffect(() => {
     let activeRequest = true;
-    resetCompressor();
+    // Flag on: Rust summarises after the turn; the renderer compressor is not used.
+    if (!turnPipelineEnabled()) resetCompressor();
     listTerrenceInteractions(conversationId).then((interactions) => {
       if (!activeRequest) return;
       dropLegacyHomeReplyIds();
@@ -103,6 +111,50 @@ export function useConversation(refresh: () => Promise<void>) {
       if (command.kind === "deliberate") {
         if (!command.topic) throw new Error("Add a topic: /deliberate <topic>");
         await runDeliberation(message, command.topic, requestId, live);
+        return;
+      }
+      if (options.turnPipeline ?? turnPipelineEnabled()) {
+        // Rust owns the pre-route (adds, navy, window open, Home Assistant), context, history and compression.
+        const kinds = new Set<string>();
+        const turn = runTurn({ conversationId, text: command.text, deep: command.deep, haNames: homeEntityNamesForTurn() }, "typed", {
+          onStatus: (phase) => { if (live()) setLoadingModel(phase === "loading_model"); },
+          onAction: (kind, payload) => {
+            if (!live()) return;
+            kinds.add(kind);
+            options.onAction?.(kind, payload);
+          },
+          onDone: (done) => {
+            if (!live()) return;
+            setLoadingModel(false);
+            const handledHere = kinds.has("navy") || kinds.has("window_open");
+            const local = kinds.has("add_preview");
+            setMessages((current) => {
+              // Navy and window requests leave no chat lines, as on the old path.
+              if (handledHere) return current.filter((m) => m.id !== `${requestId}-user`);
+              const next = local ? current.map((m) => (m.id === `${requestId}-user` ? { ...m, local: true as const } : m)) : current;
+              if (done.text.trim() === "") return next;
+              return [...next, {
+                id: `${done.interaction_id}-assistant`,
+                role: "assistant" as const,
+                content: done.text,
+                timestamp: new Date().toISOString(),
+                ...(done.tier ? { tier: { tier: done.tier, reason: "turn_pipeline", source: "router_reply" } } : {}),
+                ...(done.path === "home" ? { source: "home" as const } : {}),
+                ...(local ? { local: true as const } : {}),
+              }];
+            });
+          },
+          onError: (code, errorMessage) => {
+            if (!live() || code === "cancelled") return;
+            setLoadingModel(false);
+            setMessages((current) => [...current, { id: `${requestId}-failed`, role: "assistant", content: errorMessage, timestamp: new Date().toISOString(), status: "failed" }]);
+          },
+        });
+        turnRef.current = turn;
+        await turn.finished;
+        if (turnRef.current === turn) turnRef.current = null;
+        // Also after a local Stop: the turn may have run on in Rust, so reload once.
+        await refresh();
         return;
       }
       // Home Assistant pre-route for plain chat only: Deep (toggle or /deep) and /deliberate go straight to Hermes.
@@ -171,22 +223,28 @@ export function useConversation(refresh: () => Promise<void>) {
   const cancelPending = useCallback(() => {
     generation.current++;
     waitAbort.current?.abort();
+    turnRef.current?.cancel();
+    turnRef.current = null;
     setSending(false);
     setLoadingModel(false);
   }, []);
+  /** Local-only lines (e.g. an add preview from chat or voice). Not sent to Hermes. */
+  const postLocal = useCallback((added: ConversationMessage[]) => { setMessages((current) => [...current, ...added]); }, []);
   const startNewConversation = useCallback(() => {
     generation.current++;
     waitAbort.current?.abort();
+    turnRef.current?.cancel();
+    turnRef.current = null;
     setSending(false);
     setLoadingModel(false);
     const created = createConversationId();
     window.localStorage.setItem(CONVERSATION_KEY, created);
     window.localStorage.removeItem(HERMES_SESSION_KEY);
     window.localStorage.removeItem(HERMES_SESSION_PROFILE_KEY);
-    resetCompressor();
+    if (!turnPipelineEnabled()) resetCompressor();
     setHermesSessionId(null);
     setMessages([]);
     setConversationId(created);
   }, []);
-  return { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending };
+  return { conversationId, messages, sending, loadingModel, sendToTerrence, startNewConversation, cancelPending, postLocal };
 }

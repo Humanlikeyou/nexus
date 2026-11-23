@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -15,7 +15,7 @@ static PENDING_BODY_CONTEXT: Mutex<Option<BodyContext>> = Mutex::new(None);
 /// Minimised NOOP context stored on a session. Explicit whitelist: everything else in the
 /// health_snapshot (sources, freshness, appleDaily, battery, recentDays, spo2, skin temp,
 /// steps, ...) is dropped.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct BodyContext {
     #[serde(default)]
     pub today: Option<BodyToday>,
@@ -23,7 +23,7 @@ pub struct BodyContext {
     pub latest_night: Option<BodyNight>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct BodyToday {
     /// The day these values belong to. Absent in older session files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,7 +40,7 @@ pub struct BodyToday {
     pub sleep_total_min: Option<f64>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct BodyNight {
     #[serde(default)]
     pub day: Option<String>,
@@ -133,12 +133,34 @@ pub(crate) fn capture_body_context_with(
     roots: &noop_query::Roots,
     timeout: Duration,
 ) -> Option<BodyContext> {
+    capture_body_context_in(
+        Path::new(noop_query::SANDBOX_EXEC),
+        settings,
+        roots,
+        timeout,
+    )
+}
+
+/// Same, with the sandbox launcher given (tests on hosts without `sandbox-exec`).
+pub(crate) fn capture_body_context_in(
+    sandbox_exec: &Path,
+    settings: &NoopSettings,
+    roots: &noop_query::Roots,
+    timeout: Duration,
+) -> Option<BodyContext> {
     if settings.whoop_ble_allowed() {
         return None;
     }
     settings.binary_path.as_deref().filter(|p| !p.is_empty())?;
     let args = serde_json::json!({ "days": BODY_CONTEXT_DAYS });
-    match noop_query::run_query(settings, roots, "health_snapshot", &args, timeout) {
+    match noop_query::run_query_in(
+        sandbox_exec,
+        settings,
+        roots,
+        "health_snapshot",
+        &args,
+        timeout,
+    ) {
         Ok(v) => {
             println!("[sessions] body_context: status=ok");
             Some(BodyContext::from_snapshot(&v))
@@ -179,11 +201,11 @@ pub(crate) fn nexus_data_dir() -> PathBuf {
     crate::app_paths::data_dir()
 }
 
-fn sessions_dir() -> PathBuf {
+pub(crate) fn sessions_dir() -> PathBuf {
     nexus_data_dir().join("sessions")
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SessionSummary {
     pub avg_focus: Option<f64>,
     pub avg_relaxation: Option<f64>,
@@ -195,7 +217,14 @@ pub struct SessionSummary {
     pub calm_pct: Option<f64>,
     #[serde(default)]
     pub time_in_target_pct: Option<f64>,
+    /// Scale of `avg_focus` / `avg_relaxation`. New files say 100 (0-100). Absent in older files,
+    /// which may hold 0-1 scores; those are scaled on read (nothing is rewritten on disk).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score_scale: Option<u32>,
 }
+
+/// Scale every new session is saved with.
+pub const SCORE_SCALE: u32 = 100;
 
 impl SessionSummary {
     /// Sessions recorded before the 0–100 score scale stored Avg focus / relaxation as 0–1.
@@ -203,6 +232,9 @@ impl SessionSummary {
     /// to 0–100. A real 0–100 average of ≤1 on every score is not a plausible session, so the
     /// heuristic cannot misfire on new files in practice; nothing is rewritten on disk.
     pub fn normalize_legacy_scores(&mut self) {
+        if self.score_scale == Some(SCORE_SCALE) {
+            return;
+        }
         let scores = [self.avg_focus, self.avg_relaxation];
         let present: Vec<f64> = scores.iter().flatten().copied().collect();
         let legacy = !present.is_empty()
@@ -217,7 +249,7 @@ impl SessionSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct RecordedSession {
     pub id: String,
     pub device_type: String,
@@ -230,14 +262,81 @@ pub struct RecordedSession {
     /// NOOP health_snapshot taken at Muse session start. Absent in older session files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_context: Option<BodyContext>,
+    /// Per-step series from the recording's `.bands.json` sidecar, attached by `list_sessions`
+    /// when that sidecar already exists. Never saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub samples: Option<super::recordings::SessionSamples>,
+}
+
+/// A session file as read from disk: the session plus its raw `data` (an object in current
+/// files, a bare array in the oldest legacy ones).
+pub(crate) struct StoredSession {
+    pub session: RecordedSession,
+    pub data: serde_json::Value,
+}
+
+/// Reads every session file in `dir` (read-only). Legacy 0-1 scores are normalised in memory.
+pub(crate) fn read_stored_sessions_in(dir: &Path) -> Vec<StoredSession> {
+    let mut out = Vec::new();
+    let Ok(rd) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let Some(session_val) = parsed.get("session").cloned() else {
+            continue;
+        };
+        if let Ok(mut session) = serde_json::from_value::<RecordedSession>(session_val) {
+            session.summary.normalize_legacy_scores();
+            let data = parsed
+                .get_mut("data")
+                .map(serde_json::Value::take)
+                .unwrap_or(serde_json::Value::Null);
+            out.push(StoredSession { session, data });
+        }
+    }
+    out
+}
+
+/// Sessions newest first; a session whose replay has a current `.bands.json` carries its samples.
+pub(crate) fn list_sessions_in(dir: &Path, replays: &Path) -> Vec<RecordedSession> {
+    let mut sessions: Vec<RecordedSession> = read_stored_sessions_in(dir)
+        .into_iter()
+        .map(|s| {
+            let mut session = s.session;
+            session.samples =
+                super::recordings::cached_session_samples(replays, &session.file_path);
+            session
+        })
+        .collect();
+    sessions.sort_by(|a, b| b.start.cmp(&a.start));
+    sessions
 }
 
 #[tauri::command]
-pub fn save_session(
+#[specta::specta]
+pub fn save_session(session: RecordedSession, data: serde_json::Value) -> Result<String, String> {
+    save_session_in(&sessions_dir(), session, data)
+}
+
+/// Writes a new session file. Muse recordings are sacred (docs/decisions/0007): a session id that
+/// already has a file is refused with an error, never overwritten. `create_new` makes the check
+/// and the create one atomic step, so an existing file is never opened for writing.
+pub(crate) fn save_session_in(
+    dir: &std::path::Path,
     mut session: RecordedSession,
     data: serde_json::Value,
 ) -> Result<String, String> {
-    let dir = sessions_dir();
+    let dir = dir.to_path_buf();
     crate::app_paths::create_private_dir_all(&dir)
         .map_err(|e| format!("Failed to create sessions dir: {}", e))?;
 
@@ -246,6 +345,8 @@ pub fn save_session(
     let filename = format!("{}_{}.json", session.device_type, session.id);
     let path = super::path_safety::safe_join(&dir, &filename)?;
 
+    session.summary.score_scale = Some(SCORE_SCALE);
+    session.samples = None;
     if session.body_context.is_none() {
         session.body_context = take_pending_body_context();
     }
@@ -256,74 +357,62 @@ pub fn save_session(
 
     let json = serde_json::to_string_pretty(&payload)
         .map_err(|e| format!("Failed to serialize: {}", e))?;
-    crate::app_paths::write_private(&path, json)
+    let mut file = crate::app_paths::private_open_options()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                "A session with this id already exists; it was not overwritten".to_string()
+            } else {
+                format!("Failed to write session: {}", e)
+            }
+        })?;
+    std::io::Write::write_all(&mut file, json.as_bytes())
         .map_err(|e| format!("Failed to write session: {}", e))?;
 
     Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_sessions() -> Result<Vec<RecordedSession>, String> {
     let dir = sessions_dir();
     if !dir.exists() {
         return Ok(Vec::new());
     }
-
-    let mut sessions = Vec::new();
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-
-        let data = match fs::read_to_string(&path) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-
-        let parsed: serde_json::Value = match serde_json::from_str(&data) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        if let Some(session_val) = parsed.get("session") {
-            if let Ok(mut session) = serde_json::from_value::<RecordedSession>(session_val.clone())
-            {
-                session.summary.normalize_legacy_scores();
-                sessions.push(session);
-            }
-        }
-    }
-
-    // Sort by start time descending
-    sessions.sort_by(|a, b| b.start.cmp(&a.start));
-    Ok(sessions)
-}
-
-#[tauri::command]
-pub fn delete_session(session_id: String) -> Result<(), String> {
-    let dir = sessions_dir();
-    if !dir.exists() {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.contains(&session_id) {
-            fs::remove_file(entry.path())
-                .map_err(|e| format!("Failed to delete session: {}", e))?;
-            return Ok(());
-        }
-    }
-
-    Ok(())
+    Ok(list_sessions_in(&dir, &super::replay::replays_dir()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_session_refuses_a_duplicate_id_and_leaves_the_existing_file_untouched() {
+        let dir =
+            std::env::temp_dir().join(format!("nexus-sess-{}", uuid::Uuid::new_v4().simple()));
+        let session = |end: &str| -> RecordedSession {
+            serde_json::from_value(serde_json::json!({
+                "id": "11111111-2222-3333-4444-555555555555", "device_type": "muse",
+                "start": "2026-11-11T10:00:00Z", "end": end, "duration_secs": 60, "data_points": 1,
+                "file_path": "eeg_20261111_100000.ndjson",
+                "summary": { "avg_focus": 50.0, "avg_relaxation": 50.0, "avg_hr": null, "max_hr": null, "avg_hrv": null }
+            }))
+            .unwrap()
+        };
+        let path = save_session_in(&dir, session("first"), serde_json::json!({ "n": 1 })).unwrap();
+        let before = fs::read(&path).unwrap();
+        let err =
+            save_session_in(&dir, session("second"), serde_json::json!({ "n": 2 })).unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            before,
+            "the existing session file must be byte-identical"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn summary_without_calm_fields_still_loads() {
@@ -342,6 +431,7 @@ mod tests {
             avg_hrv: None,
             calm_pct: None,
             time_in_target_pct: None,
+            score_scale: None,
         }
     }
 
@@ -356,6 +446,21 @@ mod tests {
         one_sided.normalize_legacy_scores();
         assert_eq!(one_sided.avg_focus, None);
         assert_eq!(one_sided.avg_relaxation, Some(100.0));
+    }
+
+    #[test]
+    fn score_scale_100_marks_a_new_file_that_is_never_rescaled() {
+        // A 0-100 session whose averages happen to be <= 1 must not be read as legacy 0-1.
+        let mut s = summary(Some(0.4), Some(0.6));
+        s.score_scale = Some(SCORE_SCALE);
+        s.normalize_legacy_scores();
+        assert_eq!((s.avg_focus, s.avg_relaxation), (Some(0.4), Some(0.6)));
+        assert_eq!(serde_json::to_value(&s).unwrap()["score_scale"], 100);
+        // Old files have no field and stay without it when serialised.
+        assert!(serde_json::to_value(summary(None, None))
+            .unwrap()
+            .get("score_scale")
+            .is_none());
     }
 
     #[test]
@@ -500,25 +605,26 @@ mod tests {
         assert!(saved["today"].get("day").is_none());
     }
 
-    // noop_query runs under macOS sandbox-exec, so this can only pass on macOS.
-    #[cfg(target_os = "macos")]
+    // `sandbox-exec` exists only on macOS, so the launcher is injected: a stand-in that checks
+    // the real sandbox arguments and runs the fake CLI. Nothing here is skipped on Linux.
     #[test]
     fn body_context_capture_is_best_effort() {
         use super::noop_query::test_util::{s as sp, FakeHome};
         use super::noop_query::WhoopSource;
         let h = FakeHome::new();
         let r = h.roots();
+        let sb = h.sandbox();
         let ok = h.script(r#"cat >/dev/null; echo '{"jsonrpc":"2.0","id":2,"result":{"structuredContent":{"today":{"day":"2026-01-01","avgHrv":1.23,"spo2Pct":1.0},"battery":{}}}}'"#);
         let mut s = NoopSettings {
             binary_path: sp(&ok),
             ..Default::default()
         };
-        let bc = capture_body_context_with(&s, &r, Duration::from_secs(15)).unwrap();
+        let bc = capture_body_context_in(&sb, &s, &r, Duration::from_secs(15)).unwrap();
         assert_eq!(bc.today.unwrap().hrv, Some(1.23));
         s.whoop_source = WhoopSource::Ble;
-        assert!(capture_body_context_with(&s, &r, Duration::from_secs(5)).is_none());
+        assert!(capture_body_context_in(&sb, &s, &r, Duration::from_secs(5)).is_none());
         assert!(
-            capture_body_context_with(&NoopSettings::default(), &r, Duration::from_secs(5))
+            capture_body_context_in(&sb, &NoopSettings::default(), &r, Duration::from_secs(5))
                 .is_none()
         );
         let h2 = FakeHome::new();
@@ -528,7 +634,13 @@ mod tests {
             ..Default::default()
         };
         let t = std::time::Instant::now();
-        assert!(capture_body_context_with(&s2, &h2.roots(), Duration::from_millis(300)).is_none());
+        assert!(capture_body_context_in(
+            &h2.sandbox(),
+            &s2,
+            &h2.roots(),
+            Duration::from_millis(300)
+        )
+        .is_none());
         assert!(t.elapsed() < Duration::from_secs(5));
         let h3 = FakeHome::new();
         let bad = h3.script("cat >/dev/null; echo nope");
@@ -536,6 +648,9 @@ mod tests {
             binary_path: sp(&bad),
             ..Default::default()
         };
-        assert!(capture_body_context_with(&s3, &h3.roots(), Duration::from_secs(5)).is_none());
+        assert!(
+            capture_body_context_in(&h3.sandbox(), &s3, &h3.roots(), Duration::from_secs(5))
+                .is_none()
+        );
     }
 }

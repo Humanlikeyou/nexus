@@ -7,7 +7,7 @@ FROM ${BASE}
 USER root
 COPY requirements-test.txt .
 RUN pip install --no-cache-dir -r requirements-test.txt
-COPY main.py test_main.py ./
+COPY main.py crew_safety.py crew_tasks.py crew_memory.py crew_grants.py test_main.py test_tasks.py test_memory.py test_grants.py test_trigger.py ./
 USER crew
 # Dummy values only; the real key lives in the git-ignored stack/.env.crew and is never used here.
 ENV CREW_ALLOWED_TOOLS=kb_query,memory_query \

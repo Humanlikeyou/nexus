@@ -6,11 +6,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) }));
-vi.mock("@/lib/api", () => ({ getConfig: vi.fn(async () => ({})) }));
-vi.mock("@/lib/llm-router", () => ({ buildRouterConfig: vi.fn(() => ({})) }));
-vi.mock("../../src/terrance/system/deliberation", () => ({ deliberate: vi.fn() }));
+vi.mock("../../src-console/legacy-core/lib/api", () => ({ getConfig: vi.fn(async () => ({})) }));
+vi.mock("../../src-console/legacy-core/lib/llm-router", () => ({ buildRouterConfig: vi.fn(() => ({})) }));
+vi.mock("../../src-console/legacy-core/terrance/system/deliberation", () => ({ deliberate: vi.fn() }));
 
-import { summarizeAndStoreSession } from "../../src/terrance/system/continuity";
+import { summarizeAndStoreSession } from "../../src-console/legacy-core/terrance/system/continuity";
 
 describe("continuity: load failure must not clobber persisted context", () => {
   beforeEach(() => {

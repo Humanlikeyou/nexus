@@ -1,11 +1,27 @@
 import { Activity, BatteryCharging, BatteryLow, BatteryMedium, HeartPulse, Inbox, Moon, RefreshCw, Sparkles, Wind } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import { EMPTY_DEVICE_ID } from "../lib/devices";
 import { date, formatMinutes, number } from "../lib/format";
 import type { NoopDailyMetric, NoopHealthInsight, NoopHealthSnapshot, SystemSnapshot } from "../types";
-import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, Ring, SegmentedControl, Sparkline, StatTile, type Tone } from "../ui";
+import { Badge, Button, Card, InsetGroup, ListRow, Meter, More, PageHero, SegmentedControl, StatTile, type Tone } from "../ui";
+import { AmaraTake } from "../amaraTake/AmaraTakeCard";
+import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
+import { LinkButton } from "../adds/Composer";
+import { LastFourteenDays } from "./FitnessTrends";
+import { calendarDays, deltaWords, usualRange } from "../ui/charts/chartMath";
+import { SleepCard } from "./SleepCard";
+import { EffortCard, RecoveryCard } from "./FitnessRings";
+import { effortModel, recoveryModel } from "./fitnessRingsModel";
+import { sampleAdaptersEnabled } from "../lib/sampleAdapters";
+import { inTauri, needsYouList } from "../lib/localStores";
+import type { Route } from "../app/routes";
+import { sleepCardModel } from "./sleepModel";
+import { WorkoutsPanel } from "../fitness/WorkoutsPanel";
+import { SleepDetailPanel } from "../fitness/SleepDetailPanel";
+import { TrendsExplorer } from "../fitness/TrendsExplorer";
+import "../fitness/fitness.css";
 import "./HealthScreen.css";
 
 const NOOP_COMMAND = "get_noop_health_snapshot";
@@ -48,7 +64,6 @@ function clock(iso: string | null | undefined) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? DASH : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Tokyo" });
 }
-const pct = (fraction: number | null | undefined) => (typeof fraction === "number" && Number.isFinite(fraction) ? fraction * 100 : null);
 /** "2026-09-20" → "Sep 20" (a calendar day, not an instant: no time, no UTC shift). */
 export function dayLabel(day: string): string {
   const parsed = new Date(`${day}T00:00:00`);
@@ -57,8 +72,6 @@ export function dayLabel(day: string): string {
 /** Fitness keeps 24-hour times: "Oct 28, 13:38". */
 const observed = (iso: string | null | undefined) => (iso ? `${date(iso)}, ${clock(iso)}` : "No record");
 
-const Missing = () => <span title="unavailable">{DASH}</span>;
-const val = (text: string) => (text === DASH ? <Missing /> : text);
 /** StatTile renders null as a tertiary "—" and hides the unit. */
 const nullable = (text: string) => (text === DASH ? null : text);
 
@@ -99,7 +112,7 @@ export function buildInsights(health: NoopHealthSnapshot): NoopHealthInsight[] {
     out.push({
       metric: "latest_sleep",
       fact: `${hm(sleepMin)} of sleep`,
-      context: overnight ? `NOOP recorded the latest night from ${clock(overnight.startedAt)} to ${clock(overnight.endedAt)}.` : "Taken from the latest completed NOOP daily record.",
+      context: overnight ? `Your WHOOP recorded the latest night from ${clock(overnight.startedAt)} to ${clock(overnight.endedAt)}.` : "Taken from the latest completed daily record.",
     });
   }
   if (stages.length > 0 && overnight) {
@@ -114,13 +127,13 @@ export function buildInsights(health: NoopHealthSnapshot): NoopHealthInsight[] {
   }
   if (hrv != null || rhr != null) {
     const readings = [hrv == null ? null : `HRV ${number(hrv)} ms`, rhr == null ? null : `resting heart rate ${number(rhr)} bpm`].filter(Boolean).join(", ");
-    out.push({ metric: "overnight_signals", fact: readings.charAt(0).toUpperCase() + readings.slice(1), context: "These are measured overnight signals from the latest NOOP sleep record." });
+    out.push({ metric: "overnight_signals", fact: readings.charAt(0).toUpperCase() + readings.slice(1), context: "These are measured overnight signals from the latest sleep record." });
   }
   if (health.battery) {
     out.push({
-      // Internal id kept from the WHOOP era; user-facing copy says NOOP band.
+      // Internal id kept from the WHOOP era; user-facing copy says WHOOP.
       metric: "whoop_battery",
-      fact: `NOOP band battery is ${number(health.battery.percentage)}%`,
+      fact: `WHOOP battery is ${number(health.battery.percentage)}%`,
       context: `${health.battery.charging === true ? "Charging" : health.battery.charging === false ? "On strap" : "Charge state unavailable"}; last observed ${observed(health.battery.observedAt)}.`,
     });
   }
@@ -131,13 +144,13 @@ export function buildInsights(health: NoopHealthSnapshot): NoopHealthInsight[] {
 
 /** Sentence-case status text with a battery glyph (badges are for 1–2 word tags). */
 function BatteryStatus({ battery }: { battery: NoopHealthSnapshot["battery"] }) {
-  if (!battery) return <span className="fitness__status"><BatteryMedium className="fitness__status-icon" aria-hidden="true" />NOOP band · no reading</span>;
+  if (!battery) return <span className="fitness__status"><BatteryMedium className="fitness__status-icon" aria-hidden="true" />WHOOP · no reading</span>;
   const state = battery.charging === true ? "Charging" : battery.charging === false ? "On strap" : "Charge state unknown";
   const low = battery.percentage <= 15 && battery.charging !== true;
   const Icon = battery.charging === true ? BatteryCharging : low ? BatteryLow : BatteryMedium;
   return (
     <span className="fitness__status" data-tone={low ? "danger" : undefined} title={`Observed ${observed(battery.observedAt)}`}>
-      <Icon className="fitness__status-icon" aria-hidden="true" />NOOP band {number(battery.percentage)}% · {state}
+      <Icon className="fitness__status-icon" aria-hidden="true" />WHOOP {number(battery.percentage)}% · {state}
     </span>
   );
 }
@@ -148,9 +161,23 @@ export type HealthFieldProps = {
   onRetry?: () => void;
   /** Overrides the first-load detection (refreshedAt still equals INITIAL_SNAPSHOT's). */
   loading?: boolean;
+  /** Opens a route (App's navigate); the Recovery card's link to Settings › Devices (where the strap sync is fixed) and the stale-data sync link. */
+  onOpen?: (route: Route) => void;
 };
 
-export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
+/** 0035: true when Needs you holds the `strap-hr-only` pointer. Read-only; any failure means "no". */
+function useStrapHrOnly(enabled: boolean): boolean {
+  const [hrOnly, setHrOnly] = useState(false);
+  useEffect(() => {
+    if (!enabled || !inTauri() || sampleAdaptersEnabled()) return;
+    let live = true;
+    needsYouList().then((r) => { if (live) setHrOnly(r.some((x) => x.source === "strap" && x.state === "ok" && x.rows.some((p) => p.id === "strap-hr-only"))); }, () => { if (live) setHrOnly(false); });
+    return () => { live = false; };
+  }, [enabled]);
+  return enabled && hrOnly;
+}
+
+export function HealthField({ data, onRetry, loading, onOpen }: HealthFieldProps) {
   const health = data.noop;
   const isLoading = loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt;
   const failed = data.unavailableSources.some((s) => s.command === NOOP_COMMAND);
@@ -158,12 +185,14 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
   if (isLoading) return <FitnessSkeleton />;
 
   const status = STATUS_BADGE[health.status];
+  // "Updated today at 07:30" reads as one fact; "Up to date · Updated 07:30 · 0d old" said it three times (P9.3).
+  const dayWord = (age: number | null | undefined) => age === 0 ? "today at " : age === 1 ? "yesterday at " : age != null ? `${age} days ago at ` : "";
   const heroBand = recoveryBand(health.today?.recovery ?? null);
   const header = (
     <>
       <PageHero title="Fitness"
         statement={failed ? "Out of reach" : heroBand ? `${heroBand.word} recovery` : status.text}
-        detail={failed ? "NOOP health couldn't be read." : [heroBand && status.tone !== "warning" ? status.text : null, health.generatedAt ? `Updated ${clock(health.generatedAt)}` : null, health.dataAgeDays != null ? `${health.dataAgeDays}d old` : null, health.deviceId && health.deviceId !== EMPTY_DEVICE_ID ? health.deviceId : null].filter(Boolean).join(" · ") || undefined} />
+        detail={failed ? "Health data couldn't be read." : [heroBand && status.tone !== "warning" && status.tone !== "success" ? status.text : null, health.generatedAt ? `Updated ${dayWord(health.dataAgeDays)}${clock(health.generatedAt)}` : health.dataAgeDays != null ? `${health.dataAgeDays}d old` : null, health.deviceId && health.deviceId !== EMPTY_DEVICE_ID ? health.deviceId : null].filter(Boolean).join(" · ") || undefined} />
       <div className="fitness__header-trailing">
         {failed ? <Badge tone="danger">Unavailable</Badge> : heroBand && status.tone === "warning" && <Badge tone="warning">{status.text}</Badge>}
         {failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
@@ -175,10 +204,10 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
     return (
       <div className="fitness" data-state={failed ? "error" : "empty"}>
         {header}
-        <Card className="fitness__empty" title={failed ? "NOOP health is unavailable" : "Waiting for the first NOOP record"} headingLevel={2}>
+        <Card className="fitness__empty" title={failed ? "Health sync is unavailable" : "Waiting for the first health record"} headingLevel={2}>
           <div className="fitness__empty-lead">
             <Inbox className="fitness__empty-icon" aria-hidden="true" />
-            <p className="fitness__callout">{failed ? "Amara OS couldn't read the local NOOP store. Try again in a moment." : health.message || "NOOP health data is not available yet."}</p>
+            <p className="fitness__callout">{failed ? "Amara couldn't read the health store on this Mac. Try again in a moment." : health.message || "Health data is not available yet."}</p>
             {!failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Check again</Button>}
           </div>
           <More label="Readiness">
@@ -188,9 +217,9 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
             <StatTile label="Sleep" value={null} />
           </div>
           <InsetGroup title="Readiness" className="fitness__readiness">
-            <ListRow icon={HeartPulse} title="Data access" subtitle="Amara has no NOOP daily record to read yet." accessory={<Badge tone="neutral">Store missing</Badge>} />
+            <ListRow icon={HeartPulse} title="Data access" subtitle="Amara has no daily health record to read yet." accessory={<Badge tone="neutral">Store missing</Badge>} />
             <ListRow icon={Sparkles} title="Morning briefing" subtitle="Amara stays quiet until a fresh sleep session is available." accessory={<Badge tone="neutral">Waiting</Badge>} />
-            <ListRow icon={BatteryMedium} title="Battery watch" subtitle={health.battery ? "A current NOOP band reading is available." : "No NOOP band battery reading is available locally."} accessory={<Badge tone="neutral">{health.battery ? `${number(health.battery.percentage)}%` : "No reading"}</Badge>} />
+            <ListRow icon={BatteryMedium} title="Battery watch" subtitle={health.battery ? "A current WHOOP reading is available." : "No WHOOP battery reading on this Mac yet."} accessory={<Badge tone="neutral">{health.battery ? `${number(health.battery.percentage)}%` : "No reading"}</Badge>} />
           </InsetGroup>
           </More>
         </Card>
@@ -198,24 +227,35 @@ export function HealthField({ data, onRetry, loading }: HealthFieldProps) {
     );
   }
 
-  return <FitnessReady health={health} header={header} />;
+  return <FitnessReady health={health} header={header} onOpen={onOpen} />;
 }
 
-function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: ReactNode }) {
-  const [metric, setMetric] = useState<TrendKey>("recovery");
+/** 0017: NOOP's pages live here as tabs. "Summary" is the screen as it was; the rest are new. */
+const FITNESS_TABS = [{ value: "summary", label: "Summary" }, { value: "workouts", label: "Workouts" }, { value: "sleep", label: "Sleep detail" }, { value: "trends", label: "Trends" }] as const;
+type FitnessTab = (typeof FITNESS_TABS)[number]["value"];
+
+function FitnessReady({ health, header, onOpen }: { health: NoopHealthSnapshot; header: ReactNode; onOpen?: (route: Route) => void }) {
+  const [tab, setTab] = useState<FitnessTab>("summary");
+  const [metric, setMetric] = useState<TrendKey>("strain");
   const today = health.today;
   const nightly = health.status === "waiting_for_nightly_data";
   const overnight = health.latestNight ?? health.latestSleep;
   const sleepMin = overnight?.durationMin ?? today?.totalSleepMin ?? null;
   const hrv = overnight?.avgHrv ?? today?.avgHrv ?? null;
   const rhr = overnight?.restingHr ?? today?.restingHr ?? null;
-  const eff = pct(overnight?.efficiency ?? today?.efficiency ?? null);
-  const recovery = today?.recovery ?? null;
-  const band = recoveryBand(recovery);
-  const strain = today?.strain == null ? null : clampEffort(today.strain);
   const days = health.recentDays;
+  const todayDay = today?.day ?? health.latestDay ?? overnight?.day ?? "";
+  // design-1111r B "Horizon": the Sleep tile is left out (the Sleep card is next to it).
+  const recoveryCardModel = recoveryModel({ day: todayDay, recovery: today?.recovery ?? null, hrv, rhr, nightly }, days);
+  const hrOnly = useStrapHrOnly(recoveryCardModel.state === "pending");
+  const effortCardModel = effortModel({ day: todayDay, effort: today?.strain ?? null, sampleZones: sampleAdaptersEnabled() }, days, clampEffort);
   const everNull = (pick: (d: NoopDailyMetric) => number | null) => days.every((d) => pick(d) == null) && (today == null || pick(today) == null);
   const pending = "Arrives after the sleep record closes";
+  const sleepModel = sleepCardModel({
+    day: overnight?.day ?? today?.day ?? "", durationMin: sleepMin, efficiency: overnight?.efficiency ?? today?.efficiency ?? null,
+    startedAt: overnight?.startedAt, endedAt: overnight?.endedAt,
+    deepMin: overnight?.deepMin ?? today?.deepMin ?? null, remMin: overnight?.remMin ?? today?.remMin ?? null, lightMin: overnight?.lightMin ?? today?.lightMin ?? null, awakeMin: overnight?.awakeMin ?? null,
+  }, days);
   const extraTiles = [
     !everNull((d) => d.spo2Pct) && <StatTile key="spo2" label="SpO₂" value={nullable(fmt(today?.spo2Pct, 1))} unit="%" />,
     !everNull((d) => d.skinTempDevC) && <StatTile key="skin" label="Skin temp" value={nullable(signed(today?.skinTempDevC))} unit="°C vs baseline" />,
@@ -229,58 +269,43 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
   ];
   const nightStages = [...stages, { label: "Awake", value: overnight?.awakeMin ?? 0, color: "var(--data-sleep-awake)" }];
 
+  // design-1110c C11: recovery, HRV, resting HR and sleep are in the "Last 14 days" grid; the rest stay here.
   const trendOptions = (Object.keys(TRENDS) as TrendKey[])
+    .filter((k) => !["recovery", "hrv", "rhr", "sleep"].includes(k))
     .filter((k) => !((k === "skin" || k === "resp") && everNull(TRENDS[k].pick)))
     .map((k) => ({ value: k, label: TRENDS[k].label }));
   const trend = TRENDS[metric];
-  const series = days.map(trend.pick);
+  // Calendar slots from the first to the last day, so a missing day is a gap and x follows real time.
+  const span = days.length ? Math.min(90, Math.round((Date.parse(`${days[days.length - 1].day}T00:00:00Z`) - Date.parse(`${days[0].day}T00:00:00Z`)) / 86_400_000) + 1) : 0;
+  const slots = calendarDays(days, (d) => d.day, span);
+  const series = slots.map(({ item }) => (item ? trend.pick(item) : null));
   const points = series.filter((v): v is number => v != null && Number.isFinite(v));
   const mean = points.length ? points.reduce((a, b) => a + b, 0) / points.length : null;
   const f = (v: number) => `${v.toFixed(trend.digits)}${trend.unit && trend.unit !== "%" ? ` ${trend.unit}` : trend.unit}`;
-  const dayLabels = days.length ? [days[0], days[Math.floor((days.length - 1) / 2)], days[days.length - 1]].map((d) => d.day.slice(5)) : [];
   const insights = buildInsights(health);
 
   return (
     <div className="fitness" data-state={health.status}>
       {header}
+      <SegmentedControl label="Fitness section" size="small" value={tab} options={FITNESS_TABS} onChange={setTab} />
+      {tab === "workouts" && <WorkoutsPanel />}
+      {tab === "sleep" && <SleepDetailPanel days={fitnessDays(health)} />}
+      {tab === "trends" && <TrendsExplorer />}
+      {tab === "summary" && <>
+      <AmaraTake page="fitness" className="fitness__take" />
       {health.status === "stale" && (
         <p className="fitness__callout" role="note">
-          Last NOOP data {health.latestDay ? dayLabel(health.latestDay) : "unknown"}. <span className="fitness__hint">Open NOOP to sync.</span>
+          Last health data {health.latestDay ? dayLabel(health.latestDay) : "unknown"}. {onOpen ? <LinkButton small onClick={() => onOpen({ id: "settings", view: "devices" })} label="Open Settings, Devices, to sync your health data">Sync from Settings › Devices</LinkButton> : <span className="fitness__hint">Sync from Settings › Devices.</span>}
         </p>
       )}
 
       <div className="fitness__row fitness__row--today">
-        <Card title="Recovery" className="fitness__ring-card">
-          {nightly
-            ? <p className="fitness__pending">{pending}</p>
-            : (
-              <div className="fitness__ring-body">
-                <Ring value={recovery} label="Recovery" size="lg" color={band?.color} valueText={band ? `${fmt(recovery)}%, ${band.word}` : undefined}>
-                  <span className="fitness__ring-value">{recovery == null ? <Missing /> : `${fmt(recovery)}%`}</span>
-                </Ring>
-                <span className="fitness__band" data-band={band?.word.toLowerCase()}>{band ? band.word : "No recovery yet"}</span>
-              </div>
-            )}
-        </Card>
-        <Card title="Effort" className="fitness__ring-card">
-          <div className="fitness__ring-body">
-            <Ring value={strain} max={EFFORT_MAX} label="Effort" size="lg" color="var(--data-strain)" valueText={strain == null ? undefined : `${fmt(strain)} of ${EFFORT_MAX}`}>
-              <span className="fitness__ring-value">{strain == null ? <Missing /> : fmt(strain)}</span>
-              <span className="fitness__ring-unit">of {EFFORT_MAX}</span>
-            </Ring>
-          </div>
-        </Card>
-        <Card title="Sleep" className="fitness__sleep-card">
-          {nightly
-            ? <p className="fitness__pending">{pending}</p>
-            : (
-              <div className="fitness__sleep-body">
-                <p className="fitness__display">{val(hm(sleepMin))}</p>
-                <p className="fitness__sleep-note">{eff == null ? <Missing /> : `${fmt(eff)}%`} efficiency</p>
-              </div>
-            )}
-        </Card>
+        <RecoveryCard m={recoveryCardModel} hrOnly={hrOnly} onOpenNote={onOpen ? () => onOpen({ id: "settings", view: "devices" }) : undefined} />
+        <EffortCard m={effortCardModel} max={EFFORT_MAX} />
+        <SleepCard model={nightly ? null : sleepModel} pending={nightly ? pending : undefined} />
       </div>
+
+      <LastFourteenDays days={days} />
 
       <More label="Last night, trends and insights">
       <BatteryStatus battery={health.battery} />
@@ -305,14 +330,24 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
       )}
 
       {days.length > 0 && (
-        <Card title="14-day trends">
+        <Card title="More trends">
           <SegmentedControl label="Trend metric" size="small" value={metric} options={trendOptions} onChange={setMetric} />
           {points.length < 2
             ? <p className="fitness__pending">Trend appears after 2+ days of data.</p>
             : (
               <figure className="fitness__trend">
-                <Sparkline values={series} label={`${trend.label}, last ${days.length} days`} format={f} showMean size="lg" color={trend.color} />
-                <div className="fitness__axis" aria-hidden="true">{dayLabels.map((d, i) => <span key={`${d}-${i}`}>{d}</span>)}</div>
+                {/* design-1110c C11: the shared header, curve and usual band. */}
+                <ChartHeader title={trend.label} value={f(points[points.length - 1])} delta={deltaWords(points[points.length - 1], mean, trend.unit === "%" ? "%" : trend.unit ? ` ${trend.unit}` : "", trend.digits)} usual={`usual ${f(mean as number)}`} />
+                <TrendChart
+                  values={series.map((v) => (v != null && Number.isFinite(v) ? v : null))}
+                  labels={slots.map((d) => d.day.slice(5))}
+                  lastLabel={slots[slots.length - 1].day.slice(5)}
+                  label={`${trend.label}, last ${slots.length} days: min ${f(Math.min(...points))}, max ${f(Math.max(...points))}, last ${f(points[points.length - 1])}`}
+                  format={(v) => v.toFixed(Number.isInteger(v) ? 0 : trend.digits)}
+                  unit={trend.unit || undefined}
+                  usual={usualRange(series)}
+                  height={132}
+                />
                 <figcaption className="fitness__caption">Mean {f(mean as number)} · Min {f(Math.min(...points))} · Max {f(Math.max(...points))}</figcaption>
               </figure>
             )}
@@ -324,10 +359,18 @@ function FitnessReady({ health, header }: { health: NoopHealthSnapshot; header: 
           {insights.map((i) => <ListRow key={i.metric} icon={insightIcon(i.metric)} title={i.fact} subtitle={i.context ?? undefined} />)}
         </InsetGroup>
       )}
-      {insights.length === 0 && <p className="fitness__pending">Insights appear after NOOP&apos;s nightly sync.</p>}
+      {insights.length === 0 && <p className="fitness__pending">Insights appear after tonight&apos;s health sync.</p>}
       </More>
+      </>}
     </div>
   );
+}
+
+/** recentDays plus today, ascending and deduped: what the Sleep detail tab lists nights from. */
+function fitnessDays(health: NoopHealthSnapshot): NoopDailyMetric[] {
+  const byDay = new Map(health.recentDays.map((d) => [d.day, d]));
+  if (health.today) byDay.set(health.today.day, health.today);
+  return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
 }
 
 function FitnessSkeleton() {

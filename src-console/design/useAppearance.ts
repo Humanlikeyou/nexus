@@ -1,5 +1,5 @@
 import { useLayoutEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeBound } from "../bridge";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -22,7 +22,7 @@ export function syncWindowTheme(theme: ThemePreference): void {
   try {
     getCurrentWindow().setTheme(theme === "system" ? null : theme)
       // The Dock icon follows the window's effective appearance (dark icon in dark mode).
-      .then(() => invoke("sync_dock_icon"))
+      .then(() => invokeBound("sync_dock_icon"))
       .catch(() => { /* CSS theme still applies */ });
   } catch {
     /* not running inside Tauri */

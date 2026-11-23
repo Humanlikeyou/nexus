@@ -48,6 +48,7 @@ fn session_logs_dir() -> PathBuf {
 /// Read the canonical Amara identity file from config/terrance.identity.md.
 /// Walks up from the binary to find the project root.
 #[tauri::command]
+#[specta::specta]
 pub fn read_identity_file() -> Result<String, String> {
     // Try to find the identity file relative to project root
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -82,6 +83,7 @@ pub fn read_identity_file() -> Result<String, String> {
 /// Read the operational profile from config/terrance.profile.md.
 /// Same lookup strategy as read_identity_file.
 #[tauri::command]
+#[specta::specta]
 pub fn read_profile_file() -> Result<String, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut dir = exe.parent().unwrap_or(&exe).to_path_buf();
@@ -110,7 +112,7 @@ pub fn read_profile_file() -> Result<String, String> {
 
 // ─── Context Store ─────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerranceContext {
     pub active_goals: Vec<String>,
@@ -124,6 +126,7 @@ pub struct TerranceContext {
     #[serde(default)]
     pub last_daily_summary_timestamp: Option<u64>,
     #[serde(default, deserialize_with = "lenient_hour")]
+    #[specta(type = Option<u8>)]
     pub daily_summary_hour: Option<u8>,
     #[serde(default)]
     pub last_health_check_timestamp: Option<u64>,
@@ -160,11 +163,13 @@ where
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn load_terrance_context() -> Result<TerranceContext, String> {
     load_context_from(&data_dir())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_terrance_context(context: TerranceContext) -> Result<(), String> {
     save_context_to(&data_dir(), &context)
 }
@@ -191,94 +196,14 @@ pub(crate) fn save_context_to(
         .map_err(|e| e.to_string())
 }
 
-/// Write `bytes` to `path` atomically: write a uniquely named temp file in the
-/// same directory, fsync it, then rename over the target (and fsync the dir on
-/// Unix). A crash mid-write leaves either the old file or the new one, never a
-/// truncated mix.
-pub(crate) fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    atomic_write_with_mode(path, bytes, None)
-}
-
-/// Like [`atomic_write`], but the result always has exactly `mode` (Unix)
-/// instead of inheriting the original file's mode. Use for files holding
-/// secrets, e.g. `atomic_write_with_mode(p, b, Some(0o600))`.
-pub(crate) fn atomic_write_with_mode(
-    path: &std::path::Path,
-    bytes: &[u8],
-    forced_mode: Option<u32>,
-) -> std::io::Result<()> {
-    use std::io::Write;
-    let dir = path
-        .parent()
-        .filter(|d| !d.as_os_str().is_empty())
-        .unwrap_or_else(|| std::path::Path::new("."));
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name")
-        })?
-        .to_string_lossy()
-        .to_string();
-    // Refuse to replace a symlink (it could point anywhere); callers must
-    // resolve and validate real paths themselves.
-    if fs::symlink_metadata(path)
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("refusing to replace symlink {}", path.display()),
-        ));
-    }
-    let tmp = dir.join(format!(
-        ".{}.{}.tmp",
-        file_name,
-        uuid::Uuid::new_v4().simple()
-    ));
-    let result = (|| {
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        // Never widen permissions: create the temp file 0600, then match the
-        // original's mode (if one exists) before it replaces the target.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut f = options.open(&tmp)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = match forced_mode {
-                Some(m) => m & 0o777,
-                None => fs::metadata(path)
-                    // Only rwx bits: never carry setuid/setgid/sticky over.
-                    .map(|m| m.permissions().mode() & 0o777)
-                    .unwrap_or(0o600),
-            };
-            f.set_permissions(fs::Permissions::from_mode(mode))?;
-        }
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        drop(f);
-        fs::rename(&tmp, path)?;
-        #[cfg(unix)]
-        {
-            if let Ok(d) = fs::File::open(dir) {
-                let _ = d.sync_all();
-            }
-        }
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    result
-}
+// The atomic write moved to `shared::fsx` (package 2). Its tests stay below.
+#[cfg(test)]
+use super::shared::fsx::atomic_write;
+use super::shared::fsx::atomic_write_with_mode;
 
 // ─── Session Log ───────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionLogEntry {
     pub id: String,
@@ -290,6 +215,7 @@ pub struct SessionLogEntry {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn store_session_log(entry: SessionLogEntry) -> Result<(), String> {
     let dir = session_logs_dir();
     crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -300,6 +226,7 @@ pub fn store_session_log(entry: SessionLogEntry) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_session_logs() -> Result<Vec<SessionLogEntry>, String> {
     let dir = session_logs_dir();
     if !dir.exists() {
@@ -331,6 +258,7 @@ fn archive_dir() -> PathBuf {
 /// Move session logs older than `days_threshold` days to memory/archive/.
 /// Returns the number of files moved.
 #[tauri::command]
+#[specta::specta]
 pub async fn archive_old_session_logs(days_threshold: u32) -> Result<u32, String> {
     run_blocking(move || archive_old_session_logs_sync(days_threshold)).await
 }
@@ -370,6 +298,7 @@ fn archive_old_session_logs_sync(days_threshold: u32) -> Result<u32, String> {
 
 /// Trim the relevantMemory array in terrance_context.json to at most `max_items` entries.
 #[tauri::command]
+#[specta::specta]
 pub async fn prune_context_memory(max_items: u32) -> Result<u32, String> {
     run_blocking(move || prune_context_memory_sync(max_items)).await
 }
@@ -400,6 +329,7 @@ fn custom_jobs_path() -> PathBuf {
 
 /// Load custom cron jobs from disk. Returns JSON string.
 #[tauri::command]
+#[specta::specta]
 pub fn load_custom_jobs() -> Result<String, String> {
     let path = custom_jobs_path();
     if !path.exists() {
@@ -410,6 +340,7 @@ pub fn load_custom_jobs() -> Result<String, String> {
 
 /// Save custom cron jobs to disk. Accepts raw JSON string.
 #[tauri::command]
+#[specta::specta]
 pub fn save_custom_jobs(data: String) -> Result<(), String> {
     let dir = data_dir();
     crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -420,6 +351,7 @@ pub fn save_custom_jobs(data: String) -> Result<(), String> {
 
 /// Get aggregated session insights: total sessions, tokens, providers, daily breakdown.
 #[tauri::command]
+#[specta::specta]
 pub fn get_session_insights() -> Result<String, String> {
     let dir = session_logs_dir();
     if !dir.exists() {
@@ -491,7 +423,7 @@ pub(crate) fn activity_log_dir() -> PathBuf {
     data_dir().join("activity_log")
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityEntry {
     pub id: String,
@@ -555,6 +487,7 @@ fn redact_activity_entry(mut entry: ActivityEntry) -> ActivityEntry {
 
 /// Store an activity entry to disk as a JSON file.
 #[tauri::command]
+#[specta::specta]
 pub fn store_activity_entry(entry: ActivityEntry) -> Result<(), String> {
     let dir = activity_log_dir();
     crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -568,6 +501,7 @@ pub fn store_activity_entry(entry: ActivityEntry) -> Result<(), String> {
 /// List recent activity entries. Returns entries from the last 24 hours
 /// or up to `limit` entries, whichever yields more results.
 #[tauri::command]
+#[specta::specta]
 pub fn list_activity_entries(limit: Option<u32>) -> Result<Vec<ActivityEntry>, String> {
     list_activity_entries_in(&activity_log_dir(), limit)
 }
@@ -1267,7 +1201,7 @@ mod tests {
     fn atomic_write_preserves_restrictive_mode_and_defaults_new_files_to_0600() {
         use std::os::unix::fs::PermissionsExt;
         let dir = temp_dir("mode");
-        let existing = dir.join("openclaw.json");
+        let existing = dir.join("settings.json");
         fs::write(&existing, b"{}").unwrap();
         fs::set_permissions(&existing, fs::Permissions::from_mode(0o600)).unwrap();
         atomic_write(&existing, b"{\"a\":1}").unwrap();
@@ -1386,6 +1320,7 @@ mod tests {
 /// into monthly archives; nothing is deleted without a verified archive copy.
 /// Returns the number of files archived.
 #[tauri::command]
+#[specta::specta]
 pub async fn prune_activity_log(days: u32) -> Result<u32, String> {
     run_blocking(move || {
         archive_activity_log_sync(Some(days), None, Some(false)).map(|r| r.archived as u32)
@@ -1448,7 +1383,7 @@ fn activity_files_newest_first(dir: &std::path::Path) -> Vec<(u64, PathBuf)> {
     files
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityArchiveReport {
     pub dry_run: bool,
@@ -1617,6 +1552,7 @@ pub(crate) fn archive_activity_log_in(
 
 /// Archive old activity entries (see `archive_activity_log_in`). Defaults: 30 days, 5000 files.
 #[tauri::command]
+#[specta::specta]
 pub async fn archive_activity_log(
     keep_days: Option<u32>,
     max_files: Option<u32>,
@@ -1666,6 +1602,7 @@ fn subagents_path() -> PathBuf {
 
 /// Load subagents from disk. Returns JSON string.
 #[tauri::command]
+#[specta::specta]
 pub fn load_subagents() -> Result<String, String> {
     let path = subagents_path();
     if !path.exists() {
@@ -1676,6 +1613,7 @@ pub fn load_subagents() -> Result<String, String> {
 
 /// Save subagents to disk. Accepts raw JSON string.
 #[tauri::command]
+#[specta::specta]
 pub fn save_subagents(data: String) -> Result<(), String> {
     let dir = data_dir();
     crate::app_paths::create_private_dir_all(&dir).map_err(|e| e.to_string())?;

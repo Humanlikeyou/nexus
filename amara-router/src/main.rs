@@ -42,9 +42,10 @@ async fn main() {
     let secrets = match &cfg.secrets_file {
         Some(p) => config::load_secrets(&config::expand_home(p)).unwrap_or_else(|e| fail(e)),
         None => config::Secrets::default(),
-    };
+    }
+    .with_keychain(config::keychain_lookup);
     if check {
-        if let Err(e) = config::lan_api_key(&cfg, &secrets) {
+        if let Err(e) = config::check_secrets(&cfg, &secrets) {
             fail(e);
         }
         println!(

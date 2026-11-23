@@ -10,11 +10,13 @@ fn onboarding_path() -> PathBuf {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn check_onboarding() -> Result<bool, String> {
     Ok(onboarding_path().exists())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn complete_onboarding() -> Result<(), String> {
     let path = onboarding_path();
     let dir = path.parent().unwrap();

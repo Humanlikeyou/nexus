@@ -1,0 +1,57 @@
+/* design-1111u: Home's heart-rate take. App tokens only; Fibonacci spacing 3/5/8/13/21/34/55; text >= 11px. */
+.hrt { display: grid; gap: 8px; }
+.hrt-body { display: grid; gap: 8px; transition: opacity var(--dur-fast, .15s) var(--ease-standard, ease); }
+.hrt-body[data-dim] { opacity: .45; }
+.hrt .take__memory { font-size: 11px; padding: 3px 8px; }
+.hrt-win { margin: 0; font-size: 11px; color: var(--label-secondary); font-variant-numeric: tabular-nums; }
+.hrt-win b { color: inherit; font-weight: 600; }
+.hrt-quiet { margin: 0; font-size: 13px; line-height: 1.5; color: var(--label-secondary); }
+.hrt-quiet b { color: var(--label); font-weight: 600; }
+.hrt-reading { display: flex; gap: 8px; align-items: center; margin: 0; font-size: 13px; color: var(--label); }
+.hrt-reading i { width: 8px; height: 8px; border-radius: 50%; background: var(--copper-text); flex: none; animation: hrt-pulse 1.2s ease-in-out infinite; }
+@keyframes hrt-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .hrt-reading i { animation: none; } }
+.hrt-link { justify-self: start; font: inherit; font-size: 11px; background: none; border: 0; padding: 0; color: var(--tone-accent-text); text-decoration: underline; cursor: pointer; }
+.hrt-link:focus-visible { outline: 2px solid var(--focus-ring, var(--tone-accent-text)); outline-offset: 3px; }
+/* The 15-minute line (Today's card only; the landing keeps its live 89-second trace). */
+.hrt-trace { margin: 0; display: grid; gap: 3px; }
+.hrt-trace svg { display: block; width: 100%; height: 55px; overflow: visible; }
+.hrt-trace__band { fill: color-mix(in srgb, var(--label) 7%, transparent); }
+.hrt-trace__area { fill: color-mix(in srgb, var(--copper-text) 14%, transparent); }
+.hrt-trace__line { fill: none; stroke: var(--copper-text); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.hrt-trace__gap { stroke: color-mix(in srgb, var(--label) 40%, transparent); stroke-dasharray: 2 3; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.hrt-trace__dot { fill: var(--copper-text); }
+.hrt-trace__ax { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--label-secondary); font-variant-numeric: tabular-nums; }
+/* Inline in "Your body today": no second card, just the take column. */
+.hrt--inline .take__head { gap: 8px; }
+.hrt--inline .take__body { font-size: 13px; line-height: 1.55; }
+/* Landing: always dark (LandingScreen.css), so the secondary text is set on the glass, not from the theme. */
+.landing .hrt-win, .landing .hrt-quiet, .landing .take__memory { color: rgba(241, 236, 228, .78); }
+.landing .hrt-quiet b, .landing .hrt-win b, .landing .take__memory b, .landing .hrt-reading { color: #f1ece4; }
+.landing .take__memory { background: rgba(255, 255, 255, .06); }
+.landing .take__memory .t-q, .landing .hrt-reading i { color: #e0a878; background-color: transparent; }
+.landing .hrt-reading i { background: #e0a878; }
+.landing .hrt-link { color: #5fd3ad; }
+
+/* design-1111u C: "Your body today" (Recovery & sleep merged with the heart-rate take). 1 : 1.618. */
+.body-today__head { display: flex; align-items: center; gap: 8px; }
+:root:root .body-today__head .home__recovery-title { padding: 0; margin: 0; }
+.body-today__head .body-today__grow { flex: 1; }
+.body-today { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.618fr); gap: 21px; align-items: start; }
+.body-today__left { display: grid; gap: 13px; padding-right: 21px; box-shadow: inset -1px 0 0 var(--separator); align-content: start; }
+.body-today__ring { display: flex; gap: 13px; align-items: center; }
+.body-today__ring .ui-ring { --ui-ring-size: 55px; }
+.body-today__ring .home__ring-value { font: 500 13px/1 var(--font-text); font-variant-numeric: tabular-nums; }
+.body-today__k { display: grid; gap: 1px; font-size: 11px; color: var(--label-secondary); }
+.body-today__k .home__ring-band { font: 500 13px/1.3 var(--font-text); }
+.body-today__mini { display: grid; grid-template-columns: auto 1fr auto; gap: 5px 13px; align-items: baseline; margin: 0; font-size: 13px; color: var(--label); }
+.body-today__mini dt { font-size: 11px; color: var(--label-secondary); }
+.body-today__mini dd { margin: 0; font-variant-numeric: tabular-nums; }
+.body-today__vs { font-size: 11px; color: var(--label-secondary); white-space: nowrap; }
+.body-today__vs[data-dir="down"] { color: var(--copper-text); }
+.body-today__vs[data-dir="up"] { color: var(--tone-accent-text); }
+.body-today .home__note { margin: 0; font-size: 11px; }
+@media (max-width: 860px) {
+  .body-today { grid-template-columns: minmax(0, 1fr); }
+  .body-today__left { padding: 0 0 13px; box-shadow: inset 0 -1px 0 var(--separator); }
+}

@@ -41,7 +41,7 @@ main.command-surface > .intelligence-overlay > .nexus-mark {
   padding-left: var(--shell-traffic-inset);
   border-right: var(--hairline, 1px solid var(--separator));
 }
-main.command-surface > .intelligence-overlay > .field-clock { padding: 0 var(--inset-content, 20px); }
+main.command-surface > .intelligence-overlay > .field-clock { padding: 0 var(--inset-content, 21px); }
 /* Drag regions: Tauri only starts a drag on the element carrying data-tauri-drag-region,
  * so decorative children let the pointer through; buttons stay clickable. */
 main.command-surface > .intelligence-overlay > .nexus-mark > *,
@@ -122,12 +122,12 @@ main.command-surface .nav-group button:focus-visible > small.nav-shortcut { opac
 }
 
 /* 20px content inset at every width. */
-main.command-surface > .active-field { padding: var(--inset-content, 20px); }
+main.command-surface > .active-field { padding: var(--inset-content, 21px); }
 
 /* Footer: 24px, only rendered when it has live status (see Footer.tsx). */
 main.command-surface > .field-footer {
   height: var(--footer-h, 24px);
-  padding: 0 var(--inset-content, 20px);
+  padding: 0 var(--inset-content, 21px);
   font-size: var(--text-subheadline);
 }
 
@@ -162,3 +162,9 @@ main.command-surface > .active-field:has(> .chat-screen) { display: flex; flex-d
 :root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > .nexus-mark,
 :root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > .intelligence-overlay > .field-clock,
 :root[data-reduce-transparency="true"]:not([data-vibrancy="true"]) main.command-surface > nav.system-constellation { background: var(--glass-solid); }
+/* design-1110d gap fix (a): Business tabs are pills (approved mockup). Selected = filled pill + weight + aria-checked, not colour alone; keyboard behaviour is the SegmentedControl's. */
+main.command-surface > .active-field > .subview-bar:is([data-host="enterprise"], [data-host="life"]) .ui-segmented { gap: 3px; padding: 3px; border: 1px solid var(--separator); border-radius: 9px; }
+main.command-surface > .active-field > .subview-bar:is([data-host="enterprise"], [data-host="life"]) .ui-segmented__segment { min-height: 0; padding: 5px 13px; border-radius: 7px; font-size: 13px; }
+main.command-surface > .active-field > .subview-bar:is([data-host="enterprise"], [data-host="life"]) .ui-segmented__segment[data-checked] { background: color-mix(in srgb, var(--tone-accent-text) 16%, transparent); font-weight: 600; }
+main.command-surface > .active-field > .subview-bar:is([data-host="enterprise"], [data-host="life"]) .ui-segmented__indicator { display: none; }
+@media (forced-colors: active) { main.command-surface > .active-field > .subview-bar:is([data-host="enterprise"], [data-host="life"]) .ui-segmented__segment[data-checked] { outline: 1px solid Highlight; } }

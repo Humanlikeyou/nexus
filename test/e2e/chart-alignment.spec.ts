@@ -6,7 +6,8 @@ const SIZES = [{ width: 1280, height: 800 }, { width: 1440, height: 900 }, { wid
 const TOLERANCE = 1;
 
 type Box = { left: number; right: number };
-const boxes = (page: Page, selector: string) => page.locator(selector).evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().width > 0).map((e) => { const r = e.getBoundingClientRect(); return { left: r.left, right: r.right, name: e.className.toString() || e.tagName }; }));
+// Sections and fitness columns are solid cards (design-1110 D2): their content starts at the card's padding edge (`inner`).
+const boxes = (page: Page, selector: string) => page.locator(selector).evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().width > 0).map((e) => { const r = e.getBoundingClientRect(); const c = getComputedStyle(e); return { left: r.left, right: r.right, inner: r.left + parseFloat(c.paddingLeft) + parseFloat(c.borderLeftWidth), innerRight: r.right - parseFloat(c.paddingRight) - parseFloat(c.borderRightWidth), name: e.className.toString() || e.tagName }; }));
 const sameEdges = (items: Box[], expected: Box, label: string) => {
   for (const item of items) {
     expect(Math.abs(item.left - expected.left), `${label}: left edge`).toBeLessThanOrEqual(TOLERANCE);
@@ -32,10 +33,16 @@ for (const size of SIZES) {
       for (const range of ["Month", "Week"]) {
         await page.getByRole("radio", { name: range, exact: true }).click();
         await page.waitForTimeout(50);
-        const plots = await boxes(page, ".mind-body [data-plot]");
-        expect(plots.length).toBeGreaterThanOrEqual(8);
+        // design-1110c C7/C8: Sleep and Trends rows stack the header above a full-width plot, so those plots span the card's content edges.
+        const [section] = await boxes(page, ".mb-section");
+        const stacked = await boxes(page, ".mind-body .mb-row--stack [data-plot]");
+        expect(stacked.length).toBeGreaterThanOrEqual(6);
+        sameEdges(stacked, { left: section.inner, right: section.innerRight }, `${range} stacked`);
+        // The remaining rows keep the label column: their plots still share one left and right edge.
+        const plots = await boxes(page, ".mind-body .mb-row:not(.mb-row--stack) [data-plot]");
+        expect(plots.length).toBeGreaterThanOrEqual(2);
         sameEdges(plots, plots[0], range);
-        // Stage strip, sleep chart, four trends, load bars and the scatter are all on it.
+        // Load bars and the scatter are on it.
         expect((await boxes(page, ".mind-body .mind-body__chart svg")).length).toBeGreaterThanOrEqual(2);
         sameEdges(await boxes(page, ".mind-body .mind-body__chart svg"), plots[0], `${range} svg`);
       }
@@ -43,13 +50,13 @@ for (const size of SIZES) {
 
     test("Mind–Body: labels, drivers and the table sit on the same grid as the plots", async ({ page, theme }) => {
       await openOverview(page, theme);
-      const [plot] = await boxes(page, ".mind-body [data-plot]");
+      const [plot] = await boxes(page, ".mind-body .mb-row:not(.mb-row--stack) [data-plot]");
       const [section] = await boxes(page, ".mb-section");
-      for (const head of await boxes(page, ".mb-row__head")) expect(Math.abs(head.left - section.left)).toBeLessThanOrEqual(TOLERANCE);
+      for (const head of await boxes(page, ".mb-row__head, .mb-row--stack .chart-head")) expect(Math.abs(head.left - section.inner)).toBeLessThanOrEqual(TOLERANCE);
       for (const value of await boxes(page, ".mb-drivers__value")) expect(Math.abs(value.left - plot.left), "driver values").toBeLessThanOrEqual(TOLERANCE);
       const [week] = await boxes(page, ".mb-table thead th:nth-child(2)");
       expect(Math.abs(week.left - plot.left), "table columns").toBeLessThanOrEqual(TOLERANCE);
-      for (const line of await boxes(page, ".mb-drivers__usual")) expect(Math.abs(line.right - section.right), "usual column").toBeLessThanOrEqual(TOLERANCE);
+      for (const line of await boxes(page, ".mb-drivers__usual")) expect(Math.abs(line.right - section.innerRight), "usual column").toBeLessThanOrEqual(TOLERANCE);
     });
 
     test("Mind–Body: nothing overflows its plot", async ({ page, theme }) => {
@@ -74,9 +81,17 @@ for (const size of SIZES) {
       await openMore(page);
       const cards = await boxes(page, ".fitness__row--today > *");
       expect(cards).toHaveLength(3);
-      const rings = await boxes(page, ".fitness__ring-body .ui-ring");
-      for (const [i, ring] of rings.entries()) expect(Math.abs(ring.left - cards[i].left), "ring on its column").toBeLessThanOrEqual(TOLERANCE);
-      const tiles = await boxes(page, ".fitness__tiles > *");
+      // design-1111r B: each card's lead number starts on its card's content edge.
+      const leads = await boxes(page, ".fitness__row--today .rx__num, .fitness__row--today .sleep-dawn__dur");
+      expect(leads).toHaveLength(3);
+      for (const [i, lead] of leads.entries()) expect(Math.abs(lead.left - cards[i].inner), "lead number on its column").toBeLessThanOrEqual(TOLERANCE);
+      // Tiles on the field share the three columns; tiles inside a card start at that card's content edge.
+      const tiles = await boxes(page, ".fitness__tiles:not(.ui-card .fitness__tiles) > *");
+      const nested = await page.locator(".ui-card .fitness__tiles").evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().width > 0).map((e) => {
+        const card = e.closest(".ui-card")!; const c = getComputedStyle(card);
+        return { tile: (e.firstElementChild as HTMLElement).getBoundingClientRect().left, inner: card.getBoundingClientRect().left + parseFloat(c.paddingLeft) + parseFloat(c.borderLeftWidth) };
+      }));
+      for (const n of nested) expect(Math.abs(n.tile - n.inner), "tile on its card's edge").toBeLessThanOrEqual(TOLERANCE);
       for (const tile of tiles) expect(Math.min(...cards.map((card) => Math.abs(card.left - tile.left))), "tile on a column").toBeLessThanOrEqual(TOLERANCE);
     });
   });

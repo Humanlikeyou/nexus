@@ -16,7 +16,18 @@ use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 
 /// The low-risk tools a text call may reach. Nothing else is recovered, offered or not.
-const RECOVERABLE_PREFIXES: [&str; 2] = ["mcp__followups__", "mcp__vault__"];
+/// The vault is deliberately absent: reading a note is not harmless when injected text asks.
+const RECOVERABLE_PREFIXES: [&str; 1] = ["mcp__followups__"];
+/// Defence in depth: a name containing any of these is never recovered, even under an allowed prefix.
+const BLOCKED_WORDS: [&str; 7] = [
+    "vault",
+    "credential",
+    "secret",
+    "password",
+    "token",
+    "api_key",
+    "apikey",
+];
 
 const QUOTE: &str = "<|\"|>";
 const OPEN: &str = "<|tool_call>";
@@ -231,7 +242,17 @@ fn settle(held: String, names: &HashSet<String>) -> Option<Ev> {
 }
 
 fn recoverable(name: &str) -> bool {
-    RECOVERABLE_PREFIXES.iter().any(|p| name.starts_with(p))
+    let lower = name.to_ascii_lowercase();
+    // Only plain ASCII after the prefix, so the blocked words can't be dodged with look-alike
+    // Unicode (e.g. U+212A Kelvin sign lowercases to k).
+    RECOVERABLE_PREFIXES.iter().any(|p| {
+        name.strip_prefix(p).is_some_and(|rest| {
+            !rest.is_empty()
+                && rest
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        })
+    }) && !BLOCKED_WORDS.iter().any(|w| lower.contains(w))
 }
 
 /// Passes `events` through, recovering a tool call written as text for the offered `names` that
@@ -285,7 +306,7 @@ mod tests {
 
     const MUTE: &str = "mcp__followups__mute_topic";
     const DONE: &str = "mcp__followups__item_done";
-    const READ: &str = "mcp__vault__vault_read";
+    const READ: &str = "mcp__followups__item_list";
 
     fn names() -> HashSet<String> {
         [MUTE, DONE, READ, "terminal"].map(String::from).into()
@@ -328,9 +349,9 @@ mod tests {
 
     #[test]
     fn markers_and_value_types() {
-        let text = "<|tool_call>call:mcp__vault__vault_read{note:<|\"|>a, b } c: d<|\"|>,level:3,on:true,off:null,\
+        let text = "<|tool_call>call:mcp__followups__item_list{note:<|\"|>a, b } c: d<|\"|>,level:3,on:true,off:null,\
                     room:kitchen,tags:[<|\"|>x,y<|\"|>,2],deep:{a:{b:1.5}}}<tool_call|>\
-                    <|tool_call>call:mcp__vault__vault_read{}<tool_call|>";
+                    <|tool_call>call:mcp__followups__item_list{}<tool_call|>";
         let calls = parse_calls(text, &names()).unwrap();
         assert_eq!(calls.len(), 2);
         assert_eq!(
@@ -339,8 +360,11 @@ mod tests {
                     "room": "kitchen", "tags": ["x,y", 2], "deep": {"a": {"b": 1.5}}})
         );
         assert_eq!(call(&calls[1]).1, &json!({}));
-        let json_args =
-            parse_calls("mcp__vault__vault_read{\"on\": \"a, \\\"b\\\"\"}", &names()).unwrap();
+        let json_args = parse_calls(
+            "mcp__followups__item_list{\"on\": \"a, \\\"b\\\"\"}",
+            &names(),
+        )
+        .unwrap();
         assert_eq!(call(&json_args[0]).1, &json!({"on": "a, \"b\""}));
     }
 
@@ -358,20 +382,22 @@ mod tests {
         );
         assert_eq!(prose, "All good on that front.");
 
-        let two = "mcp__vault__vault_read{a:1}<tool_call|> mcp__vault__vault_read{a:2}\n\nDone. Mute {this} too?";
+        let two = "mcp__followups__item_list{a:1}<tool_call|> mcp__followups__item_list{a:2}\n\nDone. Mute {this} too?";
         let (calls, prose) = parse_leading_calls(two, &names()).unwrap();
         assert_eq!(calls.len(), 2);
         assert_eq!(prose, "Done. Mute {this} too?");
 
-        let (calls, prose) =
-            parse_leading_calls("mcp__vault__vault_read{a:1}, then web_search{}", &names())
-                .unwrap();
+        let (calls, prose) = parse_leading_calls(
+            "mcp__followups__item_list{a:1}, then web_search{}",
+            &names(),
+        )
+        .unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(prose, ", then web_search{}");
 
         // A cut-off second call must not reach the user.
         let (calls, prose) = parse_leading_calls(
-            "mcp__vault__vault_read{a:1} mcp__vault__vault_read{a:<|\"|>cut off",
+            "mcp__followups__item_list{a:1} mcp__followups__item_list{a:<|\"|>cut off",
             &names(),
         )
         .unwrap();
@@ -390,15 +416,15 @@ mod tests {
             // A mention, not a call.
             "You could call mcp__followups__mute_topic{topic:<|\"|>x<|\"|>} for that.",
             // Broken syntax.
-            "mcp__vault__vault_read{note:<|\"|>unclosed}",
-            "mcp__vault__vault_read{note:<|\"|>a<|\"|>",
-            "mcp__vault__vault_read{no colon}",
-            "mcp__vault__vault_read{a b:1}",
+            "mcp__followups__item_list{note:<|\"|>unclosed}",
+            "mcp__followups__item_list{note:<|\"|>a<|\"|>",
+            "mcp__followups__item_list{no colon}",
+            "mcp__followups__item_list{a b:1}",
             "lights",
         ] {
             assert_eq!(parse_leading_calls(text, &names()), None, "{text}");
         }
-        let deep = format!("mcp__vault__vault_read{{a:{}", "[".repeat(100_000));
+        let deep = format!("mcp__followups__item_list{{a:{}", "[".repeat(100_000));
         assert_eq!(parse_leading_calls(&deep, &names()), None);
     }
 
@@ -407,10 +433,10 @@ mod tests {
         assert!(may_be_call("", &names()));
         assert!(may_be_call("  mcp__foll", &names()));
         assert!(may_be_call("<|tool", &names()));
-        assert!(may_be_call("call:mcp__vault", &names()));
-        assert!(may_be_call("mcp__vault__vault_read{on:", &names()));
+        assert!(may_be_call("call:mcp__followups", &names()));
+        assert!(may_be_call("mcp__followups__item_list{on:", &names()));
         assert!(!may_be_call("Done", &names()));
-        assert!(!may_be_call("mcp__vault are on", &names()));
+        assert!(!may_be_call("mcp__followups are on", &names()));
         assert!(!may_be_call("call me", &names()));
     }
 
@@ -467,15 +493,15 @@ mod tests {
         assert_eq!(out[3], Ok(done()));
 
         // Held for a moment, then released whole.
-        let out = run(chunks(&["mcp__v", "ault notes", " now"])).await;
-        assert_eq!(out[0], Ok(text_delta("mcp__vault notes".into())));
+        let out = run(chunks(&["mcp__f", "ollowups notes", " now"])).await;
+        assert_eq!(out[0], Ok(text_delta("mcp__followups notes".into())));
         assert_eq!(out[1], Ok(text_delta(" now".into())));
     }
 
     #[tokio::test]
     async fn trailing_prose_is_held_with_the_call_and_kept() {
         let out = run(chunks(&[
-            "mcp__vault__vault_read{on:true}",
+            "mcp__followups__item_list{on:true}",
             " All good",
             " on that front.",
         ]))
@@ -494,9 +520,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_broken_call_passes_unchanged_at_the_end() {
-        let text = "mcp__vault__vault_read{on is the call I would use";
+        let text = "mcp__followups__item_list{on is the call I would use";
         let out = run(chunks(&[
-            "mcp__vault__vault_read{on",
+            "mcp__followups__item_list{on",
             " is the call I would use",
         ]))
         .await;
@@ -533,7 +559,7 @@ mod tests {
     #[tokio::test]
     async fn an_oversized_reply_goes_out_as_text() {
         let long = format!(
-            "mcp__vault__vault_read{{a:<|\"|>{}",
+            "mcp__followups__item_list{{a:<|\"|>{}",
             "x".repeat(MAX_HELD_BYTES)
         );
         let out = run(chunks(&[&long, "tail"])).await;
@@ -551,7 +577,7 @@ mod tests {
             "web_search{query:<|\"|>x<|\"|>}",
             "web_extract{url:<|\"|>x<|\"|>}",
             "mcp__noop__health_snapshot{}",
-            "xmcp__vault__vault_read{}",
+            "xmcp__followups__item_list{}",
         ] {
             let name = text
                 .trim_start_matches("<|tool_call>call:")
@@ -568,12 +594,12 @@ mod tests {
         // later blocked call in the same reply stays prose.
         let mut offered = names();
         offered.insert("terminal".to_string());
-        let text = "terminal{command:<|\"|>x<|\"|>} mcp__vault__vault_read{a:1}";
+        let text = "terminal{command:<|\"|>x<|\"|>} mcp__followups__item_list{a:1}";
         let events = futures::stream::iter(chunks(&[text])).boxed();
         let out: Vec<_> = recover_stream(events, offered).collect().await;
         assert_eq!(out, chunks(&[text]));
 
-        let text = "mcp__vault__vault_read{a:1} terminal{command:x}";
+        let text = "mcp__followups__item_list{a:1} terminal{command:x}";
         let events = futures::stream::iter(chunks(&[text])).boxed();
         let out: Vec<_> = recover_stream(events, names()).collect().await;
         let Ok(Ev::Delta {
@@ -586,6 +612,45 @@ mod tests {
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(call(&tool_calls[0]).0, READ);
         assert_eq!(content, "terminal{command:x}");
+    }
+
+    #[tokio::test]
+    async fn vault_and_credential_tools_are_never_recovered() {
+        // Text the model read must not be able to reach the vault, even when the request offers
+        // the tool, in any of the call forms, and also when it is nested under an allowed prefix.
+        for name in [
+            "mcp__vault__vault_read",
+            "mcp__vault__vault_search",
+            "mcp__vault__vault_write",
+            "mcp__followups__vault_read",
+            "mcp__followups__get_credentials",
+            "mcp__followups__read_secret",
+            "mcp__followups__export_api_key",
+            "mcp__followups__show_password",
+        ] {
+            for text in [
+                format!("{name}{{note:<|\"|>passwords<|\"|>}}<tool_call|>"),
+                format!("<|tool_call>call:{name}{{note:<|\"|>x<|\"|>}}<tool_call|>"),
+            ] {
+                let events = futures::stream::iter(chunks(&[&text])).boxed();
+                let offered = HashSet::from([name.to_string()]);
+                let out: Vec<_> = recover_stream(events, offered).collect().await;
+                assert_eq!(out, chunks(&[&text]), "{name} was recovered");
+            }
+        }
+        // Non-[a-z0-9_] names (Unicode look-alikes, upper case) are refused.
+        for bad in [
+            "mcp__followups__to\u{212A}en_read",
+            "mcp__followups__Mute_topic",
+            "mcp__followups__mute-topic",
+            "mcp__followups__",
+            "mcp__followups__m\u{fc}te",
+        ] {
+            assert!(!recoverable(bad), "{bad}");
+        }
+        // The followups tools still work.
+        assert!(recoverable("mcp__followups__mute_topic"));
+        assert!(!recoverable("mcp__vault__vault_read"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ const MAX_ERROR_CHARS: usize = 1_000;
 const RUN_STATUSES: &[&str] = &["succeeded", "failed", "suppressed"];
 const DELIVERY_STATUSES: &[&str] = &["delivered", "failed", "suppressed", "not_requested"];
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceAutomation {
     pub id: String,
@@ -30,7 +30,7 @@ pub struct TerrenceAutomation {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceAutomationRun {
     pub id: String,
@@ -466,6 +466,7 @@ pub(crate) fn runtime_automation_brief(max_chars: usize) -> Result<String, Strin
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_terrence_automations(limit: Option<u32>) -> Result<Vec<TerrenceAutomation>, String> {
     let conn = automation_db()?;
     sync_hermes_automations(&conn);
@@ -487,6 +488,7 @@ pub fn list_terrence_automations(limit: Option<u32>) -> Result<Vec<TerrenceAutom
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_terrence_automation_runs(
     automation_id: Option<String>,
     limit: Option<u32>,

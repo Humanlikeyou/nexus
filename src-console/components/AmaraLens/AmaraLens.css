@@ -197,6 +197,10 @@
 /* Hero: the iris is opaque on the glass already, and the core keeps its per-state strength so a
  * lens that isn't listening never looks lit. */
 :root[data-reduce-transparency="true"] .amara-lens[data-size="320"] .amara-lens__halo { display: none; }
+/* The 160 and 44 lenses: WKWebView never matches the media query, so the app's own flag twins it (P7.2). */
+:root[data-reduce-transparency="true"] .amara-lens:not([data-size="320"]) .amara-lens__halo { display: none; }
+:root[data-reduce-transparency="true"] .amara-lens:not([data-size="320"]) .amara-lens__core { background: radial-gradient(circle, var(--lens-hot), var(--lens-mid) 30%, var(--lens-deep) 66%, var(--lens-glass) 100%); opacity: 1; }
+:root[data-reduce-transparency="true"] .amara-lens[data-state="error"]:not([data-size="320"]) .amara-lens__core { background: radial-gradient(circle, var(--lens-error-mid), var(--lens-error-deep) 60%, var(--lens-glass) 100%); }
 @media (forced-colors: active) {
   .amara-lens__halo, .amara-lens__specular, .amara-lens__catchlight { display: none; }
   .amara-lens__bezel { background: Canvas; border: 2px solid CanvasText; box-shadow: none; }

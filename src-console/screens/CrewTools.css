@@ -1,0 +1,9 @@
+/* design-1110i: per-crew Files and terminal switch. */
+.crew-tools__banner { justify-content: space-between; }
+.crew-tools__banner-act { margin-left: auto; }
+.crew-tools__error { margin: 0; }
+.crew-tools__group { margin: 0; }
+.crew-tools__sheet-body { display: grid; gap: 13px; text-align: left; }
+.crew-tools__sheet-body > p { margin: 0; }
+.cc-table .cc-grant small { display: block; font-size: 11px; color: var(--label-secondary); }
+.pk-crumb .cc-back { margin: 0; }

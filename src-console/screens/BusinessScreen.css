@@ -1,7 +1,7 @@
 .biz { display: grid; align-content: start; }
 .biz__note { margin: 0; color: var(--label-secondary); font: var(--type-callout); }
 .biz__note strong { color: var(--label); }
-.biz__unavailable { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 12px); color: var(--label-secondary); }
+.biz__unavailable { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 13px); color: var(--label-secondary); }
 .biz__unavailable p { margin: 0; }
 .biz__pipeline { display: grid; gap: var(--space-4); }
 .biz__section { margin: 0; color: var(--label-secondary); font: 400 var(--text-callout)/var(--lh-callout) var(--font-text); }

@@ -1,4 +1,3 @@
-use reqwest::Client;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -16,18 +15,14 @@ fn db_path() -> PathBuf {
 
 fn get_db() -> Result<Connection, String> {
     let path = db_path();
-    crate::app_paths::create_private_dir_all(path.parent().unwrap())
-        .map_err(|e| format!("Failed to create data dir: {}", e))?;
-
-    crate::app_paths::ensure_private_file(&path)
-        .map_err(|e| format!("Failed to create events.db: {}", e))?;
-    let conn = Connection::open(&path).map_err(|e| format!("Failed to open events.db: {}", e))?;
-
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| format!("Failed to set WAL mode: {}", e))?;
-    crate::app_paths::restrict_sqlite_files(&path)
-        .map_err(|e| format!("Failed to secure events.db: {}", e))?;
-
+    use super::shared::sqlite::{open_private_wal, OpenStep};
+    let conn = open_private_wal(&path).map_err(|step| match step {
+        OpenStep::Dir(e) => format!("Failed to create data dir: {e}"),
+        OpenStep::File(e) => format!("Failed to create events.db: {e}"),
+        OpenStep::Open(e) => format!("Failed to open events.db: {e}"),
+        OpenStep::Configure(e) => format!("Failed to set WAL mode: {e}"),
+        OpenStep::Secure(e) => format!("Failed to secure events.db: {e}"),
+    })?;
     init_arm_db(&conn)?;
     Ok(conn)
 }
@@ -87,7 +82,7 @@ fn arm_config_path() -> PathBuf {
 
 // ─── Types ───────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ArmStrategy {
     pub id: String,
     pub name: String,
@@ -105,7 +100,7 @@ pub struct ArmStrategy {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ArmDecision {
     pub id: String,
     pub strategy_id: String,
@@ -117,7 +112,7 @@ pub struct ArmDecision {
     pub timestamp: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ArmConfig {
     pub wallet_address: Option<String>,
     pub global_capital_limit: f64,
@@ -143,13 +138,13 @@ impl Default for ArmConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct WorkerApiKey {
     pub name: String,
     pub key: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ArmRiskStatus {
     pub global_capital_deployed: f64,
     pub global_capital_limit: f64,
@@ -161,7 +156,7 @@ pub struct ArmRiskStatus {
     pub risk_index: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct RevenueSummary {
     pub total_revenue: f64,
     pub total_expenses: f64,
@@ -173,7 +168,7 @@ pub struct RevenueSummary {
     pub by_strategy: Vec<StrategyRevenue>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct StrategyRevenue {
     pub strategy_id: String,
     pub strategy_name: String,
@@ -182,7 +177,7 @@ pub struct StrategyRevenue {
     pub net: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct WorkerHealthResponse {
     pub status: String,
     pub uptime_secs: Option<u64>,
@@ -320,6 +315,7 @@ fn save_arm_config_to_disk(config: &ArmConfig) -> Result<(), String> {
 // ─── Strategy CRUD ───────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_list_strategies() -> Result<Vec<ArmStrategy>, String> {
     println!("[arm] list_strategies: status=querying");
     let conn = get_db()?;
@@ -341,6 +337,7 @@ pub fn arm_list_strategies() -> Result<Vec<ArmStrategy>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_create_strategy(
     name: String,
     strategy_type: String,
@@ -373,6 +370,7 @@ pub fn arm_create_strategy(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_update_strategy(
     id: String,
     name: Option<String>,
@@ -403,6 +401,7 @@ pub fn arm_update_strategy(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_delete_strategy(id: String) -> Result<(), String> {
     println!("[arm] delete_strategy: id={id}");
     let conn = get_db()?;
@@ -415,6 +414,7 @@ pub fn arm_delete_strategy(id: String) -> Result<(), String> {
 // ─── Strategy Status Management ──────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_activate_strategy(id: String) -> Result<ArmStrategy, String> {
     println!("[arm] activate_strategy: id={id}");
     let conn = get_db()?;
@@ -444,6 +444,7 @@ pub fn arm_activate_strategy(id: String) -> Result<ArmStrategy, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_pause_strategy(id: String, reasoning: String) -> Result<ArmStrategy, String> {
     println!("[arm] pause_strategy: id={id}");
     let conn = get_db()?;
@@ -476,7 +477,16 @@ pub fn arm_pause_strategy(id: String, reasoning: String) -> Result<ArmStrategy, 
         let url = pause_url.to_string();
         let key = get_worker_key(&existing.config);
         tokio::spawn(async move {
-            let client = Client::new();
+            let client = match super::shared::http::builder(super::shared::http::HttpSpec {
+                timeout: Some(std::time::Duration::from_secs(10)),
+                connect_timeout: Some(std::time::Duration::from_secs(3)),
+                ..Default::default()
+            })
+            .build()
+            {
+                Ok(c) => c,
+                Err(_) => return,
+            };
             let mut req = client.post(&url);
             if let Some(k) = key {
                 req = req.header("X-ARM-Key", k);
@@ -490,6 +500,7 @@ pub fn arm_pause_strategy(id: String, reasoning: String) -> Result<ArmStrategy, 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_kill_strategy(id: String, reasoning: String) -> Result<ArmStrategy, String> {
     println!("[arm] kill_strategy: id={id}");
     let conn = get_db()?;
@@ -521,7 +532,16 @@ pub fn arm_kill_strategy(id: String, reasoning: String) -> Result<ArmStrategy, S
         let url = kill_url.to_string();
         let key = get_worker_key(&existing.config);
         tokio::spawn(async move {
-            let client = Client::new();
+            let client = match super::shared::http::builder(super::shared::http::HttpSpec {
+                timeout: Some(std::time::Duration::from_secs(10)),
+                connect_timeout: Some(std::time::Duration::from_secs(3)),
+                ..Default::default()
+            })
+            .build()
+            {
+                Ok(c) => c,
+                Err(_) => return,
+            };
             let mut req = client.post(&url);
             if let Some(k) = key {
                 req = req.header("X-ARM-Key", k);
@@ -543,8 +563,15 @@ fn get_worker_key(config: &serde_json::Value) -> Option<String> {
 
 // ─── Revenue Tracking ────────────────────────────────────
 
+/// Fixed text when an ARM poll is refused (kill switch or navy local-only).
+const ARM_OUTBOUND_BLOCKED: &str = "Local only right now. I can't reach the revenue workers.";
+
 #[tauri::command]
+#[specta::specta]
 pub async fn arm_poll_revenue(strategy_id: String) -> Result<f64, String> {
+    if super::telegram::outbound_disabled() {
+        return Err(ARM_OUTBOUND_BLOCKED.to_string());
+    }
     println!("[arm] poll_revenue: strategy_id={strategy_id}");
     let conn = get_db()?;
     let strategy = get_strategy_by_id(&conn, &strategy_id)?;
@@ -556,7 +583,13 @@ pub async fn arm_poll_revenue(strategy_id: String) -> Result<f64, String> {
         .ok_or("Strategy has no revenue_endpoint configured")?
         .to_string();
 
-    let client = Client::new();
+    let client = super::shared::http::builder(super::shared::http::HttpSpec {
+        timeout: Some(std::time::Duration::from_secs(10)),
+        connect_timeout: Some(std::time::Duration::from_secs(3)),
+        ..Default::default()
+    })
+    .build()
+    .map_err(|e| format!("HTTP request failed: {}", e))?;
     let mut req = client.get(&revenue_url);
     if let Some(key) = get_worker_key(&strategy.config) {
         req = req.header("X-ARM-Key", key);
@@ -627,6 +660,7 @@ pub async fn arm_poll_revenue(strategy_id: String) -> Result<f64, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_get_revenue_summary(
     from: Option<String>,
     to: Option<String>,
@@ -716,6 +750,7 @@ pub fn arm_get_revenue_summary(
 // ─── Decision Journal ────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_log_decision(
     strategy_id: String,
     action: String,
@@ -729,6 +764,7 @@ pub fn arm_log_decision(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_list_decisions(
     strategy_id: Option<String>,
     limit: Option<u32>,
@@ -772,6 +808,7 @@ pub fn arm_list_decisions(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_update_decision_outcome(
     id: String,
     outcome: String,
@@ -797,6 +834,7 @@ pub fn arm_update_decision_outcome(
 // ─── Risk Controls ───────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_get_risk_status() -> Result<ArmRiskStatus, String> {
     println!("[arm] get_risk_status: status=computing");
     let conn = get_db()?;
@@ -883,6 +921,7 @@ pub fn arm_get_risk_status() -> Result<ArmRiskStatus, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_set_global_limits(capital_limit: f64, daily_loss_cap: f64) -> Result<(), String> {
     println!("[arm] set_global_limits: capital={capital_limit} daily_loss={daily_loss_cap}");
     let mut config = load_arm_config();
@@ -892,6 +931,7 @@ pub fn arm_set_global_limits(capital_limit: f64, daily_loss_cap: f64) -> Result<
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_kill_switch(active: bool, reasoning: String) -> Result<(), String> {
     println!("[arm] kill_switch: active={active}");
     let conn = get_db()?;
@@ -940,7 +980,11 @@ pub fn arm_kill_switch(active: bool, reasoning: String) -> Result<(), String> {
 // ─── Health Monitoring ───────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub async fn arm_health_check(strategy_id: String) -> Result<WorkerHealthResponse, String> {
+    if super::telegram::outbound_disabled() {
+        return Err(ARM_OUTBOUND_BLOCKED.to_string());
+    }
     println!("[arm] health_check: strategy_id={strategy_id}");
     let conn = get_db()?;
     let strategy = get_strategy_by_id(&conn, &strategy_id)?;
@@ -952,13 +996,23 @@ pub async fn arm_health_check(strategy_id: String) -> Result<WorkerHealthRespons
         .ok_or("Strategy has no health_endpoint configured")?
         .to_string();
 
-    let client = Client::new();
-    let mut req = client.get(&health_url);
-    if let Some(key) = get_worker_key(&strategy.config) {
-        req = req.header("X-ARM-Key", key);
-    }
-
-    let result = req.send().await;
+    // A build failure takes the same "down" path as a failed request below.
+    let result = match super::shared::http::builder(super::shared::http::HttpSpec {
+        timeout: Some(std::time::Duration::from_secs(10)),
+        connect_timeout: Some(std::time::Duration::from_secs(3)),
+        ..Default::default()
+    })
+    .build()
+    {
+        Ok(client) => {
+            let mut req = client.get(&health_url);
+            if let Some(key) = get_worker_key(&strategy.config) {
+                req = req.header("X-ARM-Key", key);
+            }
+            req.send().await
+        }
+        Err(e) => Err(e),
+    };
 
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -1000,7 +1054,11 @@ pub async fn arm_health_check(strategy_id: String) -> Result<WorkerHealthRespons
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn arm_poll_all() -> Result<Vec<ArmStrategy>, String> {
+    if super::telegram::outbound_disabled() {
+        return Err(ARM_OUTBOUND_BLOCKED.to_string());
+    }
     println!("[arm] poll_all: status=starting");
     let config = load_arm_config();
 
@@ -1076,15 +1134,49 @@ pub async fn arm_poll_all() -> Result<Vec<ArmStrategy>, String> {
 // ─── Config ──────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_get_config() -> Result<ArmConfig, String> {
     println!("[arm] get_config: status=loading");
     Ok(load_arm_config())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn arm_save_config(config: ArmConfig) -> Result<(), String> {
     println!("[arm] save_config: status=saving");
     save_arm_config_to_disk(&config)?;
     println!("[arm] save_config: status=saved");
     Ok(())
+}
+
+#[cfg(test)]
+mod outbound_gate_tests {
+    /// Each network-reaching ARM command refuses first, with fixed text, before touching the db or network.
+    #[test]
+    fn poll_and_health_commands_are_gated_on_the_outbound_switch() {
+        let src = include_str!("arm.rs");
+        for name in ["arm_poll_revenue", "arm_health_check", "arm_poll_all"] {
+            let f = &src[src.find(&format!("pub async fn {name}(")).unwrap()..];
+            let head = &f[..f.find("println!").unwrap()];
+            assert!(
+                head.contains("super::telegram::outbound_disabled()")
+                    && head.contains("ARM_OUTBOUND_BLOCKED"),
+                "{name} must be gated first"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod client_timeout_tests {
+    /// Source pin: ARM worker calls build their client with timeouts, never a bare Client::new().
+    #[test]
+    fn arm_worker_clients_have_timeouts() {
+        let src = include_str!("arm.rs");
+        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
+        assert!(
+            !prod.contains("Client::new()"),
+            "ARM worker calls must use the shared builder with timeouts"
+        );
+    }
 }

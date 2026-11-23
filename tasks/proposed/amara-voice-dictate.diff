@@ -1,0 +1,176 @@
+README (patch ignores everything above the first "---" line)
+=====================================================================
+amara-voice-dictate.diff: one on-device dictation on request, for Amara OS (Lane W4, 2026-11-14)
+
+Why: voice adds and check-ins need text from the mic, on this Mac only. Amara Voice already owns the mic
+stream and has Whisper base.en (asr.py, used by main() as `asr`), but nothing records+transcribes ONCE on
+request: the only inbound signals are SIGUSR1 (stop speaking) and, with amara-voice-speak.diff, speak/request.json.
+Amara OS cannot open the mic itself without a second stream fighting the loop's.
+
+What it adds (amara_voice.py only, ~90 lines, stdlib, no new package, no network, no cloud):
+  - dictate_watcher thread: polls <amara-voice>/dictate/request.json every 0.4 s, reads and deletes it.
+    Request: {"id","purpose":"add"|"checkin","max_secs","ts"}. Queued only if ts is within 15 s, purpose is
+    known and none is already pending (fail closed; anything else is dropped).
+  - The MAIN loop (sole owner of the mic stream) answers it while idle: Ears.next_utterance(interruptible=True)
+    returns early only before anyone starts speaking. It chimes, records ONE utterance (max_secs, 3..30), runs the
+    local Whisper, and writes dictate/result.json = {"id","ok","text"} (tmp + rename). Text only, capped at 500 chars.
+  - The audio exists only in memory: `del audio` right after transcription; nothing is written to disk. Not sent to
+    Hermes, not logged, not a wake turn. Skipped (ok=false) while an alarm/reminder is ringing.
+  - Writes its pid to logs/dictate_ready at start and removes it at exit. Amara OS treats dictation as READY only
+    when that pid is the running amara_voice.py; otherwise the mic buttons stay disabled.
+  - No navy gate: dictation is always on-device (local Whisper, text-only result), so it works in normal use.
+
+Compatibility with amara-voice-speak.diff: independent. Made against the unpatched file; the hunks are separate
+and it uses a local `import atexit`, so the two apply in either order (checked with patch --dry-run on temp copies).
+
+What Taisun applies (live, non-git dir):
+  1. cd ~/projects/amara-voice && cp amara_voice.py amara_voice.py.bak-$(date +%F)
+  2. patch -p1 --dry-run < ~/projects/nexus-amara/tasks/proposed/amara-voice-dictate.diff   (check it applies)
+  3. patch -p1 < ~/projects/nexus-amara/tasks/proposed/amara-voice-dictate.diff
+  4. Restart Amara Voice (Voice panel: Stop, Start, or ./amara stop && ./amara start).
+  5. First use: macOS may ask for microphone access for the Python the loop runs under (it already has it if the
+     loop hears you today). Never type or dictate into the app while testing unless it is you.
+
+How to test (local only):
+  1. ls ~/projects/amara-voice/logs/dictate_ready -> loop pid; ls -ld dictate/ -> 0700.
+  2. Open Life > New goal; the mic button is now enabled (disabled before). No Navy switch is needed.
+  3. Click the mic, say "run three times a week". The text appears in the box and goes to the usual
+     "Check before saving" preview; nothing is saved until you press Save.
+  4. Home > Check-in mic: same, text fills the box; you still press Save.
+  5. find ~/projects/amara-voice -newer logs/dictate_ready -name '*.wav' -o -newer logs/dictate_ready -name '*.npy'
+     -> nothing; ls dictate/ -> empty between uses.
+  6. Stop Amara Voice: logs/dictate_ready disappears and the mic buttons disable again.
+=====================================================================
+--- a/amara_voice.py	2026-11-14 15:18:38
++++ b/amara_voice.py	2026-11-14 15:18:56
+@@ -52,6 +52,13 @@
+ RATE = 16000
+ FRAME = 480  # 30 ms at 16 kHz, a valid webrtcvad frame
+ PREROLL_FRAMES = 17  # ~0.5 s kept before speech starts; Whisper drops a leading "Amara" without it
++DICTATE_DIR = HERE / "dictate"  # Amara OS drops request.json here, reads result.json back (files only, no network)
++DICTATE_READY = HERE / "logs" / "dictate_ready"  # holds this process's pid while the dictation watcher runs
++DICTATE_MAX_CHARS = 500
++DICTATE_MAX_AGE_S = 15  # a request older than this is stale: dropped, never recorded
++DICTATE_PENDING = threading.Event()  # set by dictate_watcher; the main loop (sole owner of the mic stream) answers it
++DICTATE_REQ = {}
++DICTATE = object()  # what Ears.next_utterance(interruptible=True) returns when a dictation is waiting
+ FOLLOW_UP_S = 6
+ # Self-talk guards (live session 2026-10-31: she kept "hearing" her own tail / room noise in the follow-up window).
+ ECHO_GUARD_S = 0.35  # after her audio has drained: let the room ring out before the follow-up window opens
+@@ -189,7 +196,7 @@
+         if n := self.stream.read_available:
+             self.stream.read(n)
+ 
+-    def next_utterance(self, timeout_s=None, max_s=15, silence_s=0.8):
++    def next_utterance(self, timeout_s=None, max_s=15, silence_s=0.8, interruptible=False):
+         """Return float32 audio of the next utterance, or None if nobody starts talking within timeout_s."""
+         preroll = collections.deque(maxlen=PREROLL_FRAMES)
+         frames, voiced, quiet, started = [], 0, 0, False
+@@ -204,6 +211,8 @@
+             if not speech:
+                 self._track_floor(rms)
+             if not started:
++                if interruptible and DICTATE_PENDING.is_set():
++                    return DICTATE  # idle only: never cuts into someone already speaking
+                 preroll.append(pcm)
+                 voiced = voiced + 1 if speech else 0
+                 if speech:
+@@ -269,6 +278,76 @@
+     return None
+ 
+ 
++def write_dictate_result(req_id, text):
++    """Text only (or ok=false), atomically. The audio never reaches this function or the disk."""
++    DICTATE_DIR.mkdir(mode=0o700, exist_ok=True)
++    tmp = DICTATE_DIR / "result.json.tmp"
++    tmp.write_text(json.dumps({"id": req_id, "ok": bool(text), "text": text}))
++    tmp.replace(DICTATE_DIR / "result.json")
++
++
++def run_dictation(ears, asr, out_dev, req, busy=False):
++    """One on-device dictation for Amara OS, on the mic stream the loop already owns: record once, transcribe with the
++    local Whisper (asr.py), answer with TEXT ONLY. The audio exists only in this function's memory and is dropped."""
++    text = ""
++    try:
++        if not busy:
++            ears.flush()
++            chime(out_dev, "wake")
++            ears.flush()  # the chime must not be the dictation
++            audio = ears.next_utterance(timeout_s=8, max_s=req["max_secs"])
++            if audio is not None:
++                try:
++                    tr = transcribe(asr, audio)
++                    if tr.verdict != "noise":
++                        text = " ".join(str(tr.text).split())[:DICTATE_MAX_CHARS]
++                finally:
++                    del audio  # dropped now; nothing is ever written to disk
++    except Exception as e:
++        print(f"  [dictation failed: {type(e).__name__}]", flush=True)
++        text = ""
++    finally:
++        DICTATE_REQ.clear()
++        DICTATE_PENDING.clear()
++    try:
++        write_dictate_result(req["id"], text)
++    except OSError:
++        pass
++
++
++def dictate_watcher(stop=None):
++    """Polls dictate/request.json (0.4 s), reads and deletes it. Fails closed: only a fresh request with a known
++    purpose ("add" or "checkin") is queued, one at a time; the recording itself happens in the main loop."""
++    req = DICTATE_DIR / "request.json"
++    while not (stop and stop.is_set()):
++        time.sleep(0.4)
++        try:
++            raw = req.read_text()
++            req.unlink()
++        except OSError:
++            continue
++        try:
++            d = json.loads(raw)
++            fresh = abs(time.time() * 1000 - float(d["ts"])) <= DICTATE_MAX_AGE_S * 1000
++            if not (fresh and d["purpose"] in ("add", "checkin") and not DICTATE_PENDING.is_set()):
++                continue
++            DICTATE_REQ.update(id=str(d["id"])[:40], max_secs=max(3, min(30, int(d["max_secs"]))))
++        except Exception:
++            continue
++        DICTATE_PENDING.set()
++
++
++def start_dictation():
++    import atexit  # local: the speak patch also adds a top-level import atexit
++
++    DICTATE_DIR.mkdir(mode=0o700, exist_ok=True)
++    for f in ("request.json", "result.json", "result.json.tmp"):
++        (DICTATE_DIR / f).unlink(missing_ok=True)
++    DICTATE_READY.write_text(f"{os.getpid()}\n")
++    atexit.register(lambda: DICTATE_READY.unlink(missing_ok=True))  # Amara OS sees "not ready" once she stops
++    threading.Thread(target=dictate_watcher, daemon=True).start()
++
++
+ def main():
+     ap = argparse.ArgumentParser()
+     ap.add_argument("--mic", default="MacBook Pro Microphone")
+@@ -323,6 +402,7 @@
+         ears = Ears(stream, webrtcvad.Vad(2))
+         barge = BargeIn(stream, whisper, mic=args.mic, speaker=args.speaker)
+         ears.flush()
++        start_dictation()
+         print("Listening for 'Amara'. Ctrl+C to quit.", flush=True)
+         chime(out, "ready")
+         follow_up = False
+@@ -342,7 +422,12 @@
+ 
+         while True:
+             icon.set("error" if errored else "listening" if follow_up else "idle")
+-            audio = ears.next_utterance(timeout_s=FOLLOW_UP_S if follow_up else None)
++            audio = ears.next_utterance(timeout_s=FOLLOW_UP_S if follow_up else None, interruptible=True)
++            if audio is DICTATE:  # Amara OS asked for one dictation (voice add / check-in): not a wake turn, no Hermes
++                follow_up, follow_ups, asked_repeat = False, 0, False
++                icon.set("listening")
++                run_dictation(ears, asr, out, dict(DICTATE_REQ), busy=skills.alerting.is_set())
++                continue
+             if audio is None:  # follow-up window closed
+                 follow_up, follow_ups, asked_repeat = False, 0, False
+                 chime(out, "done")

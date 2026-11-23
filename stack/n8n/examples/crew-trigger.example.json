@@ -1,0 +1,70 @@
+{
+  "name": "Example: start a Crews run (signed trigger)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "11111111-0000-4000-8000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the exact body once; the signature must cover these exact bytes.\nconst body = JSON.stringify({ name: 'n8n research', task: 'Summarise what the knowledge base says about X' });\nconst timestamp = String(Math.floor(Date.now() / 1000));\nreturn [{ json: { body, timestamp, toSign: timestamp + '.' + body } }];"
+      },
+      "id": "11111111-0000-4000-8000-000000000002",
+      "name": "Build body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "action": "hmac",
+        "type": "SHA256",
+        "value": "={{ $json.toSign }}",
+        "dataPropertyName": "signature",
+        "secret": "={{ $env.CREW_TRIGGER_SECRET }}",
+        "encoding": "hex"
+      },
+      "id": "11111111-0000-4000-8000-000000000003",
+      "name": "Sign (HMAC-SHA256)",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [440, 0],
+      "notes": "CREW_TRIGGER_SECRET must be provided to n8n by you (env or credential). It is never stored in this file."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://crew:8400/crews/trigger",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Crew-Timestamp", "value": "={{ $('Build body').item.json.timestamp }}" },
+            { "name": "X-Crew-Signature", "value": "=sha256={{ $json.signature }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $('Build body').item.json.body }}",
+        "options": {}
+      },
+      "id": "11111111-0000-4000-8000-000000000004",
+      "name": "Start run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Build body", "type": "main", "index": 0 }]] },
+    "Build body": { "main": [[{ "node": "Sign (HMAC-SHA256)", "type": "main", "index": 0 }]] },
+    "Sign (HMAC-SHA256)": { "main": [[{ "node": "Start run", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "pinData": {}
+}

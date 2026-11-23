@@ -73,6 +73,7 @@ fn save_in(dir: &std::path::Path, key: &str, value: String) -> Result<(), String
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn load_kv(key: String) -> Result<Option<String>, String> {
     if is_protected(&key) {
         return Err(RESERVED_KEY.into());
@@ -81,6 +82,7 @@ pub fn load_kv(key: String) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_kv(key: String, value: String) -> Result<(), String> {
     if is_protected(&key) {
         return Err(RESERVED_KEY.into());

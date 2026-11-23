@@ -1,0 +1,19 @@
+# PROPOSAL, not applied. Do not edit the live ~/projects/nexus/stack from the agent side.
+# Apply by hand to ~/projects/nexus/stack/docker-compose.yml (and the repo copy), then:
+#   cd ~/projects/nexus/stack && docker compose up -d crew
+# Prerequisite: the Amara app has run once (it mints <app data>/run/launch_token, dir 0700, file 0600).
+# The crew container user must be able to read the file: Docker Desktop on macOS maps bind mounts
+# to the host user, so a 0600 file owned by Taisun is readable. Verify with
+#   docker compose exec crew cat /run/amara/launch_token | wc -c   (expect 65)
+# Mount the DIRECTORY (not the file) so the app's atomic rename on each launch is visible.
+--- a/stack/docker-compose.yml
++++ b/stack/docker-compose.yml
+@@ crew: environment
+       CREW_SERVICE_TOKEN: ${CREW_SERVICE_TOKEN:?set CREW_SERVICE_TOKEN in .env}
++      # Per-launch token as a second accepted credential (static X-Crew-Token stays valid).
++      CREW_ACCEPT_LAUNCH_TOKEN: "1"
++      CREW_LAUNCH_TOKEN_FILE: /run/amara/launch_token
+       CREW_MAX_TASK_CHARS: ${CREW_MAX_TASK_CHARS:-4000}
+@@ crew: add a volumes block (crew has none today; if one is added later, merge)
++    volumes:
++      - ${HOME}/Library/Application Support/com.taisun.nexus/run:/run/amara:ro

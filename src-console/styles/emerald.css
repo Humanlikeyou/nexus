@@ -50,9 +50,9 @@
 .active-field .home__header {
   background: var(--hero-emerald);
   border-radius: var(--radius-lg, 12px);
-  padding: var(--space-4, 16px) var(--space-5, 20px);
+  padding: var(--space-4, 13px) var(--space-5, 21px);
   /* Negative margin keeps the h1 on the shared content edge. */
-  margin: calc(-1 * var(--space-4, 16px)) calc(-1 * var(--space-5, 20px)) 0;
+  margin: calc(-1 * var(--space-4, 13px)) calc(-1 * var(--space-5, 21px)) 0;
 }
 /* Active sidebar row: emerald tint, not a fill (sidebar background itself untouched). */
 :root main.command-surface .nav-group button.is-active { background: var(--active-emerald); }

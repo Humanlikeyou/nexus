@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const tauri = vi.hoisted(() => ({ setTheme: vi.fn(() => Promise.resolve()), invoke: vi.fn(() => Promise.resolve()) }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => { while (a.length && a[a.length - 1] === undefined) a.pop(); return (tauri.invoke as (...x: unknown[]) => unknown)(...a); } }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ setTheme: tauri.setTheme }) }));
 
 import { syncWindowTheme } from "./useAppearance";

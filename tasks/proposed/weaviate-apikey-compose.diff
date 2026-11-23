@@ -1,0 +1,30 @@
+# PROPOSAL, not applied. Do not edit the live ~/projects/nexus/stack from the agent side.
+# Apply by hand to ~/projects/nexus/stack/docker-compose.yml (and the repo copy) ONLY at step 2 of
+# tasks/proposed/weaviate-switchover.md. Needs WEAVIATE_API_KEY in stack/.env first (never printed).
+# This diff is stage 2a (key auth on, anonymous still on). Stage 2b is the one-line flip to "false".
+# NOT sufficient alone: n8n Code nodes also call Weaviate (see the switchover doc, step 0).
+--- a/stack/docker-compose.yml	2026-11-14 22:02:18
++++ b/stack/docker-compose.yml	2026-11-14 22:02:18
+@@ -134,7 +134,12 @@
+       - "127.0.0.1:8080:8080"
+     environment:
+       QUERY_DEFAULTS_LIMIT: 25
+-      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
++      # API-key auth. Values come from stack/.env; never write a literal key here.
++      # (/v1/.well-known/ready and /live stay unauthenticated, so the healthcheck below still works.)
++      AUTHENTICATION_APIKEY_ENABLED: "true"
++      AUTHENTICATION_APIKEY_ALLOWED_KEYS: ${WEAVIATE_API_KEY:?set WEAVIATE_API_KEY in .env}
++      AUTHENTICATION_APIKEY_USERS: ${WEAVIATE_API_USER:-amara}
++      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"   # step 2a. Step 2b: change to "false" (see switchover doc)
+       PERSISTENCE_DATA_PATH: /var/lib/weaviate
+       DEFAULT_VECTORIZER_MODULE: none
+       CLUSTER_HOSTNAME: weaviate
+@@ -165,6 +170,8 @@
+       - "127.0.0.1:8001:8000"   # 8001 avoids conflict if Windmill added later
+     environment:
+       WEAVIATE_URL_VERBA: "http://weaviate:8080"   # internal Docker network
++      # Verba authenticates to Weaviate with this (Verba's own HTTP API takes no key).
++      WEAVIATE_API_KEY_VERBA: ${WEAVIATE_API_KEY:?set WEAVIATE_API_KEY in .env}
+       # LLM / embedding backends
+       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

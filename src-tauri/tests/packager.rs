@@ -98,15 +98,16 @@ fn restore_allow_list() {
         &["sessions", "s1.json"],
         &["nexus-config", "config.json"],
         &["electron-config", "kv", "a"],
+    ] {
+        assert!(restore_allowed(ok), "{ok:?} should restore");
+    }
+    // Old backups' `openclaw/` folder is never restored (OpenClaw is uninstalled).
+    for bad in [
+        &["random.txt"][..],
         &["openclaw", "openclaw.json"],
         &["openclaw", "skills", "brief.md"],
         &["openclaw", "cron", "jobs.json"],
         &["openclaw", "memory", "2026", "10", "note.md"],
-    ] {
-        assert!(restore_allowed(ok), "{ok:?} should restore");
-    }
-    for bad in [
-        &["random.txt"][..],
         &["openclaw", "skills", "run.sh"],
         &["openclaw", "cron", "jobs.sh"],
         &["openclaw", "bin", "openclaw"],
@@ -147,11 +148,11 @@ fn a_normal_pack_unpacks_and_plans_only_allowed_files() {
     );
     let (mut restored, skipped) = plan_restore(&dest).unwrap();
     restored.sort();
-    assert_eq!(
-        restored,
-        vec!["goals.json".to_string(), "skills/brief.md".to_string()]
-    );
-    assert_eq!(skipped.len(), 2, "{skipped:?}");
+    assert_eq!(restored, vec!["goals.json".to_string()]);
+    assert_eq!(skipped.len(), 3, "{skipped:?}");
+    assert!(skipped
+        .iter()
+        .any(|s| s.starts_with("openclaw/skills/brief.md")));
     assert!(skipped
         .iter()
         .any(|s| s.starts_with("openclaw/skills/run.sh")));

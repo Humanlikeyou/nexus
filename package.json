@@ -9,6 +9,8 @@
     "test:neuro": "node --experimental-strip-types --test src-console/neuro/*.test.mjs",
     "bundle:local": "APPLE_SIGNING_IDENTITY=- tauri build",
     "preview": "vite preview",
+    "sidecars:prepare": "bash scripts/prepare-sidecars.sh",
+    "sidecars:check": "bash scripts/prepare-sidecars.sh --check",
     "tauri": "tauri",
     "mock-gateway": "node scripts/mock-gateway.mjs",
     "mock-gateway:partial": "node scripts/mock-gateway.mjs --partial",
@@ -25,7 +27,8 @@
     "@tauri-apps/api": "~2.11.1",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "three": "^0.170.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",

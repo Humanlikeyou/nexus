@@ -33,3 +33,10 @@ The router's loopback Host check doesn't stop containers.
 Cloud is off, and Ollama was already reachable, so a compromised container gains local model use only.
 
 Don't rely on the Host check as a container boundary. **Revisit if the cloud tier is enabled.**
+
+## Hermes API (127.0.0.1:8642) from Docker containers (checked 2026-11-11, read-only)
+
+- **Bind:** Hermes listens on `127.0.0.1:8642` only (`lsof`). Docker Desktop still forwards `host.docker.internal` to host loopback, so **every container on this Mac can reach it** (probe from `stack-crew-1`: HTTP 401, not "unreachable"). Other containers running today include `homeassistant`, `freqtrade-live`, n8n, Verba, Letta, Weaviate and Postgres.
+- **Auth: required.** `gateway/platforms/api_server.py` `_check_auth` checks `Authorization: Bearer` against `API_SERVER_KEY` with `hmac.compare_digest`, and `connect()` refuses to start without a usable key (≥16 chars). Unauthenticated and wrong-key requests got **401** from both the host and a container.
+- **Risk:** the key is the only barrier between any container and Hermes's terminal, file and web toolsets. It is 48 hex chars = **24 bytes** of entropy, below the 32-byte bar used elsewhere in this stack. It is in the **final rotation batch** (with Taisun's OK, after everything else): rotate to ≥32 random bytes (`openssl rand -hex 32`), update `~/.hermes/.env` and every client (Nexus reads it from `.env` on each send; amara-voice; cron tools).
+- **Optional hardening (Taisun decides; nothing applied):** don't give containers the key (none needs it today: crew-service talks to the router and n8n, not Hermes), and consider a pf rule or Hermes-side source check if Hermes ever stops requiring the key. Steps: `TAISUN-STEPS.md`.

@@ -1,13 +1,15 @@
-import { activeField, expect, navButton, openApp, openView, routeSettled, test, openMore } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, openHomeChat, openView, routeSettled, test, openMore } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 const SECTIONS: { label: string; h1: RegExp }[] = [
-  { label: "Today", h1: /^Command Center$/ },
-  { label: "Chat & Agents", h1: /^Amara$/ },
+  // Order = ⌘1–7 (decision 0009). Life opens on Goals.
+  { label: "Today", h1: /^Today$/ },
+  { label: "Life", h1: /^Goals$/ },
   { label: "Mind–Body", h1: /^Mind–Body$/ },
-  { label: "Business", h1: /^Business$/ },
-  { label: "Settings", h1: /^Settings$/ },
+  { label: "Enterprise", h1: /^Enterprise$/ },
+  { label: "Agents", h1: /^Agents$/ },
   { label: "Smart home", h1: /^Smart home$/ },
+  { label: "Settings", h1: /^Settings$/ },
 ];
 
 test.describe("sections", () => {
@@ -24,14 +26,14 @@ test.describe("sections", () => {
 test.describe("sub-views and anchors", () => {
   type Field = ReturnType<typeof activeField>;
   const SUBVIEWS: [string, string, (f: Field) => Promise<void>][] = [
-    ["Chat & Agents", "Activity", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Activity")],
-    ["Chat & Agents", "Lists", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Lists")],
-    ["Chat & Agents", "Crews", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Crews")],
-    ["Chat & Agents", "Voice", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Voice"); await f.getByText("Her voice, process and recent turns").click(); await expect(f.getByRole("list", { name: "Recent turns" })).toBeVisible(); }],
+    ["Agents", "Crews", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Crews")],
     ["Mind–Body", "Fitness", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Fitness")],
     ["Mind–Body", "Neuro", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro")],
-    ["Mind–Body", "Neuro history", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("History"); await expect(f.getByRole("list", { name: "History" })).toBeVisible(); }],
-    ["Business", "Revenue", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Business")],
+    ["Mind–Body", "Neuro history", async (f) => { await expect(f.getByRole("heading", { level: 1 })).toHaveText("Neuro history"); await expect(f.getByRole("table", { name: "Recordings" })).toBeVisible(); }],
+    ["Enterprise", "Finances", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Finances")],
+    ["Enterprise", "Decisions", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Decisions")],
+    ["Life", "Dates & deadlines", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Dates & deadlines")],
+    ["Life", "Weekly review", (f) => expect(f.getByRole("heading", { level: 1 })).toHaveText("Weekly review")],
   ];
   for (const [host, view, check] of SUBVIEWS) {
     test(`(b) ${host} › ${view} via the SegmentedControl`, async ({ page, theme, consoleErrors }) => {
@@ -46,9 +48,15 @@ test.describe("sub-views and anchors", () => {
   }
 
   const ANCHORS: [string, string, string][] = [
-    ["Settings", "Settings › Devices", "#devices"],
+    // design-1111s: Devices and Voice are Settings tabs; the command opens the tab at its top.
+    ["Settings", "Settings › Devices", "[data-tab=devices]"],
     ["Settings", "About Amara OS", "#about"],
-    ["Today", "Home › Goals", "#goals"],
+    // design-1111v: Goals moved to Life; Today keeps Needs you today and To-dos (was Lists).
+    ["Today", "Today › Needs you today", "#needs-you"],
+    ["Today", "Today › To-dos", "#lists"],
+    ["Agents", "Agents › Activity", "#activity"],
+    ["Settings", "Settings › Voice", "#voice"],
+    ["Settings", "Settings › General › Updates", "#updates"],
   ];
   for (const [host, command, anchor] of ANCHORS) {
     test(`(b) ${command} scrolls ${anchor} into view`, async ({ page, theme, consoleErrors }) => {
@@ -66,12 +74,12 @@ test.describe("sub-views and anchors", () => {
 test.describe("Mind–Body host: nothing folded in is out of reach", () => {
   const selected = (page: import("@playwright/test").Page, name: string) => activeField(page, "Mind–Body").getByRole("radio", { name, exact: true });
 
-  test("the sidebar has six items and Overview is the default", async ({ page, theme }) => {
+  test("the sidebar has seven items and Overview is the default", async ({ page, theme }) => {
     await openApp(page, { theme });
     await navButton(page, "Mind–Body").click();
-    await expect(page.locator("nav.system-constellation > .nav-group button")).toHaveCount(6);
+    await expect(page.locator("nav.system-constellation > .nav-group button")).toHaveCount(7);
     await expect(page.locator("nav.system-constellation").getByRole("button", { name: /^(Fitness|Neuro)/ })).toHaveCount(0);
-    await expect(activeField(page, "Mind–Body").getByRole("radiogroup", { name: "Mind–Body view" }).getByRole("radio")).toHaveText(["Overview", "Fitness", "Neuro", "Neuro history"]);
+    await expect(activeField(page, "Mind–Body").getByRole("radiogroup", { name: "Mind–Body view" }).getByRole("radio")).toHaveText(["Overview", "Fitness", "Neuro", "Neuro history", "Patterns"]);
     await expect(selected(page, "Overview")).toHaveAttribute("aria-checked", "true");
     await expect(activeField(page, "Mind–Body").getByRole("heading", { level: 1 })).toHaveText("Mind–Body");
   });
@@ -109,18 +117,19 @@ test.describe("Mind–Body host: nothing folded in is out of reach", () => {
   });
 });
 
-test("(c) ⌘1–6 open the six sections in order", async ({ page, theme, consoleErrors }) => {
+test("(c) ⌘1–7 open the seven sections in order", async ({ page, theme, consoleErrors }) => {
   await openApp(page, { theme });
   for (const [i, { label, h1 }] of SECTIONS.entries()) {
     await page.keyboard.press(`Meta+${i + 1}`);
     // ⌘1 is Home, the lens landing page; Today is its sub-view and has no shortcut.
-    await expect(activeField(page, i === 0 ? "Home" : label).getByRole("heading", { level: 1 })).toHaveText(h1);
+    // design-1111v: Today's h1 is "Today" now; the Home lens keeps its hidden "Command Center" h1.
+    await expect(activeField(page, i === 0 ? "Home" : label).getByRole("heading", { level: 1 })).toHaveText(i === 0 ? "Command Center" : h1);
   }
   expect(consoleErrors).toEqual([]);
 });
 
 test.describe("(d) ⌘K palette", () => {
-  test('"rev" + Enter opens Business › Revenue', async ({ page, theme }) => {
+  test('"rev" + Enter opens Enterprise › Finances (the old Revenue view)', async ({ page, theme }) => {
     await openApp(page, { theme });
     await page.keyboard.press("Meta+k");
     const input = page.getByRole("combobox", { name: "Search or ask Amara" });
@@ -128,7 +137,7 @@ test.describe("(d) ⌘K palette", () => {
     await input.fill("rev");
     await page.keyboard.press("Enter");
     await expect(input).toBeHidden();
-    await expect(activeField(page, "Business").getByRole("radio", { name: "Revenue" })).toHaveAttribute("aria-checked", "true");
+    await expect(activeField(page, "Enterprise").getByRole("radio", { name: "Finances" })).toHaveAttribute("aria-checked", "true");
   });
 
   test("no match → Ask Amara pre-fills the Chat composer", async ({ page, theme }) => {
@@ -139,7 +148,8 @@ test.describe("(d) ⌘K palette", () => {
     await expect(options).toHaveCount(1);
     await expect(options.first()).toContainText("Ask Amara: “zz no such command”");
     await page.keyboard.press("Enter");
-    await expect(activeField(page, "Chat & Agents").locator("#chat-composer")).toHaveValue("zz no such command");
+    await expect(page.locator(".landing .hchat #chat-composer")).toHaveValue("zz no such command");
+    await expect(page.locator(".landing .hchat #chat-composer")).toBeFocused();
   });
 
   test("Esc closes", async ({ page, theme }) => {
@@ -154,7 +164,7 @@ test.describe("(d) ⌘K palette", () => {
 
 /** One left edge (screen-specs › shared container): the content column starts at the same x on
  *  every section. Chat's h1 sits in its middle column, so Chat is measured by its first column;
- *  Settings is a centred 640pt preferences column by design and is pinned separately. */
+ *  Settings shares the same column (design-1110 P14.1). */
 test("(d) one content edge: h1s, Chat's first column and the sub-view bar line up", async ({ page, theme }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openApp(page, { theme });
@@ -166,30 +176,29 @@ test("(d) one content edge: h1s, Chat's first column and the sub-view bar line u
     return (await target.boundingBox())!.x;
   };
   const home = await left("Today");
-  for (const label of ["Mind–Body", "Fitness", "Neuro", "Activity", "Lists", "Crews", "Voice", "Business", "Revenue", "Smart home", "Chat & Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
+  for (const label of ["Mind–Body", "Fitness", "Neuro", "Crews", "Enterprise", "Finances", "Decisions", "Life", "Dates & deadlines", "Smart home", "Agents"]) expect(await left(label), label).toBeCloseTo(home, 0);
 
-  // Sub-view bars (Mind–Body, Chat/Activity/Crews, Business) sit on the same edge.
-  for (const label of ["Mind–Body", "Chat & Agents", "Business"]) {
+  // Sub-view bars (Mind–Body, Chat/Activity/Crews, Life, Enterprise) sit on the same edge.
+  for (const label of ["Mind–Body", "Agents", "Life", "Enterprise"]) {
     await navButton(page, label).click();
     const bar = activeField(page, label).locator(".subview-bar [role=radiogroup]").first();
     if (await bar.count()) expect((await bar.boundingBox())!.x, `${label} bar`).toBeCloseTo(home, 0);
   }
   const history = await openView(page, "Neuro history");
-  await expect(history.getByRole("heading", { level: 1 })).toHaveText("History");
+  await expect(history.getByRole("heading", { level: 1 })).toHaveText("Neuro history");
   expect((await history.getByRole("heading", { level: 1 }).boundingBox())!.x).toBeCloseTo(home, 0);
 
-  // Settings: its own centred column.
+  // Settings joins the shared column at the shared header height (design-1110 P14.1).
   await navButton(page, "Settings").click();
   const settings = (await activeField(page, "Settings").getByRole("heading", { level: 1 }).boundingBox())!.x;
-  expect(settings).toBeGreaterThan(home);
+  expect(settings).toBeCloseTo(home, 0);
 });
 
 test("(e) Chat: composer ≥ 12px above the window bottom, no horizontal scroll at minimum width", async ({ page, theme }) => {
   for (const size of [{ width: 1440, height: 900 }, { width: 900, height: 620 }]) {
     await page.setViewportSize(size);
     await openApp(page, { theme });
-    await navButton(page, "Chat & Agents").click();
-    const composer = activeField(page, "Chat & Agents").locator(".chat-screen__composer");
+    const composer = (await openHomeChat(page)).locator(".chat-screen__composer");
     await composer.waitFor();
     const box = (await composer.boundingBox())!;
     expect(size.height - (box.y + box.height), `${size.width}×${size.height}`).toBeGreaterThanOrEqual(12);

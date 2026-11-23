@@ -40,9 +40,27 @@ export async function emulateDisplay(page: Page, theme: Theme, rt: Reduce, rm: R
   await page.evaluate(apply, rt === "reduce");
 }
 
-/** Whether emulateDisplay's reduced transparency took effect in this engine. */
-export const reducedTransparency = (page: Page) =>
-  page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches || document.documentElement.getAttribute("data-reduce-transparency") === "true");
+/**
+ * The app's own reduced-transparency state: the sidebar drops its blur and paints the solid glass
+ * fill (--glass-solid). This reads what the app's CSS actually computed, so it is false if the app's
+ * fallback breaks, whatever the fixture set up.
+ */
+export const appFallbackApplied = (page: Page) =>
+  page.evaluate(() => {
+    const nav = document.querySelector("main.command-surface > nav.system-constellation");
+    if (!nav) return false;
+    const style = getComputedStyle(nav);
+    const probe = document.createElement("i");
+    probe.style.background = "var(--glass-solid)";
+    document.body.appendChild(probe);
+    const solid = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return (style.backdropFilter || "none") === "none" && solid !== "rgba(0, 0, 0, 0)" && style.backgroundColor === solid;
+  });
+
+/** Whether reduced transparency took effect in the engine AND the app's fallback is really applied (appFallbackApplied). */
+export const reducedTransparency = async (page: Page) =>
+  (await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches || document.documentElement.getAttribute("data-reduce-transparency") === "true")) && (await appFallbackApplied(page));
 
 export interface MockOptions {
   theme: Theme;
@@ -51,12 +69,21 @@ export interface MockOptions {
   data?: Responses;
   /** Per-command response delay in ms (e.g. to make the boot splash appear). */
   delays?: Record<string, number>;
+  /** design-1111v: clock start (ISO); defaults to NOW (Wed Oct 28 14:00 JST). E.g. a Sunday for the weekly-review card. */
+  now?: string;
+  /**
+   * design-1118b: Home lens. The box has software GL only, so e2e defaults to the classic lens unless a
+   * spec (or an earlier init script) chose one; sand-lens.spec / the 1118b captures opt in with "sand".
+   */
+  lens?: "sand" | "classic";
 }
 
-type InitArgs = { data: Responses; theme: Theme; reduceMotion: boolean; failing: string[]; delays: Record<string, number> };
+type InitArgs = { data: Responses; theme: Theme; reduceMotion: boolean; failing: string[]; delays: Record<string, number>; lens?: "sand" | "classic" };
 
-function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
+function initScript({ data, theme, reduceMotion, failing, delays, lens }: InitArgs) {
   localStorage.setItem("nexus.appearance.theme", theme);
+  if (lens) localStorage.setItem("nexus.sandLens", JSON.stringify({ ...JSON.parse(localStorage.getItem("nexus.sandLens") || "{}"), lens }));
+  else if (!localStorage.getItem("nexus.sandLens")) localStorage.setItem("nexus.sandLens", JSON.stringify({ lens: "classic" }));
   localStorage.setItem("nexus.appearance.reduceMotion", String(reduceMotion));
   localStorage.setItem("nexus.sidebarWidth", "220");
   const callbacks = new Map<number, unknown>();
@@ -114,7 +141,7 @@ function initScript({ data, theme, reduceMotion, failing, delays }: InitArgs) {
 
 /** Install the mock and a running clock at NOW, then open the app. */
 export async function openApp(page: Page, options: MockOptions): Promise<void> {
-  await page.clock.install({ time: new Date(NOW) });
+  await page.clock.install({ time: new Date(options.now ?? NOW) });
   // A frozen Date.now() would make every snapshot look like INITIAL_SNAPSHOT (= loading).
   await page.clock.resume();
   await page.addInitScript(initScript, {
@@ -123,6 +150,7 @@ export async function openApp(page: Page, options: MockOptions): Promise<void> {
     reduceMotion: options.reduceMotion ?? false,
     failing: options.failing ?? [],
     delays: options.delays ?? {},
+    lens: options.lens,
   });
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "Amara OS navigation" })).toBeVisible();
@@ -163,14 +191,42 @@ export const emitTauriEvent = (page: Page, event: string, payload: unknown) =>
 export const setMock = (page: Page, cmd: string, value: unknown) =>
   page.evaluate(([c, v]) => { (window as unknown as { __E2E_DATA: Record<string, unknown> }).__E2E_DATA[c as string] = v; }, [cmd, value] as const);
 
-/** Sidebar button for a section, e.g. "Chat & Agents". */
+/** Sidebar button for a section, e.g. "Agents". */
 export const navButton = (page: Page, label: string) =>
   page.getByRole("navigation", { name: "Amara OS navigation" }).getByRole("button", { name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }).first();
 
 /** The visible screen region ("<label> system"). */
 export const activeField = (page: Page, label: string) => page.getByRole("region", { name: `${label} system` });
 
-const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Activity: "Chat & Agents", Lists: "Chat & Agents", Crews: "Chat & Agents", Voice: "Chat & Agents", Revenue: "Business" };
+const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: "Mind–Body", "Neuro history": "Mind–Body", Crews: "Agents",
+  // design-1111v: Enterprise tabs (Business renamed) and Life tabs. Old labels map to the renamed tab (RADIO_ALIAS).
+  Overview: "Enterprise", Decisions: "Enterprise", Ventures: "Enterprise", Finances: "Enterprise", Tasks: "Enterprise", Content: "Enterprise",
+  Money: "Enterprise", Work: "Enterprise", Revenue: "Enterprise",
+  Goals: "Life", "Weekly review": "Life", "Dates & deadlines": "Life", "Personal money": "Life",
+  // design-1111s: Settings tabs.
+  Services: "Settings", Devices: "Settings", Notifications: "Settings", Backup: "Settings", Voice: "Settings", Memory: "Settings" };
+/** design-1110b B: folded screens that are now a section of a host page (label → host, anchor id). */
+const SECTION_HOSTS: Record<string, [string, string]> = { Activity: ["Agents", "activity"], Lists: ["Today", "lists"], "To-dos": ["Today", "lists"], "Needs you today": ["Today", "needs-you"] };
+/** design-1111v renames: the label a spec used → the tab it is now. */
+const RADIO_ALIAS: Record<string, string> = { Money: "Finances", Revenue: "Finances", Work: "Tasks" };
+
+/** Goes to Today from wherever the page is: from the landing its button, from anywhere else Home first. */
+export async function gotoToday(page: Page) {
+  const today = navButton(page, "Today");
+  if (!(await today.isVisible().catch(() => false))) { await navButton(page, "Home").click(); await routeSettled(page).catch(() => undefined); }
+  await navButton(page, "Today").click();
+  return activeField(page, "Today");
+}
+
+/** The Home chat under the lens (design-1110b A). Opens Home first when it isn't showing. */
+export async function openHomeChat(page: Page, { expand = false }: { expand?: boolean } = {}) {
+  const panel = page.locator(".landing .hchat");
+  if (!(await panel.isVisible().catch(() => false))) { await navButton(page, "Home").click(); await routeSettled(page).catch(() => undefined); }
+  await expect(panel).toBeVisible();
+  // Expand is the largest the chat gets (no Full page): the whole thread, scrollable.
+  if (expand && (await panel.getAttribute("data-state")) !== "expanded") await panel.getByRole("button", { name: "Expand" }).click();
+  return panel;
+}
 
 /** Resolves once a route transition and its enter animation have finished. */
 export const routeSettled = (page: Page) => page.waitForFunction(() => !document.documentElement.dataset.routeMotion);
@@ -184,13 +240,33 @@ export async function openMore(page: Page) {
   while (await closed.count()) await closed.first().click();
 }
 
+/** design-1111s: opens Settings on a tab (General · Services · Devices · Notifications · Backup · Voice · Memory). */
+export async function openSettingsTab(page: Page, tab: string) {
+  await navButton(page, "Settings").click();
+  const field = activeField(page, "Settings");
+  if (tab !== "General") {
+    const radio = field.getByRole("radio", { name: tab, exact: true });
+    await radio.click();
+    await expect(radio).toHaveAttribute("aria-checked", "true");
+  }
+  await routeSettled(page).catch(() => undefined);
+  return field;
+}
+
 /** Opens a section, or a sub-view through its host, and returns the screen region. */
 export async function openView(page: Page, label: string) {
+  const section = SECTION_HOSTS[label];
+  if (section) {
+    const [host, id] = section;
+    const field = host === "Today" ? await gotoToday(page) : (await navButton(page, host).click(), activeField(page, host));
+    await field.locator(`#${id}.page-section`).scrollIntoViewIfNeeded();
+    return field;
+  }
   const host = SUB_VIEW_HOSTS[label];
   await navButton(page, host ?? label).click();
   const field = activeField(page, host ?? label);
   if (host) {
-    const radio = field.getByRole("radio", { name: label, exact: true });
+    const radio = field.getByRole("radio", { name: RADIO_ALIAS[label] ?? label, exact: true });
     await radio.click();
     await expect(radio).toHaveAttribute("aria-checked", "true");
   }

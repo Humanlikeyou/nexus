@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { activeField, expect, navButton, openApp, test, openMore } from "./fixtures/tauri-mock";
+import { activeField, expect, navButton, openApp, openSettingsTab, test, openMore } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
 const SHOTS = process.env.MIND_BODY_SHOTS; // e.g. /tmp/mind-body-shots (screenshots only when set)
@@ -35,7 +35,8 @@ test.describe("Mind–Body", () => {
     const f = activeField(page, "Mind–Body");
     const inactive = f.locator(".subsystem-inactive");
     await expect(inactive).toBeVisible();
-    await expect(inactive).toContainText("NOOP isn't installed.");
+    await expect(inactive).toContainText("Amara's health reader isn't set up on this Mac yet.");
+    await expect(inactive).not.toContainText("NOOP");
     await expect(f.getByRole("button", { name: "Check again" })).toBeVisible();
     await shot(page, `inactive-${theme}`);
   });
@@ -49,13 +50,12 @@ test.describe("Mind–Body", () => {
     await expect(f.getByRole("button", { name: "Retry" })).toBeVisible();
   });
 
-  test("Settings › WHOOP controls", async ({ page, theme }) => {
+  test("Settings › Devices › WHOOP connection", async ({ page, theme }) => {
     await openApp(page, { theme });
-    await navButton(page, "Settings").click();
-    const f = activeField(page, "Settings");
+    const f = await openSettingsTab(page, "Devices");
     await openMore(page);
-    await expect(f.getByRole("radio", { name: "NOOP (recommended)" })).toHaveAttribute("aria-checked", "true");
-    await f.getByLabel("NOOP binary path").fill("relative/noop");
+    await expect(f.getByRole("radio", { name: "Health sync (recommended)" })).toHaveAttribute("aria-checked", "true");
+    await f.getByLabel("Health reader path").fill("relative/noop");
     await expect(f.getByText("Use a full path that starts with /.")).toBeVisible();
     await f.locator("#noop-settings").scrollIntoViewIfNeeded();
     if (SHOTS) await f.locator("#noop-settings").screenshot({ path: `${SHOTS}/settings-${theme}.png` });

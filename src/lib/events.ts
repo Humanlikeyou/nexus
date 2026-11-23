@@ -4,7 +4,7 @@ import type {
   RecordedSession,
   NfSession,
   Goal,
-} from "./types";
+} from "../../src-console/legacy-core/lib/types";
 
 export function snapshotToEvents(
   snapshot: BrainSnapshot,

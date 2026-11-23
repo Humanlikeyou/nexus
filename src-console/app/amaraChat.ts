@@ -5,10 +5,10 @@
  * - injectionGuard.ts on ingested/external content before it reaches a prompt
  * - contextCompressor.ts on long histories before they are sent
  */
-import { scanForInjection } from "@/terrance/system/injectionGuard";
-import { compressIfNeeded, type CompressibleMessage } from "@/terrance/system/contextCompressor";
-import type { DeliberationResult } from "@/terrance/system/deliberation";
-import type { RouterResponse } from "@/lib/types";
+import { scanForInjection } from "../legacy-core/terrance/system/injectionGuard";
+import { compressIfNeeded, type CompressibleMessage } from "../legacy-core/terrance/system/contextCompressor";
+import type { DeliberationResult } from "../legacy-core/terrance/system/deliberation";
+import type { RouterResponse } from "../legacy-core/lib/types";
 import type { AmaraContextSection, AmaraTierInfo, ChatTurn } from "../types";
 import type { ConversationMessage } from "./conversation";
 
@@ -47,7 +47,7 @@ export function guardSections(sections: AmaraContextSection[]): { sections: Amar
  */
 export function historyTurns(messages: ConversationMessage[]): ChatTurn[] {
   return messages
-    .filter((m) => m.status !== "failed" && m.content.trim() !== "")
+    .filter((m) => m.status !== "failed" && !m.local && m.content.trim() !== "")
     .map((m) => ({ role: m.role, content: m.role === "assistant" ? guardExternal(m.content).text : m.content }));
 }
 

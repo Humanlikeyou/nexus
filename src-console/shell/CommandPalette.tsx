@@ -4,20 +4,30 @@ import { HOST_VIEWS, SYSTEMS, TODAY_LABEL, TODAY_ROUTE, type Route } from "../ap
 import { Dialog } from "../ui";
 import "./CommandPalette.css";
 
-export type PaletteCommand = { id: string; label: string; hint?: string; route?: Route; run?: () => void };
+export type PaletteCommand = { id: string; label: string; hint?: string; route?: Route; run?: () => void; keywords?: string };
 
-/** Navigation commands: the 6 sections (⌘1–6) and their sub-views / anchors. */
+/** design-1111v: old names still find the renamed pages (typing "revenue" finds Finances). */
+const OLD_NAMES: Record<string, string> = {
+  "enterprise:main": "business", "enterprise": "business", "enterprise:finances": "revenue money business", "enterprise:tasks": "work business", "enterprise:decisions": "votes business",
+  "enterprise:ventures": "business", "enterprise:content": "pipeline business", "life:dates": "life admin deadlines", "life:money": "personal business", "life:goals": "trajectory", "terrance:lists": "lists",
+};
+
+/** Navigation commands: the 7 sections (⌘1–7) and their sub-views / anchors. */
 export function paletteCommands(extra: PaletteCommand[] = []): PaletteCommand[] {
-  const sections = SYSTEMS.map((s, i) => ({ id: s.id, label: s.label, hint: `⌘${i + 1}`, route: { id: s.id, view: "main" } }));
+  const sections = SYSTEMS.map((s, i) => ({ id: s.id, label: s.label, hint: `⌘${i + 1}`, route: { id: s.id, view: "main" }, keywords: OLD_NAMES[s.id] }));
   const subs: PaletteCommand[] = [];
   for (const s of SYSTEMS) {
-    for (const v of HOST_VIEWS[s.id] ?? []) if (v.view !== "main") subs.push({ id: `${s.id}:${v.view}`, label: `${s.label} › ${v.label}`, route: { id: s.id, view: v.view } });
+    for (const v of HOST_VIEWS[s.id] ?? []) if (v.view !== "main") subs.push({ id: `${s.id}:${v.view}`, label: `${s.label} › ${v.label}`, route: { id: s.id, view: v.view }, keywords: OLD_NAMES[`${s.id}:${v.view}`] });
   }
   subs.push(
     { id: "terrance:today", label: `Home › ${TODAY_LABEL}`, route: TODAY_ROUTE },
-    { id: "terrance:goals", label: "Home › Goals", route: { id: "terrance", view: "goals" } },
-    { id: "settings:devices", label: "Settings › Devices", route: { id: "settings", view: "devices" } },
+    // design-1111v: Goals, Life admin and Weekly review moved to Life (the host tabs above); Lists is To-dos.
+    { id: "terrance:needs-you", label: `${TODAY_LABEL} › Needs you today`, route: { id: "terrance", view: "needs-you" } },
+    { id: "terrance:checkin", label: `${TODAY_LABEL} › Check-in`, route: { id: "terrance", view: "checkin" } },
+    { id: "terrance:lists", label: `${TODAY_LABEL} › To-dos`, route: { id: "terrance", view: "lists" }, keywords: OLD_NAMES["terrance:lists"] },
+    { id: "chat:activity", label: "Agents › Activity", route: { id: "chat", view: "activity" } },
     { id: "settings:about", label: "About Amara OS", route: { id: "settings", view: "about" } },
+    { id: "settings:updates", label: "Settings › General › Updates", route: { id: "settings", view: "updates" } },
   );
   return [...sections, ...subs, ...extra];
 }
@@ -25,14 +35,18 @@ export function paletteCommands(extra: PaletteCommand[] = []): PaletteCommand[] 
 export function filterCommands(commands: PaletteCommand[], query: string): PaletteCommand[] {
   const q = query.trim().toLowerCase();
   if (!q) return commands;
-  return commands.filter((c) => c.label.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
+  const hits = commands.filter((c) => c.label.toLowerCase().includes(q) || c.id.toLowerCase().includes(q) || (c.keywords ?? "").includes(q));
+  // design-1111v: an old page name typed from habit ("rev" for Revenue) still lands where that page went,
+  // so a command whose old name starts with the query comes first. The rest keep their order.
+  const oldName = (c: PaletteCommand) => q.length >= 3 && (c.keywords ?? "").split(/\s+/).some((w) => w.startsWith(q));
+  return [...hits.filter(oldName), ...hits.filter((c) => !oldName(c))];
 }
 
 type Props = {
   open: boolean;
   onClose: () => void;
   onNavigate: (route: Route) => void;
-  /** No-match fallback: open Chat & Agents with the text pre-filled. */
+  /** No-match fallback: open the Home chat with the text pre-filled. */
   onAsk: (text: string) => void;
   extra?: PaletteCommand[];
 };

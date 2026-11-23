@@ -34,7 +34,7 @@ const ITEM_STATUSES: &[&str] = &[
     "superseded",
 ];
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextItem {
     pub id: String,
@@ -53,7 +53,7 @@ pub struct ContextItem {
     pub metadata: Value,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateContextItemInput {
     pub kind: String,
@@ -67,7 +67,7 @@ pub struct CreateContextItemInput {
     pub metadata: Option<Value>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CorrectContextItemInput {
     pub original_id: String,
@@ -97,7 +97,7 @@ pub(crate) struct HermesContextEvent {
     pub context_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextItemQuery {
     pub kinds: Option<Vec<String>>,
@@ -106,7 +106,7 @@ pub struct ContextItemQuery {
     pub limit: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrenceContextSnapshot {
     pub generated_at: String,
@@ -116,7 +116,7 @@ pub struct TerrenceContextSnapshot {
     pub recent_observations: Vec<ContextItem>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LegacyContextMigrationReport {
     pub inserted: u64,
@@ -167,20 +167,17 @@ fn db_path() -> PathBuf {
 }
 
 pub(crate) fn open_terrence_core_db() -> Result<Connection, String> {
+    use super::shared::sqlite::{open_private_wal, OpenStep};
     let path = db_path();
-    let parent = path
-        .parent()
-        .ok_or_else(|| "Amara context database has no parent directory.".to_string())?;
-    crate::app_paths::create_private_dir_all(parent)
-        .map_err(|error| format!("Failed to create Amara context directory: {error}"))?;
-    crate::app_paths::ensure_private_file(&path)
-        .map_err(|error| format!("Failed to create Amara context database: {error}"))?;
-    let conn = Connection::open(&path)
-        .map_err(|error| format!("Failed to open Amara context database: {error}"))?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|error| format!("Failed to configure Amara context database: {error}"))?;
-    crate::app_paths::restrict_sqlite_files(&path)
-        .map_err(|error| format!("Failed to secure Amara context database: {error}"))?;
+    let conn = open_private_wal(&path).map_err(|step| match step {
+        OpenStep::Dir(error) => format!("Failed to create Amara context directory: {error}"),
+        OpenStep::File(error) => format!("Failed to create Amara context database: {error}"),
+        OpenStep::Open(error) => format!("Failed to open Amara context database: {error}"),
+        OpenStep::Configure(error) => {
+            format!("Failed to configure Amara context database: {error}")
+        }
+        OpenStep::Secure(error) => format!("Failed to secure Amara context database: {error}"),
+    })?;
     init_db(&conn)?;
     Ok(conn)
 }
@@ -912,23 +909,27 @@ pub fn create_context_item(input: CreateContextItemInput) -> Result<ContextItem,
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_context_items(query: Option<ContextItemQuery>) -> Result<Vec<ContextItem>, String> {
     ingest_hermes_context_inbox();
     list_context_items_in(&get_db()?, query.unwrap_or_default())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn correct_context_item(input: CorrectContextItemInput) -> Result<ContextItem, String> {
     let mut conn = get_db()?;
     correct_context_item_in(&mut conn, input)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn delete_context_item(id: String) -> Result<(), String> {
     delete_context_item_in(&get_db()?, id)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_terrence_context_snapshot() -> Result<TerrenceContextSnapshot, String> {
     ingest_hermes_context_inbox();
     let conn = get_db()?;
@@ -952,6 +953,7 @@ pub fn get_terrence_context_snapshot() -> Result<TerrenceContextSnapshot, String
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn migrate_legacy_terrence_context() -> Result<LegacyContextMigrationReport, String> {
     let mut conn = get_db()?;
     let transaction = conn

@@ -60,6 +60,23 @@ const NOOP_SERIES = {
   points: noopDays.map((d) => ({ day: d.day, key: "hrv", value: d.avgHrv, source: "my-whoop", sourceKey: "hrv" })),
 };
 
+/* 0017 Fitness tabs: noop_recent_workouts, noop_hypnogram and a metric_series per key (fake values, real shapes). */
+export const NOOP_WORKOUTS = [
+  { day: "2026-10-27", startedAt: "2026-10-27T07:10:00+09:00", endedAt: "2026-10-27T07:55:00+09:00", sport: "running", durationMin: 45, energyKcal: 410, avgHr: 148, maxHr: 176, strain: 12, distanceM: 7200, steps: 8100, zoneMinutes: [4, 12, 16, 10, 3] },
+  { day: "2026-10-25", startedAt: "2026-10-25T18:00:00+09:00", endedAt: "2026-10-25T18:50:00+09:00", sport: "functional_strength", durationMin: 50, energyKcal: 320, avgHr: 124, maxHr: 158, strain: 9, distanceM: null, steps: null, zoneMinutes: null },
+];
+const NIGHT_START = Date.parse("2026-10-27T23:41:00+09:00") / 1000;
+export const NOOP_HYPNOGRAM = {
+  day: "2026-10-28", startedAt: "2026-10-27T23:41:00+09:00", endedAt: "2026-10-28T07:13:00+09:00",
+  segments: ([["light", 40], ["deep", 70], ["light", 50], ["rem", 30], ["awake", 8], ["light", 90], ["deep", 40], ["rem", 60], ["light", 64]] as const).reduce<{ t: number; out: Array<{ start: number; end: number; stage: string }> }>((acc, [stage, min]) => { acc.out.push({ start: acc.t, end: acc.t + min * 60, stage }); acc.t += min * 60; return acc; }, { t: NIGHT_START, out: [] }).out,
+};
+const SERIES_KEYS = ["recovery", "hrv", "rhr", "resp_rate", "spo2", "strain", "sleep_total_min", "steps", "active_kcal"] as const;
+const SERIES_BASE: Record<(typeof SERIES_KEYS)[number], number> = { recovery: 65, hrv: 60, rhr: 52, resp_rate: 14.6, spo2: 97, strain: 40, sleep_total_min: 440, steps: 8200, active_kcal: 480 };
+export const NOOP_SERIES_BY_KEY = Object.fromEntries(SERIES_KEYS.map((key) => [key, {
+  key, requestedSource: "my-whoop", range: { from: "2026-09-30", to: "2026-10-28" }, returned: 29,
+  points: noopDays.map((d, i) => ({ day: d.day, key, value: Math.round(SERIES_BASE[key] * (1 + (((i * 7) % 11) - 5) / 60) * 10) / 10, source: "my-whoop", sourceKey: key })),
+}]));
+
 /* Home Assistant (ha.rs shapes, camelCase; no token field anywhere). */
 export const HA_ENTITIES = [
   { entityId: "light.desk_lamp", state: "on", friendlyName: "Desk lamp", domain: "light", lastChanged: "2026-10-28T04:00:00Z", attributes: { friendly_name: "Desk lamp" } },
@@ -101,6 +118,7 @@ export function responses(): Responses {
     list_terrence_projects: [{ id: "p1", title: "Sample project", status: "active", nextAction: "Write the next step" }],
     get_noop_health_snapshot: NOOP_READY,
     get_reduce_transparency: false,
+    setup_done: true,
     get_muse_state: { connected: false, device_name: null, streaming: false },
     list_sessions: [{ id: "s1", device_type: "muse", start: "2026-10-27T21:00:00+09:00", end: "2026-10-27T21:20:00+09:00", duration_secs: 1200, data_points: 76800, summary: { avg_focus: 0.62, avg_relaxation: 0.71 }, body_context: { today: { recovery: 74, hrv: 64, rhr: 52, strain: 11, sleep_total_min: 452 }, latest_night: { day: "2026-10-27", total_sleep_min: 452, efficiency: 91, deep_min: 92, rem_min: 104, light_min: 230 } } }],
     read_tasks: [{ title: "Write release notes", status: "active", priority: "high", tags: ["docs"] }, { title: "Plan next quarter", status: "waiting", priority: null, tags: ["planning"] }, { title: "Restock samples", status: "backlog", priority: "medium", tags: [] }],
@@ -114,12 +132,13 @@ export function responses(): Responses {
       { id: "a1", type: "mac_action", name: "open_app", status: "completed", startedAt: Date.parse("2026-10-28T13:38:00+09:00"), completedAt: Date.parse("2026-10-28T13:38:01+09:00"), durationMs: 1200, detail: "Opened Notes", outcome: null },
       { id: "a2", type: "agent_task", name: "daily_brief", status: "failed", startedAt: Date.parse("2026-10-28T07:30:00+09:00"), completedAt: Date.parse("2026-10-28T07:30:42+09:00"), durationMs: 42000, detail: "Delivery failed", outcome: null },
     ],
-    read_openclaw_status: { status: "online", online: true, model: "sample-model", gateway_url: "http://127.0.0.1:18789", last_heartbeat: NOW },
     crew_health: "operational",
     crew_tools: [{ name: "kb_query", allowed: true }, { name: "memory_query", allowed: true }],
     get_allow_claude: false,
     set_allow_claude: true,
     kb_status: { state: "empty", model: "nomic-embed-text", docs: 0, detail: "knowledge base is empty" },
+    // No business/ledger.json on the mocked Mac (decision 0005): the unwired Business adapter.
+    read_business_ledger: null,
     crew_list: [crewRun("c1", "smoke", "completed", "Reply with the word OK", "OK"), crewRun("c2", "sample research", "failed", "List three sample facts", "LLM unavailable")],
     list_terrence_interactions: [
       interaction("i1", "What's on my plate this afternoon?", "Two things: finish the release notes, then review the sleep pipeline.", "2026-10-28T13:12:00+09:00"),

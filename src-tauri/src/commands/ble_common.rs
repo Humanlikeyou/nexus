@@ -16,7 +16,7 @@ pub enum BleState {
 }
 
 /// A timestamped proof event for the debug/proof log.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct BleProofEvent {
     pub timestamp: f64,
     pub device: String,
@@ -54,17 +54,23 @@ pub async fn push_proof_event(device: &str, event_type: &str, detail: &str) {
 // ── Tauri commands ──────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_proof_mode(enabled: bool) -> Result<(), String> {
     let mut mode = PROOF_MODE_ENABLED.lock().await;
     *mode = enabled;
     if !enabled {
         PROOF_LOG.lock().await.clear();
     }
-    println!("[ble_common] proof_mode={enabled}");
+    super::unified_log::log_line(
+        "ble_common",
+        super::unified_log::Level::Info,
+        &format!("proof_mode={enabled}"),
+    );
     Ok(())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_proof_log() -> Result<Vec<BleProofEvent>, String> {
     let log = PROOF_LOG.lock().await;
     Ok(log.iter().cloned().collect())

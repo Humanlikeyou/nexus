@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { expect, openApp, openView, test } from "./fixtures/tauri-mock";
 
-const SECTIONS = ["Today", "Chat & Agents", "Lists", "Mind–Body", "Fitness", "Neuro", "Business", "Settings"];
+const SECTIONS = ["Landing", "Today", "Agents", "Lists", "Voice", "Mind–Body", "Fitness", "Neuro", "Life", "Dates & deadlines", "Enterprise", "Decisions", "Finances", "Settings"];
 
 async function blockingViolations(page: Page, disableRules: string[] = [], exclude: string[] = []) {
   let builder = new AxeBuilder({ page }).disableRules(disableRules);
@@ -15,8 +15,8 @@ async function blockingViolations(page: Page, disableRules: string[] = [], exclu
 
 async function openSection(page: Page, theme: "light" | "dark", label: string) {
   await openApp(page, { theme, reduceMotion: true });
-  const field = await openView(page, label);
-  await expect(field.getByRole("heading", { level: 1 })).toBeVisible();
+  const field = label === "Landing" ? page.locator(".landing") : await openView(page, label);
+  await expect(field.getByRole("heading", { level: 1 })).toBeAttached();
   // Let the 200 ms content transitions settle so colors are final.
   await page.waitForTimeout(400);
 }

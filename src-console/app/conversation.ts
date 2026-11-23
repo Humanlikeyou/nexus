@@ -1,4 +1,5 @@
 import type { AmaraTierInfo, TerrenceAction, TerrenceInteraction } from "../types";
+import { modelLoadingDelay } from "./modelLoading";
 import { routeInfoFrom } from "./routeInfo";
 
 export type ConversationMessage = {
@@ -14,6 +15,8 @@ export type ConversationMessage = {
   tier?: AmaraTierInfo;
   /** "home": answered by Home Assistant's conversation agent (chat pre-route), not a model. */
   source?: "home";
+  /** A local-only line (e.g. an add preview from chat or voice): shown in the thread, never sent to Hermes or summarized. */
+  local?: true;
 };
 
 export const CONVERSATION_KEY = "nexus.terrence.conversationId";
@@ -86,7 +89,7 @@ export function messagesFromInteractions(interactions: TerrenceInteraction[]): C
         ...(route.model ? { servedModel: route.model } : {}),
         ...(interaction.source === "home" ? { source: "home" as const } : {}),
       });
-    } else if (interaction.error) {
+    } else if (interaction.error && modelLoadingDelay(interaction.error) === null) {
       messages.push({
         id: `${interaction.id}-failed`,
         role: "assistant",

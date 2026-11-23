@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { isOutputAllowed, deriveElectrodeMode } from "../../src/lib/electrode/electrodePolicy";
-import { PROTOCOLS } from "../../src/lib/neurofeedback/protocols";
+import { isOutputAllowed, deriveElectrodeMode } from "../legacy-core/lib/electrode/electrodePolicy";
+import { PROTOCOLS } from "../legacy-core/lib/neurofeedback/protocols";
 import type { MuseTelemetry } from "./telemetryStore";
 import { createMuseTelemetryStore } from "./telemetryStore";
 import { ADAPT_TICKS, AUX_PROVEN, BASELINE_TICKS, HOLD_COPY, TARGET_REWARD_RATE, TrainingSession, adaptScale, alphaRatio, feedbackLevel } from "./training";

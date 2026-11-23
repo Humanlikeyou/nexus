@@ -1,7 +1,7 @@
-import { activeField, expect, navButton, openApp, test, openMore } from "./fixtures/tauri-mock";
+import { activeField, expect, openApp, openSettingsTab, test, openMore } from "./fixtures/tauri-mock";
 import { responses } from "./fixtures/snapshot";
 
-/** Settings › Backup › Restore: picker → destructive Dialog → unpack_backup → result list. */
+/** Settings › Backup (tab) › Back up to a file now › Restore: picker → destructive Dialog → unpack_backup → result list. */
 test("restore from backup asks first, then shows what was restored", async ({ page, theme, consoleErrors }) => {
   await openApp(page, {
     theme,
@@ -11,8 +11,7 @@ test("restore from backup asks first, then shows what was restored", async ({ pa
       unpack_backup: ["Safety backup of current data saved to /data/restore-backups/20261029_101600-full", "Amara OS data: 4 files restored"],
     },
   });
-  await navButton(page, "Settings").click();
-  const field = activeField(page, "Settings");
+  const field = await openSettingsTab(page, "Backup");
   await openMore(page);
   await field.getByRole("button", { name: "Choose…" }).click();
   await expect(field.getByLabel("Backup file")).toHaveValue("/Users/me/Desktop/nexus-backup-20261029_101500.tar.gz");

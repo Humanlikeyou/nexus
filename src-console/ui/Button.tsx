@@ -31,7 +31,7 @@ export function Button({ variant = "secondary", size = "regular", icon: Icon, ic
       data-icon-only={iconOnly || undefined}
       data-loading={loading || undefined}
       aria-busy={loading || undefined}
-      aria-disabled={rest.disabled || undefined}
+      aria-disabled={rest.disabled || rest["aria-disabled"] || undefined}
       onClick={handleClick}
     >
       <span className="ui-button__content">

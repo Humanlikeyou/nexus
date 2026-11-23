@@ -1,0 +1,13 @@
+--- a/README.md
++++ b/README.md
+@@ -7,8 +7,8 @@
+ 
+ ## What it does
+ 
+-Pages: Home (the lens page, with Today as a subview), Chat & Agents (Chat, Activity, Lists, Crews, Voice), Mind-Body (Overview, Fitness, Neuro),
+-Business (Work, Revenue), Settings and Smart home. ⌘1 to ⌘6 follow this order.
++Pages: Home (the lens page, with chat under the lens and Today as a subview; Lists is a section of Today), Agents (Agents, with Activity, and Crews),
++Mind–Body (Overview, Fitness, Neuro, Neuro history), Business (Overview, Ventures, Money, Work), Settings (Voice is a section) and Smart home. ⌘1 to ⌘6 follow this order.
+ 
+ Chat goes from the app to Hermes, then to the Amara Router, then to Ollama. The router picks the model:
+ 

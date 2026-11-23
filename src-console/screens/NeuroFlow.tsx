@@ -1,10 +1,10 @@
 import { Volume2, VolumeX } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { deriveElectrodeMode, isOutputAllowed } from "../../src/lib/electrode/electrodePolicy";
-import { useAudioFeedback } from "../../src/hooks/useAudioFeedback";
+import { deriveElectrodeMode, isOutputAllowed } from "../legacy-core/lib/electrode/electrodePolicy";
+import { useAudioFeedback } from "../legacy-core/hooks/useAudioFeedback";
 import { loadKv, saveKv } from "../bridge";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
-import { GOALS, NOTES_KEY, SENSORS, goalOf, parseNotes, recommendedGoal, suggestedStrategy, type NfNote } from "../neuro/goals";
+import { GOALS, NOTES_KEY, sessionNoteKey, SENSORS, goalOf, parseNotes, recommendedGoal, suggestedStrategy, type NfNote } from "../neuro/goals";
 import { AUX_PROVEN, FIT_LABEL, HOLD_COPY, feedbackLevel, type ChannelFit } from "../neuro/training";
 import type { MuseTelemetry } from "../neuro/telemetryStore";
 import type { useTraining } from "../neuro/useTraining";
@@ -167,7 +167,7 @@ function SummaryStep({ training, sessions, onNote, lastStrategy }: { training: T
 }
 
 /** The session itself: goal, fit, baseline, training, summary. The lens is the feedback. */
-export function NeuroFlow({ training, telemetry, sessions, running, action }: { training: Training; telemetry: MuseTelemetry; sessions: RecordedSession[]; running: boolean; action: ReactNode }) {
+export function NeuroFlow({ training, telemetry, sessions, running, action, savedSessionId = null }: { training: Training; telemetry: MuseTelemetry; sessions: RecordedSession[]; running: boolean; action: ReactNode; /** The session just saved: the "What helped?" note is stored with its id and shown in its recording. */ savedSessionId?: string | null }) {
   const aux = AUX_PROVEN ? telemetry.aux : null;
   const { state } = training;
   const { notes, add } = useNotes();
@@ -180,13 +180,29 @@ export function NeuroFlow({ training, telemetry, sessions, running, action }: { 
 
   // Sound can only start from his click, which is the session's Start button.
   const armed = useRef(false);
+  const audioOn = useRef(false);
   useEffect(() => {
-    if (!running || armed.current) return;
-    armed.current = true;
-    setSoundOn(!!protocol?.eyesClosed);
-    try { init(); setMode("tone"); } catch { /* no audio on this machine: the light still works */ }
-  }, [running, protocol, init, setMode]);
-  useEffect(() => { if (!running && armed.current) { armed.current = false; try { cleanup(); } catch { /* nothing to close */ } } }, [running, cleanup]);
+    if (!running) return;
+    if (!armed.current) {
+      armed.current = true;
+      setSoundOn(!!protocol?.eyesClosed);
+    }
+    // Recording only (and Hemi-Sync, which switches to it) makes no sound: init() starts a continuous drone and 432 Hz tone.
+    // A protocol that changes to a real one mid-run starts audio then; back to "off" tears it down.
+    if (protocol && !audioOn.current) {
+      audioOn.current = true;
+      try { init(); setMode("tone"); } catch { /* no audio on this machine: the light still works */ }
+    } else if (!protocol && audioOn.current) {
+      audioOn.current = false;
+      try { cleanup(); } catch { /* nothing to close */ }
+    }
+  }, [running, protocol, init, setMode, cleanup]);
+  useEffect(() => () => { if (audioOn.current) { audioOn.current = false; try { cleanup(); } catch { /* nothing to close */ } } }, [cleanup]);
+  useEffect(() => {
+    if (running) return;
+    armed.current = false;
+    if (audioOn.current) { audioOn.current = false; try { cleanup(); } catch { /* nothing to close */ } }
+  }, [running, cleanup]);
   useEffect(() => { setMuted(!soundOn); }, [soundOn, setMuted]);
 
   // Bells carry the session when his eyes are closed.
@@ -201,7 +217,10 @@ export function NeuroFlow({ training, telemetry, sessions, running, action }: { 
     try { updateState("calm", state.phase === "training" && state.signal?.action === "reward"); } catch { /* the light still works */ }
   }, [stage, state.phase, state.signal, updateState]);
 
-  if (training.finished && !running) return <SummaryStep training={training} sessions={sessions} lastStrategy={strategy} onNote={(note) => add({ at: new Date().toISOString(), protocol: training.finished!.protocol_name, targetPercent: training.finished!.time_in_target_pct, strategy, note })} />;
+  if (training.finished && !running) return <SummaryStep training={training} sessions={sessions} lastStrategy={strategy} onNote={(note) => {
+    add({ at: new Date().toISOString(), protocol: training.finished!.protocol_name, targetPercent: training.finished!.time_in_target_pct, strategy, note, ...(savedSessionId ? { sessionId: savedSessionId } : {}) });
+    if (savedSessionId) saveKv(sessionNoteKey(savedSessionId), note).catch(() => undefined);
+  }} />;
   if (!running || !state.stage) {
     if (running) return <div className="nf-actions">{action}</div>; // a plain recording: the live readings below are the screen
     return <GoalStep training={training} aux={aux} lastNote={notes[0] ?? null} action={action} />;
