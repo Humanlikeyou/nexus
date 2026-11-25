@@ -364,7 +364,7 @@ pub(crate) fn links_for_in(data: &Path, goal_id: &str) -> Result<Vec<LifeLink>, 
 
 #[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct GoalProgress {
+pub struct LifeProgress {
     pub goal_id: String,
     pub status: String,
     pub current: f64,
@@ -378,7 +378,7 @@ pub struct GoalProgress {
     pub history: Vec<super::amara_store::commands::ActivityRow>,
 }
 
-pub(crate) fn progress_in(data: &Path, goal_id: &str) -> Result<GoalProgress, String> {
+pub(crate) fn progress_in(data: &Path, goal_id: &str) -> Result<LifeProgress, String> {
     let g = read_goals(data)?
         .into_iter()
         .find(|g| g.id == goal_id)
@@ -405,7 +405,7 @@ pub(crate) fn progress_in(data: &Path, goal_id: &str) -> Result<GoalProgress, St
         })
         .collect();
     history.reverse();
-    Ok(GoalProgress {
+    Ok(LifeProgress {
         goal_id: g.id.clone(),
         status: status_of(&g).to_string(),
         current: g.current,
@@ -478,3 +478,71 @@ fn note(data: &Path, kind: &str, subject: &str, data_json: Option<&str>) {
 
 #[cfg(test)]
 mod tests;
+
+// ─── Tauri commands (the Life interface's backend; decision 0055) ─────────────
+
+fn data() -> PathBuf {
+    crate::app_paths::data_dir()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn life_update(goal_id: String, fields: LifeFields) -> Result<Goal, String> {
+    update_in(&data(), &goal_id, fields)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn life_progress(goal_id: String) -> Result<LifeProgress, String> {
+    progress_in(&data(), &goal_id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn life_habit_history(
+    habit_id: String,
+    from: String,
+    to: String,
+) -> Result<Vec<HabitDay>, String> {
+    habit_history_in(&data(), &habit_id, &from, &to)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn life_areas() -> Result<Vec<LifeArea>, String> {
+    areas_in(&data())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn life_area_upsert(
+    id: Option<String>,
+    name: String,
+    description: Option<String>,
+) -> Result<LifeArea, String> {
+    area_upsert_in(&data(), id.as_deref(), &name, description.as_deref())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn life_area_archive(id: String) -> Result<LifeArea, String> {
+    area_archive_in(&data(), &id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn life_link_add(kind: String, goal_id: String, other_id: String) -> Result<LifeLink, String> {
+    link_add_in(&data(), &kind, &goal_id, &other_id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn life_link_remove(link_id: String) -> Result<bool, String> {
+    link_remove_in(&data(), &link_id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn life_links(goal_id: String) -> Result<Vec<LifeLink>, String> {
+    links_for_in(&data(), &goal_id)
+}

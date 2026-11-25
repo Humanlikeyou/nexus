@@ -465,6 +465,15 @@ export const commands = {
 	/**  Consequential-action approvals from the 0052 ledger (read-only: none can be granted here). */
 	approvalsList: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ApprovalRow_Serialize[]>("approvals_list", { limit }, options),
 	auditTrail: (recordRef: string, options?: InvokeOptions) => __TAURI_INVOKE<AuditTrail_Serialize>("audit_trail", { recordRef }, options),
+	lifeUpdate: (goalId: string, fields: LifeFields_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<Goal_Serialize>("life_update", { goalId, fields }, options),
+	lifeProgress: (goalId: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeProgress_Serialize>("life_progress", { goalId }, options),
+	lifeHabitHistory: (habitId: string, from: string, to: string, options?: InvokeOptions) => __TAURI_INVOKE<HabitDay[]>("life_habit_history", { habitId, from, to }, options),
+	lifeAreas: (options?: InvokeOptions) => __TAURI_INVOKE<LifeArea_Serialize[]>("life_areas", undefined, options),
+	lifeAreaUpsert: (id: string | null, name: string, description: string | null, options?: InvokeOptions) => __TAURI_INVOKE<LifeArea_Serialize>("life_area_upsert", { id, name, description }, options),
+	lifeAreaArchive: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeArea_Serialize>("life_area_archive", { id }, options),
+	lifeLinkAdd: (kind: string, goalId: string, otherId: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeLink>("life_link_add", { kind, goalId, otherId }, options),
+	lifeLinkRemove: (linkId: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("life_link_remove", { linkId }, options),
+	lifeLinks: (goalId: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeLink[]>("life_links", { goalId }, options),
 	/**
 	 *  The webview never receives the bot token (Stage G review MED-3): it is always null here. The
 	 *  token is managed through `secrets_status` / `secret_set` (Keychain).
@@ -3084,6 +3093,12 @@ export type HaTestResult_Serialize = {
 	version?: string,
 };
 
+export type HabitDay = {
+	day: string,
+	/**  `done` | `not_done` (marked) | `no_record` (nothing was marked: unknown, not zero) */
+	state: string,
+};
+
 export type HabitWeek = {
 	id: string,
 	title: string,
@@ -3499,6 +3514,28 @@ export type Library_Serialize = {
 	sourceFolder: string | null,
 };
 
+export type LifeArea = LifeArea_Serialize | LifeArea_Deserialize;
+
+export type LifeArea_Deserialize = {
+	id: string,
+	name: string,
+	description?: string | null,
+	/**  `active` | `archived` */
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type LifeArea_Serialize = {
+	id: string,
+	name: string,
+	description: string | null,
+	/**  `active` | `archived` */
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
 export type LifeDateDraft = LifeDateDraft_Serialize | LifeDateDraft_Deserialize;
 
 export type LifeDateDraft_Deserialize = {
@@ -3631,6 +3668,50 @@ export type LifeFields_Serialize = {
 	fullVersion: string | null,
 	/**  Reminders on or off (the time is `remind_at`). Unset = the app default. */
 	reminders: boolean | null,
+};
+
+export type LifeLink = {
+	id: string,
+	/**  `goal_project` | `goal_habit` */
+	kind: string,
+	goalId: string,
+	/**  `project:<id>` or `goals:<habit id>`. */
+	otherRef: string,
+	createdAt: string,
+};
+
+export type LifeProgress = LifeProgress_Serialize | LifeProgress_Deserialize;
+
+export type LifeProgress_Deserialize = {
+	goalId: string,
+	status: string,
+	current: number | null,
+	target: number | null,
+	unit: string,
+	baseline?: number | null,
+	/**
+	 *  Only when a baseline is set and differs from the target: (current - baseline) / (target - baseline).
+	 *  Not clamped, so overshooting or going backwards shows as it is.
+	 */
+	fraction?: number | null,
+	/**  Recorded progress changes, oldest first (from the activity history). */
+	history: ActivityRow_Deserialize[],
+};
+
+export type LifeProgress_Serialize = {
+	goalId: string,
+	status: string,
+	current: number | null,
+	target: number | null,
+	unit: string,
+	baseline: number | null,
+	/**
+	 *  Only when a baseline is set and differs from the target: (current - baseline) / (target - baseline).
+	 *  Not clamped, so overshooting or going backwards shows as it is.
+	 */
+	fraction: number | null,
+	/**  Recorded progress changes, oldest first (from the activity history). */
+	history: ActivityRow_Serialize[],
 };
 
 /**  The live heart rate for the Home screen, oldest sample first. Never log this. */
