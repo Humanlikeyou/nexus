@@ -150,6 +150,8 @@ pub fn run() {
             let _ = terrence_actions::reconcile_interrupted_conversations();
             // 0052: settle executions a quit or crash interrupted (read-back only, never a re-run).
             std::thread::spawn(commands::execution::recover_on_startup);
+            // 0053 step 1: create the activity and recommendation stores (idempotent; no existing file touched).
+            std::thread::spawn(|| commands::amara_store::init_on_startup(&app_paths::data_dir()));
             // Navy local-only is session-only: off at every start, and the voice loop's flag file says so.
             commands::telegram::init_navy_flag();
             // Outbound is off unless Settings enabled it (and the env var does not force it off).

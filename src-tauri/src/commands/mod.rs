@@ -1,3 +1,7 @@
+// 0053: created at startup (step 1). Writers get their production callers in step 4, when the
+// domain owners start recording activity; until then the API is exercised by its tests.
+#[allow(dead_code)]
+pub(crate) mod amara_store;
 pub mod amara_turn;
 pub mod approval_gate;
 pub mod arm;

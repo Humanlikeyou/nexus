@@ -429,15 +429,13 @@ mod tests {
         assert_eq!(venture_of(&d, "g-1").as_deref(), Some("taiyo-skin"));
         set_in(&d, "g-1", None, None, now).unwrap();
         assert_eq!(venture_of(&d, "g-1"), None);
-        // An unreadable file means no links at all.
+        // An unreadable file is never overwritten (0053 step 2): the save is refused, so the caller's
+        // link can't land either, and the file stays as it was.
         std::fs::write(d.goals(), "{ nope").unwrap();
         let mut g = after;
         g[0].venture_id = Some("x".into());
-        crate::commands::goals::save_goals_at(&d.goals(), g).unwrap();
-        assert!(read_goals_in(&d.data)
-            .unwrap()
-            .iter()
-            .all(|g| g.venture_id.is_none()));
+        assert!(crate::commands::goals::save_goals_at(&d.goals(), g).is_err());
+        assert_eq!(std::fs::read_to_string(d.goals()).unwrap(), "{ nope");
     }
 
     #[test]

@@ -29,6 +29,12 @@ const MAX_TEXT: usize = 500;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
+/// The one lock for the stores History/Undo writes (goals.json among them). `goals::save_goals_at`
+/// takes it too (0053 step 2), so a console save can't interleave with a History write.
+pub(crate) fn store_lock() -> std::sync::MutexGuard<'static, ()> {
+    LOCK.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 /// A preview's payload lives here, not in the client: `add_preview` hands back only a random single-use token and
 /// `add_save` redeems it, so the saved payload can't be swapped or replayed (2 minutes, one use).
 pub const TOKEN_TTL_MS: u64 = 2 * 60_000;
