@@ -73,3 +73,57 @@ The design is in `docs/specs/data-architecture-2026-11-25.md` (`495eb14`). His r
 - **Not covered yet:** workout activity from NOOP, and business actions (Enterprise, Phase 11).
 - Any UI that shows activity or recommendations (Design work).
 - Nothing has run on Taisun's Mac until a build with these commits is installed.
+
+## Foundations phase (Taisun's prompt "Implement the approved shared data foundations", same day)
+
+**What already existed and was reused, not rebuilt:**
+- Activity, recommendation, evidence and outcome tables (steps 1–4).
+- Consequential-action approvals: `execution_approvals` in `execution.db` (0052), bound to the parameter fingerprint, expiring and single-use.
+- Audit history: the append-only `execution_transitions` (0052), History/Undo (`adds`), and the append-only outcomes.
+
+**Schema change v1 → v2, and why.** The prompt requires a recommendation to store what was observed, why it matters, the suggested action, the uncertainty, and impact and effort estimates. It also requires activity to say whether it is confirmed or estimated. The approved v1 tables had no place for these, so v2 adds nullable columns:
+- `recommendation`: `observation`, `rationale`, `suggested_action`, `uncertainty`, `impact`, `effort` (`impact` and `effort` are CHECKed to low, medium or high).
+- `activity`: `certainty` (`confirmed` or `estimated`, default `confirmed`).
+
+The change is additive only: no new table, and nothing renamed or removed.
+
+**Provenance needs no column.** It is derived from the existing `source`: user = manual; scheduler or noop = automated; model = inferred; import or backfill = imported.
+
+**Migration** (`migrate_to_v2`):
+- A file that already holds rows is first copied with `VACUUM INTO <file>.v1-<timestamp>.bak` (0600).
+- The ALTERs and the version bump then run in one `BEGIN IMMEDIATE` transaction that re-checks the version under the lock, so parallel first opens migrate once.
+- On any error it rolls back and the file stays v1.
+- **Rollback:** `restore_backup(db, backup)`, run with the app closed, puts the backup in place and keeps the current file as `<file>.replaced-<timestamp>`. Nothing is deleted.
+
+**Evidence can't be invented** (`amara_store/resolve.rs`):
+- Every evidence reference is looked up in its owning store: goals, habit days, check-ins, dates, money, takes, Muse sessions, recordings (file metadata only, never samples), ledger executions and business ledger entries.
+- A missing record is refused.
+- A model-written recommendation (every one created over IPC; `produced_by = model:<purpose>`) may cite only records that were found. A store that can't be checked from here (NOOP, derived rows) is refused for models and allowed only for rules or the user.
+- The stored `snapshot_sha256` is the resolver's hash of the record as read; callers can't supply it.
+- Recommendations hold references and hashes only, never copies of goals, workouts, telemetry or business records.
+
+**Repositories and commands** (`amara_store/commands.rs`, registered and bound):
+- `activity_list` (with provenance and certainty);
+- `recommendation_list`, `recommendation_get` (with its evidence and outcomes), `recommendation_create`;
+- `recommendation_respond` (shown, accepted, modified with what changed, dismissed);
+- `recommendation_record_outcome` (completed, evaluated, expired);
+- `approvals_list` (read-only from the ledger);
+- `audit_trail(record_ref)`: activity, recommendations that target or cite the record, and the executions they produced.
+
+Each command takes a scope (personal, neural or business). Business commands open only the business file.
+
+**Fixes found by the new tests:**
+- Parallel first opens of a new store could each try the v2 migration ("duplicate column"). The fix is the locked re-check above.
+- The shared SQLite opener set WAL mode before its busy timeout, and the WAL switch can return "locked" without waiting. It now sets the timeout first and retries that one step briefly, for lock errors only. This affects every store's first open, and only by waiting instead of failing.
+
+**Tests:**
+- duplicate activity inserts, including 8 threads at once;
+- invented, missing or unverifiable evidence refused, with the hash from the resolver;
+- record linking through the audit trail;
+- a failed migration changes nothing, then the backup restores v1 with its data;
+- business and personal never crossing through the commands;
+- the full lifecycle with every field.
+
+The store suite passed 10 runs in a row. All gates pass.
+
+**Not built:** dashboards (per the prompt), and recommendation producers (no rules or model producer writes recommendations yet besides takes).

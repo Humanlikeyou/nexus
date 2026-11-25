@@ -293,6 +293,7 @@ pub(crate) fn upsert_in(dir: &Path, draft: &LifeDateDraft) -> Result<LifeDateRec
             super::amara_store::note(
                 data,
                 super::amara_store::NewActivity {
+                    certainty: "confirmed",
                     scope: super::amara_store::Scope::Personal,
                     kind: "date.done",
                     subject_ref: &format!("date:{}", rec.id),

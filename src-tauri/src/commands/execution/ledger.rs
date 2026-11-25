@@ -133,6 +133,21 @@ pub struct Transition {
     pub detail: String,
 }
 
+/// One approval: which action, bound to which parameter fingerprint, when it expires, whether used.
+#[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalRow {
+    pub approval_id: String,
+    pub action_id: String,
+    pub params_fingerprint: String,
+    pub granted_by: String,
+    pub granted_at: String,
+    pub expires_at: String,
+    pub consumed_at: Option<String>,
+    /// The execution that used it.
+    pub consumed_by: Option<String>,
+}
+
 /// The fields a new execution starts with (already redacted by the controller).
 pub(crate) struct NewExecution<'a> {
     pub workflow_id: &'a str,
@@ -407,6 +422,34 @@ impl Ledger {
     }
 
     // ── Approvals ──────────────────────────────────────────────────────────
+
+    /// The most recent approvals, newest first (read-only; for the audit view).
+    pub(crate) fn approvals(&self, limit: u32) -> Result<Vec<ApprovalRow>, LedgerError> {
+        let conn = self.open()?;
+        let mut st = conn
+            .prepare(
+                "SELECT approval_id, action_id, params_fingerprint, granted_by, granted_at, expires_at,
+                    consumed_at, consumed_by FROM execution_approvals ORDER BY granted_at DESC LIMIT ?1",
+            )
+            .map_err(storage)?;
+        let rows = st
+            .query_map(params![limit.min(500)], |r| {
+                Ok(ApprovalRow {
+                    approval_id: r.get(0)?,
+                    action_id: r.get(1)?,
+                    params_fingerprint: r.get(2)?,
+                    granted_by: r.get(3)?,
+                    granted_at: r.get(4)?,
+                    expires_at: r.get(5)?,
+                    consumed_at: r.get(6)?,
+                    consumed_by: r.get(7)?,
+                })
+            })
+            .map_err(storage)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(storage)?;
+        Ok(rows)
+    }
 
     pub(crate) fn grant_approval(
         &self,

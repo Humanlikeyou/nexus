@@ -456,6 +456,15 @@ export const commands = {
 	listExecutions: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ExecutionRecord_Serialize[]>("list_executions", { limit }, options),
 	/**  Every state transition of one execution, in order. */
 	executionHistory: (executionId: string, options?: InvokeOptions) => __TAURI_INVOKE<Transition_Serialize[]>("execution_history", { executionId }, options),
+	activityList: (scope: string, subjectRef: string | null, since: string | null, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ActivityRow_Serialize[]>("activity_list", { scope, subjectRef, since, limit }, options),
+	recommendationList: (scope: string, status: string | null, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationRow_Serialize[]>("recommendation_list", { scope, status, limit }, options),
+	recommendationGet: (scope: string, id: string, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationDetail_Serialize | null>("recommendation_get", { scope, id }, options),
+	recommendationCreate: (input: RecommendationInput_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<string>("recommendation_create", { input }, options),
+	recommendationRespond: (scope: string, id: string, response: string, modificationJson: string | null, options?: InvokeOptions) => __TAURI_INVOKE<string>("recommendation_respond", { scope, id, response, modificationJson }, options),
+	recommendationRecordOutcome: (scope: string, id: string, outcome: string, evaluation: string | null, resultRef: string | null, note: string | null, options?: InvokeOptions) => __TAURI_INVOKE<string>("recommendation_record_outcome", { scope, id, outcome, evaluation, resultRef, note }, options),
+	/**  Consequential-action approvals from the 0052 ledger (read-only: none can be granted here). */
+	approvalsList: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ApprovalRow_Serialize[]>("approvals_list", { limit }, options),
+	auditTrail: (recordRef: string, options?: InvokeOptions) => __TAURI_INVOKE<AuditTrail_Serialize>("audit_trail", { recordRef }, options),
 	/**
 	 *  The webview never receives the bot token (Stage G review MED-3): it is always null here. The
 	 *  token is managed through `secrets_status` / `secret_set` (Keychain).
@@ -713,6 +722,44 @@ export type ActivityEntry_Serialize = {
 	outcome: string | null,
 };
 
+export type ActivityRow = ActivityRow_Serialize | ActivityRow_Deserialize;
+
+export type ActivityRow_Deserialize = {
+	activityId: string,
+	scope: string,
+	kind: string,
+	subjectRef: string,
+	occurredAt: string,
+	recordedAt: string,
+	source: string,
+	/**  manual | automated | inferred | imported. */
+	provenance: string,
+	/**  confirmed | estimated. */
+	certainty: string,
+	sourceRef?: string | null,
+	actor: string,
+	summary?: string | null,
+	dataJson?: string | null,
+};
+
+export type ActivityRow_Serialize = {
+	activityId: string,
+	scope: string,
+	kind: string,
+	subjectRef: string,
+	occurredAt: string,
+	recordedAt: string,
+	source: string,
+	/**  manual | automated | inferred | imported. */
+	provenance: string,
+	/**  confirmed | estimated. */
+	certainty: string,
+	sourceRef: string | null,
+	actor: string,
+	summary: string | null,
+	dataJson: string | null,
+};
+
 export type AddPreview = AddPreview_Serialize | AddPreview_Deserialize;
 
 export type AddPreview_Deserialize = {
@@ -804,6 +851,35 @@ export type AmaraTurnInput_Serialize = {
 	deep: boolean,
 	/**  Friendly Home Assistant device names the renderer knows (at most 200, each at most 64 chars). */
 	haNames: string[],
+};
+
+/**  One approval: which action, bound to which parameter fingerprint, when it expires, whether used. */
+export type ApprovalRow = ApprovalRow_Serialize | ApprovalRow_Deserialize;
+
+/**  One approval: which action, bound to which parameter fingerprint, when it expires, whether used. */
+export type ApprovalRow_Deserialize = {
+	approvalId: string,
+	actionId: string,
+	paramsFingerprint: string,
+	grantedBy: string,
+	grantedAt: string,
+	expiresAt: string,
+	consumedAt?: string | null,
+	/**  The execution that used it. */
+	consumedBy?: string | null,
+};
+
+/**  One approval: which action, bound to which parameter fingerprint, when it expires, whether used. */
+export type ApprovalRow_Serialize = {
+	approvalId: string,
+	actionId: string,
+	paramsFingerprint: string,
+	grantedBy: string,
+	grantedAt: string,
+	expiresAt: string,
+	consumedAt: string | null,
+	/**  The execution that used it. */
+	consumedBy: string | null,
 };
 
 export type ArmConfig = ArmConfig_Serialize | ArmConfig_Deserialize;
@@ -903,6 +979,26 @@ export type AskSent = {
 	at: string,
 	/**  "sent", "suppressed" or "failed". */
 	result: string,
+};
+
+export type AuditTrail = AuditTrail_Serialize | AuditTrail_Deserialize;
+
+export type AuditTrail_Deserialize = {
+	recordRef: string,
+	activity: ActivityRow_Deserialize[],
+	/**  Recommendations that target or cite the record. */
+	recommendations: RecommendationDetail_Deserialize[],
+	/**  Ledger executions that name the record (`execution:<id>` refs in outcomes, or the target). */
+	executions: ExecutionRecord_Deserialize[],
+};
+
+export type AuditTrail_Serialize = {
+	recordRef: string,
+	activity: ActivityRow_Serialize[],
+	/**  Recommendations that target or cite the record. */
+	recommendations: RecommendationDetail_Serialize[],
+	/**  Ledger executions that name the record (`execution:<id>` refs in outcomes, or the target). */
+	executions: ExecutionRecord_Serialize[],
 };
 
 /**  The back-of-head electrode verdict that goes in the trailer. */
@@ -2141,6 +2237,52 @@ export type Event_Serialize = {
 	raw_ref: string | null,
 	created_at: string | null,
 	schema_version: number | null,
+};
+
+export type EvidenceInput = EvidenceInput_Serialize | EvidenceInput_Deserialize;
+
+export type EvidenceInput_Deserialize = {
+	recordRef: string,
+	windowStart?: string | null,
+	windowEnd?: string | null,
+	role: string,
+	quality: string,
+	note?: string | null,
+};
+
+export type EvidenceInput_Serialize = {
+	recordRef: string,
+	windowStart: string | null,
+	windowEnd: string | null,
+	role: string,
+	quality: string,
+	note: string | null,
+};
+
+export type EvidenceRow = EvidenceRow_Serialize | EvidenceRow_Deserialize;
+
+export type EvidenceRow_Deserialize = {
+	evidenceId: string,
+	recordRef: string,
+	windowStart?: string | null,
+	windowEnd?: string | null,
+	role: string,
+	quality: string,
+	note?: string | null,
+	capturedAt: string,
+	snapshotSha256?: string | null,
+};
+
+export type EvidenceRow_Serialize = {
+	evidenceId: string,
+	recordRef: string,
+	windowStart: string | null,
+	windowEnd: string | null,
+	role: string,
+	quality: string,
+	note: string | null,
+	capturedAt: string,
+	snapshotSha256: string | null,
 };
 
 export type ExecStatus = "REQUESTED" | "AUTHORIZED" | "ATTEMPTED" | "EXECUTED" | "VERIFIED" | "FAILED" | "PARTIAL" | "CANCELLED" | "UNVERIFIED" | "NOT_AUTHORIZED";
@@ -4399,6 +4541,30 @@ export type OutboxStatus_Serialize = {
 	expired: number,
 };
 
+export type OutcomeRow = OutcomeRow_Serialize | OutcomeRow_Deserialize;
+
+export type OutcomeRow_Deserialize = {
+	outcomeId: string,
+	outcome: string,
+	at: string,
+	actor: string,
+	modificationJson?: string | null,
+	resultRef?: string | null,
+	evaluation?: string | null,
+	note?: string | null,
+};
+
+export type OutcomeRow_Serialize = {
+	outcomeId: string,
+	outcome: string,
+	at: string,
+	actor: string,
+	modificationJson: string | null,
+	resultRef: string | null,
+	evaluation: string | null,
+	note: string | null,
+};
+
 export type Owner = "user" | "supervisor" | "transition";
 
 export type PackageInfo = {
@@ -4604,6 +4770,120 @@ export type RankedTrack = {
 export type ReasonCode = "not_checked" | "ok" | "slow" | "unreachable" | "timeout" | "bad_status" | "container_down" | "container_stopped" | "container_starting" | "unhealthy" | "missing_container" | "bad_bind" | "docker_unavailable" | "not_running" | "no_store" | "restarting" | "restart_failed";
 
 export type ReasonKind = "stagnation" | "not_working" | "better_route";
+
+export type RecommendationDetail = RecommendationDetail_Serialize | RecommendationDetail_Deserialize;
+
+export type RecommendationDetail_Deserialize = {
+	recommendation: RecommendationRow_Deserialize,
+	evidence: EvidenceRow_Deserialize[],
+	outcomes: OutcomeRow_Deserialize[],
+};
+
+export type RecommendationDetail_Serialize = {
+	recommendation: RecommendationRow_Serialize,
+	evidence: EvidenceRow_Serialize[],
+	outcomes: OutcomeRow_Serialize[],
+};
+
+export type RecommendationInput = RecommendationInput_Serialize | RecommendationInput_Deserialize;
+
+export type RecommendationInput_Deserialize = {
+	scope: string,
+	domain: string,
+	kind: string,
+	title: string,
+	body: string,
+	observation?: string | null,
+	rationale?: string | null,
+	suggestedAction?: string | null,
+	confidence?: number | null,
+	confidenceBasis?: string | null,
+	uncertainty?: string | null,
+	impact?: string | null,
+	effort?: string | null,
+	expiresAt?: string | null,
+	/**  The inference purpose label that produced it (e.g. `weekly_review.suggest`). */
+	purpose: string,
+	modelTier?: string | null,
+	targetRef?: string | null,
+	supersedesId?: string | null,
+	evidence: EvidenceInput_Deserialize[],
+};
+
+export type RecommendationInput_Serialize = {
+	scope: string,
+	domain: string,
+	kind: string,
+	title: string,
+	body: string,
+	observation: string | null,
+	rationale: string | null,
+	suggestedAction: string | null,
+	confidence: number | null,
+	confidenceBasis: string | null,
+	uncertainty: string | null,
+	impact: string | null,
+	effort: string | null,
+	expiresAt: string | null,
+	/**  The inference purpose label that produced it (e.g. `weekly_review.suggest`). */
+	purpose: string,
+	modelTier: string | null,
+	targetRef: string | null,
+	supersedesId: string | null,
+	evidence: EvidenceInput_Serialize[],
+};
+
+export type RecommendationRow = RecommendationRow_Serialize | RecommendationRow_Deserialize;
+
+export type RecommendationRow_Deserialize = {
+	recommendationId: string,
+	scope: string,
+	domain: string,
+	kind: string,
+	title: string,
+	body: string,
+	observation?: string | null,
+	rationale?: string | null,
+	suggestedAction?: string | null,
+	confidence?: number | null,
+	confidenceBasis?: string | null,
+	uncertainty?: string | null,
+	impact?: string | null,
+	effort?: string | null,
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+	expiresAt?: string | null,
+	producedBy: string,
+	modelTier?: string | null,
+	targetRef?: string | null,
+	supersedesId?: string | null,
+};
+
+export type RecommendationRow_Serialize = {
+	recommendationId: string,
+	scope: string,
+	domain: string,
+	kind: string,
+	title: string,
+	body: string,
+	observation: string | null,
+	rationale: string | null,
+	suggestedAction: string | null,
+	confidence: number | null,
+	confidenceBasis: string | null,
+	uncertainty: string | null,
+	impact: string | null,
+	effort: string | null,
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+	expiresAt: string | null,
+	producedBy: string,
+	modelTier: string | null,
+	targetRef: string | null,
+	supersedesId: string | null,
+};
 
 export type RecordedSession = RecordedSession_Serialize | RecordedSession_Deserialize;
 

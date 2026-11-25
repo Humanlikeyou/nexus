@@ -377,6 +377,7 @@ pub(crate) fn save_session_in(
         super::amara_store::note(
             data,
             super::amara_store::NewActivity {
+                certainty: "confirmed",
                 scope: super::amara_store::Scope::Neural,
                 kind: "neuro.session_finished",
                 subject_ref: &format!("session:{}_{}", session.device_type, session.id),

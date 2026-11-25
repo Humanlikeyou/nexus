@@ -382,6 +382,7 @@ pub(crate) fn entry_add_in(
     super::amara_store::note(
         data,
         super::amara_store::NewActivity {
+            certainty: "confirmed",
             scope: super::amara_store::Scope::Personal,
             kind: "money.logged",
             subject_ref: &format!("money:{}", e.id),

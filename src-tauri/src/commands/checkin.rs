@@ -94,6 +94,7 @@ pub(crate) fn save_in(
         super::amara_store::note(
             data,
             super::amara_store::NewActivity {
+                certainty: "confirmed",
                 scope: super::amara_store::Scope::Personal,
                 kind: "checkin.logged",
                 subject_ref: &format!("checkin:{}", r.id),

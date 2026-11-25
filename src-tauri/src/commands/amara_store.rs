@@ -20,7 +20,9 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-pub(crate) const SCHEMA_VERSION: i64 = 1;
+/// v1: the four tables (0053). v2 (foundations phase): recommendation observation, rationale,
+/// suggested action, uncertainty, impact and effort; activity certainty. Additive only.
+pub(crate) const SCHEMA_VERSION: i64 = 2;
 const MAX_DATA_JSON: usize = 4 * 1024;
 const MAX_TEXT: usize = 2_000;
 
@@ -237,6 +239,8 @@ pub enum Recorded {
 
 pub(crate) struct NewActivity<'a> {
     pub scope: Scope,
+    /// `confirmed` (it happened as recorded) or `estimated` (e.g. a day-precision backfill).
+    pub certainty: &'a str,
     pub kind: &'a str,
     pub subject_ref: &'a str,
     pub occurred_at: &'a str,
@@ -262,6 +266,18 @@ pub(crate) struct NewRecommendation<'a> {
     pub confidence_basis: Option<&'a str>,
     pub target_ref: Option<&'a str>,
     pub supersedes_id: Option<&'a str>,
+    /// What was observed (plain statement of the facts the evidence shows).
+    pub observation: Option<&'a str>,
+    /// Why it matters.
+    pub rationale: Option<&'a str>,
+    /// What Taisun could do.
+    pub suggested_action: Option<&'a str>,
+    /// What is not known or could be wrong.
+    pub uncertainty: Option<&'a str>,
+    /// `low` | `medium` | `high`.
+    pub impact: Option<&'a str>,
+    /// `low` | `medium` | `high`.
+    pub effort: Option<&'a str>,
 }
 
 pub(crate) struct NewEvidence<'a> {
@@ -271,7 +287,6 @@ pub(crate) struct NewEvidence<'a> {
     pub role: &'a str,
     pub quality: &'a str,
     pub note: Option<&'a str>,
-    pub snapshot_sha256: Option<&'a str>,
 }
 
 impl Store {
@@ -288,8 +303,17 @@ impl Store {
             .map_err(|s| format!("amara store: open failed: {s:?}"))?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| format!("amara store: {e}"))?;
-        init(&conn, self.boundary)?;
+        init(&conn, self.boundary, &self.path)?;
         Ok(conn)
+    }
+
+    /// The app data folder this store sits in (the business file is one level down).
+    pub(crate) fn data_dir(&self) -> PathBuf {
+        let parent = self.path.parent().unwrap_or(Path::new("."));
+        match self.boundary {
+            Boundary::Personal => parent.to_path_buf(),
+            Boundary::Business => parent.parent().unwrap_or(parent).to_path_buf(),
+        }
     }
 
     fn scope_ok(&self, s: Scope) -> Result<(), String> {
@@ -303,6 +327,7 @@ impl Store {
         self.scope_ok(a.scope)?;
         check(ACTIVITY_KINDS, a.kind, "activity kind")?;
         check(ACTIVITY_SOURCES, a.source, "activity source")?;
+        check(&["confirmed", "estimated"], a.certainty, "certainty")?;
         check(ACTORS, a.actor, "actor")?;
         let subject = RecordRef::parse(a.subject_ref)?;
         if !self.boundary.allows(subject.scope) {
@@ -328,11 +353,11 @@ impl Store {
         let n = conn
             .execute(
                 "INSERT OR IGNORE INTO activity (activity_id, scope, kind, subject_ref, occurred_at,
-                    recorded_at, source, source_ref, actor, summary, data_json, schema_version)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                    recorded_at, source, source_ref, actor, summary, data_json, schema_version, certainty)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
                 params![
                     id, a.scope.as_str(), a.kind, a.subject_ref, a.occurred_at, now(), a.source,
-                    a.source_ref, a.actor, a.summary, a.data_json, SCHEMA_VERSION
+                    a.source_ref, a.actor, a.summary, a.data_json, SCHEMA_VERSION, a.certainty
                 ],
             )
             .map_err(|e| format!("amara store: {e}"))?;
@@ -374,9 +399,44 @@ impl Store {
                 return Err("target is in a scope this recommendation can't touch".into());
             }
         }
+        for (v, what) in [(r.impact, "impact"), (r.effort, "effort")] {
+            if let Some(v) = v {
+                check(&["low", "medium", "high"], v, what)?;
+            }
+        }
+        for t in [
+            r.observation,
+            r.rationale,
+            r.suggested_action,
+            r.uncertainty,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            capped(t, "recommendation text")?;
+        }
+        // Evidence must point at records that exist. A model-written recommendation may cite only
+        // records the resolver found; rules and the user may also cite stores it can't check
+        // (NOOP, derived rows), but never a record that is missing.
+        let by_model = r.produced_by.starts_with("model:");
+        let data = self.data_dir();
+        let mut shas: Vec<Option<String>> = Vec::with_capacity(evidence.len());
         let mut observations = 0;
         for e in evidence {
             let rr = RecordRef::parse(e.record_ref)?;
+            match resolve::resolve(&data, &rr) {
+                resolve::Resolution::Found { sha256 } => shas.push(Some(sha256)),
+                resolve::Resolution::Missing => {
+                    return Err(format!("evidence {}: no such record", e.record_ref))
+                }
+                resolve::Resolution::Unverifiable if by_model => {
+                    return Err(format!(
+                        "evidence {}: can't be checked, so a model may not cite it",
+                        e.record_ref
+                    ))
+                }
+                resolve::Resolution::Unverifiable => shas.push(None),
+            }
             if !evidence_allowed(r.scope, rr.scope) {
                 return Err(format!(
                     "evidence {} ({}) can't support a {} recommendation",
@@ -409,16 +469,18 @@ impl Store {
         tx.execute(
             "INSERT INTO recommendation (recommendation_id, scope, domain, kind, title, body, status,
                 created_at, updated_at, expires_at, produced_by, model_tier, confidence,
-                confidence_basis, target_ref, supersedes_id, schema_version)
-             VALUES (?1,?2,?3,?4,?5,?6,'proposed',?7,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                confidence_basis, target_ref, supersedes_id, schema_version, observation, rationale,
+                suggested_action, uncertainty, impact, effort)
+             VALUES (?1,?2,?3,?4,?5,?6,'proposed',?7,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
             params![
                 id, r.scope.as_str(), r.domain, r.kind, r.title, r.body, t, r.expires_at,
                 r.produced_by, r.model_tier, r.confidence, r.confidence_basis, r.target_ref,
-                r.supersedes_id, SCHEMA_VERSION
+                r.supersedes_id, SCHEMA_VERSION, r.observation, r.rationale, r.suggested_action,
+                r.uncertainty, r.impact, r.effort
             ],
         )
         .map_err(|e| format!("amara store: {e}"))?;
-        for e in evidence {
+        for (e, sha) in evidence.iter().zip(shas) {
             tx.execute(
                 "INSERT INTO recommendation_evidence (evidence_id, recommendation_id, record_ref,
                     window_start, window_end, role, quality, note, captured_at, snapshot_sha256)
@@ -433,7 +495,8 @@ impl Store {
                     e.quality,
                     e.note,
                     t,
-                    e.snapshot_sha256
+                    // The resolver's hash of the record as read; never the caller's.
+                    sha
                 ],
             )
             .map_err(|e| format!("amara store: {e}"))?;
@@ -628,6 +691,12 @@ pub(crate) fn note_take(
     let tier = matches!(tier, "light" | "deep" | "claude").then_some(tier);
     let r = store_for(data, scope).create_recommendation(
         &NewRecommendation {
+            observation: None,
+            rationale: None,
+            suggested_action: None,
+            uncertainty: None,
+            impact: None,
+            effort: None,
             id: Some(&rid),
             scope,
             domain,
@@ -714,7 +783,7 @@ pub(crate) fn day_start(day: &str) -> String {
     format!("{day}T00:00:00+09:00")
 }
 
-fn init(conn: &Connection, b: Boundary) -> Result<(), String> {
+fn init(conn: &Connection, b: Boundary, path: &Path) -> Result<(), String> {
     let scope = b.scope_check_sql();
     conn.execute_batch(&format!(
         "
@@ -798,22 +867,155 @@ fn init(conn: &Connection, b: Boundary) -> Result<(), String> {
         )
         .optional()
         .map_err(|e| format!("amara store: {e}"))?;
-    match found.and_then(|v| v.parse::<i64>().ok()) {
+    let (version, fresh) = match found.and_then(|v| v.parse::<i64>().ok()) {
         None => {
+            // A new file starts at v1 (the tables above) and is migrated forward like any other.
             conn.execute(
-                "INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', ?1)",
-                params![SCHEMA_VERSION.to_string()],
+                "INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '1')",
+                [],
             )
             .map_err(|e| format!("amara store: {e}"))?;
+            (1, true)
         }
         Some(v) if v > SCHEMA_VERSION => {
             return Err(format!(
                 "amara store schema {v} is newer than this app ({SCHEMA_VERSION}); not touched"
             ))
         }
-        Some(_) => {}
+        Some(v) => (v, false),
+    };
+    if version < 2 {
+        migrate_to_v2(conn, path, fresh)?;
     }
     Ok(())
+}
+
+/// v1 → v2 (additive): recommendation observation, rationale, suggested_action, uncertainty,
+/// impact, effort; activity certainty. A file that already holds rows is copied first
+/// (`VACUUM INTO <file>.v1-<timestamp>.bak`, 0600). The change and the version bump are one
+/// transaction: on any error nothing changes and the file stays v1.
+fn migrate_to_v2(conn: &Connection, path: &Path, fresh: bool) -> Result<(), String> {
+    let has_rows: i64 = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM activity) + (SELECT COUNT(*) FROM recommendation)",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("amara store: {e}"))?;
+    if !fresh && has_rows > 0 {
+        backup_before_migration(conn, path, 1)?;
+    }
+    // Take the write lock, then re-check: another connection may have migrated meanwhile.
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| format!("amara store: {e}"))?;
+    match migrate_v2_locked(conn) {
+        Ok(()) => conn
+            .execute_batch("COMMIT")
+            .map_err(|e| format!("amara store: migration to v2 failed: {e}")),
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+fn migrate_v2_locked(tx: &Connection) -> Result<(), String> {
+    let now: String = tx
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key='schema_version'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("amara store: {e}"))?;
+    if now.parse::<i64>().unwrap_or(0) >= 2 {
+        return Ok(());
+    }
+    tx.execute_batch(
+        "
+        ALTER TABLE recommendation ADD COLUMN observation TEXT;
+        ALTER TABLE recommendation ADD COLUMN rationale TEXT;
+        ALTER TABLE recommendation ADD COLUMN suggested_action TEXT;
+        ALTER TABLE recommendation ADD COLUMN uncertainty TEXT;
+        ALTER TABLE recommendation ADD COLUMN impact TEXT
+            CHECK (impact IS NULL OR impact IN ('low','medium','high'));
+        ALTER TABLE recommendation ADD COLUMN effort TEXT
+            CHECK (effort IS NULL OR effort IN ('low','medium','high'));
+        ALTER TABLE activity ADD COLUMN certainty TEXT NOT NULL DEFAULT 'confirmed'
+            CHECK (certainty IN ('confirmed','estimated'));
+        ",
+    )
+    .map_err(|e| format!("amara store: migration to v2 failed: {e}"))?;
+    #[cfg(test)]
+    if FAIL_MIGRATION.with(|f| f.get()) {
+        return Err("amara store: migration to v2 failed: injected".into());
+    }
+    tx.execute(
+        "UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'",
+        [],
+    )
+    .map_err(|e| format!("amara store: {e}"))?;
+    Ok(())
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static FAIL_MIGRATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `<file>.v<from>-<timestamp>.bak` beside the database, as one consistent snapshot.
+fn backup_before_migration(conn: &Connection, path: &Path, from: i64) -> Result<PathBuf, String> {
+    let stamp = Utc::now().format("%Y%m%dT%H%M%S%.6fZ");
+    let name = format!(
+        "{}.v{from}-{stamp}.bak",
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("store.db")
+    );
+    let dest = path.with_file_name(name);
+    conn.execute("VACUUM INTO ?1", params![dest.to_string_lossy()])
+        .map_err(|e| {
+            format!("amara store: backup before migration failed, nothing changed: {e}")
+        })?;
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| format!("amara store: backup permissions: {e}"))?;
+    Ok(dest)
+}
+
+/// Rollback: put a pre-migration backup back in place of the database (the older app build then
+/// reads it). The current file is kept as `<file>.replaced-<timestamp>`; nothing is deleted.
+/// No connection to the database may be open.
+// The rollback tool: run with the app closed (tests drive it; the steps are in decision 0053).
+#[allow(dead_code)]
+pub(crate) fn restore_backup(db: &Path, backup: &Path) -> Result<PathBuf, String> {
+    if !backup.is_file() {
+        return Err("restore: the backup file doesn't exist".into());
+    }
+    let stamp = Utc::now().format("%Y%m%dT%H%M%S%.6fZ");
+    let kept = db.with_file_name(format!(
+        "{}.replaced-{stamp}",
+        db.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("store.db")
+    ));
+    if db.exists() {
+        // Fold the WAL into the file first so the kept copy is complete.
+        if let Ok(c) = Connection::open(db) {
+            let _ = c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+        }
+        std::fs::rename(db, &kept).map_err(|e| format!("restore: {e}"))?;
+    }
+    for side in ["-wal", "-shm"] {
+        let p = PathBuf::from(format!("{}{side}", db.display()));
+        if p.exists() {
+            let _ = std::fs::rename(&p, PathBuf::from(format!("{}{side}", kept.display())));
+        }
+    }
+    std::fs::copy(backup, db).map_err(|e| format!("restore: {e}"))?;
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(db, std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| format!("restore: {e}"))?;
+    Ok(kept)
 }
 
 /// 0053 step 1: create both stores at startup (idempotent) and log the first creation in
@@ -855,6 +1057,9 @@ fn log_migration(data: &Path, file: &Path, what: &str) {
         eprintln!("[amara-store] could not write the migration log");
     }
 }
+
+pub(crate) mod commands;
+pub(crate) mod resolve;
 
 #[cfg(test)]
 mod tests;

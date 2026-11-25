@@ -255,6 +255,7 @@ pub(crate) fn mark_in(
     super::amara_store::note(
         &dirs.data,
         super::amara_store::NewActivity {
+            certainty: "confirmed",
             scope: super::amara_store::Scope::Personal,
             kind: if done {
                 "habit.completed"

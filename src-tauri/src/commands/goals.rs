@@ -137,6 +137,7 @@ fn note_goal_activity(data: &std::path::Path, old: &[Goal], new: &[Goal]) {
             note(
                 data,
                 NewActivity {
+                    certainty: "confirmed",
                     scope: Scope::Personal,
                     kind,
                     subject_ref: &subject,

@@ -27,6 +27,10 @@ pub(crate) enum OpenStep {
     Secure(String),
 }
 
+fn e_is_busy(e: &rusqlite::Error) -> bool {
+    e.to_string().contains("busy")
+}
+
 /// Open (creating if needed) a private WAL database at `path` with a busy timeout.
 pub(crate) fn open_private_wal(path: &Path) -> Result<Connection, OpenStep> {
     let parent = path
@@ -35,10 +39,23 @@ pub(crate) fn open_private_wal(path: &Path) -> Result<Connection, OpenStep> {
     crate::app_paths::create_private_dir_all(parent).map_err(|e| OpenStep::Dir(e.to_string()))?;
     crate::app_paths::ensure_private_file(path).map_err(|e| OpenStep::File(e.to_string()))?;
     let conn = Connection::open(path).map_err(|e| OpenStep::Open(e.to_string()))?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| OpenStep::Configure(e.to_string()))?;
+    // The timeout first: switching a new file to WAL takes a lock, and a second connection opening
+    // the same new file at that moment must wait, not fail with "database is locked" (0053).
     conn.busy_timeout(BUSY_TIMEOUT)
         .map_err(|e| OpenStep::Configure(e.to_string()))?;
+    // Changing the journal mode can still return "locked" without waiting for the busy handler, so
+    // that one step is retried briefly (lock errors only, about 2 s in all).
+    let mut tries = 0;
+    loop {
+        match conn.pragma_update(None, "journal_mode", "WAL") {
+            Ok(()) => break,
+            Err(e) if tries < 40 && (e.to_string().contains("locked") || e_is_busy(&e)) => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => return Err(OpenStep::Configure(e.to_string())),
+        }
+    }
     crate::app_paths::restrict_sqlite_files(path).map_err(|e| OpenStep::Secure(e.to_string()))?;
     Ok(conn)
 }
