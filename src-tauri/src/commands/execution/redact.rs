@@ -123,7 +123,7 @@ mod tests {
     fn secrets_by_name_and_by_shape_and_personal_fields_are_removed() {
         let v = json!({
             "api_key": "abc", "Authorization": "x", "nested": {"refresh_token": "y", "note": "ok"},
-            "header": "Bearer abcdefghijklmnop", "raw": "sk-ant-api03-aaaaaaaaaaaaaaaaaaaaaaaa",
+            "header": "Bearer abcdefghijklmnop", "raw": "sk-ant-FAKE_ANTHROPIC_NOT_REAL_aaaaaaaa",
             "hexy": "4f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a", "path": "/Users/t/Documents/a b.md",
             "diagnosis": "private health text", "volume": 40, "idempotency_key": "k1",
             "list": ["fine", "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
@@ -134,7 +134,7 @@ mod tests {
             "abc\"",
             "\"y\"",
             "abcdefghijklmnop",
-            "sk-ant",
+            "FAKE_ANTHROPIC",
             "4f9a8b7c",
             "private health",
             "ghp_",
@@ -150,8 +150,8 @@ mod tests {
 
     #[test]
     fn error_text_is_scrubbed_and_capped() {
-        let t = text("upstream said Bearer sk-live-aaaaaaaaaaaaaaaaaaaa failed");
-        assert!(!t.contains("sk-live") && t.starts_with("upstream said "));
+        let t = text("upstream said Bearer sk-live-FAKE_LIVE_NOT_REAL_aaaa failed");
+        assert!(!t.contains("FAKE_LIVE") && t.starts_with("upstream said "));
         let long = "word ".repeat(400);
         assert!(text(&long).ends_with("(2000 chars)"));
     }

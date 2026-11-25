@@ -89,7 +89,7 @@ impl Operation for WriteFile {
             message: e.to_string(),
             submitted: true,
         })?;
-        Ok(json!({"ok": true, "api_key": "sk-should-never-be-stored-aaaaaaaaaaaa"}))
+        Ok(json!({"ok": true, "api_key": "sk-FAKE_STORED_NOT_REAL_should-never-be-stored"}))
     }
     fn read_back(&self, p: &Value) -> Option<Result<Value, String>> {
         // A missing file is a reading (the change isn't there), not a failure to read.
@@ -334,7 +334,7 @@ fn successful_change_is_verified_by_independent_read_back() {
     );
     // The response was captured, redacted.
     let resp = rec.response.as_deref().unwrap();
-    assert!(resp.contains("\"ok\":true") && !resp.contains("sk-should"));
+    assert!(resp.contains("\"ok\":true") && !resp.contains("FAKE_STORED"));
     assert_eq!(rec.attempts, 1);
     assert_eq!(rec.target_ref.as_deref(), Some(path.to_str().unwrap()));
 }
@@ -1031,7 +1031,7 @@ fn secrets_and_personal_fields_never_reach_the_ledger_file() {
         "test.write_file",
         "k",
         Origin::User,
-        json!({"path": path, "content": "x", "api_key": "sk-live-abcdefghijklmnopqrstuv", "diary": "very private"}),
+        json!({"path": path, "content": "x", "api_key": "sk-live-FAKE_LEDGER_NOT_REAL_abcdefgh", "diary": "very private"}),
     ))
     .unwrap();
     drop(r.c.ledger.open().unwrap());
@@ -1042,9 +1042,9 @@ fn secrets_and_personal_fields_never_reach_the_ledger_file() {
         }
     }
     let text = String::from_utf8_lossy(&raw);
-    assert!(!text.contains("sk-live-abcdefghij"));
+    assert!(!text.contains("FAKE_LEDGER"));
     assert!(!text.contains("very private"));
-    assert!(!text.contains("sk-should-never"));
+    assert!(!text.contains("FAKE_STORED"));
 }
 
 #[test]

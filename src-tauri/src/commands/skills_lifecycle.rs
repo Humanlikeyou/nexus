@@ -280,8 +280,16 @@ impl Operation for Activate {
     }
     fn validate(&self, p: &Value) -> Result<(), String> {
         let stem = stem_of(p["stem"].as_str().ok_or("stem required")?)?;
-        p["version"].as_u64().ok_or("version required")?;
-        p["sha256"].as_str().ok_or("sha256 required")?;
+        let version = p["version"].as_u64().ok_or("version required")? as u32;
+        let sha = p["sha256"].as_str().ok_or("sha256 required")?;
+        // Re-check the stored text now (the guard may be stricter than when it was stored).
+        let bytes = std::fs::read(self.0.version_path(&stem, version)?)
+            .map_err(|_| "the stored version can't be read".to_string())?;
+        if sha256_hex(&bytes) != sha {
+            return Err("the stored version no longer matches its checksum".into());
+        }
+        let text = String::from_utf8(bytes).map_err(|_| "version is not text".to_string())?;
+        validate_content(&text).map_err(|e| format!("content no longer passes validation: {e}"))?;
         // A project skill with the same name always wins in read_skills: activating would be a lie.
         let live = self.0.live_path(&stem)?;
         if let Some(winner) = self.0.resolve(&stem) {
@@ -470,6 +478,9 @@ pub(crate) fn propose(
 
 /// Makes a verified version the live skill (also how an older version is restored). A live file
 /// that predates the manifest is imported as a version first, so nothing existing is lost.
+/// Activation with no content binding: tests and future Rust callers. The IPC command uses
+/// `activate_inner` with the checksum shown in the dialog.
+#[cfg(test)]
 pub(crate) fn activate(
     dirs: &SkillDirs,
     controller: &Controller,
@@ -477,6 +488,20 @@ pub(crate) fn activate(
     version: u32,
     origin: Origin,
     approval_id: Option<String>,
+) -> Result<SkillOutcome, String> {
+    activate_inner(dirs, controller, name, version, origin, approval_id, None)
+}
+
+/// `shown_sha`: the checksum of the content the user saw in the approval dialog. When given, the
+/// activation is refused unless the version still has exactly that content.
+fn activate_inner(
+    dirs: &SkillDirs,
+    controller: &Controller,
+    name: &str,
+    version: u32,
+    origin: Origin,
+    approval_id: Option<String>,
+    shown_sha: Option<&str>,
 ) -> Result<SkillOutcome, String> {
     let stem = stem_of(name)?;
     let _g = MANIFEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -491,6 +516,11 @@ pub(crate) fn activate(
         .find(|v| v.version == version)
         .ok_or_else(|| format!("{stem} has no version {version}"))?
         .clone();
+    if shown_sha.is_some_and(|s| s != target.sha256) {
+        return Err(format!(
+            "changed: {stem} v{version} is not the content that was shown for approval; nothing changed"
+        ));
+    }
     if !matches!(
         target.state,
         SkillState::ReadBackVerified | SkillState::Retired | SkillState::Active
@@ -609,6 +639,49 @@ pub(crate) fn reject(
     })
 }
 
+/// The stored text and its checksum for one version, checked against the manifest.
+fn version_content(dirs: &SkillDirs, stem: &str, version: u32) -> Result<(String, String), String> {
+    let m = load(dirs)?;
+    let v = m
+        .skills
+        .get(stem)
+        .and_then(|r| r.versions.iter().find(|v| v.version == version))
+        .ok_or_else(|| format!("{stem} has no version {version}"))?;
+    let bytes = std::fs::read(dirs.version_path(stem, version)?)
+        .map_err(|_| "the stored version can't be read".to_string())?;
+    let sha = sha256_hex(&bytes);
+    if sha != v.sha256 {
+        return Err("the stored version no longer matches its checksum".into());
+    }
+    Ok((String::from_utf8_lossy(&bytes).into_owned(), sha))
+}
+
+/// Room for the skill text inside the dialog's character limit (header and footer take the rest).
+const PREVIEW_CHARS: usize = 1_400;
+
+/// The approval dialog text: what becomes active, the start of its exact content, and a checksum
+/// prefix, always within the dialog limit (longer content says how much more there is).
+pub(crate) fn approval_preview(stem: &str, version: u32, content: &str, sha: &str) -> String {
+    let clean: String = content
+        .chars()
+        .filter(|c| *c == '\n' || !c.is_control())
+        .collect();
+    let total = clean.chars().count();
+    let shown: String = clean.chars().take(PREVIEW_CHARS).collect();
+    let more = if total > PREVIEW_CHARS {
+        format!("\n… ({} more characters not shown)", total - PREVIEW_CHARS)
+    } else {
+        String::new()
+    };
+    let text = format!(
+        "Make a skill active\n\n{stem}, version {version}. Amara will use it on every reply.\nChecksum {}\n\n{shown}{more}",
+        &sha[..sha.len().min(12)]
+    );
+    text.chars()
+        .take(super::approval_gate::MAX_APPROVAL_TEXT_CHARS)
+        .collect()
+}
+
 pub(crate) fn list(dirs: &SkillDirs) -> Result<Vec<SkillRecord>, String> {
     Ok(load(dirs)?.skills.into_values().collect())
 }
@@ -652,10 +725,9 @@ pub async fn activate_skill_version(
         let stem = stem_of(&name)?;
         let key = format!("skill:{stem}");
         let _guard = super::approval_gate::InFlightGuard::acquire_all(&[key])?;
-        let text = super::approval_gate::approval_text(
-            "Make a skill active",
-            &format!("{stem}, version {version}. Amara will use it on every reply."),
-        )?;
+        let dirs = SkillDirs::live();
+        let (content, sha) = version_content(&dirs, &stem, version)?;
+        let text = approval_preview(&stem, version, &content, &sha);
         let allowed = app
             .dialog()
             .message(text)
@@ -669,13 +741,15 @@ pub async fn activate_skill_version(
         if !allowed {
             return Err(super::approval_gate::denied_message());
         }
-        activate(
-            &SkillDirs::live(),
+        // Bound to the content shown: if the version changed meanwhile, nothing is activated.
+        activate_inner(
+            &dirs,
             &super::execution::live_controller(),
             &stem,
             version,
             Origin::User,
             None,
+            Some(&sha),
         )
     })
     .await

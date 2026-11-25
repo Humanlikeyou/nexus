@@ -100,3 +100,12 @@ No existing table, file or store was migrated or changed in shape. Phase 2 may f
 - A timed-out operation's thread may still finish later. Its late result is ignored, and `reconcile` (read-back only) can settle it afterwards. There is no production caller of `reconcile` yet.
 - No UI exists for approving or rejecting generated skills, so they stay READ_BACK_VERIFIED until one is built.
 - Hermes-side tool execution is outside Nexus and outside this ledger.
+
+## Follow-up: security review of 329ea31 (same day)
+
+An automated review found that the skill-activation dialog named the skill and version but not its content, so the user approved text they could not see. Fixed:
+- The dialog now shows the start of the exact stored text (up to 1,400 characters, with a count of the rest) and a checksum prefix.
+- Activation is bound to the checksum shown. If the version's content differs, it is refused with `changed:` and nothing is activated.
+- The activate operation re-reads the version, re-checks the checksum and re-runs content validation before anything goes live, so a tampered file, or one that a stricter guard would now reject, is refused.
+
+Three tests cover this. The redaction test fixtures were also renamed to the repository's `FAKE_*_NOT_REAL` convention so `check:secrets` passes on tracked files. They were always fake values.
