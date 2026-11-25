@@ -18,7 +18,7 @@ const SURFACES: Array<[string, (p: Page) => Promise<void>]> = [
   ["Patterns", async (p) => { await sub(p, "Mind–Body", "Patterns"); }],
   ["Personal money", async (p) => { await sub(p, "Life", "Personal money"); }],
   // design-1111v: Life pages.
-  ["Life goals", async (p) => { await navButton(p, "Life").click(); }],
+  ["Life goals", async (p) => { await sub(p, "Life", "Goals & projects"); }],
   ["Weekly review", async (p) => { await sub(p, "Life", "Weekly review"); }],
   ["Settings memory", async (p) => { await sub(p, "Settings", "Memory"); }],
 ];
@@ -74,7 +74,7 @@ test("(1111a + 1111v) check-in: 5-step mood; goals, dates and the weekly review 
   await expect(today.getByRole("radiogroup", { name: "Mood" }).getByRole("radio")).toHaveCount(5);
   await expect(today.locator("#checkin.page-section")).toHaveCount(1);
   for (const id of ["goals", "life-admin", "weekly-review"]) await expect(today.locator(`#${id}`)).toHaveCount(0);
-  await sub(page, "Life", "Goals");
+  await sub(page, "Life", "Goals & projects");
   await expect(activeField(page, "Life").locator("#goals")).toHaveCount(1);
   await sub(page, "Life", "Dates & deadlines");
   await expect(activeField(page, "Life").locator("#dates")).toHaveCount(1);

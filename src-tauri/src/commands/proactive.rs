@@ -76,12 +76,39 @@ impl Default for ProactiveMoney {
     }
 }
 
+/// Life suggestions brought up by Amara (decision 0056; rules in `life_nudges.rs`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct ProactiveNudges {
+    pub enabled: bool,
+    /// Also send them on Telegram (the kill switch still applies).
+    pub telegram: bool,
+    /// New suggestions a JST day, app and Telegram together (0-10).
+    pub max_per_day: u32,
+    /// Quiet hours (JST, `HH:MM`); equal ends mean none.
+    pub quiet_from: String,
+    pub quiet_to: String,
+}
+impl Default for ProactiveNudges {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            telegram: true,
+            max_per_day: 2,
+            quiet_from: "22:00".into(),
+            quiet_to: "07:00".into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
 pub struct ProactiveSettings {
     pub checkin: ProactiveCheckin,
     pub habits: ProactiveHabits,
     pub money: ProactiveMoney,
+    /// Older files have no `nudges` and read as the defaults.
+    pub nudges: ProactiveNudges,
 }
 
 const WEEKDAYS: [(&str, Weekday); 7] = [
@@ -105,6 +132,11 @@ pub(crate) fn validate(s: &ProactiveSettings) -> Result<ProactiveSettings, Strin
     out.checkin.at = super::goals::valid_hhmm(&s.checkin.at).ok_or_else(bad)?;
     out.money.at = super::goals::valid_hhmm(&s.money.at).ok_or_else(bad)?;
     weekday_of(&s.money.weekday).ok_or_else(bad)?;
+    out.nudges.quiet_from = super::goals::valid_hhmm(&s.nudges.quiet_from).ok_or_else(bad)?;
+    out.nudges.quiet_to = super::goals::valid_hhmm(&s.nudges.quiet_to).ok_or_else(bad)?;
+    if s.nudges.max_per_day > 10 {
+        return Err(bad());
+    }
     Ok(out)
 }
 
@@ -553,6 +585,25 @@ pub fn start() {
                     {
                         Ok(()) => Outcome::Sent,
                         Err(_) => Outcome::Failed,
+                    }
+                },
+            )
+            .await;
+            let nudges = load_settings_in(&data).nudges;
+            super::life_nudges::telegram_in(
+                &data,
+                &nudges,
+                super::shared::time::now_jst(),
+                super::telegram::outbound_disabled(),
+                |text| async move {
+                    match super::telegram::send_plain_gated(
+                        text,
+                        super::telegram::outbound_disabled(),
+                    )
+                    .await
+                    {
+                        Ok(()) => super::life_nudges::TgOutcome::Sent,
+                        Err(_) => super::life_nudges::TgOutcome::Failed,
                     }
                 },
             )

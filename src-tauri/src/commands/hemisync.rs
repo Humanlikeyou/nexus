@@ -1659,6 +1659,7 @@ pub async fn hemisync_mark_wave_done(wave_number: u32, done: bool) -> Result<u64
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn hemisync_session_link(
     session_id: String,
     track_id: String,
@@ -1672,6 +1673,7 @@ pub async fn hemisync_session_link(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn hemisync_session_finish(
     session_id: String,
     listened_ms: u64,
@@ -1685,6 +1687,7 @@ pub async fn hemisync_session_finish(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn hemisync_session_rate(
     session_id: String,
     rating: u8,

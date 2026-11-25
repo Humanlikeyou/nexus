@@ -43,8 +43,9 @@ export const HOST_VIEWS: Partial<Record<ModuleId, SubView[]>> = {
   // Activity is a section of Agents, Lists (To-dos) a section of Today, Voice a section of Settings.
   chat: [{ view: "main", label: "Agents", screen: "chat" }, { view: "crews", label: "Crews", screen: "crews" }],
   mindbody: [{ view: "main", label: "Overview", screen: "mindbody" }, { view: "fitness", label: "Fitness", screen: "health" }, { view: "neuro", label: "Neuro", screen: "neuro" }, { view: "neuro-history", label: "Neuro history", screen: "sessions" }, { view: "patterns", label: "Patterns", screen: "mindbody" }],
-  // design-1111v: Life is its own host. No "main": the host opens on Goals.
-  life: [{ view: "goals", label: "Goals", screen: "life" }, { view: "weekly-review", label: "Weekly review", screen: "life" }, { view: "dates", label: "Dates & deadlines", screen: "life" }, { view: "money", label: "Personal money", screen: "life" }],
+  // design-1111v: Life is its own host. PLAN-0055 / decision 0056: it opens on Overview; Goals became "Goals & projects"
+  // (same "goals" view id) and habits moved to their own view. No "main" (life:main redirects to Overview).
+  life: [{ view: "overview", label: "Overview", screen: "life" }, { view: "goals", label: "Goals & projects", screen: "life" }, { view: "habits", label: "Habits & routines", screen: "life" }, { view: "weekly-review", label: "Weekly review", screen: "life" }, { view: "dates", label: "Dates & deadlines", screen: "life" }, { view: "money", label: "Personal money", screen: "life" }],
   // design-1111s: Settings gets section tabs, the same bar Enterprise uses (Taisun, 14:59 JST Nov 11).
   settings: [{ view: "main", label: "General", screen: "settings" }, { view: "services", label: "Services", screen: "settings" }, { view: "devices", label: "Devices", screen: "settings" }, { view: "notifications", label: "Notifications", screen: "settings" }, { view: "backup", label: "Backup", screen: "settings" }, { view: "voice", label: "Voice", screen: "settings" }, { view: "memory", label: "Memory", screen: "settings" }],
   // design-1111v: Business became Enterprise. Money → Finances (old ids "revenue" and "money" redirect), Work → Tasks,
@@ -76,7 +77,7 @@ export const VIEW_REDIRECTS: Record<string, Route> = {
   "terrance:goals": { id: "life", view: "goals" },
   "terrance:weekly-review": { id: "life", view: "weekly-review" },
   "terrance:life-admin": { id: "life", view: "dates" },
-  "life:main": { id: "life", view: "goals" },
+  "life:main": { id: "life", view: "overview" },
   "life:personal-money": { id: "life", view: "money" },
   "enterprise:personal": { id: "life", view: "money" },
   "enterprise:revenue": { id: "enterprise", view: "finances" },

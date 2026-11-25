@@ -202,13 +202,13 @@ const SUB_VIEW_HOSTS: Record<string, string> = { Fitness: "Mind–Body", Neuro: 
   // design-1111v: Enterprise tabs (Business renamed) and Life tabs. Old labels map to the renamed tab (RADIO_ALIAS).
   Overview: "Enterprise", Decisions: "Enterprise", Ventures: "Enterprise", Finances: "Enterprise", Tasks: "Enterprise", Content: "Enterprise",
   Money: "Enterprise", Work: "Enterprise", Revenue: "Enterprise",
-  Goals: "Life", "Weekly review": "Life", "Dates & deadlines": "Life", "Personal money": "Life",
+  Goals: "Life", "Goals & projects": "Life", "Habits & routines": "Life", "Weekly review": "Life", "Dates & deadlines": "Life", "Personal money": "Life",
   // design-1111s: Settings tabs.
   Services: "Settings", Devices: "Settings", Notifications: "Settings", Backup: "Settings", Voice: "Settings", Memory: "Settings" };
 /** design-1110b B: folded screens that are now a section of a host page (label → host, anchor id). */
 const SECTION_HOSTS: Record<string, [string, string]> = { Activity: ["Agents", "activity"], Lists: ["Today", "lists"], "To-dos": ["Today", "lists"], "Needs you today": ["Today", "needs-you"] };
 /** design-1111v renames: the label a spec used → the tab it is now. */
-const RADIO_ALIAS: Record<string, string> = { Money: "Finances", Revenue: "Finances", Work: "Tasks" };
+const RADIO_ALIAS: Record<string, string> = { Money: "Finances", Revenue: "Finances", Work: "Tasks", Goals: "Goals & projects" };
 
 /** Goes to Today from wherever the page is: from the landing its button, from anywhere else Home first. */
 export async function gotoToday(page: Page) {

@@ -237,16 +237,19 @@ export type CheckInWire = { id: string; at: string; day: string; mood: number; e
 const SHORT_MONTH = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 const dayLabel = (iso: string) => SHORT_MONTH.format(new Date(`${iso}T00:00:00Z`));
 
+/** One stored date as the page shows it. `month` is months from `startOffsetDays` before the date's day count (0 = today). */
+export function lifeDateFrom(r: LifeDateWire, startOffsetDays = 0): LifeDate {
+  const next = r.reminders.find((x) => !x.passed) ?? r.reminders[r.reminders.length - 1];
+  return {
+    id: r.id, title: r.title, short: r.title, sub: r.sub || (r.lane === "residence" ? "Japan · residence" : "Personal"), date: dayLabel(r.date), iso: r.date, rawSub: r.sub,
+    month: (r.inDays - startOffsetDays) / 30.4, inDays: r.inDays, reminder: r.done ? "Done" : next ? `${next.days} days · ${dayLabel(next.on)}` : "", due: r.activeWindow != null && !r.done, lane: r.lane,
+    leadDays: r.leadDays ?? [], done: r.done ?? false, goalId: r.goalId ?? null,
+  };
+}
+
 /** Upcoming dates only (the page shows the next 12 months); `month` is months from today for the timeline. */
 export function lifeAdminFrom(rows: LifeDateWire[]): LifeAdmin {
-  const dates: LifeDate[] = rows.filter((r) => r.inDays >= 0).map((r) => {
-    const next = r.reminders.find((x) => !x.passed) ?? r.reminders[r.reminders.length - 1];
-    return {
-      id: r.id, title: r.title, short: r.title, sub: r.sub || (r.lane === "residence" ? "Japan · residence" : "Personal"), date: dayLabel(r.date), iso: r.date, rawSub: r.sub,
-      month: r.inDays / 30.4, inDays: r.inDays, reminder: r.done ? "Done" : next ? `${next.days} days · ${dayLabel(next.on)}` : "", due: r.activeWindow != null && !r.done, lane: r.lane,
-      leadDays: r.leadDays ?? [], done: r.done ?? false, goalId: r.goalId ?? null,
-    };
-  });
+  const dates: LifeDate[] = rows.filter((r) => r.inDays >= 0).map((r) => lifeDateFrom(r));
   const first = dates.find((d) => !d.done);
   return { next: first ? `${first.title} in ${first.inDays} days` : "Nothing coming up", dates };
 }

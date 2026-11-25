@@ -154,6 +154,7 @@ const ACTIVITY_KINDS: &[&str] = &[
     "link.added",
     "link.removed",
     "area.updated",
+    "week.planned",
 ];
 const ACTIVITY_SOURCES: &[&str] = &["user", "model", "scheduler", "import", "backfill", "noop"];
 const ACTORS: &[&str] = &["taisun", "amara", "system"];

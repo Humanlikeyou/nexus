@@ -39,6 +39,9 @@ pub(crate) mod launch_token;
 #[allow(dead_code)]
 pub(crate) mod inference;
 pub(crate) mod life;
+pub(crate) mod life_nudges;
+pub(crate) mod life_plan;
+pub(crate) mod life_week;
 pub mod llm_router;
 pub mod loopback_http;
 pub mod memory_read;

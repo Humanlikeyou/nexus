@@ -251,6 +251,25 @@ pub(crate) fn list_in(dir: &Path, today: NaiveDate) -> Result<Vec<LifeDateView>,
         .collect())
 }
 
+/// Dates between `from` and `to` (inclusive, `YYYY-MM-DD`), past ones included, for the range picker.
+/// At most about 10 years in one read.
+pub(crate) fn range_in(
+    dir: &Path,
+    today: NaiveDate,
+    from: &str,
+    to: &str,
+) -> Result<Vec<LifeDateView>, String> {
+    let a = parse_day(from).map_err(|_| "from must be YYYY-MM-DD".to_string())?;
+    let b = parse_day(to).map_err(|_| "to must be YYYY-MM-DD".to_string())?;
+    if b < a || (b - a).num_days() > 3700 {
+        return Err("the range is 0 days to 10 years".into());
+    }
+    Ok(list_in(dir, today)?
+        .into_iter()
+        .filter(|v| parse_day(&v.record.date).is_ok_and(|d| d >= a && d <= b))
+        .collect())
+}
+
 /// Inserts or (with an existing `id`) replaces. A draft that leaves `lead_days`, `done` or `goal_id` out keeps
 /// what is stored. Returns the stored record.
 pub(crate) fn upsert_in(dir: &Path, draft: &LifeDateDraft) -> Result<LifeDateRecord, String> {
@@ -609,6 +628,15 @@ pub async fn life_date_list() -> Result<Vec<LifeDateView>, String> {
     blocking(JoinErr::Plain, || list_in(&data_dir(), day_of(&now_jst()))).await
 }
 
+#[tauri::command]
+#[specta::specta]
+pub async fn life_date_range(from: String, to: String) -> Result<Vec<LifeDateView>, String> {
+    blocking(JoinErr::Plain, move || {
+        range_in(&data_dir(), day_of(&now_jst()), &from, &to)
+    })
+    .await
+}
+
 /// Direct save (an edit, or a caller that already holds a checked date). The add flow goes through
 /// `add_preview` → `add_save`, which ends here too.
 #[tauri::command]
@@ -665,6 +693,39 @@ mod tests {
         assert_eq!(active_window(90), Some(90));
         assert_eq!(active_window(91), None);
         assert_eq!(active_window(-1), None);
+    }
+
+    #[test]
+    fn range_reads_beyond_twelve_months_and_includes_past_dates() {
+        let data = temp_dir("ld-range");
+        let dir = dir_in(&data);
+        let mk = |title: &str, date: &str| LifeDateDraft {
+            id: None,
+            title: title.into(),
+            date: date.into(),
+            lane: "personal".into(),
+            sub: None,
+            lead_days: None,
+            done: None,
+            goal_id: None,
+        };
+        upsert_in(&dir, &mk("Past", "2026-01-10")).unwrap();
+        upsert_in(&dir, &mk("Soon", "2026-12-01")).unwrap();
+        upsert_in(&dir, &mk("Far", "2029-05-01")).unwrap();
+        let today = d(2026, 11, 25);
+        let titles =
+            |v: Vec<LifeDateView>| v.into_iter().map(|x| x.record.title).collect::<Vec<_>>();
+        assert_eq!(
+            titles(range_in(&dir, today, "2026-11-25", "2030-11-25").unwrap()),
+            ["Soon", "Far"]
+        );
+        assert_eq!(
+            titles(range_in(&dir, today, "2026-01-01", "2026-12-31").unwrap()),
+            ["Past", "Soon"]
+        );
+        assert!(range_in(&dir, today, "2027-01-01", "2026-01-01").is_err());
+        assert!(range_in(&dir, today, "2026-01-01", "2040-01-01").is_err());
+        assert!(range_in(&dir, today, "nope", "2026-01-01").is_err());
     }
 
     #[test]

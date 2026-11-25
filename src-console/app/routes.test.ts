@@ -43,10 +43,10 @@ describe("navigation (7 items, 2 groups)", () => {
     expect(SYSTEMS.map((s) => s.label)).toEqual(["Home", "Life", "Mind–Body", "Enterprise", "Agents", "Smart home", "Settings"]);
   });
 
-  it("keeps host ids; Life opens on Goals and Enterprise on Overview", () => {
+  it("keeps host ids; Life opens on Overview (decision 0056) and Enterprise on Overview", () => {
     for (const s of SYSTEMS) {
       const r = resolveRoute(s.id);
-      expect(r).toEqual({ id: s.id, view: s.id === "life" ? "goals" : "main" });
+      expect(r).toEqual({ id: s.id, view: s.id === "life" ? "overview" : "main" });
     }
     expect(screenFor(resolveRoute("life"))).toBe("life");
     expect(screenFor(resolveRoute("enterprise"))).toBe("business");
@@ -82,7 +82,7 @@ describe("design-1111v redirects (HANDOFF-1111v §2): old routes keep working", 
     [{ id: "business" as never, view: "content" }, { id: "enterprise", view: "content" }],
     [{ id: "business" as never, view: "ventures/taiyo-skin" }, { id: "enterprise", view: "ventures/taiyo-skin" }],
     [{ id: "lists" as never, view: "main" }, { id: "terrance", view: "lists" }],
-    [{ id: "life" as never, view: "main" }, { id: "life", view: "goals" }],
+    [{ id: "life" as never, view: "main" }, { id: "life", view: "overview" }],
   ];
   it.each(PAIRS)("%o → %o", (from, to) => {
     expect(resolveRoute(from.id, from.view)).toEqual(to);
@@ -111,7 +111,7 @@ describe("design-1111v redirects (HANDOFF-1111v §2): old routes keep working", 
   });
 
   it("the tabs keep Taisun's names", () => {
-    expect(HOST_VIEWS.life?.map((v) => v.label)).toEqual(["Goals", "Weekly review", "Dates & deadlines", "Personal money"]);
+    expect(HOST_VIEWS.life?.map((v) => v.label)).toEqual(["Overview", "Goals & projects", "Habits & routines", "Weekly review", "Dates & deadlines", "Personal money"]);
     expect(HOST_VIEWS.enterprise?.map((v) => v.label)).toEqual(["Overview", "Decisions", "Ventures", "Finances", "Treasury", "Tasks", "Content"]);
     expect(HOST_VIEWS.business).toBeUndefined();
   });

@@ -11,8 +11,8 @@ async function openGoals(page: Page) {
   await gotoToday(page);
   await navButton(page, "Life").click();
   const field = activeField(page, "Life");
-  await field.getByRole("radio", { name: "Goals", exact: true }).click();
-  await expect(field.getByRole("heading", { level: 1, name: "Goals" })).toBeVisible();
+  await field.getByRole("radio", { name: "Goals & projects", exact: true }).click();
+  await expect(field.getByRole("heading", { level: 1, name: "Goals & projects" })).toBeVisible();
   return field;
 }
 
@@ -23,7 +23,8 @@ test("Life › Goals with sample adapters: milestones map, habits under the map,
   const field = await openGoals(page);
   await expect(field.getByRole("region", { name: "Milestones" })).toBeVisible();
   await expect(field.getByTestId("milestones-tangle")).toBeVisible();
-  await expect(field.getByRole("region", { name: "Habits this week" })).toBeVisible();
+  // PLAN-0055: habits moved to Life › Habits & routines; Goals links there.
+  await expect(field.getByText("Habits have their own page now.")).toBeVisible();
   await expect(field.getByText("Sample data").first()).toBeVisible();
   await field.locator(".d18-legend__b").first().click();
   await expect(field.getByTestId("milestones-focus")).toBeVisible();
@@ -49,6 +50,8 @@ test("Step question in the take (sample): shown once, Yes confirms with the road
   await gotoToday(page);
   await navButton(page, "Life").click();
   const field = activeField(page, "Life");
+  // Life opens on Overview now (decision 0056); the step question still lives in the Goals take.
+  await field.getByRole("radio", { name: "Goals & projects", exact: true }).click();
   const q = field.getByRole("region", { name: "Step question" });
   await expect(q).toHaveCount(1);
   await expect(q).toContainText("Have you done:");

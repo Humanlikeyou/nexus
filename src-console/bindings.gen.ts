@@ -373,6 +373,7 @@ export const commands = {
 	 */
 	lifeDateUpsert: (draft: LifeDateDraft_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<LifeDateRecord_Serialize>("life_date_upsert", { draft }, options),
 	lifeDateDelete: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("life_date_delete", { id }, options),
+	lifeDateRange: (from: string, to: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeDateView_Serialize[]>("life_date_range", { from, to }, options),
 	checkinList: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<CheckInRecord_Serialize[]>("checkin_list", { limit }, options),
 	patternsRead: (options?: InvokeOptions) => __TAURI_INVOKE<PatternsResult_Serialize>("patterns_read", undefined, options),
 	weeklyReviewRead: (options?: InvokeOptions) => __TAURI_INVOKE<Review_Serialize>("weekly_review_read", undefined, options),
@@ -474,6 +475,29 @@ export const commands = {
 	lifeLinkAdd: (kind: string, goalId: string, otherId: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeLink>("life_link_add", { kind, goalId, otherId }, options),
 	lifeLinkRemove: (linkId: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("life_link_remove", { linkId }, options),
 	lifeLinks: (goalId: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeLink[]>("life_links", { goalId }, options),
+	/**  This week's plan when `week_start` is omitted. */
+	lifeWeekPlanGet: (weekStart: string | null, options?: InvokeOptions) => __TAURI_INVOKE<WeekPlan_Serialize>("life_week_plan_get", { weekStart }, options),
+	lifeWeekPlanSet: (plan: WeekPlan_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<WeekPlan_Serialize>("life_week_plan_set", { plan }, options),
+	lifeInsight: (options?: InvokeOptions) => __TAURI_INVOKE<LifeInsight_Serialize>("life_insight", undefined, options),
+	lifeWeekObservations: (weekStart: string, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationRow_Serialize[]>("life_week_observations", { weekStart }, options),
+	/**
+	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
+	 *  `source` is "manual", "chat" or "telegram".
+	 */
+	habitMark: (habitId: string, day: string, done: boolean, source: string, options?: InvokeOptions) => __TAURI_INVOKE<HabitMarkResult_Serialize>("habit_mark", { habitId, day, done, source }, options),
+	/**  The marks with `from <= day <= to` (JST `YYYY-MM-DD`, at most 400 days), oldest first. */
+	habitDays: (from: string, to: string, options?: InvokeOptions) => __TAURI_INVOKE<HabitDayRow[]>("habit_days", { from, to }, options),
+	roadmapAccept: (goalId: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("roadmap_accept", { goalId }, options),
+	roadmapAnswerStep: (goalId: string, stepId: string, answer: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("roadmap_answer_step", { goalId, stepId, answer }, options),
+	/**  Replace a block's value (max 2000 characters) after a native approval. The old value is saved first. */
+	memoryEdit: (blockId: string, value: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("memory_edit", { blockId, value }, options),
+	/**  Clears a block's value after a native approval dialog. The block itself is never deleted. */
+	memoryDelete: (blockId: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("memory_delete", { blockId }, options),
+	/**  Undo: puts back the old value from the newest backup of this block, after a native approval. */
+	memoryRestoreLast: (blockId: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("memory_restore_last", { blockId }, options),
+	hemisyncSessionFinish: (sessionId: string, listenedMs: number, completed: boolean, options?: InvokeOptions) => __TAURI_INVOKE<null>("hemisync_session_finish", { sessionId, listenedMs, completed }, options),
+	hemisyncSessionLink: (sessionId: string, trackId: string, startedAt: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("hemisync_session_link", { sessionId, trackId, startedAt }, options),
+	hemisyncSessionRate: (sessionId: string, rating: number, note: string | null, options?: InvokeOptions) => __TAURI_INVOKE<null>("hemisync_session_rate", { sessionId, rating, note }, options),
 	/**
 	 *  The webview never receives the bot token (Stage G review MED-3): it is always null here. The
 	 *  token is managed through `secrets_status` / `secret_set` (Keychain).
@@ -3099,6 +3123,41 @@ export type HabitDay = {
 	state: string,
 };
 
+export type HabitDayRow = {
+	habitId: string,
+	/**  JST `YYYY-MM-DD`. */
+	day: string,
+	done: boolean,
+	/**  "manual" | "chat" | "telegram". */
+	source: string,
+	/**  When the mark was made (JST, ISO). */
+	at: string,
+};
+
+export type HabitMarkResult = HabitMarkResult_Serialize | HabitMarkResult_Deserialize;
+
+export type HabitMarkResult_Deserialize = {
+	/**  False when the day already had that state: nothing was written and nothing is in History. */
+	changed: boolean,
+	/**  The History id Undo takes (`add_undo("habit", id)`); `None` when nothing changed. */
+	id?: string | null,
+	habitId: string,
+	day: string,
+	done: boolean,
+	toast: string,
+};
+
+export type HabitMarkResult_Serialize = {
+	/**  False when the day already had that state: nothing was written and nothing is in History. */
+	changed: boolean,
+	/**  The History id Undo takes (`add_undo("habit", id)`); `None` when nothing changed. */
+	id: string | null,
+	habitId: string,
+	day: string,
+	done: boolean,
+	toast: string,
+};
+
 export type HabitWeek = {
 	id: string,
 	title: string,
@@ -3668,6 +3727,24 @@ export type LifeFields_Serialize = {
 	fullVersion: string | null,
 	/**  Reminders on or off (the time is `remind_at`). Unset = the app default. */
 	reminders: boolean | null,
+};
+
+export type LifeInsight = LifeInsight_Serialize | LifeInsight_Deserialize;
+
+export type LifeInsight_Deserialize = {
+	recommendation?: RecommendationRow_Deserialize | null,
+	/**  True when this read brought it up (and recorded `shown`). */
+	nudged: boolean,
+	/**  When nothing new was brought up: `off`, `quiet_hours`, `daily_limit` or `none` (nothing qualifies). */
+	held?: string | null,
+};
+
+export type LifeInsight_Serialize = {
+	recommendation: RecommendationRow_Serialize | null,
+	/**  True when this read brought it up (and recorded `shown`). */
+	nudged: boolean,
+	/**  When nothing new was brought up: `off`, `quiet_hours`, `daily_limit` or `none` (nothing qualifies). */
+	held: string | null,
 };
 
 export type LifeLink = {
@@ -4775,6 +4852,22 @@ export type PatternsResult_Serialize = {
 	reason?: string,
 };
 
+export type PlannedAction = PlannedAction_Serialize | PlannedAction_Deserialize;
+
+export type PlannedAction_Deserialize = {
+	text: string,
+	/**  The goal it moves, if any (must exist in `goals.json`). */
+	goalId?: string | null,
+	done?: boolean,
+};
+
+export type PlannedAction_Serialize = {
+	text: string,
+	/**  The goal it moves, if any (must exist in `goals.json`). */
+	goalId: string | null,
+	done: boolean,
+};
+
 export type Pointer = Pointer_Serialize | Pointer_Deserialize;
 
 export type Pointer_Deserialize = {
@@ -4842,18 +4935,49 @@ export type ProactiveMoney_Serialize = {
 	at: string,
 };
 
+/**  Life suggestions brought up by Amara (decision 0056; rules in `life_nudges.rs`). */
+export type ProactiveNudges = ProactiveNudges_Serialize | ProactiveNudges_Deserialize;
+
+/**  Life suggestions brought up by Amara (decision 0056; rules in `life_nudges.rs`). */
+export type ProactiveNudges_Deserialize = {
+	enabled?: boolean,
+	/**  Also send them on Telegram (the kill switch still applies). */
+	telegram?: boolean,
+	/**  New suggestions a JST day, app and Telegram together (0-10). */
+	maxPerDay?: number,
+	/**  Quiet hours (JST, `HH:MM`); equal ends mean none. */
+	quietFrom?: string,
+	quietTo?: string,
+};
+
+/**  Life suggestions brought up by Amara (decision 0056; rules in `life_nudges.rs`). */
+export type ProactiveNudges_Serialize = {
+	enabled: boolean,
+	/**  Also send them on Telegram (the kill switch still applies). */
+	telegram: boolean,
+	/**  New suggestions a JST day, app and Telegram together (0-10). */
+	maxPerDay: number,
+	/**  Quiet hours (JST, `HH:MM`); equal ends mean none. */
+	quietFrom: string,
+	quietTo: string,
+};
+
 export type ProactiveSettings = ProactiveSettings_Serialize | ProactiveSettings_Deserialize;
 
 export type ProactiveSettings_Deserialize = {
 	checkin?: ProactiveCheckin_Deserialize,
 	habits?: ProactiveHabits_Deserialize,
 	money?: ProactiveMoney_Deserialize,
+	/**  Older files have no `nudges` and read as the defaults. */
+	nudges?: ProactiveNudges_Deserialize,
 };
 
 export type ProactiveSettings_Serialize = {
 	checkin: ProactiveCheckin_Serialize,
 	habits: ProactiveHabits_Serialize,
 	money: ProactiveMoney_Serialize,
+	/**  Older files have no `nudges` and read as the defaults. */
+	nudges: ProactiveNudges_Serialize,
 };
 
 export type Progress = {
@@ -7669,6 +7793,32 @@ export type WatchlistView_Serialize = {
 	/**  True when the "Want new picks?" pointer is showing in Needs you. */
 	reviewDue: boolean,
 	disclaimer: string,
+};
+
+export type WeekPlan = WeekPlan_Serialize | WeekPlan_Deserialize;
+
+export type WeekPlan_Deserialize = {
+	/**  The Monday (JST) of the planned week, `YYYY-MM-DD`. */
+	weekStart: string,
+	/**  The one thing that matters most this week, in Taisun's words. `None` = not set. */
+	priority?: string | null,
+	priorityGoalId?: string | null,
+	actions?: PlannedAction_Deserialize[],
+	note?: string | null,
+	/**  When it was last saved (RFC 3339); `None` for a week never planned. */
+	updatedAt?: string | null,
+};
+
+export type WeekPlan_Serialize = {
+	/**  The Monday (JST) of the planned week, `YYYY-MM-DD`. */
+	weekStart: string,
+	/**  The one thing that matters most this week, in Taisun's words. `None` = not set. */
+	priority: string | null,
+	priorityGoalId: string | null,
+	actions: PlannedAction_Serialize[],
+	note: string | null,
+	/**  When it was last saved (RFC 3339); `None` for a week never planned. */
+	updatedAt: string | null,
 };
 
 export type WeeklyReviewHealth = WeeklyReviewHealth_Serialize | WeeklyReviewHealth_Deserialize;

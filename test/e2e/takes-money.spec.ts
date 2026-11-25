@@ -21,7 +21,7 @@ const SURFACES: Array<[string, (p: Page) => Promise<void>]> = [
   // design-1111v: Business › Personal moved to Life › Personal money; goals and the weekly review moved to Life.
   ["Life › Personal money", async (p) => { await sub(p, "Life", "Personal money"); }],
   ["Today", async (p) => { await gotoToday(p); }],
-  ["Life › Goals", async (p) => { await sub(p, "Life", "Goals"); }],
+  ["Life › Goals", async (p) => { await sub(p, "Life", "Goals & projects"); }],
   ["Life › Weekly review", async (p) => { await sub(p, "Life", "Weekly review"); }],
 ];
 for (const sample of [false, true]) {

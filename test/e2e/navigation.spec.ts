@@ -4,7 +4,7 @@ import { responses } from "./fixtures/snapshot";
 const SECTIONS: { label: string; h1: RegExp }[] = [
   // Order = ⌘1–7 (decision 0009). Life opens on Goals.
   { label: "Today", h1: /^Today$/ },
-  { label: "Life", h1: /^Goals$/ },
+  { label: "Life", h1: /^Overview$/ }, // decision 0056: Life opens on Overview
   { label: "Mind–Body", h1: /^Mind–Body$/ },
   { label: "Enterprise", h1: /^Enterprise$/ },
   { label: "Agents", h1: /^Agents$/ },
