@@ -18,7 +18,7 @@ Branch `amara-integration`, local commits only, nothing pushed (decision 0001). 
 - Rust was last run at 0daa808, with no Rust change since.
 - takes-money:80 [light] (was takes-1111t:80) is a real Design contrast bug (4.28:1). It fails in some full runs; never weaken it.
 
-Merged into nexus-v2 cc1d828 and crew rebuilt (2026-11-23, decision 0047; approvals 401 not 404). Installed: 152a549 (2026-11-25, quit and reopened): decision 0048 Dates & Deadlines on top of 0045 part 1. Rollback: ~/Backups/Amara OS-backup-20261125a.app (010624f). Pushed to origin/amara-integration. Crew rebuild waits on Taisun (0043).
+Merged into nexus-v2 cc1d828 and crew rebuilt (2026-11-23, decision 0047; approvals 401 not 404). Installed: d284e4b (2026-11-25, quit and reopened): decision 0049 part 2 (handoff §47). Rollback: ~/Backups/Amara OS-backup-20261125b.app (152a549). origin/amara-integration is at de23594 + 152a549; d284e4b and later are local until Taisun OKs a push. Crew rebuild waits on Taisun (0043).
 
 ### Handover phases (0–17)
 Plan of record: `tasks/HANDOVER-FINAL-2026-11-12.md`. Taisun put it on disk on 2026-11-14; it is untracked and his file, so don't commit it without his OK. Evidence is a commit or a decision.

@@ -26,3 +26,9 @@ His words (verbatim): **"do it that should have been done first before reinstall
 - Gates on the final tree: tsc, lint, check:secrets pass; vitest 2907; neuro 21; src-tauri fmt and clippy clean, 1843 passed / 7 ignored; amara-router 131. Full e2e run alone: 800 passed / 12 skipped / 0 failed (before the Rust-only and Python security fixes).
 - The security review (strong model) found no HIGH, 2 MEDIUM and 6 LOW; all but one optional LOW are fixed (handoff §47).
 - Commit, then install. Pushing needs a new OK (not covered above).
+
+## Install
+
+- **Committed:** d284e4b. **Installed:** d284e4b, quit and reopened, confirmed running. Rollback: `~/Backups/Amara OS-backup-20261125b.app` (build 152a549).
+- **Not pushed.** origin/amara-integration is at 152a549.
+- **What happens next on its own:** the first timed question goes out at the default 22:00 JST if there is no check-in that day. Habit reminders go out at 20:00 or each habit's own time, and the money check-in on Sunday 19:00. All of it can be switched off in Settings › Check-ins on Telegram. Replies reach the app only after Taisun installs the Hermes tools (`~/projects/hermes-patches/nexus-inbox/README.md`).
