@@ -15,3 +15,10 @@ His words (verbatim): **"go on"** (continue part 2 of decision 0045), then **"on
 - **Goal link:** a date can be linked to a goal in the edit form.
 - **Amara context:** `nexus_dates` skips done dates and says when a date has its own reminders.
 - **Older data is safe:** the new fields default when missing, and an edit that leaves them out keeps what is stored (tests cover both). Nothing is migrated.
+
+## Outcome
+
+- **Commit:** 152a549. **Pushed** to origin/amara-integration (de23594 to 152a549, fast-forward, adds only).
+- **Installed:** 152a549, quit and reopened, confirmed running. Rollback: `~/Backups/Amara OS-backup-20261125a.app` (build 010624f).
+- **Gates:** tsc, lint, vitest 2792 passed / 9 skipped, neuro 21, secrets ok, src-tauri fmt and clippy clean, src-tauri 1787 passed / 7 ignored, amara-router 131. Full e2e alone: 796 passed / 12 skipped / 0 failed.
+- **Not published:** this outcome note and the BOARD line (a docs commit follows; pushing it needs a new OK).
