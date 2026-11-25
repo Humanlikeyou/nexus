@@ -1149,7 +1149,7 @@ Plan: `tasks/PLAN-0045.md`. Taisun answered all four questions (logged in 0045).
    - an ingest job for `<data>/inbox/` (validate, apply, move to done/rejected) and `asks/open.json`
    - the proactive Rust job for the check-in ask at a configurable time, habit reminders and the weekly money check-in
    - wire `money_checkin_due` (marked `allow(dead_code)`)
-2. **Dates & Deadlines:** per-date lead days, Done state, goal link, a purpose line.
+2. ~~Dates & Deadlines~~ done 2026-11-25 (decision 0048): own lead days, Done and Reopen, goal link, a purpose line, and "remind me N before" is read.
 3. **Build the approved mock-ups:**
    - Neuro rings (brain data)
    - the HR take graph

@@ -69,12 +69,19 @@ function fromPreview(saved: Saved, p: AddPreview): LifeDate {
 }
 
 /** The stored row behind a date (the wire fields `life_date_upsert` takes). */
-type DateRow = { id: string; title: string; date: string; lane: string; sub: string };
-const rowOf = (d: LifeDate): DateRow | null => (d.iso ? { id: d.id, title: d.title, date: d.iso, lane: d.lane, sub: d.rawSub ?? "" } : null);
+type DateRow = { id: string; title: string; date: string; lane: string; sub: string; leadDays: number[]; goalId: string; done: boolean };
+const rowOf = (d: LifeDate): DateRow | null => (d.iso ? { id: d.id, title: d.title, date: d.iso, lane: d.lane, sub: d.rawSub ?? "", leadDays: d.leadDays ?? [], goalId: d.goalId ?? "", done: d.done ?? false } : null);
+/** "90, 30, 7" or "2 weeks" style numbers: only whole days, 1 to 730, at most four; blank means the default ladder. */
+export function parseLeadDays(text: string): number[] | null {
+  const nums = text.split(/[^0-9]+/).filter(Boolean).map(Number);
+  if (nums.length > 4 || nums.some((n) => n < 1 || n > 730)) return null;
+  return [...new Set(nums)].sort((a, b) => b - a);
+}
+const leadText = (d: number[]) => d.join(", ");
 const LANE_OPTIONS = [{ value: "personal", label: "Personal" }, { value: "residence", label: "Japan · residence" }];
 /** Module-level so the Undo window's start is read when an action finishes, never during render. */
 const stampNow = () => Date.now();
-const saveRow = (r: DateRow) => realInvoke("life_date_upsert", { draft: { id: r.id, title: r.title, date: r.date, lane: r.lane, sub: r.sub || null } });
+const saveRow = (r: DateRow) => realInvoke("life_date_upsert", { draft: { id: r.id, title: r.title, date: r.date, lane: r.lane, sub: r.sub || null, leadDays: r.leadDays, goalId: r.goalId, done: r.done } });
 
 /** Life › Dates & deadlines (was Today › Life admin): add, timeline, upcoming. Dates only from Taisun or his documents. */
 export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpen?: (route: Route) => void }) {
@@ -87,6 +94,9 @@ export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpe
   // Edit and delete work on the stored row (life_date_upsert / life_date_delete). Neither is logged in History, so Undo puts the
   // old row back with the same id (upsert), and only while this page stays open.
   const [editing, setEditing] = useState<DateRow | null>(null);
+  const [leads, setLeads] = useState("");
+  const goalOptions = [{ value: "", label: "No goal" }, ...(valueOf(adapter.goals())?.milestones ?? []).map((m) => ({ value: m.id, label: m.title }))];
+  const goalName = (id?: string | null) => (id ? goalOptions.find((o) => o.value === id)?.label : undefined);
   const [deleting, setDeleting] = useState<LifeDate | null>(null);
   const [done, setDone] = useState<{ text: string; at: number; undo?: () => void; error?: boolean } | null>(null);
   const live = inTauri();
@@ -95,9 +105,18 @@ export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpe
     if (!editing) return;
     const prev = v?.dates.find((d) => d.id === editing.id); const before = prev ? rowOf(prev) : null;
     if (!editing.title.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(editing.date)) { fail("Give it a title and a full date. Nothing was changed."); return; }
-    try { await saveRow({ ...editing, title: editing.title.trim() }); } catch { fail("That date didn't save. Nothing was changed."); return; }
+    const leadDays = parseLeadDays(leads);
+    if (!leadDays) { fail("Reminders are whole days before the date, up to four of them (for example 90, 14, 3). Nothing was changed."); return; }
+    try { await saveRow({ ...editing, title: editing.title.trim(), leadDays }); } catch { fail("That date didn't save. Nothing was changed."); return; }
     setEditing(null); announceAdds();
     setDone({ text: `Saved “${editing.title.trim()}”. Its reminders were recalculated.`, at: stampNow(), undo: before ? () => { void saveRow(before).then(() => { announceAdds(); setDone({ text: `Put “${before.title}” back as it was.`, at: stampNow() }); }, () => fail("That couldn't be undone. Edit the date again to fix it.")); } : undefined });
+  };
+  // Done stops its reminders and takes it out of Needs you and Amara's upcoming list; Reopen brings it back.
+  const markDone = async (d: LifeDate, finished: boolean) => {
+    const row = rowOf(d); if (!row) return;
+    try { await saveRow({ ...row, done: finished }); } catch { fail("That didn't save. Nothing was changed."); return; }
+    announceAdds();
+    setDone({ text: finished ? `Marked “${d.title}” done. Its reminders stopped.` : `Reopened “${d.title}”. Its reminders are back.`, at: stampNow(), undo: () => { void saveRow(row).then(() => { announceAdds(); setDone({ text: `Put “${d.title}” back as it was.`, at: stampNow() }); }, () => fail("That couldn't be undone. Try again.")); } });
   };
   const confirmDelete = async () => {
     const d = deleting; setDeleting(null); if (!d) return;
@@ -107,7 +126,9 @@ export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpe
     setDone({ text: `Deleted “${d.title}”. Its reminders are gone.`, at: stampNow(), undo: row ? () => { void saveRow(row).then(() => { announceAdds(); setDone({ text: `Put “${row.title}” back.`, at: stampNow() }); }, () => fail("That couldn't be undone. Add the date again.")); } : undefined });
   };
   // A live list already holds the saved date once re-read; the highlighted copy replaces it, never doubles it.
-  const all = v ? [...v.dates.filter((d) => !fresh.has(d.id)), ...added].sort((a, b) => a.month - b.month) : added;
+  const everything = v ? [...v.dates.filter((d) => !fresh.has(d.id)), ...added].sort((a, b) => a.month - b.month) : added;
+  const all = everything.filter((d) => !d.done);
+  const finished = everything.filter((d) => d.done);
   const composer = (
     <Composer title="Add a date" kind="Date" adapter={add} placeholder="e.g. Visa expires Sept 14 next year, remind me 3 months before"
       hint="Amara fills in the date and reminders and shows a preview. Dates come from you or your documents; she never guesses a legal deadline. An Enterprise date goes to Enterprise › Ventures."
@@ -118,8 +139,9 @@ export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpe
   return (
     <div className="v-page" id="dates">
       <PageHero title="Dates & deadlines" statement={v ? `Next up: ${v.next}` : "Dates that matter"}
-        detail={v ? <>{v.dates.length} dates in the next 12 months · reminders at {PERSONAL_DEFAULTS.lifeAdminLadder.join(", ")} days · Enterprise dates are read-only here {la.state === "sample" && <DataTag kind="sample" />}</> : <>Visa, residence card and contract dates come from you or your documents <DataTag kind="wire" /></>} />
+        detail={v ? <>{all.length} dates in the next 12 months · reminders at {PERSONAL_DEFAULTS.lifeAdminLadder.join(", ")} days unless you pick your own · Enterprise dates are read-only here {la.state === "sample" && <DataTag kind="sample" />}</> : <>Visa, residence card and contract dates come from you or your documents <DataTag kind="wire" /></>} />
       <AmaraTake page="life" className="life__take" />
+      <p className="pk-note">For things with a hard date that need lead time: visas, renewals, filings, contracts. Soft targets belong in Goals and small to-dos in Lists. Amara reminds you at the lead times you pick (or 90, 30 and 7 days before), shows what is close in Needs you, and knows these dates when you chat. Mark a date done when it is handled.</p>
       {composer}
       {done && <ResultLine error={done.error} onUndo={done.undo} startedAt={done.at}>{done.text}</ResultLine>}
       {!v ? <Card title="Next 12 months" accessory={<span className="pk-acc"><DataTag kind="wire" /></span>}><p className="pk-note">Needs wiring: dates appear once the life dates store exists (HANDOFF-1111a). Nothing here is made up.</p></Card> : (
@@ -132,20 +154,30 @@ export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpe
               <thead><tr><th scope="col">What</th><th scope="col">Lane</th><th scope="col">Date</th><th scope="col">Reminder</th><th scope="col"><span className="ui-visually-hidden">Action</span></th></tr></thead>
               <tbody>{all.map((d) => (
                 <tr key={d.id} className={fresh.has(d.id) ? "v-new" : undefined}>
-                  <td>{d.title}<small>{d.sub}</small></td>
+                  <td>{d.title}<small>{d.sub}{goalName(d.goalId) ? ` · Goal: ${goalName(d.goalId)}` : ""}</small></td>
                   <td>{LANE_NAME[d.lane]}</td>
                   <td>{d.date}{d.inDays != null && <small>in {d.inDays} days</small>}</td>
                   <td><StatusText kind={d.due ? "wait" : "off"}>{d.reminder}</StatusText></td>
                   <td className="r">{d.lane === "enterprise"
                     ? <><span className="v-ro">Read-only · </span><LinkButton small onClick={onOpen ? () => onOpen(enterpriseLink(d)) : undefined} label={`Edit in Enterprise: ${d.title}`}>Edit in Enterprise ›</LinkButton></>
                     : <>
-                      <Button size="small" variant="plain" disabled={!live || !d.iso || fresh.has(d.id)} aria-label={`Edit: ${d.title}`} onClick={() => { const r = rowOf(d); if (r) setEditing(r); }}>Edit</Button>
+                      <Button size="small" variant="plain" disabled={!live || !d.iso || fresh.has(d.id)} aria-label={`Done: ${d.title}`} onClick={() => { void markDone(d, true); }}>Done</Button>
+                      <Button size="small" variant="plain" disabled={!live || !d.iso || fresh.has(d.id)} aria-label={`Edit: ${d.title}`} onClick={() => { const r = rowOf(d); if (r) { setEditing(r); setLeads(leadText(r.leadDays)); } }}>Edit</Button>
                       <Button size="small" variant="plain" disabled={!live || fresh.has(d.id)} aria-label={`Delete: ${d.title}`} onClick={() => setDeleting(d)}>Delete</Button>
                     </>}</td>
                 </tr>
               ))}</tbody>
             </table>
           </Card>
+          {finished.length > 0 && (
+            <Card title="Done">
+              <table className="pk-table" aria-label="Done dates">
+                <tbody>{finished.map((d) => (
+                  <tr key={d.id}><td>{d.title}<small>{d.sub}</small></td><td>{d.date}</td><td className="r"><Button size="small" variant="plain" disabled={!live} aria-label={`Reopen: ${d.title}`} onClick={() => { void markDone(d, false); }}>Reopen</Button></td></tr>
+                ))}</tbody>
+              </table>
+            </Card>
+          )}
           {editing && (
             <Card title={`Edit: ${editing.title || "date"}`}>
               <form className="ci-form" onSubmit={(e) => { e.preventDefault(); void submitEdit(); }}>
@@ -156,6 +188,10 @@ export function DatesView({ adapter, onOpen }: { adapter: PersonalAdapter; onOpe
                 <div className="pk-g2">
                   <Select label="Lane" options={LANE_OPTIONS} value={editing.lane} onChange={(e) => setEditing({ ...editing, lane: e.target.value })} />
                   <TextField label="Note" value={editing.sub} maxLength={140} onChange={(e) => setEditing({ ...editing, sub: e.target.value })} />
+                </div>
+                <div className="pk-g2">
+                  <TextField label="Remind me (days before)" value={leads} placeholder="blank = 90, 30, 7 (up to four)" onChange={(e) => setLeads(e.target.value)} />
+                  <Select label="Goal" options={goalOptions} value={editing.goalId} onChange={(e) => setEditing({ ...editing, goalId: e.target.value })} />
                 </div>
                 <div className="pk-actions"><Button size="small" variant="primary" type="submit">Save date</Button><Button size="small" variant="plain" onClick={() => setEditing(null)}>Cancel</Button></div>
               </form>

@@ -1,6 +1,7 @@
 //! Life dates (design-1111v, HANDOFF-1111v §7 and §9.4.2): personal and Japan-residence dates and deadlines in
-//! `<data dir>/life/dates.json`. Reminders at 90, 30 and 7 days are computed from the date when the list is
-//! read. Nothing here schedules a timer or fires a notification; Needs you today and the Dates page just
+//! `<data dir>/life/dates.json`. Reminders are computed from the date when the list is read: at 90, 30 and 7
+//! days by default, or at the lead times Taisun picked for that date (decision 0045: `lead_days`). A date can
+//! be marked done (it stops reminding) and linked to a goal. Nothing here schedules a timer or fires a notification; Needs you today and the Dates page just
 //! read the computed windows. Enterprise dates are not stored here (they live in Enterprise › Ventures).
 
 use super::local_store::{
@@ -29,6 +30,15 @@ pub struct LifeDateRecord {
     pub lane: String,
     #[serde(default)]
     pub sub: String,
+    /// Days before the date to remind, largest first. Empty means the default 90/30/7 ladder.
+    #[serde(default)]
+    pub lead_days: Vec<i64>,
+    /// Done dates stop reminding and leave Needs you and Amara's upcoming list.
+    #[serde(default)]
+    pub done: bool,
+    /// The goal this date belongs to (a goal id), if any.
+    #[serde(default)]
+    pub goal_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, specta::Type)]
@@ -41,6 +51,15 @@ pub struct LifeDateDraft {
     pub lane: String,
     #[serde(default)]
     pub sub: Option<String>,
+    /// `None` keeps what is stored (a new date starts with the default ladder); `Some(vec![])` resets to it.
+    #[serde(default)]
+    pub lead_days: Option<Vec<i64>>,
+    /// `None` keeps what is stored.
+    #[serde(default)]
+    pub done: Option<bool>,
+    /// `None` keeps what is stored; `Some("")` clears the link.
+    #[serde(default)]
+    pub goal_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
@@ -81,11 +100,26 @@ fn parse_day(s: &str) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| "invalid input".to_string())
 }
 
-/// The 90/30/7 reminders for `date`, as of `today`.
+/// The rungs for a date: its own lead days (largest first), or the default ladder.
+pub(crate) fn rungs(lead_days: &[i64]) -> Vec<i64> {
+    if lead_days.is_empty() {
+        LADDER.to_vec()
+    } else {
+        lead_days.to_vec()
+    }
+}
+
+/// The default 90/30/7 reminders for `date`, as of `today`.
+#[cfg(test)]
 pub(crate) fn reminders(date: NaiveDate, today: NaiveDate) -> Vec<Reminder> {
-    LADDER
-        .iter()
-        .map(|&days| {
+    reminders_for(date, today, &[])
+}
+
+/// The reminders for `date` at its own lead days (the default ladder when none), as of `today`.
+pub(crate) fn reminders_for(date: NaiveDate, today: NaiveDate, lead_days: &[i64]) -> Vec<Reminder> {
+    rungs(lead_days)
+        .into_iter()
+        .map(|days| {
             let on = date - Duration::days(days);
             Reminder {
                 days,
@@ -96,19 +130,28 @@ pub(crate) fn reminders(date: NaiveDate, today: NaiveDate) -> Vec<Reminder> {
         .collect()
 }
 
-/// Which window `days_until` falls in. The 7-day rung is open from 7 days out to the day itself; the 90 and
-/// 30 rungs are open on the reminder day and the two days after, so a far-off date appears briefly, not all
-/// quarter. `None` outside every window or once the date has passed.
+/// Which window `days_until` falls in, for the default ladder.
+#[cfg(test)]
 pub(crate) fn active_window(days_until: i64) -> Option<i64> {
+    active_window_for(days_until, &[])
+}
+
+/// Which window `days_until` falls in. The smallest rung is open from that many days out to the day itself;
+/// every larger rung is open on the reminder day and the two days after, so a far-off date appears briefly,
+/// not all quarter. `None` outside every window or once the date has passed.
+pub(crate) fn active_window_for(days_until: i64, lead_days: &[i64]) -> Option<i64> {
     if days_until < 0 {
         return None;
     }
-    if days_until <= 7 {
-        return Some(7);
+    let mut r = rungs(lead_days);
+    r.sort_unstable();
+    let smallest = *r.first()?;
+    if days_until <= smallest {
+        return Some(smallest);
     }
-    [30, 90]
-        .into_iter()
-        .find(|&r| (r - 2..=r).contains(&days_until))
+    r.into_iter()
+        .skip(1)
+        .find(|&x| (x - 2..=x).contains(&days_until))
 }
 
 fn view(record: &LifeDateRecord, today: NaiveDate) -> Option<LifeDateView> {
@@ -117,8 +160,12 @@ fn view(record: &LifeDateRecord, today: NaiveDate) -> Option<LifeDateView> {
     Some(LifeDateView {
         record: record.clone(),
         in_days,
-        reminders: reminders(date, today),
-        active_window: active_window(in_days),
+        reminders: reminders_for(date, today, &record.lead_days),
+        active_window: if record.done {
+            None
+        } else {
+            active_window_for(in_days, &record.lead_days)
+        },
     })
 }
 
@@ -130,7 +177,23 @@ fn validate(d: &LifeDateDraft) -> Result<LifeDateRecord, String> {
     if !(2000..=2100).contains(&date.year()) {
         return Err("invalid input".into());
     }
+    let lead_days = match &d.lead_days {
+        Some(v) => clean_leads(v)?,
+        None => Vec::new(),
+    };
+    let goal_id = match d
+        .goal_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|g| !g.is_empty())
+    {
+        Some(g) => Some(clean_slug(g, 64)?),
+        None => None,
+    };
     Ok(LifeDateRecord {
+        lead_days,
+        done: d.done.unwrap_or(false),
+        goal_id,
         id: match d.id.as_deref() {
             Some(id) => clean_slug(id, 40)?,
             None => String::new(),
@@ -143,6 +206,35 @@ fn validate(d: &LifeDateDraft) -> Result<LifeDateRecord, String> {
             None => String::new(),
         },
     })
+}
+
+/// Lead times: 1 to 730 days, at most four, largest first, no repeats.
+pub(crate) fn clean_leads(v: &[i64]) -> Result<Vec<i64>, String> {
+    if v.len() > 4 || v.iter().any(|d| !(1..=730).contains(d)) {
+        return Err("invalid input".into());
+    }
+    let mut out = v.to_vec();
+    out.sort_unstable_by(|a, b| b.cmp(a));
+    out.dedup();
+    Ok(out)
+}
+
+/// "90, 30 and 7 days before" (the words the preview and the page use).
+pub(crate) fn lead_phrase(lead_days: &[i64]) -> String {
+    let r = rungs(lead_days);
+    match r.len() {
+        0 => String::new(),
+        1 => format!("{} {} before", r[0], if r[0] == 1 { "day" } else { "days" }),
+        n => format!(
+            "{} and {} days before",
+            r[..n - 1]
+                .iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(", "),
+            r[n - 1]
+        ),
+    }
 }
 
 fn sorted(mut v: Vec<LifeDateRecord>) -> Vec<LifeDateRecord> {
@@ -159,17 +251,30 @@ pub(crate) fn list_in(dir: &Path, today: NaiveDate) -> Result<Vec<LifeDateView>,
         .collect())
 }
 
-/// Inserts or (with an existing `id`) replaces. Returns the stored record.
+/// Inserts or (with an existing `id`) replaces. A draft that leaves `lead_days`, `done` or `goal_id` out keeps
+/// what is stored. Returns the stored record.
 pub(crate) fn upsert_in(dir: &Path, draft: &LifeDateDraft) -> Result<LifeDateRecord, String> {
     let mut rec = validate(draft)?;
     let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut store: Store = read_json(&file(dir), MAX_BYTES)?;
-    match store
+    let at = store
         .dates
-        .iter_mut()
-        .find(|r| r.id == rec.id && !rec.id.is_empty())
-    {
-        Some(slot) => *slot = rec.clone(),
+        .iter()
+        .position(|r| r.id == rec.id && !rec.id.is_empty());
+    match at {
+        Some(i) => {
+            let old = &store.dates[i];
+            if draft.lead_days.is_none() {
+                rec.lead_days = old.lead_days.clone();
+            }
+            if draft.done.is_none() {
+                rec.done = old.done;
+            }
+            if draft.goal_id.is_none() {
+                rec.goal_id = old.goal_id.clone();
+            }
+            store.dates[i] = rec.clone();
+        }
         None => {
             if store.dates.len() >= MAX_DATES {
                 return Err("The dates list is full.".into());
@@ -271,6 +376,81 @@ const BUSINESS: [&str; 6] = [
     "invoice",
 ];
 const RESIDENCE: [&str; 4] = ["visa", "residence", "immigration", "zairyu"];
+fn unit_days(w: &str) -> Option<i64> {
+    match w
+        .trim_matches(|c: char| !c.is_alphabetic())
+        .to_lowercase()
+        .as_str()
+    {
+        "day" | "days" => Some(1),
+        "week" | "weeks" => Some(7),
+        "month" | "months" => Some(30),
+        _ => None,
+    }
+}
+
+fn count_word(w: &str) -> Option<i64> {
+    let t = w
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase();
+    if let Ok(n) = t.parse::<i64>() {
+        return Some(n);
+    }
+    match t.as_str() {
+        "a" | "one" => Some(1),
+        "two" => Some(2),
+        "three" => Some(3),
+        "four" => Some(4),
+        "five" => Some(5),
+        "six" => Some(6),
+        "ten" => Some(10),
+        "twelve" => Some(12),
+        _ => None,
+    }
+}
+
+/// "remind me 3 months before" or "remind me 2 weeks and 3 days before": the lead times, and the words used
+/// (so they stay out of the title). Nothing is invented: no "remind" phrase means no lead times.
+fn take_lead_days(words: &[&str], used: &mut [bool]) -> Vec<i64> {
+    let Some(r) = words.iter().position(|w| {
+        w.trim_matches(|c: char| !c.is_alphabetic())
+            .to_lowercase()
+            .starts_with("remind")
+    }) else {
+        return Vec::new();
+    };
+    used[r] = true;
+    let mut out = Vec::new();
+    let mut j = r + 1;
+    while j < words.len() {
+        let t = words[j]
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_lowercase();
+        if [
+            "me", "us", "and", "before", "ahead", "in", "advance", "prior", "of",
+        ]
+        .contains(&t.as_str())
+        {
+            used[j] = true;
+            j += 1;
+            continue;
+        }
+        match (
+            count_word(words[j]),
+            words.get(j + 1).and_then(|w| unit_days(w)),
+        ) {
+            (Some(n), Some(u)) if n > 0 => {
+                out.push(n * u);
+                used[j] = true;
+                used[j + 1] = true;
+                j += 2;
+            }
+            _ => break,
+        }
+    }
+    out
+}
+
 const CONNECTORS: [&str; 8] = ["on", "by", "before", "until", "due", "is", "at", "for"];
 
 fn capital(s: &str) -> String {
@@ -292,6 +472,7 @@ pub(crate) fn read_text(text: &str, today: NaiveDate) -> Reading {
     }
     let words: Vec<&str> = text.split_whitespace().collect();
     let mut used = vec![false; words.len()];
+    let leads = take_lead_days(&words, &mut used);
     let mut md: Option<(u32, u32)> = None;
     let mut year: Option<i32> = None;
     let mut i = 0;
@@ -387,6 +568,13 @@ pub(crate) fn read_text(text: &str, today: NaiveDate) -> Reading {
         date: date.format("%Y-%m-%d").to_string(),
         lane: lane.into(),
         sub: None,
+        lead_days: if leads.is_empty() {
+            None
+        } else {
+            clean_leads(&leads).ok()
+        },
+        done: None,
+        goal_id: None,
     })
 }
 
@@ -468,6 +656,9 @@ mod tests {
             date: date.into(),
             lane: "residence".into(),
             sub: Some("renew before".into()),
+            lead_days: None,
+            done: None,
+            goal_id: None,
         };
         let a = upsert_in(&dir, &mk("Residence card expires", "2027-09-14")).unwrap();
         let b = upsert_in(&dir, &mk("Lease renewal", "2027-04-01")).unwrap();
@@ -536,6 +727,126 @@ mod tests {
                 assert_eq!(r.lane, "personal");
                 assert_eq!(r.title, "Lease renewal");
             }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn own_lead_days_replace_the_ladder_and_open_their_own_windows() {
+        let date = d(2027, 9, 14);
+        let r = reminders_for(date, d(2027, 9, 1), &[14, 3]);
+        assert_eq!(r.iter().map(|x| x.days).collect::<Vec<_>>(), [14, 3]);
+        assert_eq!(r[0].on, "2027-08-31");
+        assert!(r[0].passed && !r[1].passed);
+        assert_eq!(active_window_for(3, &[14, 3]), Some(3));
+        assert_eq!(active_window_for(4, &[14, 3]), None);
+        assert_eq!(active_window_for(13, &[14, 3]), Some(14));
+        assert_eq!(active_window_for(15, &[14, 3]), None);
+        // no lead days: the default ladder, unchanged
+        assert_eq!(active_window_for(30, &[]), Some(30));
+        assert_eq!(lead_phrase(&[]), "90, 30 and 7 days before");
+        assert_eq!(lead_phrase(&[90]), "90 days before");
+        assert_eq!(lead_phrase(&[14, 3]), "14 and 3 days before");
+    }
+
+    #[test]
+    fn lead_days_are_validated_sorted_and_kept_across_edits() {
+        let data = temp_dir("ld-lead");
+        let dir = dir_in(&data);
+        let mk = |lead: Option<Vec<i64>>| LifeDateDraft {
+            id: None,
+            title: "Visa".into(),
+            date: "2027-09-14".into(),
+            lane: "residence".into(),
+            sub: None,
+            lead_days: lead,
+            done: None,
+            goal_id: None,
+        };
+        assert!(upsert_in(&dir, &mk(Some(vec![0]))).is_err());
+        assert!(upsert_in(&dir, &mk(Some(vec![731]))).is_err());
+        assert!(upsert_in(&dir, &mk(Some(vec![1, 2, 3, 4, 5]))).is_err());
+        let a = upsert_in(&dir, &mk(Some(vec![7, 30, 30, 90]))).unwrap();
+        assert_eq!(a.lead_days, [90, 30, 7]);
+        // an edit that says nothing about lead days, done or the goal keeps them
+        let mut e = mk(None);
+        e.id = Some(a.id.clone());
+        e.title = "Visa (renewed form)".into();
+        let b = upsert_in(&dir, &e).unwrap();
+        assert_eq!(b.lead_days, [90, 30, 7]);
+        let mut e = mk(Some(vec![21]));
+        e.id = Some(a.id.clone());
+        e.done = Some(true);
+        e.goal_id = Some("g1".into());
+        let c = upsert_in(&dir, &e).unwrap();
+        assert_eq!(
+            (c.lead_days.clone(), c.done, c.goal_id.clone()),
+            (vec![21], true, Some("g1".into()))
+        );
+        let mut e = mk(None);
+        e.id = Some(a.id.clone());
+        assert_eq!(upsert_in(&dir, &e).unwrap().goal_id, Some("g1".into()));
+        // Some("") clears the link, Some(vec![]) goes back to the ladder
+        let mut e = mk(Some(vec![]));
+        e.id = Some(a.id.clone());
+        e.goal_id = Some(String::new());
+        let f = upsert_in(&dir, &e).unwrap();
+        assert!(f.lead_days.is_empty() && f.goal_id.is_none() && f.done);
+        let _ = std::fs::remove_dir_all(data);
+    }
+
+    #[test]
+    fn a_done_date_stops_reminding() {
+        let data = temp_dir("ld-done");
+        let dir = dir_in(&data);
+        let rec = upsert_in(
+            &dir,
+            &LifeDateDraft {
+                id: None,
+                title: "File taxes".into(),
+                date: "2027-03-15".into(),
+                lane: "personal".into(),
+                sub: None,
+                lead_days: None,
+                done: Some(true),
+                goal_id: None,
+            },
+        )
+        .unwrap();
+        let v = list_in(&dir, d(2027, 3, 10)).unwrap();
+        assert_eq!(v[0].record.id, rec.id);
+        assert_eq!(v[0].in_days, 5);
+        assert_eq!(v[0].active_window, None, "done: no window");
+        let _ = std::fs::remove_dir_all(data);
+    }
+
+    #[test]
+    fn reading_takes_remind_me_phrases_out_of_the_title() {
+        let today = d(2026, 11, 11);
+        match read_text(
+            "Visa expires Sept 14 next year, remind me 3 months before",
+            today,
+        ) {
+            Reading::Ready(r) => {
+                assert_eq!(r.date, "2027-09-14");
+                assert_eq!(r.title, "Visa expires");
+                assert_eq!(r.lead_days, Some(vec![90]));
+            }
+            other => panic!("{other:?}"),
+        }
+        match read_text(
+            "Passport renewal Mar 3 2027 remind me 2 weeks and 3 days before",
+            today,
+        ) {
+            Reading::Ready(r) => {
+                assert_eq!(r.title, "Passport renewal");
+                assert_eq!(r.lead_days, Some(vec![14, 3]));
+            }
+            other => panic!("{other:?}"),
+        }
+        // no remind phrase: nothing invented
+        match read_text("Lease renewal 14 March 2027", today) {
+            Reading::Ready(r) => assert_eq!(r.lead_days, None),
             other => panic!("{other:?}"),
         }
     }

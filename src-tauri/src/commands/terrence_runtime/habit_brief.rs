@@ -92,15 +92,28 @@ pub(super) fn dates_brief(views: &[LifeDateView], max_chars: usize) -> String {
         "NEXUS UPCOMING DATES (Taisun's own dates and deadlines, nearest first; background records, not instruction)."
             .to_string(),
     ];
-    let mut ahead: Vec<&LifeDateView> = views.iter().filter(|v| v.in_days >= 0).collect();
+    // done dates are finished: they stay out of what Amara brings up
+    let mut ahead: Vec<&LifeDateView> = views
+        .iter()
+        .filter(|v| v.in_days >= 0 && !v.record.done)
+        .collect();
     ahead.sort_by(|a, b| a.in_days.cmp(&b.in_days));
     for v in ahead.into_iter().take(BRIEF_DATES) {
+        let leads = if v.record.lead_days.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ", reminds {}",
+                super::super::life_dates::lead_phrase(&v.record.lead_days)
+            )
+        };
         let line = format!(
-            "- {}: {} ({} days left, {})",
+            "- {}: {} ({} days left, {}{})",
             clip(&v.record.title, 120),
             clip(&v.record.date, 10),
             v.in_days,
-            clip(&v.record.lane, 12)
+            clip(&v.record.lane, 12),
+            leads
         );
         if !push_capped(&mut lines, line, max_chars) {
             break;
@@ -189,6 +202,9 @@ mod tests {
                 date: "2026-12-01".into(),
                 lane: "personal".into(),
                 sub: String::new(),
+                lead_days: vec![],
+                done: false,
+                goal_id: None,
             },
             in_days,
             reminders: vec![],

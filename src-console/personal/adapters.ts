@@ -63,7 +63,9 @@ export type MemoryWire = { id: string; label: string; value: string; agent: stri
 export type LifeLane = "personal" | "residence" | "enterprise";
 export type LifeDate = { id: string; title: string; short?: string; sub: string; date: string; month: number; inDays?: number; reminder: string; due: boolean; lane: LifeLane;
   /** The stored row (YYYY-MM-DD and the typed sub line), for an inline edit or an Undo that puts it back. */
-  iso?: string; rawSub?: string };
+  iso?: string; rawSub?: string;
+  /** 0045: own reminder offsets (days before, largest first; empty = 90, 30, 7), done, and the goal it belongs to. */
+  leadDays?: number[]; done?: boolean; goalId?: string | null };
 export type LifeAdmin = { next: string; dates: LifeDate[] };
 
 // ---- Weekly review ----
@@ -227,7 +229,8 @@ export function makeSamplePersonal(): PersonalAdapter {
 }
 
 /** Rows as src-tauri life_dates.rs and checkin.rs return them. */
-export type LifeDateWire = { id: string; title: string; date: string; lane: "personal" | "residence"; sub: string; inDays: number; reminders: Array<{ days: number; on: string; passed: boolean }>; activeWindow: number | null };
+export type LifeDateWire = { id: string; title: string; date: string; lane: "personal" | "residence"; sub: string; inDays: number; reminders: Array<{ days: number; on: string; passed: boolean }>; activeWindow: number | null;
+  leadDays?: number[]; done?: boolean; goalId?: string | null };
 export type CheckInWire = { id: string; at: string; day: string; mood: number; energy: number; tags: string[]; text: string; transcribed: boolean };
 
 const SHORT_MONTH = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -239,10 +242,11 @@ export function lifeAdminFrom(rows: LifeDateWire[]): LifeAdmin {
     const next = r.reminders.find((x) => !x.passed) ?? r.reminders[r.reminders.length - 1];
     return {
       id: r.id, title: r.title, short: r.title, sub: r.sub || (r.lane === "residence" ? "Japan · residence" : "Personal"), date: dayLabel(r.date), iso: r.date, rawSub: r.sub,
-      month: r.inDays / 30.4, inDays: r.inDays, reminder: next ? `${next.days} days · ${dayLabel(next.on)}` : "", due: r.activeWindow != null, lane: r.lane,
+      month: r.inDays / 30.4, inDays: r.inDays, reminder: r.done ? "Done" : next ? `${next.days} days · ${dayLabel(next.on)}` : "", due: r.activeWindow != null && !r.done, lane: r.lane,
+      leadDays: r.leadDays ?? [], done: r.done ?? false, goalId: r.goalId ?? null,
     };
   });
-  const first = dates[0];
+  const first = dates.find((d) => !d.done);
   return { next: first ? `${first.title} in ${first.inDays} days` : "Nothing coming up", dates };
 }
 

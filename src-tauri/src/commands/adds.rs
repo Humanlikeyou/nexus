@@ -156,6 +156,9 @@ enum Payload {
         title: String,
         date: String,
         lane: String,
+        /// Lead days Taisun asked for ("remind me 3 months before"); empty means the default ladder.
+        #[serde(default)]
+        lead_days: Vec<i64>,
     },
     Task {
         title: String,
@@ -577,10 +580,12 @@ fn date_reading(text: &str, today: NaiveDate) -> Result<ParseResult, String> {
             } else {
                 "Personal"
             };
+            let leads = d.lead_days.clone().unwrap_or_default();
             let payload = Payload::Date {
                 title: d.title.clone(),
                 date: d.date.clone(),
                 lane: d.lane.clone(),
+                lead_days: leads.clone(),
             };
             ParseResult::Preview {
                 preview: AddPreview {
@@ -588,7 +593,7 @@ fn date_reading(text: &str, today: NaiveDate) -> Result<ParseResult, String> {
                     fields: vec![
                         ("Date".into(), date.format("%a, %b %-d, %Y").to_string()),
                         ("Lane".into(), lane.into()),
-                        ("Reminders".into(), "90, 30 and 7 days before".into()),
+                        ("Reminders".into(), life_dates::lead_phrase(&leads)),
                         ("From".into(), "You typed it".into()),
                     ],
                     note: Some(
@@ -759,7 +764,12 @@ fn apply(
                 format!("Added {title}"),
             ))
         }
-        Payload::Date { title, date, lane } => {
+        Payload::Date {
+            title,
+            date,
+            lane,
+            lead_days,
+        } => {
             let rec = life_dates::upsert_in(
                 &dirs.life(),
                 &LifeDateDraft {
@@ -768,6 +778,13 @@ fn apply(
                     date: date.clone(),
                     lane: lane.clone(),
                     sub: None,
+                    lead_days: if lead_days.is_empty() {
+                        None
+                    } else {
+                        Some(lead_days.clone())
+                    },
+                    done: None,
+                    goal_id: None,
                 },
             )?;
             Ok((

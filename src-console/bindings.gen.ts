@@ -3239,6 +3239,12 @@ export type LifeDateDraft_Deserialize = {
 	date: string,
 	lane: string,
 	sub?: string | null,
+	/**  `None` keeps what is stored (a new date starts with the default ladder); `Some(vec![])` resets to it. */
+	leadDays?: number[] | null,
+	/**  `None` keeps what is stored. */
+	done?: boolean | null,
+	/**  `None` keeps what is stored; `Some("")` clears the link. */
+	goalId?: string | null,
 };
 
 export type LifeDateDraft_Serialize = {
@@ -3247,6 +3253,12 @@ export type LifeDateDraft_Serialize = {
 	date: string,
 	lane: string,
 	sub: string | null,
+	/**  `None` keeps what is stored (a new date starts with the default ladder); `Some(vec![])` resets to it. */
+	leadDays: number[] | null,
+	/**  `None` keeps what is stored. */
+	done: boolean | null,
+	/**  `None` keeps what is stored; `Some("")` clears the link. */
+	goalId: string | null,
 };
 
 export type LifeDateRecord = LifeDateRecord_Serialize | LifeDateRecord_Deserialize;
@@ -3259,6 +3271,12 @@ export type LifeDateRecord_Deserialize = {
 	/**  "personal" or "residence". */
 	lane: string,
 	sub?: string,
+	/**  Days before the date to remind, largest first. Empty means the default 90/30/7 ladder. */
+	leadDays?: number[],
+	/**  Done dates stop reminding and leave Needs you and Amara's upcoming list. */
+	done?: boolean,
+	/**  The goal this date belongs to (a goal id), if any. */
+	goalId?: string | null,
 };
 
 export type LifeDateRecord_Serialize = {
@@ -3269,6 +3287,12 @@ export type LifeDateRecord_Serialize = {
 	/**  "personal" or "residence". */
 	lane: string,
 	sub: string,
+	/**  Days before the date to remind, largest first. Empty means the default 90/30/7 ladder. */
+	leadDays: number[],
+	/**  Done dates stop reminding and leave Needs you and Amara's upcoming list. */
+	done: boolean,
+	/**  The goal this date belongs to (a goal id), if any. */
+	goalId: string | null,
 };
 
 export type LifeDateView = LifeDateView_Serialize | LifeDateView_Deserialize;
