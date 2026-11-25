@@ -481,6 +481,11 @@ export const commands = {
 	lifeInsight: (options?: InvokeOptions) => __TAURI_INVOKE<LifeInsight_Serialize>("life_insight", undefined, options),
 	lifeWeekObservations: (weekStart: string, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationRow_Serialize[]>("life_week_observations", { weekStart }, options),
 	/**
+	 *  Packet continuity of the live stream since it started: per channel, packets received, packets
+	 *  the counter says never arrived, and repeats dropped.
+	 */
+	museStreamContinuity: (options?: InvokeOptions) => __TAURI_INVOKE<ChannelContinuity[]>("muse_stream_continuity", undefined, options),
+	/**
 	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
 	 *  `source` is "manual", "chat" or "telegram".
 	 */
@@ -1388,6 +1393,16 @@ export type CatchUpStatus = {
 export type CategoryTotal = {
 	category: string,
 	minor: number,
+};
+
+/**  Per-channel continuity counts for the running stream (and the open recording's trailer). */
+export type ChannelContinuity = {
+	channel: string,
+	packets: number,
+	missedPackets: number,
+	duplicatesDropped: number,
+	/**  Times the counter jumped far back (a headset restart); the stream is kept. */
+	counterResets: number,
 };
 
 export type Chart = Chart_Serialize | Chart_Deserialize;

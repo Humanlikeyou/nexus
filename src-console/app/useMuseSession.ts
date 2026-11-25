@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { connectMuse, disconnectMuse, markRecordingAux, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "../bridge";
 import { readableError } from "../lib/format";
 import { AUX_STEP, AuxDetector, auxInfoDetected } from "../neuro/auxDetect";
@@ -26,6 +27,13 @@ function withTimeout<T>(work: Promise<T>, ms: number, message: string): Promise<
   });
 }
 
+/** Why the headset stream stopped on its own (muse.rs `muse-stream-ended`). */
+export const STREAM_ENDED: Record<string, string> = {
+  no_data: "The headset connected but sent no EEG. Nothing was recorded from it. Turn it off and on, then connect again.",
+  silent: "The headset stopped sending EEG, so the stream was stopped. What arrived before is kept.",
+  link_lost: "The Bluetooth link to the headset dropped, so the stream was stopped. What arrived before is kept.",
+};
+
 export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void>, setNotice: (notice: string | null) => void) {
   const [museDevices, setMuseDevices] = useState<MuseDevice[]>([]);
   const [museOperation, setMuseOperation] = useState<MuseOperation>(null);
@@ -50,6 +58,17 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
   const auxFound = useRef<AuxInfo | null>(null);
   // Live telemetry lives in an external store; this hook never re-renders on packets.
   useEffect(() => museTelemetry.start(), []);
+  // Decision 0057: muse.rs ends a stream that stopped on its own and says why, instead of a silent "Streaming".
+  useEffect(() => {
+    let cancelled = false;
+    let off: (() => void) | null = null;
+    try {
+      void listen<{ reason: string }>("muse-stream-ended", ({ payload }) => {
+        if (!cancelled) setMuseError(STREAM_ENDED[payload.reason] ?? STREAM_ENDED.silent);
+      }).then((u) => { if (cancelled) u(); else off = u; }, () => {});
+    } catch { /* no Tauri event bridge (tests, browser preview) */ }
+    return () => { cancelled = true; off?.(); };
+  }, []);
   const resetTelemetry = museTelemetry.reset;
   const readCounters = museTelemetry.readCounters;
   const training = useTraining(museTelemetry.getSnapshot, sessionStartedAt !== null && sessionEndedAt === null && data.muse.streaming);
@@ -148,8 +167,14 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
           summary: { avg_focus: pick("avg_focus"), avg_relaxation: pick("avg_relaxation"), avg_hr: null, max_hr: null, avg_hrv: null, calm_pct: pick("calm_pct"), time_in_target_pct: trainingSummary?.time_in_target_pct ?? null },
         };
         finishTraining();
+        const secs = Math.max(1, (endedAt - sessionStartedAt) / 1000);
         return { session, data: {
-          source: "live_muse",
+          // Decision 0057: the real source, never a fixed "live_muse" for replay or demo data.
+          source: counters.source === "live" ? "live_muse" : counters.source ?? "unknown",
+          data_source: counters.source ?? null,
+          // Samples received per channel per second over the session (arrivals, not the headset clock).
+          received_rate_hz: Object.fromEntries(Object.entries(counters.channelSamples).map(([c, n]) => [c, Math.round((n / secs) * 10) / 10])),
+          continuity: counters.continuity,
           replay_file: recordingFile,
           packets: counters.packetCount,
           channel_samples: counters.channelSamples,

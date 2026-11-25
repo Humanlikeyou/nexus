@@ -50,7 +50,8 @@ export function createBandHistory(source: Source = museTelemetry, windowMs = HIS
     if (telemetry.packetCount === lastPacket) return;
     if (telemetry.packetCount < lastPacket) points = [];
     lastPacket = telemetry.packetCount;
-    if (telemetry.sampleCount >= MIN_SAMPLES && telemetry.lastPacketAt != null) {
+    // Decision 0057: a band set from fewer than four complete channels is all zeros; never plot it as a reading.
+    if (telemetry.sampleCount >= MIN_SAMPLES && telemetry.lastPacketAt != null && telemetry.bandsValid !== false) {
       points.push({ at: telemetry.lastPacketAt, bands: telemetry.bands });
     }
     prune(telemetry.lastPacketAt);

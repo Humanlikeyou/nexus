@@ -148,7 +148,9 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
   const lastSession = sessions[0] ?? withBands[0] ?? null;
   const recoveryNow = typeof data.noop.today?.recovery === "number" ? data.noop.today.recovery : null;
   // Live band power for the "Now" ring: only while Muse is really streaming (no second BLE connection; same telemetry as the readings below).
-  const liveBands = live ? telemetry.bands : null;
+  // Decision 0057: bands are a reading only when all four channels have a second of samples; otherwise a dash, never 0 %.
+  const bandsLive = live && telemetry.bandsValid !== false;
+  const liveBands = bandsLive ? telemetry.bands : null;
 
   return (
     <div className="neuro page-inset" data-state={!connected ? "empty" : streaming ? "streaming" : "ready"}>
@@ -234,11 +236,11 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
               <Card title="Band powers" className="neuro__bands">
                 <InsetGroup className="neuro__group">
                   {BAND_KEYS.map((key) => {
-                    const value = live ? telemetry.bands[key] : 0;
+                    const value = bandsLive ? telemetry.bands[key] : 0;
                     return (
                       <ListRow key={key} className="neuro__band" title={<><span className="neuro__band-symbol" aria-hidden="true">{BANDS[key].symbol}</span>{BANDS[key].name}</>}
-                        subtitle={<Meter size="sm" label={`${BANDS[key].name} relative power`} value={value} valueText={live ? `${Math.round(value)}%` : "No reading"} />}
-                        value={<span className="neuro__num">{acquiring ? "Acquiring…" : live ? `${Math.round(value)}%` : DASH}</span>}
+                        subtitle={<Meter size="sm" label={`${BANDS[key].name} relative power`} value={value} valueText={bandsLive ? `${Math.round(value)}%` : "No reading"} />}
+                        value={<span className="neuro__num">{acquiring ? "Acquiring…" : bandsLive ? `${Math.round(value)}%` : DASH}</span>}
                         accessory={<Sparkline className="neuro__band-trend" values={history[key]} label={`${BANDS[key].name}, last 60 s`} format={(v) => `${Math.round(v)}%`} />} />
                     );
                   })}

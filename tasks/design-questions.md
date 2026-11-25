@@ -107,3 +107,11 @@ The Phase 8 supervisor reports `separate` for apps Amara only watches and never 
 4. "Pause Download" stays disabled: there is no pause backend. Decide whether to drop it or ask for a cancel/pause command.
 5. Keychain "Review…" is still disabled (the review sheet needs markup).
 6. Size text: tiers say "Size not published yet" until the signed manifest carries sizes; Step 3 detail shows real bytes only (no time left).
+
+## 2026-11-26 · decision 0057 (NEUROSENSE reliability): copy touched in Design-owned screens
+
+Logic-only fixes plus three truthfulness copy changes the brief required ("do not represent the current HR-based sleep estimates as official WHOOP sleep staging"). Markup, classes and tokens unchanged. Please review the wording:
+- **Mind–Body › Sleep note** (`MindBodyScreen.tsx`): was "Totals for the night. Stage order needs per-epoch data, which isn't sent yet." (Fitness › Sleep already reads it). Now: "Totals for the night, as estimated by NOOP from the strap's data, not WHOOP's own sleep staging. Awake is time in bed minus time asleep. When NOOP stores stage timing, the stage order is in Fitness › Sleep."
+- **Fitness › Sleep stages** (`SleepDetailPanel.tsx`): a new `fx-muted` line under the hypnogram, "Stages estimated by NOOP from the strap's data, not WHOOP's own sleep staging." The empty hint now reads "Stage timing appears once NOOP has stored stages for the night."
+- **Neuro › Band powers** (`NeuroScreen.tsx`): logic only. The dash shows until all four channels are complete, instead of a 0 % reading.
+- **Training hold copy** (`training.ts` `HOLD_COPY`): two new lines for `frozen` and `not_live`.

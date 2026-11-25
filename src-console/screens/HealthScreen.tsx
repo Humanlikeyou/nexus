@@ -262,12 +262,14 @@ function FitnessReady({ health, header, onOpen }: { health: NoopHealthSnapshot; 
     !everNull((d) => d.respRateBpm) && <StatTile key="resp" label="Respiratory" value={nullable(fmt(today?.respRateBpm, 1))} unit="br/min" />,
   ].filter(Boolean);
 
-  const stages = [
-    { label: "Deep", value: overnight?.deepMin ?? today?.deepMin ?? 0, color: "var(--data-sleep-deep)" },
-    { label: "REM", value: overnight?.remMin ?? today?.remMin ?? 0, color: "var(--data-sleep-rem)" },
-    { label: "Light", value: overnight?.lightMin ?? today?.lightMin ?? 0, color: "var(--data-sleep-light)" },
-  ];
-  const nightStages = [...stages, { label: "Awake", value: overnight?.awakeMin ?? 0, color: "var(--data-sleep-awake)" }];
+  // Decision 0057: a stage NOOP didn't report is left out, never drawn as 0 minutes.
+  const known = <T extends { value: number | null | undefined }>(xs: T[]) => xs.filter((x): x is T & { value: number } => typeof x.value === "number");
+  const stages = known([
+    { label: "Deep", value: overnight?.deepMin ?? today?.deepMin, color: "var(--data-sleep-deep)" },
+    { label: "REM", value: overnight?.remMin ?? today?.remMin, color: "var(--data-sleep-rem)" },
+    { label: "Light", value: overnight?.lightMin ?? today?.lightMin, color: "var(--data-sleep-light)" },
+  ]);
+  const nightStages = [...stages, ...known([{ label: "Awake", value: overnight?.awakeMin, color: "var(--data-sleep-awake)" }])];
 
   // design-1110c C11: recovery, HRV, resting HR and sleep are in the "Last 14 days" grid; the rest stay here.
   const trendOptions = (Object.keys(TRENDS) as TrendKey[])

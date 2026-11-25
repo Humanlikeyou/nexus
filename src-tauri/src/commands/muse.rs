@@ -51,6 +51,8 @@ const OPTIONAL_STREAMS: [([u8; 4], OptionalStream); 7] = [
 const OPTIONAL_SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(2);
 /// Silence on the EEG channels this long counts as a stall.
 const EEG_SILENCE_CHECK: Duration = Duration::from_secs(5);
+/// After EEG has flowed, this much silence ends the stream (and tells the app) instead of a silent "Streaming".
+const EEG_GIVE_UP: Duration = Duration::from_secs(30);
 
 const ACCELEROMETER_G_PER_LSB: f64 = 0.0000610352;
 const GYROSCOPE_DPS_PER_LSB: f64 = 0.0074768;
@@ -253,9 +255,137 @@ pub struct MuseDevice {
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct EegSample {
+    /// Host clock (ms) when the packet's notification was handled; one stamp per 12-sample packet.
     pub timestamp: f64,
     pub channel: String,
     pub samples: Vec<f64>,
+    /// The headset's 16-bit packet counter (bytes 0-1), when the packet came from the headset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u16>,
+    /// Where the samples came from: `live` (the headset), `replay` (a recorded file) or `demo`
+    /// (synthetic). Consumers must never treat replay or demo data as a live measurement.
+    pub source: &'static str,
+}
+
+// ── Packet continuity (decision 0057) ──────────────────────────────────────
+
+/// The headset's packet counter: big-endian u16 in bytes 0-1 of every EEG, AUX, PPG and motion packet.
+pub fn packet_sequence(data: &[u8]) -> Option<u16> {
+    (data.len() >= 2).then(|| u16::from_be_bytes([data[0], data[1]]))
+}
+
+/// What one packet's counter says about the stream on its channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeqVerdict {
+    /// The first packet seen on this channel.
+    First,
+    /// The next packet: nothing lost.
+    Next,
+    /// `n` packets between the previous one and this one never arrived.
+    Gap(u32),
+    /// Same counter as the previous packet, or one just behind it (within 64): dropped, never emitted twice.
+    Duplicate,
+    /// A large step back: the headset restarted its counter (a new stream). Kept, and counted.
+    Reset,
+}
+
+/// How far behind the last counter a packet may be and still count as a repeat rather than a restart.
+const REPEAT_WINDOW: u16 = 64;
+
+/// Per-channel continuity counts for the running stream (and the open recording's trailer).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelContinuity {
+    pub channel: String,
+    pub packets: u64,
+    pub missed_packets: u64,
+    pub duplicates_dropped: u64,
+    /// Times the counter jumped far back (a headset restart); the stream is kept.
+    pub counter_resets: u64,
+}
+
+/// Tracks each channel's last counter. The counter wraps at 65536; a step of 1..=32767 forward is
+/// new data (a gap when over 1), anything else is a repeat or an out-of-order packet.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct SeqTracker {
+    last: HashMap<String, u16>,
+    counts: Vec<ChannelContinuity>,
+}
+
+impl SeqTracker {
+    pub fn observe(&mut self, channel: &str, seq: u16) -> SeqVerdict {
+        let verdict = match self.last.get(channel) {
+            None => SeqVerdict::First,
+            Some(&prev) => match seq.wrapping_sub(prev) {
+                0 => SeqVerdict::Duplicate,
+                1 => SeqVerdict::Next,
+                d if (2..=32767).contains(&d) => SeqVerdict::Gap(u32::from(d) - 1),
+                d if d.wrapping_neg() <= REPEAT_WINDOW => SeqVerdict::Duplicate,
+                _ => SeqVerdict::Reset,
+            },
+        };
+        let c = match self.counts.iter().position(|c| c.channel == channel) {
+            Some(i) => &mut self.counts[i],
+            None => {
+                self.counts.push(ChannelContinuity {
+                    channel: channel.to_string(),
+                    ..Default::default()
+                });
+                self.counts.last_mut().expect("just pushed")
+            }
+        };
+        match verdict {
+            SeqVerdict::Duplicate => c.duplicates_dropped += 1,
+            SeqVerdict::Gap(n) => {
+                c.missed_packets += u64::from(n);
+                c.packets += 1;
+            }
+            SeqVerdict::Reset => {
+                c.counter_resets += 1;
+                c.packets += 1;
+            }
+            _ => c.packets += 1,
+        }
+        if verdict != SeqVerdict::Duplicate {
+            self.last.insert(channel.to_string(), seq);
+        }
+        verdict
+    }
+
+    pub fn counts(&self) -> Vec<ChannelContinuity> {
+        self.counts.clone()
+    }
+}
+
+lazy_static::lazy_static! {
+    /// Continuity of the current live stream; reset when a stream starts.
+    static ref CONTINUITY: std::sync::Mutex<SeqTracker> = std::sync::Mutex::new(SeqTracker::default());
+}
+
+/// Bumped by every start and stop; a stream task whose generation is no longer current exits, so a
+/// fast stop-then-start never leaves two tasks emitting the same packets.
+static STREAM_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub(crate) async fn live_streaming() -> bool {
+    *MUSE_STREAMING.lock().await
+}
+
+/// Packet continuity of the live stream since it started: per channel, packets received, packets
+/// the counter says never arrived, and repeats dropped.
+#[tauri::command]
+#[specta::specta]
+pub fn muse_stream_continuity() -> Vec<ChannelContinuity> {
+    CONTINUITY
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .counts()
+}
+
+/// Why a stream stopped on its own (the app can show it instead of a frozen "Streaming").
+#[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
+pub struct StreamEnded {
+    /// `no_data` (nothing ever arrived), `silent` (data stopped) or `link_lost` (the BLE stream ended).
+    pub reason: String,
 }
 
 /// `muse-motion`: 3 samples per packet, each `[x, y, z]`, about 52 Hz.
@@ -686,6 +816,7 @@ pub async fn disconnect_muse(app: AppHandle) -> Result<(), String> {
         let taken = take_if_current(started_under, &MUSE_STREAMING, &MUSE_PERIPHERAL)
             .await
             .map_err(|e| e.to_string())?;
+        replay::release_source("live").await;
         // Held across the real disconnect so a same-device reconnect waits for it.
         let _teardown = TEARDOWN.lock().await;
         if let Some(peripheral) = taken {
@@ -791,6 +922,20 @@ where
 #[specta::specta]
 pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
     println!("[muse] eeg_stream: status=starting");
+    // One claim under one lock (decision 0057): refused while a replay or demo runs, and a second start
+    // while live is claimed (streaming or still starting) is a no-op, never a second emitting task.
+    if replay::claim_source("live").await? {
+        println!("[muse] eeg_stream: already streaming or starting, nothing to start");
+        return Ok(());
+    }
+    let started = start_eeg_stream_claimed(app).await;
+    if started.is_err() {
+        replay::release_source("live").await;
+    }
+    started
+}
+
+async fn start_eeg_stream_claimed(app: AppHandle) -> Result<(), String> {
     super::sessions::begin_body_context_capture();
     let stored = MUSE_PERIPHERAL.lock().await;
     let peripheral = stored.as_ref().ok_or("Muse not connected")?.clone();
@@ -884,10 +1029,12 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
         return Err("Control characteristic not found — cannot start stream".to_string());
     }
 
-    {
+    let my_gen = {
         let mut streaming = MUSE_STREAMING.lock().await;
         *streaming = true;
-    }
+        STREAM_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    };
+    *CONTINUITY.lock().unwrap_or_else(|p| p.into_inner()) = SeqTracker::default();
 
     emit_muse_state(&app, BleState::Streaming).await;
     push_proof_event("muse", "stream_start", "eeg").await;
@@ -908,13 +1055,15 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
         let mut got_first = false;
         // Silence means EEG silence: motion and PPG arriving must not hide a dead EEG stream.
         let mut silent_since = std::time::Instant::now();
+        let mut last_eeg_at = std::time::Instant::now();
+        let mut ended: Option<&'static str> = None;
 
         loop {
             // Check streaming flag
             {
                 let streaming = MUSE_STREAMING.lock().await;
-                if !*streaming {
-                    println!("[muse] eeg_task: streaming=false, exiting loop");
+                if !*streaming || STREAM_GEN.load(std::sync::atomic::Ordering::SeqCst) != my_gen {
+                    println!("[muse] eeg_task: streaming=false or superseded, exiting loop");
                     break;
                 }
             }
@@ -932,6 +1081,7 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
                         if elapsed >= 15 {
                             println!("[muse] eeg_task: giving up after 15s with 0 notifications");
                             push_proof_event("muse", "stream_dead", "0 notifications after 15s").await;
+                            ended = Some("no_data");
                             break;
                         }
                     } else {
@@ -939,6 +1089,11 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
                         let msg = format!("no notifications for 5s (total_so_far={packets_total})");
                         println!("[muse] eeg_task: WARNING {msg}");
                         push_proof_event("muse", "stream_stall", &msg).await;
+                        if last_eeg_at.elapsed() >= EEG_GIVE_UP {
+                            push_proof_event("muse", "stream_dead", "no EEG for 30s").await;
+                            ended = Some("silent");
+                            break;
+                        }
                     }
                     continue;
                 }
@@ -950,6 +1105,7 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
                     println!("[muse] eeg_task: notification_stream ended (None)");
                     push_proof_event("muse", "stream_ended", "notification_stream returned None")
                         .await;
+                    ended = Some("link_lost");
                     break;
                 }
             };
@@ -959,6 +1115,7 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
                 continue;
             }
             silent_since = std::time::Instant::now();
+            last_eeg_at = std::time::Instant::now();
 
             if !got_first {
                 got_first = true;
@@ -996,17 +1153,30 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
 
             // Parse Muse EEG packet: 16-bit timestamp + 12x 12-bit samples
             if data.len() >= 20 {
+                let sequence = packet_sequence(data);
+                if let Some(seq) = sequence {
+                    let verdict = CONTINUITY
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .observe(&channel_name, seq);
+                    if verdict == SeqVerdict::Duplicate {
+                        // A repeated or out-of-order packet: never emitted or recorded twice.
+                        continue;
+                    }
+                }
                 let samples = parse_eeg_packet(data);
                 let sample = EegSample {
                     timestamp: chrono::Utc::now().timestamp_millis() as f64,
                     channel: channel_name.clone(),
                     samples,
+                    sequence,
+                    source: "live",
                 };
+                // Record first and regardless of the UI emit: a failed emit must not cut a hole in the raw recording.
+                replay::maybe_record_sample(&sample).await;
                 match app_handle.emit("muse-eeg", &sample) {
                     Ok(()) => {
                         packets_emitted += 1;
-                        // Record sample if recording is active (fast path: checks bool)
-                        replay::maybe_record_sample(&sample).await;
                     }
                     Err(e) => {
                         emit_errors += 1;
@@ -1054,6 +1224,43 @@ pub async fn start_eeg_stream(app: AppHandle) -> Result<(), String> {
         let detail = format!("total_packets={packets_total} total_emit_errors={emit_errors}");
         println!("[muse] eeg_task: exited {detail}");
         push_proof_event("muse", "stream_exit", &detail).await;
+        // Ended on its own (not stopped): say so, instead of leaving the app showing "Streaming".
+        if let Some(reason) = ended {
+            let current = {
+                let mut streaming = MUSE_STREAMING.lock().await;
+                let current =
+                    *streaming && STREAM_GEN.load(std::sync::atomic::Ordering::SeqCst) == my_gen;
+                if current {
+                    *streaming = false;
+                }
+                current
+            };
+            if current {
+                replay::release_source("live").await;
+                // Best effort: ask the headset to halt, as a normal stop does.
+                let peripheral = MUSE_PERIPHERAL.lock().await.clone();
+                if let Some(p) = peripheral {
+                    if let Some(control) = p
+                        .characteristics()
+                        .iter()
+                        .find(|c| uuid_prefix_match(&c.uuid, &MUSE_CONTROL_PREFIX))
+                    {
+                        let _ = tokio::time::timeout(
+                            Duration::from_secs(2),
+                            p.write(control, &muse_cmd("h"), WriteType::WithoutResponse),
+                        )
+                        .await;
+                    }
+                }
+                let _ = app_handle.emit(
+                    "muse-stream-ended",
+                    StreamEnded {
+                        reason: reason.to_string(),
+                    },
+                );
+                emit_muse_state(&app_handle, BleState::Connected).await;
+            }
+        }
     });
 
     println!("[muse] eeg_stream: status=started");
@@ -1066,6 +1273,8 @@ pub async fn stop_eeg_stream(app: AppHandle) -> Result<(), String> {
     println!("[muse] eeg_stream: status=stopping");
     let mut streaming = MUSE_STREAMING.lock().await;
     *streaming = false;
+    STREAM_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    replay::release_source("live").await;
 
     let stored = MUSE_PERIPHERAL.lock().await;
     if let Some(peripheral) = stored.as_ref() {
@@ -1165,6 +1374,8 @@ pub fn decode_optional(
             timestamp,
             channel: channel.to_string(),
             samples: parse_eeg_packet(data),
+            sequence: Some(sequence),
+            source: "live",
         }),
         OptionalStream::Accelerometer => motion("accelerometer", "g", ACCELEROMETER_G_PER_LSB),
         OptionalStream::Gyroscope => motion("gyroscope", "deg/s", GYROSCOPE_DPS_PER_LSB),
@@ -1202,19 +1413,26 @@ async fn emit_optional(app: &AppHandle, stream: OptionalStream, data: &[u8]) {
     let timestamp = chrono::Utc::now().timestamp_millis() as f64;
     let emitted = match decode_optional(stream, data, timestamp) {
         Some(OptionalEvent::Aux(sample)) => {
-            let r = app.emit("muse-eeg", &sample);
+            if let Some(seq) = sample.sequence {
+                if CONTINUITY
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .observe(&sample.channel, seq)
+                    == SeqVerdict::Duplicate
+                {
+                    return;
+                }
+            }
             replay::maybe_record_sample(&sample).await;
-            r
+            app.emit("muse-eeg", &sample)
         }
         Some(OptionalEvent::Motion(sample)) => {
-            let r = app.emit("muse-motion", &sample);
             replay::maybe_record_motion(&sample).await;
-            r
+            app.emit("muse-motion", &sample)
         }
         Some(OptionalEvent::Ppg(sample)) => {
-            let r = app.emit("muse-ppg", &sample);
             replay::maybe_record_ppg(&sample).await;
-            r
+            app.emit("muse-ppg", &sample)
         }
         None => Ok(()),
     };
@@ -1446,6 +1664,78 @@ mod tests {
             serde_json::to_value(&ppg).unwrap(),
             serde_json::json!({"timestamp": 1.0, "channel": "red", "sequence": 2, "samples": [3]})
         );
+    }
+
+    #[test]
+    fn the_packet_counter_finds_gaps_repeats_and_wraps() {
+        assert_eq!(packet_sequence(&[0x01, 0x02, 0, 0]), Some(0x0102));
+        assert_eq!(packet_sequence(&[0x01]), None);
+        let mut t = SeqTracker::default();
+        assert_eq!(t.observe("TP9", 10), SeqVerdict::First);
+        assert_eq!(t.observe("TP9", 11), SeqVerdict::Next);
+        assert_eq!(t.observe("TP9", 11), SeqVerdict::Duplicate);
+        assert_eq!(
+            t.observe("TP9", 9),
+            SeqVerdict::Duplicate,
+            "out of order: behind the last one"
+        );
+        assert_eq!(t.observe("TP9", 15), SeqVerdict::Gap(3));
+        // Channels are tracked apart.
+        assert_eq!(t.observe("AF7", 15), SeqVerdict::First);
+        // Wrap: 65535 then 0 is the next packet; 65534 then 1 lost two.
+        let mut w = SeqTracker::default();
+        w.observe("TP9", 65535);
+        assert_eq!(w.observe("TP9", 0), SeqVerdict::Next);
+        let mut w = SeqTracker::default();
+        w.observe("TP9", 65534);
+        assert_eq!(w.observe("TP9", 1), SeqVerdict::Gap(2));
+        let tp9 = t.counts().into_iter().find(|c| c.channel == "TP9").unwrap();
+        assert_eq!(
+            (tp9.packets, tp9.missed_packets, tp9.duplicates_dropped),
+            (3, 3, 2)
+        );
+    }
+
+    #[test]
+    fn a_restarted_headset_counter_is_new_data_not_thousands_of_repeats() {
+        let mut r = SeqTracker::default();
+        r.observe("TP9", 30000);
+        assert_eq!(r.observe("TP9", 5), SeqVerdict::Reset);
+        assert_eq!(r.observe("TP9", 6), SeqVerdict::Next);
+        assert_eq!(r.observe("TP9", 6), SeqVerdict::Duplicate);
+        // Within the repeat window behind the last counter is still a repeat.
+        assert_eq!(r.observe("TP9", 0), SeqVerdict::Duplicate);
+        assert_eq!(r.counts()[0].counter_resets, 1);
+    }
+
+    #[test]
+    fn an_eeg_sample_says_where_it_came_from() {
+        let live = EegSample {
+            timestamp: 1.0,
+            channel: "TP9".into(),
+            samples: vec![0.5],
+            sequence: Some(7),
+            source: "live",
+        };
+        assert_eq!(
+            serde_json::to_value(&live).unwrap(),
+            serde_json::json!({"timestamp": 1.0, "channel": "TP9", "samples": [0.5], "sequence": 7, "source": "live"})
+        );
+        let demo = EegSample {
+            sequence: None,
+            source: "demo",
+            ..live
+        };
+        let v = serde_json::to_value(&demo).unwrap();
+        assert_eq!(v["source"], "demo");
+        assert!(v.get("sequence").is_none());
+        // AUX carries the headset counter too.
+        let Some(OptionalEvent::Aux(aux)) =
+            decode_optional(OptionalStream::Aux("AUX"), &packet(&[0x80; 18]), 1.0)
+        else {
+            panic!("aux")
+        };
+        assert_eq!((aux.source, aux.sequence.is_some()), ("live", true));
     }
 
     #[test]

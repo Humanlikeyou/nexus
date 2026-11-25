@@ -36,7 +36,7 @@ const HEART_RATE_EVERY_MS = 5000;
 export const AUX_PROVEN = false;
 
 export type GuidedStage = "fit" | "baseline-open" | "baseline-closed" | "training";
-export type HoldReason = "contact" | "dropout" | "blink" | "jaw" | "movement" | "noise";
+export type HoldReason = "contact" | "dropout" | "blink" | "jaw" | "movement" | "noise" | "frozen" | "not_live";
 export type ChannelFit = "good" | "fair" | "poor" | "none";
 export const FIT_LABEL: Record<ChannelFit, string> = { good: "Good contact", fair: "Fair contact", poor: "Poor contact", none: "No signal" };
 
@@ -48,7 +48,24 @@ export const HOLD_COPY: Record<HoldReason, string> = {
   jaw: "Holding: your jaw tightened. Let it soften.",
   movement: "Holding: you moved. Settle back in.",
   noise: "Holding: the signal is noisy right now.",
+  frozen: "Holding: the signal froze, the same values are repeating. Check the headset connection.",
+  not_live: "Holding: this is a replay or demo, not your live signal, so there is no feedback.",
 };
+
+/** How the numbers in a session summary were made, so each one can be traced (decision 0057). */
+export const TRAINING_METHOD = {
+  version: "training-v2-0057",
+  tick_ms: TICK_MS,
+  fft: "legacy-core computeBands: Welch (512 samples, 50% overlap) else single 256-sample PSD, Hann, 256 Hz nominal",
+  bands_hz: { delta: [1.5, 4], theta: [4, 8], alpha: [8, 13], beta: [13, 30], gamma: [30, 50] },
+  channels: "AF7 and AF8 averaged per band (AUX only when proven)",
+  focus: "beta / (beta + theta) x 100",
+  relaxation: "alpha / (alpha + beta) x 100",
+  thresholds: "baseline mean x 1.1 (reward) and x 0.9 (inhibit), scaled toward 60% reward every 30 s",
+} as const;
+
+/** Training ticks looked back over for the feedback gate's confidence (decision 0057). */
+const CONFIDENCE_TICKS = 20;
 
 /** Next reward threshold scale from the last window's reward rate. Stays within sensible limits. */
 export function adaptScale(scale: number, rewardRate: number): number {
@@ -153,7 +170,14 @@ export class TrainingSession {
   private adjustments: number[] = [];
   private streak = 0;
   private window: boolean[] = [];
-  private held: Record<HoldReason, number> = { contact: 0, dropout: 0, blink: 0, jaw: 0, movement: 0, noise: 0 };
+  private held: Record<HoldReason, number> = { contact: 0, dropout: 0, blink: 0, jaw: 0, movement: 0, noise: 0, frozen: 0, not_live: 0 };
+  /** Training-stage ticks: valid (reached the policy) or not, newest last; and each channel's fit tally. */
+  /** Recent training ticks with good-or-fair contact on every electrode (the gate's confidence). */
+  private recentFit: boolean[] = [];
+  private trainingTicks = 0;
+  private validTicks = 0;
+  private fitTally: Record<string, Record<ChannelFit, number>> = Object.fromEntries(CHANNELS.map((c) => [c, { good: 0, fair: 0, poor: 0, none: 0 }]));
+  private sources = new Set<string>();
   private readonly auxAllowed: boolean;
   private heartRates: number[] = [];
   private lastHeartRateAt = -Infinity;
@@ -201,8 +225,16 @@ export class TrainingSession {
     this.thresholds = { ...this.baseThresholds, rewardMin: Object.fromEntries(Object.entries(this.baseThresholds.rewardMin).map(([label, value]) => [label, value * this.scale])) };
   }
 
+  /** Counts a training tick as valid or not (the valid-data percentage, and the gate's confidence). */
+  private note(valid: boolean) {
+    if (this.stage !== "training") return;
+    this.trainingTicks += 1;
+    if (valid) this.validTicks += 1;
+  }
+
   private hold(reason: HoldReason, telemetry: MuseTelemetry, now: number, fit: Record<string, ChannelFit>): TrainingState {
     if (this.stage === "training") this.held[reason] += 1;
+    this.note(false);
     this.streak = 0;
     this.state = { ...this.state, phase: "held", label: HOLD_COPY[reason], stage: this.stage, hold: reason, fit, signal: null, focus: null, relaxation: null, streak: 0, delayMs: telemetry.lastPacketAt ? now - telemetry.lastPacketAt + FFT_WINDOW_DELAY_MS : null };
     return this.state;
@@ -228,6 +260,24 @@ export class TrainingSession {
     const moved = this.moved(telemetry, now);
     this.readHeartRate(telemetry, now, moved);
     const fit = this.guided ? Object.fromEntries(CHANNELS.map((channel) => [channel, this.channelFit(telemetry, channel, now)])) as Record<string, ChannelFit> : {};
+    if (this.stage === "training") {
+      for (const c of CHANNELS) if (fit[c]) this.fitTally[c][fit[c]] += 1;
+      this.recentFit.push(CHANNELS.every((c) => fit[c] === "good" || fit[c] === "fair"));
+      if (this.recentFit.length > CONFIDENCE_TICKS) this.recentFit.shift();
+    }
+    if (telemetry.source) this.sources.add(telemetry.source);
+    // Decision 0057: only the live headset can earn feedback. Replay, demo and unlabelled data never do.
+    if (telemetry.packetCount > 0 && telemetry.source !== "live") {
+      if (this.guided) return this.hold("not_live", telemetry, now, fit);
+      this.state = { ...this.state, phase: "held", label: HOLD_COPY.not_live, signal: null, focus: null, relaxation: null };
+      return this.state;
+    }
+    // A channel repeating its last packet exactly is frozen: nothing new to train on.
+    if (CHANNELS.some((c) => telemetry.continuity?.[c]?.frozen)) {
+      if (this.guided) return this.hold("frozen", telemetry, now, fit);
+      this.state = { ...this.state, phase: "held", label: HOLD_COPY.frozen, signal: null, focus: null, relaxation: null };
+      return this.state;
+    }
     if (this.guided && this.stage === "fit") {
       const ready = CHANNELS.every((channel) => fit[channel] === "good" || fit[channel] === "fair");
       this.fitGoodTicks = ready ? this.fitGoodTicks + 1 : 0;
@@ -303,7 +353,15 @@ export class TrainingSession {
       this.state = { phase: "calibrating", label: "Calibrating", calibrationPercent: Math.min(100, this.baseline.length / CALIBRATION_TICKS * 100), signal: null, focus: null, relaxation: null, calmPercent: null };
       return this.state;
     }
-    const signal = computeFeedbackSignal(bands, this.protocol, this.thresholds, 1, "good", this.artifacts.length, false);
+    // Real gate inputs (decision 0057), not the old fixed "confidence 1, good, not frozen".
+    const worst = Object.values(fit).includes("poor") ? "poor" : Object.values(fit).includes("fair") ? "fair" : "good";
+    // Confidence: the share of the last 10 s with good contact on every electrode. After a long hold it
+    // recovers within a few seconds of good contact (the gate needs 0.3), so feedback never locks out.
+    const confidence = this.recentFit.length ? this.recentFit.filter(Boolean).length / this.recentFit.length : 1;
+    // Frozen channels already held above; passed again so the engine's own gate agrees (defence in depth).
+    const frozen = CHANNELS.some((c) => telemetry.continuity?.[c]?.frozen === true);
+    const signal = computeFeedbackSignal(bands, this.protocol, this.thresholds, confidence, worst, this.artifacts.length, frozen);
+    if (!signal.gated) this.note(true);
     this.entries.push({ timestamp: now, focus: bands.focusScore, relaxation: bands.relaxationScore, action: signal.action, gated: signal.gated });
     if (this.guided) {
       if (signal.gated) return this.hold("noise", telemetry, now, fit);
@@ -351,7 +409,13 @@ export class TrainingSession {
         trained_seconds: valid.length * TICK_MS / 1000,
         alpha_eyes_closed_ratio: alphaRatio(this.baselines.open, this.baselines.closed),
         aux_source: !!this.state.auxSource,
+        // Decision 0057: how much of the training time was usable, and each electrode's contact over it.
+        valid_pct: this.trainingTicks ? Math.round(this.validTicks / this.trainingTicks * 1000) / 10 : null,
+        training_ticks: this.trainingTicks,
+        channel_fit_ticks: Object.fromEntries(Object.entries(this.fitTally).map(([c, t]) => [c, { ...t }])),
       } } : {}),
+      data_sources: [...this.sources].sort(),
+      method: TRAINING_METHOD,
     };
   }
 }

@@ -278,6 +278,7 @@ pub fn run() {
             commands::life_plan::life_week_plan_set,
             commands::life_nudges::life_insight,
             commands::life_week::life_week_observations,
+            commands::muse::muse_stream_continuity,
             openclaw::read_tasks,
             openclaw::read_content_pipeline,
             openclaw::save_skill,

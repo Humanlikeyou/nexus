@@ -46,14 +46,24 @@ fn recording_writes_lazy_header_all_streams_and_trailer() {
         // Lazy: no header until the first line.
         assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
 
-        let eeg = |channel: &str| muse::EegSample {
+        let eeg = |channel: &str, seq: u16| muse::EegSample {
             timestamp: 1000.0,
             channel: channel.into(),
             samples: vec![1.0; 12],
+            sequence: Some(seq),
+            source: "live",
         };
-        maybe_record_sample(&eeg("TP9")).await;
-        maybe_record_sample(&eeg("AUX_L")).await; // never recorded
-        maybe_record_sample(&eeg("AUX")).await;
+        maybe_record_sample(&eeg("TP9", 40)).await;
+        maybe_record_sample(&eeg("TP9", 40)).await; // repeated packet: written once (decision 0057)
+        maybe_record_sample(&eeg("AUX_L", 40)).await; // never recorded
+        maybe_record_sample(&eeg("AUX", 40)).await;
+        // Demo samples never mix into a live recording.
+        maybe_record_sample(&muse::EegSample {
+            source: "demo",
+            sequence: None,
+            ..eeg("AF7", 0)
+        })
+        .await;
         maybe_record_ppg(&muse::PpgSample {
             timestamp: 1001.0,
             channel: "infrared".into(),
@@ -96,7 +106,40 @@ fn recording_writes_lazy_header_all_streams_and_trailer() {
         assert_eq!(l[0]["ppg"], serde_json::json!(["infrared"]));
         assert_eq!(l[0]["motion"], serde_json::json!(["gyroscope"]));
         assert_eq!(l[1]["channel"], "TP9");
+        assert_eq!(l[1]["seq"], 40);
         assert_eq!(l[2]["channel"], "AUX");
+        // Reproducible metadata (decision 0057).
+        assert_eq!(l[0]["data_source"], "live");
+        assert_eq!(l[0]["sample_rate_basis"], "nominal");
+        assert_eq!(l[0]["timestamp_basis"], "host_receive_ms_per_packet");
+        assert_eq!(l[0]["samples_per_packet"], 12);
+        assert!(l[0]["eeg_decoder"]
+            .as_str()
+            .unwrap()
+            .starts_with("muse_eeg_12bit"));
+        assert!(!l[0]["app_version"].as_str().unwrap().is_empty());
+        let stats = &l[5]["stats"];
+        assert_eq!(stats["other_source_dropped"], 1);
+        assert_eq!(stats["write_errors"], 0);
+        let tp9 = stats["channels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["channel"] == "TP9")
+            .unwrap();
+        assert_eq!(
+            (
+                tp9["packets"].as_u64(),
+                tp9["samples"].as_u64(),
+                tp9["duplicates_dropped"].as_u64()
+            ),
+            (Some(1), Some(12), Some(1))
+        );
+        assert_eq!(
+            tp9["measured_rate_hz"],
+            serde_json::Value::Null,
+            "one packet: too short to measure"
+        );
         assert_eq!(l[3]["source"], "infrared");
         assert!(l[3].get("sequence").is_none() && l[4].get("sequence").is_none());
         assert_eq!(l[5]["aux"]["detected"], true);

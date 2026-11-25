@@ -102,8 +102,8 @@ export function MuseJourney({ session, recoveryNow, sessions, action, status, de
   const body = session ? parseBodyContext(session.body_context) : null;
   const that = whole(body?.recovery);
   const now = whole(recoveryNow);
-  const focus = session ? score(session.summary.avg_focus) : null;
-  const calm = session ? score(session.summary.avg_relaxation) : null;
+  const focus = session ? score(session.summary.avg_focus, session.summary.score_scale) : null;
+  const calm = session ? score(session.summary.avg_relaxation, session.summary.score_scale) : null;
   const minutes = session ? Math.max(1, Math.round(session.duration_secs / 60)) : 0;
   const [gl, setGl] = useState(glOk);
   const shares = useMemo(() => sessionShares(session), [session]);
@@ -138,8 +138,8 @@ export function MuseJourney({ session, recoveryNow, sessions, action, status, de
           <div className="d18-muse__stats">
             {brain ? (
               <div className="d18-chips">
-                <UsualChip label="Focus" value={focus} unit="/100" usual={usualSummary(sessions, (x) => score(x.summary.avg_focus), session.id)} />
-                <UsualChip label="Calm" value={calm} unit="/100" usual={usualSummary(sessions, (x) => score(x.summary.avg_relaxation), session.id)} />
+                <UsualChip label="Focus" value={focus} unit="/100" usual={usualSummary(sessions, (x) => score(x.summary.avg_focus, x.summary.score_scale), session.id)} />
+                <UsualChip label="Calm" value={calm} unit="/100" usual={usualSummary(sessions, (x) => score(x.summary.avg_relaxation, x.summary.score_scale), session.id)} />
                 <UsualChip label="Duration" value={minutes} unit="min" usual={usualSummary(sessions, (x) => x.duration_secs / 60, session.id)} />
                 {that != null && <span className="d18-stat"><b>{that}<small> %</small></b><small>Recovery that day</small></span>}
               </div>

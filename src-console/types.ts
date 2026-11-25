@@ -300,10 +300,18 @@ export interface MuseDevice {
   rssi: number | null;
 }
 
+/** Where EEG samples came from (muse.rs / replay.rs, decision 0057). Only `live` is a measurement of the person now. */
+export type EegSource = "live" | "replay" | "demo";
+
 export interface EegSample {
+  /** Host clock (ms) when the 12-sample packet arrived; not a per-sample time. */
   timestamp: number;
   channel: string;
   samples: number[];
+  /** The headset's 16-bit packet counter (absent for demo data and older replays). */
+  sequence?: number;
+  /** Absent only from builds before decision 0057; treated as unknown, never as live. */
+  source?: EegSource;
 }
 
 export interface RecordedSession {
@@ -323,6 +331,8 @@ export interface RecordedSession {
     /** Muse training only; absent on sessions saved before 2026-10-28 (show "—"). */
     calm_pct?: number | null;
     time_in_target_pct?: number | null;
+    /** 100 when the file stores 0–100 scores (sessions.rs SCORE_SCALE). */
+    score_scale?: number | null;
   };
   /** Minimised NOOP context captured at Muse session start; absent on older sessions. Parse with parseBodyContext. */
   body_context?: import("./legacy-core/lib/types").BodyContext | null;

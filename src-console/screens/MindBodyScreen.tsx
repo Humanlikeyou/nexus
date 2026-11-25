@@ -260,13 +260,14 @@ export function MindBodyField({ sessions, load = loadMindBody, onOpen }: MindBod
   const ranges = RANGES.filter((item) => Number(item.value) <= 30 || longest >= Number(item.value) / 3);
   const r = pearson(points);
   const sleepMin = night?.totalSleepMin ?? readingOf0(readings, "sleep");
+  // Decision 0057: a stage NOOP didn't report is left out, never drawn as 0 minutes.
   const stages = [
-    { label: "Deep", minutes: night?.deepMin ?? day?.deepMin ?? 0, tone: "deep" },
-    { label: "REM", minutes: night?.remMin ?? day?.remMin ?? 0, tone: "rem" },
-    { label: "Light", minutes: night?.lightMin ?? day?.lightMin ?? 0, tone: "light" },
+    { label: "Deep", minutes: night?.deepMin ?? day?.deepMin, tone: "deep" },
+    { label: "REM", minutes: night?.remMin ?? day?.remMin, tone: "rem" },
+    { label: "Light", minutes: night?.lightMin ?? day?.lightMin, tone: "light" },
     // design-1110c C9: awake = in bed minus asleep, from the real night record (hatched, never copper).
     ...(night && night.inBedMin > night.totalSleepMin ? [{ label: "Awake", minutes: night.inBedMin - night.totalSleepMin, tone: "awake" }] : []),
-  ];
+  ].filter((stage): stage is { label: string; minutes: number; tone: string } => typeof stage.minutes === "number");
   const efficiency = night?.efficiency ?? day?.efficiency ?? null;
   const also = day ? [
     ["Blood oxygen", day.spo2Pct, (v: number) => `${v.toFixed(1)}%`], ["Skin temp", day.skinTempDevC, (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)} °C`],
@@ -318,7 +319,7 @@ export function MindBodyField({ sessions, load = loadMindBody, onOpen }: MindBod
                         {stages.map((stage) => <div key={stage.tone}><dt><i data-tone={stage.tone} aria-hidden="true" />{stage.label}</dt><dd>{hoursMinutes(stage.minutes)}<small>{Math.round((stage.minutes / Math.max(1, stages.reduce((sum, item) => sum + item.minutes, 0))) * 100)}%</small></dd></div>)}
                       </dl>
                     )}
-                    <p className="mind-body__meta">Totals for the night. Stage order needs per-epoch data, which isn&apos;t sent yet.</p>
+                    <p className="mind-body__meta">Totals for the night, as estimated by NOOP from the strap&apos;s data, not WHOOP&apos;s own sleep staging. Awake is time in bed minus time asleep. When NOOP stores stage timing, the stage order is in Fitness › Sleep.</p>
                   </div>
                 </div>
                 <div className="mb-row mb-row--stack mb-row--rule">

@@ -26,7 +26,7 @@ let packet = 0;
 function telemetry(now: number, alpha: number, patch: Partial<MuseTelemetry> & { only?: Record<string, number[]> } = {}): MuseTelemetry {
   packet += 1;
   const channels = Object.fromEntries(CHANNELS.map((c) => [c, patch.only?.[c] ?? wave(alpha, packet)]));
-  return { channels, bands: { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 }, packetCount: packet, sampleCount: packet * 12, lastPacketAt: now, channelLastPacketAt: Object.fromEntries(CHANNELS.map((c) => [c, now])), aux: null, ...patch };
+  return { channels, bands: { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 }, packetCount: packet, sampleCount: packet * 12, lastPacketAt: now, channelLastPacketAt: Object.fromEntries(CHANNELS.map((c) => [c, now])), aux: null, source: "live", ...patch };
 }
 
 /** Runs a session to the given point and returns it with the clock. */

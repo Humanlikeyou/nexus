@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { EegSample } from "../types";
+import type { EegSample, EegSource } from "../types";
 import { relativeChannelBandPowers, type FrequencyBands } from "./fft";
 import { GYRO_BUFFER } from "./headMotion";
 import { PPG_BUFFER } from "./heartRate";
@@ -33,7 +33,20 @@ export interface MuseTelemetry {
   ppg?: { samples: number[]; lastPacketAt: number } | null;
   /** Last 10 s per channel for the live signal lanes (TP9…TP10, and AUX once packets arrive). */
   trace?: Record<string, number[]>;
+  /** Decision 0057: `bands` is a measurement only when this is true (all four channels have 1 s of samples).
+   *  Otherwise `bands` is all zeros and must be shown as missing, never as 0 %. */
+  bandsValid?: boolean;
+  /** Where the latest EEG came from; null before any packet or from an older build that didn't say. */
+  source?: EegSource | null;
+  /** Per channel: frozen (the same packet values repeated), packets missed (from the headset counter). */
+  continuity?: Record<string, ChannelContinuity>;
 }
+
+export type ChannelContinuity = { packets: number; missedPackets: number; repeatedPackets: number; frozen: boolean };
+
+/** Consecutive packets with exactly the previous packet's values before a channel counts as frozen.
+ *  Real EEG never repeats 12 samples to the bit; a repeated buffer (a stuck driver or a looping replay) does. */
+export const FROZEN_REPEATS = 2;
 
 /** `muse-motion`, from muse.rs. */
 export type MotionPacket = { timestamp: number; sensor: string; unit: string; sequence: number; samples: number[][] };
@@ -51,6 +64,9 @@ const emptyTelemetry = (): MuseTelemetry => ({
   aux: null,
   gyro: null,
   ppg: null,
+  bandsValid: false,
+  source: null,
+  continuity: {},
 });
 
 export function createMuseTelemetryStore() {
@@ -64,6 +80,8 @@ export function createMuseTelemetryStore() {
   let gyro: MuseTelemetry["gyro"] = null;
   let ppg: MuseTelemetry["ppg"] = null;
   let trace: Record<string, number[]> = {};
+  let source: EegSource | null = null;
+  let continuity: Record<string, ChannelContinuity & { lastSeq: number | null; last: number[] | null; run: number }> = {};
   let snapshot: MuseTelemetry = emptyTelemetry();
   let publishedPackets = 0;
   const listeners = new Set<() => void>();
@@ -81,6 +99,9 @@ export function createMuseTelemetryStore() {
     snapshot = {
       channels,
       bands: relativeChannelBandPowers(complete),
+      bandsValid: complete.length === CHANNELS.length,
+      source,
+      continuity: Object.fromEntries(Object.entries(continuity).map(([c, v]) => [c, { packets: v.packets, missedPackets: v.missedPackets, repeatedPackets: v.repeatedPackets, frozen: v.frozen }])),
       packetCount,
       sampleCount,
       lastPacketAt,
@@ -99,7 +120,37 @@ export function createMuseTelemetryStore() {
     if (buf.length > TRACE_BUFFER) buf.splice(0, buf.length - TRACE_BUFFER);
   };
 
+  /** Counter gaps and exact repeats per channel (decision 0057). Rust already drops repeated counters. */
+  const track = (payload: EegSample) => {
+    const c = continuity[payload.channel] ?? (continuity[payload.channel] = { packets: 0, missedPackets: 0, repeatedPackets: 0, frozen: false, lastSeq: null, last: null, run: 0 });
+    c.packets += 1;
+    if (typeof payload.sequence === "number") {
+      if (c.lastSeq != null) {
+        const step = (payload.sequence - c.lastSeq + 65536) % 65536;
+        if (step >= 2 && step <= 32767) c.missedPackets += step - 1;
+      }
+      c.lastSeq = payload.sequence;
+    }
+    const same = c.last != null && c.last.length === payload.samples.length && c.last.every((v, i) => v === payload.samples[i]);
+    c.run = same ? c.run + 1 : 0;
+    if (same) c.repeatedPackets += 1;
+    c.frozen = c.run >= FROZEN_REPEATS;
+    c.last = payload.samples;
+  };
+
   const ingest = (payload: EegSample) => {
+    const next = payload.source ?? null;
+    // A different source (live after a replay, or the reverse) starts clean: its samples never share a buffer.
+    if (packetCount > 0 && next !== source) {
+      buffers = { TP9: [], AF7: [], AF8: [], TP10: [] };
+      channelSamples = { TP9: 0, AF7: 0, AF8: 0, TP10: 0 };
+      sampleCount = 0;
+      aux = null;
+      trace = {};
+      continuity = {};
+    }
+    source = next;
+    track(payload);
     if (payload.channel === "AUX") {
       keepTrace("AUX", payload.samples);
       aux = { samples: [...(aux?.samples ?? []), ...payload.samples].slice(-MAX_BUFFER), lastPacketAt: Date.now() };
@@ -131,7 +182,12 @@ export function createMuseTelemetryStore() {
       return () => { listeners.delete(listener); };
     },
     getSnapshot: () => snapshot,
-    readCounters: () => ({ packetCount, sampleCount, channelSamples: { ...channelSamples } }),
+    readCounters: () => ({
+      packetCount, sampleCount, channelSamples: { ...channelSamples },
+      /** Decision 0057: where the session's samples came from, and each channel's continuity. */
+      source,
+      continuity: Object.fromEntries(Object.entries(continuity).map(([c, v]) => [c, { packets: v.packets, missedPackets: v.missedPackets, repeatedPackets: v.repeatedPackets, frozen: v.frozen }])) as Record<string, ChannelContinuity>,
+    }),
     reset() {
       buffers = { TP9: [], AF7: [], AF8: [], TP10: [] };
       packetCount = 0;
@@ -144,6 +200,8 @@ export function createMuseTelemetryStore() {
       gyro = null;
       ppg = null;
       trace = {};
+      source = null;
+      continuity = {};
       snapshot = emptyTelemetry();
       emit();
     },
