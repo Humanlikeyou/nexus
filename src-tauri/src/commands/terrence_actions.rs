@@ -1041,8 +1041,11 @@ fn update_action_status(
         "succeeded" | "failed" | "cancelled" | "needs_attention"
     )
     .then(|| now.clone());
-    conn.execute(
-        "UPDATE terrence_actions
+    // Compare-and-swap (0052): the row must still be in the status read above when the write lands,
+    // so two writers can't both move it (a double approval, or a cancel racing an execution).
+    let changed = conn
+        .execute(
+            "UPDATE terrence_actions
          SET status = ?1,
              updated_at = ?2,
              approved_at = COALESCE(?3, approved_at),
@@ -1050,19 +1053,26 @@ fn update_action_status(
              completed_at = COALESCE(?5, completed_at),
              result = COALESCE(?6, result),
              error = COALESCE(?7, error)
-         WHERE id = ?8",
-        params![
-            next_status,
-            now,
-            approved_at,
-            started_at,
-            completed_at,
-            result,
-            error,
-            id,
-        ],
-    )
-    .map_err(|error| format!("Failed to update Amara action: {error}"))?;
+         WHERE id = ?8 AND status = ?9",
+            params![
+                next_status,
+                now,
+                approved_at,
+                started_at,
+                completed_at,
+                result,
+                error,
+                id,
+                action.status,
+            ],
+        )
+        .map_err(|error| format!("Failed to update Amara action: {error}"))?;
+    if changed != 1 {
+        return Err(format!(
+            "changed: Amara action moved from '{}' before it could become '{}'.",
+            action.status, next_status
+        ));
+    }
     get_action(conn, id)?.ok_or_else(|| "Updated Amara action could not be read.".to_string())
 }
 
@@ -1439,12 +1449,12 @@ fn execute_directory_organization(parameters: &Value) -> Result<String, String> 
     ))
 }
 
-fn execute_local_action(action: &TerrenceAction) -> Result<String, String> {
-    let object = action
-        .parameters
+/// One local tool with already-normalized parameters (the body the controller's adapter calls).
+fn execute_local_tool(tool_id: &str, parameters: &Value) -> Result<String, String> {
+    let object = parameters
         .as_object()
         .ok_or_else(|| "Stored action parameters are invalid.".to_string())?;
-    let status = match action.tool_id.as_str() {
+    let status = match tool_id {
         "system.open_url" => {
             outbound_gate()?;
             Command::new("/usr/bin/open")
@@ -1482,7 +1492,7 @@ fn execute_local_action(action: &TerrenceAction) -> Result<String, String> {
                 .and_then(Value::as_i64)
                 .ok_or_else(|| "Stored action volume change is invalid.".to_string())?;
             execute_adjust_volume(delta)?;
-            return local_action_success_message(&action.tool_id, object);
+            return local_action_success_message(tool_id, object);
         }
         "system.set_mute" => {
             let muted = object
@@ -1490,21 +1500,19 @@ fn execute_local_action(action: &TerrenceAction) -> Result<String, String> {
                 .and_then(Value::as_bool)
                 .ok_or_else(|| "Stored action mute state is invalid.".to_string())?;
             execute_set_mute(muted)?;
-            return local_action_success_message(&action.tool_id, object);
+            return local_action_success_message(tool_id, object);
         }
-        "macos.workflow" => return execute_managed_workflow(&action.parameters),
-        "filesystem.organize_directory" => {
-            return execute_directory_organization(&action.parameters)
-        }
+        "macos.workflow" => return execute_managed_workflow(parameters),
+        "filesystem.organize_directory" => return execute_directory_organization(parameters),
         _ => {
             return Err(format!(
                 "Tool '{}' cannot be executed by Amara OS.",
-                action.tool_id
+                tool_id
             ))
         }
     };
     command_status(status)?;
-    local_action_success_message(&action.tool_id, object)
+    local_action_success_message(tool_id, object)
 }
 
 fn local_action_success_message(
@@ -2040,26 +2048,139 @@ fn approve_action_blocking(app: &tauri::AppHandle, id: &str) -> Result<TerrenceA
     let approved = update_action_status(&conn, id, &["awaiting_approval"], "approved", None, None)?;
     let mut executing =
         update_action_status(&conn, &approved.id, &["approved"], "executing", None, None)?;
-    // Execute exactly the normalized parameters that were shown and approved.
+    // Execute exactly the normalized parameters that were shown and approved, through the
+    // execution controller (0052): ledger, approval bound to these parameters, verification.
     executing.parameters = normalized;
-    match execute_local_action(&executing) {
-        Ok(result) => update_action_status(
-            &conn,
-            &executing.id,
-            &["executing"],
-            "succeeded",
-            Some(result),
+    let controller = super::execution::live_controller();
+    let (status, result, error) = execute_through_controller(&controller, &executing);
+    update_action_status(&conn, &executing.id, &["executing"], status, result, error)
+}
+
+/// The ledger key for one action row: the same row can never execute twice.
+pub(crate) fn action_idempotency_key(action_id: &str) -> String {
+    format!("terrence_action:{action_id}")
+}
+
+/// Runs an approved action through the controller and maps the ledger outcome onto the action's
+/// own status. The user has just clicked Allow in the native dialog: that click is the approval,
+/// recorded in the ledger and bound to exactly these parameters (expires in 2 minutes).
+pub(super) fn execute_through_controller(
+    controller: &super::execution::Controller,
+    action: &TerrenceAction,
+) -> (&'static str, Option<String>, Option<String>) {
+    use super::execution::{ExecRequest, ExecStatus, Origin};
+    let approval = match controller.grant_user_approval(
+        &action.tool_id,
+        &action.parameters,
+        Duration::from_secs(120),
+    ) {
+        Ok(a) => a,
+        Err(e) => {
+            return (
+                "failed",
+                None,
+                Some(format!("Could not record the approval: {e}")),
+            )
+        }
+    };
+    let submitted = controller.submit(&ExecRequest {
+        action_id: action.tool_id.clone(),
+        workflow_id: action
+            .conversation_id
+            .clone()
+            .unwrap_or_else(|| action.id.clone()),
+        idempotency_key: action_idempotency_key(&action.id),
+        origin: Origin::Model,
+        params: action.parameters.clone(),
+        approval_id: Some(approval),
+    });
+    let rec = match submitted {
+        Ok(s) => s.record().clone(),
+        Err(e) => return ("failed", None, Some(e.to_string())),
+    };
+    let message = rec
+        .response
+        .as_deref()
+        .and_then(|r| serde_json::from_str::<Value>(r).ok())
+        .and_then(|v| v["message"].as_str().map(str::to_string))
+        .unwrap_or_else(|| "Amara OS ran the action.".to_string());
+    match rec.status {
+        // UNVERIFIED still ran; the ledger keeps that it could not be read back.
+        ExecStatus::Verified | ExecStatus::Unverified | ExecStatus::Executed => {
+            ("succeeded", Some(message), None)
+        }
+        ExecStatus::Partial => (
+            "needs_attention",
             None,
+            Some(
+                rec.error
+                    .unwrap_or_else(|| "Only part of the action finished.".into()),
+            ),
         ),
-        Err(error) => update_action_status(
-            &conn,
-            &executing.id,
-            &["executing"],
+        _ => (
             "failed",
             None,
-            Some(error),
+            Some(
+                rec.error
+                    .unwrap_or_else(|| "The action did not run.".into()),
+            ),
         ),
     }
+}
+
+/// After a restart: a local action left `executing` takes its outcome from the ledger (which the
+/// controller has just recovered). With no ledger record it needs attention. Hermes conversations
+/// keep their own reconcile (`reconcile_interrupted_conversations`).
+pub(crate) fn reconcile_interrupted_local_actions(
+    controller: &super::execution::Controller,
+) -> Result<usize, String> {
+    reconcile_interrupted_local_actions_in(&action_db()?, controller)
+}
+
+pub(super) fn reconcile_interrupted_local_actions_in(
+    conn: &Connection,
+    controller: &super::execution::Controller,
+) -> Result<usize, String> {
+    use super::execution::ExecStatus;
+    let mut st = conn
+        .prepare(
+            "SELECT id FROM terrence_actions
+             WHERE status = 'executing' AND tool_id != 'agent.hermes_chat'",
+        )
+        .map_err(|e| format!("Failed to read interrupted Amara actions: {e}"))?;
+    let ids = st
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(|e| format!("Failed to read interrupted Amara actions: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read interrupted Amara actions: {e}"))?;
+    let mut n = 0;
+    for id in ids {
+        let rec = controller
+            .ledger
+            .by_idempotency_key(&action_idempotency_key(&id))
+            .map_err(|e| e.to_string())?;
+        let (status, result, error) = match rec.map(|r| r.status) {
+            Some(ExecStatus::Verified | ExecStatus::Unverified) => (
+                "succeeded",
+                Some("Finished before Amara OS restarted.".to_string()),
+                None,
+            ),
+            Some(ExecStatus::Failed | ExecStatus::Cancelled | ExecStatus::NotAuthorized) => (
+                "failed",
+                None,
+                Some("Did not finish before Amara OS restarted.".to_string()),
+            ),
+            _ => (
+                "needs_attention",
+                None,
+                Some("Amara OS restarted before this action finished. Check whether it happened before retrying.".to_string()),
+            ),
+        };
+        if update_action_status(conn, &id, &["executing"], status, result, error).is_ok() {
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 fn retry_action_in(conn: &Connection, id: &str) -> Result<TerrenceAction, String> {
@@ -2117,6 +2238,9 @@ pub fn cancel_terrence_action(id: String) -> Result<TerrenceAction, String> {
         Some("Cancelled by the user.".to_string()),
     )
 }
+
+mod operations;
+pub(crate) use operations::operations as local_operations;
 
 #[cfg(test)]
 mod tests;

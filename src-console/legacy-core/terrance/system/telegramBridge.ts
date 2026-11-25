@@ -279,7 +279,7 @@ async function handleAgentCommand(args: string): Promise<string> {
 
     const [name, purpose, schedule] = parts;
     const agent = await createSubagent(name, purpose, schedule);
-    if (!agent) return `Failed to create agent. Invalid schedule: "${schedule}"`;
+    if (!agent) return `Failed to create agent: the schedule "${schedule}" is invalid or it could not be saved.`;
     return `Agent spawned: "${name}"\nPurpose: ${purpose}\nSchedule: ${agent.parsedSchedule?.description ?? schedule}`;
   }
 
@@ -300,7 +300,7 @@ async function handleAgentCommand(args: string): Promise<string> {
     const query = args.slice(5).trim();
     const agent = await findSubagent(query);
     if (!agent) return `No agent matching "${query}"`;
-    await stopSubagent(agent.id);
+    if (!(await stopSubagent(agent.id))) return `Could not save: agent "${agent.name}" was not stopped.`;
     return `Agent stopped: "${agent.name}"`;
   }
 
@@ -319,7 +319,7 @@ async function handleAgentCommand(args: string): Promise<string> {
     const query = args.slice(7).trim();
     const agent = await findSubagent(query);
     if (!agent) return `No agent matching "${query}"`;
-    await deleteSubagent(agent.id);
+    if (!(await deleteSubagent(agent.id))) return `Could not save: agent "${agent.name}" was not deleted.`;
     return `Agent deleted: "${agent.name}"`;
   }
 

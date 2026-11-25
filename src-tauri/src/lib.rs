@@ -148,6 +148,8 @@ pub fn run() {
         .setup(|app| {
             // A process cannot resume an in-flight Hermes child after restart.
             let _ = terrence_actions::reconcile_interrupted_conversations();
+            // 0052: settle executions a quit or crash interrupted (read-back only, never a re-run).
+            std::thread::spawn(commands::execution::recover_on_startup);
             // Navy local-only is session-only: off at every start, and the voice loop's flag file says so.
             commands::telegram::init_navy_flag();
             // Outbound is off unless Settings enabled it (and the env var does not force it off).
@@ -247,6 +249,12 @@ pub fn run() {
             system::check_service_port,
             // Skills / tasks / content pipeline
             openclaw::read_skills,
+            commands::skills_lifecycle::list_skill_versions,
+            commands::skills_lifecycle::propose_skill_version,
+            commands::skills_lifecycle::activate_skill_version,
+            commands::skills_lifecycle::reject_skill_version,
+            commands::execution::list_executions,
+            commands::execution::execution_history,
             openclaw::read_tasks,
             openclaw::read_content_pipeline,
             openclaw::save_skill,

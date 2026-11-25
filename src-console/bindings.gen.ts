@@ -446,6 +446,16 @@ export const commands = {
 	getSystemInfo: (options?: InvokeOptions) => __TAURI_INVOKE<SystemInfo>("get_system_info", undefined, options),
 	healthCheck: (options?: InvokeOptions) => __TAURI_INVOKE<string>("health_check", undefined, options),
 	readSkills: (options?: InvokeOptions) => __TAURI_INVOKE<Skill_Serialize[]>("read_skills", undefined, options),
+	listSkillVersions: (options?: InvokeOptions) => __TAURI_INVOKE<SkillRecord_Serialize[]>("list_skill_versions", undefined, options),
+	/**  Skills evolution stores a generated version here. It is never activated by this call. */
+	proposeSkillVersion: (name: string, content: string, options?: InvokeOptions) => __TAURI_INVOKE<SkillOutcome_Serialize>("propose_skill_version", { name, content }, options),
+	/**  Activates (or restores) a version after the user allows it in the native approval dialog. */
+	activateSkillVersion: (name: string, version: number, options?: InvokeOptions) => __TAURI_INVOKE<SkillOutcome_Serialize>("activate_skill_version", { name, version }, options),
+	rejectSkillVersion: (name: string, version: number, options?: InvokeOptions) => __TAURI_INVOKE<SkillOutcome_Serialize>("reject_skill_version", { name, version }, options),
+	/**  The most recent executions, newest first (current state only). */
+	listExecutions: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ExecutionRecord_Serialize[]>("list_executions", { limit }, options),
+	/**  Every state transition of one execution, in order. */
+	executionHistory: (executionId: string, options?: InvokeOptions) => __TAURI_INVOKE<Transition_Serialize[]>("execution_history", { executionId }, options),
 	/**
 	 *  The webview never receives the bot token (Stage G review MED-3): it is always null here. The
 	 *  token is managed through `secrets_status` / `secret_set` (Keychain).
@@ -2131,6 +2141,71 @@ export type Event_Serialize = {
 	raw_ref: string | null,
 	created_at: string | null,
 	schema_version: number | null,
+};
+
+export type ExecStatus = "REQUESTED" | "AUTHORIZED" | "ATTEMPTED" | "EXECUTED" | "VERIFIED" | "FAILED" | "PARTIAL" | "CANCELLED" | "UNVERIFIED" | "NOT_AUTHORIZED";
+
+/**  One execution's current state. */
+export type ExecutionRecord = ExecutionRecord_Serialize | ExecutionRecord_Deserialize;
+
+/**  One execution's current state. */
+export type ExecutionRecord_Deserialize = {
+	executionId: string,
+	workflowId: string,
+	idempotencyKey: string,
+	createdAt: string,
+	updatedAt: string,
+	origin: string,
+	actionId: string,
+	toolId: string,
+	targetSystem: string,
+	targetRef?: string | null,
+	actionClass: string,
+	risk: string,
+	dataScope: string,
+	/**  Redacted parameters (JSON text). */
+	paramsRedacted: string,
+	paramsFingerprint: string,
+	status: ExecStatus,
+	attempts: number,
+	approvalId?: string | null,
+	expectedState?: string | null,
+	response?: string | null,
+	responseRef?: string | null,
+	verificationMethod?: string | null,
+	verificationResult?: string | null,
+	error?: string | null,
+	recovery?: string | null,
+};
+
+/**  One execution's current state. */
+export type ExecutionRecord_Serialize = {
+	executionId: string,
+	workflowId: string,
+	idempotencyKey: string,
+	createdAt: string,
+	updatedAt: string,
+	origin: string,
+	actionId: string,
+	toolId: string,
+	targetSystem: string,
+	targetRef: string | null,
+	actionClass: string,
+	risk: string,
+	dataScope: string,
+	/**  Redacted parameters (JSON text). */
+	paramsRedacted: string,
+	paramsFingerprint: string,
+	status: ExecStatus,
+	attempts: number,
+	approvalId: string | null,
+	expectedState: string | null,
+	response: string | null,
+	responseRef: string | null,
+	verificationMethod: string | null,
+	verificationResult: string | null,
+	error: string | null,
+	recovery: string | null,
 };
 
 export type Experiment = Experiment_Serialize | Experiment_Deserialize;
@@ -5193,6 +5268,66 @@ export type SiteRow = {
 
 export type Skill = Skill_Serialize | Skill_Deserialize;
 
+export type SkillOutcome = SkillOutcome_Serialize | SkillOutcome_Deserialize;
+
+export type SkillOutcome_Deserialize = {
+	name: string,
+	version: number,
+	state: SkillState,
+	/**  The ledger execution that stored or activated it. */
+	executionId?: string | null,
+	note?: string | null,
+};
+
+export type SkillOutcome_Serialize = {
+	name: string,
+	version: number,
+	state: SkillState,
+	/**  The ledger execution that stored or activated it. */
+	executionId: string | null,
+	note: string | null,
+};
+
+export type SkillRecord = SkillRecord_Serialize | SkillRecord_Deserialize;
+
+export type SkillRecord_Deserialize = {
+	name: string,
+	versions: SkillVersion_Deserialize[],
+	activeVersion?: number | null,
+};
+
+export type SkillRecord_Serialize = {
+	name: string,
+	versions: SkillVersion_Serialize[],
+	activeVersion: number | null,
+};
+
+export type SkillState = "PROPOSED" | "VALIDATED" | "STORED" | "READ_BACK_VERIFIED" | "ACTIVE" | "REJECTED" | 
+/**  Was active; replaced by another version. */
+"RETIRED";
+
+export type SkillVersion = SkillVersion_Serialize | SkillVersion_Deserialize;
+
+export type SkillVersion_Deserialize = {
+	version: number,
+	sha256: string,
+	createdAt: string,
+	/**  `generated` (skills evolution), `user`, or `existing` (a live file imported before replace). */
+	source: string,
+	state: SkillState,
+	history: StateEntry_Deserialize[],
+};
+
+export type SkillVersion_Serialize = {
+	version: number,
+	sha256: string,
+	createdAt: string,
+	/**  `generated` (skills evolution), `user`, or `existing` (a live file imported before replace). */
+	source: string,
+	state: SkillState,
+	history: StateEntry_Serialize[],
+};
+
 export type Skill_Deserialize = {
 	name: string,
 	status: string,
@@ -5278,6 +5413,20 @@ export type StartAllRow = {
 };
 
 export type StartState = "started" | "rate_limited" | "blocked" | "already_running";
+
+export type StateEntry = StateEntry_Serialize | StateEntry_Deserialize;
+
+export type StateEntry_Deserialize = {
+	state: SkillState,
+	at: string,
+	note?: string | null,
+};
+
+export type StateEntry_Serialize = {
+	state: SkillState,
+	at: string,
+	note: string | null,
+};
 
 export type Step = Step_Serialize | Step_Deserialize;
 
@@ -6043,6 +6192,28 @@ export type TrackStats_Serialize = {
 	avgRating: number | null,
 	focusAvg: number | null,
 	calmAvg: number | null,
+};
+
+export type Transition = Transition_Serialize | Transition_Deserialize;
+
+export type Transition_Deserialize = {
+	seq: number,
+	executionId: string,
+	at: string,
+	fromStatus?: ExecStatus | null,
+	toStatus: ExecStatus,
+	/**  Redacted JSON text. */
+	detail: string,
+};
+
+export type Transition_Serialize = {
+	seq: number,
+	executionId: string,
+	at: string,
+	fromStatus: ExecStatus | null,
+	toStatus: ExecStatus,
+	/**  Redacted JSON text. */
+	detail: string,
 };
 
 export type TreasuryAttentionRow = {

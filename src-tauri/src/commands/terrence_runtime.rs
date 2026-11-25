@@ -1182,6 +1182,12 @@ pub(crate) fn guard_history(
 /// Rust port of the renderer's `injectionGuard.ts` patterns (no regex dependency): same names
 /// and severities. High-severity matches become `[REDACTED]`; invisible and bidi-override
 /// characters are stripped. Medium matches are flagged only.
+/// Injection-guard pattern names found in `text` (empty = clean). For stores whose text later
+/// reaches a prompt, such as skills (0052).
+pub(crate) fn guard_scan(text: &str) -> Vec<&'static str> {
+    injection_guard::scan(text).threats
+}
+
 pub(super) mod injection_guard {
     pub struct Scan {
         pub sanitized: String,

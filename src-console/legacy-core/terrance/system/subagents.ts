@@ -60,11 +60,18 @@ async function loadFromDisk(): Promise<Subagent[]> {
   }
 }
 
-async function saveToDisk(agents: Subagent[]): Promise<void> {
+/**
+ * True only when the write succeeded (0052). On failure the in-memory cache is dropped, so the next
+ * read reloads what is really on disk, and callers report failure instead of success.
+ */
+export async function saveToDisk(agents: Subagent[]): Promise<boolean> {
   try {
     await invokeBound<void>("save_subagents", { data: JSON.stringify(agents, null, 2) });
+    return true;
   } catch (e) {
     console.error("[subagents] Failed to save:", e);
+    _cache = null;
+    return false;
   }
 }
 
@@ -109,7 +116,7 @@ export async function createSubagent(
   const agents = await getAgents();
   agents.push(agent);
   _cache = agents;
-  await saveToDisk(agents);
+  if (!(await saveToDisk(agents))) return null;
 
   console.log(`[subagents] Created: "${name}" — ${purpose} (${parsed.description})`);
   return agent;
@@ -121,8 +128,7 @@ export async function deleteSubagent(agentId: string): Promise<boolean> {
   if (idx === -1) return false;
   agents.splice(idx, 1);
   _cache = agents;
-  await saveToDisk(agents);
-  return true;
+  return saveToDisk(agents);
 }
 
 export async function toggleSubagent(agentId: string): Promise<Subagent | null> {
@@ -131,8 +137,7 @@ export async function toggleSubagent(agentId: string): Promise<Subagent | null> 
   if (!agent) return null;
   agent.status = agent.status === "active" ? "paused" : "active";
   _cache = agents;
-  await saveToDisk(agents);
-  return agent;
+  return (await saveToDisk(agents)) ? agent : null;
 }
 
 export async function stopSubagent(agentId: string): Promise<boolean> {
@@ -141,8 +146,7 @@ export async function stopSubagent(agentId: string): Promise<boolean> {
   if (!agent) return false;
   agent.status = "stopped";
   _cache = agents;
-  await saveToDisk(agents);
-  return true;
+  return saveToDisk(agents);
 }
 
 /** Find a subagent by name (case-insensitive) or ID */
@@ -184,8 +188,7 @@ export async function addSubagentJob(
 
   agent.jobs.push(job);
   _cache = agents;
-  await saveToDisk(agents);
-  return job;
+  return (await saveToDisk(agents)) ? job : null;
 }
 
 export async function deleteSubagentJob(agentId: string, jobId: string): Promise<boolean> {
@@ -196,8 +199,7 @@ export async function deleteSubagentJob(agentId: string, jobId: string): Promise
   if (idx === -1) return false;
   agent.jobs.splice(idx, 1);
   _cache = agents;
-  await saveToDisk(agents);
-  return true;
+  return saveToDisk(agents);
 }
 
 // ─── Execution ──────────────────────────────────────────────────────────────
@@ -373,6 +375,7 @@ export async function tickSubagents(): Promise<void> {
 
   if (dirty) {
     _cache = agents;
+    // A failed save is logged by saveToDisk; the run results stay unsaved, never reported as saved.
     await saveToDisk(agents);
   }
 }

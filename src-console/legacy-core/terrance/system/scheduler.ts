@@ -532,9 +532,18 @@ async function tick() {
         try {
           const evoId = activityBus.register("Skills Evolution", "skills_evolution");
           const evo = await withTimeout(evolveSkills(), AUX_TIMEOUT_MS, "skills evolution");
-          activityBus.complete(evoId, evo.created > 0 || evo.updated > 0
-            ? `${evo.created} created, ${evo.updated} updated`
-            : "No new patterns");
+          // 0052: "stored" = saved and read back, waiting for approval; nothing is made active here.
+          const stored = `${evo.created} new, ${evo.updated} revised, stored for review`;
+          if (evo.failed > 0) {
+            activityBus.fail(
+              evoId,
+              evo.proposed === 0
+                ? "Skills evolution could not run"
+                : `${evo.failed} could not be stored` + (evo.created || evo.updated ? `; ${stored}` : ""),
+            );
+          } else {
+            activityBus.complete(evoId, evo.created > 0 || evo.updated > 0 ? stored : "No new patterns");
+          }
         } catch (e) {
           console.error("[scheduler] Skills evolution error:", e);
         }

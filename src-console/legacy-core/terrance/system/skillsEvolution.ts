@@ -10,7 +10,9 @@
  *  1. Analyze recent session logs for repeated patterns/topics
  *  2. If a pattern appears 3+ times, propose a new skill
  *  3. Generate skill content via LLM
- *  4. Save to ~/.openclaw/skills/ as a .md file
+ *  4. Propose it as a new version (`propose_skill_version`, decision 0052). Rust validates it,
+ *     stores it under skill_versions/, and reads it back. It is NOT made active: activation needs
+ *     Taisun's approval in a native dialog (`activate_skill_version`).
  *  5. On subsequent runs, check if existing skills need updating
  *
  * Runs on the consolidation schedule (every 6 hours).
@@ -19,11 +21,19 @@
 import { invokeBound } from "../../../bridge";
 import { getConfig } from "../../lib/api";
 import { buildRouterConfig } from "../../lib/llm-router";
-import { invalidateSkillsCache } from "./continuity";
 import type { RouterResponse, SessionLogEntry } from "../../lib/types";
 import { activityBus } from "./activityBus";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
+
+/** `propose_skill_version`'s reply (Rust `SkillOutcome`). */
+interface SkillOutcome {
+  name: string;
+  version: number;
+  state: "PROPOSED" | "VALIDATED" | "STORED" | "READ_BACK_VERIFIED" | "ACTIVE" | "REJECTED" | "RETIRED";
+  executionId: string | null;
+  note: string | null;
+}
 
 interface SkillProposal {
   name: string;
@@ -60,12 +70,15 @@ let _lastEvolutionRun = 0;
  */
 export async function evolveSkills(): Promise<{
   proposed: number;
+  /** Stored and read back, waiting for approval (not active). */
   created: number;
   updated: number;
+  /** Versions that could not be stored. */
+  failed: number;
 }> {
   const now = Date.now();
   if (now - _lastEvolutionRun < EVOLUTION_COOLDOWN_MS) {
-    return { proposed: 0, created: 0, updated: 0 };
+    return { proposed: 0, created: 0, updated: 0, failed: 0 };
   }
   _lastEvolutionRun = now;
 
@@ -76,7 +89,7 @@ export async function evolveSkills(): Promise<{
     const recent = allLogs.filter((l) => l.timestamp >= cutoff);
 
     if (recent.length < MIN_PATTERN_COUNT) {
-      return { proposed: 0, created: 0, updated: 0 };
+      return { proposed: 0, created: 0, updated: 0, failed: 0 };
     }
 
     // Load existing skills
@@ -86,11 +99,26 @@ export async function evolveSkills(): Promise<{
     // Ask LLM to identify patterns and propose skills
     const proposals = await identifyPatterns(recent, existingSkills);
     if (!proposals || proposals.length === 0) {
-      return { proposed: 0, created: 0, updated: 0 };
+      return { proposed: 0, created: 0, updated: 0, failed: 0 };
     }
 
     let created = 0;
     let updated = 0;
+    let failed = 0;
+    // Counts only what Rust confirms it stored and read back. A rejected proposal is not created,
+    // and a failed store is a failure, never a success.
+    const store = async (name: string, content: string): Promise<boolean> => {
+      try {
+        const out = await invokeBound<SkillOutcome>("propose_skill_version", { name, content });
+        if (out.state === "READ_BACK_VERIFIED") return true;
+        console.warn(`[skills-evolution] Skill ${name} not stored: ${out.state} ${out.note ?? ""}`);
+        return false;
+      } catch (e) {
+        failed++;
+        console.error(`[skills-evolution] Storing ${name} failed:`, e);
+        return false;
+      }
+    };
 
     for (const proposal of proposals.slice(0, MAX_NEW_SKILLS_PER_RUN)) {
       const isExisting = existingNames.has(proposal.name.toLowerCase());
@@ -98,31 +126,25 @@ export async function evolveSkills(): Promise<{
       if (isExisting && proposal.isUpdate) {
         // Update existing skill
         const content = await generateSkillContent(proposal, existingSkills);
-        if (content) {
-          await invokeBound<void>("save_skill", { name: proposal.name, content });
+        if (content && (await store(proposal.name, content))) {
           updated++;
-          console.log(`[skills-evolution] Updated skill: ${proposal.name}`);
+          console.log(`[skills-evolution] Stored a revision for review: ${proposal.name}`);
         }
       } else if (!isExisting) {
         // Create new skill
         const content = await generateSkillContent(proposal, []);
-        if (content) {
-          await invokeBound<void>("save_skill", { name: proposal.name, content });
+        if (content && (await store(proposal.name, content))) {
           created++;
-          console.log(`[skills-evolution] Created skill: ${proposal.name}`);
+          console.log(`[skills-evolution] Stored a new skill for review: ${proposal.name}`);
         }
       }
     }
 
-    // Invalidate skills cache so new skills load on next prompt build
-    if (created > 0 || updated > 0) {
-      invalidateSkillsCache();
-    }
-
-    return { proposed: proposals.length, created, updated };
+    // Nothing became active, so the live skills (and the prompt cache) are unchanged.
+    return { proposed: proposals.length, created, updated, failed };
   } catch (e) {
     console.error("[skills-evolution] Error:", e);
-    return { proposed: 0, created: 0, updated: 0 };
+    return { proposed: 0, created: 0, updated: 0, failed: 1 };
   }
 }
 
