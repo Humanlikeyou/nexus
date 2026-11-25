@@ -2693,6 +2693,13 @@ export type FreezeTable_Serialize = {
 	maxTs: string | null,
 };
 
+/**  How often a habit is meant to happen. */
+export type Frequency = {
+	times: number,
+	/**  `day` | `week` */
+	per: string,
+};
+
 export type FundingRequest = FundingRequest_Serialize | FundingRequest_Deserialize;
 
 export type FundingRequest_Deserialize = {
@@ -2833,6 +2840,11 @@ export type Goal_Deserialize = {
 	remind_at?: string | null,
 	/**  Habits only: a paused habit is not asked about and does not count as missed. */
 	paused?: boolean,
+	/**
+	 *  Life model fields (Phase 6). Optional and nested so old files load unchanged and older builds
+	 *  ignore it. Only `life::update_in` changes it; a save that omits it keeps what is on disk.
+	 */
+	life?: LifeFields_Deserialize,
 };
 
 export type Goal_Serialize = {
@@ -2856,6 +2868,11 @@ export type Goal_Serialize = {
 	remind_at?: string,
 	/**  Habits only: a paused habit is not asked about and does not count as missed. */
 	paused?: boolean,
+	/**
+	 *  Life model fields (Phase 6). Optional and nested so old files load unchanged and older builds
+	 *  ignore it. Only `life::update_in` changes it; a save that omits it keeps what is on disk.
+	 */
+	life?: LifeFields_Serialize,
 };
 
 export type GoalsSection = GoalsSection_Serialize | GoalsSection_Deserialize;
@@ -3563,6 +3580,58 @@ export type LifeDateView_Serialize = {
 	/**  The reminder rung (90, 30 or 7) whose window today falls in, if any. */
 	activeWindow: number | null,
 } & LifeDateRecord_Serialize;
+
+export type LifeFields = LifeFields_Serialize | LifeFields_Deserialize;
+
+export type LifeFields_Deserialize = {
+	/**  `outcome` | `performance` | `learning` */
+	goalType?: string | null,
+	/**  `active` | `paused` | `blocked` | `completed` | `archived`. Unset = from `paused` (else active). */
+	status?: string | null,
+	/**  Why it is blocked or paused, in Taisun's words. */
+	statusReason?: string | null,
+	areaId?: string | null,
+	motivation?: string | null,
+	/**  Where it started, in the goal's unit. Without it no percentage is ever shown. */
+	baseline?: number | null,
+	desiredResult?: string | null,
+	measurement?: string | null,
+	completionCriteria?: string | null,
+	nextAction?: string | null,
+	frequency?: Frequency | null,
+	/**  `HH:MM` */
+	preferredTime?: string | null,
+	cue?: string | null,
+	minimumVersion?: string | null,
+	fullVersion?: string | null,
+	/**  Reminders on or off (the time is `remind_at`). Unset = the app default. */
+	reminders?: boolean | null,
+};
+
+export type LifeFields_Serialize = {
+	/**  `outcome` | `performance` | `learning` */
+	goalType: string | null,
+	/**  `active` | `paused` | `blocked` | `completed` | `archived`. Unset = from `paused` (else active). */
+	status: string | null,
+	/**  Why it is blocked or paused, in Taisun's words. */
+	statusReason: string | null,
+	areaId: string | null,
+	motivation: string | null,
+	/**  Where it started, in the goal's unit. Without it no percentage is ever shown. */
+	baseline: number | null,
+	desiredResult: string | null,
+	measurement: string | null,
+	completionCriteria: string | null,
+	nextAction: string | null,
+	frequency: Frequency | null,
+	/**  `HH:MM` */
+	preferredTime: string | null,
+	cue: string | null,
+	minimumVersion: string | null,
+	fullVersion: string | null,
+	/**  Reminders on or off (the time is `remind_at`). Unset = the app default. */
+	reminders: boolean | null,
+};
 
 /**  The live heart rate for the Home screen, oldest sample first. Never log this. */
 export type LiveHeartRate = {

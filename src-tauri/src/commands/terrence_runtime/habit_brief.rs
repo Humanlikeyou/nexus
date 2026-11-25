@@ -145,6 +145,7 @@ mod tests {
             why: Some("Clear head".into()),
             remind_at: None,
             paused,
+            life: Default::default(),
         }
     }
     fn row(id: &str, day: u32, done: bool) -> HabitDayRow {

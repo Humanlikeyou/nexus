@@ -1146,6 +1146,7 @@ pub(crate) fn savings_goal_set_in(
             why: None,
             remind_at: None,
             paused: false,
+            life: Default::default(),
         }),
     }
     super::goals::save_goals_at(&path, goals)

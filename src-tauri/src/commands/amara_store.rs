@@ -77,6 +77,7 @@ const STORES: &[(&str, Scope)] = &[
     ("review", Scope::Personal),
     ("take", Scope::Personal),
     ("history", Scope::Personal),
+    ("area", Scope::Personal),
     ("replay", Scope::Neural),
     ("session", Scope::Neural),
     ("hemisync", Scope::Neural),
@@ -149,6 +150,10 @@ const ACTIVITY_KINDS: &[&str] = &[
     "date.done",
     "money.logged",
     "business.action_done",
+    "goal.status_changed",
+    "link.added",
+    "link.removed",
+    "area.updated",
 ];
 const ACTIVITY_SOURCES: &[&str] = &["user", "model", "scheduler", "import", "backfill", "noop"];
 const ACTORS: &[&str] = &["taisun", "amara", "system"];

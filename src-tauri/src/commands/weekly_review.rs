@@ -798,6 +798,7 @@ mod tests {
             why: None,
             remind_at: None,
             paused: false,
+            life: Default::default(),
         }
     }
 

@@ -38,6 +38,9 @@ pub(crate) mod launch_token;
 // production caller (structured output, tools, capabilities), it is used by its tests only.
 #[allow(dead_code)]
 pub(crate) mod inference;
+// Phase 6 Life data layer: called by the Life interface (next phase); until then by its tests.
+#[allow(dead_code)]
+pub(crate) mod life;
 pub mod llm_router;
 pub mod loopback_http;
 pub mod memory_read;

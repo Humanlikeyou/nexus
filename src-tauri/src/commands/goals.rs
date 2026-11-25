@@ -37,6 +37,61 @@ pub struct Goal {
     /// Habits only: a paused habit is not asked about and does not count as missed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub paused: bool,
+    /// Life model fields (Phase 6). Optional and nested so old files load unchanged and older builds
+    /// ignore it. Only `life::update_in` changes it; a save that omits it keeps what is on disk.
+    #[serde(default, skip_serializing_if = "LifeFields::is_empty")]
+    pub life: LifeFields,
+}
+
+/// How often a habit is meant to happen.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Frequency {
+    pub times: u32,
+    /// `day` | `week`
+    pub per: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LifeFields {
+    /// `outcome` | `performance` | `learning`
+    pub goal_type: Option<String>,
+    /// `active` | `paused` | `blocked` | `completed` | `archived`. Unset = from `paused` (else active).
+    pub status: Option<String>,
+    /// Why it is blocked or paused, in Taisun's words.
+    pub status_reason: Option<String>,
+    pub area_id: Option<String>,
+    pub motivation: Option<String>,
+    /// Where it started, in the goal's unit. Without it no percentage is ever shown.
+    pub baseline: Option<f64>,
+    pub desired_result: Option<String>,
+    pub measurement: Option<String>,
+    pub completion_criteria: Option<String>,
+    pub next_action: Option<String>,
+    // Habits
+    pub frequency: Option<Frequency>,
+    /// `HH:MM`
+    pub preferred_time: Option<String>,
+    pub cue: Option<String>,
+    pub minimum_version: Option<String>,
+    pub full_version: Option<String>,
+    /// Reminders on or off (the time is `remind_at`). Unset = the app default.
+    pub reminders: Option<bool>,
+}
+
+impl LifeFields {
+    pub fn is_empty(&self) -> bool {
+        self == &LifeFields::default()
+    }
+}
+
+/// The record's status: the Life field when set, else the old `paused` flag, else active.
+pub(crate) fn status_of(g: &Goal) -> &str {
+    g.life
+        .status
+        .as_deref()
+        .unwrap_or(if g.paused { "paused" } else { "active" })
 }
 
 #[tauri::command]
@@ -95,6 +150,11 @@ pub(crate) fn save_goals_at(path: &std::path::Path, goals: Vec<Goal>) -> Result<
             .iter()
             .find(|o| o.id == g.id)
             .and_then(|o| o.venture_id.clone());
+        if g.life.is_empty() {
+            if let Some(o) = old.iter().find(|o| o.id == g.id) {
+                g.life = o.life.clone();
+            }
+        }
     }
     super::local_store::write_json_atomic(path, &goals, super::adds::MAX_MD_BYTES)
         .map_err(|e| format!("Failed to write goals: {e}"))?;
@@ -115,7 +175,7 @@ pub(crate) fn save_goals_at(path: &std::path::Path, goals: Vec<Goal>) -> Result<
 /// their own day marks (habits.rs), so they are skipped here.
 fn note_goal_activity(data: &std::path::Path, old: &[Goal], new: &[Goal]) {
     use super::amara_store::{note, NewActivity, Scope};
-    for g in new.iter().filter(|g| g.category != "habit") {
+    for g in new.iter() {
         let prev = old.iter().find(|o| o.id == g.id);
         // Created: when the goal was made. Progress: now (the console may keep the old updated_at).
         let at = match prev {
@@ -124,6 +184,30 @@ fn note_goal_activity(data: &std::path::Path, old: &[Goal], new: &[Goal]) {
         };
         let subject = format!("goals:{}", g.id);
         let done = |x: &Goal| x.target > 0.0 && x.current >= x.target;
+        if let Some(p) = prev {
+            let (a, b) = (status_of(p), status_of(g));
+            if a != b {
+                note(
+                    data,
+                    NewActivity {
+                        certainty: "confirmed",
+                        scope: Scope::Personal,
+                        kind: "goal.status_changed",
+                        subject_ref: &subject,
+                        occurred_at: &crate::commands::shared::time::now_jst().to_rfc3339(),
+                        source: "user",
+                        source_ref: None,
+                        actor: "taisun",
+                        summary: None,
+                        data_json: Some(&format!(r#"{{"from":"{a}","to":"{b}"}}"#)),
+                    },
+                );
+            }
+        }
+        if g.category == "habit" {
+            // Habits record their day marks in habits.rs; only status changes are recorded here.
+            continue;
+        }
         let kind = match prev {
             None => Some("goal.created"),
             Some(p) if done(g) && !done(p) => Some("goal.completed"),
@@ -239,6 +323,7 @@ mod tests {
             why: None,
             remind_at: None,
             paused: false,
+            life: Default::default(),
         }
     }
 

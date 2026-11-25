@@ -913,6 +913,7 @@ fn apply(
                 why: None,
                 remind_at: None,
                 paused: false,
+                life: Default::default(),
             });
             write_json_atomic(&path, &goals, MAX_MD_BYTES)?;
             Ok((
@@ -2210,6 +2211,7 @@ mod tests {
             why: None,
             remind_at: None,
             paused,
+            life: Default::default(),
         }
     }
     fn seed_habits(d: &Dirs, goals: &[Goal]) {
