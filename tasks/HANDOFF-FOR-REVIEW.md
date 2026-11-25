@@ -1222,3 +1222,38 @@ Scope and Taisun's answers: `docs/decisions/0056-life-ui-scope-2026-11-25.md`. S
 5. Tasks link to goals and projects only by `#goal:<id>` / `#project:<id>` tags in TASKS.md (no structured task store, per 0054).
 6. Workouts are not in the weekly review: the review's health section has no workout field.
 7. Sample-adapter mode: the new views read the live stores only (no sample data), so previews show them empty with honest notes.
+
+## 49. Decision 0057: NEUROSENSE reliability (Phase 7), committed `092238a` (2026-11-26)
+
+Brief: `docs/specs/neurosense-reliability-2026-11-26.md`. The audit, the changes, the security review and its fixes are in `docs/decisions/0057-neurosense-reliability-2026-11-26.md`.
+
+**In short:**
+- Packet counters are read: repeats are dropped, and gaps and restarts are counted.
+- Every EEG sample says live, replay or demo, and only live, fresh, unfrozen data with good contact can earn reward.
+- Dead streams end visibly.
+- New recordings carry reproducible metadata and measured rates.
+- Sessions save atomically.
+- Misleading 0s are gone.
+- Sleep stages are labelled as NOOP's estimate.
+
+Existing recordings are untouched. AUX and the electrode lock are unchanged.
+
+**Verification:**
+- tsc, lint, check:secrets.
+- vitest 2941 / 9 skipped; neuro 21.
+- src-tauri fmt + clippy, 1967 / 9 ignored; amara-router 133.
+- e2e 818 / 12 skipped / 2 failed. The failures were a neuro-flow mock missing the new `source` field; it was fixed and rerun 26/26 in both themes.
+
+**Not run (hardware or real data):**
+- A live Muse session: real counters, rates, frozen detection, a real link drop.
+- Reward audio live versus replay/demo in the app.
+- A headset recording's trailer.
+- Taisun's real NOOP sleep data.
+- The packaged app.
+
+**Waiting on Taisun:**
+- Unifying the two FFT pipelines, which would change historical numbers.
+- Persisted baselines and a calibration quality gate.
+- The gamma artifact unit mismatch.
+- Auto-reconnect and battery.
+- The design copy notes in `tasks/design-questions.md`.
