@@ -109,3 +109,15 @@ An automated review found that the skill-activation dialog named the skill and v
 - The activate operation re-reads the version, re-checks the checksum and re-runs content validation before anything goes live, so a tampered file, or one that a stricter guard would now reject, is refused.
 
 Three tests cover this. The redaction test fixtures were also renamed to the repository's `FAKE_*_NOT_REAL` convention so `check:secrets` passes on tracked files. They were always fake values.
+
+## Follow-up 2: second security review (83d2ca6)
+
+The first fix still showed only the start of a long skill, which is consent to text the user never saw, and it didn't remove invisible format characters. Now:
+- **Full text or refusal:** the dialog shows the whole skill text, or refuses with `refused:` when it doesn't fit. This is the approval gate's own policy: never truncate.
+- **Hidden characters:** bidi overrides, zero-width marks and tag characters are refused in the dialog. A skill containing them is rejected at proposal (`hidden_characters`).
+- **Blank lines:** runs of blank lines are collapsed, so they can't push text out of view.
+- **Identification:** the full SHA-256 and the byte count are shown.
+
+**Limit:** a skill too long for the dialog can't be activated until a full-text review screen exists (Design work).
+
+**Review status:** the automated re-review of this commit didn't run (HTTP 429).
