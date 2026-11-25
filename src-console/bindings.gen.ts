@@ -525,8 +525,8 @@ export const commands = {
 	getLlmUsage: (options?: InvokeOptions) => __TAURI_INVOKE<LlmUsageRecord_Serialize[]>("get_llm_usage", undefined, options),
 	clearLlmUsage: (options?: InvokeOptions) => __TAURI_INVOKE<null>("clear_llm_usage", undefined, options),
 	/**
-	 *  Read the canonical Amara identity file from config/terrance.identity.md.
-	 *  Walks up from the binary to find the project root.
+	 *  Amara's identity: the private copy in `<data>/config/terrance.identity.md`, else the generic default
+	 *  embedded at build time. Never read from the repository or from beside the binary.
 	 */
 	readIdentityFile: (options?: InvokeOptions) => __TAURI_INVOKE<string>("read_identity_file", undefined, options),
 	loadTerranceContext: (options?: InvokeOptions) => __TAURI_INVOKE<TerranceContext_Serialize>("load_terrance_context", undefined, options),
@@ -534,7 +534,7 @@ export const commands = {
 	storeSessionLog: (entry: SessionLogEntry, options?: InvokeOptions) => __TAURI_INVOKE<null>("store_session_log", { entry }, options),
 	listSessionLogs: (options?: InvokeOptions) => __TAURI_INVOKE<SessionLogEntry[]>("list_session_logs", undefined, options),
 	/**
-	 *  Move session logs older than `days_threshold` days to memory/archive/.
+	 *  Move session logs older than `days_threshold` days to <data>/archive/.
 	 *  Returns the number of files moved.
 	 */
 	archiveOldSessionLogs: (daysThreshold: number, options?: InvokeOptions) => __TAURI_INVOKE<number>("archive_old_session_logs", { daysThreshold }, options),
@@ -590,8 +590,8 @@ export const commands = {
 	/**  Save subagents to disk. Accepts raw JSON string. */
 	saveSubagents: (data: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("save_subagents", { data }, options),
 	/**
-	 *  Read the operational profile from config/terrance.profile.md.
-	 *  Same lookup strategy as read_identity_file.
+	 *  The operational profile: the private copy in `<data>/config/terrance.profile.md`, else the generic
+	 *  template embedded at build time.
 	 */
 	readProfileFile: (options?: InvokeOptions) => __TAURI_INVOKE<string>("read_profile_file", undefined, options),
 	/**  Read-only: what the renderer needs to decide a catch-up (decision 0018). Cheap; never calls a model. */

@@ -32,11 +32,16 @@ pub mod test_support {
         data_dir, merge_legacy_config_in, migrate_legacy_data_dir_in, private_open_options,
         DATA_DIR_ENV, DATA_DIR_NAME,
     };
+    pub use crate::commands::continuity::{
+        list_session_logs, load_terrance_context, read_identity_file, read_profile_file,
+        save_terrance_context, store_session_log, SessionLogEntry, TerranceContext,
+    };
     pub use crate::commands::goals::{read_goals, save_goals};
     pub use crate::commands::muse;
     pub use crate::commands::noop::health_snapshot;
     pub use crate::commands::onboarding::{check_onboarding, complete_onboarding};
     pub use crate::commands::outbox::get_outbox_status;
+    pub use crate::commands::private_store;
     pub use crate::commands::recordings;
     pub use crate::commands::replay::{
         mark_recording_aux, maybe_record_motion, maybe_record_ppg, maybe_record_sample,
@@ -129,6 +134,8 @@ pub mod test_support {
 pub fn run() {
     app_paths::check_dev_config_dir();
     app_paths::migrate_legacy_data_dir();
+    // 0050: one-time copy of private data older builds kept in the repository (counts-only log).
+    commands::private_store::migrate_on_startup();
     tauri::Builder::default()
         .manage(terrence_runtime_bridge::NexusRuntimeBridge::default())
         .manage(commands::amara_turn::TurnRegistry::default())

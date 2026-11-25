@@ -11,7 +11,7 @@
  *  ~/Library/Application Support/com.taisun.nexus/
  *    terrance_context.json   — active goals + last session summary
  *    llm_usage.json          — cost/usage log (managed by llm_router.rs)
- *  nexus/memory/session_logs/ — per-session summaries (committed to repo)
+ *  <app data>/session_logs/ — per-session summaries (never in the source repository; decision 0050)
  */
 
 import { invokeBound } from "../../../bridge";
@@ -49,7 +49,7 @@ export function invalidateSkillsCache(): void {
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
 
-/** The canonical system prompt prefix loaded from config/terrance.identity.md */
+/** The system prompt prefix: the private identity in app data, else the generic default (decision 0050). */
 let _identityCache: string | null = null;
 let _profileCache: string | null = null;
 
@@ -66,7 +66,7 @@ export async function loadIdentity(): Promise<string> {
   return _identityCache;
 }
 
-/** Load the operational profile from config/terrance.profile.md */
+/** The operational profile: the private copy in app data, else the generic template (decision 0050). */
 async function loadProfile(): Promise<string | null> {
   if (_profileCache !== null) return _profileCache || null;
   try {

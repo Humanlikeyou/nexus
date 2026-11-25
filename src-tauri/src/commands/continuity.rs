@@ -2,10 +2,12 @@
  * Amara Continuity Commands
  *
  * Provides Tauri commands for:
- *  - read_identity_file     — loads config/terrance.identity.md from the app bundle
+ *  - read_identity_file     — Amara's identity: <data>/config/terrance.identity.md, else the generic default
  *  - load_terrance_context  — loads active goals + last session summary from data dir
  *  - save_terrance_context  — persists context to data dir
- *  - store_session_log      — writes session summaries to memory/session_logs/
+ *  - store_session_log      — writes session summaries to <data>/session_logs/
+ *
+ * Private data never lives in the source repository (decision 0050, private_store.rs).
  */
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -26,88 +28,28 @@ pub(crate) fn context_path() -> PathBuf {
     data_dir().join(CONTEXT_FILE)
 }
 
+/// Session summaries live in the app-data folder in every build (decision 0050). Older development builds
+/// wrote them into the repository's memory/session_logs; private_store copies those over once at startup.
 fn session_logs_dir() -> PathBuf {
-    // Session logs stored alongside the app source so they can be committed to the repo
-    // Falls back to data dir if the repo path isn't found
-    let repo_path = std::env::current_exe().ok().and_then(|p| {
-        // Walk up from the binary to find the project root (contains CLAUDE.md)
-        let mut dir = p.parent()?.to_path_buf();
-        for _ in 0..6 {
-            if dir.join("CLAUDE.md").exists() {
-                return Some(dir.join("memory").join("session_logs"));
-            }
-            dir = dir.parent()?.to_path_buf();
-        }
-        None
-    });
-    repo_path.unwrap_or_else(|| data_dir().join("session_logs"))
+    super::private_store::session_logs_dir_in(&data_dir())
 }
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
 
-/// Read the canonical Amara identity file from config/terrance.identity.md.
-/// Walks up from the binary to find the project root.
+/// Amara's identity: the private copy in `<data>/config/terrance.identity.md`, else the generic default
+/// embedded at build time. Never read from the repository or from beside the binary.
 #[tauri::command]
 #[specta::specta]
 pub fn read_identity_file() -> Result<String, String> {
-    // Try to find the identity file relative to project root
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let mut dir = exe.parent().unwrap_or(&exe).to_path_buf();
-    for _ in 0..8 {
-        let candidate = dir.join("config").join("terrance.identity.md");
-        if candidate.exists() {
-            return fs::read_to_string(&candidate).map_err(|e| e.to_string());
-        }
-        if let Some(parent) = dir.parent() {
-            dir = parent.to_path_buf();
-        } else {
-            break;
-        }
-    }
-    // Fallback: check well-known project paths relative to home dir
-    if let Some(home) = dirs::home_dir() {
-        {
-            let rel = &"projects/nexus/config/terrance.identity.md";
-            let candidate = home.join(rel);
-            if candidate.exists() {
-                return fs::read_to_string(&candidate).map_err(|e| e.to_string());
-            }
-        }
-    }
-    Err(
-        "Identity file not found. Ensure config/terrance.identity.md exists in the project root."
-            .to_string(),
-    )
+    Ok(super::private_store::identity_in(&data_dir()))
 }
 
-/// Read the operational profile from config/terrance.profile.md.
-/// Same lookup strategy as read_identity_file.
+/// The operational profile: the private copy in `<data>/config/terrance.profile.md`, else the generic
+/// template embedded at build time.
 #[tauri::command]
 #[specta::specta]
 pub fn read_profile_file() -> Result<String, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let mut dir = exe.parent().unwrap_or(&exe).to_path_buf();
-    for _ in 0..8 {
-        let candidate = dir.join("config").join("terrance.profile.md");
-        if candidate.exists() {
-            return fs::read_to_string(&candidate).map_err(|e| e.to_string());
-        }
-        if let Some(parent) = dir.parent() {
-            dir = parent.to_path_buf();
-        } else {
-            break;
-        }
-    }
-    if let Some(home) = dirs::home_dir() {
-        {
-            let rel = &"projects/nexus/config/terrance.profile.md";
-            let candidate = home.join(rel);
-            if candidate.exists() {
-                return fs::read_to_string(&candidate).map_err(|e| e.to_string());
-            }
-        }
-    }
-    Err("Profile file not found.".to_string())
+    Ok(super::private_store::profile_in(&data_dir()))
 }
 
 // ─── Context Store ─────────────────────────────────────────────────────────────
@@ -249,13 +191,10 @@ pub fn list_session_logs() -> Result<Vec<SessionLogEntry>, String> {
 // ─── Archive / Prune ──────────────────────────────────────────────────────────
 
 fn archive_dir() -> PathBuf {
-    session_logs_dir()
-        .parent()
-        .unwrap_or(&session_logs_dir())
-        .join("archive")
+    super::private_store::archive_dir_in(&data_dir())
 }
 
-/// Move session logs older than `days_threshold` days to memory/archive/.
+/// Move session logs older than `days_threshold` days to <data>/archive/.
 /// Returns the number of files moved.
 #[tauri::command]
 #[specta::specta]
