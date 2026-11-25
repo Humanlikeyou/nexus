@@ -62,7 +62,7 @@ Results through the router (fast route, Allow-Claude 0):
 | The same, default temperature | uses the result |
 | Interface live test (`inference::tests::live_*`): text, JSON, tool round | 5/5 runs, first attempt each time, about 0.6–1.2 s per call |
 
-`/amara/capabilities` gives `None` against the installed router, which is the old binary. Rebuild and reinstall the router to get it.
+Against the old router binary, `/amara/capabilities` gave `None` (unknown). Since the install below it reports real values.
 
 ## Not changed
 
@@ -70,7 +70,18 @@ Results through the router (fast route, Allow-Claude 0):
 - There is no Tauri command for the layer yet: no new IPC surface and no capability change.
 - No data stores, schemas or migrations.
 
+## Router install (done 2026-11-25, at Taisun's request: "You run this code")
+
+- `cargo build --release`, then the README swap into `~/.local/bin/amara-router`. The old binary is backed up at `~/Backups/amara-router-backup-20261125`.
+- **The first try failed.** The README steps (`rm`, `cp`, then `codesign --force --sign -` in place, then `launchctl kickstart -k`) made launchd refuse the binary with `OS_REASON_CODESIGNING`, though the same file ran from the shell. The router was down for about a minute until the backup was restored.
+- **The second try worked:** copy to `~/.local/bin/.amara-router.new`, `xattr -c`, sign, `codesign --verify --strict`, `--check`, then `mv` over the live path and kickstart. It came up after launchd's 30 s throttle. The signing identifier is now `.amara-router`, taken from the temporary name. That's harmless, but the README steps should switch to this order and pass `--identifier amara-router`.
+- **Verified live:**
+  - `/health` ok and `/v1/chat/completions` 200, so Hermes keeps working.
+  - `/amara/capabilities` (with the launch token): fast = tools, json_schema, thinking, vision, context 131072, num_ctx 65536; deep = tools, json_schema, thinking, context 262144, num_ctx 32768; claude unavailable.
+  - A `/claude` dry run with no header goes to deep (blocked).
+  - The live interface test passes, now with capabilities detected.
+- The `/amara/*` paths need `X-Amara-Launch-Token`, which is existing behaviour. The app's client already sends it.
+
 ## Your steps (not done by Claude)
 
-1. **Rebuild and reload the router** to apply the default-deny change and the capabilities endpoint: `cd amara-router && cargo build --release`, then restart the LaunchAgent `com.taisun.amara-router` the way `amara-router/README.md` describes. Claude doesn't load LaunchAgents.
-2. Install a Nexus build that includes this commit, so the migrated background calls use the layer. Until then the installed app keeps the old code.
+1. Install a Nexus build that includes this commit, so the migrated background calls use the layer. Until then the installed app keeps the old code.
