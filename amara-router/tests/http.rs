@@ -164,6 +164,9 @@ async fn start_mock(m: M) -> String {
             axum::Json(json!({"models": models})).into_response()
         }))
         .route("/api/version", get(|| async { axum::Json(json!({"version": "9.9.9"})) }))
+        .route("/api/show", http_post(|| async {
+            axum::Json(json!({"capabilities": ["completion", "tools", "thinking"], "model_info": {"gemma4.context_length": 131072, "gemma4.vision.context_length": 7}}))
+        }))
         .route("/v1/messages", http_post(|AxState(m): AxState<M>| async move {
             m.lock().unwrap().anthropic_calls += 1;
             axum::Json(json!({"content": [{"type": "text", "text": "from claude"}], "stop_reason": "end_turn", "usage": {"input_tokens": 3, "output_tokens": 2}}))
@@ -1018,10 +1021,27 @@ async fn lan_listener_requires_bearer() {
 #[tokio::test]
 async fn cloud_only_when_enabled_asked_and_allowed() {
     let r = rig_with(mock("EASY", &["local"]), "cloud", None, false).await;
+    // No X-Amara-Allow-Claude header (Hermes, crews, Telegram): default-deny, deep, no network call.
     let v: Value = post(
         &format!("{}/v1/chat/completions", r.url),
         oa("/claude hi", false),
         &[],
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(v["amara"]["tier"], "deep");
+    assert_eq!(
+        v["amara"]["reason"],
+        "slash_claude; claude_blocked=claude_not_allowed"
+    );
+    assert_eq!(r.mock.lock().unwrap().anthropic_calls, 0);
+    // Explicitly allowed by the caller: Claude.
+    let v: Value = post(
+        &format!("{}/v1/chat/completions", r.url),
+        oa("/claude hi", false),
+        &[("X-Amara-Allow-Claude", "1")],
     )
     .await
     .json()
@@ -2328,4 +2348,59 @@ async fn launch_token_switch_off_by_default_ignores_the_file() {
     let r = token_rig(f, false).await;
     assert_eq!(status(&r.url, "/api/tags", None, false).await, 200);
     assert!(!amara_router::config::Security::default().require_launch_token);
+}
+
+// ── /amara/capabilities: real Ollama capabilities per tier, tier names only ──
+
+#[tokio::test]
+async fn capabilities_report_ollama_show_per_tier_and_claude_gate() {
+    let r = rig_with(mock("EASY", &["local"]), "cloud", None, false).await;
+    let v: Value = post(&format!("{}/amara/capabilities", r.url), json!({}), &[])
+        .await
+        .json()
+        .await
+        .unwrap();
+    let fast = &v["tiers"]["fast"];
+    assert_eq!(fast["available"], true);
+    assert_eq!(fast["local"], true);
+    assert_eq!(fast["tools"], true);
+    assert_eq!(fast["json_schema"], true);
+    assert_eq!(fast["thinking"], true);
+    assert_eq!(fast["vision"], false);
+    assert_eq!(fast["context_length"], 131072);
+    assert_eq!(v["tiers"]["claude"]["available"], true);
+    assert_eq!(v["tiers"]["claude"]["tools"], false);
+    // No model or provider names in the reply.
+    let text = v.to_string();
+    assert!(!text.contains("gemma") && !text.contains("qwen") && !text.contains("anthropic"));
+    assert_eq!(r.mock.lock().unwrap().anthropic_calls, 0);
+
+    // Outbound disabled: Claude is never listed as available.
+    let r = rig_with(mock("EASY", &["local"]), "cloud", None, true).await;
+    let v: Value = post(&format!("{}/amara/capabilities", r.url), json!({}), &[])
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["tiers"]["claude"]["available"], false);
+}
+
+#[tokio::test]
+async fn capabilities_mark_a_tier_unavailable_when_ollama_is_down() {
+    let r = rig_with(
+        mock("EASY", &["local"]),
+        "",
+        Some("http://127.0.0.1:9".to_string()),
+        false,
+    )
+    .await;
+    let v: Value = post(&format!("{}/amara/capabilities", r.url), json!({}), &[])
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["tiers"]["fast"]["available"], false);
+    assert_eq!(v["tiers"]["fast"]["tools"], false);
+    assert_eq!(v["tiers"]["deep"]["available"], false);
+    assert_eq!(v["tiers"]["claude"]["available"], false);
 }

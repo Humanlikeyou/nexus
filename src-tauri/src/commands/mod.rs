@@ -32,6 +32,10 @@ pub mod keychain;
 pub mod keychain_migrate;
 pub mod kv;
 pub(crate) mod launch_token;
+// 0051: the shared inference layer. Callers migrate to it step by step; until each part has a
+// production caller (structured output, tools, capabilities), it is used by its tests only.
+#[allow(dead_code)]
+pub(crate) mod inference;
 pub mod llm_router;
 pub mod loopback_http;
 pub mod memory_read;

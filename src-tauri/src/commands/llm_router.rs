@@ -27,6 +27,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use super::inference::{self, InferenceRequest, Limits, Message, ModelClass};
 use super::loopback_http::{loopback_base, LOOPBACK_CONNECT_TIMEOUT};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -52,10 +53,12 @@ pub const DEFAULT_MODE: &str = "amara";
 /// Retired OpenClaw compute mode; treated like "local".
 const RETIRED_GATEWAY_MODE: &str = "gateway";
 const PERSONA_MAX_BYTES: u64 = 64 * 1024;
-const ROUTER_DOWN: &str =
+pub(crate) const ROUTER_DOWN: &str =
     "Amara isn't responding right now. Check that the Amara router is running.";
-const OLLAMA_DOWN: &str = "Amara isn't responding right now. Check that Ollama is running.";
-const ROUTER_FAILED: &str = "Amara couldn't answer right now. Details are in the Amara router log.";
+pub(crate) const OLLAMA_DOWN: &str =
+    "Amara isn't responding right now. Check that Ollama is running.";
+pub(crate) const ROUTER_FAILED: &str =
+    "Amara couldn't answer right now. Details are in the Amara router log.";
 
 impl Default for RouterConfig {
     fn default() -> Self {
@@ -142,7 +145,17 @@ fn load_usage_records() -> Vec<LlmUsageRecord> {
         .unwrap_or_default()
 }
 
+/// Spend in the last 24 hours, from the usage log.
+pub(crate) fn daily_spend_today() -> f64 {
+    daily_spend_usd(&load_usage_records())
+}
+
+/// Serialises the read-modify-write of `llm_usage.json`: concurrent calls (chat, background jobs,
+/// the inference layer) would otherwise drop each other's records.
+static USAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub(crate) fn append_usage_record(record: LlmUsageRecord) {
+    let _guard = USAGE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut records = load_usage_records();
     records.push(record);
     if records.len() > 1000 {
@@ -188,7 +201,12 @@ pub fn estimate_cost(provider: &str, model: &str, input_tokens: u32, output_toke
     (input_tokens as f64 / 1000.0) * ir + (output_tokens as f64 / 1000.0) * or_
 }
 
-fn tier_cost(tier: Tier, config: &RouterConfig, input_tokens: u32, output_tokens: u32) -> f64 {
+pub(crate) fn tier_cost(
+    tier: Tier,
+    config: &RouterConfig,
+    input_tokens: u32,
+    output_tokens: u32,
+) -> f64 {
     match tier {
         Tier::Claude => estimate_cost(
             "anthropic",
@@ -246,7 +264,7 @@ fn is_cloud_mode(mode: &str) -> bool {
     mode == "api" || mode == "hybrid"
 }
 
-fn claude_gate(config: &RouterConfig, daily_spent: f64) -> ClaudeGate {
+pub(crate) fn claude_gate(config: &RouterConfig, daily_spent: f64) -> ClaudeGate {
     ClaudeGate {
         allow_claude: crate::commands::telegram::load_config()
             .allow_claude
@@ -390,10 +408,18 @@ pub(crate) trait RouterTransport {
     ) -> Result<(u16, Value), String>;
 }
 
-struct HttpTransport {
+pub(crate) struct HttpTransport {
     client: reqwest::Client,
     /// Largest reply body read, in bytes (None = unbounded; chat keeps its existing behaviour).
     body_cap: Option<usize>,
+}
+
+/// The loopback router transport (redirects off, proxies skipped) with an optional body cap.
+pub(crate) fn loopback_transport(body_cap: Option<usize>) -> HttpTransport {
+    HttpTransport {
+        client: no_redirect_client(),
+        body_cap,
+    }
 }
 
 /// Cap on a background (`deep_complete`) reply body.
@@ -679,23 +705,30 @@ fn log_detail(s: &str) -> String {
 /// fast, and a reply that still came from the Claude tier is refused. For text built from personal
 /// health data (the Telegram relay). `instruction` is appended to Amara's one system prompt.
 pub(crate) async fn local_complete(instruction: &str, user: &str) -> Result<String, String> {
-    let saved = crate::commands::telegram::load_config();
-    let base = router_base(None, saved.amara_router_url.as_deref());
-    if loopback_base(&base).as_deref() != Some(base.as_str()) {
-        return Err(ROUTER_FAILED.to_string());
-    }
-    let headers = local_tier_headers();
-    let system = format!("{}\n\n{instruction}", system_prompt(&amara_persona()));
-    let body = router_body(&system, user);
-    let transport = HttpTransport {
-        client: no_redirect_client(),
-        body_cap: Some(DEEP_BODY_CAP),
+    background_local(ModelClass::Fast, "background.light", instruction, user).await
+}
+
+/// One local-only background completion through the shared inference layer (decision 0051). Same
+/// behaviour as before: loopback base, `local_tier_headers()`/`local_deep_headers()`, Claude off,
+/// a Claude-tier reply refused, 600 s, no retry, fixed error text. New: an empty reply is an error
+/// (it used to come back as `Ok("")`), and the call is logged with its token usage.
+async fn background_local(
+    class: ModelClass,
+    purpose: &'static str,
+    instruction: &str,
+    user: &str,
+) -> Result<String, String> {
+    let mut req = InferenceRequest::new(purpose, class);
+    req.instruction = Some(instruction.to_string());
+    req.messages = vec![Message::user(user)];
+    req.limits = Limits {
+        timeout: std::time::Duration::from_secs(600),
+        retries: 0,
     };
-    let (content, tier, ..) = ask_router(&transport, &base, &headers, &body).await?;
-    if tier == Tier::Claude {
-        return Err(ROUTER_FAILED.to_string());
-    }
-    Ok(content)
+    inference::infer(&req)
+        .await
+        .map(|o| o.content)
+        .map_err(|e| e.user_text())
 }
 
 /// The headers a local deep-tier call sends: no Claude, local mode, deep route.
@@ -711,23 +744,33 @@ pub(crate) fn local_deep_headers() -> Vec<(&'static str, String)> {
 /// as `local_complete` (loopback base, Claude forced off, a Claude-tier reply refused) with the deep
 /// route. `instruction` is appended to Amara's one system prompt.
 pub(crate) async fn local_deep_complete(instruction: &str, user: &str) -> Result<String, String> {
-    let saved = crate::commands::telegram::load_config();
-    let base = router_base(None, saved.amara_router_url.as_deref());
-    if loopback_base(&base).as_deref() != Some(base.as_str()) {
-        return Err(ROUTER_FAILED.to_string());
-    }
-    let headers = local_deep_headers();
-    let system = format!("{}\n\n{instruction}", system_prompt(&amara_persona()));
-    let body = router_body(&system, user);
-    let transport = HttpTransport {
-        client: no_redirect_client(),
-        body_cap: Some(DEEP_BODY_CAP),
+    background_local(ModelClass::Deep, "background.deep", instruction, user).await
+}
+
+/// Source pin for the modules that call `local_complete` / `local_deep_complete` (0051): the wrapper
+/// asks the shared layer for `class` (Fast or Deep) with no cloud policy, the layer maps that class
+/// to `headers_fn` (Allow-Claude 0), the layer refuses a Claude-tier reply to a local request, and
+/// it sends nothing to a base that isn't loopback.
+#[cfg(test)]
+pub(crate) fn local_helper_is_local_only(wrapper: &str, class: &str, headers_fn: &str) -> bool {
+    let src = include_str!("llm_router.rs");
+    let body = |s: &'static str, start: &str| {
+        let f = &s[s.find(start).unwrap()..];
+        f[..f.find("\n}\n").unwrap()].to_string()
     };
-    let (content, tier, ..) = ask_router(&transport, &base, &headers, &body).await?;
-    if tier == Tier::Claude {
-        return Err(ROUTER_FAILED.to_string());
-    }
-    Ok(content)
+    let w = body(src, &format!("pub(crate) async fn {wrapper}("));
+    let shared = body(src, "async fn background_local(");
+    let inf = include_str!("inference/mod.rs");
+    let policy = body(inf, "pub(crate) fn policy_headers(");
+    w.contains(&format!("ModelClass::{class}"))
+        && shared.contains("InferenceRequest::new(purpose, class)")
+        && !shared.contains("CloudIfAuthorized")
+        && policy.contains(&format!(
+            "ModelClass::{class} => Ok(llm_router::{headers_fn}())"
+        ))
+        && inf.contains("reply.tier == Tier::Claude && !may_use_cloud")
+        && body(inf, "async fn infer_inner(")
+            .contains("if loopback_base(base).as_deref() != Some(base) {")
 }
 
 /// Asks the router's dry-run endpoint which tier it would use (may run its classifier).
@@ -1293,8 +1336,15 @@ mod tests {
         let src = include_str!("llm_router.rs");
         let body = &src[src.find("pub(crate) async fn local_complete").unwrap()..];
         let body = &body[..body.find("\n}\n").unwrap()];
-        assert!(body.contains("local_tier_headers()"));
-        assert!(body.contains("tier == Tier::Claude"));
+        // 0051: through the shared layer, whose Fast class sends exactly these headers and refuses a
+        // Claude-tier reply (inference::tests pins both).
+        assert!(body.contains("ModelClass::Fast"));
+        let deep = &src[src.find("pub(crate) async fn local_deep_complete").unwrap()..];
+        assert!(deep[..deep.find("\n}\n").unwrap()].contains("ModelClass::Deep"));
+        let shared = &src[src.find("async fn background_local").unwrap()..];
+        let shared = &shared[..shared.find("\n}\n").unwrap()];
+        assert!(shared.contains("InferenceRequest::new(purpose, class)"));
+        assert!(!shared.contains("CloudIfAuthorized"));
         assert_eq!(log_detail(&"x".repeat(500)).chars().count(), 80);
     }
 }
