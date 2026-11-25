@@ -49,7 +49,7 @@ const KINDS: [&str; 6] = [
 const CURRENCIES: [&str; 2] = ["JPY", "USD"];
 const RECURRENCES: [&str; 4] = ["none", "monthly", "weekly", "yearly"];
 const SOURCES: [&str; 3] = ["app", "chat", "telegram"];
-const CATEGORIES: [&str; 12] = [
+pub(crate) const CATEGORIES: [&str; 12] = [
     "housing",
     "food",
     "transport",
@@ -186,7 +186,7 @@ fn read_text(data: &Path) -> Result<String, String> {
 }
 
 /// Every readable entry with its void marker applied, in file order, plus the count of lines that were not readable.
-fn load(data: &Path) -> Result<(Vec<MoneyEntry>, u32), String> {
+pub(crate) fn load(data: &Path) -> Result<(Vec<MoneyEntry>, u32), String> {
     let text = read_text(data)?;
     let mut entries: Vec<MoneyEntry> = Vec::new();
     let mut voids: HashMap<String, String> = HashMap::new();
@@ -1237,8 +1237,7 @@ pub(crate) fn money_context_section_on(data: &Path, today: NaiveDate) -> Option<
 
 /// True when no balance entry is dated within the last 7 days (today included): Amara then asks for the balance.
 /// An unreadable store returns false (never nag blind).
-/// Not wired yet: the Needs-you money row and the Telegram money check-in (next session, decision 0045).
-#[allow(dead_code)]
+/// Used by the Telegram money check-in (proactive.rs, decision 0045).
 pub fn money_checkin_due(data: &Path, today: NaiveDate) -> bool {
     let Ok((entries, _)) = load(data) else {
         return false;

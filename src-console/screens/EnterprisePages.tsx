@@ -9,6 +9,7 @@ import type { Saved } from "../adds/flow";
 import { businessAdapter, type BusinessAdapter, type FundingRequest, type TaxFlag } from "../business/adapters";
 import { DECISIONS_EVENT, announceDecisions, decisionsLog, jst, type DecisionChoice, type DecisionDraft, type DecisionRecord } from "../decisions/log";
 import { humanize, money, plainText } from "../lib/format";
+import { VenturePick, withVenture, type FormVenture } from "./EnterpriseForms";
 import { valueOf, sampleAdaptersEnabled } from "../lib/sampleAdapters";
 import { askMore } from "../amaraTake/takeView";
 import type { SystemSnapshot } from "../types";
@@ -20,6 +21,13 @@ import "../adds/v1111.css";
 
 const acc = (node: React.ReactNode) => <span className="cc-card__acc">{node}</span>;
 type Task = SystemSnapshot["tasks"][number];
+
+/** The ventures a task or idea can be filed under: the ledger's, or none. */
+function useVentureChoices(data: SystemSnapshot): FormVenture[] {
+  return (valueOf(businessAdapter(data).ventures()) ?? []).map((v) => ({ id: v.id, name: v.name }));
+}
+const ventureLabel = (list: FormVenture[], id: string | null | undefined): string | null => (id ? `Venture: ${list.find((v) => v.id === id)?.name ?? humanize(id)}` : null);
+const plainTags = (tags: string[] | undefined) => (tags ?? []).filter((t) => !t.startsWith("venture:")).map(humanize);
 
 /** "1 in progress, 1 waiting": the headline state, and nothing else. */
 export function workStatement(tasks: Task[]): string {
@@ -181,11 +189,14 @@ export function TasksView({ data, onRetry, onOpen }: { data: SystemSnapshot; onR
   const done = (t: Task) => askMore({ from: "Enterprise · Tasks", chips: [{ label: "Task", value: plainText(t.title) }, { label: "Status", value: humanize(t.status) }], question: `Mark “${plainText(t.title)}” as done in my tasks, then tell me what is next.`, sample: false });
   const tasksDown = data.unavailableSources.some((s) => s.command === "read_tasks") && data.tasks.length === 0;
   const tasks = data.tasks;
+  const choices = useVentureChoices(data);
+  const [ventureId, setVentureId] = useState("");
   const other = tasks.filter((t) => !GROUPS.some((g) => g.status === t.status));
   return (
     <div className="biz page-inset cc-page">
       <PageHero title="Tasks" statement={tasksDown ? "Tasks are out of reach" : workStatement(tasks)} detail="Enterprise work across your ventures. Personal to-dos are on Today › To-dos." />
-      <Composer title="Add a task" kind="Task" adapter={addAdapter("task")} placeholder="e.g. Order 50 sample jars for Taiyo Skin by Friday" addLabel="Add task" saveLabel="Add task"
+      <VenturePick ventures={choices} value={ventureId} onChange={setVentureId} />
+      <Composer title="Add a task" kind="Task" adapter={withVenture(addAdapter("task"), choices.find((v) => v.id === ventureId)?.name ?? null)} placeholder="e.g. Order 50 sample jars for Taiyo Skin by Friday" addLabel="Add task" saveLabel="Add task"
         hint="Enterprise work only. Personal to-dos live on Today." working="Reading your task…" onOpen={onOpen}
         onSaved={(s) => (reload ? reload() : setAdded((a) => [s, ...a]))} onUndone={(id) => (reload ? reload() : setAdded((a) => a.filter((x) => x.id !== id)))}
         savedText={(s) => `Added “${s.title}” to Backlog.`} />
@@ -199,7 +210,7 @@ export function TasksView({ data, onRetry, onOpen }: { data: SystemSnapshot; onR
               <Card key={g.status} title={`${g.title} · ${items.length + fresh.length}`}>
                 <InsetGroup>
                   {fresh.map((s) => <ListRow key={s.id} className="v-new" title={s.title} subtitle="Just added · sample data" accessory={<Badge tone="accent">New</Badge>} />)}
-                  {items.map((t, i) => <ListRow key={`${t.title}-${i}`} title={plainText(t.title)} subtitle={[...(t.tags ?? []).map(humanize), t.priority ? humanize(t.priority) : null].filter(Boolean).join(" · ")} accessory={<span className="v-actions"><LinkButton small onClick={() => ask(t)} label={`Ask Amara about ${plainText(t.title)}`}>Ask Amara ›</LinkButton>{t.status !== "done" && <LinkButton small onClick={() => done(t)} label={`Mark done: ${plainText(t.title)}`}>Mark done ›</LinkButton>}<StatusText kind={TASK_KIND[t.status] ?? "off"}>{humanize(t.status)}</StatusText></span>} />)}
+                  {items.map((t, i) => <ListRow key={`${t.title}-${i}`} title={plainText(t.title)} subtitle={[ventureLabel(choices, t.venture), ...plainTags(t.tags), t.priority ? humanize(t.priority) : null].filter(Boolean).join(" · ")} accessory={<span className="v-actions"><LinkButton small onClick={() => ask(t)} label={`Ask Amara about ${plainText(t.title)}`}>Ask Amara ›</LinkButton>{t.status !== "done" && <LinkButton small onClick={() => done(t)} label={`Mark done: ${plainText(t.title)}`}>Mark done ›</LinkButton>}<StatusText kind={TASK_KIND[t.status] ?? "off"}>{humanize(t.status)}</StatusText></span>} />)}
                 </InsetGroup>
               </Card>
             );
@@ -224,19 +235,24 @@ export function ContentView({ data, onRetry, onOpen }: { data: SystemSnapshot; o
   // pipeline item that Draft with Amara works on. Without it (browser, sample mode) it stays a labelled local row.
   const reload = inTauri() && !sampleAdaptersEnabled() && onRetry ? onRetry : null;
   const pipeline = data.pipeline;
+  const choices = useVentureChoices(data);
+  const [ventureId, setVentureId] = useState("");
   const down = data.unavailableSources.some((s) => s.command === "read_content_pipeline") && pipeline.length === 0;
   const count = (stage: string) => pipeline.filter((p) => p.stage === stage).length + (stage === "ideation" ? added.length : 0);
   const total = pipeline.length + added.length;
   const board = total >= BOARD_AT;
   const statement = down ? "The pipeline is out of reach" : total === 0 ? "Pipeline is clear" : [count("drafting") ? `${count("drafting")} drafting` : null, count("review") ? `${count("review")} in review` : null, count("ideation") ? `${count("ideation")} idea${count("ideation") === 1 ? "" : "s"}` : null].filter(Boolean).join(", ") || `${total} items`;
-  const items = [...added.map((s) => ({ key: s.id, title: s.title, stage: "ideation" as string, type: "Just added · sample data" })), ...pipeline.map((p, i) => ({ key: `${p.title}-${i}`, title: plainText(p.title), stage: p.stage as string, type: humanize(p.content_type) }))];
+  const items = [...added.map((s) => ({ key: s.id, title: s.title, stage: "ideation" as string, type: "Just added · sample data" })), ...pipeline.map((p, i) => ({ key: `${p.title}-${i}`, title: plainText(p.title), stage: p.stage as string, type: [humanize(p.content_type), ventureLabel(choices, p.venture)].filter(Boolean).join(" · ") }))];
   const hereIdx = Math.max(0, STAGES.findIndex(([st]) => count(st) > 0));
   const first = items[0];
   const composer = (
-    <Composer title="New idea" kind="Idea" adapter={addAdapter("idea")} placeholder="e.g. Reel: how the label approval works, for Taiyo Skin" addLabel="Add idea" saveLabel="Add idea"
+    <>
+    <VenturePick ventures={choices} value={ventureId} onChange={setVentureId} />
+    <Composer title="New idea" kind="Idea" adapter={withVenture(addAdapter("idea"), choices.find((v) => v.id === ventureId)?.name ?? null)} placeholder="e.g. Reel: how the label approval works, for Taiyo Skin" addLabel="Add idea" saveLabel="Add idea"
       hint="Shows as a preview first, then lands in Idea." working="Reading your idea…" onOpen={onOpen}
       onSaved={(s) => (reload ? reload() : setAdded((a) => [s, ...a]))} onUndone={(id) => (reload ? reload() : setAdded((a) => a.filter((x) => x.id !== id)))}
       savedText={(s) => `Added “${s.title}” to Idea.`} />
+    </>
   );
   return (
     <div className="biz page-inset cc-page d18-page">

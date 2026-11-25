@@ -102,15 +102,17 @@ function sampleAdd(kind: AddKind, parse: (text: string) => ParseResult): AddAdap
  * and voice all call this one adapter. wired flips true after the first History read succeeds, so a missing backend
  * stays "Needs wiring". Failed calls reject; the Composer keeps the text and shows Try again.
  */
-export function makeLiveAdd(kind: AddKind, call: Invoke = realInvoke): AddAdapter & { probe(): Promise<void> } {
+export function makeLiveAdd(kind: AddKind | "habit-done", call: Invoke = realInvoke): AddAdapter & { probe(): Promise<void> } {
   let ok = false;
   let items: HistoryItem[] = [];
+  /** "I did my stretch" files a habit day: History and Undo live under kind "habit" (habits.rs `mark_in`). */
+  const logKind = kind === "habit-done" ? "habit" : kind;
   const probe = async () => {
-    try { items = await call<HistoryItem[]>("add_history", { kind }); ok = true; } catch { ok = false; }
+    try { items = await call<HistoryItem[]>("add_history", { kind: logKind }); ok = true; } catch { ok = false; }
     announceStores();
   };
   return {
-    command: ADD_COMMANDS[kind],
+    command: kind === "habit-done" ? "habit_mark" : ADD_COMMANDS[kind],
     get wired() { return ok; },
     probe,
     parse: async (text) => live(await call<ParseResult>("add_preview", { kind, text })),
@@ -121,7 +123,7 @@ export function makeLiveAdd(kind: AddKind, call: Invoke = realInvoke): AddAdapte
       return live(saved);
     },
     undo: async (id) => {
-      const done = await call<boolean>("add_undo", { kind, id });
+      const done = await call<boolean>("add_undo", { kind: logKind, id });
       if (!done) throw new Error("The 8 second undo window has passed.");
       await probe();
       announceAdds();
@@ -132,7 +134,14 @@ export function makeLiveAdd(kind: AddKind, call: Invoke = realInvoke): AddAdapte
 }
 
 const samples = new Map<AddKind, AddAdapter>();
-const lives = new Map<AddKind, AddAdapter>();
+const lives = new Map<AddKind | "habit-done", AddAdapter>();
+/** Chat and voice habit marking. No sample mode: a sample can't mark a real habit, so it says it needs wiring. */
+export function habitDoneAdapter(): AddAdapter {
+  if (sampleAdaptersEnabled() || !inTauri()) return { command: "habit_mark", wired: false, parse: async () => UNWIRED, save: async () => UNWIRED, undo: async () => UNWIRED, history: () => UNWIRED };
+  let l = lives.get("habit-done");
+  if (!l) { const made = makeLiveAdd("habit-done"); l = made; lives.set("habit-done", l); void made.probe(); }
+  return l;
+}
 /** The one write path for an add (HANDOFF-1111v §5): the page composer, chat and voice all call this. */
 export function addAdapter(kind: AddKind, now: () => Date = () => new Date()): AddAdapter {
   if (!sampleAdaptersEnabled()) {

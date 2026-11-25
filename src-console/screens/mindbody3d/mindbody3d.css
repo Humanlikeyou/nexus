@@ -1,0 +1,33 @@
+/* Mind–Body Three.js charts: the canvas is the picture, labels are HTML on the 11/13 type steps. Tokens only. */
+.gfx { position: relative; width: 100%; min-width: 0; }
+.gfx:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm, 6px); }
+.gfx__canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+.gfx__labels { position: absolute; inset: 0; pointer-events: none; }
+.gfx__tick { position: absolute; color: var(--label-secondary); font: 400 11px/14px var(--font-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gfx__tick em { font-style: normal; color: var(--label-secondary); }
+.gfx__tick[data-x="start"] { transform: none; }
+.gfx__tick[data-x="mid"] { transform: translateX(-50%); }
+.gfx__tick[data-x="end"] { transform: translateX(-100%); }
+.gfx__tick[data-x] { bottom: 0; }
+.gfx[data-fill] { position: absolute; inset: 0; width: auto; pointer-events: none; }
+
+/* Visually hidden, still read by assistive tech. */
+.mb-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+/* Readiness: the canvas sits behind the list and draws the centred bars where each row's track is. */
+.mb-driversgfx { position: relative; }
+.mb-driversgfx > .gfx { z-index: 0; }
+.mb-driversgfx > .mb-drivers { position: relative; z-index: 1; }
+.mb-drivers[data-gfx] .mb-delta { background: transparent; }
+.mb-drivers[data-gfx] .mb-delta::after, .mb-drivers[data-gfx] .mb-delta__fill { display: none; }
+.mb-driversgfx__tip { position: absolute; z-index: 2; display: grid; gap: 3px; max-width: 240px; padding: 5px 8px; border-radius: 8px; pointer-events: none; background: var(--bg-content); color: var(--label); box-shadow: inset 0 0 0 1px var(--separator), 0 6px 18px rgba(0, 0, 0, .18); font: 400 13px/16px var(--font-text); font-variant-numeric: tabular-nums; }
+.mb-driversgfx__tip strong { font-weight: 600; }
+.mb-driversgfx__tip span { color: var(--label-secondary); }
+
+/* Sleep night and Training load */
+.gfx--sleep .mb-span__axis { position: absolute; left: 0; right: 0; top: 18px; }
+.gfx--load .gfx__tick[data-dial] { transform: translateX(-50%); }
+.gfx--load .gfx__zone { position: absolute; transform: translateX(-50%); text-align: center; color: var(--label); font: 400 13px/16px var(--font-text); white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) { .gfx, .gfx * { transition: none !important; animation: none !important; } }
+:root[data-reduce-motion="true"] .gfx, :root[data-reduce-motion="true"] .gfx * { transition: none !important; animation: none !important; }

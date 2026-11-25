@@ -452,6 +452,20 @@ async fn send_telegram_message_gated(
     text: String,
     disabled: bool,
 ) -> Result<TelegramMessage, String> {
+    send_inner(text, disabled, Some("Markdown")).await
+}
+
+/// Plain text (no `parse_mode`), for the fixed check-in questions (decision 0045): nothing in the
+/// text can be misread as Markdown. Same kill switch, same config, same host as the command above.
+pub(crate) async fn send_plain_gated(text: String, disabled: bool) -> Result<(), String> {
+    send_inner(text, disabled, None).await.map(|_| ())
+}
+
+async fn send_inner(
+    text: String,
+    disabled: bool,
+    parse_mode: Option<&str>,
+) -> Result<TelegramMessage, String> {
     if disabled {
         println!(
             "[telegram] send suppressed ({OUTBOUND_DISABLED_ENV}), {} chars",
@@ -479,13 +493,13 @@ async fn send_telegram_message_gated(
     })
     .build()
     .map_err(|_| "Network error contacting Telegram.".to_string())?;
+    let mut payload = serde_json::json!({ "chat_id": chat_id, "text": text });
+    if let Some(mode) = parse_mode {
+        payload["parse_mode"] = serde_json::Value::from(mode);
+    }
     let resp = client
         .post(&url)
-        .json(&serde_json::json!({
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "Markdown"
-        }))
+        .json(&payload)
         .send()
         .await
         .map_err(|_| "Network error contacting Telegram.".to_string())?;

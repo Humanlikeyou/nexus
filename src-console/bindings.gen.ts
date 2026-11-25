@@ -379,6 +379,9 @@ export const commands = {
 	/**  Read-only. The error is one of the fixed `letta_*` codes. */
 	memoryList: (options?: InvokeOptions) => __TAURI_INVOKE<MemoryItem_Serialize[]>("memory_list", undefined, options),
 	checkinSave: (draft: CheckInDraft_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<CheckInRecord_Serialize>("checkin_save", { draft }, options),
+	proactiveSettingsGet: (options?: InvokeOptions) => __TAURI_INVOKE<ProactiveSettings_Serialize>("proactive_settings_get", undefined, options),
+	proactiveSettingsSet: (settings: ProactiveSettings_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<ProactiveSettings_Serialize>("proactive_settings_set", { settings }, options),
+	inboxStatus: (options?: InvokeOptions) => __TAURI_INVOKE<InboxStatus_Serialize>("inbox_status", undefined, options),
 	decisionsList: (options?: InvokeOptions) => __TAURI_INVOKE<DecisionRecord_Serialize[]>("decisions_list", undefined, options),
 	decisionsAppend: (draft: DecisionDraft_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<DecisionRecord_Serialize>("decisions_append", { draft }, options),
 	decisionsUndo: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("decisions_undo", { id }, options),
@@ -882,6 +885,14 @@ export type ArmStrategy_Serialize = {
 	health_status: string,
 	created_at: string,
 	updated_at: string,
+};
+
+export type AskSent = {
+	/**  "checkin", "habit" or "money". */
+	kind: string,
+	at: string,
+	/**  "sent", "suppressed" or "failed". */
+	result: string,
 };
 
 /**  The back-of-head electrode verdict that goes in the trailer. */
@@ -3060,6 +3071,29 @@ export type InCommon_Serialize = {
 	skippedCauses: string[],
 };
 
+export type InboxApplied = {
+	kind: string,
+	at: string,
+};
+
+export type InboxStatus = InboxStatus_Serialize | InboxStatus_Deserialize;
+
+export type InboxStatus_Deserialize = {
+	done: number,
+	rejected: number,
+	lastApplied?: InboxApplied | null,
+	lastRejectedReason?: string | null,
+	sentToday: AskSent[],
+};
+
+export type InboxStatus_Serialize = {
+	done: number,
+	rejected: number,
+	lastApplied: InboxApplied | null,
+	lastRejectedReason: string | null,
+	sentToday: AskSent[],
+};
+
 export type KbState = "running" | "empty" | "not_running" | "error";
 
 export type KbStatus = KbStatus_Serialize | KbStatus_Deserialize;
@@ -4379,6 +4413,56 @@ export type Preview = {
 	at: string,
 	from: string,
 	usedPlainLine: boolean,
+};
+
+export type ProactiveCheckin = ProactiveCheckin_Serialize | ProactiveCheckin_Deserialize;
+
+export type ProactiveCheckin_Deserialize = {
+	enabled?: boolean,
+	at?: string,
+};
+
+export type ProactiveCheckin_Serialize = {
+	enabled: boolean,
+	at: string,
+};
+
+export type ProactiveHabits = ProactiveHabits_Serialize | ProactiveHabits_Deserialize;
+
+export type ProactiveHabits_Deserialize = {
+	enabled?: boolean,
+};
+
+export type ProactiveHabits_Serialize = {
+	enabled: boolean,
+};
+
+export type ProactiveMoney = ProactiveMoney_Serialize | ProactiveMoney_Deserialize;
+
+export type ProactiveMoney_Deserialize = {
+	enabled?: boolean,
+	weekday?: string,
+	at?: string,
+};
+
+export type ProactiveMoney_Serialize = {
+	enabled: boolean,
+	weekday: string,
+	at: string,
+};
+
+export type ProactiveSettings = ProactiveSettings_Serialize | ProactiveSettings_Deserialize;
+
+export type ProactiveSettings_Deserialize = {
+	checkin?: ProactiveCheckin_Deserialize,
+	habits?: ProactiveHabits_Deserialize,
+	money?: ProactiveMoney_Deserialize,
+};
+
+export type ProactiveSettings_Serialize = {
+	checkin: ProactiveCheckin_Serialize,
+	habits: ProactiveHabits_Serialize,
+	money: ProactiveMoney_Serialize,
 };
 
 export type Progress = {

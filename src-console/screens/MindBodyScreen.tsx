@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MIN_TREND_SESSIONS, READINESS_COPY, matchDriver, pearson, readinessReading, shortDay, tokyoDay, trendText, type DriverKey, type DriverPoint } from "../lib/mindBody";
-import { METRICS, driverSentence, drivers as rankDrivers, hoursMinutes, inRange, lean, loadRatio, mergeSeries, metricReading, windowAverage, type MetricKey } from "../lib/mindBodyDeep";
+import { METRICS, driverSentence, drivers as rankDrivers, hoursMinutes, inRange, loadRatio, mergeSeries, metricReading, windowAverage, type MetricKey } from "../lib/mindBodyDeep";
 import { NoopShapeError, isSnapshot, noopQueryBatch, parseBodyContext, parseMetricSeries, snapshotDays } from "../lib/noop";
 import { shareSnapshot } from "../lib/noopSnapshot";
 import type { NoopDayRow, NoopLatestNight, NoopMetricPoint, NoopMetricSeries, NoopSnapshotPayload, RecordedSession } from "../types";
@@ -9,8 +9,11 @@ import { AmaraTake } from "../amaraTake/AmaraTakeCard";
 import type { Route } from "../app/routes";
 import { LinkButton } from "../adds/Composer";
 import { monotonePath } from "../ui/charts/chartMath";
-import { BaselineChart, DeltaBar, SleepSpan, StageStrip, readingDelta } from "./MindBodyCharts";
+import { BaselineChart, SleepSpan, StageStrip, readingDelta } from "./MindBodyCharts";
 import { ChartHeader } from "../ui/charts/TrendChart";
+import { ReadinessDrivers } from "./mindbody3d/ReadinessGfx";
+import { SleepNightGfx } from "./mindbody3d/SleepNightGfx";
+import { LoadGfx } from "./mindbody3d/LoadGfx";
 import "./MindBodyScreen.css";
 
 export const INVALID_PATH_STEPS = "The health reader or health store path in Settings isn't valid. Open Settings › Devices › WHOOP connection and set full paths that start with /.";
@@ -289,16 +292,7 @@ export function MindBodyField({ sessions, load = loadMindBody, onOpen }: MindBod
             {loading ? <ChartBox state="loading" label="Readiness" /> : (
               <>
                 <p className="mb-section__lede">{driverSentence(readings) ?? "Today's score needs a week of baseline first."}</p>
-                <ul className="mb-drivers" aria-label="What's driving today">
-                  {[...rankDrivers(readings), ...readings.filter((item) => !rankDrivers(readings).includes(item))].map((item) => (
-                    <li key={item.def.key} data-lean={lean(item)}>
-                      <span className="mb-drivers__label">{item.def.label}</span>
-                      <span className="mb-drivers__value">{item.value === null ? DASH : item.def.format(item.value)}</span>
-                      <DeltaBar reading={item} />
-                      <span className="mb-drivers__usual">{item.base ? `usual ${item.def.format(item.base.mean)}` : "no baseline yet"}</span>
-                    </li>
-                  ))}
-                </ul>
+                <ReadinessDrivers items={[...rankDrivers(readings), ...readings.filter((item) => !rankDrivers(readings).includes(item))]} />
               </>
             )}
           </section>
@@ -318,8 +312,7 @@ export function MindBodyField({ sessions, load = loadMindBody, onOpen }: MindBod
                       usual={[typeof efficiency === "number" ? `${Math.round(efficiency * 100)}% efficient` : null, night ? `in bed ${hoursMinutes(night.inBedMin)}` : null].filter(Boolean).join(" · ") || "\u00a0"} />
                   </div>
                   <div className="mb-plot">
-                    {night && <SleepSpan start={night.start} end={night.end} />}
-                    <StageStrip stages={stages} />
+                    <SleepNightGfx night={night} stages={stages} fallback={<>{night && <SleepSpan start={night.start} end={night.end} />}<StageStrip stages={stages} /></>} />
                     {stages.some((stage) => stage.minutes > 0) && (
                       <dl className="mb-stagekey">
                         {stages.map((stage) => <div key={stage.tone}><dt><i data-tone={stage.tone} aria-hidden="true" />{stage.label}</dt><dd>{hoursMinutes(stage.minutes)}<small>{Math.round((stage.minutes / Math.max(1, stages.reduce((sum, item) => sum + item.minutes, 0))) * 100)}%</small></dd></div>)}
@@ -371,7 +364,7 @@ export function MindBodyField({ sessions, load = loadMindBody, onOpen }: MindBod
                     <p className="mb-row__usual">28 days of strain</p>
                   </div>
                   <div className="mb-plot">
-                    <StrainBars points={series?.strain.points ?? []} />
+                    <LoadGfx points={series?.strain.points ?? []} ratio={loadRun?.ratio ?? null} fallback={<StrainBars points={series?.strain.points ?? []} />} />
                     <p className="mind-body__meta">Daily strain, with the 7-day line and the dashed 28-day line.</p>
                   </div>
                 </div>

@@ -293,6 +293,124 @@
   {
    "text": "add a goal yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
    "intent": null
+  },
+  {
+   "text": "I did my stretch",
+   "intent": {
+    "kind": "habit-done",
+    "text": "done today stretch"
+   }
+  },
+  {
+   "text": "i did my stretch yesterday",
+   "intent": {
+    "kind": "habit-done",
+    "text": "done yesterday stretch"
+   }
+  },
+  {
+   "text": "I did my morning stretch today.",
+   "intent": {
+    "kind": "habit-done",
+    "text": "done today morning stretch"
+   }
+  },
+  {
+   "text": "mark stretch done",
+   "intent": {
+    "kind": "habit-done",
+    "text": "done today stretch"
+   }
+  },
+  {
+   "text": "Mark my stretch as done for today",
+   "intent": {
+    "kind": "habit-done",
+    "text": "done today stretch"
+   }
+  },
+  {
+   "text": "mark stretch not done yesterday",
+   "intent": {
+    "kind": "habit-done",
+    "text": "not yesterday stretch"
+   }
+  },
+  {
+   "text": "Amara, please mark the evening walk as not done",
+   "intent": {
+    "kind": "habit-done",
+    "text": "not today evening walk"
+   }
+  },
+  {
+   "text": "check off meditation",
+   "intent": {
+    "kind": "habit-done",
+    "text": "done today meditation"
+   }
+  },
+  {
+   "text": "tick off cold shower for yesterday",
+   "intent": {
+    "kind": "habit-done",
+    "text": "done yesterday cold shower"
+   }
+  },
+  {
+   "text": "I didn't walk today",
+   "intent": {
+    "kind": "habit-done",
+    "text": "not today walk"
+   }
+  },
+  {
+   "text": "I did not do my stretch yesterday.",
+   "intent": {
+    "kind": "habit-done",
+    "text": "not yesterday stretch"
+   }
+  },
+  {
+   "text": "I haven't done my stretch",
+   "intent": {
+    "kind": "habit-done",
+    "text": "not today stretch"
+   }
+  },
+  {
+   "text": "I skipped the gym yesterday",
+   "intent": {
+    "kind": "habit-done",
+    "text": "not yesterday gym"
+   }
+  },
+  {
+   "text": "I've done my reading!",
+   "intent": {
+    "kind": "habit-done",
+    "text": "done today reading"
+   }
+  },
+  {
+   "text": "I did my",
+   "intent": null
+  },
+  {
+   "text": "mark it",
+   "intent": null
+  },
+  {
+   "text": "mark",
+   "intent": null
+  },
+  {
+   "text": "I did it",
+   "intent": null
+  },
+  {
+   "text": "mark the",
+   "intent": null
   }
  ],
  "turns": [

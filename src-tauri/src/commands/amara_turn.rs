@@ -1407,6 +1407,7 @@ fn add_label(kind: &str) -> &'static str {
         "goal" => "goal",
         "date" => "date",
         "task" => "task",
+        "habit-done" => "habit",
         _ => "content idea",
     }
 }
@@ -1480,12 +1481,24 @@ impl AddsFlow {
         }
         let intent = detect_add_intent(text)?;
         // A new add replaces any older pending one for this conversation.
-        self.pending
+        let older = self
+            .pending
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(conv);
         let reply = match (self.preview)(intent.kind, &intent.text) {
             Ok(r) => r,
+            // "I did my taxes": no active habit by that name, so it is not a habit turn. Chat answers it, and
+            // an older pending add is left as it was.
+            Err(e) if intent.kind == "habit-done" && e == "habit: no match" => {
+                if let Some(p) = older {
+                    self.pending
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .insert(conv.to_string(), p);
+                }
+                return None;
+            }
             Err(_) => {
                 return Some(Self::hit(
                     "failed",
@@ -2850,6 +2863,39 @@ mod tests {
         let before = goals_file(&root);
         assert!(f.handle("c1", "confirm", "chat").is_none());
         assert_eq!(goals_file(&root), before);
+    }
+
+    #[test]
+    fn habit_done_turn_previews_confirms_and_falls_through_when_no_habit_fits() {
+        let (f, root, _) = real_flow("habit-turn");
+        let data = root.join("data");
+        std::fs::write(
+            data.join("goals.json"),
+            r#"[{"id":"h1","title":"Stretch","category":"habit","target":7,"current":0,"unit":"daily","deadline":null,"created_at":"2026-11-01T09:00:00+09:00"}]"#,
+        )
+        .unwrap();
+        // not a habit: chat answers it, and a pending add is not disturbed
+        assert!(f.handle("c1", "I did my taxes", "chat").is_none());
+        let h = f.handle("c1", "I did my stretch", "chat").unwrap();
+        assert_eq!(h.payload["stage"], "preview");
+        assert_eq!(h.payload["kind"], "habit-done");
+        assert!(
+            h.text
+                .contains("Check before saving (habit): Mark Stretch done for today"),
+            "{}",
+            h.text
+        );
+        assert!(h.text.contains("Streak after: 1 day"), "{}", h.text);
+        assert!(!data.join("habits").join("days.json").exists());
+        assert!(f.handle("c1", "I did my taxes", "chat").is_none());
+        let s = f.handle("c1", "confirm", "chat").unwrap();
+        assert_eq!(s.payload["stage"], "saved", "{}", s.text);
+        let days = std::fs::read_to_string(data.join("habits").join("days.json")).unwrap();
+        assert!(
+            days.contains("\"h1\"") && days.contains("\"chat\""),
+            "{days}"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

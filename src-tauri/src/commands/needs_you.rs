@@ -478,7 +478,7 @@ async fn gather() -> Inputs {
 }
 
 /// Habit rows from goals.json with whether today has a done mark. Read-only.
-fn habits_now(data: &std::path::Path, today: NaiveDate) -> Result<Vec<HabitIn>, String> {
+pub(crate) fn habits_now(data: &std::path::Path, today: NaiveDate) -> Result<Vec<HabitIn>, String> {
     let goals: Vec<super::goals::Goal> =
         super::local_store::read_json(&data.join("goals.json"), super::adds::MAX_MD_BYTES)?;
     let rows = super::habits::rows_in(&super::habits::dir_in(data))?;
@@ -875,6 +875,8 @@ mod tests {
             ["habit-a"]
         );
         assert_eq!(rows[0].reason, "Not marked today");
+        assert_eq!(rows[0].source, "habits");
+        assert!(rows[0].quiet, "habit rows are quiet pointers");
         assert_eq!(
             rows[0].deep_link,
             Route {

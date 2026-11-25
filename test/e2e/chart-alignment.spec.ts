@@ -43,8 +43,8 @@ for (const size of SIZES) {
         expect(plots.length).toBeGreaterThanOrEqual(2);
         sameEdges(plots, plots[0], range);
         // Load bars and the scatter are on it.
-        expect((await boxes(page, ".mind-body .mind-body__chart svg")).length).toBeGreaterThanOrEqual(2);
-        sameEdges(await boxes(page, ".mind-body .mind-body__chart svg"), plots[0], `${range} svg`);
+        expect((await boxes(page, ".mind-body .mind-body__chart svg, .mind-body .gfx--load")).length).toBeGreaterThanOrEqual(2);
+        sameEdges(await boxes(page, ".mind-body .mind-body__chart svg, .mind-body .gfx--load"), plots[0], `${range} svg`);
       }
     });
 
@@ -69,10 +69,13 @@ for (const size of SIZES) {
       }));
       expect(inside.length).toBeGreaterThanOrEqual(5);
       expect(inside.every((item) => item.dot && item.line)).toBe(true);
+      // The SVG fallback load chart (no WebGL): its bars fill the plot edge to edge. The Three.js chart keeps an axis gutter and is held to the plot edges above.
       const bars = await boxes(page, ".mind-body__bar");
       const chart = (await boxes(page, ".mind-body__chart"))[0];
-      expect(Math.abs(bars[0].left - chart.left), "first bar").toBeLessThanOrEqual(TOLERANCE);
-      expect(Math.abs(bars[bars.length - 1].right - chart.right), "last bar").toBeLessThanOrEqual(TOLERANCE);
+      if (bars.length > 0) {
+        expect(Math.abs(bars[0].left - chart.left), "first bar").toBeLessThanOrEqual(TOLERANCE);
+        expect(Math.abs(bars[bars.length - 1].right - chart.right), "last bar").toBeLessThanOrEqual(TOLERANCE);
+      }
     });
 
     test("Fitness: rings and detail rows share three columns", async ({ page, theme }) => {

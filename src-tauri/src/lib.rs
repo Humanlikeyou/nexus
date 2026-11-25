@@ -190,6 +190,9 @@ pub fn run() {
             outbox::start_delivery_worker(app.handle().clone());
             // Nightly backup scheduler (in-app only; nothing runs while the app is closed).
             commands::backup_schedule::start(app.handle().clone());
+            // Telegram replies (inbox files from Hermes) and the check-in questions Nexus sends (decision 0045).
+            commands::inbox::start(app.handle().clone());
+            commands::proactive::start();
             commands::daily_table::start(app.handle().clone());
             // Telegram relay timer: a no-op until the relay is on, approved and outbound is allowed.
             commands::notify_relay::start();
@@ -279,6 +282,9 @@ pub fn run() {
             adds::add_history,
             checkin::checkin_save,
             checkin::checkin_list,
+            commands::proactive::proactive_settings_get,
+            commands::proactive::proactive_settings_set,
+            commands::inbox::inbox_status,
             commands::patterns::patterns_read,
             commands::weekly_review::weekly_review_read,
             home_windows::home_window_preflight,

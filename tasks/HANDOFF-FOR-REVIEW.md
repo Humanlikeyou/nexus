@@ -1159,3 +1159,47 @@ Plan: `tasks/PLAN-0045.md`. Taisun answered all four questions (logged in 0045).
 5. **Habits:** chat marking ("I did X"), and the Needs-you habits source label.
 6. **Enterprise:** the History list UI, and venture links on tasks and content.
 7. **bindings.gen.ts:** regenerate once the `GoalProgress` name clash between money_entries and goal_progress is resolved.
+
+
+## 47. Decision 0049: part 2 of the 0045 brief finished (2026-11-25)
+
+**Built (5 Sonnet lanes plus fixes; security review on the strong model):**
+- **Telegram inbox and timed questions:**
+  - `inbox.rs`: ingest of `<data>/inbox/*.json`, written by the Hermes MCP tools, into check-ins, habit marks and money entries. It runs on launch and every 30 s. Strict validation. Nothing is ever deleted: files go to `done/` or `rejected/` (reject reason in `.why.txt`).
+  - `proactive.rs`: Amara OS asks on Telegram: the check-in (default 22:00 JST, only if no check-in today), one habit reminder a day, and a weekly money check-in (default Sunday 19:00). It honours the kill switch and Local only. `asks/open.json` feeds Hermes' `open_asks`.
+  - Settings › "Check-ins on Telegram" sets the toggles and times.
+  - `telegram.rs` `send_plain_gated`: same gate as the old send, with no Markdown mode.
+  - **Taisun's step:** install the Hermes tools (`~/projects/hermes-patches/nexus-inbox/README.md`).
+- **Security review findings, all fixed:**
+  - M1: an unwritable state file could re-send every minute. Now an in-memory hold.
+  - M2: a hostile or confused sender could flood the stores. Now 3 check-ins, 30 habit marks and 20 money entries per day.
+  - L1: `O_NONBLOCK` against a FIFO swap.
+  - L2: a listing cap, and ingest pauses at 1000 rejected files (never deleted).
+  - L3: a money date more than a year away is rejected.
+  - L4: Japanese notes no longer blow the 8 KB limit.
+  - L5: the Hermes tool output is cleaned and capped.
+  - **Not done (L6, optional):** quote and escape the check-in note before it enters the LLM brief. It is already guarded and labelled as background data.
+  - **Not checked by the reviewer:** who Hermes accepts Telegram messages from (the chat-id allowlist in `~/.hermes`).
+- **Charts (Three.js, with the old SVG as a fallback when WebGL is missing):**
+  - Neuro "Last session" brain ring: 3D band spectrum with his usual range. "Now" ring: live Muse bands, hidden otherwise.
+  - Heart-rate ribbon.
+  - Mind-Body Readiness, Sleep, Trends and Training Load.
+  - `useSessionBands.ts` builds the band cache for the newest 5 sessions through the existing `get_session_samples`, so the ring has data. It writes only the allowed `.bands.json` cache.
+- **Money:** four charts, "Amara's money read" with assumptions, "Can I afford it?", a manual FX rate form, and all ¥ gone. A bug fixed: the entries panel refetched forever.
+- **Habits:** "I did my stretch" in chat (preview and Undo); Needs-you habit label.
+- **Enterprise:** a History list with Undo, and venture tags on tasks and content.
+
+**Verification (final tree):**
+- tsc, lint and check:secrets pass.
+- vitest 2907 passed / 9 skipped.
+- neuro 21.
+- src-tauri fmt and clippy clean; src-tauri **1843** passed / 7 ignored (after the security fixes).
+- amara-router 131.
+- Full e2e run alone, before the Rust and Python security fixes (frontend unchanged since): 800 passed / 12 skipped / 0 failed.
+
+**Not done / known:**
+1. Money entries are not in the Enterprise History list (the treasury entries store has no list command).
+2. Check-in and money replies applied from Telegram log no History entry (their save paths log nothing today).
+3. The Neuro rings were checked on the mock EEG and on injected samples, not on a real saved session in the real app. The first view of a long recording builds its band cache, so the ring may appear a moment after the page opens.
+4. The Mind-Body Readiness arc from the mock-up was not added (the hero already shows the score).
+5. A live end-to-end run of Telegram → Hermes → Amara OS has not been done, because it needs Taisun to install the Hermes tools first.

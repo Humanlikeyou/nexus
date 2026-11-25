@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { askMore } from "../amaraTake/takeView";
 import { TakeEmber } from "../amaraTake/AmaraTakeCard";
 import { useNow } from "../shell/useNow";
@@ -8,6 +8,8 @@ import { DataTag } from "../ui";
 import type { Wired } from "../lib/sampleAdapters";
 import { ageLabel, HR_MIN_COVERED, HR_WINDOW_MIN, tokyoTime, trendOf, type HrTake, type HrTakeStatus, type HrWindow } from "./adapters";
 import { useHrTake } from "./useHrTake";
+import { HrTraceGL } from "../design1118/three/HrRibbon";
+import { glOk } from "../design1118/three/stage";
 import "../amaraTake/AmaraTakeCard.css";
 import "../takes/takes.css";
 import "./hrTake.css";
@@ -35,6 +37,8 @@ function chipsOf(w: HrWindow) {
 
 /** The 15-minute line the take read, with your usual band shaded. Gaps (no readings) are dashed, never joined. */
 export function HrTrace({ w }: { w: HrWindow }) {
+  // WebGL ribbon when available (lazy three); the SVG below is the fallback and stays the default in jsdom and old WebViews.
+  const [gl, setGl] = useState(glOk);
   const W = 377, H = 55;
   const vals = w.perMinute.map((m) => m.bpm).filter((b): b is number => b != null);
   const lo = Math.min(...vals, w.usual?.lo ?? Infinity) - 3, hi = Math.max(...vals, w.usual?.hi ?? -Infinity) + 3;
@@ -50,7 +54,7 @@ export function HrTrace({ w }: { w: HrWindow }) {
   const label = s ? `Heart rate, last ${HR_WINDOW_MIN} minutes: ${s.first} to ${s.last}, average ${s.avg}${w.usual ? `; your usual ${w.usual.lo}–${w.usual.hi}` : ""}` : `Heart rate, last ${HR_WINDOW_MIN} minutes: no readings`;
   return (
     <figure className="hrt-trace">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label} preserveAspectRatio="none">
+      {gl && w.perMinute.length > 1 ? <HrTraceGL w={w} label={label} onFail={() => setGl(false)} /> : <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label} preserveAspectRatio="none">
         {w.usual && <rect className="hrt-trace__band" x="0" width={W} y={y(w.usual.hi)} height={Math.max(1, y(w.usual.lo) - y(w.usual.hi))} rx="3" />}
         {runs.map((r) => (
           <g key={`${r[0][0]}`}>
@@ -60,7 +64,7 @@ export function HrTrace({ w }: { w: HrWindow }) {
         ))}
         {runs.slice(1).map((r, k) => <line key={`g${k}`} className="hrt-trace__gap" x1={runs[k][runs[k].length - 1][0]} x2={r[0][0]} y1={H - 3} y2={H - 3} />)}
         {last && <circle className="hrt-trace__dot" cx={last[0]} cy={last[1]} r="3" />}
-      </svg>
+      </svg>}
       <figcaption className="hrt-trace__ax"><span>{tokyoTime(w.from)}</span><span>{w.usual ? `Shaded: your usual for this time of day, ${w.usual.lo}–${w.usual.hi}` : `Last ${HR_WINDOW_MIN} min`}</span><span>{tokyoTime(w.to)}</span></figcaption>
     </figure>
   );

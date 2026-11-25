@@ -87,10 +87,11 @@ export function useNeedsYou(data: SystemSnapshot, now: number): NeedsYou {
       fromAgg("crew") ?? (crew.state === "unwired" ? { source: "crew", state: "unwired", rows: [] } : { source: "crew", state: "ok", rows: crew.value, sample: crew.state === "sample" }),
       ...(fromAgg("strap") ? [fromAgg("strap") as SourceState] : []),
       ...(fromAgg("watchlist") ? [fromAgg("watchlist") as SourceState] : []),
+      ...(fromAgg("habits") ? [fromAgg("habits") as SourceState] : []),
     ];
   }, [data, todos, today, tick, agg]);
   const inbox = mergeInbox(states);
-  // Try again re-reads every source: the follow-ups directly, and the aggregator (dates, check-in, decisions, crew, strap, watchlist) through the tick.
+  // Try again re-reads every source: the follow-ups directly, and the aggregator (dates, check-in, decisions, crew, strap, watchlist, habits) through the tick.
   return { ...inbox, states, done, retry: () => { setDone([]); load(); setTick((n) => n + 1); } };
 }
 

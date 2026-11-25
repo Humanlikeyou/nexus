@@ -5,7 +5,8 @@ import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampl
 import { patternsFrom, weeklyReviewFrom, type PatternsWire, type ReviewWire, type ExperimentResultWire } from "./liveInsights";
 import { dictateOnce } from "../adds/dictation";
 import { roadmapAdapter } from "../goals/roadmap";
-import { ADDS_EVENT, announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
+import { listen } from "@tauri-apps/api/event";
+import { ADDS_EVENT, announceAdds, announceSnapshot, announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
 
 /**
  * design-1111a: Amara as a personal OS. Every surface reads from this adapter. In the app it is
@@ -438,6 +439,7 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
         .catch(() => { review = null; suggestionTitle = null; suggestionPair = null; suggestionWhy = { reason: null, findingId: null }; }),
       Promise.all([call<RawSummary | null>("money_summary_read"), call<{ rate: number; date: string; source: string } | null>("fx_rate_get")])
         .then(([sm, f]) => { money = personalMoneyFrom(sm && Array.isArray(sm.recurring) ? sm : null, mapFx(f)); }).catch(() => { money = null; }),
+      call<{ checkin?: { at?: string } }>("proactive_settings_get").then((r) => { setCheckInReminderAt(r?.checkin?.at); }).catch(() => {}),
       call<GoalWire[]>("read_goals").then((r) => { goalRows = Array.isArray(r) ? r : null; }).catch(() => { goalRows = null; }),
       // A habit log that can't be read leaves the marks unknown (the grid stays empty), never a made-up miss.
       (() => { const t = jstToday(); return call<HabitDayWire[]>("habit_days", { from: addDays(t, -(HABIT_WINDOW_DAYS - 1)), to: t }); })()
@@ -462,6 +464,8 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
     }
   };
   try { window.addEventListener(ADDS_EVENT, () => { void refresh(); }); } catch { /* no window in node tests */ }
+  // inbox.rs applied a Telegram reply (check-in, habit or money): re-read, so open pages show it without a restart.
+  try { void listen("amara-inbox://applied", () => { void refresh(); announceAdds(); announceSnapshot(); }).catch(() => {}); } catch { /* no Tauri event bridge (tests, browser preview) */ }
   return {
     ...unwiredPersonal,
     refresh,
@@ -510,8 +514,11 @@ export const resetLivePersonal = () => { liveSingleton = null; };
 export const CHECKIN_EVENT = "amara:checkin";
 
 /** Built defaults for Taisun's open 1111a choices (HANDOFF-1111a "Built"). */
+let checkInAt = "22:00";
+/** The saved Telegram check-in time (proactive_settings_get); the built default 22:00 until it is read. */
+export const setCheckInReminderAt = (hhmm: unknown) => { if (typeof hhmm === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(hhmm)) checkInAt = hhmm; };
 export const PERSONAL_DEFAULTS = {
-  checkInReminder: "22:00 JST",
+  get checkInReminder() { return `${checkInAt} JST`; },
   weeklyReview: "Sunday 19:00 JST",
   tryItSetsReminder: true,
   confirmMemories: ["health", "people"] as MemoryCategory[],

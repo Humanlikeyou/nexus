@@ -122,3 +122,34 @@ describe("review fixes", () => {
     expect(slow.saves).toEqual([]);
   });
 });
+
+describe("habit marking from chat (habit-done)", () => {
+  it("I did my stretch: preview first, a separate confirm saves through the adapter as chat", async () => {
+    const f = fake({ kind: "preview", preview: { title: "Mark Stretch done for today", fields: [["Streak after", "2 days"]], payload: { kind: "habit-done" } } });
+    const kinds: string[] = [];
+    const c = createChatAdds({ adapter: (k) => { kinds.push(k); return f.a; } });
+    const reply = await c.handle("I did my stretch", "chat");
+    expect(kinds).toEqual(["habit-done"]);
+    expect(f.calls).toEqual(["parse:done today stretch"]);
+    expect(reply).toContain("Check before saving (habit): Mark Stretch done for today");
+    expect(f.saves).toHaveLength(0);
+    expect(await c.handle("confirm", "chat")).toMatch(/^Saved: Mark Stretch done for today/);
+    expect(f.saves).toEqual([{ p: expect.objectContaining({ title: "Mark Stretch done for today" }), via: "chat" }]);
+  });
+  it("a question when several habits fit is relayed and nothing is saved", async () => {
+    const f = fake({ kind: "ask", question: "Which habit: Morning stretch or Evening stretch?", options: ["Morning stretch", "Evening stretch"] });
+    const c = createChatAdds({ adapter: () => f.a });
+    expect(await c.handle("mark stretch done", "chat")).toContain("Which habit");
+    expect(f.saves).toHaveLength(0);
+  });
+  it("the live habit adapter reads History and Undo under kind habit", async () => {
+    const call = vi.fn(async (cmd: string) => (cmd === "add_undo" ? true : []));
+    const a = makeLiveAdd("habit-done", call as never);
+    await a.probe();
+    await a.undo("habit-1");
+    expect(call).toHaveBeenCalledWith("add_history", { kind: "habit" });
+    expect(call).toHaveBeenCalledWith("add_undo", { kind: "habit", id: "habit-1" });
+    await a.parse("done today stretch");
+    expect(call).toHaveBeenCalledWith("add_preview", { kind: "habit-done", text: "done today stretch" });
+  });
+});
