@@ -1203,3 +1203,22 @@ Plan: `tasks/PLAN-0045.md`. Taisun answered all four questions (logged in 0045).
 3. The Neuro rings were checked on the mock EEG and on injected samples, not on a real saved session in the real app. The first view of a long recording builds its band cache, so the ring may appear a moment after the page opens.
 4. The Mind-Body Readiness arc from the mock-up was not added (the hero already shows the score).
 5. A live end-to-end run of Telegram → Hermes → Amara OS has not been done, because it needs Taisun to install the Hermes tools first.
+
+## 48. Decision 0056: Life UI (Phase 6), committed `1135439` (2026-11-26)
+
+Scope and Taisun's answers: `docs/decisions/0056-life-ui-scope-2026-11-25.md`. Spec: `docs/specs/life-ui-2026-11-25.md` + `tasks/PLAN-0055-life-ui.md`.
+
+**Built:** the six-tab Life host (Overview first), Goals & projects tree with milestone timelines and links, Habits & routines (calendar, trends, rhythm), the Life part of Weekly review, the five recommendation controls, the Dates range picker; backend week plans, date range, suggestion rules (app + Telegram), rule-made weekly observations.
+
+**Bug fixed on the way:** ten registered commands were never bound, so `invokeBound` rejected them (habit marks, habit-day reads, roadmap accept/answer, Letta memory edit/delete/restore, Hemi-Sync session finish/link/rate). Read from the code path; not reproduced on the packaged app.
+
+**Verification (final tree):** tsc, lint, check:secrets ok; vitest 2930 / 9 skipped; neuro 21; src-tauri fmt + clippy clean, 1957 passed / 9 ignored; amara-router 133; e2e 816 passed / 12 skipped / 4 failed on the first run (one spec used the old tab name; fixed and rerun 34/34 in both themes). The full e2e was not rerun after that one-line spec fix.
+
+**Not done / for review:**
+1. Not installed or launched: nothing here has run in the packaged app.
+2. Telegram suggestions are on by default (his choice) and send a recommendation's title and suggested action. Turn off in Life › Overview › Suggestions from Amara.
+3. An older build reading the new `proactive.json` (with `nudges`) falls back to default settings. Install forward only.
+4. Only two observation rules exist (stalled goal, habit under target); no model producer.
+5. Tasks link to goals and projects only by `#goal:<id>` / `#project:<id>` tags in TASKS.md (no structured task store, per 0054).
+6. Workouts are not in the weekly review: the review's health section has no workout field.
+7. Sample-adapter mode: the new views read the live stores only (no sample data), so previews show them empty with honest notes.
