@@ -961,3 +961,39 @@ fn concurrent_duplicate_activity_inserts_store_one_row() {
         .unwrap();
     assert_eq!(rows.len(), 1);
 }
+
+#[test]
+fn forgetting_also_removes_the_record_from_backups_which_are_private() {
+    let t = tmp("forgetbak");
+    let db = t.0.join("amara.db");
+    FAIL_MIGRATION.with(|f| f.set(true));
+    let _ = store_for(&t.0, Scope::Personal).open();
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute(
+            "INSERT INTO activity (activity_id, scope, kind, subject_ref, occurred_at, recorded_at, source, actor, schema_version)
+             VALUES ('a1','personal','goal.created','goals:g-9','2026-11-20T00:00:00Z','t','user','taisun',1)",
+            [],
+        )
+        .unwrap();
+    FAIL_MIGRATION.with(|f| f.set(false));
+    let s = store_for(&t.0, Scope::Personal);
+    s.open().unwrap();
+    let copies = s.backup_copies();
+    assert_eq!(copies.len(), 1);
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        std::fs::metadata(&copies[0]).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    s.forget("goals:g-9").unwrap();
+    let n: i64 = rusqlite::Connection::open(&copies[0])
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM activity", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "the backup must not keep a forgotten record");
+    // Retention: nothing young is pruned.
+    assert_eq!(s.prune_backups(30), 0);
+    assert_eq!(s.prune_backups(0), 1);
+    assert!(s.backup_copies().is_empty());
+}

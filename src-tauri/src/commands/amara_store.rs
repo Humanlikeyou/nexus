@@ -568,11 +568,62 @@ impl Store {
         Ok(id)
     }
 
+    /// Migration backups and rollback copies of this store (`<file>.v<n>-*.bak`, `<file>.replaced-*`).
+    pub(crate) fn backup_copies(&self) -> Vec<PathBuf> {
+        let Some(name) = self.path.file_name().and_then(|n| n.to_str()) else {
+            return vec![];
+        };
+        let Some(dir) = self.path.parent() else {
+            return vec![];
+        };
+        std::fs::read_dir(dir)
+            .map(|it| {
+                it.filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| {
+                        p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                            (n.starts_with(&format!("{name}.v")) && n.ends_with(".bak"))
+                                || n.starts_with(&format!("{name}.replaced-"))
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Removes backup copies older than `days` (they would otherwise keep data forever).
+    pub(crate) fn prune_backups(&self, days: u64) -> usize {
+        let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86_400);
+        self.backup_copies()
+            .into_iter()
+            .filter(|p| {
+                std::fs::metadata(p)
+                    .and_then(|m| m.modified())
+                    .is_ok_and(|t| t < cutoff)
+            })
+            .filter(|p| std::fs::remove_file(p).is_ok())
+            .count()
+    }
+
     /// "Forget this": removes activity about the record and evidence pointing at it. A recommendation
     /// left with no observation is expired with note `evidence_deleted`. Returns rows removed.
     pub(crate) fn forget(&self, record_ref: &str) -> Result<usize, String> {
+        let n = self.forget_in_file(record_ref, None)?;
+        // Backups must not keep what was forgotten.
+        for copy in self.backup_copies() {
+            if let Err(e) = self.forget_in_file(record_ref, Some(&copy)) {
+                eprintln!("[amara-store] forget in a backup copy failed: {e}");
+            }
+        }
+        Ok(n)
+    }
+
+    fn forget_in_file(&self, record_ref: &str, copy: Option<&Path>) -> Result<usize, String> {
         RecordRef::parse(record_ref)?;
-        let mut conn = self.open()?;
+        let mut conn = match copy {
+            None => self.open()?,
+            // A backup is opened as it is (never migrated); an older schema has the same columns used here.
+            Some(p) => Connection::open(p).map_err(|e| format!("amara store: {e}"))?,
+        };
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| format!("amara store: {e}"))?;
@@ -972,6 +1023,9 @@ fn backup_before_migration(conn: &Connection, path: &Path, from: i64) -> Result<
             .unwrap_or("store.db")
     );
     let dest = path.with_file_name(name);
+    // Created empty and 0600 first, so the copy is never readable by others, even for a moment.
+    crate::app_paths::ensure_private_file(&dest)
+        .map_err(|e| format!("amara store: backup file: {e}"))?;
     conn.execute("VACUUM INTO ?1", params![dest.to_string_lossy()])
         .map_err(|e| {
             format!("amara store: backup before migration failed, nothing changed: {e}")
@@ -1024,8 +1078,12 @@ pub(crate) fn init_on_startup(data: &Path) {
     for scope in [Scope::Personal, Scope::Business] {
         let store = store_for(data, scope);
         let existed = store.path.exists();
+        let pruned = store.prune_backups(30);
+        if pruned > 0 {
+            eprintln!("[amara-store] removed {pruned} backup copy(ies) older than 30 days");
+        }
         match store.open() {
-            Ok(_) if !existed => log_migration(data, &store.path, "created schema v1"),
+            Ok(_) if !existed => log_migration(data, &store.path, "created schema v2"),
             Ok(_) => {}
             Err(e) => eprintln!("[amara-store] {e}"),
         }
