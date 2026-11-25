@@ -114,7 +114,20 @@ fn append_locked(dir: &Path, entry: &TakeLogEntry) -> Result<bool, String> {
 /// Appends one entry. Returns false (and writes nothing) when an entry with this id exists.
 pub(crate) fn append_in(dir: &Path, entry: &TakeLogEntry) -> Result<bool, String> {
     let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    append_locked(dir, entry)
+    let new = append_locked(dir, entry)?;
+    if new {
+        if let Some(data) = super::amara_store::data_above(dir, "takes") {
+            super::amara_store::note_take(
+                data,
+                &entry.id,
+                &entry.page,
+                &entry.kind,
+                &entry.text,
+                &entry.tier,
+            );
+        }
+    }
+    Ok(new)
 }
 
 pub(crate) fn list_in(dir: &Path) -> Vec<TakeLogEntry> {
@@ -145,6 +158,14 @@ pub(crate) fn forget_in(dir: &Path, id: &str, now_ms: i64) -> Result<bool, Strin
     let tmp = dir.join("take_log.jsonl.tmp");
     crate::app_paths::write_private(&tmp, out).map_err(|e| e.to_string())?;
     fs::rename(&tmp, log_path(dir)).map_err(|e| e.to_string())?;
+    let page = entries
+        .iter()
+        .find(|e| e.id == id)
+        .map(|e| e.page.clone())
+        .unwrap_or_default();
+    if let Some(data) = super::amara_store::data_above(dir, "takes") {
+        super::amara_store::forget_take(data, id, &page);
+    }
     Ok(true)
 }
 

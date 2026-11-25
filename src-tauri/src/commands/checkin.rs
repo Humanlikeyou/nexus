@@ -90,6 +90,22 @@ pub(crate) fn save_in(
     };
     store.entries.insert(0, r.clone());
     write_json_atomic(&file(dir), &store, MAX_BYTES)?;
+    if let Some(data) = super::amara_store::data_above(dir, "checkins") {
+        super::amara_store::note(
+            data,
+            super::amara_store::NewActivity {
+                scope: super::amara_store::Scope::Personal,
+                kind: "checkin.logged",
+                subject_ref: &format!("checkin:{}", r.id),
+                occurred_at: &r.at,
+                source: "user",
+                source_ref: None,
+                actor: "taisun",
+                summary: None,
+                data_json: None,
+            },
+        );
+    }
     Ok(r)
 }
 

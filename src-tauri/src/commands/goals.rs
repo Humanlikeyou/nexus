@@ -105,7 +105,51 @@ pub(crate) fn save_goals_at(path: &std::path::Path, goals: Vec<Goal>) -> Result<
     if ids(&back) != ids(&goals) {
         return Err("Goals were written but the file doesn't match what was saved.".into());
     }
+    if let Some(data) = path.parent() {
+        note_goal_activity(data, &old, &goals);
+    }
     Ok(())
+}
+
+/// 0053 step 4: what changed between the old and new goal lists, as activity rows. Habits have
+/// their own day marks (habits.rs), so they are skipped here.
+fn note_goal_activity(data: &std::path::Path, old: &[Goal], new: &[Goal]) {
+    use super::amara_store::{note, NewActivity, Scope};
+    for g in new.iter().filter(|g| g.category != "habit") {
+        let prev = old.iter().find(|o| o.id == g.id);
+        // Created: when the goal was made. Progress: now (the console may keep the old updated_at).
+        let at = match prev {
+            None if !g.created_at.is_empty() => g.created_at.clone(),
+            _ => crate::commands::shared::time::now_jst().to_rfc3339(),
+        };
+        let subject = format!("goals:{}", g.id);
+        let done = |x: &Goal| x.target > 0.0 && x.current >= x.target;
+        let kind = match prev {
+            None => Some("goal.created"),
+            Some(p) if done(g) && !done(p) => Some("goal.completed"),
+            Some(p) if (p.current - g.current).abs() > f64::EPSILON => Some("goal.progressed"),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            let data_json = prev
+                .filter(|_| kind == "goal.progressed" || kind == "goal.completed")
+                .map(|p| format!(r#"{{"from":{},"to":{}}}"#, p.current, g.current));
+            note(
+                data,
+                NewActivity {
+                    scope: Scope::Personal,
+                    kind,
+                    subject_ref: &subject,
+                    occurred_at: &at,
+                    source: "user",
+                    source_ref: None,
+                    actor: "taisun",
+                    summary: None,
+                    data_json: data_json.as_deref(),
+                },
+            );
+        }
+    }
 }
 
 /// The goals already on disk. Missing = none. A file that exists but can't be read or parsed is an
@@ -159,6 +203,8 @@ pub fn delete_goal(goal_id: String) -> Result<Vec<Goal>, String> {
     let mut goals = read_goals()?;
     goals.retain(|g| g.id != goal_id);
     save_goals(goals.clone())?;
+    // 0053: deleting a goal also removes the activity and evidence that point at it.
+    super::amara_store::forget_record(&nexus_data_dir(), &format!("goals:{goal_id}"));
     Ok(goals)
 }
 
@@ -247,8 +293,13 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
-        // No temp file is left behind.
-        assert_eq!(fs::read_dir(&t.0).unwrap().count(), 1);
+        // No temp file is left behind (amara.db beside it is the activity store, 0053 step 4).
+        let leftovers: Vec<String> = fs::read_dir(&t.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("goals") && n != "goals.json")
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 
     #[test]

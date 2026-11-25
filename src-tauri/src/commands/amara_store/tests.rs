@@ -30,6 +30,7 @@ fn habit_done<'a>(subject: &'a str, at: &'a str) -> NewActivity<'a> {
 
 fn rec<'a>(scope: Scope, kind: &'a str) -> NewRecommendation<'a> {
     NewRecommendation {
+        id: None,
         scope,
         domain: "life",
         kind,
@@ -358,4 +359,224 @@ fn a_newer_schema_is_refused_and_left_untouched() {
         )
         .unwrap();
     assert!(s.open().unwrap_err().contains("newer"));
+}
+
+// ── Step 4: domain owners record activity after their own successful write ────
+
+fn activity_rows(data: &Path, scope: Scope) -> Vec<(String, String)> {
+    let c = store_for(data, scope).open().unwrap();
+    let mut st = c
+        .prepare("SELECT kind, subject_ref FROM activity ORDER BY recorded_at")
+        .unwrap();
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(|x| x.unwrap())
+        .collect()
+}
+
+#[test]
+fn goal_saves_record_created_progressed_and_completed() {
+    let t = tmp("goals");
+    let path = t.0.join("goals.json");
+    let mut g: crate::commands::goals::Goal = serde_json::from_value(serde_json::json!({
+        "id": "g-1", "title": "Run 10 times", "category": "life", "target": 10.0, "current": 0.0,
+        "unit": "runs", "deadline": null
+    }))
+    .unwrap();
+    crate::commands::goals::save_goals_at(&path, vec![g.clone()]).unwrap();
+    g.current = 4.0;
+    crate::commands::goals::save_goals_at(&path, vec![g.clone()]).unwrap();
+    g.current = 10.0;
+    crate::commands::goals::save_goals_at(&path, vec![g.clone()]).unwrap();
+    // No change: no row.
+    crate::commands::goals::save_goals_at(&path, vec![g.clone()]).unwrap();
+    let kinds: Vec<String> = activity_rows(&t.0, Scope::Personal)
+        .into_iter()
+        .map(|r| r.0)
+        .collect();
+    assert_eq!(kinds, ["goal.created", "goal.progressed", "goal.completed"]);
+}
+
+#[test]
+fn a_check_in_records_activity_without_its_text() {
+    let t = tmp("checkin");
+    let draft: crate::commands::checkin::CheckInDraft = serde_json::from_value(
+        serde_json::json!({"mood": 4, "energy": 3, "text": "private words"}),
+    )
+    .unwrap();
+    let r = crate::commands::checkin::save_in(
+        &crate::commands::checkin::dir_in(&t.0),
+        &draft,
+        crate::commands::shared::time::now_jst(),
+    )
+    .unwrap();
+    assert_eq!(
+        activity_rows(&t.0, Scope::Personal),
+        [("checkin.logged".to_string(), format!("checkin:{}", r.id))]
+    );
+    let raw = std::fs::read(t.0.join("amara.db")).unwrap();
+    assert!(!String::from_utf8_lossy(&raw).contains("private words"));
+}
+
+#[test]
+fn a_muse_session_records_neural_activity() {
+    let t = tmp("session");
+    let s: crate::commands::sessions::RecordedSession = serde_json::from_value(serde_json::json!({
+        "id": "abc123", "device_type": "muse", "start": "2026-11-20T07:00:00+09:00",
+        "end": "2026-11-20T07:20:00+09:00", "duration_secs": 1200, "data_points": 10, "file_path": "",
+        "summary": {"avg_focus": null, "avg_relaxation": null, "avg_hr": null, "max_hr": null, "avg_hrv": null}
+    }))
+    .unwrap();
+    crate::commands::sessions::save_session_in(&t.0.join("sessions"), s, serde_json::json!({}))
+        .unwrap();
+    let c = store_for(&t.0, Scope::Neural).open().unwrap();
+    let (kind, scope): (String, String) = c
+        .query_row("SELECT kind, scope FROM activity", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    assert_eq!(
+        (kind.as_str(), scope.as_str()),
+        ("neuro.session_finished", "neural")
+    );
+}
+
+#[test]
+fn takes_become_recommendations_and_their_events_outcomes() {
+    let t = tmp("takes");
+    let dir = t.0.join("takes");
+    let entry: crate::commands::take_log::TakeLogEntry = serde_json::from_value(serde_json::json!({
+        "id": "fitness-1", "page": "fitness", "day": "2026-11-20", "generatedAt": 1, "kind": "daily",
+        "text": "An easy day would help recovery.", "tier": "light"
+    }))
+    .unwrap();
+    assert!(crate::commands::take_log::append_in(&dir, &entry).unwrap());
+    for (id, kind, data) in [
+        (
+            "e1",
+            "take_shown",
+            serde_json::json!({"takeId": "fitness-1"}),
+        ),
+        (
+            "e2",
+            "take_rating",
+            serde_json::json!({"takeId": "fitness-1", "helpful": true}),
+        ),
+    ] {
+        let e: crate::commands::take_events::TakeEvent = serde_json::from_value(serde_json::json!({
+            "id": id, "kind": kind, "at": 1_700_000_000_000i64, "page": "fitness", "day": "2026-11-20", "data": data
+        }))
+        .unwrap();
+        crate::commands::take_events::append_in(&dir, &e, 1_700_000_000_000).unwrap();
+    }
+    let c = store_for(&t.0, Scope::Personal).open().unwrap();
+    let status: String = c
+        .query_row(
+            "SELECT status FROM recommendation WHERE recommendation_id='take:fitness-1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(status, "evaluated");
+    let outs: Vec<(String, Option<String>)> = c
+        .prepare("SELECT outcome, evaluation FROM recommendation_outcome ORDER BY at")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(|x| x.unwrap())
+        .collect();
+    assert_eq!(
+        outs,
+        [
+            ("shown".into(), None),
+            ("evaluated".into(), Some("helped".into()))
+        ]
+    );
+    // The take log itself is unchanged in role: it still holds the take.
+    assert_eq!(crate::commands::take_log::list_in(&dir).len(), 1);
+}
+
+#[test]
+fn a_business_take_goes_to_the_business_file_only() {
+    let t = tmp("biztake");
+    let entry: crate::commands::take_log::TakeLogEntry = serde_json::from_value(serde_json::json!({
+        "id": "business-1", "page": "business", "day": "2026-11-20", "generatedAt": 1, "kind": "daily",
+        "text": "Revenue is flat."
+    }))
+    .unwrap();
+    crate::commands::take_log::append_in(&t.0.join("takes"), &entry).unwrap();
+    let biz = store_for(&t.0, Scope::Business).open().unwrap();
+    let n: i64 = biz
+        .query_row("SELECT COUNT(*) FROM recommendation", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 1);
+    let personal = store_for(&t.0, Scope::Personal).open().unwrap();
+    let n: i64 = personal
+        .query_row("SELECT COUNT(*) FROM recommendation", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0);
+}
+
+#[test]
+fn habit_money_and_date_owners_record_after_their_write() {
+    // Source pins: each hook sits after the owner's successful write, with the right kind.
+    for (file, write, kind) in [
+        (
+            include_str!("../habits.rs"),
+            "adds::logged_write(\"habit\"",
+            "\"habit.completed\"",
+        ),
+        (
+            include_str!("../money_entries.rs"),
+            "write_entry(data, &e)?;",
+            "\"money.logged\"",
+        ),
+        (
+            include_str!("../life_dates.rs"),
+            "write_json_atomic(&file(dir), &store, MAX_BYTES)?;\n    if rec.done",
+            "\"date.done\"",
+        ),
+    ] {
+        let w = file.find(write).unwrap_or_else(|| panic!("{write}"));
+        let k = file.find(kind).unwrap_or_else(|| panic!("{kind}"));
+        assert!(k > w, "{kind} must be recorded after {write}");
+    }
+}
+
+#[test]
+fn a_failing_activity_store_never_fails_the_owner_write() {
+    let t = tmp("nostore");
+    // A file where amara.db should be a directory's child: the store can't open.
+    std::fs::create_dir_all(t.0.join("amara.db")).unwrap();
+    let draft: crate::commands::checkin::CheckInDraft =
+        serde_json::from_value(serde_json::json!({"mood": 3, "energy": 3})).unwrap();
+    let r = crate::commands::checkin::save_in(
+        &crate::commands::checkin::dir_in(&t.0),
+        &draft,
+        crate::commands::shared::time::now_jst(),
+    );
+    assert!(r.is_ok());
+    assert_eq!(
+        crate::commands::checkin::list_in(&crate::commands::checkin::dir_in(&t.0), 10)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn forgetting_a_take_removes_its_recommendation_and_outcomes() {
+    let t = tmp("forgettake");
+    let dir = t.0.join("takes");
+    let entry: crate::commands::take_log::TakeLogEntry = serde_json::from_value(serde_json::json!({
+        "id": "life-1", "page": "life", "day": "2026-11-20", "generatedAt": 1, "kind": "daily", "text": "x"
+    }))
+    .unwrap();
+    crate::commands::take_log::append_in(&dir, &entry).unwrap();
+    assert!(crate::commands::take_log::forget_in(&dir, "life-1", 5).unwrap());
+    let c = store_for(&t.0, Scope::Personal).open().unwrap();
+    let n: i64 = c
+        .query_row("SELECT COUNT(*) FROM recommendation", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0);
 }

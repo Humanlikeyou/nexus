@@ -378,6 +378,21 @@ pub(crate) fn entry_add_in(
     let e = validate(data, d, today)?;
     let _g = lock();
     write_entry(data, &e)?;
+    // Amounts stay in the money store; the activity row only says an entry was logged.
+    super::amara_store::note(
+        data,
+        super::amara_store::NewActivity {
+            scope: super::amara_store::Scope::Personal,
+            kind: "money.logged",
+            subject_ref: &format!("money:{}", e.id),
+            occurred_at: &super::amara_store::day_start(&e.date),
+            source: "user",
+            source_ref: None,
+            actor: "taisun",
+            summary: None,
+            data_json: Some(r#"{"precision":"day"}"#),
+        },
+    );
     Ok(e)
 }
 

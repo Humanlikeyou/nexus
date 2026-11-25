@@ -44,11 +44,6 @@ impl Scope {
             Self::Ops => "ops",
         }
     }
-    pub fn parse(s: &str) -> Option<Self> {
-        [Self::Personal, Self::Business, Self::Neural, Self::Ops]
-            .into_iter()
-            .find(|x| x.as_str() == s)
-    }
 }
 
 /// May evidence in scope `ev` support a recommendation in scope `rec`?
@@ -79,6 +74,7 @@ const STORES: &[(&str, Scope)] = &[
     ("pattern", Scope::Personal),
     ("review", Scope::Personal),
     ("take", Scope::Personal),
+    ("history", Scope::Personal),
     ("replay", Scope::Neural),
     ("session", Scope::Neural),
     ("hemisync", Scope::Neural),
@@ -168,6 +164,8 @@ fn next_status(current: &str, outcome: &str) -> Option<&'static str> {
         ("proposed" | "shown" | "accepted" | "modified", "expired") => "expired",
         ("accepted" | "modified", "completed") => "completed",
         ("completed" | "dismissed" | "expired", "evaluated") => "evaluated",
+        // Rated without acting on it (a take), and a later re-rating.
+        ("proposed" | "shown" | "evaluated", "evaluated") => "evaluated",
         _ => return None,
     })
 }
@@ -250,6 +248,8 @@ pub(crate) struct NewActivity<'a> {
 }
 
 pub(crate) struct NewRecommendation<'a> {
+    /// A fixed id (takes use `take:<take id>`); `None` = a new UUID.
+    pub id: Option<&'a str>,
     pub scope: Scope,
     pub domain: &'a str,
     pub kind: &'a str,
@@ -402,7 +402,9 @@ impl Store {
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| format!("amara store: {e}"))?;
-        let id = uuid::Uuid::new_v4().to_string();
+        let id =
+            r.id.map(str::to_string)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let t = now();
         tx.execute(
             "INSERT INTO recommendation (recommendation_id, scope, domain, kind, title, body, status,
@@ -566,6 +568,150 @@ impl Store {
         tx.commit().map_err(|e| format!("amara store: {e}"))?;
         Ok(a + e)
     }
+}
+
+/// The domain owners' hook (step 4): records one activity after the owner's own write succeeded.
+/// Best effort by design: a failure here is logged and never undoes or fails the user's change.
+pub(crate) fn note(data: &Path, a: NewActivity) {
+    if let Err(e) = store_for(data, a.scope).record_activity(&a) {
+        eprintln!("[amara-store] activity {} not recorded: {e}", a.kind);
+    }
+}
+
+/// A forgotten take: its recommendation goes, with its outcomes (cascade). Logged on failure.
+pub(crate) fn forget_take(data: &Path, take_id: &str, page: &str) {
+    let (scope, _) = take_scope(page);
+    let r = store_for(data, scope).open().and_then(|c| {
+        c.execute(
+            "DELETE FROM recommendation WHERE recommendation_id = ?1",
+            params![format!("take:{take_id}")],
+        )
+        .map_err(|e| e.to_string())
+    });
+    if let Err(e) = r {
+        eprintln!("[amara-store] forgotten take not removed: {e}");
+    }
+}
+
+/// A deleted domain record: the activity about it and the evidence pointing at it go too.
+pub(crate) fn forget_record(data: &Path, record_ref: &str) {
+    for scope in [Scope::Personal, Scope::Business] {
+        if let Err(e) = store_for(data, scope).forget(record_ref) {
+            eprintln!("[amara-store] forget {record_ref}: {e}");
+        }
+    }
+}
+
+/// Which file and domain a take on `page` belongs to.
+pub(crate) fn take_scope(page: &str) -> (Scope, &'static str) {
+    match page {
+        "business" => (Scope::Business, "enterprise"),
+        "neuro" => (Scope::Neural, "neuro"),
+        "fitness" | "mindBody" => (Scope::Personal, "fitness"),
+        _ => (Scope::Personal, "life"),
+    }
+}
+
+/// A new take becomes a `take` recommendation (`take:<id>`), alongside `take_log.jsonl`.
+pub(crate) fn note_take(
+    data: &Path,
+    take_id: &str,
+    page: &str,
+    kind: &str,
+    text: &str,
+    tier: &str,
+) {
+    let (scope, domain) = take_scope(page);
+    let rid = format!("take:{take_id}");
+    let title: String = text.chars().take(120).collect();
+    let produced = format!("model:take.{kind}");
+    let tier = matches!(tier, "light" | "deep" | "claude").then_some(tier);
+    let r = store_for(data, scope).create_recommendation(
+        &NewRecommendation {
+            id: Some(&rid),
+            scope,
+            domain,
+            kind: "take",
+            title: if title.trim().is_empty() {
+                "Take"
+            } else {
+                &title
+            },
+            body: text,
+            expires_at: None,
+            produced_by: &produced,
+            model_tier: tier,
+            confidence: None,
+            confidence_basis: None,
+            target_ref: None,
+            supersedes_id: None,
+        },
+        &[],
+    );
+    if let Err(e) = r {
+        eprintln!("[amara-store] take recommendation not recorded: {e}");
+    }
+}
+
+/// `take_shown` / `take_rating` become outcomes on the take's recommendation. A take written before
+/// the store existed has no recommendation: nothing to record, and that is not an error.
+pub(crate) fn note_take_event(
+    data: &Path,
+    take_id: &str,
+    page: &str,
+    kind: &str,
+    helpful: Option<bool>,
+) {
+    let (scope, _) = take_scope(page);
+    let store = store_for(data, scope);
+    let rid = format!("take:{take_id}");
+    let known = store.open().and_then(|c| {
+        c.query_row(
+            "SELECT status FROM recommendation WHERE recommendation_id = ?1",
+            params![rid],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+    });
+    let Ok(Some(status)) = known else { return };
+    let r = match (kind, helpful) {
+        ("take_shown", _) if status == "proposed" => {
+            store.add_outcome(&rid, "shown", "system", None, None, None, None)
+        }
+        ("take_rating", Some(h)) => store.add_outcome(
+            &rid,
+            "evaluated",
+            "taisun",
+            None,
+            None,
+            Some(if h { "helped" } else { "no_effect" }),
+            Some(if h {
+                "rated helpful"
+            } else {
+                "rated not helpful"
+            }),
+        ),
+        _ => return,
+    };
+    if let Err(e) = r {
+        eprintln!("[amara-store] take outcome not recorded: {e}");
+    }
+}
+
+/// The data folder above a store folder, only when the folder has its production name (`takes`,
+/// `checkins`, ...). Anything else (a test's scratch folder) records nothing.
+pub(crate) fn data_above<'a>(dir: &'a Path, expected: &str) -> Option<&'a Path> {
+    if dir.file_name()? == expected {
+        dir.parent()
+    } else {
+        None
+    }
+}
+
+/// `YYYY-MM-DD` as the start of that day in JST (most domain records carry a day, not a time).
+pub(crate) fn day_start(day: &str) -> String {
+    format!("{day}T00:00:00+09:00")
 }
 
 fn init(conn: &Connection, b: Boundary) -> Result<(), String> {

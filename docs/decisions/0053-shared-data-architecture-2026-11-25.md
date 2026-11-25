@@ -38,8 +38,38 @@ The design is in `docs/specs/data-architecture-2026-11-25.md` (`495eb14`). His r
   - forget, which expires recommendations left without an observation.
 - **Backups:** both files are already inside the backup's full data-folder copy (`nexus-config`), so no backup change was needed.
 
-## Not done yet
+## Steps 3 and 4 (Taisun: "Go on", same day)
 
-- **Step 3:** the one-way `context_items` goal refresh, and freezing the `events.db` `goal/current` writer.
-- **Step 4:** domain owners calling `activity::record`, and takes writing recommendation and outcome rows. Until then the store API has no production caller (`#[allow(dead_code)]` on the module, with a comment).
+**Step 3: goal copies are one-way**
+- `migrate_legacy_terrence_context`, which runs on every snapshot load, used to insert missing goals only, so the copies went stale. `refresh_goal_copies` now inserts missing goals and refreshes changed ones (title, progress, deadline, metadata).
+- A copy whose goal was deleted from `goals.json` is archived. A copy the user deleted stays deleted. Nothing writes `goals.json`, and a test pins that.
+- `events.db`: `migrate_existing_data` no longer copies goals. `insert_events` refuses domain sources (`goal`, `habit`, `project`, `task`, `checkin`, `money`, `date`) before opening the database. The existing goal rows stay as frozen history.
+
+**Step 4: owners record activity after their own successful write** (best effort: a failure is logged and never fails the user's change)
+
+| Owner | Activity |
+|---|---|
+| `goals.rs` `save_goals_at` | `goal.created`, `goal.progressed`, `goal.completed` (habits are skipped; they have day marks) |
+| `habits.rs` `mark_in` | `habit.completed` / `habit.missed`, linked to its History entry |
+| `checkin.rs` `save_in` | `checkin.logged` (no text stored) |
+| `life_dates.rs` `upsert_in` | `date.done` when a date becomes done |
+| `money_entries.rs` `entry_add_in` | `money.logged` (no amounts stored) |
+| `sessions.rs` `save_session_in` | `neuro.session_finished`, neural scope |
+
+- **Takes:**
+  - a new take becomes a `take` recommendation (`take:<id>`), and `take_log.jsonl` stays as the takes UI log;
+  - `take_shown` becomes a `shown` outcome;
+  - `take_rating` becomes `evaluated` (helpful = `helped`, not helpful = `no_effect`);
+  - business-page takes go to the business file, neuro-page takes to the neural scope;
+  - forgetting a take removes its recommendation and its outcomes.
+- **Deleting a goal** removes the activity and evidence that point at it.
+- **Hooks only record when the folder has its production name** (`takes`, `checkins`, `life`, `sessions`), so scratch folders in tests record nothing.
+
+**Tests:** goal refresh and archive, the `events.db` refusal and its source pin, each owner's hook against its real write function in a temp folder, business takes isolated, take forget, and "a failing store never fails the owner's write". The full Rust suite passed twice in a row.
+
+## Not done
+
 - **Step 5:** the backfill, which waits for Taisun's answer.
+- **Not covered yet:** workout activity from NOOP, and business actions (Enterprise, Phase 11).
+- Any UI that shows activity or recommendations (Design work).
+- Nothing has run on Taisun's Mac until a build with these commits is installed.

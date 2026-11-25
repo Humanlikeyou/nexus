@@ -370,6 +370,25 @@ pub(crate) fn save_session_in(
         })?;
     std::io::Write::write_all(&mut file, json.as_bytes())
         .map_err(|e| format!("Failed to write session: {}", e))?;
+    if let (Some(data), Ok(_)) = (
+        super::amara_store::data_above(&dir, "sessions"),
+        chrono::DateTime::parse_from_rfc3339(&session.end),
+    ) {
+        super::amara_store::note(
+            data,
+            super::amara_store::NewActivity {
+                scope: super::amara_store::Scope::Neural,
+                kind: "neuro.session_finished",
+                subject_ref: &format!("session:{}_{}", session.device_type, session.id),
+                occurred_at: &session.end,
+                source: "user",
+                source_ref: None,
+                actor: "taisun",
+                summary: None,
+                data_json: Some(&format!(r#"{{"duration_secs":{}}}"#, session.duration_secs)),
+            },
+        );
+    }
 
     Ok(path.to_string_lossy().to_string())
 }

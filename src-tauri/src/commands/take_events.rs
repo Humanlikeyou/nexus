@@ -169,6 +169,20 @@ pub(crate) fn append_in(dir: &Path, e: &TakeEvent, now_ms: i64) -> Result<bool, 
         .open(path(dir))
         .map_err(|x| x.to_string())?;
     f.write_all(line.as_bytes()).map_err(|x| x.to_string())?;
+    if matches!(e.kind.as_str(), "take_shown" | "take_rating") {
+        if let (Some(data), Some(take_id)) = (
+            super::amara_store::data_above(dir, "takes"),
+            e.data["takeId"].as_str(),
+        ) {
+            super::amara_store::note_take_event(
+                data,
+                take_id,
+                e.page.as_deref().unwrap_or(""),
+                &e.kind,
+                e.data["helpful"].as_bool(),
+            );
+        }
+    }
     Ok(true)
 }
 

@@ -261,6 +261,7 @@ pub(crate) fn upsert_in(dir: &Path, draft: &LifeDateDraft) -> Result<LifeDateRec
         .dates
         .iter()
         .position(|r| r.id == rec.id && !rec.id.is_empty());
+    let was_done = at.is_some_and(|i| store.dates[i].done);
     match at {
         Some(i) => {
             let old = &store.dates[i];
@@ -286,6 +287,25 @@ pub(crate) fn upsert_in(dir: &Path, draft: &LifeDateDraft) -> Result<LifeDateRec
         }
     }
     write_json_atomic(&file(dir), &store, MAX_BYTES)?;
+    if rec.done && !was_done {
+        if let Some(data) = super::amara_store::data_above(dir, "life") {
+            let at = chrono::Utc::now().to_rfc3339();
+            super::amara_store::note(
+                data,
+                super::amara_store::NewActivity {
+                    scope: super::amara_store::Scope::Personal,
+                    kind: "date.done",
+                    subject_ref: &format!("date:{}", rec.id),
+                    occurred_at: &at,
+                    source: "user",
+                    source_ref: None,
+                    actor: "taisun",
+                    summary: None,
+                    data_json: None,
+                },
+            );
+        }
+    }
     Ok(rec)
 }
 
