@@ -170,6 +170,9 @@ pub(crate) fn validate_content(content: &str) -> Result<(), &'static str> {
     if !content.lines().any(|l| l.starts_with("# ")) {
         return Err("no_title");
     }
+    if content.chars().any(is_hidden_format) {
+        return Err("hidden_characters");
+    }
     let scan = super::terrence_runtime::guard_scan(content);
     if !scan.is_empty() {
         return Err("injection_pattern");
@@ -656,30 +659,56 @@ fn version_content(dirs: &SkillDirs, stem: &str, version: u32) -> Result<(String
     Ok((String::from_utf8_lossy(&bytes).into_owned(), sha))
 }
 
-/// Room for the skill text inside the dialog's character limit (header and footer take the rest).
-const PREVIEW_CHARS: usize = 1_400;
+/// Invisible format characters (bidi overrides, zero-width marks, tags): they can make the
+/// approval dialog show something other than what Amara would read, so a skill may not contain them.
+fn is_hidden_format(c: char) -> bool {
+    matches!(c as u32,
+        0x00AD | 0x061C | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064
+        | 0x2066..=0x2069 | 0xFEFF | 0xE0000..=0xE007F)
+}
 
-/// The approval dialog text: what becomes active, the start of its exact content, and a checksum
-/// prefix, always within the dialog limit (longer content says how much more there is).
-pub(crate) fn approval_preview(stem: &str, version: u32, content: &str, sha: &str) -> String {
-    let clean: String = content
+/// The approval dialog text: the FULL skill text (blank-line runs collapsed), its size and its full
+/// checksum. Following the approval gate's policy, text that doesn't fit is refused, never truncated.
+pub(crate) fn approval_preview(
+    stem: &str,
+    version: u32,
+    content: &str,
+    sha: &str,
+) -> Result<String, String> {
+    if content
         .chars()
-        .filter(|c| *c == '\n' || !c.is_control())
-        .collect();
-    let total = clean.chars().count();
-    let shown: String = clean.chars().take(PREVIEW_CHARS).collect();
-    let more = if total > PREVIEW_CHARS {
-        format!("\n… ({} more characters not shown)", total - PREVIEW_CHARS)
-    } else {
-        String::new()
-    };
+        .any(|c| is_hidden_format(c) || (c.is_control() && c != '\n' && c != '\t'))
+    {
+        return Err(format!(
+            "{} the skill contains hidden or control characters, so it can't be shown faithfully.",
+            super::approval_gate::REFUSED_PREFIX
+        ));
+    }
+    let mut body = String::new();
+    let mut blank = 0;
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            blank += 1;
+            if blank > 1 {
+                continue;
+            }
+        } else {
+            blank = 0;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
     let text = format!(
-        "Make a skill active\n\n{stem}, version {version}. Amara will use it on every reply.\nChecksum {}\n\n{shown}{more}",
-        &sha[..sha.len().min(12)]
+        "{stem}, version {version}. Amara will use it on every reply.\n{} bytes, SHA-256 {sha}\n\n{}",
+        content.len(),
+        body.trim_end()
     );
-    text.chars()
-        .take(super::approval_gate::MAX_APPROVAL_TEXT_CHARS)
-        .collect()
+    super::approval_gate::approval_text("Make a skill active", &text).map_err(|_| {
+        format!(
+            "{} this skill is too long to show in full in the approval dialog, so it can't be activated from it.",
+            super::approval_gate::REFUSED_PREFIX
+        )
+    })
 }
 
 pub(crate) fn list(dirs: &SkillDirs) -> Result<Vec<SkillRecord>, String> {
@@ -727,7 +756,7 @@ pub async fn activate_skill_version(
         let _guard = super::approval_gate::InFlightGuard::acquire_all(&[key])?;
         let dirs = SkillDirs::live();
         let (content, sha) = version_content(&dirs, &stem, version)?;
-        let text = approval_preview(&stem, version, &content, &sha);
+        let text = approval_preview(&stem, version, &content, &sha)?;
         let allowed = app
             .dialog()
             .message(text)

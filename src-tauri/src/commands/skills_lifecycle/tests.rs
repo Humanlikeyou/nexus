@@ -328,15 +328,26 @@ fn concurrent_proposals_get_distinct_versions_and_all_survive() {
 // ── Approval shows and binds the exact content (security review, 2026-11-25) ──
 
 #[test]
-fn the_approval_text_shows_the_content_and_checksum_within_the_dialog_limit() {
+fn the_approval_text_shows_all_of_the_content_or_refuses() {
     let sha = sha256_hex(GOOD.as_bytes());
-    let t = approval_preview("goal-tracking", 1, GOOD, &sha);
+    let t = approval_preview("goal-tracking", 1, GOOD, &sha).unwrap();
     assert!(t.contains("**When to use**: weekly reviews."));
-    assert!(t.contains(&sha[..12]));
+    assert!(t.contains(&sha) && t.contains(&format!("{} bytes", GOOD.len())));
+    // Too long to show in full: refused, never truncated.
     let long = format!("# x\n{}", "word ".repeat(2000));
-    let t = approval_preview("x", 2, &long, &sha);
-    assert!(t.chars().count() <= crate::commands::approval_gate::MAX_APPROVAL_TEXT_CHARS);
-    assert!(t.contains("more characters not shown"));
+    assert!(approval_preview("x", 2, &long, &sha)
+        .unwrap_err()
+        .starts_with("refused:"));
+    // Hidden format characters: refused in the dialog and at proposal.
+    let bidi = "# x\nsafe \u{202E}txet nedd\u{200B}ih";
+    assert!(approval_preview("x", 3, bidi, &sha)
+        .unwrap_err()
+        .starts_with("refused:"));
+    assert_eq!(validate_content(bidi), Err("hidden_characters"));
+    // Blank-line runs are collapsed so they can't push text out of view.
+    let gaps = format!("# x\nfirst{}last", "\n".repeat(50));
+    let t = approval_preview("x", 4, &gaps, &sha).unwrap();
+    assert!(t.contains("first\n\nlast"));
 }
 
 #[test]
