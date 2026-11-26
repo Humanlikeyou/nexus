@@ -35,6 +35,7 @@ function data() {
     business_proposals: [],
     business_activity: [{ activityId: "a1", scope: "business", kind: "business.created", subjectRef: "biz:taiyo-skin/business", occurredAt: NOW, recordedAt: NOW, source: "scheduler", provenance: "automated", certainty: "confirmed", sourceRef: null, actor: "system", summary: "Workspace created: TaiyoSkin", dataJson: null }],
     business_recommendations: [],
+    business_site_changes: [],
     business_report: { report: "website", generatedAt: NOW, notes: [], insights: [
       { id: "web.views.total", group: "Page performance", title: "Page views", kind: "measured", status: "available", statement: "2279 page views recorded by the site's own analytics.", value: 2279, unit: "views", n: 2279, rows: [], window: "2026-03-22 to 2026-11-20", sources: ["Supabase page_views (synced 2026-11-26)"], note: null },
       { id: "web.pages.top", group: "Page performance", title: "Most viewed pages", kind: "calculated", status: "available", statement: "Views per page.", value: null, unit: null, n: 2279, rows: [{ label: "/shop", value: 900, share: 0.4 }], window: null, sources: ["Supabase page_views"], note: null },
@@ -63,7 +64,7 @@ test("Workspaces: TaiyoSkin's overview names every connector state, and every se
   const states = field.getByRole("list", { name: "Integration status" });
   // StatusText = glyph + word in one element.
   for (const s of ["Authentication required", "Not connected", "Error", "Connected"]) await expect(states.getByText(new RegExp(`${s}$`))).toBeVisible();
-  for (const tab of ["Context & memory", "Documents", "Integrations", "Intelligence", "Permissions", "Approvals", "Activity", "Summary"]) {
+  for (const tab of ["Context & memory", "Documents", "Integrations", "Intelligence", "Website changes", "Permissions", "Approvals", "Activity", "Summary"]) {
     await field.getByRole("radio", { name: tab, exact: true }).click();
     await expect(field.getByRole("radio", { name: tab, exact: true })).toHaveAttribute("aria-checked", "true");
     await expect(field.getByText(/^Loading /)).toHaveCount(0);
@@ -87,7 +88,7 @@ test("Workspaces: a stored key is a password field that is never filled, and onl
   await expect(field.getByRole("list", { name: "Product catalogue" }).getByText("Unverified", { exact: true })).toBeVisible();
 });
 
-for (const tab of ["Summary", "Context & memory", "Integrations", "Intelligence", "Permissions"]) {
+for (const tab of ["Summary", "Context & memory", "Integrations", "Intelligence", "Website changes", "Permissions"]) {
   test(`Workspaces › ${tab}: no serious or critical axe violations`, async ({ page, theme }) => {
     const field = await openWorkspaces(page, theme);
     await field.getByRole("radio", { name: tab, exact: true }).click();

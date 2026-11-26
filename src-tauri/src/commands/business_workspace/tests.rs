@@ -207,6 +207,10 @@ fn every_tenant_statement_binds_its_business_id() {
         "site_fact",
         "business_salt",
         "insight_note",
+        // 0065
+        "site_snapshot",
+        "site_change",
+        "site_change_event",
     ];
     // Startup maintenance: marks stale runs interrupted in every business; reads nothing out.
     let exceptions = [
@@ -225,6 +229,7 @@ fn every_tenant_statement_binds_its_business_id() {
         ("supabase.rs", include_str!("supabase.rs")),
         ("website.rs", include_str!("website.rs")),
         ("intelligence.rs", include_str!("intelligence.rs")),
+        ("site_ops.rs", include_str!("site_ops.rs")),
     ] {
         // Tests live in tests.rs, so each of these files is production code from top to bottom.
         let prod = src;
@@ -1021,6 +1026,7 @@ fn workspace_code_stays_out_of_personal_memory_and_arm_and_only_net_rs_reaches_t
         ("website.rs", include_str!("website.rs")),
         ("drive_folder.rs", include_str!("drive_folder.rs")),
         ("intelligence.rs", include_str!("intelligence.rs")),
+        ("site_ops.rs", include_str!("site_ops.rs")),
     ];
     for (name, src) in srcs {
         // Code only: comments may name the neighbouring stores to say they are not used.

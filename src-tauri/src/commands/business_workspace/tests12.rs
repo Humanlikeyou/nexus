@@ -79,7 +79,8 @@ fn a_v1_store_with_data_is_backed_up_and_migrated_with_hostinger_renamed() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "2");
+    // v1 → v2 → v3 in one open (0065 added the website-operations tables).
+    assert_eq!(v, "3");
     assert!(
         std::fs::read_dir(d.0.join("business")).unwrap().any(|e| e
             .unwrap()

@@ -5,6 +5,7 @@ import {
   type Activity, type BizDocument, type Business, type Connector, type ContextItem, type ContextVersion, type KnowledgeHit, type MemoryNote,
   type Insight, type Overview, type Permission, type Proposal, type Recommendation, type Report, type WorkspaceCalls,
 } from "./workspaceApi";
+import { SiteOpsTab } from "./SiteOpsView";
 import "../../ui/PanelKit.css";
 
 /**
@@ -12,10 +13,10 @@ import "../../ui/PanelKit.css";
  * the Enterprise host). Everything shown comes from the Rust workspace store for the selected business only.
  * No revenue is shown here: business income stays in Finances and Treasury, and ARM trading stays apart.
  */
-type Tab = "overview" | "context" | "documents" | "integrations" | "intelligence" | "permissions" | "approvals" | "activity";
+type Tab = "overview" | "context" | "documents" | "integrations" | "intelligence" | "website" | "permissions" | "approvals" | "activity";
 const TABS: Array<{ value: Tab; label: string }> = [
   { value: "overview", label: "Summary" }, { value: "context", label: "Context & memory" }, { value: "documents", label: "Documents" },
-  { value: "integrations", label: "Integrations" }, { value: "intelligence", label: "Intelligence" }, { value: "permissions", label: "Permissions" }, { value: "approvals", label: "Approvals" }, { value: "activity", label: "Activity" },
+  { value: "integrations", label: "Integrations" }, { value: "intelligence", label: "Intelligence" }, { value: "website", label: "Website changes" }, { value: "permissions", label: "Permissions" }, { value: "approvals", label: "Approvals" }, { value: "activity", label: "Activity" },
 ];
 
 function Material({ status }: { status: string }) {
@@ -455,6 +456,7 @@ export function WorkspaceView({ calls = liveWorkspaceCalls }: { calls?: Workspac
         {tab === "documents" && <DocumentsTab key={id} id={id} calls={calls} />}
         {tab === "integrations" && <IntegrationsTab key={id} id={id} calls={calls} />}
         {tab === "intelligence" && <IntelligenceTab key={id} id={id} calls={calls} />}
+        {tab === "website" && <SiteOpsTab key={id} id={id} calls={calls} />}
         {tab === "permissions" && <PermissionsTab key={id} id={id} calls={calls} />}
         {tab === "approvals" && <ApprovalsTab key={id} id={id} calls={calls} />}
         {tab === "activity" && <ActivityTab key={id} id={id} calls={calls} />}

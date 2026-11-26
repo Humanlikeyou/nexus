@@ -877,3 +877,146 @@ pub async fn business_recommendations(
     })
     .await
 }
+
+// ─── Website operations (0065) ───────────────────────────────────────────────
+
+use super::site_ops::{
+    BusinessSiteChange, BusinessSiteChangeInput, BusinessSiteEvent, BusinessSiteMatch,
+    BusinessSiteSnapshot,
+};
+
+#[tauri::command]
+#[specta::specta]
+pub async fn business_site_snapshot(business_id: String) -> Result<BusinessSiteSnapshot, String> {
+    blocking(move || {
+        super::site_ops::snapshot_live(
+            &live().tenant(&business_id)?,
+            &super::net::Live,
+            super::net::real_sleep,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn business_site_locate(
+    business_id: String,
+    query: String,
+) -> Result<Vec<BusinessSiteMatch>, String> {
+    blocking(move || super::site_ops::locate(&live().tenant(&business_id)?, &query)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn business_site_draft(
+    business_id: String,
+    input: BusinessSiteChangeInput,
+) -> Result<BusinessSiteChange, String> {
+    blocking(move || super::site_ops::draft(&live().tenant(&business_id)?, &input, "taisun")).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn business_site_changes(business_id: String) -> Result<Vec<BusinessSiteChange>, String> {
+    blocking(move || live().tenant(&business_id)?.site_changes()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn business_site_events(
+    business_id: String,
+    change_id: String,
+) -> Result<Vec<BusinessSiteEvent>, String> {
+    blocking(move || live().tenant(&business_id)?.site_events(&change_id)).await
+}
+
+/// Stage 8: the native dialog shows the target, every flag and the diff; Allow approves exactly that.
+#[tauri::command]
+#[specta::specta]
+pub async fn business_site_approve(
+    app: tauri::AppHandle,
+    business_id: String,
+    change_id: String,
+) -> Result<BusinessSiteChange, String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    blocking(move || {
+        let t = live().tenant(&business_id)?;
+        let text = super::site_ops::approval_text(&t.site_change(&change_id)?)?;
+        let _guard = crate::commands::approval_gate::InFlightGuard::acquire_all(&[format!(
+            "site-change:{business_id}:{change_id}"
+        )])?;
+        let allowed = app
+            .dialog()
+            .message(text.clone())
+            .title(crate::commands::approval_gate::APPROVAL_DIALOG_TITLE)
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Allow".into(),
+                "Deny".into(),
+            ))
+            .blocking_show();
+        if !allowed {
+            return Err(crate::commands::approval_gate::denied_message());
+        }
+        super::site_ops::approve(&t, &change_id, &text)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn business_site_reject(
+    business_id: String,
+    change_id: String,
+) -> Result<BusinessSiteChange, String> {
+    blocking(move || super::site_ops::reject(&live().tenant(&business_id)?, &change_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn business_site_confirm_backup(
+    business_id: String,
+    change_id: String,
+) -> Result<BusinessSiteChange, String> {
+    blocking(move || {
+        super::site_ops::confirm_hpanel_backup(&live().tenant(&business_id)?, &change_id)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn business_site_package(
+    business_id: String,
+    change_id: String,
+) -> Result<BusinessSiteChange, String> {
+    blocking(move || {
+        super::site_ops::package(
+            &live().tenant(&business_id)?,
+            &change_id,
+            &super::net::Live,
+            super::net::real_sleep,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn business_site_verify(
+    business_id: String,
+    change_id: String,
+    rollback: bool,
+) -> Result<BusinessSiteChange, String> {
+    blocking(move || {
+        super::site_ops::verify(
+            &live().tenant(&business_id)?,
+            &change_id,
+            &super::net::Live,
+            super::net::real_sleep,
+            rollback,
+        )
+    })
+    .await
+}

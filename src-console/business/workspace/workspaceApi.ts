@@ -16,6 +16,10 @@ import type {
   BusinessProposal_Serialize,
   BusinessReport_Serialize,
   BusinessInsight_Serialize,
+  BusinessSiteChange_Serialize,
+  BusinessSiteEvent_Serialize,
+  BusinessSiteMatch_Serialize,
+  BusinessSiteSnapshot,
   BusinessSyncRun_Serialize,
   BusinessWorkspaceOverview_Serialize,
   Business_Serialize,
@@ -37,6 +41,32 @@ export type Activity = ActivityRow_Serialize;
 export type Recommendation = RecommendationRow_Serialize;
 export type Report = BusinessReport_Serialize;
 export type Insight = BusinessInsight_Serialize;
+export type SiteChange = BusinessSiteChange_Serialize;
+export type SiteEvent = BusinessSiteEvent_Serialize;
+export type SiteMatch = BusinessSiteMatch_Serialize;
+export type SiteSnapshot = BusinessSiteSnapshot;
+export type SiteChangeInput = { contentType: string; value: string; path: string | null; documentId: string | null; sourceRefs: string[] };
+
+/** Decision 0065: what a change can be today. Bundled content waits for a source that reproduces the live build. */
+export const SITE_TYPES: Array<{ value: string; label: string; available: boolean }> = [
+  { value: "seo_description", label: "SEO description", available: true },
+  { value: "seo_title", label: "SEO title", available: true },
+  { value: "sitemap", label: "Sitemap", available: true },
+  { value: "robots", label: "robots.txt", available: true },
+  { value: "asset_replace", label: "Replace an image or asset", available: true },
+  { value: "asset_delete", label: "Delete a file", available: true },
+  { value: "product_page", label: "Product page (not available yet)", available: false },
+  { value: "product_description", label: "Product description (not available yet)", available: false },
+  { value: "ingredients", label: "Ingredient information (not available yet)", available: false },
+  { value: "faq", label: "FAQ (not available yet)", available: false },
+  { value: "blog", label: "Blog content (not available yet)", available: false },
+  { value: "landing_page", label: "Landing page (not available yet)", available: false },
+];
+export const SITE_STATUS: Record<string, string> = {
+  draft: "Draft", approved: "Approved", packaged: "Ready to upload", verified: "Published and verified", verify_failed: "Verification failed",
+  rolled_back: "Rolled back", rollback_failed: "Rollback not verified", rejected: "Rejected",
+};
+export const SITE_FLAG: Record<string, string> = { pricing: "Pricing", formulation: "Formulation", customer_communication: "Customer communication", deletion: "Deletion" };
 
 /** Decision 0064: what each insight is. Words, never colour alone. */
 export const INSIGHT_KIND: Record<string, { text: string; tone: "info" | "neutral" | "accent" | "warning" }> = {
@@ -117,6 +147,16 @@ export type WorkspaceCalls = {
   setupSql: () => Promise<string>;
   report: (id: string, report: "website" | "customers") => Promise<Report>;
   interpret: (id: string, report: "website" | "customers") => Promise<Report>;
+  siteSnapshot: (id: string) => Promise<SiteSnapshot>;
+  siteLocate: (id: string, query: string) => Promise<SiteMatch[]>;
+  siteDraft: (id: string, input: SiteChangeInput) => Promise<SiteChange>;
+  siteChanges: (id: string) => Promise<SiteChange[]>;
+  siteEvents: (id: string, changeId: string) => Promise<SiteEvent[]>;
+  siteApprove: (id: string, changeId: string) => Promise<SiteChange>;
+  siteReject: (id: string, changeId: string) => Promise<SiteChange>;
+  siteConfirmBackup: (id: string, changeId: string) => Promise<SiteChange>;
+  sitePackage: (id: string, changeId: string) => Promise<SiteChange>;
+  siteVerify: (id: string, changeId: string, rollback: boolean) => Promise<SiteChange>;
   permissions: (id: string) => Promise<Permission[]>;
   setPermission: (id: string, actor: string, capability: string, allowed: boolean) => Promise<Permission[]>;
   proposals: (id: string) => Promise<Proposal[]>;
@@ -156,6 +196,16 @@ export const liveWorkspaceCalls: WorkspaceCalls = {
   setupSql: () => call("business_supabase_setup_sql"),
   report: (businessId, report) => call("business_report", { businessId, report }),
   interpret: (businessId, report) => call("business_report_interpret", { businessId, report }),
+  siteSnapshot: (businessId) => call("business_site_snapshot", { businessId }),
+  siteLocate: (businessId, query) => call("business_site_locate", { businessId, query }),
+  siteDraft: (businessId, input) => call("business_site_draft", { businessId, input }),
+  siteChanges: (businessId) => call("business_site_changes", { businessId }),
+  siteEvents: (businessId, changeId) => call("business_site_events", { businessId, changeId }),
+  siteApprove: (businessId, changeId) => call("business_site_approve", { businessId, changeId }),
+  siteReject: (businessId, changeId) => call("business_site_reject", { businessId, changeId }),
+  siteConfirmBackup: (businessId, changeId) => call("business_site_confirm_backup", { businessId, changeId }),
+  sitePackage: (businessId, changeId) => call("business_site_package", { businessId, changeId }),
+  siteVerify: (businessId, changeId, rollback) => call("business_site_verify", { businessId, changeId, rollback }),
   permissions: (businessId) => call("business_permissions", { businessId }),
   setPermission: (businessId, actor, capability, allowed) => call("business_permission_set", { businessId, actor, capability, allowed }),
   proposals: (businessId) => call("business_proposals", { businessId, status: null }),

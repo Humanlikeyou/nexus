@@ -536,6 +536,17 @@ export const commands = {
 	 *  read permission for this business. Returns the report with the new notes.
 	 */
 	businessReportInterpret: (businessId: string, report: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessReport_Serialize>("business_report_interpret", { businessId, report }, options),
+	businessSiteSnapshot: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteSnapshot>("business_site_snapshot", { businessId }, options),
+	businessSiteLocate: (businessId: string, query: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteMatch_Serialize[]>("business_site_locate", { businessId, query }, options),
+	businessSiteDraft: (businessId: string, input: BusinessSiteChangeInput_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_draft", { businessId, input }, options),
+	businessSiteChanges: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize[]>("business_site_changes", { businessId }, options),
+	businessSiteEvents: (businessId: string, changeId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteEvent_Serialize[]>("business_site_events", { businessId, changeId }, options),
+	/**  Stage 8: the native dialog shows the target, every flag and the diff; Allow approves exactly that. */
+	businessSiteApprove: (businessId: string, changeId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_approve", { businessId, changeId }, options),
+	businessSiteReject: (businessId: string, changeId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_reject", { businessId, changeId }, options),
+	businessSiteConfirmBackup: (businessId: string, changeId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_confirm_backup", { businessId, changeId }, options),
+	businessSitePackage: (businessId: string, changeId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_package", { businessId, changeId }, options),
+	businessSiteVerify: (businessId: string, changeId: string, rollback: boolean, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_verify", { businessId, changeId, rollback }, options),
 	businessSyncRuns: (businessId: string, connectorId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSyncRun_Serialize[]>("business_sync_runs", { businessId, connectorId }, options),
 	businessPermissions: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessPermission[]>("business_permissions", { businessId }, options),
 	businessPermissionSet: (businessId: string, actor: string, capability: string, allowed: boolean, options?: InvokeOptions) => __TAURI_INVOKE<BusinessPermission[]>("business_permission_set", { businessId, actor, capability, allowed }, options),
@@ -1609,6 +1620,12 @@ export type BusinessContextVersion_Serialize = {
 	at: string,
 };
 
+export type BusinessDiffLine = {
+	/**  " " | "-" | "+". */
+	op: string,
+	text: string,
+};
+
 export type BusinessDocument = BusinessDocument_Serialize | BusinessDocument_Deserialize;
 
 export type BusinessDocument_Deserialize = {
@@ -1867,6 +1884,138 @@ export type BusinessSectionCount = {
 	approved: number,
 	draft: number,
 	unverified: number,
+};
+
+export type BusinessSiteChange = BusinessSiteChange_Serialize | BusinessSiteChange_Deserialize;
+
+export type BusinessSiteChangeInput = BusinessSiteChangeInput_Serialize | BusinessSiteChangeInput_Deserialize;
+
+export type BusinessSiteChangeInput_Deserialize = {
+	/**  seo_title | seo_description | robots | sitemap | asset_replace | asset_delete (or a bundled type, refused). */
+	contentType: string,
+	/**  The text for text changes; empty for assets. */
+	value: string,
+	/**  The file path for asset changes ("/favicon.png"). */
+	path?: string | null,
+	/**  An approved workspace document supplying the new asset bytes. */
+	documentId?: string | null,
+	/**  Approved context items the text is based on. */
+	sourceRefs: string[],
+};
+
+export type BusinessSiteChangeInput_Serialize = {
+	/**  seo_title | seo_description | robots | sitemap | asset_replace | asset_delete (or a bundled type, refused). */
+	contentType: string,
+	/**  The text for text changes; empty for assets. */
+	value: string,
+	/**  The file path for asset changes ("/favicon.png"). */
+	path: string | null,
+	/**  An approved workspace document supplying the new asset bytes. */
+	documentId: string | null,
+	/**  Approved context items the text is based on. */
+	sourceRefs: string[],
+};
+
+export type BusinessSiteChange_Deserialize = {
+	changeId: string,
+	contentType: string,
+	target: string,
+	title: string,
+	/**  draft | approved | packaged | verified | verify_failed | rolled_back | rollback_failed | rejected. */
+	status: string,
+	before: string,
+	after: string,
+	diff: BusinessDiffLine[],
+	checks: BusinessSiteCheck[],
+	/**  pricing | formulation | customer_communication | deletion. */
+	flags: string[],
+	sourceRefs: string[],
+	baseSnapshot: string,
+	hpanelBackupConfirmed: boolean,
+	packageDir?: string | null,
+	verifyDetail?: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessSiteChange_Serialize = {
+	changeId: string,
+	contentType: string,
+	target: string,
+	title: string,
+	/**  draft | approved | packaged | verified | verify_failed | rolled_back | rollback_failed | rejected. */
+	status: string,
+	before: string,
+	after: string,
+	diff: BusinessDiffLine[],
+	checks: BusinessSiteCheck[],
+	/**  pricing | formulation | customer_communication | deletion. */
+	flags: string[],
+	sourceRefs: string[],
+	baseSnapshot: string,
+	hpanelBackupConfirmed: boolean,
+	packageDir: string | null,
+	verifyDetail: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessSiteCheck = {
+	/**  ok | warn | error. */
+	level: string,
+	text: string,
+};
+
+export type BusinessSiteEvent = BusinessSiteEvent_Serialize | BusinessSiteEvent_Deserialize;
+
+export type BusinessSiteEvent_Deserialize = {
+	seq: number,
+	at: string,
+	fromStatus?: string | null,
+	toStatus: string,
+	actor: string,
+	detail: string,
+};
+
+export type BusinessSiteEvent_Serialize = {
+	seq: number,
+	at: string,
+	fromStatus: string | null,
+	toStatus: string,
+	actor: string,
+	detail: string,
+};
+
+export type BusinessSiteFile = {
+	path: string,
+	sha256: string,
+	bytes: number,
+};
+
+export type BusinessSiteMatch = BusinessSiteMatch_Serialize | BusinessSiteMatch_Deserialize;
+
+export type BusinessSiteMatch_Deserialize = {
+	/**  site | context. */
+	kind: string,
+	reference: string,
+	excerpt: string,
+	status?: string | null,
+};
+
+export type BusinessSiteMatch_Serialize = {
+	/**  site | context. */
+	kind: string,
+	reference: string,
+	excerpt: string,
+	status: string | null,
+};
+
+export type BusinessSiteSnapshot = {
+	snapshotId: string,
+	createdAt: string,
+	files: BusinessSiteFile[],
+	/**  What a public download can't include. */
+	limits: string,
 };
 
 export type BusinessSyncRun = BusinessSyncRun_Serialize | BusinessSyncRun_Deserialize;

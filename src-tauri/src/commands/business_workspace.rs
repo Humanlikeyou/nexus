@@ -26,12 +26,15 @@ pub(crate) mod drive_folder;
 pub(crate) mod intelligence;
 pub(crate) mod net;
 pub(crate) mod ops;
+pub(crate) mod site_ops;
 pub(crate) mod supabase;
 pub(crate) mod sync_local;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests12;
+#[cfg(test)]
+mod tests13;
 pub(crate) mod website;
 
 use super::amara_store::{self, NewActivity, Scope};
@@ -43,7 +46,7 @@ use std::path::{Path, PathBuf};
 
 /// v1 (0063): workspaces. v2 (0064): the Phase 12 connector registry, check results, sync cursors,
 /// first-party site analytics, customer aggregates, site facts and interpretation notes.
-pub(crate) const SCHEMA_VERSION: i64 = 2;
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 const MAX_TITLE: usize = 160;
 const MAX_BODY: usize = 20_000;
 const MAX_MEMORY: usize = 2_000;
@@ -622,6 +625,9 @@ impl Tenant {
     }
     pub(crate) fn data_path(&self) -> PathBuf {
         self.data.clone()
+    }
+    pub(crate) fn docs_path(&self) -> &Path {
+        &self.docs
     }
     fn b(&self) -> &str {
         self.id.as_str()
@@ -2032,6 +2038,33 @@ fn init(conn: &Connection) -> Result<(), String> {
     };
     if version < 2 {
         migrate_to_v2(conn)?;
+    }
+    if version < 3 {
+        // v3 (0065): website operations tables. Additive and idempotent, in one transaction.
+        conn.execute_batch("BEGIN IMMEDIATE").map_err(err)?;
+        let r = (|| {
+            conn.execute_batch(site_ops::V3_SQL).map_err(err)?;
+            for t in site_ops::V3_TABLES {
+                conn.execute_batch(&format!(
+                    "CREATE TRIGGER IF NOT EXISTS {t}_tenant_fixed BEFORE UPDATE OF business_id ON {t}
+                         BEGIN SELECT RAISE(ABORT, 'business_id is fixed'); END;"
+                ))
+                .map_err(err)?;
+            }
+            conn.execute(
+                "UPDATE schema_meta SET value = '3' WHERE key = 'schema_version'",
+                [],
+            )
+            .map_err(err)?;
+            Ok::<_, String>(())
+        })();
+        match r {
+            Ok(()) => conn.execute_batch("COMMIT").map_err(err)?,
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(e);
+            }
+        }
     }
     // A sync that was running when the app stopped can't still be running.
     conn.execute(
