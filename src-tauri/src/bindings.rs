@@ -371,6 +371,7 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::neuro_baseline::neuro_baseline_get,
             crate::commands::neuro_protocols::neuro_protocol_settings_get,
             crate::commands::neuro_protocols::neuro_protocol_settings_set,
+            crate::commands::neuro_training::neuro_training_records,
             crate::commands::habits::habit_mark,
             crate::commands::habits::habit_days,
             crate::commands::goal_roadmap::roadmap_accept,

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invokeBound } from "../bridge";
 import { Button, Card, PageHero, Select, Toggle } from "../ui";
 import type { NfProtocol } from "../legacy-core/lib/types";
 import { describeFeature, PROTOCOL_SET_VERSION, targetFeatures, type ProtocolSettings, type ProtocolSound } from "./protocolConfig";
@@ -56,11 +57,54 @@ export function ProtocolSettingsCard({ training, disabled = false }: { training:
   );
 }
 
+/** One saved session's progress record, as `neuro_training_records` returns it (no raw EEG). */
+export type TrainingRecord = {
+  sessionId: string; start: string; durationSecs: number; protocolId: string; protocolSet: string; recordVersion: string; method: string;
+  source: string | null; validPct: number | null; timeInTargetPct: number | null; trainedSeconds: number; targetRewardRate: number | null;
+  thresholdChecks: number; finalThresholdScale: number | null; baselineLevels: Record<string, number>; heldSeconds: Record<string, number>;
+  eligible: boolean; notEligibleReason: string | null;
+};
+
+const HELD_LABEL: Record<string, string> = { contact: "contact", dropout: "signal gaps", blink: "blinks", jaw: "jaw", movement: "movement", noise: "noise", frozen: "frozen signal", not_live: "not live" };
+const when = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }); };
+const num1 = (v: number | null | undefined, unit = "") => (v == null ? "Not measured" : `${Math.round(v * 10) / 10}${unit}`);
+
+const loadRecords = () => invokeBound<TrainingRecord[]>("neuro_training_records", { limit: 20 });
+
+export function TrainingRecordsCard({ protocols, load = loadRecords }: { protocols: NfProtocol[]; load?: () => Promise<TrainingRecord[]> }) {
+  const [records, setRecords] = useState<TrainingRecord[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { let alive = true; load().then((r) => { if (alive) setRecords(r ?? []); }, (e: unknown) => { if (alive) setError(e instanceof Error ? e.message : String(e)); }); return () => { alive = false; }; }, [load]);
+  const name = (id: string) => protocols.find((p) => p.id === id)?.name ?? id;
+  return (
+    <Card title="Session records">
+      <p className="pk-note">How each guided session&apos;s feedback was produced. Time in target is kept near your target reward rate by design, because the threshold adapts, so it is a record of the session, not a score.</p>
+      {error ? <p className="pk-note" role="alert">The records couldn&apos;t be read: {error}</p>
+        : records == null ? <p className="pk-note" role="status">Reading the records…</p>
+        : records.length === 0 ? <p className="pk-note">No records yet. Records start with guided sessions from this version on.</p>
+        : <ul className="pk-list" aria-label="Session records">{records.map((r) => {
+          const held = Object.entries(r.heldSeconds).filter(([, s]) => s > 0).map(([k, s]) => `${HELD_LABEL[k] ?? k} ${Math.round(s)} s`);
+          const levels = Object.entries(r.baselineLevels).map(([k, v]) => `${k} ${v.toFixed(1)}%`);
+          return (
+            <li key={r.sessionId}>
+              <b>{when(r.start)} · {name(r.protocolId)}</b> ({r.source ?? "source not recorded"})
+              <br />Usable {num1(r.validPct, "%")} of training · {Math.round(r.trainedSeconds / 60)} min trained · in target {num1(r.timeInTargetPct, "%")} (aim {r.targetRewardRate == null ? "not recorded" : `${Math.round(r.targetRewardRate * 100)}%`})
+              <br />Resting level before training: {levels.length ? levels.join(", ") : "not recorded"} · {r.thresholdChecks} threshold checks, ending at {r.finalThresholdScale == null ? "not recorded" : `x${r.finalThresholdScale.toFixed(2)}`} of the baseline threshold
+              {held.length > 0 && <><br />Held: {held.join(", ")}</>}
+              <br /><span className="v-note">{r.eligible ? "Counts toward your trends." : `Not used for trends: ${r.notEligibleReason}.`} {r.method} · {r.protocolSet}</span>
+            </li>
+          );
+        })}</ul>}
+    </Card>
+  );
+}
+
 export function TrainingView({ training, running = false, onDone }: { training: TrainingApi; running?: boolean; onDone?: () => void }) {
   return (
     <>
       <PageHero title="Training" statement="Protocols, settings and your session records" detail="Neurofeedback follows the EEG features listed for each protocol. Everything here is optional." />
       <ProtocolSettingsCard training={training} disabled={running} />
+      <TrainingRecordsCard protocols={training.protocols} />
       {onDone && <div className="pk-actions"><Button size="small" variant="plain" onClick={onDone}>Back to Neuro</Button></div>}
     </>
   );

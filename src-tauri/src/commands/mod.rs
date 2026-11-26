@@ -58,6 +58,7 @@ pub mod muse;
 pub mod n8n_status;
 pub(crate) mod neuro_baseline;
 pub(crate) mod neuro_protocols;
+pub(crate) mod neuro_training;
 pub mod noop;
 pub mod noop_freeze;
 pub mod noop_parity;

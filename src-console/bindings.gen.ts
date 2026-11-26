@@ -491,6 +491,7 @@ export const commands = {
 	neuroProtocolSettingsGet: (options?: InvokeOptions) => __TAURI_INVOKE<{ [key in string]: ProtocolSettings }>("neuro_protocol_settings_get", undefined, options),
 	/**  Saves one protocol's settings, or with `settings: null` returns it to its defaults. */
 	neuroProtocolSettingsSet: (protocolId: string, settings: ProtocolSettings | null, options?: InvokeOptions) => __TAURI_INVOKE<{ [key in string]: ProtocolSettings }>("neuro_protocol_settings_set", { protocolId, settings }, options),
+	neuroTrainingRecords: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TrainingRecord_Serialize[]>("neuro_training_records", { limit }, options),
 	/**
 	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
 	 *  `source` is "manual", "chat" or "telegram".
@@ -6983,6 +6984,66 @@ export type TrackStats_Serialize = {
 	avgRating: number | null,
 	focusAvg: number | null,
 	calmAvg: number | null,
+};
+
+export type TrainingRecord = TrainingRecord_Serialize | TrainingRecord_Deserialize;
+
+export type TrainingRecord_Deserialize = {
+	sessionId: string,
+	start: string,
+	durationSecs: number,
+	protocolId: string,
+	protocolSet: string,
+	recordVersion: string,
+	/**  Training method version: records are only compared with the same method. */
+	method: string,
+	/**  `live`, `replay`, `demo`, or null when the session did not say. */
+	source?: string | null,
+	validPct?: number | null,
+	timeInTargetPct?: number | null,
+	trainedSeconds: number | null,
+	targetRewardRate?: number | null,
+	/**  Number of 30 s threshold checks (the baseline entry is not counted). */
+	thresholdChecks: number,
+	/**  The reward threshold scale at the end of the session (1 = the baseline threshold). */
+	finalThresholdScale?: number | null,
+	/**
+	 *  Each reward feature's resting level before training: the baseline reward threshold / 1.1
+	 *  (relative band power, %, from this session's own protocol baseline).
+	 */
+	baselineLevels: { [key in string]: number | null },
+	heldSeconds: { [key in string]: number | null },
+	eligible: boolean,
+	notEligibleReason?: string | null,
+};
+
+export type TrainingRecord_Serialize = {
+	sessionId: string,
+	start: string,
+	durationSecs: number,
+	protocolId: string,
+	protocolSet: string,
+	recordVersion: string,
+	/**  Training method version: records are only compared with the same method. */
+	method: string,
+	/**  `live`, `replay`, `demo`, or null when the session did not say. */
+	source: string | null,
+	validPct: number | null,
+	timeInTargetPct: number | null,
+	trainedSeconds: number | null,
+	targetRewardRate: number | null,
+	/**  Number of 30 s threshold checks (the baseline entry is not counted). */
+	thresholdChecks: number,
+	/**  The reward threshold scale at the end of the session (1 = the baseline threshold). */
+	finalThresholdScale: number | null,
+	/**
+	 *  Each reward feature's resting level before training: the baseline reward threshold / 1.1
+	 *  (relative band power, %, from this session's own protocol baseline).
+	 */
+	baselineLevels: { [key in string]: number | null },
+	heldSeconds: { [key in string]: number | null },
+	eligible: boolean,
+	notEligibleReason: string | null,
 };
 
 export type Transition = Transition_Serialize | Transition_Deserialize;

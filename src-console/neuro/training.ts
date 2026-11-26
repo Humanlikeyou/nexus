@@ -9,7 +9,7 @@ import type { FrequencyBandPowers, NfProtocol, FeedbackSignal } from "../legacy-
 import type { MuseTelemetry } from "./useMuseTelemetry";
 import { headMoved } from "./headMotion";
 import { estimateHeartRate, heartRateSummary } from "./heartRate";
-import type { ProtocolSettings } from "./protocolConfig";
+import { PROTOCOL_SET_VERSION, targetFeatures, type ProtocolSettings } from "./protocolConfig";
 
 const CHANNELS = ["TP9", "AF7", "AF8", "TP10"];
 const CALIBRATION_TICKS = 10;
@@ -64,6 +64,25 @@ export const TRAINING_METHOD = {
   relaxation: "alpha / (alpha + beta) x 100",
   thresholds: "baseline mean x 1.1 (reward) and x 0.9 (inhibit), scaled toward 60% reward every 30 s",
 } as const;
+
+/** Decision 0059: the session progress record's format. */
+export const PROGRESS_RECORD_VERSION = "progress-v1-0059";
+/** The feedback gate's defaults (`safetyGate.ts`); a protocol may only make them stricter. */
+export const GATE_DEFAULTS = { minConfidence: 0.3, maxArtifactRate: 15 } as const;
+
+/** One entry in the auditable threshold log: what changed, when, and why. */
+export type ThresholdChange = {
+  /** Seconds of training since the protocol baseline finished. */
+  at_s: number;
+  event: "baseline" | "adapt";
+  /** Share of rewarded ticks in the window that triggered the check (adapt only). */
+  window_reward_rate: number | null;
+  scale_before: number;
+  scale_after: number;
+  reason: string;
+  reward_min: Record<string, number>;
+  inhibit_max: Record<string, number>;
+};
 
 /** Training ticks looked back over for the feedback gate's confidence (decision 0057). */
 const CONFIDENCE_TICKS = 20;
@@ -186,6 +205,9 @@ export class TrainingSession {
   private lastHeartRateAt = -Infinity;
   /** Decision 0059: the reinforcement schedule's target, from the protocol's settings (default 0.6). */
   private readonly targetRewardRate: number;
+  /** Decision 0059: every threshold change, with its reason (auditable training rules). */
+  private thresholdLog: ThresholdChange[] = [];
+  private trainingStartedAt: number | null = null;
   state: TrainingState = { ...INACTIVE_TRAINING };
 
   /** Decision 0059: the settings this session ran with (null = the built-in defaults). */
@@ -219,7 +241,7 @@ export class TrainingSession {
   }
 
   /** Thresholds from the baseline this protocol trains in: eyes closed for eyes-closed goals. */
-  private finishBaseline() {
+  private finishBaseline(now: number) {
     const source = this.baselines[this.protocol.eyesClosed ? "closed" : "open"];
     this.calibrationRelaxation = source.map((item) => item.relaxationScore);
     const average = (label: string) => source.reduce((sum, item) => sum + bandValue(item, label), 0) / source.length;
@@ -229,6 +251,11 @@ export class TrainingSession {
     };
     this.thresholds = this.baseThresholds;
     this.stage = "training";
+    this.trainingStartedAt = now;
+    const condition = this.protocol.eyesClosed ? "eyes-closed" : "eyes-open";
+    this.thresholdLog.push({ at_s: 0, event: "baseline", window_reward_rate: null, scale_before: 1, scale_after: 1,
+      reason: `set from the ${condition} baseline (${source.length} clean half-second ticks): reward above x1.1, inhibit above x0.9 of its mean`,
+      reward_min: { ...this.baseThresholds.rewardMin }, inhibit_max: { ...this.baseThresholds.inhibitMax } });
   }
 
   private applyScale() {
@@ -344,7 +371,7 @@ export class TrainingSession {
       this.baselines[eyes].push(bands);
       if (this.baselines[eyes].length >= BASELINE_TICKS) {
         if (eyes === "open") this.stage = "baseline-closed";
-        else this.finishBaseline();
+        else this.finishBaseline(now);
       }
       const done = this.stage === "baseline-closed" ? 0 : this.baselines[eyes].length;
       this.state = { ...this.state, phase: this.stage === "training" ? "training" : "calibrating", stage: this.stage, hold: null, fit, auxSource,
@@ -381,9 +408,18 @@ export class TrainingSession {
       this.streak = rewarded ? this.streak + 1 : 0;
       this.window.push(rewarded);
       if (this.window.length >= ADAPT_TICKS) {
-        this.scale = adaptScale(this.scale, this.window.filter(Boolean).length / this.window.length, this.targetRewardRate);
+        const rate = this.window.filter(Boolean).length / this.window.length;
+        const before = this.scale;
+        this.scale = adaptScale(this.scale, rate, this.targetRewardRate);
         this.adjustments.push(this.scale);
         this.applyScale();
+        const pct = (v: number) => `${Math.round(v * 100)}%`;
+        this.thresholdLog.push({ at_s: this.trainingStartedAt == null ? 0 : Math.round((now - this.trainingStartedAt) / 100) / 10, event: "adapt", window_reward_rate: Math.round(rate * 1000) / 1000,
+          scale_before: before, scale_after: this.scale,
+          reason: this.scale > before ? `rewarded ${pct(rate)} of the last 30 s of clean ticks, above the ${pct(this.targetRewardRate)} target: reward threshold raised`
+            : this.scale < before ? `rewarded ${pct(rate)} of the last 30 s of clean ticks, below the ${pct(this.targetRewardRate)} target: reward threshold lowered`
+            : `rewarded ${pct(rate)} of the last 30 s of clean ticks, within the target band${before === 1.5 || before === 0.7 ? " or at its limit" : ""}: unchanged`,
+          reward_min: { ...(this.thresholds?.rewardMin ?? {}) }, inhibit_max: { ...(this.thresholds?.inhibitMax ?? {}) } });
         this.window = [];
       }
       const valid = this.entries.filter((entry) => !entry.gated);
@@ -448,6 +484,36 @@ export class TrainingSession {
       data_sources: [...this.sources].sort(),
       method: TRAINING_METHOD,
       protocol_calibration: this.protocolCalibration(),
+      progress_record: this.progressRecord(),
+    };
+  }
+
+  /**
+   * Decision 0059: the session-level progress record. Enough to see exactly how this session's feedback was
+   * produced: the protocol set and version, the target features, the settings, the gate limits, every
+   * threshold change with its reason, held time by reason and time-in-target on valid data only. Null for
+   * unguided sessions and sessions that never reached training.
+   */
+  progressRecord() {
+    if (!this.guided || this.trainingStartedAt == null) return null;
+    const valid = this.entries.filter((entry) => !entry.gated);
+    const gate = { minConfidence: Math.max(GATE_DEFAULTS.minConfidence, this.protocol.gateOverrides?.minConfidence ?? 0), maxArtifactRate: Math.min(GATE_DEFAULTS.maxArtifactRate, this.protocol.gateOverrides?.maxArtifactRate ?? Infinity) };
+    return {
+      version: PROGRESS_RECORD_VERSION,
+      protocol_set: PROTOCOL_SET_VERSION,
+      protocol_id: this.protocol.id,
+      target_features: targetFeatures(this.protocol),
+      settings: this.settings,
+      target_reward_rate: this.targetRewardRate,
+      gate: { min_confidence: gate.minConfidence, max_artifact_rate_per_min: gate.maxArtifactRate, live_only: true, frozen_holds: true },
+      planned_duration_min: this.settings?.durationMin ?? null,
+      trained_seconds: valid.length * TICK_MS / 1000,
+      training_ticks: this.trainingTicks,
+      valid_pct: this.trainingTicks ? Math.round(this.validTicks / this.trainingTicks * 1000) / 10 : null,
+      time_in_target_pct: valid.length ? Math.round(valid.filter((entry) => entry.action === "reward").length / valid.length * 1000) / 10 : null,
+      held_seconds: Object.fromEntries(Object.entries(this.held).map(([reason, ticks]) => [reason, ticks * TICK_MS / 1000])) as Record<HoldReason, number>,
+      threshold_log: this.thresholdLog.map((entry) => ({ ...entry, reward_min: { ...entry.reward_min }, inhibit_max: { ...entry.inhibit_max } })),
+      method: TRAINING_METHOD.version,
     };
   }
 }
