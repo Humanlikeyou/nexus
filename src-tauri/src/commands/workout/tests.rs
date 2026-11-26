@@ -291,8 +291,10 @@ fn the_store_round_trips_and_keeps_one_open_session() {
     )
     .unwrap();
     assert!(t.id.starts_with("wt-"));
-    let v = plan_in(&d, &t.id, T0).unwrap();
-    assert!(plan_in(&d, &t.id, T0).unwrap_err().contains("still open"));
+    let v = plan_in(&d, &t.id, None, T0).unwrap();
+    assert!(plan_in(&d, &t.id, None, T0)
+        .unwrap_err()
+        .contains("still open"));
     act_in(&d, &v.session.id, &Action::Start, &at(0)).unwrap();
     act_in(&d, &v.session.id, &log(10), &at(30)).unwrap();
     let (done, just_ended) = act_in(&d, &v.session.id, &log(9), &at(120)).unwrap();
@@ -316,7 +318,7 @@ fn the_store_round_trips_and_keeps_one_open_session() {
         2
     );
     assert!(
-        plan_in(&d, &t.id, &at(500)).is_ok(),
+        plan_in(&d, &t.id, None, &at(500)).is_ok(),
         "a new session once the last one ended"
     );
 }
@@ -345,5 +347,107 @@ fn unknown_action_fields_are_refused() {
     assert!(
         serde_json::from_value::<Action>(raw).is_err(),
         "the screen never supplies a time"
+    );
+}
+
+// ---------------------------------------------------------------- 9b
+
+#[test]
+fn every_mapped_take_exists_in_the_catalog_and_is_valid_calisthenics() {
+    let catalog: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../src-console/amaraTake/catalog.json"
+    ))
+    .unwrap();
+    let ids: Vec<String> = catalog["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap().to_string())
+        .collect();
+    let l = lib();
+    assert!(take_templates().len() >= 10);
+    for m in take_templates() {
+        assert!(
+            ids.contains(&m.take_id),
+            "{} is not in the take catalog",
+            m.take_id
+        );
+        let t = Template {
+            id: String::new(),
+            name: m.name.clone(),
+            source: "amara".into(),
+            source_ref: Some(format!("take:{}", m.take_id)),
+            items: m.items.clone(),
+            rest_between_s: m.rest_between_s,
+            archived: false,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        validate_template(&t, &l).unwrap_or_else(|e| panic!("{}: {e}", m.take_id));
+    }
+    // Timed formats, cardio and unstated counts are never guessed into sets.
+    for unmapped in [
+        "calisthenics_emom_10",
+        "amrap_12_minutes",
+        "bodyweight_tabata",
+        "brisk_walk",
+        "upper_push_pull",
+    ] {
+        assert!(
+            !mapped_take_ids().contains(&unmapped.to_string()),
+            "{unmapped}"
+        );
+    }
+}
+
+#[test]
+fn an_amara_take_runs_through_the_same_engine_with_provenance() {
+    let d = temp_dir("workout-take");
+    let t = template_from_take_in(&d, "pushup_ladder_2", T0).unwrap();
+    assert_eq!(
+        (t.source.as_str(), t.source_ref.as_deref()),
+        ("amara", Some("take:pushup_ladder_2"))
+    );
+    assert_eq!(
+        template_from_take_in(&d, "pushup_ladder_2", &at(10))
+            .unwrap()
+            .id,
+        t.id,
+        "one template per take"
+    );
+    assert!(template_from_take_in(&d, "brisk_walk", T0).is_err());
+    assert!(plan_in(&d, &t.id, Some("bad id"), T0).is_err());
+    let v = plan_in(&d, &t.id, Some("sug-123"), T0).unwrap();
+    assert_eq!(v.session.source, "amara");
+    assert_eq!(v.session.offer_sid.as_deref(), Some("sug-123"));
+    act_in(&d, &v.session.id, &Action::Start, &at(0)).unwrap();
+    for (i, r) in [8, 8, 7].iter().enumerate() {
+        act_in(&d, &v.session.id, &log(*r), &at(60 * (i as i64 + 1))).unwrap();
+    }
+    let h = history_in(&d, 5, &at(999)).unwrap();
+    assert_eq!(
+        (h[0].session.state.as_str(), h[0].summary.total_reps),
+        ("completed", 23)
+    );
+}
+
+#[test]
+fn a_user_template_never_carries_an_offer_id() {
+    let d = temp_dir("workout-user-offer");
+    let t = save_template_in(
+        &d,
+        Template {
+            id: String::new(),
+            ..template(vec![item("push-up", 1, Some(5), None, 0)])
+        },
+        T0,
+    )
+    .unwrap();
+    assert_eq!(
+        plan_in(&d, &t.id, Some("sug-9"), T0)
+            .unwrap()
+            .session
+            .offer_sid,
+        None
     );
 }

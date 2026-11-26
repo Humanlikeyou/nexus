@@ -501,9 +501,12 @@ export const commands = {
 	workoutTemplateSave: (template: Template_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<Template_Serialize>("workout_template_save", { template }, options),
 	/**  The deterministic estimate for a draft, so the builder shows the same number the engine uses. */
 	workoutEstimate: (items: TemplateItem_Deserialize[], restBetweenS: number, options?: InvokeOptions) => __TAURI_INVOKE<number>("workout_estimate", { items, restBetweenS }, options),
-	workoutSessionPlan: (templateId: string, options?: InvokeOptions) => __TAURI_INVOKE<SessionView_Serialize>("workout_session_plan", { templateId }, options),
+	workoutSessionPlan: (templateId: string, offerSid: string | null, options?: InvokeOptions) => __TAURI_INVOKE<SessionView_Serialize>("workout_session_plan", { templateId, offerSid }, options),
 	workoutSessionAct: (sessionId: string, action: Action_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<SessionView_Serialize>("workout_session_act", { sessionId, action }, options),
 	workoutHistory: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<SessionView_Serialize[]>("workout_history", { limit }, options),
+	/**  Decision 0062 (9b): an Amara take as a workout template, through the same engine. */
+	workoutTemplateFromTake: (takeId: string, options?: InvokeOptions) => __TAURI_INVOKE<Template_Serialize>("workout_template_from_take", { takeId }, options),
+	workoutTakeIds: (options?: InvokeOptions) => __TAURI_INVOKE<string[]>("workout_take_ids", undefined, options),
 	/**
 	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
 	 *  `source` is "manual", "chat" or "telegram".
@@ -6349,6 +6352,8 @@ export type Session_Deserialize = {
 	nextItem: number,
 	nextSet: number,
 	engine: string,
+	/**  The Amara take offer that launched it (its suggestion id), so finishing can mark that take done. */
+	offerSid?: string | null,
 };
 
 export type Session_Serialize = {
@@ -6371,6 +6376,8 @@ export type Session_Serialize = {
 	nextItem: number,
 	nextSet: number,
 	engine: string,
+	/**  The Amara take offer that launched it (its suggestion id), so finishing can mark that take done. */
+	offerSid: string | null,
 };
 
 export type SetLog = SetLog_Serialize | SetLog_Deserialize;

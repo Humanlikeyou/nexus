@@ -296,6 +296,8 @@ pub fn run() {
             commands::workout::workout_session_plan,
             commands::workout::workout_session_act,
             commands::workout::workout_history,
+            commands::workout::workout_template_from_take,
+            commands::workout::workout_take_ids,
             openclaw::read_tasks,
             openclaw::read_content_pipeline,
             openclaw::save_skill,

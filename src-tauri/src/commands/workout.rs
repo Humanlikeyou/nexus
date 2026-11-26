@@ -164,6 +164,9 @@ pub struct Session {
     pub next_item: u32,
     pub next_set: u32,
     pub engine: String,
+    /// The Amara take offer that launched it (its suggestion id), so finishing can mark that take done.
+    #[serde(default)]
+    pub offer_sid: Option<String>,
 }
 
 /// What the screen asks the engine to do with a session.
@@ -671,6 +674,7 @@ pub(crate) fn plan_from(t: &Template, id: String, now: &str) -> Session {
         next_item: 0,
         next_set: 0,
         engine: ENGINE_VERSION.into(),
+        offer_sid: None,
     }
 }
 
@@ -763,7 +767,16 @@ fn view(s: Session, lib: &[Exercise], now: &str) -> SessionView {
 }
 
 /// Plans a session from a template. Only one session may be open (planned, active or paused) at a time.
-pub(crate) fn plan_in(data: &Path, template_id: &str, now: &str) -> Result<SessionView, String> {
+/// `offer_sid` names the take offer that launched it (Amara templates only).
+pub(crate) fn plan_in(
+    data: &Path,
+    template_id: &str,
+    offer_sid: Option<&str>,
+    now: &str,
+) -> Result<SessionView, String> {
+    if offer_sid.is_some_and(|o| !text_ok(o, 160) || o.contains(char::is_whitespace)) {
+        return Err("That offer id is not valid.".into());
+    }
     let lib = library_in(data)?;
     let t = templates_in(data)?
         .into_iter()
@@ -779,7 +792,10 @@ pub(crate) fn plan_in(data: &Path, template_id: &str, now: &str) -> Result<Sessi
     if all.sessions.len() >= MAX_SESSIONS {
         return Err("The workout history is full; nothing was dropped to make room.".into());
     }
-    let s = plan_from(&t, format!("ws-{}", uuid::Uuid::new_v4().simple()), now);
+    let mut s = plan_from(&t, format!("ws-{}", uuid::Uuid::new_v4().simple()), now);
+    if t.source == "amara" {
+        s.offer_sid = offer_sid.map(str::to_string);
+    }
     all.sessions.push(s.clone());
     write_json_atomic(&path, &all, MAX_BYTES)?;
     Ok(view(s, &lib, now))
@@ -823,6 +839,71 @@ pub(crate) fn history_in(data: &Path, limit: usize, now: &str) -> Result<Vec<Ses
         .take(limit.min(500))
         .map(|s| view(s, &lib, now))
         .collect())
+}
+
+// ---------------------------------------------------------------- Amara takes (9b)
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TakeTemplate {
+    take_id: String,
+    name: String,
+    rest_between_s: u32,
+    items: Vec<TemplateItem>,
+}
+
+#[derive(Deserialize)]
+struct TakeTemplates {
+    takes: Vec<TakeTemplate>,
+}
+
+fn take_templates() -> &'static [TakeTemplate] {
+    static T: OnceLock<Vec<TakeTemplate>> = OnceLock::new();
+    T.get_or_init(|| {
+        serde_json::from_str::<TakeTemplates>(include_str!("workout/amara_takes.json"))
+            .expect("the take mapping is valid JSON (tested)")
+            .takes
+    })
+}
+
+/// The take ids that can run as workouts (the screen offers "Start as a workout" only for these).
+pub(crate) fn mapped_take_ids() -> Vec<String> {
+    take_templates().iter().map(|t| t.take_id.clone()).collect()
+}
+
+/// An Amara take as a template in the same engine, reused when one already exists for that take so history
+/// groups by it. Provenance: `source: amara`, `sourceRef: take:<id>`.
+pub(crate) fn template_from_take_in(
+    data: &Path,
+    take_id: &str,
+    now: &str,
+) -> Result<Template, String> {
+    let m = take_templates()
+        .iter()
+        .find(|t| t.take_id == take_id)
+        .ok_or("That suggestion doesn't run as a workout.")?;
+    let source_ref = format!("take:{}", m.take_id);
+    if let Some(t) = templates_in(data)?
+        .into_iter()
+        .find(|t| t.source == "amara" && t.source_ref.as_deref() == Some(source_ref.as_str()))
+    {
+        return Ok(t);
+    }
+    save_template_in(
+        data,
+        Template {
+            id: String::new(),
+            name: m.name.clone(),
+            source: "amara".into(),
+            source_ref: Some(source_ref),
+            items: m.items.clone(),
+            rest_between_s: m.rest_between_s,
+            archived: false,
+            created_at: String::new(),
+            updated_at: String::new(),
+        },
+        now,
+    )
 }
 
 // ---------------------------------------------------------------- commands
@@ -897,11 +978,30 @@ pub async fn workout_estimate(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn workout_session_plan(template_id: String) -> Result<SessionView, String> {
+pub async fn workout_session_plan(
+    template_id: String,
+    offer_sid: Option<String>,
+) -> Result<SessionView, String> {
     blocking(JoinErr::Plain, move || {
-        plan_in(&data(), &template_id, &now())
+        plan_in(&data(), &template_id, offer_sid.as_deref(), &now())
     })
     .await
+}
+
+/// Decision 0062 (9b): an Amara take as a workout template, through the same engine.
+#[tauri::command]
+#[specta::specta]
+pub async fn workout_template_from_take(take_id: String) -> Result<Template, String> {
+    blocking(JoinErr::Plain, move || {
+        template_from_take_in(&data(), &take_id, &now())
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workout_take_ids() -> Result<Vec<String>, String> {
+    Ok(mapped_take_ids())
 }
 
 #[tauri::command]
