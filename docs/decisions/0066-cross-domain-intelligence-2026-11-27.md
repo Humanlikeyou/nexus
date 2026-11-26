@@ -76,8 +76,24 @@ Documents:
   - The v2→v3 and v1 migration tests were updated for the v4 step.
 - **vitest:** 5 new UI tests.
 - **e2e:** `test/e2e/briefings.spec.ts` (3 tests × 2 themes, axe), plus life-ui and workspaces: 38 passed.
-- **Full gates and the full e2e suite:** results are in the commit message.
-- **Not run:** a briefing on Taisun's real data (needs the installed app), any WHOOP daily-table case beyond fixtures, and the search-against-needs rule on real search data (none exists).
+- **Full gates** (`e5c5bce`): tsc, lint, vitest 3028 passed / 9 skipped, neuro 21, check:secrets, src-tauri fmt, clippy and 2108 passed / 11 ignored, amara-router fmt, clippy and 133. **e2e alone:** 842 passed, 12 skipped, 0 failed.
+- **On a copy of Taisun's real stores** (temp folder, no recordings copied, deleted afterwards; the opt-in test `briefings::tests::live_copy_build_prints_counts_only` prints counts only):
+  - no source missing: 6 goals, 9 check-ins, 22 daily-table rows, 13 Muse sessions, 0 workout-engine sessions;
+  - no rule fired: the records are too sparse, with no logged workouts, no Muse session in the last 7 days and no WHOOP row in the last 2 days;
+  - the TaiyoSkin briefing built, with search unavailable.
+- **Not run:** the search-against-needs rule on real search data (none exists), and a click-through of the installed app (hard rule 6).
+
+## Install (Taisun: "build and reinstall", 2026-11-26)
+
+- Built `e5c5bce` with `APPLE_SIGNING_IDENTITY=- npx tauri build --bundles app`. It includes 0063–0066.
+- **Backup:** `~/Backups/Amara OS-backup-20261127a.app` (the previous install, build `092fccb`); its signature checked.
+- Quit, replaced, reopened. The new app's signature checked, and it was running after launch. The previous bundle was moved to `/Applications/Amara OS.app.old-install-20261127`, not deleted.
+- Installed at 03:47 JST, before the 07:00 slot, so no briefing was built yet (correct: nothing was due).
+- **Rollback:** quit, move `/Applications/Amara OS.app` aside, and `ditto` the backup back. Store v4 is additive, so the older build reads past the new columns; a `amara.db.v3-*.bak` copy is kept for 30 days in any case.
+
+## Push (Taisun: "update the GitHub", 2026-11-26)
+
+Approved action: push branch `amara-integration` to `origin` (github.com/Humanlikeyou/nexus). Not approved: a merge into `nexus-v2` or `main`, a PR, or any history rewrite.
 
 ## Open for Taisun
 

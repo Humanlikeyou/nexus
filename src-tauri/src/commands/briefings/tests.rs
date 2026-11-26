@@ -893,3 +893,58 @@ fn every_rule_output_on_the_seeded_world_is_honest() {
         "distinct findings have distinct fingerprints"
     );
 }
+
+/// Opt-in check against a copy of real data (never the live folder):
+/// `NEXUS_LIVE_BRIEF_DIR=<copy> cargo test --lib briefings::tests::live -- --ignored --nocapture`.
+/// Prints counts and kinds only, never record text.
+#[test]
+#[ignore]
+fn live_copy_build_prints_counts_only() {
+    let Ok(dir) = std::env::var("NEXUS_LIVE_BRIEF_DIR") else {
+        return;
+    };
+    let data = PathBuf::from(dir);
+    assert!(
+        !data.starts_with(crate::app_paths::data_dir()),
+        "use a copy"
+    );
+    let now = super::super::local_store::jst()
+        .with_ymd_and_hms(2026, 11, 27, 7, 5, 0)
+        .unwrap();
+    let p = super::inputs::gather(&data, now);
+    eprintln!("missing: {:?}", p.missing);
+    eprintln!(
+        "goals {} · habit days {:?} · dates {} · plan {} · check-ins {} · workouts {} · daily rows {:?} · training records {} · muse sessions {} · money line {}",
+        p.goals.len(), p.habit_days.as_ref().map(|v| v.len()), p.dates.len(), p.plan.is_some(), p.checkins.len(), p.workouts.len(),
+        p.days.as_ref().map(|v| v.len()), p.training.len(), p.neuro_sessions.len(), p.money_line.is_some()
+    );
+    let b = build_personal(&data, now, "manual").unwrap();
+    for s in &b.sections {
+        eprintln!("section {} · {} · {} line(s)", s.id, s.state, s.lines.len());
+    }
+    let job = runtime_in(&data, now)
+        .jobs
+        .into_iter()
+        .find(|j| j.id == "personal")
+        .unwrap();
+    eprintln!("rules: {:?}", job.state.rule_counts);
+    for r in store_for(&data, Scope::Personal)
+        .list_recommendations(Scope::Personal, None, 300)
+        .unwrap()
+    {
+        if r.produced_by == PRODUCER {
+            eprintln!("recommendation kind {}", r.kind);
+        }
+    }
+    let ents = build_enterprise(&data, now + Duration::minutes(30), "manual").unwrap();
+    for e in &ents {
+        eprintln!(
+            "enterprise {} · sections {:?}",
+            e.business_id,
+            e.sections
+                .iter()
+                .map(|s| format!("{}:{}", s.id, s.state))
+                .collect::<Vec<_>>()
+        );
+    }
+}
