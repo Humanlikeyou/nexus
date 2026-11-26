@@ -47,3 +47,12 @@ For every step:
 - a take marked done by a real workout;
 - the NOOP link against real detected workouts;
 - the packaged app.
+
+## Install (Taisun: "build and install", 2026-11-26)
+
+- Built `092fccb` with `APPLE_SIGNING_IDENTITY=- npx tauri build --bundles app`. The build includes 0059–0062: NEUROSENSE intelligence, one FFT pipeline, session HRV and the Workout engine.
+- **Backup:** `~/Backups/Amara OS-backup-20261126c.app` (the previous install, build `e114862`); its signature checked.
+- Quit, replaced, reopened. The new app's signature checked, and it was running 20 s after launch.
+- **Left in place:** the replaced bundle is at `/Applications/Amara OS.app.old-install`, the same build as the backup. It was not deleted, because deleting needs Taisun's OK.
+- **Rollback:** quit, move `/Applications/Amara OS.app` aside, and `ditto` the backup back.
+- **Not run:** any click-through of the new screens (hard rule 6).
