@@ -55,3 +55,9 @@ Left as noted:
 - The keyword gate is broad ("alpha", "muse"), but local-only.
 
 Not verified: whether the Telegram, n8n or Hermes request paths ever take these sections. The callers found that turn sections into a turn's context (`terrence_runtime.rs`, `amara_turn.rs` and `inference/mod.rs`) all go through `nexus_context_message`, which now applies the drop.
+
+## Install (Taisun: "Build and install", 2026-11-26)
+
+- **Built:** `e114862` (Phases 6–7 and decisions 0056–0058; ad-hoc signed, not notarized). **Installed:** quit, replaced, reopened; signature verified; running 20 s after launch.
+- **Rollback:** `~/Backups/Amara OS-backup-20261126b.app` (build 9f33650).
+- **Not checked:** the new screens in the installed app (no UI driven, hard rule 6). **Not pushed, not merged into nexus-v2.**
