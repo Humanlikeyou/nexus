@@ -414,6 +414,7 @@ mod tests {
             why: None,
             remind_at: None,
             paused: false,
+            life: Default::default(),
         }
     }
     fn gr(day: &str, id: &str, n: i64) -> DailyGoalRow {

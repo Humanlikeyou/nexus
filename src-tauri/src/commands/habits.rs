@@ -251,6 +251,26 @@ pub(crate) fn mark_in(
             },
         ))
     })?;
+    let day_s = ymd(day);
+    super::amara_store::note(
+        &dirs.data,
+        super::amara_store::NewActivity {
+            certainty: "confirmed",
+            scope: super::amara_store::Scope::Personal,
+            kind: if done {
+                "habit.completed"
+            } else {
+                "habit.missed"
+            },
+            subject_ref: &format!("habit_day:{habit_id}:{day_s}"),
+            occurred_at: &super::amara_store::day_start(&day_s),
+            source: if via == "typed" { "user" } else { "model" },
+            source_ref: Some(&format!("history:{id}")),
+            actor: if via == "typed" { "taisun" } else { "amara" },
+            summary: None,
+            data_json: Some(r#"{"precision":"day"}"#),
+        },
+    );
     Ok(result(true, Some(id)))
 }
 
@@ -397,6 +417,7 @@ mod tests {
             why: None,
             remind_at: None,
             paused: false,
+            life: Default::default(),
         }
     }
     fn seed(dirs: &Dirs, goals: &[Goal]) {

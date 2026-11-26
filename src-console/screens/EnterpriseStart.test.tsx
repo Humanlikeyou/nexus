@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import { INITIAL_SNAPSHOT } from "../bridge";
 import type { SystemSnapshot } from "../types";
 import { liveBusiness } from "../business/liveLedger";
-import { amountText, makeLedgerWrites, parseMinor, type LedgerWrites } from "../business/ledgerWrite";
+import { amountText, makeLedgerWrites, parseMinor, type LedgerChange, type LedgerWrites } from "../business/ledgerWrite";
 import { BusinessField } from "./BusinessScreen";
 import { RevenueField } from "./RevenueScreen";
-import { MoneyForm, RateForm, VentureForm } from "./EnterpriseForms";
+import { MoneyForm, RateForm, VentureForm, VenturePick, withVenture } from "./EnterpriseForms";
+import { LedgerHistory, changeText } from "./EnterpriseStart";
+import type { AddAdapter } from "../adds/flow";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => null) }));
 
@@ -176,5 +178,100 @@ describe("Enterprise start page", () => {
     render(<BusinessField view="tasks" data={snap(null) && { ...snap(null), tasks: [{ title: "Order jars", status: "active", priority: "high", tags: [] }] }} writes={fake()} />);
     expect(document.body.textContent).not.toMatch(/venture link needs wiring|needs wiring; Amara updates/i);
     expect(screen.getByRole("button", { name: "Mark done: Order jars" })).toBeInTheDocument();
+  });
+});
+
+describe("Enterprise History (ledger changes with Undo)", () => {
+  const at = (ms: number) => new Date(ms).toISOString();
+  const NOW = Date.parse("2026-11-25T03:00:00Z");
+  const hist = (extra: LedgerChange[] = []): LedgerChange[] => [
+    { id: "c3", at: at(NOW - 2000), action: "venture_edit", subject: "shop", label: "Shop", undone: false },
+    { id: "c2", at: at(NOW - 3_600_000), action: "fx_set", subject: "fx", label: "150.25", undone: false },
+    { id: "c1", at: at(NOW - 7_200_000), action: "venture_add", subject: "shop", label: "Shop", undone: true },
+    ...extra,
+  ];
+  it("lists the last 10 changes in plain words; only the newest still-open one has Undo", async () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ id: `x${i}`, at: at(NOW - 3_600_000 * (i + 5)), action: "venture_archive", subject: "a", label: `V${i}`, undone: false }));
+    const w = fake({ history: vi.fn(async () => [...hist(), ...many]) });
+    render(<LedgerHistory writes={w} now={() => NOW} />);
+    const list = await screen.findByRole("list", { name: "Recent changes" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(10));
+    expect(list).toHaveTextContent("Edited: Shop");
+    expect(list).toHaveTextContent("Yen rate set: 150.25");
+    expect(list).toHaveTextContent("Added: Shop");
+    expect(within(list).getByText("Undone")).toBeInTheDocument();
+    expect(within(list).getAllByRole("button", { name: /^Undo/ })).toHaveLength(1);
+    expect(changeText(hist()[0])).toBe("Edited: Shop");
+  });
+  it("Undo calls ledger undo for that change, says so, and reloads", async () => {
+    const history = vi.fn(async () => hist());
+    const w = fake({ history });
+    render(<LedgerHistory writes={w} now={() => NOW} />);
+    const undo = await screen.findByRole("button", { name: "Undo: Edited: Shop" });
+    await act(async () => { fireEvent.click(undo); });
+    expect(w.undoChange).toHaveBeenCalledWith("c3");
+    expect(screen.getByRole("status")).toHaveTextContent("Undone.");
+    await waitFor(() => expect(history.mock.calls.length).toBeGreaterThan(1));
+  });
+  it("no Undo once the 8 second window has passed, and a refused undo says why", async () => {
+    const w = fake({ history: vi.fn(async () => hist()) });
+    const { unmount } = render(<LedgerHistory writes={w} now={() => NOW + 9000} />);
+    await screen.findByRole("list", { name: "Recent changes" });
+    expect(screen.queryByRole("button", { name: /^Undo/ })).toBeNull();
+    unmount();
+    const w2 = fake({ history: vi.fn(async () => hist()), undoChange: vi.fn(async () => false) });
+    render(<LedgerHistory writes={w2} now={() => NOW} />);
+    const undo = await screen.findByRole("button", { name: /^Undo/ });
+    await act(async () => { fireEvent.click(undo); });
+    expect(screen.getByRole("status")).toHaveTextContent("can't be undone any more");
+  });
+  it("empty and unavailable states; nothing without a backend; and it shows on the start page", async () => {
+    const { unmount } = render(<LedgerHistory writes={fake()} />);
+    expect(await screen.findByText(/No changes yet/)).toBeInTheDocument();
+    unmount();
+    const { container, unmount: u2 } = render(<LedgerHistory writes={null} />);
+    expect(container).toBeEmptyDOMElement();
+    u2();
+    render(<LedgerHistory writes={fake({ history: vi.fn(async () => { throw "x"; }) })} />);
+    expect(await screen.findByText(/History isn.t available/)).toBeInTheDocument();
+    const data = snap(ledger());
+    const { unmount: u3 } = render(<BusinessField data={data} adapter={liveBusiness(data.ledger)} writes={fake({ history: vi.fn(async () => hist()) })} />);
+    expect(await screen.findAllByRole("list", { name: "Recent changes" })).not.toHaveLength(0);
+    u3();
+  });
+});
+
+describe("Venture on tasks and content", () => {
+  it("withVenture adds the venture's name to what the add reads, once, and leaves other methods alone", async () => {
+    const parse = vi.fn(async (t: string) => ({ state: "live", value: { kind: "ask", question: t, options: [] } }));
+    const base = { command: "x", wired: true, parse, save: vi.fn(), undo: vi.fn(), history: vi.fn() } as unknown as AddAdapter;
+    const a = withVenture(base, "Shop");
+    await a.parse("Order jars");
+    await a.parse("order jars for shop");
+    expect(parse.mock.calls.map((c) => c[0])).toEqual(["Order jars for Shop", "order jars for shop"]);
+    expect(a.save).toBe(base.save);
+    expect(a.wired).toBe(true);
+    expect(withVenture(base, null)).toBe(base);
+  });
+  it("VenturePick offers No venture plus each venture, and nothing when there are none", () => {
+    const change = vi.fn();
+    const { container, unmount } = render(<VenturePick ventures={[{ id: "shop", name: "Shop" }]} value="" onChange={change} />);
+    fireEvent.change(screen.getByLabelText("Venture (optional)"), { target: { value: "shop" } });
+    expect(change).toHaveBeenCalledWith("shop");
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["No venture", "Shop"]);
+    unmount();
+    const r = render(<VenturePick ventures={[]} value="" onChange={change} />);
+    expect(r.container).toBeEmptyDOMElement();
+    expect(container).toBeDefined();
+  });
+  it("Tasks and Content rows show the venture name; the raw tag is not shown", () => {
+    const data = { ...snap(ledger()), tasks: [{ title: "Order jars", status: "active", priority: null, tags: ["venture:shop", "launch"], venture: "shop" }], pipeline: [{ title: "Jar reel", stage: "ideation", content_type: "reel", notes: null, venture: "shop" }] };
+    const { unmount } = render(<BusinessField view="tasks" data={data} adapter={liveBusiness(data.ledger)} writes={fake()} />);
+    expect(screen.getByText(/Venture: Shop/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/venture:shop|Venture shop/i);
+    expect(screen.getByLabelText("Venture (optional)")).toBeInTheDocument();
+    unmount();
+    render(<BusinessField view="content" data={data} adapter={liveBusiness(data.ledger)} writes={fake()} />);
+    expect(screen.getByText(/Reel · Venture: Shop/)).toBeInTheDocument();
   });
 });

@@ -177,7 +177,9 @@ impl State {
             enabled: self.cfg.cloud.anthropic_enabled,
             outbound_disabled: self.outbound_disabled,
             has_key: key.is_some(),
-            caller_allows: hints.allow_claude != Some(false),
+            // Default-deny: only an explicit `X-Amara-Allow-Claude: 1` opens the cloud. A caller that
+            // sends no header (Hermes, crews, Telegram) never reaches it.
+            caller_allows: hints.allow_claude == Some(true),
         }
     }
 

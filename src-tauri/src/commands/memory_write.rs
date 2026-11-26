@@ -453,6 +453,7 @@ fn check_id(id: &str) -> Result<(), String> {
 
 /// Replace a block's value (max 2000 characters) after a native approval. The old value is saved first.
 #[tauri::command]
+#[specta::specta]
 pub async fn memory_edit(
     app: tauri::AppHandle,
     block_id: String,
@@ -472,6 +473,7 @@ pub async fn memory_edit(
 
 /// Clears a block's value after a native approval dialog. The block itself is never deleted.
 #[tauri::command]
+#[specta::specta]
 pub async fn memory_delete(app: tauri::AppHandle, block_id: String) -> Result<(), String> {
     check_id(&block_id)?;
     let k = key().await.map_err(|e| e.code().to_string())?;
@@ -487,6 +489,7 @@ pub async fn memory_delete(app: tauri::AppHandle, block_id: String) -> Result<()
 
 /// Undo: puts back the old value from the newest backup of this block, after a native approval.
 #[tauri::command]
+#[specta::specta]
 pub async fn memory_restore_last(app: tauri::AppHandle, block_id: String) -> Result<(), String> {
     check_id(&block_id)?;
     let k = key().await.map_err(|e| e.code().to_string())?;

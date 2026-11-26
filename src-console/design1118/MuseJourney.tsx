@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { hoursMinutes } from "../lib/mindBodyDeep";
 import { parseBodyContext } from "../lib/noop";
 import { BANDS, hasSamples, score, sessionStats, type SessionWithSamples } from "../neuro/sessionSamples";
@@ -9,6 +9,10 @@ import { PHI, phiWave } from "./golden";
 import { smoothPath } from "./pathModel";
 import { neuroStrings, EEG_SLOWDOWN, LOOP_S } from "./tangleString";
 import { VibratingStrings, tangleGlAvailable } from "./TangleWaves";
+import { NeuroBrainRing } from "./three/NeuroBrainRing";
+import { NeuroLiveRing } from "./three/NeuroLiveRing";
+import { placeOf, placeWords, sessionShares, usualBandRanges, usualSummary, type Range, type RingKey } from "./three/neuroData";
+import { glOk } from "./three/stage";
 import "./design1118.css";
 
 /**
@@ -76,21 +80,45 @@ function NeuroWave({ session, focus, calm }: { session: RecordedSession; focus: 
   );
 }
 
-export function MuseJourney({ session, recoveryNow, sessions, action, status, devices, onOpenHistory, onOpenSession, hideNext = false }: {
+/** A headline number with where it sits against his usual (the middle half of his last sessions). Never invents a range. */
+function UsualChip({ label, value, unit, usual }: { label: string; value: number | null; unit: string; usual: Range | null }) {
+  const p = value != null ? placeOf(value, usual) : null;
+  return (
+    <span className="d18-chip2" data-testid={`chip-${label.toLowerCase()}`}>
+      <span>{label}</span>
+      <b>{value == null ? "—" : Math.round(value)}<small> {unit}</small></b>
+      <em>{usual ? `Usual ${Math.round(usual.lo)} to ${Math.round(usual.hi)} ${unit}${p ? ` · ${placeWords(p)}` : ""}` : "Usual shows after 3 sessions"}</em>
+    </span>
+  );
+}
+
+export function MuseJourney({ session, recoveryNow, sessions, action, status, devices, onOpenHistory, onOpenSession, hideNext = false, liveBands = null }: {
   session: RecordedSession | null; recoveryNow: number | null; sessions: RecordedSession[]; action: ReactNode; /** Status chip, left of the primary button on the compact Find Muse row. */ status?: ReactNode; /** Nearby headsets and scan notes; render only while scanning or when there is something to say. */ devices?: ReactNode; onOpenHistory?: () => void;
   /** A session chip or the hero opens that recording. */ onOpenSession?: (sessionId: string) => void;
   /** Last-session hero only (connected and idle: the page already has its own next step). */ hideNext?: boolean;
+  /** Live Muse band power (%) from the telemetry the page already has; null unless Muse is streaming. Never opens its own connection. */
+  liveBands?: Partial<Record<RingKey, number>> | null;
 }) {
   const body = session ? parseBodyContext(session.body_context) : null;
   const that = whole(body?.recovery);
   const now = whole(recoveryNow);
-  const focus = session ? score(session.summary.avg_focus) : null;
-  const calm = session ? score(session.summary.avg_relaxation) : null;
+  const focus = session ? score(session.summary.avg_focus, session.summary.score_scale) : null;
+  const calm = session ? score(session.summary.avg_relaxation, session.summary.score_scale) : null;
   const minutes = session ? Math.max(1, Math.round(session.duration_secs / 60)) : 0;
+  const [gl, setGl] = useState(glOk);
+  const shares = useMemo(() => sessionShares(session), [session]);
+  const usualBands = useMemo(() => usualBandRanges(sessions, session?.id), [sessions, session]);
+  const brain = gl && shares !== null;
   return (
     <div className="d18-muse">
       {session ? (
         <section className="d18-card d18-muse__hero" aria-label="Last session">
+          {brain && session ? (
+            <div className="d18-muse__rings d18-muse__rings--gl">
+              <NeuroBrainRing shares={shares} ranges={usualBands.ranges} usualCount={usualBands.count} centre={{ date: whenFmt.format(new Date(session.start)), duration: `${minutes} min` }} onFail={() => setGl(false)} />
+              <NeuroLiveRing bands={liveBands} ranges={usualBands.ranges} onFail={() => undefined} />
+            </div>
+          ) : (
           <div className="d18-muse__rings">
             <Ring value={that} size={150} tone="mint" label={`Last session ${whenFmt.format(new Date(session.start))}, ${minutes} min. Recovery that day ${that == null ? "not recorded" : `${that}%`}`}>
               <span className="d18-eyebrow">Last session</span>
@@ -104,10 +132,21 @@ export function MuseJourney({ session, recoveryNow, sessions, action, status, de
               </Ring>
             )}
           </div>
+          )}
+          {shares === null && <p className="d18-note" data-testid="no-band-data">No brainwave bands were saved for this session, so only focus and calm show here.</p>}
           <NeuroWave session={session} focus={focus} calm={calm} />
           <div className="d18-muse__stats">
-            <Ring value={focus} size={60} tone="copper" label={`Focus ${focus ?? "not recorded"}`}><b>{focus ?? "—"}</b><small>focus</small></Ring>
-            <Ring value={calm} size={60} tone="mint" label={`Calm ${calm ?? "not recorded"}`}><b>{calm ?? "—"}</b><small>calm</small></Ring>
+            {brain ? (
+              <div className="d18-chips">
+                <UsualChip label="Focus" value={focus} unit="/100" usual={usualSummary(sessions, (x) => score(x.summary.avg_focus, x.summary.score_scale), session.id)} />
+                <UsualChip label="Calm" value={calm} unit="/100" usual={usualSummary(sessions, (x) => score(x.summary.avg_relaxation, x.summary.score_scale), session.id)} />
+                <UsualChip label="Duration" value={minutes} unit="min" usual={usualSummary(sessions, (x) => x.duration_secs / 60, session.id)} />
+                {that != null && <span className="d18-stat"><b>{that}<small> %</small></b><small>Recovery that day</small></span>}
+              </div>
+            ) : (<>
+              <Ring value={focus} size={60} tone="copper" label={`Focus ${focus ?? "not recorded"}`}><b>{focus ?? "—"}</b><small>focus</small></Ring>
+              <Ring value={calm} size={60} tone="mint" label={`Calm ${calm ?? "not recorded"}`}><b>{calm ?? "—"}</b><small>calm</small></Ring>
+            </>)}
             {body?.hrv_ms != null && <span className="d18-stat"><b>{Math.round(body.hrv_ms)}<small> ms</small></b><small>HRV</small></span>}
             {body?.resting_hr != null && <span className="d18-stat"><b>{Math.round(body.resting_hr)}<small> bpm</small></b><small>Resting HR</small></span>}
             {body?.sleep_minutes != null && <span className="d18-stat"><b>{hoursMinutes(body.sleep_minutes)}</b><small>Sleep before</small></span>}

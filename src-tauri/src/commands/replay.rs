@@ -7,7 +7,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
-use super::muse::{EegSample, MotionSample, PpgSample};
+use super::muse::{ChannelContinuity, EegSample, MotionSample, PpgSample, SeqTracker, SeqVerdict};
 
 // ── Data directory ──────────────────────────────────────────────
 
@@ -60,6 +60,17 @@ struct ReplayHeader {
     motion: Vec<String>,
     start_ts: f64,
     session_id: String,
+    // Reproducibility (decision 0057). Additive: readers parse JSON values, so older readers ignore these.
+    /// `live`, `replay` or `demo`: where the recorded samples came from.
+    data_source: &'static str,
+    /// `sample_rate` is the headset's nominal rate, not a measurement; the trailer has the measured rate.
+    sample_rate_basis: &'static str,
+    /// `host_receive_ms_per_packet`: one host-clock stamp per 12-sample packet, taken when it arrived.
+    timestamp_basis: &'static str,
+    samples_per_packet: u8,
+    /// How raw counts became µV: 12-bit, 0.48828125 µV per count around 2048.
+    eeg_decoder: &'static str,
+    app_version: &'static str,
 }
 
 /// What start_eeg_recording knows; written as the header with the first line (or on stop).
@@ -67,6 +78,120 @@ struct ReplayHeader {
 struct PendingHeader {
     start_ts: f64,
     session_id: String,
+}
+
+pub(crate) const EEG_DECODER: &str = "muse_eeg_12bit_0.48828125uV_v1";
+
+/// Per channel, what the recording actually holds: the basis for its measured sample rate.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub(crate) struct RecordedChannel {
+    pub channel: String,
+    pub packets: u64,
+    pub samples: u64,
+    pub first_ts: f64,
+    pub last_ts: f64,
+}
+
+/// Trailer statistics for the open recording (decision 0057).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct RecordingStats {
+    pub data_source: Option<&'static str>,
+    pub channels: Vec<RecordedChannel>,
+    pub continuity: SeqTracker,
+    pub write_errors: u64,
+    /// Samples from another source than the recording's first (e.g. demo during a live recording): never written.
+    pub other_source_dropped: u64,
+}
+
+impl RecordingStats {
+    /// Whether a sample may be written: its source must match the recording's, and a repeated packet is
+    /// never written twice. Counts what it sees.
+    pub(crate) fn admit(&mut self, sample: &EegSample) -> bool {
+        match self.data_source {
+            None => self.data_source = Some(sample.source),
+            Some(s) if s != sample.source => {
+                self.other_source_dropped += 1;
+                return false;
+            }
+            _ => {}
+        }
+        if let Some(seq) = sample.sequence {
+            if self.continuity.observe(&sample.channel, seq) == SeqVerdict::Duplicate {
+                return false;
+            }
+        }
+        let c = match self
+            .channels
+            .iter()
+            .position(|c| c.channel == sample.channel)
+        {
+            Some(i) => &mut self.channels[i],
+            None => {
+                self.channels.push(RecordedChannel {
+                    channel: sample.channel.clone(),
+                    first_ts: sample.timestamp,
+                    ..Default::default()
+                });
+                self.channels.last_mut().expect("just pushed")
+            }
+        };
+        c.packets += 1;
+        c.samples += sample.samples.len() as u64;
+        c.last_ts = sample.timestamp;
+        true
+    }
+
+    /// Samples per second between the first and last packet's arrival, from what was written. The last
+    /// packet's samples are not counted (its arrival time marks the end of the span). `None` under 2 s.
+    pub(crate) fn measured_rate(c: &RecordedChannel) -> Option<f64> {
+        let span = (c.last_ts - c.first_ts) / 1000.0;
+        (span >= 2.0 && c.packets >= 2).then(|| ((c.samples - c.samples / c.packets) as f64) / span)
+    }
+}
+
+#[derive(Serialize)]
+struct TrailerChannel<'a> {
+    channel: &'a str,
+    packets: u64,
+    samples: u64,
+    /// Measured from the recording; `null` when it is too short to say.
+    measured_rate_hz: Option<f64>,
+    /// Packets the headset counter says never arrived (lost before this app saw them).
+    missed_packets: u64,
+    duplicates_dropped: u64,
+    counter_resets: u64,
+}
+
+#[derive(Serialize)]
+struct TrailerStats<'a> {
+    channels: Vec<TrailerChannel<'a>>,
+    write_errors: u64,
+    other_source_dropped: u64,
+}
+
+fn trailer_stats(stats: &RecordingStats) -> TrailerStats<'_> {
+    let cont: Vec<ChannelContinuity> = stats.continuity.counts();
+    TrailerStats {
+        channels: stats
+            .channels
+            .iter()
+            .map(|c| {
+                let k = cont.iter().find(|x| x.channel == c.channel);
+                TrailerChannel {
+                    channel: &c.channel,
+                    packets: c.packets,
+                    samples: c.samples,
+                    measured_rate_hz: RecordingStats::measured_rate(c)
+                        .map(|r| (r * 100.0).round() / 100.0),
+                    missed_packets: k.map_or(0, |k| k.missed_packets),
+                    duplicates_dropped: k.map_or(0, |k| k.duplicates_dropped),
+                    counter_resets: k.map_or(0, |k| k.counter_resets),
+                }
+            })
+            .collect(),
+        write_errors: stats.write_errors,
+        other_source_dropped: stats.other_source_dropped,
+    }
 }
 
 /// The back-of-head electrode verdict that goes in the trailer.
@@ -91,6 +216,7 @@ struct RecordingMeta {
     aux: Option<AuxInfo>,
     /// File name of the open recording (readers must not write a sidecar for it).
     name: Option<String>,
+    stats: RecordingStats,
 }
 
 #[derive(Serialize)]
@@ -98,6 +224,7 @@ struct ReplayTrailer<'a> {
     kind: &'static str, // "trailer"
     end_ts: f64,
     aux: Option<&'a AuxInfo>,
+    stats: TrailerStats<'a>,
 }
 
 #[derive(Serialize)]
@@ -116,7 +243,11 @@ struct ReplayMotionLine<'a> {
     samples: &'a [[f64; 3]],
 }
 
-fn header_json(pending: &PendingHeader, streams: &StreamSet) -> serde_json::Result<String> {
+fn header_json(
+    pending: &PendingHeader,
+    streams: &StreamSet,
+    data_source: &'static str,
+) -> serde_json::Result<String> {
     let mut channels: Vec<String> = ["TP9", "AF7", "AF8", "TP10"]
         .iter()
         .map(|c| c.to_string())
@@ -139,6 +270,12 @@ fn header_json(pending: &PendingHeader, streams: &StreamSet) -> serde_json::Resu
         motion: sorted(&streams.motion),
         start_ts: pending.start_ts,
         session_id: pending.session_id.clone(),
+        data_source,
+        sample_rate_basis: "nominal",
+        timestamp_basis: "host_receive_ms_per_packet",
+        samples_per_packet: 12,
+        eeg_decoder: EEG_DECODER,
+        app_version: env!("CARGO_PKG_VERSION"),
     })
 }
 
@@ -160,7 +297,8 @@ fn write_pending_header<W: Write>(
     streams: &StreamSet,
 ) -> std::io::Result<()> {
     if let Some(pending) = meta.pending_header.as_ref() {
-        let json = header_json(pending, streams).map_err(std::io::Error::other)?;
+        let json = header_json(pending, streams, meta.stats.data_source.unwrap_or("live"))
+            .map_err(std::io::Error::other)?;
         writeln!(w, "{json}")?;
         meta.pending_header = None;
     }
@@ -180,6 +318,7 @@ fn write_trailer_and_flush<W: Write>(
             kind: "trailer",
             end_ts,
             aux: meta.aux.as_ref(),
+            stats: trailer_stats(&meta.stats),
         })
         .map_err(std::io::Error::other)?;
         writeln!(w, "{json}")?;
@@ -195,6 +334,9 @@ struct ReplaySampleLine {
     timestamp: f64,
     channel: String,
     samples: Vec<f64>,
+    /// The headset's packet counter (decision 0057); absent in older files and for demo data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    seq: Option<u16>,
 }
 
 #[derive(Serialize, Clone, specta::Type)]
@@ -246,6 +388,10 @@ pub async fn maybe_record_sample(sample: &EegSample) {
         Some(f) => f,
         None => return,
     };
+    let mut meta = RECORDING_META.lock().await;
+    if !meta.stats.admit(sample) {
+        return;
+    }
 
     let mut prev_ts = RECORDING_PREV_TS.lock().await;
     let dt_ms = match *prev_ts {
@@ -260,11 +406,18 @@ pub async fn maybe_record_sample(sample: &EegSample) {
         timestamp: sample.timestamp,
         channel: sample.channel.clone(),
         samples: sample.samples.clone(),
+        seq: sample.sequence,
     };
 
-    if let Ok(json) = serde_json::to_string(&line) {
-        let mut meta = RECORDING_META.lock().await;
-        let _ = write_recorded_line(file, &mut meta, &super::muse::subscribed_streams(), &json);
+    match serde_json::to_string(&line) {
+        Ok(json) => {
+            if write_recorded_line(file, &mut meta, &super::muse::subscribed_streams(), &json)
+                .is_err()
+            {
+                meta.stats.write_errors += 1;
+            }
+        }
+        Err(_) => meta.stats.write_errors += 1,
     }
 }
 
@@ -298,9 +451,76 @@ async fn record_extra_line(json: serde_json::Result<String>) {
     let Some(file) = file_guard.as_mut() else {
         return;
     };
-    if let Ok(json) = json {
-        let mut meta = RECORDING_META.lock().await;
-        let _ = write_recorded_line(file, &mut meta, &super::muse::subscribed_streams(), &json);
+    let mut meta = RECORDING_META.lock().await;
+    // PPG and motion only come from the headset: never mixed into a replay or demo recording. When they
+    // come first they set the recording's source to live, so a later demo sample is refused, not mislabelled.
+    if *meta.stats.data_source.get_or_insert("live") != "live" {
+        meta.stats.other_source_dropped += 1;
+        return;
+    }
+    match json {
+        Ok(json) => {
+            if write_recorded_line(file, &mut meta, &super::muse::subscribed_streams(), &json)
+                .is_err()
+            {
+                meta.stats.write_errors += 1;
+            }
+        }
+        Err(_) => meta.stats.write_errors += 1,
+    }
+}
+
+lazy_static::lazy_static! {
+    /// Which source owns `muse-eeg` right now (decision 0057): claimed and released under one lock, so
+    /// live and replay/demo can never feed the app at the same time.
+    static ref EEG_SOURCE: Mutex<Option<(&'static str, std::time::Instant)>> = Mutex::new(None);
+}
+
+/// A live claim this old with no live stream running is left over from a start that failed.
+const STALE_LIVE_CLAIM: Duration = Duration::from_secs(30);
+
+/// Pure rule for [`claim_source`]: `Ok(true)` = already this source's, `Ok(false)` = newly claimed.
+pub(crate) fn claim_rule(
+    current: Option<&'static str>,
+    want: &'static str,
+    live_stale: bool,
+) -> Result<bool, String> {
+    match current {
+        None => Ok(false),
+        Some(c) if c == want => Ok(true),
+        Some("live") if live_stale => Ok(false),
+        Some("live") => Err(
+            "The headset is streaming. Stop it before playing a replay or the demo.".to_string(),
+        ),
+        // A replay and the demo replace each other (the old one stops at its next packet).
+        Some(_) if want != "live" => Ok(false),
+        Some(_) => Err(
+            "A replay or demo is running. Stop it before streaming from the headset.".to_string(),
+        ),
+    }
+}
+
+/// Claims `muse-eeg` for `want` (`live`, `replay` or `demo`).
+pub(crate) async fn claim_source(want: &'static str) -> Result<bool, String> {
+    let mut cur = EEG_SOURCE.lock().await;
+    let live_stale = match *cur {
+        Some(("live", at)) => {
+            at.elapsed() > STALE_LIVE_CLAIM && !super::muse::live_streaming().await
+        }
+        _ => false,
+    };
+    let already = claim_rule(cur.map(|(s, _)| s), want, live_stale)?;
+    if !already {
+        *cur = Some((want, std::time::Instant::now()));
+    }
+    Ok(already)
+}
+
+/// Releases the claim if `src` holds it.
+pub(crate) async fn release_source(src: &'static str) {
+    let mut cur = EEG_SOURCE.lock().await;
+    if cur.is_some_and(|(s, _)| s == src) {
+        *cur = None;
     }
 }
 
@@ -372,6 +592,7 @@ pub async fn start_eeg_recording() -> Result<String, String> {
         trailer_written: false,
         aux: None,
         name: Some(filename.clone()),
+        stats: RecordingStats::default(),
     };
 
     *RECORDING_FILE.lock().await = Some(writer);
@@ -414,6 +635,108 @@ pub async fn stop_eeg_recording() -> Result<String, String> {
 
     println!("[replay] recording stopped");
     Ok("stopped".to_string())
+}
+
+#[cfg(test)]
+mod stats_tests {
+    use super::*;
+
+    #[test]
+    fn only_one_source_feeds_the_app_at_a_time() {
+        assert_eq!(claim_rule(None, "live", false), Ok(false));
+        assert_eq!(
+            claim_rule(Some("live"), "live", false),
+            Ok(true),
+            "a second start is a no-op"
+        );
+        assert!(claim_rule(Some("live"), "replay", false).is_err());
+        assert!(claim_rule(Some("live"), "demo", false).is_err());
+        assert_eq!(
+            claim_rule(Some("live"), "replay", true),
+            Ok(false),
+            "a stale live claim never locks replay out"
+        );
+        assert!(claim_rule(Some("replay"), "live", false).is_err());
+        assert!(claim_rule(Some("demo"), "live", false).is_err());
+        assert_eq!(
+            claim_rule(Some("demo"), "replay", false),
+            Ok(false),
+            "replay and demo replace each other"
+        );
+    }
+
+    #[test]
+    fn a_counter_restart_mid_recording_keeps_writing() {
+        let mut st = RecordingStats::default();
+        assert!(st.admit(&s("TP9", 0.0, Some(30000), "live")));
+        assert!(
+            st.admit(&s("TP9", 50.0, Some(5), "live")),
+            "headset restarted its counter"
+        );
+        assert!(st.admit(&s("TP9", 100.0, Some(6), "live")));
+        assert_eq!(st.channels[0].packets, 3);
+        assert_eq!(st.continuity.counts()[0].counter_resets, 1);
+    }
+
+    fn s(channel: &str, ts: f64, seq: Option<u16>, source: &'static str) -> EegSample {
+        EegSample {
+            timestamp: ts,
+            channel: channel.into(),
+            samples: vec![0.0; 12],
+            sequence: seq,
+            source,
+        }
+    }
+
+    #[test]
+    fn a_recording_keeps_one_source_and_never_writes_a_packet_twice() {
+        let mut st = RecordingStats::default();
+        assert!(st.admit(&s("TP9", 0.0, Some(1), "live")));
+        assert!(!st.admit(&s("TP9", 1.0, Some(1), "live")), "repeat");
+        assert!(!st.admit(&s("AF7", 1.0, None, "demo")), "other source");
+        assert!(
+            st.admit(&s("TP9", 2.0, Some(3), "live")),
+            "a gap is still new data"
+        );
+        assert_eq!(st.data_source, Some("live"));
+        assert_eq!(st.other_source_dropped, 1);
+        let c = st.continuity.counts();
+        assert_eq!((c[0].missed_packets, c[0].duplicates_dropped), (1, 1));
+        assert_eq!(st.channels[0].packets, 2);
+    }
+
+    #[test]
+    fn the_measured_rate_comes_from_what_was_written() {
+        let mut st = RecordingStats::default();
+        // 64 packets of 12 samples, 46.875 ms apart: 256 Hz.
+        for i in 0..64u16 {
+            st.admit(&s("TP9", f64::from(i) * 46.875, Some(i), "live"));
+        }
+        let r = RecordingStats::measured_rate(&st.channels[0]).unwrap();
+        assert!((r - 256.0).abs() < 0.01, "{r}");
+        // Under 2 s: no rate, never the nominal 256 filled in.
+        let mut short = RecordingStats::default();
+        short.admit(&s("TP9", 0.0, Some(0), "live"));
+        short.admit(&s("TP9", 500.0, Some(1), "live"));
+        assert_eq!(RecordingStats::measured_rate(&short.channels[0]), None);
+    }
+
+    #[test]
+    fn a_demo_recording_says_demo_in_its_header() {
+        let mut meta = RecordingMeta {
+            pending_header: Some(PendingHeader {
+                start_ts: 1.0,
+                session_id: "x".into(),
+            }),
+            ..Default::default()
+        };
+        meta.stats.admit(&s("TP9", 0.0, None, "demo"));
+        let mut out = Vec::new();
+        write_recorded_line(&mut out, &mut meta, &StreamSet::default(), "{}").unwrap();
+        let head: serde_json::Value =
+            serde_json::from_str(String::from_utf8(out).unwrap().lines().next().unwrap()).unwrap();
+        assert_eq!(head["data_source"], "demo");
+    }
 }
 
 #[cfg(test)]
@@ -467,7 +790,11 @@ mod recording_tests {
                 "channels": ["TP9", "AF7", "AF8", "TP10", "AUX"],
                 "ppg": ["ambient", "infrared", "red"],
                 "motion": ["accelerometer", "gyroscope"],
-                "start_ts": 1000.0, "session_id": "sid"
+                "start_ts": 1000.0, "session_id": "sid",
+                // Decision 0057: reproducibility fields (additive).
+                "data_source": "live", "sample_rate_basis": "nominal",
+                "timestamp_basis": "host_receive_ms_per_packet", "samples_per_packet": 12,
+                "eeg_decoder": EEG_DECODER, "app_version": env!("CARGO_PKG_VERSION")
             })
         );
 
@@ -509,7 +836,8 @@ mod recording_tests {
             l[1],
             serde_json::json!({"kind": "trailer", "end_ts": 5000.0, "aux": {
                 "detected": true, "placement": "occipital", "detectedBy": "signal-quality",
-                "detectedAt": "2026-11-11T00:00:00Z"}})
+                "detectedAt": "2026-11-11T00:00:00Z"},
+                "stats": {"channels": [], "write_errors": 0, "other_source_dropped": 0}})
         );
 
         let mut w = BufWriter::new(Vec::new());
@@ -662,6 +990,7 @@ pub async fn start_replay(app: AppHandle, filename: String, speed: f64) -> Resul
     if !path.is_file() {
         return Err(format!("Replay file not found: {filename}"));
     }
+    claim_source("replay").await?;
 
     // Stop any existing replay/demo
     *REPLAY_ACTIVE.lock().await = false;
@@ -687,6 +1016,7 @@ async fn replay_task(app: &AppHandle, path: &PathBuf, speed: f64) {
         Err(e) => {
             println!("[replay] failed to open file: {e}");
             *REPLAY_ACTIVE.lock().await = false;
+            release_source("replay").await;
             return;
         }
     };
@@ -748,6 +1078,11 @@ async fn replay_task(app: &AppHandle, path: &PathBuf, speed: f64) {
                 .and_then(|s| s.as_array())
                 .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<f64>>())
                 .unwrap_or_default(),
+            sequence: v
+                .get("seq")
+                .and_then(|q| q.as_u64())
+                .and_then(|q| u16::try_from(q).ok()),
+            source: "replay",
         };
 
         let _ = app.emit("muse-eeg", &sample);
@@ -764,6 +1099,7 @@ async fn replay_task(app: &AppHandle, path: &PathBuf, speed: f64) {
 
     println!("[replay] replay finished: total_emitted={packets_emitted}");
     *REPLAY_ACTIVE.lock().await = false;
+    release_source("replay").await;
     emit_idle(app);
 }
 
@@ -782,6 +1118,8 @@ fn emit_idle(app: &AppHandle) {
 pub async fn stop_replay(app: AppHandle) -> Result<(), String> {
     println!("[replay] stop requested");
     *REPLAY_ACTIVE.lock().await = false;
+    release_source("replay").await;
+    release_source("demo").await;
     // Give the task a moment to exit
     tokio::time::sleep(Duration::from_millis(50)).await;
     emit_idle(&app);
@@ -793,6 +1131,7 @@ pub async fn stop_replay(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 #[specta::specta]
 pub async fn start_demo_eeg(app: AppHandle, mode: String, speed: f64) -> Result<(), String> {
+    claim_source("demo").await?;
     // Stop any existing replay/demo
     *REPLAY_ACTIVE.lock().await = false;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -900,11 +1239,12 @@ async fn demo_task(app: &AppHandle, mode: &str, speed: f64) {
                 timestamp: chrono::Utc::now().timestamp_millis() as f64,
                 channel: ch.to_string(),
                 samples,
+                sequence: None,
+                source: "demo",
             };
-            let _ = app.emit("muse-eeg", &sample);
-
-            // If recording is active, record demo samples too
+            // A recording opened during the demo is labelled `demo` in its header and never mixes in live data.
             maybe_record_sample(&sample).await;
+            let _ = app.emit("muse-eeg", &sample);
 
             packets_emitted += 1;
         }
@@ -928,5 +1268,6 @@ async fn demo_task(app: &AppHandle, mode: &str, speed: f64) {
 
     println!("[replay] demo stopped: total_emitted={packets_emitted}");
     *REPLAY_ACTIVE.lock().await = false;
+    release_source("demo").await;
     emit_idle(app);
 }

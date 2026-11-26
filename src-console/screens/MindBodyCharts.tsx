@@ -5,6 +5,7 @@ import { deltaWords, todayJst } from "../ui/charts/chartMath";
 
 const DASH = "\u2014";
 import type { NoopMetricPoint } from "../types";
+import { SeriesGfx } from "./mindbody3d/SeriesGfx";
 
 /**
  * design-1110c: one line against his own baseline, in the shared chart vocabulary: the copper band
@@ -23,32 +24,43 @@ export function BaselineChart({ points, reading, tall = false, bars = false, mar
   const usual = base ? { low: (base.mean - base.sd) * k, high: (base.mean + base.sd) * k, median: base.mean * k } : null;
   const unit = hours ? "h" : reading.def.unit.trim() || undefined;
   const tick = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+  const domainProps = bars && hours ? { kind: "bar" as const, smoothing: 1, domain: [0, 10] as [number, number], ticks: [0, 5, 10] } : bars ? { kind: "bar" as const, smoothing: 1 } : {};
+  const lastLabel = points[points.length - 1].day === todayJst() ? "Today" : shortDay(points[points.length - 1].day);
+  const xTicks = points.length > 21 ? [0, 7, 14, 21, points.length - 1] : undefined;
+  const readout = (i: number) => {
+    const raw = points[i]?.value;
+    return (
+      <>
+        <strong>{typeof raw === "number" ? reading.def.format(raw) : DASH}</strong>
+        <span>{shortDay(points[i].day)}</span>
+        {base && typeof raw === "number" && <span>{deltaWords(raw * k, base.mean * k, unitSuffix(reading, hours), hours ? 1 : 0)?.text}</span>}
+      </>
+    );
+  };
+  const height = tall ? 148 : 112;
+  const svg = (
+    <TrendChart
+      values={values}
+      labels={points.map((p) => shortDay(p.day))}
+      label={label}
+      format={tick}
+      unit={unit}
+      usual={usual}
+      height={height}
+      {...domainProps}
+      nowClassName="mb-chart__now"
+      lastLabel={lastLabel}
+      xTicks={xTicks}
+      markers={markers}
+      readout={readout}
+    />
+  );
+  // The facts as text for the hidden table: the most recent 31 days, each against his usual.
+  const rows = points.slice(-31).map((p) => ({ day: shortDay(p.day), value: typeof p.value === "number" ? reading.def.format(p.value) : DASH, note: base && typeof p.value === "number" ? deltaWords(p.value * k, base.mean * k, unitSuffix(reading, hours), hours ? 1 : 0)?.text : undefined }));
   return (
     <div className="mb-chart" data-plot="" data-tall={tall || undefined}>
-      <TrendChart
-        values={values}
-        labels={points.map((p) => shortDay(p.day))}
-        label={label}
-        format={tick}
-        unit={unit}
-        usual={usual}
-        height={tall ? 148 : 112}
-        {...(bars && hours ? { kind: "bar" as const, smoothing: 1, domain: [0, 10] as [number, number], ticks: [0, 5, 10] } : bars ? { kind: "bar" as const, smoothing: 1 } : {})}
-        nowClassName="mb-chart__now"
-        lastLabel={points[points.length - 1].day === todayJst() ? "Today" : shortDay(points[points.length - 1].day)}
-        xTicks={points.length > 21 ? [0, 7, 14, 21, points.length - 1] : undefined}
-        markers={markers}
-        readout={(i) => {
-          const raw = points[i]?.value;
-          return (
-            <>
-              <strong>{typeof raw === "number" ? reading.def.format(raw) : DASH}</strong>
-              <span>{shortDay(points[i].day)}</span>
-              {base && typeof raw === "number" && <span>{deltaWords(raw * k, base.mean * k, unitSuffix(reading, hours), hours ? 1 : 0)?.text}</span>}
-            </>
-          );
-        }}
-      />
+      <SeriesGfx values={values} labels={points.map((p) => shortDay(p.day))} label={label} format={tick} unit={unit} kind={bars ? "bar" : "line"} usual={usual} height={height}
+        domain={bars && hours ? [0, 10] : undefined} ticks={bars && hours ? [0, 5, 10] : undefined} xTicks={xTicks} lastLabel={lastLabel} markers={markers} readout={readout} rows={rows} fallback={svg} />
     </div>
   );
 }
@@ -70,16 +82,20 @@ const clockOf = (iso: string) => { const d = new Date(iso); return new Intl.Date
 /** Minutes since local midnight (Tokyo). */
 const minutesOf = (iso: string) => { const [h, m] = clockOf(iso).split(":").map(Number); return h * 60 + m; };
 
-/** design-1110c C9: bed → wake on a light clock axis (every 2 h), from the real night record. */
-export function SleepSpan({ start, end }: { start: string; end: string }) {
+/** Bed → wake on a clock axis, in minutes (evening bedtimes sit before midnight). Shared by the SVG/HTML and Three.js spans. */
+export function spanAxis(start: string, end: string) {
   let s = minutesOf(start), e = minutesOf(end);
   if (s > 12 * 60) s -= 1440; // evening bedtimes sit before midnight on the axis
   if (e < s) e += 1440;
   const a0 = Math.floor((s - 30) / 60) * 60, a1 = Math.max(a0 + 240, Math.ceil((e + 15) / 30) * 30);
-  const pct = (m: number) => ((m - a0) / (a1 - a0)) * 100;
   const hours: number[] = [];
   for (let m = a0; m <= a1; m += 120) hours.push(m);
-  const label = (m: number) => `${String((((Math.round(m / 60) % 24) + 24) % 24)).padStart(2, "0")}:00`;
+  return { s, e, a0, a1, hours, pct: (m: number) => ((m - a0) / (a1 - a0)) * 100, label: (m: number) => `${String((((Math.round(m / 60) % 24) + 24) % 24)).padStart(2, "0")}:00`, startClock: clockOf(start), endClock: clockOf(end) };
+}
+
+/** design-1110c C9: bed → wake on a light clock axis (every 2 h), from the real night record. */
+export function SleepSpan({ start, end }: { start: string; end: string }) {
+  const { s, e, hours, pct, label } = spanAxis(start, end);
   return (
     <div className="mb-span" role="img" aria-label={`In bed ${clockOf(start)} to ${clockOf(end)}`}>
       <div className="mb-span__track"><i style={{ left: `${pct(s)}%`, width: `${pct(e) - pct(s)}%` }} /></div>

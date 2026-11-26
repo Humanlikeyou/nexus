@@ -1,4 +1,4 @@
-import { addAdapter, type AddKind } from "./adapters";
+import { addAdapter, habitDoneAdapter } from "./adapters";
 import type { AddAdapter, AddPreview } from "./flow";
 
 /**
@@ -7,21 +7,21 @@ import type { AddAdapter, AddPreview } from "./flow";
  * phrasings; anything else returns null and nothing happens. A preview is never saved without an explicit confirm turn.
  * Audio never reaches this module: voice arrives as the transcript text amara-voice already logged (turns.jsonl).
  */
-import { detectAddIntent, isCancel, isConfirm, type AddVia } from "./intent";
+import { detectAddIntent, isCancel, isConfirm, type AddIntentKind, type AddVia } from "./intent";
 export { detectAddIntent, isCancel, isConfirm, type AddIntent, type AddVia } from "./intent";
 
-const LABEL: Record<AddKind, string> = { goal: "goal", date: "date", task: "task", idea: "content idea" };
+const LABEL: Record<AddIntentKind, string> = { goal: "goal", date: "date", task: "task", idea: "content idea", "habit-done": "habit" };
 export const PENDING_MS = 2 * 60_000;
 
-const lines = (kind: AddKind, p: AddPreview) =>
+const lines = (kind: AddIntentKind, p: AddPreview) =>
   `Check before saving (${LABEL[kind]}): ${p.title}. ${p.fields.map(([k, v]) => `${k}: ${v}`).join(". ")}.${p.note ? ` ${p.note}` : ""} Say "confirm" to save or "cancel".`;
 
-type Pending = { kind: AddKind; preview: AddPreview; via: AddVia; at: number };
-export type ChatAddDeps = { adapter?: (kind: AddKind) => AddAdapter; now?: () => number };
+type Pending = { kind: AddIntentKind; preview: AddPreview; via: AddVia; at: number };
+export type ChatAddDeps = { adapter?: (kind: AddIntentKind) => AddAdapter; now?: () => number };
 
 /** One conversation's add flow: detect, preview (nothing written), then a separate confirm turn to save. */
 export function createChatAdds(deps: ChatAddDeps = {}) {
-  const adapter = deps.adapter ?? ((k: AddKind) => addAdapter(k));
+  const adapter = deps.adapter ?? ((k: AddIntentKind) => (k === "habit-done" ? habitDoneAdapter() : addAdapter(k)));
   const now = deps.now ?? (() => Date.now());
   let pending: Pending | null = null;
   /** Monotonic: a slower, older turn can never assign or save over a newer one. */

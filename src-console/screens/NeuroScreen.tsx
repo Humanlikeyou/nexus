@@ -1,3 +1,5 @@
+import { CalibrationView } from "../neuro/CalibrationView";
+import { TrainingView } from "../neuro/TrainingView";
 import { BrainCircuit, Bluetooth, Inbox, Play, RefreshCw, Square, Unplug, X } from "lucide-react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { INITIAL_SNAPSHOT } from "../bridge";
@@ -19,6 +21,7 @@ import { HemisyncSection } from "./HemisyncSection";
 import { NeuroTrends } from "./NeuroTrends";
 import "./NeuroScreen.css";
 import { MuseJourney } from "../design1118/MuseJourney";
+import { useSessionBands } from "../neuro/useSessionBands";
 
 const MUSE_COMMAND = "get_muse_state";
 const SESSIONS_COMMAND = "list_sessions";
@@ -45,6 +48,14 @@ export function rssiText(rssi: number | null | undefined) {
 const whole = (value: number | null | undefined) => (typeof value === "number" && Number.isFinite(value) ? Math.round(value) : null);
 
 export type NeuroFieldProps = MuseScreenProps & {
+  /** The route's view: "neuro/calibration" opens the optional pre-meditation calibration (decision 0058). */
+  view?: string;
+  onOpenCalibration?: () => void;
+  onCloseCalibration?: () => void;
+  /** Decision 0059: "neuro/training" opens protocol settings and session records. */
+  onOpenTraining?: () => void;
+  /** Decision 0059: "neuro/calibration-after" is the optional rest recording after a session. */
+  onOpenAfterRest?: () => void;
   training: ReturnType<typeof useTraining>;
   /** Re-runs the snapshot load. Retry is hidden without it. */
   onRetry?: () => void;
@@ -65,12 +76,21 @@ export type NeuroFieldProps = MuseScreenProps & {
   loading?: boolean;
 };
 
-export function NeuroField({ data, devices, operation, error, sessionId = null, sessionStartedAt, sessionEndedAt, onScan, onConnect, onDisconnect, onStart, onStop, training, onRetry, loading, onOpenHistory, scanEmpty = false, lastSavedId = null, onDismissSaved, onOpenRecording, focusPrimary = 0 }: NeuroFieldProps) {
+export function NeuroField(props: NeuroFieldProps) {
+  // Decision 0058: Neuro › Calibration is its own view ("neuro/calibration"), reached from the header.
+  if (props.view === "neuro/calibration") return <div className="neuro page-inset"><CalibrationView onDone={props.onCloseCalibration} /></div>;
+  if (props.view === "neuro/calibration-after") return <div className="neuro page-inset"><CalibrationView after onDone={props.onOpenTraining ?? props.onCloseCalibration} /></div>;
+  if (props.view === "neuro/training") return <div className="neuro page-inset"><TrainingView training={props.training} running={props.sessionStartedAt != null} onDone={props.onCloseCalibration} onRecordAfter={props.onOpenAfterRest} /></div>;
+  return <NeuroMain {...props} />;
+}
+
+function NeuroMain({ data, devices, operation, error, sessionId = null, sessionStartedAt, sessionEndedAt, onScan, onConnect, onDisconnect, onStart, onStop, training, onRetry, loading, onOpenHistory, scanEmpty = false, lastSavedId = null, onDismissSaved, onOpenRecording, focusPrimary = 0, onOpenCalibration, onOpenTraining }: NeuroFieldProps) {
   const telemetry = useMuseTelemetry(); // only this screen subscribes to live readings
   const history = useBandHistory();
   const now = useNow(); // 1 s tick scoped to this screen
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const recordings = useRecordingsAdapter(data.sessions);
+  const withBands = useSessionBands(data.sessions); // band series for the newest few sessions (the brain rings)
   useFocusPrimary(focusPrimary);
 
   if (loading ?? data.refreshedAt === INITIAL_SNAPSHOT.refreshedAt) return <NeuroSkeleton />;
@@ -86,7 +106,7 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
   const signal = museSignalState(data, telemetry);
   const acquiring = streaming && telemetry.sampleCount < MIN_SAMPLES;
   const live = streaming && !acquiring;
-  const sessions = data.sessions.filter((s) => s.device_type === "muse");
+  const sessions = withBands.filter((s) => s.device_type === "muse");
   const selected = sessions.find((s) => s.id === selectedId) ?? null;
   const state = training.state;
   const showCalm = running && training.protocolId !== "off";
@@ -115,7 +135,7 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
   const header = (
     <>
       <PageHero title="Neuro" statement={failed ? "Out of reach" : deviceBadge.text} detail={failed ? <Badge tone="danger">Unavailable</Badge> : band ? <Badge tone={band.tone}>Recovery now {Math.round(recovery as number)}%</Badge> : undefined} />
-      {secondary && <div className="neuro__actions">{secondary}</div>}
+      {(secondary || (onOpenCalibration && !running && !streaming)) && <div className="neuro__actions">{secondary}{onOpenCalibration && !running && !streaming && <Button variant="plain" onClick={onOpenCalibration}>Calibrate (optional)</Button>}{onOpenTraining && !running && !streaming && <Button variant="plain" onClick={onOpenTraining}>Training</Button>}</div>}
     </>
   );
 
@@ -143,8 +163,12 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
   const heroIdle = connected && !streaming && !running;
   const saved = lastSavedId && !running ? data.sessions.find((s) => s.id === lastSavedId) ?? null : null;
   const savedBody = saved ? parseBodyContext(saved.body_context) : null;
-  const lastSession = sessions[0] ?? data.sessions[0] ?? null;
+  const lastSession = sessions[0] ?? withBands[0] ?? null;
   const recoveryNow = typeof data.noop.today?.recovery === "number" ? data.noop.today.recovery : null;
+  // Live band power for the "Now" ring: only while Muse is really streaming (no second BLE connection; same telemetry as the readings below).
+  // Decision 0057: bands are a reading only when all four channels have a second of samples; otherwise a dash, never 0 %.
+  const bandsLive = live && telemetry.bandsValid !== false;
+  const liveBands = bandsLive ? telemetry.bands : null;
 
   return (
     <div className="neuro page-inset" data-state={!connected ? "empty" : streaming ? "streaming" : "ready"}>
@@ -200,8 +224,8 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
         )
         : (
           <>
-            {heroIdle && !pendingSave && lastSession && (
-              <MuseJourney hideNext session={lastSession} sessions={sessions.length ? sessions : data.sessions} recoveryNow={recoveryNow} onOpenHistory={onOpenHistory} onOpenSession={onOpenRecording} action={null} />
+            {(heroIdle || (live && !running)) && !pendingSave && lastSession && (
+              <MuseJourney hideNext liveBands={liveBands} session={lastSession} sessions={sessions.length ? sessions : data.sessions} recoveryNow={recoveryNow} onOpenHistory={onOpenHistory} onOpenSession={onOpenRecording} action={null} />
             )}
             <NeuroFlow training={training} telemetry={telemetry} sessions={data.sessions} running={running} action={primary} savedSessionId={lastSavedId} />
             <More label="Live readings and signal" open={(running && !training.state.stage) || streaming ? true : undefined}>
@@ -230,11 +254,11 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
               <Card title="Band powers" className="neuro__bands">
                 <InsetGroup className="neuro__group">
                   {BAND_KEYS.map((key) => {
-                    const value = live ? telemetry.bands[key] : 0;
+                    const value = bandsLive ? telemetry.bands[key] : 0;
                     return (
                       <ListRow key={key} className="neuro__band" title={<><span className="neuro__band-symbol" aria-hidden="true">{BANDS[key].symbol}</span>{BANDS[key].name}</>}
-                        subtitle={<Meter size="sm" label={`${BANDS[key].name} relative power`} value={value} valueText={live ? `${Math.round(value)}%` : "No reading"} />}
-                        value={<span className="neuro__num">{acquiring ? "Acquiring…" : live ? `${Math.round(value)}%` : DASH}</span>}
+                        subtitle={<Meter size="sm" label={`${BANDS[key].name} relative power`} value={value} valueText={bandsLive ? `${Math.round(value)}%` : "No reading"} />}
+                        value={<span className="neuro__num">{acquiring ? "Acquiring…" : bandsLive ? `${Math.round(value)}%` : DASH}</span>}
                         accessory={<Sparkline className="neuro__band-trend" values={history[key]} label={`${BANDS[key].name}, last 60 s`} format={(v) => `${Math.round(v)}%`} />} />
                     );
                   })}

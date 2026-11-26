@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge, Button, Card, InsetGroup, ListRow } from "../ui";
 import { LinkButton } from "../adds/Composer";
-import { amountText, useVentureMonth, type LedgerWrites, type VentureMonth } from "../business/ledgerWrite";
+import { amountText, useVentureMonth, writeError, type LedgerChange, type LedgerWrites, type VentureMonth } from "../business/ledgerWrite";
 import type { Venture } from "../business/adapters";
 import { useStoresTick } from "../lib/localStores";
 import { MoneyForm, VentureForm, type FormVenture } from "./EnterpriseForms";
@@ -22,6 +22,58 @@ export function monthLine(rows: VentureMonth[] | null | undefined, ventureId: st
   const mine = rows.filter((r) => r.ventureId === ventureId);
   if (mine.length === 0) return "This month: nothing logged yet";
   return `This month: ${mine.map((r) => `in ${amountText(r.incomeMinor, r.currency)} · out ${amountText(r.costMinor, r.currency)}`).join(" · ")}`;
+}
+
+/** The ledger's Undo window (business_ledger.rs UNDO_MS). The backend decides; this only hides a button that would say no. */
+export const LEDGER_UNDO_MS = 8000;
+const VERB: Record<string, string> = { venture_add: "Added", venture_edit: "Edited", venture_archive: "Archived", venture_restore: "Restored", fx_set: "Yen rate set" };
+export const changeText = (c: LedgerChange): string => (c.action === "fx_set" ? `${VERB.fx_set}${c.label ? `: ${c.label}` : ""}` : `${VERB[c.action] ?? c.action}: ${c.label}`);
+const whenText = (at: string): string => {
+  const d = new Date(at);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "Asia/Tokyo" });
+};
+
+/**
+ * The last 10 ledger changes (ventures added, edited, archived or restored; the yen rate). Undo shows only on the newest change,
+ * while it is not undone and the 8 s window is open: that is all `ledger_undo` accepts. Money entries are not listed here.
+ */
+export function LedgerHistory({ writes, tick = 0, now = () => Date.now() }: { writes: LedgerWrites | null; tick?: number; now?: () => number }) {
+  /** undefined = still loading, null = could not be read. */
+  const [items, setItems] = useState<LedgerChange[] | null | undefined>(undefined);
+  const [reload, setReload] = useState(0);
+  const [msg, setMsg] = useState("");
+  const [, setClock] = useState(0);
+  useEffect(() => {
+    if (!writes) return;
+    let live = true;
+    void writes.history().then((h) => { if (live) setItems(h.slice(0, 10)); }).catch(() => { if (live) setItems(null); });
+    return () => { live = false; };
+  }, [writes, tick, reload]);
+  const newest = items?.[0];
+  const left = newest && !newest.undone ? LEDGER_UNDO_MS - (now() - Date.parse(newest.at)) : 0;
+  useEffect(() => {
+    if (left <= 0) return;
+    const id = window.setTimeout(() => setClock((n) => n + 1), left + 50);
+    return () => window.clearTimeout(id);
+  }, [left, newest?.id]);
+  if (!writes) return null;
+  const undo = async (id: string) => {
+    try { setMsg((await writes.undoChange(id)) ? "Undone." : "That can't be undone any more. Edit it instead."); } catch (e) { setMsg(writeError(e)); }
+    setReload((n) => n + 1);
+  };
+  return (
+    <Card title="History">
+      {msg && <p className="v-note" role="status">{msg}</p>}
+      {items === undefined ? <p className="cc-note">Loading…</p> : items === null ? <p className="cc-note">History isn&apos;t available right now.</p> : items.length === 0 ? <p className="cc-note">No changes yet. Ventures you add or edit, and the yen rate, are listed here.</p> : (
+        <InsetGroup aria-label="Recent changes">
+          {items.map((c, i) => (
+            <ListRow key={c.id} title={changeText(c)} subtitle={whenText(c.at)}
+              accessory={c.undone ? <Badge tone="neutral">Undone</Badge> : i === 0 && left > 0 ? <Button size="small" variant="plain" onClick={() => { void undo(c.id); }} aria-label={`Undo: ${changeText(c)}`}>Undo</Button> : undefined} />
+          ))}
+        </InsetGroup>
+      )}
+    </Card>
+  );
 }
 
 export function StartActions({ onAdd, onLog, onDecide, active }: { onAdd: () => void; onLog: () => void; onDecide: () => void; active: "venture" | "money" | null }) {
@@ -79,6 +131,7 @@ export function StartBody({ ventures, waiting, writes, onOpenVenture, onView, tr
           </InsetGroup>
         )}
       </Card>
+      <LedgerHistory writes={writes} tick={tick + storeTick} />
     </>
   );
 }

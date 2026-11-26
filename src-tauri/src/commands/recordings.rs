@@ -35,7 +35,9 @@ const GAP_SECS: f64 = 0.5;
 const EEG_RATE: f64 = 256.0;
 const PPG_RATE: f64 = 64.0;
 const MOTION_RATE: f64 = 52.0;
-const SIDECAR_VERSION: u32 = 1;
+/// 2 (decision 0060): focus/relaxation from the one band-power pipeline. Older sidecars are caches and are
+/// rebuilt from their replay the next time the recording is opened; the replay itself is never touched.
+const SIDECAR_VERSION: u32 = 2;
 const SENSORS: [&str; 4] = ["TP9", "AF7", "AF8", "TP10"];
 const KNOWN_CHANNELS: [&str; 5] = ["TP9", "AF7", "AF8", "TP10", "AUX"];
 const INDEX_CACHE_SIZE: usize = 4;
@@ -813,11 +815,14 @@ impl SeriesAcc {
             if quality.get("AF7") == Some(&dsp::Quality::Good)
                 && quality.get("AF8") == Some(&dsp::Quality::Good)
             {
-                let (f7, r7) = dsp::focus_relaxation(&slices["AF7"]);
-                let (f8, r8) = dsp::focus_relaxation(&slices["AF8"]);
-                focus_sum += (f7 + f8) / 2.0;
-                calm_sum += (r7 + r8) / 2.0;
-                fc_n += 1;
+                // Decision 0060: power averaged across AF7 and AF8, then the scores (as training does).
+                if let Some((f, r)) =
+                    dsp::focus_relaxation_channels(&[&slices["AF7"], &slices["AF8"]])
+                {
+                    focus_sum += f;
+                    calm_sum += r;
+                    fc_n += 1;
+                }
             }
         }
         for (out, sum) in self.bands.iter_mut().zip(band_sum) {

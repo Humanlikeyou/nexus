@@ -55,7 +55,7 @@ test("(1110e) live signal: stacked lanes for every channel, 10 s window, AUX lan
     const w = window as unknown as { __E2E_EMIT: (e: string, p: unknown) => void; __n: number };
     w.__n = 0;
     setInterval(() => { const s = w.__n; w.__n += 12; const g = (k: number) => Array.from({ length: 12 }, (_, i) => 14 * Math.sin(2 * Math.PI * 10 * ((s + i) / 256) + k));
-      for (const [i, c] of ["TP9", "AF7", "AF8", "TP10", "AUX"].entries()) w.__E2E_EMIT("muse-eeg", { timestamp: Date.now(), channel: c, samples: g(i) }); }, 47);
+      for (const [i, c] of ["TP9", "AF7", "AF8", "TP10", "AUX"].entries()) w.__E2E_EMIT("muse-eeg", { timestamp: Date.now(), channel: c, samples: g(i), source: "live" }); }, 47);
   });
   await page.clock.runFor(3_000);
   await openMore(page);

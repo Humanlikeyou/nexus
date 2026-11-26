@@ -110,6 +110,14 @@ pub struct EventQuery {
     pub limit: Option<u32>,
 }
 
+/// Domain sources that must never be written into the telemetry table (0053).
+pub(crate) fn is_domain_source(source: &str) -> bool {
+    matches!(
+        source.trim().to_ascii_lowercase().as_str(),
+        "goal" | "goals" | "habit" | "project" | "task" | "checkin" | "money" | "date"
+    )
+}
+
 /// Insert events + outbox row in a single IMMEDIATE transaction.
 /// If ANY step fails, the entire transaction is rolled back (via Transaction::drop).
 /// Guarantees: events and their outbox entry are atomic — you never get orphan events
@@ -117,6 +125,14 @@ pub struct EventQuery {
 #[tauri::command]
 #[specta::specta]
 pub fn insert_events(events: Vec<Event>) -> Result<u64, String> {
+    // 0053: events.db holds numeric telemetry only. Domain records (goals and the like) have their
+    // own stores and are never written here.
+    if let Some(e) = events.iter().find(|e| is_domain_source(&e.source)) {
+        return Err(format!(
+            "events: source '{}' is a domain record, not telemetry; it is not stored here",
+            e.source
+        ));
+    }
     let mut conn = get_db()?;
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -418,48 +434,39 @@ pub fn migrate_existing_data() -> Result<String, String> {
         conn.execute("COMMIT", []).map_err(|e| e.to_string())?;
     }
 
-    // Migrate goals
-    let goals_path = data_dir.join("goals.json");
-    if goals_path.exists() {
-        conn.execute("BEGIN", []).map_err(|e| e.to_string())?;
-        if let Ok(data) = fs::read_to_string(&goals_path) {
-            if let Ok(goals) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
-                for goal in &goals {
-                    let goal_id = goal["id"].as_str().unwrap_or("").to_string();
-                    let ts = goal["updated_at"].as_str().unwrap_or("").to_string();
-                    let title = goal["title"].as_str().unwrap_or("");
-                    let category = goal["category"].as_str().unwrap_or("");
-
-                    if let Some(current) = goal["current"].as_f64() {
-                        let unit = goal["unit"].as_str().unwrap_or("");
-                        let tags = serde_json::to_string(&vec![category, title])
-                            .unwrap_or_else(|_| "[]".to_string());
-                        let id = make_event_id("goal", "current", &ts, &goal_id);
-                        let _ = conn.execute(
-                            "INSERT OR IGNORE INTO events (id, session_id, timestamp, source, metric, value, unit, confidence, tags, raw_ref, created_at, schema_version)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                            params![id, goal_id, ts, "goal", "current", current, unit, 1.0, tags, "", now, 1],
-                        );
-                        total += 1;
-                    }
-
-                    if let Some(target) = goal["target"].as_f64() {
-                        let unit = goal["unit"].as_str().unwrap_or("");
-                        let tags = serde_json::to_string(&vec![category, title])
-                            .unwrap_or_else(|_| "[]".to_string());
-                        let id = make_event_id("goal", "target", &ts, &goal_id);
-                        let _ = conn.execute(
-                            "INSERT OR IGNORE INTO events (id, session_id, timestamp, source, metric, value, unit, confidence, tags, raw_ref, created_at, schema_version)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                            params![id, goal_id, ts, "goal", "target", target, unit, 1.0, tags, "", now, 1],
-                        );
-                        total += 1;
-                    }
-                }
-            }
-        }
-        conn.execute("COMMIT", []).map_err(|e| e.to_string())?;
-    }
+    // Goals are no longer copied here (0053 step 3): goals.json is their only source of truth.
+    // The `goal/current` and `goal/target` rows already in events.db are left as frozen history.
 
     Ok(format!("Migration complete: {} events inserted", total))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn domain_records_are_refused_before_the_database_is_touched() {
+        for source in ["goal", "Goals ", "habit", "project", "checkin", "money"] {
+            assert!(is_domain_source(source), "{source}");
+        }
+        for source in ["muse", "snapshot", "arm", "noop"] {
+            assert!(!is_domain_source(source), "{source}");
+        }
+        let goal: Event = serde_json::from_value(serde_json::json!({
+            "timestamp": "2026-11-25T00:00:00Z", "source": "goal", "metric": "current", "value": 3.0
+        }))
+        .unwrap();
+        let e = insert_events(vec![goal]).unwrap_err();
+        assert!(e.contains("domain record"), "{e}");
+    }
+
+    #[test]
+    fn the_migration_no_longer_copies_goals_into_events() {
+        let src = include_str!("events.rs");
+        let body = &src[src.find("pub fn migrate_existing_data").unwrap()..];
+        let body = &body[..body.find("#[cfg(test)]").unwrap()];
+        assert!(!body.contains(r#""goal", "current""#));
+        assert!(!body.contains(r#""goal", "target""#));
+        assert!(!body.contains(r#"join("goals.json")"#));
+    }
 }

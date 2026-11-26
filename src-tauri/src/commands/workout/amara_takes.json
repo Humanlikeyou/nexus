@@ -1,0 +1,26 @@
+{
+  "note": "Decision 0062 (9b): Amara's fitness takes that are fully calisthenics, with stated sets and reps or holds, as templates for the same engine. A circuit's rounds become sets of each exercise in order. Takes whose format is timed (EMOM, AMRAP, Tabata), cardio, mobility or with unstated counts are not mapped; they stay takes only.",
+  "takes": [
+    { "takeId": "bodyweight_circuit_basic", "name": "Bodyweight circuit", "restBetweenS": 60, "items": [
+      { "exerciseId": "squat", "sets": 3, "reps": 10, "restS": 60 }, { "exerciseId": "push-up", "sets": 3, "reps": 8, "restS": 60 },
+      { "exerciseId": "plank", "sets": 3, "holdS": 20, "restS": 60 }, { "exerciseId": "glute-bridge", "sets": 3, "reps": 10, "restS": 60 } ] },
+    { "takeId": "core_hollow_plank", "name": "Core session", "restBetweenS": 45, "items": [
+      { "exerciseId": "plank", "sets": 3, "holdS": 25, "restS": 30 }, { "exerciseId": "side-plank", "sets": 2, "holdS": 20, "restS": 30 },
+      { "exerciseId": "dead-bug", "sets": 3, "reps": 8, "restS": 30 } ] },
+    { "takeId": "single_leg_strength", "name": "Single-leg strength", "restBetweenS": 90, "items": [
+      { "exerciseId": "split-squat", "sets": 3, "reps": 7, "restS": 75 } ] },
+    { "takeId": "tempo_squat_calves", "name": "Tempo squats and calves", "restBetweenS": 90, "items": [
+      { "exerciseId": "squat", "sets": 4, "reps": 10, "restS": 75 }, { "exerciseId": "calf-raise", "sets": 2, "reps": 15, "restS": 45 } ] },
+    { "takeId": "pushup_ladder_1", "name": "Push-up ladder, level 1", "restBetweenS": 0, "items": [ { "exerciseId": "incline-push-up", "sets": 3, "reps": 5, "restS": 90 } ] },
+    { "takeId": "pushup_ladder_2", "name": "Push-up ladder, level 2", "restBetweenS": 0, "items": [ { "exerciseId": "push-up", "sets": 3, "reps": 8, "restS": 90 } ] },
+    { "takeId": "pushup_ladder_3", "name": "Push-up ladder, level 3", "restBetweenS": 0, "items": [ { "exerciseId": "push-up", "sets": 4, "reps": 8, "restS": 90 } ] },
+    { "takeId": "pushup_ladder_4", "name": "Push-up ladder, level 4", "restBetweenS": 0, "items": [ { "exerciseId": "push-up", "sets": 3, "reps": 12, "restS": 90 } ] },
+    { "takeId": "plank_ladder_1", "name": "Plank ladder, level 1", "restBetweenS": 0, "items": [ { "exerciseId": "plank", "sets": 3, "holdS": 20, "restS": 60 } ] },
+    { "takeId": "plank_ladder_2", "name": "Plank ladder, level 2", "restBetweenS": 0, "items": [ { "exerciseId": "plank", "sets": 3, "holdS": 30, "restS": 60 } ] },
+    { "takeId": "plank_ladder_3", "name": "Plank ladder, level 3", "restBetweenS": 0, "items": [ { "exerciseId": "plank", "sets": 3, "holdS": 45, "restS": 60 } ] },
+    { "takeId": "plank_ladder_4", "name": "Plank ladder, level 4", "restBetweenS": 0, "items": [ { "exerciseId": "plank", "sets": 3, "holdS": 60, "restS": 60 } ] },
+    { "takeId": "squat_ladder_1", "name": "Squat ladder, level 1", "restBetweenS": 0, "items": [ { "exerciseId": "squat", "sets": 3, "reps": 15, "restS": 60 } ] },
+    { "takeId": "squat_ladder_2", "name": "Squat ladder, level 2", "restBetweenS": 0, "items": [ { "exerciseId": "squat", "sets": 3, "reps": 12, "restS": 60 } ] },
+    { "takeId": "squat_ladder_3", "name": "Squat ladder, level 3", "restBetweenS": 0, "items": [ { "exerciseId": "squat", "sets": 3, "reps": 10, "restS": 60 } ] }
+  ]
+}

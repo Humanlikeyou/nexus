@@ -38,5 +38,5 @@ export const ADDS_EVENT = "amara:adds";
 export const announceAdds = () => { try { window.dispatchEvent(new Event(ADDS_EVENT)); } catch { /* no window in node tests */ } };
 
 /** Needs you today, as src-tauri needs_you.rs returns it: one report per source, rows are pointers only. */
-export type NeedsYouReport = { source: "todos" | "dates" | "checkin" | "decisions" | "crew" | "strap" | "watchlist"; state: "ok" | "failed" | "unwired"; rows: Array<{ source: string; id: string; title: string; due: string | null; reason: string; deepLink: { id: string; view: string }; badge?: { tone: "warning" | "accent" | "neutral"; label: string }; quiet?: boolean }> };
+export type NeedsYouReport = { source: "todos" | "dates" | "checkin" | "decisions" | "crew" | "strap" | "watchlist" | "habits"; state: "ok" | "failed" | "unwired"; rows: Array<{ source: string; id: string; title: string; due: string | null; reason: string; deepLink: { id: string; view: string }; badge?: { tone: "warning" | "accent" | "neutral"; label: string }; quiet?: boolean }> };
 export const needsYouList = (call: Invoke = realInvoke) => call<NeedsYouReport[]>("needs_you_list");

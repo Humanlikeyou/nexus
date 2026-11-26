@@ -154,6 +154,34 @@ describe("Hemi-Sync section", () => {
     await waitFor(() => expect(adapter.rate).toHaveBeenCalledWith({ sessionId: "ses-9", rating: 4, note: "Settled fast" }));
   });
 
+  it("decision 0059: pause keeps the Muse recording; seek stays inside the track; volume applies", async () => {
+    const adapter = liveAdapter();
+    const h = setup(adapter);
+    pick("Intro to Focus 15");
+    start();
+    await waitFor(() => expect(h.onStartMuse).toHaveBeenCalledTimes(1));
+    h.again({ operation: "starting" });
+    h.again({ operation: null, recording: true, sessionId: "ses-9" });
+    const el = FakeAudio.last! as FakeAudio & { paused?: boolean; volume?: number };
+    el.paused = false;
+    el.pause.mockImplementation(() => { el.paused = true; });
+    el.play.mockImplementation(async () => { el.paused = false; });
+    fireEvent.click(await screen.findByRole("button", { name: "Pause" }));
+    expect(el.pause).toHaveBeenCalled();
+    expect(screen.getByText("Paused. The Muse is still recording.")).toBeInTheDocument();
+    expect(h.onStopMuse).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await waitFor(() => expect(screen.queryByText("Paused. The Muse is still recording.")).not.toBeInTheDocument());
+    el.currentTime = 20;
+    fireEvent.click(screen.getByRole("button", { name: "Back 30 seconds" }));
+    expect(el.currentTime).toBe(0);
+    el.currentTime = 590;
+    fireEvent.click(screen.getByRole("button", { name: "Forward 30 seconds" }));
+    expect(el.currentTime).toBe(599.5);
+    fireEvent.change(screen.getByLabelText("Volume"), { target: { value: "0.4" } });
+    expect(el.volume).toBe(0.4);
+  });
+
   it("track end: stops the Muse too and finishes as completed", async () => {
     const adapter = liveAdapter();
     const h = setup(adapter);

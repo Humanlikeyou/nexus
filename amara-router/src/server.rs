@@ -58,6 +58,7 @@ pub fn router(state: St) -> Router {
         .route("/api/version", get(ollama_version))
         .route("/api/pull", post(ollama_pull))
         .route("/amara/route", post(dry_route))
+        .route("/amara/capabilities", post(capabilities))
         .with_state(state)
 }
 
@@ -727,6 +728,79 @@ async fn health(AxState(st): AxState<St>) -> Response {
         "error": loaded.err().map(|_| format!("Ollama is not reachable at {}", st.cfg.ollama_url)),
     }))
     .into_response()
+}
+
+/// What each tier can do, from Ollama's `/api/show` for the configured model (never guessed). Tier
+/// names only, no model names, like every other reply the app reads. Claude is listed as available
+/// only when the router itself could call it; the app's own gate still applies on top.
+async fn capabilities(AxState(st): AxState<St>) -> Response {
+    let probe = |model: String, num_ctx: u32| {
+        let st = Arc::clone(&st);
+        async move {
+            let shown: Option<Value> = async {
+                let r = st
+                    .http
+                    .post(st.cfg.ollama("/api/show"))
+                    .json(&json!({ "model": model }))
+                    .timeout(std::time::Duration::from_secs(3))
+                    .send()
+                    .await
+                    .ok()?;
+                if !r.status().is_success() {
+                    return None;
+                }
+                r.json::<Value>().await.ok()
+            }
+            .await;
+            local_tier_caps(shown.as_ref(), num_ctx)
+        }
+    };
+    let (fast, deep) = tokio::join!(
+        probe(st.cfg.models.fast.clone(), st.cfg.models.fast_num_ctx),
+        probe(st.cfg.models.deep.clone(), st.cfg.models.deep_num_ctx),
+    );
+    let claude_ready = st.cfg.cloud.anthropic_enabled
+        && !st.outbound_disabled
+        && st.secrets.anthropic_key.is_some();
+    axum::Json(json!({
+        "tiers": {
+            "fast": fast,
+            "deep": deep,
+            // The Anthropic path forwards text only: no tools, no response_format.
+            "claude": {"available": claude_ready, "local": false, "tools": false, "json_schema": false,
+                       "thinking": false, "vision": false, "context_length": null, "num_ctx": null},
+        }
+    }))
+    .into_response()
+}
+
+/// One local tier's capabilities from an `/api/show` reply (`None` = the model didn't answer).
+/// `json_schema` is Ollama's grammar-constrained `format`, which works for any completion model.
+pub fn local_tier_caps(shown: Option<&Value>, num_ctx: u32) -> Value {
+    let Some(v) = shown else {
+        return json!({"available": false, "local": true, "tools": false, "json_schema": false,
+                      "thinking": false, "vision": false, "context_length": null, "num_ctx": num_ctx});
+    };
+    let caps: Vec<&str> = v["capabilities"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let has = |c: &str| caps.contains(&c);
+    let context_length = v["model_info"].as_object().and_then(|mi| {
+        mi.iter()
+            .find(|(k, _)| k.ends_with(".context_length") && k.matches('.').count() == 1)
+            .and_then(|(_, n)| n.as_u64())
+    });
+    json!({
+        "available": has("completion"),
+        "local": true,
+        "tools": has("tools"),
+        "json_schema": has("completion"),
+        "thinking": has("thinking"),
+        "vision": has("vision"),
+        "context_length": context_length,
+        "num_ctx": num_ctx,
+    })
 }
 
 fn model_entry(name: &str) -> Value {

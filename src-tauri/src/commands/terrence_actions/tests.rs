@@ -13,7 +13,7 @@ fn action_input(tool_id: &str, parameters: Value) -> CreateTerrenceActionInput {
 #[test]
 fn network_shaped_actions_are_gated_on_the_outbound_switch() {
     let src = include_str!("../terrence_actions.rs");
-    let local = &src[src.find("fn execute_local_action").unwrap()..];
+    let local = &src[src.find("fn execute_local_tool").unwrap()..];
     let arm = &local[local.find("\"system.open_url\" =>").unwrap()..];
     assert!(arm[..arm.find("/usr/bin/open").unwrap()].contains("outbound_gate()?"));
     let step = &src[src.find("fn execute_workflow_step").unwrap()..];
@@ -711,4 +711,215 @@ fn sample_gate_action() -> super::TerrenceAction {
     .expect("TerrenceAction must deserialize from a minimal row");
     action.retry_of_action_id = None;
     action
+}
+
+// ── 0052: the approval path through the execution controller ─────────────────
+//
+// The real volume tool is never run in a test. A TEST-ONLY stand-in is registered under the same
+// action id: it records the volume in a file and reads it back from there.
+
+mod controller_path {
+    use super::*;
+    use crate::commands::execution::{
+        ActionClass, Controller, DataScope, ExecStatus, Ledger, OpError, Operation, OperationSpec,
+        Registry, RetryPolicy, Risk,
+    };
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    struct FakeVolume {
+        spec: OperationSpec,
+        file: PathBuf,
+        runs: AtomicUsize,
+        lie: bool,
+    }
+
+    impl Operation for FakeVolume {
+        fn spec(&self) -> &OperationSpec {
+            &self.spec
+        }
+        fn expected_state(&self, p: &Value) -> Option<Value> {
+            Some(json!({"volume": p["volume"]}))
+        }
+        fn execute(&self, p: &Value) -> Result<Value, OpError> {
+            self.runs.fetch_add(1, Ordering::SeqCst);
+            if !self.lie {
+                fs::write(&self.file, p["volume"].to_string()).unwrap();
+            }
+            Ok(json!({"message": format!("Amara OS set output volume to {}%.", p["volume"])}))
+        }
+        fn read_back(&self, _p: &Value) -> Option<Result<Value, String>> {
+            Some(Ok(
+                json!({"volume": fs::read_to_string(&self.file).ok().and_then(|s| s.parse::<u64>().ok())}),
+            ))
+        }
+    }
+
+    struct Rig {
+        root: PathBuf,
+        conn: Connection,
+        c: Controller,
+        op: Arc<FakeVolume>,
+    }
+    impl Drop for Rig {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn rig(tag: &str, lie: bool) -> Rig {
+        let root = std::env::temp_dir().join(format!("nexus-actions-{tag}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let op = Arc::new(FakeVolume {
+            spec: OperationSpec {
+                action_id: "system.set_volume",
+                tool_id: "system.set_volume",
+                target_system: "test_volume",
+                class: ActionClass::ReversibleLocal,
+                risk: Risk::Low,
+                scope: DataScope::System,
+                timeout: Duration::from_secs(5),
+                retry: RetryPolicy::Never,
+                personal_fields: &[],
+            },
+            file: root.join("volume"),
+            runs: AtomicUsize::new(0),
+            lie,
+        });
+        let mut ops: Registry = HashMap::new();
+        ops.insert("system.set_volume", op.clone());
+        let conn = Connection::open_in_memory().unwrap();
+        init_action_db(&conn).unwrap();
+        let c = Controller::new(Ledger::at(root.join("execution.db")), ops);
+        Rig { root, conn, c, op }
+    }
+
+    fn executing_action(r: &Rig, volume: u64) -> TerrenceAction {
+        let tool = find_tool("system.set_volume").unwrap();
+        let a = insert_action(
+            &r.conn,
+            &tool,
+            "Set volume".into(),
+            "awaiting_approval",
+            normalize_parameters("system.set_volume", json!({"volume": volume})).unwrap(),
+            Some("conversation-1".into()),
+            vec![],
+        )
+        .unwrap();
+        update_action_status(
+            &r.conn,
+            &a.id,
+            &["awaiting_approval"],
+            "approved",
+            None,
+            None,
+        )
+        .unwrap();
+        update_action_status(&r.conn, &a.id, &["approved"], "executing", None, None).unwrap()
+    }
+
+    #[test]
+    fn an_approved_action_runs_once_through_the_ledger_and_is_verified() {
+        let r = rig("ok", false);
+        let a = executing_action(&r, 35);
+        let (status, result, error) = execute_through_controller(&r.c, &a);
+        assert_eq!((status, error), ("succeeded", None));
+        assert_eq!(
+            result.as_deref(),
+            Some("Amara OS set output volume to 35%.")
+        );
+        assert_eq!(fs::read_to_string(r.root.join("volume")).unwrap(), "35");
+        let rec =
+            r.c.ledger
+                .by_idempotency_key(&action_idempotency_key(&a.id))
+                .unwrap()
+                .unwrap();
+        assert_eq!(rec.status, ExecStatus::Verified);
+        assert_eq!(rec.origin, "model");
+        assert!(rec.approval_id.is_some());
+        // A second run of the same action row (double click, replay) executes nothing.
+        execute_through_controller(&r.c, &a);
+        assert_eq!(r.op.runs.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_tool_that_claims_success_but_changed_nothing_fails_the_action() {
+        let liar = rig("liar", true);
+        fs::write(liar.root.join("volume"), "10").unwrap();
+        let a = executing_action(&liar, 80);
+        let (status, _, error) = execute_through_controller(&liar.c, &a);
+        assert_eq!(status, "failed");
+        assert!(error.unwrap().contains("does not show the expected change"));
+        assert_eq!(fs::read_to_string(liar.root.join("volume")).unwrap(), "10");
+    }
+
+    #[test]
+    fn an_action_interrupted_by_a_restart_takes_its_outcome_from_the_ledger() {
+        let r = rig("restart", false);
+        let done = executing_action(&r, 20);
+        execute_through_controller(&r.c, &done);
+        // The app quit before the action row was updated: put it back to executing.
+        r.conn
+            .execute(
+                "UPDATE terrence_actions SET status='executing' WHERE id=?1",
+                params![done.id],
+            )
+            .unwrap();
+        let never = executing_action(&r, 50);
+        assert_eq!(
+            reconcile_interrupted_local_actions_in(&r.conn, &r.c).unwrap(),
+            2
+        );
+        assert_eq!(
+            get_action(&r.conn, &done.id).unwrap().unwrap().status,
+            "succeeded"
+        );
+        let n = get_action(&r.conn, &never.id).unwrap().unwrap();
+        assert_eq!(n.status, "needs_attention");
+        assert!(n.error.unwrap().contains("Check whether it happened"));
+        assert_eq!(r.op.runs.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_status_change_that_lost_a_race_is_refused() {
+        let r = rig("race", false);
+        let a = executing_action(&r, 5);
+        // Someone else finished it meanwhile.
+        r.conn
+            .execute(
+                "UPDATE terrence_actions SET status='cancelled' WHERE id=?1",
+                params![a.id],
+            )
+            .unwrap();
+        // The update is refused and the row keeps the other writer's status.
+        let e = update_action_status(&r.conn, &a.id, &["executing"], "succeeded", None, None)
+            .unwrap_err();
+        assert!(
+            e.contains("cannot move") || e.starts_with("changed:"),
+            "{e}"
+        );
+        assert_eq!(
+            get_action(&r.conn, &a.id).unwrap().unwrap().status,
+            "cancelled"
+        );
+    }
+
+    #[test]
+    fn every_approval_gated_local_tool_is_a_registered_operation() {
+        let registered: Vec<&str> = local_operations()
+            .iter()
+            .map(|o| o.spec().action_id)
+            .collect();
+        for t in registered_tools()
+            .into_iter()
+            .filter(|t| t.requires_approval)
+        {
+            assert!(
+                registered.contains(&t.id.as_str()),
+                "{} has no controller operation",
+                t.id
+            );
+        }
+    }
 }

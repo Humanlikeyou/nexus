@@ -1149,7 +1149,7 @@ Plan: `tasks/PLAN-0045.md`. Taisun answered all four questions (logged in 0045).
    - an ingest job for `<data>/inbox/` (validate, apply, move to done/rejected) and `asks/open.json`
    - the proactive Rust job for the check-in ask at a configurable time, habit reminders and the weekly money check-in
    - wire `money_checkin_due` (marked `allow(dead_code)`)
-2. **Dates & Deadlines:** per-date lead days, Done state, goal link, a purpose line.
+2. ~~Dates & Deadlines~~ done 2026-11-25 (decision 0048): own lead days, Done and Reopen, goal link, a purpose line, and "remind me N before" is read.
 3. **Build the approved mock-ups:**
    - Neuro rings (brain data)
    - the HR take graph
@@ -1159,3 +1159,207 @@ Plan: `tasks/PLAN-0045.md`. Taisun answered all four questions (logged in 0045).
 5. **Habits:** chat marking ("I did X"), and the Needs-you habits source label.
 6. **Enterprise:** the History list UI, and venture links on tasks and content.
 7. **bindings.gen.ts:** regenerate once the `GoalProgress` name clash between money_entries and goal_progress is resolved.
+
+
+## 47. Decision 0049: part 2 of the 0045 brief finished (2026-11-25)
+
+**Built (5 Sonnet lanes plus fixes; security review on the strong model):**
+- **Telegram inbox and timed questions:**
+  - `inbox.rs`: ingest of `<data>/inbox/*.json`, written by the Hermes MCP tools, into check-ins, habit marks and money entries. It runs on launch and every 30 s. Strict validation. Nothing is ever deleted: files go to `done/` or `rejected/` (reject reason in `.why.txt`).
+  - `proactive.rs`: Amara OS asks on Telegram: the check-in (default 22:00 JST, only if no check-in today), one habit reminder a day, and a weekly money check-in (default Sunday 19:00). It honours the kill switch and Local only. `asks/open.json` feeds Hermes' `open_asks`.
+  - Settings › "Check-ins on Telegram" sets the toggles and times.
+  - `telegram.rs` `send_plain_gated`: same gate as the old send, with no Markdown mode.
+  - **Taisun's step:** install the Hermes tools (`~/projects/hermes-patches/nexus-inbox/README.md`).
+- **Security review findings, all fixed:**
+  - M1: an unwritable state file could re-send every minute. Now an in-memory hold.
+  - M2: a hostile or confused sender could flood the stores. Now 3 check-ins, 30 habit marks and 20 money entries per day.
+  - L1: `O_NONBLOCK` against a FIFO swap.
+  - L2: a listing cap, and ingest pauses at 1000 rejected files (never deleted).
+  - L3: a money date more than a year away is rejected.
+  - L4: Japanese notes no longer blow the 8 KB limit.
+  - L5: the Hermes tool output is cleaned and capped.
+  - **Not done (L6, optional):** quote and escape the check-in note before it enters the LLM brief. It is already guarded and labelled as background data.
+  - **Not checked by the reviewer:** who Hermes accepts Telegram messages from (the chat-id allowlist in `~/.hermes`).
+- **Charts (Three.js, with the old SVG as a fallback when WebGL is missing):**
+  - Neuro "Last session" brain ring: 3D band spectrum with his usual range. "Now" ring: live Muse bands, hidden otherwise.
+  - Heart-rate ribbon.
+  - Mind-Body Readiness, Sleep, Trends and Training Load.
+  - `useSessionBands.ts` builds the band cache for the newest 5 sessions through the existing `get_session_samples`, so the ring has data. It writes only the allowed `.bands.json` cache.
+- **Money:** four charts, "Amara's money read" with assumptions, "Can I afford it?", a manual FX rate form, and all ¥ gone. A bug fixed: the entries panel refetched forever.
+- **Habits:** "I did my stretch" in chat (preview and Undo); Needs-you habit label.
+- **Enterprise:** a History list with Undo, and venture tags on tasks and content.
+
+**Verification (final tree):**
+- tsc, lint and check:secrets pass.
+- vitest 2907 passed / 9 skipped.
+- neuro 21.
+- src-tauri fmt and clippy clean; src-tauri **1843** passed / 7 ignored (after the security fixes).
+- amara-router 131.
+- Full e2e run alone, before the Rust and Python security fixes (frontend unchanged since): 800 passed / 12 skipped / 0 failed.
+
+**Not done / known:**
+1. Money entries are not in the Enterprise History list (the treasury entries store has no list command).
+2. Check-in and money replies applied from Telegram log no History entry (their save paths log nothing today).
+3. The Neuro rings were checked on the mock EEG and on injected samples, not on a real saved session in the real app. The first view of a long recording builds its band cache, so the ring may appear a moment after the page opens.
+4. The Mind-Body Readiness arc from the mock-up was not added (the hero already shows the score).
+5. A live end-to-end run of Telegram → Hermes → Amara OS has not been done, because it needs Taisun to install the Hermes tools first.
+
+## 48. Decision 0056: Life UI (Phase 6), committed `1135439` (2026-11-26)
+
+Scope and Taisun's answers: `docs/decisions/0056-life-ui-scope-2026-11-25.md`. Spec: `docs/specs/life-ui-2026-11-25.md` + `tasks/PLAN-0055-life-ui.md`.
+
+**Built:** the six-tab Life host (Overview first), Goals & projects tree with milestone timelines and links, Habits & routines (calendar, trends, rhythm), the Life part of Weekly review, the five recommendation controls, the Dates range picker; backend week plans, date range, suggestion rules (app + Telegram), rule-made weekly observations.
+
+**Bug fixed on the way:** ten registered commands were never bound, so `invokeBound` rejected them (habit marks, habit-day reads, roadmap accept/answer, Letta memory edit/delete/restore, Hemi-Sync session finish/link/rate). Read from the code path; not reproduced on the packaged app.
+
+**Verification (final tree):** tsc, lint, check:secrets ok; vitest 2930 / 9 skipped; neuro 21; src-tauri fmt + clippy clean, 1957 passed / 9 ignored; amara-router 133; e2e 816 passed / 12 skipped / 4 failed on the first run (one spec used the old tab name; fixed and rerun 34/34 in both themes). The full e2e was not rerun after that one-line spec fix.
+
+**Not done / for review:**
+1. Not installed or launched: nothing here has run in the packaged app.
+2. Telegram suggestions are on by default (his choice) and send a recommendation's title and suggested action. Turn off in Life › Overview › Suggestions from Amara.
+3. An older build reading the new `proactive.json` (with `nudges`) falls back to default settings. Install forward only.
+4. Only two observation rules exist (stalled goal, habit under target); no model producer.
+5. Tasks link to goals and projects only by `#goal:<id>` / `#project:<id>` tags in TASKS.md (no structured task store, per 0054).
+6. Workouts are not in the weekly review: the review's health section has no workout field.
+7. Sample-adapter mode: the new views read the live stores only (no sample data), so previews show them empty with honest notes.
+
+## 49. Decision 0057: NEUROSENSE reliability (Phase 7), committed `092238a` (2026-11-26)
+
+Brief: `docs/specs/neurosense-reliability-2026-11-26.md`. The audit, the changes, the security review and its fixes are in `docs/decisions/0057-neurosense-reliability-2026-11-26.md`.
+
+**In short:**
+- Packet counters are read: repeats are dropped, and gaps and restarts are counted.
+- Every EEG sample says live, replay or demo, and only live, fresh, unfrozen data with good contact can earn reward.
+- Dead streams end visibly.
+- New recordings carry reproducible metadata and measured rates.
+- Sessions save atomically.
+- Misleading 0s are gone.
+- Sleep stages are labelled as NOOP's estimate.
+
+Existing recordings are untouched. AUX and the electrode lock are unchanged.
+
+**Verification:**
+- tsc, lint, check:secrets.
+- vitest 2941 / 9 skipped; neuro 21.
+- src-tauri fmt + clippy, 1967 / 9 ignored; amara-router 133.
+- e2e 818 / 12 skipped / 2 failed. The failures were a neuro-flow mock missing the new `source` field; it was fixed and rerun 26/26 in both themes.
+
+**Not run (hardware or real data):**
+- A live Muse session: real counters, rates, frozen detection, a real link drop.
+- Reward audio live versus replay/demo in the app.
+- A headset recording's trailer.
+- Taisun's real NOOP sleep data.
+- The packaged app.
+
+**Waiting on Taisun:**
+- Unifying the two FFT pipelines, which would change historical numbers.
+- Persisted baselines and a calibration quality gate.
+- The gamma artifact unit mismatch.
+- Auto-reconnect and battery.
+- The design copy notes in `tasks/design-questions.md`.
+
+## 50. Decision 0058: NEUROSENSE calibration and personal baseline, committed `3a70178` (2026-11-26)
+
+Brief: `docs/specs/neurosense-calibration-baseline-2026-11-26.md`. Details, the security review and its fixes: `docs/decisions/0058-neurosense-calibration-baseline-2026-11-26.md`.
+
+**Built:**
+- An optional pre-meditation calibration (Neuro › "Calibrate (optional)"): check, eyes open, eyes closed, report. It rejects artifact epochs by reason and measures band power, alpha peak, variability and contact.
+- A separate protocol calibration record per training session.
+- A versioned personal baseline (median/MAD, high-quality live recordings only, confidence and uncertainty) in `<data>/neuro/calibrations.json`.
+- A keyword-gated, local-only Amara measurement report.
+
+The design boundary is lifted for the Calibration view only.
+
+**Verification:**
+- tsc, lint, check:secrets.
+- vitest 2951 / 9 skipped; neuro 21.
+- src-tauri fmt + clippy, all tests pass.
+- e2e 820 / 12 skipped / 0 failed.
+- amara-router: not rerun (unchanged since 133 passed in §49).
+
+**Not run:** a real calibration on the headset; a recorded session's protocol report in the app; the packaged app.
+
+**Open:**
+- A report's `source` is supplied by the renderer, so a forged "live" report could enter the baseline (integrity only, local).
+- Whether the Telegram, n8n or Hermes request paths can carry these sections is not traced. The known callers all go through `nexus_context_message`, which drops them while the cloud is allowed.
+
+## 51. Decision 0059: NEUROSENSE intelligence (Phase 8), commits `14e9101`…8f (2026-11-26)
+
+Brief: `docs/specs/neurosense-intelligence-2026-11-26.md`. Taisun answered the five scope questions with "Up to you. and Run", so the choices are Claude's and listed in `docs/decisions/0059-neurosense-intelligence-2026-11-26.md`, each reversible:
+- the FFT pipelines are not unified;
+- the design boundary is lifted for the new views only;
+- no HRV;
+- Hemi-Sync plays imported files only;
+- steps 8a–8f, one commit each.
+
+**Built:**
+- Configurable, versioned protocols with exact target features.
+- Per-protocol settings.
+- Auditable threshold logs and session progress records.
+- Feedback sound cues with a held sound that never sounds like reward, a volume control, and a real mute.
+- An optional lens light.
+- An optional after-session rest compared with the morning recording.
+- Hemi-Sync pause, seek, volume and next-in-wave.
+- Biofeedback sensor availability, kept apart from neurofeedback.
+- Long-term trends from validated sessions.
+- A structured training report for Amara: local only, no raw EEG.
+- A new Neuro › Training view (reached from the Neuro header).
+
+**Bug fixed on the way:** muting the training sound didn't silence a playing tone (`useAudioFeedback`), and the training screen always played the tone whatever the protocol named.
+
+**Found, not changed:** every protocol declares band ranges that the training never uses. The FFT integrates fixed edges, for example delta 1.5–4 Hz where protocols say 0.5–4 Hz. Target-feature definitions now state the computed range and flag the declared one.
+
+**Verification:**
+- Each step: tsc, lint and check:secrets pass; Rust fmt and clippy clean.
+- Final tree: vitest 2991 passed / 9 skipped; neuro 21; src-tauri 2016 passed / 9 ignored; amara-router 133.
+- e2e 820 / 12 skipped / 0 failed on every step. Step 8b had one known-flaky route-motion failure; rerun alone, it passed 20/20.
+
+**Security review:** no HIGH; two MEDIUM fixed (prompt-injection through session-file strings, and the honesty note being cut off by the section cap) and three LOW fixed. Still open: the size cap on the shared session reader, and the renderer-asserted `data_source` (same as 0058).
+
+**Not run:** no live Muse session or real pre/post pair; Hemi-Sync not tried with real audio; PPG not validated on the headset; no trends from real data (no session has a progress record yet); the packaged app was not built, installed or launched.
+
+**For Taisun / Design:**
+1. The app-wide rename of "Focus" and "Calm" to neutral feature names is in `tasks/design-questions.md`.
+2. Whether to unify the two FFT pipelines (it changes historical numbers).
+3. Whether Rust should stamp the session source itself.
+4. Install: not done. Say "build and install" when you want it.
+
+## 52. Decisions 0060–0062 (2026-11-26)
+
+**0060, one EEG band-power pipeline** (`93177cb`, Taisun: "better to unify them"). `neuro/fft.ts` `bandFeatures` now feeds the display, calibration, training, the recording summary and the Rust sidecars.
+- The old training pipeline counted the edge bins in two bands, so alpha leakage landed in theta. On a pure 10 Hz signal, focus read 15; it now reads 52.
+- `training-v3-0060`, and `SIDECAR_VERSION` 2 (sidecar caches rebuild lazily when a recording is opened).
+- Stored sessions, calibrations, the baseline and replays are untouched.
+
+**0061, session HRV** (`016281e`). NOOP does store the WHOOP strap's beat-to-beat intervals (`rrInterval`, about 6.8 million rows), so 0059's "no sensor" was wrong.
+- RMSSD per session, read-only, with artifact filters and coverage limits, shown as biofeedback from the strap.
+- Not live: it is available only after the strap syncs.
+
+**0062, Workout engine (Phase 9)**: `9797e55` (9a engine), `486bbe5` (9b Amara takes), `d78bed2` (9c view), and the 9d commit.
+- **Library and engine:** a calisthenics library of 34 exercises; templates; a session state machine (planned → active ⇄ paused → completed, partly completed or abandoned).
+- **Deterministic numbers:** the estimate, set tracking, rest, completion and volume, including load in kg.
+- **Amara's takes:** the 15 fully-calisthenics takes run on the same engine, with provenance.
+- **The view:** Mind-Body › Fitness › Workout has the library, builder, player, summary and history. The Fitness page is unchanged apart from one header button.
+- **9d connections:**
+  - `workout.finished` goes into the shared activity history (`workout:` record refs);
+  - a completed Amara workout marks that day's take offer done, never over your own answer;
+  - Life's weekly review gets a Workouts card;
+  - history links an overlapping NOOP-detected workout (a link, never a merge; NOOP is never written);
+  - Amara gets a keyword-gated `nexus_workouts` section.
+
+**Test fixes on the way:**
+- The Smart home slider test now uses fake timers (`30209c6`). Before, it failed 1 of 3 runs; after, 5 of 5 passed.
+- Known flaky under heavy load: `ha_devices::a_slow_ha_does_not_block_other_history_reads` (3/3 alone), and the life-ui, sand-lens and sand-states e2e specs at load average 44 (28/28 at lower load).
+
+**Not run:**
+- a real workout in the app;
+- a real session's HRV;
+- a live Muse session on the unified pipeline;
+- opening an old recording to see its sidecar rebuilt;
+- the packaged app (nothing since `e114862` is installed).
+
+**For Taisun:**
+1. Install when you want it ("build and install").
+2. The app-wide Focus/Calm label rename for Design (`tasks/design-questions.md`).
+3. The gamma artifact threshold's units are still mismatched.
+4. Phase 10 (holographic instructor, one prototype) is next; it needs its brief.

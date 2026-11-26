@@ -32,11 +32,16 @@ pub mod test_support {
         data_dir, merge_legacy_config_in, migrate_legacy_data_dir_in, private_open_options,
         DATA_DIR_ENV, DATA_DIR_NAME,
     };
+    pub use crate::commands::continuity::{
+        list_session_logs, load_terrance_context, read_identity_file, read_profile_file,
+        save_terrance_context, store_session_log, SessionLogEntry, TerranceContext,
+    };
     pub use crate::commands::goals::{read_goals, save_goals};
     pub use crate::commands::muse;
     pub use crate::commands::noop::health_snapshot;
     pub use crate::commands::onboarding::{check_onboarding, complete_onboarding};
     pub use crate::commands::outbox::get_outbox_status;
+    pub use crate::commands::private_store;
     pub use crate::commands::recordings;
     pub use crate::commands::replay::{
         mark_recording_aux, maybe_record_motion, maybe_record_ppg, maybe_record_sample,
@@ -129,6 +134,8 @@ pub mod test_support {
 pub fn run() {
     app_paths::check_dev_config_dir();
     app_paths::migrate_legacy_data_dir();
+    // 0050: one-time copy of private data older builds kept in the repository (counts-only log).
+    commands::private_store::migrate_on_startup();
     tauri::Builder::default()
         .manage(terrence_runtime_bridge::NexusRuntimeBridge::default())
         .manage(commands::amara_turn::TurnRegistry::default())
@@ -141,6 +148,10 @@ pub fn run() {
         .setup(|app| {
             // A process cannot resume an in-flight Hermes child after restart.
             let _ = terrence_actions::reconcile_interrupted_conversations();
+            // 0052: settle executions a quit or crash interrupted (read-back only, never a re-run).
+            std::thread::spawn(commands::execution::recover_on_startup);
+            // 0053 step 1: create the activity and recommendation stores (idempotent; no existing file touched).
+            std::thread::spawn(|| commands::amara_store::init_on_startup(&app_paths::data_dir()));
             // Navy local-only is session-only: off at every start, and the voice loop's flag file says so.
             commands::telegram::init_navy_flag();
             // Outbound is off unless Settings enabled it (and the env var does not force it off).
@@ -190,7 +201,12 @@ pub fn run() {
             outbox::start_delivery_worker(app.handle().clone());
             // Nightly backup scheduler (in-app only; nothing runs while the app is closed).
             commands::backup_schedule::start(app.handle().clone());
+            // Telegram replies (inbox files from Hermes) and the check-in questions Nexus sends (decision 0045).
+            commands::inbox::start(app.handle().clone());
+            commands::proactive::start();
             commands::daily_table::start(app.handle().clone());
+            // 0066: briefings, while the app runs only (nothing runs while it is closed).
+            commands::briefings::start();
             // Telegram relay timer: a no-op until the relay is on, approved and outbound is allowed.
             commands::notify_relay::start();
             // Treasury exception monitor: nightly with catch-up; does nothing until treasury.db exists.
@@ -237,6 +253,108 @@ pub fn run() {
             system::check_service_port,
             // Skills / tasks / content pipeline
             openclaw::read_skills,
+            commands::skills_lifecycle::list_skill_versions,
+            commands::skills_lifecycle::propose_skill_version,
+            commands::skills_lifecycle::activate_skill_version,
+            commands::skills_lifecycle::reject_skill_version,
+            commands::execution::list_executions,
+            commands::execution::execution_history,
+            commands::amara_store::commands::activity_list,
+            commands::amara_store::commands::recommendation_list,
+            commands::amara_store::commands::recommendation_get,
+            commands::amara_store::commands::recommendation_create,
+            commands::amara_store::commands::recommendation_respond,
+            commands::amara_store::commands::recommendation_record_outcome,
+            commands::amara_store::commands::approvals_list,
+            commands::amara_store::commands::audit_trail,
+            commands::life::life_update,
+            commands::life::life_progress,
+            commands::life::life_habit_history,
+            commands::life::life_areas,
+            commands::life::life_area_upsert,
+            commands::life::life_area_archive,
+            commands::life::life_link_add,
+            commands::life::life_link_remove,
+            commands::life::life_links,
+            commands::life_plan::life_week_plan_get,
+            commands::life_plan::life_week_plan_set,
+            commands::life_nudges::life_insight,
+            commands::life_week::life_week_observations,
+            commands::briefings::briefing_daily_read,
+            commands::briefings::briefing_daily_refresh,
+            commands::briefings::briefing_enterprise_read,
+            commands::briefings::briefing_enterprise_refresh,
+            commands::briefings::briefing_week,
+            commands::briefings::briefing_runtime,
+            commands::briefings::briefing_recommendations,
+            commands::muse::muse_stream_continuity,
+            commands::neuro_baseline::neuro_calibration_save,
+            commands::neuro_baseline::neuro_calibration_list,
+            commands::neuro_baseline::neuro_baseline_get,
+            commands::neuro_protocols::neuro_protocol_settings_get,
+            commands::neuro_protocols::neuro_protocol_settings_set,
+            commands::neuro_training::neuro_training_records,
+            commands::neuro_training::neuro_training_trends,
+            commands::noop_rr::noop_session_hrv,
+            commands::noop_rr::noop_rr_status,
+            commands::business_workspace::commands::business_list,
+            commands::business_workspace::commands::business_create,
+            commands::business_workspace::commands::business_update,
+            commands::business_workspace::commands::business_overview,
+            commands::business_workspace::commands::business_context_list,
+            commands::business_workspace::commands::business_context_save,
+            commands::business_workspace::commands::business_context_set_status,
+            commands::business_workspace::commands::business_context_history,
+            commands::business_workspace::commands::business_context_for_amara,
+            commands::business_workspace::commands::business_memory_list,
+            commands::business_workspace::commands::business_memory_add,
+            commands::business_workspace::commands::business_memory_decide,
+            commands::business_workspace::commands::business_documents,
+            commands::business_workspace::commands::business_document_add,
+            commands::business_workspace::commands::business_document_set_status,
+            commands::business_workspace::commands::business_knowledge_search,
+            commands::business_workspace::commands::business_connectors,
+            commands::business_workspace::commands::business_connector_configure,
+            commands::business_workspace::commands::business_connector_pick_folder,
+            commands::business_workspace::commands::business_connector_secret_set,
+            commands::business_workspace::commands::business_connector_disconnect,
+            commands::business_workspace::commands::business_sync_start,
+            commands::business_workspace::commands::business_connector_check,
+            commands::business_workspace::commands::business_connector_pick_file,
+            commands::business_workspace::commands::business_supabase_setup_sql,
+            commands::business_workspace::commands::business_report,
+            commands::business_workspace::commands::business_report_interpret,
+            commands::business_workspace::commands::business_site_snapshot,
+            commands::business_workspace::commands::business_site_locate,
+            commands::business_workspace::commands::business_site_draft,
+            commands::business_workspace::commands::business_site_changes,
+            commands::business_workspace::commands::business_site_events,
+            commands::business_workspace::commands::business_site_approve,
+            commands::business_workspace::commands::business_site_reject,
+            commands::business_workspace::commands::business_site_confirm_backup,
+            commands::business_workspace::commands::business_site_package,
+            commands::business_workspace::commands::business_site_verify,
+            commands::business_workspace::commands::business_sync_runs,
+            commands::business_workspace::commands::business_permissions,
+            commands::business_workspace::commands::business_permission_set,
+            commands::business_workspace::commands::business_proposals,
+            commands::business_workspace::commands::business_proposal_create,
+            commands::business_workspace::commands::business_proposal_approve,
+            commands::business_workspace::commands::business_proposal_reject,
+            commands::business_workspace::commands::business_activity,
+            commands::business_workspace::commands::business_recommendations,
+            commands::workout::workout_library,
+            commands::workout::workout_exercise_save,
+            commands::workout::workout_templates,
+            commands::workout::workout_template_save,
+            commands::workout::workout_estimate,
+            commands::workout::workout_session_plan,
+            commands::workout::workout_session_act,
+            commands::workout::workout_history,
+            commands::workout::workout_template_from_take,
+            commands::workout::workout_take_ids,
+            commands::workout::workout_history_linked,
+            commands::workout::workout_week_summary,
             openclaw::read_tasks,
             openclaw::read_content_pipeline,
             openclaw::save_skill,
@@ -270,6 +388,7 @@ pub fn run() {
             life_dates::life_date_list,
             life_dates::life_date_upsert,
             life_dates::life_date_delete,
+            life_dates::life_date_range,
             life_dates::life_date_preview,
             habits::habit_mark,
             habits::habit_days,
@@ -279,6 +398,9 @@ pub fn run() {
             adds::add_history,
             checkin::checkin_save,
             checkin::checkin_list,
+            commands::proactive::proactive_settings_get,
+            commands::proactive::proactive_settings_set,
+            commands::inbox::inbox_status,
             commands::patterns::patterns_read,
             commands::weekly_review::weekly_review_read,
             home_windows::home_window_preflight,

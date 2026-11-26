@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { connectMuse, disconnectMuse, markRecordingAux, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "../bridge";
+import { listen } from "@tauri-apps/api/event";
+import { connectMuse, disconnectMuse, invokeBound, markRecordingAux, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "../bridge";
 import { readableError } from "../lib/format";
 import { AUX_STEP, AuxDetector, auxInfoDetected } from "../neuro/auxDetect";
 import type { AuxInfo } from "../neuro/recordings";
@@ -7,6 +8,7 @@ import { RecordingSummarizer } from "../neuro/recordingSummary";
 import { SessionFinalizer } from "../neuro/sessionFinalizer";
 import { museTelemetry } from "../neuro/telemetryStore";
 import { useTraining } from "../neuro/useTraining";
+import { TRAINING_METHOD } from "../neuro/training";
 import type { MuseOperation } from "../screens/muse";
 import type { MuseDevice, RecordedSession, SystemSnapshot } from "../types";
 
@@ -25,6 +27,13 @@ function withTimeout<T>(work: Promise<T>, ms: number, message: string): Promise<
     work.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
   });
 }
+
+/** Why the headset stream stopped on its own (muse.rs `muse-stream-ended`). */
+export const STREAM_ENDED: Record<string, string> = {
+  no_data: "The headset connected but sent no EEG. Nothing was recorded from it. Turn it off and on, then connect again.",
+  silent: "The headset stopped sending EEG, so the stream was stopped. What arrived before is kept.",
+  link_lost: "The Bluetooth link to the headset dropped, so the stream was stopped. What arrived before is kept.",
+};
 
 export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void>, setNotice: (notice: string | null) => void) {
   const [museDevices, setMuseDevices] = useState<MuseDevice[]>([]);
@@ -50,6 +59,17 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
   const auxFound = useRef<AuxInfo | null>(null);
   // Live telemetry lives in an external store; this hook never re-renders on packets.
   useEffect(() => museTelemetry.start(), []);
+  // Decision 0057: muse.rs ends a stream that stopped on its own and says why, instead of a silent "Streaming".
+  useEffect(() => {
+    let cancelled = false;
+    let off: (() => void) | null = null;
+    try {
+      void listen<{ reason: string }>("muse-stream-ended", ({ payload }) => {
+        if (!cancelled) setMuseError(STREAM_ENDED[payload.reason] ?? STREAM_ENDED.silent);
+      }).then((u) => { if (cancelled) u(); else off = u; }, () => {});
+    } catch { /* no Tauri event bridge (tests, browser preview) */ }
+    return () => { cancelled = true; off?.(); };
+  }, []);
   const resetTelemetry = museTelemetry.reset;
   const readCounters = museTelemetry.readCounters;
   const training = useTraining(museTelemetry.getSnapshot, sessionStartedAt !== null && sessionEndedAt === null && data.muse.streaming);
@@ -148,8 +168,14 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
           summary: { avg_focus: pick("avg_focus"), avg_relaxation: pick("avg_relaxation"), avg_hr: null, max_hr: null, avg_hrv: null, calm_pct: pick("calm_pct"), time_in_target_pct: trainingSummary?.time_in_target_pct ?? null },
         };
         finishTraining();
+        const secs = Math.max(1, (endedAt - sessionStartedAt) / 1000);
         return { session, data: {
-          source: "live_muse",
+          // Decision 0057: the real source, never a fixed "live_muse" for replay or demo data.
+          source: counters.source === "live" ? "live_muse" : counters.source ?? "unknown",
+          data_source: counters.source ?? null,
+          // Samples received per channel per second over the session (arrivals, not the headset clock).
+          received_rate_hz: Object.fromEntries(Object.entries(counters.channelSamples).map(([c, n]) => [c, Math.round((n / secs) * 10) / 10])),
+          continuity: counters.continuity,
           replay_file: recordingFile,
           packets: counters.packetCount,
           channel_samples: counters.channelSamples,
@@ -158,7 +184,13 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
           aux: auxFound.current,
         } };
       },
-      save: (payload) => saveMuseSession(payload.session, payload.data),
+      save: async (payload) => {
+        const saved = await saveMuseSession(payload.session, payload.data);
+        // Decision 0058: the protocol calibration is kept with the calibration history (best effort, never blocks the session).
+        const proto = (payload.data.neurofeedback as { protocol_calibration?: unknown } | null)?.protocol_calibration;
+        if (proto) void invokeBound("neuro_calibration_save", { report: { kind: "protocol", source: payload.data.data_source ?? "replay", method: { version: TRAINING_METHOD.version, epochSecs: 0.5, fft: "see protocol.method", rejection: "training holds (contact, dropout, blink, jaw, movement, noise, frozen, not_live)" }, conditions: [], protocol: proto, sessionId: payload.session.id } }).catch(() => {});
+        return saved;
+      },
     });
     return true;
   }, [recordingFile, sessionStartedAt, readCounters, summarizeTraining, finishTraining]);

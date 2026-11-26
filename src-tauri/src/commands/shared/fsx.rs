@@ -87,3 +87,35 @@ pub(crate) fn atomic_write_with_mode(
     }
     result
 }
+
+/// Writes `bytes` to `target` only if it does not exist, never leaving a partial file there
+/// (decision 0057). The bytes go to a private temp file in `scratch` (its own folder, never the
+/// target's), are synced, then hard-linked to `target`; the link fails if `target` exists, so an
+/// existing file is never replaced. Only that temp file is ever removed. `scratch` must be on the
+/// same volume as `target`.
+pub(crate) fn write_new_no_clobber(
+    scratch: &std::path::Path,
+    target: &std::path::Path,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    use std::io::Write;
+    crate::app_paths::create_private_dir_all(scratch)?;
+    let tmp = scratch.join(format!("write-{}", uuid::Uuid::new_v4().simple()));
+    let result = (|| {
+        let mut f = crate::app_paths::private_open_options()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        fs::hard_link(&tmp, target)?;
+        // The new name must survive a power loss too: sync the folder that holds it.
+        #[cfg(unix)]
+        if let Some(dir) = target.parent() {
+            fs::File::open(dir)?.sync_all()?;
+        }
+        Ok(())
+    })();
+    let _ = fs::remove_file(&tmp);
+    result
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalPointers, checkinPointer, mergeInbox, type InboxPointer, type SourceState } from "./needsYou";
+import { OPEN_LABEL, SOURCE_LABEL, approvalPointers, checkinPointer, mergeInbox, type InboxPointer, type SourceState } from "./needsYou";
 import type { TerrenceAction } from "../types";
 
 const row = (id: string, source: InboxPointer["source"], extra: Partial<InboxPointer> = {}) => ({ id, source, title: id, due: null, reason: "", deepLink: { id: "terrance", view: "main" }, ...extra }) as InboxPointer;
@@ -30,5 +30,12 @@ describe("Needs you today: one inbox of pointers (design-1111v §3)", () => {
   it("only actions awaiting approval become pointers", () => {
     const a = (id: string, status: string) => ({ id, toolId: "x", title: id, status }) as unknown as TerrenceAction;
     expect(approvalPointers([a("1", "awaiting_approval"), a("2", "succeeded")]).map((p) => p.source)).toEqual(["approvals"]);
+  });
+  it("habits has its own label and open text, and its quiet rows do not count", () => {
+    expect(SOURCE_LABEL.habits).toBe("Habits");
+    expect(OPEN_LABEL.habits).toBe("Open habits ›");
+    const inbox = mergeInbox([{ source: "habits", state: "ok", rows: [row("habit-h1", "habits", { quiet: true })] }]);
+    expect(inbox.rows).toHaveLength(1);
+    expect(inbox.count).toBe(0);
   });
 });

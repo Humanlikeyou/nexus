@@ -373,12 +373,16 @@ export const commands = {
 	 */
 	lifeDateUpsert: (draft: LifeDateDraft_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<LifeDateRecord_Serialize>("life_date_upsert", { draft }, options),
 	lifeDateDelete: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("life_date_delete", { id }, options),
+	lifeDateRange: (from: string, to: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeDateView_Serialize[]>("life_date_range", { from, to }, options),
 	checkinList: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<CheckInRecord_Serialize[]>("checkin_list", { limit }, options),
 	patternsRead: (options?: InvokeOptions) => __TAURI_INVOKE<PatternsResult_Serialize>("patterns_read", undefined, options),
 	weeklyReviewRead: (options?: InvokeOptions) => __TAURI_INVOKE<Review_Serialize>("weekly_review_read", undefined, options),
 	/**  Read-only. The error is one of the fixed `letta_*` codes. */
 	memoryList: (options?: InvokeOptions) => __TAURI_INVOKE<MemoryItem_Serialize[]>("memory_list", undefined, options),
 	checkinSave: (draft: CheckInDraft_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<CheckInRecord_Serialize>("checkin_save", { draft }, options),
+	proactiveSettingsGet: (options?: InvokeOptions) => __TAURI_INVOKE<ProactiveSettings_Serialize>("proactive_settings_get", undefined, options),
+	proactiveSettingsSet: (settings: ProactiveSettings_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<ProactiveSettings_Serialize>("proactive_settings_set", { settings }, options),
+	inboxStatus: (options?: InvokeOptions) => __TAURI_INVOKE<InboxStatus_Serialize>("inbox_status", undefined, options),
 	decisionsList: (options?: InvokeOptions) => __TAURI_INVOKE<DecisionRecord_Serialize[]>("decisions_list", undefined, options),
 	decisionsAppend: (draft: DecisionDraft_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<DecisionRecord_Serialize>("decisions_append", { draft }, options),
 	decisionsUndo: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("decisions_undo", { id }, options),
@@ -443,6 +447,160 @@ export const commands = {
 	getSystemInfo: (options?: InvokeOptions) => __TAURI_INVOKE<SystemInfo>("get_system_info", undefined, options),
 	healthCheck: (options?: InvokeOptions) => __TAURI_INVOKE<string>("health_check", undefined, options),
 	readSkills: (options?: InvokeOptions) => __TAURI_INVOKE<Skill_Serialize[]>("read_skills", undefined, options),
+	listSkillVersions: (options?: InvokeOptions) => __TAURI_INVOKE<SkillRecord_Serialize[]>("list_skill_versions", undefined, options),
+	/**  Skills evolution stores a generated version here. It is never activated by this call. */
+	proposeSkillVersion: (name: string, content: string, options?: InvokeOptions) => __TAURI_INVOKE<SkillOutcome_Serialize>("propose_skill_version", { name, content }, options),
+	/**  Activates (or restores) a version after the user allows it in the native approval dialog. */
+	activateSkillVersion: (name: string, version: number, options?: InvokeOptions) => __TAURI_INVOKE<SkillOutcome_Serialize>("activate_skill_version", { name, version }, options),
+	rejectSkillVersion: (name: string, version: number, options?: InvokeOptions) => __TAURI_INVOKE<SkillOutcome_Serialize>("reject_skill_version", { name, version }, options),
+	/**  The most recent executions, newest first (current state only). */
+	listExecutions: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ExecutionRecord_Serialize[]>("list_executions", { limit }, options),
+	/**  Every state transition of one execution, in order. */
+	executionHistory: (executionId: string, options?: InvokeOptions) => __TAURI_INVOKE<Transition_Serialize[]>("execution_history", { executionId }, options),
+	activityList: (scope: string, subjectRef: string | null, since: string | null, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ActivityRow_Serialize[]>("activity_list", { scope, subjectRef, since, limit }, options),
+	recommendationList: (scope: string, status: string | null, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationRow_Serialize[]>("recommendation_list", { scope, status, limit }, options),
+	recommendationGet: (scope: string, id: string, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationDetail_Serialize | null>("recommendation_get", { scope, id }, options),
+	recommendationCreate: (input: RecommendationInput_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<string>("recommendation_create", { input }, options),
+	recommendationRespond: (scope: string, id: string, response: string, modificationJson: string | null, options?: InvokeOptions) => __TAURI_INVOKE<string>("recommendation_respond", { scope, id, response, modificationJson }, options),
+	recommendationRecordOutcome: (scope: string, id: string, outcome: string, evaluation: string | null, resultRef: string | null, note: string | null, options?: InvokeOptions) => __TAURI_INVOKE<string>("recommendation_record_outcome", { scope, id, outcome, evaluation, resultRef, note }, options),
+	/**  Consequential-action approvals from the 0052 ledger (read-only: none can be granted here). */
+	approvalsList: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ApprovalRow_Serialize[]>("approvals_list", { limit }, options),
+	auditTrail: (recordRef: string, options?: InvokeOptions) => __TAURI_INVOKE<AuditTrail_Serialize>("audit_trail", { recordRef }, options),
+	lifeUpdate: (goalId: string, fields: LifeFields_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<Goal_Serialize>("life_update", { goalId, fields }, options),
+	lifeProgress: (goalId: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeProgress_Serialize>("life_progress", { goalId }, options),
+	lifeHabitHistory: (habitId: string, from: string, to: string, options?: InvokeOptions) => __TAURI_INVOKE<HabitDay[]>("life_habit_history", { habitId, from, to }, options),
+	lifeAreas: (options?: InvokeOptions) => __TAURI_INVOKE<LifeArea_Serialize[]>("life_areas", undefined, options),
+	lifeAreaUpsert: (id: string | null, name: string, description: string | null, options?: InvokeOptions) => __TAURI_INVOKE<LifeArea_Serialize>("life_area_upsert", { id, name, description }, options),
+	lifeAreaArchive: (id: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeArea_Serialize>("life_area_archive", { id }, options),
+	lifeLinkAdd: (kind: string, goalId: string, otherId: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeLink>("life_link_add", { kind, goalId, otherId }, options),
+	lifeLinkRemove: (linkId: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("life_link_remove", { linkId }, options),
+	lifeLinks: (goalId: string, options?: InvokeOptions) => __TAURI_INVOKE<LifeLink[]>("life_links", { goalId }, options),
+	/**  This week's plan when `week_start` is omitted. */
+	lifeWeekPlanGet: (weekStart: string | null, options?: InvokeOptions) => __TAURI_INVOKE<WeekPlan_Serialize>("life_week_plan_get", { weekStart }, options),
+	lifeWeekPlanSet: (plan: WeekPlan_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<WeekPlan_Serialize>("life_week_plan_set", { plan }, options),
+	lifeInsight: (options?: InvokeOptions) => __TAURI_INVOKE<LifeInsight_Serialize>("life_insight", undefined, options),
+	lifeWeekObservations: (weekStart: string, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationRow_Serialize[]>("life_week_observations", { weekStart }, options),
+	briefingDailyRead: (options?: InvokeOptions) => __TAURI_INVOKE<DailyBriefing_Serialize>("briefing_daily_read", undefined, options),
+	briefingDailyRefresh: (options?: InvokeOptions) => __TAURI_INVOKE<DailyBriefing_Serialize>("briefing_daily_refresh", undefined, options),
+	briefingEnterpriseRead: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<EnterpriseBriefing_Serialize>("briefing_enterprise_read", { businessId }, options),
+	briefingEnterpriseRefresh: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<EnterpriseBriefing_Serialize>("briefing_enterprise_refresh", { businessId }, options),
+	briefingWeek: (weekStart: string, options?: InvokeOptions) => __TAURI_INVOKE<WeekCrossDomain_Serialize>("briefing_week", { weekStart }, options),
+	briefingRuntime: (options?: InvokeOptions) => __TAURI_INVOKE<BriefingRuntime_Serialize>("briefing_runtime", undefined, options),
+	briefingRecommendations: (scope: string, businessId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationDetail_Serialize[]>("briefing_recommendations", { scope, businessId }, options),
+	/**
+	 *  Packet continuity of the live stream since it started: per channel, packets received, packets
+	 *  the counter says never arrived, and repeats dropped.
+	 */
+	museStreamContinuity: (options?: InvokeOptions) => __TAURI_INVOKE<ChannelContinuity[]>("muse_stream_continuity", undefined, options),
+	neuroCalibrationSave: (report: CalibrationReport_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<SavedCalibration_Serialize>("neuro_calibration_save", { report }, options),
+	neuroCalibrationList: (kind: string | null, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<CalibrationReport_Serialize[]>("neuro_calibration_list", { kind, limit }, options),
+	neuroBaselineGet: (options?: InvokeOptions) => __TAURI_INVOKE<PersonalBaseline_Serialize>("neuro_baseline_get", undefined, options),
+	neuroProtocolSettingsGet: (options?: InvokeOptions) => __TAURI_INVOKE<{ [key in string]: ProtocolSettings }>("neuro_protocol_settings_get", undefined, options),
+	/**  Saves one protocol's settings, or with `settings: null` returns it to its defaults. */
+	neuroProtocolSettingsSet: (protocolId: string, settings: ProtocolSettings | null, options?: InvokeOptions) => __TAURI_INVOKE<{ [key in string]: ProtocolSettings }>("neuro_protocol_settings_set", { protocolId, settings }, options),
+	neuroTrainingRecords: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TrainingRecord_Serialize[]>("neuro_training_records", { limit }, options),
+	neuroTrainingTrends: (options?: InvokeOptions) => __TAURI_INVOKE<TrainingTrends_Serialize>("neuro_training_trends", undefined, options),
+	noopSessionHrv: (start: string, end: string, options?: InvokeOptions) => __TAURI_INVOKE<SessionHrv_Serialize>("noop_session_hrv", { start, end }, options),
+	noopRrStatus: (options?: InvokeOptions) => __TAURI_INVOKE<RrStatus_Serialize>("noop_rr_status", undefined, options),
+	businessList: (options?: InvokeOptions) => __TAURI_INVOKE<Business_Serialize[]>("business_list", undefined, options),
+	businessCreate: (name: string, description: string | null, ventureId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<Business_Serialize>("business_create", { name, description, ventureId }, options),
+	businessUpdate: (businessId: string, name: string, description: string | null, ventureId: string | null, status: string, options?: InvokeOptions) => __TAURI_INVOKE<Business_Serialize>("business_update", { businessId, name, description, ventureId, status }, options),
+	businessOverview: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessWorkspaceOverview_Serialize>("business_overview", { businessId }, options),
+	businessContextList: (businessId: string, section: string | null, options?: InvokeOptions) => __TAURI_INVOKE<BusinessContextItem_Serialize[]>("business_context_list", { businessId, section }, options),
+	businessContextSave: (businessId: string, input: BusinessContextInput_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<BusinessContextItem_Serialize>("business_context_save", { businessId, input }, options),
+	businessContextSetStatus: (businessId: string, itemId: string, status: string, expectedVersion: number, options?: InvokeOptions) => __TAURI_INVOKE<BusinessContextItem_Serialize>("business_context_set_status", { businessId, itemId, status, expectedVersion }, options),
+	businessContextHistory: (businessId: string, itemId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessContextVersion_Serialize[]>("business_context_history", { businessId, itemId }, options),
+	/**
+	 *  Exactly what Amara may be given about this business under its current permissions (approved
+	 *  items only by default). Refused when reading context is not permitted.
+	 */
+	businessContextForAmara: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessContextItem_Serialize[]>("business_context_for_amara", { businessId }, options),
+	businessMemoryList: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessMemoryNote_Serialize[]>("business_memory_list", { businessId }, options),
+	businessMemoryAdd: (businessId: string, text: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessMemoryNote_Serialize>("business_memory_add", { businessId, text }, options),
+	businessMemoryDecide: (businessId: string, memoryId: string, status: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessMemoryNote_Serialize>("business_memory_decide", { businessId, memoryId, status }, options),
+	businessDocuments: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessDocument_Serialize[]>("business_documents", { businessId }, options),
+	/**  Opens the native file picker; the chosen file is copied in as a draft. None = cancelled. */
+	businessDocumentAdd: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessDocument_Serialize | null>("business_document_add", { businessId }, options),
+	businessDocumentSetStatus: (businessId: string, docId: string, status: string, expectedVersion: number, options?: InvokeOptions) => __TAURI_INVOKE<BusinessDocument_Serialize>("business_document_set_status", { businessId, docId, status, expectedVersion }, options),
+	businessKnowledgeSearch: (businessId: string, query: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessKnowledgeHit_Serialize[]>("business_knowledge_search", { businessId, query }, options),
+	businessConnectors: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize[]>("business_connectors", { businessId }, options),
+	businessConnectorConfigure: (businessId: string, connectorId: string, values: { [key in string]: string }, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize>("business_connector_configure", { businessId, connectorId, values }, options),
+	/**  The native folder picker for the local repository connector. None = cancelled. */
+	businessConnectorPickFolder: (businessId: string, connectorId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize | null>("business_connector_pick_folder", { businessId, connectorId }, options),
+	/**  Write-only: the value goes straight to the Keychain. The reply is the connector's status only. */
+	businessConnectorSecretSet: (businessId: string, connectorId: string, field: string, value: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize>("business_connector_secret_set", { businessId, connectorId, field, value }, options),
+	/**  Disconnect after a native confirmation: settings cleared and Keychain items removed. */
+	businessConnectorDisconnect: (businessId: string, connectorId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize>("business_connector_disconnect", { businessId, connectorId }, options),
+	businessSyncStart: (businessId: string, connectorId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSyncRun_Serialize>("business_sync_start", { businessId, connectorId }, options),
+	businessConnectorCheck: (businessId: string, connectorId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize>("business_connector_check", { businessId, connectorId }, options),
+	/**  The native file picker for a connector's file setting (the Supabase CA certificate). None = cancelled. */
+	businessConnectorPickFile: (businessId: string, connectorId: string, field: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize | null>("business_connector_pick_file", { businessId, connectorId, field }, options),
+	/**  The SQL that creates the read-only Supabase role (no secret in it; the password is a placeholder). */
+	businessSupabaseSetupSql: (options?: InvokeOptions) => __TAURI_INVOKE<string>("business_supabase_setup_sql", undefined, options),
+	businessReport: (businessId: string, report: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessReport_Serialize>("business_report", { businessId, report }, options),
+	/**
+	 *  Amara's notes on a report, on the local model only (never the cloud tier). Needs the model's
+	 *  read permission for this business. Returns the report with the new notes.
+	 */
+	businessReportInterpret: (businessId: string, report: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessReport_Serialize>("business_report_interpret", { businessId, report }, options),
+	businessSiteSnapshot: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteSnapshot>("business_site_snapshot", { businessId }, options),
+	businessSiteLocate: (businessId: string, query: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteMatch_Serialize[]>("business_site_locate", { businessId, query }, options),
+	businessSiteDraft: (businessId: string, input: BusinessSiteChangeInput_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_draft", { businessId, input }, options),
+	businessSiteChanges: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize[]>("business_site_changes", { businessId }, options),
+	businessSiteEvents: (businessId: string, changeId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteEvent_Serialize[]>("business_site_events", { businessId, changeId }, options),
+	/**  Stage 8: the native dialog shows the target, every flag and the diff; Allow approves exactly that. */
+	businessSiteApprove: (businessId: string, changeId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_approve", { businessId, changeId }, options),
+	businessSiteReject: (businessId: string, changeId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_reject", { businessId, changeId }, options),
+	businessSiteConfirmBackup: (businessId: string, changeId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_confirm_backup", { businessId, changeId }, options),
+	businessSitePackage: (businessId: string, changeId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_package", { businessId, changeId }, options),
+	businessSiteVerify: (businessId: string, changeId: string, rollback: boolean, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSiteChange_Serialize>("business_site_verify", { businessId, changeId, rollback }, options),
+	businessSyncRuns: (businessId: string, connectorId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSyncRun_Serialize[]>("business_sync_runs", { businessId, connectorId }, options),
+	businessPermissions: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessPermission[]>("business_permissions", { businessId }, options),
+	businessPermissionSet: (businessId: string, actor: string, capability: string, allowed: boolean, options?: InvokeOptions) => __TAURI_INVOKE<BusinessPermission[]>("business_permission_set", { businessId, actor, capability, allowed }, options),
+	businessProposals: (businessId: string, status: string | null, options?: InvokeOptions) => __TAURI_INVOKE<BusinessProposal_Serialize[]>("business_proposals", { businessId, status }, options),
+	/**  Amara's way to propose a change. Inert until the user approves it; needs `propose_changes`. */
+	businessProposalCreate: (businessId: string, itemId: string, title: string, body: string, rationale: string | null, options?: InvokeOptions) => __TAURI_INVOKE<BusinessProposal_Serialize>("business_proposal_create", { businessId, itemId, title, body, rationale }, options),
+	/**
+	 *  Shows the full proposed text in the native approval dialog; on Allow, applies it through the
+	 *  execution controller.
+	 */
+	businessProposalApprove: (businessId: string, proposalId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessProposal_Serialize>("business_proposal_approve", { businessId, proposalId }, options),
+	businessProposalReject: (businessId: string, proposalId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessProposal_Serialize>("business_proposal_reject", { businessId, proposalId }, options),
+	businessActivity: (businessId: string, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ActivityRow_Serialize[]>("business_activity", { businessId, limit }, options),
+	businessRecommendations: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationRow_Serialize[]>("business_recommendations", { businessId }, options),
+	workoutLibrary: (options?: InvokeOptions) => __TAURI_INVOKE<LibraryView_Serialize>("workout_library", undefined, options),
+	workoutExerciseSave: (exercise: Exercise_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<Exercise_Serialize>("workout_exercise_save", { exercise }, options),
+	workoutTemplates: (options?: InvokeOptions) => __TAURI_INVOKE<Template_Serialize[]>("workout_templates", undefined, options),
+	workoutTemplateSave: (template: Template_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<Template_Serialize>("workout_template_save", { template }, options),
+	/**  The deterministic estimate for a draft, so the builder shows the same number the engine uses. */
+	workoutEstimate: (items: TemplateItem_Deserialize[], restBetweenS: number, options?: InvokeOptions) => __TAURI_INVOKE<number>("workout_estimate", { items, restBetweenS }, options),
+	workoutSessionPlan: (templateId: string, offerSid: string | null, options?: InvokeOptions) => __TAURI_INVOKE<SessionView_Serialize>("workout_session_plan", { templateId, offerSid }, options),
+	workoutSessionAct: (sessionId: string, action: Action_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<SessionView_Serialize>("workout_session_act", { sessionId, action }, options),
+	workoutHistory: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<SessionView_Serialize[]>("workout_history", { limit }, options),
+	/**  Decision 0062 (9b): an Amara take as a workout template, through the same engine. */
+	workoutTemplateFromTake: (takeId: string, options?: InvokeOptions) => __TAURI_INVOKE<Template_Serialize>("workout_template_from_take", { takeId }, options),
+	workoutTakeIds: (options?: InvokeOptions) => __TAURI_INVOKE<TakeWorkout[]>("workout_take_ids", undefined, options),
+	workoutHistoryLinked: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<HistoryRow_Serialize[]>("workout_history_linked", { limit }, options),
+	/**  Decision 0062 (9d): the week's workouts for Life's weekly review. */
+	workoutWeekSummary: (weekStart: string, options?: InvokeOptions) => __TAURI_INVOKE<WorkoutWeek>("workout_week_summary", { weekStart }, options),
+	/**
+	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
+	 *  `source` is "manual", "chat" or "telegram".
+	 */
+	habitMark: (habitId: string, day: string, done: boolean, source: string, options?: InvokeOptions) => __TAURI_INVOKE<HabitMarkResult_Serialize>("habit_mark", { habitId, day, done, source }, options),
+	/**  The marks with `from <= day <= to` (JST `YYYY-MM-DD`, at most 400 days), oldest first. */
+	habitDays: (from: string, to: string, options?: InvokeOptions) => __TAURI_INVOKE<HabitDayRow[]>("habit_days", { from, to }, options),
+	roadmapAccept: (goalId: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("roadmap_accept", { goalId }, options),
+	roadmapAnswerStep: (goalId: string, stepId: string, answer: string, options?: InvokeOptions) => __TAURI_INVOKE<boolean>("roadmap_answer_step", { goalId, stepId, answer }, options),
+	/**  Replace a block's value (max 2000 characters) after a native approval. The old value is saved first. */
+	memoryEdit: (blockId: string, value: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("memory_edit", { blockId, value }, options),
+	/**  Clears a block's value after a native approval dialog. The block itself is never deleted. */
+	memoryDelete: (blockId: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("memory_delete", { blockId }, options),
+	/**  Undo: puts back the old value from the newest backup of this block, after a native approval. */
+	memoryRestoreLast: (blockId: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("memory_restore_last", { blockId }, options),
+	hemisyncSessionFinish: (sessionId: string, listenedMs: number, completed: boolean, options?: InvokeOptions) => __TAURI_INVOKE<null>("hemisync_session_finish", { sessionId, listenedMs, completed }, options),
+	hemisyncSessionLink: (sessionId: string, trackId: string, startedAt: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("hemisync_session_link", { sessionId, trackId, startedAt }, options),
+	hemisyncSessionRate: (sessionId: string, rating: number, note: string | null, options?: InvokeOptions) => __TAURI_INVOKE<null>("hemisync_session_rate", { sessionId, rating, note }, options),
 	/**
 	 *  The webview never receives the bot token (Stage G review MED-3): it is always null here. The
 	 *  token is managed through `secrets_status` / `secret_set` (Keychain).
@@ -522,8 +680,8 @@ export const commands = {
 	getLlmUsage: (options?: InvokeOptions) => __TAURI_INVOKE<LlmUsageRecord_Serialize[]>("get_llm_usage", undefined, options),
 	clearLlmUsage: (options?: InvokeOptions) => __TAURI_INVOKE<null>("clear_llm_usage", undefined, options),
 	/**
-	 *  Read the canonical Amara identity file from config/terrance.identity.md.
-	 *  Walks up from the binary to find the project root.
+	 *  Amara's identity: the private copy in `<data>/config/terrance.identity.md`, else the generic default
+	 *  embedded at build time. Never read from the repository or from beside the binary.
 	 */
 	readIdentityFile: (options?: InvokeOptions) => __TAURI_INVOKE<string>("read_identity_file", undefined, options),
 	loadTerranceContext: (options?: InvokeOptions) => __TAURI_INVOKE<TerranceContext_Serialize>("load_terrance_context", undefined, options),
@@ -531,7 +689,7 @@ export const commands = {
 	storeSessionLog: (entry: SessionLogEntry, options?: InvokeOptions) => __TAURI_INVOKE<null>("store_session_log", { entry }, options),
 	listSessionLogs: (options?: InvokeOptions) => __TAURI_INVOKE<SessionLogEntry[]>("list_session_logs", undefined, options),
 	/**
-	 *  Move session logs older than `days_threshold` days to memory/archive/.
+	 *  Move session logs older than `days_threshold` days to <data>/archive/.
 	 *  Returns the number of files moved.
 	 */
 	archiveOldSessionLogs: (daysThreshold: number, options?: InvokeOptions) => __TAURI_INVOKE<number>("archive_old_session_logs", { daysThreshold }, options),
@@ -587,8 +745,8 @@ export const commands = {
 	/**  Save subagents to disk. Accepts raw JSON string. */
 	saveSubagents: (data: string, options?: InvokeOptions) => __TAURI_INVOKE<null>("save_subagents", { data }, options),
 	/**
-	 *  Read the operational profile from config/terrance.profile.md.
-	 *  Same lookup strategy as read_identity_file.
+	 *  The operational profile: the private copy in `<data>/config/terrance.profile.md`, else the generic
+	 *  template embedded at build time.
 	 */
 	readProfileFile: (options?: InvokeOptions) => __TAURI_INVOKE<string>("read_profile_file", undefined, options),
 	/**  Read-only: what the renderer needs to decide a catch-up (decision 0018). Cheap; never calls a model. */
@@ -659,6 +817,27 @@ export type AccountBalance = {
 	history: BalancePoint[],
 };
 
+/**  What the screen asks the engine to do with a session. */
+export type Action = Action_Serialize | Action_Deserialize;
+
+/**  What the screen asks the engine to do with a session. */
+export type Action_Deserialize = { kind: "start" } | { kind: "pause" } | { kind: "resume" } | 
+/**  Log the next set. Reps for a reps item, hold seconds for a hold item; load is optional. */
+{ kind: "logSet"; reps?: number | null; holdS?: number | null; loadKg?: number | null } | 
+/**  Skip the next set, or the rest of the current exercise. */
+{ kind: "skip"; scope: string } | 
+/**  End now. `abandon` ends it as abandoned when no set was done. */
+{ kind: "end"; abandon?: boolean };
+
+/**  What the screen asks the engine to do with a session. */
+export type Action_Serialize = { kind: "start" } | { kind: "pause" } | { kind: "resume" } | 
+/**  Log the next set. Reps for a reps item, hold seconds for a hold item; load is optional. */
+{ kind: "logSet"; reps: number | null; holdS: number | null; loadKg: number | null } | 
+/**  Skip the next set, or the rest of the current exercise. */
+{ kind: "skip"; scope: string } | 
+/**  End now. `abandon` ends it as abandoned when no set was done. */
+{ kind: "end"; abandon: boolean };
+
 export type ActivityArchiveReport = {
 	dryRun: boolean,
 	scanned: number,
@@ -698,6 +877,44 @@ export type ActivityEntry_Serialize = {
 	durationMs: number,
 	detail: string | null,
 	outcome: string | null,
+};
+
+export type ActivityRow = ActivityRow_Serialize | ActivityRow_Deserialize;
+
+export type ActivityRow_Deserialize = {
+	activityId: string,
+	scope: string,
+	kind: string,
+	subjectRef: string,
+	occurredAt: string,
+	recordedAt: string,
+	source: string,
+	/**  manual | automated | inferred | imported. */
+	provenance: string,
+	/**  confirmed | estimated. */
+	certainty: string,
+	sourceRef?: string | null,
+	actor: string,
+	summary?: string | null,
+	dataJson?: string | null,
+};
+
+export type ActivityRow_Serialize = {
+	activityId: string,
+	scope: string,
+	kind: string,
+	subjectRef: string,
+	occurredAt: string,
+	recordedAt: string,
+	source: string,
+	/**  manual | automated | inferred | imported. */
+	provenance: string,
+	/**  confirmed | estimated. */
+	certainty: string,
+	sourceRef: string | null,
+	actor: string,
+	summary: string | null,
+	dataJson: string | null,
 };
 
 export type AddPreview = AddPreview_Serialize | AddPreview_Deserialize;
@@ -793,6 +1010,35 @@ export type AmaraTurnInput_Serialize = {
 	haNames: string[],
 };
 
+/**  One approval: which action, bound to which parameter fingerprint, when it expires, whether used. */
+export type ApprovalRow = ApprovalRow_Serialize | ApprovalRow_Deserialize;
+
+/**  One approval: which action, bound to which parameter fingerprint, when it expires, whether used. */
+export type ApprovalRow_Deserialize = {
+	approvalId: string,
+	actionId: string,
+	paramsFingerprint: string,
+	grantedBy: string,
+	grantedAt: string,
+	expiresAt: string,
+	consumedAt?: string | null,
+	/**  The execution that used it. */
+	consumedBy?: string | null,
+};
+
+/**  One approval: which action, bound to which parameter fingerprint, when it expires, whether used. */
+export type ApprovalRow_Serialize = {
+	approvalId: string,
+	actionId: string,
+	paramsFingerprint: string,
+	grantedBy: string,
+	grantedAt: string,
+	expiresAt: string,
+	consumedAt: string | null,
+	/**  The execution that used it. */
+	consumedBy: string | null,
+};
+
 export type ArmConfig = ArmConfig_Serialize | ArmConfig_Deserialize;
 
 export type ArmConfig_Deserialize = {
@@ -882,6 +1128,34 @@ export type ArmStrategy_Serialize = {
 	health_status: string,
 	created_at: string,
 	updated_at: string,
+};
+
+export type AskSent = {
+	/**  "checkin", "habit" or "money". */
+	kind: string,
+	at: string,
+	/**  "sent", "suppressed" or "failed". */
+	result: string,
+};
+
+export type AuditTrail = AuditTrail_Serialize | AuditTrail_Deserialize;
+
+export type AuditTrail_Deserialize = {
+	recordRef: string,
+	activity: ActivityRow_Deserialize[],
+	/**  Recommendations that target or cite the record. */
+	recommendations: RecommendationDetail_Deserialize[],
+	/**  Ledger executions that name the record (`execution:<id>` refs in outcomes, or the target). */
+	executions: ExecutionRecord_Deserialize[],
+};
+
+export type AuditTrail_Serialize = {
+	recordRef: string,
+	activity: ActivityRow_Serialize[],
+	/**  Recommendations that target or cite the record. */
+	recommendations: RecommendationDetail_Serialize[],
+	/**  Ledger executions that name the record (`execution:<id>` refs in outcomes, or the target). */
+	executions: ExecutionRecord_Serialize[],
 };
 
 /**  The back-of-head electrode verdict that goes in the trailer. */
@@ -1195,6 +1469,404 @@ export type BranchSuggestion_Serialize = {
 	decidedAt?: string,
 };
 
+export type BriefingJob = BriefingJob_Serialize | BriefingJob_Deserialize;
+
+export type BriefingJobState = BriefingJobState_Serialize | BriefingJobState_Deserialize;
+
+export type BriefingJobState_Deserialize = {
+	/**  The JST day the job last built for. */
+	lastDay?: string | null,
+	lastRunAt?: string | null,
+	/**  timer | catch_up | opened | manual */
+	lastTrigger?: string | null,
+	/**  ok | partial | failed */
+	lastResult?: string | null,
+	lastError?: string | null,
+	/**  What the rules did on the last run: created, suppressed, covered, refused. */
+	ruleCounts?: { [key in string]: number },
+	measured?: number,
+};
+
+export type BriefingJobState_Serialize = {
+	/**  The JST day the job last built for. */
+	lastDay: string | null,
+	lastRunAt: string | null,
+	/**  timer | catch_up | opened | manual */
+	lastTrigger: string | null,
+	/**  ok | partial | failed */
+	lastResult: string | null,
+	lastError: string | null,
+	/**  What the rules did on the last run: created, suppressed, covered, refused. */
+	ruleCounts: { [key in string]: number },
+	measured: number,
+};
+
+export type BriefingJob_Deserialize = {
+	id: string,
+	label: string,
+	schedule: string,
+	nextDueAt: string,
+	state: BriefingJobState_Deserialize,
+};
+
+export type BriefingJob_Serialize = {
+	id: string,
+	label: string,
+	schedule: string,
+	nextDueAt: string,
+	state: BriefingJobState_Serialize,
+};
+
+export type BriefingLine = {
+	text: string,
+	/**  measured | calculated | self_report | unavailable */
+	kind: string,
+	/**  Record references behind the line. */
+	sources: string[],
+};
+
+export type BriefingRuntime = BriefingRuntime_Serialize | BriefingRuntime_Deserialize;
+
+export type BriefingRuntime_Deserialize = {
+	/**  Always false: nothing runs while Amara OS is closed. */
+	runsWhileClosed: boolean,
+	/**  When this app process started the timer (`None` in a browser preview or before setup). */
+	timerStartedAt?: string | null,
+	jobs: BriefingJob_Deserialize[],
+	modelInference: string,
+	note: string,
+};
+
+export type BriefingRuntime_Serialize = {
+	/**  Always false: nothing runs while Amara OS is closed. */
+	runsWhileClosed: boolean,
+	/**  When this app process started the timer (`None` in a browser preview or before setup). */
+	timerStartedAt: string | null,
+	jobs: BriefingJob_Serialize[],
+	modelInference: string,
+	note: string,
+};
+
+export type BriefingSection = BriefingSection_Serialize | BriefingSection_Deserialize;
+
+export type BriefingSection_Deserialize = {
+	id: string,
+	title: string,
+	/**  data | none | unavailable */
+	state: string,
+	lines: BriefingLine[],
+	note?: string | null,
+};
+
+export type BriefingSection_Serialize = {
+	id: string,
+	title: string,
+	/**  data | none | unavailable */
+	state: string,
+	lines: BriefingLine[],
+	note: string | null,
+};
+
+export type Business = Business_Serialize | Business_Deserialize;
+
+export type BusinessConnector = BusinessConnector_Serialize | BusinessConnector_Deserialize;
+
+export type BusinessConnectorSecret = {
+	name: string,
+	label: string,
+	hint: string,
+	/**  Whether the Keychain holds a value. The value itself never leaves Rust. */
+	stored: boolean,
+};
+
+export type BusinessConnectorSetting = BusinessConnectorSetting_Serialize | BusinessConnectorSetting_Deserialize;
+
+export type BusinessConnectorSetting_Deserialize = {
+	name: string,
+	label: string,
+	hint: string,
+	value?: string | null,
+};
+
+export type BusinessConnectorSetting_Serialize = {
+	name: string,
+	label: string,
+	hint: string,
+	value: string | null,
+};
+
+export type BusinessConnectorSummary = {
+	connectorId: string,
+	label: string,
+	state: string,
+};
+
+export type BusinessConnector_Deserialize = {
+	connectorId: string,
+	kind: string,
+	label: string,
+	description: string,
+	config: BusinessConnectorSetting_Deserialize[],
+	secrets: BusinessConnectorSecret[],
+	/**  disconnected | auth_required | connected | error. */
+	state: string,
+	/**  One plain sentence: why it is in that state and what to do next. */
+	detail: string,
+	/**  When the state was established: now for local folders, the last check for network ones. */
+	checkedAt?: string | null,
+	/**  local | network | deferred. */
+	check: string,
+	sync: BusinessSyncState_Deserialize,
+	/**  Always false in this phase: no connector writes outside the app. */
+	externalWrites: boolean,
+};
+
+export type BusinessConnector_Serialize = {
+	connectorId: string,
+	kind: string,
+	label: string,
+	description: string,
+	config: BusinessConnectorSetting_Serialize[],
+	secrets: BusinessConnectorSecret[],
+	/**  disconnected | auth_required | connected | error. */
+	state: string,
+	/**  One plain sentence: why it is in that state and what to do next. */
+	detail: string,
+	/**  When the state was established: now for local folders, the last check for network ones. */
+	checkedAt: string | null,
+	/**  local | network | deferred. */
+	check: string,
+	sync: BusinessSyncState_Serialize,
+	/**  Always false in this phase: no connector writes outside the app. */
+	externalWrites: boolean,
+};
+
+export type BusinessContextInput = BusinessContextInput_Serialize | BusinessContextInput_Deserialize;
+
+export type BusinessContextInput_Deserialize = {
+	/**  None = a new item. */
+	itemId?: string | null,
+	section: string,
+	title: string,
+	body: string,
+	/**  draft | unverified. Approval is a separate step. */
+	status: string,
+	/**  Required when editing: the version the edit was made against. */
+	expectedVersion?: number | null,
+};
+
+export type BusinessContextInput_Serialize = {
+	/**  None = a new item. */
+	itemId: string | null,
+	section: string,
+	title: string,
+	body: string,
+	/**  draft | unverified. Approval is a separate step. */
+	status: string,
+	/**  Required when editing: the version the edit was made against. */
+	expectedVersion: number | null,
+};
+
+export type BusinessContextItem = BusinessContextItem_Serialize | BusinessContextItem_Deserialize;
+
+export type BusinessContextItem_Deserialize = {
+	itemId: string,
+	section: string,
+	title: string,
+	body: string,
+	/**  draft | unverified | approved | archived. */
+	status: string,
+	/**  user | import | sync | amara. */
+	source: string,
+	sourceRef?: string | null,
+	version: number,
+	approvedAt?: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessContextItem_Serialize = {
+	itemId: string,
+	section: string,
+	title: string,
+	body: string,
+	/**  draft | unverified | approved | archived. */
+	status: string,
+	/**  user | import | sync | amara. */
+	source: string,
+	sourceRef: string | null,
+	version: number,
+	approvedAt: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessContextVersion = BusinessContextVersion_Serialize | BusinessContextVersion_Deserialize;
+
+export type BusinessContextVersion_Deserialize = {
+	version: number,
+	title: string,
+	body: string,
+	status: string,
+	/**  taisun | amara | system. */
+	actor: string,
+	note?: string | null,
+	at: string,
+};
+
+export type BusinessContextVersion_Serialize = {
+	version: number,
+	title: string,
+	body: string,
+	status: string,
+	/**  taisun | amara | system. */
+	actor: string,
+	note: string | null,
+	at: string,
+};
+
+export type BusinessDiffLine = {
+	/**  " " | "-" | "+". */
+	op: string,
+	text: string,
+};
+
+export type BusinessDocument = BusinessDocument_Serialize | BusinessDocument_Deserialize;
+
+export type BusinessDocument_Deserialize = {
+	docId: string,
+	title: string,
+	/**  markdown | text | pdf | image | other. */
+	kind: string,
+	status: string,
+	fileName: string,
+	sha256: string,
+	bytes: number,
+	/**  user | sync. */
+	source: string,
+	sourceRef?: string | null,
+	/**  Whether text is kept for knowledge search (markdown and plain text only). */
+	searchable: boolean,
+	version: number,
+	approvedAt?: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessDocument_Serialize = {
+	docId: string,
+	title: string,
+	/**  markdown | text | pdf | image | other. */
+	kind: string,
+	status: string,
+	fileName: string,
+	sha256: string,
+	bytes: number,
+	/**  user | sync. */
+	source: string,
+	sourceRef: string | null,
+	/**  Whether text is kept for knowledge search (markdown and plain text only). */
+	searchable: boolean,
+	version: number,
+	approvedAt: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessInsight = BusinessInsight_Serialize | BusinessInsight_Deserialize;
+
+export type BusinessInsightNote = {
+	noteId: string,
+	/**  interpretation | hypothesis. */
+	kind: string,
+	statement: string,
+	basedOn: string[],
+	modelTier: string,
+	createdAt: string,
+};
+
+export type BusinessInsightRow = BusinessInsightRow_Serialize | BusinessInsightRow_Deserialize;
+
+export type BusinessInsightRow_Deserialize = {
+	label: string,
+	value: number | null,
+	/**  Fraction of the group total, when it means something. */
+	share?: number | null,
+};
+
+export type BusinessInsightRow_Serialize = {
+	label: string,
+	value: number | null,
+	/**  Fraction of the group total, when it means something. */
+	share: number | null,
+};
+
+export type BusinessInsight_Deserialize = {
+	/**  Stable id (`web.views.total`), so interpretations can cite it. */
+	id: string,
+	group: string,
+	title: string,
+	/**  measured | calculated | interpretation | hypothesis. */
+	kind: string,
+	/**  available | unavailable | too_few | suppressed. */
+	status: string,
+	statement: string,
+	value?: number | null,
+	unit?: string | null,
+	n?: number | null,
+	rows: BusinessInsightRow_Deserialize[],
+	/**  "2026-03-22 to 2026-11-20" for time-based figures. */
+	window?: string | null,
+	/**  Where it came from: connector, stream or query, and when it was read. */
+	sources: string[],
+	note?: string | null,
+};
+
+export type BusinessInsight_Serialize = {
+	/**  Stable id (`web.views.total`), so interpretations can cite it. */
+	id: string,
+	group: string,
+	title: string,
+	/**  measured | calculated | interpretation | hypothesis. */
+	kind: string,
+	/**  available | unavailable | too_few | suppressed. */
+	status: string,
+	statement: string,
+	value: number | null,
+	unit: string | null,
+	n: number | null,
+	rows: BusinessInsightRow_Serialize[],
+	/**  "2026-03-22 to 2026-11-20" for time-based figures. */
+	window: string | null,
+	/**  Where it came from: connector, stream or query, and when it was read. */
+	sources: string[],
+	note: string | null,
+};
+
+export type BusinessKnowledgeHit = BusinessKnowledgeHit_Serialize | BusinessKnowledgeHit_Deserialize;
+
+export type BusinessKnowledgeHit_Deserialize = {
+	/**  context | document. */
+	kind: string,
+	id: string,
+	title: string,
+	section?: string | null,
+	status: string,
+	/**  A short excerpt around the first match. */
+	excerpt: string,
+};
+
+export type BusinessKnowledgeHit_Serialize = {
+	/**  context | document. */
+	kind: string,
+	id: string,
+	title: string,
+	section: string | null,
+	status: string,
+	/**  A short excerpt around the first match. */
+	excerpt: string,
+};
+
 export type BusinessLedger = BusinessLedger_Serialize | BusinessLedger_Deserialize;
 
 export type BusinessLedger_Deserialize = {
@@ -1219,6 +1891,376 @@ export type BusinessLedger_Serialize = {
 	revenueTargetJpy: number | null,
 };
 
+export type BusinessMemoryNote = BusinessMemoryNote_Serialize | BusinessMemoryNote_Deserialize;
+
+export type BusinessMemoryNote_Deserialize = {
+	memoryId: string,
+	text: string,
+	/**  proposed | kept | dismissed. */
+	status: string,
+	/**  user | amara. */
+	source: string,
+	createdAt: string,
+	decidedAt?: string | null,
+};
+
+export type BusinessMemoryNote_Serialize = {
+	memoryId: string,
+	text: string,
+	/**  proposed | kept | dismissed. */
+	status: string,
+	/**  user | amara. */
+	source: string,
+	createdAt: string,
+	decidedAt: string | null,
+};
+
+export type BusinessPermission = {
+	actor: string,
+	capability: string,
+	label: string,
+	allowed: boolean,
+	updatedAt: string,
+};
+
+export type BusinessProposal = BusinessProposal_Serialize | BusinessProposal_Deserialize;
+
+export type BusinessProposal_Deserialize = {
+	proposalId: string,
+	/**  context_update. */
+	kind: string,
+	itemId: string,
+	/**  The item version the proposal was made against; applying refuses a newer one. */
+	baseVersion: number,
+	title: string,
+	body: string,
+	rationale?: string | null,
+	/**  pending | applied | rejected | failed. */
+	status: string,
+	/**  amara | scheduler. */
+	proposedBy: string,
+	proposedAt: string,
+	decidedAt?: string | null,
+	executionId?: string | null,
+	detail?: string | null,
+};
+
+export type BusinessProposal_Serialize = {
+	proposalId: string,
+	/**  context_update. */
+	kind: string,
+	itemId: string,
+	/**  The item version the proposal was made against; applying refuses a newer one. */
+	baseVersion: number,
+	title: string,
+	body: string,
+	rationale: string | null,
+	/**  pending | applied | rejected | failed. */
+	status: string,
+	/**  amara | scheduler. */
+	proposedBy: string,
+	proposedAt: string,
+	decidedAt: string | null,
+	executionId: string | null,
+	detail: string | null,
+};
+
+export type BusinessReport = BusinessReport_Serialize | BusinessReport_Deserialize;
+
+export type BusinessReport_Deserialize = {
+	/**  website | customers. */
+	report: string,
+	generatedAt: string,
+	insights: BusinessInsight_Deserialize[],
+	notes: BusinessInsightNote[],
+};
+
+export type BusinessReport_Serialize = {
+	/**  website | customers. */
+	report: string,
+	generatedAt: string,
+	insights: BusinessInsight_Serialize[],
+	notes: BusinessInsightNote[],
+};
+
+export type BusinessSectionCount = {
+	section: string,
+	label: string,
+	approved: number,
+	draft: number,
+	unverified: number,
+};
+
+export type BusinessSiteChange = BusinessSiteChange_Serialize | BusinessSiteChange_Deserialize;
+
+export type BusinessSiteChangeInput = BusinessSiteChangeInput_Serialize | BusinessSiteChangeInput_Deserialize;
+
+export type BusinessSiteChangeInput_Deserialize = {
+	/**  seo_title | seo_description | robots | sitemap | asset_replace | asset_delete (or a bundled type, refused). */
+	contentType: string,
+	/**  The text for text changes; empty for assets. */
+	value: string,
+	/**  The file path for asset changes ("/favicon.png"). */
+	path?: string | null,
+	/**  An approved workspace document supplying the new asset bytes. */
+	documentId?: string | null,
+	/**  Approved context items the text is based on. */
+	sourceRefs: string[],
+};
+
+export type BusinessSiteChangeInput_Serialize = {
+	/**  seo_title | seo_description | robots | sitemap | asset_replace | asset_delete (or a bundled type, refused). */
+	contentType: string,
+	/**  The text for text changes; empty for assets. */
+	value: string,
+	/**  The file path for asset changes ("/favicon.png"). */
+	path: string | null,
+	/**  An approved workspace document supplying the new asset bytes. */
+	documentId: string | null,
+	/**  Approved context items the text is based on. */
+	sourceRefs: string[],
+};
+
+export type BusinessSiteChange_Deserialize = {
+	changeId: string,
+	contentType: string,
+	target: string,
+	title: string,
+	/**  draft | approved | packaged | verified | verify_failed | rolled_back | rollback_failed | rejected. */
+	status: string,
+	before: string,
+	after: string,
+	diff: BusinessDiffLine[],
+	checks: BusinessSiteCheck[],
+	/**  pricing | formulation | customer_communication | deletion. */
+	flags: string[],
+	sourceRefs: string[],
+	baseSnapshot: string,
+	hpanelBackupConfirmed: boolean,
+	packageDir?: string | null,
+	verifyDetail?: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessSiteChange_Serialize = {
+	changeId: string,
+	contentType: string,
+	target: string,
+	title: string,
+	/**  draft | approved | packaged | verified | verify_failed | rolled_back | rollback_failed | rejected. */
+	status: string,
+	before: string,
+	after: string,
+	diff: BusinessDiffLine[],
+	checks: BusinessSiteCheck[],
+	/**  pricing | formulation | customer_communication | deletion. */
+	flags: string[],
+	sourceRefs: string[],
+	baseSnapshot: string,
+	hpanelBackupConfirmed: boolean,
+	packageDir: string | null,
+	verifyDetail: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessSiteCheck = {
+	/**  ok | warn | error. */
+	level: string,
+	text: string,
+};
+
+export type BusinessSiteEvent = BusinessSiteEvent_Serialize | BusinessSiteEvent_Deserialize;
+
+export type BusinessSiteEvent_Deserialize = {
+	seq: number,
+	at: string,
+	fromStatus?: string | null,
+	toStatus: string,
+	actor: string,
+	detail: string,
+};
+
+export type BusinessSiteEvent_Serialize = {
+	seq: number,
+	at: string,
+	fromStatus: string | null,
+	toStatus: string,
+	actor: string,
+	detail: string,
+};
+
+export type BusinessSiteFile = {
+	path: string,
+	sha256: string,
+	bytes: number,
+};
+
+export type BusinessSiteMatch = BusinessSiteMatch_Serialize | BusinessSiteMatch_Deserialize;
+
+export type BusinessSiteMatch_Deserialize = {
+	/**  site | context. */
+	kind: string,
+	reference: string,
+	excerpt: string,
+	status?: string | null,
+};
+
+export type BusinessSiteMatch_Serialize = {
+	/**  site | context. */
+	kind: string,
+	reference: string,
+	excerpt: string,
+	status: string | null,
+};
+
+export type BusinessSiteSnapshot = {
+	snapshotId: string,
+	createdAt: string,
+	files: BusinessSiteFile[],
+	/**  What a public download can't include. */
+	limits: string,
+};
+
+export type BusinessSyncRun = BusinessSyncRun_Serialize | BusinessSyncRun_Deserialize;
+
+export type BusinessSyncRun_Deserialize = {
+	runId: string,
+	connectorId: string,
+	startedAt: string,
+	finishedAt?: string | null,
+	/**  running | succeeded | failed | interrupted. */
+	status: string,
+	itemsSeen: number,
+	itemsChanged: number,
+	/**  Approved items the source now differs from (never changed by a sync). */
+	conflicts: number,
+	detail?: string | null,
+};
+
+export type BusinessSyncRun_Serialize = {
+	runId: string,
+	connectorId: string,
+	startedAt: string,
+	finishedAt: string | null,
+	/**  running | succeeded | failed | interrupted. */
+	status: string,
+	itemsSeen: number,
+	itemsChanged: number,
+	/**  Approved items the source now differs from (never changed by a sync). */
+	conflicts: number,
+	detail: string | null,
+};
+
+export type BusinessSyncState = BusinessSyncState_Serialize | BusinessSyncState_Deserialize;
+
+export type BusinessSyncState_Deserialize = {
+	/**  unavailable | never | running | succeeded | failed | interrupted. */
+	state: string,
+	detail: string,
+	last?: BusinessSyncRun_Deserialize | null,
+};
+
+export type BusinessSyncState_Serialize = {
+	/**  unavailable | never | running | succeeded | failed | interrupted. */
+	state: string,
+	detail: string,
+	last: BusinessSyncRun_Serialize | null,
+};
+
+export type BusinessWorkspaceOverview = BusinessWorkspaceOverview_Serialize | BusinessWorkspaceOverview_Deserialize;
+
+export type BusinessWorkspaceOverview_Deserialize = {
+	business: Business_Deserialize,
+	sections: BusinessSectionCount[],
+	connectors: BusinessConnectorSummary[],
+	documents: number,
+	approvedDocuments: number,
+	pendingProposals: number,
+	memoryNotes: number,
+};
+
+export type BusinessWorkspaceOverview_Serialize = {
+	business: Business_Serialize,
+	sections: BusinessSectionCount[],
+	connectors: BusinessConnectorSummary[],
+	documents: number,
+	approvedDocuments: number,
+	pendingProposals: number,
+	memoryNotes: number,
+};
+
+export type Business_Deserialize = {
+	businessId: string,
+	name: string,
+	description?: string | null,
+	/**  The ledger venture this workspace belongs to (`ledger.json`), when linked. */
+	ventureId?: string | null,
+	/**  active | archived. */
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type Business_Serialize = {
+	businessId: string,
+	name: string,
+	description: string | null,
+	/**  The ledger venture this workspace belongs to (`ledger.json`), when linked. */
+	ventureId: string | null,
+	/**  active | archived. */
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type CalibrationMethod = {
+	/**  The frontend feature code's version (e.g. `calibration-v1`). */
+	version: string,
+	epochSecs: number | null,
+	/**  FFT, window and band edges, in words (so a later reader can recompute or compare). */
+	fft: string,
+	/**  What rejects an epoch, in words. */
+	rejection: string,
+};
+
+export type CalibrationReport = CalibrationReport_Serialize | CalibrationReport_Deserialize;
+
+export type CalibrationReport_Deserialize = {
+	/**  Set by the store. */
+	id?: string,
+	/**  Set by the store (RFC 3339). */
+	createdAt?: string,
+	/**  `pre_meditation`, `protocol` or `post_session`. */
+	kind: string,
+	/**  `live`, `replay` or `demo` (only live reports can enter the baseline). */
+	source: string,
+	method: CalibrationMethod,
+	conditions?: ConditionResult_Deserialize[],
+	/**  Protocol calibration only: protocol id, thresholds, baseline ticks used and rejected, method. */
+	protocol?: Value | null,
+	/**  Links a protocol calibration to its training session. */
+	sessionId?: string | null,
+};
+
+export type CalibrationReport_Serialize = {
+	/**  Set by the store. */
+	id: string,
+	/**  Set by the store (RFC 3339). */
+	createdAt: string,
+	/**  `pre_meditation`, `protocol` or `post_session`. */
+	kind: string,
+	/**  `live`, `replay` or `demo` (only live reports can enter the baseline). */
+	source: string,
+	method: CalibrationMethod,
+	conditions: ConditionResult_Serialize[],
+	/**  Protocol calibration only: protocol id, thresholds, baseline ticks used and rejected, method. */
+	protocol: Value | null,
+	/**  Links a protocol calibration to its training session. */
+	sessionId: string | null,
+};
+
 export type Can = {
 	restart: boolean,
 	start: boolean,
@@ -1238,6 +2280,16 @@ export type CatchUpStatus = {
 export type CategoryTotal = {
 	category: string,
 	minor: number,
+};
+
+/**  Per-channel continuity counts for the running stream (and the open recording's trailer). */
+export type ChannelContinuity = {
+	channel: string,
+	packets: number,
+	missedPackets: number,
+	duplicatesDropped: number,
+	/**  Times the counter jumped far back (a headset restart); the stream is kept. */
+	counterResets: number,
 };
 
 export type Chart = Chart_Serialize | Chart_Deserialize;
@@ -1438,6 +2490,90 @@ export type CommonGoal_Serialize = {
 	/**  The day before each finished-step day (lag 1), ascending. Each cause names its own lag in `before_lag_days`. */
 	beforeDays: string[],
 	causes: CommonCause[],
+};
+
+export type ConditionBaseline = ConditionBaseline_Serialize | ConditionBaseline_Deserialize;
+
+export type ConditionBaseline_Deserialize = {
+	condition: string,
+	/**  Qualifying recordings used (newest first, at most 20). */
+	recordings: number,
+	reportIds: string[],
+	relBands: { [key in string]: RobustStat },
+	alphaPeakHz?: RobustStat | null,
+	variability?: RobustStat | null,
+	/**  `none` (fewer than 3), `low` (3–5), `medium` (6–11) or `high` (12+). */
+	confidence: string,
+	uncertainty: string,
+};
+
+export type ConditionBaseline_Serialize = {
+	condition: string,
+	/**  Qualifying recordings used (newest first, at most 20). */
+	recordings: number,
+	reportIds: string[],
+	relBands: { [key in string]: RobustStat },
+	alphaPeakHz: RobustStat | null,
+	variability: RobustStat | null,
+	/**  `none` (fewer than 3), `low` (3–5), `medium` (6–11) or `high` (12+). */
+	confidence: string,
+	uncertainty: string,
+};
+
+export type ConditionFeatures = ConditionFeatures_Serialize | ConditionFeatures_Deserialize;
+
+export type ConditionFeatures_Deserialize = {
+	/**  Median relative power per band over accepted epochs, percent of 1–45 Hz. */
+	relBands: { [key in string]: number | null },
+	/**  Peak of the 7–13 Hz spectrum, only where a clear peak was found (else none). */
+	alphaPeakHz?: number | null,
+	/**  Accepted epochs that had a clear alpha peak. */
+	alphaPeakEpochs?: number,
+	/**  Epoch-to-epoch spread of log total power (MAD), a measure of signal variability. */
+	variability?: number | null,
+};
+
+export type ConditionFeatures_Serialize = {
+	/**  Median relative power per band over accepted epochs, percent of 1–45 Hz. */
+	relBands: { [key in string]: number | null },
+	/**  Peak of the 7–13 Hz spectrum, only where a clear peak was found (else none). */
+	alphaPeakHz: number | null,
+	/**  Accepted epochs that had a clear alpha peak. */
+	alphaPeakEpochs: number,
+	/**  Epoch-to-epoch spread of log total power (MAD), a measure of signal variability. */
+	variability: number | null,
+};
+
+export type ConditionResult = ConditionResult_Serialize | ConditionResult_Deserialize;
+
+export type ConditionResult_Deserialize = {
+	/**  `eyes_open` or `eyes_closed`. */
+	condition: string,
+	plannedSecs: number | null,
+	recordedSecs: number | null,
+	epochsTotal: number,
+	epochsAccepted: number,
+	/**  Rejected epochs by reason (`contact`, `blink`, `movement`, `jaw`, `amplitude`, `flat`, `frozen`, `dropout`). */
+	rejected?: { [key in string]: number },
+	/**  Per channel, the fraction of epochs with usable contact (0–1). */
+	channelQuality: { [key in string]: number | null },
+	/**  None when no epoch was accepted. */
+	features?: ConditionFeatures_Deserialize | null,
+};
+
+export type ConditionResult_Serialize = {
+	/**  `eyes_open` or `eyes_closed`. */
+	condition: string,
+	plannedSecs: number | null,
+	recordedSecs: number | null,
+	epochsTotal: number,
+	epochsAccepted: number,
+	/**  Rejected epochs by reason (`contact`, `blink`, `movement`, `jaw`, `amplitude`, `flat`, `frozen`, `dropout`). */
+	rejected: { [key in string]: number },
+	/**  Per channel, the fraction of epochs with usable contact (0–1). */
+	channelQuality: { [key in string]: number | null },
+	/**  None when no epoch was accepted. */
+	features: ConditionFeatures_Serialize | null,
 };
 
 export type ContentDraft = {
@@ -1830,6 +2966,40 @@ export type CurrencyView_Serialize = {
 	excluded_duplicates: number,
 };
 
+export type DailyBriefing = DailyBriefing_Serialize | DailyBriefing_Deserialize;
+
+export type DailyBriefing_Deserialize = {
+	day: string,
+	builtAt: string,
+	/**  timer | catch_up | opened | manual */
+	trigger: string,
+	sections: BriefingSection_Deserialize[],
+	trajectories: GoalTrajectory_Deserialize[],
+	training: TrainingSummary_Deserialize,
+	neuro: NeuroSummary_Deserialize,
+	/**  Open cross-domain and Life recommendation ids at build time. */
+	openRecommendations: string[],
+	/**  Sources that couldn't be read. */
+	missing: string[],
+	method: string,
+};
+
+export type DailyBriefing_Serialize = {
+	day: string,
+	builtAt: string,
+	/**  timer | catch_up | opened | manual */
+	trigger: string,
+	sections: BriefingSection_Serialize[],
+	trajectories: GoalTrajectory_Serialize[],
+	training: TrainingSummary_Serialize,
+	neuro: NeuroSummary_Serialize,
+	/**  Open cross-domain and Life recommendation ids at build time. */
+	openRecommendations: string[],
+	/**  Sources that couldn't be read. */
+	missing: string[],
+	method: string,
+};
+
 export type DailyBuild = {
 	days: number,
 	builtAtMs: number,
@@ -2005,6 +3175,32 @@ export type DownloadSummary = {
 	completed: number,
 };
 
+export type EnterpriseBriefing = EnterpriseBriefing_Serialize | EnterpriseBriefing_Deserialize;
+
+export type EnterpriseBriefing_Deserialize = {
+	businessId: string,
+	name: string,
+	day: string,
+	builtAt: string,
+	trigger: string,
+	sections: BriefingSection_Deserialize[],
+	openRecommendations: string[],
+	missing: string[],
+	method: string,
+};
+
+export type EnterpriseBriefing_Serialize = {
+	businessId: string,
+	name: string,
+	day: string,
+	builtAt: string,
+	trigger: string,
+	sections: BriefingSection_Serialize[],
+	openRecommendations: string[],
+	missing: string[],
+	method: string,
+};
+
 export type EntriesList = EntriesList_Serialize | EntriesList_Deserialize;
 
 export type EntriesList_Deserialize = {
@@ -2122,6 +3318,175 @@ export type Event_Serialize = {
 	schema_version: number | null,
 };
 
+export type EvidenceInput = EvidenceInput_Serialize | EvidenceInput_Deserialize;
+
+export type EvidenceInput_Deserialize = {
+	recordRef: string,
+	windowStart?: string | null,
+	windowEnd?: string | null,
+	role: string,
+	quality: string,
+	note?: string | null,
+};
+
+export type EvidenceInput_Serialize = {
+	recordRef: string,
+	windowStart: string | null,
+	windowEnd: string | null,
+	role: string,
+	quality: string,
+	note: string | null,
+};
+
+export type EvidenceRow = EvidenceRow_Serialize | EvidenceRow_Deserialize;
+
+export type EvidenceRow_Deserialize = {
+	evidenceId: string,
+	recordRef: string,
+	windowStart?: string | null,
+	windowEnd?: string | null,
+	role: string,
+	quality: string,
+	note?: string | null,
+	capturedAt: string,
+	snapshotSha256?: string | null,
+};
+
+export type EvidenceRow_Serialize = {
+	evidenceId: string,
+	recordRef: string,
+	windowStart: string | null,
+	windowEnd: string | null,
+	role: string,
+	quality: string,
+	note: string | null,
+	capturedAt: string,
+	snapshotSha256: string | null,
+};
+
+export type ExecStatus = "REQUESTED" | "AUTHORIZED" | "ATTEMPTED" | "EXECUTED" | "VERIFIED" | "FAILED" | "PARTIAL" | "CANCELLED" | "UNVERIFIED" | "NOT_AUTHORIZED";
+
+/**  One execution's current state. */
+export type ExecutionRecord = ExecutionRecord_Serialize | ExecutionRecord_Deserialize;
+
+/**  One execution's current state. */
+export type ExecutionRecord_Deserialize = {
+	executionId: string,
+	workflowId: string,
+	idempotencyKey: string,
+	createdAt: string,
+	updatedAt: string,
+	origin: string,
+	actionId: string,
+	toolId: string,
+	targetSystem: string,
+	targetRef?: string | null,
+	actionClass: string,
+	risk: string,
+	dataScope: string,
+	/**  Redacted parameters (JSON text). */
+	paramsRedacted: string,
+	paramsFingerprint: string,
+	status: ExecStatus,
+	attempts: number,
+	approvalId?: string | null,
+	expectedState?: string | null,
+	response?: string | null,
+	responseRef?: string | null,
+	verificationMethod?: string | null,
+	verificationResult?: string | null,
+	error?: string | null,
+	recovery?: string | null,
+};
+
+/**  One execution's current state. */
+export type ExecutionRecord_Serialize = {
+	executionId: string,
+	workflowId: string,
+	idempotencyKey: string,
+	createdAt: string,
+	updatedAt: string,
+	origin: string,
+	actionId: string,
+	toolId: string,
+	targetSystem: string,
+	targetRef: string | null,
+	actionClass: string,
+	risk: string,
+	dataScope: string,
+	/**  Redacted parameters (JSON text). */
+	paramsRedacted: string,
+	paramsFingerprint: string,
+	status: ExecStatus,
+	attempts: number,
+	approvalId: string | null,
+	expectedState: string | null,
+	response: string | null,
+	responseRef: string | null,
+	verificationMethod: string | null,
+	verificationResult: string | null,
+	error: string | null,
+	recovery: string | null,
+};
+
+export type Exercise = Exercise_Serialize | Exercise_Deserialize;
+
+export type Exercise_Deserialize = {
+	id: string,
+	name: string,
+	/**  Progression family: `push`, `pull`, `dip`, `legs`, `core`, `skill`, or `custom`. */
+	family: string,
+	/**  Place in the family's progression, easiest first. */
+	level: number,
+	/**  `reps` or `hold`. */
+	measure: string,
+	/**  `beginner`, `intermediate` or `advanced`. */
+	difficulty: string,
+	description: string,
+	instructions: string[],
+	muscles: string[],
+	equipment?: string[],
+	/**  Recommended sets, and reps or hold seconds. */
+	sets: number,
+	reps?: number | null,
+	holdS?: number | null,
+	secsPerRep?: number | null,
+	form?: string[],
+	safety?: string[],
+	/**  Demonstration asset reference (Phase 10 fills it in; no asset exists yet). */
+	demoAsset?: string | null,
+	/**  True for exercises you added. */
+	custom?: boolean,
+};
+
+export type Exercise_Serialize = {
+	id: string,
+	name: string,
+	/**  Progression family: `push`, `pull`, `dip`, `legs`, `core`, `skill`, or `custom`. */
+	family: string,
+	/**  Place in the family's progression, easiest first. */
+	level: number,
+	/**  `reps` or `hold`. */
+	measure: string,
+	/**  `beginner`, `intermediate` or `advanced`. */
+	difficulty: string,
+	description: string,
+	instructions: string[],
+	muscles: string[],
+	equipment: string[],
+	/**  Recommended sets, and reps or hold seconds. */
+	sets: number,
+	reps: number | null,
+	holdS: number | null,
+	secsPerRep: number | null,
+	form: string[],
+	safety: string[],
+	/**  Demonstration asset reference (Phase 10 fills it in; no asset exists yet). */
+	demoAsset: string | null,
+	/**  True for exercises you added. */
+	custom: boolean,
+};
+
 export type Experiment = Experiment_Serialize | Experiment_Deserialize;
 
 export type ExperimentResult = ExperimentResult_Serialize | ExperimentResult_Deserialize;
@@ -2174,6 +3539,82 @@ export type Experiment_Serialize = {
 	measure: string | null,
 	/**  The weekly-review finding pair that produced the suggestion (for traceability). */
 	pair: string | null,
+};
+
+export type FeatureComparison = FeatureComparison_Serialize | FeatureComparison_Deserialize;
+
+export type FeatureComparison_Deserialize = {
+	condition: string,
+	/**  `alpha` (relative band), `alpha_peak_hz` or `variability`. */
+	feature: string,
+	value: number | null,
+	usualMedian: number | null,
+	usualRobustSd: number | null,
+	/**  (value - median) / robust SD; none when the spread is zero. */
+	robustZ?: number | null,
+	/**  `within`, `above` or `below` the usual range (|z| < 1.5), in signal terms only. */
+	position: string,
+};
+
+export type FeatureComparison_Serialize = {
+	condition: string,
+	/**  `alpha` (relative band), `alpha_peak_hz` or `variability`. */
+	feature: string,
+	value: number | null,
+	usualMedian: number | null,
+	usualRobustSd: number | null,
+	/**  (value - median) / robust SD; none when the spread is zero. */
+	robustZ: number | null,
+	/**  `within`, `above` or `below` the usual range (|z| < 1.5), in signal terms only. */
+	position: string,
+};
+
+export type FeatureTrend = FeatureTrend_Serialize | FeatureTrend_Deserialize;
+
+export type FeatureTrend_Deserialize = {
+	/**  `resting_level:<band>`, `final_threshold_scale` or `valid_pct`. */
+	feature: string,
+	unit: string,
+	/**  How the per-session number is calculated, in words. */
+	calculation: string,
+	n: number,
+	median: number | null,
+	robustSd: number | null,
+	/**  Median of the earlier half of the sessions, then of the later half (in time order). */
+	earlierMedian: number | null,
+	laterMedian: number | null,
+	/**  later - earlier, in the feature's unit, and in robust SDs of all sessions. */
+	change: number | null,
+	changeInSpreads?: number | null,
+	/**  Theil-Sen slope per session (median of pairwise slopes): robust to one odd session. */
+	slopePerSession: number | null,
+	/**  `higher`, `lower` or `no_clear_change` (|change| under one robust SD, or no spread). */
+	direction: string,
+	confidence: string,
+	uncertainty: string,
+};
+
+export type FeatureTrend_Serialize = {
+	/**  `resting_level:<band>`, `final_threshold_scale` or `valid_pct`. */
+	feature: string,
+	unit: string,
+	/**  How the per-session number is calculated, in words. */
+	calculation: string,
+	n: number,
+	median: number | null,
+	robustSd: number | null,
+	/**  Median of the earlier half of the sessions, then of the later half (in time order). */
+	earlierMedian: number | null,
+	laterMedian: number | null,
+	/**  later - earlier, in the feature's unit, and in robust SDs of all sessions. */
+	change: number | null,
+	changeInSpreads: number | null,
+	/**  Theil-Sen slope per session (median of pairwise slopes): robust to one odd session. */
+	slopePerSession: number | null,
+	/**  `higher`, `lower` or `no_clear_change` (|change| under one robust SD, or no spread). */
+	direction: string,
+	confidence: string,
+	uncertainty: string,
 };
 
 export type FeedState = 
@@ -2465,6 +3906,13 @@ export type FreezeTable_Serialize = {
 	maxTs: string | null,
 };
 
+/**  How often a habit is meant to happen. */
+export type Frequency = {
+	times: number,
+	/**  `day` | `week` */
+	per: string,
+};
+
 export type FundingRequest = FundingRequest_Serialize | FundingRequest_Deserialize;
 
 export type FundingRequest_Deserialize = {
@@ -2544,6 +3992,44 @@ export type GoalRoute_Serialize = {
 	note: string | null,
 };
 
+export type GoalTrajectory = GoalTrajectory_Serialize | GoalTrajectory_Deserialize;
+
+export type GoalTrajectory_Deserialize = {
+	goalId: string,
+	title: string,
+	/**  How progress is measured: "3 of 8 steps" or "2 of 5 offers". */
+	measure: string,
+	progressPct?: number | null,
+	/**  Share of the time from the goal's start to its deadline that has passed. */
+	expectedPct?: number | null,
+	deadline?: string | null,
+	daysLeft?: number | null,
+	/**  Progress recorded in the last 14 days (`goal.progressed` activity). */
+	moves14d: number,
+	/**  ahead | on_pace | behind | no_deadline | not_started | done | unknown */
+	state: string,
+	nextStep?: string | null,
+	sources: string[],
+};
+
+export type GoalTrajectory_Serialize = {
+	goalId: string,
+	title: string,
+	/**  How progress is measured: "3 of 8 steps" or "2 of 5 offers". */
+	measure: string,
+	progressPct: number | null,
+	/**  Share of the time from the goal's start to its deadline that has passed. */
+	expectedPct: number | null,
+	deadline: string | null,
+	daysLeft: number | null,
+	/**  Progress recorded in the last 14 days (`goal.progressed` activity). */
+	moves14d: number,
+	/**  ahead | on_pace | behind | no_deadline | not_started | done | unknown */
+	state: string,
+	nextStep: string | null,
+	sources: string[],
+};
+
 export type GoalVentureSet = GoalVentureSet_Serialize | GoalVentureSet_Deserialize;
 
 export type GoalVentureSet_Deserialize = {
@@ -2605,6 +4091,11 @@ export type Goal_Deserialize = {
 	remind_at?: string | null,
 	/**  Habits only: a paused habit is not asked about and does not count as missed. */
 	paused?: boolean,
+	/**
+	 *  Life model fields (Phase 6). Optional and nested so old files load unchanged and older builds
+	 *  ignore it. Only `life::update_in` changes it; a save that omits it keeps what is on disk.
+	 */
+	life?: LifeFields_Deserialize,
 };
 
 export type Goal_Serialize = {
@@ -2628,6 +4119,11 @@ export type Goal_Serialize = {
 	remind_at?: string,
 	/**  Habits only: a paused habit is not asked about and does not count as missed. */
 	paused?: boolean,
+	/**
+	 *  Life model fields (Phase 6). Optional and nested so old files load unchanged and older builds
+	 *  ignore it. Only `life::update_in` changes it; a save that omits it keeps what is on disk.
+	 */
+	life?: LifeFields_Serialize,
 };
 
 export type GoalsSection = GoalsSection_Serialize | GoalsSection_Deserialize;
@@ -2839,6 +4335,47 @@ export type HaTestResult_Serialize = {
 	version?: string,
 };
 
+export type HabitDay = {
+	day: string,
+	/**  `done` | `not_done` (marked) | `no_record` (nothing was marked: unknown, not zero) */
+	state: string,
+};
+
+export type HabitDayRow = {
+	habitId: string,
+	/**  JST `YYYY-MM-DD`. */
+	day: string,
+	done: boolean,
+	/**  "manual" | "chat" | "telegram". */
+	source: string,
+	/**  When the mark was made (JST, ISO). */
+	at: string,
+};
+
+export type HabitMarkResult = HabitMarkResult_Serialize | HabitMarkResult_Deserialize;
+
+export type HabitMarkResult_Deserialize = {
+	/**  False when the day already had that state: nothing was written and nothing is in History. */
+	changed: boolean,
+	/**  The History id Undo takes (`add_undo("habit", id)`); `None` when nothing changed. */
+	id?: string | null,
+	habitId: string,
+	day: string,
+	done: boolean,
+	toast: string,
+};
+
+export type HabitMarkResult_Serialize = {
+	/**  False when the day already had that state: nothing was written and nothing is in History. */
+	changed: boolean,
+	/**  The History id Undo takes (`add_undo("habit", id)`); `None` when nothing changed. */
+	id: string | null,
+	habitId: string,
+	day: string,
+	done: boolean,
+	toast: string,
+};
+
 export type HabitWeek = {
 	id: string,
 	title: string,
@@ -2887,6 +4424,21 @@ export type HistoryItem = {
 	when: string,
 	text: string,
 	via: string,
+};
+
+/**  History with each session's overlapping NOOP-detected workout (read-only; a link, never a merge). */
+export type HistoryRow = HistoryRow_Serialize | HistoryRow_Deserialize;
+
+/**  History with each session's overlapping NOOP-detected workout (read-only; a link, never a merge). */
+export type HistoryRow_Deserialize = {
+	view: SessionView_Deserialize,
+	noop?: NoopLink_Deserialize | null,
+};
+
+/**  History with each session's overlapping NOOP-detected workout (read-only; a link, never a merge). */
+export type HistoryRow_Serialize = {
+	view: SessionView_Serialize,
+	noop: NoopLink_Serialize | null,
 };
 
 export type HomeBrief = HomeBrief_Serialize | HomeBrief_Deserialize;
@@ -3060,6 +4612,29 @@ export type InCommon_Serialize = {
 	skippedCauses: string[],
 };
 
+export type InboxApplied = {
+	kind: string,
+	at: string,
+};
+
+export type InboxStatus = InboxStatus_Serialize | InboxStatus_Deserialize;
+
+export type InboxStatus_Deserialize = {
+	done: number,
+	rejected: number,
+	lastApplied?: InboxApplied | null,
+	lastRejectedReason?: string | null,
+	sentToday: AskSent[],
+};
+
+export type InboxStatus_Serialize = {
+	done: number,
+	rejected: number,
+	lastApplied: InboxApplied | null,
+	lastRejectedReason: string | null,
+	sentToday: AskSent[],
+};
+
 export type KbState = "running" | "empty" | "not_running" | "error";
 
 export type KbStatus = KbStatus_Serialize | KbStatus_Deserialize;
@@ -3219,6 +4794,18 @@ export type LibTrack_Serialize = {
 
 export type Library = Library_Serialize | Library_Deserialize;
 
+export type LibraryView = LibraryView_Serialize | LibraryView_Deserialize;
+
+export type LibraryView_Deserialize = {
+	version: string,
+	exercises: Exercise_Deserialize[],
+};
+
+export type LibraryView_Serialize = {
+	version: string,
+	exercises: Exercise_Serialize[],
+};
+
 export type Library_Deserialize = {
 	tracks: LibTrack_Deserialize[],
 	importedAt?: string | null,
@@ -3231,6 +4818,28 @@ export type Library_Serialize = {
 	sourceFolder: string | null,
 };
 
+export type LifeArea = LifeArea_Serialize | LifeArea_Deserialize;
+
+export type LifeArea_Deserialize = {
+	id: string,
+	name: string,
+	description?: string | null,
+	/**  `active` | `archived` */
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type LifeArea_Serialize = {
+	id: string,
+	name: string,
+	description: string | null,
+	/**  `active` | `archived` */
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
 export type LifeDateDraft = LifeDateDraft_Serialize | LifeDateDraft_Deserialize;
 
 export type LifeDateDraft_Deserialize = {
@@ -3239,6 +4848,12 @@ export type LifeDateDraft_Deserialize = {
 	date: string,
 	lane: string,
 	sub?: string | null,
+	/**  `None` keeps what is stored (a new date starts with the default ladder); `Some(vec![])` resets to it. */
+	leadDays?: number[] | null,
+	/**  `None` keeps what is stored. */
+	done?: boolean | null,
+	/**  `None` keeps what is stored; `Some("")` clears the link. */
+	goalId?: string | null,
 };
 
 export type LifeDateDraft_Serialize = {
@@ -3247,6 +4862,12 @@ export type LifeDateDraft_Serialize = {
 	date: string,
 	lane: string,
 	sub: string | null,
+	/**  `None` keeps what is stored (a new date starts with the default ladder); `Some(vec![])` resets to it. */
+	leadDays: number[] | null,
+	/**  `None` keeps what is stored. */
+	done: boolean | null,
+	/**  `None` keeps what is stored; `Some("")` clears the link. */
+	goalId: string | null,
 };
 
 export type LifeDateRecord = LifeDateRecord_Serialize | LifeDateRecord_Deserialize;
@@ -3259,6 +4880,12 @@ export type LifeDateRecord_Deserialize = {
 	/**  "personal" or "residence". */
 	lane: string,
 	sub?: string,
+	/**  Days before the date to remind, largest first. Empty means the default 90/30/7 ladder. */
+	leadDays?: number[],
+	/**  Done dates stop reminding and leave Needs you and Amara's upcoming list. */
+	done?: boolean,
+	/**  The goal this date belongs to (a goal id), if any. */
+	goalId?: string | null,
 };
 
 export type LifeDateRecord_Serialize = {
@@ -3269,6 +4896,12 @@ export type LifeDateRecord_Serialize = {
 	/**  "personal" or "residence". */
 	lane: string,
 	sub: string,
+	/**  Days before the date to remind, largest first. Empty means the default 90/30/7 ladder. */
+	leadDays: number[],
+	/**  Done dates stop reminding and leave Needs you and Amara's upcoming list. */
+	done: boolean,
+	/**  The goal this date belongs to (a goal id), if any. */
+	goalId: string | null,
 };
 
 export type LifeDateView = LifeDateView_Serialize | LifeDateView_Deserialize;
@@ -3288,6 +4921,120 @@ export type LifeDateView_Serialize = {
 	/**  The reminder rung (90, 30 or 7) whose window today falls in, if any. */
 	activeWindow: number | null,
 } & LifeDateRecord_Serialize;
+
+export type LifeFields = LifeFields_Serialize | LifeFields_Deserialize;
+
+export type LifeFields_Deserialize = {
+	/**  `outcome` | `performance` | `learning` */
+	goalType?: string | null,
+	/**  `active` | `paused` | `blocked` | `completed` | `archived`. Unset = from `paused` (else active). */
+	status?: string | null,
+	/**  Why it is blocked or paused, in Taisun's words. */
+	statusReason?: string | null,
+	areaId?: string | null,
+	motivation?: string | null,
+	/**  Where it started, in the goal's unit. Without it no percentage is ever shown. */
+	baseline?: number | null,
+	desiredResult?: string | null,
+	measurement?: string | null,
+	completionCriteria?: string | null,
+	nextAction?: string | null,
+	frequency?: Frequency | null,
+	/**  `HH:MM` */
+	preferredTime?: string | null,
+	cue?: string | null,
+	minimumVersion?: string | null,
+	fullVersion?: string | null,
+	/**  Reminders on or off (the time is `remind_at`). Unset = the app default. */
+	reminders?: boolean | null,
+};
+
+export type LifeFields_Serialize = {
+	/**  `outcome` | `performance` | `learning` */
+	goalType: string | null,
+	/**  `active` | `paused` | `blocked` | `completed` | `archived`. Unset = from `paused` (else active). */
+	status: string | null,
+	/**  Why it is blocked or paused, in Taisun's words. */
+	statusReason: string | null,
+	areaId: string | null,
+	motivation: string | null,
+	/**  Where it started, in the goal's unit. Without it no percentage is ever shown. */
+	baseline: number | null,
+	desiredResult: string | null,
+	measurement: string | null,
+	completionCriteria: string | null,
+	nextAction: string | null,
+	frequency: Frequency | null,
+	/**  `HH:MM` */
+	preferredTime: string | null,
+	cue: string | null,
+	minimumVersion: string | null,
+	fullVersion: string | null,
+	/**  Reminders on or off (the time is `remind_at`). Unset = the app default. */
+	reminders: boolean | null,
+};
+
+export type LifeInsight = LifeInsight_Serialize | LifeInsight_Deserialize;
+
+export type LifeInsight_Deserialize = {
+	recommendation?: RecommendationRow_Deserialize | null,
+	/**  True when this read brought it up (and recorded `shown`). */
+	nudged: boolean,
+	/**  When nothing new was brought up: `off`, `quiet_hours`, `daily_limit` or `none` (nothing qualifies). */
+	held?: string | null,
+};
+
+export type LifeInsight_Serialize = {
+	recommendation: RecommendationRow_Serialize | null,
+	/**  True when this read brought it up (and recorded `shown`). */
+	nudged: boolean,
+	/**  When nothing new was brought up: `off`, `quiet_hours`, `daily_limit` or `none` (nothing qualifies). */
+	held: string | null,
+};
+
+export type LifeLink = {
+	id: string,
+	/**  `goal_project` | `goal_habit` */
+	kind: string,
+	goalId: string,
+	/**  `project:<id>` or `goals:<habit id>`. */
+	otherRef: string,
+	createdAt: string,
+};
+
+export type LifeProgress = LifeProgress_Serialize | LifeProgress_Deserialize;
+
+export type LifeProgress_Deserialize = {
+	goalId: string,
+	status: string,
+	current: number | null,
+	target: number | null,
+	unit: string,
+	baseline?: number | null,
+	/**
+	 *  Only when a baseline is set and differs from the target: (current - baseline) / (target - baseline).
+	 *  Not clamped, so overshooting or going backwards shows as it is.
+	 */
+	fraction?: number | null,
+	/**  Recorded progress changes, oldest first (from the activity history). */
+	history: ActivityRow_Deserialize[],
+};
+
+export type LifeProgress_Serialize = {
+	goalId: string,
+	status: string,
+	current: number | null,
+	target: number | null,
+	unit: string,
+	baseline: number | null,
+	/**
+	 *  Only when a baseline is set and differs from the target: (current - baseline) / (target - baseline).
+	 *  Not clamped, so overshooting or going backwards shows as it is.
+	 */
+	fraction: number | null,
+	/**  Recorded progress changes, oldest first (from the activity history). */
+	history: ActivityRow_Serialize[],
+};
 
 /**  The live heart rate for the Home screen, oldest sample first. Never log this. */
 export type LiveHeartRate = {
@@ -3899,6 +5646,38 @@ export type N8nStatus_Serialize = {
 	failures7d: number | null,
 };
 
+export type NeuroSummary = NeuroSummary_Serialize | NeuroSummary_Deserialize;
+
+export type NeuroSummary_Deserialize = {
+	periodStart: string,
+	periodEnd: string,
+	sessions: number,
+	minutes: number | null,
+	/**  Training records in the period that met the eligibility rules (0059). */
+	eligibleTraining: number,
+	medianTimeInTargetPct?: number | null,
+	medianValidPct?: number | null,
+	/**  Longitudinal trend statements from `neuro_training::trends_from` (with confidence), all sessions. */
+	trends: string[],
+	sourceIds: string[],
+	note: string,
+};
+
+export type NeuroSummary_Serialize = {
+	periodStart: string,
+	periodEnd: string,
+	sessions: number,
+	minutes: number | null,
+	/**  Training records in the period that met the eligibility rules (0059). */
+	eligibleTraining: number,
+	medianTimeInTargetPct: number | null,
+	medianValidPct: number | null,
+	/**  Longitudinal trend statements from `neuro_training::trends_from` (with confidence), all sessions. */
+	trends: string[],
+	sourceIds: string[],
+	note: string,
+};
+
 export type NextAction = NextAction_Serialize | NextAction_Deserialize;
 
 export type NextAction_Deserialize = {
@@ -4107,6 +5886,25 @@ export type NoopHealthSnapshot_Serialize = {
 	message: string | null,
 };
 
+/**  One NOOP-detected workout that overlaps a session in time: a link, never a merge (NOOP is not written). */
+export type NoopLink = NoopLink_Serialize | NoopLink_Deserialize;
+
+/**  One NOOP-detected workout that overlaps a session in time: a link, never a merge (NOOP is not written). */
+export type NoopLink_Deserialize = {
+	startedAt: string,
+	sport: string,
+	durationMin?: number | null,
+	strain?: number | null,
+};
+
+/**  One NOOP-detected workout that overlaps a session in time: a link, never a merge (NOOP is not written). */
+export type NoopLink_Serialize = {
+	startedAt: string,
+	sport: string,
+	durationMin: number | null,
+	strain: number | null,
+};
+
 export type NoopQueryError = { kind: "tool_not_allowed"; detail: string } | { kind: "invalid_args"; detail: string } | { kind: "binary_missing"; detail: string } | { kind: "spawn_failed"; detail: string } | { kind: "timeout"; detail: number } | { kind: "process_failed"; detail: string } | { kind: "bad_output"; detail: string } | { kind: "tool_error"; detail: string } | { kind: "invalid_path"; detail: string } | { kind: "sandbox_missing"; detail: string } | { kind: "pin_mismatch"; detail: string } | { kind: "pin_missing"; detail: string };
 
 export type NoopSettings = NoopSettings_Serialize | NoopSettings_Deserialize;
@@ -4266,6 +6064,30 @@ export type OutboxStatus_Serialize = {
 	expired: number,
 };
 
+export type OutcomeRow = OutcomeRow_Serialize | OutcomeRow_Deserialize;
+
+export type OutcomeRow_Deserialize = {
+	outcomeId: string,
+	outcome: string,
+	at: string,
+	actor: string,
+	modificationJson?: string | null,
+	resultRef?: string | null,
+	evaluation?: string | null,
+	note?: string | null,
+};
+
+export type OutcomeRow_Serialize = {
+	outcomeId: string,
+	outcome: string,
+	at: string,
+	actor: string,
+	modificationJson: string | null,
+	resultRef: string | null,
+	evaluation: string | null,
+	note: string | null,
+};
+
 export type Owner = "user" | "supervisor" | "transition";
 
 export type PackageInfo = {
@@ -4326,6 +6148,52 @@ export type PatternsResult_Serialize = {
 	reason?: string,
 };
 
+export type Pause = Pause_Serialize | Pause_Deserialize;
+
+export type Pause_Deserialize = {
+	from: string,
+	to?: string | null,
+};
+
+export type Pause_Serialize = {
+	from: string,
+	to: string | null,
+};
+
+export type PersonalBaseline = PersonalBaseline_Serialize | PersonalBaseline_Deserialize;
+
+export type PersonalBaseline_Deserialize = {
+	version: string,
+	conditions: ConditionBaseline_Deserialize[],
+	/**  Eyes-closed over eyes-open alpha (median of per-session ratios), where both were recorded well. */
+	alphaReactivity?: RobustStat | null,
+	note: string,
+};
+
+export type PersonalBaseline_Serialize = {
+	version: string,
+	conditions: ConditionBaseline_Serialize[],
+	/**  Eyes-closed over eyes-open alpha (median of per-session ratios), where both were recorded well. */
+	alphaReactivity: RobustStat | null,
+	note: string,
+};
+
+export type PlannedAction = PlannedAction_Serialize | PlannedAction_Deserialize;
+
+export type PlannedAction_Deserialize = {
+	text: string,
+	/**  The goal it moves, if any (must exist in `goals.json`). */
+	goalId?: string | null,
+	done?: boolean,
+};
+
+export type PlannedAction_Serialize = {
+	text: string,
+	/**  The goal it moves, if any (must exist in `goals.json`). */
+	goalId: string | null,
+	done: boolean,
+};
+
 export type Pointer = Pointer_Serialize | Pointer_Deserialize;
 
 export type Pointer_Deserialize = {
@@ -4350,6 +6218,54 @@ export type Pointer_Serialize = {
 	quiet?: boolean,
 };
 
+export type PrePost = PrePost_Serialize | PrePost_Deserialize;
+
+export type PrePostChange = PrePostChange_Serialize | PrePostChange_Deserialize;
+
+export type PrePostChange_Deserialize = {
+	condition: string,
+	feature: string,
+	pre: number | null,
+	post: number | null,
+	/**  post - pre, in the feature's own unit. */
+	change: number | null,
+	/**  The baseline's robust SD for this feature, when there is a baseline. */
+	usualRobustSd?: number | null,
+	/**  change / usual robust SD. */
+	changeInUsualSpreads?: number | null,
+	/**  |change| is more than 1.5 usual spreads. False when there is no baseline to judge by. */
+	beyondUsualVariation: boolean,
+};
+
+export type PrePostChange_Serialize = {
+	condition: string,
+	feature: string,
+	pre: number | null,
+	post: number | null,
+	/**  post - pre, in the feature's own unit. */
+	change: number | null,
+	/**  The baseline's robust SD for this feature, when there is a baseline. */
+	usualRobustSd: number | null,
+	/**  change / usual robust SD. */
+	changeInUsualSpreads: number | null,
+	/**  |change| is more than 1.5 usual spreads. False when there is no baseline to judge by. */
+	beyondUsualVariation: boolean,
+};
+
+export type PrePost_Deserialize = {
+	preReportId: string,
+	minutesBetween: number,
+	changes: PrePostChange_Deserialize[],
+	note: string,
+};
+
+export type PrePost_Serialize = {
+	preReportId: string,
+	minutesBetween: number,
+	changes: PrePostChange_Serialize[],
+	note: string,
+};
+
 export type Preview = {
 	text: string,
 	at: string,
@@ -4357,10 +6273,130 @@ export type Preview = {
 	usedPlainLine: boolean,
 };
 
+export type ProactiveCheckin = ProactiveCheckin_Serialize | ProactiveCheckin_Deserialize;
+
+export type ProactiveCheckin_Deserialize = {
+	enabled?: boolean,
+	at?: string,
+};
+
+export type ProactiveCheckin_Serialize = {
+	enabled: boolean,
+	at: string,
+};
+
+export type ProactiveHabits = ProactiveHabits_Serialize | ProactiveHabits_Deserialize;
+
+export type ProactiveHabits_Deserialize = {
+	enabled?: boolean,
+};
+
+export type ProactiveHabits_Serialize = {
+	enabled: boolean,
+};
+
+export type ProactiveMoney = ProactiveMoney_Serialize | ProactiveMoney_Deserialize;
+
+export type ProactiveMoney_Deserialize = {
+	enabled?: boolean,
+	weekday?: string,
+	at?: string,
+};
+
+export type ProactiveMoney_Serialize = {
+	enabled: boolean,
+	weekday: string,
+	at: string,
+};
+
+/**  Life suggestions brought up by Amara (decision 0056; rules in `life_nudges.rs`). */
+export type ProactiveNudges = ProactiveNudges_Serialize | ProactiveNudges_Deserialize;
+
+/**  Life suggestions brought up by Amara (decision 0056; rules in `life_nudges.rs`). */
+export type ProactiveNudges_Deserialize = {
+	enabled?: boolean,
+	/**  Also send them on Telegram (the kill switch still applies). */
+	telegram?: boolean,
+	/**  New suggestions a JST day, app and Telegram together (0-10). */
+	maxPerDay?: number,
+	/**  Quiet hours (JST, `HH:MM`); equal ends mean none. */
+	quietFrom?: string,
+	quietTo?: string,
+};
+
+/**  Life suggestions brought up by Amara (decision 0056; rules in `life_nudges.rs`). */
+export type ProactiveNudges_Serialize = {
+	enabled: boolean,
+	/**  Also send them on Telegram (the kill switch still applies). */
+	telegram: boolean,
+	/**  New suggestions a JST day, app and Telegram together (0-10). */
+	maxPerDay: number,
+	/**  Quiet hours (JST, `HH:MM`); equal ends mean none. */
+	quietFrom: string,
+	quietTo: string,
+};
+
+export type ProactiveSettings = ProactiveSettings_Serialize | ProactiveSettings_Deserialize;
+
+export type ProactiveSettings_Deserialize = {
+	checkin?: ProactiveCheckin_Deserialize,
+	habits?: ProactiveHabits_Deserialize,
+	money?: ProactiveMoney_Deserialize,
+	/**  Older files have no `nudges` and read as the defaults. */
+	nudges?: ProactiveNudges_Deserialize,
+};
+
+export type ProactiveSettings_Serialize = {
+	checkin: ProactiveCheckin_Serialize,
+	habits: ProactiveHabits_Serialize,
+	money: ProactiveMoney_Serialize,
+	/**  Older files have no `nudges` and read as the defaults. */
+	nudges: ProactiveNudges_Serialize,
+};
+
 export type Progress = {
 	done: number,
 	total: number,
 	label: string,
+};
+
+export type ProtocolSettings = {
+	/**  Planned session length in minutes (5–60). */
+	durationMin: number,
+	/**  Share of clean training time the adaptive thresholds aim to reward (0.4–0.8). */
+	targetRewardRate: number | null,
+	/**  `soundscape`, `tone` or `silent`. */
+	sound: string,
+	/**  The optional visual feedback (off by default). */
+	visualFeedback: boolean,
+	/**  Feedback volume, 0–1. */
+	volume: number | null,
+};
+
+export type ProtocolTrends = ProtocolTrends_Serialize | ProtocolTrends_Deserialize;
+
+export type ProtocolTrends_Deserialize = {
+	protocolId: string,
+	method: string,
+	sessions: number,
+	first: string,
+	last: string,
+	/**  Empty below MIN_TREND_SESSIONS. */
+	features: FeatureTrend_Deserialize[],
+	/**  Session ids the trends were calculated from, oldest first (traceability). */
+	sessionIds: string[],
+};
+
+export type ProtocolTrends_Serialize = {
+	protocolId: string,
+	method: string,
+	sessions: number,
+	first: string,
+	last: string,
+	/**  Empty below MIN_TREND_SESSIONS. */
+	features: FeatureTrend_Serialize[],
+	/**  Session ids the trends were calculated from, oldest first (traceability). */
+	sessionIds: string[],
 };
 
 export type PrunePlan = {
@@ -4421,6 +6457,130 @@ export type RankedTrack = {
 export type ReasonCode = "not_checked" | "ok" | "slow" | "unreachable" | "timeout" | "bad_status" | "container_down" | "container_stopped" | "container_starting" | "unhealthy" | "missing_container" | "bad_bind" | "docker_unavailable" | "not_running" | "no_store" | "restarting" | "restart_failed";
 
 export type ReasonKind = "stagnation" | "not_working" | "better_route";
+
+export type RecommendationDetail = RecommendationDetail_Serialize | RecommendationDetail_Deserialize;
+
+export type RecommendationDetail_Deserialize = {
+	recommendation: RecommendationRow_Deserialize,
+	evidence: EvidenceRow_Deserialize[],
+	outcomes: OutcomeRow_Deserialize[],
+};
+
+export type RecommendationDetail_Serialize = {
+	recommendation: RecommendationRow_Serialize,
+	evidence: EvidenceRow_Serialize[],
+	outcomes: OutcomeRow_Serialize[],
+};
+
+export type RecommendationInput = RecommendationInput_Serialize | RecommendationInput_Deserialize;
+
+export type RecommendationInput_Deserialize = {
+	scope: string,
+	domain: string,
+	kind: string,
+	title: string,
+	body: string,
+	observation?: string | null,
+	rationale?: string | null,
+	suggestedAction?: string | null,
+	confidence?: number | null,
+	confidenceBasis?: string | null,
+	uncertainty?: string | null,
+	impact?: string | null,
+	effort?: string | null,
+	expiresAt?: string | null,
+	/**  The inference purpose label that produced it (e.g. `weekly_review.suggest`). */
+	purpose: string,
+	modelTier?: string | null,
+	targetRef?: string | null,
+	supersedesId?: string | null,
+	evidence: EvidenceInput_Deserialize[],
+};
+
+export type RecommendationInput_Serialize = {
+	scope: string,
+	domain: string,
+	kind: string,
+	title: string,
+	body: string,
+	observation: string | null,
+	rationale: string | null,
+	suggestedAction: string | null,
+	confidence: number | null,
+	confidenceBasis: string | null,
+	uncertainty: string | null,
+	impact: string | null,
+	effort: string | null,
+	expiresAt: string | null,
+	/**  The inference purpose label that produced it (e.g. `weekly_review.suggest`). */
+	purpose: string,
+	modelTier: string | null,
+	targetRef: string | null,
+	supersedesId: string | null,
+	evidence: EvidenceInput_Serialize[],
+};
+
+export type RecommendationRow = RecommendationRow_Serialize | RecommendationRow_Deserialize;
+
+export type RecommendationRow_Deserialize = {
+	recommendationId: string,
+	scope: string,
+	domain: string,
+	kind: string,
+	title: string,
+	body: string,
+	observation?: string | null,
+	rationale?: string | null,
+	suggestedAction?: string | null,
+	confidence?: number | null,
+	confidenceBasis?: string | null,
+	uncertainty?: string | null,
+	impact?: string | null,
+	effort?: string | null,
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+	expiresAt?: string | null,
+	producedBy: string,
+	modelTier?: string | null,
+	targetRef?: string | null,
+	supersedesId?: string | null,
+	/**  0066: how the action is measured (JSON object), the reporting period and the fingerprint. */
+	evaluationJson?: string | null,
+	periodStart?: string | null,
+	periodEnd?: string | null,
+	fingerprint?: string | null,
+};
+
+export type RecommendationRow_Serialize = {
+	recommendationId: string,
+	scope: string,
+	domain: string,
+	kind: string,
+	title: string,
+	body: string,
+	observation: string | null,
+	rationale: string | null,
+	suggestedAction: string | null,
+	confidence: number | null,
+	confidenceBasis: string | null,
+	uncertainty: string | null,
+	impact: string | null,
+	effort: string | null,
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+	expiresAt: string | null,
+	producedBy: string,
+	modelTier: string | null,
+	targetRef: string | null,
+	supersedesId: string | null,
+	/**  0066: how the action is measured (JSON object), the reporting period and the fingerprint. */
+	evaluationJson: string | null,
+	periodStart: string | null,
+	periodEnd: string | null,
+	fingerprint: string | null,
+};
 
 export type RecordedSession = RecordedSession_Serialize | RecordedSession_Deserialize;
 
@@ -4733,6 +6893,13 @@ export type Roadmap_Serialize = {
 	planNote: string | null,
 };
 
+/**  Median and robust SD (MAD × 1.4826) of a feature across baseline recordings. */
+export type RobustStat = {
+	median: number | null,
+	robustSd: number | null,
+	n: number,
+};
+
 export type Route = {
 	id: string,
 	view: string,
@@ -4838,7 +7005,50 @@ export type RouterResponse = {
 	routing_reason: string,
 };
 
+/**  For the biofeedback card: is NOOP holding beat-to-beat data for this strap, and up to when. */
+export type RrStatus = RrStatus_Serialize | RrStatus_Deserialize;
+
+/**  For the biofeedback card: is NOOP holding beat-to-beat data for this strap, and up to when. */
+export type RrStatus_Deserialize = {
+	available: boolean,
+	newestRrAt?: string | null,
+	beatsLast24h: number,
+	source: string,
+};
+
+/**  For the biofeedback card: is NOOP holding beat-to-beat data for this strap, and up to when. */
+export type RrStatus_Serialize = {
+	available: boolean,
+	newestRrAt: string | null,
+	beatsLast24h: number,
+	source: string,
+};
+
 export type Saved = Saved_Serialize | Saved_Deserialize;
+
+export type SavedCalibration = SavedCalibration_Serialize | SavedCalibration_Deserialize;
+
+export type SavedCalibration_Deserialize = {
+	report: CalibrationReport_Deserialize,
+	/**  Per condition: whether this recording met the baseline's quality bar. */
+	baselineEligible: { [key in string]: boolean },
+	/**  Against the baseline as it stood before this report. */
+	comparison: FeatureComparison_Deserialize[],
+	baselineBefore: PersonalBaseline_Deserialize,
+	/**  Post-session recordings only: the comparison with the same day's pre-meditation recording. */
+	prePost?: PrePost_Deserialize | null,
+};
+
+export type SavedCalibration_Serialize = {
+	report: CalibrationReport_Serialize,
+	/**  Per condition: whether this recording met the baseline's quality bar. */
+	baselineEligible: { [key in string]: boolean },
+	/**  Against the baseline as it stood before this report. */
+	comparison: FeatureComparison_Serialize[],
+	baselineBefore: PersonalBaseline_Serialize,
+	/**  Post-session recordings only: the comparison with the same day's pre-meditation recording. */
+	prePost: PrePost_Serialize | null,
+};
 
 export type Saved_Deserialize = {
 	id: string,
@@ -4947,6 +7157,44 @@ export type ServicesSummary = {
 	checkedMs: number,
 };
 
+export type Session = Session_Serialize | Session_Deserialize;
+
+export type SessionHrv = SessionHrv_Serialize | SessionHrv_Deserialize;
+
+export type SessionHrv_Deserialize = {
+	/**  `available` or `not_available`. */
+	state: string,
+	rmssdMs?: number | null,
+	meanRrMs?: number | null,
+	beats: number,
+	acceptedPairs: number,
+	rejectedPairs: number,
+	/**  Share of the window's minutes that have beats, 0–100. */
+	coveragePct: number | null,
+	/**  Newest RR interval NOOP holds for this strap (RFC 3339), so a missing session can say "not synced yet". */
+	newestRrAt?: string | null,
+	reason?: string | null,
+	source: string,
+	method: string,
+};
+
+export type SessionHrv_Serialize = {
+	/**  `available` or `not_available`. */
+	state: string,
+	rmssdMs: number | null,
+	meanRrMs: number | null,
+	beats: number,
+	acceptedPairs: number,
+	rejectedPairs: number,
+	/**  Share of the window's minutes that have beats, 0–100. */
+	coveragePct: number | null,
+	/**  Newest RR interval NOOP holds for this strap (RFC 3339), so a missing session can say "not synced yet". */
+	newestRrAt: string | null,
+	reason: string | null,
+	source: string,
+	method: string,
+};
+
 export type SessionLogEntry = {
 	id: string,
 	timestamp: number,
@@ -5044,6 +7292,96 @@ export type SessionSummary_Serialize = {
 	score_scale?: number,
 };
 
+export type SessionView = SessionView_Serialize | SessionView_Deserialize;
+
+export type SessionView_Deserialize = {
+	session: Session_Deserialize,
+	summary: Summary_Deserialize,
+};
+
+export type SessionView_Serialize = {
+	session: Session_Serialize,
+	summary: Summary_Serialize,
+};
+
+export type Session_Deserialize = {
+	id: string,
+	templateId: string,
+	templateName: string,
+	source: string,
+	sourceRef?: string | null,
+	/**  The plan as it was when the session was planned (later template edits never change it). */
+	plan: TemplateItem_Deserialize[],
+	restBetweenS: number,
+	/**  `planned`, `active`, `paused`, `completed`, `partially_completed` or `abandoned`. */
+	state: string,
+	plannedAt: string,
+	startedAt?: string | null,
+	endedAt?: string | null,
+	pauses: Pause_Deserialize[],
+	sets: SetLog_Deserialize[],
+	/**  The next set to do: (item, set). Past the end when every set is logged or skipped. */
+	nextItem: number,
+	nextSet: number,
+	engine: string,
+	/**  The Amara take offer that launched it (its suggestion id), so finishing can mark that take done. */
+	offerSid?: string | null,
+};
+
+export type Session_Serialize = {
+	id: string,
+	templateId: string,
+	templateName: string,
+	source: string,
+	sourceRef: string | null,
+	/**  The plan as it was when the session was planned (later template edits never change it). */
+	plan: TemplateItem_Serialize[],
+	restBetweenS: number,
+	/**  `planned`, `active`, `paused`, `completed`, `partially_completed` or `abandoned`. */
+	state: string,
+	plannedAt: string,
+	startedAt: string | null,
+	endedAt: string | null,
+	pauses: Pause_Serialize[],
+	sets: SetLog_Serialize[],
+	/**  The next set to do: (item, set). Past the end when every set is logged or skipped. */
+	nextItem: number,
+	nextSet: number,
+	engine: string,
+	/**  The Amara take offer that launched it (its suggestion id), so finishing can mark that take done. */
+	offerSid: string | null,
+};
+
+export type SetLog = SetLog_Serialize | SetLog_Deserialize;
+
+export type SetLog_Deserialize = {
+	item: number,
+	set: number,
+	exerciseId: string,
+	/**  `done` or `skipped`. */
+	outcome: string,
+	reps?: number | null,
+	holdS?: number | null,
+	loadKg?: number | null,
+	finishedAt: string,
+	/**  Rest taken before this set: time since the previous set finished, minus any paused time. */
+	restBeforeS?: number | null,
+};
+
+export type SetLog_Serialize = {
+	item: number,
+	set: number,
+	exerciseId: string,
+	/**  `done` or `skipped`. */
+	outcome: string,
+	reps: number | null,
+	holdS: number | null,
+	loadKg: number | null,
+	finishedAt: string,
+	/**  Rest taken before this set: time since the previous set finished, minus any paused time. */
+	restBeforeS: number | null,
+};
+
 export type Side = Side_Serialize | Side_Deserialize;
 
 export type Side_Deserialize = {
@@ -5084,6 +7422,66 @@ export type SiteRow = {
 };
 
 export type Skill = Skill_Serialize | Skill_Deserialize;
+
+export type SkillOutcome = SkillOutcome_Serialize | SkillOutcome_Deserialize;
+
+export type SkillOutcome_Deserialize = {
+	name: string,
+	version: number,
+	state: SkillState,
+	/**  The ledger execution that stored or activated it. */
+	executionId?: string | null,
+	note?: string | null,
+};
+
+export type SkillOutcome_Serialize = {
+	name: string,
+	version: number,
+	state: SkillState,
+	/**  The ledger execution that stored or activated it. */
+	executionId: string | null,
+	note: string | null,
+};
+
+export type SkillRecord = SkillRecord_Serialize | SkillRecord_Deserialize;
+
+export type SkillRecord_Deserialize = {
+	name: string,
+	versions: SkillVersion_Deserialize[],
+	activeVersion?: number | null,
+};
+
+export type SkillRecord_Serialize = {
+	name: string,
+	versions: SkillVersion_Serialize[],
+	activeVersion: number | null,
+};
+
+export type SkillState = "PROPOSED" | "VALIDATED" | "STORED" | "READ_BACK_VERIFIED" | "ACTIVE" | "REJECTED" | 
+/**  Was active; replaced by another version. */
+"RETIRED";
+
+export type SkillVersion = SkillVersion_Serialize | SkillVersion_Deserialize;
+
+export type SkillVersion_Deserialize = {
+	version: number,
+	sha256: string,
+	createdAt: string,
+	/**  `generated` (skills evolution), `user`, or `existing` (a live file imported before replace). */
+	source: string,
+	state: SkillState,
+	history: StateEntry_Deserialize[],
+};
+
+export type SkillVersion_Serialize = {
+	version: number,
+	sha256: string,
+	createdAt: string,
+	/**  `generated` (skills evolution), `user`, or `existing` (a live file imported before replace). */
+	source: string,
+	state: SkillState,
+	history: StateEntry_Serialize[],
+};
 
 export type Skill_Deserialize = {
 	name: string,
@@ -5171,6 +7569,20 @@ export type StartAllRow = {
 
 export type StartState = "started" | "rate_limited" | "blocked" | "already_running";
 
+export type StateEntry = StateEntry_Serialize | StateEntry_Deserialize;
+
+export type StateEntry_Deserialize = {
+	state: SkillState,
+	at: string,
+	note?: string | null,
+};
+
+export type StateEntry_Serialize = {
+	state: SkillState,
+	at: string,
+	note: string | null,
+};
+
 export type Step = Step_Serialize | Step_Deserialize;
 
 export type StepQuestion = {
@@ -5251,6 +7663,47 @@ export type Suggestion_Serialize = {
 	sourceIds: string[],
 	/**  The whole published finding the suggestion quotes, so a stored review can be re-checked on load. */
 	finding: Finding_Serialize,
+};
+
+/**  Deterministic totals for a session. */
+export type Summary = Summary_Serialize | Summary_Deserialize;
+
+/**  Deterministic totals for a session. */
+export type Summary_Deserialize = {
+	plannedSets: number,
+	doneSets: number,
+	skippedSets: number,
+	completionPct: number | null,
+	totalReps: number,
+	totalHoldS: number,
+	/**  Sum of reps × load over weighted sets (kg). */
+	loadVolumeKg: number | null,
+	/**  Done sets per muscle group. */
+	setsByMuscle: { [key in string]: number },
+	/**  Start to end (or now), minus paused time. */
+	activeS?: number | null,
+	pausedS: number,
+	restS: number,
+	estimatedS: number,
+};
+
+/**  Deterministic totals for a session. */
+export type Summary_Serialize = {
+	plannedSets: number,
+	doneSets: number,
+	skippedSets: number,
+	completionPct: number | null,
+	totalReps: number,
+	totalHoldS: number,
+	/**  Sum of reps × load over weighted sets (kg). */
+	loadVolumeKg: number | null,
+	/**  Done sets per muscle group. */
+	setsByMuscle: { [key in string]: number },
+	/**  Start to end (or now), minus paused time. */
+	activeS: number | null,
+	pausedS: number,
+	restS: number,
+	estimatedS: number,
 };
 
 export type SupervisorInfo = SupervisorInfo_Serialize | SupervisorInfo_Deserialize;
@@ -5405,6 +7858,12 @@ export type TakeLogEntry_Serialize = {
 	hr?: Value,
 };
 
+export type TakeWorkout = {
+	takeId: string,
+	name: string,
+	estimatedS: number,
+};
+
 export type Target = Target_Serialize | Target_Deserialize;
 
 export type Target_Deserialize = {
@@ -5462,6 +7921,64 @@ export type TelegramUpdate = {
 	text: string,
 	date: number,
 	is_bot: boolean,
+};
+
+export type Template = Template_Serialize | Template_Deserialize;
+
+export type TemplateItem = TemplateItem_Serialize | TemplateItem_Deserialize;
+
+export type TemplateItem_Deserialize = {
+	exerciseId: string,
+	sets: number,
+	reps?: number | null,
+	holdS?: number | null,
+	/**  Added load in kg (weighted calisthenics), when used. */
+	loadKg?: number | null,
+	/**  Rest between this exercise's sets. */
+	restS: number,
+};
+
+export type TemplateItem_Serialize = {
+	exerciseId: string,
+	sets: number,
+	reps: number | null,
+	holdS: number | null,
+	/**  Added load in kg (weighted calisthenics), when used. */
+	loadKg: number | null,
+	/**  Rest between this exercise's sets. */
+	restS: number,
+};
+
+export type Template_Deserialize = {
+	/**  Set by the store on first save. */
+	id?: string,
+	name: string,
+	/**  `user` or `amara`. */
+	source: string,
+	/**  For `amara`: what recommended it, for example `take:pushup_ladder_1`. */
+	sourceRef?: string | null,
+	items: TemplateItem_Deserialize[],
+	/**  Rest between exercises. */
+	restBetweenS?: number,
+	archived?: boolean,
+	createdAt?: string,
+	updatedAt?: string,
+};
+
+export type Template_Serialize = {
+	/**  Set by the store on first save. */
+	id: string,
+	name: string,
+	/**  `user` or `amara`. */
+	source: string,
+	/**  For `amara`: what recommended it, for example `take:pushup_ladder_1`. */
+	sourceRef: string | null,
+	items: TemplateItem_Serialize[],
+	/**  Rest between exercises. */
+	restBetweenS: number,
+	archived: boolean,
+	createdAt: string,
+	updatedAt: string,
 };
 
 export type TerranceContext = TerranceContext_Serialize | TerranceContext_Deserialize;
@@ -5935,6 +8452,158 @@ export type TrackStats_Serialize = {
 	avgRating: number | null,
 	focusAvg: number | null,
 	calmAvg: number | null,
+};
+
+export type TrainingRecord = TrainingRecord_Serialize | TrainingRecord_Deserialize;
+
+export type TrainingRecord_Deserialize = {
+	sessionId: string,
+	start: string,
+	durationSecs: number,
+	protocolId: string,
+	protocolSet: string,
+	recordVersion: string,
+	/**  Training method version: records are only compared with the same method. */
+	method: string,
+	/**  `live`, `replay`, `demo`, or null when the session did not say. */
+	source?: string | null,
+	validPct?: number | null,
+	timeInTargetPct?: number | null,
+	trainedSeconds: number | null,
+	targetRewardRate?: number | null,
+	/**  Number of 30 s threshold checks (the baseline entry is not counted). */
+	thresholdChecks: number,
+	/**  The reward threshold scale at the end of the session (1 = the baseline threshold). */
+	finalThresholdScale?: number | null,
+	/**
+	 *  Each reward feature's resting level before training: the baseline reward threshold / 1.1
+	 *  (relative band power, %, from this session's own protocol baseline).
+	 */
+	baselineLevels: { [key in string]: number | null },
+	heldSeconds: { [key in string]: number | null },
+	eligible: boolean,
+	notEligibleReason?: string | null,
+	/**
+	 *  Decision 0061: session HRV from the WHOOP strap's RR intervals in NOOP, filled in only by the
+	 *  records command (null elsewhere). A separate measurement from the EEG (biofeedback, not neurofeedback).
+	 */
+	hrv?: SessionHrv_Deserialize | null,
+};
+
+export type TrainingRecord_Serialize = {
+	sessionId: string,
+	start: string,
+	durationSecs: number,
+	protocolId: string,
+	protocolSet: string,
+	recordVersion: string,
+	/**  Training method version: records are only compared with the same method. */
+	method: string,
+	/**  `live`, `replay`, `demo`, or null when the session did not say. */
+	source: string | null,
+	validPct: number | null,
+	timeInTargetPct: number | null,
+	trainedSeconds: number | null,
+	targetRewardRate: number | null,
+	/**  Number of 30 s threshold checks (the baseline entry is not counted). */
+	thresholdChecks: number,
+	/**  The reward threshold scale at the end of the session (1 = the baseline threshold). */
+	finalThresholdScale: number | null,
+	/**
+	 *  Each reward feature's resting level before training: the baseline reward threshold / 1.1
+	 *  (relative band power, %, from this session's own protocol baseline).
+	 */
+	baselineLevels: { [key in string]: number | null },
+	heldSeconds: { [key in string]: number | null },
+	eligible: boolean,
+	notEligibleReason: string | null,
+	/**
+	 *  Decision 0061: session HRV from the WHOOP strap's RR intervals in NOOP, filled in only by the
+	 *  records command (null elsewhere). A separate measurement from the EEG (biofeedback, not neurofeedback).
+	 */
+	hrv: SessionHrv_Serialize | null,
+};
+
+export type TrainingSummary = TrainingSummary_Serialize | TrainingSummary_Deserialize;
+
+export type TrainingSummary_Deserialize = {
+	periodStart: string,
+	periodEnd: string,
+	sessions: number,
+	doneSets: number,
+	totalReps: number,
+	activeMin: number | null,
+	/**  Average weekly sets over the 3 earlier weeks that had logged sessions; `None` below 2 such weeks. */
+	baselineSetsPerWeek?: number | null,
+	setsByMuscle: { [key in string]: number },
+	/**
+	 *  WHOOP (via NOOP) detected workout minutes and mean strain over the same days; `None` when the
+	 *  daily table isn't usable or has no value.
+	 */
+	detectedWorkoutMin?: number | null,
+	meanStrain?: number | null,
+	sourceIds: string[],
+	note: string,
+};
+
+export type TrainingSummary_Serialize = {
+	periodStart: string,
+	periodEnd: string,
+	sessions: number,
+	doneSets: number,
+	totalReps: number,
+	activeMin: number | null,
+	/**  Average weekly sets over the 3 earlier weeks that had logged sessions; `None` below 2 such weeks. */
+	baselineSetsPerWeek: number | null,
+	setsByMuscle: { [key in string]: number },
+	/**
+	 *  WHOOP (via NOOP) detected workout minutes and mean strain over the same days; `None` when the
+	 *  daily table isn't usable or has no value.
+	 */
+	detectedWorkoutMin: number | null,
+	meanStrain: number | null,
+	sourceIds: string[],
+	note: string,
+};
+
+export type TrainingTrends = TrainingTrends_Serialize | TrainingTrends_Deserialize;
+
+export type TrainingTrends_Deserialize = {
+	version: string,
+	records: number,
+	eligible: number,
+	protocols: ProtocolTrends_Deserialize[],
+	note: string,
+};
+
+export type TrainingTrends_Serialize = {
+	version: string,
+	records: number,
+	eligible: number,
+	protocols: ProtocolTrends_Serialize[],
+	note: string,
+};
+
+export type Transition = Transition_Serialize | Transition_Deserialize;
+
+export type Transition_Deserialize = {
+	seq: number,
+	executionId: string,
+	at: string,
+	fromStatus?: ExecStatus | null,
+	toStatus: ExecStatus,
+	/**  Redacted JSON text. */
+	detail: string,
+};
+
+export type Transition_Serialize = {
+	seq: number,
+	executionId: string,
+	at: string,
+	fromStatus: ExecStatus | null,
+	toStatus: ExecStatus,
+	/**  Redacted JSON text. */
+	detail: string,
 };
 
 export type TreasuryAttentionRow = {
@@ -6962,6 +9631,56 @@ export type WatchlistView_Serialize = {
 	disclaimer: string,
 };
 
+export type WeekCrossDomain = WeekCrossDomain_Serialize | WeekCrossDomain_Deserialize;
+
+export type WeekCrossDomain_Deserialize = {
+	weekStart: string,
+	weekEnd: string,
+	training: TrainingSummary_Deserialize,
+	neuro: NeuroSummary_Deserialize,
+	trajectories: GoalTrajectory_Deserialize[],
+	/**  Cross-domain recommendations whose reporting period ends in this week. */
+	recommendations: RecommendationRow_Deserialize[],
+	missing: string[],
+};
+
+export type WeekCrossDomain_Serialize = {
+	weekStart: string,
+	weekEnd: string,
+	training: TrainingSummary_Serialize,
+	neuro: NeuroSummary_Serialize,
+	trajectories: GoalTrajectory_Serialize[],
+	/**  Cross-domain recommendations whose reporting period ends in this week. */
+	recommendations: RecommendationRow_Serialize[],
+	missing: string[],
+};
+
+export type WeekPlan = WeekPlan_Serialize | WeekPlan_Deserialize;
+
+export type WeekPlan_Deserialize = {
+	/**  The Monday (JST) of the planned week, `YYYY-MM-DD`. */
+	weekStart: string,
+	/**  The one thing that matters most this week, in Taisun's words. `None` = not set. */
+	priority?: string | null,
+	priorityGoalId?: string | null,
+	actions?: PlannedAction_Deserialize[],
+	note?: string | null,
+	/**  When it was last saved (RFC 3339); `None` for a week never planned. */
+	updatedAt?: string | null,
+};
+
+export type WeekPlan_Serialize = {
+	/**  The Monday (JST) of the planned week, `YYYY-MM-DD`. */
+	weekStart: string,
+	/**  The one thing that matters most this week, in Taisun's words. `None` = not set. */
+	priority: string | null,
+	priorityGoalId: string | null,
+	actions: PlannedAction_Serialize[],
+	note: string | null,
+	/**  When it was last saved (RFC 3339); `None` for a week never planned. */
+	updatedAt: string | null,
+};
+
 export type WeeklyReviewHealth = WeeklyReviewHealth_Serialize | WeeklyReviewHealth_Deserialize;
 
 export type WeeklyReviewHealth_Deserialize = {
@@ -7062,4 +9781,19 @@ export type WorkerHealthResponse_Serialize = {
 	uptime_secs: number | null,
 	requests_24h: number | null,
 	error_rate: number | null,
+};
+
+/**  The week from `week_start` (YYYY-MM-DD) for Life's weekly review. */
+export type WorkoutWeek = {
+	weekStart: string,
+	sessions: number,
+	completed: number,
+	partiallyCompleted: number,
+	fromAmara: number,
+	doneSets: number,
+	totalReps: number,
+	totalHoldS: number,
+	loadVolumeKg: number | null,
+	activeS: number,
+	source: string,
 };

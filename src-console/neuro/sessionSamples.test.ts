@@ -31,6 +31,9 @@ describe("design-1110c Neuro history samples", () => {
     expect(score(.62)).toBeCloseTo(62);
     expect(score(61)).toBe(61);
     expect(score(null)).toBeNull();
+    // Decision 0057: a 0–100 session's real score of 1 is 1, not 100.
+    expect(score(1, 100)).toBe(1);
+    expect(score(0.5, 100)).toBe(0.5);
     expect(clockAt(25, 5)).toBe("2:05");
   });
 });

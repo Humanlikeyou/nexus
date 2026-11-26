@@ -60,11 +60,13 @@ export function SleepDetailPanel({ days }: { days: readonly NoopDailyMetric[] })
         {nights.length > 0 && (
           <Select label="Night to show" value={day} onChange={(e) => setPicked(e.target.value)} options={[{ value: "", label: "Latest night" }, ...nights.map((n) => ({ value: n.day, label: n.label }))]} />
         )}
-        {!model && <PanelState load={load.state === "live" || load.state === "sample" ? { state: "empty" } : load} what="sleep stages" emptyHint="Stage timing arrives once the strap has finished scoring the night." onRetry={retry} />}
+        {!model && <PanelState load={load.state === "live" || load.state === "sample" ? { state: "empty" } : load} what="sleep stages" emptyHint="Stage timing appears once NOOP has stored stages for the night." onRetry={retry} />}
         {model && (
           <>
             <HypnogramChart model={model} />
             <p className="fx-muted">{model.bed} to {model.wake} · {model.awakenings} {model.awakenings === 1 ? "awakening" : "awakenings"}</p>
+            {/* Decision 0057: NOOP scores the stages itself; they are an estimate, not WHOOP's official staging. */}
+            <p className="fx-muted">{tagged ? "Sample stages." : "Stages estimated by NOOP from the strap's data, not WHOOP's own sleep staging."}</p>
             <StageBreakdown model={model} />
             <div className="fx-tiles">
               <StatTile label="Time asleep" value={night?.totalSleepMin ? formatMinutes(night.totalSleepMin) : null} />

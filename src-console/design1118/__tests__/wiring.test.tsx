@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ProposalsCard, WatchlistCard } from "../Trading";
 import { ContentItemTools, LiveFinancesCard } from "../EnterpriseWiring";
@@ -187,12 +187,20 @@ describe("Smart home live level sliders", () => {
     render(<LiveHomeDevices calls={calls as never} />);
     const sl = await screen.findByRole("slider", { name: "TV volume" });
     expect((sl as HTMLInputElement).value).toBe("30");
-    fireEvent.input(sl, { target: { value: "40" } });
-    fireEvent.keyUp(sl, { key: "Tab" });
-    await new Promise((r) => setTimeout(r, 400));
-    expect(calls.set).not.toHaveBeenCalled();
-    fireEvent.keyUp(sl, { key: "ArrowRight" });
-    await waitFor(() => expect(calls.set).toHaveBeenCalledWith("media_player.tv", "volume_set", 0.4, "typed"));
+    // Fake timers drive the 250 ms commit debounce exactly, so the test never depends on machine speed
+    // (it failed about one run in three under load while waiting in real time).
+    vi.useFakeTimers();
+    try {
+      fireEvent.input(sl, { target: { value: "40" } });
+      fireEvent.keyUp(sl, { key: "Tab" });
+      act(() => { vi.advanceTimersByTime(400); });
+      expect(calls.set).not.toHaveBeenCalled();
+      fireEvent.keyUp(sl, { key: "ArrowRight" });
+      act(() => { vi.advanceTimersByTime(250); });
+      expect(calls.set).toHaveBeenCalledWith("media_player.tv", "volume_set", 0.4, "typed");
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("is disabled while busy and absent for devices without level support", async () => {
     let release: (v: { id: string; undoable: boolean; message: string }) => void = () => {};

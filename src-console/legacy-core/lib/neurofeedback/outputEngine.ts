@@ -31,8 +31,12 @@ export function computeFeedbackSignal(
   const gate = evaluateGate(confidence, quality, artifactRate, frozen, protocol.gateOverrides);
 
   if (gate.holdState) {
+    // Decision 0057: a held (frozen) signal keeps nothing of the last one that could reward. A repeated
+    // "reward" from before the freeze would be feedback on data that no longer exists.
     return {
       ...lastSignal,
+      action: "neutral",
+      intensity: 0,
       gated: true,
       gateReason: gate.reason,
       policyDetail: policy.detail,

@@ -5,7 +5,8 @@ import { UNWIRED, sample, sampleAdaptersEnabled, type Wired } from "../lib/sampl
 import { patternsFrom, weeklyReviewFrom, type PatternsWire, type ReviewWire, type ExperimentResultWire } from "./liveInsights";
 import { dictateOnce } from "../adds/dictation";
 import { roadmapAdapter } from "../goals/roadmap";
-import { ADDS_EVENT, announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
+import { listen } from "@tauri-apps/api/event";
+import { ADDS_EVENT, announceAdds, announceSnapshot, announceStores, inTauri, live, realInvoke, type Invoke } from "../lib/localStores";
 
 /**
  * design-1111a: Amara as a personal OS. Every surface reads from this adapter. In the app it is
@@ -63,7 +64,9 @@ export type MemoryWire = { id: string; label: string; value: string; agent: stri
 export type LifeLane = "personal" | "residence" | "enterprise";
 export type LifeDate = { id: string; title: string; short?: string; sub: string; date: string; month: number; inDays?: number; reminder: string; due: boolean; lane: LifeLane;
   /** The stored row (YYYY-MM-DD and the typed sub line), for an inline edit or an Undo that puts it back. */
-  iso?: string; rawSub?: string };
+  iso?: string; rawSub?: string;
+  /** 0045: own reminder offsets (days before, largest first; empty = 90, 30, 7), done, and the goal it belongs to. */
+  leadDays?: number[]; done?: boolean; goalId?: string | null };
 export type LifeAdmin = { next: string; dates: LifeDate[] };
 
 // ---- Weekly review ----
@@ -227,22 +230,27 @@ export function makeSamplePersonal(): PersonalAdapter {
 }
 
 /** Rows as src-tauri life_dates.rs and checkin.rs return them. */
-export type LifeDateWire = { id: string; title: string; date: string; lane: "personal" | "residence"; sub: string; inDays: number; reminders: Array<{ days: number; on: string; passed: boolean }>; activeWindow: number | null };
+export type LifeDateWire = { id: string; title: string; date: string; lane: "personal" | "residence"; sub: string; inDays: number; reminders: Array<{ days: number; on: string; passed: boolean }>; activeWindow: number | null;
+  leadDays?: number[]; done?: boolean; goalId?: string | null };
 export type CheckInWire = { id: string; at: string; day: string; mood: number; energy: number; tags: string[]; text: string; transcribed: boolean };
 
 const SHORT_MONTH = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 const dayLabel = (iso: string) => SHORT_MONTH.format(new Date(`${iso}T00:00:00Z`));
 
+/** One stored date as the page shows it. `month` is months from `startOffsetDays` before the date's day count (0 = today). */
+export function lifeDateFrom(r: LifeDateWire, startOffsetDays = 0): LifeDate {
+  const next = r.reminders.find((x) => !x.passed) ?? r.reminders[r.reminders.length - 1];
+  return {
+    id: r.id, title: r.title, short: r.title, sub: r.sub || (r.lane === "residence" ? "Japan · residence" : "Personal"), date: dayLabel(r.date), iso: r.date, rawSub: r.sub,
+    month: (r.inDays - startOffsetDays) / 30.4, inDays: r.inDays, reminder: r.done ? "Done" : next ? `${next.days} days · ${dayLabel(next.on)}` : "", due: r.activeWindow != null && !r.done, lane: r.lane,
+    leadDays: r.leadDays ?? [], done: r.done ?? false, goalId: r.goalId ?? null,
+  };
+}
+
 /** Upcoming dates only (the page shows the next 12 months); `month` is months from today for the timeline. */
 export function lifeAdminFrom(rows: LifeDateWire[]): LifeAdmin {
-  const dates: LifeDate[] = rows.filter((r) => r.inDays >= 0).map((r) => {
-    const next = r.reminders.find((x) => !x.passed) ?? r.reminders[r.reminders.length - 1];
-    return {
-      id: r.id, title: r.title, short: r.title, sub: r.sub || (r.lane === "residence" ? "Japan · residence" : "Personal"), date: dayLabel(r.date), iso: r.date, rawSub: r.sub,
-      month: r.inDays / 30.4, inDays: r.inDays, reminder: next ? `${next.days} days · ${dayLabel(next.on)}` : "", due: r.activeWindow != null, lane: r.lane,
-    };
-  });
-  const first = dates[0];
+  const dates: LifeDate[] = rows.filter((r) => r.inDays >= 0).map((r) => lifeDateFrom(r));
+  const first = dates.find((d) => !d.done);
   return { next: first ? `${first.title} in ${first.inDays} days` : "Nothing coming up", dates };
 }
 
@@ -434,6 +442,7 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
         .catch(() => { review = null; suggestionTitle = null; suggestionPair = null; suggestionWhy = { reason: null, findingId: null }; }),
       Promise.all([call<RawSummary | null>("money_summary_read"), call<{ rate: number; date: string; source: string } | null>("fx_rate_get")])
         .then(([sm, f]) => { money = personalMoneyFrom(sm && Array.isArray(sm.recurring) ? sm : null, mapFx(f)); }).catch(() => { money = null; }),
+      call<{ checkin?: { at?: string } }>("proactive_settings_get").then((r) => { setCheckInReminderAt(r?.checkin?.at); }).catch(() => {}),
       call<GoalWire[]>("read_goals").then((r) => { goalRows = Array.isArray(r) ? r : null; }).catch(() => { goalRows = null; }),
       // A habit log that can't be read leaves the marks unknown (the grid stays empty), never a made-up miss.
       (() => { const t = jstToday(); return call<HabitDayWire[]>("habit_days", { from: addDays(t, -(HABIT_WINDOW_DAYS - 1)), to: t }); })()
@@ -458,6 +467,8 @@ export function makeLivePersonal(call: Invoke = realInvoke): PersonalAdapter & {
     }
   };
   try { window.addEventListener(ADDS_EVENT, () => { void refresh(); }); } catch { /* no window in node tests */ }
+  // inbox.rs applied a Telegram reply (check-in, habit or money): re-read, so open pages show it without a restart.
+  try { void listen("amara-inbox://applied", () => { void refresh(); announceAdds(); announceSnapshot(); }).catch(() => {}); } catch { /* no Tauri event bridge (tests, browser preview) */ }
   return {
     ...unwiredPersonal,
     refresh,
@@ -506,8 +517,11 @@ export const resetLivePersonal = () => { liveSingleton = null; };
 export const CHECKIN_EVENT = "amara:checkin";
 
 /** Built defaults for Taisun's open 1111a choices (HANDOFF-1111a "Built"). */
+let checkInAt = "22:00";
+/** The saved Telegram check-in time (proactive_settings_get); the built default 22:00 until it is read. */
+export const setCheckInReminderAt = (hhmm: unknown) => { if (typeof hhmm === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(hhmm)) checkInAt = hhmm; };
 export const PERSONAL_DEFAULTS = {
-  checkInReminder: "22:00 JST",
+  get checkInReminder() { return `${checkInAt} JST`; },
   weeklyReview: "Sunday 19:00 JST",
   tryItSetsReminder: true,
   confirmMemories: ["health", "people"] as MemoryCategory[],

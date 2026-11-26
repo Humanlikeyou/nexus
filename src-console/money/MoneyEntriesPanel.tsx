@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Card, DataTag, Dialog, Select, SegmentedControl, TextField } from "../ui";
+import { FxRateForm } from "./FxRateForm";
+import { MoneyAdvice } from "./MoneyAdvice";
+import { MoneyCharts } from "./MoneyCharts";
 import { CATEGORIES, CATEGORY_LABEL, KIND_LABEL, draftFrom, entryError, formatMinor, makeMoneyEntries, type Category, type Currency, type EntryKind, type MoneyEntries, type Recurrence, type WireCurrencyView, type WireEntry, type WireMonthView } from "./entries";
 
 const KINDS: EntryKind[] = ["balance", "income", "expense", "savings", "bill", "commitment"];
@@ -55,7 +58,9 @@ export function dashboardTiles(v: WireCurrencyView) {
   ];
 }
 
-export function MoneyEntriesPanel({ api = makeMoneyEntries() }: { api?: MoneyEntries }) {
+export function MoneyEntriesPanel({ api: apiProp }: { api?: MoneyEntries }) {
+  // One api object for the life of the panel: a fresh default each render re-ran `load` (and refetched) on every render.
+  const api = useMemo(() => apiProp ?? makeMoneyEntries(), [apiProp]);
   const [view, setView] = useState<WireMonthView | null | "failed">(null);
   const [recent, setRecent] = useState<WireEntry[]>([]);
   const [open, setOpen] = useState(false);
@@ -77,6 +82,9 @@ export function MoneyEntriesPanel({ api = makeMoneyEntries() }: { api?: MoneyEnt
         {(tiles ?? dashboardTiles({ currency: cur, months: [], available: null, upcoming: [], commitments: [], committed_monthly_minor: 0, goal: null, savings_series: [], balance_series: [], has_statement: false, statement_through: null, excluded_duplicates: 0 })).map((t) => <li key={t.k} className="cc-tile"><span className="cc-tile__k">{t.k}</span><span className="cc-tile__v">{t.v}</span><span className="cc-tile__s">{t.s}</span></li>)}
       </ul>
       {view && view !== "failed" && view.needs_conversion && <p className="pk-note">JPY and USD are shown separately: no exchange rate with a date is stored.</p>}
+      {cv && <MoneyCharts cv={cv} />}
+      {view && view !== "failed" && <FxRateForm api={api} fx={view.fx} today={todayJst()} onChanged={() => { void load(); }} />}
+      {cv && <MoneyAdvice cv={cv} today={view && view !== "failed" ? view.today : todayJst()} />}
       {recent.length > 0 && <div aria-label="Recent entries">{recent.map((e) => <div className="pk-row" key={e.id}><div className="pk-row__main"><span>{KIND_LABEL[e.kind]} · {formatMinor(e.amount_minor, e.currency)}</span><small>{e.date}{e.note ? ` · ${e.note}` : ""}</small></div><Button size="small" onClick={() => { void undo(e.id); }}>Undo</Button></div>)}</div>}
       {note && <p className="pk-note" role="status">{note}</p>}
       <AddEntrySheet open={open} onClose={() => setOpen(false)} onSaved={() => { setNote(null); void load(); }} api={api} />

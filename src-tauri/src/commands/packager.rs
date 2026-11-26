@@ -175,6 +175,17 @@ pub(crate) async fn pack_to(
         includes.push("Canonical event store".to_string());
     }
 
+    // 0052: the execution ledger, as one consistent snapshot (VACUUM INTO copies a live WAL
+    // database safely; a raw file copy could miss the WAL).
+    let execution_db = data_dir.join("execution.db");
+    if execution_db.exists() {
+        let dest = staging.join("execution.db");
+        rusqlite::Connection::open(&execution_db)
+            .and_then(|c| c.execute("VACUUM INTO ?1", [dest.to_string_lossy().as_ref()]))
+            .map_err(|e| format!("Failed to copy execution.db: {e}"))?;
+        includes.push("Execution ledger".to_string());
+    }
+
     // 5. Write a manifest with metadata
     report("Writing manifest", 70);
     // Hash every staged file (the manifest itself excluded) so a backup can be verified later.
@@ -545,7 +556,7 @@ pub(crate) fn restore_target(rel: &[String]) -> Option<(RestoreRoot, PathBuf)> {
         [only]
             if matches!(
                 only.as_str(),
-                "goals.json" | "events.db" | "events.db-wal" | "events.db-shm"
+                "goals.json" | "events.db" | "events.db-wal" | "events.db-shm" | "execution.db"
             ) =>
         {
             Some((RestoreRoot::Data, PathBuf::from(only)))

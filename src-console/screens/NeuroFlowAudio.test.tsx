@@ -4,7 +4,7 @@ import { INACTIVE_TRAINING } from "../neuro/training";
 import type { MuseTelemetry } from "../neuro/telemetryStore";
 import type { useTraining } from "../neuro/useTraining";
 
-const audio = vi.hoisted(() => ({ init: vi.fn(), setMode: vi.fn(), cleanup: vi.fn(), setMuted: vi.fn(), playBell: vi.fn(), updateState: vi.fn() }));
+const audio = vi.hoisted(() => ({ init: vi.fn(), setMode: vi.fn(), cleanup: vi.fn(), setMuted: vi.fn(), playBell: vi.fn(), updateState: vi.fn(), applyCue: vi.fn() }));
 vi.mock("../legacy-core/hooks/useAudioFeedback", () => ({ useAudioFeedback: () => audio }));
 vi.mock("../bridge", () => ({ loadKv: async () => null, saveKv: async () => undefined }));
 import { NeuroFlow } from "./NeuroFlow";
@@ -41,5 +41,14 @@ describe("Audio follows the protocol mid-run", () => {
     const a = render(ui("calm"));
     a.unmount();
     expect(audio.cleanup).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("decision 0059: the protocol's settings drive the sound", () => {
+  it("plays the chosen sound, and stays silent on the held cue outside training", () => {
+    const t = { ...training("calm"), settingsFor: () => ({ durationMin: 10, targetRewardRate: 0.6, sound: "soundscape", visualFeedback: false, volume: 0.4 }) } as unknown as ReturnType<typeof useTraining>;
+    render(<NeuroFlow training={t} telemetry={telemetry} sessions={[]} running action={null} />);
+    expect(audio.setMode).toHaveBeenCalledWith("soundscape");
+    expect(audio.applyCue).toHaveBeenLastCalledWith("off", 0.4);
   });
 });

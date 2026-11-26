@@ -101,11 +101,12 @@ fn decode_sleep_stage_minutes(json: Option<&str>) -> Option<SleepStageMinutes> {
                 continue;
             }
             let value = (end - start) / 60.0;
-            match stage {
-                "wake" | "awake" => minutes.awake += value,
-                "light" => minutes.light += value,
-                "deep" => minutes.deep += value,
-                "rem" => minutes.rem += value,
+            // The same stage names as the hypnogram (normalise_stage), so "core" counts as light in both.
+            match normalise_stage(stage) {
+                Some("awake") => minutes.awake += value,
+                Some("light") => minutes.light += value,
+                Some("deep") => minutes.deep += value,
+                Some("rem") => minutes.rem += value,
                 _ => continue,
             }
         }
@@ -120,7 +121,7 @@ fn decode_sleep_stage_minutes(json: Option<&str>) -> Option<SleepStageMinutes> {
     };
     let minutes = SleepStageMinutes {
         awake: number("awake") + number("wake"),
-        light: number("light"),
+        light: number("light") + number("core"),
         deep: number("deep"),
         rem: number("rem"),
     };

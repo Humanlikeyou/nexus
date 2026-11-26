@@ -19,6 +19,7 @@ import { useNow } from "../shell/useNow";
 import { standaloneAdapter, type StandaloneAdapter } from "../standalone/adapters";
 import { ServicesView } from "../standalone/ServicesView";
 import { NotificationsView } from "../standalone/NotificationsView";
+import { TelegramCheckins } from "../settings/TelegramCheckins";
 import { BackupView } from "../standalone/BackupView";
 import { UpdatesSection } from "../standalone/UpdatesSection";
 import { WhoopPanel } from "../standalone/WhoopPanel";
@@ -108,6 +109,8 @@ function GeneralTab({ data, theme, setTheme, reduceMotion, setReduceMotion, onRe
       <UpdatesSection adapter={adapter} />
 
       <StartupGroup onRunSetup={onRunSetup} />
+
+      <TelegramCheckins />
 
       <More label="Connections and diagnostics" id="settings-more">
       <InsetGroup title="General">

@@ -71,7 +71,7 @@ pub struct ContentPipelineItem {
 /// Largest file (tasks, pipeline, one skill) read into memory.
 const MAX_READ_BYTES: u64 = 1024 * 1024;
 /// Largest skill body `save_skill` will write.
-const MAX_SKILL_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_SKILL_BYTES: usize = 256 * 1024;
 
 /// Read a UTF-8 file, refusing anything over `max` bytes (checked before and while reading).
 fn read_capped(path: &std::path::Path, max: u64) -> Result<String, String> {
@@ -168,31 +168,50 @@ pub fn read_skills() -> Result<Vec<Skill>, String> {
         }
     };
 
-    // 1. Project skills: config/skills/ (walk up from binary to find project root)
+    for dir in skill_search_order() {
+        load_from(&dir, &mut skills, &mut seen);
+    }
+    Ok(skills)
+}
+
+/// Where `read_skills` looks, first match wins by name (0052 exposes this so the skill lifecycle
+/// checks the same precedence):
+/// 1. project skills: `config/skills/` found by walking up from the binary, then
+///    `~/projects/nexus/config/skills`;
+/// 2. learned skills: `<data dir>/workspace/skills`;
+/// 3. the legacy `~/.openclaw/skills` (read-only).
+pub(crate) fn skill_search_order() -> Vec<PathBuf> {
+    let mut dirs_out = project_skill_dirs();
+    dirs_out.push(learned_skills_dir());
+    dirs_out.push(openclaw_dir().join("skills"));
+    dirs_out
+}
+
+pub(crate) fn project_skill_dirs() -> Vec<PathBuf> {
+    let mut out = vec![];
     if let Ok(exe) = std::env::current_exe() {
         let mut dir = exe.as_path();
         while let Some(parent) = dir.parent() {
             let candidate = parent.join("config").join("skills");
             if candidate.exists() {
-                load_from(&candidate, &mut skills, &mut seen);
+                out.push(candidate);
                 break;
             }
             dir = parent;
         }
     }
-    // Fallback: well-known project path
     if let Some(home) = dirs::home_dir() {
         let fallback = home.join("projects/nexus/config/skills");
-        if fallback.exists() {
-            load_from(&fallback, &mut skills, &mut seen);
+        if fallback.exists() && !out.contains(&fallback) {
+            out.push(fallback);
         }
     }
+    out
+}
 
-    // 2. Learned skills: <data dir>/workspace/skills first, then the legacy ~/.openclaw/skills (read-only).
-    load_from(&app_workspace().join("skills"), &mut skills, &mut seen);
-    load_from(&openclaw_dir().join("skills"), &mut skills, &mut seen);
-
-    Ok(skills)
+/// `<data dir>/workspace/skills`: the only folder generated skills are activated into.
+pub(crate) fn learned_skills_dir() -> PathBuf {
+    app_workspace().join("skills")
 }
 
 /// Write or update a skill file in `<data dir>/workspace/skills/` (never ~/.openclaw).

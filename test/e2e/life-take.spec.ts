@@ -16,9 +16,9 @@ const lifeTake = (host: ReturnType<typeof activeField>) => host.locator(".life__
 test("Life Goals, Weekly review, Dates and Personal money each show Amara's take", async ({ page, theme, consoleErrors }) => {
   await sample(page);
   await openApp(page, { theme, reduceMotion: true });
-  for (const label of ["Goals", "Weekly review", "Dates & deadlines", "Personal money"] as const) {
+  for (const label of ["Goals & projects", "Weekly review", "Dates & deadlines", "Personal money"] as const) {
     const field = await lifeTab(page, label);
-    await expect(field.getByRole("heading", { level: 1, name: label === "Dates & deadlines" ? "Dates & deadlines" : label === "Personal money" ? "Personal money" : label })).toBeVisible();
+    await expect(field.getByRole("heading", { level: 1, name: label })).toBeVisible();
     const take = lifeTake(field);
     await expect(take).toBeVisible();
     await expect(field.getByRole("region", { name: /^Amara's take$/ })).toHaveCount(1);
@@ -44,7 +44,7 @@ test("Life Goals, Weekly review, Dates and Personal money each show Amara's take
 // every number in the take text must come from the fixture's live goal (212 and 300).
 test("without sample adapters, the Life take is built only from live goal facts and invents no numbers", async ({ page, theme }) => {
   await openApp(page, { theme, reduceMotion: true });
-  const field = await lifeTab(page, "Goals");
+  const field = await lifeTab(page, "Goals & projects");
   const take = lifeTake(field);
   await expect(take).toBeVisible();
   await expect(take).toHaveAttribute("data-state", "fresh");

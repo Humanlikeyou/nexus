@@ -6,6 +6,7 @@ import { loadKv, saveKv } from "../bridge";
 import { AmaraLens } from "../components/AmaraLens/AmaraLens";
 import { GOALS, NOTES_KEY, sessionNoteKey, SENSORS, goalOf, parseNotes, recommendedGoal, suggestedStrategy, type NfNote } from "../neuro/goals";
 import { AUX_PROVEN, FIT_LABEL, HOLD_COPY, feedbackLevel, type ChannelFit } from "../neuro/training";
+import { cueFor } from "../neuro/feedbackAudio";
 import type { MuseTelemetry } from "../neuro/telemetryStore";
 import type { useTraining } from "../neuro/useTraining";
 import { useNow } from "../shell/useNow";
@@ -108,8 +109,10 @@ function BaselineStep({ closed, percent, hold, action }: { closed: boolean; perc
 
 function TrainingStep({ training, soundOn, onSound, action }: { training: Training; soundOn: boolean; onSound: () => void; action: ReactNode }) {
   const { state } = training;
-  const level = feedbackLevel(state);
   const protocol = training.protocols.find((item) => item.id === training.protocolId);
+  // Decision 0059: visual feedback can be switched off in Neuro › Training (it is on by default).
+  const visual = training.settingsFor?.(training.protocolId)?.visualFeedback ?? true;
+  const level = visual ? feedbackLevel(state) : 0;
   const held = state.phase === "held";
   return (
     <section className="nf-live" aria-label="Live feedback" data-held={held || undefined}>
@@ -171,7 +174,7 @@ export function NeuroFlow({ training, telemetry, sessions, running, action, save
   const aux = AUX_PROVEN ? telemetry.aux : null;
   const { state } = training;
   const { notes, add } = useNotes();
-  const { init, setMode, cleanup, setMuted, playBell, updateState } = useAudioFeedback();
+  const { init, setMode, cleanup, setMuted, playBell, applyCue } = useAudioFeedback();
   const protocol = training.protocols.find((item) => item.id === training.protocolId);
   const [soundOn, setSoundOn] = useState(false);
   const stage = running ? state.stage : undefined;
@@ -191,12 +194,13 @@ export function NeuroFlow({ training, telemetry, sessions, running, action, save
     // A protocol that changes to a real one mid-run starts audio then; back to "off" tears it down.
     if (protocol && !audioOn.current) {
       audioOn.current = true;
-      try { init(); setMode("tone"); } catch { /* no audio on this machine: the light still works */ }
+      // Decision 0059: the protocol's chosen sound (it was always the tone before).
+      try { init(); setMode(training.settingsFor?.(protocol.id)?.sound ?? "tone"); } catch { /* no audio on this machine: the light still works */ }
     } else if (!protocol && audioOn.current) {
       audioOn.current = false;
       try { cleanup(); } catch { /* nothing to close */ }
     }
-  }, [running, protocol, init, setMode, cleanup]);
+  }, [running, protocol, init, setMode, cleanup, training]);
   useEffect(() => () => { if (audioOn.current) { audioOn.current = false; try { cleanup(); } catch { /* nothing to close */ } } }, [cleanup]);
   useEffect(() => {
     if (running) return;
@@ -212,10 +216,25 @@ export function NeuroFlow({ training, telemetry, sessions, running, action, save
     }
     prev.current = stage;
   }, [stage, playBell]);
+  // Decision 0059: one cue per state. Held (gated, paused) has its own quiet sound, never the reward cue.
+  const cue = running ? cueFor({ stage, phase: state.phase, signal: state.signal }) : "off";
+  const volume = training.settingsFor?.(training.protocolId)?.volume ?? 0.7;
   useEffect(() => {
-    if (stage !== "training") return;
-    try { updateState("calm", state.phase === "training" && state.signal?.action === "reward"); } catch { /* the light still works */ }
-  }, [stage, state.phase, state.signal, updateState]);
+    try { applyCue(cue, volume); } catch { /* the light still works */ }
+  }, [cue, volume, applyCue]);
+
+  // The planned length is a bell, never an automatic stop: the session ends when he stops it.
+  const plannedMin = training.settingsFor?.(training.protocolId)?.durationMin ?? null;
+  const trainingSince = useRef<number | null>(null);
+  const rang = useRef(false);
+  useEffect(() => {
+    if (stage !== "training") { trainingSince.current = null; rang.current = false; return; }
+    trainingSince.current ??= Date.now();
+    if (!rang.current && plannedMin != null && Date.now() - trainingSince.current >= plannedMin * 60_000) {
+      rang.current = true;
+      try { playBell("end"); } catch { /* the words still show */ }
+    }
+  }, [stage, state, plannedMin, playBell]);
 
   if (training.finished && !running) return <SummaryStep training={training} sessions={sessions} lastStrategy={strategy} onNote={(note) => {
     add({ at: new Date().toISOString(), protocol: training.finished!.protocol_name, targetPercent: training.finished!.time_in_target_pct, strategy, note, ...(savedSessionId ? { sessionId: savedSessionId } : {}) });

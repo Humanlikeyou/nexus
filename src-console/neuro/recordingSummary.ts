@@ -1,11 +1,10 @@
-import { computeBands } from "../legacy-core/hooks/useFFT";
+import { bandFeatures } from "./fft";
 import { assessChannel } from "../legacy-core/hooks/useSignalQuality";
-import type { FrequencyBandPowers } from "../legacy-core/lib/types";
 import { calmPercent, relaxationBaseline, type TimelineEntry } from "./training";
 
 /**
  * Summary for a plain recording (no training protocol). Uses the same frontal
- * band computation as TrainingSession (AF7/AF8, mean-removed, computeBands):
+ * band computation as TrainingSession (AF7/AF8, `neuro/fft.ts` bandFeatures, decision 0060):
  * focus = focusScore, relaxation = relaxationScore. Calm % uses the training
  * definition with the baseline from the first 60 s of valid entries.
  */
@@ -31,14 +30,10 @@ export class RecordingSummarizer {
     if (frontal.some((samples) => samples.length < MIN_WINDOW)) return;
     this.lastTick = now;
     const gated = frontal.some((samples) => samples.some((value) => !Number.isFinite(value)) || assessChannel(samples.slice(-MIN_WINDOW)) !== "good");
-    const bands = frontal.map((samples) => {
-      const finite = samples.map((value) => (Number.isFinite(value) ? value : 0));
-      const mean = finite.reduce((sum, value) => sum + value, 0) / finite.length;
-      return computeBands(finite.map((value) => value - mean));
-    });
-    const average = (key: keyof FrequencyBandPowers) => bands.reduce((sum, item) => sum + (item[key] as number), 0) / bands.length;
-    const focus = average("focusScore");
-    const relaxation = average("relaxationScore");
+    // Decision 0060: the one pipeline, power averaged across AF7 and AF8 (a gap reads as 0 and gates the tick).
+    const bands = bandFeatures(frontal.map((samples) => samples.slice(-MIN_WINDOW).map((value) => (Number.isFinite(value) ? value : 0))));
+    const focus = bands.focusScore;
+    const relaxation = bands.relaxationScore;
     this.entries.push({ timestamp: now, focus, relaxation, action: "record", gated: gated || !Number.isFinite(focus) || !Number.isFinite(relaxation) });
   }
 

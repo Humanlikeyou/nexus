@@ -627,6 +627,7 @@ pub fn roadmap_request(goal_id: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn roadmap_accept(goal_id: String) -> Result<bool, String> {
     with_store(|s| accept(s, &goal_id).map(|_| true))
 }
@@ -642,6 +643,7 @@ pub fn roadmap_edit_step(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn roadmap_answer_step(
     goal_id: String,
     step_id: String,

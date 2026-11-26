@@ -952,6 +952,115 @@ pub fn get_terrence_context_snapshot() -> Result<TerrenceContextSnapshot, String
     })
 }
 
+/// title, content, metadata, provenance_source, occurred_at, deleted_at
+type GoalCopyRow = (
+    String,
+    Option<String>,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+);
+
+/// 0053 step 3: `goals.json` is the source of truth and these are one-way copies of it. A missing
+/// goal is inserted; a changed one is refreshed (title, progress, deadline, metadata); a copy whose
+/// goal was deleted from `goals.json` is archived. Nothing here ever writes `goals.json`.
+fn refresh_goal_copies(
+    conn: &Connection,
+    goals: Vec<LegacyGoal>,
+    provenance_ref: &str,
+    report: &mut LegacyContextMigrationReport,
+) -> Result<(), String> {
+    let now = Utc::now().to_rfc3339();
+    let ids: Vec<String> = goals.iter().map(|g| g.id.clone()).collect();
+    for goal in goals {
+        supersede_legacy_goal_labels(conn, &goal.title)?;
+        let content = format!("Progress: {} / {} {}", goal.current, goal.target, goal.unit);
+        let metadata = serde_json::json!({ "legacyCategory": goal.category, "legacyUpdatedAt": goal.updated_at, "target": goal.target, "current": goal.current, "unit": goal.unit });
+        let existing: Option<GoalCopyRow> = conn
+            .query_row(
+                "SELECT title, content, metadata, provenance_source, occurred_at, deleted_at
+                 FROM context_items WHERE id = ?1",
+                params![goal.id],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| format!("Failed to read goal context item: {e}"))?;
+        match existing {
+            None => {
+                let input = CreateContextItemInput {
+                    kind: "goal".to_string(),
+                    title: goal.title,
+                    content: Some(content),
+                    status: Some("active".to_string()),
+                    confidence: Some(1.0),
+                    provenance_source: "legacy_goals_json".to_string(),
+                    provenance_ref: Some(provenance_ref.to_string()),
+                    occurred_at: goal.deadline,
+                    metadata: Some(metadata),
+                };
+                insert_context_item(conn, goal.id, input, None, Some(goal.created_at))?;
+                report.inserted += 1;
+            }
+            // Only copies of goals.json are refreshed; a user-deleted copy stays deleted.
+            Some((title, old_content, old_meta, source, occurred, deleted))
+                if source == "legacy_goals_json" && deleted.is_none() =>
+            {
+                let changed = title != goal.title
+                    || old_content.as_deref() != Some(content.as_str())
+                    || occurred != goal.deadline
+                    || serde_json::from_str::<Value>(&old_meta).ok().as_ref() != Some(&metadata);
+                if changed {
+                    conn.execute(
+                        "UPDATE context_items SET title = ?1, content = ?2, metadata = ?3,
+                            occurred_at = ?4, status = 'active', updated_at = ?5 WHERE id = ?6",
+                        params![
+                            goal.title,
+                            content,
+                            metadata.to_string(),
+                            goal.deadline,
+                            now,
+                            goal.id
+                        ],
+                    )
+                    .map_err(|e| format!("Failed to refresh goal context item: {e}"))?;
+                }
+                report.existing += 1;
+            }
+            Some(_) => report.existing += 1,
+        }
+    }
+    // Copies whose goal is gone from goals.json.
+    let mut st = conn
+        .prepare(
+            "SELECT id FROM context_items WHERE kind = 'goal' AND provenance_source = 'legacy_goals_json'
+               AND status = 'active' AND deleted_at IS NULL",
+        )
+        .map_err(|e| format!("Failed to list goal context items: {e}"))?;
+    let active: Vec<String> = st
+        .query_map([], |r| r.get(0))
+        .map_err(|e| format!("Failed to list goal context items: {e}"))?
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("Failed to list goal context items: {e}"))?;
+    for id in active.into_iter().filter(|id| !ids.contains(id)) {
+        conn.execute(
+            "UPDATE context_items SET status = 'archived', updated_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )
+        .map_err(|e| format!("Failed to archive goal context item: {e}"))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn migrate_legacy_terrence_context() -> Result<LegacyContextMigrationReport, String> {
@@ -970,32 +1079,12 @@ pub fn migrate_legacy_terrence_context() -> Result<LegacyContextMigrationReport,
     if let Ok(content) = fs::read_to_string(&goals_path) {
         match serde_json::from_str::<Vec<LegacyGoal>>(&content) {
             Ok(goals) => {
-                for goal in goals {
-                    supersede_legacy_goal_labels(&transaction, &goal.title)?;
-                    let input = CreateContextItemInput {
-                        kind: "goal".to_string(),
-                        title: goal.title,
-                        content: Some(format!(
-                            "Progress: {} / {} {}",
-                            goal.current, goal.target, goal.unit
-                        )),
-                        status: Some("active".to_string()),
-                        confidence: Some(1.0),
-                        provenance_source: "legacy_goals_json".to_string(),
-                        provenance_ref: Some(goals_path.to_string_lossy().to_string()),
-                        occurred_at: goal.deadline,
-                        metadata: Some(
-                            serde_json::json!({ "legacyCategory": goal.category, "legacyUpdatedAt": goal.updated_at, "target": goal.target, "current": goal.current, "unit": goal.unit }),
-                        ),
-                    };
-                    insert_legacy_if_missing(
-                        &transaction,
-                        goal.id,
-                        input,
-                        Some(goal.created_at),
-                        &mut report,
-                    )?;
-                }
+                refresh_goal_copies(
+                    &transaction,
+                    goals,
+                    &goals_path.to_string_lossy(),
+                    &mut report,
+                )?;
             }
             Err(_) => report.skipped += 1,
         }
@@ -1271,5 +1360,103 @@ mod tests {
         assert_eq!(items[0].provenance_source, "hermes");
         assert_eq!(items[0].title, "Protect the first focus block");
         let _ = fs::remove_dir_all(directory);
+    }
+
+    // ── 0053 step 3: goal copies are one-way from goals.json ─────────────────
+
+    fn goal(id: &str, title: &str, current: f64) -> LegacyGoal {
+        LegacyGoal {
+            id: id.into(),
+            title: title.into(),
+            category: "life".into(),
+            target: 10.0,
+            current,
+            unit: "runs".into(),
+            deadline: None,
+            created_at: "2026-11-01T00:00:00Z".into(),
+            updated_at: "2026-11-20T00:00:00Z".into(),
+        }
+    }
+
+    fn report() -> LegacyContextMigrationReport {
+        LegacyContextMigrationReport {
+            inserted: 0,
+            existing: 0,
+            skipped: 0,
+            migrated_at: String::new(),
+        }
+    }
+
+    fn row(conn: &Connection, id: &str) -> (String, String, Option<String>) {
+        conn.query_row(
+            "SELECT title, status, content FROM context_items WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn goal_copies_follow_goals_json_one_way() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn).unwrap();
+        let mut r = report();
+        refresh_goal_copies(
+            &conn,
+            vec![goal("g1", "Run", 1.0), goal("g2", "Read", 2.0)],
+            "goals.json",
+            &mut r,
+        )
+        .unwrap();
+        assert_eq!(r.inserted, 2);
+        // Progress and title changes in goals.json reach the copy.
+        refresh_goal_copies(
+            &conn,
+            vec![goal("g1", "Run 10k", 4.0), goal("g2", "Read", 2.0)],
+            "goals.json",
+            &mut report(),
+        )
+        .unwrap();
+        let (title, status, content) = row(&conn, "g1");
+        assert_eq!((title.as_str(), status.as_str()), ("Run 10k", "active"));
+        assert_eq!(content.as_deref(), Some("Progress: 4 / 10 runs"));
+        // A goal deleted from goals.json archives its copy.
+        refresh_goal_copies(
+            &conn,
+            vec![goal("g1", "Run 10k", 4.0)],
+            "goals.json",
+            &mut report(),
+        )
+        .unwrap();
+        assert_eq!(row(&conn, "g2").1, "archived");
+        // A copy the user deleted stays deleted, and is not refreshed.
+        conn.execute(
+            "UPDATE context_items SET deleted_at = 'now' WHERE id = 'g1'",
+            [],
+        )
+        .unwrap();
+        refresh_goal_copies(
+            &conn,
+            vec![goal("g1", "Changed", 9.0)],
+            "goals.json",
+            &mut report(),
+        )
+        .unwrap();
+        assert_eq!(row(&conn, "g1").0, "Run 10k");
+    }
+
+    #[test]
+    fn the_refresh_never_writes_goals_json() {
+        let src = include_str!("terrence_context.rs");
+        let body = &src[src.find("fn refresh_goal_copies").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        for w in [
+            "write_private",
+            "write_json_atomic",
+            "save_goals",
+            "fs::write",
+        ] {
+            assert!(!body.contains(w), "{w}");
+        }
     }
 }

@@ -30,9 +30,9 @@ async function startHeadset(page: Page) {
           if (w.__eeg.silent.includes(channel)) continue;
           const frontal = channel === "AF7" || channel === "AF8";
           const values = samples(i).map((v, k) => (frontal && w.__eeg.blink > 0 ? v + 260 * Math.sin(Math.PI * ((start + k) % 40) / 40) : v));
-          w.__E2E_EMIT("muse-eeg", { timestamp: Date.now(), channel, samples: values });
+          w.__E2E_EMIT("muse-eeg", { timestamp: Date.now(), channel, samples: values, source: "live" });
         }
-        if (w.__eeg.aux) w.__E2E_EMIT("muse-eeg", { timestamp: Date.now(), channel: "AUX", samples: samples(9) });
+        if (w.__eeg.aux) w.__E2E_EMIT("muse-eeg", { timestamp: Date.now(), channel: "AUX", samples: samples(9), source: "live" });
       }
       if (w.__eeg.blink > 0) w.__eeg.blink -= 1;
     }, 80);

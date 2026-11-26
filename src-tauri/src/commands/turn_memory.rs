@@ -1152,9 +1152,11 @@ mod tests {
         let body = &body[..body.find("\n}\n").unwrap()];
         assert!(body.contains("(\"X-Amara-Allow-Claude\", \"0\".to_string())"));
         assert!(!body.contains("\"1\""));
-        let lc = &router[router.find("pub(crate) async fn local_complete").unwrap()..];
-        let lc = &lc[..lc.find("\n}\n").unwrap()];
-        assert!(lc.contains("local_tier_headers()") && lc.contains("tier == Tier::Claude"));
+        assert!(crate::commands::llm_router::local_helper_is_local_only(
+            "local_complete",
+            "Fast",
+            "local_tier_headers"
+        ));
     }
 
     #[test]

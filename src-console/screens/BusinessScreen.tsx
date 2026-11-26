@@ -5,6 +5,7 @@ import type { SystemSnapshot } from "../types";
 import { DataTag } from "../ui";
 import type { LedgerWrites } from "../business/ledgerWrite";
 import { TreasuryView } from "../design1118/TreasuryView";
+import { WorkspaceView } from "../business/workspace/WorkspaceView";
 import { BusinessOverview, LinkCard, VenturesView } from "./BusinessPanels";
 import { ContentView, DecisionsView, TasksView, workStatement } from "./EnterprisePages";
 import "./BusinessScreen.css";
@@ -20,6 +21,7 @@ function WorkCards({ data, onView }: { data: SystemSnapshot; onView?: (view: str
   return (
     <div className="cc-grid2">
       <LinkCard title={tasksDown ? "Tasks" : `Tasks · ${workStatement(data.tasks)}`} line={tasksDown ? "Task source unavailable" : open.length ? open.map((t) => `${t.title} is ${t.status === "active" ? "active" : "waiting"}`).join(" · ") : "No open tasks."} open="Open Tasks ›" onOpen={onView ? () => onView("tasks") : undefined} />
+      <LinkCard title="Workspaces" line="Each business's context, documents, integrations and approvals, kept apart." open="Open Workspaces ›" onOpen={onView ? () => onView("workspaces") : undefined} />
       <LinkCard title={pipeline.length ? `Content · ${[drafting ? `${drafting} drafting` : null, ideas ? `${ideas} idea${ideas === 1 ? "" : "s"}` : null].filter(Boolean).join(", ") || `${pipeline.length} items`}` : "Content"} line={pipeline.length ? pipeline.slice(0, 2).map((p) => `${p.title} · ${p.stage === "ideation" ? "idea" : p.stage}`).join(" · ") : "Pipeline is clear."} open="Open Content ›" onOpen={onView ? () => onView("content") : undefined} tag={pipeline.length ? null : <DataTag kind="wire" />} />
     </div>
   );
@@ -40,6 +42,8 @@ export function BusinessField({ data, onRetry, view = "main", onView, onOpen, ad
   if (view === "decisions" || view.startsWith("decisions/")) return <DecisionsView data={data} adapter={adapter} onOpen={onOpen} focusId={view.startsWith("decisions/") ? view.slice("decisions/".length) : undefined} />;
   if (view === "ventures" || routed) return <VenturesView data={data} adapter={adapter} ventureId={routed ?? local} onOpen={openVenture} onView={onView} onRoute={onOpen} writes={writes} />;
   if (view === "treasury") return <TreasuryView onOpen={onOpen} writes={writes} />;
+  // Decision 0063: business workspaces (TaiyoSkin first).
+  if (view === "workspaces") return <WorkspaceView />;
   if (view === "content") return <ContentView data={data} onRetry={onRetry} onOpen={onOpen} />;
   return <TasksView data={data} onRetry={onRetry} onOpen={onOpen} />;
 }

@@ -1,0 +1,93 @@
+/* Life host (PLAN-0055, decision 0055: the design boundary is lifted for the Life host only).
+   Existing tokens only, so it keeps the app's dark green identity in both themes; no new colours. */
+
+.lf-page { display: grid; gap: var(--space-5); }
+.lf-k { color: var(--label-secondary); font-size: var(--text-subheadline); margin-right: var(--space-1); }
+.lf-big { margin: 0 0 var(--space-1); font-size: var(--text-title3); color: var(--label); }
+.lf-err { color: var(--tone-danger-text); }
+.lf-h { margin: var(--space-3) 0 var(--space-1); font-size: var(--text-subheadline); font-weight: 600; color: var(--label-secondary); }
+
+.lf-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.lf-list > li { display: grid; gap: 1px; color: var(--label); }
+.lf-list small { color: var(--label-secondary); font-size: var(--text-subheadline); }
+.lf-row { display: flex !important; align-items: center; gap: var(--space-3); justify-content: space-between; }
+.lf-row > span:first-child { display: grid; gap: 1px; min-width: 0; }
+.lf-row__end { display: inline-flex; gap: var(--space-2); flex-shrink: 0; }
+
+.lf-bar { display: block; height: 4px; border-radius: 2px; background: var(--fill-secondary); overflow: hidden; }
+.lf-bar > i { display: block; height: 100%; background: var(--accent); }
+
+/* Weekly plan */
+.lf-plan__priority { margin: 0 0 var(--space-2); }
+.lf-plan__row { align-items: end; }
+.lf-plan__rowEnd { display: flex; gap: var(--space-2); align-items: end; }
+.lf-plan__rowEnd > :first-child { flex: 1; min-width: 0; }
+.lf-checks { list-style: none; margin: 0 0 var(--space-2); padding: 0; display: grid; gap: var(--space-1); }
+.lf-checks label { display: inline-flex; gap: var(--space-2); align-items: center; color: var(--label); }
+.lf-checks input { accent-color: var(--accent); }
+.lf-checks [data-done] { color: var(--label-secondary); text-decoration: line-through; }
+.lf-checks small { margin-left: calc(var(--space-5) + 3px); color: var(--label-secondary); font-size: var(--text-subheadline); }
+
+/* Recommendations */
+.lf-rec__title { margin: 0 0 var(--space-1); color: var(--label); }
+.lf-rec__action { margin: var(--space-2) 0; color: var(--label); }
+.lf-rec__controls { flex-wrap: wrap; }
+.lf-explain { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--separator); display: grid; gap: var(--space-2); }
+.lf-inline { display: grid; gap: var(--space-2); margin: var(--space-2) 0; }
+
+/* Habits */
+.lf-habits { display: grid; gap: var(--space-3); }
+.lf-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--space-1); margin: var(--space-2) 0; }
+.lf-cal__day { display: grid; justify-items: center; gap: 1px; padding: var(--space-2) 0; border-radius: var(--radius-sm); border: 1px solid var(--separator); background: transparent; color: var(--label); font: inherit; cursor: pointer; }
+.lf-cal__day small { color: var(--label-secondary); font-size: var(--text-badge); }
+.lf-cal__day b { min-height: 1.2em; }
+.lf-cal__day[data-s="done"] { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.lf-cal__day[data-s="not_done"] { background: var(--fill-secondary); }
+.lf-cal__day[data-s="no_record"] { border-style: dashed; color: var(--label-tertiary); }
+.lf-cal__day[data-s="future"] { opacity: .45; cursor: default; }
+.lf-cal__day[data-today] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lf-cal__day:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.lf-cal__day:disabled { cursor: default; }
+
+.lf-trend__bars { list-style: none; margin: var(--space-2) 0; padding: 0; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 3px; height: 55px; }
+.lf-trend__col { position: relative; display: flex; flex-direction: column-reverse; height: 100%; border-radius: 2px; overflow: hidden; background: var(--fill-tertiary); }
+.lf-trend__col > i { display: block; width: 100%; }
+.lf-trend__col > i.d { background: var(--accent); }
+.lf-trend__col > i.n { background: var(--label-tertiary); opacity: .55; }
+.lf-trend__col > i.u { background: repeating-linear-gradient(135deg, var(--fill-secondary) 0 3px, transparent 3px 6px); }
+.lf-trend__col > em { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed var(--label-secondary); }
+.lf-fields { margin-top: var(--space-2); }
+.lf-toggle { display: inline-flex; gap: var(--space-2); align-items: center; color: var(--label); }
+
+/* Goals tree */
+.lf-tree { display: grid; gap: var(--space-3); }
+.lf-tree__head { display: flex; align-items: center; gap: var(--space-2); }
+.lf-area { display: grid; gap: var(--space-2); }
+.lf-goals { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.lf-goal { border: 1px solid var(--separator); border-radius: var(--radius-md); background: var(--bg-content); }
+.lf-goal__head { width: 100%; display: grid; gap: 1px; text-align: left; padding: var(--space-3); background: transparent; border: 0; color: var(--label); font: inherit; cursor: pointer; border-radius: var(--radius-md); }
+.lf-goal__head small { color: var(--label-secondary); font-size: var(--text-subheadline); }
+.lf-goal__head:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.lf-goal__body { padding: 0 var(--space-3) var(--space-3); display: grid; gap: var(--space-1); }
+.lf-link { margin-top: var(--space-2); align-items: end; }
+
+/* Milestone timeline */
+.lf-tl__track { list-style: none; margin: var(--space-2) 0; padding: 0; display: flex; gap: 0; overflow-x: auto; }
+.lf-tl__track > li { flex: 1 0 96px; position: relative; }
+.lf-tl__track > li::before { content: ""; position: absolute; top: 11px; left: 0; right: 0; border-top: 2px solid var(--separator); }
+.lf-tl__track > li[data-done]::before { border-color: var(--accent); }
+.lf-tl__track button { position: relative; display: grid; justify-items: center; gap: var(--space-1); width: 100%; padding: 5px 5px var(--space-1); background: transparent; border: 0; color: var(--label); font: inherit; cursor: pointer; border-radius: var(--radius-sm); }
+.lf-tl__track button[aria-pressed="true"] { background: var(--fill-secondary); }
+.lf-tl__track button:focus-visible { outline: 2px solid var(--focus-ring); }
+.lf-tl__track small { font-size: var(--text-badge); color: var(--label-secondary); text-align: center; overflow-wrap: anywhere; }
+.lf-tl__dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--label-tertiary); background: var(--bg-content); }
+.lf-tl__track > li[data-done] .lf-tl__dot { background: var(--accent); border-color: var(--accent); }
+.lf-tl__track > li[data-current] .lf-tl__dot { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.lf-tl__detail p { margin: 0 0 var(--space-1); }
+
+/* Weekly review, dates */
+.lf-review { display: grid; gap: var(--space-5); margin-top: var(--space-5); }
+.lf-obs { display: grid; gap: var(--space-3); }
+.lf-range { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: end; margin-bottom: var(--space-3); }
+
+@media (prefers-reduced-motion: reduce) { .lf-goal, .lf-cal__day { transition: none; } }

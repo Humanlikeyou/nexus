@@ -1503,10 +1503,11 @@ mod tests {
             assert!(!low.contains(w), "watchlist.rs must not contain {w}");
         }
         // The shared helper really is local-only.
-        let rt = include_str!("llm_router.rs");
-        let f = &rt[rt.find("pub(crate) async fn local_deep_complete").unwrap()..];
-        let f = &f[..f.find("\n}\n").unwrap()];
-        assert!(f.contains("local_deep_headers()") && f.contains("tier == Tier::Claude"));
+        assert!(crate::commands::llm_router::local_helper_is_local_only(
+            "local_deep_complete",
+            "Deep",
+            "local_deep_headers"
+        ));
     }
 
     #[test]

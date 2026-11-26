@@ -328,9 +328,27 @@ pub fn save_session(session: RecordedSession, data: serde_json::Value) -> Result
     save_session_in(&sessions_dir(), session, data)
 }
 
+/// Writes a new session file whole or not at all, never over an existing one (decision 0057).
+/// The temp file lives in `<data>/.tmp-writes`, outside `sessions/`; nothing in `sessions/` is
+/// ever removed or replaced.
+pub(crate) fn write_new_atomically(
+    dir: &std::path::Path,
+    path: &std::path::Path,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let scratch = dir.parent().unwrap_or(dir).join(".tmp-writes");
+    super::shared::fsx::write_new_no_clobber(&scratch, path, bytes).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            "A session with this id already exists; it was not overwritten".to_string()
+        } else {
+            format!("Failed to write session: {}", e)
+        }
+    })
+}
+
 /// Writes a new session file. Muse recordings are sacred (docs/decisions/0007): a session id that
-/// already has a file is refused with an error, never overwritten. `create_new` makes the check
-/// and the create one atomic step, so an existing file is never opened for writing.
+/// already has a file is refused with an error, never overwritten. `write_new_atomically` makes the
+/// check and the create one atomic step, so an existing file is never opened for writing.
 pub(crate) fn save_session_in(
     dir: &std::path::Path,
     mut session: RecordedSession,
@@ -357,19 +375,27 @@ pub(crate) fn save_session_in(
 
     let json = serde_json::to_string_pretty(&payload)
         .map_err(|e| format!("Failed to serialize: {}", e))?;
-    let mut file = crate::app_paths::private_open_options()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
-                "A session with this id already exists; it was not overwritten".to_string()
-            } else {
-                format!("Failed to write session: {}", e)
-            }
-        })?;
-    std::io::Write::write_all(&mut file, json.as_bytes())
-        .map_err(|e| format!("Failed to write session: {}", e))?;
+    write_new_atomically(&dir, &path, json.as_bytes())?;
+    if let (Some(data), Ok(_)) = (
+        super::amara_store::data_above(&dir, "sessions"),
+        chrono::DateTime::parse_from_rfc3339(&session.end),
+    ) {
+        super::amara_store::note(
+            data,
+            super::amara_store::NewActivity {
+                certainty: "confirmed",
+                scope: super::amara_store::Scope::Neural,
+                kind: "neuro.session_finished",
+                subject_ref: &format!("session:{}_{}", session.device_type, session.id),
+                occurred_at: &session.end,
+                source: "user",
+                source_ref: None,
+                actor: "taisun",
+                summary: None,
+                data_json: Some(&format!(r#"{{"duration_secs":{}}}"#, session.duration_secs)),
+            },
+        );
+    }
 
     Ok(path.to_string_lossy().to_string())
 }
@@ -387,6 +413,46 @@ pub fn list_sessions() -> Result<Vec<RecordedSession>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_session_file_is_written_whole_or_not_at_all_and_never_over_another() {
+        let root = std::env::temp_dir().join(format!(
+            "nexus-sess-atomic-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let dir = root.join("sessions");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("muse_a.json");
+        write_new_atomically(&dir, &path, b"{\"first\":1}").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{\"first\":1}");
+        let err = write_new_atomically(&dir, &path, b"{\"second\":2}").unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            b"{\"first\":1}",
+            "the existing file is untouched"
+        );
+        // No temp file is left behind either way.
+        let left: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(left, ["muse_a.json"]);
+        assert_eq!(
+            fs::read_dir(root.join(".tmp-writes")).unwrap().count(),
+            0,
+            "the temp file is gone"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
 
     #[test]
     fn save_session_refuses_a_duplicate_id_and_leaves_the_existing_file_untouched() {

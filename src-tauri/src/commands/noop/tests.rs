@@ -755,3 +755,15 @@ fn hypnogram_is_sorted_clipped_normalised_and_null_without_segments() {
     assert_eq!(hypnogram_in(&path, "my-whoop", None).unwrap(), None);
     let _ = fs::remove_file(path);
 }
+
+#[test]
+fn core_counts_as_light_in_the_totals_as_in_the_hypnogram() {
+    // Before decision 0057 the totals dropped "core" while the hypnogram drew it as light.
+    let seg = decode_sleep_stage_minutes(Some(
+        r#"[{"start":0,"end":3600,"stage":"core"},{"start":3600,"end":4800,"stage":"Deep"}]"#,
+    ))
+    .unwrap();
+    assert_eq!((seg.light, seg.deep), (60.0, 20.0));
+    let dict = decode_sleep_stage_minutes(Some(r#"{"core":200,"deep":50}"#)).unwrap();
+    assert_eq!(dict.light, 200.0);
+}

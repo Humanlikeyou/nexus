@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, SegmentedControl, Select, TextField } from "../ui";
 import { amountText, jstDay, parseMinor, STAGES, writeError, type Currency, type LedgerWrites } from "../business/ledgerWrite";
+import type { AddAdapter } from "../adds/flow";
 import "../adds/v1111.css";
 
 /**
@@ -8,6 +9,21 @@ import "../adds/v1111.css";
  * Each save says what happened in a role="status" line with an 8 s Undo. Nothing here moves money.
  */
 export interface FormVenture { id: string; name: string; stage?: string; note?: string; nextStep?: string | null; currency?: Currency; targetMinor?: number | null }
+
+/**
+ * Task and content-idea ventures. The stores already carry `#venture:<id>` (TASKS.md, CONTENT-PIPELINE.md; adds.rs reads it
+ * from the venture's name in the text). Picking one here adds "for <name>" to what the add reads, so the same single
+ * add path files it; nothing is written until the preview is confirmed.
+ */
+export function withVenture(adapter: AddAdapter, name: string | null): AddAdapter {
+  if (!name) return adapter;
+  return Object.create(adapter, { parse: { value: (text: string) => adapter.parse(text.toLowerCase().includes(name.toLowerCase()) ? text : `${text} for ${name}`) } }) as AddAdapter;
+}
+
+export function VenturePick({ ventures, value, onChange }: { ventures: FormVenture[]; value: string; onChange: (id: string) => void }) {
+  if (ventures.length === 0) return null;
+  return <Select label="Venture (optional)" value={value} onChange={(e) => onChange(e.target.value)} options={[{ value: "", label: "No venture" }, ...ventures.map((v) => ({ value: v.id, label: v.name }))]} />;
+}
 
 const NEEDS_APP = "Saving works in the Amara OS app. This preview can't write files.";
 

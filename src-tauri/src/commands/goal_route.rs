@@ -1180,6 +1180,7 @@ mod tests {
             why: None,
             remind_at: None,
             paused: false,
+            life: Default::default(),
         });
         write_json_atomic(&path, &goals, MAX_BYTES).unwrap();
         rm::with_store_at(&d.data, |s| {

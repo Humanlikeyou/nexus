@@ -661,6 +661,8 @@ struct TurnContextSelection {
     habits: bool,
     dates: bool,
     money: bool,
+    neuro: bool,
+    workouts: bool,
 }
 
 fn turn_context_selection(message: &str) -> TurnContextSelection {
@@ -773,6 +775,35 @@ fn turn_context_selection(message: &str) -> TurnContextSelection {
             "commitment",
             "missed",
         ]),
+        neuro: contains_any(&[
+            "calibrat",
+            "baseline",
+            " eeg",
+            "neuro",
+            "muse",
+            "alpha",
+            "brainwave",
+            "band power",
+            // Decision 0059: questions about meditation or neurofeedback sessions get the training report.
+            "meditat",
+        ]),
+        // Decision 0062: the Workout engine's logged sessions.
+        workouts: contains_any(&[
+            "workout",
+            "exercise",
+            "calisthenic",
+            "training",
+            "pull-up",
+            "pullup",
+            "push-up",
+            "pushup",
+            "plank",
+            "squat",
+            " dip",
+            "reps",
+            "l-sit",
+            "handstand",
+        ]),
         money: contains_any(&[
             "money", "spend", "spent", "budget", "afford", "saving", "income", "expense", "bill",
             "balance", "cash", "finance",
@@ -816,6 +847,8 @@ struct TurnBriefs<'a> {
     habits: &'a str,
     dates: &'a str,
     money: &'a str,
+    neuro: &'a str,
+    workouts: &'a str,
 }
 
 // ── Keyword-gated briefs: check-ins, follow-ups, pattern findings (read-only) ──
@@ -1045,6 +1078,8 @@ fn nexus_turn_sections(
         ("nexus_habits", briefs.habits, true),
         ("nexus_dates", briefs.dates, selection.dates),
         ("nexus_money", briefs.money, selection.money),
+        ("nexus_neuro", briefs.neuro, selection.neuro),
+        ("nexus_workouts", briefs.workouts, selection.workouts),
         ("noop_health_context", briefs.health, true),
     ]
     .into_iter()
@@ -1056,7 +1091,7 @@ fn nexus_turn_sections(
     .collect()
 }
 
-pub(crate) const ALLOWED_SECTION_TAGS: [&str; 16] = [
+pub(crate) const ALLOWED_SECTION_TAGS: [&str; 18] = [
     "nexus_context",
     "nexus_priorities",
     "nexus_recent_decisions",
@@ -1073,6 +1108,10 @@ pub(crate) const ALLOWED_SECTION_TAGS: [&str; 16] = [
     "nexus_dates",
     // 0045: personal money facts from the entries store (keyword-gated; JPY stays native text).
     "nexus_money",
+    // 0058: NEUROSENSE measurement report (numbers and quality only, never raw EEG); local tiers only.
+    "nexus_neuro",
+    // 0062: the Workout engine's logged sessions (counts and totals, with their source).
+    "nexus_workouts",
     "nexus_deliberation",
     // Letta human/persona blocks, read-only (turn pipeline L2; turn_memory::letta_section).
     "letta_memory",
@@ -1105,9 +1144,24 @@ pub(crate) fn guarded_section(tag: &str, text: &str) -> Option<String> {
 /// with the injection guard (the renderer's guard can be bypassed by a direct IPC call) and
 /// `<`/`>` are escaped so a section can't open or close any tag.
 pub(crate) fn nexus_context_message(sections: &[AmaraContextSection]) -> String {
+    nexus_context_message_with(sections, super::llm_router::get_allow_claude())
+}
+
+/// Tags that carry neural-scope data (0053): never in a turn while the cloud tier is allowed.
+pub(crate) const NEURAL_TAGS: [&str; 1] = ["nexus_neuro"];
+
+/// As [`nexus_context_message`], with the cloud state given. A neural section is dropped here, where
+/// every turn's context is assembled, whoever built it (decision 0058).
+pub(crate) fn nexus_context_message_with(
+    sections: &[AmaraContextSection],
+    cloud_allowed: bool,
+) -> String {
     let mut out = String::new();
     for section in sections {
         if !ALLOWED_SECTION_TAGS.contains(&section.tag.as_str()) {
+            continue;
+        }
+        if cloud_allowed && NEURAL_TAGS.contains(&section.tag.as_str()) {
             continue;
         }
         let Some(block) = guarded_section(&section.tag, &section.text) else {
@@ -1182,6 +1236,12 @@ pub(crate) fn guard_history(
 /// Rust port of the renderer's `injectionGuard.ts` patterns (no regex dependency): same names
 /// and severities. High-severity matches become `[REDACTED]`; invisible and bidi-override
 /// characters are stripped. Medium matches are flagged only.
+/// Injection-guard pattern names found in `text` (empty = clean). For stores whose text later
+/// reaches a prompt, such as skills (0052).
+pub(crate) fn guard_scan(text: &str) -> Vec<&'static str> {
+    injection_guard::scan(text).threats
+}
+
 pub(super) mod injection_guard {
     pub struct Scan {
         pub sanitized: String,
@@ -1545,6 +1605,23 @@ pub fn prepare_amara_turn(message: String) -> Result<AmaraTurnContext, String> {
     } else {
         String::new()
     };
+    // Neural data never reaches the cloud tier (0053): the report is included only while Allow Claude is off.
+    let neuro_brief = if turn_context_selection(&stripped).neuro
+        && !super::llm_router::get_allow_claude()
+    {
+        super::neuro_baseline::context_section_in(&crate::app_paths::data_dir()).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let workouts_brief = if turn_context_selection(&stripped).workouts {
+        super::workout::context_section_in(
+            &crate::app_paths::data_dir(),
+            &super::local_store::iso(&super::shared::time::now_jst()),
+        )
+        .unwrap_or_default()
+    } else {
+        String::new()
+    };
     let sections = nexus_turn_sections(
         &stripped,
         &runtime_context,
@@ -1561,6 +1638,8 @@ pub fn prepare_amara_turn(message: String) -> Result<AmaraTurnContext, String> {
             habits: &habits_brief,
             dates: &dates_brief,
             money: &money_brief,
+            neuro: &neuro_brief,
+            workouts: &workouts_brief,
         },
     );
     Ok(AmaraTurnContext {
@@ -2112,3 +2191,27 @@ mod habit_brief;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod neuro_section_tests {
+    use super::*;
+
+    #[test]
+    fn a_neural_section_never_goes_out_while_the_cloud_is_allowed() {
+        let sections = vec![
+            AmaraContextSection {
+                tag: "nexus_neuro".into(),
+                text: "alpha 31%".into(),
+            },
+            AmaraContextSection {
+                tag: "nexus_habits".into(),
+                text: "1 habit".into(),
+            },
+        ];
+        let local = nexus_context_message_with(&sections, false);
+        assert!(local.contains("nexus_neuro") && local.contains("alpha 31%"));
+        let cloud = nexus_context_message_with(&sections, true);
+        assert!(!cloud.contains("nexus_neuro") && !cloud.contains("alpha 31%"));
+        assert!(cloud.contains("1 habit"));
+    }
+}

@@ -1034,15 +1034,11 @@ mod tests {
         assert!(h.contains("(\"X-Amara-Allow-Claude\", \"0\".to_string())"));
         assert!(h.contains("(\"X-Amara-Route\", \"deep\".to_string())"));
         assert!(!h.contains("\"1\""));
-        let f = &router[router
-            .find("pub(crate) async fn local_deep_complete")
-            .unwrap()..];
-        let f = &f[..f.find("\n}\n").unwrap()];
-        assert!(
-            f.contains("local_deep_headers()")
-                && f.contains("tier == Tier::Claude")
-                && f.contains("loopback_base")
-        );
+        assert!(crate::commands::llm_router::local_helper_is_local_only(
+            "local_deep_complete",
+            "Deep",
+            "local_deep_headers"
+        ));
         // The prompt carries labels and ledger figures only: no stream name, no contact data.
         assert!(!src.contains("stream_name)") || src.contains("show_names"));
         let facts_fn = &src[src.find("fn facts_block").unwrap()..];

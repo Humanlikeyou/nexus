@@ -5,7 +5,7 @@ export const PROTOCOLS: NfProtocol[] = [
   {
     id: "focus",
     name: "Focus Training",
-    description: "Enhance sensorimotor rhythm (SMR) to sharpen concentration and reduce mental noise.",
+    description: "Rewards SMR (12–15 Hz) relative power above your session baseline; inhibits theta and high beta.",
     icon: "Crosshair",
     rewardBands: [{ label: "SMR", minHz: 12, maxHz: 15 }],
     inhibitBands: [
@@ -20,13 +20,13 @@ export const PROTOCOLS: NfProtocol[] = [
     coachingCues: [
       "Settle into your breath. Let attention sharpen naturally.",
       "If your mind wanders, gently return. The feedback will guide you.",
-      "You're building sustained attention. Stay with the process.",
+      "Stay with the process.",
     ],
   },
   {
     id: "calm",
     name: "Calm & Relax",
-    description: "Boost alpha waves to enter a relaxed, present state of awareness.",
+    description: "Rewards alpha (8–13 Hz) relative power above your session baseline; inhibits high beta.",
     icon: "Leaf",
     rewardBands: [{ label: "Alpha", minHz: 8, maxHz: 13 }],
     inhibitBands: [{ label: "High Beta", minHz: 20, maxHz: 30 }],
@@ -43,7 +43,7 @@ export const PROTOCOLS: NfProtocol[] = [
   {
     id: "deep-relaxation",
     name: "Deep Relaxation",
-    description: "Alpha-theta crossover training for deep meditative states. Eyes closed, audio-guided.",
+    description: "Eyes closed. Rewards theta and alpha relative power above your session baseline; inhibits high beta.",
     icon: "Moon",
     rewardBands: [
       { label: "Theta", minHz: 4, maxHz: 8 },
@@ -63,7 +63,7 @@ export const PROTOCOLS: NfProtocol[] = [
   {
     id: "peak-performance",
     name: "Peak Performance",
-    description: "Strengthen low-beta activity to sustain alertness and cognitive performance.",
+    description: "Rewards low-beta (15–20 Hz) relative power above your session baseline; inhibits theta.",
     icon: "Zap",
     rewardBands: [{ label: "Low Beta", minHz: 15, maxHz: 20 }],
     inhibitBands: [{ label: "Theta", minHz: 4, maxHz: 8 }],
@@ -73,8 +73,8 @@ export const PROTOCOLS: NfProtocol[] = [
     category: "performance",
     sessionPrompt: "Stay alert and engaged. Channel your mental energy.",
     coachingCues: [
-      "Maintain crisp awareness. You're in the zone.",
-      "Sustain this state. Your brain is learning the pattern.",
+      "Keep a light, steady effort.",
+      "Stay with it. The tone follows the signal, not a verdict on you.",
     ],
   },
 
@@ -82,8 +82,7 @@ export const PROTOCOLS: NfProtocol[] = [
   {
     id: "relaxed-flow",
     name: "Relaxed Flow",
-    description:
-      "Alpha + SMR co-training for calm alertness. Suppresses theta drift to prevent drowsiness while maintaining relaxed focus.",
+    description: "Rewards alpha and SMR relative power together above your session baseline; inhibits high beta and holds reward when theta drifts upward.",
     icon: "Wind",
     rewardBands: [
       { label: "Alpha", minHz: 8, maxHz: 13 },
@@ -101,14 +100,13 @@ export const PROTOCOLS: NfProtocol[] = [
     coachingCues: [
       "Find the balance — relaxed but present.",
       "If you feel drowsy, gently re-engage your attention.",
-      "You're training calm alertness. Stay with the flow.",
+      "Stay with the flow.",
     ],
   },
   {
     id: "creative-insight",
     name: "Creative Insight",
-    description:
-      "Alpha/theta coupling stability training. Rewards stable ratio between creative theta and grounding alpha. Inhibits mental noise and delta drift.",
+    description: "Rewards a stable alpha/theta ratio; inhibits high beta and delta. Gamma is shown but neither rewarded nor inhibited.",
     icon: "Lightbulb",
     rewardBands: [
       { label: "Alpha", minHz: 8, maxHz: 13 },
@@ -130,14 +128,13 @@ export const PROTOCOLS: NfProtocol[] = [
     coachingCues: [
       "Let your mind wander purposefully. Don't chase thoughts.",
       "The sweet spot is between thinking and dreaming.",
-      "Creative insight often arrives in the spaces between effort.",
+      "Rest between efforts.",
     ],
   },
   {
     id: "deep-meditation",
     name: "Deep Meditation",
-    description:
-      "Alpha coherence stability training. Rewards sustained, stable alpha — not just peaks. Allows gamma bursts without reward logic. Inhibits volatility.",
+    description: "Eyes closed. Rewards alpha relative power that stays above your session baseline steadily, not in brief peaks; inhibits high beta.",
     icon: "Mountain",
     rewardBands: [{ label: "Alpha", minHz: 8, maxHz: 13 }],
     rewardStability: true,
@@ -160,8 +157,7 @@ export const PROTOCOLS: NfProtocol[] = [
   {
     id: "hypnagogic",
     name: "Hypnagogic Imagery",
-    description:
-      "Theta increase with alpha presence — training the edge-of-sleep state. Strict artifact gating. Inhibits delta dominance and arousal.",
+    description: "Eyes closed. Rewards theta and alpha relative power above your session baseline; inhibits delta and high beta. Stricter artifact gating.",
     icon: "Eye",
     rewardBands: [
       { label: "Theta", minHz: 4, maxHz: 8 },
@@ -182,7 +178,7 @@ export const PROTOCOLS: NfProtocol[] = [
     coachingCues: [
       "Hover at the threshold. Don't fall asleep, but don't wake up.",
       "If images appear, observe them without attachment.",
-      "You're in the liminal space. Trust the process.",
+      "Trust the process.",
     ],
   },
 ];

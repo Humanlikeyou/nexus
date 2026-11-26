@@ -9,7 +9,7 @@ const channels = ["TP9", "AF7", "AF8", "TP10"];
 const signal = Array.from({ length: 512 }, (_, i) => 10 * Math.sin(2 * Math.PI * 10 * i / 256) + 5 * Math.sin(2 * Math.PI * 22 * i / 256));
 function telemetry(tick, overrides = {}) {
   const now = 10_000 + tick * 500;
-  return { channels: Object.fromEntries(channels.map((name, index) => [name, signal.map((value) => index % 2 ? -value : value)])), channelLastPacketAt: Object.fromEntries(channels.map((name) => [name, now])), packetCount: tick + 1, lastPacketAt: now, ...overrides };
+  return { channels: Object.fromEntries(channels.map((name, index) => [name, signal.map((value) => index % 2 ? -value : value)])), channelLastPacketAt: Object.fromEntries(channels.map((name) => [name, now])), packetCount: tick + 1, lastPacketAt: now, source: "live", ...overrides };
 }
 
 test("training calibrates on valid data and records real summary entries", () => {

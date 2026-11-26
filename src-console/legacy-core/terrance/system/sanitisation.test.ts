@@ -146,7 +146,8 @@ describe.each(HOSTILE)("hostile error: %s", (_label, hostile) => {
 
   it("Skills Evolution", async () => {
     const evo = await (await import("./skillsEvolution")).evolveSkills();
-    expect(evo).toEqual({ proposed: 0, created: 0, updated: 0 });
+    // 0052: a run that threw is a failure, never "no new patterns".
+    expect(evo).toEqual({ proposed: 0, created: 0, updated: 0, failed: 1 });
     for (const t of activityTexts()) assertSafe(t, "skills evolution");
   });
 

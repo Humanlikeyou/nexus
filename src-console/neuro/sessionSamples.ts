@@ -50,8 +50,10 @@ export function hasSamples(session: SessionWithSamples): session is SessionWithS
   return !!s && s.stepSecs > 0 && (s.focus.length > 1 || BANDS.some(({ key }) => (s.bands[key]?.length ?? 0) > 1));
 }
 
-/** Summary scores are stored as 0–1 on some sessions and 0–100 on others; show them as 0–100. */
-export const score = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? null : v <= 1 ? v * 100 : v);
+/** Summary scores as 0–100. Sessions saved with `score_scale: 100` are already 0–100, so a real score of 1 stays 1
+ *  (decision 0057: it used to read as 100). Only an unscaled legacy value of 1 or less is treated as 0–1. */
+export const score = (v: number | null | undefined, scale?: number | null) =>
+  (v == null || !Number.isFinite(v) ? null : scale === 100 ? v : v <= 1 ? v * 100 : v);
 
 /** C16: the session's headline numbers from its samples. */
 export function sessionStats(s: SessionSamples) {

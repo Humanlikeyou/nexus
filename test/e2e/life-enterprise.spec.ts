@@ -24,8 +24,9 @@ test("sidebar (decision 0009): Home ⌘1, Life ⌘2, Mind–Body ⌘3, Enterpris
   await expect(nav.getByRole("button", { name: /^Settings/ })).toContainText("⌘7");
   await navButton(page, "Life").click();
   await expect(activeField(page, "Life")).toBeVisible();
-  await expect(tab(page, "Life", "Goals")).toHaveAttribute("aria-checked", "true");
-  for (const label of ["Goals", "Weekly review", "Dates & deadlines", "Personal money"]) await expect(tab(page, "Life", label)).toBeVisible();
+  // Decision 0056: Life opens on Overview and has six tabs.
+  await expect(tab(page, "Life", "Overview")).toHaveAttribute("aria-checked", "true");
+  for (const label of ["Overview", "Goals & projects", "Habits & routines", "Weekly review", "Dates & deadlines", "Personal money"]) await expect(tab(page, "Life", label)).toBeVisible();
   await navButton(page, "Enterprise").click();
   await expect(activeField(page, "Enterprise")).toBeVisible();
   await expect(activeField(page, "Enterprise").getByRole("heading", { level: 1, name: "Enterprise" })).toBeVisible();
@@ -41,7 +42,7 @@ test("old routes keep working: palette names, the stored session view and in-pag
   await expect(tab(page, "Enterprise", "Finances")).toHaveAttribute("aria-checked", "true");
   await expect(activeField(page, "Enterprise").getByRole("heading", { level: 1, name: "Finances" })).toBeVisible();
   // Old names still find the page in the palette.
-  for (const [query, host, label] of [["revenue", "Enterprise", "Finances"], ["life admin", "Life", "Dates & deadlines"], ["trajectory", "Life", "Goals"]] as const) {
+  for (const [query, host, label] of [["revenue", "Enterprise", "Finances"], ["life admin", "Life", "Dates & deadlines"], ["trajectory", "Life", "Goals & projects"]] as const) {
     await page.keyboard.press("Meta+k");
     await page.getByRole("combobox", { name: "Search or ask Amara" }).fill(query);
     await page.keyboard.press("Enter");
@@ -162,7 +163,7 @@ test("Enterprise › Ventures has no Akiya; Life › Dates & deadlines has it", 
 });
 
 for (const mode of ["live", "sample"] as const) {
-  for (const label of ["Goals", "Weekly review", "Dates & deadlines", "Personal money", "Overview", "Decisions", "Ventures", "Finances", "Tasks", "Content", "Today"]) {
+  for (const label of ["Goals", "Habits & routines", "Weekly review", "Dates & deadlines", "Personal money", "Overview", "Decisions", "Ventures", "Finances", "Tasks", "Content", "Today"]) {
     test(`axe (${mode}): ${label} has no serious or critical violations`, async ({ page, theme }) => {
       if (mode === "sample") await sample(page);
       await openApp(page, { theme, reduceMotion: true });

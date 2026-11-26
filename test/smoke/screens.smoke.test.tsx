@@ -98,7 +98,7 @@ describe("lazy screens", () => {
     render(<App />);
     await flush();
     // design-1111v: Business is Enterprise; Money lives under Life as Personal money; Work is Tasks.
-    for (const [host, view] of [["Agents", "Crews"], ["Mind–Body", "Fitness"], ["Mind–Body", "Neuro"], ["Mind–Body", "Neuro history"], ["Life", "Goals"], ["Life", "Weekly review"], ["Life", "Dates & deadlines"], ["Life", "Personal money"], ["Enterprise", "Decisions"], ["Enterprise", "Ventures"], ["Enterprise", "Finances"], ["Enterprise", "Tasks"], ["Enterprise", "Content"], ["Settings", "Services"], ["Settings", "Devices"], ["Settings", "Notifications"], ["Settings", "Backup"], ["Settings", "Voice"], ["Settings", "Memory"]] as const) {
+    for (const [host, view] of [["Agents", "Crews"], ["Mind–Body", "Fitness"], ["Mind–Body", "Neuro"], ["Mind–Body", "Neuro history"], ["Life", "Overview"], ["Life", "Goals & projects"], ["Life", "Habits & routines"], ["Life", "Weekly review"], ["Life", "Dates & deadlines"], ["Life", "Personal money"], ["Enterprise", "Decisions"], ["Enterprise", "Ventures"], ["Enterprise", "Finances"], ["Enterprise", "Tasks"], ["Enterprise", "Content"], ["Settings", "Services"], ["Settings", "Devices"], ["Settings", "Notifications"], ["Settings", "Backup"], ["Settings", "Voice"], ["Settings", "Memory"]] as const) {
       go(host);
       await settle(host);
       fireEvent.click(within(field(host)!).getByRole("radio", { name: view }));

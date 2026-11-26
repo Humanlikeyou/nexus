@@ -23,7 +23,7 @@ test.describe("Mind–Body", () => {
     await expect(f.getByText("n = 1 matched sessions")).toBeVisible();
     await expect(f.getByText("Correlation, not causation.")).toBeVisible();
     await expect(f.getByText("Personal estimates, not medical data.").last()).toBeVisible();
-    await expect(f.getByRole("img", { name: /^HRV, last \d+ days/ })).toBeVisible();
+    await expect(f.getByRole("img", { name: /^HRV, last \d+ days/ }).or(f.getByRole("group", { name: /^HRV, last \d+ days/ }))).toBeVisible();
     expect(consoleErrors).toEqual([]);
     await shot(page, `data-${theme}`);
   });

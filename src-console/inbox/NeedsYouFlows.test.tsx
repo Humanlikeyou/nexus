@@ -55,3 +55,17 @@ describe("G4 Open on Home for an Amara approval", () => {
     expect(onOpen).toHaveBeenCalledWith({ id: "terrance", view: "main" });
   });
 });
+
+describe("0045 habits rows in Needs you", () => {
+  it("shows the Habits label and 'Open habits ›', and links to life/goals", async () => {
+    agg.list.mockResolvedValue([{ source: "habits", state: "ok", rows: [{ source: "habits", id: "habit-h1", title: "Stretch", due: null, reason: "Not marked today", deepLink: { id: "life", view: "goals" }, quiet: true }] }]);
+    const onOpen = vi.fn();
+    function Probe() { const inbox = useNeedsYou(data, NOW); return <NeedsYouToday inbox={inbox} onOpen={onOpen} />; }
+    render(<Probe />);
+    const btn = await screen.findByRole("button", { name: /Open habits: Stretch/ });
+    expect(btn).toHaveTextContent("Open habits ›");
+    expect(screen.getByText("Habits", { selector: ".v-src" })).toBeInTheDocument();
+    fireEvent.click(btn);
+    expect(onOpen).toHaveBeenCalledWith({ id: "life", view: "goals" });
+  });
+});

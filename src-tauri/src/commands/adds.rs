@@ -29,6 +29,12 @@ const MAX_TEXT: usize = 500;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
+/// The one lock for the stores History/Undo writes (goals.json among them). `goals::save_goals_at`
+/// takes it too (0053 step 2), so a console save can't interleave with a History write.
+pub(crate) fn store_lock() -> std::sync::MutexGuard<'static, ()> {
+    LOCK.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 /// A preview's payload lives here, not in the client: `add_preview` hands back only a random single-use token and
 /// `add_save` redeems it, so the saved payload can't be swapped or replayed (2 minutes, one use).
 pub const TOKEN_TTL_MS: u64 = 2 * 60_000;
@@ -156,6 +162,9 @@ enum Payload {
         title: String,
         date: String,
         lane: String,
+        /// Lead days Taisun asked for ("remind me 3 months before"); empty means the default ladder.
+        #[serde(default)]
+        lead_days: Vec<i64>,
     },
     Task {
         title: String,
@@ -166,6 +175,13 @@ enum Payload {
         title: String,
         content_type: String,
         venture: Option<String>,
+    },
+    /// Chat/voice "I did my stretch": written through `habits::mark_in`, which logs its own History + Undo.
+    #[serde(rename = "habit-done")]
+    HabitDone {
+        habit_id: String,
+        day: String,
+        done: bool,
     },
 }
 
@@ -306,7 +322,10 @@ impl Dirs {
 
 /// Kinds the generic add_preview / add_save path takes. "ha" is not one: device writes have their own command.
 fn kind_ok_generic(kind: &str) -> Result<(), String> {
-    if matches!(kind, "goal" | "date" | "task" | "idea" | "route" | "watch") {
+    if matches!(
+        kind,
+        "goal" | "date" | "task" | "idea" | "route" | "watch" | "habit-done"
+    ) {
         Ok(())
     } else {
         Err("invalid input".into())
@@ -577,10 +596,12 @@ fn date_reading(text: &str, today: NaiveDate) -> Result<ParseResult, String> {
             } else {
                 "Personal"
             };
+            let leads = d.lead_days.clone().unwrap_or_default();
             let payload = Payload::Date {
                 title: d.title.clone(),
                 date: d.date.clone(),
                 lane: d.lane.clone(),
+                lead_days: leads.clone(),
             };
             ParseResult::Preview {
                 preview: AddPreview {
@@ -588,7 +609,7 @@ fn date_reading(text: &str, today: NaiveDate) -> Result<ParseResult, String> {
                     fields: vec![
                         ("Date".into(), date.format("%a, %b %-d, %Y").to_string()),
                         ("Lane".into(), lane.into()),
-                        ("Reminders".into(), "90, 30 and 7 days before".into()),
+                        ("Reminders".into(), life_dates::lead_phrase(&leads)),
                         ("From".into(), "You typed it".into()),
                     ],
                     note: Some(
@@ -599,6 +620,148 @@ fn date_reading(text: &str, today: NaiveDate) -> Result<ParseResult, String> {
             }
         }
     })
+}
+
+// ---- habit marking from chat ----
+
+const HABIT_STOP: &[&str] = &[
+    "a", "an", "the", "my", "some", "of", "to", "and", "session", "routine",
+];
+
+/// A word reduced so "walked", "walking" and "walk" meet.
+fn habit_stem(w: &str) -> String {
+    let mut w = w.to_lowercase();
+    for (suffix, min) in [("ing", 5), ("ed", 4), ("es", 4), ("s", 3)] {
+        if w.chars().count() > min && w.ends_with(suffix) {
+            w.truncate(w.len() - suffix.len());
+            break;
+        }
+    }
+    if w.chars().count() > 3 && w.ends_with('e') {
+        w.pop();
+    }
+    w
+}
+
+fn habit_tokens(s: &str) -> Vec<String> {
+    s.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty() && !HABIT_STOP.contains(&w.to_lowercase().as_str()))
+        .map(habit_stem)
+        .collect()
+}
+
+/// Unique active habit for these words, or the titles that all fit. Paused habits are never offered.
+fn find_habit<'a>(words: &str, habits: &'a [Goal]) -> Result<&'a Goal, Vec<&'a Goal>> {
+    let q = habit_tokens(words);
+    if q.is_empty() {
+        return Err(Vec::new());
+    }
+    let fits = |g: &&Goal| {
+        let h = habit_tokens(&g.title);
+        !h.is_empty() && (q.iter().all(|t| h.contains(t)) || h.iter().all(|t| q.contains(t)))
+    };
+    let exact: Vec<&Goal> = habits
+        .iter()
+        .filter(|g| {
+            let h = habit_tokens(&g.title);
+            h.len() == q.len() && h.iter().all(|t| q.contains(t))
+        })
+        .collect();
+    let all: Vec<&Goal> = if exact.is_empty() {
+        habits.iter().filter(fits).collect()
+    } else {
+        exact
+    };
+    match all.as_slice() {
+        [one] => Ok(one),
+        _ => Err(all),
+    }
+}
+
+/// "done today stretch" (from `habit_done_text`) into a preview with the streak after, a question when several
+/// habits fit, or `Err("habit: no match")` so the turn falls through to normal chat. Writes nothing.
+fn habit_done_reading(text: &str, dirs: &Dirs, today: NaiveDate) -> Result<ParseResult, String> {
+    let mut it = text.splitn(3, ' ');
+    let (polarity, day_word, words) = (
+        it.next().unwrap_or(""),
+        it.next().unwrap_or(""),
+        it.next().unwrap_or(""),
+    );
+    let done = match polarity {
+        "done" => true,
+        "not" => false,
+        _ => return Err("invalid input".into()),
+    };
+    let day = match day_word {
+        "today" => today,
+        "yesterday" => today - Duration::days(1),
+        _ => return Err("invalid input".into()),
+    };
+    let goals: Vec<Goal> = read_json(&dirs.goals(), MAX_MD_BYTES)?;
+    let habits: Vec<Goal> = goals
+        .into_iter()
+        .filter(|g| g.category == "habit" && !g.paused)
+        .collect();
+    let g = match find_habit(words, &habits) {
+        Ok(g) => g,
+        Err(many) if many.len() > 1 => {
+            let options: Vec<String> = many.iter().map(|g| g.title.clone()).collect();
+            return Ok(ParseResult::Ask {
+                question: format!("Which habit: {}?", options.join(" or ")),
+                options,
+                note: Some("Say it again with the habit's name.".into()),
+            });
+        }
+        Err(_) => return Err("habit: no match".into()),
+    };
+    let key = day.format("%Y-%m-%d").to_string();
+    let mut rows = super::habits::rows_in(&super::habits::dir_in(&dirs.data))?;
+    rows.retain(|r| !(r.habit_id == g.id && r.day == key));
+    rows.push(super::habits::HabitDayRow {
+        habit_id: g.id.clone(),
+        day: key.clone(),
+        done,
+        source: "chat".into(),
+        at: String::new(),
+    });
+    let streak = super::habits::stats(g, &rows, today).streak;
+    let when = if day == today { "today" } else { "yesterday" };
+    let title: String = g.title.chars().take(80).collect();
+    Ok(ParseResult::Preview {
+        preview: AddPreview {
+            title: format!(
+                "Mark {title} {} for {when}",
+                if done { "done" } else { "not done" }
+            ),
+            fields: vec![
+                ("Habit".into(), title),
+                (
+                    "Day".into(),
+                    format!("{} ({})", capital(when), label_day(day)),
+                ),
+                (
+                    "Streak after".into(),
+                    format!("{streak} day{}", if streak == 1 { "" } else { "s" }),
+                ),
+            ],
+            note: Some("Undo is open for a few seconds after saving.".into()),
+            payload: Some(
+                serde_json::to_value(Payload::HabitDone {
+                    habit_id: g.id.clone(),
+                    day: key,
+                    done,
+                })
+                .map_err(|e| e.to_string())?,
+            ),
+        },
+    })
+}
+
+fn capital(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+        .unwrap_or_default()
 }
 
 /// Reads the line into a preview, a question or "this lives elsewhere". Writes nothing.
@@ -612,6 +775,7 @@ pub(crate) fn preview_in(
     let text = clean_text(text, 1, MAX_TEXT)?;
     let preview = match kind {
         "date" => return date_reading(&text, today),
+        "habit-done" => return habit_done_reading(&text, dirs, today),
         "goal" => goal_reading(&text)?,
         "task" => task_reading(&text, &dirs.data, today)?,
         _ => idea_reading(&text, &dirs.data)?,
@@ -705,6 +869,8 @@ fn apply(
     now: DateTime<FixedOffset>,
 ) -> Result<(Saved, UndoRef, String), String> {
     match p {
+        // Written by `save_in` through `habits::mark_in` before the History lock is taken.
+        Payload::HabitDone { .. } => Err("invalid input".into()),
         Payload::Goal {
             title,
             per_week,
@@ -747,6 +913,7 @@ fn apply(
                 why: None,
                 remind_at: None,
                 paused: false,
+                life: Default::default(),
             });
             write_json_atomic(&path, &goals, MAX_MD_BYTES)?;
             Ok((
@@ -759,7 +926,12 @@ fn apply(
                 format!("Added {title}"),
             ))
         }
-        Payload::Date { title, date, lane } => {
+        Payload::Date {
+            title,
+            date,
+            lane,
+            lead_days,
+        } => {
             let rec = life_dates::upsert_in(
                 &dirs.life(),
                 &LifeDateDraft {
@@ -768,6 +940,13 @@ fn apply(
                     date: date.clone(),
                     lane: lane.clone(),
                     sub: None,
+                    lead_days: if lead_days.is_empty() {
+                        None
+                    } else {
+                        Some(lead_days.clone())
+                    },
+                    done: None,
+                    goal_id: None,
                 },
             )?;
             Ok((
@@ -850,6 +1029,7 @@ fn payload_kind(p: &Payload) -> &'static str {
         Payload::Date { .. } => "date",
         Payload::Task { .. } => "task",
         Payload::Idea { .. } => "idea",
+        Payload::HabitDone { .. } => "habit-done",
     }
 }
 
@@ -1071,6 +1251,32 @@ pub(crate) fn save_in(
         .map_err(|_| "invalid input".to_string())?;
     if payload_kind(&payload) != kind {
         return Err("invalid input".into());
+    }
+    if let Payload::HabitDone {
+        habit_id,
+        day,
+        done,
+    } = &payload
+    {
+        // `mark_in` takes the History lock itself and logs its own entry (kind "habit", Undo via add_undo("habit")).
+        let r = super::habits::mark_in(dirs, habit_id, day, *done, "chat", now)?;
+        let goals: Vec<Goal> = read_json(&dirs.goals(), MAX_MD_BYTES)?;
+        let name = goals
+            .iter()
+            .find(|g| g.id == *habit_id)
+            .map(|g| g.title.chars().take(80).collect::<String>())
+            .unwrap_or_else(|| "habit".into());
+        let state = if *done { "done" } else { "not done" };
+        let title = if r.changed {
+            format!("{name} marked {state} for {day}")
+        } else {
+            format!("{name} was already marked {state} for {day}")
+        };
+        return Ok(Saved {
+            id: r.id.unwrap_or_default(),
+            title,
+            also: None,
+        });
     }
     let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
     // Read first: an unreadable History is an error before anything is written, never an empty one.
@@ -1450,6 +1656,129 @@ const RULES: &[(&str, &[St])] = &[
     ),
 ];
 
+/// Habit marking ("I did my stretch", "mark stretch done", "I didn't walk today"): tried after `RULES`, mirrors
+/// `HABIT_RULES` in intent.ts. The bool is the polarity of the lead words.
+const HABIT_RULES: &[(bool, &[St])] = &[
+    (
+        false,
+        &[
+            St::Lead,
+            St::Please,
+            St::Lit(&[
+                "i didn't",
+                "i didnt",
+                "i did not",
+                "i haven't",
+                "i havent",
+                "i have not",
+                "i skipped",
+                "i missed",
+            ]),
+            St::Body,
+        ],
+    ),
+    (
+        true,
+        &[
+            St::Lead,
+            St::Please,
+            St::Lit(&[
+                "i did",
+                "i've done",
+                "i have done",
+                "i just did",
+                "i finished",
+                "i completed",
+            ]),
+            St::Body,
+        ],
+    ),
+    (
+        true,
+        &[
+            St::Lead,
+            St::Please,
+            St::Lit(&["mark", "tick off", "check off"]),
+            St::Body,
+        ],
+    ),
+];
+
+/// Strips a trailing "today" / "yesterday" (optionally "for ") and returns the rest and the day. Same as
+/// `/\s+(?:for\s+)?(today|yesterday)$/i` (the text has single spaces by now).
+fn strip_day(s: &str) -> (&str, Option<&'static str>) {
+    let low = s.to_ascii_lowercase();
+    for day in ["today", "yesterday"] {
+        let Some(rest) = low.strip_suffix(day) else {
+            continue;
+        };
+        if !rest.ends_with(' ') {
+            continue;
+        }
+        if let Some(x) = rest.strip_suffix("for ") {
+            if x.ends_with(' ') {
+                return (&s[..x.len() - 1], Some(day));
+            }
+        }
+        return (&s[..rest.len() - 1], Some(day));
+    }
+    (s, None)
+}
+
+/// "my stretch done today" -> "done today stretch" (see `habitDoneText` in intent.ts, which this matches step for
+/// step). None when no habit words are left.
+pub(crate) fn habit_done_text(base: bool, body: &str) -> Option<String> {
+    let mut done = base;
+    let mut day = "today";
+    let (mut s, d) = strip_day(body);
+    if let Some(d) = d {
+        day = d;
+    }
+    let low = s.to_ascii_lowercase();
+    for (suffix, value) in [
+        (" as not done", false),
+        (" not done", false),
+        (" undone", false),
+        (" as done", true),
+        (" done", true),
+    ] {
+        if low.ends_with(suffix) {
+            done = value;
+            s = &s[..s.len() - suffix.len()];
+            let (r, d2) = strip_day(s);
+            s = r;
+            if let Some(d2) = d2 {
+                day = d2;
+            }
+            break;
+        }
+    }
+    let low = s.to_ascii_lowercase();
+    for lead in ["done ", "do "] {
+        if low.starts_with(lead) {
+            s = &s[lead.len()..];
+            break;
+        }
+    }
+    let low = s.to_ascii_lowercase();
+    for lead in ["my ", "the "] {
+        if low.starts_with(lead) {
+            s = &s[lead.len()..];
+            break;
+        }
+    }
+    let s = js_trim(s);
+    let n = s.encode_utf16().count();
+    if !(2..=60).contains(&n)
+        || ["my", "the", "do", "done"]
+            .iter()
+            .any(|w| s.eq_ignore_ascii_case(w))
+    {
+        return None;
+    }
+    Some(format!("{} {day} {s}", if done { "done" } else { "not" }))
+}
+
 /// Explicit phrasings only (same as `detectAddIntent`): anything else is None and nothing happens.
 pub(crate) fn detect_add_intent(input: &str) -> Option<AddIntent> {
     let t = js_trim(input)
@@ -1467,6 +1796,17 @@ pub(crate) fn detect_add_intent(input: &str) -> Option<AddIntent> {
                 kind,
                 text: js_trim(body).to_string(),
             });
+        }
+    }
+    for (base, steps) in HABIT_RULES {
+        if let Some((a, b)) = matches_steps(steps, &t) {
+            let body = js_trim(t[a..b].trim_end_matches(['.', '!', '?']));
+            if let Some(text) = habit_done_text(*base, body) {
+                return Some(AddIntent {
+                    kind: "habit-done",
+                    text,
+                });
+            }
         }
     }
     None
@@ -1507,6 +1847,7 @@ pub(crate) fn is_add_cancel(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::habits;
     use super::super::local_store::tests::temp_dir;
     use super::*;
     use chrono::Duration;
@@ -1853,6 +2194,174 @@ mod tests {
             goals[1].unit, "days #x a week",
             "control characters are flattened"
         );
+    }
+
+    fn habit_goal(id: &str, title: &str, paused: bool) -> Goal {
+        Goal {
+            id: id.into(),
+            title: title.into(),
+            category: "habit".into(),
+            target: 7.0,
+            current: 0.0,
+            unit: "daily".into(),
+            deadline: None,
+            created_at: "2026-11-01T09:00:00+09:00".into(),
+            updated_at: String::new(),
+            venture_id: None,
+            why: None,
+            remind_at: None,
+            paused,
+            life: Default::default(),
+        }
+    }
+    fn seed_habits(d: &Dirs, goals: &[Goal]) {
+        std::fs::create_dir_all(&d.data).unwrap();
+        write_json_atomic(&d.goals(), &goals.to_vec(), MAX_MD_BYTES).unwrap();
+    }
+    fn habit_preview(text: &str, d: &Dirs) -> Result<ParseResult, String> {
+        preview_in("habit-done", text, d, today())
+    }
+    fn jst_at(h: u32) -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339(&format!("2026-11-11T{h:02}:00:00+09:00")).unwrap()
+    }
+
+    #[test]
+    fn habit_done_text_matches_the_documented_shapes() {
+        assert_eq!(
+            habit_done_text(true, "my stretch"),
+            Some("done today stretch".into())
+        );
+        assert_eq!(
+            habit_done_text(true, "stretch as not done for yesterday"),
+            Some("not yesterday stretch".into())
+        );
+        assert_eq!(
+            habit_done_text(false, "do my stretch today"),
+            Some("not today stretch".into())
+        );
+        assert_eq!(habit_done_text(true, "my"), None);
+        assert_eq!(habit_done_text(true, "the"), None);
+        assert_eq!(habit_done_text(true, &"x".repeat(61)), None);
+    }
+
+    #[test]
+    fn habit_done_resolves_one_habit_previews_the_streak_and_saves_with_undo() {
+        let d = dirs("habit-done");
+        seed_habits(
+            &d,
+            &[
+                habit_goal("h1", "Stretch", false),
+                habit_goal("h2", "Walk", false),
+                habit_goal("h3", "Cold shower", true),
+            ],
+        );
+        // yesterday already done, so marking today makes a streak of 2
+        habits::set_in(
+            &habits::dir_in(&d.data),
+            "h1",
+            today() - Duration::days(1),
+            true,
+            "manual",
+            jst_at(9),
+        )
+        .unwrap();
+        let ParseResult::Preview { preview } = habit_preview("done today stretching", &d).unwrap()
+        else {
+            panic!("expected a preview");
+        };
+        assert_eq!(preview.title, "Mark Stretch done for today");
+        assert!(preview
+            .fields
+            .contains(&("Streak after".into(), "2 days".into())));
+        assert!(
+            !habits::dir_in(&d.data).join("days.json").exists()
+                || habits::rows_in(&habits::dir_in(&d.data))
+                    .unwrap()
+                    .iter()
+                    .all(|r| r.day != "2026-11-11"),
+            "preview wrote nothing for today"
+        );
+        let saved = save_in("habit-done", &preview, Some("chat"), &d, jst_at(10)).unwrap();
+        assert!(
+            saved.title.contains("Stretch marked done"),
+            "{}",
+            saved.title
+        );
+        let rows = habits::rows_in(&habits::dir_in(&d.data)).unwrap();
+        let mine = rows
+            .iter()
+            .find(|r| r.habit_id == "h1" && r.day == "2026-11-11")
+            .unwrap();
+        assert!(mine.done);
+        assert_eq!(mine.source, "chat");
+        // History lists it under "habit" and Undo takes it back
+        let hist = history_in("habit", &d).unwrap();
+        assert!(
+            hist[0].text.contains("Marked Stretch done"),
+            "{:?}",
+            hist[0]
+        );
+        assert!(undo_in("habit", &saved.id, &d, jst_at(10)).unwrap());
+        let rows = habits::rows_in(&habits::dir_in(&d.data)).unwrap();
+        assert!(rows.iter().all(|r| r.day != "2026-11-11"));
+        let _ = std::fs::remove_dir_all(d.data.parent().unwrap());
+    }
+
+    #[test]
+    fn habit_done_yesterday_and_not_done_and_same_state_again() {
+        let d = dirs("habit-done-y");
+        seed_habits(&d, &[habit_goal("h1", "Walk", false)]);
+        let ParseResult::Preview { preview } = habit_preview("not yesterday walk", &d).unwrap()
+        else {
+            panic!("expected a preview");
+        };
+        assert_eq!(preview.title, "Mark Walk not done for yesterday");
+        let first = save_in("habit-done", &preview, Some("chat"), &d, jst_at(10)).unwrap();
+        assert!(!first.id.is_empty());
+        let rows = habits::rows_in(&habits::dir_in(&d.data)).unwrap();
+        assert_eq!((rows[0].day.as_str(), rows[0].done), ("2026-11-10", false));
+        // the same state again changes nothing and logs nothing
+        let again = save_in("habit-done", &preview, Some("chat"), &d, jst_at(11)).unwrap();
+        assert!(again.id.is_empty());
+        assert!(again.title.contains("already marked"), "{}", again.title);
+        assert_eq!(history_in("habit", &d).unwrap().len(), 1);
+        // the payload kind is bound: a habit payload cannot be saved as a goal
+        assert!(save_in("goal", &preview, Some("chat"), &d, jst_at(10)).is_err());
+        let _ = std::fs::remove_dir_all(d.data.parent().unwrap());
+    }
+
+    #[test]
+    fn habit_done_asks_when_several_fit_skips_paused_and_has_no_match_error() {
+        let d = dirs("habit-done-ask");
+        seed_habits(
+            &d,
+            &[
+                habit_goal("h1", "Morning stretch", false),
+                habit_goal("h2", "Evening stretch", false),
+                habit_goal("h3", "Cold shower", true),
+            ],
+        );
+        match habit_preview("done today stretch", &d).unwrap() {
+            ParseResult::Ask { options, .. } => {
+                assert_eq!(options, ["Morning stretch", "Evening stretch"])
+            }
+            other => panic!("{other:?}"),
+        }
+        // the extra word picks one
+        assert!(matches!(
+            habit_preview("done today evening stretch", &d).unwrap(),
+            ParseResult::Preview { .. }
+        ));
+        // a paused habit is never offered or marked
+        assert_eq!(
+            habit_preview("done today cold shower", &d).unwrap_err(),
+            "habit: no match"
+        );
+        assert_eq!(
+            habit_preview("done today taxes", &d).unwrap_err(),
+            "habit: no match"
+        );
+        let _ = std::fs::remove_dir_all(d.data.parent().unwrap());
     }
 
     #[test]

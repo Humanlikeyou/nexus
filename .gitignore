@@ -42,3 +42,35 @@ stack/crew-tools.conf
 
 # Bundled sidecar runtimes (copied at build time, never committed; decision 0031)
 src-tauri/binaries/
+
+# Private data and runtime memory: never committed (decision 0050). The app keeps these in its
+# application-support folder; the repository only ships generic defaults in config/defaults/.
+/memory/
+/config/terrance.profile.md
+/config/terrance.identity.md
+/config/private/
+*.private.md
+*.local.md
+session_logs/
+terrance_context.json
+turn_summaries/
+terrence_interactions/
+chat_history.db*
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db-shm
+*.db-wal
+
+# Local secrets and signing material
+secrets.env
+.env.crew
+*.p8
+*.p12
+*.mobileprovision
+launch_token
+crew_service_token
+*.keychain-db
+
+# Committed on purpose: a template with no values
+!stack/.env.example
