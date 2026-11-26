@@ -45,6 +45,12 @@ pub(crate) enum KeychainError {
 pub(crate) trait Keychain: Send + Sync {
     fn get(&self, service: &str) -> Result<Vec<u8>, KeychainError>;
     fn set(&self, service: &str, value: &[u8]) -> Result<(), KeychainError>;
+    /// Removes an item (0063: disconnecting a business connector). `NotFound` when there is none.
+    fn delete(&self, _service: &str) -> Result<(), KeychainError> {
+        Err(KeychainError::Other(
+            "this keychain can't remove items".into(),
+        ))
+    }
 }
 
 pub(crate) fn service_for(name: &str) -> String {
@@ -76,6 +82,16 @@ impl Keychain for MacKeychain {
         set_generic_password(service, ACCOUNT, value)
             .map_err(|e| KeychainError::Other(format!("keychain error {}", e.code())))
     }
+    fn delete(&self, service: &str) -> Result<(), KeychainError> {
+        use security_framework::passwords::delete_generic_password;
+        delete_generic_password(service, ACCOUNT).map_err(|e| {
+            if e.code() == -25300 {
+                KeychainError::NotFound
+            } else {
+                KeychainError::Other(format!("keychain error {}", e.code()))
+            }
+        })
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -87,6 +103,9 @@ impl Keychain for MacKeychain {
         Err(KeychainError::Other("Keychain is macOS only".into()))
     }
     fn set(&self, _: &str, _: &[u8]) -> Result<(), KeychainError> {
+        Err(KeychainError::Other("Keychain is macOS only".into()))
+    }
+    fn delete(&self, _: &str) -> Result<(), KeychainError> {
         Err(KeychainError::Other("Keychain is macOS only".into()))
     }
 }
@@ -114,6 +133,14 @@ impl Keychain for FakeKeychain {
             .map_err(|_| KeychainError::Other("poisoned".into()))?
             .insert(service.to_string(), value.to_vec());
         Ok(())
+    }
+    fn delete(&self, service: &str) -> Result<(), KeychainError> {
+        self.items
+            .lock()
+            .map_err(|_| KeychainError::Other("poisoned".into()))?
+            .remove(service)
+            .map(|_| ())
+            .ok_or(KeychainError::NotFound)
     }
 }
 

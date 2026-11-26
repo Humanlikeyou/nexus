@@ -193,6 +193,74 @@ impl Store {
         Ok(rows)
     }
 
+    /// 0063: one business's activity, newest first. Only the business file is opened, and only rows
+    /// carrying exactly this `business_id` come back (rows from before v3 have none and stay out).
+    pub(crate) fn list_business_activity(
+        &self,
+        business_id: &str,
+        limit: u32,
+    ) -> Result<Vec<ActivityRow>, String> {
+        if self.boundary() != super::Boundary::Business {
+            return Err("business activity lives only in the business file".into());
+        }
+        let conn = self.open()?;
+        let mut st = conn
+            .prepare(
+                "SELECT activity_id, scope, kind, subject_ref, occurred_at, recorded_at, source,
+                    certainty, source_ref, actor, summary, data_json FROM activity
+                 WHERE scope = 'business' AND business_id = ?1
+                 ORDER BY occurred_at DESC, recorded_at DESC LIMIT ?2",
+            )
+            .map_err(err)?;
+        let rows = st
+            .query_map(params![business_id, limit.min(1000)], |r| {
+                let source: String = r.get(6)?;
+                Ok(ActivityRow {
+                    activity_id: r.get(0)?,
+                    scope: r.get(1)?,
+                    kind: r.get(2)?,
+                    subject_ref: r.get(3)?,
+                    occurred_at: r.get(4)?,
+                    recorded_at: r.get(5)?,
+                    provenance: provenance(&source).into(),
+                    source,
+                    certainty: r.get(7)?,
+                    source_ref: r.get(8)?,
+                    actor: r.get(9)?,
+                    summary: r.get(10)?,
+                    data_json: r.get(11)?,
+                })
+            })
+            .map_err(err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+        Ok(rows)
+    }
+
+    /// 0063: one business's recommendations (those whose target is one of its records).
+    pub(crate) fn list_business_recommendations(
+        &self,
+        business_id: &str,
+        limit: u32,
+    ) -> Result<Vec<RecommendationRow>, String> {
+        if self.boundary() != super::Boundary::Business {
+            return Err("business recommendations live only in the business file".into());
+        }
+        let conn = self.open()?;
+        let mut st = conn
+            .prepare(&format!(
+                "SELECT {REC_COLS} FROM recommendation WHERE scope = 'business' AND business_id = ?1
+                 ORDER BY created_at DESC LIMIT ?2"
+            ))
+            .map_err(err)?;
+        let rows = st
+            .query_map(params![business_id, limit.min(500)], rec_row)
+            .map_err(err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+        Ok(rows)
+    }
+
     pub(crate) fn list_recommendations(
         &self,
         scope: Scope,

@@ -48,9 +48,10 @@ export const HOST_VIEWS: Partial<Record<ModuleId, SubView[]>> = {
   life: [{ view: "overview", label: "Overview", screen: "life" }, { view: "goals", label: "Goals & projects", screen: "life" }, { view: "habits", label: "Habits & routines", screen: "life" }, { view: "weekly-review", label: "Weekly review", screen: "life" }, { view: "dates", label: "Dates & deadlines", screen: "life" }, { view: "money", label: "Personal money", screen: "life" }],
   // design-1111s: Settings gets section tabs, the same bar Enterprise uses (Taisun, 14:59 JST Nov 11).
   settings: [{ view: "main", label: "General", screen: "settings" }, { view: "services", label: "Services", screen: "settings" }, { view: "devices", label: "Devices", screen: "settings" }, { view: "notifications", label: "Notifications", screen: "settings" }, { view: "backup", label: "Backup", screen: "settings" }, { view: "voice", label: "Voice", screen: "settings" }, { view: "memory", label: "Memory", screen: "settings" }],
+  // Decision 0063: Workspaces (one per business) sits after Ventures; no other tab moved or changed.
   // design-1111v: Business became Enterprise. Money → Finances (old ids "revenue" and "money" redirect), Work → Tasks,
   // Personal moved to Life › Personal money. A venture is its own route: "ventures/<id>".
-  enterprise: [{ view: "main", label: "Overview", screen: "business" }, { view: "decisions", label: "Decisions", screen: "business" }, { view: "ventures", label: "Ventures", screen: "business" }, { view: "finances", label: "Finances", screen: "revenue" }, { view: "treasury", label: "Treasury", screen: "business" }, { view: "tasks", label: "Tasks", screen: "business" }, { view: "content", label: "Content", screen: "business" }],
+  enterprise: [{ view: "main", label: "Overview", screen: "business" }, { view: "decisions", label: "Decisions", screen: "business" }, { view: "ventures", label: "Ventures", screen: "business" }, { view: "workspaces", label: "Workspaces", screen: "business" }, { view: "finances", label: "Finances", screen: "revenue" }, { view: "treasury", label: "Treasury", screen: "business" }, { view: "tasks", label: "Tasks", screen: "business" }, { view: "content", label: "Content", screen: "business" }],
 };
 
 /** Folded ids stay valid ModuleIds (stored state, ⌘K, onNavigate) and resolve to their host. */

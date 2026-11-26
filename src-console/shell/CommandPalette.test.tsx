@@ -34,6 +34,7 @@ describe("⌘K command palette", () => {
         "Mind–Body › Patterns",
         "Enterprise › Decisions",
         "Enterprise › Ventures",
+        "Enterprise › Workspaces",
         "Enterprise › Finances",
         "Enterprise › Treasury",
         "Enterprise › Tasks",

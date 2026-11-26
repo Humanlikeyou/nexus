@@ -7,6 +7,7 @@ pub mod backup_schedule;
 pub mod backups;
 pub mod ble_common;
 pub mod business_ledger;
+pub(crate) mod business_workspace;
 pub mod content_drafts;
 pub mod content_pipeline;
 pub mod continuity;

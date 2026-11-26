@@ -788,7 +788,8 @@ fn a_failed_migration_changes_nothing_and_a_backup_can_be_restored() {
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].certainty, "confirmed");
-    assert_eq!(version(&raw), "2");
+    // v1 → v2 → v3 in one open (0063 added v3), with the one v1 backup below.
+    assert_eq!(version(&raw), "3");
     drop(raw);
     let backup = std::fs::read_dir(&t.0)
         .unwrap()
@@ -996,4 +997,77 @@ fn forgetting_also_removes_the_record_from_backups_which_are_private() {
     assert_eq!(s.prune_backups(30), 0);
     assert_eq!(s.prune_backups(0), 1);
     assert!(s.backup_copies().is_empty());
+}
+
+/// 0063: a v2 file with rows moves to v3 with its own backup; business rows carry their business id
+/// (derived from the `biz:` subject), every other row has none, and the personal file can never hold one.
+#[test]
+fn v3_adds_business_ids_from_biz_refs_only_with_a_backup_of_the_v2_file() {
+    let t = tmp("v3");
+    std::fs::create_dir_all(t.0.join("business")).unwrap();
+    let db = t.0.join("business/amara_business.db");
+    {
+        // Build a v2 file by hand: run v1 → v2 only, then add a row.
+        let s = store_for(&t.0, Scope::Business);
+        s.open().unwrap();
+        let c = rusqlite::Connection::open(&db).unwrap();
+        c.execute_batch(
+            "DROP INDEX idx_activity_business; DROP INDEX idx_recommendation_business;
+             ALTER TABLE activity DROP COLUMN business_id; ALTER TABLE recommendation DROP COLUMN business_id;
+             UPDATE schema_meta SET value = '2' WHERE key = 'schema_version';
+             INSERT INTO activity (activity_id, scope, kind, subject_ref, occurred_at, recorded_at, source, actor, schema_version)
+             VALUES ('old','business','business.action_done','ledger:venture:v1','2026-11-20T00:00:00Z','t','user','taisun',2);",
+        )
+        .unwrap();
+    }
+    let s = store_for(&t.0, Scope::Business);
+    s.record_activity(&NewActivity {
+        scope: Scope::Business,
+        certainty: "confirmed",
+        kind: "business.context_changed",
+        subject_ref: "biz:taiyo-skin/context/i1",
+        occurred_at: "2026-11-26T00:00:00Z",
+        source: "user",
+        source_ref: None,
+        actor: "taisun",
+        summary: None,
+        data_json: None,
+    })
+    .unwrap();
+    let mine = s.list_business_activity("taiyo-skin", 10).unwrap();
+    assert_eq!(
+        mine.len(),
+        1,
+        "the pre-v3 row has no business and stays out"
+    );
+    assert!(s.list_business_activity("other", 10).unwrap().is_empty());
+    let c = rusqlite::Connection::open(&db).unwrap();
+    let v: String = c
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key='schema_version'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(v, "3");
+    let old: Option<String> = c
+        .query_row(
+            "SELECT business_id FROM activity WHERE activity_id='old'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(old, None);
+    assert!(std::fs::read_dir(t.0.join("business")).unwrap().any(|e| e
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .contains("amara_business.db.v2-")));
+    // A `biz:` ref without a business is refused.
+    assert!(RecordRef::parse("biz:").is_err());
+    let r = RecordRef::parse("biz:taiyo-skin/context/i1").unwrap();
+    assert_eq!(
+        (r.scope, business_of(&r)),
+        (Scope::Business, Some("taiyo-skin"))
+    );
 }

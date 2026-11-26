@@ -21,8 +21,10 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 /// v1: the four tables (0053). v2 (foundations phase): recommendation observation, rationale,
-/// suggested action, uncertainty, impact and effort; activity certainty. Additive only.
-pub(crate) const SCHEMA_VERSION: i64 = 2;
+/// suggested action, uncertainty, impact and effort; activity certainty. v3 (0063, Enterprise):
+/// `business_id` on activity and recommendation, derived from a `biz:` reference and allowed only
+/// on business rows. Additive only.
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 const MAX_DATA_JSON: usize = 4 * 1024;
 const MAX_TEXT: usize = 2_000;
 
@@ -86,6 +88,8 @@ const STORES: &[(&str, Scope)] = &[
     ("ledger", Scope::Business),
     ("treasury", Scope::Business),
     ("arm", Scope::Business),
+    // 0063: business workspace records, `biz:<business id>/<kind>/<id>` (business_workspace.rs).
+    ("biz", Scope::Business),
     ("execution", Scope::Ops),
     ("job", Scope::Ops),
     ("activity", Scope::Ops),
@@ -136,6 +140,15 @@ impl RecordRef {
     }
 }
 
+/// The business a reference belongs to: `biz:<business id>/...` → the id. Any other store → None.
+pub(crate) fn business_of(r: &RecordRef) -> Option<&str> {
+    if r.store != "biz" {
+        return None;
+    }
+    let id = r.id.split('/').next().unwrap_or("");
+    (!id.is_empty()).then_some(id)
+}
+
 // ─── Vocabularies ────────────────────────────────────────────────────────────
 
 const ACTIVITY_KINDS: &[&str] = &[
@@ -157,6 +170,18 @@ const ACTIVITY_KINDS: &[&str] = &[
     "link.removed",
     "area.updated",
     "week.planned",
+    // 0063: business workspaces. Every one has a `biz:` subject, so it carries its business id.
+    "business.created",
+    "business.updated",
+    "business.context_changed",
+    "business.context_approved",
+    "business.memory_changed",
+    "business.document_added",
+    "business.document_changed",
+    "business.connector_changed",
+    "business.sync_finished",
+    "business.permission_changed",
+    "business.proposal_decided",
 ];
 const ACTIVITY_SOURCES: &[&str] = &["user", "model", "scheduler", "import", "backfill", "noop"];
 const ACTORS: &[&str] = &["taisun", "amara", "system"];
@@ -315,6 +340,10 @@ impl Store {
         Ok(conn)
     }
 
+    pub(crate) fn boundary(&self) -> Boundary {
+        self.boundary
+    }
+
     /// The app data folder this store sits in (the business file is one level down).
     pub(crate) fn data_dir(&self) -> PathBuf {
         let parent = self.path.parent().unwrap_or(Path::new("."));
@@ -341,6 +370,11 @@ impl Store {
         if !self.boundary.allows(subject.scope) {
             return Err("activity subject is in another boundary".into());
         }
+        // 0063: a workspace record's activity is tied to its business; nothing else carries one.
+        let business_id = business_of(&subject).map(str::to_string);
+        if subject.store == "biz" && business_id.is_none() {
+            return Err("activity subject names no business".into());
+        }
         if let Some(r) = a.source_ref {
             RecordRef::parse(r)?;
         }
@@ -361,11 +395,13 @@ impl Store {
         let n = conn
             .execute(
                 "INSERT OR IGNORE INTO activity (activity_id, scope, kind, subject_ref, occurred_at,
-                    recorded_at, source, source_ref, actor, summary, data_json, schema_version, certainty)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                    recorded_at, source, source_ref, actor, summary, data_json, schema_version, certainty,
+                    business_id)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
                 params![
                     id, a.scope.as_str(), a.kind, a.subject_ref, a.occurred_at, now(), a.source,
-                    a.source_ref, a.actor, a.summary, a.data_json, SCHEMA_VERSION, a.certainty
+                    a.source_ref, a.actor, a.summary, a.data_json, SCHEMA_VERSION, a.certainty,
+                    business_id
                 ],
             )
             .map_err(|e| format!("amara store: {e}"))?;
@@ -401,11 +437,13 @@ impl Store {
             (Some(_), _) => return Err("confidence needs a basis and must be 0..1".into()),
             (None, _) => {}
         }
+        let mut business_id: Option<String> = None;
         if let Some(t) = r.target_ref {
             let t = RecordRef::parse(t)?;
             if !evidence_allowed(r.scope, t.scope) {
                 return Err("target is in a scope this recommendation can't touch".into());
             }
+            business_id = business_of(&t).map(str::to_string);
         }
         for (v, what) in [(r.impact, "impact"), (r.effort, "effort")] {
             if let Some(v) = v {
@@ -432,6 +470,15 @@ impl Store {
         let mut observations = 0;
         for e in evidence {
             let rr = RecordRef::parse(e.record_ref)?;
+            // 0063: a business recommendation's evidence stays inside its own business.
+            if let (Some(b), Some(eb)) = (business_id.as_deref(), business_of(&rr)) {
+                if b != eb {
+                    return Err(format!(
+                        "evidence {} belongs to another business",
+                        e.record_ref
+                    ));
+                }
+            }
             match resolve::resolve(&data, &rr) {
                 resolve::Resolution::Found { sha256 } => shas.push(Some(sha256)),
                 resolve::Resolution::Missing => {
@@ -478,13 +525,13 @@ impl Store {
             "INSERT INTO recommendation (recommendation_id, scope, domain, kind, title, body, status,
                 created_at, updated_at, expires_at, produced_by, model_tier, confidence,
                 confidence_basis, target_ref, supersedes_id, schema_version, observation, rationale,
-                suggested_action, uncertainty, impact, effort)
-             VALUES (?1,?2,?3,?4,?5,?6,'proposed',?7,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+                suggested_action, uncertainty, impact, effort, business_id)
+             VALUES (?1,?2,?3,?4,?5,?6,'proposed',?7,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
             params![
                 id, r.scope.as_str(), r.domain, r.kind, r.title, r.body, t, r.expires_at,
                 r.produced_by, r.model_tier, r.confidence, r.confidence_basis, r.target_ref,
                 r.supersedes_id, SCHEMA_VERSION, r.observation, r.rationale, r.suggested_action,
-                r.uncertainty, r.impact, r.effort
+                r.uncertainty, r.impact, r.effort, business_id
             ],
         )
         .map_err(|e| format!("amara store: {e}"))?;
@@ -943,17 +990,23 @@ fn init(conn: &Connection, b: Boundary, path: &Path) -> Result<(), String> {
         }
         Some(v) => (v, false),
     };
+    // One backup per open: when v2 already copied the original file, v3 needs no second copy of
+    // a state that only existed inside this open.
+    let mut backed_up = false;
     if version < 2 {
-        migrate_to_v2(conn, path, fresh)?;
+        backed_up = migrate_to_v2(conn, path, fresh)?;
+    }
+    if version < 3 {
+        migrate_to_v3(conn, path, fresh || backed_up)?;
     }
     Ok(())
 }
 
-/// v1 → v2 (additive): recommendation observation, rationale, suggested_action, uncertainty,
-/// impact, effort; activity certainty. A file that already holds rows is copied first
-/// (`VACUUM INTO <file>.v1-<timestamp>.bak`, 0600). The change and the version bump are one
-/// transaction: on any error nothing changes and the file stays v1.
-fn migrate_to_v2(conn: &Connection, path: &Path, fresh: bool) -> Result<(), String> {
+/// v2 → v3 (additive, 0063): `business_id` on activity and recommendation. The CHECK allows it on
+/// business rows only, so the personal file can never hold one. Same backup and one-transaction
+/// rule as v2: on any error nothing changes and the file stays v2. `skip_backup`: a new file, or
+/// the v2 step in this same open already copied the original.
+fn migrate_to_v3(conn: &Connection, path: &Path, skip_backup: bool) -> Result<(), String> {
     let has_rows: i64 = conn
         .query_row(
             "SELECT (SELECT COUNT(*) FROM activity) + (SELECT COUNT(*) FROM recommendation)",
@@ -961,7 +1014,71 @@ fn migrate_to_v2(conn: &Connection, path: &Path, fresh: bool) -> Result<(), Stri
             |r| r.get(0),
         )
         .map_err(|e| format!("amara store: {e}"))?;
-    if !fresh && has_rows > 0 {
+    if !skip_backup && has_rows > 0 {
+        backup_before_migration(conn, path, 2)?;
+    }
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| format!("amara store: {e}"))?;
+    match migrate_v3_locked(conn) {
+        Ok(()) => conn
+            .execute_batch("COMMIT")
+            .map_err(|e| format!("amara store: migration to v3 failed: {e}")),
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+fn migrate_v3_locked(tx: &Connection) -> Result<(), String> {
+    let now: String = tx
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key='schema_version'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("amara store: {e}"))?;
+    if now.parse::<i64>().unwrap_or(0) >= 3 {
+        return Ok(());
+    }
+    tx.execute_batch(
+        "
+        ALTER TABLE activity ADD COLUMN business_id TEXT
+            CHECK (business_id IS NULL OR scope = 'business');
+        ALTER TABLE recommendation ADD COLUMN business_id TEXT
+            CHECK (business_id IS NULL OR scope = 'business');
+        CREATE INDEX IF NOT EXISTS idx_activity_business ON activity(business_id, occurred_at);
+        CREATE INDEX IF NOT EXISTS idx_recommendation_business ON recommendation(business_id, created_at);
+        ",
+    )
+    .map_err(|e| format!("amara store: migration to v3 failed: {e}"))?;
+    #[cfg(test)]
+    if FAIL_MIGRATION.with(|f| f.get()) {
+        return Err("amara store: migration to v3 failed: injected".into());
+    }
+    tx.execute(
+        "UPDATE schema_meta SET value = '3' WHERE key = 'schema_version'",
+        [],
+    )
+    .map_err(|e| format!("amara store: {e}"))?;
+    Ok(())
+}
+
+/// v1 → v2 (additive): recommendation observation, rationale, suggested_action, uncertainty,
+/// impact, effort; activity certainty. A file that already holds rows is copied first
+/// (`VACUUM INTO <file>.v1-<timestamp>.bak`, 0600). The change and the version bump are one
+/// transaction: on any error nothing changes and the file stays v1.
+/// Returns whether a backup was taken.
+fn migrate_to_v2(conn: &Connection, path: &Path, fresh: bool) -> Result<bool, String> {
+    let has_rows: i64 = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM activity) + (SELECT COUNT(*) FROM recommendation)",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("amara store: {e}"))?;
+    let backup = !fresh && has_rows > 0;
+    if backup {
         backup_before_migration(conn, path, 1)?;
     }
     // Take the write lock, then re-check: another connection may have migrated meanwhile.
@@ -970,6 +1087,7 @@ fn migrate_to_v2(conn: &Connection, path: &Path, fresh: bool) -> Result<(), Stri
     match migrate_v2_locked(conn) {
         Ok(()) => conn
             .execute_batch("COMMIT")
+            .map(|_| backup)
             .map_err(|e| format!("amara store: migration to v2 failed: {e}")),
         Err(e) => {
             let _ = conn.execute_batch("ROLLBACK");

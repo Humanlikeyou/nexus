@@ -495,6 +495,50 @@ export const commands = {
 	neuroTrainingTrends: (options?: InvokeOptions) => __TAURI_INVOKE<TrainingTrends_Serialize>("neuro_training_trends", undefined, options),
 	noopSessionHrv: (start: string, end: string, options?: InvokeOptions) => __TAURI_INVOKE<SessionHrv_Serialize>("noop_session_hrv", { start, end }, options),
 	noopRrStatus: (options?: InvokeOptions) => __TAURI_INVOKE<RrStatus_Serialize>("noop_rr_status", undefined, options),
+	businessList: (options?: InvokeOptions) => __TAURI_INVOKE<Business_Serialize[]>("business_list", undefined, options),
+	businessCreate: (name: string, description: string | null, ventureId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<Business_Serialize>("business_create", { name, description, ventureId }, options),
+	businessUpdate: (businessId: string, name: string, description: string | null, ventureId: string | null, status: string, options?: InvokeOptions) => __TAURI_INVOKE<Business_Serialize>("business_update", { businessId, name, description, ventureId, status }, options),
+	businessOverview: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessWorkspaceOverview_Serialize>("business_overview", { businessId }, options),
+	businessContextList: (businessId: string, section: string | null, options?: InvokeOptions) => __TAURI_INVOKE<BusinessContextItem_Serialize[]>("business_context_list", { businessId, section }, options),
+	businessContextSave: (businessId: string, input: BusinessContextInput_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<BusinessContextItem_Serialize>("business_context_save", { businessId, input }, options),
+	businessContextSetStatus: (businessId: string, itemId: string, status: string, expectedVersion: number, options?: InvokeOptions) => __TAURI_INVOKE<BusinessContextItem_Serialize>("business_context_set_status", { businessId, itemId, status, expectedVersion }, options),
+	businessContextHistory: (businessId: string, itemId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessContextVersion_Serialize[]>("business_context_history", { businessId, itemId }, options),
+	/**
+	 *  Exactly what Amara may be given about this business under its current permissions (approved
+	 *  items only by default). Refused when reading context is not permitted.
+	 */
+	businessContextForAmara: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessContextItem_Serialize[]>("business_context_for_amara", { businessId }, options),
+	businessMemoryList: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessMemoryNote_Serialize[]>("business_memory_list", { businessId }, options),
+	businessMemoryAdd: (businessId: string, text: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessMemoryNote_Serialize>("business_memory_add", { businessId, text }, options),
+	businessMemoryDecide: (businessId: string, memoryId: string, status: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessMemoryNote_Serialize>("business_memory_decide", { businessId, memoryId, status }, options),
+	businessDocuments: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessDocument_Serialize[]>("business_documents", { businessId }, options),
+	/**  Opens the native file picker; the chosen file is copied in as a draft. None = cancelled. */
+	businessDocumentAdd: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessDocument_Serialize | null>("business_document_add", { businessId }, options),
+	businessDocumentSetStatus: (businessId: string, docId: string, status: string, expectedVersion: number, options?: InvokeOptions) => __TAURI_INVOKE<BusinessDocument_Serialize>("business_document_set_status", { businessId, docId, status, expectedVersion }, options),
+	businessKnowledgeSearch: (businessId: string, query: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessKnowledgeHit_Serialize[]>("business_knowledge_search", { businessId, query }, options),
+	businessConnectors: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize[]>("business_connectors", { businessId }, options),
+	businessConnectorConfigure: (businessId: string, connectorId: string, values: { [key in string]: string }, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize>("business_connector_configure", { businessId, connectorId, values }, options),
+	/**  The native folder picker for the local repository connector. None = cancelled. */
+	businessConnectorPickFolder: (businessId: string, connectorId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize | null>("business_connector_pick_folder", { businessId, connectorId }, options),
+	/**  Write-only: the value goes straight to the Keychain. The reply is the connector's status only. */
+	businessConnectorSecretSet: (businessId: string, connectorId: string, field: string, value: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize>("business_connector_secret_set", { businessId, connectorId, field, value }, options),
+	/**  Disconnect after a native confirmation: settings cleared and Keychain items removed. */
+	businessConnectorDisconnect: (businessId: string, connectorId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize>("business_connector_disconnect", { businessId, connectorId }, options),
+	businessSyncStart: (businessId: string, connectorId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSyncRun_Serialize>("business_sync_start", { businessId, connectorId }, options),
+	businessSyncRuns: (businessId: string, connectorId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSyncRun_Serialize[]>("business_sync_runs", { businessId, connectorId }, options),
+	businessPermissions: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessPermission[]>("business_permissions", { businessId }, options),
+	businessPermissionSet: (businessId: string, actor: string, capability: string, allowed: boolean, options?: InvokeOptions) => __TAURI_INVOKE<BusinessPermission[]>("business_permission_set", { businessId, actor, capability, allowed }, options),
+	businessProposals: (businessId: string, status: string | null, options?: InvokeOptions) => __TAURI_INVOKE<BusinessProposal_Serialize[]>("business_proposals", { businessId, status }, options),
+	/**  Amara's way to propose a change. Inert until the user approves it; needs `propose_changes`. */
+	businessProposalCreate: (businessId: string, itemId: string, title: string, body: string, rationale: string | null, options?: InvokeOptions) => __TAURI_INVOKE<BusinessProposal_Serialize>("business_proposal_create", { businessId, itemId, title, body, rationale }, options),
+	/**
+	 *  Shows the full proposed text in the native approval dialog; on Allow, applies it through the
+	 *  execution controller.
+	 */
+	businessProposalApprove: (businessId: string, proposalId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessProposal_Serialize>("business_proposal_approve", { businessId, proposalId }, options),
+	businessProposalReject: (businessId: string, proposalId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessProposal_Serialize>("business_proposal_reject", { businessId, proposalId }, options),
+	businessActivity: (businessId: string, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<ActivityRow_Serialize[]>("business_activity", { businessId, limit }, options),
+	businessRecommendations: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationRow_Serialize[]>("business_recommendations", { businessId }, options),
 	workoutLibrary: (options?: InvokeOptions) => __TAURI_INVOKE<LibraryView_Serialize>("workout_library", undefined, options),
 	workoutExerciseSave: (exercise: Exercise_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<Exercise_Serialize>("workout_exercise_save", { exercise }, options),
 	workoutTemplates: (options?: InvokeOptions) => __TAURI_INVOKE<Template_Serialize[]>("workout_templates", undefined, options),
@@ -1396,6 +1440,226 @@ export type BranchSuggestion_Serialize = {
 	decidedAt?: string,
 };
 
+export type Business = Business_Serialize | Business_Deserialize;
+
+export type BusinessConnector = BusinessConnector_Serialize | BusinessConnector_Deserialize;
+
+export type BusinessConnectorSecret = {
+	name: string,
+	label: string,
+	hint: string,
+	/**  Whether the Keychain holds a value. The value itself never leaves Rust. */
+	stored: boolean,
+};
+
+export type BusinessConnectorSetting = BusinessConnectorSetting_Serialize | BusinessConnectorSetting_Deserialize;
+
+export type BusinessConnectorSetting_Deserialize = {
+	name: string,
+	label: string,
+	hint: string,
+	value?: string | null,
+};
+
+export type BusinessConnectorSetting_Serialize = {
+	name: string,
+	label: string,
+	hint: string,
+	value: string | null,
+};
+
+export type BusinessConnectorSummary = {
+	connectorId: string,
+	label: string,
+	state: string,
+};
+
+export type BusinessConnector_Deserialize = {
+	connectorId: string,
+	kind: string,
+	label: string,
+	description: string,
+	config: BusinessConnectorSetting_Deserialize[],
+	secrets: BusinessConnectorSecret[],
+	/**  disconnected | auth_required | connected | error. */
+	state: string,
+	/**  One plain sentence: why it is in that state and what to do next. */
+	detail: string,
+	/**  When the state above was worked out (now: it is checked on every read). */
+	checkedAt: string,
+	sync: BusinessSyncState_Deserialize,
+	/**  Always false in this phase: no connector writes outside the app. */
+	externalWrites: boolean,
+};
+
+export type BusinessConnector_Serialize = {
+	connectorId: string,
+	kind: string,
+	label: string,
+	description: string,
+	config: BusinessConnectorSetting_Serialize[],
+	secrets: BusinessConnectorSecret[],
+	/**  disconnected | auth_required | connected | error. */
+	state: string,
+	/**  One plain sentence: why it is in that state and what to do next. */
+	detail: string,
+	/**  When the state above was worked out (now: it is checked on every read). */
+	checkedAt: string,
+	sync: BusinessSyncState_Serialize,
+	/**  Always false in this phase: no connector writes outside the app. */
+	externalWrites: boolean,
+};
+
+export type BusinessContextInput = BusinessContextInput_Serialize | BusinessContextInput_Deserialize;
+
+export type BusinessContextInput_Deserialize = {
+	/**  None = a new item. */
+	itemId?: string | null,
+	section: string,
+	title: string,
+	body: string,
+	/**  draft | unverified. Approval is a separate step. */
+	status: string,
+	/**  Required when editing: the version the edit was made against. */
+	expectedVersion?: number | null,
+};
+
+export type BusinessContextInput_Serialize = {
+	/**  None = a new item. */
+	itemId: string | null,
+	section: string,
+	title: string,
+	body: string,
+	/**  draft | unverified. Approval is a separate step. */
+	status: string,
+	/**  Required when editing: the version the edit was made against. */
+	expectedVersion: number | null,
+};
+
+export type BusinessContextItem = BusinessContextItem_Serialize | BusinessContextItem_Deserialize;
+
+export type BusinessContextItem_Deserialize = {
+	itemId: string,
+	section: string,
+	title: string,
+	body: string,
+	/**  draft | unverified | approved | archived. */
+	status: string,
+	/**  user | import | sync | amara. */
+	source: string,
+	sourceRef?: string | null,
+	version: number,
+	approvedAt?: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessContextItem_Serialize = {
+	itemId: string,
+	section: string,
+	title: string,
+	body: string,
+	/**  draft | unverified | approved | archived. */
+	status: string,
+	/**  user | import | sync | amara. */
+	source: string,
+	sourceRef: string | null,
+	version: number,
+	approvedAt: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessContextVersion = BusinessContextVersion_Serialize | BusinessContextVersion_Deserialize;
+
+export type BusinessContextVersion_Deserialize = {
+	version: number,
+	title: string,
+	body: string,
+	status: string,
+	/**  taisun | amara | system. */
+	actor: string,
+	note?: string | null,
+	at: string,
+};
+
+export type BusinessContextVersion_Serialize = {
+	version: number,
+	title: string,
+	body: string,
+	status: string,
+	/**  taisun | amara | system. */
+	actor: string,
+	note: string | null,
+	at: string,
+};
+
+export type BusinessDocument = BusinessDocument_Serialize | BusinessDocument_Deserialize;
+
+export type BusinessDocument_Deserialize = {
+	docId: string,
+	title: string,
+	/**  markdown | text | pdf | image | other. */
+	kind: string,
+	status: string,
+	fileName: string,
+	sha256: string,
+	bytes: number,
+	/**  user | sync. */
+	source: string,
+	sourceRef?: string | null,
+	/**  Whether text is kept for knowledge search (markdown and plain text only). */
+	searchable: boolean,
+	version: number,
+	approvedAt?: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessDocument_Serialize = {
+	docId: string,
+	title: string,
+	/**  markdown | text | pdf | image | other. */
+	kind: string,
+	status: string,
+	fileName: string,
+	sha256: string,
+	bytes: number,
+	/**  user | sync. */
+	source: string,
+	sourceRef: string | null,
+	/**  Whether text is kept for knowledge search (markdown and plain text only). */
+	searchable: boolean,
+	version: number,
+	approvedAt: string | null,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type BusinessKnowledgeHit = BusinessKnowledgeHit_Serialize | BusinessKnowledgeHit_Deserialize;
+
+export type BusinessKnowledgeHit_Deserialize = {
+	/**  context | document. */
+	kind: string,
+	id: string,
+	title: string,
+	section?: string | null,
+	status: string,
+	/**  A short excerpt around the first match. */
+	excerpt: string,
+};
+
+export type BusinessKnowledgeHit_Serialize = {
+	/**  context | document. */
+	kind: string,
+	id: string,
+	title: string,
+	section: string | null,
+	status: string,
+	/**  A short excerpt around the first match. */
+	excerpt: string,
+};
+
 export type BusinessLedger = BusinessLedger_Serialize | BusinessLedger_Deserialize;
 
 export type BusinessLedger_Deserialize = {
@@ -1418,6 +1682,180 @@ export type BusinessLedger_Serialize = {
 	taxFlags: TaxFlag[],
 	voteRules: VoteRules | null,
 	revenueTargetJpy: number | null,
+};
+
+export type BusinessMemoryNote = BusinessMemoryNote_Serialize | BusinessMemoryNote_Deserialize;
+
+export type BusinessMemoryNote_Deserialize = {
+	memoryId: string,
+	text: string,
+	/**  proposed | kept | dismissed. */
+	status: string,
+	/**  user | amara. */
+	source: string,
+	createdAt: string,
+	decidedAt?: string | null,
+};
+
+export type BusinessMemoryNote_Serialize = {
+	memoryId: string,
+	text: string,
+	/**  proposed | kept | dismissed. */
+	status: string,
+	/**  user | amara. */
+	source: string,
+	createdAt: string,
+	decidedAt: string | null,
+};
+
+export type BusinessPermission = {
+	actor: string,
+	capability: string,
+	label: string,
+	allowed: boolean,
+	updatedAt: string,
+};
+
+export type BusinessProposal = BusinessProposal_Serialize | BusinessProposal_Deserialize;
+
+export type BusinessProposal_Deserialize = {
+	proposalId: string,
+	/**  context_update. */
+	kind: string,
+	itemId: string,
+	/**  The item version the proposal was made against; applying refuses a newer one. */
+	baseVersion: number,
+	title: string,
+	body: string,
+	rationale?: string | null,
+	/**  pending | applied | rejected | failed. */
+	status: string,
+	/**  amara | scheduler. */
+	proposedBy: string,
+	proposedAt: string,
+	decidedAt?: string | null,
+	executionId?: string | null,
+	detail?: string | null,
+};
+
+export type BusinessProposal_Serialize = {
+	proposalId: string,
+	/**  context_update. */
+	kind: string,
+	itemId: string,
+	/**  The item version the proposal was made against; applying refuses a newer one. */
+	baseVersion: number,
+	title: string,
+	body: string,
+	rationale: string | null,
+	/**  pending | applied | rejected | failed. */
+	status: string,
+	/**  amara | scheduler. */
+	proposedBy: string,
+	proposedAt: string,
+	decidedAt: string | null,
+	executionId: string | null,
+	detail: string | null,
+};
+
+export type BusinessSectionCount = {
+	section: string,
+	label: string,
+	approved: number,
+	draft: number,
+	unverified: number,
+};
+
+export type BusinessSyncRun = BusinessSyncRun_Serialize | BusinessSyncRun_Deserialize;
+
+export type BusinessSyncRun_Deserialize = {
+	runId: string,
+	connectorId: string,
+	startedAt: string,
+	finishedAt?: string | null,
+	/**  running | succeeded | failed | interrupted. */
+	status: string,
+	itemsSeen: number,
+	itemsChanged: number,
+	/**  Approved items the source now differs from (never changed by a sync). */
+	conflicts: number,
+	detail?: string | null,
+};
+
+export type BusinessSyncRun_Serialize = {
+	runId: string,
+	connectorId: string,
+	startedAt: string,
+	finishedAt: string | null,
+	/**  running | succeeded | failed | interrupted. */
+	status: string,
+	itemsSeen: number,
+	itemsChanged: number,
+	/**  Approved items the source now differs from (never changed by a sync). */
+	conflicts: number,
+	detail: string | null,
+};
+
+export type BusinessSyncState = BusinessSyncState_Serialize | BusinessSyncState_Deserialize;
+
+export type BusinessSyncState_Deserialize = {
+	/**  unavailable | never | running | succeeded | failed | interrupted. */
+	state: string,
+	detail: string,
+	last?: BusinessSyncRun_Deserialize | null,
+};
+
+export type BusinessSyncState_Serialize = {
+	/**  unavailable | never | running | succeeded | failed | interrupted. */
+	state: string,
+	detail: string,
+	last: BusinessSyncRun_Serialize | null,
+};
+
+export type BusinessWorkspaceOverview = BusinessWorkspaceOverview_Serialize | BusinessWorkspaceOverview_Deserialize;
+
+export type BusinessWorkspaceOverview_Deserialize = {
+	business: Business_Deserialize,
+	sections: BusinessSectionCount[],
+	connectors: BusinessConnectorSummary[],
+	documents: number,
+	approvedDocuments: number,
+	pendingProposals: number,
+	memoryNotes: number,
+};
+
+export type BusinessWorkspaceOverview_Serialize = {
+	business: Business_Serialize,
+	sections: BusinessSectionCount[],
+	connectors: BusinessConnectorSummary[],
+	documents: number,
+	approvedDocuments: number,
+	pendingProposals: number,
+	memoryNotes: number,
+};
+
+export type Business_Deserialize = {
+	businessId: string,
+	name: string,
+	description?: string | null,
+	/**  The ledger venture this workspace belongs to (`ledger.json`), when linked. */
+	ventureId?: string | null,
+	/**  active | archived. */
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type Business_Serialize = {
+	businessId: string,
+	name: string,
+	description: string | null,
+	/**  The ledger venture this workspace belongs to (`ledger.json`), when linked. */
+	ventureId: string | null,
+	/**  active | archived. */
+	status: string,
+	createdAt: string,
+	updatedAt: string,
 };
 
 export type CalibrationMethod = {

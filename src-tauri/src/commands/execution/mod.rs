@@ -760,6 +760,7 @@ pub(crate) fn registry() -> Registry {
     for op in crate::commands::terrence_actions::local_operations()
         .into_iter()
         .chain(crate::commands::skills_lifecycle::operations())
+        .chain(crate::commands::business_workspace::ops::operations())
     {
         ops.insert(op.spec().action_id, op);
     }
