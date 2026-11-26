@@ -379,6 +379,11 @@ pub(crate) fn flags(
     f
 }
 
+/// A snapshot file's name on disk: the SHA-256 of its site path, so two paths can never collide.
+pub(crate) fn stored_name(path: &str) -> String {
+    sha256_hex(path.as_bytes())
+}
+
 fn chk(level: &str, text: impl Into<String>) -> BusinessSiteCheck {
     BusinessSiteCheck {
         level: level.into(),
@@ -402,12 +407,25 @@ impl Tenant {
         if path.contains("..") || !path.starts_with('/') {
             return Err("bad path".into());
         }
-        let p = self
-            .site_dir()
-            .join("snapshots")
-            .join(snapshot)
-            .join(path.trim_start_matches('/').replace('/', "__"));
-        std::fs::read(p).map_err(|_| format!("{path} isn't in the snapshot"))
+        let want = self
+            .snapshot_manifest(snapshot)?
+            .into_iter()
+            .find(|f| f.path == path)
+            .ok_or_else(|| format!("{path} isn't in the snapshot"))?;
+        let bytes = std::fs::read(
+            self.site_dir()
+                .join("snapshots")
+                .join(snapshot)
+                .join(stored_name(path)),
+        )
+        .map_err(|_| format!("{path} isn't in the snapshot"))?;
+        // Never trust a stored copy that doesn't match the manifest.
+        if sha256_hex(&bytes) != want.sha256 {
+            return Err(format!(
+                "the stored copy of {path} doesn't match its hash; take a new snapshot"
+            ));
+        }
+        Ok(bytes)
     }
 
     pub(crate) fn snapshot_manifest(
@@ -485,7 +503,7 @@ pub(crate) fn snapshot_live(
         } else {
             path.clone()
         };
-        let file = dir.join(stored.trim_start_matches('/').replace('/', "__"));
+        let file = dir.join(stored_name(&stored));
         crate::app_paths::write_private(&file, &r.body).map_err(err)?;
         if sha256_hex(&std::fs::read(&file).map_err(err)?) != sha256_hex(&r.body) {
             return Err("a snapshot file didn't read back; snapshot stopped".into());

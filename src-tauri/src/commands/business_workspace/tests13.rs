@@ -429,3 +429,28 @@ fn site_operations_have_no_write_path_to_the_website() {
         .iter()
         .any(|l| l.op == "+" && l.text == "B"));
 }
+
+#[test]
+fn snapshot_files_cannot_collide_and_a_tampered_copy_is_refused() {
+    assert_ne!(
+        site_ops::stored_name("/a/b"),
+        site_ops::stored_name("/a__b")
+    );
+    let d = tmp("tamper");
+    let t = setup(&d.0);
+    let site = Site::new();
+    let snap = site_ops::snapshot_live(&t, &site, no_sleep).unwrap();
+    let f =
+        d.0.join("business/workspaces/taiyo-skin/site/snapshots")
+            .join(&snap.snapshot_id)
+            .join(site_ops::stored_name("/index.html"));
+    std::fs::write(&f, b"<html><head><title>tampered</title></head></html>").unwrap();
+    assert!(site_ops::draft(
+        &t,
+        &input("seo_title", "Taiyo Skin daily care", vec![]),
+        "taisun"
+    )
+    .unwrap_err()
+    .contains("doesn't match its hash"));
+    TEST_ALLOW_NET.with(|a| a.set(false));
+}
