@@ -45,6 +45,24 @@ pub struct TrainingRecord {
     pub held_seconds: BTreeMap<String, f64>,
     pub eligible: bool,
     pub not_eligible_reason: Option<String>,
+    /// Decision 0061: session HRV from the WHOOP strap's RR intervals in NOOP, filled in only by the
+    /// records command (null elsewhere). A separate measurement from the EEG (biofeedback, not neurofeedback).
+    pub hrv: Option<super::noop_rr::SessionHrv>,
+}
+
+/// The session's end, from its start and length.
+/// Never panics on a corrupt length (security review, 0061): an unrepresentable end reads as empty.
+fn end_of(r: &TrainingRecord) -> String {
+    chrono::DateTime::parse_from_rfc3339(&r.start)
+        .ok()
+        .and_then(|s| {
+            i64::try_from(r.duration_secs)
+                .ok()
+                .and_then(chrono::TimeDelta::try_seconds)
+                .and_then(|d| s.checked_add_signed(d))
+        })
+        .map(|e| e.to_rfc3339())
+        .unwrap_or_default()
 }
 
 fn num(v: &Value) -> Option<f64> {
@@ -167,6 +185,7 @@ pub(crate) fn record_from(
         held_seconds: num_map(r.get("held_seconds").unwrap_or(&Value::Null)),
         eligible: reason.is_none(),
         not_eligible_reason: reason.map(str::to_string),
+        hrv: None,
     })
 }
 
@@ -191,6 +210,14 @@ pub async fn neuro_training_records(limit: Option<u32>) -> Result<Vec<TrainingRe
     blocking(JoinErr::Plain, move || {
         let mut r = records_in(&sessions_dir());
         r.truncate(limit.unwrap_or(50).min(MAX_RECORDS as u32) as usize);
+        // One read-only open of NOOP's store for the whole list (security review, 0061).
+        let windows: Vec<(String, String)> = r
+            .iter()
+            .map(|rec| (rec.start.clone(), end_of(rec)))
+            .collect();
+        for (rec, h) in r.iter_mut().zip(super::noop_rr::session_hrv_many(&windows)) {
+            rec.hrv = Some(h);
+        }
         Ok(r)
     })
     .await
@@ -397,6 +424,16 @@ pub async fn neuro_training_trends() -> Result<TrainingTrends, String> {
 
 /// Lines for Amara's local-only `nexus_neuro` section: structured, no raw EEG, with what is uncertain.
 pub(crate) fn context_lines(sessions_dir: &Path) -> Vec<String> {
+    context_lines_with(sessions_dir, |r| {
+        super::noop_rr::session_hrv(&r.start, &end_of(r))
+    })
+}
+
+/// `hrv_of` reads the latest session's HRV (injected so tests never open the real NOOP store).
+pub(crate) fn context_lines_with(
+    sessions_dir: &Path,
+    hrv_of: impl Fn(&TrainingRecord) -> super::noop_rr::SessionHrv,
+) -> Vec<String> {
     let records = records_in(sessions_dir);
     if records.is_empty() {
         return vec!["No neurofeedback training records yet (records start with guided sessions from decision 0059).".into()];
@@ -427,6 +464,17 @@ pub(crate) fn context_lines(sessions_dir: &Path) -> Vec<String> {
             if levels.is_empty() { "not recorded".into() } else { levels.join(", ") },
             r.not_eligible_reason.as_deref().map_or(String::new(), |w| format!("; not used for trends ({w})")),
         ));
+        let h = hrv_of(r);
+        lines.push(match (h.state.as_str(), h.rmssd_ms) {
+            ("available", Some(v)) => format!(
+                "Latest session HRV (biofeedback, separate from the EEG): RMSSD {v:.0} ms over {} clean beat pairs, {:.0}% of the session covered; source {}.",
+                h.accepted_pairs, h.coverage_pct, h.source
+            ),
+            _ => format!(
+                "Latest session HRV: not available ({}).",
+                h.reason.as_deref().unwrap_or("no reading")
+            ),
+        });
     }
     for p in &t.protocols {
         if p.features.is_empty() {

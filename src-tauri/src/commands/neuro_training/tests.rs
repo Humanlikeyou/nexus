@@ -237,6 +237,7 @@ fn rec(id: &str, day: u32, alpha: f64, scale: f64, valid: f64, eligible: bool) -
         held_seconds: BTreeMap::new(),
         eligible,
         not_eligible_reason: (!eligible).then(|| "x".to_string()),
+        hrv: None,
     }
 }
 
@@ -338,4 +339,53 @@ fn amaras_lines_are_structured_and_hold_no_raw_eeg() {
     assert!(text.contains("Trend calm resting_level:Alpha (5 sessions, confidence low)"));
     assert!(text.contains("not measures of emotion, attention, stress or relaxation"));
     assert!(!text.contains("\"channels\"") && !text.contains("samples"));
+    // In a test build the real NOOP store is never opened.
+    assert!(text.contains(
+        "Latest session HRV: not available (NOOP isn't installed or its store can't be read.)"
+    ));
+}
+
+#[test]
+fn a_corrupt_session_length_never_panics() {
+    let r = TrainingRecord {
+        duration_secs: u64::MAX,
+        ..rec("x", 1, 30.0, 1.0, 90.0, true)
+    };
+    assert_eq!(end_of(&r), "");
+    let r2 = TrainingRecord {
+        start: "not a time".into(),
+        ..rec("y", 1, 30.0, 1.0, 90.0, true)
+    };
+    assert_eq!(end_of(&r2), "");
+}
+
+#[test]
+fn amara_gets_session_hrv_as_biofeedback_when_it_is_available() {
+    let dir = temp_dir("neuro-training-hrv").join("sessions");
+    write_session(
+        &dir,
+        "s1",
+        "2026-11-20T10:00:00Z",
+        "live",
+        json!({ "progress_record": progress(90.0, 600.0, &[]) }),
+    );
+    let text = context_lines_with(&dir, |r| {
+        assert_eq!(r.session_id, "s1");
+        assert_eq!(end_of(r), "2026-11-20T10:10:00+00:00");
+        crate::commands::noop_rr::SessionHrv {
+            state: "available".into(),
+            rmssd_ms: Some(42.4),
+            mean_rr_ms: Some(980.0),
+            beats: 600,
+            accepted_pairs: 580,
+            rejected_pairs: 19,
+            coverage_pct: 98.0,
+            newest_rr_at: None,
+            reason: None,
+            source: crate::commands::noop_rr::SOURCE.into(),
+            method: crate::commands::noop_rr::HRV_METHOD.into(),
+        }
+    })
+    .join("\n");
+    assert!(text.contains("Latest session HRV (biofeedback, separate from the EEG): RMSSD 42 ms over 580 clean beat pairs, 98% of the session covered; source WHOOP strap RR intervals, read from NOOP."), "{text}");
 }

@@ -373,6 +373,8 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::neuro_protocols::neuro_protocol_settings_set,
             crate::commands::neuro_training::neuro_training_records,
             crate::commands::neuro_training::neuro_training_trends,
+            crate::commands::noop_rr::noop_session_hrv,
+            crate::commands::noop_rr::noop_rr_status,
             crate::commands::habits::habit_mark,
             crate::commands::habits::habit_days,
             crate::commands::goal_roadmap::roadmap_accept,

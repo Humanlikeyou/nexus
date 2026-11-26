@@ -33,7 +33,17 @@ describe("decision 0059: biofeedback never assumes a sensor", () => {
     expect(biofeedback({ ...base, ppg: { samples: flat, lastPacketAt: NOW - 50 } }, NOW).heartRate).toBeNull();
   });
 
-  it("RR intervals and HRV are never available, even with a good pulse", () => {
+  it("decision 0061: RR and HRV come from NOOP's strap data when it is there, and say it is not live", () => {
+    const rr = { available: true, newestRrAt: "2026-11-26T01:33:49Z", beatsLast24h: 67382, source: "WHOOP strap RR intervals, read from NOOP" };
+    const b = biofeedback(base, NOW, rr);
+    expect(b.rrIntervals.state).toBe("available");
+    expect(b.rrIntervals.detail).toMatch(/WHOOP strap.*synced up to.*not live/);
+    expect(b.hrv.state).toBe("available");
+    expect(b.hrv.detail).toMatch(/Per session.*never from EEG/);
+    expect(biofeedback(base, NOW, { ...rr, available: false, newestRrAt: null }).hrv.state).toBe("not_available");
+  });
+
+  it("without NOOP's RR data, RR intervals and HRV are not available, even with a good pulse", () => {
     const b = biofeedback({ ...base, ppg: { samples: pulse(), lastPacketAt: NOW - 50 }, gyro: { samples: [[0, 0, 0]], lastPacketAt: NOW - 50 } } as MuseTelemetry, NOW);
     expect(b.imu.state).toBe("available");
     expect(b.rrIntervals.state).toBe("not_available");

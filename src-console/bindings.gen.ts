@@ -493,6 +493,8 @@ export const commands = {
 	neuroProtocolSettingsSet: (protocolId: string, settings: ProtocolSettings | null, options?: InvokeOptions) => __TAURI_INVOKE<{ [key in string]: ProtocolSettings }>("neuro_protocol_settings_set", { protocolId, settings }, options),
 	neuroTrainingRecords: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TrainingRecord_Serialize[]>("neuro_training_records", { limit }, options),
 	neuroTrainingTrends: (options?: InvokeOptions) => __TAURI_INVOKE<TrainingTrends_Serialize>("neuro_training_trends", undefined, options),
+	noopSessionHrv: (start: string, end: string, options?: InvokeOptions) => __TAURI_INVOKE<SessionHrv_Serialize>("noop_session_hrv", { start, end }, options),
+	noopRrStatus: (options?: InvokeOptions) => __TAURI_INVOKE<RrStatus_Serialize>("noop_rr_status", undefined, options),
 	/**
 	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
 	 *  `source` is "manual", "chat" or "telegram".
@@ -5916,6 +5918,25 @@ export type RouterResponse = {
 	routing_reason: string,
 };
 
+/**  For the biofeedback card: is NOOP holding beat-to-beat data for this strap, and up to when. */
+export type RrStatus = RrStatus_Serialize | RrStatus_Deserialize;
+
+/**  For the biofeedback card: is NOOP holding beat-to-beat data for this strap, and up to when. */
+export type RrStatus_Deserialize = {
+	available: boolean,
+	newestRrAt?: string | null,
+	beatsLast24h: number,
+	source: string,
+};
+
+/**  For the biofeedback card: is NOOP holding beat-to-beat data for this strap, and up to when. */
+export type RrStatus_Serialize = {
+	available: boolean,
+	newestRrAt: string | null,
+	beatsLast24h: number,
+	source: string,
+};
+
 export type Saved = Saved_Serialize | Saved_Deserialize;
 
 export type SavedCalibration = SavedCalibration_Serialize | SavedCalibration_Deserialize;
@@ -6047,6 +6068,42 @@ export type ServicesSummary = {
 	separate: number,
 	unknown: number,
 	checkedMs: number,
+};
+
+export type SessionHrv = SessionHrv_Serialize | SessionHrv_Deserialize;
+
+export type SessionHrv_Deserialize = {
+	/**  `available` or `not_available`. */
+	state: string,
+	rmssdMs?: number | null,
+	meanRrMs?: number | null,
+	beats: number,
+	acceptedPairs: number,
+	rejectedPairs: number,
+	/**  Share of the window's minutes that have beats, 0–100. */
+	coveragePct: number | null,
+	/**  Newest RR interval NOOP holds for this strap (RFC 3339), so a missing session can say "not synced yet". */
+	newestRrAt?: string | null,
+	reason?: string | null,
+	source: string,
+	method: string,
+};
+
+export type SessionHrv_Serialize = {
+	/**  `available` or `not_available`. */
+	state: string,
+	rmssdMs: number | null,
+	meanRrMs: number | null,
+	beats: number,
+	acceptedPairs: number,
+	rejectedPairs: number,
+	/**  Share of the window's minutes that have beats, 0–100. */
+	coveragePct: number | null,
+	/**  Newest RR interval NOOP holds for this strap (RFC 3339), so a missing session can say "not synced yet". */
+	newestRrAt: string | null,
+	reason: string | null,
+	source: string,
+	method: string,
 };
 
 export type SessionLogEntry = {
@@ -7142,6 +7199,11 @@ export type TrainingRecord_Deserialize = {
 	heldSeconds: { [key in string]: number | null },
 	eligible: boolean,
 	notEligibleReason?: string | null,
+	/**
+	 *  Decision 0061: session HRV from the WHOOP strap's RR intervals in NOOP, filled in only by the
+	 *  records command (null elsewhere). A separate measurement from the EEG (biofeedback, not neurofeedback).
+	 */
+	hrv?: SessionHrv_Deserialize | null,
 };
 
 export type TrainingRecord_Serialize = {
@@ -7171,6 +7233,11 @@ export type TrainingRecord_Serialize = {
 	heldSeconds: { [key in string]: number | null },
 	eligible: boolean,
 	notEligibleReason: string | null,
+	/**
+	 *  Decision 0061: session HRV from the WHOOP strap's RR intervals in NOOP, filled in only by the
+	 *  records command (null elsewhere). A separate measurement from the EEG (biofeedback, not neurofeedback).
+	 */
+	hrv: SessionHrv_Serialize | null,
 };
 
 export type TrainingTrends = TrainingTrends_Serialize | TrainingTrends_Deserialize;

@@ -3,7 +3,7 @@ import { invokeBound } from "../bridge";
 import { Button, Card, PageHero, Select, Toggle } from "../ui";
 import type { NfProtocol } from "../legacy-core/lib/types";
 import { describeFeature, PROTOCOL_SET_VERSION, targetFeatures, type ProtocolSettings, type ProtocolSound } from "./protocolConfig";
-import { biofeedback, type Biofeedback } from "./biofeedback";
+import { biofeedback, type Biofeedback, type RrStatus } from "./biofeedback";
 import { TrendsCard } from "./TrendsCard";
 import { useMuseTelemetry } from "./useMuseTelemetry";
 import "../ui/PanelKit.css";
@@ -66,6 +66,8 @@ export type TrainingRecord = {
   source: string | null; validPct: number | null; timeInTargetPct: number | null; trainedSeconds: number; targetRewardRate: number | null;
   thresholdChecks: number; finalThresholdScale: number | null; baselineLevels: Record<string, number>; heldSeconds: Record<string, number>;
   eligible: boolean; notEligibleReason: string | null;
+  /** Decision 0061: session HRV from the strap's RR intervals in NOOP (biofeedback, not neurofeedback). */
+  hrv?: { state: string; rmssdMs: number | null; acceptedPairs: number; coveragePct: number; reason: string | null; source: string } | null;
 };
 
 const HELD_LABEL: Record<string, string> = { contact: "contact", dropout: "signal gaps", blink: "blinks", jaw: "jaw", movement: "movement", noise: "noise", frozen: "frozen signal", not_live: "not live" };
@@ -94,6 +96,7 @@ export function TrainingRecordsCard({ protocols, load = loadRecords }: { protoco
               <br />Usable {num1(r.validPct, "%")} of training · {Math.round(r.trainedSeconds / 60)} min trained · in target {num1(r.timeInTargetPct, "%")} (aim {r.targetRewardRate == null ? "not recorded" : `${Math.round(r.targetRewardRate * 100)}%`})
               <br />Resting level before training: {levels.length ? levels.join(", ") : "not recorded"} · {r.thresholdChecks} threshold checks, ending at {r.finalThresholdScale == null ? "not recorded" : `x${r.finalThresholdScale.toFixed(2)}`} of the baseline threshold
               {held.length > 0 && <><br />Held: {held.join(", ")}</>}
+              {r.hrv && <><br />HRV (from the strap, not the EEG): {r.hrv.state === "available" && r.hrv.rmssdMs != null ? `RMSSD ${Math.round(r.hrv.rmssdMs)} ms over ${r.hrv.acceptedPairs} clean beat pairs, ${Math.round(r.hrv.coveragePct)}% of the session covered` : `not available. ${r.hrv.reason ?? ""}`}</>}
               <br /><span className="v-note">{r.eligible ? "Counts toward your trends." : `Not used for trends: ${r.notEligibleReason}.`} {r.method} · {r.protocolSet}</span>
             </li>
           );
@@ -122,7 +125,10 @@ function LiveBiofeedback() {
   // A once-a-second clock, so a sensor that stops sending reads as not available without new telemetry.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(id); }, []);
-  return <BiofeedbackCard read={biofeedback(telemetry, now)} />;
+  // Decision 0061: NOOP's beat-to-beat data from the WHOOP strap (read once; it changes only when the strap syncs).
+  const [rr, setRr] = useState<RrStatus | null>(null);
+  useEffect(() => { let alive = true; invokeBound<RrStatus>("noop_rr_status").then((s) => { if (alive) setRr(s); }, () => {}); return () => { alive = false; }; }, []);
+  return <BiofeedbackCard read={biofeedback(telemetry, now, rr)} />;
 }
 
 export function TrainingView({ training, running = false, onDone, onRecordAfter }: { training: TrainingApi; running?: boolean; onDone?: () => void; onRecordAfter?: () => void }) {

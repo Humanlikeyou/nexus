@@ -63,6 +63,7 @@ pub mod noop;
 pub mod noop_freeze;
 pub mod noop_parity;
 pub mod noop_query;
+pub mod noop_rr;
 pub mod notify_relay;
 pub mod onboarding;
 pub mod openclaw;

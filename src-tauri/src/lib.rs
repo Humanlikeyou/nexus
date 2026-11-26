@@ -286,6 +286,8 @@ pub fn run() {
             commands::neuro_protocols::neuro_protocol_settings_set,
             commands::neuro_training::neuro_training_records,
             commands::neuro_training::neuro_training_trends,
+            commands::noop_rr::noop_session_hrv,
+            commands::noop_rr::noop_rr_status,
             openclaw::read_tasks,
             openclaw::read_content_pipeline,
             openclaw::save_skill,
