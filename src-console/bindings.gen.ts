@@ -525,6 +525,17 @@ export const commands = {
 	/**  Disconnect after a native confirmation: settings cleared and Keychain items removed. */
 	businessConnectorDisconnect: (businessId: string, connectorId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize>("business_connector_disconnect", { businessId, connectorId }, options),
 	businessSyncStart: (businessId: string, connectorId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSyncRun_Serialize>("business_sync_start", { businessId, connectorId }, options),
+	businessConnectorCheck: (businessId: string, connectorId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize>("business_connector_check", { businessId, connectorId }, options),
+	/**  The native file picker for a connector's file setting (the Supabase CA certificate). None = cancelled. */
+	businessConnectorPickFile: (businessId: string, connectorId: string, field: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessConnector_Serialize | null>("business_connector_pick_file", { businessId, connectorId, field }, options),
+	/**  The SQL that creates the read-only Supabase role (no secret in it; the password is a placeholder). */
+	businessSupabaseSetupSql: (options?: InvokeOptions) => __TAURI_INVOKE<string>("business_supabase_setup_sql", undefined, options),
+	businessReport: (businessId: string, report: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessReport_Serialize>("business_report", { businessId, report }, options),
+	/**
+	 *  Amara's notes on a report, on the local model only (never the cloud tier). Needs the model's
+	 *  read permission for this business. Returns the report with the new notes.
+	 */
+	businessReportInterpret: (businessId: string, report: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessReport_Serialize>("business_report_interpret", { businessId, report }, options),
 	businessSyncRuns: (businessId: string, connectorId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<BusinessSyncRun_Serialize[]>("business_sync_runs", { businessId, connectorId }, options),
 	businessPermissions: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<BusinessPermission[]>("business_permissions", { businessId }, options),
 	businessPermissionSet: (businessId: string, actor: string, capability: string, allowed: boolean, options?: InvokeOptions) => __TAURI_INVOKE<BusinessPermission[]>("business_permission_set", { businessId, actor, capability, allowed }, options),
@@ -1485,8 +1496,10 @@ export type BusinessConnector_Deserialize = {
 	state: string,
 	/**  One plain sentence: why it is in that state and what to do next. */
 	detail: string,
-	/**  When the state above was worked out (now: it is checked on every read). */
-	checkedAt: string,
+	/**  When the state was established: now for local folders, the last check for network ones. */
+	checkedAt?: string | null,
+	/**  local | network | deferred. */
+	check: string,
 	sync: BusinessSyncState_Deserialize,
 	/**  Always false in this phase: no connector writes outside the app. */
 	externalWrites: boolean,
@@ -1503,8 +1516,10 @@ export type BusinessConnector_Serialize = {
 	state: string,
 	/**  One plain sentence: why it is in that state and what to do next. */
 	detail: string,
-	/**  When the state above was worked out (now: it is checked on every read). */
-	checkedAt: string,
+	/**  When the state was established: now for local folders, the last check for network ones. */
+	checkedAt: string | null,
+	/**  local | network | deferred. */
+	check: string,
 	sync: BusinessSyncState_Serialize,
 	/**  Always false in this phase: no connector writes outside the app. */
 	externalWrites: boolean,
@@ -1636,6 +1651,76 @@ export type BusinessDocument_Serialize = {
 	updatedAt: string,
 };
 
+export type BusinessInsight = BusinessInsight_Serialize | BusinessInsight_Deserialize;
+
+export type BusinessInsightNote = {
+	noteId: string,
+	/**  interpretation | hypothesis. */
+	kind: string,
+	statement: string,
+	basedOn: string[],
+	modelTier: string,
+	createdAt: string,
+};
+
+export type BusinessInsightRow = BusinessInsightRow_Serialize | BusinessInsightRow_Deserialize;
+
+export type BusinessInsightRow_Deserialize = {
+	label: string,
+	value: number | null,
+	/**  Fraction of the group total, when it means something. */
+	share?: number | null,
+};
+
+export type BusinessInsightRow_Serialize = {
+	label: string,
+	value: number | null,
+	/**  Fraction of the group total, when it means something. */
+	share: number | null,
+};
+
+export type BusinessInsight_Deserialize = {
+	/**  Stable id (`web.views.total`), so interpretations can cite it. */
+	id: string,
+	group: string,
+	title: string,
+	/**  measured | calculated | interpretation | hypothesis. */
+	kind: string,
+	/**  available | unavailable | too_few | suppressed. */
+	status: string,
+	statement: string,
+	value?: number | null,
+	unit?: string | null,
+	n?: number | null,
+	rows: BusinessInsightRow_Deserialize[],
+	/**  "2026-03-22 to 2026-11-20" for time-based figures. */
+	window?: string | null,
+	/**  Where it came from: connector, stream or query, and when it was read. */
+	sources: string[],
+	note?: string | null,
+};
+
+export type BusinessInsight_Serialize = {
+	/**  Stable id (`web.views.total`), so interpretations can cite it. */
+	id: string,
+	group: string,
+	title: string,
+	/**  measured | calculated | interpretation | hypothesis. */
+	kind: string,
+	/**  available | unavailable | too_few | suppressed. */
+	status: string,
+	statement: string,
+	value: number | null,
+	unit: string | null,
+	n: number | null,
+	rows: BusinessInsightRow_Serialize[],
+	/**  "2026-03-22 to 2026-11-20" for time-based figures. */
+	window: string | null,
+	/**  Where it came from: connector, stream or query, and when it was read. */
+	sources: string[],
+	note: string | null,
+};
+
 export type BusinessKnowledgeHit = BusinessKnowledgeHit_Serialize | BusinessKnowledgeHit_Deserialize;
 
 export type BusinessKnowledgeHit_Deserialize = {
@@ -1756,6 +1841,24 @@ export type BusinessProposal_Serialize = {
 	decidedAt: string | null,
 	executionId: string | null,
 	detail: string | null,
+};
+
+export type BusinessReport = BusinessReport_Serialize | BusinessReport_Deserialize;
+
+export type BusinessReport_Deserialize = {
+	/**  website | customers. */
+	report: string,
+	generatedAt: string,
+	insights: BusinessInsight_Deserialize[],
+	notes: BusinessInsightNote[],
+};
+
+export type BusinessReport_Serialize = {
+	/**  website | customers. */
+	report: string,
+	generatedAt: string,
+	insights: BusinessInsight_Serialize[],
+	notes: BusinessInsightNote[],
 };
 
 export type BusinessSectionCount = {

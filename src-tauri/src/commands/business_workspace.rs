@@ -22,10 +22,17 @@
 
 pub(crate) mod commands;
 pub(crate) mod connectors;
+pub(crate) mod drive_folder;
+pub(crate) mod intelligence;
+pub(crate) mod net;
 pub(crate) mod ops;
+pub(crate) mod supabase;
 pub(crate) mod sync_local;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests12;
+pub(crate) mod website;
 
 use super::amara_store::{self, NewActivity, Scope};
 use chrono::Utc;
@@ -34,7 +41,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-pub(crate) const SCHEMA_VERSION: i64 = 1;
+/// v1 (0063): workspaces. v2 (0064): the Phase 12 connector registry, check results, sync cursors,
+/// first-party site analytics, customer aggregates, site facts and interpretation notes.
+pub(crate) const SCHEMA_VERSION: i64 = 2;
 const MAX_TITLE: usize = 160;
 const MAX_BODY: usize = 20_000;
 const MAX_MEMORY: usize = 2_000;
@@ -1590,7 +1599,7 @@ fn kind_of(name: &str) -> &'static str {
     let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     match ext.as_str() {
         "md" | "markdown" => "markdown",
-        "txt" | "csv" | "json" => "text",
+        "txt" | "csv" | "json" | "html" | "htm" => "text",
         "pdf" => "pdf",
         "png" | "jpg" | "jpeg" | "webp" | "gif" => "image",
         _ => "other",
@@ -1598,6 +1607,254 @@ fn kind_of(name: &str) -> &'static str {
 }
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
+
+/// The v2 connector kinds (0064). `hostinger` became `website`: its job is the public site check.
+pub(crate) const CONNECTOR_KINDS_SQL: &str =
+    "'supabase','website','github','google_analytics','search_console','instagram','local_repo','drive_folder'";
+
+/// The tables v2 adds; every one is tenant-scoped (the isolation pin lists them).
+pub(crate) const V2_TABLES: &[&str] = &[
+    "connector_check",
+    "source_cursor",
+    "site_page_view",
+    "site_session",
+    "site_event",
+    "site_checkout",
+    "aggregate_snapshot",
+    "site_fact",
+    "business_salt",
+    "insight_note",
+];
+
+/// v1 → v2 (0064). A file that already holds workspace rows is copied first (`VACUUM INTO
+/// <file>.v1-<timestamp>.bak`, 0600). The connector table is rebuilt (SQLite can't change a CHECK)
+/// with foreign keys off, inside one transaction, and foreign keys are checked before it commits.
+/// On any error nothing changes and the file stays v1.
+fn migrate_to_v2(conn: &Connection) -> Result<(), String> {
+    let rows: i64 = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM context_item) + (SELECT COUNT(*) FROM document) + (SELECT COUNT(*) FROM sync_run)",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    if rows > 0 {
+        let path: String = conn
+            .query_row(
+                "SELECT file FROM pragma_database_list WHERE name = 'main'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        let dest = format!("{path}.v1-{}.bak", Utc::now().format("%Y%m%dT%H%M%S%.6fZ"));
+        crate::app_paths::ensure_private_file(Path::new(&dest)).map_err(err)?;
+        conn.execute("VACUUM INTO ?1", params![dest]).map_err(|e| {
+            err(format!(
+                "backup before migration failed, nothing changed: {e}"
+            ))
+        })?;
+    }
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")
+        .map_err(err)?;
+    let result = (|| -> Result<(), String> {
+        conn.execute_batch("BEGIN IMMEDIATE").map_err(err)?;
+        let now_v: String = conn
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        if now_v.parse::<i64>().unwrap_or(0) >= 2 {
+            return Ok(());
+        }
+        conn.execute_batch(&format!(
+            "
+            CREATE TABLE connector_v2 (
+                business_id  TEXT NOT NULL REFERENCES business(business_id),
+                connector_id TEXT NOT NULL,
+                kind         TEXT NOT NULL CHECK (kind IN ({CONNECTOR_KINDS_SQL})),
+                config_json  TEXT NOT NULL,
+                created_at   TEXT NOT NULL,
+                updated_at   TEXT NOT NULL,
+                PRIMARY KEY (business_id, connector_id)
+            );
+            INSERT INTO connector_v2 (business_id, connector_id, kind, config_json, created_at, updated_at)
+                SELECT business_id,
+                       CASE connector_id WHEN 'hostinger' THEN 'website' ELSE connector_id END,
+                       CASE kind WHEN 'hostinger' THEN 'website' ELSE kind END,
+                       config_json, created_at, updated_at FROM connector;
+            UPDATE sync_run SET connector_id = 'website' WHERE connector_id = 'hostinger';
+            DROP TABLE connector;
+            ALTER TABLE connector_v2 RENAME TO connector;
+            CREATE TRIGGER IF NOT EXISTS connector_tenant_fixed BEFORE UPDATE OF business_id ON connector
+                BEGIN SELECT RAISE(ABORT, 'business_id is fixed'); END;
+
+            -- The last real check of a connector that can't be checked on every read (network ones).
+            CREATE TABLE connector_check (
+                business_id  TEXT NOT NULL,
+                connector_id TEXT NOT NULL,
+                outcome      TEXT NOT NULL CHECK (outcome IN ('ok','auth','error')),
+                detail       TEXT NOT NULL,
+                checked_at   TEXT NOT NULL,
+                PRIMARY KEY (business_id, connector_id),
+                FOREIGN KEY (business_id, connector_id) REFERENCES connector(business_id, connector_id)
+            );
+            -- Where the last sync of each stream stopped (keyset pagination resumes after it).
+            CREATE TABLE source_cursor (
+                business_id  TEXT NOT NULL,
+                connector_id TEXT NOT NULL,
+                stream       TEXT NOT NULL,
+                cursor_at    TEXT NOT NULL,
+                cursor_id    TEXT NOT NULL,
+                updated_at   TEXT NOT NULL,
+                PRIMARY KEY (business_id, connector_id, stream),
+                FOREIGN KEY (business_id, connector_id) REFERENCES connector(business_id, connector_id)
+            );
+            -- First-party site analytics, pseudonymous only: no user ids, emails, user agents or query strings.
+            CREATE TABLE site_page_view (
+                business_id   TEXT NOT NULL REFERENCES business(business_id),
+                source_id     TEXT NOT NULL,
+                path          TEXT NOT NULL,
+                referrer_host TEXT,
+                session_key   TEXT,
+                at            TEXT NOT NULL,
+                run_id        TEXT NOT NULL,
+                PRIMARY KEY (business_id, source_id)
+            );
+            CREATE TABLE site_session (
+                business_id  TEXT NOT NULL REFERENCES business(business_id),
+                source_id    TEXT NOT NULL,
+                session_key  TEXT,
+                entry_path   TEXT,
+                exit_path    TEXT,
+                time_spent_s INTEGER,
+                bounced      INTEGER,
+                started_at   TEXT NOT NULL,
+                ended_at     TEXT,
+                run_id       TEXT NOT NULL,
+                PRIMARY KEY (business_id, source_id)
+            );
+            CREATE TABLE site_event (
+                business_id TEXT NOT NULL REFERENCES business(business_id),
+                source_id   TEXT NOT NULL,
+                event_name  TEXT NOT NULL,
+                page        TEXT,
+                quiz_step   INTEGER,
+                session_key TEXT,
+                at          TEXT NOT NULL,
+                run_id      TEXT NOT NULL,
+                PRIMARY KEY (business_id, source_id)
+            );
+            CREATE TABLE site_checkout (
+                business_id TEXT NOT NULL REFERENCES business(business_id),
+                source_id   TEXT NOT NULL,
+                event_type  TEXT NOT NULL,
+                session_key TEXT,
+                cart_value  REAL,
+                products    TEXT NOT NULL,
+                at          TEXT NOT NULL,
+                run_id      TEXT NOT NULL,
+                PRIMARY KEY (business_id, source_id)
+            );
+            -- Customer information as aggregates only, computed in the source database. A group of
+            -- fewer than 5 is stored suppressed (value and n NULL), never as its count.
+            CREATE TABLE aggregate_snapshot (
+                business_id  TEXT NOT NULL REFERENCES business(business_id),
+                connector_id TEXT NOT NULL,
+                metric       TEXT NOT NULL,
+                dimension    TEXT NOT NULL,
+                value        REAL,
+                n            INTEGER,
+                suppressed   INTEGER NOT NULL CHECK (suppressed IN (0,1)),
+                source_query TEXT NOT NULL,
+                run_id       TEXT NOT NULL,
+                captured_at  TEXT NOT NULL,
+                PRIMARY KEY (business_id, connector_id, metric, dimension),
+                CHECK (suppressed = 0 OR (value IS NULL AND n IS NULL))
+            );
+            -- Website and deployment facts (sitemap size, last-modified, latest commit …), one per key.
+            CREATE TABLE site_fact (
+                business_id  TEXT NOT NULL REFERENCES business(business_id),
+                connector_id TEXT NOT NULL,
+                key          TEXT NOT NULL,
+                value        TEXT NOT NULL,
+                source_ref   TEXT NOT NULL,
+                run_id       TEXT NOT NULL,
+                captured_at  TEXT NOT NULL,
+                PRIMARY KEY (business_id, connector_id, key)
+            );
+            -- A random value per business so session ids are kept only as keyed hashes.
+            CREATE TABLE business_salt (
+                business_id TEXT PRIMARY KEY REFERENCES business(business_id),
+                salt        TEXT NOT NULL
+            );
+            -- Amara's interpretations and hypotheses about a report, each tied to the insights it used.
+            CREATE TABLE insight_note (
+                business_id TEXT NOT NULL REFERENCES business(business_id),
+                note_id     TEXT NOT NULL,
+                report      TEXT NOT NULL CHECK (report IN ('website','customers')),
+                kind        TEXT NOT NULL CHECK (kind IN ('interpretation','hypothesis')),
+                statement   TEXT NOT NULL,
+                based_on    TEXT NOT NULL,
+                model_tier  TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                PRIMARY KEY (business_id, note_id)
+            );
+            "
+        ))
+        .map_err(err)?;
+        for t in V2_TABLES {
+            conn.execute_batch(&format!(
+                "CREATE TRIGGER IF NOT EXISTS {t}_tenant_fixed BEFORE UPDATE OF business_id ON {t}
+                     BEGIN SELECT RAISE(ABORT, 'business_id is fixed'); END;"
+            ))
+            .map_err(err)?;
+        }
+        // Every existing business gets every registered connector, disconnected.
+        let t = now();
+        for def in connectors::DEFINITIONS {
+            conn.execute(
+                "INSERT OR IGNORE INTO connector (business_id, connector_id, kind, config_json, created_at, updated_at)
+                 SELECT business_id, ?1, ?1, '{}', ?2, ?2 FROM business",
+                params![def.kind, t],
+            )
+            .map_err(err)?;
+        }
+        conn.execute(
+            "UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'",
+            [],
+        )
+        .map_err(err)?;
+        Ok(())
+    })();
+    let finish = match result {
+        Ok(()) => {
+            let bad: i64 = conn
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                    r.get(0)
+                })
+                .map_err(err)?;
+            if bad > 0 {
+                let _ = conn.execute_batch("ROLLBACK");
+                Err(err(
+                    "migration to v2 left broken references; nothing changed",
+                ))
+            } else if conn.is_autocommit() {
+                Ok(())
+            } else {
+                conn.execute_batch("COMMIT").map_err(err)
+            }
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    };
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(err)?;
+    finish
+}
 
 fn init(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
@@ -1756,20 +2013,25 @@ fn init(conn: &Connection) -> Result<(), String> {
         )
         .optional()
         .map_err(err)?;
-    match found.and_then(|v| v.parse::<i64>().ok()) {
+    let version = match found.and_then(|v| v.parse::<i64>().ok()) {
         None => {
+            // A new file starts at v1 (the tables above) and is migrated forward like any other.
             conn.execute(
-                "INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', ?1)",
-                params![SCHEMA_VERSION.to_string()],
+                "INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '1')",
+                [],
             )
             .map_err(err)?;
+            1
         }
         Some(v) if v > SCHEMA_VERSION => {
             return Err(format!(
                 "workspace store schema {v} is newer than this app ({SCHEMA_VERSION}); not touched"
             ));
         }
-        Some(_) => {}
+        Some(v) => v,
+    };
+    if version < 2 {
+        migrate_to_v2(conn)?;
     }
     // A sync that was running when the app stopped can't still be running.
     conn.execute(

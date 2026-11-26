@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Badge, Button, Card, PageHero, SegmentedControl, Select, StatusText, TextField, Toggle } from "../../ui";
 import {
-  ACTOR_LABEL, CONNECTOR_STATE, MATERIAL, SECTIONS, SYNC_STATE, errText, liveWorkspaceCalls, sectionLabel, sourceText, whenText,
+  ACTOR_LABEL, CONNECTOR_STATE, INSIGHT_KIND, INSIGHT_STATUS, MATERIAL, SECTIONS, SYNC_STATE, errText, liveWorkspaceCalls, sectionLabel, sourceText, whenText,
   type Activity, type BizDocument, type Business, type Connector, type ContextItem, type ContextVersion, type KnowledgeHit, type MemoryNote,
-  type Overview, type Permission, type Proposal, type Recommendation, type WorkspaceCalls,
+  type Insight, type Overview, type Permission, type Proposal, type Recommendation, type Report, type WorkspaceCalls,
 } from "./workspaceApi";
 import "../../ui/PanelKit.css";
 
@@ -12,10 +12,10 @@ import "../../ui/PanelKit.css";
  * the Enterprise host). Everything shown comes from the Rust workspace store for the selected business only.
  * No revenue is shown here: business income stays in Finances and Treasury, and ARM trading stays apart.
  */
-type Tab = "overview" | "context" | "documents" | "integrations" | "permissions" | "approvals" | "activity";
+type Tab = "overview" | "context" | "documents" | "integrations" | "intelligence" | "permissions" | "approvals" | "activity";
 const TABS: Array<{ value: Tab; label: string }> = [
   { value: "overview", label: "Summary" }, { value: "context", label: "Context & memory" }, { value: "documents", label: "Documents" },
-  { value: "integrations", label: "Integrations" }, { value: "permissions", label: "Permissions" }, { value: "approvals", label: "Approvals" }, { value: "activity", label: "Activity" },
+  { value: "integrations", label: "Integrations" }, { value: "intelligence", label: "Intelligence" }, { value: "permissions", label: "Permissions" }, { value: "approvals", label: "Approvals" }, { value: "activity", label: "Activity" },
 ];
 
 function Material({ status }: { status: string }) {
@@ -220,37 +220,59 @@ function DocumentsTab({ id, calls }: { id: string; calls: WorkspaceCalls }) {
 
 // ─── Integrations ────────────────────────────────────────────────────────────
 
+function SetupSql({ calls }: { calls: WorkspaceCalls }) {
+  const [sql, setSql] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+  if (sql === null) return <p className="pk-note"><Button size="small" variant="plain" onClick={() => void calls.setupSql().then(setSql, (e: unknown) => setMsg(errText(e)))}>Show the setup SQL</Button>{msg && ` ${msg}`}</p>;
+  return (
+    <>
+      <p className="pk-note">Run this once in the Supabase SQL editor, after replacing the password placeholder. It creates a role that can only read the listed, non-identifying columns.</p>
+      <pre className="pk-note" style={{ whiteSpace: "pre-wrap", maxHeight: 220, overflow: "auto" }} aria-label="Setup SQL">{sql}</pre>
+      <p className="pk-note"><Button size="small" variant="plain" onClick={() => void navigator.clipboard?.writeText(sql).then(() => setMsg("Copied."), () => setMsg("Couldn't copy; select the text instead."))}>Copy</Button> <Button size="small" variant="plain" onClick={() => setSql(null)}>Hide</Button>{msg && ` ${msg}`}</p>
+    </>
+  );
+}
+
 function ConnectorCard({ id, c, calls, onChange }: { id: string; c: Connector; calls: WorkspaceCalls; onChange: (c: Connector) => void }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(c.config.map((f) => [f.name, f.value ?? ""])));
   const [secret, setSecret] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState(""); const [busy, setBusy] = useState(false);
   const s = CONNECTOR_STATE[c.state] ?? { text: c.state, kind: "off" as const };
   const run = (p: Promise<Connector | null>, done: string) => { setBusy(true); return p.then((v) => { if (v) onChange(v); setMsg(v ? done : "Nothing chosen."); }, (e: unknown) => setMsg(errText(e))).finally(() => setBusy(false)); };
-  const isLocal = c.kind === "local_repo";
+  const local = c.check === "local", deferred = c.check === "deferred";
+  const typed = c.config.filter((f) => f.name !== "ca_cert");
+  const complete = c.config.every((f) => f.value) && c.secrets.every((f) => f.stored);
   const sync = () => { setBusy(true); setMsg("Synchronizing…"); calls.sync(id, c.connectorId).then((r) => { setMsg(`${SYNC_STATE[r.status] ?? r.status}: ${r.detail ?? ""}`); return calls.connectors(id).then((all) => { const me = all.find((x) => x.connectorId === c.connectorId); if (me) onChange(me); }); }, (e: unknown) => setMsg(errText(e))).finally(() => setBusy(false)); };
   return (
     <Card title={c.label} headingLevel={3} accessory={<span className="pk-acc"><StatusText kind={s.kind}>{s.text}</StatusText></span>}>
       <p className="pk-note">{c.description}</p>
-      <p className="pk-note" role="status">{c.detail} <span className="pk-dim">(checked {whenText(c.checkedAt)})</span></p>
-      {isLocal ? (
+      <p className="pk-note" role="status">{c.detail}{!deferred && <span className="pk-dim"> ({c.checkedAt ? `checked ${whenText(c.checkedAt)}` : "not checked yet"})</span>}</p>
+      {!deferred && (local ? (
         <p className="pk-note">Folder: {c.config[0]?.value ?? "not chosen"} <Button size="small" variant="secondary" disabled={busy} onClick={() => void run(calls.pickFolder(id, c.connectorId), "Folder saved.")}>Choose folder…</Button></p>
       ) : (
         <>
-          {c.config.map((f) => <TextField key={f.name} label={f.label} placeholder={f.hint} value={values[f.name] ?? ""} onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))} />)}
-          <p className="pk-note"><Button size="small" variant="secondary" disabled={busy} onClick={() => void run(calls.configure(id, c.connectorId, values), "Settings saved.")}>Save settings</Button></p>
+          {typed.map((f) => <TextField key={f.name} label={f.label} placeholder={f.hint} value={values[f.name] ?? ""} onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))} />)}
+          {typed.length > 0 && <p className="pk-note"><Button size="small" variant="secondary" disabled={busy} onClick={() => void run(calls.configure(id, c.connectorId, Object.fromEntries(typed.map((f) => [f.name, values[f.name] ?? ""]))), "Settings saved.")}>Save settings</Button></p>}
+          {c.config.filter((f) => f.name === "ca_cert").map((f) => (
+            <p key={f.name} className="pk-note">{f.label}: {f.value ?? "not chosen"} <span className="pk-dim">({f.hint})</span> <Button size="small" variant="secondary" disabled={busy} onClick={() => void run(calls.pickFile(id, c.connectorId, f.name), "Certificate saved.")}>Choose certificate…</Button></p>
+          ))}
           {c.secrets.map((f) => (
             <div key={f.name}>
               <TextField label={f.label} type="password" autoComplete="off" description={f.stored ? "Stored in the Keychain. Enter a new value to replace it." : f.hint} value={secret[f.name] ?? ""} onChange={(e) => setSecret((v) => ({ ...v, [f.name]: e.target.value }))} />
               <p className="pk-note"><Button size="small" variant="secondary" disabled={busy || !(secret[f.name] ?? "").trim()} onClick={() => { const value = secret[f.name] ?? ""; setSecret((v) => ({ ...v, [f.name]: "" })); void run(calls.setSecret(id, c.connectorId, f.name, value), "Stored in the Keychain."); }}>Store in Keychain</Button> {f.stored ? <StatusText kind="ok">Stored</StatusText> : <StatusText kind="off">Not stored</StatusText>}</p>
             </div>
           ))}
+          {c.kind === "supabase" && <SetupSql calls={calls} />}
         </>
+      ))}
+      {!deferred && <p className="pk-note">{SYNC_STATE[c.sync.state] ?? c.sync.state}{c.sync.last ? ` · ${whenText(c.sync.last.finishedAt ?? c.sync.last.startedAt)}` : ""}{c.sync.detail ? ` · ${c.sync.detail}` : ""}</p>}
+      {!deferred && (
+        <p className="pk-note">
+          {!local && <Button size="small" variant="secondary" disabled={busy || !complete} onClick={() => { setBusy(true); setMsg("Checking…"); calls.check(id, c.connectorId).then((v) => { onChange(v); setMsg(""); }, (e: unknown) => setMsg(errText(e))).finally(() => setBusy(false)); }}>Check connection</Button>}{" "}
+          <Button size="small" variant="primary" disabled={busy || c.state !== "connected"} onClick={sync}>Sync now</Button>{" "}
+          {c.state !== "disconnected" && <Button size="small" variant="plain" disabled={busy} onClick={() => void run(calls.disconnect(id, c.connectorId), "Disconnected.")}>Disconnect…</Button>}
+        </p>
       )}
-      <p className="pk-note">{SYNC_STATE[c.sync.state] ?? c.sync.state}{c.sync.last ? ` · ${whenText(c.sync.last.finishedAt ?? c.sync.last.startedAt)}` : ""}{c.sync.detail ? ` · ${c.sync.detail}` : ""}</p>
-      <p className="pk-note">
-        {isLocal && <Button size="small" variant="primary" disabled={busy || c.state !== "connected"} onClick={sync}>Sync now</Button>}{" "}
-        {c.state !== "disconnected" && <Button size="small" variant="plain" disabled={busy} onClick={() => void run(calls.disconnect(id, c.connectorId), "Disconnected.")}>Disconnect…</Button>}
-      </p>
       <p className="pk-note">Writes outside the app: none.</p>
       {msg && <p className="pk-note" role="status">{msg}</p>}
     </Card>
@@ -262,8 +284,67 @@ function IntegrationsTab({ id, calls }: { id: string; calls: WorkspaceCalls }) {
   if (!data) return <Loading err={err} retry={reload} what="integrations" />;
   return (
     <>
-      <p className="pk-note">A connection is shown as connected only after it is checked. Remote accounts can't be checked until read-only integrations arrive, so a stored key shows as "Authentication required". Keys go to the macOS Keychain and are never shown again.</p>
+      <p className="pk-note">Everything here is read-only and runs only when you choose Check or Sync. A connection shows as connected only after a check passed. Keys go to the macOS Keychain and are never shown again. Network use follows the outbound switch: while it is off, nothing is sent.</p>
       {data.map((c) => <ConnectorCard key={c.connectorId} id={id} c={c} calls={calls} onChange={(n) => setData((all) => (all ?? []).map((x) => (x.connectorId === n.connectorId ? n : x)))} />)}
+    </>
+  );
+}
+
+// ─── Intelligence ────────────────────────────────────────────────────────────
+
+function InsightView({ i }: { i: Insight }) {
+  const k = INSIGHT_KIND[i.kind] ?? { text: i.kind, tone: "neutral" as const };
+  const pct = (x: number) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
+  const value = i.value == null ? null : i.unit === "share" ? pct(i.value) : `${Number.isInteger(i.value) ? i.value : i.value.toFixed(1)}${i.unit && i.unit !== "share" ? ` ${i.unit}` : ""}`;
+  return (
+    <li>
+      <b>{i.title}</b> <Badge tone={k.tone}>{k.text}</Badge>{i.status !== "available" && <> <Badge tone="neutral">{INSIGHT_STATUS[i.status] ?? i.status}</Badge></>}
+      {value && <span className="pk-num"> · {value}</span>}
+      <br /><span className="pk-note">{i.statement}{i.n != null ? ` (n = ${i.n})` : ""}{i.window ? ` · ${i.window}` : ""}</span>
+      {i.rows.length > 0 && (
+        <ul className="pk-list" aria-label={i.title}>
+          {i.rows.map((r) => <li key={r.label} className="pk-num">{r.label}: {r.value == null ? "not available" : Number.isInteger(r.value) ? r.value : r.value.toFixed(1)}{r.share != null ? ` (${pct(r.share)})` : ""}</li>)}
+        </ul>
+      )}
+      {i.note && <p className="pk-note">{i.note}</p>}
+      {i.sources.length > 0 && <p className="pk-note pk-dim">Source: {i.sources.join("; ")}</p>}
+    </li>
+  );
+}
+
+function ReportView({ id, calls, which }: { id: string; calls: WorkspaceCalls; which: "website" | "customers" }) {
+  const { data, err, reload, setData } = useLoad<Report>(() => calls.report(id, which), [id, which]);
+  const [busy, setBusy] = useState(false); const [msg, setMsg] = useState("");
+  if (!data) return <Loading err={err} retry={reload} what="the report" />;
+  const groups = [...new Set(data.insights.map((i) => i.group))];
+  const ask = () => { setBusy(true); setMsg("Amara is reading the report on this Mac…"); calls.interpret(id, which).then((r) => { setData(r); setMsg(""); }, (e: unknown) => setMsg(errText(e))).finally(() => setBusy(false)); };
+  return (
+    <>
+      <p className="pk-note">Generated {whenText(data.generatedAt)}. Every line says whether it is measured, calculated, an AI interpretation or an unverified hypothesis. Missing figures are marked as not available and never estimated.{which === "customers" ? " Customer figures are aggregates; groups under 5 people are hidden." : ""}</p>
+      {groups.map((g) => (
+        <Card key={g} title={g} headingLevel={3}>
+          <ul className="pk-list" aria-label={g}>{data.insights.filter((i) => i.group === g).map((i) => <InsightView key={i.id} i={i} />)}</ul>
+        </Card>
+      ))}
+      <Card title="Amara's reading" headingLevel={3} accessory={<span className="pk-acc">Local model only</span>}>
+        {data.notes.length === 0 ? <p className="pk-note">No interpretation yet.</p> : (
+          <ul className="pk-list" aria-label="Amara's notes">
+            {data.notes.map((n) => <li key={n.noteId}><Badge tone={INSIGHT_KIND[n.kind]?.tone ?? "neutral"}>{INSIGHT_KIND[n.kind]?.text ?? n.kind}</Badge> {n.statement} <span className="pk-dim">· based on {n.basedOn.map((b) => data.insights.find((i) => i.id === b)?.title ?? b).join(", ")}</span></li>)}
+          </ul>
+        )}
+        <p className="pk-note"><Button size="small" variant="secondary" disabled={busy} onClick={ask}>Ask Amara to interpret</Button> <span className="pk-dim">Only the aggregated figures above are given to Amara, on this Mac, never the cloud.</span></p>
+        {msg && <p className="pk-note" role="status">{msg}</p>}
+      </Card>
+    </>
+  );
+}
+
+function IntelligenceTab({ id, calls }: { id: string; calls: WorkspaceCalls }) {
+  const [which, setWhich] = useState<"website" | "customers">("website");
+  return (
+    <>
+      <SegmentedControl label="Report" options={[{ value: "website", label: "Website" }, { value: "customers", label: "Customers" }]} value={which} onChange={setWhich} />
+      <ReportView key={which} id={id} calls={calls} which={which} />
     </>
   );
 }
@@ -373,6 +454,7 @@ export function WorkspaceView({ calls = liveWorkspaceCalls }: { calls?: Workspac
         {tab === "context" && <ContextTab key={id} id={id} calls={calls} />}
         {tab === "documents" && <DocumentsTab key={id} id={id} calls={calls} />}
         {tab === "integrations" && <IntegrationsTab key={id} id={id} calls={calls} />}
+        {tab === "intelligence" && <IntelligenceTab key={id} id={id} calls={calls} />}
         {tab === "permissions" && <PermissionsTab key={id} id={id} calls={calls} />}
         {tab === "approvals" && <ApprovalsTab key={id} id={id} calls={calls} />}
         {tab === "activity" && <ActivityTab key={id} id={id} calls={calls} />}

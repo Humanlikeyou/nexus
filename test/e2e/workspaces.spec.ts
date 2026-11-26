@@ -8,7 +8,7 @@ const NOW = "2026-11-26T01:00:00Z";
 const biz = { businessId: "taiyo-skin", name: "TaiyoSkin", description: "Skin care brand.", ventureId: "taiyo-skin", status: "active", createdAt: NOW, updatedAt: NOW };
 const SECTIONS = [["identity", "Brand identity and voice"], ["products", "Product catalogue"], ["formulations", "Approved formulations"], ["ingredients", "Ingredient information"], ["audiences", "Target audiences"], ["positioning", "Brand positioning"], ["objectives", "Business objectives"], ["website", "Website structure"], ["documents", "Approved business documents"], ["decisions", "Historical decisions and recommendations"]];
 const connector = (kind: string, label: string, state: string, detail: string, stored = false) => ({
-  connectorId: kind, kind, label, description: `${label}.`, state, detail, checkedAt: NOW, externalWrites: false,
+  connectorId: kind, kind, label, description: `${label}.`, state, detail, checkedAt: NOW, externalWrites: false, check: kind === "local_repo" ? "local" : "network",
   config: [{ name: kind === "local_repo" ? "path" : "project_url", label: kind === "local_repo" ? "Folder" : "Project URL", hint: "hint", value: kind === "local_repo" ? "/Users/me/site" : null }],
   secrets: kind === "local_repo" ? [] : [{ name: "service_role_key", label: `${label} key`, hint: "Kept in the Keychain; never shown again", stored }],
   sync: kind === "local_repo" ? { state: "succeeded", detail: "7 found, 7 added or updated", last: { runId: "r1", connectorId: kind, startedAt: NOW, finishedAt: NOW, status: "succeeded", itemsSeen: 7, itemsChanged: 7, conflicts: 0, detail: "7 found, 7 added or updated" } } : { state: "unavailable", detail: "Sync arrives with read-only integrations (Phase 12).", last: null },
@@ -35,6 +35,11 @@ function data() {
     business_proposals: [],
     business_activity: [{ activityId: "a1", scope: "business", kind: "business.created", subjectRef: "biz:taiyo-skin/business", occurredAt: NOW, recordedAt: NOW, source: "scheduler", provenance: "automated", certainty: "confirmed", sourceRef: null, actor: "system", summary: "Workspace created: TaiyoSkin", dataJson: null }],
     business_recommendations: [],
+    business_report: { report: "website", generatedAt: NOW, notes: [], insights: [
+      { id: "web.views.total", group: "Page performance", title: "Page views", kind: "measured", status: "available", statement: "2279 page views recorded by the site's own analytics.", value: 2279, unit: "views", n: 2279, rows: [], window: "2026-03-22 to 2026-11-20", sources: ["Supabase page_views (synced 2026-11-26)"], note: null },
+      { id: "web.pages.top", group: "Page performance", title: "Most viewed pages", kind: "calculated", status: "available", statement: "Views per page.", value: null, unit: null, n: 2279, rows: [{ label: "/shop", value: 900, share: 0.4 }], window: null, sources: ["Supabase page_views"], note: null },
+      { id: "search.clicks", group: "Search", title: "Search clicks", kind: "measured", status: "unavailable", statement: "Not available.", value: null, unit: null, n: null, rows: [], window: null, sources: [], note: "Search Console is deferred (decision 0064)." },
+    ] },
   };
 }
 
@@ -58,7 +63,7 @@ test("Workspaces: TaiyoSkin's overview names every connector state, and every se
   const states = field.getByRole("list", { name: "Integration status" });
   // StatusText = glyph + word in one element.
   for (const s of ["Authentication required", "Not connected", "Error", "Connected"]) await expect(states.getByText(new RegExp(`${s}$`))).toBeVisible();
-  for (const tab of ["Context & memory", "Documents", "Integrations", "Permissions", "Approvals", "Activity", "Summary"]) {
+  for (const tab of ["Context & memory", "Documents", "Integrations", "Intelligence", "Permissions", "Approvals", "Activity", "Summary"]) {
     await field.getByRole("radio", { name: tab, exact: true }).click();
     await expect(field.getByRole("radio", { name: tab, exact: true })).toHaveAttribute("aria-checked", "true");
     await expect(field.getByText(/^Loading /)).toHaveCount(0);
@@ -74,7 +79,7 @@ test("Workspaces: a stored key is a password field that is never filled, and onl
   await expect(key).toHaveAttribute("type", "password");
   await expect(key).toHaveValue("");
   await expect(field.getByText("Key stored in the Keychain but not verified.")).toBeVisible();
-  await expect(field.getByRole("button", { name: "Sync now" })).toBeEnabled();
+  await expect(field.getByRole("region", { name: "Website source on this Mac" }).or(field.locator("section", { has: field.getByRole("heading", { name: "Website source on this Mac" }) })).getByRole("button", { name: "Sync now" })).toBeEnabled();
   await expect(field.getByText("Writes outside the app: none.")).toHaveCount(4);
   // The Context tab labels unverified material.
   await field.getByRole("radio", { name: "Context & memory", exact: true }).click();
@@ -82,7 +87,7 @@ test("Workspaces: a stored key is a password field that is never filled, and onl
   await expect(field.getByRole("list", { name: "Product catalogue" }).getByText("Unverified", { exact: true })).toBeVisible();
 });
 
-for (const tab of ["Summary", "Context & memory", "Integrations", "Permissions"]) {
+for (const tab of ["Summary", "Context & memory", "Integrations", "Intelligence", "Permissions"]) {
   test(`Workspaces › ${tab}: no serious or critical axe violations`, async ({ page, theme }) => {
     const field = await openWorkspaces(page, theme);
     await field.getByRole("radio", { name: tab, exact: true }).click();

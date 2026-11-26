@@ -297,6 +297,11 @@ export const BOUND_TABLE: Record<string, Row> = {
   life_progress: (a) => bound.lifeProgress(a.goalId as never),
   life_habit_history: (a) => bound.lifeHabitHistory(a.habitId as never, a.from as never, a.to as never),
   // 0063: business workspaces.
+  business_connector_check: (a) => bound.businessConnectorCheck(a.businessId as never, a.connectorId as never),
+  business_connector_pick_file: (a) => bound.businessConnectorPickFile(a.businessId as never, a.connectorId as never, a.field as never),
+  business_supabase_setup_sql: () => bound.businessSupabaseSetupSql(),
+  business_report: (a) => bound.businessReport(a.businessId as never, a.report as never),
+  business_report_interpret: (a) => bound.businessReportInterpret(a.businessId as never, a.report as never),
   business_list: () => bound.businessList(),
   business_create: (a) => bound.businessCreate(a.name as never, (a.description ?? null) as never, (a.ventureId ?? null) as never),
   business_update: (a) => bound.businessUpdate(a.businessId as never, a.name as never, (a.description ?? null) as never, (a.ventureId ?? null) as never, a.status as never),

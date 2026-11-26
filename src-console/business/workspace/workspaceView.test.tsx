@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { CONNECTOR_STATE, SECTIONS, sourceText, type Business, type Connector, type ContextItem, type Overview, type Permission, type Proposal, type WorkspaceCalls } from "./workspaceApi";
+import { CONNECTOR_STATE, INSIGHT_KIND, SECTIONS, sourceText, type Business, type Connector, type ContextItem, type Insight, type Overview, type Permission, type Proposal, type Report, type WorkspaceCalls } from "./workspaceApi";
 import { WorkspaceView } from "./WorkspaceView";
 
 const biz = (id: string, name: string): Business => ({ businessId: id, name, description: null, ventureId: id === "taiyo-skin" ? "taiyo-skin" : null, status: "active", createdAt: "2026-11-26T00:00:00Z", updatedAt: "2026-11-26T00:00:00Z" });
@@ -8,7 +8,7 @@ const conn = (kind: string, state: string, detail: string, stored = false): Conn
   connectorId: kind, kind, label: kind === "local_repo" ? "Website source on this Mac" : kind[0].toUpperCase() + kind.slice(1), description: `${kind} description`,
   config: [{ name: kind === "local_repo" ? "path" : "project_url", label: kind === "local_repo" ? "Folder" : "Project URL", hint: "hint", value: kind === "local_repo" ? "/Users/x/site" : null }],
   secrets: kind === "local_repo" ? [] : [{ name: "service_role_key", label: "Service-role key", hint: "Kept in the Keychain", stored }],
-  state, detail, checkedAt: "2026-11-26T01:00:00Z",
+  state, detail, checkedAt: "2026-11-26T01:00:00Z", check: kind === "local_repo" ? "local" : "network",
   sync: kind === "local_repo" ? { state: "never", detail: "Not synchronized yet.", last: null } : { state: "unavailable", detail: "Sync arrives with read-only integrations (Phase 12).", last: null },
   externalWrites: false,
 });
@@ -58,9 +58,32 @@ function calls(over: Partial<WorkspaceCalls> = {}): WorkspaceCalls & Record<stri
     rejectProposal: vi.fn(async () => ({ ...proposal, status: "rejected" })),
     activity: vi.fn(async () => [{ activityId: "a1", scope: "business", kind: "business.created", subjectRef: "biz:taiyo-skin/business", occurredAt: "2026-11-26T00:00:00Z", recordedAt: "", source: "scheduler", provenance: "automated", certainty: "confirmed", sourceRef: null, actor: "system", summary: "Workspace created: TaiyoSkin", dataJson: null }]),
     recommendations: vi.fn(async () => []),
+    check: vi.fn(async () => ({ ...conn("supabase", "connected", "Signed in as nexus_reader: read-only, no personal columns (checked just now).", true) })),
+    pickFile: vi.fn(async () => null),
+    setupSql: vi.fn(async () => "create role nexus_reader with login password 'REPLACE-WITH-A-LONG-RANDOM-PASSWORD';"),
+    report: vi.fn(async (_id: string, which: "website" | "customers") => (which === "website" ? websiteReport : customerReport)),
+    interpret: vi.fn(async () => ({ ...websiteReport, notes: [{ noteId: "n1", kind: "interpretation", statement: "The shop page draws most views.", basedOn: ["web.pages.top"], modelTier: "light", createdAt: "2026-11-26T02:00:00Z" }] })),
     ...over,
   } as never;
 }
+
+const insight = (over: Partial<Insight>): Insight => ({ id: "x", group: "Page performance", title: "T", kind: "measured", status: "available", statement: "S", value: null, unit: null, n: null, rows: [], window: null, sources: [], note: null, ...over });
+const websiteReport: Report = {
+  report: "website", generatedAt: "2026-11-26T01:00:00Z", notes: [],
+  insights: [
+    insight({ id: "web.views.total", title: "Page views", value: 2279, unit: "views", n: 2279, statement: "2279 page views recorded by the site's own analytics.", sources: ["Supabase page_views (synced 2026-11-26)"], window: "2026-03-22 to 2026-11-20" }),
+    insight({ id: "web.pages.top", title: "Most viewed pages", kind: "calculated", rows: [{ label: "/shop", value: 900, share: 0.4 }] }),
+    insight({ id: "search.clicks", group: "Search", title: "Search clicks", status: "unavailable", statement: "Not available.", note: "Search Console is deferred (decision 0064)." }),
+  ],
+};
+const customerReport: Report = {
+  report: "customers", generatedAt: "2026-11-26T01:00:00Z", notes: [],
+  insights: [
+    insight({ id: "cust.concerns", group: "Frequent customer concerns", title: "Concerns chosen in the skin quiz", status: "too_few", rows: [{ label: "hyperpigmentation", value: 7, share: 0.58 }], note: "Answers given by fewer than 5 people are combined and not shown." }),
+    insight({ id: "cust.faq", group: "Frequently asked questions", title: "Contact request topics", status: "suppressed", statement: "Every answer here was given by fewer than 5 people, so none is shown." }),
+    insight({ id: "cust.content_gaps", group: "Content gaps", title: "Concerns no page seems to cover", kind: "hypothesis", statement: "Unverified: these concerns were named by 5 or more people." }),
+  ],
+};
 
 const openTab = (name: string) => fireEvent.click(screen.getByRole("radio", { name }));
 
@@ -126,7 +149,7 @@ describe("decision 0063: business workspaces", () => {
     await waitFor(() => expect(c.setSecret).toHaveBeenCalledWith("taiyo-skin", "supabase", "service_role_key", "sk-secret-123"));
     expect(field.value).toBe("");
     expect(document.body.textContent).not.toContain("sk-secret-123");
-    expect(screen.getByText("Sync not available yet", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("No sync in this phase", { exact: false })).toBeInTheDocument();
     expect(screen.getAllByText("Writes outside the app: none.").length).toBe(2);
   });
 
@@ -135,7 +158,8 @@ describe("decision 0063: business workspaces", () => {
     render(<WorkspaceView calls={c} />);
     await screen.findByText(/linked to the ledger venture/);
     openTab("Integrations");
-    fireEvent.click(await screen.findByRole("button", { name: "Sync now" }));
+    const card = (await screen.findByRole("heading", { name: "Website source on this Mac" })).closest("section") as HTMLElement;
+    fireEvent.click(within(card).getByRole("button", { name: "Sync now" }));
     expect(await screen.findByText(/Last sync succeeded: 7 found, 7 added or updated/)).toBeInTheDocument();
     expect(c.sync).toHaveBeenCalledWith("taiyo-skin", "local_repo");
   });
@@ -186,5 +210,59 @@ describe("decision 0063: business workspaces", () => {
     expect(SECTIONS).toHaveLength(10);
     expect(sourceText("sync", "local_repo:README.md")).toBe("From the website source: README.md");
     expect(sourceText("user", null)).toBe("Added by you");
+  });
+
+  it("a network connector is checked on request, and a deferred one has no controls", async () => {
+    const supaSet = { ...conn("supabase", "auth_required", "Set up but not checked yet. Choose Check connection.", true), config: [{ name: "pooler_host", label: "Connection pooler host", hint: "", value: "aws-1-ap-northeast-1.pooler.supabase.com" }, { name: "ca_cert", label: "Supabase CA certificate", hint: "", value: "/Users/me/prod-ca-2021.crt" }] };
+    const c = calls({ connectors: vi.fn(async () => [supaSet, { ...conn("google_analytics", "disconnected", "Deferred (decision 0064): the live site doesn't load the GA4 tag."), config: [], secrets: [], check: "deferred", label: "Google Analytics 4" }]) });
+    render(<WorkspaceView calls={c} />);
+    await screen.findByText(/linked to the ledger venture/);
+    openTab("Integrations");
+    const ga = (await screen.findByRole("heading", { name: "Google Analytics 4" })).closest("section") as HTMLElement;
+    expect(within(ga).getByText(/Deferred \(decision 0064\)/)).toBeInTheDocument();
+    expect(within(ga).queryByRole("button")).toBeNull();
+    const supa = screen.getByRole("heading", { name: "Supabase" }).closest("section") as HTMLElement;
+    expect(within(supa).getByText(/not checked yet/)).toBeInTheDocument();
+    expect(within(supa).getByRole("button", { name: "Sync now" })).toBeDisabled();
+    expect(within(supa).getByText(/prod-ca-2021.crt/)).toBeInTheDocument();
+    expect(within(supa).queryByLabelText("Supabase CA certificate")).toBeNull();
+    fireEvent.click(within(supa).getByRole("button", { name: "Show the setup SQL" }));
+    expect(await within(supa).findByLabelText("Setup SQL")).toHaveTextContent("REPLACE-WITH-A-LONG-RANDOM-PASSWORD");
+    fireEvent.click(within(supa).getByRole("button", { name: "Check connection" }));
+    await waitFor(() => expect(c.check).toHaveBeenCalledWith("taiyo-skin", "supabase"));
+    expect(await within(supa).findByText(/read-only, no personal columns/)).toBeInTheDocument();
+  });
+
+  it("the website report labels every line and says when a figure isn't available", async () => {
+    const c = calls();
+    render(<WorkspaceView calls={c} />);
+    await screen.findByText(/linked to the ledger venture/);
+    openTab("Intelligence");
+    const views = within(await screen.findByRole("list", { name: "Page performance" }));
+    expect(views.getAllByText("Measured").length).toBeGreaterThan(0);
+    expect(views.getByText("Calculated")).toBeInTheDocument();
+    expect(views.getByText(/n = 2279/)).toBeInTheDocument();
+    expect(views.getByText(/Source: Supabase page_views/)).toBeInTheDocument();
+    expect(views.getByText("/shop: 900 (40%)")).toBeInTheDocument();
+    const search = within(screen.getByRole("list", { name: "Search" }));
+    expect(search.getByText("Not available")).toBeInTheDocument();
+    expect(search.getByText(/Search Console is deferred/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ask Amara to interpret" }));
+    const notes = within(await screen.findByRole("list", { name: "Amara's notes" }));
+    expect(notes.getByText("AI interpretation")).toBeInTheDocument();
+    expect(notes.getByText(/based on Most viewed pages/)).toBeInTheDocument();
+    expect(c.interpret).toHaveBeenCalledWith("taiyo-skin", "website");
+  });
+
+  it("the customer report hides small groups and marks hypotheses as unverified", async () => {
+    const c = calls();
+    render(<WorkspaceView calls={c} />);
+    await screen.findByText(/linked to the ledger venture/);
+    openTab("Intelligence");
+    fireEvent.click(await screen.findByRole("radio", { name: "Customers" }));
+    expect(await screen.findByText("Too few to tell")).toBeInTheDocument();
+    expect(screen.getByText("Hidden: groups under 5")).toBeInTheDocument();
+    expect(screen.getByText(INSIGHT_KIND.hypothesis.text)).toBeInTheDocument();
+    expect(screen.getByText(/groups under 5 people are hidden/)).toBeInTheDocument();
   });
 });

@@ -505,7 +505,222 @@ pub async fn business_sync_start(
 ) -> Result<BusinessSyncRun, String> {
     blocking(move || {
         let t = live().tenant(&business_id)?;
-        super::sync_local::run(&t, &connector_id, "user")
+        sync_in(
+            &t,
+            &MacKeychain,
+            &super::net::Live,
+            super::net::real_sleep,
+            &connector_id,
+            "user",
+        )
+    })
+    .await
+}
+
+/// One explicit sync of one connector, recorded as a run. Network connectors go through `net.rs`
+/// (approved hosts, the outbound switch, retries) or the pinned Supabase connection.
+pub(crate) fn sync_in(
+    t: &super::Tenant,
+    kc: &dyn Keychain,
+    http: &dyn super::net::Transport,
+    sleep: super::net::Sleep,
+    connector_id: &str,
+    actor: &str,
+) -> Result<BusinessSyncRun, String> {
+    let (kind, _) = t.config_of(connector_id)?;
+    let def = super::connectors::definition(&kind)?;
+    if !def.syncs {
+        return Err(format!(
+            "{} has no synchronization in this phase",
+            def.label
+        ));
+    }
+    match kind.as_str() {
+        "local_repo" => super::sync_local::run(t, connector_id, actor),
+        "supabase" => super::supabase::sync_live(t, kc, actor),
+        _ => {
+            t.require(actor, "sync_connectors")?;
+            let run_id = t.begin_run(connector_id)?;
+            let outcome = match kind.as_str() {
+                "website" => super::website::sync_website(t, http, sleep, &run_id),
+                "github" => super::website::sync_github(t, kc, http, sleep, &run_id),
+                "drive_folder" => super::drive_folder::sync(t, &run_id),
+                _ => Err("no sync for this connector".to_string()),
+            };
+            t.finish_run(&run_id, def.label, outcome, actor)
+        }
+    }
+}
+
+/// Check connection: local folders are checked on every read; network connectors here, on request.
+pub(crate) fn check_in(
+    t: &super::Tenant,
+    kc: &dyn Keychain,
+    http: &dyn super::net::Transport,
+    sleep: super::net::Sleep,
+    connector_id: &str,
+) -> Result<BusinessConnector, String> {
+    let (kind, _) = t.config_of(connector_id)?;
+    match kind.as_str() {
+        "supabase" => {
+            super::supabase::check_live(t, kc)?;
+        }
+        "website" => {
+            super::website::check_website(t, http, sleep)?;
+        }
+        "github" => {
+            super::website::check_github(t, kc, http, sleep)?;
+        }
+        _ => {}
+    }
+    t.connector_view(kc, connector_id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn business_connector_check(
+    business_id: String,
+    connector_id: String,
+) -> Result<BusinessConnector, String> {
+    blocking(move || {
+        let t = live().tenant(&business_id)?;
+        check_in(
+            &t,
+            &MacKeychain,
+            &super::net::Live,
+            super::net::real_sleep,
+            &connector_id,
+        )
+    })
+    .await
+}
+
+/// The native file picker for a connector's file setting (the Supabase CA certificate). None = cancelled.
+#[tauri::command]
+#[specta::specta]
+pub async fn business_connector_pick_file(
+    app: tauri::AppHandle,
+    business_id: String,
+    connector_id: String,
+    field: String,
+) -> Result<Option<BusinessConnector>, String> {
+    use tauri::Manager;
+    use tauri_plugin_dialog::DialogExt;
+    if field != "ca_cert" {
+        return Err("that setting isn't a file".into());
+    }
+    live().tenant(&business_id)?;
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let mut d = app
+            .dialog()
+            .file()
+            .set_title("Choose the Supabase CA certificate")
+            .add_filter("Certificate", &["crt", "pem", "cer"]);
+        if let Some(w) = app.get_webview_window("main") {
+            d = d.set_parent(&w);
+        }
+        d.blocking_pick_file()
+    })
+    .await
+    .map_err(|_| "failed".to_string())?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(None);
+    };
+    blocking(move || {
+        let mut v = BTreeMap::new();
+        v.insert(field, path.to_string_lossy().into_owned());
+        live()
+            .tenant(&business_id)?
+            .connector_configure(&MacKeychain, &connector_id, &v)
+            .map(Some)
+    })
+    .await
+}
+
+/// The SQL that creates the read-only Supabase role (no secret in it; the password is a placeholder).
+#[tauri::command]
+#[specta::specta]
+pub fn business_supabase_setup_sql() -> String {
+    super::supabase::setup_sql()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn business_report(
+    business_id: String,
+    report: String,
+) -> Result<super::intelligence::BusinessReport, String> {
+    blocking(move || {
+        let t = live().tenant(&business_id)?;
+        match report.as_str() {
+            "website" => super::intelligence::website_report(&t),
+            "customers" => super::intelligence::customer_report(&t),
+            _ => Err("report must be website or customers".into()),
+        }
+    })
+    .await
+}
+
+/// Amara's notes on a report, on the local model only (never the cloud tier). Needs the model's
+/// read permission for this business. Returns the report with the new notes.
+#[tauri::command]
+#[specta::specta]
+pub async fn business_report_interpret(
+    business_id: String,
+    report: String,
+) -> Result<super::intelligence::BusinessReport, String> {
+    use crate::commands::inference::{
+        infer, InferenceRequest, Message, ModelClass, OutputSpec, ProviderPolicy,
+    };
+    let (r, input) = {
+        let id = business_id.clone();
+        let rep = report.clone();
+        blocking(move || {
+            let t = live().tenant(&id)?;
+            t.require("model", "read_approved_context")?;
+            let r = match rep.as_str() {
+                "website" => super::intelligence::website_report(&t)?,
+                "customers" => super::intelligence::customer_report(&t)?,
+                _ => return Err("report must be website or customers".into()),
+            };
+            let input = super::intelligence::interpretation_input(&r);
+            Ok((r, input))
+        })
+        .await?
+    };
+    if input.as_array().is_none_or(|a| a.is_empty()) {
+        return Err(
+            "There is nothing measured yet for Amara to interpret. Sync the connectors first."
+                .into(),
+        );
+    }
+    let mut req = InferenceRequest::new("business.report_interpret", ModelClass::Fast);
+    req.policy = ProviderPolicy::LocalOnly;
+    req.persona = false;
+    req.instruction = Some(super::intelligence::INSTRUCTION.into());
+    req.messages = vec![Message::user(format!("Report ({report}):\n{input}"))];
+    req.output = OutputSpec::Json {
+        name: "report_notes".into(),
+        schema: super::intelligence::notes_schema(),
+    };
+    req.params.temperature = Some(0.2);
+    let out = infer(&req).await.map_err(|e| {
+        format!(
+            "Amara couldn't interpret the report ({}). Nothing was saved.",
+            e.kind()
+        )
+    })?;
+    let answer = out
+        .json
+        .ok_or("Amara's answer wasn't structured, so nothing was saved.")?;
+    let tier = format!("{:?}", out.tier).to_lowercase();
+    blocking(move || {
+        let t = live().tenant(&business_id)?;
+        super::intelligence::store_notes(&t, &r, &answer, &tier)?;
+        match report.as_str() {
+            "website" => super::intelligence::website_report(&t),
+            _ => super::intelligence::customer_report(&t),
+        }
     })
     .await
 }

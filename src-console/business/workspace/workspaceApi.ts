@@ -14,6 +14,8 @@ import type {
   BusinessMemoryNote_Serialize,
   BusinessPermission,
   BusinessProposal_Serialize,
+  BusinessReport_Serialize,
+  BusinessInsight_Serialize,
   BusinessSyncRun_Serialize,
   BusinessWorkspaceOverview_Serialize,
   Business_Serialize,
@@ -33,6 +35,17 @@ export type Permission = BusinessPermission;
 export type Proposal = BusinessProposal_Serialize;
 export type Activity = ActivityRow_Serialize;
 export type Recommendation = RecommendationRow_Serialize;
+export type Report = BusinessReport_Serialize;
+export type Insight = BusinessInsight_Serialize;
+
+/** Decision 0064: what each insight is. Words, never colour alone. */
+export const INSIGHT_KIND: Record<string, { text: string; tone: "info" | "neutral" | "accent" | "warning" }> = {
+  measured: { text: "Measured", tone: "info" },
+  calculated: { text: "Calculated", tone: "neutral" },
+  interpretation: { text: "AI interpretation", tone: "accent" },
+  hypothesis: { text: "Unverified hypothesis", tone: "warning" },
+};
+export const INSIGHT_STATUS: Record<string, string> = { unavailable: "Not available", too_few: "Too few to tell", suppressed: "Hidden: groups under 5" };
 export type ContextInput = { itemId: string | null; section: string; title: string; body: string; status: "draft" | "unverified"; expectedVersion: number | null };
 
 /** The ten sections, in the Rust order (business_workspace.rs SECTIONS). */
@@ -66,7 +79,7 @@ export const CONNECTOR_STATE: Record<string, { text: string; kind: "ok" | "off" 
   error: { text: "Error", kind: "fail" },
 };
 export const SYNC_STATE: Record<string, string> = {
-  unavailable: "Sync not available yet",
+  unavailable: "No sync in this phase",
   never: "Never synchronized",
   running: "Synchronizing…",
   succeeded: "Last sync succeeded",
@@ -99,6 +112,11 @@ export type WorkspaceCalls = {
   setSecret: (id: string, connectorId: string, field: string, value: string) => Promise<Connector>;
   disconnect: (id: string, connectorId: string) => Promise<Connector>;
   sync: (id: string, connectorId: string) => Promise<SyncRun>;
+  check: (id: string, connectorId: string) => Promise<Connector>;
+  pickFile: (id: string, connectorId: string, field: string) => Promise<Connector | null>;
+  setupSql: () => Promise<string>;
+  report: (id: string, report: "website" | "customers") => Promise<Report>;
+  interpret: (id: string, report: "website" | "customers") => Promise<Report>;
   permissions: (id: string) => Promise<Permission[]>;
   setPermission: (id: string, actor: string, capability: string, allowed: boolean) => Promise<Permission[]>;
   proposals: (id: string) => Promise<Proposal[]>;
@@ -133,6 +151,11 @@ export const liveWorkspaceCalls: WorkspaceCalls = {
   setSecret: (businessId, connectorId, field, value) => call("business_connector_secret_set", { businessId, connectorId, field, value }),
   disconnect: (businessId, connectorId) => call("business_connector_disconnect", { businessId, connectorId }),
   sync: (businessId, connectorId) => call("business_sync_start", { businessId, connectorId }),
+  check: (businessId, connectorId) => call("business_connector_check", { businessId, connectorId }),
+  pickFile: (businessId, connectorId, field) => call("business_connector_pick_file", { businessId, connectorId, field }),
+  setupSql: () => call("business_supabase_setup_sql"),
+  report: (businessId, report) => call("business_report", { businessId, report }),
+  interpret: (businessId, report) => call("business_report_interpret", { businessId, report }),
   permissions: (businessId) => call("business_permissions", { businessId }),
   setPermission: (businessId, actor, capability, allowed) => call("business_permission_set", { businessId, actor, capability, allowed }),
   proposals: (businessId) => call("business_proposals", { businessId, status: null }),

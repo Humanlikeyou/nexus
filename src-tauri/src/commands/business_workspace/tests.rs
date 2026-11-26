@@ -1,6 +1,8 @@
 //! 0063 workspace tests: real SQLite files and folders in a temp directory; rows checked on disk.
 
-use super::connectors::{definition, derive_state, service_name, validate_config, TEST_HOME};
+use super::connectors::{
+    definition, derive_state, service_name, validate_config, CheckResult, TEST_HOME,
+};
 use super::*;
 use crate::commands::amara_store::{store_for, Scope};
 use crate::commands::execution::{Controller, ExecRequest, ExecStatus, Ledger, Origin, Registry};
@@ -53,7 +55,16 @@ fn a_new_store_holds_taiyoskin_linked_to_its_venture_with_every_connector_discon
     let cs = t.connectors(&kc).unwrap();
     assert_eq!(
         cs.iter().map(|c| c.kind.as_str()).collect::<Vec<_>>(),
-        ["supabase", "hostinger", "instagram", "local_repo"]
+        [
+            "supabase",
+            "website",
+            "github",
+            "google_analytics",
+            "search_console",
+            "instagram",
+            "local_repo",
+            "drive_folder"
+        ]
     );
     assert!(cs
         .iter()
@@ -185,9 +196,24 @@ fn every_tenant_statement_binds_its_business_id() {
         "sync_run",
         "permission",
         "proposal",
+        // 0064
+        "connector_check",
+        "source_cursor",
+        "site_page_view",
+        "site_session",
+        "site_event",
+        "site_checkout",
+        "aggregate_snapshot",
+        "site_fact",
+        "business_salt",
+        "insight_note",
     ];
     // Startup maintenance: marks stale runs interrupted in every business; reads nothing out.
-    let exceptions = ["SET status = 'interrupted'"];
+    let exceptions = [
+        "SET status = 'interrupted'",
+        // The v2 schema migration renames a connector id in every business; it reads nothing out.
+        "SET connector_id = 'website' WHERE connector_id = 'hostinger'",
+    ];
     let mut checked = 0;
     for (name, src) in [
         (
@@ -196,6 +222,9 @@ fn every_tenant_statement_binds_its_business_id() {
         ),
         ("connectors.rs", include_str!("connectors.rs")),
         ("sync_local.rs", include_str!("sync_local.rs")),
+        ("supabase.rs", include_str!("supabase.rs")),
+        ("website.rs", include_str!("website.rs")),
+        ("intelligence.rs", include_str!("intelligence.rs")),
     ] {
         // Tests live in tests.rs, so each of these files is production code from top to bottom.
         let prod = src;
@@ -431,7 +460,24 @@ fn documents_are_copied_privately_hashed_and_searchable_by_status() {
 #[test]
 fn connector_states_are_never_connected_without_a_passing_check() {
     let supa = definition("supabase").unwrap();
+    let site = definition("website").unwrap();
     let local = definition("local_repo").unwrap();
+    let ga = definition("google_analytics").unwrap();
+    let ok = CheckResult {
+        outcome: "ok".into(),
+        detail: "fine".into(),
+        at: "t".into(),
+    };
+    let auth = CheckResult {
+        outcome: "auth".into(),
+        detail: "refused".into(),
+        at: "t".into(),
+    };
+    let bad = CheckResult {
+        outcome: "error".into(),
+        detail: "gone".into(),
+        at: "t".into(),
+    };
     assert_eq!(
         derive_state(supa, false, &Ok(vec![false]), None).0,
         "disconnected"
@@ -443,25 +489,44 @@ fn connector_states_are_never_connected_without_a_passing_check() {
     let (s, why) = derive_state(supa, true, &Ok(vec![true]), None);
     assert_eq!(
         s, "auth_required",
-        "a stored key is not a verified connection"
+        "a stored key with no check is not a connection"
     );
-    assert!(why.contains("not verified"));
+    assert!(why.contains("not checked"));
     assert_eq!(
-        derive_state(supa, true, &Err("locked".into()), None).0,
-        "error"
-    );
-    assert_eq!(
-        derive_state(local, true, &Ok(vec![]), Some(&Ok("ok".into()))).0,
+        derive_state(supa, true, &Ok(vec![true]), Some(&ok)).0,
         "connected"
     );
     assert_eq!(
-        derive_state(local, true, &Ok(vec![]), Some(&Err("gone".into()))).0,
+        derive_state(supa, true, &Ok(vec![true]), Some(&auth)).0,
+        "auth_required"
+    );
+    assert_eq!(
+        derive_state(supa, true, &Ok(vec![true]), Some(&bad)).0,
+        "error"
+    );
+    assert_eq!(
+        derive_state(supa, true, &Err("locked".into()), Some(&ok)).0,
+        "error"
+    );
+    assert_eq!(
+        derive_state(site, true, &Ok(vec![]), None).0,
+        "disconnected"
+    );
+    assert_eq!(
+        derive_state(local, true, &Ok(vec![]), Some(&ok)).0,
+        "connected"
+    );
+    assert_eq!(
+        derive_state(local, true, &Ok(vec![]), Some(&bad)).0,
         "error"
     );
     assert_eq!(
         derive_state(local, false, &Ok(vec![]), None).0,
         "disconnected"
     );
+    let (s, why) = derive_state(ga, true, &Ok(vec![]), Some(&ok));
+    assert_eq!(s, "disconnected", "a deferred connector is never connected");
+    assert!(why.contains("Deferred"));
 }
 
 #[test]
@@ -472,61 +537,84 @@ fn secrets_go_to_the_keychain_per_business_and_never_come_back() {
     let v = a
         .connector_configure(
             &kc,
-            "supabase",
-            &BTreeMap::from([("project_url".into(), "https://abcdefgh.supabase.co".into())]),
+            "github",
+            &BTreeMap::from([("repo".into(), "owner/site".into())]),
         )
         .unwrap();
     assert_eq!(v.state, "auth_required");
     let v = a
-        .connector_secret_set(
-            &kc,
-            "supabase",
-            "service_role_key",
-            "  sk-test-VALUE-123  ".into(),
-        )
+        .connector_secret_set(&kc, "github", "token", "  ghp_test-VALUE-123  ".into())
         .unwrap();
     assert!(v.secrets[0].stored);
-    assert_eq!(v.state, "auth_required");
+    assert_eq!(v.state, "auth_required", "stored but not checked");
     let json = serde_json::to_string(&v).unwrap();
-    assert!(!json.contains("sk-test-VALUE-123"), "no secret in any view");
-    assert_eq!(
-        kc.get(&service_name(a.id(), "supabase", "service_role_key"))
-            .unwrap(),
-        b"sk-test-VALUE-123"
+    assert!(
+        !json.contains("ghp_test-VALUE-123"),
+        "no secret in any view"
     );
-    // The other business has its own, empty, item.
-    assert!(!b.connector_view(&kc, "supabase").unwrap().secrets[0].stored);
-    // Nothing secret is in the database file.
+    assert_eq!(
+        kc.get(&service_name(a.id(), "github", "token")).unwrap(),
+        b"ghp_test-VALUE-123"
+    );
+    assert!(!b.connector_view(&kc, "github").unwrap().secrets[0].stored);
     let raw = std::fs::read(d.0.join("business/workspaces.db")).unwrap();
-    assert!(!String::from_utf8_lossy(&raw).contains("sk-test-VALUE-123"));
+    assert!(!String::from_utf8_lossy(&raw).contains("ghp_test-VALUE-123"));
     assert!(a
-        .connector_secret_set(&kc, "supabase", "other", "x".into())
+        .connector_secret_set(&kc, "github", "other", "x".into())
         .is_err());
     assert!(a
         .connector_secret_set(&kc, "local_repo", "path", "x".into())
         .is_err());
     assert!(a
-        .connector_secret_set(&kc, "supabase", "service_role_key", "has space".into())
+        .connector_secret_set(&kc, "github", "token", "has space".into())
         .is_err());
-    // Disconnect removes the key and the settings.
-    let v = a.connector_disconnect(&kc, "supabase").unwrap();
+    // A passing check, then a new key: the check no longer applies.
+    a.record_check("github", "ok", "readable").unwrap();
+    assert_eq!(a.connector_view(&kc, "github").unwrap().state, "connected");
+    a.connector_secret_set(&kc, "github", "token", "ghp_new".into())
+        .unwrap();
+    assert_eq!(
+        a.connector_view(&kc, "github").unwrap().state,
+        "auth_required"
+    );
+    // Disconnect removes the key, the settings and the check.
+    let v = a.connector_disconnect(&kc, "github").unwrap();
     assert_eq!(v.state, "disconnected");
-    assert!(kc
-        .get(&service_name(a.id(), "supabase", "service_role_key"))
-        .is_err());
+    assert!(kc.get(&service_name(a.id(), "github", "token")).is_err());
+    assert!(a.last_check("github").unwrap().is_none());
 }
 
 #[test]
 fn connector_settings_are_validated_and_unknown_fields_refused() {
-    assert!(validate_config("supabase", "project_url", "http://abc.supabase.co").is_err());
-    assert!(validate_config("supabase", "project_url", "https://evil.com/.supabase.co").is_err());
-    assert_eq!(
-        validate_config("instagram", "handle", "taiyoskin").unwrap(),
-        "@taiyoskin"
+    assert!(validate_config(
+        "supabase",
+        "pooler_host",
+        "aws-1-ap-northeast-1.pooler.supabase.com"
+    )
+    .is_ok());
+    assert!(
+        validate_config(
+            "supabase",
+            "pooler_host",
+            "aws-1-us-east-1.pooler.supabase.com"
+        )
+        .is_err(),
+        "only the approved region"
     );
-    assert!(validate_config("hostinger", "domain", "bad domain").is_err());
+    assert!(validate_config("supabase", "pooler_host", "evil.com").is_err());
+    assert!(validate_config("supabase", "project_ref", "hghluspjxlfhymjmlmcx").is_ok());
+    assert!(validate_config("supabase", "project_ref", "short").is_err());
+    assert!(validate_config("website", "domain", "taiyoskin.com").is_ok());
+    assert!(
+        validate_config("website", "domain", "example.com").is_err(),
+        "an unapproved domain is refused"
+    );
+    assert!(validate_config("website", "domain", "api.github.com").is_err());
+    assert!(validate_config("github", "repo", "owner/site").is_ok());
+    assert!(validate_config("github", "repo", "owner/../x").is_err());
+    assert!(validate_config("github", "repo", "a/b/c").is_err());
     assert!(validate_config("local_repo", "path", "relative/path").is_err());
-    assert!(validate_config("local_repo", "path", "/etc").is_err());
+    assert!(validate_config("drive_folder", "path", "/etc").is_err());
     let d = tmp("cfg");
     let t = store_in(&d.0).tenant("taiyo-skin").unwrap();
     let kc = FakeKeychain::default();
@@ -534,9 +622,13 @@ fn connector_settings_are_validated_and_unknown_fields_refused() {
         .connector_configure(
             &kc,
             "supabase",
-            &BTreeMap::from([("service_role_key".into(), "x".into())])
+            &BTreeMap::from([("db_password".into(), "x".into())])
         )
         .is_err());
+    assert!(t
+        .connector_configure(&kc, "google_analytics", &BTreeMap::new())
+        .unwrap_err()
+        .contains("isn't available"));
     assert!(t.connector_view(&kc, "stripe").is_err());
 }
 
@@ -914,15 +1006,23 @@ fn activity_goes_to_the_business_file_tagged_with_its_business_only() {
 }
 
 #[test]
-fn workspace_code_stays_out_of_personal_memory_arm_and_the_network() {
+fn workspace_code_stays_out_of_personal_memory_and_arm_and_only_net_rs_reaches_the_network() {
     let srcs = [
-        include_str!("../business_workspace.rs"),
-        include_str!("connectors.rs"),
-        include_str!("sync_local.rs"),
-        include_str!("ops.rs"),
-        include_str!("commands.rs"),
+        (
+            "business_workspace.rs",
+            include_str!("../business_workspace.rs"),
+        ),
+        ("connectors.rs", include_str!("connectors.rs")),
+        ("sync_local.rs", include_str!("sync_local.rs")),
+        ("ops.rs", include_str!("ops.rs")),
+        ("commands.rs", include_str!("commands.rs")),
+        ("net.rs", include_str!("net.rs")),
+        ("supabase.rs", include_str!("supabase.rs")),
+        ("website.rs", include_str!("website.rs")),
+        ("drive_folder.rs", include_str!("drive_folder.rs")),
+        ("intelligence.rs", include_str!("intelligence.rs")),
     ];
-    for src in srcs {
+    for (name, src) in srcs {
         // Code only: comments may name the neighbouring stores to say they are not used.
         let prod: String = src
             .lines()
@@ -937,14 +1037,30 @@ fn workspace_code_stays_out_of_personal_memory_arm_and_the_network() {
             "money",
             "arm::",
             "treasury",
-            "reqwest",
             "TcpStream",
             "Command::new",
             "chat_history",
+            "ModelClass::Cloud",
+            "CloudIfAuthorized",
         ] {
-            assert!(!prod.contains(banned), "workspace code mentions {banned}");
+            assert!(!prod.contains(banned), "{name} mentions {banned}");
+        }
+        // HTTP only in net.rs; Postgres only in supabase.rs.
+        if name != "net.rs" {
+            assert!(!prod.contains("reqwest"), "{name} uses reqwest directly");
+        }
+        if name != "supabase.rs" {
+            assert!(
+                !prod.contains("tokio_postgres"),
+                "{name} opens Postgres directly"
+            );
         }
     }
+    // The approved hosts are exactly these (decision 0064); adding one is a decision, not a code edit.
+    assert_eq!(
+        super::net::APPROVED_HTTP_HOSTS,
+        ["taiyoskin.com", "www.taiyoskin.com", "api.github.com"]
+    );
     // And the personal chat context never reads a workspace.
     for (name, src) in [
         (
