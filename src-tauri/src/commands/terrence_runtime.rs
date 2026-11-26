@@ -662,6 +662,7 @@ struct TurnContextSelection {
     dates: bool,
     money: bool,
     neuro: bool,
+    workouts: bool,
 }
 
 fn turn_context_selection(message: &str) -> TurnContextSelection {
@@ -786,6 +787,23 @@ fn turn_context_selection(message: &str) -> TurnContextSelection {
             // Decision 0059: questions about meditation or neurofeedback sessions get the training report.
             "meditat",
         ]),
+        // Decision 0062: the Workout engine's logged sessions.
+        workouts: contains_any(&[
+            "workout",
+            "exercise",
+            "calisthenic",
+            "training",
+            "pull-up",
+            "pullup",
+            "push-up",
+            "pushup",
+            "plank",
+            "squat",
+            " dip",
+            "reps",
+            "l-sit",
+            "handstand",
+        ]),
         money: contains_any(&[
             "money", "spend", "spent", "budget", "afford", "saving", "income", "expense", "bill",
             "balance", "cash", "finance",
@@ -830,6 +848,7 @@ struct TurnBriefs<'a> {
     dates: &'a str,
     money: &'a str,
     neuro: &'a str,
+    workouts: &'a str,
 }
 
 // ── Keyword-gated briefs: check-ins, follow-ups, pattern findings (read-only) ──
@@ -1060,6 +1079,7 @@ fn nexus_turn_sections(
         ("nexus_dates", briefs.dates, selection.dates),
         ("nexus_money", briefs.money, selection.money),
         ("nexus_neuro", briefs.neuro, selection.neuro),
+        ("nexus_workouts", briefs.workouts, selection.workouts),
         ("noop_health_context", briefs.health, true),
     ]
     .into_iter()
@@ -1071,7 +1091,7 @@ fn nexus_turn_sections(
     .collect()
 }
 
-pub(crate) const ALLOWED_SECTION_TAGS: [&str; 17] = [
+pub(crate) const ALLOWED_SECTION_TAGS: [&str; 18] = [
     "nexus_context",
     "nexus_priorities",
     "nexus_recent_decisions",
@@ -1090,6 +1110,8 @@ pub(crate) const ALLOWED_SECTION_TAGS: [&str; 17] = [
     "nexus_money",
     // 0058: NEUROSENSE measurement report (numbers and quality only, never raw EEG); local tiers only.
     "nexus_neuro",
+    // 0062: the Workout engine's logged sessions (counts and totals, with their source).
+    "nexus_workouts",
     "nexus_deliberation",
     // Letta human/persona blocks, read-only (turn pipeline L2; turn_memory::letta_section).
     "letta_memory",
@@ -1591,6 +1613,15 @@ pub fn prepare_amara_turn(message: String) -> Result<AmaraTurnContext, String> {
     } else {
         String::new()
     };
+    let workouts_brief = if turn_context_selection(&stripped).workouts {
+        super::workout::context_section_in(
+            &crate::app_paths::data_dir(),
+            &super::local_store::iso(&super::shared::time::now_jst()),
+        )
+        .unwrap_or_default()
+    } else {
+        String::new()
+    };
     let sections = nexus_turn_sections(
         &stripped,
         &runtime_context,
@@ -1608,6 +1639,7 @@ pub fn prepare_amara_turn(message: String) -> Result<AmaraTurnContext, String> {
             dates: &dates_brief,
             money: &money_brief,
             neuro: &neuro_brief,
+            workouts: &workouts_brief,
         },
     );
     Ok(AmaraTurnContext {

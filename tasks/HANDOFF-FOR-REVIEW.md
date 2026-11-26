@@ -1323,3 +1323,43 @@ Brief: `docs/specs/neurosense-intelligence-2026-11-26.md`. Taisun answered the f
 2. Whether to unify the two FFT pipelines (it changes historical numbers).
 3. Whether Rust should stamp the session source itself.
 4. Install: not done. Say "build and install" when you want it.
+
+## 52. Decisions 0060–0062 (2026-11-26)
+
+**0060, one EEG band-power pipeline** (`93177cb`, Taisun: "better to unify them"). `neuro/fft.ts` `bandFeatures` now feeds the display, calibration, training, the recording summary and the Rust sidecars.
+- The old training pipeline counted the edge bins in two bands, so alpha leakage landed in theta. On a pure 10 Hz signal, focus read 15; it now reads 52.
+- `training-v3-0060`, and `SIDECAR_VERSION` 2 (sidecar caches rebuild lazily when a recording is opened).
+- Stored sessions, calibrations, the baseline and replays are untouched.
+
+**0061, session HRV** (`016281e`). NOOP does store the WHOOP strap's beat-to-beat intervals (`rrInterval`, about 6.8 million rows), so 0059's "no sensor" was wrong.
+- RMSSD per session, read-only, with artifact filters and coverage limits, shown as biofeedback from the strap.
+- Not live: it is available only after the strap syncs.
+
+**0062, Workout engine (Phase 9)**: `9797e55` (9a engine), `486bbe5` (9b Amara takes), `d78bed2` (9c view), and the 9d commit.
+- **Library and engine:** a calisthenics library of 34 exercises; templates; a session state machine (planned → active ⇄ paused → completed, partly completed or abandoned).
+- **Deterministic numbers:** the estimate, set tracking, rest, completion and volume, including load in kg.
+- **Amara's takes:** the 15 fully-calisthenics takes run on the same engine, with provenance.
+- **The view:** Mind-Body › Fitness › Workout has the library, builder, player, summary and history. The Fitness page is unchanged apart from one header button.
+- **9d connections:**
+  - `workout.finished` goes into the shared activity history (`workout:` record refs);
+  - a completed Amara workout marks that day's take offer done, never over your own answer;
+  - Life's weekly review gets a Workouts card;
+  - history links an overlapping NOOP-detected workout (a link, never a merge; NOOP is never written);
+  - Amara gets a keyword-gated `nexus_workouts` section.
+
+**Test fixes on the way:**
+- The Smart home slider test now uses fake timers (`30209c6`). Before, it failed 1 of 3 runs; after, 5 of 5 passed.
+- Known flaky under heavy load: `ha_devices::a_slow_ha_does_not_block_other_history_reads` (3/3 alone), and the life-ui, sand-lens and sand-states e2e specs at load average 44 (28/28 at lower load).
+
+**Not run:**
+- a real workout in the app;
+- a real session's HRV;
+- a live Muse session on the unified pipeline;
+- opening an old recording to see its sidecar rebuilt;
+- the packaged app (nothing since `e114862` is installed).
+
+**For Taisun:**
+1. Install when you want it ("build and install").
+2. The app-wide Focus/Calm label rename for Design (`tasks/design-questions.md`).
+3. The gamma artifact threshold's units are still mismatched.
+4. Phase 10 (holographic instructor, one prototype) is next; it needs its brief.

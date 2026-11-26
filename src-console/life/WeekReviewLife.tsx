@@ -21,10 +21,15 @@ function reviewWeek(days: LifeData["history"][string], target: number | null, mo
  * apart, goals that progressed or stalled (or have no data), sleep and money only where their source has data, up to 3
  * rule-made observations with their controls, and next week's plan.
  */
+/** Decision 0062: `workout_week_summary`. */
+type WorkoutWeek = { weekStart: string; sessions: number; completed: number; partiallyCompleted: number; fromAmara: number; doneSets: number; totalReps: number; totalHoldS: number; loadVolumeKg: number; activeS: number; source: string };
+
 export function WeekReviewLife({ data, writes, call }: { data: LifeData; writes: LifeWrites | null; call: Invoke | null }) {
   const [review, setReview] = useState<Review | null | "failed">(null);
   const [obs, setObs] = useState<RecommendationRow[] | "failed" | null>(null);
   const [plan, setPlan] = useState<WeekPlan | null | "failed">(null);
+  // Decision 0062: the week's workouts from the Workout engine (with its source).
+  const [workouts, setWorkouts] = useState<WorkoutWeek | null | "failed">(null);
   useEffect(() => {
     if (!call) return;
     let live = true;
@@ -40,6 +45,7 @@ export function WeekReviewLife({ data, writes, call }: { data: LifeData; writes:
     let live = true;
     writes.weekObservations(monday).then((r) => { if (live) setObs(r.slice(0, 3)); }, () => { if (live) setObs("failed"); });
     call?.<WeekPlan>("life_week_plan_get", { weekStart: nextMonday }).then((p) => { if (live) setPlan(p); }, () => { if (live) setPlan("failed"); });
+    call?.<WorkoutWeek>("workout_week_summary", { weekStart: monday }).then((w) => { if (live) setWorkouts(w); }, () => { if (live) setWorkouts("failed"); });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monday, review === null]);
@@ -82,8 +88,11 @@ export function WeekReviewLife({ data, writes, call }: { data: LifeData; writes:
           </>}
         </Card>
       </div>
-      {(sleep || money) && (
+      {(sleep || money || workouts) && (
         <div className="pk-g2">
+          {workouts && <Card title="Workouts"><p className="pk-note">{workouts === "failed" ? "Workouts couldn't be read just now."
+            : workouts.sessions === 0 ? "No workouts logged in Workout this week."
+            : `${workouts.sessions} workout${workouts.sessions === 1 ? "" : "s"} (${workouts.completed} completed${workouts.partiallyCompleted ? `, ${workouts.partiallyCompleted} partly` : ""}${workouts.fromAmara ? `, ${workouts.fromAmara} suggested by Amara` : ""}) · ${workouts.doneSets} sets · ${workouts.totalReps} reps${workouts.totalHoldS ? ` · ${workouts.totalHoldS} s of holds` : ""} · ${Math.round(workouts.activeS / 60)} min active. From the workouts you logged; NOOP-detected workouts are on the Fitness page.`}</p></Card>}
           {sleep && <Card title="Sleep (NOOP)"><p className="pk-note">{sleep.nights} night{sleep.nights === 1 ? "" : "s"} recorded{sleep.avgSleepH != null ? ` · average ${Math.round(sleep.avgSleepH * 10) / 10} h` : ""}{sleep.sleepDeltaH != null ? ` · ${sleep.sleepDeltaH >= 0 ? "+" : ""}${Math.round(sleep.sleepDeltaH * 10) / 10} h on last week` : ""}. Nights NOOP didn&apos;t record aren&apos;t counted.</p></Card>}
           {money && <Card title="Personal money"><p className="pk-note">{money.accounts.length} account{money.accounts.length === 1 ? "" : "s"} with entries{money.personalChangeUsd != null ? ` · change this week ${money.personalChangeUsd >= 0 ? "+" : "−"}$${Math.abs(Math.round(money.personalChangeUsd)).toLocaleString("en-US")}` : ""}. From your money entries only.</p></Card>}
         </div>

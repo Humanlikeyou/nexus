@@ -776,3 +776,23 @@ fn telegram_health_reports_unknown_when_the_latest_startup_failed() {
     assert_eq!(telegram_status_from_log(log, true), "unknown");
     assert_eq!(telegram_status_from_log(log, false), "offline");
 }
+
+#[test]
+fn decision_0062_workout_questions_get_the_workouts_section_and_others_do_not() {
+    for q in [
+        "How did my workout go?",
+        "how many pull-ups did I do this week",
+        "plan my calisthenics",
+        "Was the plank ladder too easy?",
+    ] {
+        assert!(turn_context_selection(q).workouts, "{q}");
+    }
+    for q in [
+        "what's on my calendar",
+        "how much did I spend",
+        "set the lights to warm",
+    ] {
+        assert!(!turn_context_selection(q).workouts, "{q}");
+    }
+    assert!(ALLOWED_SECTION_TAGS.contains(&"nexus_workouts"));
+}

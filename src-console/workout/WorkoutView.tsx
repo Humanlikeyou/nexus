@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, PageHero, SegmentedControl, Select, StatusText, TextField } from "../ui";
-import { duration, FAMILY_LABEL, itemFor, liveWorkoutCalls, move, OPEN_STATES, prescription, STATE_LABEL, type Exercise, type SessionView, type Template, type TemplateItem, type WorkoutCalls } from "./workoutApi";
+import { duration, FAMILY_LABEL, itemFor, liveWorkoutCalls, move, OPEN_STATES, prescription, STATE_LABEL, type Exercise, type NoopLink, type SessionView, type Template, type TemplateItem, type WorkoutCalls } from "./workoutApi";
 import "../ui/PanelKit.css";
 
 /**
@@ -171,6 +171,7 @@ export function WorkoutView({ calls = liveWorkoutCalls, onDone }: { calls?: Work
   const [lib, setLib] = useState<Exercise[] | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [history, setHistory] = useState<SessionView[]>([]);
+  const [linked, setLinked] = useState<Map<string, NoopLink | null>>(new Map());
   const [takes, setTakes] = useState<Array<{ takeId: string; name: string; estimatedS: number }>>([]);
   const [current, setCurrent] = useState<SessionView | null>(null);
   const [editing, setEditing] = useState<Template | null>(null);
@@ -180,6 +181,7 @@ export function WorkoutView({ calls = liveWorkoutCalls, onDone }: { calls?: Work
       setLib(l.exercises); setTemplates(t.filter((x) => !x.archived)); setHistory(h); setTakes(k);
       setCurrent((c) => h.find((v) => OPEN_STATES.includes(v.session.state)) ?? (c && !OPEN_STATES.includes(c.session.state) ? c : null));
     }, (e: unknown) => setErr(errText(e)));
+    calls.historyLinked(50).then((rows) => setLinked(new Map(rows.map((r) => [r.view.session.id, r.noop]))), () => setLinked(new Map()));
   }, [calls]);
   useEffect(() => { reload(); }, [reload]);
   const plan = (templateId: string) => calls.plan(templateId).then((v) => { setCurrent(v); setErr(null); }, (e: unknown) => setErr(errText(e)));
@@ -215,7 +217,7 @@ export function WorkoutView({ calls = liveWorkoutCalls, onDone }: { calls?: Work
             <Card title="History">
               {history.length === 0 ? <p className="pk-note">No workouts yet.</p> : (
                 <ul className="pk-list" aria-label="Workout history">{history.map((v) => (
-                  <li key={v.session.id}><b>{when(v.session.startedAt ?? v.session.plannedAt)} · {v.session.templateName}</b>{v.session.source === "amara" ? " (Amara)" : ""} · {STATE_LABEL[v.session.state]} · {v.summary.doneSets}/{v.summary.plannedSets} sets · {v.summary.totalReps} reps · active {duration(v.summary.activeS)}</li>
+                  <li key={v.session.id}><b>{when(v.session.startedAt ?? v.session.plannedAt)} · {v.session.templateName}</b>{v.session.source === "amara" ? " (Amara)" : ""} · {STATE_LABEL[v.session.state]} · {v.summary.doneSets}/{v.summary.plannedSets} sets · {v.summary.totalReps} reps · active {duration(v.summary.activeS)}{(() => { const n = linked.get(v.session.id); return n ? ` · the strap also recorded ${n.sport}${n.durationMin != null ? ` (${Math.round(n.durationMin)} min${n.strain != null ? `, strain ${n.strain.toFixed(1)}` : ""})` : ""} in NOOP` : ""; })()}</li>
                 ))}</ul>
               )}
             </Card>

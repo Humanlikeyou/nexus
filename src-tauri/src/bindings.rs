@@ -385,6 +385,8 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::workout::workout_history,
             crate::commands::workout::workout_template_from_take,
             crate::commands::workout::workout_take_ids,
+            crate::commands::workout::workout_history_linked,
+            crate::commands::workout::workout_week_summary,
             crate::commands::habits::habit_mark,
             crate::commands::habits::habit_days,
             crate::commands::goal_roadmap::roadmap_accept,

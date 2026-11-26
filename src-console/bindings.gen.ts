@@ -507,6 +507,9 @@ export const commands = {
 	/**  Decision 0062 (9b): an Amara take as a workout template, through the same engine. */
 	workoutTemplateFromTake: (takeId: string, options?: InvokeOptions) => __TAURI_INVOKE<Template_Serialize>("workout_template_from_take", { takeId }, options),
 	workoutTakeIds: (options?: InvokeOptions) => __TAURI_INVOKE<TakeWorkout[]>("workout_take_ids", undefined, options),
+	workoutHistoryLinked: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<HistoryRow_Serialize[]>("workout_history_linked", { limit }, options),
+	/**  Decision 0062 (9d): the week's workouts for Life's weekly review. */
+	workoutWeekSummary: (weekStart: string, options?: InvokeOptions) => __TAURI_INVOKE<WorkoutWeek>("workout_week_summary", { weekStart }, options),
 	/**
 	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
 	 *  `source` is "manual", "chat" or "telegram".
@@ -3530,6 +3533,21 @@ export type HistoryItem = {
 	via: string,
 };
 
+/**  History with each session's overlapping NOOP-detected workout (read-only; a link, never a merge). */
+export type HistoryRow = HistoryRow_Serialize | HistoryRow_Deserialize;
+
+/**  History with each session's overlapping NOOP-detected workout (read-only; a link, never a merge). */
+export type HistoryRow_Deserialize = {
+	view: SessionView_Deserialize,
+	noop?: NoopLink_Deserialize | null,
+};
+
+/**  History with each session's overlapping NOOP-detected workout (read-only; a link, never a merge). */
+export type HistoryRow_Serialize = {
+	view: SessionView_Serialize,
+	noop: NoopLink_Serialize | null,
+};
+
 export type HomeBrief = HomeBrief_Serialize | HomeBrief_Deserialize;
 
 export type HomeBrief_Deserialize = {
@@ -4941,6 +4959,25 @@ export type NoopHealthSnapshot_Serialize = {
 	battery: NoopBatteryState_Serialize | null,
 	insights: NoopHealthInsight_Serialize[],
 	message: string | null,
+};
+
+/**  One NOOP-detected workout that overlaps a session in time: a link, never a merge (NOOP is not written). */
+export type NoopLink = NoopLink_Serialize | NoopLink_Deserialize;
+
+/**  One NOOP-detected workout that overlaps a session in time: a link, never a merge (NOOP is not written). */
+export type NoopLink_Deserialize = {
+	startedAt: string,
+	sport: string,
+	durationMin?: number | null,
+	strain?: number | null,
+};
+
+/**  One NOOP-detected workout that overlaps a session in time: a link, never a merge (NOOP is not written). */
+export type NoopLink_Serialize = {
+	startedAt: string,
+	sport: string,
+	durationMin: number | null,
+	strain: number | null,
 };
 
 export type NoopQueryError = { kind: "tool_not_allowed"; detail: string } | { kind: "invalid_args"; detail: string } | { kind: "binary_missing"; detail: string } | { kind: "spawn_failed"; detail: string } | { kind: "timeout"; detail: number } | { kind: "process_failed"; detail: string } | { kind: "bad_output"; detail: string } | { kind: "tool_error"; detail: string } | { kind: "invalid_path"; detail: string } | { kind: "sandbox_missing"; detail: string } | { kind: "pin_mismatch"; detail: string } | { kind: "pin_missing"; detail: string };
@@ -8743,4 +8780,19 @@ export type WorkerHealthResponse_Serialize = {
 	uptime_secs: number | null,
 	requests_24h: number | null,
 	error_rate: number | null,
+};
+
+/**  The week from `week_start` (YYYY-MM-DD) for Life's weekly review. */
+export type WorkoutWeek = {
+	weekStart: string,
+	sessions: number,
+	completed: number,
+	partiallyCompleted: number,
+	fromAmara: number,
+	doneSets: number,
+	totalReps: number,
+	totalHoldS: number,
+	loadVolumeKg: number | null,
+	activeS: number,
+	source: string,
 };

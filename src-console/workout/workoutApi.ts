@@ -23,6 +23,7 @@ export type Summary = {
   setsByMuscle: Record<string, number>; activeS: number | null; pausedS: number; restS: number; estimatedS: number;
 };
 export type SessionView = { session: Session; summary: Summary };
+export type NoopLink = { startedAt: string; sport: string; durationMin: number | null; strain: number | null };
 export type Action =
   | { kind: "start" } | { kind: "pause" } | { kind: "resume" }
   | { kind: "logSet"; reps?: number | null; holdS?: number | null; loadKg?: number | null }
@@ -37,6 +38,8 @@ export type WorkoutCalls = {
   plan: (templateId: string, offerSid?: string | null) => Promise<SessionView>;
   act: (sessionId: string, action: Action) => Promise<SessionView>;
   history: (limit?: number) => Promise<SessionView[]>;
+  /** History with the overlapping NOOP-detected workout, when there is one (a link, never a merge). */
+  historyLinked: (limit?: number) => Promise<Array<{ view: SessionView; noop: NoopLink | null }>>;
   fromTake: (takeId: string) => Promise<Template>;
   takeIds: () => Promise<Array<{ takeId: string; name: string; estimatedS: number }>>;
 };
@@ -49,6 +52,7 @@ export const liveWorkoutCalls: WorkoutCalls = {
   plan: (templateId, offerSid = null) => invokeBound("workout_session_plan", { templateId, offerSid }),
   act: (sessionId, action) => invokeBound("workout_session_act", { sessionId, action }),
   history: (limit = 50) => invokeBound("workout_history", { limit }),
+  historyLinked: (limit = 50) => invokeBound("workout_history_linked", { limit }),
   fromTake: (takeId) => invokeBound("workout_template_from_take", { takeId }),
   takeIds: () => invokeBound("workout_take_ids"),
 };

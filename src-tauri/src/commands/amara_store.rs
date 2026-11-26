@@ -78,6 +78,8 @@ const STORES: &[(&str, Scope)] = &[
     ("take", Scope::Personal),
     ("history", Scope::Personal),
     ("area", Scope::Personal),
+    // 0062: Workout engine sessions (`workout:<session id>`).
+    ("workout", Scope::Personal),
     ("replay", Scope::Neural),
     ("session", Scope::Neural),
     ("hemisync", Scope::Neural),

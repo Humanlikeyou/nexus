@@ -208,3 +208,20 @@ describe("Goals & projects", () => {
     expect(call).toHaveBeenCalledWith("life_update", { goalId: "a", fields: expect.objectContaining({ status: "blocked", statusReason: "Waiting on the bank", baseline: 100 }) });
   });
 });
+
+describe("decision 0062: workouts in the weekly review", () => {
+  it("shows the week's logged workouts with their source, and a plain note when there are none", async () => {
+    const { WeekReviewLife } = await import("./WeekReviewLife");
+    const writes = { weekObservations: vi.fn(async () => []) } as never;
+    const week = { weekStart: "2026-11-16", sessions: 2, completed: 1, partiallyCompleted: 1, fromAmara: 1, doneSets: 9, totalReps: 64, totalHoldS: 60, loadVolumeKg: 0, activeS: 1500, source: "Workout engine" };
+    const call = vi.fn(async (cmd: string) => (cmd === "weekly_review_read" ? { weekStart: "2026-11-16", health: { state: "none", nights: 0 }, money: { accounts: [] } } : cmd === "workout_week_summary" ? week : null));
+    const { unmount } = render(<WeekReviewLife data={data()} writes={writes} call={call as never} />);
+    expect(await screen.findByText(/2 workouts \(1 completed, 1 partly, 1 suggested by Amara\) · 9 sets · 64 reps · 60 s of holds · 25 min active/)).toBeInTheDocument();
+    expect(screen.getByText(/NOOP-detected workouts are on the Fitness page/)).toBeInTheDocument();
+    expect(call).toHaveBeenCalledWith("workout_week_summary", { weekStart: "2026-11-16" });
+    unmount();
+    const none = vi.fn(async (cmd: string) => (cmd === "weekly_review_read" ? { weekStart: "2026-11-16", health: { state: "none", nights: 0 }, money: { accounts: [] } } : cmd === "workout_week_summary" ? { ...week, sessions: 0 } : null));
+    render(<WeekReviewLife data={data()} writes={writes} call={none as never} />);
+    expect(await screen.findByText("No workouts logged in Workout this week.")).toBeInTheDocument();
+  });
+});

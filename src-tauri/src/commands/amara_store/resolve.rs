@@ -99,6 +99,12 @@ pub(crate) fn resolve(data: &Path, r: &RecordRef) -> Resolution {
         )),
         "money" => found_or_missing(jsonl_by_id(&data.join("money").join("entries.jsonl"), id)),
         "take" => found_or_missing(jsonl_by_id(&data.join("takes").join("take_log.jsonl"), id)),
+        "workout" => found_or_missing(by_id(
+            read_json(&data.join("workout").join("sessions.json"))
+                .as_ref()
+                .map(|v| &v["sessions"]),
+            id,
+        )),
         "session" => {
             if !plain(id) {
                 return Resolution::Missing;

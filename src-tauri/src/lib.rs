@@ -298,6 +298,8 @@ pub fn run() {
             commands::workout::workout_history,
             commands::workout::workout_template_from_take,
             commands::workout::workout_take_ids,
+            commands::workout::workout_history_linked,
+            commands::workout::workout_week_summary,
             openclaw::read_tasks,
             openclaw::read_content_pipeline,
             openclaw::save_skill,

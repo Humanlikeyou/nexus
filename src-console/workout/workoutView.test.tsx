@@ -27,6 +27,7 @@ function calls(over: Partial<WorkoutCalls> = {}): WorkoutCalls & Record<string, 
     plan: vi.fn(async () => view("planned")),
     act: vi.fn(async () => view("active")),
     history: vi.fn(async () => []),
+    historyLinked: vi.fn(async () => []),
     fromTake: vi.fn(async () => ({ ...t, id: "wt-a", source: "amara" as const, sourceRef: "take:pushup_ladder_2", name: "Push-up ladder, level 2" })),
     takeIds: vi.fn(async () => [{ takeId: "pushup_ladder_2", name: "Push-up ladder, level 2", estimatedS: 252 }]),
     ...over,
@@ -113,9 +114,12 @@ describe("decision 0062: Workout view", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Another workout is still open");
   });
 
-  it("history lists each session's state and totals", async () => {
-    render(<WorkoutView calls={calls({ history: vi.fn(async () => [view("completed", { endedAt: "x" }, { doneSets: 2, totalReps: 12, activeS: 600 })]) as never })} />);
+  it("history lists each session's state and totals, and the overlapping NOOP workout as a link", async () => {
+    const done = view("completed", { endedAt: "x" }, { doneSets: 2, totalReps: 12, activeS: 600 });
+    render(<WorkoutView calls={calls({ history: vi.fn(async () => [done]) as never, historyLinked: vi.fn(async () => [{ view: done, noop: { startedAt: "t", sport: "functional fitness", durationMin: 21, strain: 7.24 } }]) as never })} />);
     fireEvent.click(await screen.findByRole("radio", { name: "History" }));
-    expect(screen.getByRole("list", { name: "Workout history" })).toHaveTextContent("Pull day · Completed · 2/2 sets · 12 reps · active 10 min");
+    const list = screen.getByRole("list", { name: "Workout history" });
+    expect(list).toHaveTextContent("Pull day · Completed · 2/2 sets · 12 reps · active 10 min");
+    await waitFor(() => expect(list).toHaveTextContent("the strap also recorded functional fitness (21 min, strain 7.2) in NOOP"));
   });
 });

@@ -279,9 +279,7 @@ fn slug_ok(s: &str, max: usize) -> bool {
 }
 
 fn text_ok(s: &str, max: usize) -> bool {
-    !s.trim().is_empty()
-        && s.chars().count() <= max
-        && !s.chars().any(|c| c.is_control() && c != '\n')
+    !s.trim().is_empty() && s.chars().count() <= max && !s.chars().any(char::is_control)
 }
 
 fn list_ok(v: &[String], max_items: usize, max_len: usize, allow_empty: bool) -> bool {
@@ -490,13 +488,22 @@ pub(crate) fn summary(s: &Session, lib: &[Exercise], now: &str) -> Summary {
         } else {
             (f64::from(done.len() as u32) / f64::from(planned) * 1000.0).round() / 10.0
         },
-        total_reps: done.iter().filter_map(|x| x.reps).sum(),
-        total_hold_s: done.iter().filter_map(|x| x.hold_s).sum(),
+        total_reps: done
+            .iter()
+            .filter_map(|x| x.reps)
+            .fold(0u32, u32::saturating_add),
+        total_hold_s: done
+            .iter()
+            .filter_map(|x| x.hold_s)
+            .fold(0u32, u32::saturating_add),
         load_volume_kg: (load * 10.0).round() / 10.0,
         sets_by_muscle: by_muscle,
         active_s: active,
         paused_s: paused.max(0) as u32,
-        rest_s: done.iter().filter_map(|x| x.rest_before_s).sum(),
+        rest_s: done
+            .iter()
+            .filter_map(|x| x.rest_before_s)
+            .fold(0u32, u32::saturating_add),
         estimated_s: estimate_s(&s.plan, s.rest_between_s, lib),
     }
 }
@@ -794,7 +801,14 @@ pub(crate) fn plan_in(
     }
     let mut s = plan_from(&t, format!("ws-{}", uuid::Uuid::new_v4().simple()), now);
     if t.source == "amara" {
-        s.offer_sid = offer_sid.map(str::to_string);
+        // Security review (0062): the offer must be this take's (`fitness-<YYYY-MM-DD>-<take id>`).
+        let take = t
+            .source_ref
+            .as_deref()
+            .and_then(|r| r.strip_prefix("take:"));
+        s.offer_sid = offer_sid
+            .filter(|o| take.is_some_and(|k| offer_matches(o, k)))
+            .map(str::to_string);
     }
     all.sessions.push(s.clone());
     write_json_atomic(&path, &all, MAX_BYTES)?;
@@ -915,6 +929,295 @@ pub(crate) fn template_from_take_in(
     )
 }
 
+// ---------------------------------------------------------------- connections (9d)
+
+/// After a workout ends: the shared activity history, and Amara's take marked done when this workout came
+/// from one and was completed. Best effort: a failure here never undoes or blocks the saved workout.
+pub(crate) fn on_finished(data: &Path, v: &SessionView, now: &str) {
+    let s = &v.session;
+    if s.state == "abandoned" {
+        return; // nothing was performed
+    }
+    let m = &v.summary;
+    let payload = serde_json::json!({
+        "state": s.state, "doneSets": m.done_sets, "plannedSets": m.planned_sets, "totalReps": m.total_reps,
+        "totalHoldS": m.total_hold_s, "loadVolumeKg": m.load_volume_kg, "activeS": m.active_s,
+        "template": s.template_name, "source": s.source, "engine": s.engine,
+    })
+    .to_string();
+    let subject = format!("workout:{}", s.id);
+    super::amara_store::note(
+        data,
+        super::amara_store::NewActivity {
+            scope: super::amara_store::Scope::Personal,
+            certainty: "confirmed",
+            kind: "workout.finished",
+            subject_ref: &subject,
+            occurred_at: s.ended_at.as_deref().unwrap_or(now),
+            source: "user",
+            source_ref: s.source_ref.as_deref(),
+            actor: "taisun",
+            summary: None,
+            data_json: Some(&payload),
+        },
+    );
+    if s.state == "completed" {
+        let _ = mark_take_done(&data.join("takes"), s, now);
+    }
+}
+
+/// Decision 0062 (Taisun: "auto"): a completed workout from an Amara take marks that take's offer done, as
+/// the take detectors do. Never over an answer already given (a tap, or an earlier detection).
+pub(crate) fn mark_take_done(takes_dir: &Path, s: &Session, now: &str) -> Result<bool, String> {
+    let Some(take_id) = s
+        .source_ref
+        .as_deref()
+        .and_then(|r| r.strip_prefix("take:"))
+    else {
+        return Ok(false);
+    };
+    if s.source != "amara" {
+        return Ok(false);
+    }
+    let events = super::take_events::list_in(takes_dir);
+    let today = now.get(..10).unwrap_or("").to_string();
+    let yesterday = parse(now)
+        .map(|t| {
+            (t - chrono::Duration::days(1))
+                .format("%Y-%m-%d")
+                .to_string()
+        })
+        .unwrap_or_default();
+    // The offer: the one this session carries, else today's (or yesterday's) offer of this take.
+    let offer = s.offer_sid.clone().or_else(|| {
+        [today.as_str(), yesterday.as_str()]
+            .into_iter()
+            .find_map(|day| {
+                events
+                    .iter()
+                    .any(|e| {
+                        e.kind == "today"
+                            && e.page.as_deref() == Some("fitness")
+                            && e.day.as_deref() == Some(day)
+                            && e.data["kind"] == "suggestion"
+                            && e.data["recId"] == take_id
+                    })
+                    .then(|| format!("fitness-{day}-{take_id}"))
+            })
+    });
+    let Some(sid) = offer.filter(|o| offer_matches(o, take_id)) else {
+        return Ok(false);
+    };
+    if events
+        .iter()
+        .any(|e| matches!(e.kind.as_str(), "answer" | "undo") && e.data["sid"] == sid.as_str())
+    {
+        return Ok(false);
+    }
+    let day = sid
+        .get("fitness-".len()..("fitness-".len() + 10))
+        .map_or(today.clone(), str::to_string);
+    let at = parse(now).map_or(0, |t| t.timestamp_millis());
+    super::take_events::append_in(
+        takes_dir,
+        &super::take_events::TakeEvent {
+            id: format!("wo-{sid}"),
+            kind: "answer".into(),
+            at,
+            page: Some("fitness".into()),
+            day: Some(day),
+            data: serde_json::json!({ "sid": sid, "state": "done", "source": "detected", "evidenceRef": format!("workout:{}", s.id), "detail": format!("Workout completed: {}", s.template_name) }),
+        },
+        at,
+    )
+}
+
+/// `fitness-<YYYY-MM-DD>-<take id>` for exactly this take, with a real date.
+pub(crate) fn offer_matches(sid: &str, take_id: &str) -> bool {
+    sid.strip_prefix("fitness-")
+        .and_then(|rest| rest.split_at_checked(10))
+        .is_some_and(|(day, tail)| {
+            chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").is_ok()
+                && tail == format!("-{take_id}")
+        })
+}
+
+/// One NOOP-detected workout that overlaps a session in time: a link, never a merge (NOOP is not written).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NoopLink {
+    pub started_at: String,
+    pub sport: String,
+    pub duration_min: Option<f64>,
+    pub strain: Option<f64>,
+}
+
+pub(crate) fn noop_link(s: &Session, noop: &[super::noop::NoopWorkout]) -> Option<NoopLink> {
+    let (a, b) = (
+        parse(s.started_at.as_deref()?)?,
+        parse(s.ended_at.as_deref()?)?,
+    );
+    noop.iter()
+        .filter_map(|w| Some((w, parse(&w.started_at)?, parse(&w.ended_at)?)))
+        .filter(|(_, ws, we)| *ws < b && *we > a)
+        .max_by_key(|(_, ws, we)| ((*we).min(b) - (*ws).max(a)).num_seconds())
+        .map(|(w, _, _)| NoopLink {
+            started_at: w.started_at.clone(),
+            sport: w.sport.clone(),
+            duration_min: w.duration_min,
+            strain: w.strain,
+        })
+}
+
+/// The week from `week_start` (YYYY-MM-DD) for Life's weekly review.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkoutWeek {
+    pub week_start: String,
+    pub sessions: u32,
+    pub completed: u32,
+    pub partially_completed: u32,
+    pub from_amara: u32,
+    pub done_sets: u32,
+    pub total_reps: u32,
+    pub total_hold_s: u32,
+    pub load_volume_kg: f64,
+    pub active_s: u32,
+    pub source: String,
+}
+
+/// Ended, non-abandoned sessions started in that week.
+pub(crate) fn week_in(data: &Path, week_start: &str, now: &str) -> Result<WorkoutWeek, String> {
+    let start = chrono::NaiveDate::parse_from_str(week_start, "%Y-%m-%d")
+        .map_err(|_| "The week start must be YYYY-MM-DD.".to_string())?;
+    let end = start + chrono::Duration::days(7);
+    let lib = library_in(data)?;
+    let mut w = WorkoutWeek {
+        week_start: week_start.into(),
+        sessions: 0,
+        completed: 0,
+        partially_completed: 0,
+        from_amara: 0,
+        done_sets: 0,
+        total_reps: 0,
+        total_hold_s: 0,
+        load_volume_kg: 0.0,
+        active_s: 0,
+        source: format!("Workout engine ({ENGINE_VERSION}), sessions you logged"),
+    };
+    for s in sessions_in(data)? {
+        let Some(day) = s
+            .started_at
+            .as_deref()
+            .and_then(|t| t.get(..10))
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        else {
+            continue;
+        };
+        if day < start || day >= end || !ended(&s) || s.state == "abandoned" {
+            continue;
+        }
+        let m = summary(&s, &lib, now);
+        w.sessions += 1;
+        if s.state == "completed" {
+            w.completed += 1;
+        } else {
+            w.partially_completed += 1;
+        }
+        if s.source == "amara" {
+            w.from_amara += 1;
+        }
+        w.done_sets += m.done_sets;
+        w.total_reps += m.total_reps;
+        w.total_hold_s += m.total_hold_s;
+        w.load_volume_kg = ((w.load_volume_kg + m.load_volume_kg) * 10.0).round() / 10.0;
+        w.active_s += m.active_s.unwrap_or(0);
+    }
+    Ok(w)
+}
+
+/// One line of plain words: whitespace flattened, at most `max` characters (security review, 0062).
+fn flat(s: &str, max: usize) -> String {
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(max)
+        .collect()
+}
+
+/// Amara's `nexus_workouts` section: the last 7 and 30 days of logged workouts and the latest one, each
+/// with its source. Counts and totals only. Workouts NOOP detects from the strap are a separate source.
+pub(crate) fn context_section_in(data: &Path, now: &str) -> Option<String> {
+    let lib = library_in(data).ok()?;
+    let mut all: Vec<Session> = sessions_in(data)
+        .ok()?
+        .into_iter()
+        .filter(|s| ended(s) && s.state != "abandoned")
+        .collect();
+    if all.is_empty() {
+        return Some(
+            "No workouts logged in the Workout engine yet (Mind-Body › Fitness › Workout).".into(),
+        );
+    }
+    all.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    let now_t = parse(now)?;
+    let within = |s: &Session, days: i64| {
+        s.started_at
+            .as_deref()
+            .and_then(parse)
+            .is_some_and(|t| (now_t - t).num_days() < days)
+    };
+    let mut lines = vec!["Workout engine (calisthenics; sessions Taisun logged; every number is computed by the engine, not estimated). NOOP-detected workouts are a separate source.".to_string()];
+    for days in [7, 30] {
+        let rs: Vec<&Session> = all.iter().filter(|s| within(s, days)).collect();
+        let sums: Vec<Summary> = rs.iter().map(|s| summary(s, &lib, now)).collect();
+        lines.push(format!(
+            "Last {days} days: {} workouts ({} completed, {} partly), {} sets, {} reps, {} s of holds, {} min active.",
+            rs.len(),
+            rs.iter().filter(|s| s.state == "completed").count(),
+            rs.iter().filter(|s| s.state == "partially_completed").count(),
+            sums.iter().map(|m| m.done_sets).fold(0u32, u32::saturating_add),
+            sums.iter().map(|m| m.total_reps).fold(0u32, u32::saturating_add),
+            sums.iter().map(|m| m.total_hold_s).fold(0u32, u32::saturating_add),
+            sums.iter().map(|m| m.active_s.unwrap_or(0)).fold(0u32, u32::saturating_add) / 60,
+        ));
+    }
+    if let Some(s) = all.first() {
+        let m = summary(s, &lib, now);
+        let names: Vec<String> = s
+            .plan
+            .iter()
+            .filter_map(|i| find(&lib, &i.exercise_id).map(|e| e.name.clone()))
+            .collect();
+        lines.push(format!(
+            "Latest: {} on {} ({}, {}): {} of {} sets, {} reps, active {} min; exercises {}.",
+            flat(&s.template_name, 40),
+            s.started_at
+                .as_deref()
+                .and_then(|t| t.get(..10))
+                .unwrap_or("?"),
+            s.state.replace('_', " "),
+            if s.source == "amara" {
+                "Amara's suggestion"
+            } else {
+                "his own workout"
+            },
+            m.done_sets,
+            m.planned_sets,
+            m.total_reps,
+            m.active_s.unwrap_or(0) / 60,
+            names
+                .iter()
+                .take(8)
+                .map(|n| flat(n, 40))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ));
+    }
+    Some(lines.join("\n"))
+}
+
 // ---------------------------------------------------------------- commands
 
 fn data() -> PathBuf {
@@ -960,7 +1263,24 @@ pub async fn workout_templates() -> Result<Vec<Template>, String> {
 #[specta::specta]
 pub async fn workout_template_save(template: Template) -> Result<Template, String> {
     blocking(JoinErr::Plain, move || {
-        save_template_in(&data(), template, &now())
+        let d = data();
+        // Security review (0062): only the Rust take mapping makes Amara templates; the screen saves its own.
+        if !template.id.is_empty()
+            && templates_in(&d)?
+                .iter()
+                .any(|t| t.id == template.id && t.source != "user")
+        {
+            return Err("Amara's workouts can't be edited; build your own from it instead.".into());
+        }
+        save_template_in(
+            &d,
+            Template {
+                source: "user".into(),
+                source_ref: None,
+                ..template
+            },
+            &now(),
+        )
     })
     .await
 }
@@ -1031,7 +1351,12 @@ pub async fn workout_session_act(
     action: Action,
 ) -> Result<SessionView, String> {
     blocking(JoinErr::Plain, move || {
-        let (v, _just_ended) = act_in(&data(), &session_id, &action, &now())?;
+        let d = data();
+        let now = now();
+        let (v, just_ended) = act_in(&d, &session_id, &action, &now)?;
+        if just_ended {
+            on_finished(&d, &v, &now);
+        }
         Ok(v)
     })
     .await
@@ -1042,6 +1367,46 @@ pub async fn workout_session_act(
 pub async fn workout_history(limit: Option<u32>) -> Result<Vec<SessionView>, String> {
     blocking(JoinErr::Plain, move || {
         history_in(&data(), limit.unwrap_or(50) as usize, &now())
+    })
+    .await
+}
+
+/// History with each session's overlapping NOOP-detected workout (read-only; a link, never a merge).
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryRow {
+    pub view: SessionView,
+    pub noop: Option<NoopLink>,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workout_history_linked(limit: Option<u32>) -> Result<Vec<HistoryRow>, String> {
+    blocking(JoinErr::Plain, move || {
+        let rows = history_in(&data(), limit.unwrap_or(50) as usize, &now())?;
+        // Tests never open the real NOOP store.
+        let noop = if cfg!(test) {
+            Vec::new()
+        } else {
+            super::noop::recent_workouts_live(90).unwrap_or_default()
+        };
+        Ok(rows
+            .into_iter()
+            .map(|v| {
+                let n = noop_link(&v.session, &noop);
+                HistoryRow { view: v, noop: n }
+            })
+            .collect())
+    })
+    .await
+}
+
+/// Decision 0062 (9d): the week's workouts for Life's weekly review.
+#[tauri::command]
+#[specta::specta]
+pub async fn workout_week_summary(week_start: String) -> Result<WorkoutWeek, String> {
+    blocking(JoinErr::Plain, move || {
+        week_in(&data(), &week_start, &now())
     })
     .await
 }
