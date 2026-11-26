@@ -282,6 +282,8 @@ pub fn run() {
             commands::neuro_baseline::neuro_calibration_save,
             commands::neuro_baseline::neuro_calibration_list,
             commands::neuro_baseline::neuro_baseline_get,
+            commands::neuro_protocols::neuro_protocol_settings_get,
+            commands::neuro_protocols::neuro_protocol_settings_set,
             openclaw::read_tasks,
             openclaw::read_content_pipeline,
             openclaw::save_skill,

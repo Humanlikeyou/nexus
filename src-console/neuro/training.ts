@@ -9,6 +9,7 @@ import type { FrequencyBandPowers, NfProtocol, FeedbackSignal } from "../legacy-
 import type { MuseTelemetry } from "./useMuseTelemetry";
 import { headMoved } from "./headMotion";
 import { estimateHeartRate, heartRateSummary } from "./heartRate";
+import type { ProtocolSettings } from "./protocolConfig";
 
 const CHANNELS = ["TP9", "AF7", "AF8", "TP10"];
 const CALIBRATION_TICKS = 10;
@@ -68,9 +69,9 @@ export const TRAINING_METHOD = {
 const CONFIDENCE_TICKS = 20;
 
 /** Next reward threshold scale from the last window's reward rate. Stays within sensible limits. */
-export function adaptScale(scale: number, rewardRate: number): number {
-  if (rewardRate > TARGET_REWARD_RATE + ADAPT_BAND) return Math.min(ADAPT_MAX, scale * ADAPT_STEP);
-  if (rewardRate < TARGET_REWARD_RATE - ADAPT_BAND) return Math.max(ADAPT_MIN, scale / ADAPT_STEP);
+export function adaptScale(scale: number, rewardRate: number, target = TARGET_REWARD_RATE): number {
+  if (rewardRate > target + ADAPT_BAND) return Math.min(ADAPT_MAX, scale * ADAPT_STEP);
+  if (rewardRate < target - ADAPT_BAND) return Math.max(ADAPT_MIN, scale / ADAPT_STEP);
   return scale;
 }
 
@@ -183,12 +184,20 @@ export class TrainingSession {
   private readonly auxAllowed: boolean;
   private heartRates: number[] = [];
   private lastHeartRateAt = -Infinity;
+  /** Decision 0059: the reinforcement schedule's target, from the protocol's settings (default 0.6). */
+  private readonly targetRewardRate: number;
   state: TrainingState = { ...INACTIVE_TRAINING };
 
-  constructor(readonly protocol: NfProtocol, options: { guided?: boolean; aux?: boolean } = {}) {
+  /** Decision 0059: the settings this session ran with (null = the built-in defaults). */
+  readonly settings: ProtocolSettings | null;
+
+  constructor(readonly protocol: NfProtocol, options: { guided?: boolean; aux?: boolean; settings?: ProtocolSettings } = {}) {
     resetOutputEngine();
     resetPolicyState();
     this.guided = options.guided ?? false;
+    this.settings = options.settings ?? null;
+    const rate = options.settings?.targetRewardRate;
+    this.targetRewardRate = rate != null && Number.isFinite(rate) && rate >= 0.4 && rate <= 0.8 ? rate : TARGET_REWARD_RATE;
     this.auxAllowed = options.aux ?? AUX_PROVEN;
     this.state = { ...INACTIVE_TRAINING, phase: "calibrating", label: "Calibrating" };
     if (this.guided) this.state = { ...this.state, label: "Checking the fit", stage: "fit", fit: {}, fitReady: false };
@@ -372,7 +381,7 @@ export class TrainingSession {
       this.streak = rewarded ? this.streak + 1 : 0;
       this.window.push(rewarded);
       if (this.window.length >= ADAPT_TICKS) {
-        this.scale = adaptScale(this.scale, this.window.filter(Boolean).length / this.window.length);
+        this.scale = adaptScale(this.scale, this.window.filter(Boolean).length / this.window.length, this.targetRewardRate);
         this.adjustments.push(this.scale);
         this.applyScale();
         this.window = [];
@@ -426,7 +435,7 @@ export class TrainingSession {
       relaxation_baseline: baseline, calm_pct: calmPercent(this.entries, baseline), timeline: [...this.entries],
       heart_rate: heartRateSummary(this.heartRates),
       ...(this.guided ? { guided: {
-        reward_schedule: { target_rate: TARGET_REWARD_RATE, check_every_s: ADAPT_TICKS * TICK_MS / 1000, threshold_scale: this.scale, adjustments: [...this.adjustments] },
+        reward_schedule: { target_rate: this.targetRewardRate, check_every_s: ADAPT_TICKS * TICK_MS / 1000, threshold_scale: this.scale, adjustments: [...this.adjustments] },
         held_seconds: Object.fromEntries(Object.entries(this.held).map(([reason, ticks]) => [reason, ticks * TICK_MS / 1000])) as Record<HoldReason, number>,
         trained_seconds: valid.length * TICK_MS / 1000,
         alpha_eyes_closed_ratio: alphaRatio(this.baselines.open, this.baselines.closed),

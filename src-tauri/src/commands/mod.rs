@@ -57,6 +57,7 @@ pub mod money_summary;
 pub mod muse;
 pub mod n8n_status;
 pub(crate) mod neuro_baseline;
+pub(crate) mod neuro_protocols;
 pub mod noop;
 pub mod noop_freeze;
 pub mod noop_parity;

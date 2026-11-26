@@ -488,6 +488,9 @@ export const commands = {
 	neuroCalibrationSave: (report: CalibrationReport_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<SavedCalibration_Serialize>("neuro_calibration_save", { report }, options),
 	neuroCalibrationList: (kind: string | null, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<CalibrationReport_Serialize[]>("neuro_calibration_list", { kind, limit }, options),
 	neuroBaselineGet: (options?: InvokeOptions) => __TAURI_INVOKE<PersonalBaseline_Serialize>("neuro_baseline_get", undefined, options),
+	neuroProtocolSettingsGet: (options?: InvokeOptions) => __TAURI_INVOKE<{ [key in string]: ProtocolSettings }>("neuro_protocol_settings_get", undefined, options),
+	/**  Saves one protocol's settings, or with `settings: null` returns it to its defaults. */
+	neuroProtocolSettingsSet: (protocolId: string, settings: ProtocolSettings | null, options?: InvokeOptions) => __TAURI_INVOKE<{ [key in string]: ProtocolSettings }>("neuro_protocol_settings_set", { protocolId, settings }, options),
 	/**
 	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
 	 *  `source` is "manual", "chat" or "telegram".
@@ -5178,6 +5181,19 @@ export type Progress = {
 	done: number,
 	total: number,
 	label: string,
+};
+
+export type ProtocolSettings = {
+	/**  Planned session length in minutes (5–60). */
+	durationMin: number,
+	/**  Share of clean training time the adaptive thresholds aim to reward (0.4–0.8). */
+	targetRewardRate: number | null,
+	/**  `soundscape`, `tone` or `silent`. */
+	sound: string,
+	/**  The optional visual feedback (off by default). */
+	visualFeedback: boolean,
+	/**  Feedback volume, 0–1. */
+	volume: number | null,
 };
 
 export type PrunePlan = {

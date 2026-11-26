@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invokeBound } from "../bridge";
 import { PROTOCOLS } from "../legacy-core/lib/neurofeedback/protocols";
+import { effectiveSettings, type ProtocolSettings } from "./protocolConfig";
 import { INACTIVE_TRAINING, TrainingSession } from "./training";
 import type { MuseTelemetry } from "./telemetryStore";
+
+type SavedSettings = Record<string, Partial<ProtocolSettings>>;
 
 /** `readTelemetry` is read on each 500 ms tick (no React subscription to live data). */
 export function useTraining(readTelemetry: () => MuseTelemetry, active: boolean) {
@@ -12,12 +16,29 @@ export function useTraining(readTelemetry: () => MuseTelemetry, active: boolean)
   const live = useRef({ readTelemetry, active });
   useEffect(() => { live.current = { readTelemetry, active }; }, [readTelemetry, active]);
 
+  // Decision 0059: per-protocol settings, saved in <data>/neuro. Unreadable or missing means defaults.
+  const [saved, setSaved] = useState<SavedSettings>({});
+  useEffect(() => {
+    let alive = true;
+    invokeBound<SavedSettings>("neuro_protocol_settings_get").then((s) => { if (alive) setSaved(s ?? {}); }, () => {});
+    return () => { alive = false; };
+  }, []);
+  const settingsFor = useCallback((id: string): ProtocolSettings | null => {
+    const protocol = PROTOCOLS.find((item) => item.id === id);
+    return protocol ? effectiveSettings(protocol, saved[id]) : null;
+  }, [saved]);
+  const saveSettings = useCallback(async (id: string, settings: ProtocolSettings | null) => {
+    const next = await invokeBound<SavedSettings>("neuro_protocol_settings_set", { protocolId: id, settings });
+    setSaved(next ?? {});
+  }, []);
+
   const begin = useCallback(() => {
     const protocol = PROTOCOLS.find((item) => item.id === protocolId);
-    session.current = protocol ? new TrainingSession(protocol, { guided: true }) : null;
+    const settings = protocol ? effectiveSettings(protocol, saved[protocol.id]) : null;
+    session.current = protocol && settings ? new TrainingSession(protocol, { guided: true, settings }) : null;
     setFinished(null);
     setState(session.current?.state ?? INACTIVE_TRAINING);
-  }, [protocolId]);
+  }, [protocolId, saved]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -37,5 +58,5 @@ export function useTraining(readTelemetry: () => MuseTelemetry, active: boolean)
     setState(INACTIVE_TRAINING);
   }, []);
   const dismissFinished = useCallback(() => setFinished(null), []);
-  return { protocolId, setProtocolId, state, begin, advance, summary, finish, finished, dismissFinished, protocols: PROTOCOLS };
+  return { protocolId, setProtocolId, state, begin, advance, summary, finish, finished, dismissFinished, protocols: PROTOCOLS, settingsFor, saveSettings };
 }

@@ -115,3 +115,9 @@ Logic-only fixes plus three truthfulness copy changes the brief required ("do no
 - **Fitness › Sleep stages** (`SleepDetailPanel.tsx`): a new `fx-muted` line under the hypnogram, "Stages estimated by NOOP from the strap's data, not WHOOP's own sleep staging." The empty hint now reads "Stage timing appears once NOOP has stored stages for the night."
 - **Neuro › Band powers** (`NeuroScreen.tsx`): logic only. The dash shows until all four channels are complete, instead of a 0 % reading.
 - **Training hold copy** (`training.ts` `HOLD_COPY`): two new lines for `frozen` and `not_live`.
+
+## Decision 0059 (Phase 8, NEUROSENSE intelligence): band-power labels (2026-11-26)
+
+The Phase 8 brief says: "Do not present EEG band power as a direct measurement of emotion, attention, stress or relaxation." Today the band-power ratios are labelled **Focus** (beta / (beta + theta)) and **Calm** (alpha / (alpha + beta)) on about ten Design-owned screens: Neuro (`NeuroScreen.tsx` stat tiles, the Calm ring, the saved-session line, history rows), Recordings (`RecordingsPanels.tsx`), `SessionGraphs.tsx`, `NeuroTrends.tsx`, `HemisyncSection.tsx`, `design1118/MuseJourney.tsx`, and the take samples (`amaraTake/takeView.ts`, `personal/adapters.ts`). Claude did not rename them, because renaming on only one screen would make the app inconsistent.
+
+Proposal for the Design team: one app-wide rename to neutral feature names, for example **Beta/theta** and **Alpha/beta**, with "Calm %" becoming "Time with alpha/beta above your baseline". The stored field names (`avg_focus`, `avg_relaxation`, `calm_pct`) stay the same. The new Neuro › Training view already uses the neutral names.
