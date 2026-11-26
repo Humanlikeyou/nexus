@@ -485,6 +485,9 @@ export const commands = {
 	 *  the counter says never arrived, and repeats dropped.
 	 */
 	museStreamContinuity: (options?: InvokeOptions) => __TAURI_INVOKE<ChannelContinuity[]>("muse_stream_continuity", undefined, options),
+	neuroCalibrationSave: (report: CalibrationReport_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<SavedCalibration_Serialize>("neuro_calibration_save", { report }, options),
+	neuroCalibrationList: (kind: string | null, limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<CalibrationReport_Serialize[]>("neuro_calibration_list", { kind, limit }, options),
+	neuroBaselineGet: (options?: InvokeOptions) => __TAURI_INVOKE<PersonalBaseline_Serialize>("neuro_baseline_get", undefined, options),
 	/**
 	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
 	 *  `source` is "manual", "chat" or "telegram".
@@ -1374,6 +1377,52 @@ export type BusinessLedger_Serialize = {
 	revenueTargetJpy: number | null,
 };
 
+export type CalibrationMethod = {
+	/**  The frontend feature code's version (e.g. `calibration-v1`). */
+	version: string,
+	epochSecs: number | null,
+	/**  FFT, window and band edges, in words (so a later reader can recompute or compare). */
+	fft: string,
+	/**  What rejects an epoch, in words. */
+	rejection: string,
+};
+
+export type CalibrationReport = CalibrationReport_Serialize | CalibrationReport_Deserialize;
+
+export type CalibrationReport_Deserialize = {
+	/**  Set by the store. */
+	id?: string,
+	/**  Set by the store (RFC 3339). */
+	createdAt?: string,
+	/**  `pre_meditation` or `protocol`. */
+	kind: string,
+	/**  `live`, `replay` or `demo` (only live reports can enter the baseline). */
+	source: string,
+	method: CalibrationMethod,
+	conditions?: ConditionResult_Deserialize[],
+	/**  Protocol calibration only: protocol id, thresholds, baseline ticks used and rejected, method. */
+	protocol?: Value | null,
+	/**  Links a protocol calibration to its training session. */
+	sessionId?: string | null,
+};
+
+export type CalibrationReport_Serialize = {
+	/**  Set by the store. */
+	id: string,
+	/**  Set by the store (RFC 3339). */
+	createdAt: string,
+	/**  `pre_meditation` or `protocol`. */
+	kind: string,
+	/**  `live`, `replay` or `demo` (only live reports can enter the baseline). */
+	source: string,
+	method: CalibrationMethod,
+	conditions: ConditionResult_Serialize[],
+	/**  Protocol calibration only: protocol id, thresholds, baseline ticks used and rejected, method. */
+	protocol: Value | null,
+	/**  Links a protocol calibration to its training session. */
+	sessionId: string | null,
+};
+
 export type Can = {
 	restart: boolean,
 	start: boolean,
@@ -1603,6 +1652,90 @@ export type CommonGoal_Serialize = {
 	/**  The day before each finished-step day (lag 1), ascending. Each cause names its own lag in `before_lag_days`. */
 	beforeDays: string[],
 	causes: CommonCause[],
+};
+
+export type ConditionBaseline = ConditionBaseline_Serialize | ConditionBaseline_Deserialize;
+
+export type ConditionBaseline_Deserialize = {
+	condition: string,
+	/**  Qualifying recordings used (newest first, at most 20). */
+	recordings: number,
+	reportIds: string[],
+	relBands: { [key in string]: RobustStat },
+	alphaPeakHz?: RobustStat | null,
+	variability?: RobustStat | null,
+	/**  `none` (fewer than 3), `low` (3–5), `medium` (6–11) or `high` (12+). */
+	confidence: string,
+	uncertainty: string,
+};
+
+export type ConditionBaseline_Serialize = {
+	condition: string,
+	/**  Qualifying recordings used (newest first, at most 20). */
+	recordings: number,
+	reportIds: string[],
+	relBands: { [key in string]: RobustStat },
+	alphaPeakHz: RobustStat | null,
+	variability: RobustStat | null,
+	/**  `none` (fewer than 3), `low` (3–5), `medium` (6–11) or `high` (12+). */
+	confidence: string,
+	uncertainty: string,
+};
+
+export type ConditionFeatures = ConditionFeatures_Serialize | ConditionFeatures_Deserialize;
+
+export type ConditionFeatures_Deserialize = {
+	/**  Median relative power per band over accepted epochs, percent of 1–45 Hz. */
+	relBands: { [key in string]: number | null },
+	/**  Peak of the 7–13 Hz spectrum, only where a clear peak was found (else none). */
+	alphaPeakHz?: number | null,
+	/**  Accepted epochs that had a clear alpha peak. */
+	alphaPeakEpochs?: number,
+	/**  Epoch-to-epoch spread of log total power (MAD), a measure of signal variability. */
+	variability?: number | null,
+};
+
+export type ConditionFeatures_Serialize = {
+	/**  Median relative power per band over accepted epochs, percent of 1–45 Hz. */
+	relBands: { [key in string]: number | null },
+	/**  Peak of the 7–13 Hz spectrum, only where a clear peak was found (else none). */
+	alphaPeakHz: number | null,
+	/**  Accepted epochs that had a clear alpha peak. */
+	alphaPeakEpochs: number,
+	/**  Epoch-to-epoch spread of log total power (MAD), a measure of signal variability. */
+	variability: number | null,
+};
+
+export type ConditionResult = ConditionResult_Serialize | ConditionResult_Deserialize;
+
+export type ConditionResult_Deserialize = {
+	/**  `eyes_open` or `eyes_closed`. */
+	condition: string,
+	plannedSecs: number | null,
+	recordedSecs: number | null,
+	epochsTotal: number,
+	epochsAccepted: number,
+	/**  Rejected epochs by reason (`contact`, `blink`, `movement`, `jaw`, `amplitude`, `flat`, `frozen`, `dropout`). */
+	rejected?: { [key in string]: number },
+	/**  Per channel, the fraction of epochs with usable contact (0–1). */
+	channelQuality: { [key in string]: number | null },
+	/**  None when no epoch was accepted. */
+	features?: ConditionFeatures_Deserialize | null,
+};
+
+export type ConditionResult_Serialize = {
+	/**  `eyes_open` or `eyes_closed`. */
+	condition: string,
+	plannedSecs: number | null,
+	recordedSecs: number | null,
+	epochsTotal: number,
+	epochsAccepted: number,
+	/**  Rejected epochs by reason (`contact`, `blink`, `movement`, `jaw`, `amplitude`, `flat`, `frozen`, `dropout`). */
+	rejected: { [key in string]: number },
+	/**  Per channel, the fraction of epochs with usable contact (0–1). */
+	channelQuality: { [key in string]: number | null },
+	/**  None when no epoch was accepted. */
+	features: ConditionFeatures_Serialize | null,
 };
 
 export type ContentDraft = {
@@ -2450,6 +2583,34 @@ export type Experiment_Serialize = {
 	measure: string | null,
 	/**  The weekly-review finding pair that produced the suggestion (for traceability). */
 	pair: string | null,
+};
+
+export type FeatureComparison = FeatureComparison_Serialize | FeatureComparison_Deserialize;
+
+export type FeatureComparison_Deserialize = {
+	condition: string,
+	/**  `alpha` (relative band), `alpha_peak_hz` or `variability`. */
+	feature: string,
+	value: number | null,
+	usualMedian: number | null,
+	usualRobustSd: number | null,
+	/**  (value - median) / robust SD; none when the spread is zero. */
+	robustZ?: number | null,
+	/**  `within`, `above` or `below` the usual range (|z| < 1.5), in signal terms only. */
+	position: string,
+};
+
+export type FeatureComparison_Serialize = {
+	condition: string,
+	/**  `alpha` (relative band), `alpha_peak_hz` or `variability`. */
+	feature: string,
+	value: number | null,
+	usualMedian: number | null,
+	usualRobustSd: number | null,
+	/**  (value - median) / robust SD; none when the spread is zero. */
+	robustZ: number | null,
+	/**  `within`, `above` or `below` the usual range (|z| < 1.5), in signal terms only. */
+	position: string,
 };
 
 export type FeedState = 
@@ -4867,6 +5028,24 @@ export type PatternsResult_Serialize = {
 	reason?: string,
 };
 
+export type PersonalBaseline = PersonalBaseline_Serialize | PersonalBaseline_Deserialize;
+
+export type PersonalBaseline_Deserialize = {
+	version: string,
+	conditions: ConditionBaseline_Deserialize[],
+	/**  Eyes-closed over eyes-open alpha (median of per-session ratios), where both were recorded well. */
+	alphaReactivity?: RobustStat | null,
+	note: string,
+};
+
+export type PersonalBaseline_Serialize = {
+	version: string,
+	conditions: ConditionBaseline_Serialize[],
+	/**  Eyes-closed over eyes-open alpha (median of per-session ratios), where both were recorded well. */
+	alphaReactivity: RobustStat | null,
+	note: string,
+};
+
 export type PlannedAction = PlannedAction_Serialize | PlannedAction_Deserialize;
 
 export type PlannedAction_Deserialize = {
@@ -5485,6 +5664,13 @@ export type Roadmap_Serialize = {
 	planNote: string | null,
 };
 
+/**  Median and robust SD (MAD × 1.4826) of a feature across baseline recordings. */
+export type RobustStat = {
+	median: number | null,
+	robustSd: number | null,
+	n: number,
+};
+
 export type Route = {
 	id: string,
 	view: string,
@@ -5591,6 +5777,26 @@ export type RouterResponse = {
 };
 
 export type Saved = Saved_Serialize | Saved_Deserialize;
+
+export type SavedCalibration = SavedCalibration_Serialize | SavedCalibration_Deserialize;
+
+export type SavedCalibration_Deserialize = {
+	report: CalibrationReport_Deserialize,
+	/**  Per condition: whether this recording met the baseline's quality bar. */
+	baselineEligible: { [key in string]: boolean },
+	/**  Against the baseline as it stood before this report. */
+	comparison: FeatureComparison_Deserialize[],
+	baselineBefore: PersonalBaseline_Deserialize,
+};
+
+export type SavedCalibration_Serialize = {
+	report: CalibrationReport_Serialize,
+	/**  Per condition: whether this recording met the baseline's quality bar. */
+	baselineEligible: { [key in string]: boolean },
+	/**  Against the baseline as it stood before this report. */
+	comparison: FeatureComparison_Serialize[],
+	baselineBefore: PersonalBaseline_Serialize,
+};
 
 export type Saved_Deserialize = {
 	id: string,

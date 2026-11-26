@@ -1,3 +1,4 @@
+import { CalibrationView } from "../neuro/CalibrationView";
 import { BrainCircuit, Bluetooth, Inbox, Play, RefreshCw, Square, Unplug, X } from "lucide-react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { INITIAL_SNAPSHOT } from "../bridge";
@@ -46,6 +47,10 @@ export function rssiText(rssi: number | null | undefined) {
 const whole = (value: number | null | undefined) => (typeof value === "number" && Number.isFinite(value) ? Math.round(value) : null);
 
 export type NeuroFieldProps = MuseScreenProps & {
+  /** The route's view: "neuro/calibration" opens the optional pre-meditation calibration (decision 0058). */
+  view?: string;
+  onOpenCalibration?: () => void;
+  onCloseCalibration?: () => void;
   training: ReturnType<typeof useTraining>;
   /** Re-runs the snapshot load. Retry is hidden without it. */
   onRetry?: () => void;
@@ -66,7 +71,13 @@ export type NeuroFieldProps = MuseScreenProps & {
   loading?: boolean;
 };
 
-export function NeuroField({ data, devices, operation, error, sessionId = null, sessionStartedAt, sessionEndedAt, onScan, onConnect, onDisconnect, onStart, onStop, training, onRetry, loading, onOpenHistory, scanEmpty = false, lastSavedId = null, onDismissSaved, onOpenRecording, focusPrimary = 0 }: NeuroFieldProps) {
+export function NeuroField(props: NeuroFieldProps) {
+  // Decision 0058: Neuro › Calibration is its own view ("neuro/calibration"), reached from the header.
+  if (props.view === "neuro/calibration") return <div className="neuro page-inset"><CalibrationView onDone={props.onCloseCalibration} /></div>;
+  return <NeuroMain {...props} />;
+}
+
+function NeuroMain({ data, devices, operation, error, sessionId = null, sessionStartedAt, sessionEndedAt, onScan, onConnect, onDisconnect, onStart, onStop, training, onRetry, loading, onOpenHistory, scanEmpty = false, lastSavedId = null, onDismissSaved, onOpenRecording, focusPrimary = 0, onOpenCalibration }: NeuroFieldProps) {
   const telemetry = useMuseTelemetry(); // only this screen subscribes to live readings
   const history = useBandHistory();
   const now = useNow(); // 1 s tick scoped to this screen
@@ -117,7 +128,7 @@ export function NeuroField({ data, devices, operation, error, sessionId = null, 
   const header = (
     <>
       <PageHero title="Neuro" statement={failed ? "Out of reach" : deviceBadge.text} detail={failed ? <Badge tone="danger">Unavailable</Badge> : band ? <Badge tone={band.tone}>Recovery now {Math.round(recovery as number)}%</Badge> : undefined} />
-      {secondary && <div className="neuro__actions">{secondary}</div>}
+      {(secondary || (onOpenCalibration && !running && !streaming)) && <div className="neuro__actions">{secondary}{onOpenCalibration && !running && !streaming && <Button variant="plain" onClick={onOpenCalibration}>Calibrate (optional)</Button>}</div>}
     </>
   );
 

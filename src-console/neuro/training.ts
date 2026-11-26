@@ -178,6 +178,8 @@ export class TrainingSession {
   private validTicks = 0;
   private fitTally: Record<string, Record<ChannelFit, number>> = Object.fromEntries(CHANNELS.map((c) => [c, { good: 0, fair: 0, poor: 0, none: 0 }]));
   private sources = new Set<string>();
+  /** Baseline ticks held (rejected) while the protocol calibrated, by reason. */
+  private baselineHeld: Partial<Record<HoldReason, number>> = {};
   private readonly auxAllowed: boolean;
   private heartRates: number[] = [];
   private lastHeartRateAt = -Infinity;
@@ -234,6 +236,7 @@ export class TrainingSession {
 
   private hold(reason: HoldReason, telemetry: MuseTelemetry, now: number, fit: Record<string, ChannelFit>): TrainingState {
     if (this.stage === "training") this.held[reason] += 1;
+    if (this.stage === "baseline-open" || this.stage === "baseline-closed") this.baselineHeld[reason] = (this.baselineHeld[reason] ?? 0) + 1;
     this.note(false);
     this.streak = 0;
     this.state = { ...this.state, phase: "held", label: HOLD_COPY[reason], stage: this.stage, hold: reason, fit, signal: null, focus: null, relaxation: null, streak: 0, delayMs: telemetry.lastPacketAt ? now - telemetry.lastPacketAt + FFT_WINDOW_DELAY_MS : null };
@@ -394,6 +397,25 @@ export class TrainingSession {
     return this.state;
   }
 
+  /**
+   * Decision 0058: the protocol calibration, kept apart from the pre-meditation calibration. The thresholds
+   * this protocol set from this session's own baseline, how much data they rest on, and the method, so it can
+   * be reproduced. Null until the baseline finished.
+   */
+  protocolCalibration() {
+    if (!this.guided || !this.baseThresholds) return null;
+    return {
+      protocolId: this.protocol.id,
+      baselineCondition: this.protocol.eyesClosed ? "eyes_closed" : "eyes_open",
+      thresholds: this.baseThresholds,
+      thresholdScale: this.scale,
+      baselineTicks: { eyes_open: this.baselines.open.length, eyes_closed: this.baselines.closed.length },
+      baselineHeldTicks: { ...this.baselineHeld },
+      alphaEyesClosedRatio: alphaRatio(this.baselines.open, this.baselines.closed),
+      method: TRAINING_METHOD,
+    };
+  }
+
   summary() {
     const valid = this.entries.filter((entry) => !entry.gated);
     const average = (key: "focus" | "relaxation") => valid.length ? valid.reduce((sum, entry) => sum + entry[key], 0) / valid.length : null;
@@ -416,6 +438,7 @@ export class TrainingSession {
       } } : {}),
       data_sources: [...this.sources].sort(),
       method: TRAINING_METHOD,
+      protocol_calibration: this.protocolCalibration(),
     };
   }
 }

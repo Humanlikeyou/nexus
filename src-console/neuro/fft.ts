@@ -47,7 +47,7 @@ function fft(real: Float64Array, imaginary: Float64Array) {
   }
 }
 
-function powerSpectrum(samples: number[]) {
+export function powerSpectrum(samples: number[]) {
   const real = new Float64Array(FFT_SIZE);
   const imaginary = new Float64Array(FFT_SIZE);
   const source = samples.slice(-FFT_SIZE);

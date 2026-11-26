@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { connectMuse, disconnectMuse, markRecordingAux, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "../bridge";
+import { connectMuse, disconnectMuse, invokeBound, markRecordingAux, saveMuseSession, scanMuse, startEegRecording, startEegStream, stopEegRecording, stopEegStream } from "../bridge";
 import { readableError } from "../lib/format";
 import { AUX_STEP, AuxDetector, auxInfoDetected } from "../neuro/auxDetect";
 import type { AuxInfo } from "../neuro/recordings";
@@ -183,7 +183,13 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
           aux: auxFound.current,
         } };
       },
-      save: (payload) => saveMuseSession(payload.session, payload.data),
+      save: async (payload) => {
+        const saved = await saveMuseSession(payload.session, payload.data);
+        // Decision 0058: the protocol calibration is kept with the calibration history (best effort, never blocks the session).
+        const proto = (payload.data.neurofeedback as { protocol_calibration?: unknown } | null)?.protocol_calibration;
+        if (proto) void invokeBound("neuro_calibration_save", { report: { kind: "protocol", source: payload.data.data_source ?? "replay", method: { version: "training-v2-0057", epochSecs: 0.5, fft: "see protocol.method", rejection: "training holds (contact, dropout, blink, jaw, movement, noise, frozen, not_live)" }, conditions: [], protocol: proto, sessionId: payload.session.id } }).catch(() => {});
+        return saved;
+      },
     });
     return true;
   }, [recordingFile, sessionStartedAt, readCounters, summarizeTraining, finishTraining]);

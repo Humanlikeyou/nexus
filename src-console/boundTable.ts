@@ -308,6 +308,9 @@ export const BOUND_TABLE: Record<string, Row> = {
   life_week_observations: (a) => bound.lifeWeekObservations(a.weekStart as never),
   // Registered before the typed bridge (371e0d2) but never bound, so invokeBound rejected them (habit marks, roadmap answers, memory writes, Hemi-Sync sessions).
   muse_stream_continuity: () => bound.museStreamContinuity(),
+  neuro_calibration_save: (a) => bound.neuroCalibrationSave(a.report as never),
+  neuro_calibration_list: (a) => bound.neuroCalibrationList((a.kind ?? null) as never, (a.limit ?? null) as never),
+  neuro_baseline_get: () => bound.neuroBaselineGet(),
   habit_mark: (a) => bound.habitMark(a.habitId as never, a.day as never, a.done as never, a.source as never),
   habit_days: (a) => bound.habitDays(a.from as never, a.to as never),
   roadmap_accept: (a) => bound.roadmapAccept(a.goalId as never),
