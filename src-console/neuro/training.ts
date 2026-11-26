@@ -1,4 +1,4 @@
-import { computeBands } from "../legacy-core/hooks/useFFT";
+import { bandFeatures, BAND_EDGES_HZ, FEATURE_METHOD } from "./fft";
 import { assessChannel } from "../legacy-core/hooks/useSignalQuality";
 import { computeFeedbackSignal, resetOutputEngine } from "../legacy-core/lib/neurofeedback/outputEngine";
 import { resetPolicyState } from "../legacy-core/lib/neurofeedback/policyEngine";
@@ -55,11 +55,12 @@ export const HOLD_COPY: Record<HoldReason, string> = {
 
 /** How the numbers in a session summary were made, so each one can be traced (decision 0057). */
 export const TRAINING_METHOD = {
-  version: "training-v2-0057",
+  version: "training-v3-0060",
   tick_ms: TICK_MS,
-  fft: "legacy-core computeBands: Welch (512 samples, 50% overlap) else single 256-sample PSD, Hann, 256 Hz nominal",
-  bands_hz: { delta: [1.5, 4], theta: [4, 8], alpha: [8, 13], beta: [13, 30], gamma: [30, 50] },
-  channels: "AF7 and AF8 averaged per band (AUX only when proven)",
+  // Decision 0060: the one band-power pipeline (display, calibration, training, recordings).
+  fft: FEATURE_METHOD,
+  bands_hz: BAND_EDGES_HZ,
+  channels: "AF7 and AF8, line noise removed, power averaged before relative (AUX only when proven)",
   focus: "beta / (beta + theta) x 100",
   relaxation: "alpha / (alpha + beta) x 100",
   thresholds: "baseline mean x 1.1 (reward) and x 0.9 (inhibit), scaled toward 60% reward every 30 s",
@@ -360,12 +361,9 @@ export class TrainingSession {
     // The back-of-head electrode reads alpha better than the forehead, when it's really there.
     const auxLive = this.guided && this.auxAllowed && telemetry.aux != null && now - telemetry.aux.lastPacketAt < STALE_MS && telemetry.aux.samples.length >= 256 && assessChannel(telemetry.aux.samples.slice(-256)) !== "poor";
     const auxSource = auxLive && this.protocol.rewardBands.some((band) => band.label === "Alpha");
-    const frontal = (auxSource ? ["AUX"] : ["AF7", "AF8"]).map((channel) => {
-      const samples = removeLineNoise(channel === "AUX" ? (telemetry.aux as NonNullable<MuseTelemetry["aux"]>).samples : telemetry.channels[channel]);
-      const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length;
-      return computeBands(samples.map((value) => value - mean));
-    });
-    const bands = Object.fromEntries(Object.keys(frontal[0]).map((key) => [key, frontal.reduce((sum, item) => sum + item[key as keyof FrequencyBandPowers], 0) / frontal.length])) as unknown as FrequencyBandPowers;
+    const frontal = (auxSource ? ["AUX"] : ["AF7", "AF8"]).map((channel) => removeLineNoise((channel === "AUX" ? (telemetry.aux as NonNullable<MuseTelemetry["aux"]>).samples : telemetry.channels[channel]).slice(-256)));
+    // Decision 0060: one window, power averaged across the electrodes, then relative (as the display and calibration).
+    const bands: FrequencyBandPowers = bandFeatures(frontal);
     if (this.guided && !this.thresholds) {
       const eyes = this.stage === "baseline-closed" ? "closed" : "open";
       this.baselines[eyes].push(bands);

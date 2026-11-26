@@ -8,6 +8,7 @@ import { RecordingSummarizer } from "../neuro/recordingSummary";
 import { SessionFinalizer } from "../neuro/sessionFinalizer";
 import { museTelemetry } from "../neuro/telemetryStore";
 import { useTraining } from "../neuro/useTraining";
+import { TRAINING_METHOD } from "../neuro/training";
 import type { MuseOperation } from "../screens/muse";
 import type { MuseDevice, RecordedSession, SystemSnapshot } from "../types";
 
@@ -187,7 +188,7 @@ export function useMuseSession(data: SystemSnapshot, refresh: () => Promise<void
         const saved = await saveMuseSession(payload.session, payload.data);
         // Decision 0058: the protocol calibration is kept with the calibration history (best effort, never blocks the session).
         const proto = (payload.data.neurofeedback as { protocol_calibration?: unknown } | null)?.protocol_calibration;
-        if (proto) void invokeBound("neuro_calibration_save", { report: { kind: "protocol", source: payload.data.data_source ?? "replay", method: { version: "training-v2-0057", epochSecs: 0.5, fft: "see protocol.method", rejection: "training holds (contact, dropout, blink, jaw, movement, noise, frozen, not_live)" }, conditions: [], protocol: proto, sessionId: payload.session.id } }).catch(() => {});
+        if (proto) void invokeBound("neuro_calibration_save", { report: { kind: "protocol", source: payload.data.data_source ?? "replay", method: { version: TRAINING_METHOD.version, epochSecs: 0.5, fft: "see protocol.method", rejection: "training holds (contact, dropout, blink, jaw, movement, noise, frozen, not_live)" }, conditions: [], protocol: proto, sessionId: payload.session.id } }).catch(() => {});
         return saved;
       },
     });

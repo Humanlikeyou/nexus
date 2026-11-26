@@ -153,7 +153,9 @@ describe("feedback gate", () => {
     expect(s.guided?.channel_fit_ticks.AF7.none).toBe(2);
     expect(s.data_sources).toEqual(["live"]);
     expect(s.method).toBe(TRAINING_METHOD);
-    expect(TRAINING_METHOD.version).toMatch(/0057/);
+    // Decision 0060: the method names its version and the one band-power pipeline it used.
+    expect(TRAINING_METHOD.version).toBe("training-v3-0060");
+    expect(TRAINING_METHOD.fft).toMatch(/neuro\/fft\.ts/);
   });
 
   it("a session with no training time reports no valid percentage rather than 0 or 100", () => {

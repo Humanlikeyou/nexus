@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { FrequencyBandPowers } from "../lib/types";
-import { SAMPLE_RATE, FFT_SIZE, welchPSD, singlePSD, bandPower } from "../lib/fft";
+import { FFT_SIZE } from "../lib/fft";
+import { bandFeatures } from "../../neuro/fft";
 
 const WELCH_BUFFER = 512;   // Total buffer for Welch: 2s of data
 const EMA_ALPHA = 0.2;      // Exponential moving average smoothing factor
@@ -10,71 +11,9 @@ function ema(prev: number, next: number): number {
   return EMA_ALPHA * next + (1 - EMA_ALPHA) * prev;
 }
 
+/** Decision 0060: one band-power pipeline. This is `neuro/fft.ts` `bandFeatures` for one channel. */
 export function computeBands(samples: number[]): FrequencyBandPowers {
-  const powers = samples.length >= WELCH_BUFFER
-    ? welchPSD(samples)
-    : singlePSD(samples);
-
-  const delta = bandPower(powers, 1.5, 4);
-  const theta = bandPower(powers, 4, 8);
-  const alpha = bandPower(powers, 8, 13);
-  const beta = bandPower(powers, 13, 30);
-  const gamma = bandPower(powers, 30, 50);
-  const smr = bandPower(powers, 12, 15);
-  const lowBeta = bandPower(powers, 15, 20);
-  const highBeta = bandPower(powers, 20, 30);
-
-  // Alpha peak frequency
-  const binSize = SAMPLE_RATE / FFT_SIZE;
-  const alphaMinBin = Math.floor(8 / binSize);
-  const alphaMaxBin = Math.ceil(13 / binSize);
-  let peakBin = alphaMinBin;
-  let peakVal = 0;
-  for (let i = alphaMinBin; i <= alphaMaxBin && i < powers.length; i++) {
-    if (powers[i] > peakVal) { peakVal = powers[i]; peakBin = i; }
-  }
-  const alphaPeak = Math.round(peakBin * binSize * 10) / 10;
-
-  const total = delta + theta + alpha + beta + gamma || 1;
-
-  const deltaPct = (delta / total) * 100;
-  const thetaPct = (theta / total) * 100;
-  const alphaPct = (alpha / total) * 100;
-  const betaPct = (beta / total) * 100;
-  const gammaPct = (gamma / total) * 100;
-  const smrPct = (smr / total) * 100;
-  const lowBetaPct = (lowBeta / total) * 100;
-  const highBetaPct = (highBeta / total) * 100;
-
-  // Focus: beta / (beta + theta)
-  const focusScore = beta + theta > 0
-    ? Math.round((beta / (beta + theta)) * 100)
-    : 0;
-
-  // Relaxation: alpha / (alpha + beta)
-  const relaxationScore = alpha + beta > 0
-    ? Math.round((alpha / (alpha + beta)) * 100)
-    : 0;
-
-  // Ratios (raw, not percentage)
-  const alphaTheta = theta > 0 ? Math.round((alpha / theta) * 100) / 100 : 0;
-  const betaAlpha = alpha > 0 ? Math.round((beta / alpha) * 100) / 100 : 0;
-
-  return {
-    delta: Math.round(deltaPct * 10) / 10,
-    theta: Math.round(thetaPct * 10) / 10,
-    alpha: Math.round(alphaPct * 10) / 10,
-    beta: Math.round(betaPct * 10) / 10,
-    gamma: Math.round(gammaPct * 10) / 10,
-    smr: Math.round(smrPct * 10) / 10,
-    lowBeta: Math.round(lowBetaPct * 10) / 10,
-    highBeta: Math.round(highBetaPct * 10) / 10,
-    alphaPeak,
-    focusScore,
-    relaxationScore,
-    alphaTheta,
-    betaAlpha,
-  };
+  return bandFeatures([samples]);
 }
 
 const ZERO_BANDS: FrequencyBandPowers = {

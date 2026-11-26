@@ -12,9 +12,9 @@ import { TARGET_REWARD_RATE, TRAINING_METHOD } from "./training";
 
 export const PROTOCOL_SET_VERSION = "protocols-v1-0059";
 
-/** The edges `computeBands` actually integrates, per protocol band label. */
+/** The edges the one band-power pipeline (`neuro/fft.ts`, decision 0060) integrates, per protocol band label. */
 export const COMPUTED_BANDS_HZ: Record<string, [number, number]> = {
-  delta: [1.5, 4], theta: [4, 8], alpha: [8, 13], beta: [13, 30], gamma: [30, 50],
+  delta: [1, 4], theta: [4, 8], alpha: [8, 13], beta: [13, 30], gamma: [30, 45],
   smr: [12, 15], lowbeta: [15, 20], highbeta: [20, 30],
 };
 
@@ -37,7 +37,7 @@ export type TargetFeature = {
 };
 
 const key = (label: string) => label.toLowerCase().replace(/\s+/g, "");
-const MEASURE = "relative band power, % of 1.5–50 Hz total, AF7 and AF8 averaged";
+const MEASURE = "relative band power, % of the 1–45 Hz total, power averaged across AF7 and AF8 (decision 0060)";
 const REFERENCE = "this session's own baseline mean (eyes open or closed as the protocol trains): reward above x1.1, inhibit above x0.9; the reward threshold is scaled toward the target reward rate every 30 s";
 
 function feature(role: FeatureRole, band: { label: string; minHz?: number; maxHz?: number }, direction: TargetFeature["direction"], reference = REFERENCE, measure = MEASURE): TargetFeature {

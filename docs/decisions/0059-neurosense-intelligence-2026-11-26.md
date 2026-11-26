@@ -24,7 +24,7 @@ Claude's, made under that delegation, and each one can be reversed.
    - The protocol descriptions and coaching text in `protocols.ts` are reworded so they make no claims
      about mental state or learning.
    - Internal field names (`avg_focus`, `avg_relaxation`, `calm_pct`) stay unchanged for compatibility.
-3. **No HRV.** No connected sensor gives beat-to-beat RR intervals. HRV biofeedback shows "not
+3. **No HRV** (*corrected 2026-11-26: this was wrong.* NOOP's `whoop.sqlite` has an `rrInterval` table of beat-to-beat intervals from the WHOOP strap, about 6.8 million rows and recent. They arrive when the strap syncs, not live. Using them for session HRV is proposed as a follow-up; until then the statement below stands in the app). As first written: no connected sensor gives beat-to-beat RR intervals. HRV biofeedback shows "not
    available", and nothing computes HRV from EEG or from PPG heart-rate estimates (a test enforces this).
    PPG heart rate stays an estimate, shown only when the PPG stream is fresh and its pulse peak is clear.
 4. **Hemi-Sync** stays limited to audio Taisun imports himself from his own folders (the existing import).

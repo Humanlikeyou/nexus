@@ -7,7 +7,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { relativeChannelBandPowers } from "../../src-console/neuro/fft";
+import { bandFeatures, relativeChannelBandPowers } from "../../src-console/neuro/fft";
 import { computeBands } from "../../src-console/legacy-core/hooks/useFFT";
 import { assessChannel } from "../../src-console/legacy-core/hooks/useSignalQuality";
 
@@ -16,13 +16,20 @@ const inputs = JSON.parse(readFileSync(new URL("parity_inputs.json", dir), "utf8
 const expectedUrl = new URL("parity_expected.json", dir);
 const BAND_KEYS = ["delta", "theta", "alpha", "beta", "gamma"] as const;
 
+/** Decision 0060: two electrodes together (power averaged first), as training and the sidecar do it. */
+const PAIRS = [["alpha10", "mixed"], ["alpha10", "noisy"], ["hum50", "mixed"]] as const;
+
 function compute() {
-  return Object.fromEntries(Object.entries(inputs).map(([name, samples]) => {
+  const pairs = Object.fromEntries(PAIRS.map(([a, b]) => {
+    const f = bandFeatures([inputs[a], inputs[b]]);
+    return [`${a}+${b}`, { focus: f.focusScore, relaxation: f.relaxationScore }];
+  }));
+  return { _pairs: pairs, ...Object.fromEntries(Object.entries(inputs).map(([name, samples]) => {
     const bands = relativeChannelBandPowers([samples]);
     const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
     const scores = computeBands(samples.map((v) => v - mean));
     return [name, { bands: BAND_KEYS.map((k) => bands[k]), quality: assessChannel(samples), focus: scores.focusScore, relaxation: scores.relaxationScore }];
-  }));
+  })) };
 }
 
 describe("muse maths parity fixtures", () => {
@@ -30,7 +37,8 @@ describe("muse maths parity fixtures", () => {
     const actual = compute();
     if (process.env.MUSE_PARITY_UPDATE === "1" || !existsSync(expectedUrl)) writeFileSync(expectedUrl, JSON.stringify(actual, null, 1) + "\n");
     const expected = JSON.parse(readFileSync(expectedUrl, "utf8"));
-    for (const [name, value] of Object.entries(actual)) {
+    expect(expected._pairs).toEqual(actual._pairs);
+    for (const [name, value] of Object.entries(actual).filter(([name]) => name !== "_pairs") as Array<[string, { bands: number[]; quality: string; focus: number; relaxation: number }]>) {
       expect(expected[name].quality).toBe(value.quality);
       expect(expected[name].focus).toBe(value.focus);
       expect(expected[name].relaxation).toBe(value.relaxation);

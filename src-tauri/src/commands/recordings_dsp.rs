@@ -5,7 +5,7 @@
 //! - `relative_channel_band_powers`: src-console/neuro/fft.ts
 //! - `remove_line_noise`: src/lib/lineNoise.ts
 //! - `assess_channel`: src/hooks/useSignalQuality.ts
-//! - `focus_relaxation`: src/hooks/useFFT.ts `computeBands` (focusScore, relaxationScore)
+//! - `focus_relaxation`: src-console/neuro/fft.ts `bandFeatures` (focusScore, relaxationScore; decision 0060)
 //! - `head_movement_events`: src-console/neuro/headMotion.ts thresholds
 
 pub const SAMPLE_RATE: f64 = 256.0;
@@ -114,14 +114,6 @@ fn band_power_exclusive(powers: &[f64], min: f64, max: f64) -> f64 {
     let start = ((min / bin).ceil() as usize).max(1);
     let end = ((max / bin).ceil() as usize).min(powers.len());
     (start..end).map(|i| powers[i]).sum()
-}
-
-/// src/lib/fft.ts `bandPower`: bins [max(1, floor(min/bin)), min(len-1, ceil(max/bin))] inclusive.
-fn band_power_inclusive(powers: &[f64], min: f64, max: f64) -> f64 {
-    let bin = SAMPLE_RATE / FFT_SIZE as f64;
-    let lo = ((min / bin).floor() as usize).max(1);
-    let hi = ((max / bin).ceil() as usize).min(powers.len() - 1);
-    (lo..=hi).map(|i| powers[i]).sum()
 }
 
 /// Relative band power (% of delta..gamma total) of the channels that have a full finite
@@ -294,14 +286,40 @@ pub fn assess_channel(samples: &[f64]) -> Quality {
 }
 
 /// Focus (beta / (beta + theta)) and relaxation (alpha / (alpha + beta)) scores, 0-100, of a
-/// mean-removed 256-sample window, as `computeBands` returns them.
+/// mean-removed 256-sample window, as `neuro/fft.ts` `bandFeatures` returns them for one channel.
+/// Decision 0060: half-open bins, so the 8 and 13 Hz bins are no longer counted in two bands.
+/// Test anchor: the single-electrode parity check against the TypeScript (the app uses `focus_relaxation_channels`).
+#[cfg(test)]
 pub fn focus_relaxation(window_samples: &[f64]) -> (f64, f64) {
     let mean = window_samples.iter().sum::<f64>() / window_samples.len().max(1) as f64;
     let centred: Vec<f64> = window_samples.iter().map(|v| v - mean).collect();
-    let powers = single_psd(&centred);
-    let theta = band_power_inclusive(&powers, 4.0, 8.0);
-    let alpha = band_power_inclusive(&powers, 8.0, 13.0);
-    let beta = band_power_inclusive(&powers, 13.0, 30.0);
+    scores(&single_psd(&centred))
+}
+
+/// Decision 0060 (security review): several electrodes, as `bandFeatures` does it. Their power spectra are
+/// averaged first and the scores taken from the average, never the scores averaged. `None` when no
+/// electrode has a full finite window.
+pub fn focus_relaxation_channels(channels: &[&[f64]]) -> Option<(f64, f64)> {
+    let complete: Vec<&&[f64]> = channels
+        .iter()
+        .filter(|c| c.len() >= FFT_SIZE && c[c.len() - FFT_SIZE..].iter().all(|v| v.is_finite()))
+        .collect();
+    if complete.is_empty() {
+        return None;
+    }
+    let mut powers = [0.0; FFT_SIZE / 2];
+    for c in &complete {
+        for (acc, p) in powers.iter_mut().zip(power_spectrum(c)) {
+            *acc += p / complete.len() as f64;
+        }
+    }
+    Some(scores(&powers))
+}
+
+fn scores(powers: &[f64]) -> (f64, f64) {
+    let theta = band_power_exclusive(powers, 4.0, 8.0);
+    let alpha = band_power_exclusive(powers, 8.0, 13.0);
+    let beta = band_power_exclusive(powers, 13.0, 30.0);
     let focus = if beta + theta > 0.0 {
         (beta / (beta + theta) * 100.0).round()
     } else {
@@ -577,5 +595,24 @@ mod parity {
             assert_eq!(f, want["focus"].as_f64().unwrap(), "{name} focus");
             assert_eq!(r, want["relaxation"].as_f64().unwrap(), "{name} relaxation");
         }
+        // Decision 0060: two electrodes, power averaged first, match the TypeScript bandFeatures.
+        let pairs = expected["_pairs"].as_object().expect("pair fixtures");
+        assert!(!pairs.is_empty());
+        for (key, want) in pairs {
+            let (a, b) = key.split_once('+').unwrap();
+            let get = |n: &str| -> Vec<f64> {
+                inputs[n]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_f64().unwrap())
+                    .collect()
+            };
+            let (x, y) = (get(a), get(b));
+            let (f, r) = focus_relaxation_channels(&[&x, &y]).unwrap();
+            assert_eq!(f, want["focus"].as_f64().unwrap(), "{key} focus");
+            assert_eq!(r, want["relaxation"].as_f64().unwrap(), "{key} relaxation");
+        }
+        assert_eq!(focus_relaxation_channels(&[&[1.0; 10]]), None);
     }
 }
