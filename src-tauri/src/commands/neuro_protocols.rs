@@ -50,7 +50,7 @@ fn file(data: &Path) -> PathBuf {
 
 fn valid_id(id: &str) -> bool {
     !id.is_empty()
-        && id.len() <= 64
+        && id.len() <= 40
         && id
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')

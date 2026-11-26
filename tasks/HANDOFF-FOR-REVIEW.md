@@ -1282,3 +1282,44 @@ The design boundary is lifted for the Calibration view only.
 **Open:**
 - A report's `source` is supplied by the renderer, so a forged "live" report could enter the baseline (integrity only, local).
 - Whether the Telegram, n8n or Hermes request paths can carry these sections is not traced. The known callers all go through `nexus_context_message`, which drops them while the cloud is allowed.
+
+## 51. Decision 0059: NEUROSENSE intelligence (Phase 8), commits `14e9101`…8f (2026-11-26)
+
+Brief: `docs/specs/neurosense-intelligence-2026-11-26.md`. Taisun answered the five scope questions with "Up to you. and Run", so the choices are Claude's and listed in `docs/decisions/0059-neurosense-intelligence-2026-11-26.md`, each reversible:
+- the FFT pipelines are not unified;
+- the design boundary is lifted for the new views only;
+- no HRV;
+- Hemi-Sync plays imported files only;
+- steps 8a–8f, one commit each.
+
+**Built:**
+- Configurable, versioned protocols with exact target features.
+- Per-protocol settings.
+- Auditable threshold logs and session progress records.
+- Feedback sound cues with a held sound that never sounds like reward, a volume control, and a real mute.
+- An optional lens light.
+- An optional after-session rest compared with the morning recording.
+- Hemi-Sync pause, seek, volume and next-in-wave.
+- Biofeedback sensor availability, kept apart from neurofeedback.
+- Long-term trends from validated sessions.
+- A structured training report for Amara: local only, no raw EEG.
+- A new Neuro › Training view (reached from the Neuro header).
+
+**Bug fixed on the way:** muting the training sound didn't silence a playing tone (`useAudioFeedback`), and the training screen always played the tone whatever the protocol named.
+
+**Found, not changed:** every protocol declares band ranges that the training never uses. The FFT integrates fixed edges, for example delta 1.5–4 Hz where protocols say 0.5–4 Hz. Target-feature definitions now state the computed range and flag the declared one.
+
+**Verification:**
+- Each step: tsc, lint and check:secrets pass; Rust fmt and clippy clean.
+- Final tree: vitest 2991 passed / 9 skipped; neuro 21; src-tauri 2016 passed / 9 ignored; amara-router 133.
+- e2e 820 / 12 skipped / 0 failed on every step. Step 8b had one known-flaky route-motion failure; rerun alone, it passed 20/20.
+
+**Security review:** no HIGH; two MEDIUM fixed (prompt-injection through session-file strings, and the honesty note being cut off by the section cap) and three LOW fixed. Still open: the size cap on the shared session reader, and the renderer-asserted `data_source` (same as 0058).
+
+**Not run:** no live Muse session or real pre/post pair; Hemi-Sync not tried with real audio; PPG not validated on the headset; no trends from real data (no session has a progress record yet); the packaged app was not built, installed or launched.
+
+**For Taisun / Design:**
+1. The app-wide rename of "Focus" and "Calm" to neutral feature names is in `tasks/design-questions.md`.
+2. Whether to unify the two FFT pipelines (it changes historical numbers).
+3. Whether Rust should stamp the session source itself.
+4. Install: not done. Say "build and install" when you want it.

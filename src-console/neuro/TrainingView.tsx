@@ -4,6 +4,7 @@ import { Button, Card, PageHero, Select, Toggle } from "../ui";
 import type { NfProtocol } from "../legacy-core/lib/types";
 import { describeFeature, PROTOCOL_SET_VERSION, targetFeatures, type ProtocolSettings, type ProtocolSound } from "./protocolConfig";
 import { biofeedback, type Biofeedback } from "./biofeedback";
+import { TrendsCard } from "./TrendsCard";
 import { useMuseTelemetry } from "./useMuseTelemetry";
 import "../ui/PanelKit.css";
 
@@ -76,12 +77,12 @@ const loadRecords = () => invokeBound<TrainingRecord[]>("neuro_training_records"
 export function TrainingRecordsCard({ protocols, load = loadRecords }: { protocols: NfProtocol[]; load?: () => Promise<TrainingRecord[]> }) {
   const [records, setRecords] = useState<TrainingRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { let alive = true; load().then((r) => { if (alive) setRecords(r ?? []); }, (e: unknown) => { if (alive) setError(e instanceof Error ? e.message : String(e)); }); return () => { alive = false; }; }, [load]);
+  useEffect(() => { let alive = true; load().then((r) => { if (alive) setRecords(r ?? []); }, (e: unknown) => { console.error("neuro_training_records", e); if (alive) setError("unreadable"); }); return () => { alive = false; }; }, [load]);
   const name = (id: string) => protocols.find((p) => p.id === id)?.name ?? id;
   return (
     <Card title="Session records">
       <p className="pk-note">How each guided session&apos;s feedback was produced. Time in target is kept near your target reward rate by design, because the threshold adapts, so it is a record of the session, not a score.</p>
-      {error ? <p className="pk-note" role="alert">The records couldn&apos;t be read: {error}</p>
+      {error ? <p className="pk-note" role="alert">The records couldn&apos;t be read.</p>
         : records == null ? <p className="pk-note" role="status">Reading the records…</p>
         : records.length === 0 ? <p className="pk-note">No records yet. Records start with guided sessions from this version on.</p>
         : <ul className="pk-list" aria-label="Session records">{records.map((r) => {
@@ -130,6 +131,7 @@ export function TrainingView({ training, running = false, onDone, onRecordAfter 
       <PageHero title="Training" statement="Protocols, settings and your session records" detail="Neurofeedback follows the EEG features listed for each protocol. Everything here is optional." />
       <ProtocolSettingsCard training={training} disabled={running} />
       <TrainingRecordsCard protocols={training.protocols} />
+      <TrendsCard protocols={training.protocols} />
       <LiveBiofeedback />
       {onRecordAfter && (
         <Card title="Before and after a session">

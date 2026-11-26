@@ -314,6 +314,7 @@ export const BOUND_TABLE: Record<string, Row> = {
   neuro_protocol_settings_get: () => bound.neuroProtocolSettingsGet(),
   neuro_protocol_settings_set: (a) => bound.neuroProtocolSettingsSet(a.protocolId as never, (a.settings ?? null) as never),
   neuro_training_records: (a) => bound.neuroTrainingRecords((a.limit ?? null) as never),
+  neuro_training_trends: () => bound.neuroTrainingTrends(),
   habit_mark: (a) => bound.habitMark(a.habitId as never, a.day as never, a.done as never, a.source as never),
   habit_days: (a) => bound.habitDays(a.from as never, a.to as never),
   roadmap_accept: (a) => bound.roadmapAccept(a.goalId as never),

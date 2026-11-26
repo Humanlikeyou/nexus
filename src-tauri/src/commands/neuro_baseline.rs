@@ -617,8 +617,13 @@ pub(crate) fn context_section_in(data: &Path) -> Option<String> {
     let reports = list_in(data, None, 500).ok()?;
     let latest_pre = reports.iter().find(|r| r.kind == "pre_meditation");
     let latest_proto = reports.iter().find(|r| r.kind == "protocol");
+    // Decision 0059: the training records and trends, structured, from the session files (read-only).
+    let training = super::neuro_training::context_lines(&data.join("sessions"));
     if latest_pre.is_none() && latest_proto.is_none() {
-        return Some("No NEUROSENSE calibration recorded yet. Calibration is optional.".into());
+        let mut lines =
+            vec!["No NEUROSENSE calibration recorded yet. Calibration is optional.".to_string()];
+        lines.extend(training);
+        return Some(lines.join("\n"));
     }
     let base = baseline_in(data).ok()?;
     let mut lines = vec!["NEUROSENSE measurement report (relative EEG band power, alpha peak, variability). These are signal measurements, not measures of emotion, attention, stress or relaxation; do not describe them as such.".to_string()];
@@ -668,6 +673,46 @@ pub(crate) fn context_section_in(data: &Path) -> Option<String> {
             lines.push(format!("Latest protocol calibration: {id} (thresholds set from that session's own baseline)."));
         }
     }
+    if let Some(post) = reports.iter().find(|r| r.kind == "post_session") {
+        let base_before: Vec<CalibrationReport> = reports
+            .iter()
+            .rev()
+            .filter(|r| r.created_at < post.created_at)
+            .cloned()
+            .collect();
+        if let Some(pp) = pre_post(&base_before, post, &base) {
+            let shown: Vec<String> = pp
+                .changes
+                .iter()
+                .filter(|c| c.feature == "alpha")
+                .map(|c| {
+                    format!(
+                        "{} alpha {:+.1} points ({})",
+                        c.condition.replace('_', " "),
+                        c.change,
+                        if c.change_in_usual_spreads.is_none() {
+                            "no baseline to judge by"
+                        } else if c.beyond_usual_variation {
+                            "larger than usual variation"
+                        } else {
+                            "within usual variation"
+                        }
+                    )
+                })
+                .collect();
+            lines.push(format!(
+                "Latest before/after session rest ({} min apart): {}. {}",
+                pp.minutes_between,
+                if shown.is_empty() {
+                    "no alpha change measured".into()
+                } else {
+                    shown.join("; ")
+                },
+                pp.note
+            ));
+        }
+    }
+    lines.extend(training);
     Some(lines.join("\n"))
 }
 

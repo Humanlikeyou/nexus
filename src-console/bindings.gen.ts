@@ -492,6 +492,7 @@ export const commands = {
 	/**  Saves one protocol's settings, or with `settings: null` returns it to its defaults. */
 	neuroProtocolSettingsSet: (protocolId: string, settings: ProtocolSettings | null, options?: InvokeOptions) => __TAURI_INVOKE<{ [key in string]: ProtocolSettings }>("neuro_protocol_settings_set", { protocolId, settings }, options),
 	neuroTrainingRecords: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<TrainingRecord_Serialize[]>("neuro_training_records", { limit }, options),
+	neuroTrainingTrends: (options?: InvokeOptions) => __TAURI_INVOKE<TrainingTrends_Serialize>("neuro_training_trends", undefined, options),
 	/**
 	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
 	 *  `source` is "manual", "chat" or "telegram".
@@ -2615,6 +2616,54 @@ export type FeatureComparison_Serialize = {
 	robustZ: number | null,
 	/**  `within`, `above` or `below` the usual range (|z| < 1.5), in signal terms only. */
 	position: string,
+};
+
+export type FeatureTrend = FeatureTrend_Serialize | FeatureTrend_Deserialize;
+
+export type FeatureTrend_Deserialize = {
+	/**  `resting_level:<band>`, `final_threshold_scale` or `valid_pct`. */
+	feature: string,
+	unit: string,
+	/**  How the per-session number is calculated, in words. */
+	calculation: string,
+	n: number,
+	median: number | null,
+	robustSd: number | null,
+	/**  Median of the earlier half of the sessions, then of the later half (in time order). */
+	earlierMedian: number | null,
+	laterMedian: number | null,
+	/**  later - earlier, in the feature's unit, and in robust SDs of all sessions. */
+	change: number | null,
+	changeInSpreads?: number | null,
+	/**  Theil-Sen slope per session (median of pairwise slopes): robust to one odd session. */
+	slopePerSession: number | null,
+	/**  `higher`, `lower` or `no_clear_change` (|change| under one robust SD, or no spread). */
+	direction: string,
+	confidence: string,
+	uncertainty: string,
+};
+
+export type FeatureTrend_Serialize = {
+	/**  `resting_level:<band>`, `final_threshold_scale` or `valid_pct`. */
+	feature: string,
+	unit: string,
+	/**  How the per-session number is calculated, in words. */
+	calculation: string,
+	n: number,
+	median: number | null,
+	robustSd: number | null,
+	/**  Median of the earlier half of the sessions, then of the later half (in time order). */
+	earlierMedian: number | null,
+	laterMedian: number | null,
+	/**  later - earlier, in the feature's unit, and in robust SDs of all sessions. */
+	change: number | null,
+	changeInSpreads: number | null,
+	/**  Theil-Sen slope per session (median of pairwise slopes): robust to one odd session. */
+	slopePerSession: number | null,
+	/**  `higher`, `lower` or `no_clear_change` (|change| under one robust SD, or no spread). */
+	direction: string,
+	confidence: string,
+	uncertainty: string,
 };
 
 export type FeedState = 
@@ -5245,6 +5294,32 @@ export type ProtocolSettings = {
 	volume: number | null,
 };
 
+export type ProtocolTrends = ProtocolTrends_Serialize | ProtocolTrends_Deserialize;
+
+export type ProtocolTrends_Deserialize = {
+	protocolId: string,
+	method: string,
+	sessions: number,
+	first: string,
+	last: string,
+	/**  Empty below MIN_TREND_SESSIONS. */
+	features: FeatureTrend_Deserialize[],
+	/**  Session ids the trends were calculated from, oldest first (traceability). */
+	sessionIds: string[],
+};
+
+export type ProtocolTrends_Serialize = {
+	protocolId: string,
+	method: string,
+	sessions: number,
+	first: string,
+	last: string,
+	/**  Empty below MIN_TREND_SESSIONS. */
+	features: FeatureTrend_Serialize[],
+	/**  Session ids the trends were calculated from, oldest first (traceability). */
+	sessionIds: string[],
+};
+
 export type PrunePlan = {
 	/**  WOULD be deleted (oldest first). Nothing deletes them. */
 	wouldDelete: string[],
@@ -7096,6 +7171,24 @@ export type TrainingRecord_Serialize = {
 	heldSeconds: { [key in string]: number | null },
 	eligible: boolean,
 	notEligibleReason: string | null,
+};
+
+export type TrainingTrends = TrainingTrends_Serialize | TrainingTrends_Deserialize;
+
+export type TrainingTrends_Deserialize = {
+	version: string,
+	records: number,
+	eligible: number,
+	protocols: ProtocolTrends_Deserialize[],
+	note: string,
+};
+
+export type TrainingTrends_Serialize = {
+	version: string,
+	records: number,
+	eligible: number,
+	protocols: ProtocolTrends_Serialize[],
+	note: string,
 };
 
 export type Transition = Transition_Serialize | Transition_Deserialize;

@@ -55,4 +55,27 @@ Every step must also hold:
 
 ## Results
 
-Filled in as each step lands.
+| Step | Commit | What landed |
+|---|---|---|
+| 8a | `14e9101` | Protocol set `protocols-v1-0059`. `targetFeatures()` states each band's computed edges, measure, direction, reference and method, and flags declared ranges that differ (found: protocols declare delta 0.5–4 Hz, the FFT integrates 1.5–4 Hz; the declared Hz were never used). Per-protocol settings in `<data>/neuro/protocol_settings.json` (`neuro_protocol_settings_get/set`). Neutral protocol descriptions. Neuro › Training view |
+| 8b | `3fecfe5` | Threshold log with reasons; `progress_record` (`progress-v1-0059`) in each session file's `data.neurofeedback`; `neuro_training_records` (read-only); safety gates pinned by tests |
+| 8c | `b4a63fd` | Sound cues per state, a distinct held sound, volume, ramps from the current value. **Bug fixed:** muting only blocked later changes, so a playing tone kept sounding. The protocol's chosen sound is used (it was always the tone). End bell at the planned length (no auto-stop). The lens light can be switched off |
+| 8d | `3006761` | Calibration kind `post_session` (never in the baseline), paired with the same day's pre-meditation recording (≤6 h, same source); changes measured in usual spreads |
+| 8e | `a030003` | Hemi-Sync pause, resume, ±30 s, volume, next-in-wave offered; `biofeedback.ts` sensor availability; HRV and RR "not available"; HRV guard test |
+| 8f | (this commit) | `neuro_training_trends`: per protocol and method, eligible sessions only (live, ≥70% usable, ≥3 min), at least 5 sessions; resting level per reward band, final threshold scale, usable signal; earlier vs later medians, Theil–Sen slope, confidence, calculation and uncertainty. Time in target is deliberately not trended (the adaptive threshold holds it near the target). Amara's local-only `nexus_neuro` section gets the training report and the latest before/after; keyword gate adds "meditat". Trends card in Neuro › Training |
+
+**Security review** (nexus-security, read-only, over all six steps). No HIGH findings.
+- **MEDIUM, fixed:** free-form strings from session files (protocol id, method, source, band and hold keys) could carry injected text into Amara's prompt. Now only slugs, version strings, the three known sources and short plain keys pass. Tested with newline and injection payloads.
+- **MEDIUM, fixed:** the 4000-character section cap could cut off the honesty note, which came last. The note now comes first, and the training lines are kept within a 2400-character budget of whole lines.
+- **LOW, fixed:** Theil–Sen is limited to the newest 100 sessions. The cards show fixed error text. Protocol ids are limited to 40 characters in both stores.
+- **LOW, open:** the shared session reader (`sessions.rs`) reads each file with no size cap, and now runs on matching chat turns. Not changed here, because it is a recordings-rule file.
+- **INFO, open (as in 0058):** a session's `data_source` is asserted by the renderer, so a compromised renderer could forge "live" records.
+- **Passed:** no write, move or delete under sessions, replays or muse; `nexus_neuro` is still dropped whenever the cloud is allowed; no raw EEG anywhere; no new hosts; `AUX_PROVEN` false; safety gate and electrode code untouched; no HRV.
+
+**Not run (needs hardware or Taisun):**
+- a live Muse session with the new feedback sounds, held sound, volume and end bell;
+- a real pre and post rest pair;
+- the Hemi-Sync controls with a real track;
+- PPG validation on a real headset;
+- trends from real sessions (no session yet has a progress record);
+- the packaged app.

@@ -783,6 +783,8 @@ fn turn_context_selection(message: &str) -> TurnContextSelection {
             "alpha",
             "brainwave",
             "band power",
+            // Decision 0059: questions about meditation or neurofeedback sessions get the training report.
+            "meditat",
         ]),
         money: contains_any(&[
             "money", "spend", "spent", "budget", "afford", "saving", "income", "expense", "bill",
