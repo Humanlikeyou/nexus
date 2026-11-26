@@ -506,7 +506,7 @@ export const commands = {
 	workoutHistory: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<SessionView_Serialize[]>("workout_history", { limit }, options),
 	/**  Decision 0062 (9b): an Amara take as a workout template, through the same engine. */
 	workoutTemplateFromTake: (takeId: string, options?: InvokeOptions) => __TAURI_INVOKE<Template_Serialize>("workout_template_from_take", { takeId }, options),
-	workoutTakeIds: (options?: InvokeOptions) => __TAURI_INVOKE<string[]>("workout_take_ids", undefined, options),
+	workoutTakeIds: (options?: InvokeOptions) => __TAURI_INVOKE<TakeWorkout[]>("workout_take_ids", undefined, options),
 	/**
 	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
 	 *  `source` is "manual", "chat" or "telegram".
@@ -747,7 +747,7 @@ export type Action = Action_Serialize | Action_Deserialize;
 /**  What the screen asks the engine to do with a session. */
 export type Action_Deserialize = { kind: "start" } | { kind: "pause" } | { kind: "resume" } | 
 /**  Log the next set. Reps for a reps item, hold seconds for a hold item; load is optional. */
-{ kind: "logSet"; reps?: number | null; hold_s?: number | null; load_kg?: number | null } | 
+{ kind: "logSet"; reps?: number | null; holdS?: number | null; loadKg?: number | null } | 
 /**  Skip the next set, or the rest of the current exercise. */
 { kind: "skip"; scope: string } | 
 /**  End now. `abandon` ends it as abandoned when no set was done. */
@@ -756,7 +756,7 @@ export type Action_Deserialize = { kind: "start" } | { kind: "pause" } | { kind:
 /**  What the screen asks the engine to do with a session. */
 export type Action_Serialize = { kind: "start" } | { kind: "pause" } | { kind: "resume" } | 
 /**  Log the next set. Reps for a reps item, hold seconds for a hold item; load is optional. */
-{ kind: "logSet"; reps: number | null; hold_s: number | null; load_kg: number | null } | 
+{ kind: "logSet"; reps: number | null; holdS: number | null; loadKg: number | null } | 
 /**  Skip the next set, or the rest of the current exercise. */
 { kind: "skip"; scope: string } | 
 /**  End now. `abandon` ends it as abandoned when no set was done. */
@@ -6884,6 +6884,12 @@ export type TakeLogEntry_Serialize = {
 	memoryLine: string | null,
 	forgottenAt: number | null,
 	hr?: Value,
+};
+
+export type TakeWorkout = {
+	takeId: string,
+	name: string,
+	estimatedS: number,
 };
 
 export type Target = Target_Serialize | Target_Deserialize;

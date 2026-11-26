@@ -196,6 +196,8 @@ export function HealthField({ data, onRetry, loading, onOpen }: HealthFieldProps
       <div className="fitness__header-trailing">
         {failed ? <Badge tone="danger">Unavailable</Badge> : heroBand && status.tone === "warning" && <Badge tone="warning">{status.text}</Badge>}
         {failed && onRetry && <Button variant="secondary" size="small" icon={RefreshCw} onClick={onRetry}>Retry</Button>}
+        {/* Decision 0062: the one entry to the Workout engine; the Fitness page itself is unchanged. */}
+        {onOpen && <Button variant="secondary" size="small" onClick={() => onOpen({ id: "mindbody", view: "fitness/workout" })}>Workout</Button>}
       </div>
     </>
   );

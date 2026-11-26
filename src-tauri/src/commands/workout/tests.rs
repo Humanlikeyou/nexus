@@ -451,3 +451,31 @@ fn a_user_template_never_carries_an_offer_id() {
         None
     );
 }
+
+#[test]
+fn the_screen_s_action_json_parses() {
+    let a: Action = serde_json::from_value(
+        serde_json::json!({ "kind": "logSet", "reps": null, "holdS": 30, "loadKg": 5.0 }),
+    )
+    .unwrap();
+    assert_eq!(
+        a,
+        Action::LogSet {
+            reps: None,
+            hold_s: Some(30),
+            load_kg: Some(5.0)
+        }
+    );
+    let s: Action =
+        serde_json::from_value(serde_json::json!({ "kind": "skip", "scope": "exercise" })).unwrap();
+    assert_eq!(
+        s,
+        Action::Skip {
+            scope: "exercise".into()
+        }
+    );
+    assert_eq!(
+        serde_json::from_value::<Action>(serde_json::json!({ "kind": "end" })).unwrap(),
+        Action::End { abandon: false }
+    );
+}

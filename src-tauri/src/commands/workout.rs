@@ -180,9 +180,9 @@ pub enum Action {
     LogSet {
         #[serde(default)]
         reps: Option<u32>,
-        #[serde(default)]
+        #[serde(default, rename = "holdS")]
         hold_s: Option<u32>,
-        #[serde(default)]
+        #[serde(default, rename = "loadKg")]
         load_kg: Option<f64>,
     },
     /// Skip the next set, or the rest of the current exercise.
@@ -866,9 +866,18 @@ fn take_templates() -> &'static [TakeTemplate] {
     })
 }
 
-/// The take ids that can run as workouts (the screen offers "Start as a workout" only for these).
+/// The take ids that can run as workouts (tests; the command returns names and estimates too).
+#[cfg(test)]
 pub(crate) fn mapped_take_ids() -> Vec<String> {
     take_templates().iter().map(|t| t.take_id.clone()).collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TakeWorkout {
+    pub take_id: String,
+    pub name: String,
+    pub estimated_s: u32,
 }
 
 /// An Amara take as a template in the same engine, reused when one already exists for that take so history
@@ -1000,8 +1009,19 @@ pub async fn workout_template_from_take(take_id: String) -> Result<Template, Str
 
 #[tauri::command]
 #[specta::specta]
-pub async fn workout_take_ids() -> Result<Vec<String>, String> {
-    Ok(mapped_take_ids())
+pub async fn workout_take_ids() -> Result<Vec<TakeWorkout>, String> {
+    blocking(JoinErr::Plain, || {
+        let lib = library_in(&data())?;
+        Ok(take_templates()
+            .iter()
+            .map(|t| TakeWorkout {
+                take_id: t.take_id.clone(),
+                name: t.name.clone(),
+                estimated_s: estimate_s(&t.items, t.rest_between_s, &lib),
+            })
+            .collect())
+    })
+    .await
 }
 
 #[tauri::command]
