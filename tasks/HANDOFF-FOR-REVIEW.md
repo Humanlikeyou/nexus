@@ -1257,3 +1257,28 @@ Existing recordings are untouched. AUX and the electrode lock are unchanged.
 - The gamma artifact unit mismatch.
 - Auto-reconnect and battery.
 - The design copy notes in `tasks/design-questions.md`.
+
+## 50. Decision 0058: NEUROSENSE calibration and personal baseline, committed `3a70178` (2026-11-26)
+
+Brief: `docs/specs/neurosense-calibration-baseline-2026-11-26.md`. Details, the security review and its fixes: `docs/decisions/0058-neurosense-calibration-baseline-2026-11-26.md`.
+
+**Built:**
+- An optional pre-meditation calibration (Neuro › "Calibrate (optional)"): check, eyes open, eyes closed, report. It rejects artifact epochs by reason and measures band power, alpha peak, variability and contact.
+- A separate protocol calibration record per training session.
+- A versioned personal baseline (median/MAD, high-quality live recordings only, confidence and uncertainty) in `<data>/neuro/calibrations.json`.
+- A keyword-gated, local-only Amara measurement report.
+
+The design boundary is lifted for the Calibration view only.
+
+**Verification:**
+- tsc, lint, check:secrets.
+- vitest 2951 / 9 skipped; neuro 21.
+- src-tauri fmt + clippy, all tests pass.
+- e2e 820 / 12 skipped / 0 failed.
+- amara-router: not rerun (unchanged since 133 passed in §49).
+
+**Not run:** a real calibration on the headset; a recorded session's protocol report in the app; the packaged app.
+
+**Open:**
+- A report's `source` is supplied by the renderer, so a forged "live" report could enter the baseline (integrity only, local).
+- Whether the Telegram, n8n or Hermes request paths can carry these sections is not traced. The known callers all go through `nexus_context_message`, which drops them while the cloud is allowed.
