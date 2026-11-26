@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Button, Card, StatusText, TextField } from "../ui";
+import { MEASURED_LABEL, parsePlan, planText } from "../briefings/briefingApi";
 import { dayLabel, QUALITY_LABEL, ROLE_LABEL, type LifeWrites, type RecommendationDetail, type RecommendationRow } from "./lifeApi";
+
+/** The three calls a card needs, so a business-scoped caller can supply its own (0066). */
+export type RecWrites = Pick<LifeWrites, "recGet" | "recRespond" | "recOutcome">;
 
 const STATUS_TEXT: Record<string, string> = {
   proposed: "New", shown: "Suggested", accepted: "Accepted", modified: "Accepted with changes", dismissed: "Dismissed",
@@ -20,7 +24,7 @@ const windowText = (a: string | null, b: string | null) => (a && b ? `${dayLabel
  * backend's status machine allows it, so nothing is shown that would be refused.
  */
 export function RecommendationCard({ rec, writes, title = "Amara's suggestion", heading = 2, onChanged }: {
-  rec: RecommendationRow; writes: LifeWrites; title?: string; heading?: 2 | 3; onChanged?: () => void;
+  rec: RecommendationRow; writes: RecWrites; title?: string; heading?: 2 | 3; onChanged?: () => void;
 }) {
   const [status, setStatus] = useState(rec.status);
   const [action, setAction] = useState(rec.suggestedAction ?? "");
@@ -45,6 +49,9 @@ export function RecommendationCard({ rec, writes, title = "Amara's suggestion", 
   const answerable = status === "proposed" || status === "shown";
   const acted = status === "accepted" || status === "modified";
   const evaluable = status === "completed" || status === "dismissed" || status === "expired";
+  // 0066: a cross-domain suggestion also stores how it's measured and its reporting period.
+  const plan = parsePlan(rec.evaluationJson);
+  const cross = rec.producedBy === "rules:cross_domain";
   const saveModify = () => {
     const text = draft.trim();
     if (!text) { setMsg({ text: "Write what you'll do instead, or cancel.", error: true }); return; }
@@ -55,6 +62,7 @@ export function RecommendationCard({ rec, writes, title = "Amara's suggestion", 
       <p className="lf-rec__title"><b>{rec.title}</b></p>
       {rec.observation && <p className="pk-note">{rec.observation}</p>}
       {action && !editing && <p className="lf-rec__action"><span className="lf-k">Suggested</span> {action}</p>}
+      {plan && <p className="pk-note"><span className="lf-k">How it&apos;s measured</span> {plan.how ? `${plan.how} ` : ""}{planText(plan)}</p>}
       {editing && (
         <form className="lf-inline" onSubmit={(e) => { e.preventDefault(); saveModify(); }}>
           <TextField label="What you'll do instead" value={draft} maxLength={200} onChange={(e) => setDraft(e.target.value)} />
@@ -86,8 +94,13 @@ export function RecommendationCard({ rec, writes, title = "Amara's suggestion", 
                   ))}
                 </ul>
               )}
-              {detail.recommendation.rationale && <p className="pk-note"><span className="lf-k">Why it matters</span> {detail.recommendation.rationale}</p>}
-              {detail.recommendation.uncertainty && <p className="pk-note"><span className="lf-k">What isn&apos;t known</span> {detail.recommendation.uncertainty}</p>}
+              {detail.recommendation.periodStart && detail.recommendation.periodEnd && <p className="pk-note"><span className="lf-k">Reporting period</span> {windowText(detail.recommendation.periodStart, detail.recommendation.periodEnd)}</p>}
+              {detail.recommendation.rationale && <p className="pk-note"><span className="lf-k">{cross ? "Interpretation" : "Why it matters"}</span> {detail.recommendation.rationale}</p>}
+              {detail.recommendation.confidence !== null && <p className="pk-note"><span className="lf-k">Confidence</span> {Math.round(detail.recommendation.confidence * 100)}%{detail.recommendation.confidenceBasis ? `, from ${detail.recommendation.confidenceBasis}` : ""}</p>}
+              {detail.recommendation.uncertainty && <p className="pk-note"><span className="lf-k">{cross ? "Limitations" : "What isn't known"}</span> {detail.recommendation.uncertainty}</p>}
+              {detail.outcomes.filter((o) => o.outcome === "measured").map((o) => (
+                <p key={o.outcomeId} className="pk-note"><span className="lf-k">{MEASURED_LABEL[o.evaluation ?? ""] ?? "Measured"}</span> {o.note}</p>
+              ))}
               <p className="pk-note">Made by {detail.recommendation.producedBy.startsWith("rules:") ? "a fixed rule" : detail.recommendation.producedBy.startsWith("model:") ? "Amara (a model)" : detail.recommendation.producedBy}.</p>
             </>}
         </div>

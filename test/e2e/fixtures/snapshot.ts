@@ -110,6 +110,12 @@ export type Responses = Record<string, unknown>;
 /** Every command the console reads on load, with sample values. */
 export function responses(): Responses {
   return {
+    // 0066: the weekly review's cross-domain part (empty by default).
+    briefing_week: {
+      weekStart: "2026-10-19", weekEnd: "2026-10-25", trajectories: [], recommendations: [], missing: [],
+      training: { periodStart: "2026-10-19", periodEnd: "2026-10-25", sessions: 0, doneSets: 0, totalReps: 0, activeMin: 0, baselineSetsPerWeek: null, setsByMuscle: {}, detectedWorkoutMin: null, meanStrain: null, sourceIds: [], note: "Sessions are the ones you logged in the workout engine." },
+      neuro: { periodStart: "2026-10-19", periodEnd: "2026-10-25", sessions: 0, minutes: 0, eligibleTraining: 0, medianTimeInTargetPct: null, medianValidPct: null, trends: [], sourceIds: [], note: "Muse EEG figures describe the recorded signal and the training protocol's targets. They are not a measure of mood, ability or mental health." },
+    },
     get_terrence_runtime_health: { runtime: "hermes", status: "online", model: "sample-model", provider: "ollama", gatewayRunning: true, telegramStatus: "connected", activeSchedules: 3, configuredToolsets: ["web", "files"], checkedAt: NOW, detail: null },
     list_terrence_capabilities: [{ name: "web", status: "ready", description: "Web search" }, { name: "files", status: "ready", description: "Workspace files" }],
     get_terrence_context_snapshot: { generatedAt: NOW, priorities: [], activeProjects: [], commitments: [], recentObservations: [] },

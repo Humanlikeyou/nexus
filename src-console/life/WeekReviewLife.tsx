@@ -3,6 +3,7 @@ import type { Review_Serialize as Review } from "../bindings.gen";
 import { addDays } from "../personal/adapters";
 import { Card } from "../ui";
 import type { Invoke } from "../lib/localStores";
+import { CrossDomainWeek } from "./CrossDomainWeek";
 import { RecommendationCard } from "./RecommendationCard";
 import { WeekPlanCard } from "./WeekPlan";
 import {
@@ -104,6 +105,7 @@ export function WeekReviewLife({ data, writes, call }: { data: LifeData; writes:
           : obs.length === 0 ? <p className="pk-note">Nothing to suggest from this week&apos;s records. Amara suggests only from what was recorded, at most 3 a week.</p>
           : obs.map((o) => <RecommendationCard key={o.recommendationId} rec={o} writes={writes!} title="Observation" heading={3} />)}
       </section>
+      {call && writes && <CrossDomainWeek call={call} writes={writes} weekStart={monday} />}
       {plan !== "failed" && (
         <WeekPlanCard key={plan?.updatedAt ?? "new"} plan={plan} monday={nextMonday} goals={data.goals} writes={writes} title={nextMonday <= data.today ? "This week's plan" : "Next week's plan"} onSaved={setPlan} />
       )}

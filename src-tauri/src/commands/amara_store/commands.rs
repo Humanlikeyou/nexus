@@ -79,6 +79,11 @@ pub struct RecommendationRow {
     pub model_tier: Option<String>,
     pub target_ref: Option<String>,
     pub supersedes_id: Option<String>,
+    /// 0066: how the action is measured (JSON object), the reporting period and the fingerprint.
+    pub evaluation_json: Option<String>,
+    pub period_start: Option<String>,
+    pub period_end: Option<String>,
+    pub fingerprint: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, specta::Type)]
@@ -119,7 +124,8 @@ pub struct RecommendationDetail {
 const REC_COLS: &str =
     "recommendation_id, scope, domain, kind, title, body, observation, rationale,
     suggested_action, confidence, confidence_basis, uncertainty, impact, effort, status, created_at,
-    updated_at, expires_at, produced_by, model_tier, target_ref, supersedes_id";
+    updated_at, expires_at, produced_by, model_tier, target_ref, supersedes_id, evaluation_json,
+    period_start, period_end, fingerprint";
 
 fn rec_row(r: &rusqlite::Row) -> rusqlite::Result<RecommendationRow> {
     Ok(RecommendationRow {
@@ -145,6 +151,10 @@ fn rec_row(r: &rusqlite::Row) -> rusqlite::Result<RecommendationRow> {
         model_tier: r.get(19)?,
         target_ref: r.get(20)?,
         supersedes_id: r.get(21)?,
+        evaluation_json: r.get(22)?,
+        period_start: r.get(23)?,
+        period_end: r.get(24)?,
+        fingerprint: r.get(25)?,
     })
 }
 
@@ -445,6 +455,10 @@ pub(crate) fn create_from_input(
             uncertainty: input.uncertainty.as_deref(),
             impact: input.impact.as_deref(),
             effort: input.effort.as_deref(),
+            evaluation_json: None,
+            period_start: None,
+            period_end: None,
+            fingerprint: None,
         },
         &evidence,
     )

@@ -26,6 +26,7 @@ describe("⌘K command palette", () => {
         "Life › Goals & projects",
         "Life › Habits & routines",
         "Life › Weekly review",
+        "Life › Briefings",
         "Life › Dates & deadlines",
         "Life › Personal money",
         "Mind–Body › Fitness",

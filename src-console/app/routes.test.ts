@@ -111,7 +111,8 @@ describe("design-1111v redirects (HANDOFF-1111v §2): old routes keep working", 
   });
 
   it("the tabs keep Taisun's names", () => {
-    expect(HOST_VIEWS.life?.map((v) => v.label)).toEqual(["Overview", "Goals & projects", "Habits & routines", "Weekly review", "Dates & deadlines", "Personal money"]);
+    // 0066: Briefings added under Taisun's design override for the Life host.
+    expect(HOST_VIEWS.life?.map((v) => v.label)).toEqual(["Overview", "Goals & projects", "Habits & routines", "Weekly review", "Briefings", "Dates & deadlines", "Personal money"]);
     // Decision 0063 (Taisun's Enterprise override): Workspaces added after Ventures; every existing name and order kept.
     expect(HOST_VIEWS.enterprise?.map((v) => v.label)).toEqual(["Overview", "Decisions", "Ventures", "Workspaces", "Finances", "Treasury", "Tasks", "Content"]);
     expect(HOST_VIEWS.business).toBeUndefined();

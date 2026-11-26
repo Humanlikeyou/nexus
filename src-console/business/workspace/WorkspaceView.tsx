@@ -6,6 +6,7 @@ import {
   type Insight, type Overview, type Permission, type Proposal, type Recommendation, type Report, type WorkspaceCalls,
 } from "./workspaceApi";
 import { SiteOpsTab } from "./SiteOpsView";
+import { BusinessBriefingTab } from "./BusinessBriefingView";
 import "../../ui/PanelKit.css";
 
 /**
@@ -13,9 +14,9 @@ import "../../ui/PanelKit.css";
  * the Enterprise host). Everything shown comes from the Rust workspace store for the selected business only.
  * No revenue is shown here: business income stays in Finances and Treasury, and ARM trading stays apart.
  */
-type Tab = "overview" | "context" | "documents" | "integrations" | "intelligence" | "website" | "permissions" | "approvals" | "activity";
+type Tab = "overview" | "briefing" | "context" | "documents" | "integrations" | "intelligence" | "website" | "permissions" | "approvals" | "activity";
 const TABS: Array<{ value: Tab; label: string }> = [
-  { value: "overview", label: "Summary" }, { value: "context", label: "Context & memory" }, { value: "documents", label: "Documents" },
+  { value: "overview", label: "Summary" }, { value: "briefing", label: "Briefing" }, { value: "context", label: "Context & memory" }, { value: "documents", label: "Documents" },
   { value: "integrations", label: "Integrations" }, { value: "intelligence", label: "Intelligence" }, { value: "website", label: "Website changes" }, { value: "permissions", label: "Permissions" }, { value: "approvals", label: "Approvals" }, { value: "activity", label: "Activity" },
 ];
 
@@ -452,6 +453,7 @@ export function WorkspaceView({ calls = liveWorkspaceCalls }: { calls?: Workspac
       <>
         <SegmentedControl label="Workspace sections" options={TABS} value={tab} onChange={setTab} />
         {tab === "overview" && <OverviewTab key={id} id={id} calls={calls} onChanged={load} />}
+        {tab === "briefing" && <BusinessBriefingTab key={id} id={id} />}
         {tab === "context" && <ContextTab key={id} id={id} calls={calls} />}
         {tab === "documents" && <DocumentsTab key={id} id={id} calls={calls} />}
         {tab === "integrations" && <IntegrationsTab key={id} id={id} calls={calls} />}

@@ -21,7 +21,7 @@ function data(over: Partial<LifeData> = {}): LifeData {
 const rec = (over: Partial<RecommendationRow> = {}): RecommendationRow => ({
   recommendationId: "r1", scope: "personal", domain: "life", kind: "habit_below_target", title: "Meditate was done 1 of 5 days", body: "", observation: "1 done, 1 not done.",
   rationale: "Seeing the gap helps.", suggestedAction: "Try one breath", confidence: null, confidenceBasis: null, uncertainty: "Only recorded days count.", impact: null, effort: "low",
-  status: "shown", createdAt: "", updatedAt: "", expiresAt: null, producedBy: "rules:life_week", modelTier: null, targetRef: "goals:h1", supersedesId: null, ...over,
+  status: "shown", createdAt: "", updatedAt: "", expiresAt: null, producedBy: "rules:life_week", modelTier: null, targetRef: "goals:h1", supersedesId: null, evaluationJson: null, periodStart: null, periodEnd: null, fingerprint: null, ...over,
 });
 const caller = (answers: Record<string, unknown> = {}) => {
   const fn = vi.fn(async (cmd: string) => {

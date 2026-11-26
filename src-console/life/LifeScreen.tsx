@@ -14,6 +14,7 @@ import { HabitsView } from "./HabitsView";
 import { lifeWrites, useLife, type LifeState } from "./lifeApi";
 import { OverviewView } from "./OverviewView";
 import { WeekReviewLife } from "./WeekReviewLife";
+import { BriefingsView } from "./BriefingsView";
 import "../adds/v1111.css";
 import "./life.css";
 
@@ -23,7 +24,7 @@ function NotHere({ title }: { title: string }) {
 }
 const loadingCard = (title: string) => <div className="v-page lf-page"><Card title={title}><p className="pk-note">Reading your Life stores…</p></Card></div>;
 
-/** design-1111v → PLAN-0055: the Life host. Overview · Goals & projects · Habits & routines · Weekly review · Dates & deadlines · Personal money.
+/** design-1111v → PLAN-0055: the Life host. Overview · Goals & projects · Habits & routines · Weekly review · Briefings (0066) · Dates & deadlines · Personal money.
  *  The route id stays `life`; old links (trajectory, terrance:goals) still open Goals. */
 export function LifeField({ data, view = "overview", onOpen, onRetry }: { data: SystemSnapshot; view?: string; onOpen?: (route: Route) => void; onRetry?: () => void }) {
   const personal = personalAdapter();
@@ -49,6 +50,8 @@ export function LifeField({ data, view = "overview", onOpen, onRetry }: { data: 
       {life && <WeekReviewLife data={life} writes={writes} call={call} />}
     </div>
   );
+  // 0066 (Taisun's design override): the daily briefing, summaries and cross-domain suggestions.
+  if (view === "briefings") return <div className="page-inset"><BriefingsView call={call} writes={writes} /></div>;
   if (view === "dates") return <div className="page-inset"><DatesView adapter={personal} onOpen={onOpen} /></div>;
   // Only the mount point moved (HANDOFF-1111v §3): the 1111t money contract is unchanged.
   if (view === "money") return <PersonalMoneyView adapter={personal} onOpenFinances={onOpen ? () => onOpen({ id: "enterprise", view: "finances" }) : undefined} />;

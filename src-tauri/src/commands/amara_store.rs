@@ -23,8 +23,10 @@ use std::path::{Path, PathBuf};
 /// v1: the four tables (0053). v2 (foundations phase): recommendation observation, rationale,
 /// suggested action, uncertainty, impact and effort; activity certainty. v3 (0063, Enterprise):
 /// `business_id` on activity and recommendation, derived from a `biz:` reference and allowed only
-/// on business rows. Additive only.
-pub(crate) const SCHEMA_VERSION: i64 = 3;
+/// on business rows. v4 (0066, cross-domain): recommendation `evaluation_json` (how the action is
+/// measured), `period_start`/`period_end` (the reporting period) and `fingerprint` (duplicate
+/// suppression). Additive only.
+pub(crate) const SCHEMA_VERSION: i64 = 4;
 const MAX_DATA_JSON: usize = 4 * 1024;
 const MAX_TEXT: usize = 2_000;
 
@@ -311,6 +313,70 @@ pub(crate) struct NewRecommendation<'a> {
     pub impact: Option<&'a str>,
     /// `low` | `medium` | `high`.
     pub effort: Option<&'a str>,
+    /// 0066: how the suggested action will be measured, a JSON object (see [`check_evaluation`]).
+    pub evaluation_json: Option<&'a str>,
+    /// 0066: the reporting period the observation covers (RFC 3339).
+    pub period_start: Option<&'a str>,
+    pub period_end: Option<&'a str>,
+    /// 0066: what makes two recommendations "the same finding" (duplicate suppression).
+    pub fingerprint: Option<&'a str>,
+}
+
+/// 0066: duplicate suppression for [`Store::create_unless_duplicate`].
+pub(crate) struct Suppress {
+    /// No new one within this many days of the last one with the same fingerprint.
+    pub cooldown_days: i64,
+    /// No new one within this many days of a dismissal of the same fingerprint.
+    pub dismissed_days: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Created {
+    New(String),
+    /// Not created; the reason, and the id of the recommendation that suppressed it.
+    Suppressed {
+        reason: &'static str,
+        by: String,
+    },
+}
+
+/// 0066: an evaluation plan is a JSON object with a `metric`, a `target`, a `direction`
+/// (`at_least` | `at_most`), a `unit` and a `measure_after` date (RFC 3339 or YYYY-MM-DD). A
+/// `baseline` is a number or null (unknown, never zero).
+pub(crate) fn check_evaluation(s: &str) -> Result<serde_json::Value, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(s).map_err(|_| "evaluation is not JSON".to_string())?;
+    let o = v.as_object().ok_or("evaluation must be an object")?;
+    let text = |k: &str| {
+        o.get(k)
+            .and_then(|x| x.as_str())
+            .filter(|x| !x.trim().is_empty())
+    };
+    if text("metric").is_none() || text("unit").is_none() {
+        return Err("evaluation needs a metric and a unit".into());
+    }
+    if !matches!(text("direction"), Some("at_least" | "at_most")) {
+        return Err("evaluation direction must be at_least or at_most".into());
+    }
+    if !o.get("target").is_some_and(|t| t.is_number()) {
+        return Err("evaluation needs a numeric target".into());
+    }
+    if !o
+        .get("baseline")
+        .is_some_and(|b| b.is_number() || b.is_null())
+    {
+        return Err("evaluation baseline must be a number or null".into());
+    }
+    let after = text("measure_after").ok_or("evaluation needs measure_after")?;
+    if chrono::DateTime::parse_from_rfc3339(after).is_err()
+        && chrono::NaiveDate::parse_from_str(after, "%Y-%m-%d").is_err()
+    {
+        return Err("evaluation measure_after must be a date".into());
+    }
+    if s.len() > MAX_DATA_JSON {
+        return Err("evaluation is over 4 KB".into());
+    }
+    Ok(v)
 }
 
 pub(crate) struct NewEvidence<'a> {
@@ -424,6 +490,33 @@ impl Store {
         r: &NewRecommendation,
         evidence: &[NewEvidence],
     ) -> Result<String, String> {
+        match self.create_checked(r, evidence, None)? {
+            Created::New(id) => Ok(id),
+            Created::Suppressed { .. } => Err("suppressed".into()),
+        }
+    }
+
+    /// 0066: like [`Self::create_recommendation`], but not created when the same fingerprint is
+    /// still open, was raised within the cooldown, or was dismissed recently. The check and the
+    /// insert share one write transaction, so two producers can't both create it.
+    pub(crate) fn create_unless_duplicate(
+        &self,
+        r: &NewRecommendation,
+        evidence: &[NewEvidence],
+        suppress: &Suppress,
+    ) -> Result<Created, String> {
+        if r.fingerprint.is_none() {
+            return Err("duplicate suppression needs a fingerprint".into());
+        }
+        self.create_checked(r, evidence, Some(suppress))
+    }
+
+    fn create_checked(
+        &self,
+        r: &NewRecommendation,
+        evidence: &[NewEvidence],
+        suppress: Option<&Suppress>,
+    ) -> Result<Created, String> {
         self.scope_ok(r.scope)?;
         check(DOMAINS, r.domain, "domain")?;
         capped(r.title, "title")?;
@@ -513,10 +606,44 @@ impl Store {
         if r.kind != "take" && observations == 0 {
             return Err("a recommendation needs at least one observation as evidence".into());
         }
+        if let Some(e) = r.evaluation_json {
+            check_evaluation(e)?;
+        }
+        for p in [r.period_start, r.period_end].into_iter().flatten() {
+            chrono::DateTime::parse_from_rfc3339(p)
+                .map_err(|_| "reporting period must be RFC 3339".to_string())?;
+        }
+        if let Some(f) = r.fingerprint {
+            if f.is_empty() || f.len() > 128 {
+                return Err("fingerprint: empty or too long".into());
+            }
+        }
+        // 0066: a rule-written cross-domain recommendation carries all six parts.
+        if r.produced_by.starts_with("rules:cross_domain") {
+            let parts = [
+                r.observation,
+                r.rationale,
+                r.uncertainty,
+                r.suggested_action,
+                r.evaluation_json,
+                r.period_start,
+                r.period_end,
+                r.fingerprint,
+            ];
+            if parts.iter().any(|p| p.is_none_or(|s| s.trim().is_empty())) || r.confidence.is_none()
+            {
+                return Err("a cross-domain recommendation needs an observation, interpretation, confidence, limitations, action, evaluation, reporting period and fingerprint".into());
+            }
+        }
         let mut conn = self.open()?;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| format!("amara store: {e}"))?;
+        if let (Some(f), Some(policy)) = (r.fingerprint, suppress) {
+            if let Some(c) = duplicate_of(&tx, r.scope, f, policy)? {
+                return Ok(c);
+            }
+        }
         let id =
             r.id.map(str::to_string)
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -525,13 +652,15 @@ impl Store {
             "INSERT INTO recommendation (recommendation_id, scope, domain, kind, title, body, status,
                 created_at, updated_at, expires_at, produced_by, model_tier, confidence,
                 confidence_basis, target_ref, supersedes_id, schema_version, observation, rationale,
-                suggested_action, uncertainty, impact, effort, business_id)
-             VALUES (?1,?2,?3,?4,?5,?6,'proposed',?7,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
+                suggested_action, uncertainty, impact, effort, business_id, evaluation_json,
+                period_start, period_end, fingerprint)
+             VALUES (?1,?2,?3,?4,?5,?6,'proposed',?7,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26)",
             params![
                 id, r.scope.as_str(), r.domain, r.kind, r.title, r.body, t, r.expires_at,
                 r.produced_by, r.model_tier, r.confidence, r.confidence_basis, r.target_ref,
                 r.supersedes_id, SCHEMA_VERSION, r.observation, r.rationale, r.suggested_action,
-                r.uncertainty, r.impact, r.effort, business_id
+                r.uncertainty, r.impact, r.effort, business_id, r.evaluation_json, r.period_start,
+                r.period_end, r.fingerprint
             ],
         )
         .map_err(|e| format!("amara store: {e}"))?;
@@ -557,7 +686,7 @@ impl Store {
             .map_err(|e| format!("amara store: {e}"))?;
         }
         tx.commit().map_err(|e| format!("amara store: {e}"))?;
-        Ok(id)
+        Ok(Created::New(id))
     }
 
     /// Appends an outcome and moves the status, compare-and-swap, in one transaction.
@@ -583,6 +712,15 @@ impl Store {
                 "evaluation",
             )?;
         }
+        // 0066: `measured` is the app re-reading the evaluation metric from the records. It says
+        // whether the target was met, never whether the action caused it, so the status stays.
+        if outcome == "measured" {
+            check(
+                &["met", "not_met", "unknown"],
+                evaluation.unwrap_or(""),
+                "measurement",
+            )?;
+        }
         if let Some(m) = modification_json {
             serde_json::from_str::<serde_json::Value>(m)
                 .map_err(|_| "modification is not JSON".to_string())?;
@@ -600,8 +738,13 @@ impl Store {
             .optional()
             .map_err(|e| format!("amara store: {e}"))?;
         let current = current.ok_or("recommendation not found")?;
-        let next = next_status(&current, outcome)
-            .ok_or_else(|| format!("can't go from {current} to {outcome}"))?;
+        let next: String = if outcome == "measured" {
+            current.clone()
+        } else {
+            next_status(&current, outcome)
+                .ok_or_else(|| format!("can't go from {current} to {outcome}"))?
+                .to_string()
+        };
         let t = now();
         let changed = tx
             .execute(
@@ -739,6 +882,55 @@ impl Store {
     }
 }
 
+/// 0066: the recommendation that makes a new one with fingerprint `f` a duplicate, if any.
+fn duplicate_of(
+    tx: &Connection,
+    scope: Scope,
+    f: &str,
+    p: &Suppress,
+) -> Result<Option<Created>, String> {
+    let q = |sql: &str, arg: Option<String>| -> Result<Option<String>, String> {
+        tx.query_row(sql, params![scope.as_str(), f, arg], |r| r.get(0))
+            .optional()
+            .map_err(|e| format!("amara store: {e}"))
+    };
+    if let Some(id) = q(
+        "SELECT recommendation_id FROM recommendation WHERE scope=?1 AND fingerprint=?2
+           AND status IN ('proposed','shown','accepted','modified') AND (?3 IS NULL OR 1)
+         ORDER BY created_at DESC LIMIT 1",
+        None,
+    )? {
+        return Ok(Some(Created::Suppressed {
+            reason: "open",
+            by: id,
+        }));
+    }
+    let since = |days: i64| (Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+    if let Some(id) = q(
+        "SELECT r.recommendation_id FROM recommendation r JOIN recommendation_outcome o
+           ON o.recommendation_id = r.recommendation_id
+         WHERE r.scope=?1 AND r.fingerprint=?2 AND o.outcome='dismissed' AND o.at >= ?3
+         ORDER BY o.at DESC LIMIT 1",
+        Some(since(p.dismissed_days)),
+    )? {
+        return Ok(Some(Created::Suppressed {
+            reason: "dismissed",
+            by: id,
+        }));
+    }
+    if let Some(id) = q(
+        "SELECT recommendation_id FROM recommendation WHERE scope=?1 AND fingerprint=?2
+           AND created_at >= ?3 ORDER BY created_at DESC LIMIT 1",
+        Some(since(p.cooldown_days)),
+    )? {
+        return Ok(Some(Created::Suppressed {
+            reason: "cooldown",
+            by: id,
+        }));
+    }
+    Ok(None)
+}
+
 /// The domain owners' hook (step 4): records one activity after the owner's own write succeeded.
 /// Best effort by design: a failure here is logged and never undoes or fails the user's change.
 pub(crate) fn note(data: &Path, a: NewActivity) {
@@ -803,6 +995,10 @@ pub(crate) fn note_take(
             uncertainty: None,
             impact: None,
             effort: None,
+            evaluation_json: None,
+            period_start: None,
+            period_end: None,
+            fingerprint: None,
             id: Some(&rid),
             scope,
             domain,
@@ -997,16 +1193,17 @@ fn init(conn: &Connection, b: Boundary, path: &Path) -> Result<(), String> {
         backed_up = migrate_to_v2(conn, path, fresh)?;
     }
     if version < 3 {
-        migrate_to_v3(conn, path, fresh || backed_up)?;
+        backed_up |= migrate_to_v3(conn, path, fresh || backed_up)?;
+    }
+    if version < 4 {
+        migrate_to_v4(conn, path, fresh || backed_up)?;
     }
     Ok(())
 }
 
-/// v2 → v3 (additive, 0063): `business_id` on activity and recommendation. The CHECK allows it on
-/// business rows only, so the personal file can never hold one. Same backup and one-transaction
-/// rule as v2: on any error nothing changes and the file stays v2. `skip_backup`: a new file, or
-/// the v2 step in this same open already copied the original.
-fn migrate_to_v3(conn: &Connection, path: &Path, skip_backup: bool) -> Result<(), String> {
+/// v3 → v4 (additive, 0066): the evaluation plan, the reporting period and the duplicate
+/// fingerprint on recommendations. Same backup and one-transaction rule as v2 and v3.
+fn migrate_to_v4(conn: &Connection, path: &Path, skip_backup: bool) -> Result<(), String> {
     let has_rows: i64 = conn
         .query_row(
             "SELECT (SELECT COUNT(*) FROM activity) + (SELECT COUNT(*) FROM recommendation)",
@@ -1015,6 +1212,68 @@ fn migrate_to_v3(conn: &Connection, path: &Path, skip_backup: bool) -> Result<()
         )
         .map_err(|e| format!("amara store: {e}"))?;
     if !skip_backup && has_rows > 0 {
+        backup_before_migration(conn, path, 3)?;
+    }
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| format!("amara store: {e}"))?;
+    let run = || -> Result<(), String> {
+        let v: String = conn
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key='schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("amara store: {e}"))?;
+        if v.parse::<i64>().unwrap_or(0) >= 4 {
+            return Ok(());
+        }
+        conn.execute_batch(
+            "
+            ALTER TABLE recommendation ADD COLUMN evaluation_json TEXT;
+            ALTER TABLE recommendation ADD COLUMN period_start TEXT;
+            ALTER TABLE recommendation ADD COLUMN period_end TEXT;
+            ALTER TABLE recommendation ADD COLUMN fingerprint TEXT;
+            CREATE INDEX IF NOT EXISTS idx_recommendation_fingerprint
+                ON recommendation(scope, fingerprint, created_at);
+            ",
+        )
+        .map_err(|e| format!("amara store: migration to v4 failed: {e}"))?;
+        #[cfg(test)]
+        if FAIL_MIGRATION.with(|f| f.get()) {
+            return Err("amara store: migration to v4 failed: injected".into());
+        }
+        conn.execute(
+            "UPDATE schema_meta SET value = '4' WHERE key = 'schema_version'",
+            [],
+        )
+        .map_err(|e| format!("amara store: {e}"))?;
+        Ok(())
+    };
+    match run() {
+        Ok(()) => conn
+            .execute_batch("COMMIT")
+            .map_err(|e| format!("amara store: migration to v4 failed: {e}")),
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+/// v2 → v3 (additive, 0063): `business_id` on activity and recommendation. The CHECK allows it on
+/// business rows only, so the personal file can never hold one. Same backup and one-transaction
+/// rule as v2: on any error nothing changes and the file stays v2. `skip_backup`: a new file, or
+/// the v2 step in this same open already copied the original.
+fn migrate_to_v3(conn: &Connection, path: &Path, skip_backup: bool) -> Result<bool, String> {
+    let has_rows: i64 = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM activity) + (SELECT COUNT(*) FROM recommendation)",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("amara store: {e}"))?;
+    let backup = !skip_backup && has_rows > 0;
+    if backup {
         backup_before_migration(conn, path, 2)?;
     }
     conn.execute_batch("BEGIN IMMEDIATE")
@@ -1022,6 +1281,7 @@ fn migrate_to_v3(conn: &Connection, path: &Path, skip_backup: bool) -> Result<()
     match migrate_v3_locked(conn) {
         Ok(()) => conn
             .execute_batch("COMMIT")
+            .map(|_| backup)
             .map_err(|e| format!("amara store: migration to v3 failed: {e}")),
         Err(e) => {
             let _ = conn.execute_batch("ROLLBACK");
@@ -1209,7 +1469,7 @@ pub(crate) fn init_on_startup(data: &Path) {
             eprintln!("[amara-store] removed {pruned} backup copy(ies) older than 30 days");
         }
         match store.open() {
-            Ok(_) if !existed => log_migration(data, &store.path, "created schema v2"),
+            Ok(_) if !existed => log_migration(data, &store.path, "created schema v4"),
             Ok(_) => {}
             Err(e) => eprintln!("[amara-store] {e}"),
         }

@@ -205,6 +205,8 @@ pub fn run() {
             commands::inbox::start(app.handle().clone());
             commands::proactive::start();
             commands::daily_table::start(app.handle().clone());
+            // 0066: briefings, while the app runs only (nothing runs while it is closed).
+            commands::briefings::start();
             // Telegram relay timer: a no-op until the relay is on, approved and outbound is allowed.
             commands::notify_relay::start();
             // Treasury exception monitor: nightly with catch-up; does nothing until treasury.db exists.
@@ -278,6 +280,13 @@ pub fn run() {
             commands::life_plan::life_week_plan_set,
             commands::life_nudges::life_insight,
             commands::life_week::life_week_observations,
+            commands::briefings::briefing_daily_read,
+            commands::briefings::briefing_daily_refresh,
+            commands::briefings::briefing_enterprise_read,
+            commands::briefings::briefing_enterprise_refresh,
+            commands::briefings::briefing_week,
+            commands::briefings::briefing_runtime,
+            commands::briefings::briefing_recommendations,
             commands::muse::muse_stream_continuity,
             commands::neuro_baseline::neuro_calibration_save,
             commands::neuro_baseline::neuro_calibration_list,

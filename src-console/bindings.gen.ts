@@ -480,6 +480,13 @@ export const commands = {
 	lifeWeekPlanSet: (plan: WeekPlan_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<WeekPlan_Serialize>("life_week_plan_set", { plan }, options),
 	lifeInsight: (options?: InvokeOptions) => __TAURI_INVOKE<LifeInsight_Serialize>("life_insight", undefined, options),
 	lifeWeekObservations: (weekStart: string, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationRow_Serialize[]>("life_week_observations", { weekStart }, options),
+	briefingDailyRead: (options?: InvokeOptions) => __TAURI_INVOKE<DailyBriefing_Serialize>("briefing_daily_read", undefined, options),
+	briefingDailyRefresh: (options?: InvokeOptions) => __TAURI_INVOKE<DailyBriefing_Serialize>("briefing_daily_refresh", undefined, options),
+	briefingEnterpriseRead: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<EnterpriseBriefing_Serialize>("briefing_enterprise_read", { businessId }, options),
+	briefingEnterpriseRefresh: (businessId: string, options?: InvokeOptions) => __TAURI_INVOKE<EnterpriseBriefing_Serialize>("briefing_enterprise_refresh", { businessId }, options),
+	briefingWeek: (weekStart: string, options?: InvokeOptions) => __TAURI_INVOKE<WeekCrossDomain_Serialize>("briefing_week", { weekStart }, options),
+	briefingRuntime: (options?: InvokeOptions) => __TAURI_INVOKE<BriefingRuntime_Serialize>("briefing_runtime", undefined, options),
+	briefingRecommendations: (scope: string, businessId: string | null, options?: InvokeOptions) => __TAURI_INVOKE<RecommendationDetail_Serialize[]>("briefing_recommendations", { scope, businessId }, options),
 	/**
 	 *  Packet continuity of the live stream since it started: per channel, packets received, packets
 	 *  the counter says never arrived, and repeats dropped.
@@ -1460,6 +1467,104 @@ export type BranchSuggestion_Serialize = {
 	createdAt: string,
 	sample?: boolean,
 	decidedAt?: string,
+};
+
+export type BriefingJob = BriefingJob_Serialize | BriefingJob_Deserialize;
+
+export type BriefingJobState = BriefingJobState_Serialize | BriefingJobState_Deserialize;
+
+export type BriefingJobState_Deserialize = {
+	/**  The JST day the job last built for. */
+	lastDay?: string | null,
+	lastRunAt?: string | null,
+	/**  timer | catch_up | opened | manual */
+	lastTrigger?: string | null,
+	/**  ok | partial | failed */
+	lastResult?: string | null,
+	lastError?: string | null,
+	/**  What the rules did on the last run: created, suppressed, covered, refused. */
+	ruleCounts?: { [key in string]: number },
+	measured?: number,
+};
+
+export type BriefingJobState_Serialize = {
+	/**  The JST day the job last built for. */
+	lastDay: string | null,
+	lastRunAt: string | null,
+	/**  timer | catch_up | opened | manual */
+	lastTrigger: string | null,
+	/**  ok | partial | failed */
+	lastResult: string | null,
+	lastError: string | null,
+	/**  What the rules did on the last run: created, suppressed, covered, refused. */
+	ruleCounts: { [key in string]: number },
+	measured: number,
+};
+
+export type BriefingJob_Deserialize = {
+	id: string,
+	label: string,
+	schedule: string,
+	nextDueAt: string,
+	state: BriefingJobState_Deserialize,
+};
+
+export type BriefingJob_Serialize = {
+	id: string,
+	label: string,
+	schedule: string,
+	nextDueAt: string,
+	state: BriefingJobState_Serialize,
+};
+
+export type BriefingLine = {
+	text: string,
+	/**  measured | calculated | self_report | unavailable */
+	kind: string,
+	/**  Record references behind the line. */
+	sources: string[],
+};
+
+export type BriefingRuntime = BriefingRuntime_Serialize | BriefingRuntime_Deserialize;
+
+export type BriefingRuntime_Deserialize = {
+	/**  Always false: nothing runs while Amara OS is closed. */
+	runsWhileClosed: boolean,
+	/**  When this app process started the timer (`None` in a browser preview or before setup). */
+	timerStartedAt?: string | null,
+	jobs: BriefingJob_Deserialize[],
+	modelInference: string,
+	note: string,
+};
+
+export type BriefingRuntime_Serialize = {
+	/**  Always false: nothing runs while Amara OS is closed. */
+	runsWhileClosed: boolean,
+	/**  When this app process started the timer (`None` in a browser preview or before setup). */
+	timerStartedAt: string | null,
+	jobs: BriefingJob_Serialize[],
+	modelInference: string,
+	note: string,
+};
+
+export type BriefingSection = BriefingSection_Serialize | BriefingSection_Deserialize;
+
+export type BriefingSection_Deserialize = {
+	id: string,
+	title: string,
+	/**  data | none | unavailable */
+	state: string,
+	lines: BriefingLine[],
+	note?: string | null,
+};
+
+export type BriefingSection_Serialize = {
+	id: string,
+	title: string,
+	/**  data | none | unavailable */
+	state: string,
+	lines: BriefingLine[],
+	note: string | null,
 };
 
 export type Business = Business_Serialize | Business_Deserialize;
@@ -2861,6 +2966,40 @@ export type CurrencyView_Serialize = {
 	excluded_duplicates: number,
 };
 
+export type DailyBriefing = DailyBriefing_Serialize | DailyBriefing_Deserialize;
+
+export type DailyBriefing_Deserialize = {
+	day: string,
+	builtAt: string,
+	/**  timer | catch_up | opened | manual */
+	trigger: string,
+	sections: BriefingSection_Deserialize[],
+	trajectories: GoalTrajectory_Deserialize[],
+	training: TrainingSummary_Deserialize,
+	neuro: NeuroSummary_Deserialize,
+	/**  Open cross-domain and Life recommendation ids at build time. */
+	openRecommendations: string[],
+	/**  Sources that couldn't be read. */
+	missing: string[],
+	method: string,
+};
+
+export type DailyBriefing_Serialize = {
+	day: string,
+	builtAt: string,
+	/**  timer | catch_up | opened | manual */
+	trigger: string,
+	sections: BriefingSection_Serialize[],
+	trajectories: GoalTrajectory_Serialize[],
+	training: TrainingSummary_Serialize,
+	neuro: NeuroSummary_Serialize,
+	/**  Open cross-domain and Life recommendation ids at build time. */
+	openRecommendations: string[],
+	/**  Sources that couldn't be read. */
+	missing: string[],
+	method: string,
+};
+
 export type DailyBuild = {
 	days: number,
 	builtAtMs: number,
@@ -3034,6 +3173,32 @@ export type DecisionRecord_Serialize = {
 export type DownloadSummary = {
 	tier: string,
 	completed: number,
+};
+
+export type EnterpriseBriefing = EnterpriseBriefing_Serialize | EnterpriseBriefing_Deserialize;
+
+export type EnterpriseBriefing_Deserialize = {
+	businessId: string,
+	name: string,
+	day: string,
+	builtAt: string,
+	trigger: string,
+	sections: BriefingSection_Deserialize[],
+	openRecommendations: string[],
+	missing: string[],
+	method: string,
+};
+
+export type EnterpriseBriefing_Serialize = {
+	businessId: string,
+	name: string,
+	day: string,
+	builtAt: string,
+	trigger: string,
+	sections: BriefingSection_Serialize[],
+	openRecommendations: string[],
+	missing: string[],
+	method: string,
 };
 
 export type EntriesList = EntriesList_Serialize | EntriesList_Deserialize;
@@ -3825,6 +3990,44 @@ export type GoalRoute_Serialize = {
 	percent: number | null,
 	/**  Short fixed reason while planning has not produced a route. Never model text. */
 	note: string | null,
+};
+
+export type GoalTrajectory = GoalTrajectory_Serialize | GoalTrajectory_Deserialize;
+
+export type GoalTrajectory_Deserialize = {
+	goalId: string,
+	title: string,
+	/**  How progress is measured: "3 of 8 steps" or "2 of 5 offers". */
+	measure: string,
+	progressPct?: number | null,
+	/**  Share of the time from the goal's start to its deadline that has passed. */
+	expectedPct?: number | null,
+	deadline?: string | null,
+	daysLeft?: number | null,
+	/**  Progress recorded in the last 14 days (`goal.progressed` activity). */
+	moves14d: number,
+	/**  ahead | on_pace | behind | no_deadline | not_started | done | unknown */
+	state: string,
+	nextStep?: string | null,
+	sources: string[],
+};
+
+export type GoalTrajectory_Serialize = {
+	goalId: string,
+	title: string,
+	/**  How progress is measured: "3 of 8 steps" or "2 of 5 offers". */
+	measure: string,
+	progressPct: number | null,
+	/**  Share of the time from the goal's start to its deadline that has passed. */
+	expectedPct: number | null,
+	deadline: string | null,
+	daysLeft: number | null,
+	/**  Progress recorded in the last 14 days (`goal.progressed` activity). */
+	moves14d: number,
+	/**  ahead | on_pace | behind | no_deadline | not_started | done | unknown */
+	state: string,
+	nextStep: string | null,
+	sources: string[],
 };
 
 export type GoalVentureSet = GoalVentureSet_Serialize | GoalVentureSet_Deserialize;
@@ -5443,6 +5646,38 @@ export type N8nStatus_Serialize = {
 	failures7d: number | null,
 };
 
+export type NeuroSummary = NeuroSummary_Serialize | NeuroSummary_Deserialize;
+
+export type NeuroSummary_Deserialize = {
+	periodStart: string,
+	periodEnd: string,
+	sessions: number,
+	minutes: number | null,
+	/**  Training records in the period that met the eligibility rules (0059). */
+	eligibleTraining: number,
+	medianTimeInTargetPct?: number | null,
+	medianValidPct?: number | null,
+	/**  Longitudinal trend statements from `neuro_training::trends_from` (with confidence), all sessions. */
+	trends: string[],
+	sourceIds: string[],
+	note: string,
+};
+
+export type NeuroSummary_Serialize = {
+	periodStart: string,
+	periodEnd: string,
+	sessions: number,
+	minutes: number | null,
+	/**  Training records in the period that met the eligibility rules (0059). */
+	eligibleTraining: number,
+	medianTimeInTargetPct: number | null,
+	medianValidPct: number | null,
+	/**  Longitudinal trend statements from `neuro_training::trends_from` (with confidence), all sessions. */
+	trends: string[],
+	sourceIds: string[],
+	note: string,
+};
+
 export type NextAction = NextAction_Serialize | NextAction_Deserialize;
 
 export type NextAction_Deserialize = {
@@ -6310,6 +6545,11 @@ export type RecommendationRow_Deserialize = {
 	modelTier?: string | null,
 	targetRef?: string | null,
 	supersedesId?: string | null,
+	/**  0066: how the action is measured (JSON object), the reporting period and the fingerprint. */
+	evaluationJson?: string | null,
+	periodStart?: string | null,
+	periodEnd?: string | null,
+	fingerprint?: string | null,
 };
 
 export type RecommendationRow_Serialize = {
@@ -6335,6 +6575,11 @@ export type RecommendationRow_Serialize = {
 	modelTier: string | null,
 	targetRef: string | null,
 	supersedesId: string | null,
+	/**  0066: how the action is measured (JSON object), the reporting period and the fingerprint. */
+	evaluationJson: string | null,
+	periodStart: string | null,
+	periodEnd: string | null,
+	fingerprint: string | null,
 };
 
 export type RecordedSession = RecordedSession_Serialize | RecordedSession_Deserialize;
@@ -8279,6 +8524,48 @@ export type TrainingRecord_Serialize = {
 	hrv: SessionHrv_Serialize | null,
 };
 
+export type TrainingSummary = TrainingSummary_Serialize | TrainingSummary_Deserialize;
+
+export type TrainingSummary_Deserialize = {
+	periodStart: string,
+	periodEnd: string,
+	sessions: number,
+	doneSets: number,
+	totalReps: number,
+	activeMin: number | null,
+	/**  Average weekly sets over the 3 earlier weeks that had logged sessions; `None` below 2 such weeks. */
+	baselineSetsPerWeek?: number | null,
+	setsByMuscle: { [key in string]: number },
+	/**
+	 *  WHOOP (via NOOP) detected workout minutes and mean strain over the same days; `None` when the
+	 *  daily table isn't usable or has no value.
+	 */
+	detectedWorkoutMin?: number | null,
+	meanStrain?: number | null,
+	sourceIds: string[],
+	note: string,
+};
+
+export type TrainingSummary_Serialize = {
+	periodStart: string,
+	periodEnd: string,
+	sessions: number,
+	doneSets: number,
+	totalReps: number,
+	activeMin: number | null,
+	/**  Average weekly sets over the 3 earlier weeks that had logged sessions; `None` below 2 such weeks. */
+	baselineSetsPerWeek: number | null,
+	setsByMuscle: { [key in string]: number },
+	/**
+	 *  WHOOP (via NOOP) detected workout minutes and mean strain over the same days; `None` when the
+	 *  daily table isn't usable or has no value.
+	 */
+	detectedWorkoutMin: number | null,
+	meanStrain: number | null,
+	sourceIds: string[],
+	note: string,
+};
+
 export type TrainingTrends = TrainingTrends_Serialize | TrainingTrends_Deserialize;
 
 export type TrainingTrends_Deserialize = {
@@ -9342,6 +9629,30 @@ export type WatchlistView_Serialize = {
 	/**  True when the "Want new picks?" pointer is showing in Needs you. */
 	reviewDue: boolean,
 	disclaimer: string,
+};
+
+export type WeekCrossDomain = WeekCrossDomain_Serialize | WeekCrossDomain_Deserialize;
+
+export type WeekCrossDomain_Deserialize = {
+	weekStart: string,
+	weekEnd: string,
+	training: TrainingSummary_Deserialize,
+	neuro: NeuroSummary_Deserialize,
+	trajectories: GoalTrajectory_Deserialize[],
+	/**  Cross-domain recommendations whose reporting period ends in this week. */
+	recommendations: RecommendationRow_Deserialize[],
+	missing: string[],
+};
+
+export type WeekCrossDomain_Serialize = {
+	weekStart: string,
+	weekEnd: string,
+	training: TrainingSummary_Serialize,
+	neuro: NeuroSummary_Serialize,
+	trajectories: GoalTrajectory_Serialize[],
+	/**  Cross-domain recommendations whose reporting period ends in this week. */
+	recommendations: RecommendationRow_Serialize[],
+	missing: string[],
 };
 
 export type WeekPlan = WeekPlan_Serialize | WeekPlan_Deserialize;

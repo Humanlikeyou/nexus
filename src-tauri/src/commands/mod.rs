@@ -121,6 +121,7 @@ pub(crate) mod workout;
 // design-1111v stores (decisions, life dates, adds, check-in, Needs you today)
 pub mod adds;
 pub mod agents_now;
+pub mod briefings;
 pub mod checkin;
 pub mod decisions_log;
 pub mod goal_progress;

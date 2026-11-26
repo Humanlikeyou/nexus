@@ -353,6 +353,13 @@ export const BOUND_TABLE: Record<string, Row> = {
   life_week_plan_set: (a) => bound.lifeWeekPlanSet(a.plan as never),
   life_insight: () => bound.lifeInsight(),
   life_week_observations: (a) => bound.lifeWeekObservations(a.weekStart as never),
+  briefing_daily_read: () => bound.briefingDailyRead(),
+  briefing_daily_refresh: () => bound.briefingDailyRefresh(),
+  briefing_enterprise_read: (a) => bound.briefingEnterpriseRead(a.businessId as never),
+  briefing_enterprise_refresh: (a) => bound.briefingEnterpriseRefresh(a.businessId as never),
+  briefing_week: (a) => bound.briefingWeek(a.weekStart as never),
+  briefing_runtime: () => bound.briefingRuntime(),
+  briefing_recommendations: (a) => bound.briefingRecommendations(a.scope as never, a.businessId as never),
   // Registered before the typed bridge (371e0d2) but never bound, so invokeBound rejected them (habit marks, roadmap answers, memory writes, Hemi-Sync sessions).
   muse_stream_continuity: () => bound.museStreamContinuity(),
   neuro_calibration_save: (a) => bound.neuroCalibrationSave(a.report as never),

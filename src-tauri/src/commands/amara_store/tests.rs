@@ -60,6 +60,10 @@ fn rec<'a>(scope: Scope, kind: &'a str) -> NewRecommendation<'a> {
         uncertainty: None,
         impact: None,
         effort: None,
+        evaluation_json: None,
+        period_start: None,
+        period_end: None,
+        fingerprint: None,
         id: None,
         scope,
         domain: "life",
@@ -788,8 +792,8 @@ fn a_failed_migration_changes_nothing_and_a_backup_can_be_restored() {
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].certainty, "confirmed");
-    // v1 → v2 → v3 in one open (0063 added v3), with the one v1 backup below.
-    assert_eq!(version(&raw), "3");
+    // v1 → v2 → v3 → v4 in one open (0063 added v3, 0066 v4), with the one v1 backup below.
+    assert_eq!(version(&raw), "4");
     drop(raw);
     let backup = std::fs::read_dir(&t.0)
         .unwrap()
@@ -1013,6 +1017,9 @@ fn v3_adds_business_ids_from_biz_refs_only_with_a_backup_of_the_v2_file() {
         let c = rusqlite::Connection::open(&db).unwrap();
         c.execute_batch(
             "DROP INDEX idx_activity_business; DROP INDEX idx_recommendation_business;
+             DROP INDEX idx_recommendation_fingerprint;
+             ALTER TABLE recommendation DROP COLUMN evaluation_json; ALTER TABLE recommendation DROP COLUMN period_start;
+             ALTER TABLE recommendation DROP COLUMN period_end; ALTER TABLE recommendation DROP COLUMN fingerprint;
              ALTER TABLE activity DROP COLUMN business_id; ALTER TABLE recommendation DROP COLUMN business_id;
              UPDATE schema_meta SET value = '2' WHERE key = 'schema_version';
              INSERT INTO activity (activity_id, scope, kind, subject_ref, occurred_at, recorded_at, source, actor, schema_version)
@@ -1049,7 +1056,7 @@ fn v3_adds_business_ids_from_biz_refs_only_with_a_backup_of_the_v2_file() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(v, "3");
+    assert_eq!(v, "4", "v2 → v3 → v4 in one open");
     let old: Option<String> = c
         .query_row(
             "SELECT business_id FROM activity WHERE activity_id='old'",
@@ -1070,4 +1077,260 @@ fn v3_adds_business_ids_from_biz_refs_only_with_a_backup_of_the_v2_file() {
         (r.scope, business_of(&r)),
         (Scope::Business, Some("taiyo-skin"))
     );
+}
+
+// ───────────────────────────── 0066: schema v4 ─────────────────────────────
+
+fn cross<'a>(fp: &'a str, eval: &'a str) -> NewRecommendation<'a> {
+    let mut r = rec(Scope::Personal, "training_volume_rising");
+    r.produced_by = "rules:cross_domain";
+    r.confidence = Some(0.5);
+    r.confidence_basis = Some("3 weeks");
+    r.observation = Some("You logged 40 sets.");
+    r.rationale = Some("Rising faster than usual.");
+    r.uncertainty = Some("Only logged sessions count.");
+    r.suggested_action = Some("Keep next week at or below 22 sets.");
+    r.evaluation_json = Some(eval);
+    r.period_start = Some("2026-11-01T00:00:00+09:00");
+    r.period_end = Some("2026-11-26T23:59:59+09:00");
+    r.fingerprint = Some(fp);
+    r
+}
+
+const EVAL: &str = r#"{"metric":"workout.done_sets_7d","params":{},"baseline":40,"target":22,"direction":"at_most","unit":"sets","measure_after":"2026-12-03","window_days":7,"how":"x"}"#;
+
+#[test]
+fn v3_files_migrate_to_v4_with_a_backup_and_a_failed_v4_changes_nothing() {
+    let t = tmp("v4");
+    let db = t.0.join("amara.db");
+    {
+        let s = store_for(&t.0, Scope::Personal);
+        s.open().unwrap();
+        let c = rusqlite::Connection::open(&db).unwrap();
+        c.execute_batch(
+            "DROP INDEX idx_recommendation_fingerprint;
+             ALTER TABLE recommendation DROP COLUMN evaluation_json; ALTER TABLE recommendation DROP COLUMN period_start;
+             ALTER TABLE recommendation DROP COLUMN period_end; ALTER TABLE recommendation DROP COLUMN fingerprint;
+             UPDATE schema_meta SET value = '3' WHERE key = 'schema_version';
+             INSERT INTO activity (activity_id, scope, kind, subject_ref, occurred_at, recorded_at, source, actor, schema_version)
+             VALUES ('old','personal','habit.completed','goals:g-1','2026-11-20T00:00:00Z','t','user','taisun',3);",
+        )
+        .unwrap();
+    }
+    let version = || -> String {
+        rusqlite::Connection::open(&db)
+            .unwrap()
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key='schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    FAIL_MIGRATION.with(|f| f.set(true));
+    assert!(store_for(&t.0, Scope::Personal).open().is_err());
+    FAIL_MIGRATION.with(|f| f.set(false));
+    assert_eq!(version(), "3", "a failed v4 leaves the file at v3");
+    store_for(&t.0, Scope::Personal).open().unwrap();
+    assert_eq!(version(), "4");
+    let backups: Vec<String> = std::fs::read_dir(&t.0)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .filter(|n| n.starts_with("amara.db.v3-"))
+        .collect();
+    assert!(!backups.is_empty(), "the v3 file was copied first");
+    let n: i64 = rusqlite::Connection::open(&db)
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM activity WHERE activity_id='old'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 1, "existing rows are kept");
+}
+
+#[test]
+fn a_cross_domain_recommendation_needs_all_six_parts_and_a_valid_evaluation() {
+    let t = tmp("six");
+    seed(&t.0);
+    let s = store_for(&t.0, Scope::Personal);
+    let ev = [obs("goals:g-1")];
+    assert!(s.create_recommendation(&cross("fp:a", EVAL), &ev).is_ok());
+    for strip in 0..6 {
+        let mut r = cross("fp:b", EVAL);
+        match strip {
+            0 => r.rationale = None,
+            1 => r.uncertainty = None,
+            2 => r.suggested_action = None,
+            3 => r.evaluation_json = None,
+            4 => r.period_end = None,
+            _ => {
+                r.confidence = None;
+                r.confidence_basis = None;
+            }
+        }
+        assert!(
+            s.create_recommendation(&r, &ev).is_err(),
+            "part {strip} missing must be refused"
+        );
+    }
+    for bad in [
+        r#"{"metric":"x","unit":"u","direction":"up","target":1,"baseline":null,"measure_after":"2026-12-03"}"#,
+        r#"{"metric":"x","unit":"u","direction":"at_least","target":"1","baseline":null,"measure_after":"2026-12-03"}"#,
+        r#"{"metric":"x","unit":"u","direction":"at_least","target":1,"measure_after":"2026-12-03"}"#,
+        r#"{"metric":"x","unit":"u","direction":"at_least","target":1,"baseline":0,"measure_after":"soon"}"#,
+    ] {
+        assert!(
+            s.create_recommendation(&cross("fp:c", bad), &ev).is_err(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn duplicates_are_suppressed_while_open_within_the_cooldown_and_after_a_dismissal() {
+    let t = tmp("dup");
+    seed(&t.0);
+    let s = store_for(&t.0, Scope::Personal);
+    let ev = [obs("goals:g-1")];
+    let p = Suppress {
+        cooldown_days: 7,
+        dismissed_days: 30,
+    };
+    let Created::New(first) = s
+        .create_unless_duplicate(&cross("fp:x", EVAL), &ev, &p)
+        .unwrap()
+    else {
+        panic!("first is created")
+    };
+    assert_eq!(
+        s.create_unless_duplicate(&cross("fp:x", EVAL), &ev, &p)
+            .unwrap(),
+        Created::Suppressed {
+            reason: "open",
+            by: first.clone()
+        }
+    );
+    // Dismissed: still suppressed for 30 days.
+    s.add_outcome(&first, "dismissed", "taisun", None, None, None, None)
+        .unwrap();
+    assert!(matches!(
+        s.create_unless_duplicate(&cross("fp:x", EVAL), &ev, &p)
+            .unwrap(),
+        Created::Suppressed {
+            reason: "dismissed",
+            ..
+        }
+    ));
+    // Another fingerprint is not affected.
+    assert!(matches!(
+        s.create_unless_duplicate(&cross("fp:y", EVAL), &ev, &p)
+            .unwrap(),
+        Created::New(_)
+    ));
+    // Completed (closed) but inside the cooldown.
+    let Created::New(z) = s
+        .create_unless_duplicate(&cross("fp:z", EVAL), &ev, &p)
+        .unwrap()
+    else {
+        panic!()
+    };
+    s.add_outcome(&z, "accepted", "taisun", None, None, None, None)
+        .unwrap();
+    s.add_outcome(&z, "completed", "taisun", None, None, None, None)
+        .unwrap();
+    assert!(matches!(
+        s.create_unless_duplicate(&cross("fp:z", EVAL), &ev, &p)
+            .unwrap(),
+        Created::Suppressed {
+            reason: "cooldown",
+            ..
+        }
+    ));
+    let zero = Suppress {
+        cooldown_days: 0,
+        dismissed_days: 30,
+    };
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    assert!(matches!(
+        s.create_unless_duplicate(&cross("fp:z", EVAL), &ev, &zero)
+            .unwrap(),
+        Created::New(_)
+    ));
+    // Without a fingerprint there is nothing to compare: refused.
+    let mut r = cross("fp:q", EVAL);
+    r.fingerprint = None;
+    r.produced_by = "rules:other";
+    assert!(s.create_unless_duplicate(&r, &ev, &p).is_err());
+}
+
+#[test]
+fn parallel_producers_create_one_recommendation_per_fingerprint() {
+    let t = tmp("dup-par");
+    seed(&t.0);
+    let d = t.0.clone();
+    let handles: Vec<_> = (0..6)
+        .map(|_| {
+            let d = d.clone();
+            std::thread::spawn(move || {
+                store_for(&d, Scope::Personal)
+                    .create_unless_duplicate(
+                        &cross("fp:par", EVAL),
+                        &[obs("goals:g-1")],
+                        &Suppress {
+                            cooldown_days: 7,
+                            dismissed_days: 30,
+                        },
+                    )
+                    .unwrap()
+            })
+        })
+        .collect();
+    let made = handles
+        .into_iter()
+        .map(|h| h.join().unwrap())
+        .filter(|c| matches!(c, Created::New(_)))
+        .count();
+    assert_eq!(made, 1);
+}
+
+#[test]
+fn a_measurement_records_met_or_not_without_moving_the_status() {
+    let t = tmp("measured");
+    seed(&t.0);
+    let s = store_for(&t.0, Scope::Personal);
+    let id = s
+        .create_recommendation(&cross("fp:m", EVAL), &[obs("goals:g-1")])
+        .unwrap();
+    s.add_outcome(&id, "accepted", "taisun", None, None, None, None)
+        .unwrap();
+    assert!(
+        s.add_outcome(&id, "measured", "system", None, None, Some("helped"), None)
+            .is_err(),
+        "measured is met, not_met or unknown"
+    );
+    s.add_outcome(
+        &id,
+        "measured",
+        "system",
+        None,
+        None,
+        Some("met"),
+        Some("12 sets"),
+    )
+    .unwrap();
+    let d = s.get_recommendation(&id).unwrap().unwrap();
+    assert_eq!(d.recommendation.status, "accepted");
+    assert_eq!(d.recommendation.evaluation_json.as_deref(), Some(EVAL));
+    assert_eq!(d.recommendation.fingerprint.as_deref(), Some("fp:m"));
+    assert!(d
+        .outcomes
+        .iter()
+        .any(|o| o.outcome == "measured" && o.evaluation.as_deref() == Some("met")));
+    // Taisun's own judgement still follows the status machine.
+    s.add_outcome(&id, "completed", "taisun", None, None, None, None)
+        .unwrap();
+    s.add_outcome(&id, "evaluated", "taisun", None, None, Some("helped"), None)
+        .unwrap();
 }

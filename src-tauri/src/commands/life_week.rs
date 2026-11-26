@@ -237,6 +237,10 @@ pub(crate) fn observe_in(data: &Path, week_start: &str) -> Result<Vec<Recommenda
             ),
             impact: None,
             effort: Some("low"),
+            evaluation_json: None,
+            period_start: None,
+            period_end: None,
+            fingerprint: None,
         };
         if store.create_recommendation(&rec, &evidence).is_ok() {
             room -= 1;
