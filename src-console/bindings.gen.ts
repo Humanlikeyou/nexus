@@ -495,6 +495,15 @@ export const commands = {
 	neuroTrainingTrends: (options?: InvokeOptions) => __TAURI_INVOKE<TrainingTrends_Serialize>("neuro_training_trends", undefined, options),
 	noopSessionHrv: (start: string, end: string, options?: InvokeOptions) => __TAURI_INVOKE<SessionHrv_Serialize>("noop_session_hrv", { start, end }, options),
 	noopRrStatus: (options?: InvokeOptions) => __TAURI_INVOKE<RrStatus_Serialize>("noop_rr_status", undefined, options),
+	workoutLibrary: (options?: InvokeOptions) => __TAURI_INVOKE<LibraryView_Serialize>("workout_library", undefined, options),
+	workoutExerciseSave: (exercise: Exercise_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<Exercise_Serialize>("workout_exercise_save", { exercise }, options),
+	workoutTemplates: (options?: InvokeOptions) => __TAURI_INVOKE<Template_Serialize[]>("workout_templates", undefined, options),
+	workoutTemplateSave: (template: Template_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<Template_Serialize>("workout_template_save", { template }, options),
+	/**  The deterministic estimate for a draft, so the builder shows the same number the engine uses. */
+	workoutEstimate: (items: TemplateItem_Deserialize[], restBetweenS: number, options?: InvokeOptions) => __TAURI_INVOKE<number>("workout_estimate", { items, restBetweenS }, options),
+	workoutSessionPlan: (templateId: string, options?: InvokeOptions) => __TAURI_INVOKE<SessionView_Serialize>("workout_session_plan", { templateId }, options),
+	workoutSessionAct: (sessionId: string, action: Action_Deserialize, options?: InvokeOptions) => __TAURI_INVOKE<SessionView_Serialize>("workout_session_act", { sessionId, action }, options),
+	workoutHistory: (limit: number | null, options?: InvokeOptions) => __TAURI_INVOKE<SessionView_Serialize[]>("workout_history", { limit }, options),
 	/**
 	 *  Marks a habit done (or not done) for `day` (today, or up to 7 days back). History + 8 s Undo.
 	 *  `source` is "manual", "chat" or "telegram".
@@ -728,6 +737,27 @@ export type AccountBalance = {
 	 */
 	history: BalancePoint[],
 };
+
+/**  What the screen asks the engine to do with a session. */
+export type Action = Action_Serialize | Action_Deserialize;
+
+/**  What the screen asks the engine to do with a session. */
+export type Action_Deserialize = { kind: "start" } | { kind: "pause" } | { kind: "resume" } | 
+/**  Log the next set. Reps for a reps item, hold seconds for a hold item; load is optional. */
+{ kind: "logSet"; reps?: number | null; hold_s?: number | null; load_kg?: number | null } | 
+/**  Skip the next set, or the rest of the current exercise. */
+{ kind: "skip"; scope: string } | 
+/**  End now. `abandon` ends it as abandoned when no set was done. */
+{ kind: "end"; abandon?: boolean };
+
+/**  What the screen asks the engine to do with a session. */
+export type Action_Serialize = { kind: "start" } | { kind: "pause" } | { kind: "resume" } | 
+/**  Log the next set. Reps for a reps item, hold seconds for a hold item; load is optional. */
+{ kind: "logSet"; reps: number | null; hold_s: number | null; load_kg: number | null } | 
+/**  Skip the next set, or the rest of the current exercise. */
+{ kind: "skip"; scope: string } | 
+/**  End now. `abandon` ends it as abandoned when no set was done. */
+{ kind: "end"; abandon: boolean };
 
 export type ActivityArchiveReport = {
 	dryRun: boolean,
@@ -2538,6 +2568,64 @@ export type ExecutionRecord_Serialize = {
 	recovery: string | null,
 };
 
+export type Exercise = Exercise_Serialize | Exercise_Deserialize;
+
+export type Exercise_Deserialize = {
+	id: string,
+	name: string,
+	/**  Progression family: `push`, `pull`, `dip`, `legs`, `core`, `skill`, or `custom`. */
+	family: string,
+	/**  Place in the family's progression, easiest first. */
+	level: number,
+	/**  `reps` or `hold`. */
+	measure: string,
+	/**  `beginner`, `intermediate` or `advanced`. */
+	difficulty: string,
+	description: string,
+	instructions: string[],
+	muscles: string[],
+	equipment?: string[],
+	/**  Recommended sets, and reps or hold seconds. */
+	sets: number,
+	reps?: number | null,
+	holdS?: number | null,
+	secsPerRep?: number | null,
+	form?: string[],
+	safety?: string[],
+	/**  Demonstration asset reference (Phase 10 fills it in; no asset exists yet). */
+	demoAsset?: string | null,
+	/**  True for exercises you added. */
+	custom?: boolean,
+};
+
+export type Exercise_Serialize = {
+	id: string,
+	name: string,
+	/**  Progression family: `push`, `pull`, `dip`, `legs`, `core`, `skill`, or `custom`. */
+	family: string,
+	/**  Place in the family's progression, easiest first. */
+	level: number,
+	/**  `reps` or `hold`. */
+	measure: string,
+	/**  `beginner`, `intermediate` or `advanced`. */
+	difficulty: string,
+	description: string,
+	instructions: string[],
+	muscles: string[],
+	equipment: string[],
+	/**  Recommended sets, and reps or hold seconds. */
+	sets: number,
+	reps: number | null,
+	holdS: number | null,
+	secsPerRep: number | null,
+	form: string[],
+	safety: string[],
+	/**  Demonstration asset reference (Phase 10 fills it in; no asset exists yet). */
+	demoAsset: string | null,
+	/**  True for exercises you added. */
+	custom: boolean,
+};
+
 export type Experiment = Experiment_Serialize | Experiment_Deserialize;
 
 export type ExperimentResult = ExperimentResult_Serialize | ExperimentResult_Deserialize;
@@ -3791,6 +3879,18 @@ export type LibTrack_Serialize = {
 };
 
 export type Library = Library_Serialize | Library_Deserialize;
+
+export type LibraryView = LibraryView_Serialize | LibraryView_Deserialize;
+
+export type LibraryView_Deserialize = {
+	version: string,
+	exercises: Exercise_Deserialize[],
+};
+
+export type LibraryView_Serialize = {
+	version: string,
+	exercises: Exercise_Serialize[],
+};
 
 export type Library_Deserialize = {
 	tracks: LibTrack_Deserialize[],
@@ -5083,6 +5183,18 @@ export type PatternsResult_Serialize = {
 	reason?: string,
 };
 
+export type Pause = Pause_Serialize | Pause_Deserialize;
+
+export type Pause_Deserialize = {
+	from: string,
+	to?: string | null,
+};
+
+export type Pause_Serialize = {
+	from: string,
+	to: string | null,
+};
+
 export type PersonalBaseline = PersonalBaseline_Serialize | PersonalBaseline_Deserialize;
 
 export type PersonalBaseline_Deserialize = {
@@ -6070,6 +6182,8 @@ export type ServicesSummary = {
 	checkedMs: number,
 };
 
+export type Session = Session_Serialize | Session_Deserialize;
+
 export type SessionHrv = SessionHrv_Serialize | SessionHrv_Deserialize;
 
 export type SessionHrv_Deserialize = {
@@ -6201,6 +6315,92 @@ export type SessionSummary_Serialize = {
 	 *  which may hold 0-1 scores; those are scaled on read (nothing is rewritten on disk).
 	 */
 	score_scale?: number,
+};
+
+export type SessionView = SessionView_Serialize | SessionView_Deserialize;
+
+export type SessionView_Deserialize = {
+	session: Session_Deserialize,
+	summary: Summary_Deserialize,
+};
+
+export type SessionView_Serialize = {
+	session: Session_Serialize,
+	summary: Summary_Serialize,
+};
+
+export type Session_Deserialize = {
+	id: string,
+	templateId: string,
+	templateName: string,
+	source: string,
+	sourceRef?: string | null,
+	/**  The plan as it was when the session was planned (later template edits never change it). */
+	plan: TemplateItem_Deserialize[],
+	restBetweenS: number,
+	/**  `planned`, `active`, `paused`, `completed`, `partially_completed` or `abandoned`. */
+	state: string,
+	plannedAt: string,
+	startedAt?: string | null,
+	endedAt?: string | null,
+	pauses: Pause_Deserialize[],
+	sets: SetLog_Deserialize[],
+	/**  The next set to do: (item, set). Past the end when every set is logged or skipped. */
+	nextItem: number,
+	nextSet: number,
+	engine: string,
+};
+
+export type Session_Serialize = {
+	id: string,
+	templateId: string,
+	templateName: string,
+	source: string,
+	sourceRef: string | null,
+	/**  The plan as it was when the session was planned (later template edits never change it). */
+	plan: TemplateItem_Serialize[],
+	restBetweenS: number,
+	/**  `planned`, `active`, `paused`, `completed`, `partially_completed` or `abandoned`. */
+	state: string,
+	plannedAt: string,
+	startedAt: string | null,
+	endedAt: string | null,
+	pauses: Pause_Serialize[],
+	sets: SetLog_Serialize[],
+	/**  The next set to do: (item, set). Past the end when every set is logged or skipped. */
+	nextItem: number,
+	nextSet: number,
+	engine: string,
+};
+
+export type SetLog = SetLog_Serialize | SetLog_Deserialize;
+
+export type SetLog_Deserialize = {
+	item: number,
+	set: number,
+	exerciseId: string,
+	/**  `done` or `skipped`. */
+	outcome: string,
+	reps?: number | null,
+	holdS?: number | null,
+	loadKg?: number | null,
+	finishedAt: string,
+	/**  Rest taken before this set: time since the previous set finished, minus any paused time. */
+	restBeforeS?: number | null,
+};
+
+export type SetLog_Serialize = {
+	item: number,
+	set: number,
+	exerciseId: string,
+	/**  `done` or `skipped`. */
+	outcome: string,
+	reps: number | null,
+	holdS: number | null,
+	loadKg: number | null,
+	finishedAt: string,
+	/**  Rest taken before this set: time since the previous set finished, minus any paused time. */
+	restBeforeS: number | null,
 };
 
 export type Side = Side_Serialize | Side_Deserialize;
@@ -6486,6 +6686,47 @@ export type Suggestion_Serialize = {
 	finding: Finding_Serialize,
 };
 
+/**  Deterministic totals for a session. */
+export type Summary = Summary_Serialize | Summary_Deserialize;
+
+/**  Deterministic totals for a session. */
+export type Summary_Deserialize = {
+	plannedSets: number,
+	doneSets: number,
+	skippedSets: number,
+	completionPct: number | null,
+	totalReps: number,
+	totalHoldS: number,
+	/**  Sum of reps × load over weighted sets (kg). */
+	loadVolumeKg: number | null,
+	/**  Done sets per muscle group. */
+	setsByMuscle: { [key in string]: number },
+	/**  Start to end (or now), minus paused time. */
+	activeS?: number | null,
+	pausedS: number,
+	restS: number,
+	estimatedS: number,
+};
+
+/**  Deterministic totals for a session. */
+export type Summary_Serialize = {
+	plannedSets: number,
+	doneSets: number,
+	skippedSets: number,
+	completionPct: number | null,
+	totalReps: number,
+	totalHoldS: number,
+	/**  Sum of reps × load over weighted sets (kg). */
+	loadVolumeKg: number | null,
+	/**  Done sets per muscle group. */
+	setsByMuscle: { [key in string]: number },
+	/**  Start to end (or now), minus paused time. */
+	activeS: number | null,
+	pausedS: number,
+	restS: number,
+	estimatedS: number,
+};
+
 export type SupervisorInfo = SupervisorInfo_Serialize | SupervisorInfo_Deserialize;
 
 export type SupervisorInfo_Deserialize = {
@@ -6695,6 +6936,64 @@ export type TelegramUpdate = {
 	text: string,
 	date: number,
 	is_bot: boolean,
+};
+
+export type Template = Template_Serialize | Template_Deserialize;
+
+export type TemplateItem = TemplateItem_Serialize | TemplateItem_Deserialize;
+
+export type TemplateItem_Deserialize = {
+	exerciseId: string,
+	sets: number,
+	reps?: number | null,
+	holdS?: number | null,
+	/**  Added load in kg (weighted calisthenics), when used. */
+	loadKg?: number | null,
+	/**  Rest between this exercise's sets. */
+	restS: number,
+};
+
+export type TemplateItem_Serialize = {
+	exerciseId: string,
+	sets: number,
+	reps: number | null,
+	holdS: number | null,
+	/**  Added load in kg (weighted calisthenics), when used. */
+	loadKg: number | null,
+	/**  Rest between this exercise's sets. */
+	restS: number,
+};
+
+export type Template_Deserialize = {
+	/**  Set by the store on first save. */
+	id?: string,
+	name: string,
+	/**  `user` or `amara`. */
+	source: string,
+	/**  For `amara`: what recommended it, for example `take:pushup_ladder_1`. */
+	sourceRef?: string | null,
+	items: TemplateItem_Deserialize[],
+	/**  Rest between exercises. */
+	restBetweenS?: number,
+	archived?: boolean,
+	createdAt?: string,
+	updatedAt?: string,
+};
+
+export type Template_Serialize = {
+	/**  Set by the store on first save. */
+	id: string,
+	name: string,
+	/**  `user` or `amara`. */
+	source: string,
+	/**  For `amara`: what recommended it, for example `take:pushup_ladder_1`. */
+	sourceRef: string | null,
+	items: TemplateItem_Serialize[],
+	/**  Rest between exercises. */
+	restBetweenS: number,
+	archived: boolean,
+	createdAt: string,
+	updatedAt: string,
 };
 
 export type TerranceContext = TerranceContext_Serialize | TerranceContext_Deserialize;

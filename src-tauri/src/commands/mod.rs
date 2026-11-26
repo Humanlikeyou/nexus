@@ -116,6 +116,7 @@ pub mod voice;
 pub mod voice_bridge;
 pub mod voice_heartbeat;
 pub mod whoop_status;
+pub(crate) mod workout;
 // design-1111v stores (decisions, life dates, adds, check-in, Needs you today)
 pub mod adds;
 pub mod agents_now;
