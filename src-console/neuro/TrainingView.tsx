@@ -99,12 +99,18 @@ export function TrainingRecordsCard({ protocols, load = loadRecords }: { protoco
   );
 }
 
-export function TrainingView({ training, running = false, onDone }: { training: TrainingApi; running?: boolean; onDone?: () => void }) {
+export function TrainingView({ training, running = false, onDone, onRecordAfter }: { training: TrainingApi; running?: boolean; onDone?: () => void; onRecordAfter?: () => void }) {
   return (
     <>
       <PageHero title="Training" statement="Protocols, settings and your session records" detail="Neurofeedback follows the EEG features listed for each protocol. Everything here is optional." />
       <ProtocolSettingsCard training={training} disabled={running} />
       <TrainingRecordsCard protocols={training.protocols} />
+      {onRecordAfter && (
+        <Card title="Before and after a session">
+          <p className="pk-note">Optional. Make a resting recording in Calibration before a session and another here after it, and the two are compared feature by feature. It shows a measured change in the signal, not an improvement.</p>
+          <div className="pk-actions"><Button size="small" variant="secondary" disabled={running} onClick={onRecordAfter}>Record an after-session rest</Button></div>
+        </Card>
+      )}
       {onDone && <div className="pk-actions"><Button size="small" variant="plain" onClick={onDone}>Back to Neuro</Button></div>}
     </>
   );

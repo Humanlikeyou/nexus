@@ -10,7 +10,9 @@ type Stat = { median: number; robustSd: number; n: number };
 type Comparison = { condition: string; feature: string; value: number; usualMedian: number; usualRobustSd: number; robustZ: number | null; position: string };
 type CondBase = { condition: string; recordings: number; relBands: Record<string, Stat>; alphaPeakHz: Stat | null; confidence: string; uncertainty: string };
 type Baseline = { version: string; conditions: CondBase[]; alphaReactivity: Stat | null; note: string };
-type Saved = { report: { id: string; createdAt: string }; baselineEligible: Record<string, boolean>; comparison: Comparison[]; baselineBefore: Baseline };
+type PrePostChange = { condition: string; feature: string; pre: number; post: number; change: number; usualRobustSd: number | null; changeInUsualSpreads: number | null; beyondUsualVariation: boolean };
+type PrePost = { preReportId: string; minutesBetween: number; changes: PrePostChange[]; note: string };
+type Saved = { report: { id: string; createdAt: string }; baselineEligible: Record<string, boolean>; comparison: Comparison[]; baselineBefore: Baseline; prePost?: PrePost | null };
 type Call = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
 const DURATIONS = [20, 30, 60, 90, 120, 180, 300].map((s) => ({ value: String(s), label: s < 60 ? `${s} seconds` : `${s / 60} minute${s === 60 ? "" : "s"}` }));
@@ -46,6 +48,29 @@ function ConditionReport({ r, comparison, eligible }: { r: ConditionResult; comp
   );
 }
 
+/** Decision 0059: before and after a session, feature by feature. A measured change, never a verdict. */
+export function PrePostCard({ prePost }: { prePost: PrePost | null | undefined }) {
+  if (!prePost) return <Card title="Before and after"><p className="pk-note">There is no resting recording from before this session (from the last six hours), so there is nothing to compare with. The recording is still saved.</p></Card>;
+  const signed = (feature: string, v: number) => `${v > 0 ? "+" : v < 0 ? "−" : "±"}${fmt(feature, Math.abs(v))}`;
+  return (
+    <Card title="Before and after">
+      <p className="pk-note">Compared with your resting recording from {prePost.minutesBetween} minutes earlier.</p>
+      {(["eyes_open", "eyes_closed"] as const).map((cond) => {
+        const rows = prePost.changes.filter((c) => c.condition === cond);
+        if (!rows.length) return null;
+        return (
+          <table key={cond} className="pk-table" aria-label={`${COND_LABEL[cond]} before and after`}>
+            <thead><tr><th scope="col">{COND_LABEL[cond]}</th><th scope="col">Before</th><th scope="col">After</th><th scope="col">Change</th></tr></thead>
+            <tbody>{rows.map((c) => <tr key={c.feature}><td>{FEATURE_LABEL[c.feature]}</td><td>{fmt(c.feature, c.pre)}</td><td>{fmt(c.feature, c.post)}</td>
+              <td>{signed(c.feature, c.change)} · {c.changeInUsualSpreads == null ? "no baseline to judge by" : c.beyondUsualVariation ? "larger than your usual variation" : "within your usual variation"}</td></tr>)}</tbody>
+          </table>
+        );
+      })}
+      <p className="pk-note">{prePost.note}</p>
+    </Card>
+  );
+}
+
 export function BaselineCard({ base }: { base: Baseline | null }) {
   if (!base) return null;
   return (
@@ -61,7 +86,7 @@ export function BaselineCard({ base }: { base: Baseline | null }) {
 }
 
 /** Pre-meditation calibration: check, eyes open, eyes closed, report. Separate from a protocol's own calibration. */
-export function CalibrationView({ onDone, call = invokeBound as Call, now = Date.now }: { onDone?: () => void; call?: Call; now?: () => number }) {
+export function CalibrationView({ onDone, call = invokeBound as Call, now = Date.now, after = false }: { onDone?: () => void; call?: Call; now?: () => number; /** Decision 0059: the optional rest recording after a session. */ after?: boolean }) {
   const telemetry = useMuseTelemetry();
   const [secs, setSecs] = useState(DEFAULT_SECS);
   const run = useRef<CalibrationRun | null>(null);
@@ -88,7 +113,7 @@ export function CalibrationView({ onDone, call = invokeBound as Call, now = Date
     const s = run.current.tick(telemetry, now());
     setState(s);
     if (s.stage === "done" && !saved && !err) {
-      const report = run.current.report();
+      const report = run.current.report(after ? "post_session" : "pre_meditation");
       run.current = null;
       if (!report.conditions.length) return;
       call<Saved>("neuro_calibration_save", { report }).then((r) => { setSaved(r); return call<Baseline>("neuro_baseline_get").then(setBase); }, () => setErr("The calibration couldn't be saved. Nothing was changed."));
@@ -100,13 +125,15 @@ export function CalibrationView({ onDone, call = invokeBound as Call, now = Date
   const stage = state?.stage;
   return (
     <div className="v-page" id="calibration">
-      <PageHero title="Calibration" statement="A resting recording before you meditate" detail="Optional. It measures your resting EEG with eyes open and eyes closed, and builds a personal baseline over time. You can start a session without it." />
+      {after
+        ? <PageHero title="After-session rest" statement="A resting recording after your session" detail="Optional. The same eyes-open and eyes-closed recording, compared with the one from before your session. It is kept apart from your baseline." />
+        : <PageHero title="Calibration" statement="A resting recording before you meditate" detail="Optional. It measures your resting EEG with eyes open and eyes closed, and builds a personal baseline over time. You can start a session without it." />}
       <BaselineCard base={base} />
       {!state || (stage === "done" && (saved || err)) ? (
         <Card title={saved ? "Calibrate again" : "Before you start"}>
           <p className="pk-note">Sit comfortably with the Muse on and streaming. You&apos;ll keep your eyes open for the first part and closed for the second. Stay still; blinks and movement are left out automatically.</p>
           <Select label="Length of each part" options={DURATIONS} value={String(secs)} onChange={(e) => setSecs(Number(e.target.value))} />
-          <div className="pk-actions"><Button size="small" variant="primary" onClick={startCheck}>Check the headset</Button>{onDone && <Button size="small" variant="plain" onClick={onDone}>Skip calibration</Button>}</div>
+          <div className="pk-actions"><Button size="small" variant="primary" onClick={startCheck}>Check the headset</Button>{onDone && <Button size="small" variant="plain" onClick={onDone}>{after ? "Skip" : "Skip calibration"}</Button>}</div>
         </Card>
       ) : stage === "check" ? (
         <Card title="Checking the headset">
@@ -126,9 +153,11 @@ export function CalibrationView({ onDone, call = invokeBound as Call, now = Date
       {err && <p className="pk-note" role="alert">{err}</p>}
       {saved && state && (
         <section aria-label="Calibration report">
-          {state.results.map((r) => <ConditionReport key={r.condition} r={r} comparison={saved.comparison} eligible={saved.baselineEligible[r.condition]} />)}
+          {after && <PrePostCard prePost={saved.prePost} />}
+          {state.results.map((r) => <ConditionReport key={r.condition} r={r} comparison={saved.comparison} eligible={after ? undefined : saved.baselineEligible[r.condition]} />)}
+          {after && <p className="pk-note">After-session recordings are kept apart from your baseline.</p>}
           <p className="pk-note">{NOT_A_STATE}</p>
-          {onDone && <div className="pk-actions"><Button size="small" variant="primary" onClick={onDone}>Continue to a session</Button></div>}
+          {onDone && <div className="pk-actions"><Button size="small" variant="primary" onClick={onDone}>{after ? "Done" : "Continue to a session"}</Button></div>}
         </section>
       )}
     </div>

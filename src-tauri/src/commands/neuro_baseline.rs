@@ -6,6 +6,9 @@
 //!   personal baseline, and only when recorded live at high quality.
 //! - `protocol`: the thresholds a neurofeedback protocol calibrated for one session, with its data
 //!   quality and method. Never part of the baseline.
+//! - `post_session` (decision 0059): the same resting recording, made after a session. Never part of the
+//!   baseline (it is a different recording condition). On save it is compared with the same day's
+//!   pre-meditation calibration and with the baseline, as a measured change and nothing more.
 //!
 //! Reports hold features and counts only, never raw EEG. `<data>/neuro/calibrations.json` (0600, atomic).
 //! The store refuses new reports when full rather than dropping old ones. The baseline is recomputed on
@@ -89,7 +92,7 @@ pub struct CalibrationReport {
     /// Set by the store (RFC 3339).
     #[serde(default)]
     pub created_at: String,
-    /// `pre_meditation` or `protocol`.
+    /// `pre_meditation`, `protocol` or `post_session`.
     pub kind: String,
     /// `live`, `replay` or `demo` (only live reports can enter the baseline).
     pub source: String,
@@ -120,8 +123,11 @@ fn finite01(v: f64) -> bool {
 
 /// Refuses anything malformed; never stores raw samples (the shape has no room for them).
 pub(crate) fn validate(r: &CalibrationReport) -> Result<(), String> {
-    if !matches!(r.kind.as_str(), "pre_meditation" | "protocol") {
-        return Err("kind must be pre_meditation or protocol".into());
+    if !matches!(
+        r.kind.as_str(),
+        "pre_meditation" | "protocol" | "post_session"
+    ) {
+        return Err("kind must be pre_meditation, protocol or post_session".into());
     }
     if !matches!(r.source.as_str(), "live" | "replay" | "demo") {
         return Err("source must be live, replay or demo".into());
@@ -133,8 +139,8 @@ pub(crate) fn validate(r: &CalibrationReport) -> Result<(), String> {
     {
         return Err("the method needs a version and short descriptions".into());
     }
-    if r.kind == "pre_meditation" && r.conditions.is_empty() {
-        return Err("a pre-meditation calibration needs at least one condition".into());
+    if matches!(r.kind.as_str(), "pre_meditation" | "post_session") && r.conditions.is_empty() {
+        return Err("a resting calibration needs at least one condition".into());
     }
     if r.kind == "protocol" && r.protocol.is_none() {
         return Err("a protocol calibration needs its protocol block".into());
@@ -418,6 +424,116 @@ pub(crate) fn compare(r: &CalibrationReport, base: &PersonalBaseline) -> Vec<Fea
     out
 }
 
+/// The most a pre-meditation calibration can come before a post-session one and still pair with it.
+pub(crate) const PRE_POST_MAX_MINUTES: i64 = 6 * 60;
+/// A change bigger than this many usual spreads (robust SD) is outside your usual variation.
+const PRE_POST_SPREADS: f64 = 1.5;
+
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PrePostChange {
+    pub condition: String,
+    pub feature: String,
+    pub pre: f64,
+    pub post: f64,
+    /// post - pre, in the feature's own unit.
+    pub change: f64,
+    /// The baseline's robust SD for this feature, when there is a baseline.
+    pub usual_robust_sd: Option<f64>,
+    /// change / usual robust SD.
+    pub change_in_usual_spreads: Option<f64>,
+    /// |change| is more than 1.5 usual spreads. False when there is no baseline to judge by.
+    pub beyond_usual_variation: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PrePost {
+    pub pre_report_id: String,
+    pub minutes_between: i64,
+    pub changes: Vec<PrePostChange>,
+    pub note: String,
+}
+
+fn features_of(c: &ConditionResult) -> Vec<(String, f64)> {
+    let Some(f) = &c.features else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, f64)> = BANDS
+        .iter()
+        .filter_map(|b| f.rel_bands.get(*b).map(|v| (b.to_string(), *v)))
+        .collect();
+    if let Some(v) = f.alpha_peak_hz {
+        out.push(("alpha_peak_hz".into(), v));
+    }
+    if let Some(v) = f.variability {
+        out.push(("variability".into(), v));
+    }
+    out
+}
+
+fn usual_sd(base: &PersonalBaseline, condition: &str, feature: &str) -> Option<f64> {
+    let b = base.conditions.iter().find(|x| x.condition == condition)?;
+    let s = match feature {
+        "alpha_peak_hz" => b.alpha_peak_hz.as_ref(),
+        "variability" => b.variability.as_ref(),
+        band => b.rel_bands.get(band),
+    }?;
+    (s.robust_sd > 0.0).then_some(s.robust_sd)
+}
+
+/// A post-session recording against the newest pre-meditation one from the same source within six hours
+/// before it, feature by feature, each change also measured in the baseline's usual spread.
+pub(crate) fn pre_post(
+    history: &[CalibrationReport],
+    post: &CalibrationReport,
+    base: &PersonalBaseline,
+) -> Option<PrePost> {
+    if post.kind != "post_session" {
+        return None;
+    }
+    let at = chrono::DateTime::parse_from_rfc3339(&post.created_at).ok()?;
+    let (pre, minutes) = history.iter().rev().find_map(|r| {
+        if r.kind != "pre_meditation" || r.source != post.source {
+            return None;
+        }
+        let t = chrono::DateTime::parse_from_rfc3339(&r.created_at).ok()?;
+        let m = (at - t).num_minutes();
+        (0..=PRE_POST_MAX_MINUTES).contains(&m).then_some((r, m))
+    })?;
+    let mut changes = Vec::new();
+    for c in &post.conditions {
+        let Some(pc) = pre.conditions.iter().find(|x| x.condition == c.condition) else {
+            continue;
+        };
+        let before: BTreeMap<String, f64> = features_of(pc).into_iter().collect();
+        for (feature, post_v) in features_of(c) {
+            let Some(pre_v) = before.get(&feature).copied() else {
+                continue;
+            };
+            let change = ((post_v - pre_v) * 1000.0).round() / 1000.0;
+            let sd = usual_sd(base, &c.condition, &feature);
+            let spreads = sd.map(|s| ((change / s) * 100.0).round() / 100.0);
+            changes.push(PrePostChange {
+                condition: c.condition.clone(),
+                feature,
+                pre: pre_v,
+                post: post_v,
+                change,
+                usual_robust_sd: sd,
+                change_in_usual_spreads: spreads,
+                beyond_usual_variation: spreads.is_some_and(|z| z.abs() > PRE_POST_SPREADS),
+            });
+        }
+    }
+    Some(PrePost {
+        pre_report_id: pre.id.clone(),
+        minutes_between: minutes,
+        changes,
+        note: "A measured change in the EEG signal between two resting recordings. It does not show a lasting change, an improvement, or a change in emotion, attention, stress or relaxation; resting EEG also varies from one recording to the next.".into(),
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedCalibration {
@@ -427,6 +543,8 @@ pub struct SavedCalibration {
     /// Against the baseline as it stood before this report.
     pub comparison: Vec<FeatureComparison>,
     pub baseline_before: PersonalBaseline,
+    /// Post-session recordings only: the comparison with the same day's pre-meditation recording.
+    pub pre_post: Option<PrePost>,
 }
 
 pub(crate) fn save_in(
@@ -449,6 +567,7 @@ pub(crate) fn save_in(
         .iter()
         .map(|c| (c.condition.clone(), high_quality(&r, c)))
         .collect();
+    let pre_post = pre_post(&store.reports, &r, &before);
     store.reports.push(r.clone());
     write_json_atomic(&file(data), &store, MAX_BYTES)?;
     Ok(SavedCalibration {
@@ -456,6 +575,7 @@ pub(crate) fn save_in(
         baseline_eligible: eligible,
         comparison,
         baseline_before: before,
+        pre_post,
     })
 }
 

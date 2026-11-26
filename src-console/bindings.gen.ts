@@ -1398,7 +1398,7 @@ export type CalibrationReport_Deserialize = {
 	id?: string,
 	/**  Set by the store (RFC 3339). */
 	createdAt?: string,
-	/**  `pre_meditation` or `protocol`. */
+	/**  `pre_meditation`, `protocol` or `post_session`. */
 	kind: string,
 	/**  `live`, `replay` or `demo` (only live reports can enter the baseline). */
 	source: string,
@@ -1415,7 +1415,7 @@ export type CalibrationReport_Serialize = {
 	id: string,
 	/**  Set by the store (RFC 3339). */
 	createdAt: string,
-	/**  `pre_meditation` or `protocol`. */
+	/**  `pre_meditation`, `protocol` or `post_session`. */
 	kind: string,
 	/**  `live`, `replay` or `demo` (only live reports can enter the baseline). */
 	source: string,
@@ -5090,6 +5090,54 @@ export type Pointer_Serialize = {
 	quiet?: boolean,
 };
 
+export type PrePost = PrePost_Serialize | PrePost_Deserialize;
+
+export type PrePostChange = PrePostChange_Serialize | PrePostChange_Deserialize;
+
+export type PrePostChange_Deserialize = {
+	condition: string,
+	feature: string,
+	pre: number | null,
+	post: number | null,
+	/**  post - pre, in the feature's own unit. */
+	change: number | null,
+	/**  The baseline's robust SD for this feature, when there is a baseline. */
+	usualRobustSd?: number | null,
+	/**  change / usual robust SD. */
+	changeInUsualSpreads?: number | null,
+	/**  |change| is more than 1.5 usual spreads. False when there is no baseline to judge by. */
+	beyondUsualVariation: boolean,
+};
+
+export type PrePostChange_Serialize = {
+	condition: string,
+	feature: string,
+	pre: number | null,
+	post: number | null,
+	/**  post - pre, in the feature's own unit. */
+	change: number | null,
+	/**  The baseline's robust SD for this feature, when there is a baseline. */
+	usualRobustSd: number | null,
+	/**  change / usual robust SD. */
+	changeInUsualSpreads: number | null,
+	/**  |change| is more than 1.5 usual spreads. False when there is no baseline to judge by. */
+	beyondUsualVariation: boolean,
+};
+
+export type PrePost_Deserialize = {
+	preReportId: string,
+	minutesBetween: number,
+	changes: PrePostChange_Deserialize[],
+	note: string,
+};
+
+export type PrePost_Serialize = {
+	preReportId: string,
+	minutesBetween: number,
+	changes: PrePostChange_Serialize[],
+	note: string,
+};
+
 export type Preview = {
 	text: string,
 	at: string,
@@ -5804,6 +5852,8 @@ export type SavedCalibration_Deserialize = {
 	/**  Against the baseline as it stood before this report. */
 	comparison: FeatureComparison_Deserialize[],
 	baselineBefore: PersonalBaseline_Deserialize,
+	/**  Post-session recordings only: the comparison with the same day's pre-meditation recording. */
+	prePost?: PrePost_Deserialize | null,
 };
 
 export type SavedCalibration_Serialize = {
@@ -5813,6 +5863,8 @@ export type SavedCalibration_Serialize = {
 	/**  Against the baseline as it stood before this report. */
 	comparison: FeatureComparison_Serialize[],
 	baselineBefore: PersonalBaseline_Serialize,
+	/**  Post-session recordings only: the comparison with the same day's pre-meditation recording. */
+	prePost: PrePost_Serialize | null,
 };
 
 export type Saved_Deserialize = {

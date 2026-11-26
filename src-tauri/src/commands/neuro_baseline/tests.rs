@@ -225,3 +225,93 @@ fn a_protocol_block_needs_a_short_slug_id_and_stays_small() {
     };
     assert!(save_in(&d, big, "t").is_err());
 }
+
+// Decision 0059 (8d): post-session recordings.
+
+fn post(source: &str, eo: f64, ec: f64) -> CalibrationReport {
+    CalibrationReport {
+        kind: "post_session".into(),
+        ..report(source, eo, ec)
+    }
+}
+
+#[test]
+fn a_post_session_recording_never_enters_the_baseline() {
+    let d = temp_dir("nb-post-baseline");
+    for i in 0..4 {
+        save_in(
+            &d,
+            post("live", 20.0, 30.0 + f64::from(i)),
+            "2026-11-26T08:00:00+09:00",
+        )
+        .unwrap();
+    }
+    let b = baseline_in(&d).unwrap();
+    assert!(b.conditions.iter().all(|c| c.recordings == 0));
+    let saved = save_in(&d, post("live", 20.0, 30.0), "2026-11-26T08:30:00+09:00").unwrap();
+    assert!(saved.baseline_eligible.values().all(|e| !e));
+}
+
+#[test]
+fn post_session_needs_conditions() {
+    let mut r = post("live", 20.0, 30.0);
+    r.conditions.clear();
+    assert!(validate(&r).is_err());
+}
+
+#[test]
+fn post_session_pairs_with_the_same_days_pre_meditation_recording() {
+    let d = temp_dir("nb-prepost");
+    // Three earlier days give a baseline with a spread (eyes-closed alpha 30, 32, 34).
+    for (i, day) in ["21", "22", "23"].iter().enumerate() {
+        save_in(
+            &d,
+            report("live", 20.0, 30.0 + 2.0 * i as f64),
+            &format!("2026-11-{day}T08:00:00+09:00"),
+        )
+        .unwrap();
+    }
+    let pre = save_in(&d, report("live", 20.0, 31.0), "2026-11-26T08:00:00+09:00").unwrap();
+    let saved = save_in(&d, post("live", 20.0, 40.0), "2026-11-26T08:40:00+09:00").unwrap();
+    let pp = saved.pre_post.expect("paired with the morning recording");
+    assert_eq!(pp.pre_report_id, pre.report.id);
+    assert_eq!(pp.minutes_between, 40);
+    let alpha = pp
+        .changes
+        .iter()
+        .find(|c| c.condition == "eyes_closed" && c.feature == "alpha")
+        .unwrap();
+    assert_eq!((alpha.pre, alpha.post, alpha.change), (31.0, 40.0, 9.0));
+    assert!(alpha.usual_robust_sd.is_some());
+    assert!(alpha.beyond_usual_variation, "{alpha:?}");
+    let same = pp
+        .changes
+        .iter()
+        .find(|c| c.condition == "eyes_open" && c.feature == "alpha")
+        .unwrap();
+    assert_eq!(same.change, 0.0);
+    assert!(!same.beyond_usual_variation);
+    assert!(pp.note.contains("does not show a lasting change"));
+}
+
+#[test]
+fn no_pairing_across_sources_or_beyond_six_hours() {
+    let d = temp_dir("nb-prepost-none");
+    save_in(&d, report("demo", 20.0, 31.0), "2026-11-26T08:00:00+09:00").unwrap();
+    let a = save_in(&d, post("live", 20.0, 40.0), "2026-11-26T08:30:00+09:00").unwrap();
+    assert!(
+        a.pre_post.is_none(),
+        "a demo recording never pairs with a live one"
+    );
+    save_in(&d, report("live", 20.0, 31.0), "2026-11-26T01:00:00+09:00").unwrap();
+    let b = save_in(&d, post("live", 20.0, 40.0), "2026-11-26T08:30:00+09:00").unwrap();
+    assert!(
+        b.pre_post.is_none(),
+        "seven and a half hours is too far apart"
+    );
+    let c = save_in(&d, report("live", 20.0, 31.0), "2026-11-26T09:00:00+09:00").unwrap();
+    assert!(
+        c.pre_post.is_none(),
+        "a pre-meditation recording has no pre/post block"
+    );
+}

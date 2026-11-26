@@ -54,6 +54,8 @@ export type NeuroFieldProps = MuseScreenProps & {
   onCloseCalibration?: () => void;
   /** Decision 0059: "neuro/training" opens protocol settings and session records. */
   onOpenTraining?: () => void;
+  /** Decision 0059: "neuro/calibration-after" is the optional rest recording after a session. */
+  onOpenAfterRest?: () => void;
   training: ReturnType<typeof useTraining>;
   /** Re-runs the snapshot load. Retry is hidden without it. */
   onRetry?: () => void;
@@ -77,7 +79,8 @@ export type NeuroFieldProps = MuseScreenProps & {
 export function NeuroField(props: NeuroFieldProps) {
   // Decision 0058: Neuro › Calibration is its own view ("neuro/calibration"), reached from the header.
   if (props.view === "neuro/calibration") return <div className="neuro page-inset"><CalibrationView onDone={props.onCloseCalibration} /></div>;
-  if (props.view === "neuro/training") return <div className="neuro page-inset"><TrainingView training={props.training} running={props.sessionStartedAt != null} onDone={props.onCloseCalibration} /></div>;
+  if (props.view === "neuro/calibration-after") return <div className="neuro page-inset"><CalibrationView after onDone={props.onOpenTraining ?? props.onCloseCalibration} /></div>;
+  if (props.view === "neuro/training") return <div className="neuro page-inset"><TrainingView training={props.training} running={props.sessionStartedAt != null} onDone={props.onCloseCalibration} onRecordAfter={props.onOpenAfterRest} /></div>;
   return <NeuroMain {...props} />;
 }
 

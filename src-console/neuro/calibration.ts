@@ -197,10 +197,11 @@ export class CalibrationRun {
   }
 
   /** The report for `neuro_calibration_save`: features and counts only. */
-  report() {
+  report(kind: "pre_meditation" | "post_session" = "pre_meditation") {
     // begin() only passes with live data; anything else is labelled as such, never assumed live.
     const source = this.source === "live" || this.source === "demo" ? this.source : "replay";
-    return { kind: "pre_meditation" as const, source, method: METHOD, conditions: this.results, protocol: null, sessionId: null };
+    // Decision 0059: the same recording after a session is `post_session`, kept out of the baseline.
+    return { kind, source, method: METHOD, conditions: this.results, protocol: null, sessionId: null };
   }
 }
 
