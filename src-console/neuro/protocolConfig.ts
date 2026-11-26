@@ -73,10 +73,13 @@ export type ProtocolSettings = {
 
 export const SETTINGS_LIMITS = { durationMin: [5, 60], targetRewardRate: [0.4, 0.8], volume: [0, 1] } as const;
 
-/** Defaults reproduce the training behaviour from before 0059. */
+/**
+ * Defaults reproduce the training behaviour from before 0059: the training screen always played the tone
+ * (whatever `audioMode` a protocol names) and always showed the lens light.
+ */
 export function defaultSettings(protocol: NfProtocol): ProtocolSettings {
   const [lo, hi] = SETTINGS_LIMITS.durationMin;
-  return { durationMin: Math.min(hi, Math.max(lo, protocol.defaultDurationMin)), targetRewardRate: TARGET_REWARD_RATE, sound: protocol.audioMode, visualFeedback: false, volume: 0.7 };
+  return { durationMin: Math.min(hi, Math.max(lo, protocol.defaultDurationMin)), targetRewardRate: TARGET_REWARD_RATE, sound: "tone", visualFeedback: true, volume: 0.7 };
 }
 
 /** Saved settings when valid, else the protocol's defaults. Never lets a bad value reach training. */

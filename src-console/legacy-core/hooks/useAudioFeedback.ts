@@ -1,7 +1,16 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import type { BrainState } from "../lib/types";
+import { audioTargets, RAMP_S, type FeedbackCue } from "../../neuro/feedbackAudio";
 
 type AudioMode = "soundscape" | "tone" | "silent";
+
+/** Ramp a gain from where it is now (no jump), over `secs`. */
+function rampTo(param: AudioParam | undefined, value: number, now: number, secs: number) {
+  if (!param) return;
+  param.cancelScheduledValues(now);
+  param.setValueAtTime(param.value, now);
+  param.linearRampToValueAtTime(value, now + secs);
+}
 
 export function useAudioFeedback() {
   const [muted, setMuted] = useState(false);
@@ -16,6 +25,10 @@ export function useAudioFeedback() {
   const rewardGainRef = useRef<GainNode | null>(null);
   const toneGainRef = useRef<GainNode | null>(null);
   const feedbackOscRef = useRef<OscillatorNode | null>(null);
+
+  // Decision 0059: the last feedback cue and volume, so mute and unmute land on the right levels.
+  const cueRef = useRef<{ cue: FeedbackCue; volume: number }>({ cue: "off", volume: 0.7 });
+  const mutedRef = useRef(false);
 
   // Cooldowns
   const lastRewardRef = useRef(0);
@@ -209,6 +222,25 @@ export function useAudioFeedback() {
     }
   }, [muted]);
 
+  /** Decision 0059: set the sound for a feedback cue at a volume. A held cue never sounds like reward. */
+  const applyCue = useCallback((cue: FeedbackCue, volume: number) => {
+    cueRef.current = { cue, volume };
+    const ctx = ctxRef.current;
+    if (!ctx || !nodesCreatedRef.current) return;
+    const mode = modeRef.current;
+    const t = audioTargets(mode, cue, volume, mutedRef.current);
+    const now = ctx.currentTime;
+    rampTo(ambientGainRef.current?.gain, t.ambient, now, RAMP_S);
+    rampTo(toneGainRef.current?.gain, t.tone, now, RAMP_S);
+    rampTo(noiseFilterRef.current?.frequency, t.filterHz, now, RAMP_S);
+  }, []);
+
+  // Muting silences what is already playing (it used to only stop later changes), and unmuting restores it.
+  useEffect(() => {
+    mutedRef.current = muted;
+    applyCue(cueRef.current.cue, cueRef.current.volume);
+  }, [muted, applyCue]);
+
   const cleanup = useCallback(() => {
     noiseSourceRef.current?.stop();
     droneOscRef.current?.stop();
@@ -222,6 +254,7 @@ export function useAudioFeedback() {
     init,
     setMode,
     updateState,
+    applyCue,
     triggerReward,
     playBell,
     cleanup,

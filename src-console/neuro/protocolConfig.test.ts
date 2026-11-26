@@ -45,7 +45,7 @@ describe("decision 0059: protocol settings", () => {
   const calm = getProtocol("calm")!;
 
   it("defaults reproduce the training before 0059", () => {
-    expect(defaultSettings(calm)).toEqual({ durationMin: 10, targetRewardRate: TARGET_REWARD_RATE, sound: "soundscape", visualFeedback: false, volume: 0.7 });
+    expect(defaultSettings(calm)).toEqual({ durationMin: 10, targetRewardRate: TARGET_REWARD_RATE, sound: "tone", visualFeedback: true, volume: 0.7 });
   });
 
   it("an invalid saved value never reaches training", () => {
