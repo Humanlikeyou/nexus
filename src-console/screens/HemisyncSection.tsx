@@ -3,10 +3,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { valueOf, type Wired } from "../lib/sampleAdapters";
 import type { HemisyncAdapter, HemisyncSession, HemisyncWave, HemisyncTrack, HemisyncTrackStats, ImportProgress } from "../neuro/hemisync/adapters";
 import { hemisyncAdapter } from "../neuro/hemisync/live";
-import { Button, DataTag, Dialog, InsetGroup, ListRow, More, SegmentedControl, wiredTag } from "../ui";
+import { Button, DataTag, Dialog, InsetGroup, ListRow, More, SegmentedControl, Select, wiredTag } from "../ui";
 import { ChartHeader, TrendChart } from "../ui/charts/TrendChart";
 import { deltaWords, usualRange } from "../ui/charts/chartMath";
-import { useHemisyncRun, notice } from "./useHemisyncRun";
+import { nextInWave, useHemisyncRun, notice } from "./useHemisyncRun";
 import { hemisyncRanking, type HemiTrackRanking } from "../bridge";
 import { WaveJourney, journeyPosition, trackDoneIds } from "../design1118/WaveJourney";
 import "../ui/PanelKit.css";
@@ -215,6 +215,20 @@ export function BestTracks({ ranking, tracks }: { ranking: HemiTrackRanking | nu
   );
 }
 
+/** Decision 0059: pause, move, and volume. The Muse keeps recording while the track is paused. */
+function PlaybackControls({ run }: { run: Pick<ReturnType<typeof useHemisyncRun>, "paused" | "pause" | "resume" | "seek" | "volume" | "setVolume"> }) {
+  return (
+    <div className="pk-actions" role="group" aria-label="Playback">
+      {run.paused ? <Button variant="secondary" size="small" onClick={run.resume}>Resume</Button> : <Button variant="secondary" size="small" onClick={run.pause}>Pause</Button>}
+      <Button variant="plain" size="small" aria-label="Back 30 seconds" onClick={() => run.seek(-30)}>−30 s</Button>
+      <Button variant="plain" size="small" aria-label="Forward 30 seconds" onClick={() => run.seek(30)}>+30 s</Button>
+      <Select label="Volume" options={VOLUMES} value={String(Math.round(run.volume * 10) / 10)} onChange={(e) => run.setVolume(Number(e.target.value))} />
+      {run.paused && <span>Paused. The Muse is still recording.</span>}
+    </div>
+  );
+}
+const VOLUMES = Array.from({ length: 11 }, (_, i) => ({ value: String(i / 10), label: `${i * 10}%` }));
+
 export function HemisyncSection({ adapter: given, connected, recording, sessionId, operation, protocolId, setProtocolId, onStartMuse, onStopMuse, onFindMuse, onOpenRecording, ranking: readRanking = hemisyncRanking }: HemisyncSectionProps) {
   const adapter = useMemo(() => given ?? hemisyncAdapter(), [given]);
   const [tick, setTick] = useState(0);
@@ -275,6 +289,8 @@ export function HemisyncSection({ adapter: given, connected, recording, sessionI
     changed();
   };
   const note = hint ?? run.message;
+  // Decision 0059: after a track, the next one in its wave is offered (never played on its own).
+  const next = nextInWave(tracks, picked);
 
   return (
     <>
@@ -333,8 +349,10 @@ export function HemisyncSection({ adapter: given, connected, recording, sessionI
               <div className="hs-playing" role="status">
                 <span>{run.phase === "starting" ? "Starting the Muse and the track…" : `Playing and recording · ${clock(run.position.at)}${run.position.of ? ` of ${clock(run.position.of)}` : ""}`}</span>
                 <div className="hs-import__bar" role="progressbar" aria-label="Track position" aria-valuemin={0} aria-valuemax={100} aria-valuenow={run.position.of ? Math.round((run.position.at / run.position.of) * 100) : 0}><i style={{ transform: `scaleX(${run.position.of ? run.position.at / run.position.of : 0})` }} /></div>
+                {run.phase === "playing" && <PlaybackControls run={run} />}
               </div>
             )}
+            {!playing && next && connected && <p className="hs-note">Next in Wave {next.wave}: <strong>{next.title}</strong> <Button variant="plain" size="small" onClick={() => start(next)}>Start it</Button></p>}
             {!playing && !connected && (
               <div className="hs-note" role="status">
                 <p>Connect your Muse first. Start records with the Muse and plays the track together, so it never plays on its own.</p>

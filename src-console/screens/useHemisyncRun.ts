@@ -13,6 +13,19 @@ export function notice(message: string) {
  * this hook only owns the audio, the link to the Muse session id, and the finish call.
  */
 export type RunPhase = "idle" | "starting" | "playing";
+
+/** Decision 0059: the next track in the same wave, in its order. Never played on its own; it is offered. */
+export function nextInWave(tracks: HemisyncTrack[], current: HemisyncTrack | null): HemisyncTrack | null {
+  if (!current || current.wave === 0) return null;
+  const same = tracks.filter((t) => t.wave === current.wave && t.src).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
+  const at = same.findIndex((t) => t.id === current.id);
+  return at >= 0 && at + 1 < same.length ? same[at + 1] : null;
+}
+
+const VOLUME_KEY = "nexus.hemisync.volume";
+function savedVolume(): number {
+  try { const v = Number(localStorage.getItem(VOLUME_KEY)); return Number.isFinite(v) && v >= 0 && v <= 1 && localStorage.getItem(VOLUME_KEY) !== null ? v : 1; } catch { return 1; }
+}
 export type Finished = { sessionId: string; trackId: string; title: string } | null;
 
 type Run = { track: HemisyncTrack; startedAt: number; startedIso: string; sessionId: string | null; linked: boolean };
@@ -40,6 +53,9 @@ export function useHemisyncRun({ adapter, connected, recording, sessionId, opera
   const [unsaved, setUnsaved] = useState(false);
   const [finished, setFinished] = useState<Finished>(null);
   const [position, setPosition] = useState({ at: 0, of: 0 });
+  // Decision 0059: playback controls. Pausing the track never stops the Muse recording.
+  const [paused, setPaused] = useState(false);
+  const [volume, setVolumeState] = useState(savedVolume);
   const pendingStart = useRef(false);
   const audio = useRef<HTMLAudioElement | null>(null);
   const run = useRef<Run | null>(null);
@@ -62,6 +78,7 @@ export function useHemisyncRun({ adapter, connected, recording, sessionId, opera
     if (el) { el.pause(); el.removeAttribute("src"); el.load?.(); }
     audio.current = null;
     setActive(false);
+    setPaused(false);
     setPosition({ at: 0, of: 0 });
     if (stopRecording && live.current.recording) live.current.stopMuse();
     const id = current.sessionId;
@@ -81,6 +98,7 @@ export function useHemisyncRun({ adapter, connected, recording, sessionId, opera
     if (recording && protocolId !== "off") { setMessage("A training session is already running with feedback sounds. Stop it, then press Start so Hemi-Sync records only."); return; }
     const el = new Audio(track.src);
     el.preload = "auto";
+    el.volume = volume;
     try {
       await el.play(); // from the click, so the browser allows sound
     } catch {
@@ -95,7 +113,7 @@ export function useHemisyncRun({ adapter, connected, recording, sessionId, opera
     setActive(true);
     if (recording) return; // a recording is already running: the track joins it
     if (protocolId !== "off") { setProtocolId("off"); pendingStart.current = true; } else startMuse();
-  }, [connected, recording, sessionId, protocolId, setProtocolId, startMuse, finish]);
+  }, [connected, recording, sessionId, protocolId, setProtocolId, startMuse, finish, volume]);
 
   // Hemi-Sync records only (no feedback sounds on top of the track). Start once the protocol has switched.
   useEffect(() => {
@@ -130,6 +148,22 @@ export function useHemisyncRun({ adapter, connected, recording, sessionId, opera
   }, []);
 
   const stop = useCallback(() => finish(false, true), [finish]);
+  const pause = useCallback(() => { const el = audio.current; if (el && !el.paused) { el.pause(); setPaused(true); } }, []);
+  const resume = useCallback(() => { const el = audio.current; if (el && el.paused) void el.play().then(() => setPaused(false), () => setMessage("The track couldn't resume. Stop and start it again.")); }, []);
+  /** Moves the track by `deltaS` seconds, kept inside the track. */
+  const seek = useCallback((deltaS: number) => {
+    const el = audio.current;
+    if (!el || !Number.isFinite(deltaS)) return;
+    const end = Number.isFinite(el.duration) ? el.duration : Infinity;
+    el.currentTime = Math.min(Math.max(0, el.currentTime + deltaS), Math.max(0, end - 0.5));
+    setPosition({ at: el.currentTime, of: Number.isFinite(el.duration) ? el.duration : 0 });
+  }, []);
+  const setVolume = useCallback((v: number) => {
+    const clamped = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1;
+    setVolumeState(clamped);
+    if (audio.current) audio.current.volume = clamped;
+    try { localStorage.setItem(VOLUME_KEY, String(clamped)); } catch { /* only a convenience */ }
+  }, []);
   const rate = useCallback(async (rating: 1 | 2 | 3 | 4 | 5, note: string) => {
     if (!finished) return;
     const result = await adapter.rate({ sessionId: finished.sessionId, rating, ...(note.trim() ? { note: note.trim() } : {}) }).catch(() => null);
@@ -141,5 +175,5 @@ export function useHemisyncRun({ adapter, connected, recording, sessionId, opera
   }, [adapter, changed, finished]);
 
   const phase: RunPhase = !active ? "idle" : recording && sessionId ? "playing" : "starting";
-  return { phase, message, unsaved, finished, dismissFinished: () => setFinished(null), position, begin, stop, rate };
+  return { phase, message, unsaved, finished, dismissFinished: () => setFinished(null), position, begin, stop, rate, paused, pause, resume, seek, volume, setVolume };
 }

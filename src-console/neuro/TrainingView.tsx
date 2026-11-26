@@ -3,6 +3,8 @@ import { invokeBound } from "../bridge";
 import { Button, Card, PageHero, Select, Toggle } from "../ui";
 import type { NfProtocol } from "../legacy-core/lib/types";
 import { describeFeature, PROTOCOL_SET_VERSION, targetFeatures, type ProtocolSettings, type ProtocolSound } from "./protocolConfig";
+import { biofeedback, type Biofeedback } from "./biofeedback";
+import { useMuseTelemetry } from "./useMuseTelemetry";
 import "../ui/PanelKit.css";
 
 /**
@@ -99,12 +101,36 @@ export function TrainingRecordsCard({ protocols, load = loadRecords }: { protoco
   );
 }
 
+const SENSOR_ROWS: Array<[keyof Omit<Biofeedback, "heartRate">, string]> = [["eeg", "EEG (Muse)"], ["imu", "Motion (Muse gyroscope)"], ["ppg", "PPG (Muse forehead sensor)"], ["rrIntervals", "Beat-to-beat (RR) intervals"], ["hrv", "Heart rate variability"]];
+
+/** Decision 0059: biofeedback, apart from neurofeedback. Only the sensors that are really arriving now. */
+export function BiofeedbackCard({ read }: { read: Biofeedback }) {
+  return (
+    <Card title="Biofeedback sensors">
+      <p className="pk-note">Biofeedback follows body signals and is kept apart from neurofeedback, which follows the EEG features above. Nothing is assumed to be connected.</p>
+      <ul className="pk-list" aria-label="Biofeedback sensors">
+        {SENSOR_ROWS.map(([k, label]) => <li key={k}><b>{label}</b>: {read[k].state === "available" ? "available" : "not available"}. {read[k].detail}</li>)}
+      </ul>
+      <p className="pk-note" role="status">{read.heartRate ? `Heart rate ${read.heartRate.bpm} bpm (an estimate from the forehead PPG, not a medical reading).` : "No heart-rate reading right now."}</p>
+    </Card>
+  );
+}
+
+function LiveBiofeedback() {
+  const telemetry = useMuseTelemetry();
+  // A once-a-second clock, so a sensor that stops sending reads as not available without new telemetry.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(id); }, []);
+  return <BiofeedbackCard read={biofeedback(telemetry, now)} />;
+}
+
 export function TrainingView({ training, running = false, onDone, onRecordAfter }: { training: TrainingApi; running?: boolean; onDone?: () => void; onRecordAfter?: () => void }) {
   return (
     <>
       <PageHero title="Training" statement="Protocols, settings and your session records" detail="Neurofeedback follows the EEG features listed for each protocol. Everything here is optional." />
       <ProtocolSettingsCard training={training} disabled={running} />
       <TrainingRecordsCard protocols={training.protocols} />
+      <LiveBiofeedback />
       {onRecordAfter && (
         <Card title="Before and after a session">
           <p className="pk-note">Optional. Make a resting recording in Calibration before a session and another here after it, and the two are compared feature by feature. It shows a measured change in the signal, not an improvement.</p>
